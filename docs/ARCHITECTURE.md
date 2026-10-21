@@ -100,7 +100,13 @@ The creator selects among all 16 base theaters. Scene replacement rebuilds the G
 The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses, and holds `Airframe`, which wraps the simulation's `AircraftType` (`aircraft_type.rs` in `tore-world`: the imported profile, flight model, sensors and engine outlet points, with no art) beside the drawn half. `instruments.rs` renders independent small rasters from flight/equipment state, each framed by the aircraft's own original instrument window picture (named by its HUD) and coloured every frame through the live cockpit palette, as the cockpit art is; page content draws in coordinates relative to the 138×114 screen ([bezel spec](spec/instrument-bezel.md)). The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
 
 `surface_lighting.rs` owns three geometric shadow maps and the shared light
-uniform. The effect renderer supplies size-scaled fire light and fading
+uniform. Its `Settings` turn the Graphics screen's shadow quality into the
+map size, cascade count, soft-edge sample count and the city building and
+tree caster distances. Static ground objects cast from their own chunked
+copy of the static batch (`terrain_chunks::placements`, 8,192 ft chunks,
+ground-level and see-through triangles dropped), culled per cascade like the
+terrain; the city fill and the vegetation cull pass write instanced caster
+lists that `draw_more` adds to each cascade. The effect renderer supplies size-scaled fire light and fading
 fireball light to this same bounded pool, alongside flares and impact flashes.
 Fireball light excludes the separately tracked initial flash, and fire fade
 changes intensity without moving its source ([rules](spec/explosions.md#night-glow)).
@@ -115,7 +121,11 @@ continuous blocker weights. The bounded penumbra filter combines caster
 distance with smooth camera-distance antialiasing. Terrain has a separate
 stream of area-weighted shared normals for lighting; shadow depth still uses
 actual triangles. Smooth sky, glare and shadow directions share fractional
-weather-clock time. Sun-disc strength and geometric visibility are independent
+weather-clock time. `sky_mix.rs` weights the weather records that overlap at
+dawn and dusk, so the sky fades decks, horizon gradients, haze tables and the
+star flag instead of switching them, and `night_sky.rs` turns the sky about the
+theater's pole for the shader's procedural starfield and a moving moon
+([continuous dawn and dusk, night sky](spec/sun-glow.md#continuous-dawn-and-dusk)). Sun-disc strength and geometric visibility are independent
 of the sunglare toggle. Terrain alone reduces low-sun ambient fill on unexposed
 slopes; exposed ridges, aircraft and water retain their existing response. Smooth aircraft geometry is complete,
 including faces hidden from the camera, and hiding the player in cockpit view
@@ -124,6 +134,42 @@ effects and -7 identifies textured flame sheets. Glass and flame sheets do not
 cast solid shadows; ordinary cutout surfaces cast only their opaque texels. Stepped
 mode retains palette lighting and camera face rejection. See the
 [surface specification](spec/surface-lighting.md) for fitted limits.
+
+The terrain buffer is split into square chunks of 65,536 feet
+(`terrain_chunks.rs`, optimization S13a). Each triangle goes to the chunk
+under its centroid and keeps its source order there, so the pieces a runway
+recess cuts from one cell stay together; normals are summed in the source
+order first and then follow their triangles. A chunk holds its shadow-opaque
+triangles first (untextured, or on a texture page with no cut-out texel),
+then the rest. The world pass draws the chunks inside the view's frustum and
+2,200,000-foot far plane, nearest first, so nearer hills hide farther ground
+before it is shaded. Each shadow cascade draws only the chunks inside its
+orthographic volume, the shadow-opaque ranges through a depth-only pipeline
+with no fragment stage and the rest through the cut-out test, and skips any
+object batch (airports, surface units, the flown aircraft, combat geometry,
+each formation model) whose vertex box lies outside it; the boxes are
+measured when the batches are uploaded. A chunk or batch is skipped only when
+its box, widened by 64 feet, is wholly outside one clip plane, so culling
+removes nothing that could draw. The same upload splits each object batch
+(`terrain_chunks::CasterShape`, optimization round 2) into runs of triangles
+whose three vertices carry no layer `shadow_fragment` tests (glass, flame
+sheets, emissive effects and the cut-out object texture: -2, -5 to -8), drawn
+through a depth-only object pipeline, and the rest, drawn with the test; only
+the eight longest runs of at least 32 triangles go depth-only, to bound the
+draw calls. A depth-only pass keeps the nearest depth in any order, so no
+shadow texel changes. Each shadow tap reads its four stored depths with one
+`textureGather` (a non-filtering sampler at group 1, binding 3) instead of four
+loads; the gather point is the four texels' shared corner, so it reads exactly
+the texels the loads read, and the captures are identical. Fully fogged
+terrain is not culled: it still draws the fog colour over the sky. A round 2
+experiment that skipped chunks wholly beyond the far haze distance changed 17
+of 22 scenes (the distant hills and horizon band, up to 111 of 255), so it is
+not done. The only order-dependent pixels are samples
+where triangles of two chunks tie at exactly the same depth, such as a ridge
+folded along a chunk edge; the S13a captures found 13 such pixels (at most
+2 of 255) in one of 171 scenes. Vertex and uniform uploads go through
+`sim_renderer::write_floats`, which writes the floats little-endian straight
+into the queue's staging memory instead of building a byte vector.
 
 
 
@@ -138,7 +184,60 @@ aircraft can be the reference. [Behavior and fitted constants](spec/flight-views
 `flight_ui.rs` owns desktop command dispatch, the imported menu's flight actions, session presentation settings and pause state; the menu's navigation, hit geometry and drawing are `pause_menu.rs`, shared with the replay viewer. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
 
 
-`flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged scaled panel rasters are cached. Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
+`flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged pages are neither drawn nor scaled again (see below). Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
+
+How the canvas avoids redrawing what has not changed (optimization rounds 1
+and 2). Every rule here keeps the pixels exactly as a full redraw gives them.
+
+- **Page keys.** Each instrument page has a dependency key
+  (`Instruments::page_key`, `instruments/page_key.rs`, with the envelope's in
+  `instruments/envelope.rs`): the bytes of what the page draws, at the
+  precision it draws it. Text is keyed as formatted, symbols as their plotted
+  pixel positions, and blinks and the radar noise by their phase (the RWR's
+  120-tick blink, the link marks' blink, the noise's `tick / 12`, the envelope
+  marker's colour). The live palette, the held button and the camera pictures
+  are in the key too. Pages built from large readouts (the AC-130 gunsight,
+  the targeting page, the forward view symbology, aim marks) key those values
+  through their `Debug` text, which writes every field and every float
+  exactly. `flight_canvas::prepare_panel` keeps a page's raster and scaled
+  image while its key is unchanged, so the page is not drawn, compared or
+  scaled. The airframe's font, frame picture and HUD colours are left out of
+  the keys: `FlightCanvas::begin` drops every kept page when they change.
+  Debug builds (every test) and release builds run with
+  `TORE_PAGE_KEY_CHECK=1` draw a kept page anyway and compare. A debug build
+  panics on a difference; a release build prints it, draws the page and
+  prints a running count (`Page keys: N pages kept, N checked, 0 differed`).
+  A change to what a page draws needs the same change to its key; the key
+  tests (`flight_canvas/key_tests.rs`) catch a missing one.
+- **Partial rescale.** When a page did change, only the destination pixels
+  whose 2x2 filter taps read a changed source pixel are worked out again
+  (`flight_canvas/partial.rs`: `changed_spans`, `reach`, and
+  `FlightCanvas::blit_within`, which writes only given row segments and is the
+  same arithmetic as `blit`). The rest come from the kept image. A 640x480
+  layer that changes in place, such as the map with moving aircraft, does the
+  same over the picture beneath it (`legacy_layer`'s `redraw_changed`): the
+  kept result is copied, then only the reached pixels are put back to the
+  picture beneath and drawn again. Both fall back to a full scaling when half
+  the image or more would be redrawn.
+- **Composition.** A cached panel whose clear pixels are all zero goes onto
+  clear canvas rows as a plain row copy, which a test of every colour and
+  alpha shows is what `blit` gives there.
+- **Covered frames.** With the map open (an opaque letterbox over the whole
+  canvas) or the AC-130 sensor console up (which wipes the canvas), the frame
+  starts from `FlightCanvas::clear` and composes no instrument windows.
+- **Rows.** The canvas clears only the rows drawn on since the last clear, and
+  the renderer uploads only rows that differ from what the GPU holds
+  (`canvas_rows.rs`). An unchanged page is composed again each frame but
+  uploads nothing.
+- **Sensor console.** The outline pass (`sensor_console::Mask::pixels`) works
+  out, per row, the columns that can hold anything (cells set, or ink within
+  the outline width in the rows around) and fills the rest clear without
+  counting.
+
+The HUD (`hud::draw`, `weapon_hud::draw`) has no key: its inputs (attitude,
+speeds, the whole weapon readout) change on almost every flight frame, so a
+key would hit only while paused. Its texture is still uploaded by changed
+rows only. Measurements: [cockpit pages](baselines/performance-threads.md#cockpit-pages-round-2).
 
 `tore_sim::autopilot` owns captured heading/altitude, mode and an optional
 world-space navigation target, and the AC-130's orbit hold (`autopilot::orbit`:
@@ -162,7 +261,14 @@ World camera depth uses `Depth32Float`, storing the near plane at depth 1 and
 the far plane at depth 0. Using the near and far distances, the vertex shader computes clip Z as
 `near * (far - view_z) / (far - near)`, then perspective division yields depth.
 Depth clears to zero and nearer fragments compare greater. The existing near
-plane and 2,200,000-foot far limit remain. Aircraft, terrain, static objects,
+plane and 2,200,000-foot far limit remain. The full-screen sky and the
+celestial sprites sit at depth 0 and are drawn after the city fill and the
+terrain with a greater-or-equal test, so they fill only samples nothing opaque
+wrote and covered pixels skip the sky shader. Each sample takes the same
+colour it took when the sky went first and was drawn over: everything before
+the sky writes colour only together with depth and without blending, and
+vegetation, aircraft, canopies, clouds and the blended effects all come after
+it. Aircraft, terrain, static objects,
 clouds, smoke, vapor, chaff, flares, flare glare and the spotting aid use
 this same mapping. The separate
 orthographic shadow maps keep their existing depth convention. This is an
@@ -184,11 +290,47 @@ of zero reproduces world-coordinate vertices exactly. Target-window framing
 converts those relative mesh vertices back to world positions before fitting
 them against its world-space camera.
 
-Active simulation views request the next redraw without a post-render timer; AutoVsync and a requested maximum frame latency of one provide presentation backpressure. Idle menu behavior is unchanged. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
+Frame pacing lives in `frame_pacing.rs`, following the Graphics screen's [frame rate](spec/graphics-options.md#frame-rate) choice (V-sync by default). V-sync presents with `Fifo` and a maximum frame latency of one, and live views (flight, the terrain viewer, replays) ask for the next redraw as soon as a frame is presented, so the display paces them; with `Fifo` the window requests Wayland frame callbacks. The 60, 100 and 200 choices present with `Mailbox` (else `Immediate`) and `about_to_wait` sleeps (`WaitUntil`) until a timer's evenly spaced slot. A stopped single-player flight whose camera pose has settled waits for an event or its next notice to expire; an unfocused window draws about ten frames a second; a hidden one (`WindowEvent::Occluded`, or a zero-size window) draws nothing, and a hidden or minimised single-player flight pauses as on focus loss. A session's network turn (`net_tick`) also runs from `about_to_wait` whenever its next wake is due and no redraw is, so multiplayer keeps ticking and sending keepalives while drawing waits. Input scripts, performance measurements, captures and smoke tests draw uncapped and unthrottled unless `TORE_FRAME_LIMIT` is set; `TORE_FRAME_LIMIT=off` gives uncapped rendering for benchmarks. Idle menus draw only on input or news (see Menu pacing below). With the frame-rate counter shown every screen is a live view instead: `frame_pacing::counted` turns whatever a screen wants after its frame into "again as often as the frame rate allows" (the menus, the lobby, the replay viewer and a paused flight alike), the menu-pace and 20 Hz loading redraws step aside for the same timer (`App::loading_next_frame`, `loading_wait`), and `frame_pacing::too_soon` holds an event's redraw request for the timer's slot under a capped rate so the counter never reads above the cap. The check is live: `Renderer::counter_shown` reads the setting each frame, so it applies at once either way. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
 
-The GPU cockpit texture survives view and size changes; projection uniforms track the current aspect. Aircraft GPU resources are prepared when the renderer/theater loads. Live camera panels submit bounded asynchronous readbacks (at most one pending per camera page), consume completed rasters on later frames, and retain their last image while pending. The simulation renderer caches world-pass attachments (depth, multisampled colour and the render-scale image) for up to five output sizes, so the display, mirrors and 138×114 panels do not reallocate at every refresh. World pipelines live together in `sim_renderer::Pipelines` and are rebuilt when the anti-aliasing sample count changes. After the world pass, an optional resample pass scales the render-scale image to the output, and the spotting-aid pass draws single-sampled outlines using the world depth; `graphics.rs` holds the options and the [graphics options](spec/graphics-options.md) page specifies them. Offline captures retain an explicit blocking readback so smoke evidence contains the requested image. Direct GPU panel composition, full GPU UI rendering and native terrain LOD remain future optimization work.
+The GPU cockpit texture survives view and size changes; projection uniforms track the current aspect. Aircraft GPU resources are prepared when the renderer/theater loads. Live camera panels submit bounded asynchronous readbacks (at most one pending per camera page), consume completed rasters on later frames, and retain their last image while pending. The simulation renderer caches world-pass attachments (depth, multisampled colour and the render-scale image) for up to five output sizes, so the display, mirrors and 138×114 panels do not reallocate at every refresh. The rear mirrors are one 768×384 rear camera, 66 degrees vertical (10% wider than a 1x view), drawn on every other visible flight frame (`mirrors::Cadence`; always for a capture) and cropped by the cockpit shader into each mirror; on a frame that skips it, the flown aircraft's vertex buffer is still left as the mirror pass leaves it, so the main view is the same either way. Work that does not depend on the camera is done once per frame and shared by the views: the effect sprites' fire fitting and their glows (until the next `effects` or `emitters` call), the airfield flasher pattern (per weather tick), and the burning city's frame, which the mirror takes from the main view. The mirror keeps its own encoder and submission: every view writes the same uniform, vertex and cull buffers with `Queue::write_buffer`, which a submission applies before any of its commands, so two views in one submission would both see the second view's data. World pipelines live together in `sim_renderer::Pipelines` and are rebuilt when the anti-aliasing sample count changes. After the world pass, an optional resample pass scales the render-scale image to the output, and the spotting-aid pass draws single-sampled outlines using the world depth; `graphics.rs` holds the options and the [graphics options](spec/graphics-options.md) page specifies them. Offline captures retain an explicit blocking readback so smoke evidence contains the requested image. Direct GPU panel composition, full GPU UI rendering and native terrain LOD remain future optimization work.
 
 `look.rs` owns authored held-key classification, look limits and exterior spherical orbit. Shift arrows are isolated from flight input and retain their look classification until physical release, including after modifier changes; Ctrl arrows, FA's thrust vectoring, do nothing yet. Camera motion uses elapsed presentation time while unpaused. Internal elevation is limited to the forward eye line through overhead; exterior orbit keeps a fixed radius and aims at the same interpolated aircraft pose. It does not alter simulation state or synchronously capture the GPU.
+
+### Menu pacing (optimization slice S4)
+
+A menu with a session open (the lobby, Direct Connection, the Internet Lobby, a
+debrief) used to redraw about 60 times a second only to pump the socket. Now
+`about_to_wait` calls `App::pump_in_wait`, which takes the session's turn
+(`net_tick`) when `NetSession::next_wake` says (at most 10 ms, so keepalives,
+timeouts and the input clock behave as before) and records what it saw in
+`net::pace::MenuPace`. A frame is requested when the pump handled events or
+the lobby, the client's `unable` word or its phase changed; for 600 ms after
+any input event (so button rockers and check lamps animate at the display's
+pace); and on a 100 ms heartbeat for what changes by itself (the King's Force
+Start countdown, search results). The network loading screen and the load
+screens draw at 20 Hz, with the loader still polled every 16 ms. The lobby,
+Direct and Internet screens no longer report themselves as animating.
+Flight, the replay viewer and sessions in flight are unchanged.
+With the frame-rate counter shown none of this low-power pacing applies: every
+screen redraws continuously at the Frame rate setting so the counter shows live
+numbers (`frame_pacing::counted`; the menu pace's redraw requests are skipped
+and the loading screens follow `next_frame` instead of 20 Hz). The pump of the
+session and the controller polling are unchanged.
+
+Controller polling: the app polls every 8 ms in flight, the replay viewer and
+the controls screen (`Input::set_pace`), every 16 ms in menus with a controller
+connected and every 33 ms with none; a key or mouse change that can make an
+action brings the next poll forward. The device thread of `tore-input-native`
+rests 4 ms only with a controller connected and the game in flight
+(`Backend::set_flight`), 16 ms with a controller in a menu and 50 ms with none,
+never past a rumble's end, and is woken at once by rumble, stop and flight. The
+Linux scan keeps a set of event nodes known not to be controllers so their
+sysfs files are not read every second; a node that leaves `/dev/input` is
+forgotten.
+
+The loading screen composes its photograph and logo once per window size and
+photograph (`loading.rs`, `Background`), builds its font once, and each frame
+copies that and draws the stage words, the bar and the percentage.
 
 ### The frame loop under load
 
@@ -257,22 +399,28 @@ While a missile is selected and a target is designated, each ownship works out
 the weapon's maximum range and favourable firing band every 60 ticks
 (`maximum_range` and `firing_band` in `tore-sim/src/combat/missiles.rs`,
 called from the combat step). Both fly trial missiles through `intercept`, the
-same 120 Hz fly-out the guidance uses, about twenty trials in all, each up to
+same 120 Hz fly-out the guidance uses, up to 27 range trials and 17 band trials, each up to
 the weapon's whole flight (an AIM-120 about 3,600 ticks, an AIM-54 about
 10,200). PF1 measured that at 37 ms for one tick (AIM-120, default mission) to
 100 ms (AIM-54): a hitch every half second of mission time, every 62 ms of wall
 time at 8x.
 
-Three shortcuts skip only trials whose answer is already fixed, so every
+Four shortcuts skip only trials whose answer is already fixed, so every
 number the player sees is the same, bit for bit:
 
 | Shortcut | Why the answer cannot change |
 | --- | --- |
 | `maximum_range` does not fly a distance that the missile and the target cannot close within the weapon's whole flight (`travel_ceiling`: the speed the motor could reach with all its thrust spent in a line, the coast slowdown, the largest sag or ejection speed, and the target's own speed) | `intercept` succeeds only once the closest approach is within 25 ft, and a tick closes the gap by no more than the two objects move; the old code flew the whole trial to answer no |
 | `firing_band` stops a trial once a hit could no longer score 70 (a binary search for the latest hit time that still scores 70) | the band uses only `score >= 70`, and a later hit never scores higher than an earlier one |
-| `intercept` checks every 16 ticks while the missile coasts whether the gap is more than missile and target can still close, and stops with the answer it would have reached, no hit | out of fuel the missile only slows (a turn costs speed, the coast slowdown takes it), its sag is capped, and the target keeps its speed (`coasting_reach`) |
+| `intercept` checks every 16 ticks in every motor phase whether the target is out of reach, and stops with no hit | `out_of_reach` bounds closure along the current line of sight using the target's straight-line motion, inherited missile speed, unspent motor budget, coast slowdown and sag or ejection; the bound also covers the swept segment between ticks |
+| `intercept_kept` keeps the last four launch solutions per thread for the release check, mounted IR boresight check and repeated readouts | every motor field, every motion field, all four input vectors, age and lifetime must match exactly; floating-point fields compare by bits, including signed zero; misses are cached too |
 
-Each bound carries a small rounding margin (`unreachable`). The tests in
+The range and fly-out bounds carry a small rounding margin (`unreachable` and
+`out_of_reach`). The cache is a bounded round-robin replacement of answers,
+not simulation state, and is absent from checkpoints and recordings. Range
+and firing-band searches use uncached `intercept`. A frame still supplies its
+interpolated launcher: a different sub-tick position or velocity is a different
+question, never replaced by a simulation-tick answer. The tests in
 `missile_tests.rs` hold every shortcut to full-flight references: copies of
 `maximum_range`, `firing_band` and `intercept` retain the full loops with current
 path-holding steering and run beside the optimized versions on
@@ -283,11 +431,19 @@ missile reaches the target. A bound made 10% too small, or one that forgets
 the sag, fails them. The work is bounded without timing:
 `a_range_estimate_flies_a_bounded_number_of_ticks` counts the ticks
 `intercept` flew (a counter compiled only into test builds) for a fixed set of
-three missiles and six targets, and fails above 1,500,000 ticks. It flies
-1,231,686; the old code flew 2,187,517, so a change that brings the cost back
-goes over the bound. The shortcuts cut the ticks flown by about 44 percent.
+three missiles and six targets, and fails above 1,000,000 ticks. It flies
+831,341; the full-flight reference flies 2,187,517, so a change that brings the cost back
+goes over the bound. The shortcuts cut the ticks flown by about 62 percent. The powered-flight
+regression includes receding targets that can be rejected before burnout.
+The cache test measures 240 hits from 360 queries by three same-state readers
+across 120 distinct states (66.67%); this is a synthetic workload, not a measured
+gameplay hit rate.
+The [fly-out cost validation](baselines/missile-flyout-cost.md) records the
+headless CPU measurements, real recorded-probe cache rates and byte comparisons.
 
-The worst frame in the table is the estimate's cost: 41 to 26 ms and 115 to
+The earlier windowed measurements above cover the original three shortcuts,
+before the powered-phase bound and cache. The worst frame in the table is
+the estimate's cost: 41 to 26 ms and 115 to
 34 ms in the default mission at 1x and 8x, and 52 to 34 ms in the heavy one at
 1x. The mean frame improved by 0.1 to 0.2 ms and the rate reached did not
 change within the spread, because the estimate is one tick in sixty.
@@ -795,7 +951,13 @@ owns the fitted parameters and limits.
 
 Smooth lens flare is a continuous optical-light composite over the completed
 world, so the sky gradient is not quantized inside flare circles. Stepped mode
-keeps indexed remapping. Water's solar glint tests geometric light visibility
+keeps indexed remapping. The circles scale with how much of the sun's disc is
+in view: after the world pass a one-workgroup compute pass
+(`sun_visibility.wgsl`) samples the world depth at 64 points over the disc,
+eases the fraction per camera slot into a small storage buffer, and the
+composition reads it the same frame (no readback); points off the view take the
+share of five terrain rays (`lens_flare::terrain_clear`) that the whiteout also
+uses, and the world pass keeps its depth when a flare is drawn. Water's solar glint tests geometric light visibility
 before adding reflected sunlight; ordinary water shadow tint is a separate
 operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 [water reflection](spec/ocean.md#separate-sun-and-environment-reflection-trial).
@@ -1069,6 +1231,16 @@ the playhead from the recording (`replay/playback.rs`) and makes the same
 renderer calls as live flight, with the cockpit and mirrors switched off every
 frame and a blank flight canvas carrying only the viewer's interface. Nothing
 it draws feeds back into the simulation; see [replays](REPLAYS.md#viewer).
+The HUD camera view shows its tape layer at 24 pictures a second
+(`replay/tape_pacing.rs`, a presentation rate that leaves the replay clock
+alone): on the frames between pictures the viewer skips the scene hand-off and
+the CPU tape layer and asks the renderer to run only the CRT pass again over
+the world picture and overlay it kept (`Renderer::repeat_console`), then
+draws the interface at the window's rate. A paused, unchanged moment keeps its
+picture without making more. The tape layer's CPU work (`replay/tape_views.rs`)
+only visits the rows and blocks of the 640 x 480 HUD raster that hold symbols,
+keeps its scratch memory between pictures and keeps the recorder's lines until
+their words change.
 Its Esc menu (`replay/pause.rs`) is flight's paused menu widget
 (`pause_menu.rs`, which `flight_ui.rs` embeds) over a tree built from the
 imported one; the Graphics and Sound screens it opens stay the app's, drawn
@@ -3422,7 +3594,13 @@ difference is refused with the names of the files that differ.
 **What a joining client also needs.** The host tick, from which the weather
 clock's reading follows (its seconds of day and ticks are a function of the
 tick and the mission's start time), and the combat's contrail sortie number,
-which sets each aircraft's contrail height. Both travel in the Mission message.
+which sets each aircraft's contrail height. Both travel in the Mission message. A
+dedicated server's world makes no contrail puffs of its own (optimization slice
+S11, John, 2026-10-19): no screen draws its world, and every client makes its
+own contrails from the aircraft it draws and the sortie number. The switch is
+in the combat checkpoint and the standby stream's Flight record, so a standby's
+copy steps the same way and a takeover keeps the sortie; the players' contrails
+never came from the host, so they go on without a gap.
 
 ### One step for a human's plane
 
@@ -3618,9 +3796,18 @@ the plane's exact state in a second packet. The
 [wire protocol](formats/net-protocol.md#snapshots) has the rules.
 
 The dedicated server runs the host on its main thread: it polls its
-non-blocking sockets at least every 4 ms, steps due ticks and sends due
-packets, sleeping and then spinning to each tick's deadline
-(`tore_net::wait_until`). Stage E runs the same host, with the same loop, on a
+non-blocking sockets, steps due ticks and sends due packets, sleeping and then
+spinning to each tick's deadline (`tore_net::wait_until`). *Idle pacing
+(optimization run S2):* `tore_net::plan_wake` chooses each wake from the host's
+`next_wake` and `Host::wake_pace` (flying or not, any connection or not). A
+flying host with a connection polls at least every 4 ms (`MAX_NAP`), spinning
+only in the last `SPIN_MARGIN` before a tick deadline; those 4 ms housekeeping
+naps sleep with no spin tail. A flying host with nobody connected wakes for its
+ticks alone. A host that is not flying honours `next_wake` (10 ms) and never
+spins, and with no connection at all it sleeps 20 ms (`EMPTY_NAP`), so a lobby
+join, keepalive, console command or status line is served at most that much
+later. Tick pacing and catch-up are the host's and are unchanged; the Windows
+margin (2 ms) is unchanged and should be re-measured there. Stage E runs the same host, with the same loop, on a
 thread inside the game ([the host inside the game](#the-host-inside-the-game-stage-e)).
 
 **The calls** (agreed with the server slice, D7b). `Host::new(spec,
@@ -3760,7 +3947,8 @@ debrief.
 *Built (D8b, the game joins a server).* `tore-app --connect` starts a
 `NetSession` (`net/session.rs`): the client session,
 its UDP socket, the files and the game's own build of the mission. The game's
-turn comes at the start of every redraw (`App::net_tick` in `net/play.rs`): the
+turn comes at the start of every redraw in flight and from the event loop's
+wait everywhere else (`App::net_tick` in `net/play.rs`, `net/pace.rs`): the
 controls go in (one `Controls` a frame from the keyboard, mouse and
 controllers, neutral while the Esc menu is up or the window has lost focus),
 the network is pumped, session events become messages, and once the host has
@@ -4445,10 +4633,12 @@ A player whose window stalls should come back to their flight, not to a
 
 **What stalls the loop, by platform.** Read from the source of winit 0.30.13,
 the version in `Cargo.lock`, on 2026-10-01; none of it has been checked by a
-run on Windows or macOS yet. The game pumps its session only at the start of
-a redraw (`net_tick` on `RedrawRequested`, `net/play.rs`), and `about_to_wait`
-asks for the redraws, with `ControlFlow::WaitUntil` no later than the
-session's next wake, about 10 ms (`main.rs`).
+run on Windows or macOS yet. In flight the game pumps its session at the start
+of a redraw (`net_tick` on `RedrawRequested`, `net/play.rs`), and
+`about_to_wait` asks for the redraws, with `ControlFlow::WaitUntil` no later
+than the session's next wake, about 10 ms (`main.rs`). Outside flight
+`about_to_wait` pumps the session itself on that wake (see "Menu pacing"
+below), so a stalled loop stalls both the same way.
 
 - **Windows.** Dragging the title bar or a border runs the system's modal
   move and size loop inside `DefWindowProcW`. Winit emits `about_to_wait` and
@@ -7495,11 +7685,14 @@ otherwise.
   as it stands (the destroyed ground objects in Observing, the craters, fires
   and effects as events), as a seated player is.
 - **The delay** applies to every observer of a PvP mission whose
-  `observer-delay` is set (co-op has none). The ring records from the mission's
-  first tick whenever the mission flies with a delay, watched or not, so an
-  observer who starts sees the battle as it was a delay ago at once: one frame
-  each snapshot interval, at the ticks whose number is a multiple of the ticks
-  per snapshot, and every mission-wide event with the tick it became known.
+  `observer-delay` is set (co-op has none). The ring records only while some
+  connection watches or asks to (John, 2026-10-19, optimization slice S11;
+  until then it recorded from the mission's first tick, watched or not): the
+  first observer to ask starts it at its asking, so it is shown the battle from
+  that moment once the delay has passed, and when the last observer stops the
+  ring is dropped and the next one starts afresh. It holds one frame each
+  snapshot interval, at the ticks whose number is a multiple of the ticks per
+  snapshot, and every mission-wide event with the tick it became known.
   **Every delayed observer's snapshot ticks are the ring's** (a correction to
   the wire's lobby-id phase, which holds without a delay): the host sends the
   frame of its tick less the delay, and with it the events that became known by
@@ -8353,8 +8546,10 @@ Anthology, and nothing derived from retail media ever reaches it.
 datagrams from each of its two ports, hands each to `Master::receive(now,
 port, from, bytes)`, calls `Master::update(now)` for its timers (expiry,
 retries, relay idle, statistics), sends what `Master::poll_transmit` gives,
-and sleeps a millisecond when there was nothing to do (agent decision: a
-portable loop, measured in I2; a relay frame waits at most that long). Its
+and sleeps a millisecond when there was nothing to do while busy (a datagram
+read or a relay channel open within the last second; a relay frame waits at
+most that long), else ten milliseconds, running its timers every 25
+(optimization run S2; agent decision: a portable loop, measured in I2). Its
 two ports are `ServerSocket`s on `Listen::Any`, so it serves IPv4 and IPv6 on
 each.
 
@@ -9331,13 +9526,48 @@ candidate measurements, not the before reference for this implementation.
 
 ### Shared scoped workers
 
-One `tore-workers::Executor` is shared by the process, including a hosting game
-and its frame loop. The fitted automatic size is available logical CPUs minus
-three, capped at eight. If that leaves fewer than two workers, automatic
-execution is serial. This leaves scheduling headroom, not reserved cores.
-`TORE_WORKERS=0` runs inline; explicit sizes, including one, are capped at eight.
-Invalid settings or thread-creation failure produce a diagnostic and retain
-serial execution. Successful initialization is silent.
+One `tore-workers::Executor` (`shared()`) is shared by the process, including a
+hosting game and its frame loop, and it is **load-aware** (optimization run,
+slice S9; John, 2026-10-19). Measured on the 15 against 15 fight, eight
+workers cost a quarter more CPU for a tenth less wall time, and a dedicated
+server flying 12 AI woke up seven times as often (174 to 1,254 a second) for
+a little more CPU, so the simulation runs on its own thread unless it needs
+help:
+
+- **Serial by default**, in the game and the dedicated server. No pool exists
+  and no worker thread has been started: the pool is built the first time a
+  collection fans out, and an idle server shows its own few threads.
+- **Fans out** to at most four workers (fewer when the machine has fewer than
+  seven logical CPUs, and none under five) while a loop reports pressure
+  through `tore_workers::observe(Load { compression, tick_cost, late })`:
+  time compression above 1x, a tick that cost more than its 8.3 ms budget, or
+  a loop that is late. The host loop (`Host::fly`, so a hosted game and the
+  dedicated server) reports after each batch of ticks, late meaning more than
+  one tick owed; the flight frame loop (`main.rs`) reports once per frame,
+  late meaning a frame over 100 ms.
+- **Back to serial** a second after the last report of pressure
+  (`KEEP_UP`), so a loop hovering at its budget does not flap every frame.
+  The pool stays parked, not spinning: rayon's idle workers sleep.
+- **`TORE_WORKERS=N` forces a fixed count** (zero is always serial, sizes are
+  capped at eight) and is never gated by load; the probe, tests and CI use
+  it. Without it the automatic size is available logical CPUs minus three,
+  capped at eight, with serial execution when that leaves fewer than two
+  workers; the load-aware executor uses at most four of those. Invalid
+  settings or thread-creation failure produce a diagnostic and retain
+  serial execution. Successful initialization is silent.
+- Results never depend on any of it: jobs are independent and results are
+  published in input order, so a run is bit for bit the same whichever way
+  each collection was dispatched, including when the dispatch flips between
+  two ticks (tested).
+
+`tore_workers::bulk()` is the other entry: an executor for a one-off job
+(vegetation placement, grass tiles, coast distances, sprite baking and the
+canopy at load, and the unbudgeted vegetation chunk build) where the machine
+is otherwise idle and the whole automatic pool clearly helps. It starts its
+threads when the job first fans out and stops them when the job's statement
+ends. It follows `TORE_WORKERS` but not the load. Per-frame work (the
+aircraft batches, the instrument pages, the host's snapshots, the budgeted
+vegetation pass in flight) uses `shared()`.
 
 The interface provides ordered borrowed maps and disjoint mutable visits.
 The unused mutable-map and join APIs were removed after review. Instrument
@@ -9389,11 +9619,156 @@ endpoint bits match. A query with different endpoints calls the terrain service
 again without replacing the first entry. This keeps repeated channel checks
 cheap without making future callers depend on an implicit endpoint assumption.
 
+Exact AI work (optimization run S7; each change gives the same decisions and
+simulation bits, guarded by a test against the path it replaced):
+
+- The AI's ground is `Terrain::surface_height`, exactly `surface(x, z).height`
+  without the wind, water and slope, through `AiMission::step_on_ground` and
+  `AiWings::advance_on_ground`. The flight model step keeps the full surface.
+- One observer's sight lines for one tick are a plain list keyed by the exact
+  bits of the far end (`SightLines` in `mission_observation.rs`, no hashing);
+  a line from anywhere but the observer is sampled. The sensors, received
+  emitters, lookout and decision frame's `terrain_blocked` share it, serial or
+  prepared on a worker. The lookout asks for the terrain answer only inside
+  visual range (`Lookout::check_with`), where the result depends on it.
+- The ground ceiling (below) also skips sampling for those sight lines,
+  missile threat sight lines, the strike ground picture, the projectile terrain
+  test and missile obscuration (`live::terrain_hit_below`, the ceiling held by
+  the world's `Combat` and handed to `live::State` every step, never coded) and
+  surface fire line of sight (`fire::Scene::line_of_sight`). One ceiling serves
+  combat and the AI wings.
+- Both sensor channels read one sighting per target, worked out only when the
+  distance is inside a volume's maximum; received emitters test range before
+  any angle and work out the heading once.
+- Incoming fire indexes the tick's gun rounds by x once (`incoming_fire::Rounds`)
+  and each aircraft visits only rounds within a close pass of it or within its
+  lookout's visual range, in the original order. Visible tracer samples live in
+  reused id-sorted lists coded exactly as the map they replaced.
+- `report_perceived_attacks` tests range, then terrain, then builds the possible
+  shooters; the engagement policy's selection and its debug explanation share
+  one pass (`Policy::select_explained`); every controller shares the tick's one
+  traffic table (`Arc<[Traffic]>`).
+- Surface fire looks only at the contacts a weapon can aim at by kind, keeps
+  each unit's place while it stands still, and checks a projectile's own fields
+  before the surface round lookup; moving units find their combat rows in one
+  pass.
+
+Test builds compare the indexed incoming fire, the perceived-attack search,
+the shared selection pass, the surface fire contact lists, kept places and
+course rows with the replaced code on every AI and surface test.
+
+Exact AI and combat work for heavy fights (optimization round 2, 2026-10-19;
+same decisions and simulation bits, each guarded by a test against the code it
+replaced, kept test-only):
+
+- **The gun solve** (`combat/gunsight.rs`) returns at once for an unpowered
+  round that cannot reach the target in its flight time, and otherwise reads
+  the round's path from a per-thread list of kept paths
+  (`gunsight_trajectory.rs`, 16 kept). A path depends on the record, the
+  launch speed and, only while a motor drives the round, its 256-foot height
+  band (or its exact height when it falls before the motor lights), never on
+  the target. The first tick whose crossing could turn non-negative is found
+  by bisection over a running bound (the target is never nearer than its
+  distance less its own travel and the round's drop), and the crossings are
+  worked out from there as the old loop did. Every AI aircraft solves its guns
+  every tick at the same launch speed, so nearly every solve reads a kept path.
+- **Envelope bands** (`flight::RowSpeeds`): each envelope row's speed band at
+  one altitude is worked out once and read by every pass of the AI's speed
+  limits, G limits and approach floor; `RowSpeeds::of` keeps them per thread
+  (64 kept) by the configuration's shared allocation, which the entry holds so
+  it cannot be reused for another configuration, and the altitude's bits. A
+  configuration is never changed in place (`AircraftModel::configuration_arc`).
+- **The world bridge** finds actors and target rows by id from a sorted list
+  per walk (`AiMission::actor_places`, `Places`; the first place of a repeated
+  id answers, as a walk from the front did), and an AI aircraft's sensors read
+  the world's observables in place (`Sensors::step_with_refs`).
+- **The render snapshot** writes each target pose field by field into the
+  spare snapshot's slot and keeps each row's drawn attitude while its basis
+  bits stay the same (`RenderHistory::angles`, scratch like the stores cache).
+- **Smoke** keeps the quotients of the last drift, so puffs laid in one wind
+  skip the two divisions.
+
 A test-only copy of the unsplit observation code independently validates the
 serial extraction. Worker comparisons cover complete actor/mission state,
 flight bytes, outputs and bounded journal contents, including new damage
 recovery, shared airports, cancelled landings, ejection, late leaders, human
 handoff and error partial state.
+
+### AI test settings: observation rate and lean sensors
+
+Two settings for trying how much CPU the AI's observation takes and how the AI
+fights without part of it (optimization run, slice S7b; John, 2026-10-19).
+The observation rate defaults to **60 Hz** since optimization round 2 (John,
+2026-10-19: lower if it behaves the same; a matrix of 240 fights behaved at
+60 Hz as at 120 Hz within the fights' own chaos and 40 Hz and below did not, see
+[the baseline](baselines/performance-threads.md#ai-observation-rate-matrix);
+`AiTestSettings::every_tick()` is 120 Hz, what the AI's unit tests written for
+observation every tick run at), and **lean sensors are on by
+default** since slice S9 (John, 2026-10-19: S7b measured the same decisions,
+journal and checksum with lean and full sensors at every rate, for about 2%
+less CPU). 120 Hz with either sensor setting is bit for bit the run of a
+build without the settings, apart from the values a checkpoint codes (see
+below). `tore_sim::ai::test_settings::AiTestSettings`
+holds them (`AiTestSettings::full()` is 120 Hz with full sensors, what tests
+compare against); `AiWings::set_ai_test` hands them to the mission before
+every step. They are host setup like the ground ceiling, not state: no
+checkpoint codes them, the host sets them wherever it steps the world, and a
+restored world starts with the defaults until it does.
+
+Where they are set:
+
+| Where | How |
+| --- | --- |
+| Flight menu, Debug tab (Escape, then Debug) | Two rows and Back to defaults. Single player applies them at the next tick; a game the player hosts sends them to its host thread (`Command::SetAiTest`); a joined game shows them dimmed with the host's governing |
+| `tore-app` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (bare means on): the AI probe's settings, and the starting values of a windowed flight's Debug tab |
+| `tore-server` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (`HostConfig::ai_test`) |
+
+**Observation rate.** 120, 60 (the default), 40, 30 or 20 Hz: an AI aircraft's
+observation, which is its sensors, its lookout over the world, its received
+emitters and the awareness memory they feed, runs once every 1, 2, 3, 4 or 6
+ticks. Aircraft are staggered by their place in the mission,
+`(tick + index) % divisor == 0` (`AiMission::observation_due`), so every tick
+carries the same share of the work. The controller, the flight model, the
+missile threat service and the incoming fire service stay at 120 Hz.
+
+| Between two observations the aircraft | |
+| --- | --- |
+| holds | the awareness memory (the targets the controller and the engagement policy choose from), the sensors' contacts, selection and track, the received emitters. The held targets, and the target the guns track, are placed where their observed velocity has carried them since they were seen (`awareness::held_position`; optimization round 2: without it the gun tracking's aligned test flipped between the fresh and the one-tick-old picture, which showed as activity flapping in about 3% of 60 Hz fights and never at 120 Hz). An observation made this tick is used as it is, so 120 Hz is unchanged |
+| refreshes | the lookout (its own pose and this tick's scan sector, with the attention point of the last observation), so missile warnings and incoming fire still react at 120 Hz; the decision frame's terrain flag for each held target (it depends on the aircraft's own position); the wing attackers count; held targets that have died are dropped |
+| counts as | `divisor` ticks for the sensors: a radar track still takes half a second to acquire, a lost plot goes stale after a second and a trail is sampled every half second (`Sensors::step_with`, `StepOptions::elapsed`) |
+
+Everything held is already coded by the checkpoint (memory, sensors, lookout,
+emitters), and the phase is a function of the mission tick and the aircraft's
+place, so a checkpoint taken between two observations resumes exactly while
+the host keeps the setting; serial and worker steps agree (both prepare only
+the aircraft whose turn it is). Aircraft leaving or joining the mission move
+the later ones' phases by one place once.
+
+**Lean sensors.** Reads, by search of the code (2026-10-19): the AI never reads
+its own sensors' visual channel list or its map list, except that a player's
+wing order that needs a target ("Engage my target" and the like) asks whether
+the wingman's sensors hold it, in the radar contacts or the visual list
+(`ai_wings/orders.rs`); the decision frame, the recorder and the debug
+explanation read the awareness memory and the lookout, not those lists; the
+network snapshots and the replay recorder read the human ownships' sensors,
+never an AI aircraft's. The received emitters (`received_emitters`) are read in
+one place, `step_actor`, to name the launcher of a missile warning whose source
+is `ElectronicSupported`. With lean sensors the sensors skip the visual channel
+and the map list, the wing order asks the awareness memory instead (which holds
+what the eyes and the radar showed the pilot), and the emitters are built when
+such a warning needs them, from the same inputs as the observation would
+(`received_emitters_on_demand`). A lean run flies, decides and journals exactly
+as a full one at the same rate (tested over a 30-aircraft mission); its
+checkpoints hold an empty visual list, map list and emitter list. Since slice
+S9 this is the default, so a default run's checkpoints are smaller than a
+build without the setting wrote and not byte for byte theirs; the layout is
+unchanged. `--ai-lean-sensors off` (or the Debug tab) runs the full sensors
+for comparison.
+
+A host with either setting off its default (another rate, or lean sensors
+turned off) appoints no standby: a standby replays the journal with the
+defaults, which the journal does not say otherwise. Nothing is told to joined players, and no wire message carries the
+settings (no protocol change).
 
 ### Ownships and host pictures
 
@@ -9436,10 +9811,176 @@ Unshown cache entries remain available.
 Already-sized images with transparent corners have an exact integer-coordinate
 composition path. The original filter remains for scaling, fractional placement
 and clipping. Independent pixel tests cover every source/destination alpha pair.
+
+CPU-drawn interface cost (optimization run S6; every change keeps the pixels,
+each guarded by a test against the path it replaced):
+
+- `FlightCanvas` notes the rows each drawing call writes (`touched`). The next
+  frame clears only those rows (the rest are zero), and the rows possibly
+  different from the GPU copy (`pending`) are compared with a CPU copy the
+  renderer keeps of the texture (`canvas_rows::changed_bands`); only changed
+  bands are written, nothing when the picture is the same. A call that fails
+  to present leaves its rows pending for the next upload, and any other
+  picture in the texture (menus, loading, the replay) drops the CPU copy so
+  the next flight frame goes up whole. Code that writes `pixels` directly
+  must call `touch_rows`, `blend_rect` or `fill_opaque`.
+- The cockpit's 640 by 480 HUD texture is updated the same way against its own
+  copy.
+- `legacy_layer` keeps its last two layers, and the canvas rows under them
+  before and after drawing, and copies the result back when neither changed. The
+  four-tap filter in `blit` works out each row's and column's taps and each
+  source pixel's premultiplied colour once, with the same arithmetic order.
+  The pause and map layer is only scanned or drawn when something drew on it.
+- The map keeps its theater picture while the view, palette and theater hold.
+- The AC-130 sensor console outline is two sliding window counts instead of a
+  search of up to 25 cells per pixel; its mask and overlay buffers are reused
+  (the renderer hands the uploaded overlay back).
+- Notices sum their coverage in a text-wide reused buffer; the scoreboard band
+  takes the clear-pixel result directly; menu text uses a 256-entry sRGB
+  table, reused scratch vectors and static sprite names.
+
+Simulation and presenter hygiene (optimization run S8; every change keeps the
+simulation, the wire bytes and the recorded replay bytes, each guarded by a test
+against the code it replaced, and the headless probe's output and recording were
+compared before and after):
+
+- A round's weapon record is taken out of the projectile for its pass in
+  `State::step` and put back, instead of being cloned for every round every
+  tick. `live::is_gun` is one binary search in a sorted table of the upper-cased
+  gun records (built from the aircraft guns and the surface-gun table), and the
+  pass classifies each round once. `State::snapshots` skips the missile profile
+  table for a gun (tested: no gun record has a profile). The broad-phase boxes,
+  row bounds and side map of the hit search are built only when a round that is
+  not an inert store is in the air. Checkpoint bytes are unchanged.
+- `Combat::snapshot` is `snapshot_reusing`: the picture is written over the
+  snapshot that fell out of the history (`RenderHistory::spare`), so the lists
+  and the strings in them are reused. The four per-actor maps are one id-sorted
+  walk of the roster; the AI aircraft's drawn stores are kept per actor
+  (`RenderHistory::ai_stores`, forgotten at a restart) while their loads and
+  loadout stay as they were; `places` is a sorted list; a piece of debris finds
+  its owner's row by id. Debug builds make every history snapshot a second time
+  from nothing and compare. `snapshot()` keeps its signature for the host's
+  per-seat pictures.
+- The recorder finds a tick's targets and rounds by id in an id-sorted index
+  (`ById`) it reuses, builds the next tick's shot map in one go, finds a shot's
+  weapon id from its last tick's id, and builds the list of rounds that
+  vanished only on a tick with a ground burst. Its writer backlog is a
+  `VecDeque`.
+- `Smoke::step` ages, moves and expires puffs in one pass with the per-kind
+  rise and lifetime looked up once, popping the expired from the front; the
+  contrail outlets are compared and stored in place, with no map built.
+- `flight::State::step_surface` keeps the last surface asked for (by the bits of
+  the point), as the step asks for the surface under one point several times.
+  `Envelope::speeds` has no modulo in its loop. `solid_contact` tests a box
+  only after a sphere test that cannot reject a box the segment touches, and
+  keeps the live ids in a sorted list.
+  `TickOutput` is cleared, not replaced, and the sensor weather's bands are
+  compared before they are collected.
+- The single-player tick presenter builds the scene for the listener's camera
+  and the weather camera lean (the player and the missiles) when the main view
+  and the saved Other View follow the player's own aircraft
+  (`Rig::needs_bodies`), finds each aircraft type's engine sounds once, and
+  works out the ejection warning only for a mixer. A camera's weather step
+  reads the weather layer and the camera's facing once for the sun's alignment
+  and its smooth target. A frame's spatial sound is
+  one call: each tick keeps its own listener, emissions, launches and player
+  (`audio::SpatialStep`) and `Audio::spatial_frame` steps them all on the
+  sources and loops of the frame's last tick, with one lock and no copy of the
+  loops (the Engine level is applied while they are heard, and the launches of
+  the frame's ticks are laid out before the lock is taken). With one tick in a
+  frame this is the sound it always was.
+  What stays per tick is whatever carries state across ticks: the recorder, the
+  cues, the weather presentations (a seeded step each tick), the music and
+  warning tones, the vapor, and the propagation of sound.
+
+Replay playback and audio (optimization run S14; replay bytes, the pictures the
+viewer draws and the mixed sound are unchanged, each guarded by a test against
+the code it replaced):
+
+- The viewer's smoke and contrails (`replay::playback`, `SmokeTrack`) keep the
+  puffs alive at the tick drawn and, playing forward, add only those released
+  since (`Recording::spawns` over the ticks crossed, found by bisection in a
+  chunk's sparse spawn list) and drop the expired; the two layers are refilled
+  in place. Each puff's position, drift and age are worked out from its release
+  as before, so nothing accumulates. A seek, reverse play or a jump of a puff
+  lifetime or more reads the whole window again, and so does a tick the
+  recording cannot read.
+- The player's wing vapor (`VaporTrack`) is stepped through the poses crossed
+  when playing forward up to 250 ticks, instead of rebuilt from 250 poses at
+  every displayed tick. That is the same history because the commits follow one
+  schedule from launch and a history that has stepped over 250 ticks of it holds
+  only the last ten commits. It is used only when the history began on that
+  schedule (not at a recording's first pose, whose commits follow a schedule of
+  their own), every pose was found, and the poses' devices were all animated or
+  all not; anything else rebuilds. A pose is placed on the scratch state
+  without cloning it.
+- The recorder builds a tick in a frame the writer thread has written, emptied
+  (`Frame::clear`) and handed back through a small channel, so the aircraft,
+  round and puff lists keep their room. Frames the channel cannot take, or that
+  were dropped for a full queue, are simply freed. The file is the same.
+- A placed sound (other aircraft's engines, fires, the player's engine heard
+  from outside) works out its gain and pitch glide coefficients when the sample
+  rate changes and its treble filter's when the cutoff does, instead of up to
+  three `exp` per sample per voice. A seeker tone at zero gain skips its sines
+  (its output is then zero, `+0.0` where the wave's sign once made it `-0.0`).
+  The test `cached_smoothing_and_a_silent_seeker_render_the_pcm_the_uncached_math_did`
+  renders six seconds of a scripted scene at 48 kHz through the offline mixer
+  twice, once with the old per-sample math kept test-only, and compares the
+  samples.
+
+Host and network (optimization run S11; every change but the last keeps the
+wire bytes, each guarded by a test against the code it replaced):
+
+- The seats' pictures share one picture a tick. `Combat::wire_picture` gives
+  the part of every seat's picture that does not depend on the seat, as a seat
+  flying none of the human-flown planes would draw it, holding only what the
+  wire reads (no stores, gun rounds, effects, marks or models);
+  `from_world::SharedPicture` quantizes its aircraft and rounds once; each due
+  seat adds its own plane (`SeatOwn`: the debris of its own plane drawn as its
+  type in its cockpit's damage variant, its own pilot and second crew member
+  from its cockpit) in `from_world::seat_entities`. A seat keeps of its last
+  picture only the sorted places of the debris, pilots and surface units
+  (`PictureMemory`), so a velocity is a binary search, not a walk. The readout
+  stays per seat. Where combat draws every target over the player's state (no
+  target models) the seats take whole pictures as before. Compared tick by
+  tick against the per-seat pictures in a fight with missiles, debris and
+  ejections, and packet by packet in the host with 0, 15 and 30 humans.
+- `EntitySender::select` finds the entities by key in a sorted list instead of
+  a hash map and moves the chosen records out; the lobby state is built once
+  per pass; the session part of the journal is coded once a tick; CRC-32 takes
+  eight bytes a step (slice-by-8, the same checksums).
+- The PvP observers' ring is kept only while someone watches (see
+  [the observer view](#the-observer-view)).
+- A dedicated server's world makes no contrail puffs (see
+  [a mission with no window](#a-mission-with-no-window)).
+  This one changes checkpoint and standby-stream bytes.
+
+Host per-seat work (optimization round 2; the wire bytes are unchanged, shown
+by the host benchmark's hash of every datagram at 2, 15 and 30 humans and by
+tests against the code each change replaced):
+
+- A human's gun rounds no longer test every ground object and aircraft of the
+  mission each tick (see [projectiles in flight](#projectiles-in-flight)). This was most of
+  the host's cost in a gun fight, and the reason that cost grew with the humans.
+- The readout record (`readout::write_record`) is coded against one copy of the
+  acknowledged readout, advanced in place, whose parts become what the client
+  holds as each is coded, instead of a copy for the advance, one for the
+  client's and one per list. A list's changed entries are coded into one writer
+  and appended by range (`flat::write_list_into`), and an entry's delta is written
+  straight from the two rows.
+- Entity groups and readout list entries are rows of numbers kept inline
+  (`wire::row::Row`, up to 24 numbers, longer ones on the heap), so flattening
+  a state or copying a readout allocates nothing per entry.
+
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 
 ### Projectiles in flight
+
+Missile launch solutions use the [exact firing-estimate shortcuts](#the-firing-estimate-and-its-exact-shortcuts):
+four answers per thread for identical questions, and a conservative reach check
+every 16 fly-out ticks, including powered flight. Neither changes live missile
+motion or the interpolated frame launcher.
 
 John raised the cap on rounds, missiles and bombs in flight from 256 to 5,000
 on 2026-10-09 (`live::MAX_PROJECTILES`), after a fight of four MiG-21s threw
@@ -9453,15 +9994,24 @@ affordable, each an agent decision that changes no answer:
 - **The contact search** (`combat/live/broad.rs`) first skips the targets a
   round's swept segment cannot reach this tick: each target's box over its
   move, widened by its largest volume, kept in order along x. The targets it
-  keeps are tested exactly as before, in the same order.
+  keeps are tested exactly as before, in the same order. A human's gun round,
+  tested against the aircraft as the shooter saw them, skips the ground
+  objects' solid boxes it cannot reach, since those are met by its own segment
+  whatever the rewind, and the aircraft whose past volume it is tested
+  against lies outside the box that bounds that volume as the first pass
+  bounds a volume now (optimization round 2; before it every such round
+  tested every target of the mission each tick).
 - **The AI's sight lines to tracers** skip sampling the ground when the whole
   line is above the highest ground under it (`tore_sim::ground_ceiling`, built
-  once from the terrain grid and runways by `Terrain::ground_ceiling`).
+  once from the terrain grid and runways by `Terrain::ground_ceiling`). Since
+  optimization run S7 the same ceiling also serves the rounds' own terrain test,
+  missile obscuration, AI observation and surface fire line of sight.
 - **The runway lookup** skips the trigonometry for runways nowhere near the
   point (`OrientedBox::contains_horizontal`).
 
-What remains grows with the AI aircraft times the rounds: each AI aircraft
-still looks at every round for incoming fire. The
+What remains grows with the AI aircraft times the rounds near them: since
+optimization run S7 each AI aircraft looks only at the rounds that could pass
+close or that its lookout could see (`incoming_fire::Rounds`). The
 [baseline](baselines/projectile-cap-2026-10-09.md) has the numbers.
 
 ### Measurement rules
@@ -10330,7 +10880,7 @@ continues from. Every player is sent the ready standbys and their addresses
 **The stream** is one ordered, reliable stream of
 [standby records](formats/net-protocol.md#the-standby-stream) on the standby's
 own connection: Appoint, Dismiss, Flight, Checkpoint begin and chunks, Ticks
-(a snapshot interval of journal ticks, sent with the snapshots), State,
+(the journal ticks of each host update, sent with their snapshots), State,
 Check, Ended and Handover. Order is what keeps it simple: any prefix of the
 stream a standby holds is consistent.
 
@@ -10387,7 +10937,7 @@ sequenceDiagram
   participant H as Host
   participant S as Standby 1
   participant C as Client
-  H->>S: Journal and state parts, every snapshot interval
+  H->>S: Journal and state parts, every update
   H->>C: Snapshots and the succession
   Note over H: The host is lost
   Note over S,C: 1.5 s without a packet from the host
@@ -10976,6 +11526,26 @@ synchronous default. Transport updates continue, and session events retain their
 order behind the pending build. See the [loading specification](spec/loading-screen.md)
 and [CPU measurement](baselines/loading-screen.md).
 
+## City fill rendering
+
+`fill_renderer.rs` draws the city fill buildings in tiers chosen per view on
+the GPU (`fill_cull.wgsl` writes per-piece full detail lists, the far box
+list and shadow boxes; indirect draws read them). The building records are
+stored in spatial blocks (`fill_blocks.rs`): sorted by 8,192 ft cell, then a
+Z curve of 256 ft squares, cut at each cell and every 256 records, each with
+a sphere around its buildings' test points and the largest radius and
+on-screen size inside. Per view, main, mirror and panel alike, the CPU drops
+blocks that no building could pass the shader's own rejections from (draw
+distance, behind the eye, outside a side of the view, under the smallest
+drawn size), with 16 ft plus 0.01% of the distance of slack for the shader's
+single precision, and dispatches one workgroup per remaining block. The
+per-building test is unchanged, so the drawn set is the same
+(`TORE_CITY_FILL_BLOCKS=0` dispatches every block for comparisons). Knocked
+down buildings change one flag word per record: the renderer diffs the
+fill's flattened set against the last one it uploaded and rewrites only the
+changed records (runs closer than 8 records merged), instead of the whole
+record buffer (16 MB at 500,000 buildings).
+
 ## Exploratory vegetation rendering
 
 On `exp/vegetation`, vegetation is app presentation data. The menu scene omits
@@ -10994,6 +11564,25 @@ failure leaves the load working. Runtime retail derivatives stay local. The
 coast mask uses one bit per cell. Canopy pages store 128 by 256 samples in each
 256-square index page, using every row and halving their former padded storage. `TORE_VEG_CACHE=0` bypasses caching for timings.
 
+`tore_world::city::cache` keeps the city fill's placement (its cities, its
+buildings and the candidate count, 15 bytes a building, at most 7.5 MB) under
+the profile's `city-cache/`, one `<THEATER>-<key>.city` file per entry, at most
+four per theater, newest kept. The app configures it beside the vegetation cache
+and the dedicated server once it has loaded the import, so a server start reads
+the layout too. The key hashes every input of `fill::place`: the light map
+(tiles, quarter turns, picture names, classified flags, districts) and the kit,
+both still built from the import on every load and hashed by content, the layout
+name, keep-outs (layout objects and redrawn airports), named placements and the
+building budget, plus a hand-bumped generator version and a build-script hash of
+the `tore-world` and `tore-codec` sources. A file carries a magic, the key and an
+FNV-1a checksum; a missing, foreign, truncated, corrupt or inconsistent entry is
+placed again and rewritten through a temporary file and a rename. The resources
+a load reads, and so the content manifest, are the same on a hit. The
+in-process memo of built layouts holds its lock only to find a layout's slot;
+the build itself runs outside it. `TORE_CITY_CACHE=0` bypasses the disk cache,
+and `tore-app --city-layout-digest` prints each theater's full layout digest and
+build time ([measurements](baselines/loading-screen.md#city-layout-cache-2026-10-19)).
+
 `Placement` retains fixed geographic selections within configured quotas, with
 no distance-dependent repacking or budget squeeze. The bounded worker completes
 a guarded ring before publishing it. Near chunks precede velocity-prefetched
@@ -11004,6 +11593,40 @@ only after settings changes; chunk tables upload only on publication. Hidden
 angle cards degenerate before rasterization. Canopy shading exits before its
 texture reads inside the protected detail radius. See the
 [numerical specification](spec/terrain-detail.md#sprites-and-cached-placement).
+
+Each world draw names its camera (`vegetation_renderer::ViewKind`: `Main`,
+`Mirror` or `Panel(page)`, through `SimRenderer::draw_view`; `draw` is the main
+view). Only the main view moves the stream: it sends worker requests, uploads
+pages and grows the visible circle. The mirror, whose eye is about 12 ft from
+the main one, culls and draws the main stream's uploaded chunks at its reach,
+read-only, and so does a camera panel within 4,096 ft (the two-chunk guard ring)
+of the main eye. A panel farther away (the target camera framing a distant
+target) gets its own small stream, keyed by page and made on first use: at most
+2 nm drawn and 1 nm at full density, the main stream's objects per chunk over
+that smaller ring, pages sized for it (about 14 MB of instances at the default
+settings, against about 100 MB for the main stream), its circle shown as soon as
+it is in rather than grown, and dropped with its buffers after 5 s unused. The
+streams share the cull outputs, since each view culls and draws in its own
+submission. `vegetation_stream::Stream` holds a stream's CPU side (worker, page
+bookkeeping, visible circle), so CPU tests run the production routing. Before
+optimization S10 every view asked the one worker for its own eye: a mirror
+defeated the "same request" check on every frame and a far panel evicted the
+main view's chunks.
+
+Tree pages are culled per view before the cull pass (`vegetation_pages.rs`,
+optimization round 2). When a chunk's bytes are staged, each of its pages gets
+the box of its objects' cull points (base plus half the height) and the largest
+cull radius (`max(radius, height / 2)`); the stream publishes them with its page
+table. Each view keeps only the pages that could hold a drawn object, writes that
+list over the stream's page table buffer (each view culls in its own submission)
+and dispatches one workgroup per kept page. A page is dropped only when its
+whole box fails one of `vegetation_cull.wgsl`'s own tests with the largest
+radius: beyond the draw distance, behind the eye, or outside one side of the
+view, with 16 ft plus 0.01% of the distance as slack for the shader's f32
+maths. The objects the pass keeps are therefore the same; only their list order,
+already atomic, can differ. `TORE_VEG_PAGE_CULL=0` dispatches every page, as a
+comparison aid. Trees cast no geometric shadows (the cull's caster binding is
+unused), so there is nothing to cull per cascade.
 
 The 64-byte candidate record is unchanged. The culled record is 96 bytes and the
 mesh table is 48 bytes, with top-card page, height and opaque half extents. Facing/cross/top
@@ -11086,12 +11709,30 @@ pages/rotations and fallback colours. Both textures upload once per scene.
 Cache identity includes source, palette, terrain and exclusion changes.
 
 `grass_blades.wgsl` generates five-vertex strips from vertex and instance indices.
-A single draw has no vertex/instance buffer and no alpha discard. Integer world
+A compute pass (`blade_cull`) evaluates each candidate once with the same
+`blade_candidate` function and appends grown blades (64 bytes each) to a list
+whose count feeds an indirect draw (`blade_list_vertex`). The list is sized
+(`vegetation_grass::grown_bound`, round 2) to the cells whose blade square can
+reach inside each level's circle (plus 4 ft), less the cells a coarser level
+owns, plus an eighth spare, instead of every candidate: 9.4 MB instead of
+16.8 MB at High and 500 ft (36% to 69% less across densities and distances).
+The pass hands out slots from its own counter and raises the draw count only up
+to the list's capacity, so an overflow would drop blades rather than draw past
+the list; the bound is checked against the shader's selection in a test. So
+per-candidate
+hashing, habitat, ground, canopy and wind work runs once instead of in each of
+five vertices. `SimRenderer::draw_view` records the pass after the vegetation
+prepare, before the world pass. Adapters without compute limits (and
+`TORE_GRASS_PATH=vertex`) keep the original single draw, which evaluates the
+blade in every vertex; both render the same pixels (GPU test
+`gpu_candidate_pass_matches_the_vertex_path`). No alpha discard. Integer world
 cells keep the same hash as the camera moves. Coarse levels own disjoint subsets
 through the inner disk too, avoiding LOD identity changes. The default path sends
 zero radius to the legacy worker and bypasses grass patch selection/packing.
 Each frame writes one 64-byte stack uniform for grid budget, time and mission
-wind. Legacy tufts remain intact and selectable. Numerical rules and limits live
+wind. The draw is skipped when the eye is more than the radius plus 64 ft above
+the highest terrain vertex under the grass radius, where every blade root
+already fails the shader's distance test (same pixels). Legacy tufts remain intact and selectable. Numerical rules and limits live
 in [the grass spec](spec/terrain-detail.md#grass).
 
 Nothing enters simulation, replays, checkpoints or networking.

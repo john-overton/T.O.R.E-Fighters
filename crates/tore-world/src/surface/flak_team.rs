@@ -361,7 +361,7 @@ impl TeamGun<'_> {
                 .arms
                 .search_limit
                 .is_none_or(|limit| distance <= limit * FLAK_TEAM_DETECTION_FACTOR)
-            && line_of_sight(from, contact.position, scene.ground)
+            && scene.line_of_sight(from, contact.position)
     }
     /// `contact` is inside the gun's fire zone (range and altitude band).
     fn reaches(&self, contact: &Contact) -> bool {

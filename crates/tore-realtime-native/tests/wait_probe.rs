@@ -6,7 +6,7 @@
 //! system".
 
 use std::time::{Duration, Instant};
-use tore_net::{MAX_NAP, RealClock, SPIN_MARGIN, wait_until};
+use tore_net::{Pace, RealClock, SPIN_MARGIN, plan_wake, wait_until};
 use tore_realtime_native::{Activity, real_time_thread, summary};
 
 const TICK: Duration = Duration::from_nanos(8_333_333);
@@ -36,7 +36,7 @@ fn sleeps(length: Duration) -> (f64, f64) {
 }
 
 /// A host's loop: wake at each tick or after `MAX_NAP`, whichever is first,
-/// through the shared wait; how late each tick is noticed.
+/// through the shared wait (naps without a spin tail, ticks with one); how late each tick is noticed.
 fn ticks() -> (f64, f64) {
     let mut clock = RealClock::new();
     let start = clock.now();
@@ -50,7 +50,16 @@ fn ticks() -> (f64, f64) {
             tick += 1;
             continue;
         }
-        wait_until(&mut clock, due.min(now + MAX_NAP), SPIN_MARGIN);
+        let wake = plan_wake(
+            now,
+            due - now,
+            Pace {
+                flying: true,
+                connections: true,
+            },
+            SPIN_MARGIN,
+        );
+        wait_until(&mut clock, wake.at, wake.spin_margin);
     }
     spread(&late)
 }

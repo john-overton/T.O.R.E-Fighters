@@ -10,10 +10,13 @@
 //! the ticks and the parts they changed. It drains the journal (slice K1)
 //! and gives each standby its records in order:
 //!
-//! - **Ticks** wait in each stream until a snapshot interval of them (four at
-//!   30 snapshots a second) is there, and go out as one Ticks record; any
-//!   other record sends the waiting ticks first, so the stream keeps the
-//!   journal's order.
+//! - **Ticks** stepped in an update go out at its end as one Ticks record
+//!   (at most [`TICKS_PER_RECORD`] a record), in the same send as the
+//!   snapshots of those ticks; any other record sends the waiting ticks
+//!   first, so the stream keeps the journal's order. (Until the battery
+//!   fixes of 2026-10-20 they waited for a snapshot interval of them, so a
+//!   host killed between two updates could take the last tick it stepped,
+//!   and showed its players, with it.)
 //! - **State, Flight and Ended** go out as they come. A Flight or an Ended
 //!   drops a checkpoint still going out: it belongs to the flight before.
 //! - **Checks** go to the warm standbys at the first update at or after each
@@ -220,7 +223,7 @@ struct Stream {
     role: StandbyMark,
     warm: bool,
     writer: StreamWriter,
-    /// Ticks waiting for a snapshot interval of them.
+    /// Ticks stepped in this update, waiting for its end.
     ticks: Vec<Tick>,
     outgoing: Option<Outgoing>,
     /// When the last checkpoint finished going out.
@@ -317,6 +320,27 @@ impl Host {
     /// dismissed at the next update.
     pub fn set_standbys_enabled(&mut self, on: bool) {
         self.standbys.enabled = on;
+    }
+
+    /// Sets the host's AI test settings (observation rate, lean sensors):
+    /// they apply from the next tick, and any standby is dismissed while they
+    /// differ from the defaults (see [`Self::standbys_on`]).
+    pub fn set_ai_test(&mut self, settings: tore_sim::ai::test_settings::AiTestSettings) {
+        self.config.ai_test = settings;
+    }
+
+    /// The host's AI test settings.
+    pub fn ai_test(&self) -> tore_sim::ai::test_settings::AiTestSettings {
+        self.config.ai_test
+    }
+
+    /// Whether standbys are appointed now: switched on, and the AI test
+    /// settings at their defaults. A standby replays the host's journal with
+    /// the defaults, which the journal does not say otherwise, so a host
+    /// running a slow AI observation rate or lean sensors (slice S7b) would
+    /// only part from it; it keeps none.
+    fn standbys_on(&self) -> bool {
+        self.standbys.enabled && self.config.ai_test.is_default()
     }
 
     /// A standby's status (message 47): kept, and acted on at the next
@@ -429,11 +453,12 @@ impl Host {
             self.checks_due();
             self.cold_checkpoints_due();
         }
-        let interval = self.ticks_per_snapshot() as usize;
         for index in 0..self.standbys.streams.len() {
-            if self.standbys.streams[index].ticks.len() >= interval {
-                self.flush_ticks(index);
-            }
+            // Every tick stepped in this update goes out in it, with the
+            // snapshots of those ticks: a standby never lacks a tick a
+            // player was shown, so a host killed between two updates loses
+            // none of its stepped ticks.
+            self.flush_ticks(index);
             self.pace(index);
             self.extra_packets(index);
         }
@@ -561,7 +586,7 @@ impl Host {
         let Some(peer) = self.peers.get(&connection) else {
             return false;
         };
-        self.standbys.enabled
+        self.standbys_on()
             && !matches!(self.life, Life::Stopped)
             && !peer.house
             && !matches!(peer.stage, Stage::Closing { .. })
@@ -578,7 +603,7 @@ impl Host {
         let Some(peer) = self.peers.get(&connection) else {
             return false;
         };
-        self.standbys.enabled
+        self.standbys_on()
             && !matches!(self.life, Life::Stopped)
             && !matches!(peer.stage, Stage::Closing { .. })
             && peer.goodbye.is_none()
@@ -601,7 +626,7 @@ impl Host {
     /// free roles from the ranking. The journal records while any standby
     /// is appointed.
     fn appoint_standbys(&mut self) {
-        let ranked = if self.standbys.enabled {
+        let ranked = if self.standbys_on() {
             self.ranked_candidates()
         } else {
             Vec::new()
@@ -650,7 +675,7 @@ impl Host {
     /// not yet); false when the standbys are off, the game is not in its
     /// lobby, or the player may not stand by.
     pub(super) fn make_first_standby(&mut self, order: u64) -> bool {
-        if !self.standbys.enabled || !matches!(self.life, Life::Lobby) {
+        if !self.standbys_on() || !matches!(self.life, Life::Lobby) {
             return false;
         }
         let Some(connection) = self

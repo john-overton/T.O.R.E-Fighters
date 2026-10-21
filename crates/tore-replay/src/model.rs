@@ -390,6 +390,48 @@ pub struct Frame {
     pub checksum: Option<u64>,
 }
 
+impl Frame {
+    /// Empties the frame to what `Frame::default()` holds, keeping the
+    /// capacity of every list so the next tick can be built in it.
+    pub fn clear(&mut self) {
+        // Every field is named, so a field added later cannot be missed.
+        let Self {
+            tick,
+            aircraft,
+            projectiles,
+            debris,
+            escapees,
+            new_effects,
+            new_puffs,
+            surface_hp,
+            surface,
+            surface_stock,
+            debris_pieces,
+            events,
+            trees,
+            city_fell,
+            city_stood,
+            checksum,
+        } = self;
+        *tick = 0;
+        aircraft.clear();
+        projectiles.clear();
+        debris.clear();
+        escapees.clear();
+        new_effects.clear();
+        new_puffs.clear();
+        surface_hp.clear();
+        surface.clear();
+        surface_stock.clear();
+        debris_pieces.clear();
+        events.clear();
+        trees.clear();
+        city_fell.clear();
+        *city_stood = false;
+        *checksum = None;
+    }
+}
+
 /// Number of animated device slots.
 pub const DEVICE_COUNT: usize = 22;
 

@@ -28,9 +28,19 @@ use tore_net::master::{
     RendezvousEvent, Role,
 };
 use tore_net::portmap::keeper::{self, Keeper, KeeperConfig};
-use tore_net::{Entropy, Platform, ServerSocket};
+use tore_net::{Entropy, Pace, Platform, ServerSocket};
 use tore_session::wire::chat::receiver_label;
 use tore_session::{BuildId, HostConfig, HostLog, LeaveReason, Phase};
+
+/// The AI test settings the command line asked for (`--ai-observe-hz`,
+/// `--ai-lean-sensors`), kept for the host the program builds. Unset, which a
+/// test build always is, they are today's behaviour.
+static AI_TEST: std::sync::OnceLock<tore_session::AiTestSettings> = std::sync::OnceLock::new();
+
+/// Records the command line's AI test settings; only the first call counts.
+pub fn set_ai_test(settings: tore_session::AiTestSettings) {
+    let _ = AI_TEST.set(settings);
+}
 
 /// The mapper the configuration asks for: the real router when
 /// `port-mapping` is on (and `TORE_NO_PORT_MAPPING` is not set), never in a
@@ -115,10 +125,14 @@ pub fn start_host_with(
         tore_session::CrownRule::None
     };
     config.mission_locked = c.king_mission_locked;
+    // No screen draws a dedicated server's world: its contrails are the
+    // clients' own (optimization slice S11; John, 2026-10-19).
+    config.contrail_puffs = false;
     config.listable = false;
     config.entropy = Entropy::System;
     // The program has already refused the switch; the host refuses it too.
     config.retail_stall_speeds = false;
+    config.ai_test = AI_TEST.get().copied().unwrap_or_default();
     let mut host = tore_session::Host::new(spec, resources, config)
         .map_err(|error| format!("The host session cannot start: {error}"))?;
     let rotation = rotation.map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
@@ -438,6 +452,10 @@ impl Host for SessionHost {
         self.host.next_wake(now)
     }
 
+    fn wake_pace(&self) -> Pace {
+        self.host.wake_pace()
+    }
+
     fn take_events(&mut self) -> Vec<Event> {
         self.drain_log();
         if let Some(rotation) = &self.rotation {
@@ -597,10 +615,12 @@ impl SessionHost {
             self.events
                 .push_back(Event::Note(format!("send failed: {error}")));
         }
-        let master = self.listing.master_text();
+        // The master's text is written only when there is news to say.
+        let mut master: Option<String> = None;
         while let Some(event) = self.listing.poll_event() {
+            let master = master.get_or_insert_with(|| self.listing.master_text());
             self.events
-                .push_back(Event::Note(listing_text(event, &master)));
+                .push_back(Event::Note(listing_text(event, master)));
         }
     }
 }

@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 // CPU weights measured on the private UKR/F18 profile probe (2026-10-16).
@@ -140,10 +140,17 @@ impl Progress {
         (current.0, current.1.elapsed().as_secs_f64())
     }
 }
+/// How long a load that continues from a menu page may run before the
+/// loading photograph replaces that page (`Job::continue_from_menu`). A short
+/// load shows the page it was started from until the next page is ready, not a
+/// photograph for a handful of frames.
+pub(crate) const MENU_GRACE: Duration = Duration::from_millis(250);
 pub(crate) struct Job<T> {
     receive: mpsc::Receiver<Result<T, String>>,
     pub progress: Progress,
     photo: usize,
+    /// Until this time the screen the load started from stays up.
+    quiet_until: Option<Instant>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl<T: Send + 'static> Job<T> {
@@ -160,6 +167,24 @@ impl<T: Send + 'static> Job<T> {
         complete: bool,
         work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
     ) -> Result<Self, String> {
+        Self::start(progress, complete, false, work)
+    }
+    /// A load that opens the next menu page, started from a menu page: that
+    /// page stays up for [`MENU_GRACE`] and the loading photograph comes only
+    /// if the load runs longer (`screen_kept`). The photographs decode beside
+    /// the work, not before it, so a short load is not held up by them.
+    pub fn continue_from_menu(
+        work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
+    ) -> Result<Self, String> {
+        request_background_decode();
+        Self::start(None, false, true, work)
+    }
+    fn start(
+        progress: Option<Progress>,
+        complete: bool,
+        from_menu: bool,
+        work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
+    ) -> Result<Self, String> {
         let (send, receive) = mpsc::channel();
         let progress = progress.unwrap_or_else(Progress::new);
         let photo = progress.1;
@@ -168,7 +193,9 @@ impl<T: Send + 'static> Job<T> {
             .name("flight-loader".into())
             .spawn(move || {
                 // Decode before mission work, on this thread, not the window thread.
-                prepare_photos();
+                if !from_menu {
+                    prepare_photos();
+                }
                 let result = work(status.clone());
                 // A failed load is not completion: leave the last real stage up.
                 if complete && result.is_ok() {
@@ -181,8 +208,14 @@ impl<T: Send + 'static> Job<T> {
             receive,
             progress,
             photo,
+            quiet_until: from_menu.then(|| Instant::now() + MENU_GRACE),
             thread: Some(thread),
         })
+    }
+    /// Whether the screen the load started from is still the one to show at
+    /// `now`.
+    pub fn screen_kept(&self, now: Instant) -> bool {
+        self.quiet_until.is_some_and(|until| now < until)
     }
     /// The worker, still running or finished. Dropping the job discards its
     /// result; the caller joins this handle after the window closes.
@@ -381,7 +414,124 @@ pub(crate) fn draw_window(
     draw_sized(pixels, size, photo, stage, elapsed, details);
     size
 }
+/// The composed background of the loading screen: the photograph cropped to
+/// the canvas with its shading, and the logo over the centre. It depends only
+/// on the canvas size and the photograph, so it is made once and each frame
+/// copies it and draws the changing text and bar over it.
+struct Background {
+    size: [u32; 2],
+    photo: usize,
+    /// Whether the photograph had been decoded when this was composed. A
+    /// dark field composed before that is replaced once it has.
+    decoded: bool,
+    pixels: Vec<u8>,
+}
+thread_local! {
+    static BACKGROUND: std::cell::RefCell<Option<Background>> =
+        const { std::cell::RefCell::new(None) };
+}
+/// The text face of the loading screen, built once.
+fn loading_font() -> &'static crate::menu::Sprite {
+    static FONT: OnceLock<crate::menu::Sprite> = OnceLock::new();
+    FONT.get_or_init(|| crate::menu::flat_font_large([245, 245, 245]))
+}
+/// The photograph and the logo, as the loading screen draws them behind its
+/// text.
+fn compose_background(size: [u32; 2], decoded: Option<&Rgb>) -> Vec<u8> {
+    use crate::menu::{HEIGHT, WIDTH};
+    let (width, height) = (size[0] as usize, size[1] as usize);
+    let mut pixels = vec![0; width * height * 4];
+    blit_photo(&mut pixels, width, height, decoded);
+    let left = (width - WIDTH) / 2;
+    let top = (height - HEIGHT) / 2;
+    let logo = include_bytes!("../assets/loading/logo.rgba");
+    let (w, h) = dimensions(logo);
+    for y in 0..h {
+        for x in 0..w {
+            let src = 8 + (y * w + x) * 4;
+            let dst = ((y + 55 + top) * width + left + x + (WIDTH - w) / 2) * 4;
+            let a = logo[src + 3] as u32;
+            for c in 0..3 {
+                pixels[dst + c] =
+                    ((logo[src + c] as u32 * a + pixels[dst + c] as u32 * (255 - a)) / 255) as u8;
+            }
+        }
+    }
+    pixels
+}
 fn draw_sized(
+    pixels: &mut [u8],
+    size: [u32; 2],
+    photo: usize,
+    stage: Stage,
+    elapsed: f64,
+    details: [&str; 2],
+) {
+    let decoded = cached_photos().and_then(|photos| photos.frames[photo & 1].as_ref());
+    BACKGROUND.with_borrow_mut(|cache| {
+        let current = cache.as_ref().is_some_and(|b| {
+            b.size == size && b.photo == photo & 1 && b.decoded == decoded.is_some()
+        });
+        if !current {
+            *cache = Some(Background {
+                size,
+                photo: photo & 1,
+                decoded: decoded.is_some(),
+                pixels: compose_background(size, decoded),
+            });
+        }
+        let background = cache.as_ref().expect("a composed background");
+        pixels.copy_from_slice(&background.pixels);
+    });
+    draw_text_and_bar(pixels, size, stage, elapsed, details);
+}
+/// What changes from frame to frame: the stage words, the bar, the clock and
+/// the two lines of details, drawn over the 640 by 480 centre.
+fn draw_text_and_bar(
+    output: &mut [u8],
+    size: [u32; 2],
+    stage: Stage,
+    elapsed: f64,
+    details: [&str; 2],
+) {
+    use crate::menu::{Canvas, HEIGHT, WIDTH};
+    let width = size[0] as usize;
+    let left = (width - WIDTH) / 2;
+    let top = (size[1] as usize - HEIGHT) / 2;
+    let mut overlay = vec![0; WIDTH * HEIGHT * 4];
+    for y in 0..HEIGHT {
+        overlay[y * WIDTH * 4..(y + 1) * WIDTH * 4].copy_from_slice(
+            &output[((y + top) * width + left) * 4..((y + top) * width + left + WIDTH) * 4],
+        );
+    }
+    let mut canvas = Canvas(&mut overlay[..]);
+    let font = loading_font();
+    canvas.centered_text(font, stage.words(), (40, 330, 560, 24));
+    canvas.rect((80, 370, 480, 16), [30, 35, 40, 255]);
+    canvas.rect(
+        (80, 370, (4.8 * stage.estimate(elapsed)) as i32, 16),
+        [180, 200, 220, 255],
+    );
+    // No seconds counter (John, 2026-10-19). The externally timed stages show
+    // the stage words and a stationary bar only.
+    if !matches!(stage, Stage::Content | Stage::Connecting | Stage::Waiting) {
+        canvas.centered_text(
+            font,
+            &format!("Estimated {:.1}%", stage.estimate(elapsed)),
+            (80, 405, 480, 24),
+        );
+    }
+    canvas.centered_text(font, details[0], (20, 285, 600, 18));
+    canvas.centered_text(font, details[1], (20, 307, 600, 18));
+    for y in 0..HEIGHT {
+        output[((y + top) * width + left) * 4..((y + top) * width + left + WIDTH) * 4]
+            .copy_from_slice(&overlay[y * WIDTH * 4..(y + 1) * WIDTH * 4]);
+    }
+}
+/// The loading screen as every frame drew it before the background was
+/// cached: the reference the cached drawing must equal pixel for pixel.
+#[cfg(test)]
+fn draw_sized_reference(
     pixels: &mut [u8],
     size: [u32; 2],
     photo: usize,
@@ -424,22 +574,17 @@ fn draw_sized(
         (80, 370, (4.8 * stage.estimate(elapsed)) as i32, 16),
         [180, 200, 220, 255],
     );
-    if matches!(stage, Stage::Content | Stage::Connecting | Stage::Waiting) {
-        canvas.centered_text(&font, &format!("{elapsed:.0}s"), (80, 405, 480, 24));
-    } else {
+    // No seconds counter (John, 2026-10-19). The externally timed stages show
+    // the stage words and a stationary bar only.
+    if !matches!(stage, Stage::Content | Stage::Connecting | Stage::Waiting) {
         canvas.centered_text(
             &font,
-            &format!(
-                "Estimated {:.1}%   {:.0}s",
-                stage.estimate(elapsed),
-                elapsed
-            ),
+            &format!("Estimated {:.1}%", stage.estimate(elapsed)),
             (80, 405, 480, 24),
         );
     }
     canvas.centered_text(&font, details[0], (20, 285, 600, 18));
     canvas.centered_text(&font, details[1], (20, 307, 600, 18));
-    // End the temporary borrow before copying the center back.
     for y in 0..HEIGHT {
         output[((y + top) * width + left) * 4..((y + top) * width + left + WIDTH) * 4]
             .copy_from_slice(&overlay[y * WIDTH * 4..(y + 1) * WIDTH * 4]);
@@ -534,6 +679,21 @@ pub(crate) enum Prepared {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_load_from_a_menu_page_keeps_that_page_up_for_the_grace_time() {
+        // A plain load shows the loading photograph at once.
+        let plain = Job::continue_load(None, false, |_| Ok(())).unwrap();
+        assert!(!plain.screen_kept(Instant::now()));
+        // One started from a menu page keeps the page for MENU_GRACE, then
+        // lets the photograph come (it is not hidden for good).
+        let from_menu = Job::continue_from_menu(|_| Ok(())).unwrap();
+        let started = Instant::now();
+        assert!(from_menu.screen_kept(started));
+        assert!(from_menu.screen_kept(started + MENU_GRACE / 2));
+        assert!(!from_menu.screen_kept(started + MENU_GRACE + Duration::from_millis(5)));
+        // The grace is short enough that a slow load still shows its bar.
+        assert!(MENU_GRACE <= Duration::from_millis(300));
+    }
     #[test]
     fn one_photo_and_monotonic_progress_across_selection_and_mission() {
         let progress = Progress::new();
@@ -710,6 +870,82 @@ mod tests {
             assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
             assert!(pixels.chunks_exact(4).any(|p| p[..3] != [0, 0, 0]));
         }
+    }
+    #[test]
+    fn the_cached_background_draws_the_same_pixels_as_every_frame_did() {
+        prepare_photos();
+        let details = ["Host game", "Goose, Maverick"];
+        for (size, photo) in [([640, 480], 0), ([853, 480], 1), ([640, 853], 0)] {
+            // Several frames on one cache: the bar and the clock move, the
+            // background underneath is the one composed on the first.
+            for (stage, elapsed) in [
+                (Stage::Mission, 0.),
+                (Stage::Aircraft, 1.25),
+                (Stage::Scenery, 3.4),
+                (Stage::Connecting, 7.),
+                (Stage::Ready, 9.),
+            ] {
+                let mut cached = vec![0; size[0] as usize * size[1] as usize * 4];
+                let mut reference = cached.clone();
+                draw_sized(&mut cached, size, photo, stage, elapsed, details);
+                draw_sized_reference(&mut reference, size, photo, stage, elapsed, details);
+                assert!(
+                    cached == reference,
+                    "{size:?} photo {photo} {stage:?} {elapsed}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn the_cached_background_follows_the_window_size_and_the_photograph() {
+        prepare_photos();
+        let mut pixels = Vec::new();
+        let a = draw_window(&mut pixels, [640, 480], 0, Stage::Mission, 0., ["", ""]);
+        let first = pixels.clone();
+        let b = draw_window(&mut pixels, [1920, 1080], 0, Stage::Mission, 0., ["", ""]);
+        assert_ne!(a, b);
+        assert_eq!(pixels.len(), b[0] as usize * b[1] as usize * 4);
+        draw_window(&mut pixels, [640, 480], 1, Stage::Mission, 0., ["", ""]);
+        assert_ne!(pixels, first, "the other photograph");
+        draw_window(&mut pixels, [640, 480], 0, Stage::Mission, 0., ["", ""]);
+        assert_eq!(pixels, first, "back to the first, as a fresh drawing");
+    }
+    #[test]
+    fn the_bar_only_moves_forward_between_cached_frames() {
+        prepare_photos();
+        let mut pixels = Vec::new();
+        let mut last = 0;
+        for tenth in 0..40 {
+            draw_window(
+                &mut pixels,
+                [640, 480],
+                0,
+                Stage::Scenery,
+                f64::from(tenth) / 10.,
+                ["", ""],
+            );
+            let lit = (80..560)
+                .take_while(|&x| pixels[(378 * 640 + x) * 4..][..3] == [180, 200, 220])
+                .count();
+            assert!(lit >= last, "the bar went back at {tenth}");
+            last = lit;
+        }
+        assert!(last > 0);
+    }
+    #[test]
+    fn no_seconds_counter_is_drawn_under_the_bar() {
+        prepare_photos();
+        let (mut early, mut later) = (Vec::new(), Vec::new());
+        // The stages without a percentage show the label and a bar only.
+        draw_window(&mut early, [640, 480], 0, Stage::Connecting, 0., ["", ""]);
+        draw_window(&mut later, [640, 480], 0, Stage::Connecting, 42., ["", ""]);
+        assert!(early == later, "elapsed time must not change the frame");
+        // Elsewhere only the percentage sits there, and rows of text do not
+        // depend on the whole seconds.
+        draw_window(&mut early, [640, 480], 0, Stage::Scenery, 5.01, ["", ""]);
+        draw_window(&mut later, [640, 480], 0, Stage::Scenery, 5.02, ["", ""]);
+        let rows = 405 * 640 * 4..430 * 640 * 4;
+        assert_eq!(early[rows.clone()], later[rows]);
     }
     #[test]
     fn a_missing_photo_is_a_plain_dark_background() {

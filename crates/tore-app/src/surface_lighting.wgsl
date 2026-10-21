@@ -1,13 +1,17 @@
 // Shared surface response and geometry shadows, docs/spec/surface-lighting.md.
 struct ShadowProjection { right:vec4<f32>, up:vec4<f32>, depth:vec4<f32>, scale:vec4<f32> }
 // reserved: visible sun fraction, sun elevation sine, tangent of the sun's
-// radius, burning flare count. flares: position relative to the view origin
-// and strength, docs/spec/countermeasures.md.
+// radius, burning flare count. quality: shadow map side in texels, soft-edge
+// disc samples, 1 when trees cast (surface_lighting.rs Settings). flares:
+// position relative to the view origin and strength,
+// docs/spec/countermeasures.md.
 struct AreaLight { source:vec4<f32>, extent:vec4<f32> }
-struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4<f32>, moon:vec4<f32>, reserved:vec4<f32>, flares:array<AreaLight,16> }
+struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4<f32>, moon:vec4<f32>, reserved:vec4<f32>, quality:vec4<f32>, flares:array<AreaLight,16> }
 @group(1) @binding(0) var<uniform> surface:SurfaceLight;
 @group(1) @binding(1) var shadows:texture_depth_2d_array;
 @group(1) @binding(2) var shadow_sampler:sampler_comparison;
+// For textureGather in shadow_tap: the four stored depths, unfiltered.
+@group(1) @binding(3) var shadow_point:sampler;
 // 0 in full daylight, 1 at night. CPU night_glow::night_factor supplies
 // scene.view.z so group-0-only sprite pipelines need no surface binding.
 fn device_night()->f32 {
@@ -50,15 +54,22 @@ fn shadow_cutout(uv:vec2<f32>,layer:i32) {
 // Hardware comparison filtering uses one depth for all four neighbors, which
 // causes sloped tiles to intermittently classify themselves as blockers.
 fn shadow_tap(uv:vec2<f32>,depth:f32,gradient:vec2<f32>,cascade:i32)->vec2<f32> {
- let m=surface.maps[cascade];let pixel=uv*2048.0-vec2<f32>(0.5);
+ // Map sizes and sample counts are powers of two, so multiplying by their
+ // reciprocals is exact and cheaper than dividing.
+ let m=surface.maps[cascade];let size=surface.quality.x;let texel=1.0/size;let pixel=uv*size-vec2<f32>(0.5);
  let base=vec2<i32>(floor(pixel));let f=fract(pixel);
  let tolerance=max(0.125,m.scale.x*0.002);
  var result=vec2<f32>(0.0);
+ // One gather reads the four texels base..base+1 (the exact stored values).
+ // Its point is the shared corner, so the footprint is base whatever the
+ // sub-texel rounding; edge texels it clamps are skipped below as before.
+ let quad=textureGather(shadows,shadow_point,(vec2<f32>(base)+vec2<f32>(1.0))*texel,cascade);
+ let texels=array<f32,4>(quad.w,quad.z,quad.x,quad.y);
  for(var y=0;y<2;y++) {for(var x=0;x<2;x++) {
   let at=base+vec2<i32>(x,y);
-  if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(2048)) {continue;}
-  let sample_uv=(vec2<f32>(at)+vec2<f32>(0.5))/2048.0;
-  let stored=textureLoad(shadows,at,cascade,0);
+  if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(i32(size))) {continue;}
+  let sample_uv=(vec2<f32>(at)+vec2<f32>(0.5))*texel;
+  let stored=texels[y*2+x];
   let gap=(depth+dot(gradient,sample_uv-uv)-stored)*2.0*m.scale.z;
   let weight=select(1.0-f.x,f.x,x==1)*select(1.0-f.y,f.y,y==1);
   let blocked=smoothstep(tolerance,2.0*tolerance,gap)*select(1.0,0.0,stored>=1.0);
@@ -77,14 +88,15 @@ fn shadow_sample(relative:vec3<f32>,normal:vec3<f32>,cascade:i32)->f32 {
  let light_dot=dot(normal,surface.sun.xyz);
  let denominator=select(-1.0,1.0,light_dot>=0.0)*max(abs(light_dot),0.0001);
  let gradient=vec2<f32>(dot(normal,m.right.xyz),-dot(normal,m.up.xyz))*m.scale.y*m.scale.y/(m.scale.z*denominator);
+ let texel=1.0/surface.quality.x;
  var separation=0.0;var blockers=0.0;
  for(var i=0;i<17;i++) {
   var offset=vec2<f32>(0.0);
   if i>0 {
    let ring=(i-1)/4;let axis=(i-1)%4;
-   let radius=pow(4.0,f32(ring));
+   let radius=f32(1<<u32(2*ring));
    let directions=array<vec2<f32>,4>(vec2<f32>(1.0,0.0),vec2<f32>(-1.0,0.0),vec2<f32>(0.0,1.0),vec2<f32>(0.0,-1.0));
-   offset=directions[axis]*radius/2048.0;
+   offset=directions[axis]*radius*texel;
   }
   let tap=shadow_tap(uv+offset,p.z+dot(gradient,offset),gradient,cascade);
   separation+=tap.y;blockers+=tap.x;
@@ -95,14 +107,15 @@ fn shadow_sample(relative:vec3<f32>,normal:vec3<f32>,cascade:i32)->f32 {
  let physical=separation/max(blockers,0.000001)*surface.reserved.z/m.scale.x;
  let radius=clamp(mix(base_radius,max(base_radius,physical),smoothstep(0.0,1.0,blockers)),base_radius,64.0);
  var visibility=0.0;
- for(var i=0;i<32;i++) {
+ let samples=i32(surface.quality.y);let share=1.0/surface.quality.y;
+ for(var i=0;i<samples;i++) {
   let angle=f32(i)*2.39996323;
-  let offset=vec2<f32>(cos(angle),sin(angle))*sqrt((f32(i)+0.5)/32.0)*radius/2048.0;
+  let offset=vec2<f32>(cos(angle),sin(angle))*sqrt((f32(i)+0.5)*share)*radius*texel;
   let at=uv+offset;
   if any(at<vec2<f32>(0.0)) || any(at>vec2<f32>(1.0)) {visibility+=1.0;continue;}
   visibility+=1.0-shadow_tap(at,p.z+dot(gradient,offset),gradient,cascade).x;
  }
- return mix(1.0,visibility/32.0,smoothstep(0.0,1.0,blockers));
+ return mix(1.0,visibility*share,smoothstep(0.0,1.0,blockers));
 }
 fn geometric_visibility(relative:vec3<f32>,normal:vec3<f32>)->f32 {
  if surface.origin.w<=0.0 {return 1.0;}
@@ -187,13 +200,35 @@ fn surface_normal(relative:vec3<f32>)->vec3<f32> {
 }
 // Any flares burning nearby. Guards the extra undarkened texture reads.
 fn flares_burning()->bool {return surface.sun.w>0.0 && surface.reserved.w>=1.0;}
+// Ground in a low sun (smooth weather only; original graphics keep the
+// plain cosine). The ground's weather palette already darkens it toward
+// dawn and dusk, and with the cosine alone a level field in a low sun took
+// little light and read as shaded beside the sunlit trees and objects on it
+// (John, 2026-10-20). Below 35 degrees of sun the cosine gains up to
+// GROUND_GAIN more, so slopes turned to the sun stand out from those turned
+// away, and sunlit ground takes GROUND_LIFT more besides, as foliage's wrap
+// does (veg_light); cast shadows (visibility) take both away. Both are
+// whole below 6 degrees and fade out by 35, so the midday look is
+// unchanged. Opinionated, fitted by eye.
+const GROUND_GAIN:f32=0.9;
+const GROUND_LIFT:f32=0.12;
+fn ground_facing(cosine:f32)->f32 {
+ let plain=max(cosine,0.0);
+ if !smooth_weather() {return plain;}
+ let low=1.0-smoothstep(0.104528,0.573576,surface.reserved.y);
+ return plain*(1.0+GROUND_GAIN*low)+GROUND_LIFT*low*smoothstep(-0.05,0.25,cosine);
+}
 // albedo: the art's color before the weather's shade remaps. Those remaps
 // darken it at night, but a flare shows the art's own colors.
 fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool,receiver_normal:vec3<f32>,albedo:vec3<f32>)->vec3<f32> {
  if surface.sun.w<=0.0 {return color;}
  let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
- let facing=max(dot(normal,surface.sun.xyz),0.0);
- let visibility=geometric_visibility(relative,receiver_normal)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;
+ var facing=max(dot(normal,surface.sun.xyz),0.0);
+ if !panels {facing=ground_facing(dot(normal,surface.sun.xyz));}
+ // Only ever used as facing*visibility, so the shadow search is skipped
+ // where the surface faces away from the sun.
+ var visibility=0.0;
+ if facing>0.0 {visibility=geometric_visibility(relative,receiver_normal)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;}
  let tint=mix(vec3<f32>(1.0),solar_tint(surface.reserved.y),0.65);
  let skyward=clamp(normal.y*0.5+0.5,0.0,1.0);
  var ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);

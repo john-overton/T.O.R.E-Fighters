@@ -275,23 +275,19 @@ impl SmokeRenderer {
             .filter_map(|p| frustum.distance(p).map(|distance| (distance, p)))
             .collect();
         visible.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let mut instances = Vec::with_capacity(visible.len() * INSTANCE_BYTES);
+        let mut instances: Vec<f32> = Vec::with_capacity(visible.len() * INSTANCE_BYTES / 4);
         for (_, p) in visible {
-            for value in p
-                .position
-                .map(|v| v as f32)
-                .into_iter()
-                .chain([p.radius as f32, p.cell, p.opacity])
-                .chain(glow(flares, p.position))
-                .chain(p.tint)
-            {
-                instances.extend(value.to_le_bytes());
-            }
+            instances.extend(
+                p.position
+                    .map(|v| v as f32)
+                    .into_iter()
+                    .chain([p.radius as f32, p.cell, p.opacity])
+                    .chain(glow(flares, p.position))
+                    .chain(p.tint),
+            );
         }
-        self.count = (instances.len() / INSTANCE_BYTES) as u32;
-        if !instances.is_empty() {
-            queue.write_buffer(&self.buffer, 0, &instances);
-        }
+        self.count = (instances.len() * 4 / INSTANCE_BYTES) as u32;
+        crate::sim_renderer::write_floats(queue, &self.buffer, 0, &instances);
     }
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.count == 0 {
@@ -400,8 +396,11 @@ mod tests {
             camera.yaw = 0.;
             camera.pitch = 0.;
             let mut values = camera.uniform(1., [0., 1000000., 0., 0.], [0; 3]);
-            values.resize(356, 0.);
+            values.resize((crate::sim_renderer::UNIFORM_BYTES / 4) as usize, 0.);
             values[336] = 1.;
+            // Tinted puffs (blast dust) dim after dark by the sun's height
+            // (scene.sun.y, float 33); this fixture checks the daylight colour.
+            values[33] = 1.;
             let raw: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: None,

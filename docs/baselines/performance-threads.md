@@ -200,9 +200,130 @@ byte-identical. Times include process startup and loading.
 One explicitly requested worker pays dispatch/copying costs without parallel
 throughput and is slower than inline execution here. Automatic sizing uses
 serial execution when fewer than two workers remain after its headroom rule.
-The 4- and 8-worker results support retaining the bounded eight-worker default
-on this machine. The separate debug quick guard with `TORE_WORKERS=0` reports
+The 4- and 8-worker results supported the bounded eight-worker default on this
+machine at the time; [slice S9](#load-aware-dispatch-optimization-slice-s9-2026-10-19) replaced it. The separate debug quick guard with `TORE_WORKERS=0` reports
 **SAME 52, DIFFERENT 0, MISSING 0** against the canonical reference.
+
+## Load-aware dispatch (optimization slice S9, 2026-10-19)
+
+Superseding the eight-worker default above. After the serial work of the
+optimization run (slices S1 to S8), the worker counts were measured again on
+the same machine, from a release build, the 15 against 15 fight at 5 nautical
+miles (`--ai-probe-ticks`, scripted attack, no audio), three repeats at 2,400
+ticks and one at 21,600, and a dedicated server flying a 12 AI mission for 30
+seconds. Every worker count printed the same checksum.
+
+| Workers | 2,400 ticks wall s (median of 3) | CPU s | Voluntary context switches | 21,600 ticks wall s | CPU s |
+| --- | --- | --- | --- | --- | --- |
+| 0 (serial) | 4.62 | 4.57 | 1 | 10.27 | 10.22 |
+| 2 | 4.42 | 4.98 | 7,400 | 10.02 | 12.10 |
+| 4 | 4.25 | 5.23 | 12,200 | 9.64 | 13.86 |
+| 8 | 4.12 | 5.76 | 22,300 | 9.68 | 17.77 |
+
+Eight workers bought about 11% of the wall time at the cost of 26% more CPU
+on the short run, and about 6% of the wall time for 80% more CPU on the long
+one. The dedicated server, flying, used 11.6% of a core, 174 wake-ups a second
+and 2 threads serial; 13.8% (14.1% with eight), 1,254 (1,334) and 10 threads
+with the automatic pool. A host that keeps up has no use for the workers.
+
+So the shared executor is serial until a loop is slow or late and fans out to
+at most four workers only then (rules in
+[the architecture](../ARCHITECTURE.md#shared-scoped-workers)): time compression
+above 1x, a tick over the 8.3 ms budget, or a loop that is late (the host: more
+than one tick owed; the flight frame loop: a frame over 100 ms). A second after
+the last report of that it goes serial again. The pool is built on first
+fan-out. `TORE_WORKERS=N` still forces a fixed count. One-off loading jobs
+(vegetation placement, grass tiles, coast distances, sprite baking, the
+canopy) keep using the whole automatic pool through `tore_workers::bulk()`,
+which starts its threads for the job and stops them after it.
+The probe's checksum is `416d3b1e5e8e4f05` serial, forced and by default.
+The lead's measurement of the new default is recorded with the run's final
+figures.
+
+## Heavy fights (optimization round 2, 2026-10-19)
+
+Exact work on the simulation's hot paths for large fights (the gun solve, the
+envelope bands, the bridge's id lookups, the AI's observables, the render
+snapshot, smoke; see [the architecture](../ARCHITECTURE.md#ai-observation-and-ordered-decisions)).
+Release builds of `optimization` (`fba0db05`) and of the round 2 branch, the
+same imported profile, the probe serial (`TORE_WORKERS=0`). Counts are
+user-space instructions and cycles read with `perf_event_open` (instructions
+barely move with the machine's load; cycles are the median of three runs on a
+quiet machine), each binary run once first so its caches are built. The
+120-tick run is the loading cost, taken off below.
+
+| Probe (15v15 unless noted, 5 nm, scripted attack) | Before cycles | After cycles | Simulation only (less loading) |
+| --- | --- | --- | --- |
+| 120 ticks (loading) | 2.06 G | 1.92 G | |
+| 2,400 ticks | 14.14 G | 12.32 G | 12.08 to 10.40 G (-14%) |
+| 21,600 ticks | 39.60 G | 33.62 G | 37.54 to 31.70 G (-16%) |
+| 2v2, 21,600 ticks | 14.45 G | 12.52 G | about -15% |
+
+Instructions for the same runs: 38.5 to 30.0 G, 110.9 to 88.6 G and 37.0 to
+30.3 G. Every checksum is unchanged (`416d3b1e5e8e4f05`, `1035a55da803a4db`,
+`3408da7166d2aa5a` serial, the 2,400-tick fight also with four workers), and
+the 240 fights of the rate matrix below gave the same checksum at 120 Hz before
+and after. Raw runs, profiles and the matrix are local under
+`.local/next-round/optimization/round2/prof/`.
+
+Windowed heavy fight at 8x (15v15, 1920x1080, uncapped, hidden workspace,
+`TORE_WORKERS=8`, recording on, 2,400 ticks, four runs each, alternating):
+7.0x to 7.5x achieved, frame interval mean 160 to 114 ms (p95 360 to 218 ms).
+The main thread was busy throughout: about 63% simulation, 13% the mission
+recorder (which works out the cockpit readout again), 14% drawing on the CPU,
+2% the tick presenter and 1% waiting. A dedicated server flying the 12 AI
+perf mission used 8.6% of a core before and 7.5% after (two 30-second windows
+each).
+
+What is left in a heavy fight's tick, from the profiles: the AI's own
+observation (about 18%, which a slower observation rate thins), the render
+snapshot (about 6% to 14%), the human's missile fly-out for the
+time-to-impact and launch range (in the first minutes of a fight up to 18%
+of a tick, and in the windowed game worked out again by the readout and the
+recorder), and many small lists built and dropped every tick.
+
+### AI observation rate matrix
+
+240 fights (head, rear and side geometries; 2, 5, 10, 20 and 50 nm; novice,
+average, experienced and ace enemies; 2v2, 4v4, 8v8 and 15v15; 21,600 ticks
+each) at every observation rate, plus each fight at 120 Hz and 60 Hz with the
+player's first shot 10 ticks later as a measure of how far one small change
+moves a chaotic fight. Each rate is compared with 120 Hz fight by fight
+(mean difference over its standard error).
+
+- **First pass** (held observations at their last-seen position): no outcome
+  moved beyond noise at 60 Hz, but the probe's "activity flapping" anomaly
+  appeared in 6 of 240 fights at 60 Hz, 5 at 40, 13 at 30 and 16 at 20, and in
+  none of 480 at 120 Hz. The gun tracking's aligned test flipped between the
+  fresh and the one-tick-old picture. Held observations are now carried on at
+  their observed velocity, which changes nothing at 120 Hz.
+- **Second pass**: flapping 0 at 60 and 40 Hz (1 at 30 and 20). At 60 Hz, of
+  117 comparisons (9 groups by 13 measures) three were beyond two standard
+  errors, about what chance gives, and none in kills, losses, ejections,
+  decoys, gun defense, mid-air collisions or the debrief over all fights;
+  the fight-by-fight spread was smaller than the chaos measure's in every
+  measure. The first visual sighting comes 0.48 ticks (4 ms) later on
+  average, the half observation interval. Close merges in big fights (2 nm,
+  8v8 and 15v15) showed no shift. At 40 Hz twelve comparisons were beyond two
+  standard errors (15v15 enemies lost -0.70, -2.8 SE; 8v8 destroyed +0.50;
+  more mid-air collisions in close merges), at 30 Hz seven and at 20 Hz six.
+
+So 60 Hz behaves as 120 Hz does within the fights' own chaos, and 40 Hz and
+below do not: 60 Hz is the default since then. The probe's checksums at the
+new default are `6d7f0d87dc66bd00` (15v15, 2,400 ticks), `a185f08cc8427934`
+(15v15, 21,600) and `1b3ef475ed3772a4` (2v2, 21,600), serial and with four
+workers; `--ai-observe-hz 120` gives the earlier ones above.
+
+With the round's exact work and 60 Hz together, against `fba0db05` (same
+method): serial 15v15 simulation cycles 12.0 to 9.3 G at 2,400 ticks (-22%)
+and 37.6 to 28.5 G at 21,600 (-24%); 2v2 at 21,600 about -15%; the windowed
+heavy fight at 8x 7.1x to 7.7x achieved with frames of 151 to 102 ms mean
+(p95 347 to 216 ms, three runs each); the dedicated server flying the perf
+mission 8.6% to 7.2% of a core. CPU of the serial 15v15 probe at each rate (cycles, simulation
+only): 2,400 ticks 10.35 G at 120 Hz, 9.16 at 60 (-11%), 8.75 at 40, 8.43 at
+30, 8.29 at 20; 21,600 ticks 31.6 G, 28.7 (-9%), 27.2, 25.6, 25.6. The
+windowed heavy fight at 8x used 4.5% less CPU at 60 Hz (three runs each) and
+reached 7.66x against 7.58x.
 
 ## Unchanged behavior and capture correction
 
@@ -302,6 +423,39 @@ audio-dependent slowdown. In the sampled current heavy-8x interval, spatial
 audio processing was about 0.5% of main-thread sampled CPU. No playback rule
 was changed. These CPU samples do not establish mixer wait times or callback
 silence counts, and do not rule out an audio issue in another workload.
+
+## Cockpit pages (round 2)
+
+Optimization round 2, 2026-10-19, branch `r2-cockpit` against `fba0db05`, on
+this Linux machine while other work shared it (load average 14 to 29), so
+single runs are noisy; before and after builds ran alternately, twice each.
+Windowed quick mission, 2 against 2 at 5 nmi, uncapped on a hidden workspace,
+no audio, 2,400 ticks at 1x, radar lock and target. The figure is the game's
+"UI composition" timer (from the end of the simulation to the GPU submit),
+mean milliseconds per frame. The mechanisms are in
+[the architecture notes](../ARCHITECTURE.md#first-simulation-renderer).
+
+| Case | before | after |
+| --- | --- | --- |
+| Large windows, 1920x1080 | 1.56, 1.56 | 1.00, 0.98 |
+| Small windows, 1920x1080 | 1.16, 0.92 | 1.16, 0.63 |
+| Large windows, 3840x2160 | 4.00, 2.52 | 2.02, 1.22 |
+| Map open (Shift+M), 1920x1080 | 27.22, 25.19 | 4.61, 3.65 |
+| AC-130 sensor console, 1920x1080 | 8.77, 7.99 | 2.63, 1.64 |
+
+With the map open the mean frame interval fell from about 34 ms to about 12 ms,
+and with the console from about 15 ms to about 6 ms. The other cases are held
+by the GPU and presentation (about 9.4 ms at 1080p, 23 to 24 ms at 4K). Sampled
+profiles put the large-window page rasters at 0.33 ms a frame before and 0.06
+after (plus 0.04 for the keys), all panel preparation at 1.7 and 0.5, the map
+layer at 28.1 and 2.3, and the console's outline pass at 5.0 and 2.3.
+
+Pixels: release builds run with `TORE_PAGE_KEY_CHECK=1` drew every kept page
+again and compared it, through scripted flights that opened every page in both
+layouts, the map, an AC-130 (its gunsight camera and console) and an A-10
+(targeting page): 40,000 kept pages, none different. Captured flight frames
+(large and small windows, the map, the AC-130, the A-10, the flight menu) are
+byte for byte the same before and after.
 
 ## Limits and remaining review
 

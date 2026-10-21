@@ -664,7 +664,7 @@ impl List {
             None,
             None,
         );
-        let rocker = kit.sprite(&self.rocker.sprite());
+        let rocker = kit.sprite(self.rocker.sprite());
         canvas.blit(rocker, pager.rocker, 0, rocker.width, 1.0);
         text(canvas, kit, bright, "PAGE", pager.page_label, None, None);
         let page_box = kit.sprite("PAGEBOX");

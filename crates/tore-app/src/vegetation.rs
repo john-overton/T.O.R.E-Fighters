@@ -1843,15 +1843,10 @@ impl Placement {
             (cx as f64 + 0.5) * CHUNK as f64,
             (cz as f64 + 0.5) * CHUNK as f64,
         ];
-        let draw = draw + 2. * CHUNK as f32;
         // Fixed geographic quotas reserve room for the entire guarded ring.
         // They depend only on settings, never on camera distance or local load.
-        let radius = (draw / CHUNK as f32).ceil() as i64 + 1;
-        let count = (-radius..=radius)
-            .flat_map(|z| (-radius..=radius).map(move |x| (x, z)))
-            .filter(|&(x, z)| chunk_distance([CHUNK as f64 * 0.5; 2], x, z) <= draw)
-            .count();
-        let quota = self.budget / count.max(1);
+        let quota = self.budget / ring_chunks(draw).max(1);
+        let draw = draw + 2. * CHUNK as f32;
         if quota != self.chunk_budget {
             self.reset_cache();
             self.chunk_budget = quota;
@@ -1925,7 +1920,11 @@ impl Placement {
             .map(|(_, key)| *key)
             .collect();
         let started = std::time::Instant::now();
-        let chunks = tore_workers::shared().ordered_map(&missing, 2, |_, key| {
+        // Building everything (the load) is a bulk job; a budgeted pass in
+        // flight is a few chunks a frame and follows the load-aware executor.
+        let bulk = budget.is_none().then(tore_workers::bulk);
+        let workers = bulk.as_ref().unwrap_or_else(|| tore_workers::shared());
+        let chunks = workers.ordered_map(&missing, 2, |_, key| {
             let mut objects = self.atlas.chunk(world, key.0, key.1, 0., 1., self.density);
             if objects.len() > self.chunk_budget {
                 objects.sort_by(|a, b| {
@@ -2092,6 +2091,17 @@ fn distance_fade(distance: f32, full: f32, draw: f32) -> f32 {
     } else {
         1. - smoothstep(full, draw.max(full + 1.), distance)
     }
+}
+
+/// Chunks in the guarded ring a stream keeps for a `draw`-foot circle: the
+/// most chunks one selection can hold, wherever the eye is in its cell.
+pub fn ring_chunks(draw: f32) -> usize {
+    let draw = draw + 2. * CHUNK as f32;
+    let radius = (draw / CHUNK as f32).ceil() as i64 + 1;
+    (-radius..=radius)
+        .flat_map(|z| (-radius..=radius).map(move |x| (x, z)))
+        .filter(|&(x, z)| chunk_distance([CHUNK as f64 * 0.5; 2], x, z) <= draw)
+        .count()
 }
 
 fn chunk_distance(eye: [f64; 2], cx: i64, cz: i64) -> f32 {

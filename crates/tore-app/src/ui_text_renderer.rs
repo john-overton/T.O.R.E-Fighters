@@ -273,19 +273,18 @@ impl UiTextRenderer {
         pass.draw(0..6, 0..self.count);
     }
 
-    /// Draws `quads` in window pixels over the whole target. A separate
+    /// Uploads `quads` in window pixels for [`draw_window_in`], returning
+    /// the glyph count, or `None` when there is nothing to draw. A separate
     /// buffer from [`set`], so the menu text of this frame is left as it is.
-    pub(crate) fn draw_window(
+    pub(crate) fn prepare_window(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
         quads: &[Quad],
         size: [f32; 2],
-    ) {
+    ) -> Option<u32> {
         if quads.is_empty() || size[0] < 1.0 || size[1] < 1.0 {
-            return;
+            return None;
         }
         if quads.len() > self.fps_capacity {
             self.fps_capacity = quads.len().next_power_of_two();
@@ -308,23 +307,16 @@ impl UiTextRenderer {
         size_bytes[..4].copy_from_slice(&size[0].to_le_bytes());
         size_bytes[4..8].copy_from_slice(&size[1].to_le_bytes());
         queue.write_buffer(&self.fps_size, 0, &size_bytes);
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Frame rate"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
+        Some(quads.len() as u32)
+    }
+
+    /// Draws the `count` glyphs of [`prepare_window`] into `pass`, whose
+    /// viewport must be the whole window.
+    pub(crate) fn draw_window_in(&self, pass: &mut wgpu::RenderPass<'_>, count: u32) {
         pass.set_pipeline(&self.fps_pipeline);
         pass.set_bind_group(0, &self.fps_bind, &[]);
         pass.set_vertex_buffer(0, self.fps_instances.slice(..));
-        pass.draw(0..6, 0..quads.len() as u32);
+        pass.draw(0..6, 0..count);
     }
 }
 

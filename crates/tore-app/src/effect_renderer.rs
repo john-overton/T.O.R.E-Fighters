@@ -713,12 +713,22 @@ pub struct EffectRenderer {
     glows: Vec<crate::night_glow::Glow>,
     sustained_lights: Vec<crate::countermeasure_renderer::FlareLight>,
     glow_on: bool,
+    /// This frame's sprites with their fires fitted, and those sprites'
+    /// glows and lights, shared by every view until the next `prepare` or
+    /// `fit_fires`.
+    fitted: Option<FittedSprites>,
 }
+
+type FittedSprites = (
+    Vec<Sprite>,
+    Vec<crate::night_glow::Glow>,
+    Vec<crate::countermeasure_renderer::FlareLight>,
+);
 
 /// What the camera at `eye` draws, in drawing order: the nearest
 /// [`MAX_MARK_INSTANCES`] flat marks within their draw distance, far to
 /// near, then everything else far to near, [`MAX_INSTANCES`] in all.
-fn visible(sprites: &[Sprite], eye: [f64; 3]) -> Vec<&Sprite> {
+fn visible<'a>(sprites: impl IntoIterator<Item = &'a Sprite>, eye: [f64; 3]) -> Vec<&'a Sprite> {
     let distance = |s: &Sprite| -> f64 {
         let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
         offset.iter().map(|v| v * v).sum::<f64>().sqrt()
@@ -799,9 +809,27 @@ fn glows_of(
 /// A fire this near a fitted fire's spot (feet, level) is that fire.
 const FIRE_FIT_FT: f64 = 2.;
 
-/// Fitted raster tolerance for independently triangulated coplanar ground.
-/// Sixteen reversed floating-point depth units, never a slope or world lift.
-const GROUND_DEPTH_BIAS: i32 = 16;
+/// Raster tolerance that lets a flat mark win against the independently
+/// triangulated terrain it lies on, never a world-space lift.
+///
+/// The depth buffer is `Depth32Float` with reversed Z on every backend, so
+/// the constant is in units of the float's own resolution at the primitive:
+/// sixteen of them are a fixed fraction of the mark's depth (about 2e-6),
+/// far under a vehicle's six feet at any range, and cover the rounding
+/// between coplanar triangles seen head on. They do not cover a tilted
+/// receiver: two triangulations of one slope disagree by more as depth
+/// changes faster across a pixel (a hillside, a grazing view, a long zoom),
+/// which lost one triangle of a crater on a 15 degree slope. The slope term
+/// adds half of the mark's steepest per-pixel depth change, so the lift is
+/// under one pixel's footprint of height at the mark at any range and zoom.
+/// Fitted by sweeping both terms in `depth_tests` (every case passes with
+/// the slope term from 0.1 to 4.5; 0.5 sits well inside, and above 5 a roof
+/// six feet up is covered at grazing views).
+const GROUND_DEPTH_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState {
+    constant: 16,
+    slope_scale: 0.5,
+    clamp: 0.,
+};
 
 /// `sprites` with every fire sprite that stands on one of `fires` drawn at
 /// that fire's width (the fire's sheet is as wide as it is tall by the
@@ -889,12 +917,14 @@ impl EffectRenderer {
             glows: Vec::new(),
             sustained_lights: Vec::new(),
             glow_on: crate::night_glow::enabled(),
+            fitted: None,
         }
     }
     /// The fires of destroyed units and the width each is drawn at, for the
     /// next `update`.
     pub fn fit_fires(&mut self, fires: &[([f64; 3], f64)]) {
         self.fires = fires.to_vec();
+        self.fitted = None;
     }
     /// The burning city buildings' fires for this frame, `tick` the
     /// presentation tick that turns their flames' frames. Replaces the last
@@ -957,7 +987,14 @@ impl EffectRenderer {
         shader: &wgpu::ShaderModule,
         samples: u32,
     ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-        let pipeline = Self::pipeline(device, format, shader, samples, 0, None);
+        let pipeline = Self::pipeline(
+            device,
+            format,
+            shader,
+            samples,
+            wgpu::DepthBiasState::default(),
+            None,
+        );
         // Both passes use the same resources. Share the layout explicitly:
         // independently inferred layouts cannot share a bind group.
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -980,7 +1017,7 @@ impl EffectRenderer {
         format: wgpu::TextureFormat,
         shader: &wgpu::ShaderModule,
         samples: u32,
-        bias: i32,
+        bias: wgpu::DepthBiasState,
         layout: Option<&wgpu::PipelineLayout>,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1025,12 +1062,8 @@ impl EffectRenderer {
                 depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::Greater,
                 stencil: Default::default(),
-                // A few reversed-depth raster units for flat marks, no slope
-                // bias and no world-space lift. Standing effects use zero.
-                bias: wgpu::DepthBiasState {
-                    constant: bias,
-                    ..Default::default()
-                },
+                // `GROUND_DEPTH_BIAS` for flat marks; standing effects use none.
+                bias,
             }),
             multisample: wgpu::MultisampleState {
                 count: samples,
@@ -1113,6 +1146,7 @@ impl EffectRenderer {
         }
         self.fire_present = art.present[FIRE_SHEET];
         self.sprites = sprites(art, effects, marks, climate);
+        self.fitted = None;
     }
     /// Sorts what the camera can see: craters first, then everything else
     /// far to near.
@@ -1123,27 +1157,39 @@ impl EffectRenderer {
         world: &crate::terrain::Terrain,
     ) {
         let eye = camera.position;
-        let mut fitted = fit_fires(&self.sprites, &self.fires);
-        fitted.extend_from_slice(&self.city);
+        // The fitted sprites and their glows do not depend on the camera:
+        // made once per frame (after `prepare` and `fit_fires`), shared by
+        // every view. The city's fires are per view and follow them.
+        let glow_on = self.glow_on;
+        let (sprites, fires) = (&self.sprites, &self.fires);
+        let (base, base_glows, base_lights) = self.fitted.get_or_insert_with(|| {
+            let fitted = fit_fires(sprites, fires);
+            let (glows, lights) = if glow_on {
+                glows_of(&fitted)
+            } else {
+                Default::default()
+            };
+            (fitted, glows, lights)
+        });
         self.glows.clear();
         self.sustained_lights.clear();
         if self.glow_on {
-            (self.glows, self.sustained_lights) = glows_of(&fitted);
+            let (city_glows, city_lights) = glows_of(&self.city);
+            self.glows.extend_from_slice(base_glows);
+            self.glows.extend(city_glows);
+            self.sustained_lights.extend_from_slice(base_lights);
+            self.sustained_lights.extend(city_lights);
             self.glows.extend_from_slice(&self.far_city);
         }
-        let visible = visible(&fitted, eye);
+        let visible = visible(base.iter().chain(&self.city), eye);
         self.flat_count = visible.iter().take_while(|s| s.mode == Mode::Flat).count() as u32;
-        let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
+        let mut instances: Vec<f32> =
+            Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES / 4);
         for s in visible {
-            let values = instance_values(s, eye, &|x, z| ground_height(world, x, z));
-            for value in values {
-                instances.extend(value.to_le_bytes());
-            }
+            instances.extend(instance_values(s, eye, &|x, z| ground_height(world, x, z)));
         }
-        self.count = (instances.len() / INSTANCE_BYTES) as u32;
-        if !instances.is_empty() {
-            queue.write_buffer(&self.buffer, 0, &instances);
-        }
+        self.count = (instances.len() * 4 / INSTANCE_BYTES) as u32;
+        crate::sim_renderer::write_floats(queue, &self.buffer, 0, &instances);
     }
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.count == 0 {

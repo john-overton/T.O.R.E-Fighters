@@ -153,6 +153,15 @@ def probe_problems(
     return problems
 
 
+# How long a theater's land-pair probe runs, where the default 900 s is too
+# long. The scripted player cruises on along the runway heading while its
+# wingman lands, and the probe needs no enemy near it (`player_flies`). From
+# Kimpo (NSK 9) that heading runs north into North Korea: the theater
+# layout's own Redfor SA-6 and ZSU-23 stand 71 nm up it and shot the player
+# down at 631 s (first SA-6 launch 570 s at 8.6 nm, checked 2026-10-20). The
+# wingman has rolled out by 485 s, so the probe ends at 540 s.
+LAND_PAIR_TICKS = {"NSK": 64800}
+
 THRESHOLD = re.compile(r"^t=\d+ \(([\d.]+)s\) THRESHOLD (\S+ \d-\d+) wheels=(-?\d+) ft", re.M)
 # An AI final crossing the threshold this low is landing short, this high
 # is landing long (the ILS path crosses it about 52 ft up).
@@ -1367,7 +1376,8 @@ def scenarios() -> list[Scenario]:
         out.append(probe(f"theater-{theater.lower()}-land-pair", where + [
             "--ground-start", str(airports[0]), "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
-            ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)))
+            ticks=LAND_PAIR_TICKS.get(theater, 108000), timeout=2400,
+            check=checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)))
     # Runway ends whose 3 degree path meets terrain in the last 5 nm
     # (`--validate-ils` prints them as `ils-terrain:`; docs/testing/ils.md):
     # a pair ordered to land must land without hitting the ground and must

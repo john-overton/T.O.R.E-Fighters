@@ -108,6 +108,17 @@ pub(crate) fn rear_basis(body: Basis) -> Basis {
 pub(crate) fn pilot_eye(position: [f64; 3], body: Basis) -> [f64; 3] {
     std::array::from_fn(|i| position[i] + body.up[i] * 7. + body.forward[i] * 10.)
 }
+/// How much wider the rear camera's field of view is than a 1x view's 60
+/// degrees vertical: 66 degrees vertical, about 105 across the 2:1 rear
+/// picture (98 before). Opinionated, John 2026-10-19 ("maybe 10% wider").
+pub const WIDENING: f64 = 1.1;
+/// The rear camera's zoom: a 1x view's half-angle tangent over the widened
+/// one's.
+pub fn rear_zoom() -> f32 {
+    let half = std::f64::consts::FRAC_PI_6;
+    (half.tan() / (half * WIDENING).tan()) as f32
+}
+/// The one rear camera every mirror of a cockpit shows a crop of.
 pub fn camera(state: &State) -> Camera {
     let body = Basis::new(state.yaw, state.pitch, state.bank);
     let [yaw, pitch, bank] = rear_basis(body).angles();
@@ -117,12 +128,110 @@ pub fn camera(state: &State) -> Camera {
     c.yaw = yaw as f32;
     c.pitch = pitch as f32;
     c.roll = -bank as f32;
-    c.zoom = 1.;
+    c.zoom = rear_zoom();
     c
+}
+/// Where mirror `id` (1 centre, 2 left, 3 right) of source rectangle
+/// `rect` samples the rear picture at `uv` within the rectangle: an
+/// aspect-preserving, horizontally reflected crop of the one picture. The
+/// CPU twin of `cockpit.wgsl`'s mirror sampling, for tests.
+#[cfg(test)]
+pub fn crop(id: usize, rect: [f32; 4], uv: [f32; 2]) -> [f32; 2] {
+    let width = (rect[2] / rect[3] / 2.).min(1.);
+    let height = (2. * rect[3] / rect[2]).min(1.);
+    let center = [0.5, 0.8, 0.2][id - 1];
+    let start = (center - width * 0.5).clamp(0., 1. - width);
+    [start + (1. - uv[0]) * width, 0.5 + (uv[1] - 0.5) * height]
+}
+/// Which visible flight frames draw the rear picture: every other one, the
+/// mirrors showing the last picture in between (John, 2026-10-19). The first
+/// visible frame after hidden ones always draws, so a mirror never shows an
+/// old picture.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Cadence {
+    frame: u64,
+    drawn: Option<u64>,
+}
+impl Cadence {
+    /// Called once per flight frame; whether this frame draws the mirrors.
+    pub fn due(&mut self, visible: bool) -> bool {
+        self.frame += 1;
+        if !visible {
+            return false;
+        }
+        let due = self.drawn != Some(self.frame - 1);
+        if due {
+            self.drawn = Some(self.frame);
+        }
+        due
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mirrors_draw_every_other_visible_frame_and_never_start_stale() {
+        let mut c = Cadence::default();
+        let drawn: Vec<bool> = (0..6).map(|_| c.due(true)).collect();
+        assert_eq!(drawn, [true, false, true, false, true, false]);
+        // Hidden frames draw nothing; the first visible one after them draws.
+        assert!(!c.due(false));
+        assert!(!c.due(false));
+        assert!(c.due(true));
+        assert!(!c.due(true));
+        // A single hidden frame between: the next visible frame draws even
+        // though the frame before the gap did not.
+        assert!(c.due(true));
+        assert!(!c.due(false));
+        assert!(c.due(true));
+        // A fresh cadence (new aircraft or scene) draws at once.
+        let mut c = Cadence::default();
+        assert!(c.due(true));
+        // Half the visible frames over a long run.
+        let mut c = Cadence::default();
+        assert_eq!((0..1000).filter(|_| c.due(true)).count(), 500);
+    }
+    #[test]
+    fn rear_camera_is_ten_percent_wider_than_a_1x_view() {
+        let zoom = rear_zoom();
+        // Camera::uniform projects with focal = half height * sqrt(3) * zoom.
+        let half = (1. / (3f64.sqrt() * f64::from(zoom))).atan();
+        assert!((2. * half.to_degrees() - 66.).abs() < 1e-3, "{zoom}");
+        let across = (2. * (2. * half.tan()).atan()).to_degrees();
+        assert!((across - 104.86).abs() < 0.05, "{across}");
+        assert!(zoom < 1.);
+    }
+    #[test]
+    fn every_mirror_is_a_crop_of_the_one_rear_picture() {
+        // Each mirror's corners land inside the 2:1 picture, keep the
+        // mirror's own aspect on it, and the side mirrors look to their own
+        // side of it (the picture is reflected: the left mirror shows the
+        // right of the rear picture's centre, which is the aircraft's left).
+        for (id, rect) in [
+            (1, [500., 20., 280., 50.]),
+            (2, [60., 340., 110., 70.]),
+            (3, [1110., 340., 110., 70.]),
+        ] {
+            let corners = [[0., 0.], [1., 0.], [0., 1.], [1., 1.]].map(|uv| crop(id, rect, uv));
+            for [u, v] in corners {
+                assert!(
+                    (0. ..=1.).contains(&u) && (0. ..=1.).contains(&v),
+                    "{id} {u} {v}"
+                );
+            }
+            let w = (corners[0][0] - corners[1][0]).abs() * SIZE[0] as f32;
+            let h = (corners[2][1] - corners[0][1]).abs() * SIZE[1] as f32;
+            assert!((w / h - rect[2] / rect[3]).abs() < 1e-3, "{id}");
+        }
+        let centre = |id, rect| crop(id, rect, [0.5, 0.5])[0];
+        assert!(centre(2, [60., 340., 110., 70.]) > 0.5);
+        assert!(centre(3, [1110., 340., 110., 70.]) < 0.5);
+        assert_eq!(centre(1, [500., 20., 280., 50.]), 0.5);
+        // The shader samples the same crops from a single rear texture.
+        let shader = include_str!("cockpit.wgsl");
+        assert!(shader.contains("array<f32,3>(.5,.8,.2)"));
+        assert_eq!(shader.matches("textureSampleLevel(rear,").count(), 1);
+    }
     #[test]
     fn rear_camera_tracks_body_through_bank_and_vertical_attitudes() {
         for (yaw, pitch, bank) in [

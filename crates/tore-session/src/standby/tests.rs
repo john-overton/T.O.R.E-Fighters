@@ -148,6 +148,7 @@ impl Source {
             mission: MISSION,
             spec_hash: tore_codec::fnv1a64(crowd_spec().to_text().as_bytes()),
             identity: self.world.mission_identity(),
+            contrail_puffs: self.world.combat.contrail_puffs(),
         };
         self.code(&Record::Flight(flight))
     }
@@ -627,6 +628,7 @@ fn another_mission_a_gap_or_an_unreadable_record_puts_the_standby_behind() {
         mission: MISSION,
         spec_hash: 1,
         identity: source.world.mission_identity() ^ 1,
+        contrail_puffs: true,
     }));
     feed(&mut standby, &[appoint, foreign]);
     assert_eq!(standby.status().state, StandbyState::Behind);

@@ -44,7 +44,7 @@ impl Map {
                 palette,
                 &mut parallel,
                 first,
-                tore_workers::shared(),
+                &tore_workers::bulk(),
             );
             crate::loading::measured("vegetation canopy parallel", started.elapsed());
             assert_eq!(expected, actual);
@@ -59,7 +59,7 @@ impl Map {
             palette,
             pages,
             first,
-            tore_workers::shared(),
+            &tore_workers::bulk(),
         )
     }
 

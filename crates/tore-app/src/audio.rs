@@ -151,6 +151,44 @@ pub struct Launch<'a> {
     /// aircraft's launches").
     pub shooter: Option<Shooter>,
 }
+/// A [`Launch`] that keeps its own recording name, for one that waits.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnedLaunch {
+    pub gun: bool,
+    pub name: String,
+    pub max_distance_ft: i16,
+    pub shooter: Option<Shooter>,
+}
+impl OwnedLaunch {
+    pub fn of(launch: &Launch) -> Self {
+        Self {
+            gun: launch.gun,
+            name: launch.name.to_owned(),
+            max_distance_ft: launch.max_distance_ft,
+            shooter: launch.shooter,
+        }
+    }
+    pub fn launch(&self) -> Launch<'_> {
+        Launch {
+            gun: self.gun,
+            name: &self.name,
+            max_distance_ft: self.max_distance_ft,
+            shooter: self.shooter,
+        }
+    }
+}
+/// What one simulation tick of single-player flight asks of the spatial
+/// sound, kept until the frame's last tick is presented: where the listener
+/// was, what the tick emitted and launched, and where the player was. The
+/// sources and loops are the frame's last tick's ([`Audio::spatial_frame`]).
+#[derive(Clone, Debug)]
+pub struct SpatialStep {
+    pub listener: tore_sim::acoustics::Listener,
+    pub emissions: Vec<tore_sim::acoustics::Emission>,
+    pub launches: Vec<OwnedLaunch>,
+    pub player_position: [f64; 3],
+    pub player_velocity: [f64; 3],
+}
 /// An aircraft other than the listener's own that fired a weapon.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shooter {
@@ -327,7 +365,8 @@ pub fn shooter_position(
 /// 2026-10-12). The shared mixer groups gun rounds into bounded bursts.
 #[derive(Clone, Debug, Default)]
 pub struct LaunchWatch {
-    known: std::collections::BTreeSet<u32>,
+    /// The projectile ids of the last call, sorted and without repeats.
+    known: Vec<u32>,
 }
 /// A launch the watch found: the firing aircraft, where it was, and the
 /// record's recording and reach.
@@ -351,7 +390,7 @@ impl LaunchWatch {
         let heard = picture
             .projectiles
             .iter()
-            .filter(|p| p.gun && p.owner != own && !self.known.contains(&p.id))
+            .filter(|p| p.gun && p.owner != own && !self.knows(p.id))
             .filter_map(|p| {
                 catalog.heard(
                     &p.weapon,
@@ -360,13 +399,18 @@ impl LaunchWatch {
                 )
             })
             .collect();
-        self.known = picture
-            .projectiles
-            .iter()
-            .filter(|p| p.gun)
-            .map(|p| p.id)
-            .collect();
+        self.learn(picture.projectiles.iter().filter(|p| p.gun).map(|p| p.id));
         heard
+    }
+    fn knows(&self, id: u32) -> bool {
+        self.known.binary_search(&id).is_ok()
+    }
+    /// Makes `ids` the projectiles known, in the list that was there.
+    fn learn(&mut self, ids: impl Iterator<Item = u32>) {
+        self.known.clear();
+        self.known.extend(ids);
+        self.known.sort_unstable();
+        self.known.dedup();
     }
     /// The launches of the projectiles new since the last call, except those
     /// of `own`, in id order.
@@ -375,10 +419,10 @@ impl LaunchWatch {
         let mut fresh: Vec<&live::Projectile> = state
             .projectiles
             .iter()
-            .filter(|p| !self.known.contains(&p.id))
+            .filter(|p| !self.knows(p.id))
             .collect();
         fresh.sort_by_key(|p| p.id);
-        self.known = state.projectiles.iter().map(|p| p.id).collect();
+        self.learn(state.projectiles.iter().map(|p| p.id));
         fresh
             .into_iter()
             .filter(|p| p.owner != own)
@@ -636,6 +680,35 @@ impl EngineSounds {
             start: get(ENGINE_START),
             stop: get(ENGINE_STOP),
         }
+    }
+}
+/// The engine recordings of the aircraft types a flight loaded, found when
+/// the set of types is first seen and kept while it is the same set. A type
+/// is told apart by where it is loaded and by its identity, so a new mission's
+/// types start the list over.
+#[derive(Default)]
+pub struct EngineSoundsCache {
+    key: Vec<(usize, tore_formats::aircraft::AircraftId)>,
+    sounds: Vec<(tore_formats::aircraft::AircraftId, EngineSounds)>,
+}
+impl EngineSoundsCache {
+    /// `(id, sounds)` for each of `models`, in their order.
+    pub fn of<'a>(
+        &mut self,
+        models: impl Iterator<Item = &'a tore_world::aircraft_type::AircraftType> + Clone,
+    ) -> &[(tore_formats::aircraft::AircraftId, EngineSounds)] {
+        let key = |model: &tore_world::aircraft_type::AircraftType| {
+            (std::ptr::from_ref(model) as usize, model.profile.id)
+        };
+        if self.key.len() != models.clone().count()
+            || !self.key.iter().copied().eq(models.clone().map(key))
+        {
+            self.key = models.clone().map(key).collect();
+            self.sounds = models
+                .map(|model| (model.profile.id, EngineSounds::of(&model.profile)))
+                .collect();
+        }
+        &self.sounds
     }
 }
 /// The engine of the aircraft a replay is watching, for
@@ -1076,6 +1149,28 @@ impl Audio {
                 engine,
                 loops,
             );
+        }
+    }
+    /// The ticks of one frame of single-player flight, each stepped as
+    /// [`Self::spatial_tick`] steps one, on the sources and loops of the
+    /// frame's last tick. The mixer is locked once and the loops are heard
+    /// once for all of them.
+    pub fn spatial_frame(
+        &self,
+        steps: &[SpatialStep],
+        sources: &[tore_sim::acoustics::Source],
+        loops: &[LoopSource],
+    ) {
+        if steps.is_empty() {
+            return;
+        }
+        // The launches each tick sounds, laid out before the lock is taken.
+        let launches: Vec<Vec<Launch>> = steps
+            .iter()
+            .map(|step| step.launches.iter().map(OwnedLaunch::launch).collect())
+            .collect();
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.spatial_steps(&self.clips, steps, &launches, sources, loops);
         }
     }
     pub fn controls(&self, before: &crate::flight::State, after: &crate::flight::State) {
@@ -1550,10 +1645,63 @@ impl Mixer {
             self.radio.extend(voices);
         }
     }
+    /// The ticks of [`Audio::spatial_frame`].
+    fn spatial_steps(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        steps: &[SpatialStep],
+        launches: &[Vec<Launch>],
+        sources: &[tore_sim::acoustics::Source],
+        loops: &[LoopSource],
+    ) {
+        if self.flight_paused {
+            return;
+        }
+        for (step, launches) in steps.iter().zip(launches) {
+            self.spatial_step(
+                clips,
+                step.listener,
+                sources,
+                &step.emissions,
+                launches,
+                step.player_position,
+                Some((step.player_position, step.player_velocity)),
+                loops,
+            );
+        }
+    }
     /// One simulation tick of traveling sound, loops and the engine's place
     /// ([`Audio::spatial_tick`]).
     #[allow(clippy::too_many_arguments)]
     fn spatial_tick(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        listener: tore_sim::acoustics::Listener,
+        sources: &[tore_sim::acoustics::Source],
+        emissions: &[tore_sim::acoustics::Emission],
+        releases: &[Launch],
+        player_position: [f64; 3],
+        engine: Option<([f64; 3], [f64; 3])>,
+        loops: &[LoopSource],
+    ) {
+        if self.flight_paused {
+            return;
+        }
+        self.spatial_step(
+            clips,
+            listener,
+            sources,
+            emissions,
+            releases,
+            player_position,
+            engine,
+            loops,
+        );
+    }
+    /// One tick of [`Self::spatial_tick`], for a caller stepping several
+    /// ticks on one set of loops and sources.
+    #[allow(clippy::too_many_arguments)]
+    fn spatial_step(
         &mut self,
         clips: &BTreeMap<String, Arc<Clip>>,
         listener: tore_sim::acoustics::Listener,
@@ -1595,21 +1743,14 @@ impl Mixer {
             }
             None => self.engine_place.aim(None, 1., self.spatial.stereo),
         }
-        // Other aircraft's engines follow the Engine level; fires do not.
-        let engine = self.volumes.engine;
-        let loops: Vec<LoopSource> = loops
-            .iter()
-            .map(|l| LoopSource {
-                gain: if matches!(l.key.0, 1 | 2) {
-                    l.gain * engine
-                } else {
-                    l.gain
-                },
-                ..l.clone()
-            })
-            .collect();
-        self.spatial
-            .loops(clips, listener, velocity, &loops, enabled);
+        self.spatial.loops(
+            clips,
+            listener,
+            velocity,
+            loops,
+            self.volumes.engine,
+            enabled,
+        );
         if enabled {
             let sounds = one_sound_per_release(releases);
             for launch in sounds.iter().filter(|l| l.shooter.is_none()) {
@@ -2055,6 +2196,313 @@ mod tests {
             play(500., true, 10).spatial.voice_count(),
             OTHER_LAUNCH_VOICES
         );
+    }
+
+    #[test]
+    fn engine_sounds_are_found_once_for_a_set_of_types_and_again_for_another() {
+        use tore_formats::aircraft::AircraftId;
+        use tore_world::aircraft_type::AircraftType;
+        let mut types: Vec<AircraftType> = [AircraftId::F18, AircraftId::Rafale]
+            .into_iter()
+            .map(|id| AircraftType::synthetic(id, Vec::new()))
+            .collect();
+        for (n, kind) in types.iter_mut().enumerate() {
+            kind.profile
+                .sounds
+                .insert(ENGINE_LOOP.to_owned(), format!("&ENGINE{n}.5K"));
+        }
+        let direct = |types: &[AircraftType]| -> Vec<(AircraftId, EngineSounds)> {
+            types
+                .iter()
+                .map(|kind| (kind.profile.id, EngineSounds::of(&kind.profile)))
+                .collect()
+        };
+        let mut cache = EngineSoundsCache::default();
+        assert_eq!(cache.of(types.iter()), direct(&types));
+        let first = cache.sounds.as_ptr();
+        // The same types again: the same list, not found again.
+        assert_eq!(cache.of(types.iter()), direct(&types));
+        assert_eq!(cache.sounds.as_ptr(), first);
+        // Fewer types, or the same ones elsewhere, start it over.
+        assert_eq!(cache.of(types[..1].iter()), direct(&types[..1]));
+        let moved: Vec<AircraftType> = types
+            .into_iter()
+            .map(|kind| AircraftType::synthetic(kind.profile.id, Vec::new()))
+            .collect();
+        assert_eq!(cache.of(moved.iter()), direct(&moved));
+        assert_eq!(cache.sounds.len(), 2);
+    }
+
+    #[test]
+    fn a_frame_of_steps_sounds_as_the_same_ticks_one_at_a_time() {
+        use tore_sim::acoustics::{Emission, Kind, Listener};
+        let clips: BTreeMap<String, Arc<Clip>> = [
+            ("&EXPL12.5K".to_string(), flat_clip(210)),
+            ("&ASHVMIS.11K".to_string(), flat_clip(190)),
+            ("LOOP".to_string(), flat_clip(170)),
+        ]
+        .into();
+        let loops = [
+            LoopSource {
+                key: (1, 7),
+                clip: "LOOP".into(),
+                position: [700., 40., 900.],
+                velocity: [0., 0., 300.],
+                gain: 0.5,
+                reference: ENGINE_REFERENCE_FT,
+                maximum: ENGINE_MAXIMUM_FT,
+                pitch: 1.,
+            },
+            LoopSource {
+                key: (0, 3),
+                clip: "LOOP".into(),
+                position: [-200., 0., 400.],
+                velocity: [0.; 3],
+                gain: 0.8,
+                reference: ENGINE_REFERENCE_FT,
+                maximum: ENGINE_MAXIMUM_FT,
+                pitch: 1.,
+            },
+        ];
+        let steps: Vec<SpatialStep> = (0..5)
+            .map(|tick| SpatialStep {
+                listener: Listener {
+                    position: [f64::from(tick) * 2.5, 100., f64::from(tick) * 3.],
+                    right: [1., 0., 0.],
+                    view: 1,
+                    external: tick != 3,
+                    own: Some(0),
+                },
+                emissions: if tick == 1 {
+                    vec![Emission {
+                        kind: Kind::Explosion,
+                        position: [1500., 0., 2000.],
+                        arrived: false,
+                        own: false,
+                    }]
+                } else {
+                    Vec::new()
+                },
+                launches: if tick == 2 {
+                    vec![
+                        OwnedLaunch::of(&Launch::by(9, [900., 50., 300.], "&ASHVMIS.11K", 7000)),
+                        OwnedLaunch::of(&Launch::new("&ASHVMIS.11K", 7000)),
+                    ]
+                } else {
+                    Vec::new()
+                },
+                player_position: [f64::from(tick) * 2.5, 100., f64::from(tick) * 3.],
+                player_velocity: [300., 0., 360.],
+            })
+            .collect();
+        let mut one_by_one = test_mixer();
+        let mut together = test_mixer();
+        for step in &steps {
+            let launches: Vec<Launch> = step.launches.iter().map(OwnedLaunch::launch).collect();
+            one_by_one.spatial_tick(
+                &clips,
+                step.listener,
+                &[],
+                &step.emissions,
+                &launches,
+                step.player_position,
+                Some((step.player_position, step.player_velocity)),
+                &loops,
+            );
+        }
+        let launches: Vec<Vec<Launch>> = steps
+            .iter()
+            .map(|step| step.launches.iter().map(OwnedLaunch::launch).collect())
+            .collect();
+        together.spatial_steps(&clips, &steps, &launches, &[], &loops);
+        let mut heard = false;
+        for sample in 0..6000 {
+            let (a, b) = (one_by_one.frame(8000.), together.frame(8000.));
+            assert_eq!(a, b, "sample {sample}");
+            heard |= a != [0.; 2];
+        }
+        assert!(heard, "the ticks made some sound");
+        assert_eq!(
+            one_by_one.spatial.voice_count(),
+            together.spatial.voice_count()
+        );
+    }
+
+    /// A looping or one-shot recording of a wave, so that filters and
+    /// pitch have something to do.
+    fn wave_clip(period: f64, length: usize, rate: f64) -> Arc<Clip> {
+        Arc::new(Clip {
+            samples: (0..length)
+                .map(|i| {
+                    let t = i as f64 / period * std::f64::consts::TAU;
+                    (128. + 90. * t.sin() + 30. * (t * 3.7).sin()) as u8
+                })
+                .collect(),
+            rate,
+        })
+    }
+
+    /// Renders a scripted scene for `seconds` at 48 kHz, the way a reel's
+    /// offline capture does (a mixer, no device), one simulation tick of
+    /// spatial sound for every 400 frames: a listener that flies and changes
+    /// views, engines and fires near and far that come and go, an explosion,
+    /// weapon launches (the player's and another aircraft's), a fly-by, the
+    /// engine and afterburner placed from outside, and the seeker tone
+    /// ramping, locking and stopping.
+    fn render_scripted_scene(seconds: usize) -> Vec<[f32; 2]> {
+        use tore_sim::acoustics::{Emission, Kind, Listener, Source, SourceId};
+        let clips: BTreeMap<String, Arc<Clip>> = [
+            ("&EXPL12.5K".to_string(), wave_clip(90., 24_000, 11_025.)),
+            ("&EXPL3.5K".to_string(), wave_clip(70., 9_000, 11_025.)),
+            ("&ASHVMIS.11K".to_string(), wave_clip(55., 30_000, 11_025.)),
+            ("&AIRPASS.11K".to_string(), wave_clip(40., 30_000, 11_025.)),
+            ("&MPASS.5K".to_string(), wave_clip(33., 20_000, 5_512.)),
+            ("FIRE".to_string(), wave_clip(61., 4_000, 11_025.)),
+            ("JET".to_string(), wave_clip(47., 6_000, 22_050.)),
+        ]
+        .into();
+        let mut mixer = test_mixer();
+        mixer.engine = Some(Voice {
+            clip: clips["JET"].clone(),
+            position: 0.,
+        });
+        mixer.burner = Some(Voice {
+            clip: clips["FIRE"].clone(),
+            position: 17.,
+        });
+        mixer.engine_gain = 0.7;
+        mixer.burner_gain = 0.4;
+        mixer.volumes.engine = 0.8;
+        let ticks = seconds * 120;
+        let mut out = Vec::with_capacity(ticks * 400);
+        for tick in 0..ticks {
+            let t = tick as f64;
+            let me = [t * 2.2, 3_000. + (t * 0.01).sin() * 400., t * 1.3];
+            let view = (tick / 90 % 4) as u8;
+            // Inside the cockpit in view 0, outside in the others.
+            let listener = Listener {
+                position: me,
+                right: [1., 0., 0.],
+                view,
+                external: view != 0,
+                own: Some(0),
+            };
+            // Fires and other aircraft's engines, closing and drawing off.
+            let loops: Vec<LoopSource> = (0..14u64)
+                .filter(|i| (tick as u64 + i * 37) % 700 > 90)
+                .map(|i| {
+                    let a = i as f64 * 0.9 + t * 0.002 * (1. + i as f64 * 0.1);
+                    let range = 300. + (i as f64) * 1_300. + (t * 0.8).sin() * 900.;
+                    LoopSource {
+                        key: (if i % 3 == 0 { 0 } else { 1 + (i % 2) as u8 }, i),
+                        clip: if i % 3 == 0 { "FIRE" } else { "JET" }.into(),
+                        position: [
+                            me[0] + a.cos() * range,
+                            me[1] - 200.,
+                            me[2] + a.sin() * range,
+                        ],
+                        velocity: [a.sin() * 400., 0., a.cos() * 400.],
+                        gain: 0.3 + 0.05 * i as f32,
+                        reference: ENGINE_REFERENCE_FT,
+                        maximum: ENGINE_MAXIMUM_FT,
+                        pitch: 1. + (i % 4) as f64 * 0.05,
+                    }
+                })
+                .collect();
+            let sources = [
+                Source {
+                    id: SourceId::Aircraft(3),
+                    position: [me[0] + 2_000. - t * 5., me[1], me[2] + 300.],
+                    velocity: [-600., 0., 0.],
+                },
+                Source {
+                    id: SourceId::Missile(4),
+                    position: [me[0] - 9_000. + t * 9., me[1] + 100., me[2] - 500.],
+                    velocity: [1_100., 0., 0.],
+                },
+            ];
+            let emissions = if tick == 150 || tick == 400 {
+                vec![Emission {
+                    kind: if tick == 150 {
+                        Kind::Explosion
+                    } else {
+                        Kind::Impact
+                    },
+                    position: [me[0] + 1_800., 0., me[2] + 900.],
+                    arrived: false,
+                    own: false,
+                }]
+            } else {
+                Vec::new()
+            };
+            let launches = match tick {
+                200 => vec![Launch::new("&ASHVMIS.11K", 7_000)],
+                260 => vec![Launch::by(
+                    9,
+                    [me[0] + 700., me[1], me[2] + 400.],
+                    "&ASHVMIS.11K",
+                    7_000,
+                )],
+                _ => Vec::new(),
+            };
+            // The seeker tone: ramps up, locks, drops, changes kind.
+            match tick {
+                60 => mixer.seeker.target = 1.,
+                180 => mixer.seeker.locked = true,
+                240 => mixer.seeker.radar = true,
+                300 => mixer.seeker.target = 0.,
+                380 => {
+                    mixer.seeker.locked = false;
+                    mixer.seeker.radar = false;
+                    mixer.seeker.ground = true;
+                    mixer.seeker.target = 0.5;
+                }
+                _ => {}
+            }
+            mixer.spatial_tick(
+                &clips,
+                listener,
+                &sources,
+                &emissions,
+                &launches,
+                me,
+                Some((me, [300., 0., 180.])),
+                &loops,
+            );
+            for _ in 0..400 {
+                out.push(mixer.frame(48_000.));
+            }
+        }
+        out
+    }
+
+    /// The offline mix of a scripted scene is the same, sample for sample,
+    /// whether the smoothing coefficients are cached per rate or worked out
+    /// at every sample as they were before, and the silent seeker tone
+    /// skips its waves.
+    #[test]
+    fn cached_smoothing_and_a_silent_seeker_render_the_pcm_the_uncached_math_did() {
+        spatial::REFERENCE_MATH.set(true);
+        let reference = render_scripted_scene(6);
+        spatial::REFERENCE_MATH.set(false);
+        let cached = render_scripted_scene(6);
+        assert_eq!(reference.len(), cached.len());
+        let heard = reference.iter().filter(|s| **s != [0.; 2]).count();
+        assert!(
+            heard > reference.len() / 2,
+            "{heard} of {} samples",
+            reference.len()
+        );
+        for (index, (a, b)) in reference.iter().zip(&cached).enumerate() {
+            // Equal as numbers: a tone at zero gain is +0.0 where its
+            // wave's sign once made it -0.0.
+            assert_eq!(a, b, "sample {index}");
+            for side in 0..2 {
+                if a[side] != 0. {
+                    assert_eq!(a[side].to_bits(), b[side].to_bits(), "sample {index}");
+                }
+            }
+        }
     }
 
     #[test]

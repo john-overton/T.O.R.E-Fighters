@@ -54,8 +54,15 @@ marks and wreck/building scorch marks stay beneath vehicles, people,
 buildings and wrecks, including in magnified target cameras and the AC-130
 console. The four console picture modes and replays use the same geometry.
 The depth tie break is fitted by the agent: sixteen reversed
-floating-point raster depth bias units, with zero world-space lift and no
-zoom multiplier.
+floating-point raster depth bias units plus half a unit of slope-scaled bias
+(half the mark's steepest depth change per pixel), with zero world-space lift
+and no zoom multiplier. The constant alone left a triangle of a crater
+missing on a 15 degree hillside at an external view, and at grazing views
+even on level ground; the slope term follows the view angle and zoom, and
+anything from 0.1 to 4.5 passes the whole `depth_tests` sweep (15 and 30
+degree slopes and level ground, external to 600,000 ft sensor ranges,
+grazing and overhead, craters and pock marks, with six-foot roofs staying
+uncovered); above 5 a roof is covered at grazing views.
 It replaces the old view-ray pull of up to 20 ft. Standing flames, smoke and
 explosions remain depth-tested effects, not flat ground marks. Colour-6 ground
 shadows use the separate [scenery path](../formats/objects-and-shapes.md#ground-shadow-decals-2026-10-13).
@@ -66,7 +73,7 @@ keeping its horizontal footprint and joining those heights with two triangles
 uses double-precision world coordinates so distant map coordinates do not
 bury corners through rounding. Buildings and vehicles are not receivers.
 Standing fire and billboard effects do not sample terrain. No camera-facing
-pull or world-space lift is added; the 16-unit raster bias still resolves
+pull or world-space lift is added; the raster bias still resolves
 coplanar ties. Across a terrain crease, the two triangles interpolate the
 four sampled corners rather than subdividing at every terrain edge.
 

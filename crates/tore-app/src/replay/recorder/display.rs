@@ -85,8 +85,12 @@ impl Recorder {
             &readout,
             load.nav,
             load.range,
-            |index| load.sources.get(index).cloned(),
-            |index| load.mounts.get(index).copied(),
+            |index| {
+                load.stations
+                    .get(index)
+                    .map(|station| station.weapon.source.clone())
+            },
+            |index| load.stations.get(index).map(|station| station.mount),
         );
         sampled.insert(id);
     }
@@ -110,30 +114,20 @@ impl Recorder {
     }
 }
 
-struct Loadout {
+struct Loadout<'a> {
     nav: bool,
     range: u8,
-    sources: Vec<String>,
-    mounts: Vec<[f64; 3]>,
+    /// The stations, whose weapon names and mounts the sample asks for by
+    /// index, only for the one it names.
+    stations: &'a [live::Station],
 }
 
-fn loadout(state: &live::State, id: u32) -> Option<Loadout> {
+fn loadout(state: &live::State, id: u32) -> Option<Loadout<'_>> {
     let own = state.ownship(id)?;
     Some(Loadout {
         nav: !own.cockpit.armed,
         range: u8::try_from(own.sensors.controls.range_index).unwrap_or(1),
-        sources: own
-            .configuration()
-            .stations
-            .iter()
-            .map(|station| station.weapon.source.clone())
-            .collect(),
-        mounts: own
-            .configuration()
-            .stations
-            .iter()
-            .map(|station| station.mount)
-            .collect(),
+        stations: &own.configuration().stations,
     })
 }
 

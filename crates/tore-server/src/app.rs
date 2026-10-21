@@ -73,6 +73,14 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Failure> {
         return Ok(());
     }
     prepare::refuse_retail_stall_speeds(&options, std::env::var_os("TORE_RETAIL_STALL_SPEEDS"))?;
+    let ai_test = options.ai_test();
+    wiring::set_ai_test(ai_test);
+    if !ai_test.is_default() {
+        say(&format!(
+            "AI test settings: {} (a test of this server only; standbys are not appointed)",
+            ai_test.describe()
+        ));
+    }
     tore_import::set_log(|level, text| match level {
         tore_import::Level::Info => say(text),
         tore_import::Level::Warn => eprintln!("warning: {text}"),

@@ -23,10 +23,16 @@
 //! The per-view work is on the GPU: a compute pass culls every building
 //! against the view and writes the full detail lists per piece and the far
 //! box list, and indirect draws read them (one per piece and pass, plus one
-//! for every far box). The CPU writes one small uniform per view. Knocked-down
-//! buildings draw as a low stub (0.08 of their height, in the cull shader).
-//! Buildings within [`SHADOW_NM`] cast their box's shadow into the shadow
-//! maps.
+//! for every far box). The buildings sit on the GPU in spatial blocks of up
+//! to 256 ([`blocks`]); the CPU drops the blocks no drawn building can be
+//! in and writes one small uniform and the visible block list per view.
+//! Knocked-down buildings draw as a low stub (0.08 of their height, in the
+//! cull shader); a knock-down rewrites only the changed records.
+//! Buildings within the shadow quality's building distance ([`SHADOW_NM`]
+//! at Med and High) cast their box's shadow into the shadow maps.
+
+#[path = "fill_blocks.rs"]
+pub mod blocks;
 
 use crate::{AppResult, camera::Camera};
 use std::{collections::BTreeMap, ops::Range, sync::Arc};
@@ -163,9 +169,17 @@ pub struct FillArt {
     /// Per piece: its first slot in the full detail list, colour, half
     /// footprint, height and radius (the cull shader's `Piece`).
     piece_table: Vec<u32>,
-    /// Per building: world base, piece, cosine, sine, hash and flags (the
-    /// cull shader's `Inst`), eight words each.
+    /// Per building, in GPU order ([`blocks::arrange`]): world base, piece,
+    /// cosine, sine, hash and flags (the cull shader's `Inst`), eight words
+    /// each.
     records: Vec<u32>,
+    /// The building (layout index) at each GPU slot, and each building's
+    /// slot.
+    order: Vec<u32>,
+    slot_of: Vec<u32>,
+    /// Spatial runs of GPU slots with conservative bounds, culled per view
+    /// before the per-building pass.
+    blocks: Vec<blocks::Block>,
 }
 
 impl FillArt {
@@ -322,8 +336,29 @@ impl FillArt {
             ]);
             offset += per_piece[n];
         }
+        // The GPU order: spatial blocks, each culled whole per view.
+        let buildings: Vec<blocks::Building> = layout
+            .instances
+            .iter()
+            .enumerate()
+            .map(|(n, i)| {
+                let piece = &piece_table[usize::from(i.piece) * 8..];
+                blocks::Building {
+                    pos: [f64::from(i.x), f64::from(fill.base[n]), f64::from(i.z)],
+                    height: f64::from(f32::from_bits(piece[4])),
+                    radius: f64::from(f32::from_bits(piece[5])),
+                }
+            })
+            .collect();
+        let (order, blocks) = blocks::arrange(&buildings);
+        let mut slot_of = vec![0u32; order.len()];
+        for (slot, &n) in order.iter().enumerate() {
+            slot_of[n as usize] = slot as u32;
+        }
         let mut records = Vec::with_capacity(layout.instances.len() * 8);
-        for (n, i) in layout.instances.iter().enumerate() {
+        for &n in &order {
+            let n = n as usize;
+            let i = &layout.instances[n];
             let heading = i32::from(i.heading);
             let cos = (tore_world::surface::layout::trig::cos(heading) as f64 / one) as f32;
             let sin = (tore_world::surface::layout::trig::sin(heading) as f64 / one) as f32;
@@ -340,7 +375,7 @@ impl FillArt {
                 cos.to_bits(),
                 sin.to_bits(),
                 hash.to_bits(),
-                u32::from(fill.hidden[n]),
+                blocks::flags(fill.hidden[n], false),
             ]);
         }
         Ok(Self {
@@ -350,6 +385,9 @@ impl FillArt {
             box_range,
             piece_table,
             records,
+            order,
+            slot_of,
+            blocks,
         })
     }
 
@@ -388,11 +426,21 @@ pub struct FillRenderer {
     args: wgpu::Buffer,
     readback: wgpu::Buffer,
     params: Vec<wgpu::Buffer>,
+    /// Per slot: the view's visible blocks (first and end GPU slot each).
+    block_lists: Vec<wgpu::Buffer>,
     binds: Vec<wgpu::BindGroup>,
     slot: usize,
     /// The bind group of the last prepared view, and whether it drew.
     prepared: bool,
-    flattened_version: u64,
+    /// The fill version and flattened set the GPU records hold (none
+    /// before the first view).
+    flattened_version: Option<u64>,
+    uploaded: Vec<u32>,
+    /// Scratch: this view's visible blocks.
+    visible: Vec<u32>,
+    /// Coarse block culling on (`TORE_CITY_FILL_BLOCKS=0` dispatches every
+    /// block, a comparison aid).
+    block_cull: bool,
     cull: wgpu::ComputePipeline,
     finish: wgpu::ComputePipeline,
     pipelines: Pipelines,
@@ -729,6 +777,7 @@ impl FillRenderer {
                 entry(5, write),
                 entry(6, write),
                 entry(7, write),
+                entry(8, read),
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -758,9 +807,20 @@ impl FillRenderer {
                 })
             })
             .collect();
+        let block_lists: Vec<wgpu::Buffer> = (0..SLOTS)
+            .map(|_| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("City fill visible blocks"),
+                    size: art.blocks.len().max(1) as u64 * 8,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
         let binds = params
             .iter()
-            .map(|p| {
+            .zip(&block_lists)
+            .map(|(p, list)| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("City fill cull bindings"),
                     layout: &bind_layout,
@@ -797,6 +857,10 @@ impl FillRenderer {
                             binding: 7,
                             resource: shadows.as_entire_binding(),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: list.as_entire_binding(),
+                        },
                     ],
                 })
             })
@@ -823,10 +887,14 @@ impl FillRenderer {
             args,
             readback,
             params,
+            block_lists,
             binds,
             slot: 0,
             prepared: false,
-            flattened_version: 0,
+            flattened_version: None,
+            uploaded: Vec::new(),
+            visible: Vec::new(),
+            block_cull: std::env::var("TORE_CITY_FILL_BLOCKS").as_deref() != Ok("0"),
             cull,
             finish,
             pipelines,
@@ -842,6 +910,15 @@ impl FillRenderer {
     /// Takes the Graphics screen's building distances.
     pub fn set_options(&mut self, options: &crate::graphics::Options) {
         self.tiers = Tiers::from_options(options);
+    }
+
+    /// Takes the shadow quality's building shadow distance
+    /// (`TORE_CITY_FILL_SHADOW_NM` still overrides it).
+    pub fn set_shadows(&mut self, shadows: &crate::surface_lighting::Settings) {
+        self.shadow_nm = std::env::var("TORE_CITY_FILL_SHADOW_NM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(shadows.buildings_nm);
     }
 
     /// Replaces the tiers for every view until cleared (a measuring aid, as
@@ -892,17 +969,24 @@ impl FillRenderer {
         size: [u32; 2],
     ) {
         let fill = &self.art.fill;
-        // Knocked-down buildings: refresh the records' flags.
+        // Knocked-down buildings: rewrite only the records whose flags
+        // changed since the last upload.
         let version = fill.version();
-        if version != self.flattened_version {
-            self.flattened_version = version;
-            let mut records = self.art.records.clone();
-            for n in 0..self.art.len() {
-                records[n * 8 + 7] =
-                    u32::from(fill.hidden[n]) | (u32::from(fill.is_flattened(n)) << 1);
+        if self.flattened_version != Some(version) {
+            self.flattened_version = Some(version);
+            let now = fill.flattened();
+            let art = &self.art;
+            for (offset, bytes) in blocks::flag_writes(
+                &art.records,
+                &art.slot_of,
+                &self.uploaded,
+                &now,
+                |n| fill.is_flattened(n),
+                &art.order,
+            ) {
+                queue.write_buffer(&self.records, offset, &bytes);
             }
-            let bytes: Vec<u8> = records.iter().flat_map(|v| v.to_le_bytes()).collect();
-            queue.write_buffer(&self.records, 0, &bytes);
+            self.uploaded = now;
         }
         let (sy, cy) = camera.yaw.sin_cos();
         let (sp, cp) = camera.pitch.sin_cos();
@@ -945,14 +1029,41 @@ impl FillRenderer {
         bytes[31 * 4..32 * 4].copy_from_slice(&((self.shadow_nm * NM) as f32).to_le_bytes());
         self.slot = (self.slot + 1) % SLOTS;
         queue.write_buffer(&self.params[self.slot], 0, &bytes);
+        // The blocks that may hold a drawn building, from the same view
+        // values the shader reads.
+        let f = |r: std::ops::Range<usize>| -> [f64; 3] {
+            std::array::from_fn(|k| f64::from(p[r.start + k]))
+        };
+        let view = blocks::View {
+            eye: camera.position,
+            forward: f(8..11),
+            right: f(12..15),
+            up: f(16..19),
+            draw: f64::from(p[22]),
+            view: std::array::from_fn(|k| f64::from(p[24 + k])),
+        };
+        self.visible.clear();
+        for block in &self.art.blocks {
+            if !self.block_cull || blocks::visible(block, &view) {
+                self.visible
+                    .extend([block.records.start, block.records.end]);
+            }
+        }
+        let groups = (self.visible.len() / 2) as u32;
+        if groups > 0 {
+            let bytes: Vec<u8> = self.visible.iter().flat_map(|v| v.to_le_bytes()).collect();
+            queue.write_buffer(&self.block_lists[self.slot], 0, &bytes);
+        }
         encoder.clear_buffer(&self.counts, 0, None);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("City fill cull"),
             timestamp_writes: None,
         });
         pass.set_bind_group(0, &self.binds[self.slot], &[]);
-        pass.set_pipeline(&self.cull);
-        pass.dispatch_workgroups((self.art.len() as u32).div_ceil(256).max(1), 1, 1);
+        if groups > 0 {
+            pass.set_pipeline(&self.cull);
+            pass.dispatch_workgroups(groups, 1, 1);
+        }
         pass.set_pipeline(&self.finish);
         pass.dispatch_workgroups((self.art.ranges.len() as u32 + 2).div_ceil(64), 1, 1);
         drop(pass);
@@ -966,7 +1077,7 @@ impl FillRenderer {
         encoder: &mut wgpu::CommandEncoder,
         bind: &wgpu::BindGroup,
     ) {
-        if !self.prepared {
+        if !self.prepared || self.shadow_nm <= 0. {
             return;
         }
         let offset = (2 * self.art.ranges.len() as u64 + 1) * 16;
@@ -1108,8 +1219,23 @@ mod tests {
             0,
             0,
         ];
+        let buildings: Vec<blocks::Building> = at
+            .iter()
+            .map(|&(x, z)| blocks::Building {
+                pos: [f64::from(x), 0., f64::from(z)],
+                height: height as f64,
+                radius: f64::from(radius),
+            })
+            .collect();
+        let (order, blocks) = blocks::arrange(&buildings);
+        let mut slot_of = vec![0; order.len()];
+        for (slot, &n) in order.iter().enumerate() {
+            slot_of[n as usize] = slot as u32;
+        }
         let mut records = Vec::new();
-        for (n, &(x, z)) in at.iter().enumerate() {
+        for &n in &order {
+            let n = n as usize;
+            let (x, z) = at[n];
             records.extend([
                 (x as f32).to_bits(),
                 0f32.to_bits(),
@@ -1128,6 +1254,9 @@ mod tests {
             box_range,
             piece_table,
             records,
+            order,
+            slot_of,
+            blocks,
         }
     }
 
@@ -1226,6 +1355,148 @@ mod tests {
                 assert_eq!((target.full, target.boxes), (3, 1));
                 assert!(fading, "the target display's full detail fades in");
             }
+        });
+    }
+
+    /// Knock-downs and restores on a live renderer (sparse flag writes)
+    /// draw exactly what a renderer built fresh for that state draws, and
+    /// the coarse block cull draws exactly what dispatching every block
+    /// draws.
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn gpu_sparse_knock_downs_and_block_cull_match_full_work() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .unwrap();
+            // A 40 x 40 town 400 ft apart, ahead of the camera, plus a far
+            // ring of blocks behind and beside it.
+            let mut at = Vec::new();
+            for i in 0..40 {
+                for j in 0..40 {
+                    at.push((i * 400 - 8_000, j * 400 + 1_000));
+                }
+            }
+            for k in 0..64 {
+                let a = f64::from(k) / 64. * std::f64::consts::TAU;
+                at.push(((a.sin() * 60_000.) as i32, (a.cos() * 60_000.) as i32));
+            }
+            let world = tore_world::test_support::terrain();
+            let size = 256u32;
+            let image = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let read = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: u64::from(size * size * 4),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let make = |art: &Arc<FillArt>| {
+                let mut scenery = crate::scenery::tests::scenery();
+                scenery.fill = Some(Arc::clone(art));
+                if scenery.vertices.is_empty() {
+                    scenery.vertices = vec![0.; 30];
+                }
+                let renderer = crate::sim_renderer::SimRenderer::new(
+                    &device,
+                    &queue,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    &scenery,
+                    crate::graphics::Options::default(),
+                    4,
+                );
+                (renderer, scenery)
+            };
+            let mut camera = Camera::new();
+            camera.position = [0., 600., -2_000.];
+            camera.pitch = -0.2;
+            let picture = |renderer: &mut crate::sim_renderer::SimRenderer,
+                           scenery: &crate::scenery::Scenery| {
+                let mut encoder = device.create_command_encoder(&Default::default());
+                renderer.draw(
+                    &device,
+                    &queue,
+                    &mut encoder,
+                    &image.create_view(&Default::default()),
+                    [size, size],
+                    &camera,
+                    &world,
+                    scenery,
+                );
+                encoder.copy_texture_to_buffer(
+                    image.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &read,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(size * 4),
+                            rows_per_image: Some(size),
+                        },
+                    },
+                    image.size(),
+                );
+                queue.submit([encoder.finish()]);
+                read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+                device
+                    .poll(wgpu::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    })
+                    .unwrap();
+                let pixels = read.slice(..).get_mapped_range().to_vec();
+                read.unmap();
+                let stats = renderer
+                    .fill
+                    .as_ref()
+                    .unwrap()
+                    .stats(&device, &queue)
+                    .unwrap();
+                (pixels, stats.full, stats.boxes)
+            };
+            let live_art = Arc::new(synthetic(&at, 60, 300));
+            let (mut live, live_scenery) = make(&live_art);
+            let culled = live.fill.as_ref().unwrap();
+            assert!(culled.block_cull);
+            let fill = Arc::clone(&live_art.fill);
+            let states: [&[u32]; 4] = [&[], &[3, 4, 5, 41, 42, 900, 1_599], &[], &[7, 8]];
+            for (step, ids) in states.iter().enumerate() {
+                fill.set_flattened(ids);
+                let now = picture(&mut live, &live_scenery);
+                // A fresh renderer for the same state, every block
+                // dispatched.
+                let fresh_art = Arc::new(synthetic(&at, 60, 300));
+                fresh_art.fill.set_flattened(ids);
+                let (mut fresh, fresh_scenery) = make(&fresh_art);
+                fresh.fill.as_mut().unwrap().block_cull = false;
+                let want = picture(&mut fresh, &fresh_scenery);
+                assert_eq!((now.1, now.2), (want.1, want.2), "step {step}");
+                assert!(now.0 == want.0, "step {step}: pictures differ");
+                assert!(now.1 + now.2 > 0);
+            }
+            // Knocked down: the stubs change the picture.
+            fill.set_flattened(&[]);
+            let whole = picture(&mut live, &live_scenery);
+            fill.set_flattened(&(0..1_600).collect::<Vec<u32>>());
+            let flat = picture(&mut live, &live_scenery);
+            assert!(whole.0 != flat.0);
         });
     }
 }

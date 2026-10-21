@@ -50,6 +50,7 @@ pub mod space;
 
 pub(crate) mod bits;
 mod flat;
+mod row;
 
 #[cfg(test)]
 mod compat_tests;
@@ -251,7 +252,7 @@ pub fn path_words(path: Path) -> &'static str {
 /// F-16C inner wet pair and the Rafale centreline), so an older game must
 /// not join.
 /// 52 since min-players and the King's force start (slices nr-minplayers, nr-lobbyui): the lobby settings list gains min-players, and the Lobby message gains the force-start seconds, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 52;
+pub const PROTOCOL_VERSION: u16 = 62;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

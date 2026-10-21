@@ -18,8 +18,15 @@ impl Rocker {
     /// Fitted: retail waits one screen update per frame.
     pub const FRAME: Duration = Duration::from_millis(40);
     /// The sprite for the current frame.
-    pub fn sprite(&self) -> String {
-        format!("ROCKER0{}.PIC", self.frame)
+    pub fn sprite(&self) -> &'static str {
+        const FRAMES: [&str; 5] = [
+            "ROCKER00.PIC",
+            "ROCKER01.PIC",
+            "ROCKER02.PIC",
+            "ROCKER03.PIC",
+            "ROCKER04.PIC",
+        ];
+        FRAMES[self.frame]
     }
     pub fn held(&self) -> bool {
         self.held

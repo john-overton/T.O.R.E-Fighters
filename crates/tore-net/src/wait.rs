@@ -25,8 +25,78 @@ pub const SPIN_MARGIN: Duration = Duration::from_millis(2);
 pub const SPIN_MARGIN: Duration = Duration::from_micros(400);
 
 /// The longest a host's loop goes without polling the host, its sockets and
-/// its commands.
+/// its commands while a mission is flying and a connection is open (the
+/// flying host's per-tick work is the tick, and its packets want a prompt
+/// read).
 pub const MAX_NAP: Duration = Duration::from_millis(4);
+
+/// How long a host with no connection at all sleeps between polls when it is
+/// not flying: a lobby join, keepalive or console command is read at most
+/// this much later than before (it is [`MAX_NAP`] for a host in use).
+pub const EMPTY_NAP: Duration = Duration::from_millis(20);
+
+/// What a host loop is doing, which decides how it naps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pace {
+    /// A mission is flying, so the host has tick deadlines.
+    pub flying: bool,
+    /// At least one connection is open.
+    pub connections: bool,
+}
+
+/// When the loop wakes next, and how much of the wait it spends spinning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Wake {
+    /// The time to wake at, on the loop's clock.
+    pub at: Duration,
+    /// The spin margin for [`wait_until`]: the margin for a real tick
+    /// deadline, none for a housekeeping nap, which has no use for the
+    /// precision.
+    pub spin_margin: Duration,
+}
+
+impl Wake {
+    /// Wakes no later than `due`, a housekeeping deadline (a status line, a
+    /// log entry), which is never worth a spin; an earlier tick deadline is
+    /// kept as it was.
+    pub fn limit(&mut self, due: Duration) {
+        if due < self.at {
+            self.at = due;
+            self.spin_margin = Duration::ZERO;
+        }
+    }
+}
+
+/// Plans a host loop's next wake from the host's own `next_wake` (a duration
+/// from `now`): while flying, the next tick's deadline is spun to with
+/// `spin_margin`, and naps cap at [`MAX_NAP`] when a connection is open;
+/// when not flying, the loop honours `next_wake` (which is at most the host's
+/// idle wake) and sleeps to it without a spin, or sleeps up to
+/// [`EMPTY_NAP`] when no connection is open either. Tick pacing and
+/// catch-up are the host's, not the wait's, and do not change.
+pub fn plan_wake(now: Duration, next_wake: Duration, pace: Pace, spin_margin: Duration) -> Wake {
+    if pace.flying {
+        if !pace.connections || next_wake <= MAX_NAP {
+            return Wake {
+                at: now + next_wake,
+                spin_margin,
+            };
+        }
+        return Wake {
+            at: now + MAX_NAP,
+            spin_margin: Duration::ZERO,
+        };
+    }
+    let nap = if pace.connections {
+        next_wake
+    } else {
+        next_wake.max(EMPTY_NAP)
+    };
+    Wake {
+        at: now + nap,
+        spin_margin: Duration::ZERO,
+    }
+}
 
 /// Time and sleeping, so tests can fake both.
 pub trait Sleep {
@@ -125,6 +195,136 @@ mod tests {
             Duration::from_millis(2),
         );
         assert_eq!(clock.now, before);
+    }
+
+    const MARGIN: Duration = Duration::from_micros(400);
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    fn plan(next_wake: Duration, flying: bool, connections: bool) -> Wake {
+        plan_wake(
+            ms(100),
+            next_wake,
+            Pace {
+                flying,
+                connections,
+            },
+            MARGIN,
+        )
+    }
+
+    #[test]
+    fn a_tick_deadline_is_spun_to_and_a_nap_is_not() {
+        // The tick is 3 ms away: that is the deadline, spin to it.
+        assert_eq!(
+            plan(ms(3), true, true),
+            Wake {
+                at: ms(103),
+                spin_margin: MARGIN
+            }
+        );
+        // The tick is 8 ms away: nap 4 ms with no spin tail.
+        assert_eq!(
+            plan(ms(8), true, true),
+            Wake {
+                at: ms(104),
+                spin_margin: Duration::ZERO
+            }
+        );
+        // Exactly MAX_NAP away is the deadline.
+        assert_eq!(plan(MAX_NAP, true, true).spin_margin, MARGIN);
+    }
+
+    #[test]
+    fn a_flying_host_with_no_connections_waits_for_its_tick() {
+        // Nothing needs a 4 ms read, so it wakes for the tick alone.
+        assert_eq!(
+            plan(ms(8), true, false),
+            Wake {
+                at: ms(108),
+                spin_margin: MARGIN
+            }
+        );
+    }
+
+    #[test]
+    fn a_lobby_honours_the_hosts_wake_without_a_spin() {
+        assert_eq!(
+            plan(ms(10), false, true),
+            Wake {
+                at: ms(110),
+                spin_margin: Duration::ZERO
+            }
+        );
+        // An earlier host wake (a timer) is honoured too.
+        assert_eq!(plan(ms(2), false, true).at, ms(102));
+        assert_eq!(plan(ms(2), false, true).spin_margin, Duration::ZERO);
+    }
+
+    #[test]
+    fn an_empty_idle_host_sleeps_longer() {
+        assert_eq!(
+            plan(ms(10), false, false),
+            Wake {
+                at: ms(120),
+                spin_margin: Duration::ZERO
+            }
+        );
+        // The empty nap is a floor only for the idle wake, never longer than
+        // the host asks when it asks for more.
+        assert_eq!(plan(ms(30), false, false).at, ms(130));
+    }
+
+    #[test]
+    fn a_housekeeping_deadline_cuts_a_wake_short_without_a_spin() {
+        let mut wake = plan(ms(8), true, true);
+        wake.limit(ms(102));
+        assert_eq!(
+            wake,
+            Wake {
+                at: ms(102),
+                spin_margin: Duration::ZERO
+            }
+        );
+        // A later deadline leaves the tick deadline and its spin alone.
+        let mut wake = plan(ms(3), true, true);
+        wake.limit(ms(150));
+        assert_eq!(
+            wake,
+            Wake {
+                at: ms(103),
+                spin_margin: MARGIN
+            }
+        );
+    }
+
+    #[test]
+    fn a_nap_wait_never_spins_and_a_tick_wait_does() {
+        let mut clock = Fake::default();
+        let nap = plan_wake(
+            clock.now,
+            ms(10),
+            Pace {
+                flying: false,
+                connections: true,
+            },
+            MARGIN,
+        );
+        wait_until(&mut clock, nap.at, nap.spin_margin);
+        assert_eq!((clock.sleeps.len(), clock.spins), (1, 0));
+        let tick = plan_wake(
+            clock.now,
+            ms(3),
+            Pace {
+                flying: true,
+                connections: true,
+            },
+            MARGIN,
+        );
+        wait_until(&mut clock, tick.at, tick.spin_margin);
+        assert_eq!((clock.sleeps.len(), clock.spins), (2, 400));
     }
 
     #[test]

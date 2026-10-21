@@ -132,6 +132,11 @@ pub const MAX_HIT_RECORDS: usize = 128;
 /// The puff a dud bomb raises: the original's bullet-on-land explosion, its
 /// smallest dust burst (explosion type 15; docs/spec/explosions.md).
 const DUD_PUFF: u8 = 15;
+/// How long after its motor lights a drop-launched store keeps sparing its
+/// launcher, in the record's quarter-second steps: 1 s (fitted, agent
+/// decision 2026-10-20; a lofting AIM-54 is clear of the launcher's
+/// 128 ft box about 0.6 s after it lights).
+const DROP_SEPARATION_T: u64 = 4;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
 const BAY_RELEASE_TICKS: u64 = 360;
 /// Fitted: the bay stays open 1 second after a release so the weapon clears.
@@ -1758,6 +1763,12 @@ pub struct State {
     /// bomb keeps its release rather than a velocity. Mission state.
     bombs: BTreeMap<u32, super::ballistics::BombMotion>,
     jettisoned: BTreeMap<u32, bool>,
+    /// Where each jettisoned store and each guided bomb falling blind has
+    /// got to along its stored fall, by projectile number, so a fall steps
+    /// once a tick rather than again from its release. Not mission state:
+    /// a checkpoint leaves it out and it is rebuilt from `bombs` and
+    /// `guided` with the identical result.
+    falls: super::ballistics::FallCursors,
     /// The guidance of each guided air-to-ground weapon an ownship released
     /// and is in flight, by projectile number ([`guided`]). Mission state.
     guided: BTreeMap<u32, guided::GuidedFlight>,
@@ -1798,6 +1809,10 @@ pub struct State {
     airfield: std::collections::BTreeSet<u32>,
     /// The weather's sensor effects ([`State::set_sensor_weather`]).
     sensor_weather: sensors::Weather,
+    /// Host setup, not state: the highest the step's `ground` reaches over
+    /// each square ([`State::set_ground_ceiling`]). A segment wholly above it
+    /// is not sampled.
+    ground_ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -2935,7 +2950,9 @@ impl<'a> LauncherView<'a> {
             .weapon;
         let profile = missiles::Profile::for_weapon(w)?;
         let observed = self.weapon_observation()?;
-        missiles::intercept(
+        // Repeated readers of exactly this launcher and observation share the
+        // fly-out. An interpolated frame launcher remains a separate key.
+        missiles::intercept_kept(
             &w.movement,
             Motion::launch(w, launcher.velocity, launcher.position[1]),
             launcher.position,
@@ -3054,7 +3071,7 @@ fn weapon_observation<'a>(
                     launcher.basis,
                     o.position,
                     None,
-                ) && missiles::intercept(
+                ) && missiles::intercept_kept(
                     &w.movement,
                     Motion::launch(w, launcher.velocity, launcher.position[1]),
                     launcher.position,
@@ -3141,6 +3158,7 @@ impl State {
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
             bombs: BTreeMap::new(),
             jettisoned: BTreeMap::new(),
+            falls: Default::default(),
             guided: BTreeMap::new(),
             guided_impacts: BTreeMap::new(),
             kept: BTreeMap::new(),
@@ -3151,6 +3169,7 @@ impl State {
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
             sensor_weather: Default::default(),
+            ground_ceiling: None,
             parked: BTreeMap::new(),
         }
     }
@@ -3283,6 +3302,11 @@ impl State {
     pub fn motor_powered(&self, projectile: &Projectile) -> bool {
         motor_powered(self.weapon(projectile), projectile, (self.tick / 30) as u16)
     }
+    /// [`Self::motor_powered`] for a caller that has the projectile's weapon
+    /// already ([`Self::weapon`]).
+    pub fn motor_powered_with(&self, weapon: &Weapon, projectile: &Projectile) -> bool {
+        motor_powered(weapon, projectile, (self.tick / 30) as u16)
+    }
     /// Development-only visual fixture. Gameplay damage always arrives through impacts.
     pub fn preview_localized_damage(&mut self, section: DamageSection, fraction: f64) {
         let fraction = fraction.clamp(0., 1.);
@@ -3386,9 +3410,12 @@ impl State {
             .filter_map(|projectile| {
                 let weapon = projectile_weapon(ships, projectile);
                 let flight = projectile.guidance.as_ref();
-                let profile = flight
-                    .map(|flight| flight.profile)
-                    .or_else(|| missiles::Profile::for_weapon(weapon))?;
+                // A gun has no profile (tested), so its round skips the table.
+                let profile = flight.map(|flight| flight.profile).or_else(|| {
+                    (!is_gun(weapon))
+                        .then(|| missiles::Profile::for_weapon(weapon))
+                        .flatten()
+                })?;
                 let target = flight
                     .and_then(|flight| flight.seeker.target)
                     .or(projectile.target);
@@ -4479,7 +4506,10 @@ impl State {
                     .map(|input| (k, *input))
             })
             .collect();
-        let obscured = |from: Vector, to: Vector| terrain_hit(from, to, &ground).is_some();
+        let ceiling = self.ground_ceiling.clone();
+        let obscured = |from: Vector, to: Vector| {
+            terrain_hit_below(from, to, &ground, ceiling.as_deref()).is_some()
+        };
         for &(k, input) in &active {
             let own = &mut ships[k];
             own.enforce_guns_only(self.cheats.guns_only);
@@ -5207,14 +5237,26 @@ impl State {
                 .get(&t.id)
                 .map(|bounds| (bounds.center, bounds.half)),
         };
+        // These three are read only for a round that is not an inert store,
+        // so a sky with no such round in the air (the usual case between
+        // fights) does not build them.
+        let live_rounds = if self.jettisoned.is_empty() {
+            !self.projectiles.is_empty()
+        } else {
+            self.projectiles
+                .iter()
+                .any(|p| !self.jettisoned.contains_key(&p.id))
+        };
         let target_broad = broad::Broad::new(
             self.targets
                 .iter()
                 .zip(&old_targets)
+                .filter(|_| live_rounds)
                 .map(|(t, previous)| body(t, *previous)),
         );
         let row_bounds: Vec<Option<broad::Bounds>> = rows
             .iter()
+            .filter(|_| live_rounds)
             .map(|r| {
                 broad::Body {
                     solid: None,
@@ -5226,7 +5268,7 @@ impl State {
         // Each aircraft's side, the first row of an id answering, for the
         // friendly fire rule and for whom a surface round counts as hostile.
         let mut target_sides: BTreeMap<u32, Side> = BTreeMap::new();
-        if friendly_fire_off || !self.surface_rounds.is_empty() {
+        if live_rounds && (friendly_fire_off || !self.surface_rounds.is_empty()) {
             for t in &self.targets {
                 target_sides.entry(t.id).or_insert(t.side);
             }
@@ -5234,22 +5276,28 @@ impl State {
         let mut candidates: Vec<usize> = Vec::new();
         // Every round's collateral bursts, applied after the search.
         let mut bursts: Vec<collateral::Burst> = Vec::new();
-        self.projectiles.retain_mut(|p| {
-            let owned = p.weapon.clone();
+        // A round's pass reads its weapon record while the round is borrowed
+        // whole, so the record is taken out of the round for the pass (a
+        // round that carries its own has no station to read) and put back
+        // after it, with no clone of the record.
+        let mut pass = |p: &mut Projectile, owned: &Option<Weapon>| -> bool {
             let w = owned.as_ref().unwrap_or_else(|| {
                 &owner_configuration(&ships, p.owner).stations[p.station].weapon
             });
             // Inert stores never enter guidance, fuzing, collision damage or scoring.
             if self.jettisoned.contains_key(&p.id) {
-                let Some(motion) = self.bombs.get(&p.id).copied() else {
+                let Some(motion) = self.bombs.get(&p.id) else {
                     return false;
                 };
                 p.previous = p.position;
                 p.age += 1;
                 let seconds = p.age as f64 / 120.;
-                p.position = motion.position(seconds);
-                p.direction = motion.direction(seconds);
-                p.speed_f8 = (missiles::length(motion.velocity(seconds)) * 256.) as i32;
+                // The stored motion's position, direction and velocity at
+                // `seconds`, from one sample on the store's cursor.
+                let flight = self.falls.follow(p.id, motion).at(motion, seconds);
+                p.position = flight.position;
+                p.direction = unit(flight.velocity);
+                p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
                 if let Some(at) = terrain_hit(p.previous, p.position, &ground) {
                     let mut position = std::array::from_fn(|i| {
                         p.previous[i] + (p.position[i] - p.previous[i]) * at
@@ -5269,7 +5317,9 @@ impl State {
             }
             let by_ownship = ships.iter().any(|o| o.aircraft == p.owner);
             let easy = self.cheats.easy_aiming && by_ownship && p.incoming.is_none();
-            let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
+            // Classified once; the eased copy keeps the record.
+            let gun = is_gun(w);
+            let eased = (easy && !gun).then(|| eased_weapon(w));
             let w = eased.as_ref().unwrap_or(w);
             // A surface unit's round, and its shooter's side: who is hostile
             // to its flak fuze, and whom friendly fire spares from any
@@ -5285,7 +5335,7 @@ impl State {
             } else {
                 NO_SIDE
             };
-            let surface_gun = surface.is_some() && is_gun(w);
+            let surface_gun = surface.is_some() && gun;
             let shooter = collateral::Shooter {
                 side: if friendly_fire_off {
                     owner_side
@@ -5307,7 +5357,7 @@ impl State {
                 .rewinds
                 .get(&p.id)
                 .copied()
-                .filter(|ticks| *ticks > 0 && is_gun(w));
+                .filter(|ticks| *ticks > 0 && gun);
             let volumes = &self.volumes;
             let past = |id: u32| rewind.and_then(|ticks| volumes.volume(id, ticks));
             if p.age == 0 {
@@ -5357,7 +5407,7 @@ impl State {
             // Every motor smokes while it burns, a rocket's (no seeker) as
             // well as a missile's (bug B6); gun rounds and bombs have none.
             // The same rule as `motor_powered`.
-            if phase == super::EnginePhase::Powered && !is_gun(w) {
+            if phase == super::EnginePhase::Powered && !gun {
                 sources.push((
                     std::array::from_fn(|i| p.position[i] - p.direction[i] * 4.),
                     super::smoke::Kind::Missile,
@@ -5443,7 +5493,7 @@ impl State {
                     let supported = if p.incoming.is_some() {
                         // The diagnostic incoming round is always illuminated.
                         true
-                    } else if p.weapon.is_some() {
+                    } else if owned.is_some() {
                         self.targets.iter().any(|owner| {
                             owner.id == p.owner && owner.hp > 0 && owner.radar_emitting
                         })
@@ -5496,6 +5546,7 @@ impl State {
                         targets: &self.targets,
                         ground: &ground,
                     },
+                    &mut self.falls,
                 )
             });
             if super::guided::is_glide_bomb(w)
@@ -5517,9 +5568,10 @@ impl State {
                 p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
             } else if let Some(Some((fall, start))) = guided_fall {
                 let seconds = (p.age + 1 - start) as f64 / 120.;
-                p.position = fall.position(seconds);
-                p.direction = fall.direction(seconds);
-                p.speed_f8 = (missiles::length(fall.velocity(seconds)) * 256.) as i32;
+                let flight = self.falls.follow(p.id, &fall).at(&fall, seconds);
+                p.position = flight.position;
+                p.direction = unit(flight.velocity);
+                p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
             } else if let Some(motion) = &mut p.motion {
                 if guided_fall.is_none() {
                     motion.turn(old_direction, p.direction);
@@ -5571,6 +5623,17 @@ impl State {
             } else {
                 now.wrapping_sub(p.launched_t) >= w.damage.fuze_arm_t
             };
+            // Launch grace for a drop launch: a store whose motor lights after
+            // release falls below its launcher, lights at about the edge of the
+            // launcher's box and climbs ahead past it, so it spares its launcher
+            // until a second after its motor lights, wherever it is.
+            let separating = w.movement.ignite_t > 0
+                && if p.motion.is_some() {
+                    p.age < (u64::from(w.movement.ignite_t) + DROP_SEPARATION_T) * 30
+                } else {
+                    now.wrapping_sub(p.launched_t)
+                        < w.movement.ignite_t.saturating_add(DROP_SEPARATION_T as u16)
+                };
             p.age += 1;
             let mut first: Option<(f64, Option<Hit>)> = None;
             // With friendly fire off, no round damages an aircraft of its
@@ -5579,12 +5642,28 @@ impl State {
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
             // The round's swept segment widened by its fuze, for the first
-            // pass; a round tested against past volumes skips it.
-            let reach = if rewind.is_none() {
-                let fuze = f64::from(w.damage.fuze_radius.max(0));
-                broad::Bounds::segment(p.previous, p.position, fuze)
-            } else {
-                None
+            // pass; a round tested against past volumes keeps it for the
+            // ground objects' solid boxes alone.
+            let segment = broad::Bounds::segment(
+                p.previous,
+                p.position,
+                f64::from(w.damage.fuze_radius.max(0)),
+            );
+            let reach = if rewind.is_none() { segment } else { None };
+            // A rewound round meets an aircraft's past volume, which the
+            // first pass bounds as it bounds a volume now: the round's
+            // segment that misses the box cannot touch it.
+            let past_missed = |id: u32| {
+                past(id).is_some_and(|v| {
+                    let body = broad::Body {
+                        previous: v.previous,
+                        position: v.position,
+                        basis: v.basis,
+                        radius: v.radius,
+                        solid: None,
+                    };
+                    matches!((body.bounds(), segment), (Some(b), Some(s)) if !b.overlaps(&s))
+                })
             };
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
@@ -5597,14 +5676,17 @@ impl State {
                         continue;
                     }
                     let t = &r.target;
+                    if gun && past_missed(t.id) {
+                        continue;
+                    }
                     // Easy aiming widens the volume of the aircraft it shoots at,
                     // never the shooter's own.
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
-                    if (!is_gun(w) || p.owner != t.id)
+                    if (!gun || p.owner != t.id)
                         && (t.hp <= 0 || !spares(t.side))
                         && (t.hp <= 0 || p.guidance.as_ref().is_none_or(|f| f.eligible(w, t)))
                         && t.body_present()
-                        && let Some(at) = if is_gun(w) {
+                        && let Some(at) = if gun {
                             if let Some(v) = past(t.id) {
                                 rewound_contact(p, v, hitbox)
                             } else {
@@ -5619,8 +5701,11 @@ impl State {
                             let start = sub(p.previous, r.previous);
                             // Launch grace: a round still inside its own launcher's
                             // volume (the aircraft sphere widened by the fuze)
-                            // neither hits nor fuzes on it.
-                            if p.owner == t.id && dot(start, start) <= radius * radius {
+                            // neither hits nor fuzes on it, nor does a separating
+                            // drop-launched store.
+                            if p.owner == t.id
+                                && (separating || dot(start, start) <= radius * radius)
+                            {
                                 None
                             } else {
                                 segment_sphere(start, sub(p.position, t.position), radius)
@@ -5633,7 +5718,11 @@ impl State {
                 }
             }
             if armed {
-                target_broad.candidates(reach, &mut candidates);
+                if rewind.is_none() {
+                    target_broad.candidates(reach, &mut candidates);
+                } else {
+                    target_broad.candidates_rewound(segment, &mut candidates);
+                }
                 for &i in &candidates {
                     let t = &self.targets[i];
                     // A surface round strikes aircraft and the other side's
@@ -5647,12 +5736,19 @@ impl State {
                         continue;
                     }
                     if !(t.body_present()
-                        && (!is_gun(w) || t.id != p.owner)
+                        && (!gun || t.id != p.owner)
                         && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side)))
                     {
                         continue;
                     }
                     if t.hp > 0 && p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
+                        continue;
+                    }
+                    if gun
+                        && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
+                        && !self.ground_bounds.contains_key(&t.id)
+                        && past_missed(t.id)
+                    {
                         continue;
                     }
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
@@ -5661,7 +5757,7 @@ impl State {
                         // radius remains a separate damage rule and does not turn
                         // a long runway into a giant interception sphere.
                         bounds.segment_fraction(p.previous, p.position)
-                    } else if is_gun(w)
+                    } else if gun
                         && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
                     {
                         // A parked aircraft has the same aircraft volume.
@@ -5686,8 +5782,9 @@ impl State {
                         let start = sub(p.previous, old_targets[i]);
                         // Launch grace: a round still inside its own launcher's
                         // volume (the aircraft sphere widened by the fuze)
-                        // neither hits nor fuzes on it.
-                        if p.owner == t.id && dot(start, start) <= radius * radius {
+                        // neither hits nor fuzes on it, nor does a separating
+                        // drop-launched store.
+                        if p.owner == t.id && (separating || dot(start, start) <= radius * radius) {
                             None
                         } else {
                             segment_sphere(start, sub(p.position, t.position), radius)
@@ -5702,7 +5799,7 @@ impl State {
             }
             // Sample the whole segment, then bisect the first crossing; bounded
             // contact approximation prevents fast rounds tunneling through terrain.
-            if let Some(at) = terrain_hit(p.previous, p.position, &ground)
+            if let Some(at) = terrain_hit_below(p.previous, p.position, &ground, ceiling.as_deref())
                 && first.is_none_or(|f| at < f.0)
             {
                 first = Some((at, None));
@@ -5843,7 +5940,7 @@ impl State {
                             None,
                             super::blast_scale::of(w),
                         ));
-                        if !is_gun(w) {
+                        if !gun {
                             events.push(Event::Jolt(Jolt {
                                 target: r.target.id,
                                 from: position,
@@ -5904,7 +6001,7 @@ impl State {
                         )
                     };
                     let scaled = projectile_damage(p, w, nominal);
-                    if t.role == TargetRole::Aircraft && !is_gun(w) {
+                    if t.role == TargetRole::Aircraft && !gun {
                         events.push(Event::Jolt(Jolt {
                             target: t.id,
                             from: position,
@@ -6088,6 +6185,12 @@ impl State {
                 return false;
             }
             true
+        };
+        self.projectiles.retain_mut(|p| {
+            let owned = p.weapon.take();
+            let kept = pass(p, &owned);
+            p.weapon = owned;
+            kept
         });
         // A round that is gone takes its rewind, its surface record and its
         // bomb path with it.
@@ -6095,6 +6198,7 @@ impl State {
             || !self.surface_rounds.is_empty()
             || !self.bombs.is_empty()
             || !self.guided.is_empty()
+            || !self.falls.is_empty()
         {
             let flying: std::collections::BTreeSet<u32> =
                 self.projectiles.iter().map(|p| p.id).collect();
@@ -6102,6 +6206,7 @@ impl State {
             self.surface_rounds.retain(|id, _| flying.contains(id));
             self.bombs.retain(|id, _| flying.contains(id));
             self.jettisoned.retain(|id, _| flying.contains(id));
+            self.falls.retain(|id| flying.contains(&id));
             // A guided weapon that is gone marks its aircraft's last impact.
             let (tick, impacts) = (self.tick, &mut self.guided_impacts);
             self.guided.retain(|id, flight| {
@@ -6543,6 +6648,56 @@ pub fn is_gun_pod(w: &Weapon) -> bool {
 /// tuning table. Gun rounds are hit-tested against the aircraft volume, spread
 /// by the gun dispersion and never home.
 pub fn is_gun(w: &Weapon) -> bool {
+    GunRecords::get().contains(&w.source)
+}
+/// The gun records, aircraft and surface, upper-cased and sorted, so that
+/// classifying a round is one binary search and no scan of about sixty names.
+/// Record names compare without regard to ASCII case, as before.
+struct GunRecords {
+    names: Vec<Vec<u8>>,
+    longest: usize,
+}
+impl GunRecords {
+    fn get() -> &'static Self {
+        static RECORDS: std::sync::OnceLock<GunRecords> = std::sync::OnceLock::new();
+        RECORDS.get_or_init(|| {
+            let mut names: Vec<Vec<u8>> = AircraftId::ALL
+                .into_iter()
+                .chain([AircraftId::Faxx])
+                .flat_map(|aircraft| aircraft.guns().iter().copied())
+                .chain(super::surface_guns::records())
+                .map(|name| name.to_ascii_uppercase().into_bytes())
+                .collect();
+            names.sort_unstable();
+            names.dedup();
+            let longest = names.iter().map(Vec::len).max().unwrap_or(0);
+            GunRecords { names, longest }
+        })
+    }
+    fn contains(&self, source: &str) -> bool {
+        let source = source.as_bytes();
+        if source.len() > self.longest {
+            return false;
+        }
+        let mut upper = [0u8; 48];
+        let Some(slot) = upper.get_mut(..source.len()) else {
+            // A table name this long is not expected; scan instead.
+            return self
+                .names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(source));
+        };
+        for (to, from) in slot.iter_mut().zip(source) {
+            *to = from.to_ascii_uppercase();
+        }
+        self.names
+            .binary_search_by(|name| name.as_slice().cmp(&*slot))
+            .is_ok()
+    }
+}
+/// The scan [`is_gun`] replaced, kept to test it against.
+#[cfg(test)]
+fn is_gun_scan(w: &Weapon) -> bool {
     is_aircraft_gun(w) || super::surface_guns::is_surface_gun(&w.source)
 }
 /// The station Tab fires: the first gun with rounds left, else the first gun,
@@ -6687,6 +6842,22 @@ pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let t = (-bb - disc.sqrt()) / aa;
     (0. ..=1.).contains(&t).then_some(t)
 }
+/// [`terrain_hit`], answering `None` without sampling when `ceiling`
+/// proves the whole segment above the ground. The ceiling must be built
+/// from the same ground (`GroundCeiling` never clears a segment that
+/// touches it), so the answer is always the one sampling gives.
+pub fn terrain_hit_below(
+    a: Vector,
+    b: Vector,
+    ground: &impl Fn(f64, f64) -> f64,
+    ceiling: Option<&crate::ground_ceiling::GroundCeiling>,
+) -> Option<f64> {
+    if ceiling.is_some_and(|ceiling| ceiling.clear_above(a, b)) {
+        return None;
+    }
+    terrain_hit(a, b, ground)
+}
+
 pub fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
     let below = |t: f64| {
         let p: Vector = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
@@ -6914,6 +7085,84 @@ mod tests {
             load.cheat = true;
             assert_eq!(load.capacity(0, &weapon), count);
         }
+    }
+
+    #[test]
+    fn the_eagles_wing_pylons_take_a_tank_or_air_to_air_missiles_one_a_side() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::{Hardpoint, stations};
+        // The appended row as the parser builds it: a tank, infrared or
+        // active radar, 90 class, two (one a pylon).
+        let mut rows = [
+            (1, 8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 8, [0, 0, 0], "F15R.SEE", 1, 0),
+            (1, 8, [0, 0, -50], "F15.ECM", 1, 0),
+            (1, 8, [5, -5, -5], "M61.JT", 940, 0),
+            (1, 0x7e5, [25, -10, 0], "AIM120.JT", 4, 60),
+            (4, 0x7e5, [50, -20, 0], "AIM9M.JT", 4, 14),
+        ]
+        .map(
+            |(location, flags, position, store, count, weight_class)| Hardpoint {
+                location,
+                flags,
+                position,
+                store: Some(store.into()),
+                count,
+                weight_class,
+            },
+        )
+        .to_vec();
+        stations::append(AircraftId::F15, &mut rows);
+        let pylons = rows[7].clone();
+        assert_eq!((pylons.flags, pylons.count), (0x2a5, 2));
+        let mut config = fixture(false).own().configuration().clone();
+        let mut weapon = config.stations[0].weapon.clone();
+        config.stations.truncate(1);
+        config.hardpoint_slots = vec![None; 8];
+        config.hardpoint_slots[7] = Some(0);
+        config.tanks.clear();
+        let mut load = Loadout {
+            aircraft: AircraftId::F15,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 5000.,
+            empty_lbs: 10000.,
+            maximum_lbs: 50000.,
+            hardpoints: vec![pylons],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        let set = |w: &mut Weapon, source: &str, flags, signature, weight| {
+            w.source = source.into();
+            w.flags = flags;
+            w.seeker.signature = signature;
+            w.weight = weight;
+            w.burst.projectiles_in_pod = 1;
+        };
+        // An AIM-120 or a Sidewinder of any mark, one a side.
+        set(&mut weapon, "AIM120.JT", 0x1204f, 3, 345);
+        assert_eq!(load.capacity(0, &weapon), 2);
+        for source in ["AIM9B.JT", "AIM9M.JT", "AIM9X.JT"] {
+            set(&mut weapon, source, 0x1204f, 2, 190);
+            assert_eq!(load.capacity(0, &weapon), 2, "{source}");
+        }
+        // Not the Sparrow, the Archer, bombs or the Maverick.
+        set(&mut weapon, "AIM7.JT", 0x1234f, 3, 505);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "AA11.JT", 0x1204f, 2, 230);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "MK82.JT", 0x22012, 0, 500);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "AGM65G.JT", 0x1204f, 1, 675);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        // The same row on another aircraft keeps the plain mask rule (the
+        // Sparrow's 0x40 class is not in the mask, nor are bombs).
+        set(&mut weapon, "AIM120.JT", 0x1204f, 3, 345);
+        load.aircraft = AircraftId::F18;
+        assert_eq!(load.capacity(0, &weapon), 2);
+        set(&mut weapon, "AA11.JT", 0x1204f, 2, 230);
+        assert_eq!(load.capacity(0, &weapon), 2);
     }
 
     #[test]

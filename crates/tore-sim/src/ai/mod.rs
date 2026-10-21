@@ -51,6 +51,7 @@ pub mod strike;
 pub mod surface;
 pub mod tactics;
 pub mod targeting;
+pub mod test_settings;
 pub mod thought;
 pub mod threat;
 pub mod threat_route;

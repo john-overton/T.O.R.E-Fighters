@@ -115,10 +115,11 @@ impl Gpu {
     pub fn mirror(&mut self, camera: &Camera, world: &Terrain, scenery: &Scenery) {
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.sim.draw(
+        self.sim.draw_view(
             &self.device,
             &self.queue,
             &mut encoder,
+            crate::sim_renderer::ViewKind::Mirror,
             &view,
             crate::mirrors::SIZE,
             camera,
@@ -145,7 +146,7 @@ impl Gpu {
             world,
             scenery,
         );
-        self.cockpit.draw(&mut encoder, &view);
+        self.cockpit.draw(&mut encoder, &view, [WIDTH, HEIGHT]);
         self.read(encoder, false)
     }
     /// The world drawn thermally and shown through the sensor console's CRT
@@ -252,7 +253,7 @@ impl Gpu {
             })],
             ..Default::default()
         });
-        self.cockpit.draw(&mut encoder, &view);
+        self.cockpit.draw(&mut encoder, &view, [WIDTH, HEIGHT]);
         self.read(encoder, true)
     }
     fn read(&mut self, mut encoder: wgpu::CommandEncoder, symbols: bool) -> AppResult<Vec<u8>> {
@@ -310,7 +311,8 @@ pub struct Frame {
     pub eye: [f64; 3],
     pub target: [f64; 3],
     pub fov: f64,
-    pub time_minutes: Option<i32>,
+    /// Minutes of the day, a fraction for seconds in between.
+    pub time_minutes: Option<f64>,
     pub view: u8,
     pub rate: f64,
     /// When set, the eye is placed in the anchor's recorded heading frame at
@@ -341,7 +343,7 @@ impl Frame {
             eye: [n[2], n[3], n[4]],
             target: [n[5], n[6], n[7]],
             fov: n[8],
-            time_minutes: (n[9] >= 0.).then_some(n[9] as i32),
+            time_minutes: (n[9] >= 0.).then_some(n[9]),
             view: n.get(10).copied().unwrap_or(0.) as u8,
             rate: n.get(11).copied().unwrap_or(1.),
             eye_tick: n.get(12).filter(|t| **t >= 0.).map(|t| *t as u64),

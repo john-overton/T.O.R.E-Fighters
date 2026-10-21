@@ -21,7 +21,9 @@
 //!   readout's kept fly-out times, cleared on a load) and `notes` (the
 //!   mission recorder's command notes, which nothing in flight reads);
 //! - rebuilt: `RenderHistory::places` is each snapshot's target index by id,
-//!   built again from the coded snapshots, as `set_current` and `advance` do.
+//!   built again from the coded snapshots, as `set_current` and `advance` do;
+//!   `RenderHistory::spare`, `ai_stores` and `angles` are scratch the next
+//!   snapshot is written over and from, and start empty.
 //!
 //! The wrapper's own fields are coded by [`Combat::save_wrapper`] and
 //! [`Combat::restore_wrapper`], apart from `state`, so they are tested before
@@ -60,6 +62,11 @@ impl Checkpoint for RenderHistory {
             // Rebuilt from the snapshots, as `set_current` and `advance`
             // build it.
             places: _,
+            // The spare snapshot and the stores cache are only what a
+            // snapshot is written over and from; neither is read back.
+            spare: _,
+            ai_stores: _,
+            angles: _,
             restarts,
         } = self;
         plane.save(s, None)?;
@@ -74,16 +81,18 @@ impl Checkpoint for RenderHistory {
         let current = RenderSnapshot::load(l, previous.as_ref())?;
         // `places[0]` indexes `previous` (empty without one, as after a
         // restart) and `places[1]` indexes `current`.
-        let places = [
-            previous.as_ref().map(Self::places).unwrap_or_default(),
-            Self::places(&current),
-        ];
+        let mut places: [Vec<(u32, u32)>; 2] = Default::default();
+        if let Some(previous) = &previous {
+            Self::place(&mut places[0], previous);
+        }
+        Self::place(&mut places[1], &current);
         Ok(RenderHistory {
             plane,
             previous,
             current,
             places,
             restarts,
+            ..RenderHistory::default()
         })
     }
 }
@@ -100,6 +109,7 @@ impl Combat {
             contrail_offsets: _,
             contrail_sortie,
             contrails,
+            contrail_puffs,
             triggers,
             ownship_contrails,
             poses,
@@ -134,8 +144,11 @@ impl Combat {
             terrain_tti: _,
             // Local: the mission recorder's notes, which no tick reads.
             notes: _,
+            // Setup: built from the world on the first step.
+            ground_ceiling: _,
         } = self;
         contrail_sortie.save(s, None)?;
+        contrail_puffs.save(s, None)?;
         contrails.save(s, None)?;
         triggers.save(s, None)?;
         ownship_contrails.save(s, None)?;
@@ -150,6 +163,7 @@ impl Combat {
     /// the wrapper as it was.
     pub(crate) fn restore_wrapper(&mut self, l: &mut Loader<'_>) -> Result<(), CheckpointError> {
         let contrail_sortie = Checkpoint::load(l, None)?;
+        let contrail_puffs = Checkpoint::load(l, None)?;
         let contrails = Checkpoint::load(l, None)?;
         let triggers = Checkpoint::load(l, None)?;
         let ownship_contrails = Checkpoint::load(l, None)?;
@@ -166,6 +180,7 @@ impl Combat {
             contrail_offsets: _,
             contrail_sortie: contrail_sortie_slot,
             contrails: contrails_slot,
+            contrail_puffs: contrail_puffs_slot,
             triggers: triggers_slot,
             ownship_contrails: ownship_contrails_slot,
             poses: poses_slot,
@@ -191,9 +206,11 @@ impl Combat {
             last_launcher: _,
             terrain_tti: terrain_tti_slot,
             notes: _,
+            ground_ceiling: _,
         } = self;
         terrain_tti_slot.clear();
         *contrail_sortie_slot = contrail_sortie;
+        *contrail_puffs_slot = contrail_puffs;
         *contrails_slot = contrails;
         *triggers_slot = triggers;
         *ownship_contrails_slot = ownship_contrails;
@@ -600,5 +617,118 @@ mod tests {
         // The guns kept firing while the trigger was held and stopped when
         // it was let go, in both.
         assert!(a.combat.triggers.values().all(|t| !t.held()));
+    }
+
+    /// The open mission at 40,000 feet, above every aircraft's contrail
+    /// height.
+    fn high_mission() -> World {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 3;
+        spec.wings[3].count = 3;
+        spec.wings[3].skill = Skill::Average;
+        spec.separation_nm = 5;
+        spec.start = Start::Airborne {
+            altitude_ft: 40_000,
+        };
+        World::new(&spec, &resources(), Seating::Open).unwrap()
+    }
+
+    /// Engine outlets for the human-flown planes, which the synthetic
+    /// aircraft have none of, so their type leaves contrails.
+    fn give_outlets(world: &mut World) {
+        let planes: Vec<u32> = world
+            .combat
+            .state
+            .ownships()
+            .iter()
+            .map(|own| own.aircraft)
+            .collect();
+        for plane in planes {
+            world
+                .combat
+                .ownship_contrails
+                .insert(plane, vec![[4., 0., -25.], [-4., 0., -25.]]);
+        }
+    }
+
+    /// `world`'s checkpoint as it would be with no contrail puffs: the
+    /// switch off and the puffs gone, put back afterwards.
+    fn checkpoint_without_puffs(world: &mut World) -> Vec<u8> {
+        let puffs = std::mem::take(&mut world.combat.contrails);
+        let on = std::mem::replace(&mut world.combat.contrail_puffs, false);
+        let bytes = world.checkpoint().unwrap();
+        world.combat.contrails = puffs;
+        world.combat.contrail_puffs = on;
+        bytes
+    }
+
+    /// Slice S11: a world that makes no contrail puffs (a dedicated
+    /// server's) steps exactly as one that makes them, but for the puffs:
+    /// the same tick output, the same pictures, and a checkpoint equal to
+    /// the other's with its puffs taken out. The sortie number, which every
+    /// client's own contrails follow, is the same.
+    #[test]
+    fn a_world_without_contrail_puffs_steps_as_one_with_them_but_for_the_puffs() {
+        let (mut a, mut b) = (high_mission(), high_mission());
+        b.combat.set_contrail_puffs(false);
+        assert!(a.combat.contrail_puffs() && !b.combat.contrail_puffs());
+        let (mut out_a, mut out_b) = (TickOutput::default(), TickOutput::default());
+        let mut most = 0;
+        for n in 0..600 {
+            if n == 62 {
+                give_outlets(&mut a);
+                give_outlets(&mut b);
+            }
+            step(&mut a, n, &mut out_a);
+            step(&mut b, n, &mut out_b);
+            assert_eq!(effects(&out_a), effects(&out_b), "tick {n}");
+            assert_eq!(a.combat.render.current, b.combat.render.current);
+            assert!(b.combat.contrails.puffs.is_empty(), "tick {n}");
+            most = most.max(a.combat.contrails.puffs.len());
+            if n % 50 == 49 {
+                assert!(
+                    checkpoint_without_puffs(&mut a) == b.checkpoint().unwrap(),
+                    "the checkpoints but for the puffs at tick {n}"
+                );
+            }
+        }
+        assert!(most > 100, "the other world made contrails: {most} puffs");
+        assert_eq!(a.combat.contrail_sortie(), b.combat.contrail_sortie());
+    }
+
+    /// The switch travels in the checkpoint: a world restored from one that
+    /// makes no puffs makes none either, and both fly on alike.
+    #[test]
+    fn the_contrail_switch_is_restored_with_the_checkpoint() {
+        let (mut a, mut b) = (high_mission(), high_mission());
+        a.combat.set_contrail_puffs(false);
+        let (mut out_a, mut out_b) = (TickOutput::default(), TickOutput::default());
+        for n in 0..200 {
+            if n == 62 {
+                give_outlets(&mut a);
+            }
+            step(&mut a, n, &mut out_a);
+        }
+        let bytes = a.checkpoint().unwrap();
+        b.restore(&bytes).unwrap();
+        assert!(!b.combat.contrail_puffs(), "restored off");
+        for n in 200..500 {
+            step(&mut a, n, &mut out_a);
+            step(&mut b, n, &mut out_b);
+            assert_eq!(effects(&out_a), effects(&out_b), "tick {n}");
+            if n % 50 == 49 {
+                assert!(
+                    a.checkpoint().unwrap() == b.checkpoint().unwrap(),
+                    "tick {n}"
+                );
+            }
+        }
+        assert!(b.combat.contrails.puffs.is_empty());
+        // And back on: puffs come again.
+        b.combat.set_contrail_puffs(true);
+        for n in 500..560 {
+            step(&mut b, n, &mut out_b);
+        }
+        assert!(!b.combat.contrails.puffs.is_empty());
     }
 }

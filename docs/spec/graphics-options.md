@@ -36,8 +36,9 @@ their buffers) are rebuilt once, not once per step. A change still settling is
 applied and saved when the screen closes or the game quits.
 
 The rows sit under four headings in a list that scrolls: **Display**
-(anti-aliasing, render scale, spotting aid), **Terrain and scenery** (terrain
-filtering, ground detail and its distance, building distance and detail),
+(anti-aliasing, render scale, spotting aid, frame rate), **Terrain and scenery** (terrain
+filtering, ground detail and its distance, building distance and detail,
+shadows),
 **Vegetation and grass** (vegetation distance, detail, density and cards,
 grass, grass density and distance) and **Performance** (the frame-rate
 counter). The scroll bar is the map's arrow bar, the one the multiplayer
@@ -57,9 +58,11 @@ resolutions); the group names and wording are agent decisions.
 | Anti-aliasing | Off, 2x, 4x, 8x | 4x |
 | Render scale | 75%, 100%, 125%, 150%, 200% | 100% |
 | Spotting aid | Off, Subtle, Strong | Subtle |
+| Frame rate | 60, 100, 200, V-sync | V-sync |
 | Terrain filtering | Off, On | On |
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
+| Shadows | Off, Low, Med, High, Ultra | Med |
 | Ground detail | Off, On, Fine | On |
 | Ground detail distance | 1 nm, 2 nm, 4 nm | 2 nm |
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
@@ -72,7 +75,66 @@ Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
 Smoke tests and captures ignore the saved file, like the other display
 preferences. The frame-rate line is written only when the counter is on
-(`frame-rate true`), so a default file is unchanged.
+(`frame-rate true`), so a default file is unchanged. The frame rate is
+written only when it is not V-sync (`frame-limit 60`, `100` or `200`); a file
+from before the choice existed reads as V-sync. The shadow quality is written
+only when it is not Med (`shadows off`, `low`, `high` or `ultra`); a file
+from before the choice existed reads as Med.
+
+## Frame rate
+
+How often the window is drawn. The choices and the V-sync default were set by
+John on 2026-10-19; the rest of this section is agent decisions, made the same
+day. The simulation does not depend on it: every flight frame still turns the
+wall time since the last frame into 120 Hz ticks (at most 0.25 s, every owed
+tick run), and a multiplayer flight's ticks belong to the session.
+
+| Choice | Presentation | Pacing |
+| --- | --- | --- |
+| V-sync (default) | `Fifo`: each frame waits for the display | One frame per display refresh |
+| 60, 100, 200 | `Mailbox` (no tearing), else `Immediate`, else `Fifo` | A timer spaces frames evenly at that rate; the event loop sleeps until each frame is due, it does not spin |
+
+V-sync uses `Fifo` rather than `Mailbox` plus a timer at the monitor's
+refresh. A timer is not locked to the display: its drift against the refresh
+shows as a doubled or dropped frame every so often, which is the uneven
+pacing V-sync is meant to avoid. `Fifo` costs up to one refresh of input delay
+over a non-waiting mode. With `Fifo` the window also asks Wayland for frame
+callbacks, so a hidden window on Wayland gets no redraws rather than blocking
+in its next present. Above the display's refresh, 100 and 200 lower the input
+delay at the cost of drawing frames that are never shown. A late frame starts
+the timer's count again rather than rushing to catch up. A change applies at
+once, in flight too; the surface is configured again when the presentation
+mode changes.
+
+Throttles that need no setting:
+
+- A single-player flight that is stopped (paused, its Escape menu or a screen
+  opened from it) draws only when something happens once its picture has
+  settled: a key, the mouse, a controller button, a resize, a notice expiring,
+  or an animation on the screen over it. Mouse look-around while paused, the
+  map and the [frame-rate counter](#frame-rate-counter) keep it drawing. The first running frame
+  after a stop turns at most 1/30 s of wall time into ticks; every resume
+  already restarts the flight clock, so this only guards a missed one.
+- An unfocused window draws about ten frames a second.
+- A hidden window draws nothing until it shows again: `Occluded` where the
+  platform reports it (X11, macOS), or minimised to no size (Windows).
+  Wayland reports neither; there V-sync's frame callbacks stop the drawing,
+  and focus loss pauses a single-player flight.
+- A minimised or hidden single-player flight pauses, as on focus loss.
+  Multiplayer never pauses: the session takes its network turns between
+  frames whenever its next tick is due, so its ticks, controls and keepalives
+  continue while the window is unfocused, hidden or drawing slowly.
+
+Scripted runs (`--input-script`), performance measurements (`TORE_PERF_FRAMES`),
+captures and smoke tests are never throttled, and draw uncapped (`Immediate`)
+unless `TORE_FRAME_LIMIT` is set: they keep the presentation they were written
+against, and agent windows on a hidden workspace get no frame callbacks.
+
+`TORE_FRAME_LIMIT` replaces the saved choice for one run without saving it:
+`vsync`, `60`, `100`, `200`, or `off` for uncapped rendering (`Immediate`,
+else `Mailbox`, else `Fifo`, no timer and no unfocused cap) for benchmarks.
+Uncapped is not offered on the screen. Any other value is ignored with a
+warning. While it is set, the About panel says so under the Frame rate row.
 
 ## Anti-aliasing
 
@@ -188,6 +250,50 @@ only when they differ from the defaults. Measured costs are in the city
 fill notes; at 4K the 5 nm default adds about 2 to 5 ms over Kiev, 1 nm
 about 1 ms. The fades cost about 0.1 to 0.4 ms more at 4K (2026-10-12).
 
+## Shadows
+
+Requested by John on 2026-10-20 ("maybe we add a shadow quality setting to
+the graphics menu", with every ground object casting); the levels, what each
+draws and the Med default are agent decisions. The row sets how detailed the
+sun's [geometric shadows](surface-lighting.md#geometry-shadows) are and what
+casts them. Every level but Off has the terrain, the aircraft and every
+ground object cast: airports, buildings, bridges, SAM and AAA sites, parked
+aircraft, vehicles, ships and men.
+
+| Level | Shadow maps | Reach | Soft edge samples | City buildings cast | Trees cast |
+| --- | --- | --- | --- | --- | --- |
+| Off | none | | | | |
+| Low | 1,024 texels | two maps, to 8,192 ft from the eye | 16 | no | no |
+| Med | 2,048 texels | three maps, to 131,072 ft | 32 | within 0.5 nm | no |
+| High | 2,048 texels | three maps, to 131,072 ft | 32 | within 0.5 nm | within about 3,000 ft |
+| Ultra | 4,096 texels | three maps, to 131,072 ft | 32 | within 1 nm | within about 6,000 ft |
+
+Med, the default, is the shadow look from before the setting existed, with
+the static ground objects added. Tree shadows are left to High and Ultra
+because they cost the most: the ground under woods then runs the full soft
+shadow filter. A change applies at once. `--shadows
+off|low|medium|high|ultra` sets it for one run from the command line and
+`TORE_SHADOWS` does the same for one run of any tool, offscreen captures
+included, without saving.
+
+GPU time of a still offscreen frame at 3840 by 2160 on an RTX 4070
+(2026-10-20, morning sun, `--vegetation-preview` cameras with the static
+ground objects loaded, best of two rounds of seven eight-frame means, in
+milliseconds; "before" is the build before this setting, where static ground
+objects did not cast):
+
+| Scene | Before | Off | Low | Med | High | Ultra |
+| --- | --- | --- | --- | --- | --- | --- |
+| Ukraine airfield | 11.3 | 7.0 | 10.8 | 11.4 | 12.0 | 13.2 |
+| Ukraine forest, 300 ft | 7.4 | 5.7 | 7.0 | 7.4 | 9.2 | 9.5 |
+| Ukraine open ground, 300 ft | 9.0 | 5.6 | 7.3 | 9.1 | 10.4 | 10.6 |
+| Hanoi, 300 ft | 12.2 | 3.3 | 8.2 | 12.4 | 12.4 | 12.5 |
+| Hanoi, 2,000 ft | 11.8 | 6.7 | 8.9 | 11.9 | 12.1 | 13.1 |
+
+The ground objects' shadows cost under 0.2 ms; tree shadows cost 0.3 ms over
+a city and up to 1.9 ms over woods, mostly the soft filter on the newly
+shaded ground. At 2560 by 1440 the same steps are about half as large.
+
 ## Vegetation texture and vegetation objects
 
 Shown when the exploratory vegetation is on, which it is on this branch
@@ -264,8 +370,12 @@ The following budgets are agent choices at the 500 ft default:
 
 Ultra grows to a 344-square grid at 1,000 ft, with a hard maximum of 2,366,720
 vertices. Low grows to 136 at 1,000 ft; Medium and High retain their grid side. These limits include rejected
-candidates in every direction; actual visible counts are lower. Geometry stays
-opaque, with no blade buffers or CPU placement. See [grass rules](terrain-detail.md#grass).
+candidates in every direction; actual visible counts are lower. Since S13b
+(2026-10-19) a GPU pass evaluates each submitted slot once and only grown
+blades reach the vertex stage, five vertices each; the grown list costs 64
+bytes per blade the circles can hold (since round 2 of the optimization, about
+9.4 MB at High, 500 ft, down from 16.8 MB for every slot). Geometry stays
+opaque, with no CPU placement. See [grass rules](terrain-detail.md#grass).
 Grass-only GPU cost and final appearance require measurement on a GPU host.
 
 Tufts retain their legacy horizontal footprint; Blades use distance from the eye.
@@ -293,13 +403,28 @@ the top right of the window, over the picture, in the bundled Noto face:
 `62 fps  16.1 ms  cpu 4.2  gpu 11.8  low 48`. The rate and the milliseconds are the mean
 frame over about the last half second. `low` is the slowest frame in the
 last second, written as a rate. Slow rendering frames, including frames longer
-than half a second, count. Disabling the counter resets its history. While enabled, presentation requests the next
-redraw continuously, including idle menus and paused flight/replay, so the line
-measures the actual render load. CPU milliseconds include main-thread frame
-preparation and encoding, excluding surface acquisition waits. GPU milliseconds
-are asynchronous timestamps around the main window command encoder, including
-scene and interface passes, excluding separately submitted mirrors, queued staging
-uploads, CPU time and presentation waits. CPU/GPU values average up to 30 recent samples. Three
+than half a second, count. Disabling the counter resets its history. While enabled, every
+screen redraws continuously at the [frame rate](#frame-rate) in effect (John,
+2026-10-19: V-sync, or 60, 100 or 200 a second), including the main menu and
+every menu screen, the lobby and the network screens, loading screens, the
+paused flight's menu and the paused replay, so the line shows live, real
+numbers and measures the actual render load. Turning it on or off applies at
+once. Hidden, none of this applies: menus keep their low-power pacing (a menu
+draws on input or news, a lobby also on a 10 Hz heartbeat, a loading screen at
+20 Hz, a still paused flight on events only). With a capped rate, events such
+as mouse movement do not add frames beyond the timer's, so the line never reads
+above the cap; an unfocused window still draws about ten frames a second and
+the line reads that. A gap of more than a second between frames (the window
+was hidden, or the counter was off) restarts the history instead of counting
+as one slow frame. CPU milliseconds are the main thread's wall-clock time
+for frame preparation and encoding, excluding surface acquisition waits; they are
+not the CPU seconds summed over worker threads. GPU milliseconds
+are asynchronous timestamps over all of the frame's GPU work: each live camera
+panel picture, the cockpit mirrors on the frames that draw them, and the window pass (scene, cockpit, interface
+and the counter). Each submission is timed on its own and the figure is the sum, so
+GPU idle time between submissions is not counted. Queued staging
+uploads, CPU time and presentation waits are excluded. Offscreen captures and
+screenshots are not timed. CPU/GPU values average up to 30 recent samples. Three
 readback slots never wait on the GPU. Adapters without both timestamp features
 show `gpu --`, never an estimate. GPU/CPU timings overlap and need not sum to the
 frame interval. These measurement choices are agent decisions.
@@ -329,9 +454,10 @@ For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--building-detail 1|2|5|10|20`, `--vegetation-texture off|on|fine`,
 `--vegetation-texture-distance 1|2|4`, `--vegetation-distance 2|4|6|8`,
 `--vegetation-detail 1|2|3|4`, `--vegetation-density low|medium|high|ultra`,
-and `--original-graphics` for everything off
+`--shadows off|low|medium|high|ultra`, and `--original-graphics` for everything off
 at 100%. `TORE_SHOW_FPS=1` shows the frame-rate counter for that run without
-writing it into the file. Flags apply in order, so `--original-graphics --spotting-aid strong`
+writing it into the file, and `TORE_FRAME_LIMIT=off|vsync|60|100|200` sets the
+[frame rate](#frame-rate) for that run. Flags apply in order, so `--original-graphics --spotting-aid strong`
 turns on only the outline. Any change on the Graphics screen saves everything
 the screen shows, including a flag's value.
 

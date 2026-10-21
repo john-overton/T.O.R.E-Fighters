@@ -642,7 +642,9 @@ no slot available, and pure spectators. Observers cannot chat to the players
 flying, but they talk among themselves ([decision](#decisions)). In
 PvP the King can set an observer delay so observers cannot relay live positions
 to a side. The delay is applied by the host before anything is sent, so an
-observer's machine never holds live positions.
+observer's machine never holds live positions. The host keeps the delayed
+picture only while someone watches (John, 2026-10-19): an observer who starts
+watching sees the battle from the moment it asked, once the delay has passed.
 
 *Designed (phase 2; the decision above is John's, the rest agent proposals):*
 a connection with no plane while the mission flies can **Watch**: the host
@@ -1906,7 +1908,11 @@ content check and travel with the flight build.
 A late join to a Choice slot removes its AI aircraft cleanly and creates the
 accepted player aircraft at revival placement. Departure returns the lineage to
 its wing AI default under the existing AI respawn delay and lives rules, at its
-original spawn. These removals award no kill or loss.
+original spawn. These removals award no kill or loss. A drop (a crash, a lost
+connection) is not a departure: as in a fixed wing, the AI flies the chosen
+aircraft, kept for the player, who takes it back with the rejoin token, also
+after a host migration; the lineage returns to the default only when that
+reservation ends (the King's Release).
 
 With `respawn revive`, the flight continues beneath a menu while waiting, using the in-flight
 Escape menu widget. Loadout lists stations in Load Ordnance display order, then

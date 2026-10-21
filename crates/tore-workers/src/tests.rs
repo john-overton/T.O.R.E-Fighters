@@ -217,8 +217,17 @@ fn collections_finish_borrowed_work_before_panics_propagate() {
 fn worker_count(executor: &Executor) -> usize {
     match &executor.mode {
         Mode::Parallel(pool) => pool.current_num_threads(),
+        Mode::Lazy(lazy) => lazy
+            .pool
+            .get()
+            .and_then(Option::as_ref)
+            .map_or(0, rayon::ThreadPool::current_num_threads),
         _ => 0,
     }
+}
+
+fn pool_is_built(executor: &Executor) -> bool {
+    matches!(&executor.mode, Mode::Lazy(lazy) if lazy.pool.get().is_some())
 }
 
 #[test]
@@ -247,13 +256,170 @@ fn configuration_reserves_headroom_caps_threads_and_honors_zero() {
 }
 
 #[test]
-fn startup_failure_falls_back_without_losing_results() {
-    let executor = finish_startup(Err(BuildError("injected thread creation refusal".into())));
-    assert_eq!(worker_count(&executor), 0);
+fn a_refused_pool_build_keeps_jobs_inline_without_losing_results() {
+    let executor = Executor {
+        mode: Mode::Lazy(Lazy {
+            workers: 2,
+            gate: None,
+            pool: OnceLock::from(None),
+        }),
+    };
+    assert!(!executor.should_dispatch(8, 2));
     assert_eq!(
         executor.ordered_map(&[3, 5], 2, |_, value| value * 2),
         [6, 10]
     );
+    let mut items = [1, 2, 3];
+    executor.for_each_mut(&mut items, 2, |_, value| *value += 1);
+    assert_eq!(items, [2, 3, 4]);
+}
+
+#[test]
+fn a_lazy_pool_starts_no_threads_until_a_collection_dispatches() {
+    let caller = thread::current().id();
+    let executor = Executor::lazy(3);
+    assert!(!pool_is_built(&executor));
+    // Small and below-threshold collections stay inline and build nothing.
+    assert!(!executor.should_dispatch(1, 0));
+    assert_eq!(
+        executor.ordered_map(&[1], 0, |_, _| thread::current().id()),
+        [caller]
+    );
+    assert_eq!(
+        executor.ordered_map(&[1, 2], 3, |_, _| thread::current().id()),
+        [caller, caller]
+    );
+    assert!(!pool_is_built(&executor));
+    let ids = executor.ordered_map(&[1, 2, 3, 4], 2, |_, _| thread::current().id());
+    assert!(ids.iter().all(|id| *id != caller));
+    assert!(pool_is_built(&executor));
+    assert_eq!(worker_count(&executor), 3);
+    // Zero workers is plain serial, with no pool to build.
+    assert!(matches!(Executor::lazy(0).mode, Mode::Serial));
+    assert_eq!(worker_count(&Executor::lazy(usize::MAX)), 0);
+    assert!(matches!(
+        &Executor::lazy(usize::MAX).mode,
+        Mode::Lazy(lazy) if lazy.workers == MAX_WORKERS
+    ));
+}
+
+#[test]
+fn a_governed_executor_dispatches_only_while_the_governor_says() {
+    let caller = thread::current().id();
+    let governor = Arc::new(Governor::new());
+    let executor = Executor::governed(4, Arc::clone(&governor));
+    let items: Vec<_> = (0..16).collect();
+    let on_caller = |executor: &Executor| {
+        executor
+            .ordered_map(&items, 2, |_, _| thread::current().id())
+            .iter()
+            .all(|id| *id == caller)
+    };
+    // Calm: inline, and no thread was ever started.
+    assert!(on_caller(&executor));
+    assert!(!executor.should_dispatch(16, 2));
+    assert!(!pool_is_built(&executor));
+    governor.observe(Load::CALM);
+    assert!(on_caller(&executor) && !pool_is_built(&executor));
+    // Pressure from any one of the signals fans out, to the asked-for size.
+    governor.observe(Load {
+        compression: 2.,
+        ..Load::CALM
+    });
+    assert!(executor.should_dispatch(16, 2));
+    assert!(!on_caller(&executor));
+    assert_eq!(worker_count(&executor), 4);
+    // Back to serial when the hold ends; the pool stays parked, unused.
+    governor.release();
+    assert!(on_caller(&executor));
+    assert_eq!(worker_count(&executor), 4);
+}
+
+#[test]
+fn toggling_dispatch_between_collections_never_changes_a_result() {
+    let governor = Arc::new(Governor::new());
+    let executor = Executor::governed(4, Arc::clone(&governor));
+    let serial = Executor::serial();
+    let mut toggled: Vec<u64> = (0..257).collect();
+    let mut reference = toggled.clone();
+    let mut seen = Vec::new();
+    for pass in 0..40u64 {
+        if pass % 3 == 0 {
+            governor.observe(Load {
+                late: true,
+                ..Load::CALM
+            });
+        } else if pass % 3 == 1 {
+            governor.release();
+        }
+        let step = |index: usize, value: &u64| {
+            (value
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .rotate_left((index % 61) as u32)
+                ^ pass)
+                .wrapping_add(
+                    f64::from_bits(*value | 0x3ff0_0000_0000_0000)
+                        .sin()
+                        .to_bits(),
+                )
+        };
+        let next = executor.ordered_map(&toggled, 2, step);
+        assert_eq!(next, serial.ordered_map(&reference, 2, step), "pass {pass}");
+        executor.for_each_mut(&mut toggled, 2, |index, value| *value = step(index, value));
+        serial.for_each_mut(&mut reference, 2, |index, value| {
+            *value = step(index, value)
+        });
+        assert_eq!(toggled, reference, "pass {pass}");
+        seen.push(executor.should_dispatch(toggled.len(), 2));
+    }
+    assert!(
+        seen.contains(&true) && seen.contains(&false),
+        "both paths ran"
+    );
+}
+
+#[test]
+fn the_shared_executor_is_forced_or_governed_by_the_setting() {
+    let governor = Arc::new(Governor::new());
+    let forced = shared_for(
+        Sizing {
+            workers: 6,
+            forced: true,
+        },
+        &governor,
+    );
+    assert!(matches!(&forced.mode, Mode::Lazy(lazy) if lazy.workers == 6 && lazy.gate.is_none()));
+    let off = shared_for(
+        Sizing {
+            workers: 0,
+            forced: true,
+        },
+        &governor,
+    );
+    assert!(matches!(off.mode, Mode::Serial));
+    for (available, expected) in [(24, 4), (8, 4), (7, 4), (5, 2)] {
+        let workers = configured_workers(None, available).unwrap();
+        let auto = shared_for(
+            Sizing {
+                workers,
+                forced: false,
+            },
+            &governor,
+        );
+        assert!(
+            matches!(&auto.mode, Mode::Lazy(lazy) if lazy.workers == expected && lazy.gate.is_some()),
+            "{available} cpus"
+        );
+        assert!(!pool_is_built(&auto), "no threads until they are wanted");
+    }
+    let small = shared_for(
+        Sizing {
+            workers: configured_workers(None, 4).unwrap(),
+            forced: false,
+        },
+        &governor,
+    );
+    assert!(matches!(small.mode, Mode::Serial), "four cpus stay serial");
 }
 
 #[test]

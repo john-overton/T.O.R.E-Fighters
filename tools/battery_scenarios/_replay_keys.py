@@ -19,8 +19,11 @@ PY = "python3"
 DRIVER = drive.__file__
 
 
-def drive_step(keys: str, game: list[str], *, random: str = "", recording: bool = True, timeout: float = 240.0) -> Step:
+def drive_step(keys: str, game: list[str], *, random: str = "", recording: bool = False, timeout: float = 240.0) -> Step:
+    """A driver run; `recording` makes the keys wait until the flight is recording (it has started)."""
     args = [PY, DRIVER, "--data", "{work}/data"]
+    if recording:
+        args.append("--await-recording")
     if keys:
         args += ["--keys", keys]
     if random:
@@ -60,7 +63,10 @@ def flight_checks(work: Path, output: str, *, min_bookmarks: int = 0, ended: str
         problems += semantic_log_problems(body)
         problems += invariant_problems(body)
         problems += pause_problems(body)
-    problems += rc.file_problems(work, "live.acmi", rc.check_acmi)
+    # A random key can end the flight on its first tick (the Escape menu's Exit, as above): that recording holds one
+    # frame, "ticks 0 to 0", and its Tacview file has no time past #0. Anything longer must have a time span.
+    one_frame = re.search(r"(?m)^Length .*\(1 frames, ticks 0 to 0\b", info) is not None
+    problems += rc.file_problems(work, "live.acmi", lambda text: rc.check_acmi(text, need_span=not one_frame))
     return problems
 
 
@@ -119,7 +125,7 @@ def keyed_flight(name: str, game: list[str], *, keys: str = "", random: str = ""
         # until Alt+F4. TORE_RECORD_MISSIONS=1 makes such a run record.
         env={"TORE_RECORD_MISSIONS": "1", "TORE_PERF_FRAMES": "100000", "TORE_PERF_ACTIVE": "1"},
         then=[
-            drive_step(keys, game, random=random),
+            drive_step(keys, game, random=random, recording=True),
             Step([PY, tools.__file__, "newest", "{work}/data", "{work}/live.tore-replay"], app=False),
             Step(["--recording-info", "{work}/live.tore-replay"]),
             Step(["--recording-log", "{work}/live.tore-replay", "--out", "{work}/log", "--rate", "5"]),

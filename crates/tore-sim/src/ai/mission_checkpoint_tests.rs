@@ -304,6 +304,36 @@ fn a_fight_restores_at_any_tick_and_steps_on_identically() {
     assert_eq!(mission.wing_leader(Side(1), 1), Some(5));
 }
 
+/// The AI test settings (slice S7b) are host setup, not state: a fight at a
+/// 30 Hz observation rate with lean sensors restores between two
+/// observations (the ticks are not multiples of 4 for most aircraft) and steps
+/// on identically, byte for byte, when the host sets the settings again.
+#[test]
+fn a_fight_at_a_slow_observation_rate_restores_between_observations() {
+    use crate::ai::test_settings::AiTestSettings;
+    let settings = AiTestSettings::default()
+        .with_observation_hz(30)
+        .unwrap()
+        .with_lean_sensors(true);
+    let mut host = |mission: &mut AiMission| {
+        mission.set_test_settings(settings);
+        fight_host(mission)
+    };
+    let mut mission = fight();
+    let mut checked = 0;
+    while mission.tick() < 900 {
+        if [221, 342, 463, 603].contains(&mission.tick()) {
+            checked += 1;
+            step_on(&mut mission.clone(), &mut host, 300);
+        }
+        host(&mut mission);
+    }
+    assert_eq!(checked, 4);
+    // The sensors' clock kept pace with the mission's, four ticks a step.
+    let ticks = mission.actor(1).unwrap().sensors().unwrap().tick();
+    assert!(ticks.abs_diff(900) <= 3, "{ticks}");
+}
+
 // ---------------------------------------------------------------------------
 // The airfield: ground starts, takeoffs and landings on a flat runway.
 

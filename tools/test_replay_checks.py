@@ -29,6 +29,11 @@ class AcmiTests(unittest.TestCase):
         self.assertTrue(rc.check_acmi(GOOD_ACMI.replace("-10000000000\n", "-10000000009\n")))
         self.assertTrue(rc.check_acmi(GOOD_ACMI.split("#0\n")[0]))
 
+    def test_a_one_frame_flight_has_no_time_span_and_may_be_excused(self):
+        one = "FileType=text/acmi/tacview\nFileVersion=2.2\n0,Title=t\n#0\n10000000000,T=0|0|1500|0|0|0|0|0|0,Name=F/A-18D\n"
+        self.assertIn("ACMI has no time span", rc.check_acmi(one))
+        self.assertEqual(rc.check_acmi(one, need_span=False), [])
+
 
 class AcmiVsLogTests(unittest.TestCase):
     LOG = '{"type":"sample","t":1,"id":0,"pos_ft":[3280.84,1000,6561.68]}\n'

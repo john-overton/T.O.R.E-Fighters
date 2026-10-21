@@ -1,10 +1,14 @@
 //! Player graphics choices for the 3D view: anti-aliasing, render scale, the
 //! spotting aid, terrain distance filtering, city fill distances, the
-//! exploratory vegetation distances and the frame-rate counter. These are
+//! exploratory vegetation distances, the frame rate and the frame-rate
+//! counter and the shadow quality. These are
 //! opinionated host additions requested by John on 2026-09-22; the original
 //! game had none of them. The vegetation rows were added on 2026-10-16, and
-//! the frame-rate counter on 2026-10-17. The values and defaults are agent
-//! choices. They are saved in their own small file, `graphics-v1.conf`,
+//! the frame-rate counter on 2026-10-17, and the frame rate choice on
+//! 2026-10-19 (John chose its steps and the V-sync default), and the shadow
+//! quality on 2026-10-20 (John asked for the setting; its levels and default
+//! are agent choices). The other values
+//! and defaults are agent choices. They are saved in their own small file, `graphics-v1.conf`,
 //! beside the preferences.
 use std::path::Path;
 
@@ -292,6 +296,101 @@ impl Grass {
     }
 }
 
+/// How often the window is drawn. V-sync draws one frame per display refresh,
+/// waiting for the display; the numbers cap the rate with a timer and present
+/// without waiting. John chose these steps and the V-sync default on
+/// 2026-10-19; `crate::frame_pacing` applies them, and `TORE_FRAME_LIMIT`
+/// overrides them for one run (including `off`, uncapped, for benchmarks).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameLimit {
+    Fps60,
+    Fps100,
+    Fps200,
+    #[default]
+    VSync,
+}
+impl FrameLimit {
+    pub const ALL: [Self; 4] = [Self::Fps60, Self::Fps100, Self::Fps200, Self::VSync];
+    /// Frames a second for the capped choices; None for V-sync.
+    pub fn rate(self) -> Option<u32> {
+        match self {
+            Self::Fps60 => Some(60),
+            Self::Fps100 => Some(100),
+            Self::Fps200 => Some(200),
+            Self::VSync => None,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fps60 => "60",
+            Self::Fps100 => "100",
+            Self::Fps200 => "200",
+            Self::VSync => "V-sync",
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Fps60 => "60",
+            Self::Fps100 => "100",
+            Self::Fps200 => "200",
+            Self::VSync => "vsync",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+}
+
+/// How detailed the geometric shadows are: the shadow map size, how many
+/// map cascades, the soft-edge sample count and which objects cast
+/// (`crate::surface_lighting::Settings`; docs/spec/surface-lighting.md).
+/// Off draws no geometric shadows. Medium is the default: the shadow maps
+/// from before the setting existed, with every ground object casting; the
+/// trees' shadows (High) cost about 0.5 to 0.8 ms at 1440p over woods
+/// (agent choice, 2026-10-20).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShadowQuality {
+    Off,
+    Low,
+    #[default]
+    Medium,
+    High,
+    Ultra,
+}
+impl ShadowQuality {
+    pub const ALL: [Self; 5] = [Self::Off, Self::Low, Self::Medium, Self::High, Self::Ultra];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Med",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Ultra => "ultra",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    /// `TORE_SHADOWS=off|low|medium|high|ultra` sets the quality for one
+    /// run (offscreen tools and captures included) without saving it.
+    pub fn effective(self) -> Self {
+        std::env::var("TORE_SHADOWS")
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+            .unwrap_or(self)
+    }
+}
+
 /// How far the close-range ground detail reaches, nautical miles.
 pub const GROUND_TEXTURE_DISTANCES: [u32; 3] = [1, 2, 4];
 /// How far vegetation objects are drawn, nautical miles.
@@ -343,6 +442,10 @@ pub struct Options {
     /// default (John, 2026-10-17). `TORE_SHOW_FPS=1` shows it for one run
     /// without saving.
     pub show_frame_rate: bool,
+    /// How often the window is drawn. V-sync by default (John, 2026-10-19).
+    pub frame_limit: FrameLimit,
+    /// How detailed the geometric shadows are, and what casts them.
+    pub shadow_quality: ShadowQuality,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -363,6 +466,8 @@ impl Default for Options {
             grass_density: DEFAULT_GRASS_DENSITY,
             grass_distance_ft: DEFAULT_GRASS_DISTANCE,
             show_frame_rate: false,
+            frame_limit: FrameLimit::default(),
+            shadow_quality: ShadowQuality::default(),
         }
     }
 }
@@ -388,6 +493,8 @@ impl Options {
             grass_density: DEFAULT_GRASS_DENSITY,
             grass_distance_ft: DEFAULT_GRASS_DISTANCE,
             show_frame_rate: false,
+            frame_limit: FrameLimit::default(),
+            shadow_quality: ShadowQuality::default(),
         }
     }
     pub fn scale(&self) -> f32 {
@@ -451,6 +558,12 @@ impl Options {
         if self.show_frame_rate {
             text += "frame-rate true\n";
         }
+        if self.frame_limit != FrameLimit::default() {
+            text += &format!("frame-limit {}\n", self.frame_limit.key());
+        }
+        if self.shadow_quality != ShadowQuality::default() {
+            text += &format!("shadows {}\n", self.shadow_quality.key());
+        }
         text
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -481,6 +594,8 @@ impl Options {
             "grass-density",
             "grass-distance",
             "frame-rate",
+            "frame-limit",
+            "shadows",
         ]
         .iter()
         .filter(|k| values.contains_key(*k))
@@ -560,6 +675,14 @@ impl Options {
                 None => false,
                 Some(_) => boolean("frame-rate")?,
             },
+            frame_limit: match values.get("frame-limit") {
+                None => FrameLimit::default(),
+                Some(v) => FrameLimit::parse(v).ok_or("invalid frame-limit")?,
+            },
+            shadow_quality: match values.get("shadows") {
+                None => ShadowQuality::default(),
+                Some(v) => ShadowQuality::parse(v).ok_or("invalid shadows")?,
+            },
         })
     }
     /// Command-line overrides for one run; they are not saved by themselves.
@@ -626,6 +749,10 @@ impl Options {
                         .ok()
                         .filter(|n| VEGETATION_DETAILS.contains(n))
                         .ok_or("--vegetation-detail needs 1, 2, 3 or 4")?
+                }
+                "--shadows" => {
+                    self.shadow_quality = ShadowQuality::parse(value)
+                        .ok_or("--shadows needs off, low, medium, high or ultra")?
                 }
                 "--vegetation-density" => {
                     self.vegetation_density = VegDensity::parse(value)
@@ -765,6 +892,8 @@ mod tests {
             grass_density: Some(VegDensity::Ultra),
             grass_distance_ft: 1000,
             show_frame_rate: true,
+            frame_limit: FrameLimit::Fps100,
+            shadow_quality: ShadowQuality::Low,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
         // The default building and vegetation distances are not written, and
@@ -794,6 +923,86 @@ mod tests {
         assert!(Options::parse(&(text.clone() + "sun-glint true\n")).is_err());
         assert!(Options::parse(&text.replace("tore-graphics 1", "tore-graphics 2")).is_err());
         assert!(Options::parse("tore-graphics 1\n").is_err());
+    }
+    #[test]
+    fn frame_limit_defaults_to_vsync_and_roundtrips() {
+        assert_eq!(Options::default().frame_limit, FrameLimit::VSync);
+        assert_eq!(Options::original().frame_limit, FrameLimit::VSync);
+        // A default file does not name it, and a file written before the
+        // choice existed reads as V-sync.
+        assert!(!Options::default().text().contains("frame-limit"));
+        let old = "tore-graphics 1\nanti-aliasing 4x\nrender-scale 100\nspotting-aid subtle\nterrain-filtering true\nframe-rate true\n";
+        let parsed = Options::parse(old).unwrap();
+        assert_eq!(parsed.frame_limit, FrameLimit::VSync);
+        assert!(parsed.show_frame_rate);
+        for limit in FrameLimit::ALL {
+            let options = Options {
+                frame_limit: limit,
+                ..Options::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap(), options);
+            assert_eq!(FrameLimit::parse(limit.key()), Some(limit));
+        }
+        assert!(
+            Options {
+                frame_limit: FrameLimit::Fps60,
+                ..Options::default()
+            }
+            .text()
+            .contains("frame-limit 60\n")
+        );
+        assert_eq!(
+            FrameLimit::ALL.map(FrameLimit::rate),
+            [Some(60), Some(100), Some(200), None]
+        );
+        assert_eq!(
+            FrameLimit::ALL.map(FrameLimit::label),
+            ["60", "100", "200", "V-sync"]
+        );
+        // Uncapped is not a saved choice.
+        for bad in ["off", "144", "unlimited", ""] {
+            assert!(Options::parse(&format!("{old}frame-limit {bad}\n")).is_err());
+        }
+    }
+    #[test]
+    fn shadow_quality_defaults_to_medium_and_roundtrips() {
+        assert_eq!(Options::default().shadow_quality, ShadowQuality::Medium);
+        assert_eq!(Options::original().shadow_quality, ShadowQuality::Medium);
+        // A default file does not name it, and an older file reads as Medium.
+        assert!(!Options::default().text().contains("shadows"));
+        let old = "tore-graphics 1\nanti-aliasing 4x\nrender-scale 100\nspotting-aid subtle\nterrain-filtering true\n";
+        assert_eq!(
+            Options::parse(old).unwrap().shadow_quality,
+            ShadowQuality::Medium
+        );
+        for quality in ShadowQuality::ALL {
+            let options = Options {
+                shadow_quality: quality,
+                ..Options::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap(), options);
+            assert_eq!(ShadowQuality::parse(quality.key()), Some(quality));
+        }
+        assert!(
+            Options {
+                shadow_quality: ShadowQuality::Off,
+                ..Options::default()
+            }
+            .text()
+            .contains("shadows off\n")
+        );
+        assert_eq!(
+            ShadowQuality::ALL.map(ShadowQuality::label),
+            ["Off", "Low", "Med", "High", "Ultra"]
+        );
+        for bad in ["none", "max", ""] {
+            assert!(Options::parse(&format!("{old}shadows {bad}\n")).is_err());
+        }
+        let mut options = Options::default();
+        let flag = |v: &str| [("--shadows".to_owned(), v.to_owned())];
+        options.apply_flags(&flag("ultra")).unwrap();
+        assert_eq!(options.shadow_quality, ShadowQuality::Ultra);
+        assert!(options.apply_flags(&flag("on")).is_err());
     }
     #[test]
     fn a_missing_or_damaged_file_gives_the_defaults() {

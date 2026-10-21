@@ -27,7 +27,9 @@ pub struct Meter {
 }
 
 impl Meter {
-    /// Render preparation and encoding, excluding swapchain waits. GPU samples
+    /// Main-thread wall time for render preparation and encoding, excluding
+    /// swapchain waits (not CPU seconds summed over workers). The GPU figure
+    /// is the frame's whole GPU work, panels and mirrors included; samples
     /// arrive asynchronously and never block presentation.
     pub fn work(&mut self, cpu_ms: f64, gpu_ms: Option<f64>) {
         fn add(samples: &mut VecDeque<f64>, value: f64) {
@@ -45,10 +47,24 @@ impl Meter {
     }
     /// One continuously presented frame. The first call starts the clock.
     /// Slow frames count too. Disabling the counter resets its history.
+    ///
+    /// The counter measures continuous drawing. A gap longer than [`WORST`]
+    /// means frames were not being drawn (the window was hidden, or the
+    /// counter was off), so the clock restarts rather than counting the gap
+    /// as one very slow frame.
     pub fn tick(&mut self) {
-        let now = std::time::Instant::now();
+        self.tick_at(std::time::Instant::now());
+    }
+
+    /// [`Meter::tick`] at `now`.
+    pub fn tick_at(&mut self, now: std::time::Instant) {
         if let Some(last) = self.last.replace(now) {
-            self.push(now.saturating_duration_since(last).as_secs_f64());
+            let dt = now.saturating_duration_since(last).as_secs_f64();
+            if dt > WORST {
+                self.push(0.0);
+            } else {
+                self.push(dt);
+            }
         }
     }
 
@@ -247,6 +263,32 @@ pub fn shown_with(saved: bool, variable: Option<&str>) -> bool {
     }
 }
 
+/// `TORE_TRACE_PRESENT=1` logs every change of what the window presents (menu,
+/// loading photograph, flight, replay) with the frames drawn of the one before,
+/// to see a screen flash between two others. Development only.
+pub fn trace_present(surface: Surface) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static LAST: std::sync::Mutex<Option<(&'static str, u32)>> = std::sync::Mutex::new(None);
+    if !*ON.get_or_init(|| std::env::var("TORE_TRACE_PRESENT").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let name = match surface {
+        Surface::Menu => "menu",
+        Surface::Loading => "loading",
+        Surface::Flight { .. } => "flight",
+        Surface::Replay { .. } => "replay",
+    };
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    match &mut *last {
+        Some((was, frames)) if *was == name => *frames += 1,
+        Some((was, frames)) => {
+            log::info!("present: {frames} {was} frames, now {name}");
+            *last = Some((name, 1));
+        }
+        None => *last = Some((name, 1)),
+    }
+}
+
 /// Glyphs for `text`, right-aligned on `anchor`, with a one-pixel shadow.
 /// Empty when `text` is empty: the off state draws nothing.
 pub fn quads(text: &str, anchor: Anchor, linear: bool) -> Vec<Quad> {
@@ -308,16 +350,49 @@ mod tests {
         m = Meter::default();
         m.push(0.0161);
         assert!(m.line().unwrap().contains("cpu --  gpu --"));
-        // Every window surface uses Renderer::draw, which schedules another
-        // frame when shown, including paused flight and idle menus.
-        let render = include_str!("renderer.rs");
-        let tail = render.split("frame.present();").nth(1).unwrap();
-        assert!(
-            tail.split("self.first_frame.complete()")
-                .next()
-                .unwrap()
-                .contains("request_redraw()")
-        );
+        // Shown, the counter keeps every view drawing, paused flight and
+        // idle menus included, through the frame pacing (`App::pace` and
+        // the stopped flight's stillness), so the frame rate choice still
+        // caps it.
+        let main = include_str!("main.rs");
+        for (function, needle) in [
+            ("fn pace(&mut self", "counted("),
+            ("fn flight_want(&mut self", "counter_shown()"),
+        ] {
+            let body = main.split(function).nth(1).unwrap();
+            assert!(
+                body.split("\n    }\n").next().unwrap().contains(needle),
+                "{function}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_continuous_frames_read_as_the_rate_and_a_gap_restarts_the_clock() {
+        use std::time::{Duration, Instant};
+        for hz in [60u32, 100, 200] {
+            let mut meter = Meter::default();
+            let start = Instant::now();
+            let period = Duration::from_secs_f64(1.0 / f64::from(hz));
+            for n in 0..(hz * 2) {
+                meter.tick_at(start + period * n);
+            }
+            let line = meter.line().unwrap();
+            assert!(line.starts_with(&format!("{hz} fps")), "{hz}: {line}");
+        }
+        // A long idle gap (no frames drawn) is not one slow frame.
+        let mut meter = Meter::default();
+        let start = Instant::now();
+        for n in 0..30 {
+            meter.tick_at(start + Duration::from_millis(16) * n);
+        }
+        let resumed = start + Duration::from_secs(30);
+        meter.tick_at(resumed);
+        assert_eq!(meter.line(), None, "the history restarts after a gap");
+        for n in 1..30 {
+            meter.tick_at(resumed + Duration::from_millis(10) * n);
+        }
+        assert!(meter.line().unwrap().starts_with("100 fps"));
     }
     #[test]
     fn the_average_is_half_a_second_and_low_is_the_slowest_frame() {

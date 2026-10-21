@@ -92,6 +92,27 @@ pub struct LivePuff {
     pub position: [f64; 3],
 }
 
+impl LivePuff {
+    /// The puff released at `spawn_tick` as it looks at `tick`, or `None`
+    /// once it has lived its lifetime (or if its kind has none known).
+    pub fn at(spawn_tick: u64, puff: &PuffSpawn, tick: u64) -> Option<Self> {
+        let age = tick - spawn_tick;
+        let lifetime = puff.kind.lifetime_ticks()?;
+        if age >= lifetime {
+            return None;
+        }
+        let mut position = puff.position;
+        position[1] += puff.kind.rise_fps() * age as f64 / 120.;
+        Some(Self {
+            spawn_tick,
+            age_ticks: age,
+            layer: puff.layer,
+            kind: puff.kind,
+            position,
+        })
+    }
+}
+
 /// What [`Recording::peek`] reads without scanning the frames.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Peek {
@@ -797,10 +818,13 @@ impl Recording {
             if first > to {
                 break;
             }
-            for (frame, effects, puffs) in self.chunk_spawns(index)?.iter() {
+            let spawns = self.chunk_spawns(index)?;
+            // Entries ascend by frame, so the range starts by bisection.
+            let begin = spawns.partition_point(|(frame, ..)| first + u64::from(*frame) < from);
+            for (frame, effects, puffs) in &spawns[begin..] {
                 let tick = first + u64::from(*frame);
-                if tick < from || tick > to {
-                    continue;
+                if tick > to {
+                    break;
                 }
                 out.effects
                     .extend(effects.iter().map(|e| (tick, e.clone())));
@@ -821,21 +845,8 @@ impl Recording {
         let mut smoke = Vec::new();
         let mut contrails = Vec::new();
         for (spawn_tick, puff) in spawns.puffs {
-            let age = tick - spawn_tick;
-            let Some(lifetime) = puff.kind.lifetime_ticks() else {
+            let Some(live) = LivePuff::at(spawn_tick, &puff, tick) else {
                 continue;
-            };
-            if age >= lifetime {
-                continue;
-            }
-            let mut position = puff.position;
-            position[1] += puff.kind.rise_fps() * age as f64 / 120.;
-            let live = LivePuff {
-                spawn_tick,
-                age_ticks: age,
-                layer: puff.layer,
-                kind: puff.kind,
-                position,
             };
             if puff.layer == LAYER_CONTRAILS {
                 contrails.push(live);

@@ -109,6 +109,115 @@ The trial orange-rim disc grading is removed at John's request. The sun uses
 its preceding color treatment, retaining the earlier atmospheric glow and
 continuous visual arc at the smaller size.
 
+## Continuous dawn and dusk
+
+Implementation mode, requested by John on 2026-10-19 ("the high level clouds
+just pop in"). **Opinionated** presentation; the rule below is an agent
+decision. Smooth weather only; stepped mode and the simulation are unchanged.
+
+The weather crosses dawn and dusk through records that overlap in time (DAY2:
+night 00:00 to 07:05, dawn 07:00 to 07:10, day 07:06 to 19:04, dusk 19:00 to
+19:08, night from 19:05). Colours already blended across each overlap. The
+rest switched: the native blend takes a record's sky and ocean decks whole as
+soon as it counts (the high SKY deck at 75,000 feet appeared at 07:06:04,
+about five minutes into a dawn mission, and stayed through dusk until 19:08),
+the horizon gradients switch with the decks, the haze resolves through the
+nearest of a few fixed shade tables, and the star flag follows whichever record
+is nearer. Each of these showed as a single-frame pop.
+
+Now every record that counts at an instant has a share: across an overlap the
+later record's share rises linearly from 0 to 1 over the overlap's span, the
+same rule the colours use. Each deck is drawn at the total share of the records
+that name it, so the high clouds fade in over the four-minute dawn overlap and
+out over the three-minute dusk one. When two records name different textures
+for the same deck (each record picks its own SKY or OCEAN variant), the
+textures cross-fade by share. The upper and lower horizon gradients are
+weighted the same way: a gradient at weight w draws its index ramp compressed
+toward the flat middle by w. The haze colour, the fog palette levels and the
+shade remap rows of the weather art are each a share-weighted mix of the
+records' own tables. The stars and moon follow the share of records carrying
+the star flag. Nothing jumps between frames: a unit test steps a whole DAY2 day
+at 1/60 second through every transition and finds no step larger than the
+share's own rate.
+
+The ground, the buildings and every other surface seen through a weather band
+cross the same way (John, 2026-10-20: "at a certain time the ground texture
+color just flips"; seen at 01:35 of a dusk replay over a city, where the land
+went from a flat warm brown to a greener, darker palette in one frame). Each
+band resolved its haze through the nearest shade table to its blended haze
+colour, so the table switched part way through the overlap. Now each band
+takes its records' own tables by share: the heaviest and the next, crossed by
+the next one's share of the two (a table with fewer levels is read at the same
+haze, between its levels). The crossed colours are precomputed per band on the
+CPU, one row of 256 per haze level, so the ground reads one colour per level
+instead of a remap and a palette lookup (this made terrain cheaper, not
+dearer). A surface seen across two bands keeps the remap atlas and reads the
+second tables as well while they cross.
+
+The simulation, sensors, visibility effects and native weather records are
+untouched; only what is drawn reads the shares. The overlap spans are the
+original records' own. They are short at dusk (three minutes from pink to
+night), so the change is quick but continuous.
+
+## Night sky
+
+Implementation mode, requested by John on 2026-10-19 ("the moon doesn't move,
+and we also need more stars ... a realistic pixelated starfield"). Smooth
+weather only; **opinionated**, constants chosen by the agent.
+
+The sky turns once a sidereal day (86,164 s) about the celestial pole, which
+stands at the theater's latitude above the north horizon (the replay export's
+theater anchors; 40 degrees for an unknown map). The turn runs on the mission
+clock without the daily wrap, so it continues smoothly through midnight and a
+replay shows the same sky.
+
+The starfield is drawn by the sky shader, procedurally from a fixed hash: the
+celestial sphere is split into a cube of 96 by 96 angle-even cells a face, and
+each cell holds at most one star (20 percent of cells, rising to 75 percent
+along a brighter band within about 9 degrees of its centre line), about 15,000
+stars over the whole sky.
+Brightness follows a steep power law in five levels, so most stars are faint
+and a few are bright; the brightest 5 percent draw as a small cross. About a
+third are tinted blue, yellow or orange. Each star is a square 1/1080 of the
+image height (1 pixel at 1080p, 2 at 2160p, never under a pixel; the cross
+arms are squares beside it) placed at its exact sub-pixel position: every
+pixel takes the share of the square it covers, added in linear light and
+stopping at white. A star therefore keeps its crisp footprint at rest, and
+glides with no stepping or flicker as the sky turns or the camera turns or
+moves; its light and centre stay the same wherever it sits. A whole pixel of
+star adds 95 percent of its level (John, 2026-10-20: "intensity needs to be
+down by 5 percent" and "quadruple the resolution"; before that, a star lit a
+block of 1/540 of the height snapped to the screen grid, so it moved two
+pixels at a time at 1080p).
+
+Star visibility follows how dark the sky is at each pixel: the star-flag
+share (which rises as dusk's high cloud deck fades out, and falls as dawn's
+sky fills in) times a twilight fade, then hidden by bright sky (toward the sun's glow
+and the bright horizon at dusk and dawn), thinned within 5 degrees of the
+horizon and dimmed within about 10 degrees of the moon. Stars come in in
+order of brightness: the brightest show as soon as the sky starts to darken,
+each fainter star needs a darker sky (the faintest need 55 percent of full
+darkness) and fades in over the next 35 percent, so all are at full strength
+by 90 percent. On DAY2 the brightest appear at about 19:06 as the high cloud
+fades, the faint ones follow over the next ten minutes. The twilight fade
+differs by time of day: in the evening none while the sun is above the
+horizon, full by 5 degrees below it; in the morning (after midnight, before
+noon) full until the sun is 2 degrees up, none by 10. So at dawn the stars
+stay through the end of the night and fade with the star-flag share as the
+dawn sky fills in, like the moon (John, 2026-10-20): on DAY2 all are still
+out at 07:00, the faintest go first and the brightest last, by 07:05. Both
+rules give full at midnight and none at noon, so nothing steps between them. Sky decks and clouds draw over
+the stars. The original STARS.SH points are not drawn in smooth weather.
+
+The moon keeps its weather record's direction at the mission's nearest
+midnight and turns about the same pole once a lunar day (89,428 s), so it
+rises in the east and sets in the west and drifts slowly against the stars.
+Its opacity is the star-flag share, so it fades through dawn and dusk rather
+than vanishing with the flag. It sets behind the high sky deck's clouds instead
+of drawing over them. Its light on terrain and aircraft follows its direction
+and fades out as it sets, so nothing is lit from below the horizon. The moon
+has no phase.
+
 ## Horizon glare
 
 John requested gentler sunset glare with a rapid drop below the horizon on
@@ -135,3 +244,49 @@ The underlying sky remains continuous through each circle, without palette
 lookup boundaries or wedges. Stepped mode retains original palette remapping.
 
 See the [gradient-composition GPU check](../baselines/aircraft-lighting.md).
+
+## Sun hidden behind terrain or objects
+
+John requested on 2026-10-19 that sun glare and lens flare be suppressed when
+the sun is behind an object or terrain. This is **opinionated** presentation
+with agent-chosen constants; it changes no simulation, wire, checkpoint or
+replay byte.
+
+The lens flare circles are scaled by the share of the sun's disc that is in
+view. After the world pass a compute pass samples the world depth at 64 points
+spread evenly over the disc (a golden-angle spiral). The sky and the sun are
+drawn only where nothing opaque wrote depth, so a point counts as open exactly
+when its depth is still the cleared value. Terrain, the city fill, trees and
+other vegetation, aircraft (the flown one in outside views included), other
+vehicles, airports and the canopy structure all write depth and hide the sun.
+The disc radius is the sun's solid circle, at least 8 output pixels, so a sun
+passing behind a ridge or a tree fades over about two disc widths of travel
+rather than switching.
+
+The share is eased over time per view (the main view, the mirror and each
+camera panel keep their own): each frame it moves toward the measured value by
+`1 - exp(-dt / 0.12 s)`, so the flare fades in about a third of a second as the
+sun goes behind trees, and returns the same way. A view that was not drawn for
+half a second, and a still capture, start from the measured value. The measurement stays on the GPU
+and the flare composition reads it the same frame, so nothing is read back.
+
+The flare's gates are unchanged: it still shows with the sun up to 9/16 of the
+view's size from the centre, which is a little beyond the edge. Disc points
+that fall off the view cannot be read from the depth; they count by the
+terrain instead: five rays (the sun's direction and four on a ring of 0.7 of
+the disc's radius) are walked over the height grid from the eye in quarter-cell
+steps to 800,000 ft, and the open share of those rays stands in for every
+off-view point. A sun that is just off the view and behind a hill therefore
+draws no ghosts. Only terrain is known off the view: a tree or an aircraft
+beyond the edge does not hide the sun there.
+
+The whiteout (the palette moving toward white when the camera faces the sun,
+both the stepped palette and the smooth one) is eased by the same terrain
+rays, worked out only while the view is within about 20 degrees of the sun: a
+sun the terrain hides does not whiten the picture, and the existing 1.9 second
+whiteout ramp makes the change gradual. Objects and trees do not dim the
+whiteout, because it is part of the CPU palette and the depth is read on the
+GPU. The cockpit frame is flat art drawn after the flare, so it covers ghost
+circles where it is opaque, but does not count in the sun's share. Clouds
+already dim both through the dense-band rule above; the sky's cloud deck draws
+no depth and does not enter the sun's share beyond that.

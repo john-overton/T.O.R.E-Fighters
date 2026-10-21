@@ -189,6 +189,51 @@ fn a_dropped_player_rejoins_its_reserved_plane_which_nobody_else_could_take() {
     no_errors(&rig);
 }
 
+/// A dropped player's Player Choice plane is kept for it like any other (the
+/// AI flies the chosen aircraft, as for an away player) and taken back with
+/// the token; before, a drop counted as a departure, the plane was removed
+/// and the returning player found it "destroyed or has lost its pilot", even
+/// after a host migration that kept every other reservation.
+#[test]
+fn a_dropped_player_rejoins_its_kept_player_choice_plane() {
+    let mut mission = spec(5, 1, 50);
+    mission.player_choice[0] = true;
+    let mut rig = Rig::new(mission, config(), LinkConfig::one_way(5 * MS));
+    let hawk = rig.join(|c| c.callsign = "Hawk".into());
+    rig.clients[hawk].ready = None;
+    let viper = rig.join(|c| c.callsign = "Viper".into());
+    rig.clients[viper].ready = Some(Some(0));
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.seated(viper) && r.clients[hawk].lobby.is_some()
+    }));
+    rig.run(Duration::from_millis(300));
+    let plane = rig.clients[viper].seated.as_ref().unwrap().plane;
+    let token = token_of(&rig, viper);
+    let order = peer(&rig, "Viper").lobby.order;
+    drop_player(&mut rig, viper);
+    rig.run(Duration::from_millis(300));
+    assert_eq!(
+        rig.host.rejoin.reserved.get(&order).map(|r| r.plane),
+        Some(PlaneId(plane)),
+        "the dropped player's Choice plane is kept for it"
+    );
+    assert_eq!(pilot(&rig, plane), Pilot::Ai, "the AI flies it meanwhile");
+    assert!(!rig.host.world().head_lost(PlaneId(plane)));
+
+    let back = rig.join(|c| {
+        c.callsign = "Viper".into();
+        c.token = Some(token);
+    });
+    assert!(reseated(&mut rig, back));
+    assert_eq!(rig.clients[back].seated.as_ref().unwrap().plane, plane);
+    assert_eq!(
+        rig.clients[back].notices,
+        ["Welcome back, Viper: your aircraft is waiting."]
+    );
+    assert!(logged_rejoin(&rig, Some(plane)));
+    no_errors(&rig);
+}
+
 fn logged_rejoin(rig: &Rig, plane: Option<u32>) -> bool {
     rig.logs.iter().any(|log| {
         matches!(log, HostLog::Lobby { callsign, event: LobbyEvent::Rejoined { plane: p }, .. }

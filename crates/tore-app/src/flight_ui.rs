@@ -242,6 +242,48 @@ pub const DEBUG_PANELS: &str = "Debug panels?";
 /// The authored Pref row choosing the powered-lift aircraft's stability
 /// level (VTOL overhaul, design 5.2 and 5.7); retail has no such row.
 pub const STABILITY_LEVEL: &str = "Stability level";
+/// The Debug menu's labels (slice S7b, John 2026-10-19): two AI test
+/// settings for trying how much CPU the AI's observation takes and how the AI
+/// fights without some of it. Defaults are the game as it plays.
+pub const DEBUG_TAB: &str = "Debug";
+pub const AI_OBSERVATION_RATE: &str = "AI observation rate";
+pub const LEAN_AI_SENSORS: &str = "Lean AI sensors";
+pub const DEBUG_DEFAULTS: &str = "Back to defaults";
+/// What a joined game's Debug rows say: the host's settings govern the AI.
+pub const AI_TEST_LOCKED: &str = "The host's AI test settings apply in a joined game";
+/// The Debug rows, in order.
+const DEBUG_ROWS: [&str; 3] = [AI_OBSERVATION_RATE, LEAN_AI_SENSORS, DEBUG_DEFAULTS];
+/// The rows a joined game dims.
+const AI_TEST_ROWS: [&str; 3] = DEBUG_ROWS;
+/// The name an observation rate is shown by.
+pub fn observation_rate_name(hz: u32) -> &'static str {
+    match hz {
+        60 => "60 Hz",
+        40 => "40 Hz",
+        30 => "30 Hz",
+        20 => "20 Hz",
+        _ => "120 Hz",
+    }
+}
+/// Appends the Debug tab to the flight menu tree: the AI test settings, off
+/// by default. The retail tabs and their order are unchanged.
+pub fn add_debug_tab(tree: &mut Vec<MenuNode>) {
+    if tree.iter().any(|node| node.label == DEBUG_TAB) {
+        return;
+    }
+    tree.push(MenuNode {
+        label: DEBUG_TAB.into(),
+        shortcut: String::new(),
+        children: DEBUG_ROWS
+            .iter()
+            .map(|label| MenuNode {
+                label: (*label).into(),
+                shortcut: String::new(),
+                children: vec![],
+            })
+            .collect(),
+    });
+}
 /// The name a stability level is shown and announced by.
 pub fn stability_name(level: tore_input::StabilityLevel) -> &'static str {
     match level {
@@ -325,6 +367,14 @@ pub struct FlightUi {
     /// refused, and the Cheat menu keeps only what changes the screen alone
     /// (John, 2026-09-30). See [`session_menu`].
     pub session: bool,
+    /// The AI test settings the Debug tab edits: how often AI aircraft
+    /// observe, and whether their sensors are lean. They apply to the
+    /// simulation this game runs (single player, or the game it hosts) at
+    /// the next tick; a flight keeps them across a restart, and nothing
+    /// saves them.
+    pub ai_test: tore_sim::ai::test_settings::AiTestSettings,
+    /// The Debug rows are locked: a joined game has the host's settings.
+    pub ai_test_locked: bool,
 }
 impl Default for FlightUi {
     fn default() -> Self {
@@ -349,6 +399,8 @@ impl Default for FlightUi {
             pause: PauseMenu::default(),
             bank_gyro: Default::default(),
             session: false,
+            ai_test: Default::default(),
+            ai_test_locked: false,
         }
     }
 }
@@ -444,6 +496,7 @@ impl FlightUi {
     pub fn reset_for_flight(&mut self) {
         *self = Self {
             cheats: self.cheats,
+            ai_test: self.ai_test,
             ..Default::default()
         };
     }
@@ -460,6 +513,25 @@ impl FlightUi {
     fn cheat_state(&self, label: &str) -> Option<&'static str> {
         if label == STABILITY_LEVEL {
             return Some(stability_name(self.stability));
+        }
+        if label == AI_OBSERVATION_RATE {
+            return Some(if self.ai_test_locked {
+                "Host"
+            } else {
+                observation_rate_name(self.ai_test.observation_hz())
+            });
+        }
+        if label == LEAN_AI_SENSORS {
+            return Some(if self.ai_test_locked {
+                "Host"
+            } else if self.ai_test.lean_sensors {
+                "On"
+            } else {
+                "Off"
+            });
+        }
+        if label == DEBUG_DEFAULTS {
+            return Some("");
         }
         let mut cheats = self.cheats;
         let on = match label {
@@ -531,6 +603,22 @@ impl FlightUi {
     pub fn cancel_press(&mut self) {
         self.map.cancel_press();
         self.pause.cancel_press();
+    }
+    /// A joined game's Debug rows are locked and drawn dim, with the host's
+    /// settings governing the AI; anywhere else they edit this game's.
+    pub fn lock_ai_test(&mut self, locked: bool) {
+        if self.ai_test_locked == locked {
+            return;
+        }
+        self.ai_test_locked = locked;
+        self.pause
+            .dim
+            .retain(|label| !AI_TEST_ROWS.contains(&label.as_str()));
+        if locked {
+            self.pause
+                .dim
+                .extend(AI_TEST_ROWS.iter().map(|label| (*label).to_owned()));
+        }
     }
     pub fn message(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -696,6 +784,19 @@ impl FlightUi {
             }
             "Brighten HUD" => {
                 self.brightness = (self.brightness + 16).min(256);
+                Command::Click
+            }
+            AI_OBSERVATION_RATE | LEAN_AI_SENSORS | DEBUG_DEFAULTS => {
+                if self.ai_test_locked {
+                    self.message(AI_TEST_LOCKED);
+                    return Command::Click;
+                }
+                self.ai_test = match label {
+                    AI_OBSERVATION_RATE => self.ai_test.next_rate(),
+                    LEAN_AI_SENSORS => self.ai_test.with_lean_sensors(!self.ai_test.lean_sensors),
+                    _ => Default::default(),
+                };
+                self.message(format!("AI test settings: {}", self.ai_test.describe()));
                 Command::Click
             }
             "Sound..." => Command::SoundOpen,
@@ -1088,6 +1189,14 @@ impl FlightUi {
             .text(font, "PAUSED - Ctrl-P to resume", 232, 42);
         }
     }
+    /// When the next notice on screen expires, for a still picture to be
+    /// drawn again without it.
+    pub fn notices_until(&self) -> Option<Instant> {
+        self.notices
+            .iter()
+            .map(|(_, at)| *at + NOTICE_LIFETIME)
+            .min()
+    }
     /// Draw the message lines straight onto the flight view at the HUD's
     /// on-screen scale, with smoothed edges like the HUD's filtered symbols.
     /// Pass the HUD font. Lines are centered and grow upward from the bottom.
@@ -1147,40 +1256,71 @@ pub fn draw_messages<'a>(
     let bottom = h - (NOTICE_MARGIN + raise) * layer + scale;
     let top = (bottom - lines.len() as f64 * line_height).round();
     // Glyph pixels become boxes; each screen pixel takes the area covered.
-    let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
-    let mut cover = vec![0f64; columns * rows];
-    for (i, line) in lines.iter().enumerate() {
-        let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
-        let y = i as f64 * line_height;
-        for ch in line.glyph_codes() {
-            let glyph = &font.glyphs[ch as usize];
-            for &(gx, gy) in &glyph.pixels {
-                let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
-                let (right, down) = (left + scale, up + scale);
+    // The areas are summed in a buffer only as wide as the text, kept from
+    // one frame to the next.
+    let rows = (bottom - top).ceil() as usize + 1;
+    let canvas_columns = canvas.size[0] as usize;
+    let glyph_boxes = |lines: &[String], mut each: Box<dyn FnMut(f64, f64, f64, f64) + '_>| {
+        for (i, line) in lines.iter().enumerate() {
+            let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
+            let y = i as f64 * line_height;
+            for ch in line.glyph_codes() {
+                let glyph = &font.glyphs[ch as usize];
+                for &(gx, gy) in &glyph.pixels {
+                    let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
+                    each(left, up, left + scale, up + scale);
+                }
+                x += glyph.advance as f64 * scale;
+            }
+        }
+    };
+    let (mut first, mut last) = (canvas_columns, 0);
+    glyph_boxes(
+        lines,
+        Box::new(|left, _, right, _| {
+            first = first.min(left.max(0.).floor() as usize);
+            last = last.max((right.ceil().max(0.) as usize).min(canvas_columns));
+        }),
+    );
+    if first >= last {
+        return;
+    }
+    let columns = last - first;
+    COVER.with(|cover| {
+        let mut cover = cover.borrow_mut();
+        cover.clear();
+        cover.resize(columns * rows, 0.);
+        glyph_boxes(
+            lines,
+            Box::new(|left, up, right, down| {
                 for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
                     let dy = down.min(row as f64 + 1.) - up.max(row as f64);
-                    for column in
-                        left.max(0.).floor() as usize..(right.ceil().max(0.) as usize).min(columns)
+                    for column in left.max(0.).floor() as usize
+                        ..(right.ceil().max(0.) as usize).min(canvas_columns)
                     {
                         let dx = right.min(column as f64 + 1.) - left.max(column as f64);
-                        cover[row * columns + column] += dx * dy;
+                        cover[row * columns + column - first] += dx * dy;
                     }
                 }
+            }),
+        );
+        for (at, &amount) in cover.iter().enumerate() {
+            if amount > 0. {
+                let (column, row) = (at % columns + first, at / columns);
+                canvas.blend(
+                    column as i32,
+                    top as i32 + row as i32,
+                    hud_color,
+                    amount.min(1.),
+                );
             }
-            x += glyph.advance as f64 * scale;
         }
-    }
-    for (at, amount) in cover.into_iter().enumerate() {
-        if amount > 0. {
-            let (column, row) = (at % columns, at / columns);
-            canvas.blend(
-                column as i32,
-                top as i32 + row as i32,
-                hud_color,
-                amount.min(1.),
-            );
-        }
-    }
+    });
+}
+thread_local! {
+    /// Coverage areas for `draw_messages`, kept to avoid a large clear
+    /// buffer every frame.
+    static COVER: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 fn text_width(font: &Font, text: &str) -> usize {
     text.glyph_codes()
@@ -1210,6 +1350,25 @@ mod tests {
     use super::*;
     fn shown(ui: &FlightUi) -> Vec<&str> {
         ui.notices.iter().map(|(text, _)| text.as_str()).collect()
+    }
+    #[test]
+    fn a_still_paused_picture_wakes_when_its_oldest_notice_expires() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.notices_until(), None);
+        let before = Instant::now();
+        ui.message("first");
+        ui.message("second");
+        let until = ui.notices_until().unwrap();
+        assert!(until >= before + NOTICE_LIFETIME);
+        assert!(until <= Instant::now() + NOTICE_LIFETIME);
+        assert_eq!(until, ui.notices[0].1 + NOTICE_LIFETIME);
+        // Pausing for focus loss stops single-player time; a session's never.
+        ui.pause_for_focus();
+        assert!(ui.stopped());
+        let mut session = FlightUi::default();
+        session.enter_session();
+        session.pause_for_focus();
+        assert!(!session.stopped());
     }
     #[test]
     fn messages_stack_to_seven_lines_and_repeats_move_to_the_bottom() {
@@ -1283,6 +1442,118 @@ mod tests {
         assert!(lit.iter().all(|p| p[..3] == [0, 255, 0]));
         let alpha: f64 = lit.iter().map(|p| f64::from(p[3]) / 255.).sum();
         assert!((alpha - 3. * 1.445f64.powi(2)).abs() < 0.05);
+    }
+    /// `draw_messages` with the canvas-wide buffer it used to have.
+    fn draw_messages_reference<'a>(
+        canvas: &mut crate::flight_canvas::FlightCanvas,
+        font: &Font,
+        hud_color: [u8; 3],
+        messages: impl IntoIterator<Item = &'a str>,
+        raise: f64,
+    ) {
+        let [w, h] = canvas.size.map(f64::from);
+        let layer = (w / 640.).min(h / 480.);
+        let scale = layer * crate::flight_canvas::HUD_SCALE;
+        let lines: Vec<String> = messages
+            .into_iter()
+            .flat_map(|text| wrap(font, text, (600. * layer / scale) as usize))
+            .collect();
+        let lines = &lines[lines.len().saturating_sub(NOTICE_LINES)..];
+        if lines.is_empty() {
+            return;
+        }
+        let line_height = (font.height + 1) as f64 * scale;
+        let bottom = h - (NOTICE_MARGIN + raise) * layer + scale;
+        let top = (bottom - lines.len() as f64 * line_height).round();
+        let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
+        let mut cover = vec![0f64; columns * rows];
+        for (i, line) in lines.iter().enumerate() {
+            let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
+            let y = i as f64 * line_height;
+            for ch in line.glyph_codes() {
+                let glyph = &font.glyphs[ch as usize];
+                for &(gx, gy) in &glyph.pixels {
+                    let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
+                    let (right, down) = (left + scale, up + scale);
+                    for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
+                        let dy = down.min(row as f64 + 1.) - up.max(row as f64);
+                        for column in left.max(0.).floor() as usize
+                            ..(right.ceil().max(0.) as usize).min(columns)
+                        {
+                            let dx = right.min(column as f64 + 1.) - left.max(column as f64);
+                            cover[row * columns + column] += dx * dy;
+                        }
+                    }
+                }
+                x += glyph.advance as f64 * scale;
+            }
+        }
+        for (at, amount) in cover.into_iter().enumerate() {
+            if amount > 0. {
+                let (column, row) = (at % columns, at / columns);
+                canvas.blend(
+                    column as i32,
+                    top as i32 + row as i32,
+                    hud_color,
+                    amount.min(1.),
+                );
+            }
+        }
+    }
+    #[test]
+    fn messages_in_a_text_sized_buffer_match_the_canvas_wide_original() {
+        let font = Font {
+            height: 7,
+            glyphs: (0..256)
+                .map(|c| tore_formats::font::Glyph {
+                    advance: 4 + c % 3,
+                    pixels: (0..(c % 5))
+                        .map(|k| ((k * 2 + c) % 6, (k + c / 3) % 7))
+                        .collect(),
+                })
+                .collect(),
+        };
+        let texts = [
+            vec!["Hello there"],
+            vec![
+                "A",
+                "Bb Cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx yy zz 0123456789 and so on for a good while to wrap lines",
+            ],
+            vec![],
+            vec!["", "x"],
+        ];
+        for size in [[640, 480], [1280, 960], [1920, 1080], [300, 700]] {
+            for (n, messages) in texts.iter().enumerate() {
+                for raise in [0., 31.5] {
+                    let mut actual = crate::flight_canvas::FlightCanvas::default();
+                    actual.blank(size);
+                    for (i, p) in actual.pixels.chunks_exact_mut(4).enumerate() {
+                        p.copy_from_slice(&[(i % 251) as u8, 40, 90, [0, 255, 77][i % 3]]);
+                    }
+                    let mut expected = crate::flight_canvas::FlightCanvas::default();
+                    expected.blank(size);
+                    expected.pixels.clone_from(&actual.pixels);
+                    draw_messages(
+                        &mut actual,
+                        &font,
+                        [10, 255, 10],
+                        messages.iter().copied(),
+                        raise,
+                    );
+                    draw_messages_reference(
+                        &mut expected,
+                        &font,
+                        [10, 255, 10],
+                        messages.iter().copied(),
+                        raise,
+                    );
+                    assert!(
+                        actual.pixels == expected.pixels,
+                        "{size:?} text {n} raise {raise}"
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn messages_can_sit_higher_and_fill_a_known_band() {
@@ -2299,5 +2570,76 @@ mod tests {
         assert_eq!(ui.key("t", false, true, false, &[]), Command::Click);
         assert!(ui.target_info);
         assert_eq!(ui.key("u", false, false, false, &[]), Command::Iff);
+    }
+    #[test]
+    fn the_debug_tab_edits_the_ai_test_settings_and_a_joined_game_locks_it() {
+        use tore_sim::ai::test_settings::AiTestSettings;
+        let mut t = tree();
+        add_debug_tab(&mut t);
+        add_debug_tab(&mut t);
+        assert_eq!(t.len(), 2, "added once, after the other tabs");
+        assert_eq!(t[1].label, DEBUG_TAB);
+        let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(rows, DEBUG_ROWS);
+
+        // The defaults are 60 Hz with lean sensors and read so.
+        let mut ui = FlightUi::default();
+        assert!(ui.ai_test.is_default());
+        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("60 Hz"));
+        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("On"));
+
+        // Escape, Right to the tab, Enter on the rate row: the next rate.
+        ui.key("Escape", false, false, false, &t);
+        ui.key("ArrowRight", false, false, false, &t);
+        assert_eq!(ui.key("Enter", false, false, false, &t), Command::Click);
+        assert_eq!(ui.ai_test.observation_hz(), 40);
+        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("40 Hz"));
+        for hz in [30, 20, 120, 60] {
+            ui.activate(AI_OBSERVATION_RATE, "");
+            assert_eq!(ui.ai_test.observation_hz(), hz);
+            assert_eq!(
+                ui.cheat_state(AI_OBSERVATION_RATE),
+                Some(observation_rate_name(hz))
+            );
+        }
+        ui.activate(LEAN_AI_SENSORS, "");
+        assert!(!ui.ai_test.lean_sensors);
+        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("Off"));
+        // A restart keeps the test settings; Back to defaults clears them.
+        ui.activate(AI_OBSERVATION_RATE, "");
+        ui.reset_for_flight();
+        assert_eq!(ui.ai_test.observation_hz(), 40);
+        assert!(!ui.ai_test.lean_sensors);
+        ui.activate(DEBUG_DEFAULTS, "");
+        assert_eq!(ui.ai_test, AiTestSettings::default());
+        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("On"));
+
+        // A joined game has the host's settings: the rows are dimmed, say so
+        // and change nothing.
+        ui.lock_ai_test(true);
+        assert!(
+            ui.pause
+                .dim
+                .iter()
+                .any(|label| label == AI_OBSERVATION_RATE)
+        );
+        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("Host"));
+        ui.activate(AI_OBSERVATION_RATE, "");
+        ui.activate(LEAN_AI_SENSORS, "");
+        assert_eq!(ui.ai_test, AiTestSettings::default());
+        assert_eq!(shown(&ui).last().copied(), Some(AI_TEST_LOCKED));
+        ui.lock_ai_test(false);
+        assert!(ui.pause.dim.is_empty());
+        ui.activate(LEAN_AI_SENSORS, "");
+        assert!(!ui.ai_test.lean_sensors);
+    }
+    #[test]
+    fn the_debug_rows_survive_the_session_menu_filter() {
+        let mut t = tree();
+        add_debug_tab(&mut t);
+        let menu = session_menu(&t);
+        assert!(menu.iter().any(|node| node.label == DEBUG_TAB));
+        assert_eq!(session_refusal(AI_OBSERVATION_RATE), None);
+        assert_eq!(session_refusal(LEAN_AI_SENSORS), None);
     }
 }

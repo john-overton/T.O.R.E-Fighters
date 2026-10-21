@@ -43,11 +43,12 @@ as fitted estimates pending separate measurements. The resulting boundaries are 
 78.9, 84.1 and 100 percent. The label explicitly says Estimated. Elapsed time
 advances within a stage asymptotically toward its next boundary; only worker
 completion reaches 100 percent. Progress never resets within a load; duplicate or late stage notifications
-cannot move it backward. Elapsed seconds remain visible. There is no moving
+cannot move it backward. No seconds counter is shown (John, 2026-10-19). There is no moving
 activity strip or moving bar highlight, requested by John on 2026-10-17.
+The screen redraws at 20 Hz; with the [frame-rate counter](graphics-options.md#frame-rate-counter) shown it redraws at the Frame rate setting instead, so the counter reads live numbers (John, 2026-10-19).
 [Measurement and limits](../baselines/loading-screen.md) give the source of the
 weights. Checking game content, Connecting to the host and Waiting for the host use a
-stationary bar and elapsed time without a percentage because their durations
+stationary bar, with no percentage, because their durations
 are externally determined. The same photo continues into mission preparation.
 
 ## Scheduling and cancellation
@@ -56,8 +57,12 @@ Quick Mission selection loads only the aircraft needed for the loadout page.
 It does not build a throwaway terrain, combat world, scenery or graphics set.
 Automatic launch continues the same progress and photograph into the single
 mission build. Custom loadout editing finishes selection on Preparing loadout,
-before user editing. Fly then starts its own load, which opens on Building
-the mission. Selection no longer builds terrain, scenery or graphics, so those
+before user editing. That load starts from the Quick Mission creator and only
+opens the next page, so the creator stays on screen for the first 250 ms and the
+photograph replaces it only if the load runs longer (opinionated, John
+2026-10-20: the page loaded in a few frames used to flash the photograph between
+the creator and Load Ordnance). Select Plane returns without a load. Fly then
+starts its own load, which opens on Building the mission. Selection no longer builds terrain, scenery or graphics, so those
 stages run only in the mission build.
 A multiplayer join keeps one progress from content check through mission
 preparation. A player who leaves a flight and takes a plane again continues

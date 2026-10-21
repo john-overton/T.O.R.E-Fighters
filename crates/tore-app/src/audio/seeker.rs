@@ -31,6 +31,15 @@ impl Tone {
             }
         }
         self.phase = (self.phase + 1. / rate).fract();
+        // A silent tone is zero whatever its wave: the phase has moved on,
+        // and the four `sin` are not needed.
+        #[cfg(test)]
+        let silent = self.gain == 0. && !super::spatial::REFERENCE_MATH.get();
+        #[cfg(not(test))]
+        let silent = self.gain == 0.;
+        if silent {
+            return 0.;
+        }
         let wave = if self.locked {
             (self.phase * if self.radar { 1800. } else { 1320. } * std::f64::consts::TAU).sin()
         } else if self.radar {

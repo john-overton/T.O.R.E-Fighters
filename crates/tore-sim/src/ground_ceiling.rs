@@ -173,4 +173,63 @@ mod tests {
         assert!(!g.clear_above([f64::NAN, 1000., 0.], [3000., 1000., 2000.]));
         assert!(!g.clear_above([0., f64::NAN, 0.], [3000., 1000., 2000.]));
     }
+
+    /// Over random hills blended as the host blends them, the shortcut gives
+    /// exactly what `terrain_hit` gives, for long and short segments, low
+    /// and high, on and off the grid.
+    #[test]
+    fn terrain_hit_below_matches_terrain_hit() {
+        let mut seed = 0x0f1e_2d3c_4b5a_6978_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (cols, rows, cell) = (16, 12, 2048.);
+        let heights: Vec<f64> = (0..cols * rows)
+            .map(|_| (next() % 6_000) as f64 * if next() % 4 == 0 { 2. } else { 0.2 })
+            .collect();
+        let point = |col: usize, row: usize| heights[row * cols + col];
+        let ground = |x: f64, z: f64| {
+            let fx = (x / cell).clamp(0., (cols - 1) as f64 - 0.001);
+            let fz = (z / cell).clamp(0., (rows - 1) as f64 - 0.001);
+            let (col, row) = (fx as usize, fz as usize);
+            let (u, v) = (fx - col as f64, fz - row as f64);
+            let h = |dc, dr| point(col + dc, row + dr);
+            if u + v <= 1. {
+                h(0, 0) + (h(1, 0) - h(0, 0)) * u + (h(0, 1) - h(0, 0)) * v
+            } else {
+                h(1, 1) + (h(0, 1) - h(1, 1)) * (1. - u) + (h(1, 0) - h(1, 1)) * (1. - v)
+            }
+        };
+        let ceiling = GroundCeiling::from_grid(cols, rows, cell, point);
+        let span = cell * (cols as f64 + 2.);
+        let (mut skipped, mut hits) = (0, 0);
+        for round in 0..40_000 {
+            let mut place = || {
+                [
+                    (next() % 1_000_000) as f64 / 1e6 * span - cell,
+                    (next() % 14_000) as f64 - 500.,
+                    (next() % 1_000_000) as f64 / 1e6 * span - cell,
+                ]
+            };
+            let a = place();
+            let mut b = place();
+            // Mostly short segments, as a round moves in one tick.
+            if round % 4 != 0 {
+                b = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * 0.01);
+            }
+            let expected = crate::combat::live::terrain_hit(a, b, &ground);
+            let actual = crate::combat::live::terrain_hit_below(a, b, &ground, Some(&ceiling));
+            assert_eq!(
+                actual.map(f64::to_bits),
+                expected.map(f64::to_bits),
+                "{a:?} {b:?}"
+            );
+            skipped += usize::from(ceiling.clear_above(a, b));
+            hits += usize::from(expected.is_some());
+        }
+        assert!(skipped > 5_000 && hits > 5_000, "{skipped} {hits}");
+    }
 }

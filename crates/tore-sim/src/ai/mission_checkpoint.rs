@@ -15,7 +15,10 @@
 //! - **Why-records:** `AiMission::journal` (the message journal, drained by
 //!   the host, which no decision reads); `AiActor::trace` (the latest step's
 //!   explanation, started afresh on every step) and `AiActor::journal_memory`
-//!   (which journal lines were already written; it only gates journal text).
+//!   (which journal lines were already written; it only gates journal text)
+//!   and `AiActor::last_visual` (the lookout's verdicts of the last
+//!   observation, shown again in the trace between observations at an AI
+//!   observation rate below 120 Hz).
 //! - **Per-tick scratch:** `AiMission::missiles` and `AiMission::gun_rounds`
 //!   (proof at the skip) and `AiActor::adapter` (proof at the skip).
 //!
@@ -250,6 +253,7 @@ impl Checkpoint for AiActor {
             jet_lift,
             trace: _,
             journal_memory: _,
+            last_visual: _,
         } = self;
         identity.save(s, None)?;
         controller.save(s, None)?;
@@ -382,6 +386,7 @@ impl Checkpoint for AiActor {
             jet_lift: Checkpoint::load(l, None)?,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
+            last_visual: Vec::new(),
         })
     }
 }
@@ -398,6 +403,13 @@ impl Checkpoint for AiActor {
 // `ground_ceiling`: host setup, not state. The host sets it from its terrain
 // before every step (`AiWings::step`); it only spares terrain samples that
 // could not change an answer, so a restored mission without it steps the same.
+//
+// `test`: the AI test settings (observation rate, lean sensors), host setup
+// like the ground ceiling: the host sets them before every step. What they
+// hold between two observations (the awareness memory, the sensors, the
+// lookout, the received emitters) is all coded above, and the phase of an
+// actor's observations is `(tick + index) % divisor`, so a checkpoint taken
+// between observations resumes exactly while the host keeps the setting.
 //
 // `link`: per-step scratch too. The host hands the mission the data link's
 // input with `set_link` before every step and the step takes it
@@ -431,6 +443,7 @@ crate::checkpoint_struct!(AiMission {
     missiles = Vec::new(),
     gun_rounds = Vec::new(),
     ground_ceiling = None,
+    test = crate::ai::test_settings::AiTestSettings::default(),
     link = crate::ai::link::LinkInput::default(),
     journal = Journal::default(),
 });

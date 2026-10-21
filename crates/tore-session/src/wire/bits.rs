@@ -84,6 +84,26 @@ pub fn write_uladder(w: &mut BitWriter, value: u64, ladder: &[u32]) {
     }
 }
 
+/// The bits [`write_uladder`] writes for `value` with `ladder`, worked out
+/// without writing them.
+pub fn uladder_bits(value: u64, ladder: &[u32]) -> usize {
+    let bits = index_bits(ladder.len()) as usize;
+    match ladder
+        .iter()
+        .position(|&width| width == 64 || value >> width == 0)
+    {
+        Some(index) => bits + ladder[index] as usize,
+        None => bits + 8 * varint_bytes(value),
+    }
+}
+
+/// The bytes of [`BitWriter::write_varint`]'s coding of `value`: seven bits
+/// a byte.
+fn varint_bytes(value: u64) -> usize {
+    let significant = (u64::BITS - value.leading_zeros()).max(1) as usize;
+    significant.div_ceil(7)
+}
+
 /// Reads a value [`write_uladder`] wrote with the same `ladder`, rejecting
 /// any form it would not have written.
 pub fn read_uladder(r: &mut BitReader<'_>, ladder: &[u32]) -> WireResult<u64> {
@@ -211,6 +231,21 @@ pub fn append(destination: &mut BitWriter, source: &BitWriter) {
     }
 }
 
+/// Appends the `len` bits of `source` that start at bit `start`, as
+/// [`append`] appends a whole writer.
+pub fn append_range(destination: &mut BitWriter, source: &BitWriter, start: usize, len: usize) {
+    debug_assert!(start + len <= source.bit_len());
+    let mut r = BitReader::new(&source.as_bytes()[start / 8..]);
+    let _ = r.read_bits((start % 8) as u32);
+    let mut left = len;
+    while left > 0 {
+        let take = left.min(32) as u32;
+        let value = r.read_bits(take).unwrap_or(0);
+        let _ = destination.write_bits(value, take);
+        left -= take as usize;
+    }
+}
+
 /// The body's bytes: padded with zero bits to a whole byte.
 pub fn finish(mut w: BitWriter) -> Vec<u8> {
     w.align();
@@ -246,6 +281,26 @@ mod tests {
         w.write_bits(0, 4).unwrap();
         let bytes = w.finish();
         assert!(read_uladder(&mut BitReader::new(&bytes), &ladder).is_err());
+    }
+
+    #[test]
+    fn uladder_bits_are_what_the_writer_writes() {
+        let mut values: Vec<u64> = (0..2_000).collect();
+        for shift in 0..64 {
+            values.extend([1u64 << shift, (1u64 << shift) - 1, (1u64 << shift) + 1]);
+        }
+        values.push(u64::MAX);
+        for ladder in [&[0, 4, 10][..], &[0, 4, 10, 20], &[3], &[0, 64], &[]] {
+            for &value in &values {
+                let mut w = BitWriter::new();
+                write_uladder(&mut w, value, ladder);
+                assert_eq!(
+                    uladder_bits(value, ladder),
+                    w.bit_len(),
+                    "{value} {ladder:?}"
+                );
+            }
+        }
     }
 
     #[test]

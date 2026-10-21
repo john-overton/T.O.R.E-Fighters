@@ -399,8 +399,12 @@ impl LoadoutSpec {
             .iter()
             .filter(|h| h.store.as_deref().is_some_and(|name| name.ends_with(".JT")))
             .count();
-        if self.stations.len() != base.configuration.stations.len()
+        let current = base.configuration.stations.len();
+        if self.stations.len() != current
             && self.stations.len() != old_prefix
+            && self.stations.len()
+                + tore_formats::aircraft::stations::later_weapon_rows(base.aircraft)
+                != current
         {
             return Err(format!(
                 "the loadout has {} stations but {} has {}",

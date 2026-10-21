@@ -696,6 +696,17 @@ fn the_session_part_restores_its_settings_and_timers_on_another_clock() {
         panic!("ended, with a next mission");
     };
     let bytes = host.encode_part(Part::Session).unwrap();
+    // Slice S11: coded once, the bytes and the hash are what coding it twice
+    // gave, at any clock reading.
+    let saved = host.now;
+    for millis in [0, 1, 7, 255, 256, 65_537, 9_999_999] {
+        host.now = Duration::from_millis(millis);
+        assert_eq!(
+            host.encode_part_hashed(Part::Session).unwrap(),
+            host.encode_session_twice().unwrap()
+        );
+    }
+    host.now = saved;
     let mut fresh = Host::new(
         crowd_spec(),
         Arc::new(resources()),

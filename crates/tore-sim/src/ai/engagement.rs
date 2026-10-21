@@ -432,6 +432,59 @@ impl Policy {
             .map(|(selection, _)| selection)
     }
 
+    /// [`Self::select`] and [`Self::explain`] in one pass: the explanation
+    /// classifies every target once, and its choice is exactly what
+    /// `select` returns (the same eligibility, priorities, kept current
+    /// target, B41 score and id order).
+    #[allow(clippy::too_many_arguments)]
+    pub fn select_explained(
+        &mut self,
+        own_id: u32,
+        own_side: targeting::Side,
+        own_position: [f64; 3],
+        assignment: &Assignment,
+        targets: &[TargetView],
+        protected: &[ProtectedView],
+        reports: &[ThreatReport],
+        current_target: Option<u32>,
+        assignment_allowance: u32,
+    ) -> (Option<Selection>, Explanation) {
+        // Every test that selects checks the shared pass against `select`.
+        #[cfg(test)]
+        let mut reference = self.clone();
+        #[cfg(test)]
+        let expected = reference.select(
+            own_id,
+            own_side,
+            own_position,
+            assignment,
+            targets,
+            protected,
+            reports,
+            current_target,
+            assignment_allowance,
+        );
+        self.update_leash(own_position, assignment, protected);
+        let explanation = self.explain(
+            own_id,
+            own_side,
+            own_position,
+            assignment,
+            targets,
+            protected,
+            reports,
+            current_target,
+            assignment_allowance,
+        );
+        let selection = explanation.chosen;
+        #[cfg(test)]
+        {
+            assert_eq!(selection, expected);
+            assert_eq!(*self, reference);
+        }
+        (selection, explanation)
+    }
+
     /// Why [`Self::select`] chose what it did, for the replay debug panels.
     /// Call it after `select` with the same inputs: `select` updates the
     /// escort leash first, and this reads that state without changing

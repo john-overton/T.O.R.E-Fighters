@@ -11,8 +11,11 @@ use crate::{
     terrain::Terrain,
     world::plane::{self, OwnshipTerms},
 };
-use std::{collections::BTreeMap, sync::Arc};
-use tore_formats::aircraft::AircraftId;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
+use tore_formats::{aircraft::AircraftId, theater::CELL_FEET};
 use tore_sim::flight;
 use tore_sim::{
     attitude::{Basis, Vector},
@@ -78,6 +81,63 @@ pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
         [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
     }
 }
+/// A target row's attitude worked out from its basis (`Basis::angles`),
+/// with the bits of that basis.
+type KeptAngles = Option<([u64; 9], [f64; 3])>;
+
+/// [`target_pose`] with the kept angles of the row at `index`: a basis seen
+/// before, bit for bit, gives the angles it gave then, without the
+/// trigonometry.
+fn target_pose_kept(
+    target: &live::Target,
+    ai_poses: bool,
+    kept: &mut [KeptAngles],
+    index: usize,
+) -> [f64; 3] {
+    if !(ai_poses || target.hp <= 0) {
+        return target_pose(target, ai_poses);
+    }
+    let basis = target.basis;
+    let bits: [u64; 9] =
+        std::array::from_fn(|i| [basis.right, basis.up, basis.forward][i / 3][i % 3].to_bits());
+    match kept.get_mut(index) {
+        Some(Some((kept_bits, angles))) if *kept_bits == bits => *angles,
+        Some(slot) => {
+            let angles = basis.angles();
+            *slot = Some((bits, angles));
+            angles
+        }
+        None => basis.angles(),
+    }
+}
+
+/// An AI aircraft's drawn stores as last worked out, with what they were
+/// worked out from: the loadout (by identity) and the stations' loads.
+struct StoresEntry {
+    identity: (usize, AircraftId, usize, usize, u64),
+    loads: Vec<crate::snapshot::StationStores>,
+    poses: Arc<Vec<crate::snapshot::StorePose>>,
+}
+impl StoresEntry {
+    /// Where the loadout lives, which aircraft it is, how many stations and
+    /// tanks it has, and the total of their counts: a loadout that was
+    /// replaced or edited reads as another.
+    fn identity(config: &live::Configuration) -> (usize, AircraftId, usize, usize, u64) {
+        (
+            std::ptr::from_ref(config) as usize,
+            config.aircraft,
+            config.stations.len(),
+            config.tanks.len(),
+            config
+                .stations
+                .iter()
+                .map(|station| u64::from(station.count))
+                .chain(config.tanks.iter().map(|tank| u64::from(tank.quantity)))
+                .sum(),
+        )
+    }
+}
+
 /// The last two per-tick render snapshots. They are presentation output only
 /// and never feed back into sensors or physics, except that an aircraft whose
 /// AI stopped flying keeps the devices last drawn for it. The frame's blend of
@@ -90,8 +150,19 @@ struct RenderHistory {
     /// The snapshot one tick earlier; none right after a restart.
     previous: Option<RenderSnapshot>,
     current: RenderSnapshot,
-    /// Each target's index in `previous` and in `current`, by id.
-    places: [BTreeMap<u32, usize>; 2],
+    /// Each target's index in `previous` and in `current`, as (id, index)
+    /// sorted by id; of a repeated id the last row answers.
+    places: [Vec<(u32, u32)>; 2],
+    /// The snapshot that fell out of the history last, for the next to be
+    /// written over.
+    spare: Option<RenderSnapshot>,
+    /// The AI aircraft's drawn stores, worked out again only when their
+    /// loads or their loadout change. A restart forgets them.
+    ai_stores: Mutex<BTreeMap<u32, StoresEntry>>,
+    /// Each target row's drawn attitude as last worked out from its basis,
+    /// with the basis it was worked out from (a parked aircraft's or a ground
+    /// object's basis stays as it is, tick after tick).
+    angles: Mutex<Vec<KeptAngles>>,
     /// How many times the history has started over.
     restarts: u64,
 }
@@ -103,37 +174,65 @@ impl RenderHistory {
             ..Self::default()
         };
     }
-    fn places(snapshot: &RenderSnapshot) -> BTreeMap<u32, usize> {
-        snapshot
-            .targets
-            .iter()
-            .enumerate()
-            .map(|(index, pose)| (pose.id, index))
-            .collect()
+    /// Each target of `snapshot` by id, written into `places`.
+    fn place(places: &mut Vec<(u32, u32)>, snapshot: &RenderSnapshot) {
+        places.clear();
+        places.extend(
+            snapshot
+                .targets
+                .iter()
+                .enumerate()
+                .map(|(index, pose)| (pose.id, index as u32)),
+        );
+        places.sort_unstable();
+        let mut kept = 0;
+        for at in 0..places.len() {
+            if places
+                .get(at + 1)
+                .is_some_and(|next| next.0 == places[at].0)
+            {
+                continue;
+            }
+            places[kept] = places[at];
+            kept += 1;
+        }
+        places.truncate(kept);
+    }
+    /// The snapshot to write the next one over: the one that fell out of the
+    /// history, or an empty one.
+    fn take_spare(&mut self) -> RenderSnapshot {
+        self.spare.take().unwrap_or_default()
     }
     /// Replaces the current snapshot, keeping the previous one.
     fn set_current(&mut self, current: RenderSnapshot) {
         self.plane = Some(current.player.id);
-        self.places[1] = Self::places(&current);
-        self.current = current;
+        Self::place(&mut self.places[1], &current);
+        self.spare = Some(std::mem::replace(&mut self.current, current));
     }
     /// The current snapshot becomes the previous one.
     fn advance(&mut self, next: RenderSnapshot) {
         self.plane = Some(next.player.id);
-        let places = Self::places(&next);
+        let mut places = std::mem::take(&mut self.places[0]);
+        Self::place(&mut places, &next);
         self.places[0] = std::mem::replace(&mut self.places[1], places);
-        self.previous = Some(std::mem::replace(&mut self.current, next));
+        self.spare = self
+            .previous
+            .replace(std::mem::replace(&mut self.current, next));
     }
     fn current_target(&self, id: u32) -> Option<&AircraftPose> {
-        self.places[1]
-            .get(&id)
-            .map(|&index| &self.current.targets[index])
+        Self::found(&self.places[1], id).map(|index| &self.current.targets[index])
     }
     fn previous_target(&self, id: u32) -> Option<&AircraftPose> {
         self.previous
             .as_ref()
-            .zip(self.places[0].get(&id))
-            .map(|(snapshot, &index)| &snapshot.targets[index])
+            .zip(Self::found(&self.places[0], id))
+            .map(|(snapshot, index)| &snapshot.targets[index])
+    }
+    fn found(places: &[(u32, u32)], id: u32) -> Option<usize> {
+        places
+            .binary_search_by_key(&id, |(id, _)| *id)
+            .ok()
+            .map(|at| places[at].1 as usize)
     }
 }
 
@@ -142,6 +241,11 @@ pub struct Combat {
     contrail_offsets: Vec<Vector>,
     contrail_sortie: u64,
     pub contrails: tore_sim::combat::smoke::Smoke,
+    /// Contrail puffs are made: off on a dedicated server, whose world no
+    /// screen draws (optimization slice S11; John, 2026-10-19). The sortie
+    /// number still sets every client's contrails, which each client makes
+    /// for itself.
+    contrail_puffs: bool,
     /// Each ownship's trigger, made on first use.
     triggers: BTreeMap<u32, Trigger>,
     /// The engine outlets of the ownships other than the first, by aircraft.
@@ -202,6 +306,11 @@ pub struct Combat {
     /// Player commands since the mission recorder last looked. Nothing in
     /// flight reads them.
     notes: std::collections::VecDeque<CommandNote>,
+    /// The highest the terrain reaches over each square, built from the
+    /// world on the first step and handed to the state every step, so a
+    /// round's or a missile's sight line far above the ground is not
+    /// sampled. Setup, never checkpointed.
+    ground_ceiling: Option<Arc<tore_sim::ground_ceiling::GroundCeiling>>,
 }
 
 /// What one combat tick did for the human-flown aircraft.
@@ -320,6 +429,20 @@ impl Combat {
     /// heights.
     pub fn contrail_sortie(&self) -> u64 {
         self.contrail_sortie
+    }
+    /// Whether the step makes contrail puffs ([`Self::contrails`]).
+    pub fn contrail_puffs(&self) -> bool {
+        self.contrail_puffs
+    }
+    /// Makes contrail puffs, or stops and drops them: a dedicated server,
+    /// whose world no screen draws, makes none. The sortie number, which sets
+    /// where every client draws its own, is kept either way. A checkpoint
+    /// carries the switch, so a standby's copy steps as the host's does.
+    pub fn set_contrail_puffs(&mut self, on: bool) {
+        self.contrail_puffs = on;
+        if !on {
+            self.contrails = Default::default();
+        }
     }
     /// The aircraft a host with one flight flies: its first ownship. For free
     /// flight, the range, the AI probe and the loadout screen, which always
@@ -682,6 +805,7 @@ impl Combat {
             contrail_offsets,
             contrail_sortie: 0,
             contrails: Default::default(),
+            contrail_puffs: true,
             state,
             dummies: Vec::new(),
             mission_spawns: None,
@@ -708,6 +832,7 @@ impl Combat {
             last_launcher: None,
             terrain_tti: Default::default(),
             notes: Default::default(),
+            ground_ceiling: None,
         }
     }
     /// Everything combat draws for this tick, as plain data, for the screen
@@ -722,6 +847,31 @@ impl Combat {
         plane: u32,
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
+    ) -> RenderSnapshot {
+        self.snapshot_reusing(
+            plane,
+            player,
+            wings,
+            RenderSnapshot::default(),
+            &self.render.ai_stores,
+            &self.render.angles,
+        )
+    }
+    /// [`Self::snapshot`] written over `spare`, a snapshot nobody needs any
+    /// more, whose lists and strings it reuses where it can, so a tick builds
+    /// few new ones. Every field of the result is written, so what `spare`
+    /// held makes no difference. `ai_stores` keeps the AI aircraft's drawn
+    /// stores while their loads stay as they were, and `angles` each target
+    /// row's attitude while its basis stays as it was; empty ones make the
+    /// snapshot work them all out.
+    fn snapshot_reusing(
+        &self,
+        plane: u32,
+        player: &flight::State,
+        wings: Option<&crate::ai_wings::AiWings>,
+        mut spare: RenderSnapshot,
+        ai_stores: &Mutex<BTreeMap<u32, StoresEntry>>,
+        angles: &Mutex<Vec<KeptAngles>>,
     ) -> RenderSnapshot {
         let ownship = self.dummies.is_empty();
         let own_id = plane;
@@ -752,53 +902,83 @@ impl Combat {
                 model(id).map_or(Draw::Hidden, Draw::Model)
             }
         };
-        let flying: BTreeMap<u32, [f64; crate::snapshot::DEVICES]> = wings
-            .into_iter()
-            .flat_map(|wings| wings.mission().actors())
-            .filter(|actor| actor.alive())
-            .map(|actor| (actor.id(), crate::snapshot::devices(actor.flight())))
-            .collect();
-        // The AI rotorcraft's rotor speeds, for their sound, and their blade
-        // angles and disk tilts, for their drawing.
-        let rotors: BTreeMap<u32, Engine> = wings
-            .into_iter()
-            .flat_map(|wings| wings.mission().actors())
-            .filter(|actor| actor.alive())
-            .filter_map(|actor| {
+        // What each AI actor adds to its aircraft's pose, found in one walk
+        // of the roster and looked up by id: the devices an actor that flies
+        // is drawn with (the last ones drawn hold once it stops), a
+        // rotorcraft's rotors for their sound and their drawing, a lit
+        // afterburner for the flame light, and the stores each station holds
+        // now (B3).
+        struct Actor {
+            id: u32,
+            devices: Option<[f64; crate::snapshot::DEVICES]>,
+            rotor: Option<Engine>,
+            burning: bool,
+            stores: Option<Arc<Vec<crate::snapshot::StorePose>>>,
+        }
+        let mut actors: Vec<Actor> = Vec::new();
+        if let Some(wings) = wings {
+            for actor in wings.mission().actors() {
+                let alive = actor.alive();
                 let flight = actor.flight();
-                flight.rotor_speed_percent().map(|percent| {
-                    let (rotor_turns, rotor_tilt) = crate::snapshot::rotor_pose(flight);
-                    (
-                        actor.id(),
-                        Engine {
-                            rotor: percent / 100.,
-                            rotor_turns,
-                            rotor_tilt,
-                            ..Engine::default()
-                        },
-                    )
-                })
-            })
-            .collect();
-        // AI aircraft whose afterburner is lit, for their flame lights.
-        let burning: std::collections::BTreeSet<u32> = wings
-            .into_iter()
-            .flat_map(|wings| wings.mission().actors())
-            .filter(|actor| actor.alive() && actor.flight().afterburner_active())
-            .map(|actor| actor.id())
-            .collect();
-        // The AI aircraft's stores as drawn: what each station holds now
-        // (B3).
-        let ai_stores: BTreeMap<u32, Vec<crate::snapshot::StorePose>> = wings
-            .into_iter()
-            .flat_map(ai_station_stores)
-            .map(|(id, config, loads)| (id, crate::snapshot::store_poses_of(config, &loads)))
-            .collect();
+                actors.push(Actor {
+                    id: actor.id(),
+                    devices: alive.then(|| crate::snapshot::devices(flight)),
+                    rotor: if alive {
+                        flight.rotor_speed_percent().map(|percent| {
+                            let (rotor_turns, rotor_tilt) = crate::snapshot::rotor_pose(flight);
+                            Engine {
+                                rotor: percent / 100.,
+                                rotor_turns,
+                                rotor_tilt,
+                                ..Engine::default()
+                            }
+                        })
+                    } else {
+                        None
+                    },
+                    burning: alive && flight.afterburner_active(),
+                    stores: None,
+                });
+            }
+            actors.sort_by_key(|actor| actor.id);
+            // The cache is held only while it is checked and filled, so
+            // snapshots made at once for several seats do not wait on one
+            // another.
+            let mut stored = ai_stores.lock().unwrap_or_else(|e| e.into_inner());
+            for (id, config, loads) in ai_station_stores(wings) {
+                let identity = StoresEntry::identity(config);
+                let entry = match stored.get(&id) {
+                    Some(entry) if entry.identity == identity && entry.loads == loads => {
+                        entry.poses.clone()
+                    }
+                    _ => {
+                        let poses = Arc::new(crate::snapshot::store_poses_of(config, &loads));
+                        stored.insert(
+                            id,
+                            StoresEntry {
+                                identity,
+                                loads,
+                                poses: poses.clone(),
+                            },
+                        );
+                        poses
+                    }
+                };
+                if let Ok(index) = actors.binary_search_by_key(&id, |actor| actor.id) {
+                    actors[index].stores = Some(entry);
+                }
+            }
+        }
+        let actor_of = |id: u32| {
+            actors
+                .binary_search_by_key(&id, |actor| actor.id)
+                .ok()
+                .map(|index| &actors[index])
+        };
         // The last devices drawn hold once an aircraft stops flying.
         let simulated = |id: u32| {
-            flying
-                .get(&id)
-                .copied()
+            actor_of(id)
+                .and_then(|actor| actor.devices)
                 .or_else(|| self.render.current_target(id).and_then(|pose| pose.devices))
         };
         let gun_devices = |mut devices: [f64; crate::snapshot::DEVICES], own: &live::Ownship| {
@@ -849,170 +1029,223 @@ impl Combat {
             crew: true,
             ..pilot(owner, escape)
         };
-        RenderSnapshot {
-            tick: self.state.tick(),
-            player: AircraftPose {
-                id: own_id,
-                aircraft: Some(config.aircraft),
-                draw: Draw::Ownship,
-                position: player.position,
-                attitude: [player.yaw, player.pitch, player.bank],
-                velocity: player.velocity,
-                devices: Some(gun_devices(crate::snapshot::devices(player), own)),
-                engine: player_engine,
+        let player_pose = AircraftPose {
+            id: own_id,
+            aircraft: Some(config.aircraft),
+            draw: Draw::Ownship,
+            position: player.position,
+            attitude: [player.yaw, player.pitch, player.bank],
+            velocity: player.velocity,
+            devices: Some(gun_devices(crate::snapshot::devices(player), own)),
+            engine: player_engine,
+            damage: Damage {
+                hp: own.hp,
+                initial_hp: capacity,
+                // The exact amounts the drawn fractions divide.
+                sections: own.damage_amounts(),
+                structural: own.damage_section(),
+            },
+            airborne: true,
+            wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
+            crashed: player.crashed,
+            stores: own_stores(own),
+        };
+        // Every combat target in target order, then the other human-flown
+        // planes. A slot of the spare keeps its list of stores, which the new
+        // pose's stores are written over.
+        let mut targets = std::mem::take(&mut spare.targets);
+        let mut kept_angles = angles.lock().unwrap_or_else(|e| e.into_inner());
+        kept_angles.resize(self.state.targets.len(), None);
+        let mut at = 0;
+        for (index, t) in self.state.targets.iter().enumerate() {
+            if targets.len() == at {
+                targets.push(AircraftPose::default());
+            }
+            // Written field by field into the slot, which keeps its list of
+            // stores: every field is named, so none is left from before.
+            let AircraftPose {
+                id,
+                aircraft,
+                draw: drawn,
+                position,
+                attitude,
+                velocity,
+                devices,
+                engine,
+                damage,
+                airborne,
+                wreck,
+                crashed,
+                stores,
+            } = &mut targets[at];
+            match actor_of(t.id).and_then(|actor| actor.stores.as_deref()) {
+                Some(poses) => stores.clone_from(poses),
+                None => stores.clear(),
+            }
+            *id = t.id;
+            *aircraft = t.aircraft;
+            *drawn = draw(t.id);
+            *position = t.position;
+            *attitude = target_pose_kept(t, self.ai_poses, &mut kept_angles, index);
+            *velocity = t.velocity;
+            *devices = simulated(t.id);
+            *engine = Engine {
+                flame: t.airborne && t.hp > 0 && actor_of(t.id).is_some_and(|actor| actor.burning),
+                ..if ownship {
+                    Engine {
+                        afterburner: fixture_afterburner && t.hp > 0,
+                        ..player_engine
+                    }
+                } else {
+                    match actor_of(t.id).and_then(|actor| actor.rotor) {
+                        Some(rotor) => Engine {
+                            rotor: rotor.rotor,
+                            rotor_turns: rotor.rotor_turns,
+                            rotor_tilt: rotor.rotor_tilt,
+                            ..model_engine
+                        },
+                        None => model_engine,
+                    }
+                }
+            };
+            *damage = Damage {
+                hp: t.hp,
+                initial_hp: t.initial_hp,
+                sections: t.localized_damage.amounts,
+                structural: t.localized_damage.structural_section,
+            };
+            *airborne = t.airborne;
+            *wreck = t.wreck.as_ref().map(|wreck| wreck.phase);
+            *crashed = t.hp <= 0;
+            at += 1;
+        }
+        drop(kept_angles);
+        for (own, pose) in &others {
+            let pose = AircraftPose {
+                id: own.aircraft,
+                aircraft: Some(own.configuration().aircraft),
+                draw: Draw::Model(own.configuration().aircraft),
+                position: pose.position,
+                attitude: pose.attitude,
+                velocity: pose.velocity,
+                devices: Some(gun_devices(pose.devices, own)),
+                engine: Engine {
+                    flame: pose.engine.flame && own.hp > 0,
+                    ..pose.engine
+                },
                 damage: Damage {
                     hp: own.hp,
-                    initial_hp: capacity,
-                    // The exact amounts the drawn fractions divide.
+                    initial_hp: own.configuration().damage_capacity,
                     sections: own.damage_amounts(),
                     structural: own.damage_section(),
                 },
                 airborne: true,
-                wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
-                crashed: player.crashed,
+                wreck: pose.wreck,
+                crashed: pose.crashed,
                 stores: own_stores(own),
-            },
-            targets: self
+            };
+            match targets.get_mut(at) {
+                Some(slot) => *slot = pose,
+                None => targets.push(pose),
+            }
+            at += 1;
+        }
+        targets.truncate(at);
+        // The rounds in flight, each written over a slot of the spare so that
+        // its record name and shape reuse the strings already there.
+        let mut projectiles = std::mem::take(&mut spare.projectiles);
+        projectiles.resize_with(self.state.projectiles.len(), Default::default);
+        for (slot, p) in projectiles.iter_mut().zip(&self.state.projectiles) {
+            let weapon = self.state.weapon(p);
+            let mut name = std::mem::take(&mut slot.weapon);
+            name.clone_from(&weapon.source);
+            let mut shape = std::mem::take(&mut slot.shape);
+            shape.clone_from(&weapon.shape);
+            *slot = ProjectilePose {
+                id: p.id,
+                owner: p.owner,
+                weapon: name,
+                shape,
+                gun: live::is_gun(weapon),
+                tracer: p.tracer,
+                position: p.position,
+                previous: p.previous,
+                direction: p.direction,
+                target: p.target,
+                incoming: p.incoming.is_some(),
+                speed_f8: p.speed_f8,
+                powered: self.state.motor_powered_with(weapon, p),
+            };
+        }
+        let mut effects = std::mem::take(&mut spare.effects);
+        effects.clear();
+        effects.extend(self.state.effects.iter().map(|e| EffectPose {
+            kind: e.kind,
+            position: e.position,
+            ticks: e.ticks,
+            blast: e.blast,
+            scale: e.scale,
+        }));
+        let mut marks = std::mem::take(&mut spare.marks);
+        marks.clear();
+        marks.extend(
+            self.state
+                .marks
+                .iter()
+                .map(|m| MarkPose::of(m, self.state.tick())),
+        );
+        // A piece of debris takes its owner's structural section from the
+        // owner's row, the first of its id: found by id, not by a walk of
+        // every row for every piece.
+        let rows_by_id = (!self.state.debris.is_empty()).then(|| {
+            let mut rows: Vec<(u32, usize)> = self
                 .state
                 .targets
                 .iter()
-                .map(|t| AircraftPose {
-                    id: t.id,
-                    aircraft: t.aircraft,
-                    draw: draw(t.id),
-                    position: t.position,
-                    attitude: target_pose(t, self.ai_poses),
-                    velocity: t.velocity,
-                    devices: simulated(t.id),
-                    engine: Engine {
-                        flame: t.airborne && t.hp > 0 && burning.contains(&t.id),
-                        ..if ownship {
-                            Engine {
-                                afterburner: fixture_afterburner && t.hp > 0,
-                                ..player_engine
-                            }
-                        } else {
-                            match rotors.get(&t.id) {
-                                Some(rotor) => Engine {
-                                    rotor: rotor.rotor,
-                                    rotor_turns: rotor.rotor_turns,
-                                    rotor_tilt: rotor.rotor_tilt,
-                                    ..model_engine
-                                },
-                                None => model_engine,
-                            }
-                        }
-                    },
-                    damage: Damage {
-                        hp: t.hp,
-                        initial_hp: t.initial_hp,
-                        sections: t.localized_damage.amounts,
-                        structural: t.localized_damage.structural_section,
-                    },
-                    airborne: t.airborne,
-                    wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
-                    crashed: t.hp <= 0,
-                    stores: ai_stores.get(&t.id).cloned().unwrap_or_default(),
-                })
-                .chain(others.iter().map(|(own, pose)| AircraftPose {
-                    id: own.aircraft,
-                    aircraft: Some(own.configuration().aircraft),
-                    draw: Draw::Model(own.configuration().aircraft),
-                    position: pose.position,
-                    attitude: pose.attitude,
-                    velocity: pose.velocity,
-                    devices: Some(gun_devices(pose.devices, own)),
-                    engine: Engine {
-                        flame: pose.engine.flame && own.hp > 0,
-                        ..pose.engine
-                    },
-                    damage: Damage {
-                        hp: own.hp,
-                        initial_hp: own.configuration().damage_capacity,
-                        sections: own.damage_amounts(),
-                        structural: own.damage_section(),
-                    },
-                    airborne: true,
-                    wreck: pose.wreck,
-                    crashed: pose.crashed,
-                    stores: own_stores(own),
-                }))
-                .collect(),
-            projectiles: self
-                .state
-                .projectiles
-                .iter()
-                .map(|p| {
-                    let weapon = self.state.weapon(p);
-                    ProjectilePose {
-                        id: p.id,
-                        owner: p.owner,
-                        weapon: weapon.source.clone(),
-                        shape: weapon.shape.clone(),
-                        gun: live::is_gun(weapon),
-                        tracer: p.tracer,
-                        position: p.position,
-                        previous: p.previous,
-                        direction: p.direction,
-                        target: p.target,
-                        incoming: p.incoming.is_some(),
-                        speed_f8: p.speed_f8,
-                        powered: self.state.motor_powered(p),
-                    }
-                })
-                .collect(),
-            effects: self
-                .state
-                .effects
-                .iter()
-                .map(|e| EffectPose {
-                    kind: e.kind,
-                    position: e.position,
-                    ticks: e.ticks,
-                    blast: e.blast,
-                    scale: e.scale,
-                })
-                .collect(),
-            marks: self
-                .state
-                .marks
-                .iter()
-                .map(|m| MarkPose::of(m, self.state.tick()))
-                .collect(),
-            debris: self
-                .state
-                .debris
-                .iter()
-                .map(|piece| DebrisPose {
-                    owner: piece.owner,
-                    draw: if piece.owner == own_id {
-                        Draw::Ownship
-                    } else {
-                        draw(piece.owner)
-                    },
-                    position: piece.position,
-                    attitude: piece.basis.angles(),
-                    variant: if piece.owner == own_id {
-                        player.damage_variant
-                    } else if let Some((own, _)) =
-                        others.iter().find(|(own, _)| own.aircraft == piece.owner)
-                    {
-                        own.damage_section().map(|section| section as usize)
-                    } else if self.state.is_parked(piece.owner) {
-                        // A parked aircraft's piece: 0 is its `_B` shape,
-                        // 1 its `_D` (docs/spec/surface-defenses.md).
-                        Some(piece.variant)
-                    } else {
-                        self.state
-                            .targets
-                            .iter()
-                            .find(|target| target.id == piece.owner)
-                            .and_then(|target| target.localized_damage.structural_section)
-                            .map(|section| section as usize)
-                    },
-                })
-                .collect(),
-            pilots: player
+                .enumerate()
+                .map(|(index, target)| (target.id, index))
+                .collect();
+            rows.sort_unstable();
+            rows
+        });
+        let first_row_of = |id: u32| {
+            let rows = rows_by_id.as_deref()?;
+            let at = rows.partition_point(|(row, _)| *row < id);
+            rows.get(at)
+                .filter(|(row, _)| *row == id)
+                .map(|(_, index)| &self.state.targets[*index])
+        };
+        let mut debris = std::mem::take(&mut spare.debris);
+        debris.clear();
+        debris.extend(self.state.debris.iter().map(|piece| DebrisPose {
+            owner: piece.owner,
+            draw: if piece.owner == own_id {
+                Draw::Ownship
+            } else {
+                draw(piece.owner)
+            },
+            position: piece.position,
+            attitude: piece.basis.angles(),
+            variant: if piece.owner == own_id {
+                player.damage_variant
+            } else if let Some((own, _)) =
+                others.iter().find(|(own, _)| own.aircraft == piece.owner)
+            {
+                own.damage_section().map(|section| section as usize)
+            } else if self.state.is_parked(piece.owner) {
+                // A parked aircraft's piece: 0 is its `_B` shape,
+                // 1 its `_D` (docs/spec/surface-defenses.md).
+                Some(piece.variant)
+            } else {
+                first_row_of(piece.owner)
+                    .and_then(|target| target.localized_damage.structural_section)
+                    .map(|section| section as usize)
+            },
+        }));
+        let mut pilots = std::mem::take(&mut spare.pilots);
+        pilots.clear();
+        pilots.extend(
+            player
                 .escape
                 .iter()
                 .map(|escape| pilot(own_id, escape))
@@ -1040,18 +1273,27 @@ impl Combat {
                         .into_iter()
                         .flat_map(|wings| wings.crew_escapees())
                         .map(|(owner, escape)| crew(owner, escape)),
-                )
-                .collect(),
-            models: {
-                let mut models: Vec<_> = self.dummy_types.iter().map(|h| h.profile.id).collect();
-                // The type of every other human-flown plane, for the app to draw.
-                for (own, _) in &others {
-                    if !models.contains(&own.configuration().aircraft) {
-                        models.push(own.configuration().aircraft);
-                    }
-                }
-                models
-            },
+                ),
+        );
+        let mut models = std::mem::take(&mut spare.models);
+        models.clear();
+        models.extend(self.dummy_types.iter().map(|h| h.profile.id));
+        // The type of every other human-flown plane, for the app to draw.
+        for (own, _) in &others {
+            if !models.contains(&own.configuration().aircraft) {
+                models.push(own.configuration().aircraft);
+            }
+        }
+        RenderSnapshot {
+            tick: self.state.tick(),
+            player: player_pose,
+            targets,
+            projectiles,
+            effects,
+            marks,
+            debris,
+            pilots,
+            models,
             surface: self.surface_poses(),
         }
     }
@@ -1073,7 +1315,36 @@ impl Combat {
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
-        let next = self.snapshot(plane, player, wings);
+        let spare = self.render.take_spare();
+        let next = self.snapshot_reusing(
+            plane,
+            player,
+            wings,
+            spare,
+            &self.render.ai_stores,
+            &self.render.angles,
+        );
+        // Debug builds make the snapshot again from nothing and compare.
+        #[cfg(debug_assertions)]
+        {
+            let fresh = self.snapshot_reusing(
+                plane,
+                player,
+                wings,
+                RenderSnapshot::default(),
+                &Mutex::default(),
+                &Mutex::default(),
+            );
+            if next != fresh {
+                // A NaN is never equal to itself; the text of both says if
+                // anything else differs.
+                assert_eq!(
+                    format!("{next:?}"),
+                    format!("{fresh:?}"),
+                    "a reused snapshot"
+                );
+            }
+        }
         self.render.advance(next);
     }
     /// Retakes the current snapshot after a command changed the scene between
@@ -1084,7 +1355,15 @@ impl Combat {
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
-        let current = self.snapshot(plane, player, wings);
+        let spare = self.render.take_spare();
+        let current = self.snapshot_reusing(
+            plane,
+            player,
+            wings,
+            spare,
+            &self.render.ai_stores,
+            &self.render.angles,
+        );
         self.render.set_current(current);
     }
     /// An AI aircraft that flew into the ground with hit points left gets a
@@ -1109,6 +1388,47 @@ impl Combat {
             self.state.aircraft_crashed(id, position, water);
         }
     }
+    /// Developer preview (`TORE_EFFECT_PREVIEW=hill`): the open ground
+    /// nearest `from` that is one even slope of 12 to 20 degrees across 2,400
+    /// feet (a plane within 25 ft, on land), as its centre and the heading
+    /// that faces uphill. The preview then starts 2,600 feet short of it, so
+    /// its craters lie on the hillside.
+    pub fn preview_hillside(world: &Terrain, from: [f64; 2]) -> Option<([f64; 3], f64)> {
+        const STEP: f64 = 250.;
+        const REACH: f64 = 600.;
+        let height = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
+        let size = [
+            world.theater.cols as f64 * f64::from(CELL_FEET),
+            world.theater.rows as f64 * f64::from(CELL_FEET),
+        ];
+        let mut best: Option<(f64, [f64; 3], f64)> = None;
+        let mut x = REACH * 2.;
+        while x < size[0] - REACH * 2. {
+            let mut z = REACH * 2.;
+            while z < size[1] - REACH * 2. {
+                let distance = (x - from[0]).hypot(z - from[1]);
+                if distance < best.map_or(f64::MAX, |b| b.0) && !world.over_water(x, z) {
+                    let centre = height(x, z);
+                    let gx = (height(x + REACH, z) - height(x - REACH, z)) / (2. * REACH);
+                    let gz = (height(x, z + REACH) - height(x, z - REACH)) / (2. * REACH);
+                    let angle = gx.hypot(gz).atan().to_degrees();
+                    let flat = (12. ..=20.).contains(&angle)
+                        && [-2., -1., 0., 1., 2.].iter().all(|&i| {
+                            [-2., -1., 0., 1., 2.].iter().all(|&j| {
+                                let (dx, dz) = (i * REACH, j * REACH);
+                                (height(x + dx, z + dz) - (centre + gx * dx + gz * dz)).abs() < 25.
+                            })
+                        });
+                    if flat {
+                        best = Some((distance, [x, centre, z], gx.atan2(gz)));
+                    }
+                }
+                z += STEP;
+            }
+            x += STEP;
+        }
+        best.map(|(_, site, yaw)| (site, yaw))
+    }
     /// Developer preview (`TORE_EFFECT_PREVIEW=1`): every explosion type
     /// 15 to 38 halfway through its animation in a row 2,500 feet ahead,
     /// surface types on the ground, and a burning crash site with its
@@ -1122,6 +1442,31 @@ impl Combat {
             let z = s.position[2] + forward[2] * ahead + right[2] * across;
             [x, f64::from(world.height(x as f32, z as f32)), z]
         };
+        // `hill` shows craters alone: six of them in two rows on the slope.
+        let hill = std::env::var_os("TORE_EFFECT_PREVIEW").is_some_and(|mode| mode == "hill");
+        if hill {
+            for (n, (ahead, across, size)) in [
+                (2200., -220., 18),
+                (2600., -220., 9),
+                (3000., -220., 18),
+                (2200., 220., 18),
+                (2600., 220., 3),
+                (3000., 220., 9),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                self.state.marks.push(blast::Mark {
+                    position: at(ahead, across),
+                    kind: blast::MarkKind::Crater(size),
+                    ticks: blast::FOREVER,
+                    born: 0,
+                    scale: tore_sim::combat::blast_scale::FULL,
+                    serial: u64::MAX - n as u64,
+                });
+            }
+            return;
+        }
         for kind in blast::FIRST..=blast::LAST {
             let row = blast::explosion(kind).expect("table type");
             let mut position = at(2500., (f64::from(kind) - 26.5) * 120.);
@@ -1562,6 +1907,17 @@ impl Combat {
     }
     /// One combat tick for the first ownship's aircraft, as a host with one
     /// flight steps it.
+    /// The highest `world`'s terrain reaches over each square, built on
+    /// first use and kept: the world's terrain never changes in a mission.
+    pub(crate) fn ground_ceiling(
+        &mut self,
+        world: &Terrain,
+    ) -> Arc<tore_sim::ground_ceiling::GroundCeiling> {
+        self.ground_ceiling
+            .get_or_insert_with(|| Arc::new(world.ground_ceiling()))
+            .clone()
+    }
+
     pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> WorldResult<Vec<Event>> {
         let aircraft = self.own_id();
         Ok(self.step_all(&mut [(aircraft, s)], world)?.events)
@@ -1580,98 +1936,16 @@ impl Combat {
     ) -> WorldResult<Stepped> {
         self.step_all_rewound(flights, &[], world)
     }
-    /// [`Self::step_all`] with lag compensation: `rewinds` gives, by
-    /// aircraft, the rewind in ticks ([`gun_rewind`]) of the gun rounds its
-    /// seat fires this tick. An aircraft not listed fires rounds with none.
-    pub fn step_all_rewound(
+    /// The contrail puffs of the step: each engine outlet of every aircraft
+    /// flying at or above its contrail height, then the puffs moved on.
+    fn step_contrails(
         &mut self,
-        flights: &mut [(u32, &mut flight::State)],
-        rewinds: &[(u32, u16)],
         world: &Terrain,
-    ) -> WorldResult<Stepped> {
-        flights.sort_by_key(|(aircraft, _)| *aircraft);
-        let first = self.host_plane();
-        let mut inputs = Vec::new();
-        let mut events = Vec::new();
-        for (aircraft, s) in flights.iter() {
-            let aircraft = *aircraft;
-            if self.state.ownship(aircraft).is_none() {
-                continue;
-            }
-            let l = launcher(s);
-            let held = self.triggers.get(&aircraft).is_some_and(Trigger::held);
-            if Some(aircraft) == first {
-                self.last_launcher = Some(l);
-                self.record_tape(if held { "fire" } else { "tick" }, l);
-            }
-            if let Some(own) = self.state.ownship_mut(aircraft) {
-                own.note_loaded();
-            }
-            if s.airburst()
-                && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
-            {
-                events.push(event);
-            }
-            if s.ground_impact()
-                && let Some(event) = self.state.ownship_ground_impact(
-                    aircraft,
-                    s.position,
-                    world.over_water(s.position[0], s.position[2]),
-                )
-            {
-                events.push(event);
-            }
-            inputs.push(OwnshipInput {
-                aircraft,
-                held,
-                launcher: l,
-            });
-        }
-        self.state.smoke.wind = world.wind();
-        self.state.devices.wind = world.wind();
-        self.contrails.wind = world.wind();
-        // Stop wreck emissions before advancing smoke on the impact/airburst tick.
-        events.extend(self.state.step_rewound(
-            &inputs,
-            rewinds,
-            |x, z| f64::from(world.height(x as f32, z as f32)),
-            |x, z| world.over_water(x, z),
-        ));
-        // The city fill's buildings within a ground burst's flattening reach
-        // fall (scenery only: nothing is scored).
-        for burst in self.state.ground_bursts.drain(..) {
-            if let Some(fill) = &world.city_fill {
-                fill.flatten(
-                    burst.position,
-                    crate::city::flatten_radius(burst.radius, burst.percent),
-                );
-            }
-        }
-        for (aircraft, s) in flights.iter_mut() {
-            let aircraft = *aircraft;
-            let Some(own) = self.state.ownship(aircraft) else {
-                continue;
-            };
-            plane::take_system_hits(
-                s,
-                &OwnshipTerms::of(own, self.state.tick()),
-                own.configuration(),
-            );
-            let mut uncredited = false;
-            if s.crashed
-                && let Some(event) = self.state.systems_destroyed(aircraft)
-            {
-                events.push(event);
-                // Lost to its own structure (overspeed, the map edge).
-                uncredited = s.systems.structure.cause.is_some();
-            }
-            // A loss with no shooter credits nobody, even after an earlier hit,
-            // as for an AI aircraft (lead's decision, 2026-09-29).
-            if uncredited {
-                self.state.ledger.lose_without_credit(aircraft);
-            }
-        }
+        first: Option<u32>,
+        flights: &[(u32, &mut flight::State)],
+    ) {
         use tore_sim::combat::smoke::contrail_altitude_ft;
+        self.contrails.wind = world.wind();
         let sortie = self.contrail_sortie;
         let mut outlets = Vec::new();
         let mut add = |id: u32, position: Vector, basis: Basis, offsets: &[Vector]| {
@@ -1737,6 +2011,102 @@ impl Combat {
         }
         self.contrails.step([]);
         self.contrails.contrails(outlets);
+    }
+    /// [`Self::step_all`] with lag compensation: `rewinds` gives, by
+    /// aircraft, the rewind in ticks ([`gun_rewind`]) of the gun rounds its
+    /// seat fires this tick. An aircraft not listed fires rounds with none.
+    pub fn step_all_rewound(
+        &mut self,
+        flights: &mut [(u32, &mut flight::State)],
+        rewinds: &[(u32, u16)],
+        world: &Terrain,
+    ) -> WorldResult<Stepped> {
+        flights.sort_by_key(|(aircraft, _)| *aircraft);
+        let first = self.host_plane();
+        let mut inputs = Vec::new();
+        let mut events = Vec::new();
+        for (aircraft, s) in flights.iter() {
+            let aircraft = *aircraft;
+            if self.state.ownship(aircraft).is_none() {
+                continue;
+            }
+            let l = launcher(s);
+            let held = self.triggers.get(&aircraft).is_some_and(Trigger::held);
+            if Some(aircraft) == first {
+                self.last_launcher = Some(l);
+                self.record_tape(if held { "fire" } else { "tick" }, l);
+            }
+            if let Some(own) = self.state.ownship_mut(aircraft) {
+                own.note_loaded();
+            }
+            if s.airburst()
+                && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
+            {
+                events.push(event);
+            }
+            if s.ground_impact()
+                && let Some(event) = self.state.ownship_ground_impact(
+                    aircraft,
+                    s.position,
+                    world.over_water(s.position[0], s.position[2]),
+                )
+            {
+                events.push(event);
+            }
+            inputs.push(OwnshipInput {
+                aircraft,
+                held,
+                launcher: l,
+            });
+        }
+        self.state.smoke.wind = world.wind();
+        self.state.devices.wind = world.wind();
+        let ceiling = self.ground_ceiling(world);
+        self.state.set_ground_ceiling(Some(ceiling));
+        // Stop wreck emissions before advancing smoke on the impact/airburst tick.
+        events.extend(self.state.step_rewound(
+            &inputs,
+            rewinds,
+            |x, z| f64::from(world.height(x as f32, z as f32)),
+            |x, z| world.over_water(x, z),
+        ));
+        // The city fill's buildings within a ground burst's flattening reach
+        // fall (scenery only: nothing is scored).
+        for burst in self.state.ground_bursts.drain(..) {
+            if let Some(fill) = &world.city_fill {
+                fill.flatten(
+                    burst.position,
+                    crate::city::flatten_radius(burst.radius, burst.percent),
+                );
+            }
+        }
+        for (aircraft, s) in flights.iter_mut() {
+            let aircraft = *aircraft;
+            let Some(own) = self.state.ownship(aircraft) else {
+                continue;
+            };
+            plane::take_system_hits(
+                s,
+                &OwnshipTerms::of(own, self.state.tick()),
+                own.configuration(),
+            );
+            let mut uncredited = false;
+            if s.crashed
+                && let Some(event) = self.state.systems_destroyed(aircraft)
+            {
+                events.push(event);
+                // Lost to its own structure (overspeed, the map edge).
+                uncredited = s.systems.structure.cause.is_some();
+            }
+            // A loss with no shooter credits nobody, even after an earlier hit,
+            // as for an AI aircraft (lead's decision, 2026-09-29).
+            if uncredited {
+                self.state.ledger.lose_without_credit(aircraft);
+            }
+        }
+        if self.contrail_puffs {
+            self.step_contrails(world, first, flights);
+        }
         let mut terms = Vec::with_capacity(flights.len());
         for (aircraft, s) in flights.iter_mut() {
             let aircraft = *aircraft;
@@ -2223,6 +2593,7 @@ pub mod fixtures {
             contrail_offsets: Vec::new(),
             contrail_sortie: 0,
             contrails: Default::default(),
+            contrail_puffs: true,
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
             poses: BTreeMap::new(),
@@ -2248,6 +2619,7 @@ pub mod fixtures {
             last_launcher: None,
             terrain_tti: Default::default(),
             notes: Default::default(),
+            ground_ceiling: None,
         }
     }
     /// Synthetic types for the three other aircraft the scene draws, in the
@@ -2828,3 +3200,8 @@ pub mod fixtures {
 // Exact checkpoints (docs/formats/checkpoint.md).
 #[path = "combat_checkpoint.rs"]
 mod checkpoint;
+
+// The seats' shared network picture (optimization slice S11).
+#[path = "combat_wire.rs"]
+mod wire;
+pub use wire::{WirePicture, WirePilot};

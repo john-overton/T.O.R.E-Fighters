@@ -71,8 +71,9 @@ cargo test --release --locked -p tore-app instrument_canvas_workers_wall_time --
 ## Host elapsed time
 
 Platform CI sets `TORE_WORKERS=2` for the workspace tests, real UDP loopback
-and strict Linux host tests. Small hosted runners would otherwise select the
-automatic serial fallback. This exercises the production pool during the
+and strict Linux host tests. `TORE_WORKERS=N` forces a fixed count, ignoring
+load; unset, the shared executor is serial until a loop is slow or late (slice
+S9), which small hosted runners would otherwise never exercise. This exercises the production pool during the
 Apple Silicon golden comparisons and Windows 32-bit tests, alongside explicit
 0/1/2/4/8-worker and shuffled equivalence tests. It does not substitute for
 interactive flight and shared host/render performance checks on real machines.
@@ -83,7 +84,11 @@ tore-session --test host_players --no-run`. Pass its executable under
 runs 0, 15 and 30 humans for 60 simulated seconds by default.
 
 The benchmark times the complete host call with `Instant`, including worker
-completion. Its separate Linux host-thread CPU figure excludes workers and
+completion. `TORE_MEASURE_DUMP=FILE` writes each ticking call's first tick,
+ticks stepped and elapsed nanoseconds, to find which ticks are heavy, and
+`TORE_MEASURE_HASH=1` prints a hash of every datagram the host sent, so two
+builds that must send the same bytes can be compared (the hashing adds to the
+measured time; leave it off for timings). Its separate Linux host-thread CPU figure excludes workers and
 cannot establish a threading speed-up. The simulated bots run outside the
 measured host calls. Deadline and frame contention must additionally be checked
 with a real hosting game; a fast-forwarded host-only test is not that check.

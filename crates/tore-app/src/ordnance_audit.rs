@@ -18,13 +18,13 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 /// record why in `docs/baselines/ordnance-availability.md`, when the supported
 /// weapon list, the tank records or the aircraft change.
 const AIRCRAFT: usize = 36;
-const RECOVERED_STATIONS: usize = 12;
+const RECOVERED_STATIONS: usize = 13;
 const TANK_RECORDS: usize = 9;
-const WEAPON_PLACEMENTS: usize = 3403;
+const WEAPON_PLACEMENTS: usize = 3407;
 const TANK_PLACEMENTS: usize = 175;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
-const NOVELTY_PLACEMENTS: usize = 166;
+const NOVELTY_PLACEMENTS: usize = 168;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 const POD_PLACEMENTS: usize = 65;
 
@@ -291,7 +291,10 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 let expected = if tip_amraam {
                     2
                 } else if r27
-                    || matches!((id, hardpoint), (AircraftId::F15, 6) | (AircraftId::F22, 8))
+                    || matches!(
+                        (id, hardpoint),
+                        (AircraftId::F15, 6 | 7) | (AircraftId::F22, 8)
+                    )
                 {
                     rows.iter()
                         .find(|r| r.hardpoint == hardpoint)
@@ -678,6 +681,15 @@ fn extra_stations(
     if restored.ammunition()? != before_ammo || restored.external_fuel_lbs() != before_fuel {
         return Err("old loadout did not preserve defaults with empty added rows".into());
     }
+    if aircraft.id == AircraftId::F15 {
+        // A load saved before the wing pylons took missiles ends one weapon
+        // slot short of the table; one saved before the bomb rack, two.
+        old.stations.pop();
+        let restored = old.apply(standard.clone(), data, None)?;
+        if restored.ammunition()? != before_ammo || restored.external_fuel_lbs() != before_fuel {
+            return Err("older Eagle loadout did not restore with empty added rows".into());
+        }
+    }
     let mut feeding = tore_sim::aircraft_systems::Fuel::new(full.configuration.external_fuel_lbs);
     let mut internal = full.fuel_lbs;
     feeding.consume(&mut internal, before_fuel + fuel);
@@ -709,7 +721,14 @@ fn extra_stations(
         return Err("extra tank jettison lost weapons or retained tank mass".into());
     }
     let weapons: &[(usize, &str, u16)] = match aircraft.id {
-        AircraftId::F15 => &[(6, "MK82.JT", 3), (6, "GBU12.JT", 3), (6, "MK84.JT", 2)],
+        AircraftId::F15 => &[
+            (6, "MK82.JT", 3),
+            (6, "GBU12.JT", 3),
+            (6, "MK84.JT", 2),
+            (7, "AIM120.JT", 2),
+            (7, "AIM9M.JT", 2),
+            (7, "AIM9X.JT", 2),
+        ],
         AircraftId::F16C => &[(9, "MK82.JT", 2), (9, "AGM65G.JT", 2)],
         AircraftId::F22 => &[(8, "AIM120.JT", 4), (8, "AIM9M.JT", 4), (8, "AIM9X.JT", 4)],
         _ => &[],
@@ -762,6 +781,16 @@ fn extra_stations(
         for name in rejected {
             if standard.capacity(slot, &Weapon::parse(name, &data[*name])?) != 0 {
                 return Err(format!("unexpected derived weapon permission {name}").into());
+            }
+        }
+        if aircraft.id == AircraftId::F15 {
+            // The wing pylons: Sidewinders and the AIM-120, not the Sparrow,
+            // the Archer or air-to-ground stores.
+            let wing = standard.configuration.hardpoint_slots[7].unwrap();
+            for name in ["AIM7.JT", "AA11.JT", "MK82.JT", "AGM65G.JT"] {
+                if standard.capacity(wing, &Weapon::parse(name, &data[name])?) != 0 {
+                    return Err(format!("unexpected wing pylon permission {name}").into());
+                }
             }
         }
         let accepted: Vec<_> = SUPPORTED_WEAPONS

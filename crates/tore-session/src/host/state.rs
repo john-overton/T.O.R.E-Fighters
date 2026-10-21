@@ -384,16 +384,32 @@ impl Host {
     /// of its bytes, the session part's without its clock reading.
     pub(super) fn encode_part_hashed(&self, part: Part) -> Result<(Vec<u8>, u64)> {
         if part == Part::Session {
-            let stable = to_bytes(|s| self.save_session(s))?;
+            // Coded once: the hash is of the bytes before the clock reading
+            // (a partly filled last byte has zero padding, as the coding of
+            // the session alone ends).
+            let mut hash = 0;
             let bytes = to_bytes(|s| {
                 self.save_session(s)?;
+                hash = tore_codec::fnv1a64(s.writer().as_bytes());
                 save_time(s, self.now)
             })?;
-            return Ok((bytes, tore_codec::fnv1a64(&stable)));
+            return Ok((bytes, hash));
         }
         let bytes = self.encode_other(part)?;
         let hash = tore_codec::fnv1a64(&bytes);
         Ok((bytes, hash))
+    }
+
+    /// The session part's coding and hash as made before slice S11, coded
+    /// twice: kept for the test that compares the two.
+    #[cfg(test)]
+    pub(super) fn encode_session_twice(&self) -> Result<(Vec<u8>, u64)> {
+        let stable = to_bytes(|s| self.save_session(s))?;
+        let bytes = to_bytes(|s| {
+            self.save_session(s)?;
+            save_time(s, self.now)
+        })?;
+        Ok((bytes, tore_codec::fnv1a64(&stable)))
     }
 
     fn encode_other(&self, part: Part) -> Result<Vec<u8>> {
@@ -570,6 +586,8 @@ impl Host {
                 test_designations: _,
             #[cfg(test)]
                 snapshot_executor: _,
+            #[cfg(test)]
+                legacy_pictures: _,
             // Coded.
             session_id,
             settings,

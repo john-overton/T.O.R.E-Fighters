@@ -435,7 +435,10 @@ Before and after grass captures must reuse the same camera file.
 The existing `vegetation-top-crowns` audit requires zero rendered top extents for
 pine groves, while checking individual crown bounds and floor cutouts for the
 remaining groves. Pine source art is retained even though its horizontal disk
-is no longer drawn.
+is no longer drawn. It needs an import made since vegetation pass 3 kept the
+retail vegetation art: on an older profile `--vegetation-art` exits with "the
+import predates the retail vegetation art; re-import media" and the scenario
+reports that as an environment problem.
 
 ## Terrain tile seam audit
 

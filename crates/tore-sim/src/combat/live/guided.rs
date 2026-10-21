@@ -37,7 +37,7 @@
 use super::cockpit::{Cockpits, StrikeCockpit};
 use super::{Configuration, Launcher, NO_SIDE, OwnRow, Ownship, Projectile, State, Target};
 use crate::attitude::{Vector, dot, unit};
-use crate::combat::ballistics::{BombMotion, ReleaseState};
+use crate::combat::ballistics::{BombMotion, FallCursors, ReleaseState};
 use crate::combat::delivery::DeliveryMode;
 use crate::combat::guided::{self, Advisory, GuidedLevel, GuidedSight, Reach};
 use crate::combat::laser::{self, LaserSpot, LaserState};
@@ -287,6 +287,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     p: &mut Projectile,
     w: &Weapon,
     cx: &Context<'_, G>,
+    falls: &mut FallCursors,
 ) -> Option<(BombMotion, u64)> {
     let glide = guided::is_glide_bomb(w);
     let was_guiding = flight.mode == Mode::Guiding;
@@ -419,9 +420,12 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
         }
     } else if let Some((fall, start)) = flight.fall {
         let elapsed = (p.age - start) as f64 / 120.;
-        let here = fall.position(elapsed);
-        flight.seconds = fall
-            .fall_time((cx.ground)(here[0], here[2]))
+        // The fall's cursor gives the same answers as the fall itself
+        // without flying it again from its start each tick.
+        let cursor = falls.follow(p.id, &fall);
+        let here = cursor.at(&fall, elapsed).position;
+        flight.seconds = cursor
+            .fall_time(&fall, (cx.ground)(here[0], here[2]))
             .map(|t| (t - elapsed).max(0.));
     } else {
         flight.seconds = None;

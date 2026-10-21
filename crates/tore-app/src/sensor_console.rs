@@ -852,12 +852,61 @@ struct Mask {
     h: i32,
     cells: Vec<u8>,
 }
+
+/// Buffers the console's overlay drawing reuses from frame to frame: the
+/// mask raster (about 2 MB at 1080p) and the overlay pixels (8.3 MB), which
+/// the renderer hands back after uploading them (see [`recycle`]).
+#[derive(Default)]
+struct Spare {
+    cells: Vec<u8>,
+    overlay: Vec<u8>,
+}
+thread_local! {
+    static SPARE: std::cell::RefCell<Spare> = std::cell::RefCell::new(Spare::default());
+}
+
+/// A cleared overlay buffer of `len` bytes, the spare one's memory when it
+/// has any: for the HUD camera's tape layer, which goes to the renderer and
+/// comes back through [`recycle`].
+pub fn spare_overlay(len: usize) -> Vec<u8> {
+    let mut out = SPARE.with(|spare| std::mem::take(&mut spare.borrow_mut().overlay));
+    out.clear();
+    out.resize(len, 0);
+    out
+}
+
+/// Gives an overlay returned by [`draw`], [`draw_pod`] or [`captions`] back
+/// for the next one to draw into.
+pub fn recycle(overlay: Vec<u8>) {
+    SPARE.with(|spare| {
+        let mut spare = spare.borrow_mut();
+        if overlay.capacity() > spare.overlay.capacity() {
+            spare.overlay = overlay;
+        }
+    });
+}
+
+impl Drop for Mask {
+    fn drop(&mut self) {
+        let cells = std::mem::take(&mut self.cells);
+        SPARE.with(|spare| {
+            let mut spare = spare.borrow_mut();
+            if cells.capacity() > spare.cells.capacity() {
+                spare.cells = cells;
+            }
+        });
+    }
+}
 impl Mask {
     fn new(size: [u32; 2]) -> Self {
+        let len = size[0] as usize * size[1] as usize;
+        let mut cells = SPARE.with(|spare| std::mem::take(&mut spare.borrow_mut().cells));
+        cells.clear();
+        cells.resize(len, 0);
         Self {
             w: size[0] as i32,
             h: size[1] as i32,
-            cells: vec![0; size[0] as usize * size[1] as usize],
+            cells,
         }
     }
     fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, v: u8) {
@@ -917,7 +966,120 @@ impl Mask {
     }
     /// The overlay's pixels: ink, its dark outline `o` pixels wide, and the
     /// dark fills.
+    ///
+    /// A clear cell takes the outline when any ink cell lies within `o`
+    /// cells of it in both directions (a square window). That window is the
+    /// same as a run along the row followed by a run along the column, so two
+    /// sliding counts replace the search of up to (2o+1)^2 cells per pixel.
     fn pixels(&self, o: i32) -> Vec<u8> {
+        let (w, h, o) = (self.w as usize, self.h as usize, o.max(0) as usize);
+        let mut out = SPARE.with(|spare| std::mem::take(&mut spare.borrow_mut().overlay));
+        // Every pixel is written below, so no clearing pass is needed.
+        out.resize(w * h * 4, 0);
+        // Per row, the columns from the first to the last cell set, and from
+        // the first to the last ink cell. Outside those (widened by `o` for
+        // ink in the rows around) a pixel has no cell and no ink near it, so
+        // it is clear; the counts below would give the same.
+        let lit: Vec<_> = self
+            .cells
+            .chunks_exact(w)
+            .map(|row| span_of(row, 0))
+            .collect();
+        // The columns where a row's `row_near` can be true.
+        let near_span: Vec<_> = self
+            .cells
+            .chunks_exact(w)
+            .map(|row| span_of(row, 1).map(|ink| ink.start.saturating_sub(o)..(ink.end + o).min(w)))
+            .collect();
+        // `row_near[y * w + x]`: ink within `o` cells of (x, y) along row y.
+        // It stays false outside the row's `near_span`.
+        let mut row_near = vec![false; w * h];
+        for ((cells, near), columns) in self
+            .cells
+            .chunks_exact(w)
+            .zip(row_near.chunks_exact_mut(w))
+            .zip(&near_span)
+        {
+            let Some(columns) = columns else {
+                continue;
+            };
+            // Ink in the window [x - o, x + o], kept as a running count.
+            let start = columns.start;
+            let mut count = cells[start.saturating_sub(o)..(start + o + 1).min(w)]
+                .iter()
+                .filter(|&&v| v == 1)
+                .count();
+            for x in columns.clone() {
+                near[x] = count > 0;
+                if x + o + 1 < w && cells[x + o + 1] == 1 {
+                    count += 1;
+                }
+                if x >= o && cells[x - o] == 1 {
+                    count -= 1;
+                }
+            }
+        }
+        // Per column, how many rows in the window [y - o, y + o] have ink
+        // near the pixel.
+        let mut column_near = vec![0u32; w];
+        let add = |column_near: &mut [u32], row: usize, sign: bool| {
+            if let Some(columns) = &near_span[row] {
+                let near = &row_near[row * w..(row + 1) * w];
+                for x in columns.clone() {
+                    if sign {
+                        column_near[x] += u32::from(near[x]);
+                    } else {
+                        column_near[x] -= u32::from(near[x]);
+                    }
+                }
+            }
+        };
+        for row in 0..(o + 1).min(h) {
+            add(&mut column_near, row, true);
+        }
+        for y in 0..h {
+            let cells = &self.cells[y * w..(y + 1) * w];
+            let pixels = &mut out[y * w * 4..(y + 1) * w * 4];
+            // The columns that may hold anything in this row.
+            let window = y.saturating_sub(o)..(y + o + 1).min(h);
+            let active = near_span[window]
+                .iter()
+                .chain([&lit[y]])
+                .flatten()
+                .fold(None::<std::ops::Range<usize>>, |hull, c| {
+                    Some(hull.map_or(c.clone(), |h| h.start.min(c.start)..h.end.max(c.end)))
+                });
+            match active {
+                None => pixels.fill(0),
+                Some(active) => {
+                    pixels[..active.start * 4].fill(0);
+                    pixels[active.end * 4..].fill(0);
+                    for ((&v, &count), pixel) in cells[active.clone()]
+                        .iter()
+                        .zip(&column_near[active.clone()])
+                        .zip(pixels[active.start * 4..active.end * 4].chunks_exact_mut(4))
+                    {
+                        pixel.copy_from_slice(&match v {
+                            1 => INK,
+                            2 => DARK,
+                            _ if count > 0 => DARK,
+                            _ => [0; 4],
+                        });
+                    }
+                }
+            }
+            if y + o + 1 < h {
+                add(&mut column_near, y + o + 1, true);
+            }
+            if y >= o {
+                add(&mut column_near, y - o, false);
+            }
+        }
+        out
+    }
+    /// The outline search `pixels` replaced, kept to show they agree.
+    #[cfg(test)]
+    fn pixels_reference(&self, o: i32) -> Vec<u8> {
         let mut out = vec![0u8; (self.w * self.h * 4) as usize];
         for y in 0..self.h {
             for x in 0..self.w {
@@ -952,6 +1114,41 @@ impl Mask {
         }
         out
     }
+}
+
+/// The columns of `row` from the first to the last cell that is not 0
+/// (`value` 0) or that is 1 (`value` 1), eight cells at a time.
+fn span_of(row: &[u8], value: u8) -> Option<std::ops::Range<usize>> {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    let hit = |v: u8| if value == 0 { v != 0 } else { v == value };
+    // Whether a word holds such a cell: for 1, a zero byte of `word ^ ONES`
+    // (the exact zero-byte test).
+    let word_hits = |word: &[u8]| {
+        let x = u64::from_ne_bytes(word.try_into().unwrap());
+        if value == 0 {
+            x != 0
+        } else {
+            let y = x ^ (ONES * u64::from(value));
+            y.wrapping_sub(ONES) & !y & (ONES << 7) != 0
+        }
+    };
+    let words = row.len() / 8;
+    let first = (0..words)
+        .find(|&i| word_hits(&row[i * 8..i * 8 + 8]))
+        .map(|i| i * 8)
+        .unwrap_or(words * 8);
+    let first = first + row[first..].iter().position(|&v| hit(v))?;
+    let tail = words * 8;
+    let last = match row[tail..].iter().rposition(|&v| hit(v)) {
+        Some(at) => tail + at,
+        None => {
+            let i = (0..words)
+                .rev()
+                .find(|&i| word_hits(&row[i * 8..i * 8 + 8]))?;
+            i * 8 + row[i * 8..i * 8 + 8].iter().rposition(|&v| hit(v))?
+        }
+    };
+    Some(first..last + 1)
 }
 
 /// A glyph's advance in font pixels (5 wide plus a gap).
@@ -1910,6 +2107,125 @@ mod tests {
             (1..=6).map(field_name).collect::<Vec<_>>(),
             ["WFOV", "MFOV", "NFOV", "NFOV E2", "NFOV E4", "NFOV E8"]
         );
+    }
+
+    /// A deterministic pseudo-random mask of ink, fill and clear cells.
+    fn noisy_mask(size: [u32; 2], density: u32, seed: u32) -> Mask {
+        let mut m = Mask::new(size);
+        let mut state = seed.wrapping_mul(2_654_435_761).wrapping_add(1);
+        for cell in &mut m.cells {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let r = (state >> 16) % 1000;
+            *cell = if r < density {
+                1
+            } else if r < density * 2 {
+                2
+            } else {
+                0
+            };
+        }
+        m
+    }
+
+    #[test]
+    fn the_separable_outline_matches_the_window_search_cell_for_cell() {
+        for (size, density, o) in [
+            ([1, 1], 500, 1),
+            ([7, 5], 100, 1),
+            ([5, 7], 100, 2),
+            ([31, 17], 20, 3),
+            ([40, 3], 300, 4),
+            ([3, 40], 300, 4),
+            ([64, 48], 5, 1),
+            ([64, 48], 5, 2),
+            ([64, 48], 5, 6),
+            ([64, 48], 200, 2),
+            ([64, 48], 0, 2),
+            ([13, 9], 30, 20),
+        ] {
+            for seed in 0..4 {
+                let m = noisy_mask(size, density, seed);
+                assert_eq!(
+                    m.pixels(o),
+                    m.pixels_reference(o),
+                    "{size:?} density {density} o {o} seed {seed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cells_far_from_ink_come_out_clear_as_the_window_search_gives() {
+        // Bands of ink, rows of fill only and long empty stretches, so rows
+        // and columns are skipped next to ones that are not.
+        for (size, o) in [([50, 60], 1), ([50, 60], 3), ([20, 90], 7), ([9, 12], 20)] {
+            for seed in 0..6u32 {
+                let mut m = noisy_mask(size, 120, seed);
+                for (y, row) in m.cells.chunks_exact_mut(size[0] as usize).enumerate() {
+                    match (y as u32 + seed) % 11 {
+                        0 | 1 => {}
+                        2 => row.iter_mut().for_each(|v| *v = u8::from(*v != 0) * 2),
+                        _ => row.fill(0),
+                    }
+                    // Narrow column bands too, so rows are drawn in part.
+                    let keep = (y * 7 + seed as usize) % row.len();
+                    for (x, v) in row.iter_mut().enumerate() {
+                        if seed % 2 == 1 && x.abs_diff(keep) > 3 + seed as usize {
+                            *v = 0;
+                        }
+                    }
+                }
+                assert_eq!(
+                    m.pixels(o),
+                    m.pixels_reference(o),
+                    "{size:?} o {o} seed {seed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn spans_found_a_word_at_a_time_are_the_ones_found_cell_by_cell() {
+        let mut state = 7u32;
+        for len in [0, 1, 7, 8, 9, 16, 23, 64, 1921] {
+            for _ in 0..40 {
+                let mut row = vec![0u8; len];
+                for _ in 0..(state % 4) {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    if len > 0 {
+                        row[(state >> 8) as usize % len] =
+                            [1, 2, 3, 255][(state >> 4) as usize % 4];
+                    }
+                }
+                for value in [0u8, 1] {
+                    let hit = |v: u8| if value == 0 { v != 0 } else { v == value };
+                    let expected = row
+                        .iter()
+                        .position(|&v| hit(v))
+                        .map(|first| first..row.iter().rposition(|&v| hit(v)).unwrap() + 1);
+                    assert_eq!(span_of(&row, value), expected, "{row:?} {value}");
+                }
+                state = state.wrapping_add(1);
+            }
+        }
+    }
+
+    #[test]
+    fn the_overlay_buffers_are_reused_without_changing_pixels() {
+        let mut camera = Camera::new();
+        camera.position = [0., 6000., 0.];
+        camera.pitch = -0.4;
+        let size = [480, 270];
+        let first = draw(&sample(), &camera, size);
+        // Hand the dirty buffer back and draw again, at a different size too.
+        recycle(first.clone());
+        let again = draw(&sample(), &camera, size);
+        assert_eq!(first, again);
+        recycle(again);
+        let smaller = draw(&sample(), &camera, [240, 135]);
+        assert_eq!(smaller.len(), 240 * 135 * 4);
+        recycle(smaller);
+        assert_eq!(first, draw(&sample(), &camera, size));
     }
 
     #[test]

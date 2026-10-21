@@ -373,13 +373,23 @@ impl ControlAdapter {
             }
             _ => desired_g,
         };
-        let delta = desired_g / (authority * flap_gain).max(0.01) - 1.0;
+        // The flight model also scales the lift by the airframe's damage
+        // (a damaged wing or tail, `regional_effects`; a wing fault halves
+        // it) and the elevator by the tail's damage. Inverted here as the
+        // flap lift is (agent decision, 2026-10-21): without it a damaged
+        // aircraft's pull fell short of the load it asked for, and on final
+        // an F/A-18D with a quarter of its tail damaged sank 50 ft under
+        // the glide path and touched down at the threshold.
+        let regional = crate::aircraft_systems::regional_effects(state.damage_regions);
+        let damaged_lift = regional.lift * if state.systems.has(25) { 0.5 } else { 1.0 };
+        let delta = desired_g / (authority * flap_gain * damaged_lift).max(0.01) - 1.0;
         let pitch_input = delta
             / if delta > 0.0 {
                 (high - 1.0).max(0.01)
             } else {
                 (1.0 - low).max(0.01)
-            };
+            }
+            / regional.authority[0].max(0.01);
 
         let input = PilotInput {
             pitch: if dt_s > 0.0 {
@@ -767,6 +777,52 @@ mod tests {
         );
         assert!(s.position[1] < 7_900.0);
         assert!(!s.crashed);
+    }
+
+    #[test]
+    fn a_damaged_airframe_still_holds_the_requested_descent() {
+        // 2026-10-21 (ai-long-15v15): an F/A-18D with a quarter of its tail
+        // damaged flew its final 50 ft under the glide path, because the
+        // stick it was given ignored the damaged lift and elevator.
+        let fly = |regions: [f64; 6], research: bool| {
+            let mut s = State::new(&profile(), [0.0, 8_000.0, 0.0]).unwrap();
+            if research {
+                s.enable_research(1).unwrap();
+                s.gear_down = true;
+                s.gear = 1.0;
+                s.flaps_down = true;
+                s.flaps = 1.0;
+            }
+            s.damage_regions = regions;
+            s.yaw = 0.0;
+            s.pitch = -3_f64.to_radians();
+            s.bank = 0.0;
+            s.speed = if research { 230.0 } else { 400.0 };
+            s.velocity = crate::attitude::Basis::new(s.yaw, s.pitch, s.bank)
+                .forward
+                .map(|v| v * s.speed);
+            let command = intent(0.0, -3.0, s.speed);
+            for _ in 0..30 * 120 {
+                let output = controls(&s, &command, crate::flight::DT);
+                s.step(&output.input, |_, _| 0.0);
+            }
+            assert!(!s.crashed);
+            attitude(&s).unwrap().flight_path_pitch_deg
+        };
+        for research in [false, true] {
+            let clean = fly([0.0; 6], research);
+            for regions in [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.25],
+                [0.0, 0.0, 0.0, 0.3, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.2, 0.2, 0.5],
+            ] {
+                let damaged = fly(regions, research);
+                assert!(
+                    (damaged - clean).abs() < 0.25 && (damaged + 3.0).abs() < 0.5,
+                    "research={research} {regions:?}: clean {clean}, damaged {damaged}"
+                );
+            }
+        }
     }
 
     #[test]

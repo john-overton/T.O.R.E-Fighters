@@ -239,13 +239,22 @@ impl Scene {
         wings: Option<&crate::ai_wings::AiWings>,
         presented: Option<&crate::combat_view::CombatView>,
     ) -> Self {
+        // The wing aircraft that fly: a wing slot whose target row is
+        // airborne with hit points left. Ids are looked up in a sorted list,
+        // not searched for in every row for every slot.
+        let flying_ids = || {
+            let mut ids: Vec<u32> = combat
+                .state
+                .targets
+                .iter()
+                .filter(|t| t.airborne && t.hp > 0)
+                .map(|t| t.id)
+                .collect();
+            ids.sort_unstable();
+            ids
+        };
         Self::from_parts(
-            Body::new(
-                frame.plane.0,
-                player.view_position(),
-                player.velocity,
-                Basis::new(player.yaw, player.pitch, player.bank),
-            ),
+            Self::player_body(frame, player),
             frame.readout.targets.view.as_ref().map(|t| t.id),
             combat
                 .state
@@ -266,15 +275,10 @@ impl Scene {
                 })
                 .collect(),
             wings.map_or_else(Vec::new, |w| {
+                let flying = flying_ids();
                 w.slots()
                     .iter()
-                    .filter(|slot| {
-                        combat
-                            .state
-                            .targets
-                            .iter()
-                            .any(|t| t.id == slot.id && t.airborne && t.hp > 0)
-                    })
+                    .filter(|slot| flying.binary_search(&slot.id).is_ok())
                     .map(|slot| {
                         (
                             slot.id,
@@ -285,31 +289,59 @@ impl Scene {
                     })
                     .collect()
             }),
-            combat
-                .state
-                .projectiles
-                .iter()
-                .filter(|p| !tore_sim::combat::live::is_gun(combat.state.weapon(p)))
-                .map(|p| {
-                    let direction = unit(p.direction, [0., 0., 1.]);
-                    Shot::new(
-                        Body::missile(
-                            p.id,
-                            p.position,
-                            direction.map(|v| v * f64::from(p.speed_f8) / 256.),
-                            Basis::new(
-                                direction[0].atan2(direction[2]),
-                                direction[1].atan2(direction[0].hypot(direction[2])),
-                                0.,
-                            ),
-                        ),
-                        p.owner,
-                        p.target,
-                        p.incoming.is_some(),
-                    )
-                })
-                .collect(),
+            Self::missile_shots(combat),
         )
+    }
+    /// The part of [`Scene::new`] a camera that follows the player's own
+    /// aircraft reads: the player and the missiles in flight (the rig keeps
+    /// track of the newest of its own). No aircraft bodies, wings or target.
+    /// A rig answers [`Rig::needs_bodies`] to say when this is enough.
+    pub fn lean(
+        frame: &crate::frame::FlightFrame,
+        player: &flight::State,
+        combat: &Combat,
+    ) -> Self {
+        Self::from_parts(
+            Self::player_body(frame, player),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Self::missile_shots(combat),
+        )
+    }
+    fn player_body(frame: &crate::frame::FlightFrame, player: &flight::State) -> Body {
+        Body::new(
+            frame.plane.0,
+            player.view_position(),
+            player.velocity,
+            Basis::new(player.yaw, player.pitch, player.bank),
+        )
+    }
+    fn missile_shots(combat: &Combat) -> Vec<Shot> {
+        combat
+            .state
+            .projectiles
+            .iter()
+            .filter(|p| !tore_sim::combat::live::is_gun(combat.state.weapon(p)))
+            .map(|p| {
+                let direction = unit(p.direction, [0., 0., 1.]);
+                Shot::new(
+                    Body::missile(
+                        p.id,
+                        p.position,
+                        direction.map(|v| v * f64::from(p.speed_f8) / 256.),
+                        Basis::new(
+                            direction[0].atan2(direction[2]),
+                            direction[1].atan2(direction[0].hypot(direction[2])),
+                            0.,
+                        ),
+                    ),
+                    p.owner,
+                    p.target,
+                    p.incoming.is_some(),
+                )
+            })
+            .collect()
     }
     /// Whether two scenes hold the same subjects to within `tolerance` of a
     /// foot, a foot a second or a unit of direction.
@@ -484,6 +516,19 @@ impl Rig {
     }
     pub fn cockpit(&self, view: u8) -> bool {
         self.reference == Reference::Player && matches!(view, 0 | 3 | 4 | TRACK)
+    }
+    /// Whether the main view `view` or the saved Other View reads anything
+    /// of the scene but the player and the missiles: every reference but the
+    /// player's own does, and so does every view past the basic five
+    /// (0 to 4), which relate the player to a target, a wingman or a missile.
+    /// When it says no, [`Scene::lean`] gives the cameras what they read.
+    pub fn needs_bodies(&self, view: u8) -> bool {
+        let reads = |reference: Reference, view: u8| reference != Reference::Player || view > 4;
+        reads(self.reference, view)
+            || self
+                .other
+                .as_ref()
+                .is_some_and(|s| reads(s.reference, s.view))
     }
     pub fn save(&mut self, view: u8, look: [f32; 2], zoom: f32) {
         self.other_pending = false;
@@ -796,6 +841,101 @@ mod tests {
     }
     fn near(a: Vector, b: Vector) {
         assert!(distance(a, b) < 0.001, "{a:?} != {b:?}");
+    }
+    /// The lean scene of `scene`: its player and missiles alone.
+    fn lean_of(scene: &Scene) -> Scene {
+        Scene::from_parts(
+            scene.player,
+            None,
+            Vec::new(),
+            Vec::new(),
+            scene.missiles.clone(),
+        )
+    }
+    /// Every field of a camera, as text.
+    fn shown(camera: &Result<Camera, &'static str>) -> String {
+        match camera {
+            Ok(c) => format!(
+                "{:?} {:?} {:?} {} {} {} {} {} {} {} {:?} {} {}",
+                c.weather_slot,
+                c.hidden_target,
+                c.hidden_projectile,
+                c.yaw,
+                c.pitch,
+                c.roll,
+                c.view_fraction,
+                c.zoom,
+                c.near_clip,
+                c.thermal,
+                c.keys,
+                c.sensor,
+                c.position
+                    .map(f64::to_bits)
+                    .map(|b| b.to_string())
+                    .join(","),
+            ),
+            Err(reason) => (*reason).to_owned(),
+        }
+    }
+    #[test]
+    fn a_lean_scene_serves_every_camera_that_follows_the_players_own_aircraft() {
+        let mut full = scene();
+        full.player.velocity = [30., -4., 250.];
+        full.player.basis = Basis::new(0.7, 0.2, -0.4);
+        full.missiles = vec![
+            shot(40, 0, Some(1), [100., 1000., 100.]),
+            shot(44, 9, Some(0), [-300., 900., 500.]),
+            shot(41, 0, None, [100., 1200., 100.]),
+        ];
+        let lean = lean_of(&full);
+        let saved = [None, Some(3), Some(4), Some(0)];
+        for other in saved {
+            for view in 0..=4u8 {
+                for look in [[0.; 2], [0.4, -0.2], [-1.2, 0.9]] {
+                    let (mut with_all, mut with_lean) = (Rig::for_plane(0), Rig::for_plane(0));
+                    if let Some(saved_view) = other {
+                        for rig in [&mut with_all, &mut with_lean] {
+                            rig.save(saved_view, [0.2, 0.1], 1.5);
+                        }
+                    }
+                    assert!(!with_lean.needs_bodies(view));
+                    let base = |scene: &Scene| body_camera(scene.player, view);
+                    let (a, b) = (
+                        with_all.camera(view, &full, base(&full), look, 1.25),
+                        with_lean.camera(view, &lean, base(&lean), look, 1.25),
+                    );
+                    assert_eq!(shown(&a), shown(&b), "view {view}");
+                    let (a, b) = (
+                        with_all.other_camera(&full, Camera::new()),
+                        with_lean.other_camera(&lean, Camera::new()),
+                    );
+                    assert_eq!(shown(&a), shown(&b), "other {other:?}");
+                    with_all.observe(&full);
+                    with_lean.observe(&lean);
+                    assert_eq!(with_all.missile_subject(), with_lean.missile_subject());
+                    assert_eq!(with_all.missile_subject(), Some(41));
+                }
+            }
+        }
+    }
+    #[test]
+    fn a_view_of_anything_but_the_player_needs_the_other_bodies() {
+        let mut rig = Rig::for_plane(0);
+        assert!(!rig.needs_bodies(0) && !rig.needs_bodies(4));
+        for view in [TRACK, THREAT, WING, TARGET, TARGET_PLAYER, FLY_BY, MISSILE] {
+            assert!(rig.needs_bodies(view), "view {view}");
+        }
+        for reference in [
+            Reference::Target,
+            Reference::Missile,
+            Reference::Aircraft(3),
+        ] {
+            rig.select(reference);
+            assert!(rig.needs_bodies(0), "{reference:?}");
+        }
+        rig.select(Reference::Player);
+        rig.save(WING, [0.; 2], 1.);
+        assert!(rig.needs_bodies(0), "a saved Other View of a wingman");
     }
     #[test]
     fn relations_reverse_endpoints_and_show_the_reference_subject() {

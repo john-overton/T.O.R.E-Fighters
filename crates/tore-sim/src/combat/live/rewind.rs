@@ -363,6 +363,65 @@ mod hit_tests {
         carried
     }
 
+    /// A rewound burst at a ground object among many far ones: it strikes
+    /// the object as an unrewound burst does, tick for tick (a ground box is
+    /// met by the round's own segment whatever the rewind, so the first pass
+    /// keeps it for rewound rounds too).
+    #[test]
+    fn a_rewound_burst_strikes_a_ground_object_as_an_unrewound_one() {
+        let (_, height) = arrival(1500.);
+        let run = |rewind: u16| {
+            let mut s = gunship();
+            let solid = |center: Vector| crate::airport::OrientedBox {
+                center,
+                half: [40., 30., 20.],
+                heading: 0.3,
+                pitch: 0.,
+                bank: 0.,
+            };
+            s.add_ground_target(
+                0x4000_0000,
+                solid([0., height, 1500.]),
+                10_000,
+                0x100,
+                NO_SIDE,
+            )
+            .unwrap();
+            for n in 1..200u32 {
+                let at = [
+                    f64::from(n % 20) * 900. - 9_000.,
+                    0.,
+                    f64::from(n / 20) * 700. + 3_000.,
+                ];
+                s.add_ground_target(0x4000_0000 + n, solid(at), 10_000, 0x100, NO_SIDE)
+                    .unwrap();
+            }
+            let mut log = Vec::new();
+            for step in 0..FIRE + 200 {
+                let held = (FIRE..FIRE + BURST).contains(&step);
+                let events = s.step_rewound(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held,
+                        launcher: shooter(),
+                    }],
+                    &[(0, rewind)],
+                    |_, _| 0.,
+                    |_, _| false,
+                );
+                let hp = s.targets.iter().find(|t| t.id == 0x4000_0000).unwrap().hp;
+                log.push((format!("{events:?}"), hp));
+            }
+            log
+        };
+        let rewound = run(VIEW_TICKS);
+        assert!(
+            rewound.last().unwrap().1 < 10_000,
+            "the burst hit the object"
+        );
+        assert_eq!(rewound, run(0));
+    }
+
     #[test]
     fn a_rewind_is_capped_and_only_gun_rounds_carry_one() {
         assert!(carried(true, VIEW_TICKS).iter().all(|&r| r == VIEW_TICKS));

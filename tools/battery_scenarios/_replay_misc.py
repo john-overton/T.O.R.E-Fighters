@@ -69,7 +69,7 @@ def diagnostics_scenarios() -> list[Scenario]:
             name="replay-diag-startup-script",
             lane="replay",
             args=["--version"],
-            then=[Step([PY, "tools/check_startup_diagnostics.py", str(ROOT / "target" / "debug" / "tore-app")], app=False, timeout=240)],
+            then=[Step([PY, "tools/check_startup_diagnostics.py", "{bin}"], app=False, timeout=240)],
             expect=[r"tore-app|T\.O\.R\.E"],
             check_work=lambda work, output: [] if "Startup diagnostics passed" in output else ["startup diagnostics script did not pass"],
         )

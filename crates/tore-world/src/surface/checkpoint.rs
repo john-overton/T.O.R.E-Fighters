@@ -95,6 +95,7 @@ tore_sim::checkpoint_struct!(SurfaceState {
     locks = Vec::new(),
     painting = Vec::new(),
     places = Default::default(),
+    static_places = Vec::new(),
     bursts = Vec::new(),
     flak_teams = Default::default(),
 });

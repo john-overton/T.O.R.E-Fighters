@@ -39,23 +39,27 @@ VARIANT_THEATERS = [t for t in AIRPORTS if t.startswith("~")]
 # Gun capacity and the other station capacities of each aircraft's default load,
 # in the order `--weapon-slot 1..N` selects them (from the combat smoke). A trailing 0 is a
 # retained selection station the variety import added: configured but never loaded, so the
-# weapon cycle skips it (docs/formats/aircraft-ordnance.md).
+# weapon cycle skips it (docs/formats/aircraft-ordnance.md). A rocket pod station counts its
+# rockets, not its pods (ffc8fff2: two LAU-61 or B-8M1 pods hold 38, two B-13L pods 10).
+# The A-4E's default load carries three tanks in place of retail's centreline Mk 82s, which
+# stay selectable at 0 (35023ad1). F22.PT row 8 is the optional inboard wing pair, empty by
+# default (30f69393); F22N.PT, which the F-22N and F/A-XX fly, has no such row.
 STATIONS = {
     "f18": [570, 2, 4, 4, 2],
     "rafale": [250, 4, 2, 2, 2],
     "f14": [675, 4, 2, 2],
-    "a4e": [400, 4, 2, 0],
+    "a4e": [400, 0, 38, 0],
     "x31": [740, 2, 2, 2, 0],
     "mig29": [150, 2, 2, 2],
     "su27": [150, 2, 2, 4, 2],
     "mig21": [200, 2, 2, 0],
-    "su25": [250, 2, 4, 4, 0],
-    "mig23": [200, 2, 2, 2, 0],
+    "su25": [250, 10, 4, 4, 0],
+    "mig23": [200, 38, 2, 2, 0],
     "su35": [150, 1, 2, 4, 2],
-    "f22": [750, 2, 2, 4],
+    "f22": [750, 2, 2, 4, 0],
 }
-STATIONS["f22n"] = STATIONS["f22"]
-STATIONS["faxx"] = STATIONS["f22"]
+STATIONS["f22n"] = [750, 2, 2, 4]
+STATIONS["faxx"] = STATIONS["f22n"]
 
 
 def _numbers(output: str, prefix: str) -> dict:

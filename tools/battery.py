@@ -514,7 +514,8 @@ def run_steps(
 ) -> str:
     """Runs a scenario's follow-up commands, appending their output; returns the joined output."""
     for i, step in enumerate(s.then):
-        step_cmd = [a.replace("{work}", str(work)) for a in step.args]
+        # `{bin}` is the tore-app under test (--bin), for steps that run it as an argument.
+        step_cmd = [a.replace("{work}", str(work)).replace("{bin}", str(opts.bin)) for a in step.args]
         if step.app:
             step_cmd = [opts.bin, *step_cmd]
         if step.window:
@@ -764,6 +765,8 @@ def main(argv: list[str]) -> int:
     if not Path(opts.bin).exists():
         print(f"binary not found: {opts.bin} (build it first)", file=sys.stderr)
         return 2
+    # Checks that run the app themselves (e.g. `--recording-info`) use the same binary.
+    os.environ["TORE_BATTERY_BIN"] = str(Path(opts.bin).resolve())
     for path in missing_binaries(scenarios, opts):
         print(f"binary not found: {path} (cargo build --locked -p tore-server -p tore-session)", file=sys.stderr)
         return 2

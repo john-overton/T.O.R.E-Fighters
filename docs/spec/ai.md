@@ -899,6 +899,17 @@ about 3 s more. At 440 kt the look-ahead is 4,500 ft; below 100 kt the retail
 1,000 ft applies. Before this, supersonic AI aircraft saw rising ground 0.6 s
 before hitting it.
 
+**Fitted (agent decision, 2026-10-20, fuzz seed 43):** above corner speed the
+envelope, not the pilot, limits the pull, so the look-ahead also covers the
+time the G left there takes to raise the flight path those 14 degrees: 3 s to
+roll level and settle, plus the angle times the speed over 32.174 ft/s² times
+the excess G above 1 (taken as at least 0.25), never less than six seconds and
+never more than 20. The six-second estimate above undercounts that term: at
+1,800 ft/s with 1.2 G of excess it is about 11 s, not 3. A loaded F-22N at
+1,030 kt and 3,000 ft keeps only about 1.5 G; with six seconds (10,300 ft) it
+saw a 17 degree escarpment too late and flew into it at full back stick. With
+20 s it climbs over. Helicopters and the V-22 keep six seconds.
+
 Other overrides: above its ceiling altitude the aircraft does not accept a
 climbing pitch request. On the ground it holds its entry pitch, and may pitch
 up only above minimum speed unless in the airborne part of a takeoff; the
@@ -1226,7 +1237,12 @@ leader's airport, joins the landing.
 
 Fuel: with a home airport the aircraft computes time to reach it at a cruise
 speed (minimum plus one fifth of the envelope, or half if that is under
-75 ft/s) and its endurance at the lowest throttle that holds that speed. It is
+75 ft/s) and its endurance at the lowest throttle that holds that speed. The
+endurance counts all remaining fuel, external tanks included: every AI
+aircraft starts with its tanks full, a default load's as well as a given
+one's, and burns them first, as the player does (fixed 2026-10-20; before, a
+default load's tank, such as the F/A-18's or F-16C's centreline tank, was
+carried at full weight with no fuel in it). It is
 out of fuel at zero, critical below four minutes of endurance, on bingo when
 endurance is under time-to-home plus five minutes, and on caution at or
 under time-to-home plus ten minutes. An AI wingman whose leader is AI-controlled
@@ -1705,3 +1721,6 @@ opinionated where labelled, not recovered retail AI decision predicates.
 John requested AI defensive jettison on 2026-10-15. The shared
 [jettison contract](jettison.md#replay-network-and-ai) defines tank shedding,
 merge range, skill-dependent strike-load retention and inert recording behavior.
+Since John's 2026-10-20 revision a fight drops only the tanks; the
+air-to-ground load goes only when the pilot must save the aircraft (damaged or
+short of fuel going home, or losing a close defensive fight).

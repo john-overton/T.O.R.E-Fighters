@@ -20,7 +20,10 @@
 //! is `friendly` (default) or `all` (needed above 15),
 //! `TORE_MEASURE_SECONDS` is the simulated flying time (default 300) and
 //! `TORE_MEASURE_RATE` the snapshot rate (default the host's, 60 since slice
-//! D12).
+//! D12). `TORE_MEASURE_DUMP` names a file for each ticking call's first tick,
+//! ticks stepped and elapsed nanoseconds; with `TORE_MEASURE_HASH` set the
+//! run prints a hash of every datagram the host sent, to show that two builds
+//! send the same bytes (hashing adds to the measured time).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -105,6 +108,46 @@ impl CpuClock {
     }
 }
 
+/// The host's socket, with a running hash of every datagram it sends (its
+/// address and bytes), so two builds can be shown to send the same packets.
+struct Tap<'a> {
+    socket: &'a mut tore_net::sim::SimSocket,
+    /// Hashing is on with `TORE_MEASURE_HASH`, as it adds to the measured
+    /// calls.
+    on: bool,
+    hash: u64,
+    datagrams: u64,
+    bytes: u64,
+}
+
+impl Tap<'_> {
+    fn mix(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.hash = (self.hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+}
+
+impl tore_net::Datagrams for Tap<'_> {
+    fn send_datagram(&mut self, to: std::net::SocketAddr, datagram: &[u8]) -> std::io::Result<()> {
+        if self.on {
+            self.mix(to.to_string().as_bytes());
+            self.mix(&(datagram.len() as u64).to_le_bytes());
+            self.mix(datagram);
+        }
+        self.datagrams += 1;
+        self.bytes += datagram.len() as u64;
+        self.socket.send_datagram(to, datagram)
+    }
+
+    fn recv_datagram(
+        &mut self,
+        buf: &mut [u8],
+    ) -> std::io::Result<Option<(usize, std::net::SocketAddr)>> {
+        self.socket.recv_datagram(buf)
+    }
+}
+
 fn percentile(sorted: &[u64], p: f64) -> f64 {
     if sorted.is_empty() {
         return 0.;
@@ -136,7 +179,14 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
     let net = SimNetwork::new(7);
     net.set_default_link(LinkConfig::PERFECT);
     let address = "10.0.0.1:26900".parse().unwrap();
-    let mut host_socket = net.bind(address).unwrap();
+    let mut raw_socket = net.bind(address).unwrap();
+    let mut host_socket = Tap {
+        socket: &mut raw_socket,
+        on: std::env::var_os("TORE_MEASURE_HASH").is_some(),
+        hash: 0xcbf2_9ce4_8422_2325,
+        datagrams: 0,
+        bytes: 0,
+    };
     let mut host = Host::new(
         spec(),
         Arc::clone(&resources),
@@ -184,6 +234,10 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
     let mut up_total: Vec<f64> = Vec::new();
     let mut down_total: Vec<f64> = Vec::new();
     let mut peak_up_total = 0f64;
+    // `TORE_MEASURE_DUMP` names a file for each ticking call's first tick
+    // and elapsed nanoseconds, to find which ticks are heavy.
+    let dump_path = std::env::var("TORE_MEASURE_DUMP").ok();
+    let mut dump: Vec<(u64, u64, u64)> = Vec::new();
     let wall = Instant::now();
     loop {
         net.advance(step);
@@ -230,6 +284,9 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
         calls.push(spent);
         if ticked > 0 {
             tick_calls.push(spent);
+            if dump_path.is_some() {
+                dump.push((before, ticked, spent));
+            }
         }
         minute.0 += spent;
         minute.1 += ticked;
@@ -256,6 +313,13 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
         }
     }
     let ticks = host.world().tick() - ticks_before;
+    if let Some(path) = &dump_path {
+        let text: String = dump
+            .iter()
+            .map(|(tick, ticked, ns)| format!("{tick} {ticked} {ns}\n"))
+            .collect();
+        std::fs::write(path, text).expect("the dump file");
+    }
     let logs: Vec<HostLog> = std::iter::from_fn(|| host.poll_log()).collect();
     let faults = logs
         .iter()
@@ -313,6 +377,10 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
         mean(&down),
         max(&down),
         mean(&down_total)
+    );
+    println!(
+        "host sent {} datagrams, {} bytes, hash {:016x}",
+        host_socket.datagrams, host_socket.bytes, host_socket.hash
     );
     println!(
         "host log: {} entries, {} faults, {} overloads",

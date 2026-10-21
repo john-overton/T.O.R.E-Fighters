@@ -115,8 +115,8 @@ use tore_net::master::{
 };
 use tore_net::peers::{Peers, Route};
 use tore_net::{
-    Datagrams, Entropy, LINK_ADDRESS, LinkEnd, Linked, Listen, MAX_NAP, Platform, RealClock,
-    SPIN_MARGIN, ServerSocket, wait_until,
+    Datagrams, Entropy, LINK_ADDRESS, LinkEnd, Linked, Listen, Platform, RealClock, SPIN_MARGIN,
+    ServerSocket, plan_wake, wait_until,
 };
 use tore_realtime_native::{Activity, real_time_thread, summary};
 use tore_session::{
@@ -195,6 +195,9 @@ pub enum Command {
     // (`follow_visibility`).
     #[cfg_attr(not(test), allow(dead_code))]
     SetListed(bool),
+    /// The Debug menu's AI test settings (observation rate, lean sensors):
+    /// the host's setting governs the simulation, from the next tick.
+    SetAiTest(tore_sim::ai::test_settings::AiTestSettings),
     /// Panic on the thread, for the tests of the panic rule.
     #[cfg(test)]
     Panic,
@@ -1204,6 +1207,7 @@ fn serve(
         loop {
             match commands.try_recv() {
                 Ok(Command::Stop) => stop = true,
+                Ok(Command::SetAiTest(settings)) => host.set_ai_test(settings),
                 Ok(Command::SetListed(listed)) => match listings.listing.as_mut() {
                     Some(listing) => listing.set_listed(listed, now),
                     None => log::info!(
@@ -1266,8 +1270,9 @@ fn serve(
             forward_listing(listing, reports, &mut listing_state);
             return End::Stopped;
         }
-        let wake = (now + host.next_wake(now)).min(now + MAX_NAP);
-        wait_until(&mut clock, wake, SPIN_MARGIN);
+        // A tick deadline is spun to; a housekeeping nap is slept to.
+        let wake = plan_wake(now, host.next_wake(now), host.wake_pace(), SPIN_MARGIN);
+        wait_until(&mut clock, wake.at, wake.spin_margin);
     }
 }
 

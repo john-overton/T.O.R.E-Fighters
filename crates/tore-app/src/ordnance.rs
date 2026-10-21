@@ -1173,6 +1173,27 @@ impl Ordnance {
                     }
                 }
             }
+            "ordnance-wing-amraam" => {
+                // An AIM-120 on the Eagle's wing pylons (the appended row 7,
+                // a tank or a missile a side), on the air-to-air page, with
+                // that station selected.
+                self.category = 0;
+                if let Some(weapon) = self
+                    .catalog
+                    .iter()
+                    .find(|w| w.source == "AIM120.JT")
+                    .cloned()
+                {
+                    let rows = self.loadout.editable_stations();
+                    if let Some((index, slot)) = rows.iter().enumerate().find_map(|(i, r)| {
+                        r.weapon.filter(|_| r.hardpoint == 7).map(|slot| (i, slot))
+                    }) && self.loadout.select(slot, weapon).is_ok()
+                    {
+                        self.station = index;
+                        self.reveal_station();
+                    }
+                }
+            }
             "lobby-ordnance-gaps" => {
                 // The catalog's first and third weapons are in a gap, and
                 // the first is the one the player just tried.
@@ -1435,7 +1456,7 @@ impl Ordnance {
             (248, 388, 48, 15),
         );
         for (rocker, at) in self.rockers.iter().zip([(260, 408), (547, 356)]) {
-            let sprite = &self.sprites[&rocker.sprite()];
+            let sprite = &self.sprites[rocker.sprite()];
             c.blit(sprite, at, 0, sprite.width, 1.);
         }
         self.controls.extend([
@@ -2617,9 +2638,25 @@ fn validate_guns_only(
         if bridge.len() != 29 {
             return Err("guns-only validation lost wing members".into());
         }
+        let tank_fuel: f64 = load.configuration.external_fuel_lbs.iter().sum();
         for actor in bridge.mission().actors() {
             if actor.stations().len() != load.configuration.stations.len() {
                 return Err("guns-only validation lost stations".into());
+            }
+            // A default load's tanks start full and the systems know every
+            // engine, as the player's do (an F/A-18 or F-16C centreline tank).
+            let systems = &actor.flight().systems;
+            if systems.external_lbs() != tank_fuel
+                || systems.engine.count() != load.configuration.engines
+            {
+                return Err(format!(
+                    "{:?} AI default load starts with {:.0} lb external fuel and {} engines, not {tank_fuel:.0} lb and {}",
+                    load.aircraft,
+                    systems.external_lbs(),
+                    systems.engine.count(),
+                    load.configuration.engines
+                )
+                .into());
             }
             for (index, (actual, original)) in actor
                 .stations()

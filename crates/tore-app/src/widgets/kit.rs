@@ -138,8 +138,14 @@ pub struct Kit {
 }
 
 /// The retail fonts the multiplayer screens draw text in.
-const TEXT_FONTS: [&str; 7] = [
-    "PANELFNT", "PANELFND", "SMLFONT", "FONTACT", "FONTACD", "FONTDFT", "FONTDFD",
+const TEXT_FONTS: [(&str, &str); 7] = [
+    ("PANELFNT", "PANELFNT.PIC"),
+    ("PANELFND", "PANELFND.PIC"),
+    ("SMLFONT", "SMLFONT.PIC"),
+    ("FONTACT", "FONTACT.PIC"),
+    ("FONTACD", "FONTACD.PIC"),
+    ("FONTDFT", "FONTDFT.PIC"),
+    ("FONTDFD", "FONTDFD.PIC"),
 ];
 
 /// A picture found in one of the two maps.
@@ -269,22 +275,18 @@ impl Kit {
         let styles = self.text_styles.get_or_init(|| {
             TEXT_FONTS
                 .iter()
-                .map(|name| {
-                    (
-                        *name,
-                        self.sprites.get(&format!("{name}.PIC")).and_then(Style::of),
-                    )
-                })
+                .map(|(name, file)| (*name, self.sprites.get(*file).and_then(Style::of)))
                 .collect()
         });
         styles
             .iter()
-            .find(|(name, _)| {
+            .zip(TEXT_FONTS)
+            .find(|(_, (_, file))| {
                 self.sprites
-                    .get(&format!("{name}.PIC"))
+                    .get(*file)
                     .is_some_and(|sprite| std::ptr::eq(sprite, font))
             })
-            .and_then(|(_, style)| *style)
+            .and_then(|((_, style), _)| *style)
     }
 
     /// True when the kit has the piece (every required one is always there;
@@ -302,12 +304,12 @@ impl Kit {
     /// One piece by retail name, with or without `.PIC`.
     pub fn sprite(&self, name: &str) -> &Sprite {
         let key = if name.ends_with(".PIC") {
-            name.to_owned()
+            std::borrow::Cow::Borrowed(name)
         } else {
-            format!("{name}.PIC")
+            std::borrow::Cow::Owned(format!("{name}.PIC"))
         };
         self.sprites
-            .get(&key)
+            .get(&*key)
             .unwrap_or_else(|| panic!("the kit has no piece {key}"))
     }
 

@@ -517,9 +517,9 @@ struct Peer {
     mismatch_answered: u32,
     /// The ownship terms the plane took last tick.
     terms: Option<OwnshipTerms>,
-    /// The seat's picture at its last snapshot, for debris and pilots'
-    /// velocities.
-    picture: Option<tore_world::snapshot::RenderSnapshot>,
+    /// What the seat's next snapshot needs of its last picture: debris,
+    /// pilots' and surface units' places, for their velocities.
+    picture: Option<from_world::PictureMemory>,
     /// The mission ended while it was connected, and the host stops.
     ended: bool,
     /// Its place in the lobby.
@@ -682,21 +682,42 @@ pub struct Host {
     /// change or a second production pool.
     #[cfg(test)]
     snapshot_executor: Option<Arc<tore_workers::Executor>>,
+    /// Every seat takes a whole picture of its own and its entities as they
+    /// were made before slice S11, for the tests that compare the two.
+    #[cfg(test)]
+    legacy_pictures: bool,
 }
 
 /// Pure per-seat output prepared from the completed world before any name
 /// registration, packet budgeting, sending, or acknowledgement bookkeeping.
 struct PreparedSeat {
-    picture: tore_world::snapshot::RenderSnapshot,
+    picture: SeatPicture,
     readout: Option<tore_world::readout::CockpitReadout>,
 }
 
-fn prepare_seat(world: &World, plane: PlaneId) -> Option<PreparedSeat> {
+/// A seat's share of the tick's picture: its own plane beside the part
+/// every seat shares ([`from_world::SharedPicture`], slice S11), or a whole
+/// picture of its own where the seats share none.
+enum SeatPicture {
+    Own(from_world::SeatOwn),
+    Whole(Box<tore_world::snapshot::RenderSnapshot>),
+}
+
+/// `world`'s picture for the seat flying `plane`, beside `shared` when the
+/// tick has one.
+fn prepare_seat(
+    world: &World,
+    plane: PlaneId,
+    shared: Option<&from_world::SharedPicture>,
+) -> Option<PreparedSeat> {
     let cockpit = world
         .cockpits
         .iter()
         .find(|cockpit| cockpit.plane == plane)?;
-    let picture = from_world::seat_picture(world, plane)?;
+    let picture = match shared {
+        Some(_) => SeatPicture::Own(from_world::SeatOwn::of(world, plane)?),
+        None => SeatPicture::Whole(Box::new(from_world::seat_picture(world, plane)?)),
+    };
     // Combat's readout with the plane's share of the data link, as
     // `World::cockpit_readout` builds it (slice G7).
     let readout = world
@@ -731,10 +752,12 @@ pub(crate) enum Unforeseen {
 fn build_world(
     spec: &MissionSpec,
     resources: &BTreeMap<String, Vec<u8>>,
+    contrail_puffs: bool,
 ) -> Result<(journal::Driver, Manifest), HostError> {
     let reads = ResourceReads::new(resources);
-    let world = World::new(spec, &reads, Seating::Open)
+    let mut world = World::new(spec, &reads, Seating::Open)
         .map_err(|error| HostError::Mission(error.to_string()))?;
+    world.combat.set_contrail_puffs(contrail_puffs);
     Ok((journal::Driver::new(world), reads.manifest()))
 }
 
@@ -916,7 +939,7 @@ impl Host {
         let spec = king::with_settings(spec, &settings);
         let session_id = session_id(config.entropy);
         let spec = with_surface_seed(spec, session_id, 1);
-        let (world, manifest) = build_world(&spec, &resources)?;
+        let (world, manifest) = build_world(&spec, &resources, config.contrail_puffs)?;
         let mut server = Server::new(ServerConfig {
             protocol_version: PROTOCOL_VERSION,
             max_connections: config.max_players,
@@ -969,6 +992,8 @@ impl Host {
             test_designations: BTreeMap::new(),
             #[cfg(test)]
             snapshot_executor: None,
+            #[cfg(test)]
+            legacy_pictures: false,
             out: TickOutput::default(),
             stream: observe::Stream::default(),
             score: score::Scoring::default(),
@@ -1090,6 +1115,16 @@ impl Host {
             }
             (Life::Flying, None) => Duration::ZERO,
             _ => IDLE_WAKE,
+        }
+    }
+
+    /// What the host's loop is doing, for choosing how to nap between
+    /// polls: whether a mission is flying (tick deadlines) and whether any
+    /// connection is open (packets and keepalives to read).
+    pub fn wake_pace(&self) -> tore_net::Pace {
+        tore_net::Pace {
+            flying: matches!(self.life, Life::Flying),
+            connections: !self.peers.is_empty() || self.server.connections().next().is_some(),
         }
     }
 
@@ -3228,9 +3263,23 @@ impl Host {
             })
             .map(|(id, peer)| (*id, peer.lobby.id))
             .collect();
+        // The lobby is built once and differs only in whom it is for: a
+        // send changes nothing it is built from.
+        let mut lobby: Option<Box<LobbyState>> = None;
         for (id, you) in to {
-            let message = Message::Lobby(Box::new(self.lobby(you)));
+            let state = match lobby.take() {
+                Some(mut state) => {
+                    state.you = you;
+                    state
+                }
+                None => Box::new(self.lobby(you)),
+            };
+            let message = Message::Lobby(state);
             self.send(id, &message);
+            let Message::Lobby(state) = message else {
+                unreachable!("the lobby message")
+            };
+            lobby = Some(state);
             if let Some(peer) = self.peers.get_mut(&id) {
                 peer.lobby_stale = false;
                 peer.lobby_sent = Some(now);
@@ -3509,12 +3558,24 @@ impl Host {
         let owed = whole_ticks(now.saturating_sub(origin)) + 1;
         let behind = owed.saturating_sub(self.ticks_run);
         let run = behind.min(MAX_CATCH_UP_TICKS);
+        let mut worst = Duration::ZERO;
         for _ in 0..run {
             if !matches!(self.life, Life::Flying) {
                 return;
             }
             self.ticks_run += 1;
+            let started = Instant::now();
             self.tick(now);
+            worst = worst.max(started.elapsed());
+        }
+        if run > 0 {
+            // Slice S9: the shared workers fan out only while the host is
+            // slow or late (a tick over budget, or more than one tick owed).
+            tore_workers::observe(tore_workers::Load {
+                compression: 1.,
+                tick_cost: worst,
+                late: behind > 1,
+            });
         }
         if behind > MAX_CATCH_UP_TICKS {
             let dropped = behind - MAX_CATCH_UP_TICKS;
@@ -3567,11 +3628,10 @@ impl Host {
                 .and_then(|s| s.plane)
                 .and_then(|p| self.world.roster.plane(p))
                 .is_some_and(|p| {
+                    // A plane kept for its player (away or dropped) goes to
+                    // the AI; only a departure removes it.
                     self.spec.player_choice[MissionSpec::wing_index(p.slot.wing)]
-                        && !self
-                            .rejoin
-                            .reserved_plane(p.id)
-                            .is_some_and(|(_, kept)| kept.away)
+                        && self.rejoin.reserved_plane(p.id).is_none()
                 });
             if (!self.settings.ai() || choice_departure) && self.world.can_give_back(seat).is_ok() {
                 if let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) {
@@ -3682,6 +3742,8 @@ impl Host {
         // Stage K: the seats of players not yet back fly on (slice K4).
         self.resume_absent_inputs(tick, &mut journal);
 
+        // The host's AI test settings govern the simulation (slice S7b).
+        self.world.set_ai_test(self.config.ai_test);
         // One door into the world: the host steps through the journal's
         // driver, which adds the changes made since the last step and drains
         // the world after it, as a standby replays it.
@@ -3950,14 +4012,24 @@ impl Host {
             set.extend(own.sensors.contacts().iter().map(|c| c.id));
             set.extend(own.sensors.visual().iter().map(|c| c.id));
         }
+        // The part of the pictures every seat shares, built once (slice
+        // S11); none, and each seat takes a whole picture of its own.
+        #[cfg(test)]
+        let legacy = self.legacy_pictures;
+        #[cfg(not(test))]
+        let legacy = false;
+        let shared = (!legacy && ids.iter().any(|id| self.peers[id].plane.is_some()))
+            .then(|| from_world::SharedPicture::of(&self.world))
+            .flatten();
         // Only immutable pictures and readouts cross the worker boundary.
         // Preserve connection-ID order, snapshot phases, and all transport
         // mutations below. Fitted: two due seats amortize the dispatch.
         let mut prepared = executor.should_dispatch(ids.len(), 2).then(|| {
             let planes: Vec<_> = ids.iter().map(|id| self.peers[id].plane).collect();
             let world = &self.world;
+            let shared = shared.as_ref();
             executor.ordered_map(&planes, 2, |_, plane| {
-                plane.and_then(|plane| prepare_seat(world, plane))
+                plane.and_then(|plane| prepare_seat(world, plane, shared))
             })
         });
         let mut failed = Vec::new();
@@ -3966,13 +4038,13 @@ impl Host {
                 Some(pictures) => pictures[index].take(),
                 None => self.peers[&id]
                     .plane
-                    .and_then(|plane| prepare_seat(&self.world, plane)),
+                    .and_then(|plane| prepare_seat(&self.world, plane, shared.as_ref())),
             };
             let Some(picture) = picture else {
                 continue;
             };
             if self
-                .snapshot(id, tick, now, out, &tracked, picture)
+                .snapshot(id, tick, now, out, &tracked, picture, shared.as_ref())
                 .is_err()
             {
                 failed.push(id);
@@ -3983,6 +4055,7 @@ impl Host {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn snapshot(
         &mut self,
         connection: ConnectionId,
@@ -3991,6 +4064,7 @@ impl Host {
         out: &TickOutput,
         tracked: &BTreeMap<bool, BTreeSet<u32>>,
         prepared: PreparedSeat,
+        shared: Option<&from_world::SharedPicture>,
     ) -> Result<(), WireError> {
         let world = &self.world;
         let Some(peer) = self.peers.get_mut(&connection) else {
@@ -4013,23 +4087,55 @@ impl Host {
             .collect();
         let side_tracks = slot.and_then(|s| tracked.get(&(s.wing.side == Side::Friendly)));
         let own = cockpit.flight.position;
-        let entities: Vec<(Entity, _)> = from_world::entities(
-            &picture,
-            peer.picture.as_ref(),
-            plane.0,
-            &mut peer.wire.names,
-        )?
-        .into_iter()
-        .map(|entity| {
-            let mut relevance = from_world::distance_relevance(&entity, own, plane.0);
-            let aircraft = entity.state.kind() == EntityKind::Aircraft;
-            relevance.own_flight = aircraft && flight.contains(&entity.id);
-            relevance.friendly_tracked =
-                aircraft && side_tracks.is_some_and(|t| t.contains(&entity.id));
-            relevance.viewed = peer.inputs.view_subject == Some(entity.key());
-            (entity, relevance)
-        })
-        .collect();
+        let (entities, memory) = match (&picture, shared) {
+            (SeatPicture::Own(seat), Some(shared)) => from_world::seat_entities(
+                shared,
+                seat,
+                peer.picture.as_ref(),
+                &mut peer.wire.names,
+            )?,
+            #[cfg(test)]
+            (SeatPicture::Whole(picture), _) if self.legacy_pictures => {
+                let entities = from_world::entities_scan(
+                    picture,
+                    peer.picture.as_ref().and_then(|m| m.whole.as_deref()),
+                    plane.0,
+                    &mut peer.wire.names,
+                )?;
+                let mut memory = from_world::PictureMemory::of(picture);
+                memory.keys = entities.iter().map(Entity::key).collect();
+                memory.whole = Some(picture.clone());
+                (entities, memory)
+            }
+            (SeatPicture::Whole(picture), _) => {
+                let entities = from_world::entities_after(
+                    picture,
+                    peer.picture.as_ref(),
+                    plane.0,
+                    &mut peer.wire.names,
+                )?;
+                #[allow(unused_mut)]
+                let mut memory = from_world::PictureMemory::of(picture);
+                #[cfg(test)]
+                {
+                    memory.keys = entities.iter().map(Entity::key).collect();
+                }
+                (entities, memory)
+            }
+            (SeatPicture::Own(_), None) => return Err(WireError::Invalid("no shared picture")),
+        };
+        let entities: Vec<(Entity, _)> = entities
+            .into_iter()
+            .map(|entity| {
+                let mut relevance = from_world::distance_relevance(&entity, own, plane.0);
+                let aircraft = entity.state.kind() == EntityKind::Aircraft;
+                relevance.own_flight = aircraft && flight.contains(&entity.id);
+                relevance.friendly_tracked =
+                    aircraft && side_tracks.is_some_and(|t| t.contains(&entity.id));
+                relevance.viewed = peer.inputs.view_subject == Some(entity.key());
+                (entity, relevance)
+            })
+            .collect();
         let terms = out.terms.iter().find(|(p, _)| *p == plane).map(|(_, t)| *t);
         let exact = ExactState::of(&OwnPlane::of(cockpit), terms.as_ref());
         let (input_margin, inputs_repeated) = peer.inputs.report();
@@ -4068,7 +4174,7 @@ impl Host {
             Ok(sequence) => peer.wire.sent(sequence),
             Err(_) => peer.wire.discard(),
         }
-        peer.picture = Some(picture);
+        peer.picture = Some(memory);
 
         // The Seated message comes first: an exact state is held until it
         // is acknowledged (every reliable message acknowledged, since the

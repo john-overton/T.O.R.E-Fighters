@@ -26,7 +26,7 @@ AIRCRAFT = re.compile(
     r"\d+ tank placements; defaults and restart passed; catalog (\d+) normal, (\d+) Cheat$",
     re.M,
 )
-AUDIT = re.compile(r"^ordnance audit: 36 aircraft, 12 recovered weapon stations, \d+ weapon placements, "
+AUDIT = re.compile(r"^ordnance audit: 36 aircraft, 13 recovered weapon stations, \d+ weapon placements, "
                    r"175 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
 # radar aircraft carry nothing.
@@ -66,9 +66,9 @@ def scenarios() -> list[Scenario]:
             args=["--validate-ordnance", "--no-audio"],
             timeout=600,
             expect=[
-                r"ordnance audit: 36 aircraft, 12 recovered weapon stations, \d+ weapon placements, 175 tank placements, \d+ weapon and 9 tank records; passed",
+                r"ordnance audit: 36 aircraft, 13 recovered weapon stations, \d+ weapon placements, 175 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 166 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 168 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

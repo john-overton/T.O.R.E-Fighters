@@ -651,7 +651,7 @@ def check_soft_damage(work: Path, output: str) -> list[str]:
 
 def killed_probe_scenario() -> Scenario:
     """A recording whose writer is killed mid-flight must still read back as incomplete."""
-    binary = str(ROOT / "target" / "debug" / "tore-app")
+    binary = "{bin}"  # the tore-app under test, filled in by battery.run_steps
     return Scenario(
         name="replay-rec-killed-probe",
         lane="replay",

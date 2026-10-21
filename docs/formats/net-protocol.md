@@ -2273,7 +2273,7 @@ prefix it holds is consistent. Each record starts with its type (4 bits).
 | --- | --- | --- |
 | 0 | Appoint | The role (2 bits: 1 or 2); warm (1 bit); a Check every N ticks (varint, 600); when cold, a checkpoint every N ticks (varint, 1,200); the lobby mission's number (varint) |
 | 1 | Dismiss | Nothing: the game is no longer a standby and drops its copy |
-| 2 | Flight | The mission's number (varint), the FNV-1a 64 of the flight's spec text (64) and the [mission identity](checkpoint.md#restoring) (64): build the world fresh from the spec the player holds; the journal starts at its tick 0 |
+| 2 | Flight | The mission's number (varint), the FNV-1a 64 of the flight's spec text (64), the [mission identity](checkpoint.md#restoring) (64) and whether the host's world makes contrail puffs (1 bit, since protocol 53: a dedicated server's makes none): build the world fresh from the spec the player holds, making puffs as the host's does; the journal starts at its tick 0 |
 | 3 | Checkpoint begin | Its tick (32), its length in bytes (32), its chunks (16) |
 | 4 | Checkpoint chunk | Its index (16), its bytes (a long byte string, at most 4,096) |
 | 5 | Ticks | The first tick (32) and a count (8, 1 to 60), then each tick: the changes before the step (a count; each 1 bit: 0 scoring, then on or off, 1 bit; 1 a store cut, then the plane, a varint, and the revival weapons, 2 bits); the mission commands (a count, each by the checkpoint trait's coder of `MissionCommand`); the seat inputs (a count; each: the seat, 8 bits, then against that seat's previous input in the stream: the last command applied, 1 bit when the previous one's and else 16 bits; the controls, a bit when they lie on the wire's grid and then the Inputs section's frame against the previous one's, else each control by the trait, the gunsight's slew and zoom step included since protocol 21; the two command lists behind one presence bit; the view, 1 bit when the previous one's moved on, else 2 bits for none, as Inputs codes it (offset 8 bits, delay 6) or whole by the trait). Protocol 14 ([as built](#stage-k-as-built)) |
@@ -2488,9 +2488,13 @@ choice below is an agent decision.
 - **The stream a host sends** (slice K3; protocol 14 only for the seat
   inputs' coding above). After the
   Appoint: a checkpoint when flying (no Flight record), then every state
-  part, holding after the last tick stepped. Ticks records carry a
-  snapshot interval of ticks (four at 30 snapshots a second); any other
-  record sends the waiting ticks first. A Check goes at the first update at
+  part, holding after the last tick stepped. A Ticks record carries the
+  ticks stepped in one host update (usually one), sent at the end of that
+  update with the snapshots of those ticks, so a host killed between two
+  updates has sent every tick it showed its players (*battery fix,
+  2026-10-20:* it used to carry a snapshot interval of ticks, and a host
+  killed with half an interval waiting lost it); any other record sends
+  the waiting ticks first. A Check goes at the first update at
   or after each 600th tick, to warm standbys only. A cold standby's next
   checkpoint begins 1,200 ticks after its last began, or as soon as its last
   has gone out. A checkpoint's chunks go at its bytes over 8 seconds, at
@@ -3146,7 +3150,49 @@ again with an observer; the capture format did not change for it.
   older game must not join;
   52 since min-players and the King's force start (slices nr-minplayers,
   nr-lobbyui): the lobby settings list gains min-players, and the Lobby
-  message gains the force-start seconds, so an older game must not join.
+  message gains the force-start seconds, so an older game must not join;
+  53 since the optimization run (slices S7b, S9 and S11): AI aircraft code
+  empty visual, map and received-radar lists by default (lean sensors), the
+  world checkpoint codes whether the world makes contrail puffs (a dedicated
+  server's makes none), and the standby stream's Flight record carries that
+  bit, so an older game must not join;
+  54 since optimization round 2 (slice r2-prof): AI aircraft observe at 60 Hz
+  by default (staggered, held observations carried forward at their velocity),
+  so a standby replaying the journal at an older default would part from the
+  host, and an older game must not join;
+  55 since the F-15C wing pylons (slice v2-f15): the F-15C gains a fifth
+  weapon station (its wing row takes a tank or one air-to-air missile), so its
+  configuration in the world checkpoint and its lobby loadout carry one more
+  station, and an older game must not join;
+  56 since the F-15C shoulder rails (slice v2-f15 follow-up): its twin
+  shoulder Sidewinders sit and release 0.85 ft either side of the pylon
+  instead of 1.75 ft, which changes where those rounds start, so an older game
+  must not join;
+  57 since the F-15C wing pylons moved inboard (slice v2-f15 second follow-up):
+  the shoulder rails are back at 1.75 ft either side of their pylon, and the
+  whole wing pylon assembly sits 11 ft from the centreline instead of 16.7 ft,
+  which moves those stores' release points, so an older game must not join;
+  58 since the F-15C wing pylons moved forward (slice v2-f15 forward pass): the
+  whole wing assembly sits 7 ft further forward, just behind the leading edge,
+  which moves those stores' release points again, so an older game must not
+  join;
+  59 since the AI jettison policy (slice bf-aijett): AI aircraft drop only
+  their external tanks entering a fight and keep their weapons, shedding
+  air-to-ground loads only to get home damaged, on fuel, or when losing a close
+  fight, which changes AI behaviour and the simulation, so an older game must
+  not join;
+  60 since the battery AI fixes (slice bf-ai): a drop-launched missile spares its
+  launcher until a second after its motor lights, the AI's terrain look-ahead
+  grows with excess speed, and an AI approach on its glide path no longer holds
+  high over rising ground, which changes the simulation, so an older game must
+  not join;
+  61 since AI default loads carry fuel (slice bf-aifuel): AI aircraft on their
+  default load start with their tanks full and their real engine count, and AI
+  endurance counts external fuel, which changes the simulation, so an older
+  game must not join;
+  62 since the steering adapter flies a damaged airframe (slice bf-final): an
+  AI's stick for a wanted load allows for lost lift and elevator authority,
+  which changes damaged AI flight, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

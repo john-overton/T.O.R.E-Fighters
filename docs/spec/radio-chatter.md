@@ -190,6 +190,12 @@ See [player release rules](missiles.md#player-release-advisories-and-maddog).
   2026-10-10); the victim's own "I'm hit" is unchanged.
 - **Guided weapon hits.** One of five: "Bullseye", "Impact!", "Oh, yeah!",
   "Alright!", "Good shot!". No further cooldown.
+- **One call per shot.** A missile bursting beside a formation damages every
+  aircraft its splash reaches, but its shooter calls one hit for the shot,
+  not one per aircraft: of one shooter's surviving victims in the same tick
+  only the first is announced (`opinionated`, agent decision, 2026-10-20;
+  splash itself is John's 2026-10-10 addition, so the original has no rule
+  here). Kill calls and each victim's own "I'm hit" are unchanged.
 - **Unguided weapon hits.** One of eight: "Bullseye", "He's taking damage",
   "Multiple hits", "Oh, yeah!", "He's getting fragged!", "Eat hot lead!",
   "Debris is flying!", "He's hurtin' now!". Global cooldown 4 seconds.

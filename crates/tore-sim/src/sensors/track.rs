@@ -3,9 +3,9 @@
 //! history and the received interference used by both detection and the scope.
 //! Timings are the authored values in docs/radar.md at the fixed 120 Hz cadence.
 use super::detection::{
-    Sighting, angular_coupling, clutter_exposure, effective_range_ft, infrared_range_ft,
-    interference_quotient, jammer_factor, look_down_factor, notch_factor, notch_speed_fps,
-    received,
+    LazySighting, Sighting, angular_coupling, clutter_exposure, effective_range_ft,
+    infrared_range_ft, interference_quotient, jammer_factor, look_down_factor, notch_factor,
+    notch_speed_fps, received,
 };
 use super::profile::{
     DEFAULT_RANGE_INDEX, JammerProfile, RANGE_LADDER_NMI, RadarProfile, SensorProfiles,
@@ -308,6 +308,26 @@ pub struct MapContact {
 /// only aircraft inside it.
 const FORWARD_VIEW_HALF_HEIGHT: f64 = std::f64::consts::FRAC_PI_6;
 const FORWARD_VIEW_HALF_WIDTH: f64 = 0.656_053; // atan(4/3 * tan 30 degrees)
+
+/// How one [`Sensors::step_with`] differs from the plain 120 Hz step. Only the
+/// AI test settings use anything but [`StepOptions::NORMAL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepOptions {
+    /// How many 120 Hz ticks this step stands for: 1 for a step every tick.
+    pub elapsed: u32,
+    /// Whether the visual channel and the map list are worked out. An AI
+    /// aircraft's visual list is read only by the player's wing orders,
+    /// which the lean setting answers another way.
+    pub visual: bool,
+}
+
+impl StepOptions {
+    /// One step per tick with every channel: what [`Sensors::step`] does.
+    pub const NORMAL: Self = Self {
+        elapsed: 1,
+        visual: true,
+    };
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sensors {
@@ -650,6 +670,45 @@ impl Sensors {
         targets: &[Observable],
         environment: &Environment<'_>,
     ) -> Vec<Event> {
+        self.step_with(observer, targets, environment, StepOptions::NORMAL)
+    }
+
+    /// [`Self::step`] with the AI test settings' options: one step standing
+    /// for several 120 Hz ticks (every count below advances by that many, so
+    /// a track takes the same time to acquire, a plot to go stale and a
+    /// trail sample to be taken), and no visual channel for an aircraft whose
+    /// visual list nothing reads. [`StepOptions::NORMAL`] is exactly `step`.
+    pub fn step_with(
+        &mut self,
+        observer: &Observer,
+        targets: &[Observable],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        self.step_targets(observer, targets, environment, options)
+    }
+
+    /// [`Self::step_with`] over references to the observables, for a caller
+    /// that holds them elsewhere (the AI reads its world's observables
+    /// without copying them).
+    pub fn step_with_refs(
+        &mut self,
+        observer: &Observer,
+        targets: &[&Observable],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        self.step_targets(observer, targets, environment, options)
+    }
+
+    fn step_targets(
+        &mut self,
+        observer: &Observer,
+        targets: &[impl std::borrow::Borrow<Observable>],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        let elapsed = options.elapsed.max(1);
         let mut events = Vec::new();
         self.radar_powered = observer.radar_powered;
         self.radar_failed = observer.radar_failed;
@@ -708,14 +767,14 @@ impl Sensors {
             if live.contains(&strobe.id) {
                 return true;
             }
-            *age += 1;
+            *age += elapsed;
             emitting && *age <= NOISE_FADE_STEPS
         });
-        let mut sorted: Vec<&Observable> = targets.iter().collect();
+        let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
         sorted.sort_by_key(|t| t.id);
         self.visual.clear();
         self.map_contacts.clear();
-        let visual = !observer.visual_failed;
+        let visual = !observer.visual_failed && options.visual;
         for target in &sorted {
             // Channels share a result only for the same ordered endpoint bits.
             // The local cache never crosses a tick, observer or worker.
@@ -725,13 +784,18 @@ impl Sensors {
                 obscured: &obscured,
             };
             let environment = &query;
-            let sensed = channel
-                .filter(|_| air_picture)
-                .and_then(|channel| self.observe(observer, target, channel, environment));
+            // Both channels read one sighting, worked out only if a range
+            // test leaves the target in reach.
+            let sighting = LazySighting::new(observer.position, &observer.basis, target.position);
+            let sensed = channel.filter(|_| air_picture).and_then(|channel| {
+                self.observe(observer, target, channel, &sighting, environment)
+            });
             let seen = visual
-                .then(|| self.observe(observer, target, Channel::Visual, environment))
+                .then(|| self.observe(observer, target, Channel::Visual, &sighting, environment))
                 .flatten();
-            if let Some(contact) = seen.as_ref().or(sensed.as_ref()) {
+            if options.visual
+                && let Some(contact) = seen.as_ref().or(sensed.as_ref())
+            {
                 self.map_contacts.push(MapContact {
                     contact: *contact,
                     identified: seen.is_some(),
@@ -746,8 +810,13 @@ impl Sensors {
         }
         // Selection survives only while the radar or infrared scope still
         // holds the contact; seeing it no longer keeps it (John, 2026-09-23).
-        let kept =
-            |id: u32| self.keep_selection && targets.iter().any(|t| t.id == id && t.airborne);
+        let kept = |id: u32| {
+            self.keep_selection
+                && targets
+                    .iter()
+                    .map(|t| t.borrow())
+                    .any(|t| t.id == id && t.airborne)
+        };
         // The ground rules (the page list, the sight's track, a ground object
         // in view) keep a ground selection; `step_ground` decides them.
         let ground_kept = |id: u32| {
@@ -772,7 +841,7 @@ impl Sensors {
                 && self.contact(id).is_some_and(|c| c.track_eligible)
         });
         if eligible {
-            self.acquisition = self.acquisition.saturating_add(1);
+            self.acquisition = self.acquisition.saturating_add(elapsed);
             if self.acquisition >= ACQUISITION_STEPS && self.acquired != self.selected {
                 self.acquired = self.selected;
                 events.push(Event::TrackAcquired(self.selected.expect("selected")));
@@ -803,21 +872,23 @@ impl Sensors {
             });
         }
         for plot in &mut self.plots {
-            plot.age += 1;
+            plot.age += elapsed;
         }
         self.plots
             .retain(|p| p.age <= STALE_STEPS && !self.contacts.iter().any(|c| c.id == p.id));
-        self.record_history(channel);
-        self.tick += 1;
+        self.record_history(channel, elapsed);
+        self.tick += u64::from(elapsed);
         events
     }
-    fn record_history(&mut self, channel: Option<Channel>) {
+    fn record_history(&mut self, channel: Option<Channel>, elapsed: u32) {
         // History is collected whether or not it is displayed, so enabling it
-        // shows the recent observations immediately.
+        // shows the recent observations immediately. A step standing for
+        // several ticks takes the sample of the interval mark it passed.
+        let mark = (self.tick..self.tick + u64::from(elapsed))
+            .find(|tick| tick.is_multiple_of(HISTORY_INTERVAL_STEPS));
         if let Some(channel) = channel
-            && self.tick.is_multiple_of(HISTORY_INTERVAL_STEPS)
+            && let Some(tick) = mark
         {
-            let tick = self.tick;
             for contact in &self.contacts {
                 let trail = match self
                     .history
@@ -856,15 +927,27 @@ impl Sensors {
         observer: &Observer,
         target: &Observable,
         channel: Channel,
+        sighting: &LazySighting<'_>,
         environment: &Environment<'_>,
     ) -> Option<Contact> {
-        let sighting = Sighting::new(observer.position, &observer.basis, target.position);
-        if !sighting.distance_ft.is_finite() {
+        let distance_ft = sighting.distance_ft;
+        if !distance_ft.is_finite() {
             return None;
         }
+        // Every effective range is at most its volume's nominal maximum (or
+        // zero), and a contact needs the distance within the search or the
+        // track range: a target beyond both maxima is never a contact, and
+        // nothing below would change that, so the angles are not worked out.
+        let beyond = |search: &super::profile::Volume, track: &super::profile::Volume| {
+            distance_ft > search.maximum_ft.max(0.) && distance_ft > track.maximum_ft.max(0.)
+        };
         let (search, track) = match channel {
             Channel::Radar => {
                 let radar = self.profiles.radar.as_ref()?;
+                if beyond(&radar.search, &radar.track) {
+                    return None;
+                }
+                let sighting = sighting.get();
                 let to_observer: Vector =
                     std::array::from_fn(|i| observer.position[i] - target.position[i]);
                 let effective = target.signature.effective_radar(
@@ -878,12 +961,12 @@ impl Sensors {
                 let relative = effective / 100.;
                 let height = target.position[1]
                     - (environment.ground)(target.position[0], target.position[2]);
-                let clutter = clutter_exposure(&sighting, height);
+                let clutter = clutter_exposure(sighting, height);
                 let look_down = look_down_factor(radar.look_down, clutter);
                 let notch = notch_factor(
                     &radar.notch,
                     clutter,
-                    notch_speed_fps(&sighting, target.velocity),
+                    notch_speed_fps(sighting, target.velocity),
                 );
                 let coupled: f64 = self
                     .strobes
@@ -929,6 +1012,9 @@ impl Sensors {
             }
             Channel::Infrared => {
                 let infrared = self.profiles.infrared.as_ref()?;
+                if beyond(&infrared.search, &infrared.track) {
+                    return None;
+                }
                 let signature = target.signature.infrared;
                 (
                     (
@@ -945,6 +1031,9 @@ impl Sensors {
             // signature scaling, no interference and no weapon support.
             Channel::Visual => {
                 let visual = self.profiles.visual.as_ref()?;
+                if beyond(&visual.search, &visual.track) {
+                    return None;
+                }
                 (
                     (&visual.search, visual.search.maximum_ft),
                     (&visual.track, visual.track.maximum_ft),
@@ -953,6 +1042,7 @@ impl Sensors {
             // The HARM page lists its emitters in the ground list.
             Channel::Harm => return None,
         };
+        let sighting = sighting.get();
         let admits = |(volume, effective): (&super::profile::Volume, f64)| {
             volume.admits_geometry(
                 sighting.azimuth_rad,
@@ -992,11 +1082,11 @@ impl Sensors {
 /// still interferes; nothing here requires the emitter to be a known target.
 fn strobes(
     observer: &Observer,
-    targets: &[Observable],
+    targets: &[impl std::borrow::Borrow<Observable>],
     radar: &RadarProfile,
     environment: &Environment<'_>,
 ) -> Vec<Strobe> {
-    let mut sorted: Vec<&Observable> = targets.iter().collect();
+    let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
     sorted.sort_by_key(|t| t.id);
     let mut strobes = Vec::new();
     for target in sorted {

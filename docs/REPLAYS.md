@@ -1661,6 +1661,25 @@ are agent choices (2026-09-28).
   - Every part of the look comes from the replay tick, 60 fields a second,
     not the wall clock: a still or a paused picture is always the same, at
     any speed, while scrubbing and in `--replay-stills`.
+  - **24 pictures a second.** Opinionated, requested by John on 2026-10-19
+    ("it should run at 24 fps capped (because it's a VHS tape)"). The tape
+    layer (the world, the HUD, the recorder's lines and the tape effects) is
+    made 24 times a second on a fixed grid and shown again between those
+    pictures; the transport bar, labels, panels, cursor and menus are drawn
+    every frame at the window's own rate and stay responsive. Playback speed
+    and timing are unchanged: this is a presentation rate, not a playback
+    rate, and the other views keep the frame rate from the Graphics screen.
+    A paused replay whose moment, aircraft, zoom and trails and marks
+    choices have not changed makes no new picture at all, so a stopped tape
+    costs the interface and one CRT pass a frame (the picture is a function of
+    the tick, so a paused tape is a still). With the Escape menu or a screen
+    open the picture is still made at 24 a second, so a Graphics change shows.
+    Before this a frame spent about 40 ms of CPU at 4K placing the HUD on the
+    tape layer with a full-picture smoothing and blur; that now only works
+    where the HUD has symbols and the recorder's lines are kept until their
+    words change. The pictures are bit for bit the ones made before.
+    `crates/tore-app/src/replay/tape_pacing.rs` has the rule, the renderer
+    keeps the picture (`Renderer::repeat_console`).
 - <a id="sensor-view"></a>**Sensor View** (Shift+V; the right-click menu's
   **Sensor view** on an aircraft that has one). The [AC-130 sensor
   console](spec/target-window.md#sensor-console) from the selected
@@ -1755,7 +1774,10 @@ under the playhead:
   A wreck's smoke starts on the tick the unit died, wherever the playhead was
   put.
 - Smoke and contrails rebuilt from their release ticks with the
-  simulation's lifetimes, rise and caps; effects from their start ticks.
+  simulation's lifetimes, rise and caps (playing forward, only the puffs
+  released since the last tick drawn are read and the expired dropped; a seek
+  or reverse play reads the whole window, and the result is the same); effects
+  from their start ticks.
   Craters and crash-site fires, which can last the whole mission, are read
   once when the recording opens and kept to the simulation's caps.
 - The city fill as the recording left it at the tick shown (nr-fx3): its
@@ -1778,7 +1800,8 @@ under the playhead:
 - The player's wing vapor, rebuilt by stepping the vapor history over the
   last 250 ticks of recorded poses from one of live flight's own commit
   ticks, so it matches live flight exactly once two seconds of history
-  exist. Recordings keep attitudes, not turn rates, so the roll rate that
+  exist (playing forward it is stepped on pose by pose instead, to the same
+  history; a seek or reverse play rebuilds it). Recordings keep attitudes, not turn rates, so the roll rate that
   shortens the vapor is worked out from the attitudes a tick apart
   (fitted).
 - The weather, re-stepped one tick at a time as live flight steps it, with
@@ -2030,6 +2053,10 @@ starts with the interface hidden, as H hides it. `--replay-look-at` starts
 in the [object view](#object-view) from the selected aircraft toward that
 aircraft, ground object or weapon (a weapon by its projectile id, as the
 debug log's launch events give it).
+`--flight-view 13` starts in the [HUD camera](#hud-camera) and `14` in the
+[Sensor View](#sensor-view); with `--capture-replay OUT.ppm` the capture then
+saves the tape's picture (the world, the HUD and the tape effects, without
+the transport bar and labels) instead of the plain 3D view.
 `--replay-speed S` starts playing at a ladder speed, negative for reverse,
 and with `TORE_PERF_FRAMES=N` the viewer reports frame timings like live
 flight. `--replay-panels thought,telemetry,guidance,comms,menu` opens
@@ -2578,7 +2605,10 @@ headless workflow.
   in `tore-app/src/replay/convert.rs`: `aircraft_state`, `projectile_state`,
   `debris_states`, `escapee_state` and `EffectWatch` (effects are recorded
   once, when they start) on the way in; `snapshot` on the way out, which
-  draws the same picture through the same helpers; `difference` names the
+  draws the same picture through the same helpers, with the effects
+  `playing_effects` finds by replaying the simulation's 64-effect cap over
+  the recorded starts (an effect the game cut short at the cap stays gone,
+  even after others run out); `difference` names the
   first thing two snapshots disagree on beyond the precision above. The
   draw rules that hold for a whole flight (which models are loaded, which
   aircraft draw with them) are header extras, read with

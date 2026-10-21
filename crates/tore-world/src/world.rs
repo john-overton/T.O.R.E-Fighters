@@ -310,6 +310,35 @@ pub struct TickOutput {
     pub terms: Vec<(PlaneId, plane::OwnshipTerms)>,
 }
 
+impl TickOutput {
+    /// Empties the output for the next tick, as `*self = Self::default()`
+    /// would, but keeps what each queue grew to hold.
+    pub fn clear(&mut self) {
+        let Self {
+            cues,
+            commanded,
+            orders,
+            events,
+            releases,
+            outcomes,
+            journal,
+            emissions,
+            fault,
+            terms,
+        } = self;
+        cues.clear();
+        *commanded = 0;
+        orders.clear();
+        events.clear();
+        releases.clear();
+        outcomes.clear();
+        *journal = None;
+        emissions.clear();
+        *fault = None;
+        terms.clear();
+    }
+}
+
 impl World {
     /// Restarts the weather clock and every cockpit's turbulence from the
     /// launch conditions and their fixed seeds. The camera weather is the
@@ -786,7 +815,7 @@ impl World {
         out: &mut TickOutput,
         commands_applied: impl FnOnce(&World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
-        *out = TickOutput::default();
+        out.clear();
         let stepped = self.tick();
         self.check_inputs(mission, inputs)?;
         // Mission commands first, then each seat's commands in seat order on
@@ -851,7 +880,7 @@ impl World {
         // The ground pages scale their ranges by the weather's sensor effects.
         self.combat
             .state
-            .set_sensor_weather(self.terrain.weather.sensor_weather());
+            .set_sensor_weather_bands(self.terrain.weather.sensor_weather_bands());
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
             let cockpit = &mut self.cockpits[index];
@@ -1168,6 +1197,8 @@ impl World {
             // The radars painting each aircraft: a helicopter learns where
             // they stand (slice H4).
             bridge.set_painting(self.combat.surface.painting.clone());
+            // One ground ceiling for the world's terrain, shared with combat.
+            bridge.share_ground_ceiling(self.combat.ground_ceiling(&self.terrain));
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             // The A-G page lists aircraft only in an airfield sequence.
             for (id, attached) in bridge.airfield_attachment() {
@@ -1284,7 +1315,7 @@ impl World {
                 position: flight.position,
                 velocity: flight.velocity,
                 category: own.configuration().target_category,
-                airborne: !flight.supported_at(self.terrain.surface(x, z).height),
+                airborne: !flight.supported_at(self.terrain.surface_height(x, z)),
                 jammer: combat::launcher(flight).jammer,
             });
         }
@@ -1293,11 +1324,13 @@ impl World {
         let ground = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
         // Night and fog hide a target from a blind battery's optical sight.
         let daylight = !matches!(terrain.condition, Some(2 | 5));
+        let ceiling = self.combat.ground_ceiling(terrain);
         let scene = fire::Scene {
             tick: self.combat.state.tick(),
             aircraft: &aircraft,
             ground: &ground,
             daylight,
+            ceiling: Some(&ceiling),
         };
         // A live friendly supply truck within 0.1 mile sets each unit's
         // `supply` flag before the controllers read it, and its timers

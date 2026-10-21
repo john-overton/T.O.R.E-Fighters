@@ -87,6 +87,18 @@ impl Lookout {
         visibility_limit_ft: Option<f64>,
         terrain_clear: bool,
     ) -> VisualResult {
+        self.check_with(skill, target, visibility_limit_ft, || terrain_clear)
+    }
+
+    /// [`Self::check`] asking `terrain_clear` only for a target in visual
+    /// range, the one case whose answer depends on it.
+    pub fn check_with(
+        self,
+        skill: Experience,
+        target: [f64; 3],
+        visibility_limit_ft: Option<f64>,
+        terrain_clear: impl FnOnce() -> bool,
+    ) -> VisualResult {
         let delta: [f64; 3] = std::array::from_fn(|i| target[i] - self.position[i]);
         let distance = crate::attitude::dot(delta, delta).sqrt();
         let limit = visibility_limit_ft.unwrap_or(f64::INFINITY);
@@ -96,7 +108,7 @@ impl Lookout {
         {
             return VisualResult::OutOfRange;
         }
-        if !terrain_clear {
+        if !terrain_clear() {
             return VisualResult::Terrain;
         }
         let in_cone = |axis: [f64; 3]| {
@@ -163,6 +175,20 @@ pub struct Snapshot {
     pub first_observed_tick: u64,
     pub last_observed_tick: u64,
     pub source_ticks: SourceTimestamps,
+}
+
+/// Where a held observation's target is at `tick`: the observed position
+/// carried on at the observed velocity for the ticks since it was observed
+/// (a slower AI observation rate holds observations between its
+/// observations). An observation made at `tick` is its own position, bit
+/// for bit, so the default rate, which observes every tick, is unchanged.
+pub fn held_position(snapshot: &Snapshot, tick: u64) -> [f64; 3] {
+    let ticks = tick.saturating_sub(snapshot.last_observed_tick);
+    if ticks == 0 {
+        return snapshot.target.position;
+    }
+    let seconds = ticks as f64 / 120.;
+    std::array::from_fn(|i| snapshot.target.position[i] + snapshot.velocity[i] * seconds)
 }
 
 impl Snapshot {
@@ -420,6 +446,22 @@ mod tests {
             velocity: [1.0, 2.0, 3.0],
             source,
         }
+    }
+
+    #[test]
+    fn a_held_observation_is_carried_on_at_its_velocity() {
+        let mut snapshot = Snapshot::new(40, observation(7, 2, ObservationSource::Radar));
+        snapshot.target.position = [-0.0, 1e-300, 5_000.];
+        // Observed this tick: the observed position, bit for bit.
+        assert_eq!(
+            held_position(&snapshot, 40).map(f64::to_bits),
+            snapshot.target.position.map(f64::to_bits)
+        );
+        // Two ticks later at 1, 2 and 3 ft/s.
+        assert_eq!(
+            held_position(&snapshot, 42),
+            [2. / 120., 1e-300 + 4. / 120., 5_000. + 6. / 120.]
+        );
     }
 
     #[test]

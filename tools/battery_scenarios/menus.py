@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from battery import Scenario, Step
+from battery_scenarios._strips import ground_airport
 
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
 
@@ -379,7 +380,7 @@ def scenarios() -> list[Scenario]:
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3403 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 13 recovered weapon stations, 3407 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -631,6 +632,8 @@ def scenarios() -> list[Scenario]:
     for a, state in (
         ("f16c", "ordnance-authored-tank"),
         ("f16c", "ordnance-tip-amraam"),
+        # The Eagle's wing pylons take an AIM-120 in place of a tank (John, 2026-10-20).
+        ("f15", "ordnance-wing-amraam"),
         ("f16c", "ordnance-pod"),
         ("f16c", "ordnance-pod-yellow"),
         # The F-4B's centreline gun pod (John, 2026-10-16), in place of its four Sidewinders.
@@ -797,7 +800,11 @@ def scenarios() -> list[Scenario]:
         name = f"menus-window-terrain-{theater.lower()}-{WEATHER_NAMES[condition]}-{'ground' if ground else 'air'}-{aircraft}"
         args = ["--theater", theater, "--weather-condition", str(condition), "--aircraft", aircraft]
         if ground:
-            args += ["--ground-start", "1"]
+            # The first airport Blue may start at: --ground-start refuses an
+            # enemy field (6c83d6c1), and UKR's airport 1 is Redfor.
+            airport = ground_airport(theater, 1)
+            assert airport is not None, f"{theater} has no Blue ground start"
+            args += ["--ground-start", str(airport)]
         return Scenario(
             name=name,
             lane="menus",
@@ -817,7 +824,10 @@ def scenarios() -> list[Scenario]:
         for theater in ("UKR", "KURILE", "PGU", "VLA"):
             out.append(terrain_scenario(theater, condition, False, AIRCRAFT[n % 14]))
             n += 1
-    for theater in ("UKR", "TVIET"):
+    # Ground starts in a temperate and a tropical theater. North Vietnam was
+    # the tropical one until fields took their runway's side (6c83d6c1): Blue
+    # has no field there, so Cuba (Blue's Guantanamo) stands in.
+    for theater in ("UKR", "CUB"):
         for condition in range(6):
             out.append(terrain_scenario(theater, condition, True, AIRCRAFT[n % 14]))
             n += 1

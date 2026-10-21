@@ -305,7 +305,7 @@ impl Library {
         palette: &[[u8; 3]; 256],
     ) {
         let source_first = first(pages);
-        let baked = tore_workers::shared().ordered_map(&self.meshes, 2, |_, mesh| {
+        let baked = tore_workers::bulk().ordered_map(&self.meshes, 2, |_, mesh| {
             let vertices = &self.vertices
                 [mesh.range.start as usize * FLOATS..mesh.range.end as usize * FLOATS];
             (0..4)

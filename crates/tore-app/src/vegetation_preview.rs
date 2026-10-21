@@ -16,7 +16,8 @@
 //!
 //! Every shot's camera is written to `cameras.txt`; `TORE_VEG_PREVIEW_CAMERAS`
 //! renders such a file's cameras instead, so another build can take the
-//! same pictures.
+//! same pictures; with `TORE_VEG_PREVIEW_STATIC=1` those pictures include
+//! the theater's static ground objects, and `=list` prints each one's box.
 
 use crate::{AppResult, camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::{io::Write, path::Path, time::Instant};
@@ -1731,17 +1732,63 @@ fn replay_cameras(
             let mut view =
                 pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
             view.set_shown(std::env::var("TORE_SEAM_SURFACE_ONLY").as_deref() != Ok("1"));
+            // The theater's static ground objects (airports, buildings,
+            // sites) standing, as a mission starts them.
+            if std::env::var("TORE_VEG_PREVIEW_STATIC").as_deref() == Ok("1") {
+                let geometry = std::sync::Arc::clone(
+                    scenery.static_geometry_where(&std::collections::BTreeSet::new()),
+                );
+                view.sim.airports(&view.device, &view.queue, &geometry);
+            }
+            // `list`: print each placement's box (feet), to find scenes.
+            if std::env::var("TORE_VEG_PREVIEW_STATIC").as_deref() == Ok("list") {
+                let geometry = std::sync::Arc::clone(
+                    scenery.static_geometry_where(&std::collections::BTreeSet::new()),
+                );
+                for range in &geometry.placements {
+                    let v = &geometry.vertices[range.start as usize * 10..range.end as usize * 10];
+                    let b = crate::terrain_chunks::Bounds::of_vertices(v);
+                    println!(
+                        "placement {} {:.0} {:.0} {:.0} {:.0} {:.0} {:.0} {}",
+                        cam.code,
+                        b.min[0],
+                        b.min[1],
+                        b.min[2],
+                        b.max[0],
+                        b.max[1],
+                        b.max[2],
+                        range.len() / 3
+                    );
+                }
+            }
             current = Some((cam.code.clone(), world, scenery, view));
         }
         let (_, world, scenery, view) = current.as_mut().expect("built above");
         let camera = cam.camera();
         let ms = view.time(&camera, world, scenery)?;
+        // With TORE_VEG_GPU_TIMING=1, also the GPU's own time: the median
+        // of seven eight-frame means from timestamp queries.
+        let mut gpu = Vec::new();
+        if std::env::var("TORE_VEG_GPU_TIMING").as_deref() == Ok("1") {
+            for _ in 0..7 {
+                gpu.extend(view.gpu_time(&camera, world, scenery)?);
+            }
+            gpu.sort_by(f64::total_cmp);
+        }
         let pixels = view.pixels(&camera, world, scenery)?;
         write_png(out, &format!("{}.png", cam.name), size, &pixels)?;
-        println!("  {}: {ms:.2} ms", cam.name);
+        match gpu.get(gpu.len() / 2) {
+            Some(g) => println!("  {}: {ms:.2} ms, gpu {g:.3} ms", cam.name),
+            None => println!("  {}: {ms:.2} ms", cam.name),
+        }
     }
     Ok(())
 }
+
+/// What `--vegetation-art` says for an import made before the retail
+/// vegetation shapes and textures were kept (vegetation pass 3, 3804ce10).
+const VEGETATION_ART_MISSING: &str =
+    "vegetation art: the import predates the retail vegetation art; re-import media";
 
 /// `--vegetation-art OUT`: every retail vegetation and rock texture of the
 /// import as a PNG through the Ukraine reference palette, the cutout (index
@@ -1759,6 +1806,10 @@ pub fn art() -> AppResult<()> {
     let palette = tore_world::city::mask::reference_palette(resources, &environment.map)
         .ok_or("no reference palette")?;
     let art = crate::vegetation::art();
+    if art.is_empty() {
+        // The game falls back without them; this audit has nothing to read.
+        return Err(VEGETATION_ART_MISSING.into());
+    }
     let mut names: Vec<(&String, &Vec<u8>)> = art.iter().collect();
     names.extend(
         resources
@@ -2633,5 +2684,79 @@ mod grass_camera_tests {
             atlas.kind_at(edge.x as i64 + 8, edge.z as i64),
             crate::vegetation::Kind::Grass
         );
+    }
+}
+
+#[cfg(test)]
+mod blade_pass_tests {
+    use super::*;
+
+    /// The grass candidate pass (one compute thread per candidate, then an
+    /// indirect draw of the grown blades) draws the same blades as the
+    /// vertex path, which evaluates every candidate in each vertex: over a
+    /// real meadow, close and at the grass distance, both paths render the
+    /// same picture to within floating-point noise, and the pass grew
+    /// blades.
+    fn blades(view: &mut View) -> &mut crate::vegetation::grass::gpu::Blades {
+        view.sim.vegetation.as_mut().unwrap().blades_mut()
+    }
+
+    #[test]
+    #[ignore = "requires a GPU adapter and TORE_DATA_DIR pointing to a full import"]
+    fn gpu_candidate_pass_matches_the_vertex_path() {
+        let assets = crate::reel::load_assets().unwrap();
+        let resources = &assets.theater_resources;
+        for code in ["UKR", "TVIET"] {
+            let world =
+                Terrain::for_mission(resources, code, Some(0), &overrides([12, 0]).unwrap())
+                    .unwrap();
+            let scenery = Scenery::build(resources, &world).unwrap();
+            let atlas = crate::vegetation::Atlas::build(resources, &world)
+                .unwrap()
+                .unwrap();
+            let spots = crate::vegetation::spots(&atlas, &world);
+            let spot = spots
+                .iter()
+                .find(|s| s.label == "meadow" || s.label == "field")
+                .expect("a meadow or field");
+            let size = [640, 360];
+            let mut view = pollster::block_on(View::new(
+                &scenery,
+                size,
+                options(crate::graphics::VegDensity::High),
+                false,
+            ))
+            .unwrap();
+            for (height, pitch) in [(6., 12.), (30., 4.), (450., 40.)] {
+                let mut scenery = Scenery::build(resources, &world).unwrap();
+                let camera = look_at(&world, spot, &shot("grass", "meadow", height, pitch, 0.));
+                scenery.resolve_palette(&world, camera.position[1]);
+                scenery.set_origin(camera.position);
+                blades(&mut view).set_vertex_only(false);
+                let listed = view.pixels(&camera, &world, &scenery).unwrap();
+                let grown = view
+                    .sim
+                    .vegetation
+                    .as_ref()
+                    .unwrap()
+                    .blades()
+                    .grown(&view.device, &view.queue);
+                blades(&mut view).set_vertex_only(true);
+                let direct = view.pixels(&camera, &world, &scenery).unwrap();
+                let changed = listed
+                    .chunks_exact(4)
+                    .zip(direct.chunks_exact(4))
+                    .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 2))
+                    .count();
+                println!(
+                    "{code} {height} ft: grown {grown:?}, {changed} pixels differ by more than 2"
+                );
+                assert!(grown.is_some_and(|n| n > 0) || height > 400.);
+                assert!(
+                    changed * 2000 < listed.len() / 4,
+                    "{code} {height} ft: {changed} pixels differ"
+                );
+            }
+        }
     }
 }

@@ -334,13 +334,16 @@ impl Loadout {
             {
                 return 0;
             }
-            if self.aircraft == AircraftId::F22
-                && row == Some(8)
-                && !matches!(
-                    w.source.as_str(),
-                    "AIM120.JT" | "AIM9B.JT" | "AIM9M.JT" | "AIM9X.JT"
-                )
-            {
+            // The F-22's inboard pair and the Eagle's wing pylons take a
+            // tank or air-to-air missiles: the mask's other classes (the
+            // Sparrow's, bombs) stay off them.
+            if matches!(
+                (self.aircraft, row),
+                (AircraftId::F22, Some(8)) | (AircraftId::F15, Some(7))
+            ) && !matches!(
+                w.source.as_str(),
+                "AIM120.JT" | "AIM9B.JT" | "AIM9M.JT" | "AIM9X.JT"
+            ) {
                 return 0;
             }
         }

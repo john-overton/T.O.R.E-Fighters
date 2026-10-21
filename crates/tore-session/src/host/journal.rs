@@ -84,6 +84,16 @@ impl Driver {
         }
     }
 
+    /// The host's AI test settings for the next step (slice S7b). Not
+    /// journaled: a host with settings off their defaults appoints no
+    /// standby (`Host::set_ai_test`), so no replay of the journal exists to
+    /// part from it.
+    pub(super) fn set_ai_test(&mut self, settings: tore_sim::ai::test_settings::AiTestSettings) {
+        if let Some(wings) = self.world.ai_wings.as_mut() {
+            wings.set_ai_test(settings);
+        }
+    }
+
     /// Scoring on or off ([`World::set_scoring`]), made at the next step.
     pub(super) fn set_scoring(&mut self, on: bool) {
         self.changes.push(Change::Scoring(on));
@@ -235,6 +245,7 @@ impl Host {
             mission: self.number,
             spec_hash: tore_codec::fnv1a64(self.spec_text.as_bytes()),
             identity: self.world.mission_identity(),
+            contrail_puffs: self.world.combat.contrail_puffs(),
         };
         self.journal.push(JournalRecord::Flight(record));
     }

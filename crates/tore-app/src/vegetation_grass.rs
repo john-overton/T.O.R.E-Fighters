@@ -38,6 +38,53 @@ pub fn candidates(density: VegDensity, radius: f32) -> u32 {
     LEVELS * side(density, radius).pow(2)
 }
 
+/// Feet added to each level's circle in [`grown_bound`]: far more than the
+/// rounding of the shader's single-precision blade and eye positions.
+const GROWN_MARGIN: f64 = 4.;
+
+/// The most blades the candidate pass can grow for an eye at `eye`
+/// (world x and z): per level, the cells whose blade square can reach
+/// inside that level's circle, less the cells a coarser level owns
+/// (`blade_candidate` in grass_blades.wgsl), and never more than the
+/// level's candidates. The grown list is sized to this instead of every
+/// candidate (round 2: about half the slots at High and 500 ft).
+pub fn grown_bound(density: VegDensity, radius: f32, eye: [f64; 2]) -> u32 {
+    let side = side(density, radius);
+    let s0 = f64::from(spacing(density));
+    let mut total = 0u64;
+    for level in 0..LEVELS {
+        let step = f64::from(1u32 << level);
+        let s = s0 * step;
+        // The shader's circle: min(radius, (side / 2 - 1) * spacing).
+        let r = f64::from(radius.min((side / 2 - 1) as f32 * (s as f32))) + GROWN_MARGIN;
+        // A cell k holds its blade in [k s, k s + s0) on each axis.
+        let mut count = 0u64;
+        let first = ((eye[1] - r) / s).floor() as i64 - 1;
+        let last = ((eye[1] + r) / s).floor() as i64 + 1;
+        for ky in first..=last {
+            let y0 = ky as f64 * s;
+            let dy = (y0 - eye[1]).max(eye[1] - (y0 + s0)).max(0.);
+            if dy >= r {
+                continue;
+            }
+            let w = (r * r - dy * dy).sqrt();
+            let lo = ((eye[0] - w - s0) / s).floor() as i64 + 1;
+            let hi = ((eye[0] + w) / s).ceil() as i64 - 1;
+            if hi < lo {
+                continue;
+            }
+            let mut n = (hi - lo + 1) as u64;
+            if level < LEVELS - 1 && ky.rem_euclid(2) == 0 {
+                // Both indices even: the coarser level's cell.
+                n -= (hi.div_euclid(2) - (lo - 1).div_euclid(2)) as u64;
+            }
+            count += n;
+        }
+        total += count.min(u64::from(side).pow(2));
+    }
+    total.min(u64::from(candidates(density, radius))) as u32
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Map {
     /// Origin in feet, width/height in 512 ft blocks. Each RGBA texel encodes
@@ -76,7 +123,7 @@ impl Map {
         let nz = w.rows.div_ceil(PAGE);
         let kinds: [Kind; 256] = std::array::from_fn(|i| atlas.kind_index(i as u8));
         let tiles: Vec<_> = (0..nx * nz).collect();
-        let built = tore_workers::shared().ordered_map(&tiles, 1, |_, &tile| {
+        let built = tore_workers::bulk().ordered_map(&tiles, 1, |_, &tile| {
             let mut bytes = vec![0; PAGE * PAGE * 4];
             // Lookup locality avoids repeating a BTree search and colour
             // classification for every texel of the same source picture.
@@ -356,6 +403,63 @@ mod tests {
             let fade_radius = (n / 2 - 1) as f32 * step;
             assert!(step - last > fade_radius + step);
         }
+    }
+    /// The candidates `blade_candidate` can grow at an eye, by its own
+    /// first two rejections in single precision: the coarser level's cells,
+    /// and the horizontal circle. Every grown blade is one of these.
+    fn in_circle(density: VegDensity, radius: f32, eye: [f32; 2]) -> u32 {
+        let side = side(density, radius);
+        let s0 = spacing(density);
+        let mut n = 0;
+        for level in 0..LEVELS {
+            let step = 1u32 << level;
+            let s = s0 * step as f32;
+            let center = eye.map(|e| (e / s).floor() as i32);
+            let r = radius.min((side / 2 - 1) as f32 * s);
+            for slot in 0..side * side {
+                let c: [i32; 2] = std::array::from_fn(|k| {
+                    (center[k] + [slot % side, slot / side][k] as i32 - (side / 2) as i32)
+                        * step as i32
+                });
+                let mask = (step * 2 - 1) as i32;
+                if level < 3 && c[0] & mask == 0 && c[1] & mask == 0 {
+                    continue;
+                }
+                let jitter = [17, 31].map(|salt| (hash(c, salt) >> 16) as f32 / 65536.);
+                let world: [f32; 2] =
+                    std::array::from_fn(|k| (c[k] as f32 + 0.075 + jitter[k] * 0.85) * s0);
+                let h = [world[0] - eye[0], world[1] - eye[1]];
+                if (h[0] * h[0] + h[1] * h[1]).sqrt() < r {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+    #[test]
+    fn the_grown_list_bound_holds_every_blade_in_the_circles() {
+        for density in VegDensity::ALL {
+            for radius in crate::graphics::GRASS_DISTANCES {
+                let radius = radius as f32;
+                for eye in [[0.25, -0.5], [-731.4, 77.9], [1_048_575.3, 812_345.8]] {
+                    let bound = grown_bound(density, radius, eye.map(f64::from));
+                    let exact = in_circle(density, radius, eye);
+                    assert!(
+                        exact <= bound,
+                        "{density:?} {radius} {eye:?}: {exact} > {bound}"
+                    );
+                    // Tight: the margin and blade squares add only rims.
+                    assert!(
+                        f64::from(bound) < f64::from(exact) * 1.08 + 200.,
+                        "{density:?} {radius}: {bound} for {exact}"
+                    );
+                }
+            }
+        }
+        // At High and the default 500 ft, about half the candidates.
+        let bound = grown_bound(VegDensity::High, 500., [1000.5, 2000.5]);
+        let all = candidates(VegDensity::High, 500.);
+        assert!(bound * 10 < all * 7, "{bound} of {all}");
     }
     #[test]
     fn grass_density_has_a_hard_vertex_budget() {

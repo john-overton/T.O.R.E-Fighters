@@ -29,6 +29,7 @@ mod blast_preview;
 mod c130_animation;
 mod camera;
 mod canvas_present;
+mod canvas_rows;
 mod celestial;
 mod city_fill_dump;
 mod city_fires;
@@ -69,6 +70,7 @@ mod flight_views;
 mod flight_watch;
 mod formation_trace;
 mod frame_gpu;
+mod frame_pacing;
 mod frame_rate;
 mod graphics;
 mod graphics_screen;
@@ -104,6 +106,7 @@ mod missile_sag;
 mod navigation;
 mod net;
 mod night_glow;
+mod night_sky;
 mod ocean;
 mod ordnance;
 mod ordnance_audit;
@@ -128,6 +131,7 @@ mod scope;
 mod seeker_view;
 mod sensor_console;
 mod sim_renderer;
+mod sky_mix;
 mod smoke_renderer;
 mod sound_prefs;
 mod sound_screen;
@@ -153,6 +157,7 @@ mod tape_file;
 mod target_info;
 mod target_preview;
 mod terrain_audit;
+mod terrain_chunks;
 mod terrain_colors;
 mod terrain_seams;
 mod ui_text;
@@ -162,6 +167,7 @@ mod variety_animation;
 mod variety_rotors;
 mod vegetation;
 mod vegetation_limits;
+mod vegetation_pages;
 mod vegetation_preview;
 mod vegetation_renderer;
 mod vegetation_shapes;
@@ -305,6 +311,13 @@ fn sync_stability(
         ));
     }
 }
+/// The most wall time the first running flight frame after a stopped one
+/// turns into ticks, seconds: one frame at 30 a second.
+const RESUME_MAX_ELAPSED: f64 = 1. / 30.;
+/// A flight frame that took longer than this, seconds, tells the workers'
+/// governor the loop is late (slice S9).
+const LATE_FRAME_SECONDS: f64 = 0.1;
+
 struct App {
     creator_loading_view: Option<loading::CreatorView>,
     network_loading_stage: Option<loading::Progress>,
@@ -358,6 +371,12 @@ struct App {
     rwr_warnings: rwr_tone::Warnings,
     /// The other aircraft's launches already sounded.
     launch_watch: audio::LaunchWatch,
+    /// Each loaded aircraft type's engine recordings, found once per set of
+    /// types for the tick presenter's loop sources.
+    engine_sounds: audio::EngineSoundsCache,
+    /// The spatial sound the ticks of this frame asked for, until the frame's
+    /// last tick is presented.
+    spatial_steps: Vec<audio::SpatialStep>,
     vapor: tore_sim::vapor::Vapor,
     /// Player blackout and redout, stepped with the simulation.
     g_effects: tore_sim::g_effects::GEffects,
@@ -446,6 +465,15 @@ struct App {
     head_look: [f32; 2],
     finished: bool,
     next_frame: Option<Instant>,
+    /// When a menu with a session open pumps the network and draws.
+    menu_pace: net::pace::MenuPace,
+    /// Frame pacing (`frame_pacing`): the capped rates' timer, whether a
+    /// stopped flight's picture has settled, whether the window is hidden,
+    /// and whether the last flight frame had its time stopped.
+    pacer: frame_pacing::Pacer,
+    stillness: frame_pacing::Stillness,
+    occluded: bool,
+    stopped_frame: bool,
     error: Option<Box<dyn Error>>,
     /// Where every flight's mission recording goes; `None` turns recording
     /// off (captures and diagnostics). See docs/REPLAYS.md.
@@ -641,6 +669,9 @@ struct TickPresenter<'a> {
     flight_music: &'a mut flight_music::Observer,
     rwr_warnings: &'a mut rwr_tone::Warnings,
     launch_watch: &'a mut audio::LaunchWatch,
+    engine_sounds: &'a mut audio::EngineSoundsCache,
+    /// The spatial sound the frame's ticks asked for so far.
+    spatial: &'a mut Vec<audio::SpatialStep>,
 }
 
 impl TickPresenter<'_> {
@@ -772,11 +803,13 @@ impl TickPresenter<'_> {
         }
         let frame = shared_tick_frame(self.world, input.seat, &out.cues, &shared);
         let (plane, flight) = (frame.plane.0, frame.flight);
-        let danger = tore_sim::ejection::assess(flight, |x, z| {
-            f64::from(self.world.terrain.height(x as f32, z as f32))
-        })
-        .is_some();
+        // The danger is the ejection warning's alone, so it is worked out
+        // only for a mixer that sounds it.
         if let Some(audio) = self.audio {
+            let danger = tore_sim::ejection::assess(flight, |x, z| {
+                f64::from(self.world.terrain.height(x as f32, z as f32))
+            })
+            .is_some();
             audio.ejection(frame.previous, flight, danger);
         }
         if let Some(audio) = self.audio {
@@ -798,14 +831,20 @@ impl TickPresenter<'_> {
             }
         }
         // Audio observes authoritative poses and consumes each emission once.
-        if let Some(audio) = self.audio {
-            let scene = flight_views::Scene::new(
-                &frame,
-                flight,
-                &self.world.combat,
-                self.world.ai_wings.as_ref(),
-                None,
-            );
+        if self.audio.is_some() {
+            // The listener's camera needs the other aircraft only for a view
+            // that looks at one.
+            let scene = if self.view_rig.needs_bodies(*self.flight_view) {
+                flight_views::Scene::new(
+                    &frame,
+                    flight,
+                    &self.world.combat,
+                    self.world.ai_wings.as_ref(),
+                    None,
+                )
+            } else {
+                flight_views::Scene::lean(&frame, flight, &self.world.combat)
+            };
             let listener_camera = self
                 .view_rig
                 .clone()
@@ -830,17 +869,19 @@ impl TickPresenter<'_> {
             // Every other aircraft's launches this tick (AI wings, enemies,
             // other players), heard from where they were fired.
             let others = self.launch_watch.fresh(&self.world.combat.state, plane);
-            audio.spatial_tick(
-                tore_sim::acoustics::Listener {
+            // The tick's own part of the spatial sound is kept for the end of
+            // the frame, when the sources and loops of its last tick are
+            // worked out once for all the ticks ([`audio::Audio::spatial_frame`]).
+            self.spatial.push(audio::SpatialStep {
+                listener: tore_sim::acoustics::Listener {
                     position: listener_camera.position,
                     right: basis.right,
                     view: *self.flight_view,
                     external: !self.view_rig.cockpit(*self.flight_view),
                     own: Some(plane),
                 },
-                &audio::spatial_sources(&self.world.combat.state, plane, flight),
-                &out.emissions,
-                &seat_releases(self.world, input.seat, &out.releases)
+                emissions: out.emissions.clone(),
+                launches: seat_releases(self.world, input.seat, &out.releases)
                     .into_iter()
                     .map(|(sound, weapon)| {
                         audio::Launch::new(sound, weapon.effects.max_sound_distance)
@@ -854,22 +895,11 @@ impl TickPresenter<'_> {
                         )
                         .with_gun(launch.gun)
                     }))
-                    .collect::<Vec<_>>(),
-                flight.position,
-                Some((flight.position, flight.velocity)),
-                &audio::loop_sources(
-                    frame.picture,
-                    &self
-                        .world
-                        .combat
-                        .dummy_types()
-                        .iter()
-                        .map(|kind| &**kind)
-                        .chain([&**self.hornet])
-                        .map(|model| (model.profile.id, audio::EngineSounds::of(&model.profile)))
-                        .collect::<Vec<_>>(),
-                ),
-            );
+                    .map(|launch| audio::OwnedLaunch::of(&launch))
+                    .collect(),
+                player_position: flight.position,
+                player_velocity: flight.velocity,
+            });
         }
         if let Some(recording) = &mut self.recorder {
             let releases = seat_releases(self.world, input.seat, &out.releases);
@@ -912,13 +942,17 @@ impl TickPresenter<'_> {
         let frame = shared_tick_frame(self.world, seat, &[], shared);
         let flight = frame.flight;
         let speed = flight.speed;
-        let scene = flight_views::Scene::new(
-            &frame,
-            flight,
-            &self.world.combat,
-            self.world.ai_wings.as_ref(),
-            None,
-        );
+        let scene = if self.view_rig.needs_bodies(*self.flight_view) {
+            flight_views::Scene::new(
+                &frame,
+                flight,
+                &self.world.combat,
+                self.world.ai_wings.as_ref(),
+                None,
+            )
+        } else {
+            flight_views::Scene::lean(&frame, flight, &self.world.combat)
+        };
         let weather_view = self
             .view_rig
             .camera(
@@ -2594,6 +2628,72 @@ impl App {
             }
         }
     }
+    /// The window's state for frame pacing. Scripted and measured runs,
+    /// captures and smoke tests are never throttled.
+    fn pace_window(&self) -> frame_pacing::Window {
+        let hidden = self.renderer.as_ref().is_some_and(|renderer| {
+            let size = renderer.window.inner_size();
+            size.width == 0 || size.height == 0
+        });
+        frame_pacing::Window {
+            focused: self.focused,
+            hidden: self.occluded || hidden,
+            automated: self.script.is_some()
+                || self.performance.measuring()
+                || self.capture_terrain.is_some()
+                || self.smoke_test,
+        }
+    }
+    /// When to draw again after a frame that wants `want`; None waits for
+    /// an event. The frame-rate counter keeps every view drawing while it
+    /// measures.
+    fn pace(&mut self, want: frame_pacing::Want) -> Option<Instant> {
+        let renderer = self.renderer.as_ref()?;
+        let limit = renderer.frame_limit();
+        let want = frame_pacing::counted(want, renderer.counter_shown());
+        let window = self.pace_window();
+        self.pacer.next(limit, want, window, Instant::now())
+    }
+    /// Whether the frame-rate counter is shown, which keeps every screen
+    /// drawing at the frame rate setting so it measures real frames.
+    fn counter_shown(&self) -> bool {
+        self.renderer.as_ref().is_some_and(|r| r.counter_shown())
+    }
+    /// Whether a redraw request arriving now waits for the frame timer
+    /// (`frame_pacing::too_soon`): with the counter shown under a capped rate,
+    /// events add no frames beyond the timer's.
+    fn redraw_too_soon(&self) -> bool {
+        let Some(renderer) = &self.renderer else {
+            return false;
+        };
+        frame_pacing::too_soon(
+            renderer.frame_limit(),
+            renderer.counter_shown(),
+            self.pace_window().automated,
+            self.next_frame,
+            Instant::now(),
+        )
+    }
+    /// What a flight wants after its frame: the next frame, or, while a
+    /// single-player flight is stopped and its picture has settled, nothing
+    /// until an event or the next notice expiring. `moving` is an overlay
+    /// that animated this frame.
+    fn flight_want(&mut self, moving: bool) -> frame_pacing::Want {
+        let pose = frame_pacing::Pose::of(&self.camera, self.flight_view);
+        let moving = moving
+            || !self.camera.keys.is_empty()
+            || self.mouse_look.is_some()
+            || self.flight_ui.map.open
+            || self.pace_window().automated
+            || self.renderer.as_ref().is_some_and(|r| r.counter_shown());
+        if self.stillness.still(self.flight_ui.stopped(), pose, moving) {
+            self.flight_ui
+                .notices_until()
+                .map_or(frame_pacing::Want::Nothing, frame_pacing::Want::At)
+        } else {
+            frame_pacing::Want::Live
+        }
+    }
     /// Applies the Graphics screen's pending changes and saves them, once
     /// they have settled (`graphics_screen::SETTLE` after the last one) or
     /// at once with `now`. Every change on the screen comes through here, so
@@ -3003,11 +3103,19 @@ impl App {
                     let automatic = self.quick.draft.values[18] == 0;
                     // Ready would say Starting flight. This load only prepares
                     // the loadout page, or hands the same bar to the mission.
-                    let job = loading::Job::continue_load(None, false, move |_| {
+                    let work = move |_: loading::Progress| {
                         aircraft::Airframe::load(&resources, id)
                             .map(|aircraft| loading::Prepared::Selection(Box::new(aircraft)))
                             .map_err(|e| e.to_string())
-                    });
+                    };
+                    // A custom loadout only opens the Load Ordnance page: the
+                    // creator stays up unless the load runs long, not a
+                    // photograph for a few frames.
+                    let job = if automatic {
+                        loading::Job::continue_load(None, false, work)
+                    } else {
+                        loading::Job::continue_from_menu(work)
+                    };
                     match job {
                         Ok(job) => {
                             self.mission_loading_progress = automatic.then(|| job.progress.clone());
@@ -3779,6 +3887,10 @@ impl ApplicationHandler for App {
                 diagnostics::stage_done();
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
+                let automated = self.pace_window().automated;
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.automate(automated);
+                }
                 if let Some(session) = self.connect.take() {
                     match session {
                         net::options::Session::Join(options) => self.start_session(options),
@@ -3821,6 +3933,12 @@ impl ApplicationHandler for App {
         if self.finished {
             return;
         }
+        self.note_menu_input(&event);
+        // With the frame-rate counter under a capped rate, the timer draws
+        // the frames: a request from an event waits for the next slot.
+        if matches!(event, WindowEvent::RedrawRequested) && self.redraw_too_soon() {
+            return;
+        }
         if matches!(event, WindowEvent::RedrawRequested)
             && let Some(renderer) = &mut self.renderer
         {
@@ -3839,9 +3957,7 @@ impl ApplicationHandler for App {
                 self.end_session(event_loop);
                 return;
             }
-            if matches!(event, WindowEvent::RedrawRequested) && self.world.0.is_some() {
-                self.net_tick(event_loop);
-            }
+            // The session is pumped from the event loop's wait (about_to_wait).
             if let Some(renderer) = &mut self.renderer {
                 if renderer.window.id() != id {
                     return;
@@ -3857,6 +3973,15 @@ impl ApplicationHandler for App {
                     WindowEvent::Focused(focused) => {
                         self.focused = focused;
                         self.input.context(true, focused);
+                    }
+                    WindowEvent::RedrawRequested
+                        if self
+                            .loading
+                            .as_ref()
+                            .is_some_and(|job| job.screen_kept(Instant::now())) =>
+                    {
+                        // The page the load started from stays on screen;
+                        // the photograph comes only if the load runs long.
                     }
                     WindowEvent::RedrawRequested => {
                         renderer.set_veil([0., 0.]);
@@ -3885,11 +4010,13 @@ impl ApplicationHandler for App {
                             &self.loading_pixels,
                             None,
                             Some(size),
+                            None,
                             frame_rate::Surface::Loading,
                         ) {
                             self.error = Some(error);
                             event_loop.exit();
                         }
+                        self.loading_next_frame();
                     }
                     _ => {}
                 }
@@ -3913,7 +4040,9 @@ impl ApplicationHandler for App {
         if matches!(event, WindowEvent::RedrawRequested)
             && self.renderer.as_ref().is_some_and(|r| r.window.id() == id)
         {
-            self.net_tick(event_loop);
+            if !self.net_pumped_in_wait() {
+                self.net_tick(event_loop);
+            }
             self.direct_tick(event_loop);
             self.internet_tick(event_loop);
         }
@@ -3991,12 +4120,15 @@ impl ApplicationHandler for App {
                         &self.loading_pixels,
                         None,
                         Some(size),
+                        None,
                         frame_rate::Surface::Loading,
                     ) {
                         self.error = Some(error);
                         event_loop.exit();
                     }
-                    renderer.window.request_redraw();
+                    // The next frame is asked for by about_to_wait, at 20 Hz,
+                    // or at the frame rate while the counter is shown.
+                    self.loading_next_frame();
                 }
                 return;
             }
@@ -4007,10 +4139,35 @@ impl ApplicationHandler for App {
         if renderer.window.id() != id {
             return;
         }
+        // A stopped flight waiting on a still picture draws again when
+        // anything happens, as soon as the frame rate allows.
+        if self.screen == Screen::Flight
+            && self.next_frame.is_none()
+            && !matches!(
+                event,
+                WindowEvent::RedrawRequested | WindowEvent::Occluded(true)
+            )
+        {
+            let limit = renderer.frame_limit();
+            let window = self.pace_window();
+            self.next_frame = self.pacer.soonest(limit, window, Instant::now());
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
         let action = match event {
             WindowEvent::CloseRequested => Action::Exit,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 renderer.resize();
+                // Minimised to nothing (Windows): a single-player flight
+                // pauses, as it does when the window loses focus.
+                let size = renderer.window.inner_size();
+                if (size.width == 0 || size.height == 0)
+                    && self.screen == Screen::Flight
+                    && self.script.is_none()
+                {
+                    self.flight_ui.pause_for_focus();
+                }
                 self.menu.state.cancel();
                 self.quick.cancel();
                 self.instruments.cancel_press();
@@ -4184,6 +4341,21 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(true) => {
                 self.focused = true;
+                // Back to full rate at once, not after the unfocused wait.
+                renderer.window.request_redraw();
+                Action::None
+            }
+            // Hidden (minimised or covered, where the platform says so):
+            // nothing is drawn until it shows again, and a single-player
+            // flight pauses as it does on focus loss. A session's flight
+            // keeps its network turns (`about_to_wait`).
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                if !occluded {
+                    renderer.window.request_redraw();
+                } else if self.screen == Screen::Flight && self.script.is_none() {
+                    self.flight_ui.pause_for_focus();
+                }
                 Action::None
             }
             WindowEvent::Focused(false) if self.script.is_none() => {
@@ -4504,6 +4676,8 @@ impl ApplicationHandler for App {
                 // The text the multiplayer screens drew this frame, for the
                 // renderer to draw sharp over the canvas.
                 let mut menu_text: Option<ui_text::Layer> = None;
+                // A screen over a flight that animated this frame.
+                let mut overlay_moving = false;
                 let mut animating = match self.screen {
                     Screen::Main => {
                         // The Replays screen covers the menu, so a menu
@@ -4527,8 +4701,10 @@ impl ApplicationHandler for App {
                             &mut menu::Canvas(&mut self.menu.pixels),
                         );
                         menu_text = ui_text::finish().filter(|_| drawn);
+                        // The lobby, Direct and Internet screens are drawn on
+                        // the menu pace (net::pace), not every frame.
                         let mut animating = if drawn {
-                            true
+                            false
                         } else {
                             self.menu.render()
                                 || self.direct.is_building()
@@ -4572,6 +4748,18 @@ impl ApplicationHandler for App {
                         } else {
                             (now - self.frame_time).as_secs_f64().min(0.25)
                         };
+                        // A stopped flight with a still picture draws only on
+                        // events, so its last frame can be long before the
+                        // resume. Every resume resets the clock; should one
+                        // not, the first running frame still owes no more
+                        // than a frame's time, as when stopped frames ran
+                        // continuously.
+                        let elapsed = if self.stopped_frame && !self.flight_ui.stopped() {
+                            elapsed.min(RESUME_MAX_ELAPSED)
+                        } else {
+                            elapsed
+                        };
+                        self.stopped_frame = self.flight_ui.stopped();
                         // A networked flight's ticks are the client session's.
                         let session = self.net_flight.is_some();
                         let steps = if session {
@@ -4592,6 +4780,7 @@ impl ApplicationHandler for App {
                             recording.session(&self.flight_ui);
                         }
                         let mut output = world::TickOutput::default();
+                        let ticks_started = Instant::now();
                         for _ in 0..steps {
                             // Navigation-page clicks become airport commands,
                             // from the state at the start of the tick.
@@ -4680,6 +4869,10 @@ impl ApplicationHandler for App {
                                 })
                                 .into_iter()
                                 .collect();
+                            // The Debug menu's AI test settings, from this tick.
+                            if let Some(wings) = self.world.ai_wings.as_mut() {
+                                wings.set_ai_test(self.flight_ui.ai_test);
+                            }
                             let stepped = self.world.step_with(
                                 &mission,
                                 std::slice::from_ref(&input),
@@ -4716,13 +4909,53 @@ impl ApplicationHandler for App {
                                 flight_music: &mut self.flight_music,
                                 rwr_warnings: &mut self.rwr_warnings,
                                 launch_watch: &mut self.launch_watch,
+                                engine_sounds: &mut self.engine_sounds,
+                                spatial: &mut self.spatial_steps,
                             }
                             .present(&input, &output);
                             if !presented {
                                 break;
                             }
                         }
+                        // The ticks' spatial sound, on the sources and loops
+                        // of the last of them.
+                        if let Some(audio) = &self.audio
+                            && !self.spatial_steps.is_empty()
+                        {
+                            let own = seat_cockpit(&self.world, SEAT);
+                            audio.spatial_frame(
+                                &self.spatial_steps,
+                                &audio::spatial_sources(
+                                    &self.world.combat.state,
+                                    own.plane.0,
+                                    &own.flight,
+                                ),
+                                &audio::loop_sources(
+                                    self.world.combat.render_snapshot(),
+                                    self.engine_sounds.of(self
+                                        .world
+                                        .combat
+                                        .dummy_types()
+                                        .iter()
+                                        .map(|kind| &**kind)
+                                        .chain([&*self.hornet])),
+                                ),
+                            );
+                        }
+                        self.spatial_steps.clear();
                         self.performance.ticks(steps, self.flight_ui.time_scale);
+                        // Slice S9: the shared workers fan out only while the
+                        // flight is compressed, a tick ran over its budget or
+                        // a frame ran long (over 100 ms).
+                        tore_workers::observe(tore_workers::Load {
+                            compression: if steps > 0 {
+                                self.flight_ui.time_scale
+                            } else {
+                                1.
+                            },
+                            tick_cost: ticks_started.elapsed() / steps.max(1) as u32,
+                            late: elapsed > LATE_FRAME_SECONDS,
+                        });
                         self.input.feedback_flush();
                         // In the sensor console the look keys and axes fly
                         // the console's autopilot (Input::frame), not the view.
@@ -5315,6 +5548,7 @@ impl ApplicationHandler for App {
                                     let result = if self.smoke_test {
                                         renderer
                                             .scene_pixels(
+                                                sim_renderer::ViewKind::Panel(page),
                                                 &camera,
                                                 &self.world.terrain,
                                                 &self.scenery,
@@ -5598,12 +5832,26 @@ impl ApplicationHandler for App {
                         self.instruments.hud_color =
                             cockpit_palette[usize::from(self.hornet.hud.primary_color)];
                         self.instruments.palette = cockpit_palette;
-                        self.flight_canvas.begin(
-                            renderer.flight_size(),
-                            &self.hornet,
-                            presented,
-                            &self.instruments,
-                        );
+                        // The map's opaque letterbox and the sensor console's
+                        // blank canvas, both below, cover every instrument window:
+                        // those frames start from a clear canvas without them.
+                        let map_open = self.flight_ui.map.open;
+                        let console_blank = console_on
+                            && self
+                                .instruments
+                                .combat
+                                .as_ref()
+                                .is_some_and(|c| c.gunsight.is_some());
+                        if map_open || console_blank {
+                            self.flight_canvas.clear(renderer.flight_size());
+                        } else {
+                            self.flight_canvas.begin(
+                                renderer.flight_size(),
+                                &self.hornet,
+                                presented,
+                                &self.instruments,
+                            );
+                        }
                         self.menu.pixels.fill(0);
                         let gyro_bank = self.flight_ui.bank_gyro.follow(
                             presented.bank,
@@ -5743,7 +5991,10 @@ impl ApplicationHandler for App {
                             &self.menu.pixels,
                             &cockpit_palette,
                         );
-                        self.menu.pixels.fill(0);
+                        // Only the HUD drawings above left anything in the layer.
+                        if self.flight_ui.hud && self.view_rig.cockpit(self.flight_view) {
+                            self.menu.pixels.fill(0);
+                        }
                         if self.view_rig.cockpit(self.flight_view)
                             && self.flight_ui.weapon_diagnostics_shown(self.flight_view)
                         {
@@ -5755,8 +6006,8 @@ impl ApplicationHandler for App {
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                             );
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
+                            self.menu.pixels.fill(0);
                         }
-                        self.menu.pixels.fill(0);
                         let aim_color = cockpit_palette[usize::from(self.hornet.hud.primary_color)];
                         if let Some(point) = easy_square {
                             self.flight_canvas.target_square(
@@ -5797,7 +6048,7 @@ impl ApplicationHandler for App {
                         // The sensor console replaces the cockpit, the HUD and the
                         // instrument windows with its own symbology; the map,
                         // menus and messages still draw over it below.
-                        if console_on
+                        if console_blank
                             && let Some(page) = self
                                 .instruments
                                 .combat
@@ -5835,7 +6086,8 @@ impl ApplicationHandler for App {
                                 overlay,
                                 size,
                             );
-                            self.flight_canvas.blank(size);
+                            // Only rows drawn on since the clear hold anything.
+                            self.flight_canvas.clear(size);
                         }
                         use tore_sim::g_effects::GEffects;
                         // The canvas shader veils the finished frame on the GPU.
@@ -5857,7 +6109,7 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if self.flight_ui.map.open {
+                        if map_open {
                             self.flight_ui.map.draw(
                                 &mut self.menu.pixels,
                                 &self.world.terrain,
@@ -5876,9 +6128,7 @@ impl ApplicationHandler for App {
                                 self.mission_markup.as_ref(),
                             );
                             // Opaque letterbox prevents the cockpit leaking around the map.
-                            for pixel in self.flight_canvas.pixels.chunks_exact_mut(4) {
-                                pixel.copy_from_slice(&[72, 72, 72, 255]);
-                            }
+                            self.flight_canvas.fill_opaque([72, 72, 72]);
                             self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                             self.menu.pixels.fill(0);
                         }
@@ -5987,6 +6237,16 @@ impl ApplicationHandler for App {
                             &mut self.flight_canvas,
                             &self.hornet.hud_font,
                         );
+                        // The layer is clear here unless one of these draws on it.
+                        let layer_drawn = self.flight_ui.menu
+                            || self.flight_ui.paused
+                            || self
+                                .net_flight
+                                .as_ref()
+                                .is_some_and(|f| f.respawn_menu.is_some())
+                            || self.controls.is_some()
+                            || self.graphics_screen.is_some()
+                            || self.sound_screen.is_some();
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
@@ -6011,7 +6271,7 @@ impl ApplicationHandler for App {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
                         if let Some(screen) = &mut self.sound_screen {
-                            screen.animate();
+                            overlay_moving |= screen.animate();
                             if screen.take_switch_sound()
                                 && let Some(audio) = &self.audio
                             {
@@ -6019,7 +6279,9 @@ impl ApplicationHandler for App {
                             }
                             screen.draw(&mut self.menu.pixels, &self.menu.sprites);
                         }
-                        self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
+                        if layer_drawn {
+                            self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
+                        }
                         if let Some(audio) = &self.audio {
                             // The tone follows the flight as the last tick left
                             // it, not the blended one the screen draws.
@@ -6106,6 +6368,9 @@ impl ApplicationHandler for App {
                 } else {
                     frame_rate::Surface::Menu
                 };
+                if self.screen == Screen::Flight {
+                    self.flight_canvas.prepare_upload();
+                }
                 match renderer.draw(
                     if self.screen == Screen::Flight {
                         &self.flight_canvas.pixels
@@ -6118,6 +6383,7 @@ impl ApplicationHandler for App {
                         &self.scenery,
                     )),
                     (self.screen == Screen::Flight).then_some(self.flight_canvas.size),
+                    (self.screen == Screen::Flight).then_some(&mut self.flight_canvas.pending),
                     readout,
                 ) {
                     Ok(true) if self.smoke_test => {
@@ -6156,20 +6422,21 @@ impl ApplicationHandler for App {
                     )
                 {
                     println!(
-                        "  rear mirror renders: {} (one per visible frame; no readback)",
+                        "  rear mirror renders: {} (every other visible frame; no readback)",
                         renderer.mirror_frames
                     );
                     self.finished = true;
                     event_loop.exit();
                 }
-                // Simulation views are paced by presentation, not an extra post-render sleep.
-                self.next_frame = animating.then(|| {
-                    if matches!(self.screen, Screen::Flight | Screen::Viewer) {
-                        Instant::now()
-                    } else {
-                        Instant::now() + Duration::from_millis(16)
-                    }
-                });
+                // Live views are paced by the frame rate choice: V-sync by
+                // presentation, the capped rates by a timer (`frame_pacing`).
+                let want = match self.screen {
+                    _ if !animating => frame_pacing::Want::Nothing,
+                    Screen::Flight => self.flight_want(overlay_moving),
+                    Screen::Viewer => frame_pacing::Want::Live,
+                    _ => frame_pacing::Want::Menu,
+                };
+                self.next_frame = self.pace(want);
                 return;
             }
             _ => return,
@@ -6212,6 +6479,9 @@ impl ApplicationHandler for App {
         // The Graphics screen's changes apply once they settle; this also
         // keeps its window size current after a resize.
         self.settle_graphics(false);
+        // A session outside flight is pumped here, on its own wake, not at
+        // the start of a redraw (net::pace).
+        self.pump_in_wait(event_loop);
         // Measure event-loop service, not the arrival of window events: a
         // minimized or untouched window can legitimately receive none.
         let preparing = self.loading.is_some()
@@ -6250,7 +6520,8 @@ impl ApplicationHandler for App {
         }
 
         if self.pending_host.is_some() {
-            if net::session::content_ready(&self.theater_resources) {
+            let ready = net::session::content_ready(&self.theater_resources);
+            if ready {
                 let (options, lobby) = self.pending_host.take().unwrap();
                 let name = options.name.clone();
                 match self.begin_hosting(options, lobby) {
@@ -6259,31 +6530,24 @@ impl ApplicationHandler for App {
                     Err(error) => self.message(error),
                 }
             }
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            self.loading_wait(event_loop, ready);
             return;
         }
 
         if self.pending_join.is_some() {
-            if net::session::content_ready(&self.theater_resources) {
+            let ready = net::session::content_ready(&self.theater_resources);
+            if ready {
                 let (join, label) = self.pending_join.take().unwrap();
                 self.start_join(join, &label);
             }
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            self.loading_wait(event_loop, ready);
             return;
         }
 
         if let Some(job) = &self.loading {
+            let mut finished = false;
             if let Some(result) = job.poll() {
+                finished = true;
                 let continuation = job.progress.clone();
                 self.loading = None;
                 match result {
@@ -6370,22 +6634,14 @@ impl ApplicationHandler for App {
                 }
                 self.frame_time = Instant::now();
             }
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            // The photo and text are drawn at 20 Hz; the job is still
+            // polled every 16 ms so a finished load starts at once.
+            self.loading_wait(event_loop, finished);
             return;
         }
         self.run_script(event_loop);
         if self.loading.is_some() || self.pending_join.is_some() || self.pending_host.is_some() {
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            self.loading_wait(event_loop, true);
             return;
         }
         // The replay viewer shows instead of the Replays screen, which stays
@@ -6397,6 +6653,13 @@ impl ApplicationHandler for App {
         }
         let paused = self.input_paused();
         self.input.context(paused, self.focused);
+        // Controllers are polled every 8 ms in flight, the replay viewer and
+        // the controls screen; the menus poll less often.
+        self.input.set_pace(
+            self.screen == Screen::Replay
+                || self.controls.is_some()
+                || (self.screen == Screen::Flight && !paused),
+        );
         let cockpit = self
             .world
             .cockpits
@@ -6523,11 +6786,36 @@ impl ApplicationHandler for App {
             if changed && let Some(renderer) = &self.renderer {
                 renderer.window.request_redraw();
             }
+            if changed {
+                self.menu_pace.activity(Instant::now());
+            }
         }
-        // A joined server needs a turn every few milliseconds, so while it is
-        // not the flight redrawing, the screen redraws about 60 times a second.
-        if self.net.is_some() && self.screen != Screen::Flight && self.next_frame.is_none() {
-            self.next_frame = Some(Instant::now() + Duration::from_millis(16));
+        // A menu with a session or a network screen is drawn when the pump
+        // brought news, after input, and on a slow heartbeat (net::pace).
+        // The frame-rate counter draws every screen continuously instead.
+        let paced = self.menu_paced();
+        if paced
+            && !self.counter_shown()
+            && self
+                .menu_pace
+                .redraw_due(Instant::now(), self.net_preparing())
+            && let Some(renderer) = &self.renderer
+        {
+            renderer.window.request_redraw();
+        }
+        // A session takes its turns between frames too: drawing may wait (a
+        // capped rate, an unfocused window, or a hidden one, which with
+        // V-sync on Wayland gets no redraws at all), the session's ticks,
+        // controls and keepalives do not. Menus are pumped above on the menu
+        // pace (net::pace), so this covers flight and the replay viewer.
+        if !self.net_pumped_in_wait()
+            && self.next_frame.is_none_or(|next| Instant::now() < next)
+            && self
+                .net
+                .as_ref()
+                .is_some_and(|session| session.next_wake() < Duration::from_micros(500))
+        {
+            self.net_tick(event_loop);
         }
         if self.next_frame.is_some_and(|next| Instant::now() >= next) {
             if let Some(renderer) = &self.renderer {
@@ -6538,7 +6826,15 @@ impl ApplicationHandler for App {
         let mut next = self
             .next_frame
             .map_or(self.input.next_poll, |n| n.min(self.input.next_poll));
-        if let Some(session) = &self.net {
+        if paced {
+            next = next.min(self.menu_pace.next_due(
+                Instant::now(),
+                self.net_preparing(),
+                self.net_pumped_in_wait(),
+            ));
+        } else if self.net_pumped_in_wait() {
+            next = next.min(self.menu_pace.next_pump());
+        } else if let Some(session) = &self.net {
             next = next.min(Instant::now() + session.next_wake());
         }
         if self.script.is_some() {
@@ -6730,6 +7026,10 @@ struct ProbeScript {
     /// by the handoff a networked Redfor player uses, parked at the Redfor
     /// field `--ground-start` names (slice CL-R).
     redfor: bool,
+    /// `--ai-observe-hz N` and `--ai-lean-sensors [on|off]` (slices S7b and
+    /// S9): the AI test settings, 60 Hz with lean sensors unless given. They also start a windowed
+    /// flight's Debug menu with these values.
+    ai_test: tore_sim::ai::test_settings::AiTestSettings,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -8712,6 +9012,12 @@ fn ai_probe_run(
     }
     bridge.configure_probe(script.researched, enemy_heading, world.wind())?;
     bridge.set_flight_model(script.ai_flight_model)?;
+    bridge.set_ai_test(script.ai_test);
+    if !script.ai_test.is_default() {
+        // Only a probe that asked for them says so: the default output is
+        // the probe's output of before the settings existed.
+        println!("AI probe test settings: {}", script.ai_test.describe());
+    }
     if script.blind_wing {
         bridge.blind_wingmen(ai_wings::PLAYER_ID);
     }
@@ -9038,6 +9344,9 @@ fn redfor_probe_run(
     // The mission builds its own terrain from the spec.
     drop(terrain);
     let mut mission = world::World::new(&spec, resources, world::Seating::Open)?;
+    if let Some(wings) = mission.ai_wings.as_mut() {
+        wings.set_ai_test(script.ai_test);
+    }
     let lead = mission
         .roster
         .planes()
@@ -9659,6 +9968,30 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                 flight.systems.engine.temperature,
                 flight.systems.pilot.wounded(),
                 flight.escape.is_some()
+            );
+        }
+        // What each aircraft still carries: AI jettison evidence
+        // (docs/spec/jettison.md). Output only; no decision reads it.
+        if let Some(config) = bridge.configuration(actor.id()) {
+            let stores: Vec<String> = actor
+                .stations()
+                .iter()
+                .filter_map(|s| {
+                    let station = config.stations.get(usize::from(s.station.0))?;
+                    let rounds = match s.rounds() {
+                        tore_sim::ai::weapon_service::Rounds::Finite(n) => n.to_string(),
+                        tore_sim::ai::weapon_service::Rounds::Unlimited => "inf".into(),
+                    };
+                    Some(format!("{} x{rounds}", station.weapon.hud_name))
+                })
+                .collect();
+            let tanks: u32 = config.tanks.iter().map(|t| u32::from(t.quantity)).sum();
+            println!(
+                "AI stores: actor={} tanks={tanks} external_fuel={:.0} payload={:.0} stations=[{}]",
+                actor.id(),
+                flight.systems.external_lbs(),
+                flight.payload_lbs,
+                stores.join(", ")
             );
         }
     }
@@ -10725,6 +11058,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         vegetation_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--city-layout-digest") {
+        city_fill_dump::digests()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-survey") {
         city_fill_dump::survey()?;
         return Ok(Outcome::Done);
@@ -10823,7 +11160,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             println!("{}", version::label());
         }
     }
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(1).peekable();
     let mut live_fire = false;
     let mut dummy_aircraft = Vec::new();
     let mut jammer_on = false;
@@ -11039,6 +11376,23 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err(usage.into());
                 }
                 probe_script.groups.push((group - 1, choice, survive));
+            }
+            "--ai-observe-hz" => {
+                let usage = "--ai-observe-hz needs 120, 60, 40, 30 or 20";
+                let hz: u32 = args.next().ok_or(usage)?.parse().map_err(|_| usage)?;
+                probe_script.ai_test = probe_script.ai_test.with_observation_hz(hz).ok_or(usage)?;
+            }
+            "--ai-lean-sensors" => {
+                // Bare means on; `on` or `off` follows when given.
+                let lean = match args.peek().map(String::as_str) {
+                    Some(word @ ("on" | "off")) => {
+                        let lean = word == "on";
+                        args.next();
+                        lean
+                    }
+                    _ => true,
+                };
+                probe_script.ai_test = probe_script.ai_test.with_lean_sensors(lean);
             }
             "--probe-fight" => {
                 let usage = "--probe-fight needs FRIENDLY:ENEMY, each 1..15";
@@ -11562,7 +11916,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     .next()
                     .ok_or("--flight-view needs 0..11")?
                     .parse::<u8>().map_err(|e| bad_number(&arg, &e))?;
-                if flight_view > flight_views::MISSILE {
+                // 13 and 14 are the replay's HUD camera and Sensor View.
+                if flight_view > flight_views::MISSILE
+                    && !matches!(flight_view, replay::tape_views::HUD_CAMERA | replay::tape_views::SENSOR)
+                {
                     return Err("--flight-view needs 0..11".into());
                 }
             }
@@ -11925,7 +12282,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             flag @ ("--anti-aliasing" | "--render-scale" | "--spotting-aid"
             | "--terrain-filtering" | "--building-distance" | "--building-detail"
             | "--vegetation-texture" | "--vegetation-texture-distance"
-            | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density") => {
+            | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density"
+            | "--shadows") => {
                 let value = args.next().ok_or(format!("{flag} needs a value"))?;
                 graphics_flags.push((flag.to_owned(), value));
             }
@@ -11987,7 +12345,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --gun-flash-preview OUT_DIR (first argument) renders the AC-130 muzzle flashes, gun light, blast smoke and 105 mm tracer offscreen by day, dusk and night, outside and through the gunsight camera (TORE_PREVIEW_THEATER picks the theater). --blast-preview OUT_DIR (first argument) renders a large ground explosion's shockwave ring through its two seconds, and a water explosion's, offscreen. --impact-preview OUT_DIR (first argument) renders weapon impacts side by side (20 mm, 105 mm, 250, 500 and 2,000 lb bombs) with their light, sparks and smoke, by day and at night, offscreen; add shockwave after OUT_DIR for a 500 lb bomb, a 2,000 lb bomb and an AGM-65G from 0.1 to 60 seconds (shockwave ring, vapor and lingering dust; TORE_PREVIEW_THEATER picks the theater, so its climate), or night-range for bombs and fires at night from 0.3 to 30 nm (the night glow; TORE_NIGHT_GLOW=0 for without). --replay-stills REPLAY FRAME_PLAN OUT_DIR (first argument) draws a recording's director frames offscreen as PNG files. --cockpit-sheet OUT_DIR [ID,ID,...] (first argument) renders every flyable aircraft's cockpit with live mirrors, its cockpit art with the mirror masks tinted, and two contact sheets, offscreen. --dome-sheet OUT_DIR (first argument) renders the E-3, IL-76 and E-2 radar domes at six ticks to show their turn, offscreen. --surface-preview OUT_DIR (first argument) writes contact sheets of the surface-unit shapes (ships, launchers, soldiers) and their damaged shapes from four sides, read from the retail archives without opening a window (add destroyed for each class beside its destroyed look). --surface-scene OUT_DIR THEATER STEM renders a ground target in game offscreen after --seconds, with --kill, --rails and --focus (docs/DEVELOPMENT.md). --hud-a2g-preview OUT_DIR (first argument) writes review frames and sheets of the HUD's bomb and rocket sights (CCIP, the level T, the rocket pipper, LOW and FRAG) without a window. --hud-guided-preview OUT_DIR (first argument) writes review frames of the guided weapons' release range scale (JDAM, laser bomb and laser missile) without a window. --sight-preview heading,elevation,ticks holds the AC-130 sight at a body-relative look and runs the sim that many ticks first, so --capture-flight shows the aim-point box and diamond (add --combat-command sight-pin for a pinned point). --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --snapshot-state map (or map-lobby) draws the creator's Map of both sides' starts and the objective area, and enemy-ground-start, enemy-ground-start-auto and enemy-airports show the Enemy start rows; --validate-creator checks all imported loadouts and restart without a display; --validate-ordnance checks source station coverage, weapon/tank availability and saved loads for every reviewed aircraft; --validate-wing-loadout OUT_DIR records a four-ship F-16 custom load before and after sharing and checks ground starts and restart.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons tanks; Ctrl-Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --gunsight-probe pin-orbit|fire-no-target|track-out-of-arc (with --aircraft ac130) runs a scripted AC-130 gunsight check on flat ground and prints PASS or FAIL lines, and --gunsight-dump PATH writes the orbit's gun train as CSV; --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..288000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-redfor (with --probe-wing-only and --ground-start at a Redfor field) seats the probe's wing on Redfor, as Enemy Wing 1 of an open mission whose parked lead the probe takes by handoff; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target|sort orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-blind-wing takes the sensors from the player's wingmen, so only the data link can show them an enemy; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|75|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --gun-flash-preview OUT_DIR (first argument) renders the AC-130 muzzle flashes, gun light, blast smoke and 105 mm tracer offscreen by day, dusk and night, outside and through the gunsight camera (TORE_PREVIEW_THEATER picks the theater). --blast-preview OUT_DIR (first argument) renders a large ground explosion's shockwave ring through its two seconds, and a water explosion's, offscreen. --impact-preview OUT_DIR (first argument) renders weapon impacts side by side (20 mm, 105 mm, 250, 500 and 2,000 lb bombs) with their light, sparks and smoke, by day and at night, offscreen; add shockwave after OUT_DIR for a 500 lb bomb, a 2,000 lb bomb and an AGM-65G from 0.1 to 60 seconds (shockwave ring, vapor and lingering dust; TORE_PREVIEW_THEATER picks the theater, so its climate), or night-range for bombs and fires at night from 0.3 to 30 nm (the night glow; TORE_NIGHT_GLOW=0 for without). --replay-stills REPLAY FRAME_PLAN OUT_DIR (first argument) draws a recording's director frames offscreen as PNG files. --cockpit-sheet OUT_DIR [ID,ID,...] (first argument) renders every flyable aircraft's cockpit with live mirrors, its cockpit art with the mirror masks tinted, and two contact sheets, offscreen. --dome-sheet OUT_DIR (first argument) renders the E-3, IL-76 and E-2 radar domes at six ticks to show their turn, offscreen. --surface-preview OUT_DIR (first argument) writes contact sheets of the surface-unit shapes (ships, launchers, soldiers) and their damaged shapes from four sides, read from the retail archives without opening a window (add destroyed for each class beside its destroyed look). --surface-scene OUT_DIR THEATER STEM renders a ground target in game offscreen after --seconds, with --kill, --rails and --focus (docs/DEVELOPMENT.md). --hud-a2g-preview OUT_DIR (first argument) writes review frames and sheets of the HUD's bomb and rocket sights (CCIP, the level T, the rocket pipper, LOW and FRAG) without a window. --hud-guided-preview OUT_DIR (first argument) writes review frames of the guided weapons' release range scale (JDAM, laser bomb and laser missile) without a window. --sight-preview heading,elevation,ticks holds the AC-130 sight at a body-relative look and runs the sim that many ticks first, so --capture-flight shows the aim-point box and diamond (add --combat-command sight-pin for a pinned point). --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --snapshot-state map (or map-lobby) draws the creator's Map of both sides' starts and the objective area, and enemy-ground-start, enemy-ground-start-auto and enemy-airports show the Enemy start rows; --validate-creator checks all imported loadouts and restart without a display; --validate-ordnance checks source station coverage, weapon/tank availability and saved loads for every reviewed aircraft; --validate-wing-loadout OUT_DIR records a four-ship F-16 custom load before and after sharing and checks ground starts and restart.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons tanks; Ctrl-Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --gunsight-probe pin-orbit|fire-no-target|track-out-of-arc (with --aircraft ac130) runs a scripted AC-130 gunsight check on flat ground and prints PASS or FAIL lines, and --gunsight-dump PATH writes the orbit's gun train as CSV; --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..288000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-redfor (with --probe-wing-only and --ground-start at a Redfor field) seats the probe's wing on Redfor, as Enemy Wing 1 of an open mission whose parked lead the probe takes by handoff; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target|sort orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-blind-wing takes the sensors from the player's wingmen, so only the data link can show them an enemy; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --ai-observe-hz 120|60|40|30|20 and --ai-lean-sensors [on|off] are AI test settings (also in the flight menu's Debug tab, which they start): the first makes AI aircraft observe that many times a second, staggered across ticks, with the controller and flight model still at 120 Hz; the second has them skip the visual channel and build the received-radar list only when a warning needs it. Defaults are 60 and on (60 behaves as 120 within a fight's chaos; lean sensors decide exactly as full ones do); the probe prints an `AI probe test settings:` line only when they differ from the defaults. --separation 1|2|5|10|20|50|75|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --list also lists the hosted game on the Internet Lobby, on the master --master HOST[:PORT] names (default the public one). --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits. --browse SECONDS [--master HOST[:PORT]] lists the games on the Internet Lobby for that long, with each one's mission and players, and exits. A hosting game asks the router to forward its port (UPnP, NAT-PMP or PCP) while Options > Forward the game port on my router is on, and removes it when hosting stops; --map-port SECONDS [--port N] does the same by itself for that long and exits, to check that the router answers."
@@ -12073,6 +12431,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if watch_replay.is_some() && std::env::args().any(|a| a == "--flight-view") {
         replay_options.view = Some(flight_view);
+    } else if flight_view > flight_views::MISSILE {
+        return Err("--flight-view 13 and 14 are replay views: use --watch-replay".into());
     }
     if fixture_wings
         && (ai_wings_enabled || enemy_skill.is_some() || ai_mission != ai_wings::Preset::Free)
@@ -12641,7 +13001,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let catalog = tore_formats::theater::map_catalog(&assets.theater_resources)?;
         for (code, _) in &catalog {
             let world = scenery::launch_terrain(&assets.theater_resources, code, None)?;
-            let scenery = scenery::Scenery::build(&assets.theater_resources, &world)?;
+            // The layout's own art, without the flight vegetation: baking
+            // vegetation for 75 layouts took 5 to 15 s each on a cold cache
+            // and pushed this past the battery's 10 minutes. The vegetation
+            // pages are checked against the device limits, through the real
+            // mission loader, by `--vegetation-preview DIR limits-check`.
+            let scenery = scenery::Scenery::build_for(&assets.theater_resources, &world, false)?;
             let bytes = scenery.texture_indices.len() + scenery.sky_indices.len();
             if bytes / 65536 > 4096 {
                 return Err("map artwork exceeds GPU page budget".into());
@@ -13748,6 +14113,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "ordnance-pod-yellow"
                     | "ordnance-gun-pod"
                     | "ordnance-tip-amraam"
+                    | "ordnance-wing-amraam"
                     | "ordnance-authored-tank"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
@@ -14497,7 +14863,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight.bay_open = value > 0.;
     }
 
-    if std::env::var_os("TORE_EFFECT_PREVIEW").is_some() {
+    if let Some(mode) = std::env::var_os("TORE_EFFECT_PREVIEW") {
+        if mode == "hill" {
+            // Start short of the nearest hillside, facing uphill, so the
+            // preview's craters lie on a slope.
+            let (site, yaw) =
+                combat::Combat::preview_hillside(&world, [flight.position[0], flight.position[2]])
+                    .ok_or("no hillside near the start")?;
+            let (sin, cos) = yaw.sin_cos();
+            flight.yaw = yaw;
+            flight.position = [site[0] - sin * 2600., site[1] + 700., site[2] - cos * 2600.];
+            println!(
+                "Effect preview hillside at {site:?}, facing {:.0} degrees",
+                yaw.to_degrees()
+            );
+        }
         combat.preview_effects(&flight, &world);
         combat.refresh_render(combat.own_id(), &flight, None);
     }
@@ -15058,6 +15438,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight_music: Default::default(),
         rwr_warnings: Default::default(),
         launch_watch: Default::default(),
+        engine_sounds: Default::default(),
+        spatial_steps: Vec::new(),
         vapor: probe_vapor,
         g_effects: Default::default(),
         flight_view,
@@ -15077,6 +15459,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ui.map.open = flight_map;
             ui.weapon_diagnostics = weapon_diagnostics;
             ui.debug_panels = debug_panels;
+            ui.ai_test = probe_script.ai_test;
             ui.paused = animation_capture || combat_probe.is_some() || ejection_preview.is_some();
             ui.look = flight_look.map(f32::to_radians);
             ui.zoom = flight_zoom;
@@ -15126,6 +15509,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         head_look: [0.; 2],
         finished: false,
         next_frame: None,
+        menu_pace: net::pace::MenuPace::new(Instant::now()),
+        pacer: Default::default(),
+        stillness: Default::default(),
+        occluded: false,
+        stopped_frame: false,
         error: None,
         replay_library: match std::env::var("TORE_RECORD_MISSIONS").as_deref() {
             Err(std::env::VarError::NotPresent) => preferences_enabled,

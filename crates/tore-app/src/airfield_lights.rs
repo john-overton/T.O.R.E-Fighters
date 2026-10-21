@@ -1,8 +1,8 @@
 //! Experiment AP1: the lights of redrawn airports (`terrain::redrawn::lights`),
 //! drawn as additive points in the world pass, tested against the world depth
 //! without writing it, like burning flares. Steady lights are uploaded once
-//! per scene; the sequenced flashers are rewritten each frame from the
-//! world's tick clock, so a replay flashes as the flight did. Presentation is
+//! per scene; the sequenced flashers are rewritten from the world's tick
+//! clock whenever one turns on or off, so a replay flashes as the flight did. Presentation is
 //! `fitted`, agent choices of 2026-10-10: colours, how far each kind shows at
 //! night and how much of it shows by day (only the PAPI, at full strength
 //! and a larger point, so it reads on a daylight final from 2 to 3 nm; John,
@@ -149,6 +149,12 @@ pub struct Lights {
     steady: Option<(wgpu::Buffer, u32)>,
     flashers: Vec<Light>,
     flash: Option<wgpu::Buffer>,
+    /// Which flashers the flash buffer holds lit, so an unchanged sequence
+    /// (the same tick, or another view of it) is not written again.
+    flash_lit: Option<Vec<bool>>,
+    /// The weather tick `flash_lit` was worked out for: the pattern depends
+    /// only on it, so other views of the same tick skip the work.
+    flash_tick: Option<i64>,
 }
 
 impl Default for Lights {
@@ -165,6 +171,8 @@ impl Lights {
             steady: None,
             flashers: Vec::new(),
             flash: None,
+            flash_lit: None,
+            flash_tick: None,
         }
     }
 
@@ -180,6 +188,8 @@ impl Lights {
             self.key = Some(key);
             let mut steady = Vec::new();
             self.flashers.clear();
+            self.flash_lit = None;
+            self.flash_tick = None;
             for light in world.redrawn.iter().flat_map(|b| &b.lights) {
                 if light.kind == LightKind::Flasher {
                     self.flashers.push(*light);
@@ -210,17 +220,25 @@ impl Lights {
                 )
             });
         }
-        if let Some(flash) = &self.flash {
-            let seconds = world.weather.ticks() as f64 / 120.;
-            let mut bytes = Vec::with_capacity(self.flashers.len() * INSTANCE_BYTES);
-            for light in &self.flashers {
-                push(
-                    &mut bytes,
-                    light,
-                    f64::from(u8::from(flasher_lit(light.param, seconds))),
-                );
+        let tick = world.weather.ticks();
+        if let Some(flash) = &self.flash
+            && self.flash_tick != Some(tick)
+        {
+            self.flash_tick = Some(tick);
+            let seconds = tick as f64 / 120.;
+            let lit: Vec<bool> = self
+                .flashers
+                .iter()
+                .map(|light| flasher_lit(light.param, seconds))
+                .collect();
+            if self.flash_lit.as_ref() != Some(&lit) {
+                let mut bytes = Vec::with_capacity(self.flashers.len() * INSTANCE_BYTES);
+                for (light, on) in self.flashers.iter().zip(&lit) {
+                    push(&mut bytes, light, f64::from(u8::from(*on)));
+                }
+                queue.write_buffer(flash, 0, &bytes);
+                self.flash_lit = Some(lit);
             }
-            queue.write_buffer(flash, 0, &bytes);
         }
     }
 

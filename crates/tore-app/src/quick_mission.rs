@@ -1982,6 +1982,7 @@ impl QuickMission {
             | "ordnance-pod-yellow"
             | "ordnance-gun-pod"
             | "ordnance-tip-amraam"
+            | "ordnance-wing-amraam"
             | "ordnance-authored-tank" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
@@ -2812,7 +2813,7 @@ impl QuickMission {
             );
             c.text(font, "PREV", 380, 394, None);
             c.text(font, "NEXT", 380, 417, None);
-            let rocker = &sprites[&self.rocker.sprite()];
+            let rocker = &sprites[self.rocker.sprite()];
             c.blit(rocker, (410, 393), 0, rocker.width, 1.);
             self.controls
                 .extend([(UP, (410, 393, 18, 17)), (DOWN, (410, 410, 18, 17))]);

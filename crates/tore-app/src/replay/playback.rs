@@ -1,17 +1,23 @@
 //! Any moment of a recording, rebuilt from the recording alone: the picture
 //! combat draws (from the nearest keyframe, a chunk at a time), smoke and
 //! contrails (from their release ticks), and the player's wing vapor (from
-//! the last 250 ticks of recorded poses). Nothing here remembers how the
+//! the last 250 ticks of recorded poses). Nothing here depends on how the
 //! playhead got to a tick, so reverse play shows exactly what forward play
-//! showed. A few decoded chunks around the playhead keep both directions
-//! smooth.
+//! showed. Playing forward only steps what the playhead crossed (the puffs
+//! released since the last tick drawn, the poses since it); a seek, reverse
+//! play or a long jump rebuilds from the recording as ever, and the tests
+//! hold both ways to the same result at every tick. A few decoded chunks
+//! around the playhead keep both directions smooth.
 use crate::aircraft::Airframe;
 use crate::flight;
-use crate::replay::convert::{self, EFFECT_LOOKBACK_TICKS, Identities, Presentation};
+use crate::replay::convert::{self, Identities, Presentation};
 use crate::snapshot::{self, RenderSnapshot, set_devices};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tore_replay::{AircraftState, Frame, LAYER_CONTRAILS, PuffKind, Recording};
+use tore_replay::{
+    AircraftState, CONTRAIL_PUFF_CAP, Frame, LAYER_CONTRAILS, LONGEST_PUFF_TICKS, LivePuff,
+    PuffKind, PuffSpawn, Recording, SMOKE_PUFF_CAP,
+};
 use tore_sim::combat::smoke::{Kind, Puff, Smoke};
 use tore_sim::vapor::{COMMIT_TICKS, Vapor};
 
@@ -70,6 +76,35 @@ pub fn place(state: &mut flight::State, recorded: &AircraftState) {
     }
 }
 
+/// The smoke and contrails of the last tick drawn, and the puffs it was
+/// made from, so the next tick forward adds the puffs released since and
+/// drops the ones that expired instead of reading them all again.
+struct SmokeTrack {
+    tick: u64,
+    /// Every puff alive at `tick` with a known lifetime, as released: the
+    /// release tick and the spawn, in the order the recording lists them.
+    live: Vec<(u64, PuffSpawn)>,
+    layers: [Smoke; 2],
+    /// `live` holds exactly what the recording lists up to `tick`.
+    exact: bool,
+}
+
+/// The player's wing vapor at the last tick drawn, and what is needed to
+/// carry it forward a tick at a time to the same result a rebuild gives.
+struct VaporTrack {
+    tick: u64,
+    vapor: Option<Vapor>,
+    /// The rebuild stepped every tick from a commit tick of the launch
+    /// schedule (see [`Playback::vapor`]), so stepping on from here gives
+    /// what a rebuild at a later tick gives, and every pose was found.
+    exact: bool,
+    /// The history started on the launch schedule rather than at the
+    /// recording's first pose.
+    scheduled: bool,
+    /// Whether the poses stepped so far carried animated devices, all alike.
+    animated: Option<bool>,
+}
+
 pub struct Playback {
     recording: Arc<Recording>,
     pub presentation: Presentation,
@@ -80,8 +115,8 @@ pub struct Playback {
     chunks: Vec<(usize, Arc<Vec<Frame>>)>,
     /// The snapshots of the last tick drawn and the tick before it.
     pair: Option<(u64, Option<RenderSnapshot>, RenderSnapshot)>,
-    smoke: Option<(u64, [Smoke; 2])>,
-    vapor: Option<(u64, Option<Vapor>)>,
+    smoke: Option<SmokeTrack>,
+    vapor: Option<VaporTrack>,
     commits: Vec<u64>,
     /// Every crater and fire the recording started.
     marks: Vec<(u64, tore_replay::EffectSpawn)>,
@@ -101,6 +136,12 @@ pub struct Playback {
     /// the import ([`Playback::add_motors`]): a round draws its flame only
     /// while its motor burns (bug B7). Without them no flame is drawn.
     motors: BTreeMap<String, Option<crate::regen::Motor>>,
+    /// Rebuilds from the recording that smoke and vapor made, and steps on
+    /// from the tick before them (tests only).
+    #[cfg(test)]
+    rebuilds: [u32; 2],
+    #[cfg(test)]
+    steps_on: [u32; 2],
 }
 
 impl Playback {
@@ -136,6 +177,10 @@ impl Playback {
             vapor: None,
             rotor_starts: Vec::new(),
             motors: BTreeMap::new(),
+            #[cfg(test)]
+            rebuilds: [0; 2],
+            #[cfg(test)]
+            steps_on: [0; 2],
         }
     }
 
@@ -221,9 +266,7 @@ impl Playback {
         let (frames, at) = self.frame(tick)?;
         let frame = &frames[at];
         let playing = if effects {
-            self.recording
-                .live_effects(frame.tick, EFFECT_LOOKBACK_TICKS)
-                .unwrap_or_default()
+            convert::playing_effects(&self.recording, frame.tick).unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -328,47 +371,143 @@ impl Playback {
     }
 
     /// Smoke and contrails alive at `tick`, rebuilt from their release ticks
-    /// with the simulation's lifetimes, rise and caps.
+    /// with the simulation's lifetimes, rise and caps. Moving forward from
+    /// the tick drawn last, only the puffs released in between are read and
+    /// the expired ones dropped; anything else (a seek, reverse play, a jump
+    /// of a puff lifetime or more) reads the whole window again.
     pub fn smoke(&mut self, tick: u64) -> &[Smoke; 2] {
-        if self.smoke.as_ref().is_none_or(|(at, _)| *at != tick) {
-            let mut layers = [Smoke::default(), Smoke::default()];
-            for layer in &mut layers {
-                layer.wind = self.recording.header().world.wind_fps;
-            }
-            for puff in self.recording.live_puffs(tick).unwrap_or_default() {
-                let kind = match puff.kind {
-                    PuffKind::Missile => Kind::Missile,
-                    PuffKind::Aircraft => Kind::Aircraft,
-                    PuffKind::Contrail => Kind::Contrail,
-                    PuffKind::Burning => Kind::Burning,
-                    PuffKind::Other(_) => continue,
-                };
-                // Every puff drifts with the recorded wind, and a crash-site
-                // column also in its cone, as flight drifts them.
-                let seconds = puff.age_ticks as f64 / 120.;
-                let wind = self.recording.header().world.wind_fps;
-                let mut drift = [wind[0], wind[2]];
-                if kind == Kind::Burning {
-                    let mut release = puff.position;
-                    release[1] -= Kind::Burning.rise() * seconds;
-                    let cone = tore_sim::combat::smoke::burning_drift(release);
-                    drift = [drift[0] + cone[0], drift[1] + cone[1]];
-                }
-                let mut position = puff.position;
-                position[0] += drift[0] * seconds;
-                position[2] += drift[1] * seconds;
-                layers[usize::from(puff.layer == LAYER_CONTRAILS)]
-                    .puffs
-                    .push_back(Puff {
-                        position,
-                        kind,
-                        drift,
-                        age: u16::try_from(puff.age_ticks).unwrap_or(u16::MAX),
-                    });
-            }
-            self.smoke = Some((tick, layers));
+        if self.smoke.as_ref().is_none_or(|t| t.tick != tick) {
+            self.advance_smoke(tick);
         }
-        &self.smoke.as_ref().expect("just filled").1
+        &self.smoke.as_ref().expect("just filled").layers
+    }
+
+    fn advance_smoke(&mut self, tick: u64) {
+        let wind = self.recording.header().world.wind_fps;
+        let (mut track, from) = match self.smoke.take() {
+            Some(track)
+                if track.exact && track.tick < tick && tick - track.tick < LONGEST_PUFF_TICKS =>
+            {
+                #[cfg(test)]
+                {
+                    self.steps_on[0] += 1;
+                }
+                let from = track.tick + 1;
+                (track, from)
+            }
+            Some(mut track) => {
+                #[cfg(test)]
+                {
+                    self.rebuilds[0] += 1;
+                }
+                track.live.clear();
+                (track, tick.saturating_sub(LONGEST_PUFF_TICKS - 1))
+            }
+            None => {
+                #[cfg(test)]
+                {
+                    self.rebuilds[0] += 1;
+                }
+                (
+                    SmokeTrack {
+                        tick,
+                        live: Vec::new(),
+                        layers: [Smoke::default(), Smoke::default()],
+                        exact: true,
+                    },
+                    tick.saturating_sub(LONGEST_PUFF_TICKS - 1),
+                )
+            }
+        };
+        track.tick = tick;
+        track.exact = true;
+        for layer in &mut track.layers {
+            layer.wind = wind;
+            layer.puffs.clear();
+        }
+        match self.recording.spawns(from, tick) {
+            Ok(spawns) => track.live.extend(
+                spawns
+                    .puffs
+                    .into_iter()
+                    .filter(|(_, puff)| puff.kind.lifetime_ticks().is_some()),
+            ),
+            Err(_) => {
+                // Nothing is shown at a tick that cannot be read, and the
+                // next one starts over.
+                track.live.clear();
+                track.exact = false;
+            }
+        }
+        track
+            .live
+            .retain(|(spawn, puff)| LivePuff::at(*spawn, puff, tick).is_some());
+        let in_contrails = |puff: &PuffSpawn| puff.layer == LAYER_CONTRAILS;
+        let contrails = track.live.iter().filter(|(_, p)| in_contrails(p)).count();
+        // Each layer keeps only its newest puffs up to the caps.
+        let mut skip = [
+            (track.live.len() - contrails).saturating_sub(SMOKE_PUFF_CAP),
+            contrails.saturating_sub(CONTRAIL_PUFF_CAP),
+        ];
+        for (spawn, spawn_puff) in &track.live {
+            let layer = usize::from(in_contrails(spawn_puff));
+            if skip[layer] > 0 {
+                skip[layer] -= 1;
+                continue;
+            }
+            let puff = LivePuff::at(*spawn, spawn_puff, tick).expect("retained live");
+            if let Some(puff) = Self::drifted(&puff, wind) {
+                track.layers[layer].puffs.push_back(puff);
+            }
+        }
+        self.smoke = Some(track);
+    }
+
+    /// A live puff as the simulation's smoke holds it: drifting with the
+    /// recorded wind, a crash-site column also in its cone, as flight drifts
+    /// them. `None` for a kind the simulation does not have.
+    fn drifted(puff: &LivePuff, wind: [f64; 3]) -> Option<Puff> {
+        let kind = match puff.kind {
+            PuffKind::Missile => Kind::Missile,
+            PuffKind::Aircraft => Kind::Aircraft,
+            PuffKind::Contrail => Kind::Contrail,
+            PuffKind::Burning => Kind::Burning,
+            PuffKind::Other(_) => return None,
+        };
+        let seconds = puff.age_ticks as f64 / 120.;
+        let mut drift = [wind[0], wind[2]];
+        if kind == Kind::Burning {
+            let mut release = puff.position;
+            release[1] -= Kind::Burning.rise() * seconds;
+            let cone = tore_sim::combat::smoke::burning_drift(release);
+            drift = [drift[0] + cone[0], drift[1] + cone[1]];
+        }
+        let mut position = puff.position;
+        position[0] += drift[0] * seconds;
+        position[2] += drift[1] * seconds;
+        Some(Puff {
+            position,
+            kind,
+            drift,
+            age: u16::try_from(puff.age_ticks).unwrap_or(u16::MAX),
+        })
+    }
+
+    /// Where the player's recorded pose at `at` puts the wing vapor's
+    /// attachment points, and whether the pose carries animated devices.
+    /// `scratch` is moved to the pose. `None` when the player is not
+    /// recorded there or the aircraft has no vapor points.
+    fn vapor_points(
+        &mut self,
+        at: u64,
+        ownship: &Airframe,
+        scratch: &mut flight::State,
+    ) -> Option<([[f64; 3]; 2], bool)> {
+        let player = self.presentation.player;
+        let (frames, index) = self.frame(at)?;
+        let recorded = frames[index].aircraft.iter().find(|a| a.id == player)?;
+        place(scratch, recorded);
+        Some((ownship.streamer_points(scratch)?, recorded.flags.animated))
     }
 
     /// The player's wing vapor history at `tick`, rebuilt by stepping the
@@ -377,43 +516,126 @@ impl Playback {
     /// had. `scratch` is a flight state for `ownship` whose pose is
     /// overwritten. `None` when the aircraft has no vapor points or the
     /// player is not recorded.
+    ///
+    /// Playing forward from the tick drawn last, the history is stepped on
+    /// through the ticks crossed instead. That is the same history: the
+    /// commits follow one schedule from launch, and a history that has
+    /// stepped over 250 ticks of it holds only the last ten commits and the
+    /// live pose, wherever it started on the schedule. It is only done when
+    /// every pose was found, the devices were all animated or all not, and
+    /// the history began on the schedule (not at a recording's first pose,
+    /// which is a schedule of its own); otherwise, and on a seek, reverse
+    /// play or a jump of more than [`VAPOR_TICKS`], the rebuild runs.
     pub fn vapor(
         &mut self,
         tick: u64,
         ownship: &Airframe,
         scratch: &mut flight::State,
     ) -> Option<Vapor> {
-        if let Some((at, vapor)) = &self.vapor
-            && *at == tick
+        if let Some(track) = &self.vapor
+            && track.tick == tick
         {
-            return *vapor;
+            return track.vapor;
         }
-        let back = tick.saturating_sub(VAPOR_TICKS);
-        let start = self.commits[self.commits.partition_point(|c| *c <= back) - 1];
         let (first, last) = (self.first, self.last);
-        let mut points = |this: &mut Self, at: u64| {
-            let player = this.presentation.player;
-            let recorded = this.aircraft(at, player)?;
-            place(scratch, &recorded);
-            ownship.streamer_points(scratch)
+        if let Some(track) = &self.vapor
+            && let Some(mut vapor) = track.vapor
+            && track.exact
+            && track.tick >= first
+            && track.tick < tick
+            && tick <= last
+            && tick - track.tick <= VAPOR_TICKS
+            && track.scheduled == (self.vapor_start(tick) >= first)
+        {
+            let (mut animated, scheduled) = (track.animated, track.scheduled);
+            let mut found = true;
+            for at in track.tick + 1..=tick {
+                match self.vapor_points(at, ownship, scratch) {
+                    Some((points, now)) if animated.is_none_or(|before| before == now) => {
+                        animated = Some(now);
+                        vapor.step(native_ticks(at), points);
+                    }
+                    _ => {
+                        found = false;
+                        break;
+                    }
+                }
+            }
+            if found {
+                #[cfg(test)]
+                {
+                    self.steps_on[1] += 1;
+                }
+                self.vapor = Some(VaporTrack {
+                    tick,
+                    vapor: Some(vapor),
+                    exact: true,
+                    scheduled,
+                    animated,
+                });
+                return Some(vapor);
+            }
+        }
+        self.rebuild_vapor(tick, ownship, scratch)
+    }
+
+    /// The commit tick of live flight's schedule the rebuild at `tick`
+    /// starts from.
+    fn vapor_start(&self, tick: u64) -> u64 {
+        let back = tick.saturating_sub(VAPOR_TICKS);
+        self.commits[self.commits.partition_point(|c| *c <= back) - 1]
+    }
+
+    /// The vapor history at `tick` from the recorded poses alone.
+    fn rebuild_vapor(
+        &mut self,
+        tick: u64,
+        ownship: &Airframe,
+        scratch: &mut flight::State,
+    ) -> Option<Vapor> {
+        #[cfg(test)]
+        {
+            self.rebuilds[1] += 1;
+        }
+        let start = self.vapor_start(tick);
+        let (first, last) = (self.first, self.last);
+        let mut animated: Option<bool> = None;
+        let mut exact = true;
+        let mut note = |now: bool, exact: &mut bool| {
+            if animated.is_some_and(|before| before != now) {
+                *exact = false;
+            }
+            animated = Some(now);
         };
         // Live flight seeds the history at launch and commits on its own
         // schedule; starting on one of its commit ticks lines the rebuilt
         // history up with it once the seed has been pushed out. A recording
         // that starts after launch seeds from its first pose.
-        let vapor = points(self, start.max(first)).map(|seed| {
-            let mut vapor = Vapor::seeded(seed);
-            if start > 0 && start >= first {
-                vapor.step(native_ticks(start), seed);
-            }
-            for at in (start + 1).max(first)..=tick.min(last) {
-                if let Some(p) = points(self, at) {
-                    vapor.step(native_ticks(at), p);
+        let vapor = self
+            .vapor_points(start.max(first), ownship, scratch)
+            .map(|(seed, now)| {
+                note(now, &mut exact);
+                let mut vapor = Vapor::seeded(seed);
+                if start > 0 && start >= first {
+                    vapor.step(native_ticks(start), seed);
                 }
-            }
-            vapor
+                for at in (start + 1).max(first)..=tick.min(last) {
+                    if let Some((p, now)) = self.vapor_points(at, ownship, scratch) {
+                        note(now, &mut exact);
+                        vapor.step(native_ticks(at), p);
+                    } else {
+                        exact = false;
+                    }
+                }
+                vapor
+            });
+        self.vapor = Some(VaporTrack {
+            tick,
+            vapor,
+            exact: exact && vapor.is_some(),
+            scheduled: start >= first,
+            animated,
         });
-        self.vapor = Some((tick, vapor));
         vapor
     }
 }
@@ -423,6 +645,7 @@ mod tests {
     use super::*;
     use crate::replay::fixture;
     use crate::replay::tests::TempDir;
+    use tore_replay::LAYER_SMOKE;
 
     fn playback(dir: &TempDir, name: &str) -> Playback {
         Playback::new(Arc::new(fixture::recording(dir.path(), name)))
@@ -502,7 +725,7 @@ mod tests {
         let snapshot = |playback: &Playback, tick: u64, effects: bool| {
             let frame = recording.frame(tick).unwrap().unwrap();
             let effects = if effects {
-                recording.live_effects(tick, EFFECT_LOOKBACK_TICKS).unwrap()
+                convert::playing_effects(&recording, tick).unwrap()
             } else {
                 Vec::new()
             };
@@ -924,5 +1147,389 @@ mod tests {
             .find(|pose| pose.id == 1)
             .unwrap();
         assert_eq!((other.engine.rotor, other.engine.rotor_turns), (0., 0.));
+    }
+
+    /// What the viewer did before playback stepped puffs and poses on: every
+    /// puff alive at `tick` read from the recording and built again.
+    fn smoke_rebuilt(playback: &Playback, tick: u64) -> [Smoke; 2] {
+        let mut layers = [Smoke::default(), Smoke::default()];
+        for layer in &mut layers {
+            layer.wind = playback.recording.header().world.wind_fps;
+        }
+        for puff in playback.recording.live_puffs(tick).unwrap_or_default() {
+            let kind = match puff.kind {
+                PuffKind::Missile => Kind::Missile,
+                PuffKind::Aircraft => Kind::Aircraft,
+                PuffKind::Contrail => Kind::Contrail,
+                PuffKind::Burning => Kind::Burning,
+                PuffKind::Other(_) => continue,
+            };
+            let seconds = puff.age_ticks as f64 / 120.;
+            let wind = playback.recording.header().world.wind_fps;
+            let mut drift = [wind[0], wind[2]];
+            if kind == Kind::Burning {
+                let mut release = puff.position;
+                release[1] -= Kind::Burning.rise() * seconds;
+                let cone = tore_sim::combat::smoke::burning_drift(release);
+                drift = [drift[0] + cone[0], drift[1] + cone[1]];
+            }
+            let mut position = puff.position;
+            position[0] += drift[0] * seconds;
+            position[2] += drift[1] * seconds;
+            layers[usize::from(puff.layer == LAYER_CONTRAILS)]
+                .puffs
+                .push_back(Puff {
+                    position,
+                    kind,
+                    drift,
+                    age: u16::try_from(puff.age_ticks).unwrap_or(u16::MAX),
+                });
+        }
+        layers
+    }
+
+    /// The vapor rebuild as it was before playback stepped it on: every
+    /// pose of the window fetched and cloned, nothing remembered.
+    fn vapor_rebuilt(
+        playback: &mut Playback,
+        tick: u64,
+        ownship: &Airframe,
+        scratch: &mut flight::State,
+    ) -> Option<Vapor> {
+        let back = tick.saturating_sub(VAPOR_TICKS);
+        let start = playback.commits[playback.commits.partition_point(|c| *c <= back) - 1];
+        let (first, last) = (playback.first, playback.last);
+        let mut points = |this: &mut Playback, at: u64| {
+            let player = this.presentation.player;
+            let recorded = this.aircraft(at, player)?;
+            place(scratch, &recorded);
+            ownship.streamer_points(scratch)
+        };
+        points(playback, start.max(first)).map(|seed| {
+            let mut vapor = Vapor::seeded(seed);
+            if start > 0 && start >= first {
+                vapor.step(native_ticks(start), seed);
+            }
+            for at in (start + 1).max(first)..=tick.min(last) {
+                if let Some(p) = points(playback, at) {
+                    vapor.step(native_ticks(at), p);
+                }
+            }
+            vapor
+        })
+    }
+
+    /// Playheads of a viewing session over `first..=last`: forward a tick at
+    /// a time (past both ends), a seek, forward again, reverse across the
+    /// middle, the speeds one after another (2x to 64x, and a jump too long
+    /// to step), a tick asked twice, a seek to each end and back.
+    fn session(first: u64, last: u64) -> Vec<u64> {
+        let mut ticks: Vec<u64> = (first.saturating_sub(4)..=last + 4).collect();
+        let at = |fraction: f64| first + ((last - first) as f64 * fraction) as u64;
+        ticks.push(at(0.1));
+        ticks.extend(at(0.1) + 1..at(0.1) + 40);
+        ticks.extend((at(0.4)..at(0.6)).rev());
+        for speed in [2, 4, 8, 16, 64, 249, 250, 251] {
+            ticks.extend((0..6).map(|i| at(0.2) + i * speed));
+        }
+        ticks.extend([at(0.3), at(0.3), at(0.3) + 1, last, first, last, at(0.5)]);
+        ticks
+    }
+
+    #[test]
+    fn smoke_stepped_forward_is_the_smoke_rebuilt_at_every_tick() {
+        let dir = TempDir::new("playback-smoke-forward");
+        let mut playback = playback(&dir, "smokes");
+        let (first, last) = (playback.first, playback.last);
+        let mut moves = 0;
+        for tick in session(first, last) {
+            let drawn = playback.smoke(tick).clone();
+            assert_eq!(drawn, smoke_rebuilt(&playback, tick), "tick {tick}");
+            moves += 1;
+        }
+        // Most of the session is playing forward: those ticks did not read
+        // the recording's window again.
+        let [rebuilds, steps] = [playback.rebuilds[0], playback.steps_on[0]];
+        assert!(
+            steps > 800 && rebuilds < 260,
+            "{steps} steps, {rebuilds} rebuilds"
+        );
+        assert!(moves > 1_000);
+        assert!(!playback.smoke(last)[1].puffs.is_empty());
+    }
+
+    /// A recording of `ticks` ticks with `spawns` of puffs every tick and
+    /// the player (id 0) flown by `player` where it returns a pose.
+    fn synthetic(
+        dir: &TempDir,
+        name: &str,
+        range: std::ops::RangeInclusive<u64>,
+        spawns: impl Fn(u64) -> Vec<PuffSpawn>,
+        player: impl Fn(u64) -> Option<AircraftState>,
+    ) -> Recording {
+        use tore_replay::{AircraftInfo, Frame, Writer, WriterOptions};
+        let path = dir.path().join(format!("{name}.tore-replay"));
+        let mut writer = Writer::create_with(
+            &path,
+            &tore_replay::Header::default(),
+            WriterOptions {
+                chunk_ticks: 120,
+                sync_ticks: 3_600,
+            },
+        )
+        .unwrap();
+        writer
+            .register_aircraft(&AircraftInfo {
+                id: 0,
+                pt: "F18.PT".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        for tick in range {
+            writer
+                .push(&Frame {
+                    tick,
+                    aircraft: player(tick).into_iter().collect(),
+                    new_puffs: spawns(tick),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let path = writer.finish(&tore_replay::Footer::default()).unwrap();
+        Recording::open(path).unwrap()
+    }
+
+    fn puff(layer: u8, kind: PuffKind, tick: u64, n: u64) -> PuffSpawn {
+        let k = (tick * 31 + n * 7) % 997;
+        PuffSpawn {
+            layer,
+            kind,
+            position: [
+                100_000. + k as f64 * 3.5,
+                6_000. + (n * 40 + tick % 90) as f64,
+                90_000. + (k * 5 % 777) as f64,
+            ],
+        }
+    }
+
+    #[test]
+    fn puffs_of_every_kind_expire_and_are_capped_as_the_rebuild_does() {
+        let dir = TempDir::new("playback-puff-kinds");
+        // Every kind, one unknown kind, and enough aircraft smoke that the
+        // smoke layer passes its cap once the first puffs are 960 ticks old.
+        let recording = synthetic(
+            &dir,
+            "kinds",
+            0..=1_500,
+            |t| {
+                let mut spawns: Vec<PuffSpawn> = (0..10)
+                    .map(|n| puff(LAYER_SMOKE, PuffKind::Aircraft, t, n))
+                    .collect();
+                if t % 3 == 0 {
+                    spawns.push(puff(LAYER_SMOKE, PuffKind::Missile, t, 11));
+                }
+                if t % 97 == 0 {
+                    spawns.push(puff(LAYER_SMOKE, PuffKind::Burning, t, 12));
+                }
+                if t % 2 == 0 {
+                    spawns.push(puff(LAYER_CONTRAILS, PuffKind::Contrail, t, 13));
+                }
+                if t % 111 == 0 {
+                    spawns.push(puff(LAYER_SMOKE, PuffKind::Other(9), t, 14));
+                }
+                spawns
+            },
+            |_| None,
+        );
+        let mut playback = Playback::new(Arc::new(recording));
+        let mut capped = false;
+        for tick in (0..=1_500).chain([200, 199, 198, 900, 1_400, 1_401, 1_500]) {
+            let drawn = playback.smoke(tick).clone();
+            capped |= drawn[0].puffs.len() == SMOKE_PUFF_CAP;
+            assert_eq!(drawn, smoke_rebuilt(&playback, tick), "tick {tick}");
+        }
+        assert!(capped, "the smoke layer reached its cap");
+        assert!(playback.rebuilds[0] < 8, "{}", playback.rebuilds[0]);
+    }
+
+    #[test]
+    fn contrails_past_their_cap_keep_the_newest_as_the_rebuild_does() {
+        let dir = TempDir::new("playback-contrail-cap");
+        let recording = synthetic(
+            &dir,
+            "contrails",
+            0..=3_700,
+            |t| {
+                (0..20)
+                    .map(|n| puff(LAYER_CONTRAILS, PuffKind::Contrail, t, n))
+                    .collect()
+            },
+            |_| None,
+        );
+        let mut playback = Playback::new(Arc::new(recording));
+        // Forward in strides (each far fewer ticks than a puff's lifetime),
+        // across the cap at 3,600 ticks of 20.
+        for tick in [
+            100, 150, 1_000, 2_999, 3_599, 3_600, 3_601, 3_650, 3_700, 50,
+        ] {
+            let drawn = playback.smoke(tick).clone();
+            assert_eq!(drawn, smoke_rebuilt(&playback, tick), "tick {tick}");
+        }
+        assert_eq!(playback.smoke(3_700)[1].puffs.len(), CONTRAIL_PUFF_CAP);
+        assert_eq!(playback.rebuilds[0], 2, "first read and the seek back");
+    }
+
+    /// The ownship the vapor tests fly: wing points on both sides.
+    fn winged() -> Airframe {
+        let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
+        ownship.streamer = Some(tore_formats::shape::StreamerDef {
+            pivot: [0; 3],
+            hinge_scale: 0,
+            points: [
+                [-30 * 256, 2 * 256, -10 * 256],
+                [30 * 256, 2 * 256, -10 * 256],
+            ],
+        });
+        ownship
+    }
+
+    #[test]
+    fn vapor_stepped_forward_is_the_vapor_rebuilt_at_every_tick() {
+        let dir = TempDir::new("playback-vapor-forward");
+        let mut playback = playback(&dir, "vapors");
+        let ownship = winged();
+        let template = crate::combat_view::render_hash_tests::player();
+        let (mut scratch, mut reference) = (template.clone(), template);
+        let (first, last) = (playback.first, playback.last);
+        let mut checked = Playback::new(Arc::clone(playback.recording()));
+        for tick in session(first, last) {
+            let drawn = playback.vapor(tick, &ownship, &mut scratch);
+            let rebuilt = vapor_rebuilt(&mut checked, tick, &ownship, &mut reference);
+            assert_eq!(drawn, rebuilt, "tick {tick}");
+        }
+        let [rebuilds, steps] = [playback.rebuilds[1], playback.steps_on[1]];
+        assert!(
+            steps > 800 && rebuilds < 260,
+            "{steps} steps, {rebuilds} rebuilds"
+        );
+    }
+
+    /// The player at `tick` of the vapor edge recordings: a climbing turn,
+    /// animated unless `animated` says otherwise.
+    fn flown(tick: u64, animated: bool) -> AircraftState {
+        let t = tick as f64 / 120.;
+        AircraftState {
+            id: 0,
+            position: [
+                100_000. + t.sin() * 3_000.,
+                8_000. + t * 15.,
+                90_000. + t.cos() * 3_000.,
+            ],
+            attitude: [t * 0.3, 0.05, 0.6 + (t * 2.).sin() * 0.3],
+            flags: tore_replay::AircraftFlags {
+                engine_on: true,
+                airborne: true,
+                alive: true,
+                animated,
+                ..Default::default()
+            },
+            hp: 100,
+            max_hp: 100,
+            ..Default::default()
+        }
+    }
+
+    /// Plays `recording` through `session` and holds every tick to the
+    /// rebuild; returns the playback.
+    fn vapor_matches_rebuild_at_every_tick(recording: Recording) -> Playback {
+        let ownship = winged();
+        let template = crate::combat_view::render_hash_tests::player();
+        let (mut scratch, mut reference) = (template.clone(), template);
+        let recording = Arc::new(recording);
+        let mut playback = Playback::new(Arc::clone(&recording));
+        let mut checked = Playback::new(recording);
+        let (first, last) = (playback.first, playback.last);
+        for tick in session(first, last) {
+            let drawn = playback.vapor(tick, &ownship, &mut scratch);
+            let rebuilt = vapor_rebuilt(&mut checked, tick, &ownship, &mut reference);
+            assert_eq!(drawn, rebuilt, "tick {tick}");
+        }
+        playback
+    }
+
+    #[test]
+    fn vapor_stepped_forward_matches_a_rebuild_wherever_the_recording_begins() {
+        // From tick 0 (the history is live flight's from launch), and from
+        // late ticks, one on the commit schedule and one off it.
+        for (name, first) in [("zero", 0), ("late", 143), ("later", 1_000)] {
+            let dir = TempDir::new(&format!("playback-vapor-{name}"));
+            let recording = synthetic(
+                &dir,
+                name,
+                first..=first + 900,
+                |_| Vec::new(),
+                |t| Some(flown(t, true)),
+            );
+            let playback = vapor_matches_rebuild_at_every_tick(recording);
+            assert!(
+                playback.steps_on[1] > 800,
+                "{name}: {}",
+                playback.steps_on[1]
+            );
+        }
+    }
+
+    #[test]
+    fn vapor_falls_back_to_the_rebuild_where_a_pose_is_missing_or_changes_kind() {
+        // The player is missing from some frames, and the devices stop being
+        // animated for a while: stepping on would not give the rebuild's
+        // history there, so the rebuild runs, and the result is its own.
+        let dir = TempDir::new("playback-vapor-gaps");
+        let recording = synthetic(
+            &dir,
+            "missing",
+            0..=900,
+            |_| Vec::new(),
+            |t| {
+                (!(300..=310).contains(&t) && t != 620).then(|| flown(t, !(450..=470).contains(&t)))
+            },
+        );
+        let playback = vapor_matches_rebuild_at_every_tick(recording);
+        assert!(playback.rebuilds[1] > 60, "{}", playback.rebuilds[1]);
+    }
+
+    /// Plays a real recording (`TORE_S14_REPLAY=path`) forward, then through
+    /// a session of seeks, reverse stretches and strides, holding the
+    /// smoke and the vapor to the rebuild at every tick. Run by hand:
+    /// `TORE_S14_REPLAY=x.tore-replay cargo test -p tore-app a_recording_from_a_run -- --ignored`.
+    #[test]
+    #[ignore = "needs a recording named by TORE_S14_REPLAY"]
+    fn a_recording_from_a_run_steps_forward_as_it_rebuilds() {
+        let Some(path) = std::env::var_os("TORE_S14_REPLAY") else {
+            return;
+        };
+        let recording = Arc::new(Recording::open(path).unwrap());
+        let mut playback = Playback::new(Arc::clone(&recording));
+        let mut checked = Playback::new(recording);
+        let ownship = winged();
+        let template = crate::combat_view::render_hash_tests::player();
+        let (mut scratch, mut reference) = (template.clone(), template);
+        let (first, last) = (playback.first, playback.last);
+        let mut vapors = 0;
+        let mut puffs = 0;
+        for tick in session(first, last) {
+            let smoke = playback.smoke(tick).clone();
+            puffs += smoke[0].puffs.len() + smoke[1].puffs.len();
+            assert_eq!(smoke, smoke_rebuilt(&checked, tick), "smoke at tick {tick}");
+            let vapor = playback.vapor(tick, &ownship, &mut scratch);
+            vapors += usize::from(vapor.is_some());
+            let rebuilt = vapor_rebuilt(&mut checked, tick, &ownship, &mut reference);
+            assert_eq!(vapor, rebuilt, "vapor at tick {tick}");
+        }
+        eprintln!(
+            "{first}..={last}: {puffs} puff-ticks, {vapors} vapors; smoke {:?} vapor {:?} (rebuilds, steps)",
+            (playback.rebuilds[0], playback.steps_on[0]),
+            (playback.rebuilds[1], playback.steps_on[1]),
+        );
     }
 }

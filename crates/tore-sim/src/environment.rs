@@ -447,16 +447,19 @@ impl Environment {
     /// ([`crate::sensors::Weather::percent`] answers as [`Self::effect`]).
     pub fn sensor_weather(&self) -> crate::sensors::Weather {
         crate::sensors::Weather {
-            bands: self
-                .active
-                .iter()
-                .map(|layer| crate::sensors::WeatherBand {
-                    low_ft: f64::from(layer.low_feet),
-                    high_ft: f64::from(layer.high_feet),
-                    effects: std::array::from_fn(|selector| layer.effect(selector).unwrap_or(100)),
-                })
-                .collect(),
+            bands: self.sensor_weather_bands().collect(),
         }
+    }
+    /// The bands of [`Self::sensor_weather`], without collecting them: a
+    /// caller that holds the last ones can compare before it builds.
+    pub fn sensor_weather_bands(
+        &self,
+    ) -> impl ExactSizeIterator<Item = crate::sensors::WeatherBand> + Clone + '_ {
+        self.active.iter().map(|layer| crate::sensors::WeatherBand {
+            low_ft: f64::from(layer.low_feet),
+            high_ft: f64::from(layer.high_feet),
+            effects: std::array::from_fn(|selector| layer.effect(selector).unwrap_or(100)),
+        })
     }
 
     /// FA 0x4b34af reschedules after one second when a callback ran, ten otherwise;

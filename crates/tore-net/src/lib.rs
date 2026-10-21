@@ -101,7 +101,7 @@ pub use platform::Platform;
 pub use reliable::{MAX_MESSAGE_BODY, MAX_MESSAGE_LEN, MAX_QUEUED_MESSAGES, MESSAGE_WINDOW};
 pub use server::{AcceptInfo, ConnectDetails, Decision, Gate, Server, ServerConfig, ServerEvent};
 pub use socket::{Listen, ServerSocket};
-pub use wait::{MAX_NAP, SPIN_MARGIN, Sleep, wait_until};
+pub use wait::{EMPTY_NAP, MAX_NAP, Pace, SPIN_MARGIN, Sleep, Wake, plan_wake, wait_until};
 
 /// The default server port (a setting).
 pub const DEFAULT_PORT: u16 = 26900;

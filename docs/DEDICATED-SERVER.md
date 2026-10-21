@@ -83,6 +83,12 @@ changes it), so on a machine that already has the game imported the server
 needs no import at all. Loading prunes older import generations in that folder,
 as the game does ([import cache](spec/import-cache.md)).
 
+The server keeps each theater's city fill layout in `city-cache/` in the data
+folder, shared with the game, so after the first start on a theater the city
+loads in a fraction of a second instead of up to about two seconds. The files
+are disposable: delete the folder at any time, or set `TORE_CITY_CACHE=0` to
+skip it ([layout cache](ARCHITECTURE.md#exploratory-vegetation-rendering)).
+
 ## Running it
 
 ```sh
@@ -96,6 +102,7 @@ tore-server --config server.conf
 | `--import FOLDER` | Import the game, then exit |
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
 | `--check` | Validate the configuration and import; with rotation, build every entry and report its summary/settings. Print the selected mission's aircraft, runways, manifest and import content. Exit without opening the port |
+| `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` | AI test settings (slices S7b and S9), for measuring and trying, not for play: `N` is how often AI aircraft observe, 120, 60 (default since optimization round 2), 40, 30 or 20, staggered across ticks, and lean sensors (on by default; a bare flag means on, `off` runs the full sensors) have AI aircraft skip the visual channel and build the received-radar list only when a warning needs it, which decides exactly as full ones do. The server's setting governs the simulation and no player is told; a server running another rate or full sensors appoints no standby. See [AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors) |
 | `--help`, `--version` | Print the options, or the version and commit, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
@@ -288,7 +295,8 @@ twice.
 When a player takes a Choice slot, the log identifies the accepted type:
 `Viper took plane 6 (Player choice): F-16C`. Late Choice joins replace the AI
 cleanly at revival placement. Departures return to the wing AI default under
-`ai-respawn`, at the original spawn. With `ai off`, no AI replacement appears.
+`ai-respawn`, at the original spawn; a dropped player's Choice aircraft is kept
+for it, flown by the AI, like any other. With `ai off`, no AI replacement appears.
 
 
 *Status of the ground target lines:* they are read, checked against the
@@ -1100,6 +1108,18 @@ never skipping time. A server on a machine that is also busy with other work
 reports "overloaded" while it catches up; give a 30-player server a core of
 its own. The bytes are the transport's payload, without the 28 bytes of IP
 and UDP headers on each packet.
+
+**Threads and `TORE_WORKERS`.** The simulation runs on the server's loop
+thread. Since optimization slice S9 the server starts no worker threads at
+the default: a pool of at most four is built the first time the loop is slow
+or late (a tick over its 8.3 ms budget, or more than one tick owed), and the
+work returns to the loop thread after a second of keeping up. A flying
+server with a dozen AI used about 12% of a core with 174 wake-ups a second
+this way, against 14% and 1,254 with the eight workers it used to start.
+`TORE_WORKERS=N` in the server's environment forces a fixed count instead:
+`0` never uses workers, `2` to `8` always do (capped at eight), and an
+unset variable is the load-aware default. Results are identical whatever
+the setting; it changes only which threads do the work.
 
 **Upload.** At 60 snapshots a second the server sends about twice what it
 did at 30 (1.50 Mbit/s with 15 players and 3.58 with 30 at 30 a second, the

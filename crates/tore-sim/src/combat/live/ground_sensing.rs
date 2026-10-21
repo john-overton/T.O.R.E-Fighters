@@ -49,8 +49,32 @@ impl State {
             self.sensor_weather = weather;
         }
     }
+    /// [`Self::set_sensor_weather`] for bands the caller has not collected:
+    /// they are collected only when they differ from the ones held, which is
+    /// almost never (the active layers change a few times a mission).
+    pub fn set_sensor_weather_bands(
+        &mut self,
+        bands: impl ExactSizeIterator<Item = sensors::WeatherBand> + Clone,
+    ) {
+        let held = &self.sensor_weather.bands;
+        if bands.len() != held.len() || bands.clone().zip(held).any(|(new, old)| new != *old) {
+            self.sensor_weather = sensors::Weather {
+                bands: bands.collect(),
+            };
+        }
+    }
     pub fn sensor_weather(&self) -> &sensors::Weather {
         &self.sensor_weather
+    }
+    /// The highest the host's step `ground` reaches over each square, so a
+    /// round's or a missile's sight line wholly above it is not sampled.
+    /// Host setup, not state: never checkpointed. It must describe the
+    /// `ground` every step is given, or be `None`.
+    pub fn set_ground_ceiling(
+        &mut self,
+        ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
+    ) {
+        self.ground_ceiling = ceiling;
     }
     /// Ctrl+X: the nearest standing ground object (a surface row: a unit, a
     /// structure, a ship or a parked aircraft) of another side than `own`'s,

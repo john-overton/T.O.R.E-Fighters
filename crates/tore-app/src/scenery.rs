@@ -30,6 +30,9 @@ pub struct ViewWeather {
     pub fog: [f32; 4],
     pub haze: [u8; 3],
     pub visual_bands: Vec<tore_formats::weather::Layer>,
+    /// What the sky draws of each deck and horizon gradient
+    /// ([`crate::sky_mix`]): weighted through dawn and dusk in smooth weather.
+    pub sky: crate::sky_mix::SkyMix,
 }
 
 /// One immutable standing airport batch. Its shared identity lets each renderer
@@ -37,6 +40,9 @@ pub struct ViewWeather {
 pub struct StaticGeometry {
     pub vertices: Vec<f32>,
     pub lines: Vec<f32>,
+    /// Each placement's vertex range in `vertices`, in order, for the
+    /// shadow casters ([`crate::terrain_chunks::placements`]).
+    pub placements: Vec<std::ops::Range<u32>>,
 }
 
 struct StandingGeometry {
@@ -1002,7 +1008,9 @@ impl Scenery {
             // its buffer and nothing vanishes (B16).
             let intact: usize = self.static_vertices.values().map(Vec::len).sum();
             let mut room = surface_art::BUDGET.saturating_sub(intact);
+            let mut placements = Vec::new();
             for id in self.placement_ids() {
+                let start = (vertices.len() / 10) as u32;
                 let standing = self.static_vertices.get(&id).map_or(&[][..], Vec::as_slice);
                 let drawn = looks.get(&id).map(|look| self.surface.drawn(id, look));
                 match drawn {
@@ -1019,10 +1027,18 @@ impl Scenery {
                         );
                     }
                 }
+                let end = (vertices.len() / 10) as u32;
+                if end > start {
+                    placements.push(start..end);
+                }
             }
             self.standing_geometry = Some(StandingGeometry {
                 looks,
-                geometry: Arc::new(StaticGeometry { vertices, lines }),
+                geometry: Arc::new(StaticGeometry {
+                    vertices,
+                    lines,
+                    placements,
+                }),
             });
         }
         &self.standing_geometry.as_ref().unwrap().geometry
@@ -1055,32 +1071,56 @@ impl Scenery {
     /// Slots have independent seeded presentation state; queries never consume RNG.
     pub fn step_view_weather(&mut self, terrain: &Terrain, camera: &Camera, speed_fps: f64) {
         let altitude = camera.position[1];
-        let alignment = if self.glare_enabled() {
-            terrain
-                .weather
-                .sample(altitude)
+        let glare = self.glare_enabled();
+        // The weather layer at the camera's altitude and the direction the
+        // camera faces, which the sun's alignment and its smooth target both
+        // read: worked out once (the same layer and the same vector as when
+        // each worked them out for itself).
+        let layer = if glare {
+            terrain.weather.sample(altitude)
+        } else {
+            None
+        };
+        let facing = camera.facing();
+        // The share of the sun's disc the terrain leaves open, worked out
+        // only for a sun the camera faces (the only one that whitens).
+        let open = |sun: [f32; 3]| -> f64 {
+            let alignment: f32 = (0..3).map(|i| sun[i] * facing[i]).sum();
+            if alignment > crate::lens_flare::WHITEOUT_FACING {
+                f64::from(crate::lens_flare::terrain_open(
+                    terrain,
+                    self,
+                    camera.position,
+                    sun,
+                ))
+            } else {
+                1.
+            }
+        };
+        let alignment = if glare {
+            layer
+                .as_ref()
                 .and_then(|l| {
-                    tore_sim::environment::sun_angles(&l, terrain.weather.seconds_of_day())
+                    tore_sim::environment::sun_angles(l, terrain.weather.seconds_of_day())
                 })
                 .map_or(-1., |a| {
                     let sun = crate::celestial::rotate([0., 0., 1.], a);
-                    let view = camera.uniform(1., [0.; 4], [0; 3]);
-                    (0..3)
-                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
-                        .sum()
+                    let alignment: f64 = (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(facing[i]))
+                        .sum();
+                    // A sun behind terrain does not whiten the picture.
+                    if open(sun) <= 0. { -1. } else { alignment }
                 })
         } else {
             -1.
         };
-        let visual_target = if self.smooth_weather && self.glare_enabled() {
-            terrain
-                .weather
-                .sample(altitude)
-                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &terrain.weather))
+        let visual_target = if self.smooth_weather && glare {
+            layer
+                .as_ref()
+                .and_then(|layer| crate::celestial::visual_sun_direction(layer, &terrain.weather))
                 .map_or(0., |sun| {
-                    let view = camera.uniform(1., [0.; 4], [0; 3]);
                     let alignment: f64 = (0..3)
-                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .map(|i| f64::from(sun[i]) * f64::from(facing[i]))
                         .sum();
                     let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
                         .floor()
@@ -1091,6 +1131,7 @@ impl Scenery {
                         * f64::from(crate::celestial::glare_strength(
                             terrain, self, altitude, sun,
                         ))
+                        * if response > 0. { open(sun) } else { 1. }
                 })
         } else {
             0.
@@ -1133,6 +1174,19 @@ impl Scenery {
             fog: self.fog,
             haze: self.haze,
             visual_bands: Vec::new(),
+            sky: crate::sky_mix::SkyMix {
+                decks: std::array::from_fn(|_| crate::sky_mix::DeckMix {
+                    deck: None,
+                    texture: -1.,
+                    second: -1.,
+                    mix: 0.,
+                    opacity: 0.,
+                }),
+                upper_band: 1.,
+                lower_band: 1.,
+                night: 0.,
+                shades: Vec::new(),
+            },
         };
         let visual = self
             .smooth_weather
@@ -1151,8 +1205,24 @@ impl Scenery {
                 0.,
             ]
         });
-        // Texture selection and draw flags retain native scheduling. Only the
-        // color/fog parameters below use fractional-time presentation samples.
+        // Stepped weather keeps native deck and gradient scheduling; smooth
+        // weather weights them by the records' fractional-time shares.
+        out.sky = crate::sky_mix::SkyMix::stepped(&layer, &self.deck_textures, altitude_ft);
+        let records = terrain.weather.configuration().layers();
+        let shares = if visual.is_some() {
+            crate::sky_mix::shares(
+                records,
+                terrain.weather.visual_seconds_of_day(),
+                altitude_ft,
+            )
+        } else {
+            Vec::new()
+        };
+        if !shares.is_empty() {
+            out.sky =
+                crate::sky_mix::SkyMix::new(records, &shares, &self.deck_textures, altitude_ft);
+            out.decks = std::array::from_fn(|slot| out.sky.decks[slot].uniform());
+        }
         let layer = visual.as_ref().map_or(layer.clone(), |s| s.layer.clone());
         out.palette = tore_formats::weather::expand_effects(
             terrain.weather.configuration().base_palette(),
@@ -1183,6 +1253,14 @@ impl Scenery {
             .iter()
             .map(|indices| indices.map(|index| out.palette[usize::from(index)]))
             .collect();
+        // Smooth weather mixes each record's own haze table and colour, so
+        // the haze does not jump between the fixed tables mid-crossing.
+        let mixed = crate::sky_mix::haze(
+            records,
+            &shares,
+            terrain.weather.configuration(),
+            &out.palette,
+        );
         let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
         out.fog = [
             feet(layer.fog_near),
@@ -1192,6 +1270,10 @@ impl Scenery {
         ];
         // Six-bit source components, the same expansion the palette ramps use.
         out.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+        if let Some((haze, fog)) = mixed {
+            out.haze = haze.map(|c| (c * 255. / 63.).round().clamp(0., 255.) as u8);
+            out.fog_palette = fog;
+        }
         out
     }
 }
@@ -1772,6 +1854,150 @@ pub(crate) mod tests {
             s.celestial.as_ref().unwrap().sun_uniform(&w, &s, 5000.)
         );
         assert_eq!(ticks, w.weather.ticks());
+    }
+
+    /// `step_view_weather` as it was: the layer and the camera's uniform
+    /// worked out again for each use.
+    fn step_view_weather_reference(
+        s: &mut Scenery,
+        terrain: &Terrain,
+        camera: &Camera,
+        speed_fps: f64,
+    ) {
+        let altitude = camera.position[1];
+        let alignment = if s.glare_enabled() {
+            terrain
+                .weather
+                .sample(altitude)
+                .and_then(|l| {
+                    tore_sim::environment::sun_angles(&l, terrain.weather.seconds_of_day())
+                })
+                .map_or(-1., |a| {
+                    let sun = crate::celestial::rotate([0., 0., 1.], a);
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum()
+                })
+        } else {
+            -1.
+        };
+        let visual_target = if s.smooth_weather && s.glare_enabled() {
+            terrain
+                .weather
+                .sample(altitude)
+                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &terrain.weather))
+                .map_or(0., |sun| {
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    let alignment: f64 = (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum();
+                    let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
+                        .floor()
+                        - 15564.)
+                        / 3.)
+                        .clamp(0., 255.);
+                    response
+                        * f64::from(crate::celestial::glare_strength(terrain, s, altitude, sun))
+                })
+        } else {
+            0.
+        };
+        let presentation = if camera.weather_slot == 0 {
+            &mut s.weather_presentation
+        } else {
+            &mut s.auxiliary_presentations[camera.weather_slot - 1]
+        };
+        let previous_visual = presentation.visual_sun;
+        presentation.step_with_alignment(&terrain.weather, altitude, speed_fps, alignment);
+        if s.smooth_weather {
+            presentation.visual_sun =
+                previous_visual + (visual_target - previous_visual).clamp(-16. / 7.2, 16. / 7.2);
+        }
+    }
+
+    #[test]
+    fn the_sun_inputs_of_a_cameras_weather_are_what_each_use_worked_out_for_itself() {
+        use tore_formats::weather::shape::{Primitive, WeatherShape};
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let l = &mut module.layers[0];
+        l.flags = 8;
+        l.start_seconds = 0;
+        l.end_seconds = 86399;
+        l.sunrise_seconds = 0;
+        l.sunset_seconds = 86400;
+        let angles = tore_sim::environment::sun_angles(l, 9 * 3600).unwrap();
+        let mut w = tore_world::test_support::terrain();
+        w.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 9, 0, 0, None).unwrap(),
+        );
+        let empty = WeatherShape {
+            primitives: vec![],
+            scale_exponent: 8,
+            publishes_point: false,
+        };
+        let celestial = || crate::celestial::Celestial {
+            sun: WeatherShape {
+                primitives: vec![Primitive::Circle {
+                    center: [0., 0., 160.],
+                    diameter: 4,
+                    fill: 254,
+                }],
+                ..empty.clone()
+            },
+            moon: empty.clone(),
+            stars: empty.clone(),
+            sun_effects: true,
+            moon_texture: 0,
+            moon_uv: [0., 0., 1., 1.],
+            sun_remap: 0,
+            shade_rows: BTreeMap::new(),
+            light_rows: [0; 2],
+            flare: tore_formats::weather::flare::Layout {
+                circles: vec![tore_formats::weather::flare::Circle {
+                    offset_percent: 50,
+                    radius: 10,
+                    fill: 265,
+                }],
+            },
+        };
+        let (mut now, mut then) = (scenery(), scenery());
+        for s in [&mut now, &mut then] {
+            s.celestial = Some(celestial());
+            s.smooth_weather = true;
+        }
+        let sun = crate::celestial::rotate([0., 0., 1.], angles);
+        let mut forward = Camera::new();
+        forward.position[1] = 5000.;
+        forward.yaw = sun[0].atan2(sun[2]);
+        forward.pitch = sun[1].asin() - 0.1;
+        let mut rear = Camera::new();
+        rear.weather_slot = 1;
+        rear.position = forward.position;
+        rear.yaw = forward.yaw + std::f32::consts::PI;
+        rear.pitch = -forward.pitch;
+        let mut wandering = Camera::new();
+        wandering.weather_slot = 2;
+        for tick in 0..400 {
+            w.weather.step();
+            // A camera that swings through the sun and climbs through the day.
+            wandering.position[1] = 3000. + f64::from(tick) * 11.;
+            wandering.yaw = forward.yaw + (tick as f32 * 0.013).sin();
+            wandering.pitch = forward.pitch + (tick as f32 * 0.021).cos() * 0.2;
+            for camera in [&forward, &rear, &wandering] {
+                now.step_view_weather(&w, camera, 700.);
+                step_view_weather_reference(&mut then, &w, camera, 700.);
+            }
+            assert_eq!(
+                (&now.weather_presentation, &now.auxiliary_presentations),
+                (&then.weather_presentation, &then.auxiliary_presentations),
+                "tick {tick}"
+            );
+        }
+        assert!(now.weather_presentation.sun_whitening > 0);
+        assert!(now.weather_presentation.visual_sun != 0.);
     }
 
     #[test]

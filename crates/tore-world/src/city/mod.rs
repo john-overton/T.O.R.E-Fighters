@@ -19,7 +19,10 @@
 //! ([`CityFill::knock_down`] on each player's copy), and the world
 //! checkpoint carries them ([`CityFill::flattened`], protocol 25).
 
+pub mod cache;
 pub mod fill;
+#[cfg(test)]
+mod fill_reference;
 pub mod kit;
 pub mod mask;
 
@@ -27,7 +30,7 @@ use crate::{resources::ResourceSource, surface::layout::trig, terrain::Terrain};
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -112,6 +115,69 @@ impl Layout {
         }
         tore_codec::fnv1a64(&bytes)
     }
+
+    /// FNV-1a over everything a load builds from the layout: every
+    /// instance (piece, position, heading, core lot, city), every kit piece
+    /// (source, shape, faces, origin, scale, footprint, height, class), every
+    /// city (name, tiles, centre, radius, counts), the candidate count and the
+    /// inputs read. Two layouts with the same full digest place, draw and
+    /// collide the same buildings. The proof that a cached or reworked build
+    /// is the old one.
+    pub fn full_digest(&self) -> u64 {
+        let mut h = tore_codec::Fnv1a64::new();
+        let text = |h: &mut tore_codec::Fnv1a64, s: &str| {
+            h.update(&(s.len() as u64).to_le_bytes());
+            h.update(s.as_bytes());
+        };
+        text(&mut h, &self.layout);
+        h.update(&(self.instances.len() as u64).to_le_bytes());
+        for i in &self.instances {
+            h.update(&i.piece.to_le_bytes());
+            h.update(&i.x.to_le_bytes());
+            h.update(&i.z.to_le_bytes());
+            h.update(&i.heading.to_le_bytes());
+            h.update(&[u8::from(i.core)]);
+            h.update(&i.city.to_le_bytes());
+        }
+        h.update(&(self.kit.pieces.len() as u64).to_le_bytes());
+        for p in &self.kit.pieces {
+            text(&mut h, &p.source);
+            text(&mut h, &p.shape);
+            h.update(&(p.faces.len() as u64).to_le_bytes());
+            for f in &p.faces {
+                h.update(&f.to_le_bytes());
+            }
+            for v in p.origin {
+                h.update(&v.to_bits().to_le_bytes());
+            }
+            h.update(&p.scale.to_bits().to_le_bytes());
+            for v in [p.half[0], p.half[1], p.height] {
+                h.update(&v.to_le_bytes());
+            }
+            h.update(&[p.class as u8, u8::from(p.cut)]);
+        }
+        h.update(&(self.cities.len() as u64).to_le_bytes());
+        for c in &self.cities {
+            text(&mut h, &c.name);
+            h.update(&(c.tiles.len() as u64).to_le_bytes());
+            for t in &c.tiles {
+                h.update(&t.0.to_le_bytes());
+                h.update(&t.1.to_le_bytes());
+            }
+            for v in [c.center[0], c.center[1], c.radius] {
+                h.update(&v.to_le_bytes());
+            }
+            for v in [c.candidates, c.placed, c.core] {
+                h.update(&(v as u64).to_le_bytes());
+            }
+        }
+        h.update(&(self.candidates as u64).to_le_bytes());
+        h.update(&(self.inputs.len() as u64).to_le_bytes());
+        for name in &self.inputs {
+            text(&mut h, name);
+        }
+        h.finish()
+    }
 }
 
 /// Grid cell for the collision and flatten queries, feet.
@@ -140,7 +206,11 @@ impl std::fmt::Debug for CityFill {
     }
 }
 
-static LAYOUTS: Mutex<BTreeMap<String, Arc<Layout>>> = Mutex::new(BTreeMap::new());
+/// One slot per layout, budget and keep-outs, built once per process. The
+/// map's lock is held only to find or add a slot, never while a layout is
+/// built: two loads of one layout wait on its slot, loads of others go on.
+type Slot = Arc<OnceLock<Arc<Layout>>>;
+static LAYOUTS: Mutex<BTreeMap<String, Slot>> = Mutex::new(BTreeMap::new());
 
 fn cell(v: i64) -> i64 {
     v.div_euclid(GRID_FT)
@@ -158,55 +228,57 @@ impl CityFill {
         terrain: &Terrain,
         cap: usize,
     ) -> Option<Self> {
-        let layout = {
-            let mut cache = LAYOUTS.lock().unwrap_or_else(|e| e.into_inner());
-            // The fill depends on the layout, the budget and what it keeps
-            // out of (the redrawn airports move buildings and pavement).
-            let keepouts = layout_keepouts(terrain);
-            let mut bytes = Vec::with_capacity(keepouts.len() * 48);
-            for k in &keepouts {
-                for v in [k.center[0], k.center[1], k.half[0], k.half[1]] {
-                    bytes.extend_from_slice(&v.to_le_bytes());
-                }
-                bytes.extend_from_slice(&i64::from(k.heading).to_le_bytes());
-                bytes.extend_from_slice(&k.clearance.to_le_bytes());
+        // The fill depends on the layout, the budget and what it keeps
+        // out of (the redrawn airports move buildings and pavement).
+        let keepouts = layout_keepouts(terrain);
+        let mut bytes = Vec::with_capacity(keepouts.len() * 48);
+        for k in &keepouts {
+            for v in [k.center[0], k.center[1], k.half[0], k.half[1]] {
+                bytes.extend_from_slice(&v.to_le_bytes());
             }
-            let key = format!(
-                "{}#{}#{:016x}",
-                terrain.layout,
-                cap,
-                tore_codec::fnv1a64(&bytes)
-            );
-            match cache.get(&key) {
-                Some(layout) => {
-                    for name in &layout.inputs {
-                        resources.get(name);
-                    }
-                    if std::env::var_os("TORE_LOADING_PROFILE").is_some() {
-                        eprintln!(
-                            "loading stage CityFillGeneration: 0.000 ms cached instances={}",
-                            layout.instances.len()
-                        );
-                    }
-                    Arc::clone(layout)
-                }
-                None => {
-                    let generated = std::env::var_os("TORE_LOADING_PROFILE")
-                        .is_some()
-                        .then(std::time::Instant::now);
-                    let layout = Arc::new(build_layout(resources, terrain, cap));
-                    if let Some(started) = generated {
-                        eprintln!(
-                            "loading stage CityFillGeneration: {:.3} ms instances={}",
-                            started.elapsed().as_secs_f64() * 1000.,
-                            layout.instances.len()
-                        );
-                    }
-                    cache.insert(key, Arc::clone(&layout));
-                    layout
-                }
+            bytes.extend_from_slice(&i64::from(k.heading).to_le_bytes());
+            bytes.extend_from_slice(&k.clearance.to_le_bytes());
+        }
+        let key = format!(
+            "{}#{}#{:016x}",
+            terrain.layout,
+            cap,
+            tore_codec::fnv1a64(&bytes)
+        );
+        let slot = Arc::clone(
+            LAYOUTS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(key)
+                .or_default(),
+        );
+        let mut built = false;
+        let layout = Arc::clone(slot.get_or_init(|| {
+            built = true;
+            let generated = std::env::var_os("TORE_LOADING_PROFILE")
+                .is_some()
+                .then(std::time::Instant::now);
+            let layout = Arc::new(build_layout(resources, terrain, cap));
+            if let Some(started) = generated {
+                eprintln!(
+                    "loading stage CityFillGeneration: {:.3} ms instances={}",
+                    started.elapsed().as_secs_f64() * 1000.,
+                    layout.instances.len()
+                );
             }
-        };
+            layout
+        }));
+        if !built {
+            for name in &layout.inputs {
+                resources.get(name);
+            }
+            if std::env::var_os("TORE_LOADING_PROFILE").is_some() {
+                eprintln!(
+                    "loading stage CityFillGeneration: 0.000 ms cached instances={}",
+                    layout.instances.len()
+                );
+            }
+        }
         if layout.instances.is_empty() {
             return None;
         }
@@ -619,14 +691,51 @@ fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain, cap: usi
                 .collect()
         })
         .unwrap_or_default();
-    let (cities, instances, candidates) =
-        fill::place(&map, &kit, &terrain.layout, &keepouts, &names, cap);
+    let inputs = cache::Inputs {
+        map: &map,
+        kit: &kit,
+        layout: &terrain.layout,
+        keepouts: &keepouts,
+        names: &names,
+        cap,
+    };
+    let entry = cache::directory().map(|directory| {
+        cache::Entry::new(
+            &directory,
+            &terrain.layout,
+            cache::key(&inputs, cache::SOURCE),
+        )
+    });
+    let cached = entry.as_ref().and_then(|e| e.read(kit.pieces.len(), cap));
+    let hit = cached.is_some();
+    let cache::Placed {
+        cities,
+        instances,
+        candidates,
+    } = cached.unwrap_or_else(|| {
+        let (cities, instances, candidates) =
+            fill::place(&map, &kit, &terrain.layout, &keepouts, &names, cap);
+        let placed = cache::Placed {
+            cities,
+            instances,
+            candidates,
+        };
+        if let Some(entry) = &entry {
+            entry.write(&placed);
+        }
+        placed
+    });
     if let Some(started) = place_started {
         eprintln!(
-            "loading stage CityFillPlace: {:.3} ms instances={} candidates={}",
+            "loading stage CityFillPlace: {:.3} ms instances={} candidates={} disk_cache={}",
             started.elapsed().as_secs_f64() * 1000.,
             instances.len(),
-            candidates
+            candidates,
+            match (&entry, hit) {
+                (None, _) => "off",
+                (Some(_), true) => "hit",
+                (Some(_), false) => "miss",
+            }
         );
     }
     Layout {

@@ -131,13 +131,11 @@ impl Smoke {
     /// Call exactly once per combat tick, even when the source list is empty.
     pub fn step(&mut self, sources: impl IntoIterator<Item = (Vector, Kind)>) {
         self.ticks += 1;
-        for puff in &mut self.puffs {
-            puff.age = puff.age.saturating_add(1);
-            puff.position[1] += puff.kind.rise() / 120.;
-            puff.position[0] += puff.drift[0] / 120.;
-            puff.position[2] += puff.drift[1] / 120.;
-        }
-        self.puffs.retain(|p| p.age < p.kind.lifetime());
+        self.age_puffs();
+        self.release(sources);
+    }
+    /// Lays this tick's puffs from `sources`.
+    fn release(&mut self, sources: impl IntoIterator<Item = (Vector, Kind)>) {
         let sources: Vec<(Vector, Kind)> = sources.into_iter().collect();
         // Past FULL_COLUMNS burning columns each one lets a puff go less
         // often (a whole number of 12 tick steps, staggered from column to
@@ -184,12 +182,77 @@ impl Smoke {
             });
         }
     }
+    /// Ages every puff one tick, moves it, and drops the ones that reached
+    /// their lifetime, in one pass. The per-kind rise and lifetime are looked
+    /// up once, not per puff; the arithmetic on each puff is what it was
+    /// (`rise / 120.` is the same division, taken once).
+    fn age_puffs(&mut self) {
+        const KINDS: [Kind; 4] = [Kind::Missile, Kind::Aircraft, Kind::Contrail, Kind::Burning];
+        let rise = KINDS.map(|kind| kind.rise() / 120.);
+        let lifetime = KINDS.map(Kind::lifetime);
+        let mut expired = 0usize;
+        // Puffs laid in the same wind drift alike: a drift seen just before,
+        // bit for bit, gives the same quotients without the divisions.
+        let mut last: Option<([u64; 2], [f64; 2])> = None;
+        let (head, tail) = self.puffs.as_mut_slices();
+        for puff in head.iter_mut().chain(tail.iter_mut()) {
+            let kind = puff.kind as usize;
+            puff.age = puff.age.saturating_add(1);
+            puff.position[1] += rise[kind];
+            let bits = puff.drift.map(f64::to_bits);
+            let step = match last {
+                Some((kept, step)) if kept == bits => step,
+                _ => {
+                    let step = [puff.drift[0] / 120., puff.drift[1] / 120.];
+                    last = Some((bits, step));
+                    step
+                }
+            };
+            puff.position[0] += step[0];
+            puff.position[2] += step[1];
+            expired += usize::from(puff.age >= lifetime[kind]);
+        }
+        if expired == 0 {
+            return;
+        }
+        // Puffs of one kind are laid oldest first, so the expired are
+        // usually the front of the list; anything left between kinds is
+        // dropped by the same test, in order.
+        while expired > 0
+            && self
+                .puffs
+                .front()
+                .is_some_and(|puff| puff.age >= lifetime[puff.kind as usize])
+        {
+            self.puffs.pop_front();
+            expired -= 1;
+        }
+        if expired > 0 {
+            self.puffs
+                .retain(|puff| puff.age < lifetime[puff.kind as usize]);
+        }
+    }
     /// App bridge supplies moving world-space engine outlets once per `step`.
     /// Source motion controls emission only; existing puffs expire by age.
     pub fn contrails(&mut self, sources: impl IntoIterator<Item = (u64, Vector)>) {
-        let current: BTreeMap<_, _> = sources.into_iter().collect();
+        // The outlets by id, a later entry for an id replacing an earlier
+        // one, as collecting them into a map did.
+        let mut current: Vec<(u64, Vector)> = sources.into_iter().collect();
+        current.sort_by_key(|(id, _)| *id);
+        let mut kept = 0;
+        for index in 0..current.len() {
+            if current
+                .get(index + 1)
+                .is_some_and(|next| next.0 == current[index].0)
+            {
+                continue;
+            }
+            current[kept] = current[index];
+            kept += 1;
+        }
+        current.truncate(kept);
         if self.ticks.is_multiple_of(12) {
-            for (&id, &position) in &current {
+            for &(id, position) in &current {
                 if self
                     .outlets
                     .get(&id)
@@ -208,12 +271,150 @@ impl Smoke {
                 });
             }
         }
-        self.outlets = current;
+        // The outlets become exactly `current`: drop the ones that left and
+        // write the rest in place, with no new map.
+        if self.outlets.len() != current.len()
+            || self.outlets.keys().zip(&current).any(|(a, (b, _))| a != b)
+        {
+            self.outlets
+                .retain(|id, _| current.binary_search_by_key(id, |(id, _)| *id).is_ok());
+        }
+        for (id, position) in current {
+            match self.outlets.get_mut(&id) {
+                Some(held) => *held = position,
+                None => {
+                    self.outlets.insert(id, position);
+                }
+            }
+        }
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    impl Smoke {
+        /// The two passes `step` made before they were one, kept to test
+        /// the single pass against.
+        fn age_puffs_reference(&mut self) {
+            for puff in &mut self.puffs {
+                puff.age = puff.age.saturating_add(1);
+                puff.position[1] += puff.kind.rise() / 120.;
+                puff.position[0] += puff.drift[0] / 120.;
+                puff.position[2] += puff.drift[1] / 120.;
+            }
+            self.puffs.retain(|p| p.age < p.kind.lifetime());
+        }
+        /// `contrails` as it was, with a map built from the outlets.
+        fn contrails_reference(&mut self, sources: impl IntoIterator<Item = (u64, Vector)>) {
+            let current: BTreeMap<_, _> = sources.into_iter().collect();
+            if self.ticks.is_multiple_of(12) {
+                for (&id, &position) in &current {
+                    if self
+                        .outlets
+                        .get(&id)
+                        .is_none_or(|previous| *previous == position)
+                    {
+                        continue;
+                    }
+                    if self.puffs.len() == MAX_CONTRAIL_PUFFS {
+                        self.puffs.pop_front();
+                    }
+                    self.puffs.push_back(Puff {
+                        position,
+                        kind: Kind::Contrail,
+                        age: 0,
+                        drift: [self.wind[0], self.wind[2]],
+                    });
+                }
+            }
+            self.outlets = current;
+        }
+    }
+
+    /// Bits of every puff and every outlet, so that "equal" means identical.
+    fn bits(smoke: &Smoke) -> Vec<u64> {
+        let mut bits: Vec<u64> = smoke
+            .outlets
+            .iter()
+            .flat_map(|(id, p)| [*id, p[0].to_bits(), p[1].to_bits(), p[2].to_bits()])
+            .collect();
+        bits.push(u64::MAX);
+        for puff in &smoke.puffs {
+            bits.extend(puff.position.map(f64::to_bits));
+            bits.extend(puff.drift.map(f64::to_bits));
+            bits.push(u64::from(puff.age) | (puff.kind as u64) << 32);
+        }
+        bits
+    }
+
+    #[test]
+    fn the_single_pass_ages_and_expires_exactly_as_the_two_passes_did() {
+        // Mixed kinds that expire out of order, a wind, outlets that come,
+        // go, repeat an id and move, and the cap on both lists.
+        let mut fast = Smoke {
+            wind: [12.5, 0., -7.25],
+            ..Smoke::default()
+        };
+        let mut slow = fast.clone();
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for tick in 0..40_000u64 {
+            let t = tick as f64;
+            let mut sources = vec![
+                ([100. + t, 5000., 40. * t], Kind::Missile),
+                ([0., 3000. - t * 0.1, 200. * t], Kind::Aircraft),
+            ];
+            let columns = if tick % 9000 < 4000 { 3 } else { 40 };
+            for column in 0..columns {
+                sources.push(([column as f64 * 100., 520., 2000.], Kind::Burning));
+            }
+            let mut outlets = vec![(3, [0., 31_000., 250. * t])];
+            if next() % 3 != 0 {
+                outlets.push((20 - (next() % 20), [20., 31_000., 250. * t + 3.]));
+            }
+            if next() % 5 == 0 {
+                outlets.push((3, [1., 2., t]));
+            }
+            if tick % 7000 < 5000 {
+                outlets.push((9, [-60., 33_000., 300. * t]));
+            }
+            // The wind shifts now and then, so puffs of several drifts mix
+            // (the kept quotient of the last drift must not carry over).
+            if tick % 1500 == 0 {
+                let wind = [
+                    (next() % 61) as f64 - 30.5,
+                    0.,
+                    (next() % 41) as f64 * 0.25 - 5.,
+                ];
+                fast.wind = wind;
+                slow.wind = wind;
+            }
+            fast.step(sources.clone());
+            slow.ticks += 1;
+            slow.age_puffs_reference();
+            slow.release(sources);
+            fast.contrails(outlets.clone());
+            slow.contrails_reference(outlets);
+            if tick % 97 == 0 || tick > 39_900 {
+                assert_eq!(bits(&fast), bits(&slow), "tick {tick}");
+                assert_eq!(fast, slow);
+            }
+        }
+        assert!(
+            fast.puffs
+                .iter()
+                .map(|p| p.kind as u8)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                >= 3
+        );
+    }
+
     #[test]
     fn contrail_onset_is_bounded_stable_and_varies_by_aircraft_and_sortie() {
         for sortie in 0..4 {

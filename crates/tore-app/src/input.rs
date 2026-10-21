@@ -346,6 +346,17 @@ fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> b
     }
 }
 
+/// The gap between polls of the controllers and of the keys' actions: 8 ms
+/// where the game is flown or a control is being captured, 16 ms in the
+/// menus with a controller connected, 33 ms with none.
+pub(crate) fn poll_interval(fast: bool, controller: bool) -> Duration {
+    Duration::from_millis(match (fast, controller) {
+        (true, _) => 8,
+        (false, true) => 16,
+        (false, false) => 33,
+    })
+}
+
 pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
@@ -365,6 +376,9 @@ pub struct Input {
     key_values: BTreeMap<String, f64>,
     context: (bool, bool),
     pub next_poll: Instant,
+    /// Flight, the replay viewer and the controls screen poll every 8 ms;
+    /// the menus do not need it ([`poll_interval`]).
+    fast: bool,
     native: bool,
     head: HeadTracker,
     head_raw: Option<[f64; 2]>,
@@ -453,6 +467,7 @@ impl Input {
             key_values: BTreeMap::new(),
             context: (false, true),
             next_poll: Instant::now(),
+            fast: true,
             native,
             head,
             head_raw: None,
@@ -731,6 +746,7 @@ impl Input {
             });
         }
         if self.key_values.insert(key, value) != Some(value) {
+            self.poll_soon();
             self.resolver.event(Event {
                 device: "mouse".into(),
                 control: control.into(),
@@ -786,6 +802,7 @@ impl Input {
             });
         }
         if self.key_values.insert(control.into(), value) != Some(value) {
+            self.poll_soon();
             self.resolver.event(Event {
                 device: "keyboard".into(),
                 control: control.into(),
@@ -949,9 +966,29 @@ impl Input {
             }
         }
     }
+    /// Sets the poll cadence for where the game is: `fast` in flight, in the
+    /// replay viewer and on the controls screen, where a controller is
+    /// captured or flown; slower in the menus.
+    pub fn set_pace(&mut self, fast: bool) {
+        if self.fast != fast {
+            self.fast = fast;
+            self.backend.set_flight(fast);
+            if fast {
+                let soon = Instant::now() + poll_interval(true, true);
+                self.next_poll = self.next_poll.min(soon);
+            }
+        }
+    }
+    /// A key or mouse change that the next poll turns into an action: in the
+    /// menus the poll waits longer, so it is called for at once.
+    fn poll_soon(&mut self) {
+        if !self.fast {
+            self.next_poll = Instant::now();
+        }
+    }
     pub fn poll(&mut self) -> (Vec<Action>, bool, Vec<String>) {
         self.observed.clear();
-        self.next_poll = Instant::now() + Duration::from_millis(8);
+        self.next_poll = Instant::now() + poll_interval(self.fast, !self.devices.is_empty());
         let mut lost = false;
         let mut warnings = vec![];
         for notification in self.backend.drain() {
@@ -1559,6 +1596,38 @@ mod tests {
         input.resolver.profile.aliases.extend(profile.aliases);
         input.resolver.profile.bindings.extend(profile.bindings);
         input
+    }
+    #[test]
+    fn the_poll_cadence_is_8_ms_in_flight_16_in_menus_with_a_controller_33_without() {
+        let ms = |fast, controller| poll_interval(fast, controller).as_millis();
+        assert_eq!(ms(true, true), 8);
+        assert_eq!(ms(true, false), 8, "flight keeps its cadence without a pad");
+        assert_eq!(ms(false, true), 16);
+        assert_eq!(ms(false, false), 33);
+    }
+    #[test]
+    fn the_menu_pace_slows_the_poll_and_a_key_or_flight_brings_it_back() {
+        let mut input = input("");
+        // Flight cadence until the game says it is in a menu.
+        input.poll();
+        assert!(input.next_poll <= Instant::now() + Duration::from_millis(8));
+        input.set_pace(false);
+        input.poll();
+        let now = Instant::now();
+        assert!(input.next_poll > now + Duration::from_millis(25), "33 ms");
+        assert!(input.next_poll <= now + Duration::from_millis(33));
+        // A key that changes what the resolver holds is polled at once.
+        input.key_value("Enter", 1.);
+        assert!(input.next_poll <= Instant::now());
+        // Going to flight pulls a far poll in to the flight cadence.
+        input.poll();
+        input.set_pace(true);
+        assert!(input.next_poll <= Instant::now() + Duration::from_millis(8));
+        // And in flight a key does not change when the poll is.
+        input.poll();
+        let due = input.next_poll;
+        input.key_value("Enter", 0.);
+        assert_eq!(input.next_poll, due);
     }
     /// The AC-130's command keys the controls catalog lists (and so
     /// CONTROLS.md and the keyboard map show) are bound in the stock profile:

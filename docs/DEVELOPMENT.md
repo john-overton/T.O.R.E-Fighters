@@ -707,14 +707,14 @@ same Cargo commands. Remove the environment override after the session with
 
 ## Graphics options
 
-Pref → Graphics... sets anti-aliasing, render scale, the spotting aid, terrain filtering and the frame-rate counter; see [graphics options](spec/graphics-options.md). `TORE_SHOW_FPS=1` shows the counter for one run without saving it. For one run, without saving, use `--anti-aliasing off|2x|4x|8x`, `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong` and `--terrain-filtering on|off`; `--original-graphics` turns every addition off at 100%. Flags apply in order. Captures and smoke tests ignore the saved `graphics-v1.conf` and use the defaults plus any flags, so compare `--original-graphics` against no flag for matched before/after images.
+Pref → Graphics... sets anti-aliasing, render scale, the spotting aid, the frame rate, terrain filtering and the frame-rate counter; see [graphics options](spec/graphics-options.md). `TORE_SHOW_FPS=1` shows the counter for one run without saving it. `TORE_TRACE_PRESENT=1` logs (at info level, to the diagnostics log) each change of the presented screen kind, menu, loading, flight or replay, with the frames drawn of the one before, to catch a screen flashing between two others; the battery's `replay-script-ordnance-no-flash` uses it. `TORE_FRAME_LIMIT=off|vsync|60|100|200` sets the [frame rate](spec/graphics-options.md#frame-rate) for one run; `off` is uncapped rendering for benchmarks. Scripted runs, `TORE_PERF_FRAMES` measurements, captures and smoke tests are uncapped unless it is set. For one run, without saving, use `--anti-aliasing off|2x|4x|8x`, `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong` and `--terrain-filtering on|off`; `--original-graphics` turns every addition off at 100%. Flags apply in order. Captures and smoke tests ignore the saved `graphics-v1.conf` and use the defaults plus any flags, so compare `--original-graphics` against no flag for matched before/after images.
 
 ## Flight performance
 
 For the fixed-work before/after threading battery, see
 [performance validation](testing/performance.md).
 
-Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and requests uncapped Immediate presentation, then Mailbox, with FIFO only as a supported-mode fallback and one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.
+Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses at the Graphics screen's [frame rate](spec/graphics-options.md#frame-rate) (V-sync by default, with one requested queued frame). Performance measurements (`TORE_PERF_FRAMES`) draw uncapped with Immediate presentation, as before, unless `TORE_FRAME_LIMIT` names a rate; set `TORE_FRAME_LIMIT=vsync` or `60` to measure a capped run.
 
 Run a bounded desktop measurement (macOS/Linux shell):
 
@@ -906,11 +906,11 @@ exterior stays hidden from the forward cockpit camera. Mirrors share cockpit
 pan, zoom and fade. Source silhouettes are flood-filled at runtime from reviewed
 opaque fills; optics and viewpoint are fitted. See [mirror evidence](baselines/mirrors.md).
 
-Presentation requests Immediate, then Mailbox if Immediate is unavailable, then
-FIFO as the portable fallback. Uncapped modes omit Wayland frame callbacks that
-otherwise throttle redraw requests to compositor refresh. No compositor settings
-are changed. Platforms/drivers may still pace presentation; the selected mode is
-printed at startup. Physics remains fixed at 120 Hz.
+Presentation follows the [frame rate](spec/graphics-options.md#frame-rate)
+choice: FIFO for V-sync (with Wayland frame callbacks), Mailbox then Immediate
+with a timer for 60, 100 and 200, and Immediate then Mailbox for
+`TORE_FRAME_LIMIT=off`. No compositor settings are changed. The selected mode
+is logged at startup and on every change. Physics remains fixed at 120 Hz.
 
 For a matched diagnostic without mirrors, set `TORE_MIRRORS=0` at launch; original
 flat fills remain. Omit it for normal live mirrors. Combine with
@@ -1182,6 +1182,9 @@ and per-pixel angular lighting on sky-deck textures and cloud sheets. Its visual
 sun arc runs continuously through the day, with symmetric dawn/dusk twilight
 gradients rather than a 19:00 drawing cutoff. The Sunset preset remains 19:01.
 The sun and moon use half their previous apparent diameter (shared scale 2).
+Decks, horizon gradients, haze tables, stars and moon fade through the dawn
+and dusk record overlaps; the night sky turns, with a procedural starfield and
+a moon that rises and sets ([spec](spec/sun-glow.md#night-sky)).
 The trial orange-rim grade is removed; the earlier atmospheric glow remains. Smooth-mode glare
 is gentler near the horizon and drops rapidly to zero by 0.5 degrees below it.
 See [sun glow specification](spec/sun-glow.md).
@@ -1447,6 +1450,38 @@ for firing. It refuses an existing output directory. The usual actor, trace and
 verification lines are grouped under `AI probe matrix: CASE`. This is an
 explicit development batch, not a retail comparison or automated balance score.
 
+### AI test settings in the probe
+
+`--ai-observe-hz 120|60|40|30|20` and `--ai-lean-sensors [on|off]` run the probe
+with the AI test settings described under
+[AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors):
+AI aircraft observe at that rate (staggered across ticks; their controllers and
+flight stay at 120 Hz), and with lean sensors (the default; a bare flag means
+on, `off` gives the full sensors) skip the visual channel and build the
+received-radar list only when a warning needs it. The default rate is 60 Hz
+since optimization round 2 (a matrix of 240 fights behaved at 60 Hz as at
+120 Hz within the fights' own chaos; see
+[the baseline](baselines/performance-threads.md#ai-observation-rate-matrix)), so
+a run without either flag differs from a build before that change;
+`--ai-observe-hz 120` gives the earlier run, its stdout and its checksum (lean
+sensors decide as full ones do). With a setting off its default the probe adds
+an `AI probe test settings:` line. Compare
+runs by the probe's own outcome lines: `AI probe attack:` (`lost_friendly`,
+`lost_enemy`, `destroyed`, `decoys_used`), `AI probe encounter:`
+(`first_visual`, `first_engage`, `first_gun_defense` per aircraft), the
+`AI probe debrief:` line and the `destroyed:` and `ejected` lines. The same
+two settings are in the flight menu's Debug tab (Escape, then Debug).
+
+The probe runs its ticks flat out, so the load-aware shared workers (see
+[shared scoped workers](ARCHITECTURE.md#shared-scoped-workers)) stay serial
+unless `TORE_WORKERS=N` forces a count; the checksum is the same either way.
+
+```sh
+TORE_DATA_DIR="$PWD/.local/dev-profile" target/release/tore-app --ai-probe-ticks 2400 \
+  --probe-fight 15:15 --separation 5 --probe-attack 600:10 --no-audio \
+  --ai-observe-hz 30 --ai-lean-sensors off
+```
+
 ## Mission recordings for debugging
 
 Every flight in the game records itself into `replays/` in the data folder
@@ -1590,6 +1625,11 @@ see the ground row:
 TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --free-flight --capture-flight .local/effects/row.ppm --flight-view 1 --no-audio
 TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --free-flight --capture-flight .local/effects/ground.ppm --flight-view 1 --flight-look 0,40 --flight-zoom 2.5 --no-audio
 ```
+
+`TORE_EFFECT_PREVIEW=hill` instead starts 2,600 feet short of the nearest even
+12 to 20 degree hillside, facing uphill, with six craters (sizes 3, 9 and 18) on
+it and nothing else, to check ground marks against sloping terrain
+(`--flight-view 1`; try `--flight-look 0,0` and `0,-35`).
 
 A cache made before the explosion sounds and sheets were added re-imports on
 first start, as any stale cache does. See [the evidence](baselines/explosions.md).
@@ -1931,7 +1971,7 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR Q
 recording's frames offscreen through the replay viewer, as PNG files
 (`still-NN-tTICK.png`), with no window, no audio written and no ffmpeg. The
 plan is the reel director's (`--reel-render`, one frame a line: tick,
-anchor, eye, target, field of view, visual time in minutes or -1, view,
+anchor, eye, target, field of view, visual time in minutes of the day (a fraction steps the clock on to the second) or -1, view,
 rate, fixed-eye tick or -1); anchor 4294967294 puts the eye and target in
 world feet. A plan's rows may jump backwards, which is how the stills check a
 seek. When the city fill has burning buildings a frame also prints a `Replay
@@ -1988,7 +2028,9 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~U
 
 `--airport-allegiance` (imported media, no display) lists, for every base theater and for Blue and for Redfor, the ground-start airports the creator offers and checks them, the automatic ground start and the AI's home runway against the built world: none may be the other side's ([allegiance](spec/airports.md#allegiance)). `--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
-indexed artwork size, and exits with an error on construction failure. The
+indexed artwork size (without the flight vegetation, whose pages
+`--vegetation-preview DIR limits-check` checks through the mission loader), and
+exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the
 `TORE_TERRAIN_V2` dependency set. Use the existing isolated import workflow
 above; never write extracted retail resources into tracked assets.
