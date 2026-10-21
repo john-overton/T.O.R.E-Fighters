@@ -15,6 +15,8 @@ pub const UKRAINE_START: [f64; 3] = [1_070_000.0, 28_000.0, 590_000.0];
 /// What the simulation queries about the mission's ground and sky. Built from
 /// the imported resources alone, so a server can build it without any art.
 pub struct Terrain {
+    /// Shared foundation terrain triangles for contact and drawing.
+    pub foundations: crate::grounding::pads::Mesh,
     pub theater: Theater,
     /// Exact selected MM identity, distinct from its referenced base grid.
     pub layout: String,
@@ -256,6 +258,8 @@ pub struct Placements {
     pub definitions: BTreeMap<String, tore_formats::static_object::Definition>,
     pub shapes: BTreeMap<String, tore_formats::shape::Shape>,
     shape_scales: BTreeMap<String, f64>,
+    /// NT records whose movement limit is zero, including fixed SAM sites.
+    fixed_units: BTreeSet<String>,
     /// STRIP anchor 0x11 midpoint by object type, in the shape's frame.
     runway_anchors: BTreeMap<String, [f64; 3]>,
     strip_boxes: BTreeMap<String, Vec<tore_formats::shape::ContactBox>>,
@@ -748,6 +752,7 @@ impl Placements {
             definitions: BTreeMap::new(),
             shapes: BTreeMap::new(),
             shape_scales: BTreeMap::new(),
+            fixed_units: BTreeSet::new(),
             runway_anchors: BTreeMap::new(),
             strip_boxes: BTreeMap::new(),
             unreadable: Vec::new(),
@@ -826,6 +831,13 @@ impl Placements {
         if self.definitions.contains_key(object_type) {
             return Ok(());
         }
+        if object_type.ends_with(".NT")
+            && let Some(bytes) = resources.get(object_type)
+            && let Ok(unit) = tore_formats::surface_unit::SurfaceUnit::parse(bytes)
+            && unit.movement.max_speed == 0
+        {
+            self.fixed_units.insert(object_type.to_owned());
+        }
         let definition = if object_type == crate::surface::catalog::HAWK_RADAR {
             crate::surface::catalog::hawk_radar_definition(resources).ok_or_else(|| {
                 format!("{source}: missing the HAWK radar's record or shape; re-import media")
@@ -871,6 +883,23 @@ impl Placements {
     /// The scale `object_type`'s shape is drawn at (1 when unknown).
     pub fn shape_scale(&self, object_type: &str) -> f64 {
         self.shape_scales.get(object_type).copied().unwrap_or(1.0)
+    }
+
+    /// One foundation eligibility path for world construction, drawing and
+    /// audits. Mobile NT records never acquire permanent terrain foundations.
+    pub fn foundation(
+        &self,
+        p: &tore_formats::mission::Placement,
+    ) -> Option<crate::grounding::pads::Pad> {
+        if !p.object_type.ends_with(".OT") && !self.fixed_units.contains(&p.object_type) {
+            return None;
+        }
+        crate::grounding::pads::Pad::of(
+            self.definitions.get(&p.object_type)?,
+            self.shapes.get(&p.object_type)?,
+            self.shape_scale(&p.object_type),
+            p,
+        )
     }
 
     /// The shared stance on actual terrain, used by both drawing and contact.
@@ -994,6 +1023,25 @@ impl Placements {
 }
 
 impl Terrain {
+    /// Shared drawing/contact stance. Runway planes, map-tied grades and ship
+    /// waterlines keep the imported datum even when a nearby foundation's
+    /// skirt changes the terrain under their placement anchor.
+    pub fn placement_stance(
+        &self,
+        sources: &Placements,
+        p: &tore_formats::mission::Placement,
+    ) -> Option<Stance> {
+        let foundation = crate::grounding::footing(sources.definitions.get(&p.object_type)?)
+            == crate::grounding::Footing::Bottom;
+        sources.stance_on_terrain(p, |x, z| {
+            f64::from(if foundation {
+                self.height(x as f32, z as f32)
+            } else {
+                self.raw_height(x as f32, z as f32)
+            })
+        })
+    }
+
     /// The terrain with the mission's own weather and no launch overrides.
     pub fn for_theater(resources: &dyn ResourceSource, code: &str) -> WorldResult<Self> {
         Self::for_mission(resources, code, None, &Overrides::default())
@@ -1158,6 +1206,7 @@ impl Terrain {
         }
         environment.clouds = Some(cloud_altitude);
         let mut out = Self {
+            foundations: Default::default(),
             theater,
             layout,
             condition,
@@ -1283,6 +1332,54 @@ impl Terrain {
                 unit.angles = p.angles;
             }
         }
+        // Keep the existing airport planes authoritative. A foundation beside
+        // a runway must not put its buildings and vehicles on another surface.
+        let airfields: Vec<_> = sources
+            .placed()
+            .filter_map(|placed| {
+                let (id, p) = placed.ok()?;
+                let stance = sources.stance(
+                    p,
+                    self.raw_height(p.position[0] as f32, p.position[2] as f32)
+                        .into(),
+                )?;
+                if !stance.runway {
+                    return None;
+                }
+                if self.redrawn.iter().any(|b| b.merged_from == Some(id)) {
+                    return None;
+                }
+                Some(redrawn::Built::for_runway(&self.redrawn, id).map_or(
+                    OrientedBox {
+                        center: [stance.center[0], stance.support_origin[1], stance.center[2]],
+                        half: stance.half,
+                        heading: stance.heading,
+                        pitch: stance.pitch,
+                        bank: stance.bank,
+                    },
+                    |b| b.surface,
+                ))
+            })
+            .collect();
+        let pads = sources
+            .placed()
+            .filter_map(|placed| {
+                let (_, p) = placed.ok()?;
+                sources.foundation(p)
+            })
+            .collect();
+        self.foundations = crate::grounding::pads::Mesh::build_with_support(
+            pads,
+            self.theater.cols,
+            self.theater.rows,
+            |x, z| self.raw_height(x, z),
+            |pad| {
+                airfields
+                    .iter()
+                    .find(|field| pad.meets_airfield(field))
+                    .map(|field| field.center[1])
+            },
+        );
         let mut objects = Vec::new();
         let mut slope_lifts = BTreeMap::new();
         let mut runways = Vec::new();
@@ -1321,11 +1418,10 @@ impl Terrain {
             if !sources.shapes.contains_key(&placement.object_type) {
                 continue;
             }
-            let ground =
-                f64::from(self.height(placement.position[0] as f32, placement.position[2] as f32));
-            let Some(stance) = sources
-                .stance_on_terrain(placement, |x, z| f64::from(self.height(x as f32, z as f32)))
-            else {
+            let ground = f64::from(
+                self.raw_height(placement.position[0] as f32, placement.position[2] as f32),
+            );
+            let Some(stance) = self.placement_stance(&sources, placement) else {
                 continue;
             };
             let Stance {
@@ -1888,6 +1984,24 @@ impl Terrain {
             f64::from(CELL_FEET),
             |col, row| f64::from(f32::from(theater.cell(col, row).elevation) * HEIGHT_FEET),
         );
+        for (&(x, z), triangles) in &self.foundations.cells {
+            let top = triangles
+                .iter()
+                .flatten()
+                .map(|p| f64::from(p[1]))
+                .fold(f64::NEG_INFINITY, f64::max);
+            ceiling.raise(
+                [
+                    x as f64 * f64::from(CELL_FEET),
+                    z as f64 * f64::from(CELL_FEET),
+                ],
+                [
+                    (x + 1) as f64 * f64::from(CELL_FEET),
+                    (z + 1) as f64 * f64::from(CELL_FEET),
+                ],
+                top,
+            );
+        }
         for runway in &self.airport_scene.runways {
             if let Some((lo, hi, top)) = runway.surface_extent() {
                 ceiling.raise(lo, hi, top);
@@ -1897,6 +2011,13 @@ impl Terrain {
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
+        self.foundations
+            .height(x, z)
+            .unwrap_or_else(|| self.raw_height(x, z))
+    }
+
+    /// Imported terrain before static foundations, for audits and construction.
+    pub fn raw_height(&self, x: f32, z: f32) -> f32 {
         let fx = (x / CELL_FEET).clamp(0.0, (self.theater.cols - 1) as f32 - 0.001);
         let fy = (z / CELL_FEET).clamp(0.0, (self.theater.rows - 1) as f32 - 0.001);
         let (ix, iy) = (fx as usize, fy as usize);
@@ -2074,6 +2195,94 @@ mod tests {
         assert!((d(-3. * nm, -4. * nm) - 5.).abs() < 1e-9);
     }
     use crate::test_support::terrain as world;
+    #[test]
+    fn authored_support_planes_do_not_drift_with_foundation_terrain() {
+        let mut t = world();
+        t.foundations = crate::grounding::pads::Mesh::build(
+            vec![crate::grounding::pads::Pad {
+                min: [1000., 1000.],
+                max: [3000., 3000.],
+                height: 0.,
+            }],
+            2,
+            2,
+            |x, z| t.raw_height(x, z),
+        );
+        let p = tore_formats::mission::Layout::parse(
+            "T.MM",
+            b"textFormat\nobj\n\ttype STRIP.OT\n\tpos 1100 0 1100\n\t.\n",
+        )
+        .unwrap()
+        .placements
+        .remove(0);
+        let mut sources = Placements::empty();
+        sources
+            .definitions
+            .insert("STRIP.OT".into(), definition("STRIP.OT", "_STRIPProc"));
+        sources.shapes.insert(
+            "STRIP.OT".into(),
+            tore_formats::shape::Shape {
+                faces: Vec::new(),
+                lines: Vec::new(),
+                state_words: Default::default(),
+                billboards: vec![tore_formats::shape::Billboard {
+                    center: [0., 0., 0.],
+                    size: [300., 20.],
+                    texture: String::new(),
+                    uv: None,
+                    fog: Default::default(),
+                    address: 0,
+                }],
+            },
+        );
+        assert_ne!(t.height(1100., 1100.), t.raw_height(1100., 1100.));
+        let stance = t.placement_stance(&sources, &p).unwrap();
+        assert_eq!(
+            stance.support_origin[1],
+            f64::from(t.raw_height(1100., 1100.))
+        );
+    }
+
+    #[test]
+    fn only_fixed_surface_records_can_make_permanent_foundations() {
+        let mut sources = Placements::empty();
+        let p = tore_formats::mission::Layout::parse(
+            "T.MM",
+            b"textFormat\nobj\n\ttype TEST.NT\n\tpos 1000 0 1000\n\t.\n",
+        )
+        .unwrap()
+        .placements
+        .remove(0);
+        sources
+            .definitions
+            .insert("TEST.NT".into(), definition("TEST.NT", "_NTProc"));
+        sources.shapes.insert(
+            "TEST.NT".into(),
+            tore_formats::shape::Shape {
+                faces: Vec::new(),
+                lines: Vec::new(),
+                state_words: Default::default(),
+                billboards: vec![tore_formats::shape::Billboard {
+                    center: [0., 0., 0.],
+                    size: [300., 20.],
+                    texture: String::new(),
+                    uv: None,
+                    fog: Default::default(),
+                    address: 0,
+                }],
+            },
+        );
+        assert!(
+            sources.foundation(&p).is_none(),
+            "a mobile unit must not level its starting position"
+        );
+        sources.fixed_units.insert("TEST.NT".into());
+        assert!(
+            sources.foundation(&p).is_some(),
+            "a fixed site uses the same footprint rule as a building"
+        );
+    }
+
     #[test]
     fn dominant_pavement_not_roof_controls_grounding() {
         use tore_formats::shape::{Face, FogMode, Shape};

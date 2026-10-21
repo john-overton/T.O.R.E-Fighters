@@ -31,6 +31,12 @@ when the viewer opens. Its existing tape whitening and softness still apply.
 Lighting changes during a flight are not recorded, and
 old recordings remain unchanged. [Cockpit lighting](spec/cockpit-lighting.md).
 
+Ground-pad foundations change reconstructed terrain contact under protocol 63
+(2026-10-21). Replay bytes and readers are unchanged. Existing recordings still
+load, but their world uses the corrected foundation terrain; old simulation
+checksums are not evidence of agreement with this version near changed sites.
+See [grounding](formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape).
+
 ## Recording
 
 ### When

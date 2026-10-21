@@ -491,41 +491,43 @@ the drawing or grounding calculation. This restores pre-ccba1db2 local
 contact extents while preserving the corrected placement origin and slope
 lift. [Full shape audit and validation](../baselines/maverick-regression.md).
 
-`Placements::stance_on_terrain` applies the same origin translation to drawing
-and the solid hit box. It samples terrain under the transformed geometry, then translates
-the complete assembly vertically until its minimum clearance is zero.
-Authored placement height is preserved above that support. This fixes an
-origin-only height sample burying the uphill side of a site. Runway planes,
-map-tied bridge/road origins and ship waterlines retain their existing rules.
-This is **fitted**, an agent decision, not a recovered retail slope rule.
-It does not flatten terrain or rotate buildings into a hillside. A rigid
-base can have a gap on its downhill side; interior face crossings over a
-terrain ridge are not measured by this vertex-based rule.
+`Terrain::build_airport_scene` first constructs static foundations through
+`tore_world::grounding::pads`, then places every object against that finished
+terrain. The [behaviour rule and constants](../spec/surface-defenses.md#grounded-objective-assemblies)
+are **fitted**, agent choices. Foundation triangles are indexed by source T2
+cell and shared with `Scenery::build_mesh`; height queries interpolate the
+same stored float coordinates that drawing uploads. Per-cell 256 ft buckets
+index nearby triangles for frequent ground queries. Existing level airport
+planes constrain foundations that touch them. `Terrain::placement_stance`
+keeps runway, bridge/road and ship datum queries on imported heights, so a
+nearby skirt cannot move an authored support plane. Source T2 bytes remain
+unchanged. Ground ceilings include raised foundations. Overlapping foundations
+merge before selecting their height, avoiding source-order-dependent steps.
+A flat pad's hidden substrate uses the airport recess routine; the pad plane
+is the actual simulation surface, with no depth bias or contact lift.
 
-**Only compact shapes take the slope lift** (`grounding::slope_lift_ft`,
-lead decision 2026-10-14). A rigid lift leaves a downhill gap about twice the
-burial it removes, and a city block lifted 167 ft over a 265 ft gap looks
-worse than one cut into the hill. The origin rule (the bottom on the ground
-under the origin, cut into the slope) stays for:
+`Placements::stance_on_terrain` applies the same bottom-origin translation to
+drawing and the solid hit box. Outside foundations, the previous compact
+slope rule still samples transformed vertices and translates the complete
+assembly vertically until its minimum clearance is zero. Authored placement
+height is preserved. This **fitted** fallback does not cover interior ridges.
 
-- flat ground art, a shape with no height: CROPA, CROPB, LOT, REACTB, DTSTRP;
-- a shape reaching more than `SLOPE_LIFT_MAX_REACH_FT` (400 ft) from its
-  origin: the city blocks CTYBKA to CTYBKG (457 ft), town blocks TWNBKA to
-  TWNBKF, CITY1 to CITY3, IND1, IND2, HILT, CASTLE, the large rocks ROCKB*
-  and ROCKD (and the long bridges, roads, runways and ships, which keep
-  their own footing anyway);
-- a placement whose lift would leave more than `SLOPE_LIFT_MAX_GAP_FT`
-  (30 ft) of air under its underside (points within `BOTTOM_BAND_FT`, 1 ft,
-  of its lowest point). On 2026-10-14 that was 4 placements: SA3SITE in the
-  Vladivostok campaign extra `BMULTI05.M` (would leave 87 ft) and FLAGY2 in
-  `VLA.MM` (37 ft).
+**Only compact shapes take the fallback slope lift**
+(`grounding::slope_lift_ft`, lead decision 2026-10-14). The origin rule remains
+for nonqualifying flat shapes, reach beyond `SLOPE_LIFT_MAX_REACH_FT` (400 ft),
+or a lift leaving more than `SLOPE_LIFT_MAX_GAP_FT` (30 ft) of air under points
+within `BOTTOM_BAND_FT` (1 ft) of the bottom. Broad flat bases now qualify for
+foundations instead of being deliberately left cut into a hill. Map-tied
+bridges and roads, runway pavement and ship waterlines keep their exceptions.
 
-The thresholds come from the site audit's `reach` and `gap`: the largest
+The fallback thresholds come from the 2026-10-14 site audit's `reach` and
+`gap`: the largest
 compact objectives reach 364 ft (HANGRB; SA3SITE 351, FLAGO1 351, SA-2 site
 SA2A 312) and the smallest composites 409 ft (ROCKD) and 457 ft (CTYBK*).
-The largest lifts kept are COLTWR 15 ft (30 ft gap), BNK1 14.3 ft, the
+That version kept lifts of COLTWR 15 ft (30 ft gap), BNK1 14.3 ft, the
 Panama SA-2 site 13.75 ft (27.6 ft gap) and the Kuril factory 13.2 ft
-(27.3 ft gap); the GCI and KING radars keep their frame fix everywhere.
+(27.3 ft gap). Qualifying sites now use foundations; the GCI and KING
+radars retain their frame fix.
 
 **Driving units follow the same rule.** A unit on a route tilts with the
 slope as it settles each step (`surface::movement`); its course keeps its
@@ -554,6 +556,16 @@ deck crew CATGUY placed on land (2 ft) and the GCI radar (17.3 ft) were sunk
 the same way. They now stand on their feet, and their hit boxes rise with
 them (deterministic on every machine, both ends build them from the same
 data).
+
+**Foundation audit.** `tore-app --surface-dump --ground-pads [THEATER ...]`
+builds every theater, imported alternate MM layout and offered objective at
+its authored and seed-1 relocated site, plus Ukraine's three unoffered
+objectives. It samples a 17 by 17 grid across each qualifying shape's
+footprint, reports the old burial and new support error, and fails above
+0.05 ft. `surface-ground-pads` runs it in the battery.
+[Measurements and captures](../baselines/ground-pads.md). This covers actual
+mission construction; the historical site audit below also inspects text
+campaign placements that do not have a live campaign runtime.
 
 **The audit.** `tore-app --surface-dump --grounding [TYPE ...]` stands every
 OT, NT and PT of the import and the retail media on flat ground through the

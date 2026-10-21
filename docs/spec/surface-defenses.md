@@ -79,22 +79,49 @@ Related specs: [AI](ai.md) (the B42 weapon service this reuses), [missiles](miss
 
 A ground objective's complete shape stands on the terrain with its dish,
 mast, antenna frame, base and other decoded components kept together.
-Faces, line endpoints and sprite bounds all count. On a slope, the whole
-shape moves vertically until its nearest geometry meets the ground, within
-0.05 ft in the audit, then keeps any authored placement height. Drawing and
-hit boxes use the same stance. Runways, bridges, roads and ships keep their
-existing pavement, map-height and waterline rules. Only compact shapes are
-lifted: flat ground art, shapes reaching more than 400 ft (city and town
-blocks, CITY1 to CITY3) and placements where the lift would leave more than
-30 ft of air downhill keep the origin rule, cut into the hill (lead
-decision 2026-10-14). Units driving a route tilt with the slope and take the
-same lift as they settle, so a unit does not drop or sink as it drives off.
+Faces, line endpoints and sprite bounds all count. Drawing and hit boxes
+use the same stance through `tore_world::grounding`.
 
-This slope support is **fitted**, an agent decision on 2026-10-14 responding
-to John's buried-objective report. It preserves rigid shapes rather than
-flattening terrain; a downhill edge may remain above the slope. Terrain
-ridge crossings inside a face are not covered by vertex sampling. The
-original game's slope treatment remains unknown. The next research step
+**Broad static foundations (fitted, agent decision, 2026-10-21).** A level
+static object at authored height zero gets flat support when its shape is
+flat, or its footprint spans at least 200 ft on either local axis. A closed
+horizontal bottom face is not required. This includes concrete lots, reactor
+pads, factory floors, open-bottomed buildings, revetments, bunkers, compound
+sites and broad rocks without naming individual types. Fixed NT units whose
+recorded maximum speed is zero, including the SA-2 site, use the same rule.
+Mobile units, ships,
+bridges, roads, runways and tilted or explicitly raised placements retain their own rules.
+
+The foundation uses the world-axis rectangle enclosing the complete shape,
+with 2 ft of clearance at each edge. Intersecting rectangles merge into one
+rectangle. Its height is the imported terrain height at the merged centre.
+A foundation or skirt meeting a level airfield instead inherits that
+airfield's existing support height, so runway and building contact agree.
+The whole footprint is flat, including terrain ridges through its interior.
+A 512 ft skirt joins it continuously to the original terrain. The skirt is
+piecewise planar, triangulated at footprint, skirt and source-cell edges.
+The conservative rectangle can level bare ground beside a rotated or
+irregular base. These dimensions and the rectangle choice are agent choices,
+not measurements of the original game.
+
+Terrain contact, units, buildings, parked aircraft, impacts and ground
+clearance use the same foundation triangles as drawing. Bottom-face artwork, including compound site bases,
+covers a 1 ft recessed visual substrate, following the airport technique,
+to prevent coplanar raster ties. Recesses follow the actual face triangles,
+leaving gaps and ground outside them intact; shadow decals are excluded.
+The visible pad and its simulation support
+stay at the foundation height. This recess alone is not the slope fix.
+
+Other small shapes retain the existing fitted slope lift: translate the
+complete shape vertically to meet the terrain, unless its reach exceeds
+400 ft or the resulting downhill gap exceeds 30 ft. Nonqualifying placements
+retain origin support when the slope lift refuses them. Runways, bridges,
+roads and ships retain
+pavement, map-height and waterline support. Driving units tilt and settle
+against the finished terrain. Buildings on a foundation therefore stand on
+the same plane as its pad.
+
+The original game's slope treatment remains unknown. The next research step
 is to recover how its placed-object contact point selects terrain support.
 See [the shared grounding rule](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)
 for implementation and audit coverage.

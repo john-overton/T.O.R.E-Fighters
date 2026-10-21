@@ -42,6 +42,13 @@ validated from disk. Successful import and startup load remove older numbered
 packs from that cache directory. Cleanup is best effort and does not touch
 source media or extracted assets. [Retention contract](spec/import-cache.md).
 
+Static ground foundations live in `tore_world::grounding::pads`. World construction
+levels qualifying base footprints before placing objects. Simulation and scenery
+share the resulting triangles, including the transition skirt. Vegetation
+workers retain this immutable terrain, and cached habitat and seam data
+include its triangles in their identity. See the
+[grounding contract](formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape).
+
 ## Startup diagnostics
 
 `diagnostics.rs` installs a bounded `log` sink and panic hook at the start of

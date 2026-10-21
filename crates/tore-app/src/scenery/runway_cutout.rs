@@ -1,4 +1,4 @@
-//! Render-only, bounded terrain recesses under airport footprints. The runway
+//! Bounded hidden substrates under airport footprints and foundation faces. The runway
 //! and flight support plane stay fixed. See docs/spec/airports.md.
 use tore_sim::airport::Runway;
 
@@ -18,13 +18,16 @@ fn edge_distance(runway: &Runway, v: &Vertex, edge: usize) -> f64 {
     p[axis] * if edge.is_multiple_of(2) { 1. } else { -1. } - runway.surface.half[axis * 2]
 }
 fn clip(polygon: &[Vertex], runway: &Runway, edge: usize, inside: bool) -> Vec<Vertex> {
+    clip_by(polygon, |v| edge_distance(runway, v, edge), inside)
+}
+fn clip_by(polygon: &[Vertex], distance: impl Fn(&Vertex) -> f64, inside: bool) -> Vec<Vertex> {
     let mut out = Vec::new();
     let Some(mut previous) = polygon.last() else {
         return out;
     };
-    let mut before = edge_distance(runway, previous, edge);
+    let mut before = distance(previous);
     for vertex in polygon {
-        let after = edge_distance(runway, vertex, edge);
+        let after = distance(vertex);
         let keep_before = (before <= 0.) == inside;
         let keep_after = (after <= 0.) == inside;
         if keep_before != keep_after {
@@ -149,6 +152,108 @@ pub(super) fn terrain(vertices: &[f32], runways: &[Runway]) -> Vec<f32> {
     out
 }
 
+/// Recess only actual bottom-face coverage, including nonrectangular bases of
+/// compound objects. The shared foundation already supplies physical support.
+/// Holes between faces and bare ground beside a rotated shape stay untouched.
+pub(super) fn pads(vertices: &[f32], covers: &[[[f32; 3]; 3]]) -> Vec<f32> {
+    use std::collections::BTreeMap;
+    const CELL: f32 = tore_formats::theater::CELL_FEET;
+    let mut index: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
+    for (id, t) in covers.iter().enumerate() {
+        let lo = [0, 2].map(|a| t.iter().map(|p| p[a]).fold(f32::INFINITY, f32::min));
+        let hi = [0, 2].map(|a| t.iter().map(|p| p[a]).fold(f32::NEG_INFINITY, f32::max));
+        for z in (lo[1] / CELL).floor() as i32..=(hi[1] / CELL).floor() as i32 {
+            for x in (lo[0] / CELL).floor() as i32..=(hi[0] / CELL).floor() as i32 {
+                index.entry((x, z)).or_default().push(id);
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(vertices.len());
+    for triangle in vertices.chunks_exact(30) {
+        let t: [Vertex; 3] =
+            std::array::from_fn(|i| triangle[i * 10..i * 10 + 10].try_into().unwrap());
+        let key = (
+            (t.iter().map(|v| f64::from(v[0])).sum::<f64>() / (3. * f64::from(CELL))).floor()
+                as i32,
+            (t.iter().map(|v| f64::from(v[2])).sum::<f64>() / (3. * f64::from(CELL))).floor()
+                as i32,
+        );
+        let Some(ids) = index.get(&key) else {
+            out.extend_from_slice(triangle);
+            continue;
+        };
+        let low = [0, 2].map(|a| t.iter().map(|p| p[a]).fold(f32::INFINITY, f32::min));
+        let high = [0, 2].map(|a| t.iter().map(|p| p[a]).fold(f32::NEG_INFINITY, f32::max));
+        let mut remaining = vec![t.to_vec()];
+        for id in ids {
+            let cover = covers[*id];
+            let cover_low =
+                [0, 2].map(|a| cover.iter().map(|p| p[a]).fold(f32::INFINITY, f32::min));
+            let cover_high =
+                [0, 2].map(|a| cover.iter().map(|p| p[a]).fold(f32::NEG_INFINITY, f32::max));
+            if (0..2).any(|a| high[a] <= cover_low[a] || low[a] >= cover_high[a]) {
+                continue;
+            }
+            let cross = |a: [f32; 3], b: [f32; 3], x: f32, z: f32| {
+                (f64::from(b[0]) - f64::from(a[0])) * (f64::from(z) - f64::from(a[2]))
+                    - (f64::from(b[2]) - f64::from(a[2])) * (f64::from(x) - f64::from(a[0]))
+            };
+            let area = cross(cover[0], cover[1], cover[2][0], cover[2][2]);
+            if area.abs() < 0.001 {
+                continue;
+            }
+            let distance = |v: &Vertex, edge: usize| {
+                let a = cover[edge];
+                let b = cover[(edge + 1) % 3];
+                let length =
+                    (f64::from(b[0]) - f64::from(a[0])).hypot(f64::from(b[2]) - f64::from(a[2]));
+                -area.signum() * cross(a, b, v[0], v[2]) / length
+            };
+            let mut next = Vec::new();
+            for mut polygon in remaining {
+                for edge in 0..3 {
+                    let outside = clip_by(&polygon, |v| distance(v, edge), false);
+                    if outside.len() >= 3 {
+                        next.push(outside);
+                    }
+                    polygon = clip_by(&polygon, |v| distance(v, edge), true);
+                    if polygon.len() < 3 {
+                        break;
+                    }
+                }
+                if polygon.len() >= 3 {
+                    let lowered: Vec<Vertex> = polygon
+                        .iter()
+                        .map(|v| {
+                            let mut p = *v;
+                            p[1] = p[1].min(cover[0][1] - RECESS_FT as f32);
+                            p
+                        })
+                        .collect();
+                    triangulate(&mut out, &lowered);
+                    for i in 0..polygon.len() {
+                        let j = (i + 1) % polygon.len();
+                        if (0..3).any(|e| {
+                            distance(&polygon[i], e).abs() < 0.25
+                                && distance(&polygon[j], e).abs() < 0.25
+                        }) {
+                            triangulate(
+                                &mut out,
+                                &[polygon[i], polygon[j], lowered[j], lowered[i]],
+                            );
+                        }
+                    }
+                }
+            }
+            remaining = next;
+        }
+        for polygon in remaining {
+            triangulate(&mut out, &polygon);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +298,41 @@ mod tests {
             })
             .sum()
     }
+    #[test]
+    fn foundation_substrate_follows_triangular_faces_and_preserves_exposed_ground() {
+        let mut source = mesh(0.);
+        for v in source.chunks_exact_mut(10) {
+            v[0] += 512.;
+            v[2] += 512.;
+        }
+        let covers = [[[472., 0., 472.], [552., 0., 472.], [472., 0., 552.]]];
+        let result = pads(&source, &covers);
+        assert!((area(&result) - 40000.).abs() < 0.1);
+        let mut recessed = 0.;
+        for t in result.chunks_exact(30) {
+            let a = area(t);
+            if a < 0.001 {
+                continue;
+            }
+            let x = (t[0] + t[10] + t[20]) / 3.;
+            let z = (t[2] + t[12] + t[22]) / 3.;
+            let inside = x >= 472. && z >= 472. && x + z <= 1024.;
+            for v in t.chunks_exact(10) {
+                assert_eq!(v[1], if inside { -1. } else { 0. });
+                assert!((v[3] - (v[0] - 512.) / 200.).abs() < 1e-6);
+                assert!((v[4] - (v[2] - 512.) / 200.).abs() < 1e-6);
+            }
+            if inside {
+                recessed += a;
+            }
+        }
+        assert!(
+            (recessed - 3200.).abs() < 0.1,
+            "the rectangle outside the triangular pad stays at ground height"
+        );
+        assert_eq!(pads(&source, &[]), source);
+    }
+
     #[test]
     fn rotated_footprints_recess_only_the_inside_and_preserve_uv_and_area() {
         for angle in [0., 0.4, std::f64::consts::FRAC_PI_2] {

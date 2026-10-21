@@ -161,6 +161,18 @@ impl Cache {
         hash.update(
             format!("{:?}{:?}", world.theater.cells, world.airport_scene.runways).as_bytes(),
         );
+        // Cached ground habitat and seam heights must follow mission-specific
+        // foundations, including when only the objective layout changes.
+        for (&(x, z), triangles) in &world.foundations.cells {
+            hash.update(&(x as u32).to_le_bytes());
+            hash.update(&(z as u32).to_le_bytes());
+            hash.update(&(triangles.len() as u32).to_le_bytes());
+            for point in triangles.iter().flatten() {
+                for coordinate in point {
+                    hash.update(&coordinate.to_bits().to_le_bytes());
+                }
+            }
+        }
         hash.update(format!("{:?}", world.neutral_airfield_ground).as_bytes());
         if let Some(fill) = &world.city_fill {
             hash.update(format!("{:?}", fill.layout.map).as_bytes());
@@ -701,6 +713,38 @@ fn decode_atlas(bytes: &[u8]) -> Option<super::Atlas> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cached_ground_heights_change_with_the_missions_foundations() {
+        let mut world = tore_world::test_support::terrain();
+        let key = |world: &Terrain| {
+            Cache::with_profile(
+                (
+                    std::env::temp_dir().join("tore-foundation-cache-test"),
+                    Vec::new(),
+                ),
+                &BTreeMap::new(),
+                world,
+                &[[0; 3]; 256],
+                0,
+                "test",
+                "test",
+            )
+            .key
+        };
+        let before = key(&world);
+        world.foundations = tore_world::grounding::pads::Mesh::build(
+            vec![tore_world::grounding::pads::Pad {
+                min: [1000., 1000.],
+                max: [2000., 2000.],
+                height: 0.,
+            }],
+            2,
+            2,
+            |x, z| world.raw_height(x, z),
+        );
+        assert_ne!(before, key(&world));
+    }
+
     #[test]
     fn override_content_changes_and_removal_change_cache_key() {
         let root = std::env::temp_dir().join(format!("tore-top-overrides-{}", std::process::id()));
