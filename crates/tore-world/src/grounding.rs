@@ -24,6 +24,8 @@
 //! 2026-10-13): the lowest point agrees with the shape's F2 ground offset,
 //! the word FA 0x42e0c0 reads to stand an object on the ground, within 3 ft
 //! for every placed type of the retail data.
+pub mod pads;
+
 use crate::terrain::PlacedSize;
 use tore_formats::{
     shape::{Billboard, Shape},
@@ -389,6 +391,49 @@ mod tests {
             flags: 0,
             max_visible: 0,
         }
+    }
+
+    #[test]
+    fn foundation_selection_uses_geometry_scale_and_grounding_exceptions() {
+        let mut shape = upright(0., 0.);
+        shape.faces[0].positions = vec![
+            [-300., -150., 0.],
+            [300., -150., 0.],
+            [300., 150., 0.],
+            [-300., 150., 0.],
+        ];
+        let layout = tore_formats::mission::Layout::parse(
+            "SYNTH.MM",
+            b"textFormat\nobj\n\ttype BASE.OT\n\tpos 1000 0 2000\n\tangle 45 0 0\n\t.\n",
+        )
+        .unwrap();
+        let mut p = layout.placements[0].clone();
+        let def = definition("BASE.OT", "_OBJProc", 0);
+        let pad = pads::Pad::of(&def, &shape, 1. / 3., &p).unwrap();
+        assert!((pad.max[0] - pad.min[0] - (300f64 / 2f64.sqrt() + 4.)).abs() < 1e-8);
+        assert!(
+            pads::Pad::of(&def, &shape, 0.1, &p).is_some(),
+            "small flat pads also need support"
+        );
+        for fixed in [
+            definition("BASE.PT", "_APProc", 0),
+            definition("STRIP.OT", "_STRIPProc", 0),
+            definition("BRDMID.OT", "_OBJProc", 0),
+        ] {
+            assert!(pads::Pad::of(&fixed, &shape, 1., &p).is_none());
+        }
+        p.position[1] = 10;
+        assert!(pads::Pad::of(&def, &shape, 1., &p).is_none());
+        p.position[1] = 0;
+        p.angles[1] = 5;
+        assert!(pads::Pad::of(&def, &shape, 1., &p).is_none());
+        p.angles[1] = 0;
+        shape.faces[0].positions[0][2] = -20.;
+        assert!(
+            pads::Pad::of(&def, &shape, 1., &p).is_some(),
+            "broad open-bottomed structures need support too"
+        );
+        assert!(pads::Pad::of(&def, &shape, 0.1, &p).is_none());
     }
 
     #[test]

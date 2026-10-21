@@ -440,6 +440,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/terrain/redrawn.rs", ("airports", "ai-airfield", "surface"), "redrawn airports: plans, AI points, ILS lines"),
     _r("crates/tore-world/src/terrain/redrawn/*", ("airports", "ai-airfield", "surface"), "redrawn airports: plans, AI points, ILS lines"),
     _r("crates/tore-world/airports/*", ("airports", "ai-airfield", "surface"), "redrawn airport plans"),
+    _r("crates/tore-world/src/grounding/*", ("surface", "airports", "flight-environment"), "shared foundation terrain"),
     _r("crates/tore-world/src/grounding.rs", ("surface", "airports", "ai-airfield", "replay-recording"), "ground-object footing and contact geometry"),
     _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator", "surface"), "terrain and airport lists"),
     _r("crates/tore-world/src/surface/*", ("surface", "airports", "flight-combat", "ai-fights", "net-surface"), "surface units: resolution, ids and sides; what the network sends of them"),

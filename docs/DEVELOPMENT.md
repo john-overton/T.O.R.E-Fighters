@@ -1750,6 +1750,10 @@ lowest drawn point of its faces, its hit box and its man sprites or cards near a
 far, in world feet at its drawn size; anything sunk or floating is listed as
 a problem ([grounding](formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape),
 `surface-grounding`).
+`--ground-pads [THEATER ...]` builds the actual theater layouts and objectives,
+authored and relocated, and checks flat shapes and broad fixed footprints against the finished
+terrain. It prints old burial and current support error; `surface-ground-pads`
+is the matching battery scenario.
 `--damage [TYPE ...]` lists every OT (or the types named) with where retail
 keeps its destroyed look: its `~` variant, the damage branch inside its shape
 (intact and damaged face counts and heights) or neither

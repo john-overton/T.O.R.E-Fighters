@@ -19,7 +19,7 @@ use std::{
 };
 use tore_formats::{
     Pic,
-    theater::{CELL_FEET, HEIGHT_FEET, TexturePlacement, Theater},
+    theater::{CELL_FEET, HEIGHT_FEET, TexturePlacement},
 };
 
 /// A pure camera query; contains no clock, random generator or trail history.
@@ -484,7 +484,7 @@ impl Scenery {
         };
         out.resolve_palette(terrain, 0.);
         out.vertices = Self::build_mesh(
-            &terrain.theater,
+            terrain,
             &terrain.environment.textures,
             &ground_layers,
             land_texture,
@@ -647,6 +647,7 @@ impl Scenery {
             log::warn!("Airport scene: {main_shape} retained without visual geometry: {error}");
         }
         let mut static_float_count = 0usize;
+        let mut pad_substrates = Vec::new();
         // Every drawn shape with its id, type, scale, orientation and origin.
         let mut drawn: Vec<(
             u32,
@@ -669,12 +670,40 @@ impl Scenery {
                 origin,
                 support_origin,
                 ..
-            }) = sources.stance_on_terrain(placement, |x, z| {
-                f64::from(terrain.height(x as f32, z as f32))
-            })
+            }) = terrain.placement_stance(&sources, placement)
             else {
                 continue;
             };
+            // Bottom faces cover the physical foundation. Recess their hidden
+            // substrate to resolve coplanar raster ties, including a fixed
+            // site's nonrectangular base, while retaining gaps between faces.
+            if sources.foundation(placement).is_some() {
+                let low = tore_world::grounding::height_range(shape).unwrap()[0];
+                for face in &shape.faces {
+                    if face.positions.len() < 3
+                        || surface_art::is_shadow_decal(face, low as f32)
+                        || !face
+                            .positions
+                            .iter()
+                            .all(|p| (f64::from(p[2]) - low).abs() * scale < 0.05)
+                    {
+                        continue;
+                    }
+                    for k in 1..face.positions.len() - 1 {
+                        pad_substrates.push([0, k, k + 1].map(|j| {
+                            let p = face.positions[j];
+                            std::array::from_fn(|a| {
+                                (origin[a]
+                                    + scale
+                                        * (basis.right[a] * f64::from(p[0])
+                                            + basis.up[a] * f64::from(p[2])
+                                            + basis.forward[a] * f64::from(p[1])))
+                                    as f32
+                            })
+                        }));
+                    }
+                }
+            }
             // How far the shape stands above its placement point (a land
             // unit on its lowest point): a moving unit keeps it.
             let lift = (0..3)
@@ -692,6 +721,7 @@ impl Scenery {
                 lift,
             ));
         }
+        self.vertices = runway_cutout::pads(&self.vertices, &pad_substrates);
         // The parked aircraft, gear down at the aircraft convention, where
         // the terrain placed them (docs/spec/surface-defenses.md, "Parked
         // aircraft"). When destroyed they become a burnt hulk of their own
@@ -798,11 +828,12 @@ impl Scenery {
     /// The terrain triangles: `textures` are the shoreline and ground art
     /// placements and `layers` the texture layer each was uploaded to.
     fn build_mesh(
-        t: &Theater,
+        terrain: &Terrain,
         textures: &BTreeMap<(i32, i32), TexturePlacement>,
         layers: &BTreeMap<(i32, i32), usize>,
         land_texture: Option<usize>,
     ) -> Vec<f32> {
+        let t = &terrain.theater;
         let mut vertices = Vec::new();
         // Same four sample corners as 0x4a9d00. Fixed triangulation and full-resolution
         // rendering are our first GPU implementation, not the original adaptive tessellator.
@@ -821,9 +852,27 @@ impl Scenery {
                     continue;
                 }
                 let index = f32::from(c.color);
-                for (dx, dy) in [(0, 0), (0, 1), (1, 0), (1, 0), (0, 1), (1, 1)] {
-                    let sample = t.cell(x + dx, y + dy);
-                    let (mut u, mut v) = (((x % 4 + dx) as f32) / 4.0, ((y % 4 + dy) as f32) / 4.0);
+                let corner = |dx, dz| {
+                    [
+                        (x + dx) as f32 * CELL_FEET,
+                        f32::from(t.cell(x + dx, y + dz).elevation) * HEIGHT_FEET,
+                        (y + dz) as f32 * CELL_FEET,
+                    ]
+                };
+                let original = [
+                    [corner(0, 0), corner(0, 1), corner(1, 0)],
+                    [corner(1, 0), corner(0, 1), corner(1, 1)],
+                ];
+                let triangles = terrain
+                    .foundations
+                    .cells
+                    .get(&(x, y))
+                    .map_or(original.as_slice(), Vec::as_slice);
+                for point in triangles.iter().flatten() {
+                    let (mut u, mut v) = (
+                        (point[0] / CELL_FEET - (x & !3) as f32) / 4.,
+                        (point[2] / CELL_FEET - (y & !3) as f32) / 4.,
+                    );
                     // 0x4aa9ac chooses quarter-turn UV transforms; V follows north-up world.
                     match placement.map_or(0, |p| p.rotation) {
                         1 => (u, v) = (1.0 - v, u),
@@ -832,9 +881,9 @@ impl Scenery {
                         _ => {}
                     }
                     vertices.extend_from_slice(&[
-                        (x + dx) as f32 * CELL_FEET,
-                        sample.elevation as f32 * HEIGHT_FEET,
-                        (y + dy) as f32 * CELL_FEET,
+                        point[0],
+                        point[1],
+                        point[2],
                         u,
                         1.0 - v,
                         layer,
@@ -1723,13 +1772,48 @@ pub(crate) mod tests {
     /// A world's identity survives a recording header, and rebuilding from it
     /// restores the launch settings exactly, whatever set the wind.
     #[test]
+    fn foundation_mesh_keeps_contact_heights_and_rotated_texture_coordinates() {
+        let mut terrain = tore_world::test_support::terrain();
+        terrain.foundations = tore_world::grounding::pads::Mesh::build(
+            vec![tore_world::grounding::pads::Pad {
+                min: [1000., 1000.],
+                max: [2200., 2300.],
+                height: 0.,
+            }],
+            2,
+            2,
+            |x, z| terrain.raw_height(x, z),
+        );
+        let mut textures = BTreeMap::new();
+        textures.insert(
+            (0, 0),
+            TexturePlacement {
+                col: 0,
+                row: 0,
+                texture: 0,
+                rotation: 1,
+                resource: None,
+            },
+        );
+        let layers = BTreeMap::from([((0, 0), 2)]);
+        let mesh = Scenery::build_mesh(&terrain, &textures, &layers, None);
+        assert!(mesh.len() > 60);
+        for v in mesh.chunks_exact(10) {
+            assert!((v[1] - terrain.height(v[0], v[2])).abs() < 0.001);
+            assert!((v[3] - (1. - v[2] / (4. * CELL_FEET))).abs() < 1e-6);
+            assert!((v[4] - (1. - v[0] / (4. * CELL_FEET))).abs() < 1e-6);
+            assert_eq!(v[5], 2.);
+        }
+    }
+
+    #[test]
     fn water_has_no_opaque_fallback_but_shore_art_keeps_its_geometry() {
         let mut terrain = tore_world::test_support::terrain();
         terrain.theater.cells[0].color = 255;
         let height = terrain.height(2048., 2048.);
         let mut textures = BTreeMap::new();
         let mesh = |terrain: &Terrain, textures: &_, layers: &_| {
-            Scenery::build_mesh(&terrain.theater, textures, layers, None)
+            Scenery::build_mesh(terrain, textures, layers, None)
         };
         assert!(
             mesh(&terrain, &textures, &BTreeMap::new()).is_empty(),

@@ -57,6 +57,7 @@ impl Worker {
         // Only immutable placement inputs are retained. No live simulation state
         // is shared with or modified by the presentation worker.
         let world = Terrain {
+            foundations: world.foundations.clone(),
             theater: tore_formats::theater::Theater {
                 name: world.theater.name.clone(),
                 map: world.theater.map.clone(),

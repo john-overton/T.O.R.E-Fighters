@@ -3192,7 +3192,10 @@ again with an observer; the capture format did not change for it.
   game must not join;
   62 since the steering adapter flies a damaged airframe (slice bf-final): an
   AI's stick for a wanted load allows for lost lift and elevator authority,
-  which changes damaged AI flight, so an older game must not join.
+  which changes damaged AI flight, so an older game must not join;
+  63 since shared ground-pad foundations (ground-pads, 2026-10-21): static
+  foundations level the terrain used by placement, movement and contact,
+  changing simulation checksums, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

@@ -28,6 +28,10 @@ objdump -d gameassets/fighters-anthology/FA.EXE > .local/theater-research/fa-dis
 
 Addresses below are virtual addresses in this exact `FA.EXE`, SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`. They are not portable to another edition. The extraction report records archive/output SHA-256, offsets and decoded sizes, plus structured terrain/mission metadata. Full inputs and derived captures remain ignored. Readers live in `crates/tore-formats/src/theater.rs`; runtime construction in `crates/tore-world/src/terrain.rs` (queries) and `crates/tore-app/src/scenery.rs` (art and mesh).
 
+Runtime terrain adds [shared static foundations](objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)
+after resolving the layout and objective. These fitted triangles serve both
+contact and drawing; the imported BIT2 grid and its classification are unchanged.
+
 ## BIT2 / T2: confirmed packed layout
 
 All 16 supplied T2 resources parse with these rules. Multi-byte numbers are little endian; names are null-terminated ASCII. Unknown header bytes remain in the extracted original file and are not assigned runtime meanings.

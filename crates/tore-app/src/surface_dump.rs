@@ -174,6 +174,7 @@ pub fn run() -> AppResult<()> {
     let mut classes = false;
     let mut grounding = false;
     let mut grounding_sites = false;
+    let mut ground_pads = false;
     let mut damage = false;
     let mut faces = false;
     let mut seeds = None;
@@ -200,6 +201,7 @@ pub fn run() -> AppResult<()> {
             "--classes" => classes = true,
             "--grounding" => grounding = true,
             "--grounding-sites" => grounding_sites = true,
+            "--ground-pads" => ground_pads = true,
             "--damage" => damage = true,
             "--faces" => faces = true,
             "--no-jitter" => variation.jitter = false,
@@ -232,6 +234,9 @@ pub fn run() -> AppResult<()> {
     }
     if area_sweep {
         return area_sweep_run(&resources, seeds.unwrap_or(3), png.as_deref(), &positional);
+    }
+    if ground_pads {
+        return ground_pads_survey(&resources, &positional);
     }
     if grounding_sites {
         return grounding_sites_survey(&resources);
@@ -2182,6 +2187,101 @@ fn area_map(
         path,
         crate::replay::png::encode_rgba(w as u32, h as u32, &rgba)?,
     )?;
+    Ok(())
+}
+
+/// Exercise the actual world construction, not isolated origin corrections.
+/// Every offered objective is checked at its authored and relocated position.
+fn ground_pads_survey(resources: &BTreeMap<String, Vec<u8>>, only: &[String]) -> AppResult<()> {
+    use tore_world::terrain::Placements;
+    let mut total = 0;
+    let mut problems = 0;
+    let mut worlds = 0;
+    for (index, theater) in tables::THEATERS.iter().enumerate() {
+        if !only.is_empty() && !only.iter().any(|t| t.eq_ignore_ascii_case(theater)) {
+            continue;
+        }
+        let mut cases = vec![(theater.to_string(), None, "base")];
+        for name in resources.keys().filter(|n| {
+            n.ends_with(".MM")
+                && n.starts_with('~')
+                && tore_formats::theater::base_theater(n) == Some(*theater)
+        }) {
+            cases.push((name.trim_end_matches(".MM").to_owned(), None, "layout"));
+        }
+        let mut stems = tables::TEMPLATES[index].to_vec();
+        if *theater == "UKR" {
+            stems.extend(["QFACT", "QUBUNK", "QURADAR"]);
+        }
+        for stem in stems {
+            for (variation, label) in [(Variation::OFF, "authored"), (Variation::ON, "relocated")] {
+                let mut target = heavy(stem, index, 1);
+                target.variation = variation;
+                cases.push((theater.to_string(), Some(target), label));
+            }
+        }
+        let mut count = 0;
+        for (layout, target, variant) in cases {
+            let terrain = Terrain::for_mission_with(
+                resources,
+                &layout,
+                Some(0),
+                &Overrides {
+                    city_fill: false,
+                    ..overrides()?
+                },
+                target.as_ref(),
+            )?;
+            let sources = Placements::for_terrain(resources, &terrain, &layout)?;
+            let stem = target.as_ref().map_or("base", |t| t.stem.as_str());
+            worlds += 1;
+            for placed in sources.placed() {
+                let (_, p) = placed?;
+                let Some(pad) = sources.foundation(p) else {
+                    continue;
+                };
+                let shape = &sources.shapes[&p.object_type];
+                let before = sources
+                    .stance_on_terrain(p, |x, z| f64::from(terrain.raw_height(x as f32, z as f32)))
+                    .unwrap();
+                let after = terrain.placement_stance(&sources, p).unwrap();
+                let bottom = tore_world::grounding::height_range(shape).unwrap()[0] * after.scale;
+                let old_bottom = before.origin[1] + bottom;
+                let new_bottom = after.origin[1] + bottom;
+                let mut buried = 0f64;
+                let mut error = 0f64;
+                for ix in 0..=16 {
+                    for iz in 0..=16 {
+                        // Exclude the two-foot rounding guard around actual geometry.
+                        let x =
+                            pad.min[0] + 2. + (pad.max[0] - pad.min[0] - 4.) * f64::from(ix) / 16.;
+                        let z =
+                            pad.min[1] + 2. + (pad.max[1] - pad.min[1] - 4.) * f64::from(iz) / 16.;
+                        buried = buried
+                            .max(f64::from(terrain.raw_height(x as f32, z as f32)) - old_bottom);
+                        error = error.max(
+                            (f64::from(terrain.height(x as f32, z as f32)) - new_bottom).abs(),
+                        );
+                        error = error.max((terrain.surface_height(x, z) - new_bottom).abs());
+                    }
+                }
+                if error > 0.05 {
+                    problems += 1;
+                }
+                count += 1;
+                println!(
+                    "ground-pad: {theater} {layout} {stem} {variant} {} #{} at {} {} before-buried {buried:.2} after-error {error:.4}",
+                    p.object_type, p.key.ordinal, p.position[0], p.position[2]
+                );
+            }
+        }
+        total += count;
+        println!("ground-pads-theater: {theater} placements {count}");
+    }
+    println!("ground-pads: worlds {worlds} placements {total} problems {problems}");
+    if problems > 0 {
+        return Err(format!("{problems} foundation support failures").into());
+    }
     Ok(())
 }
 

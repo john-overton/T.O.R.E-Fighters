@@ -207,6 +207,7 @@ pub fn terrain() -> Terrain {
         })
         .to_vec();
     Terrain {
+        foundations: Default::default(),
         theater: Theater {
             name: "Synthetic".into(),
             map: "T.PIC".into(),

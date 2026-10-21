@@ -955,6 +955,12 @@ def scenarios() -> list[Scenario]:
                   "including thin frames below the solid hit box. Reads the records the import lacks from the retail media.",
         ),
         Scenario(
+            name="surface-ground-pads", lane="ai",
+            args=["--surface-dump", "--ground-pads"], timeout=1200,
+            expect=[r"^ground-pads: worlds [1-9]\d* placements [1-9]\d* problems 0$"],
+            notes="Every theater, alternate layout and objective, authored and relocated: flat shapes and broad fixed footprints share terrain support within 0.05 ft.",
+        ),
+        Scenario(
             name="surface-grounding-sites", lane="ai",
             args=["--surface-dump", "--grounding-sites"], timeout=600,
             expect=[r"^grounding-sites: 16 theaters, 0 unread resources, 0 problems$"] + [
