@@ -1785,6 +1785,11 @@ fn replay_cameras(
     Ok(())
 }
 
+/// What `--vegetation-art` says for an import made before the retail
+/// vegetation shapes and textures were kept (vegetation pass 3, 3804ce10).
+const VEGETATION_ART_MISSING: &str =
+    "vegetation art: the import predates the retail vegetation art; re-import media";
+
 /// `--vegetation-art OUT`: every retail vegetation and rock texture of the
 /// import as a PNG through the Ukraine reference palette, the cutout (index
 /// 255) in magenta. A look at what the import holds; nothing is committed.
@@ -1801,6 +1806,10 @@ pub fn art() -> AppResult<()> {
     let palette = tore_world::city::mask::reference_palette(resources, &environment.map)
         .ok_or("no reference palette")?;
     let art = crate::vegetation::art();
+    if art.is_empty() {
+        // The game falls back without them; this audit has nothing to read.
+        return Err(VEGETATION_ART_MISSING.into());
+    }
     let mut names: Vec<(&String, &Vec<u8>)> = art.iter().collect();
     names.extend(
         resources

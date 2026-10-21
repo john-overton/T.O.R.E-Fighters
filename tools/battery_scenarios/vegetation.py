@@ -100,8 +100,15 @@ def scenarios():
     )]
 
 
-def check_top_crowns(work, _output):
-    rows=(work/'art'/'top-crowns.tsv').read_text().splitlines()[1:]
+def check_top_crowns(work, output):
+    if 'the import predates the retail vegetation art' in output:
+        # The profile was imported before vegetation pass 3 (3804ce10) kept
+        # the retail shapes and textures: an environment limit, not a bug.
+        return ['environment: the profile\'s import predates the retail vegetation art; re-import media into it']
+    report = work/'art'/'top-crowns.tsv'
+    if not report.exists():
+        return ['no retail grove crown audit']
+    rows=report.read_text().splitlines()[1:]
     if not rows:
         return ['no retail grove crown audit']
     errors=[]

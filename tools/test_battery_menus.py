@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from battery_scenarios import menus  # noqa: E402
+from battery_scenarios import menus, render, vegetation  # noqa: E402
+from battery_scenarios._strips import is_enemy_field  # noqa: E402
 
 
 def write_ppm(directory, name, width, height, pixel):
@@ -89,6 +90,34 @@ class WingLoadoutRecordingTests(unittest.TestCase):
     def test_missing_export_is_a_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(len(menus.wing_loadout_recording_problems(Path(directory), "")), 3)
+
+class GroundStartFieldTests(unittest.TestCase):
+    def test_window_ground_starts_are_at_blue_fields(self):
+        # --ground-start refuses an enemy field (6c83d6c1); free flight is Blue
+        # and starts in UKR unless --theater says otherwise.
+        checked = 0
+        for s in menus.scenarios() + render.scenarios():
+            if "--ground-start" not in s.args or "--capture-flight" not in s.args:
+                continue
+            theater = s.args[s.args.index("--theater") + 1] if "--theater" in s.args else "UKR"
+            airport = int(s.args[s.args.index("--ground-start") + 1])
+            self.assertFalse(is_enemy_field(theater, airport), f"{s.name}: {theater} airport {airport} is Redfor")
+            checked += 1
+        self.assertGreaterEqual(checked, 14)
+
+
+class TopCrownAuditTests(unittest.TestCase):
+    def test_an_import_without_vegetation_art_is_an_environment_problem(self):
+        output = "vegetation art: the import predates the retail vegetation art; re-import media\n"
+        with tempfile.TemporaryDirectory() as d:
+            problems = vegetation.check_top_crowns(Path(d), output)
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("environment:"), problems)
+
+    def test_a_missing_audit_without_a_reason_is_still_a_failure(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(vegetation.check_top_crowns(Path(d), ""), ["no retail grove crown audit"])
+
 
 if __name__ == "__main__":
     unittest.main()
