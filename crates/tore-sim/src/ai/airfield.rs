@@ -1457,6 +1457,23 @@ impl Sequence {
         )
     }
 
+    /// Fitted (agent decision, 2026-10-20): a fixed-wing aircraft past its
+    /// first gate flies down the extended centerline to gates on the 3
+    /// degree path, and while its wheels are no more than [`PATH_LOST_FT`]
+    /// below that path the terrain hold and climb stand down, as on the
+    /// final. Where ground rises toward the gates the path itself can pass
+    /// only 150 to 500 ft above it (VLA Petrovka from the south), inside the
+    /// 1,000 ft hold and the 500 ft climb, and holding the aircraft that
+    /// far above the ground brought it to the last gate 900 ft above the
+    /// path, too high for the final to recover.
+    fn on_centerline_path(&self, s: &Situation) -> bool {
+        if self.phase != Phase::Approach || self.lift.vertical() || self.leg <= self.first_gate() {
+            return false;
+        }
+        let (path, height) = self.final_path(s);
+        height >= path - PATH_LOST_FT
+    }
+
     /// Fitted (agent decision, 2026-09-29): a final that has sunk more than
     /// [`PATH_LOST_FT`] below its path while still above
     /// [`PATH_LOST_FLOOR_FT`] goes around while it has height to climb away,
@@ -1860,6 +1877,7 @@ impl Sequence {
                 Phase::ClimbOut | Phase::Inbound | Phase::Marshal | Phase::Approach
             )
             && terrain > self.landing_point()[1] + TERRAIN_IGNORED_FT
+            && !self.on_centerline_path(s)
         {
             let clearance = s.position[1] - terrain;
             if clearance < TERRAIN_CLIMB_FT || (!approach && clearance < TERRAIN_HOLD_FT) {
@@ -2270,6 +2288,47 @@ mod tests {
         assert!(pitch >= 0. && !level);
         // Close above them: climb, wings level.
         let (_, pitch, level) = guide(1_200., 0.);
+        assert!(pitch >= TERRAIN_CLIMB_DEG && level);
+    }
+
+    #[test]
+    fn past_the_first_gate_the_path_over_rising_ground_is_flown_down() {
+        // 2026-10-20: at VLA Petrovka the 3 degree path runs 150 to 500 ft
+        // above rising ground under the gates; the terrain hold kept an
+        // F/A-18D 1,000 ft above it and it crossed the threshold 579 ft up.
+        let path = |out: f64| out * APPROACH_PATH_DEG.to_radians().tan();
+        let guide = |leg: usize, above_path: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Approach;
+            seq.leg = leg;
+            let out = 16_000.;
+            let height = path(out) + above_path;
+            let mut s = on_final(&seq, out, height, 360.);
+            // Ground 300 ft under the aircraft on the way to the gate, more
+            // than 300 ft above the runway: inside the hold and the climb.
+            s.terrain_to_gate_ft = s.position[1] - 300.;
+            match seq.step(&s).command.control {
+                Control::Air(g) => (g.flight_path_pitch_deg, g.wings_level),
+                other => panic!("{other:?}"),
+            }
+        };
+        // On the centreline legs, above the path or a little below it, the
+        // aircraft keeps descending toward its gate on the path.
+        for above in [300., 0., -PATH_LOST_FT + 10.] {
+            let (pitch, level) = guide(2, above);
+            if above > 0. {
+                assert!(pitch < 0., "{above} ft above the path: {pitch}");
+            }
+            assert!(
+                pitch < TERRAIN_CLIMB_DEG && !level,
+                "{above}: {pitch} {level}"
+            );
+        }
+        // Well below the path the terrain climb still applies.
+        let (pitch, level) = guide(2, -PATH_LOST_FT - 50.);
+        assert!(pitch >= TERRAIN_CLIMB_DEG && level);
+        // On the way to the first gate, off the centerline, it applies too.
+        let (pitch, level) = guide(0, 300.);
         assert!(pitch >= TERRAIN_CLIMB_DEG && level);
     }
 
