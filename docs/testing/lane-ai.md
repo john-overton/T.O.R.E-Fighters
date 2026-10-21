@@ -104,7 +104,11 @@ order must be accepted, the pair must land, and a scripted player that has
 crashed is reported, never excused (a crashed leader would hand the wing to its
 next member and get "you are not leading your wing"). The probes with no enemy
 near (`ai-takeoff-*`, the bug-out and land-pair probes) also require the player
-to end alive.
+to end alive. The player cruises on along the runway heading, so a land-pair
+probe ends before that heading reaches the theater's own enemy defenses: from
+Kimpo (`ai-theater-nsk-land-pair`) a Redfor SA-6 and ZSU-23 stand 71 nm north,
+so that probe runs 540 s, not 900 s (`LAND_PAIR_TICKS` in
+`tools/battery_scenarios/ai.py`).
 
 A probe that needs a lost player (`lost-lead-*`) loses it on purpose with
 `--probe-lose-player TICK`, which crashes the scripted player's aircraft at that
