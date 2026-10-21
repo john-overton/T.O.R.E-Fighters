@@ -124,7 +124,13 @@ impl App {
             }
         }
         self.lobby_tick();
-        let session = self.net.is_some();
+        // A host or join waiting for the game's content (worked out on a
+        // worker, longer on a loaded machine) is a session starting: the
+        // screen must not take the game port back for its search meanwhile,
+        // or the host it waits for finds the port in use (net-window-lobby,
+        // 2026-10-21), nor offer New or Join again.
+        let session =
+            self.net.is_some() || self.pending_host.is_some() || self.pending_join.is_some();
         // Flying, or under a debrief with no session, the screen has no turn.
         if self.screen == Screen::Flight || (self.screen != Screen::Main && !session) {
             return;
