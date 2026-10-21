@@ -1,6 +1,7 @@
-"""CPU-only vegetation camera coverage. Never creates a window or GPU adapter."""
+"""Vegetation camera coverage, pack checks and an opt-in GPU cutout regression."""
 import math
-from battery import Scenario
+import shutil
+from battery import Scenario, Step
 
 
 def check_cameras(work, _output):
@@ -42,7 +43,18 @@ def check_grass_cameras(work, _output):
 
 
 def scenarios():
+    priority = ['nice', '-n', '10'] if shutil.which('nice') else []
     return [Scenario(
+        name='vegetation-material-fringe', lane='menus',
+        args=['--vegetation-art', '{work}/art'], timeout=600,
+        env={'CARGO_BUILD_JOBS': '6'},
+        outputs=['art/top-crowns.tsv'], check_work=check_top_crowns,
+        then=[Step([*priority, 'cargo', 'test', '--locked', '-p', 'tore-app',
+                    'vegetation_gpu_cutout_never_uses_transparency_as_a_material',
+                    '--', '--ignored'], app=False, window=True, timeout=600)],
+        expect=['1 passed; 0 failed'],
+        notes='Synthetic GPU samples execute the production material and alpha functions.',
+    ), Scenario(
         name='vegetation-tile-seams', lane='menus',
         args=['--vegetation-preview', '{work}/seams', 'seam-check'],
         env={'TORE_VEGETATION': '1', 'TORE_TERRAIN_SEAMS': '1'}, timeout=600,

@@ -347,7 +347,15 @@ a window or creating a GPU adapter. Use the same resulting camera file for both
 builds via `TORE_VEG_PREVIEW_CAMERAS`. This checks camera coverage, not rendered
 appearance. The synthetic vegetation unit tests cover placement, scale, missing
 cutouts and indexed atlas selection. `tools/test_slice_vegetation.py` checks the
-generated packs' alpha, gutters, chroma removal and local glow rejection.
+generated packs' alpha, gutters, material IDs and conservative white-matte repair.
+The packer's `--audit REPORT.json` records both views of all 54 source pairs;
+see the [asset rules](../../crates/tore-app/assets/vegetation/README.md).
+`vegetation-material-fringe` exports the pack and runs the ignored GPU test
+`vegetation_gpu_cutout_never_uses_transparency_as_a_material` through the window
+wrapper. It executes production sampling functions with synthetic foliage,
+bark, stone, straw, empty and mixed-material cutouts. It checks exact interior
+colour, boundary colour and unchanged bilinear alpha. A GPU adapter and the
+Rust development toolchain are required; retail art is not a test input.
 The CPU-only `vegetation-pass5-cameras` case selects coast, forest hand-off and
 top-view situations. `--vegetation-preview OUT pass5-cameras` writes that list.
 These reproduce the requested situations; player screenshot coordinates are unknown.

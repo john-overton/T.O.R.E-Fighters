@@ -30,7 +30,50 @@ def material(kind, rgb):
     return 0
 
 
-def encode(source, kind):
+def edge_audit(rgba, kind):
+    """Conservative white-matte audit at the final authored texel size.
+
+    Bright orange wood and solid highlights are not background evidence. A
+    suspect must touch a cutout, be near white, and exceed a neighbouring
+    opaque texel of the same material by at least 64 RGB levels.
+    """
+    pixels = rgba.load()
+    bright, matte = [], {}
+    for y in range(rgba.height):
+        for x in range(rgba.width):
+            rgb = pixels[x, y][:3]
+            if pixels[x, y][3] < 128:
+                continue
+            neighbours = [pixels[xx, yy]
+                          for yy in range(max(0, y - 1), min(rgba.height, y + 2))
+                          for xx in range(max(0, x - 1), min(rgba.width, x + 2))
+                          if (xx, yy) != (x, y)]
+            if not any(p[3] < 128 for p in neighbours):
+                continue
+            m = material(kind, rgb)
+            light = max(rgb) if m == 1 else sum(rgb) / 3
+            darker = [p[:3] for p in neighbours
+                      if p[3] >= 128 and material(kind, p[:3]) == m
+                      and max(p[:3]) <= light - 64]
+            if light >= 224 and darker:
+                bright.append((x, y))
+                if min(rgb) >= 224 and max(rgb) - min(rgb) <= 24:
+                    # Use an existing same-material shade, not a new palette.
+                    darker.sort(key=lambda p: sum(p))
+                    matte[x, y] = darker[len(darker) // 2]
+    return bright, matte
+
+
+def defringe(rgba, kind):
+    """Darken isolated white matte without eroding branches or moving bounds."""
+    out = rgba.copy()
+    _, matte = edge_audit(rgba, kind)
+    for (x, y), rgb in matte.items():
+        out.putpixel((x, y), (*rgb, rgba.getpixel((x, y))[3]))
+    return out
+
+
+def encode(source, kind, audit=None):
     """Trim using generated alpha, then retain coarse nearest-neighbour art."""
     rgba = source.convert('RGBA')
     alpha = rgba.getchannel('A').point(lambda a: 255 if a >= 128 else 0)
@@ -51,6 +94,14 @@ def encode(source, kind):
         if bounds == (0, 0, EXTENT, EXTENT):
             break
         rgba = rgba.crop(bounds).resize((EXTENT, EXTENT), Image.Resampling.NEAREST)
+    before_bright, before_matte = edge_audit(rgba, kind)
+    rgba = defringe(rgba, kind)
+    if audit is not None:
+        after_bright, after_matte = edge_audit(rgba, kind)
+        audit.update(bright_edge_before=len(before_bright),
+                     bright_edge_after=len(after_bright),
+                     white_matte_before=len(before_matte),
+                     white_matte_after=len(after_matte))
     out = Image.new('L', (CELL, CELL), 255)
     for y in range(EXTENT):
         for x in range(EXTENT):
@@ -70,9 +121,9 @@ def rust_float(value):
     return text + '0' if text.endswith('.') else text
 
 
-def build(source, output):
+def build(source, output, audit_path=None):
     output.mkdir(parents=True, exist_ok=True)
-    pages, records = [], []
+    pages, records, audits = [], [], []
     for kind in KINDS:
         for variant in range(1, 4):
             name = f'{kind}-{variant}'
@@ -80,9 +131,11 @@ def build(source, output):
             pair = Image.open(path).convert('RGBA')
             cells, aspects = [], []
             for half in range(2):
+                audit = dict(name=name, view=('side', 'top')[half])
                 cell, aspect = encode(pair.crop((half * pair.width // 2, 0,
                                                 (half + 1) * pair.width // 2,
-                                                pair.height)), kind)
+                                                pair.height)), kind, audit)
+                audits.append(audit)
                 slot = len(records) * 2 + half
                 if slot % 4 == 0:
                     pages.append(Image.new('L', (256, 256), 255))
@@ -102,11 +155,14 @@ def build(source, output):
                     (r['name'], r['kind'], r['side'], r['top'], rust_float(r['radius']), rust_float(r['top_aspect'])))
     rows.append('];\n')
     (output / 'pack_layout.rs').write_text('\n'.join(rows))
+    if audit_path is not None:
+        audit_path.write_text(json.dumps(audits, indent=2) + '\n')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--audit', type=Path, help='write all side/top edge counts as JSON')
     args = parser.parse_args()
-    build(args.source, args.output)
+    build(args.source, args.output, args.audit)

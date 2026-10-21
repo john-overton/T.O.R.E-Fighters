@@ -1278,10 +1278,28 @@ fn veg_material(pixel:u32,tint:vec3<f32>,bark:vec3<f32>)->vec3<f32> {
 fn veg_sample(uv:vec2<f32>,layer:i32,tint:vec3<f32>,bark:vec3<f32>)->vec4<f32> {
  let size=vec2<i32>(tile_size());
  let at=clamp(vec2<i32>(floor(uv*vec2<f32>(size))),vec2<i32>(0),size-vec2<i32>(1));
- let pixel=read_tile(at,layer);
+ var pixel=read_tile(at,layer);
  // Nearest colour retains authored pixels; the existing bilinear alpha keeps
  // depth, colour and shadow silhouettes on the same multisample coverage.
  let alpha=veg_alpha(uv,layer);
+ if pixel==255u {
+  // Coverage can reach outside the nearest opaque texel. The cutout sentinel
+  // is not material 7 at maximum brightness: borrow the closest contributing
+  // opaque colour, without changing coverage or blurring opaque interiors.
+  let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
+  let base=floor(p);
+  let f=p-base;
+  var best=0.0;
+  for(var j=0;j<2;j++){
+   for(var i=0;i<2;i++){
+    let xy=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
+    let candidate=read_tile(xy,layer);
+    let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
+    if candidate!=255u && w>best {pixel=candidate;best=w;}
+   }
+  }
+  if pixel==255u {return vec4<f32>(0.0,0.0,0.0,alpha);}
+ }
  return vec4<f32>(veg_material(pixel,tint,bark),alpha);
 }
 @fragment fn veg_fragment(in:VegOut)->FillOut {

@@ -199,6 +199,12 @@ One byte stores each pixel: material times 32 plus a shade from 0 to 31;
 multiplies its material colour by `0.25 + 1.25 * shade / 31`. Colours are linear
 RGB; nearest colour samples preserve coarse pixels, while the existing alpha
 coverage, grounding, surface lighting, fog and shadow passes remain.
+Transparent texels contribute coverage only, never a bright material colour.
+Where edge smoothing covers a sample whose nearest texel is transparent, its
+colour comes from the closest opaque contributor in the bilinear footprint.
+This **fitted agent choice** removes the white fringe on thin dead branches
+without changing silhouettes, dimensions or the authored opaque shading.
+The conservative authoring defringe thresholds are documented in the asset README.
 
 Foliage starts from sRGB temperate (78,103,44), desert (104,111,57), arctic
 (69,89,65) or tropical (48,91,43). It mixes 28% local tile colour, with each

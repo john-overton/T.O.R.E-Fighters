@@ -1472,3 +1472,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "vegetation_sample_tests.rs"]
+mod sample_tests;
