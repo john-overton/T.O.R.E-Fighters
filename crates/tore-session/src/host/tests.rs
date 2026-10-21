@@ -45,7 +45,7 @@ fn spec(friendly: usize, enemy: usize, separation_nm: u32) -> MissionSpec {
 
 fn build() -> BuildId {
     BuildId {
-        version: "0.1.3-1-gtest".into(),
+        version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
     }
@@ -1030,7 +1030,7 @@ fn refusals_reach_the_client_with_their_reason() {
     });
     let (reason, text) = refused(&rig, client);
     assert_eq!(reason, RefuseReason::GameBuild);
-    assert!(text.contains("0.1.3-1-gtest"), "{text}");
+    assert!(text.contains("0.2.0-1-gtest"), "{text}");
 
     // A game of protocol 7, before stage F phase 2's messages, is refused
     // by its version, naming both, before it can send an answer.

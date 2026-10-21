@@ -51,7 +51,7 @@ fn prefix(text: &str) -> Prefix {
 fn build() -> Build {
     Build {
         protocol_version: VERSION,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         release: true,
     }
@@ -183,7 +183,7 @@ impl Row {
             players: 0,
             capacity: 8,
             phase: DiscoverPhase::Lobby,
-            game_version: "0.1.3".into(),
+            game_version: "0.2.0".into(),
             game_commit: "abc".into(),
             name: "Friday night".into(),
             ..ListingSummary::default()

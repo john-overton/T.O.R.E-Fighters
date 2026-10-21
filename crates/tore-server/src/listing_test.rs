@@ -49,7 +49,7 @@ fn address(text: &str) -> SocketAddr {
 fn build() -> Build {
     Build {
         protocol_version: tore_session::wire::PROTOCOL_VERSION,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         release: false,
     }
@@ -62,7 +62,7 @@ fn summary(players: u8) -> ListingSummary {
         players,
         capacity: 15,
         session_id: 7,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         name: "Friday night".into(),
         mission: "UKR, 2 v 2".into(),

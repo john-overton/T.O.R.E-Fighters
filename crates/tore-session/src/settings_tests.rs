@@ -194,7 +194,7 @@ fn the_lobby_list_carries_every_setting_and_only_whether_a_password_is_set() {
 #[test]
 fn a_host_starts_from_its_configuration() {
     let mut config = HostConfig::new(crate::host::BuildId {
-        version: "0.1.3".into(),
+        version: "0.2.0".into(),
         commit: "abc".into(),
         release: false,
     });

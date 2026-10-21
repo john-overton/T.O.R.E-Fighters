@@ -81,7 +81,7 @@ mod tests {
 
     fn build() -> BuildId {
         BuildId {
-            version: "0.1.3-1-gtest".into(),
+            version: "0.2.0-1-gtest".into(),
             commit: "test-commit".into(),
             release: false,
         }
@@ -197,7 +197,7 @@ mod tests {
         assert_eq!(answer.protocol_version, PROTOCOL_VERSION);
         assert_eq!(
             (answer.game_version.as_str(), answer.game_commit.as_str()),
-            ("0.1.3-1-gtest", "test-commit")
+            ("0.2.0-1-gtest", "test-commit")
         );
         assert_eq!(
             (answer.name.as_str(), answer.summary),

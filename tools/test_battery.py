@@ -340,10 +340,10 @@ class DriverTests(unittest.TestCase):
         commit = "0123456789abcdef0123456789abcdef01234567"
         with tempfile.TemporaryDirectory() as d:
             server = Path(d) / "tore-server"
-            server.write_text(f"#!/bin/sh\necho 'T.O.R.E server v0.1.3 ({commit})'\n")
+            server.write_text(f"#!/bin/sh\necho 'T.O.R.E server v0.2.0 ({commit})'\n")
             os.chmod(server, 0o755)
             self.assertEqual(battery.server_commit(str(server)), commit)
-            server.write_text("#!/bin/sh\necho 'T.O.R.E server v0.1.3 (unknown)'\n")
+            server.write_text("#!/bin/sh\necho 'T.O.R.E server v0.2.0 (unknown)'\n")
             self.assertIsNone(battery.server_commit(str(server)))
             self.assertIsNone(battery.server_commit(str(Path(d) / "missing")))
 

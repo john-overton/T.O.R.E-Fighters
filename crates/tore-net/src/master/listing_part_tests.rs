@@ -20,7 +20,7 @@ fn config() -> HostRendezvous {
     HostRendezvous {
         build: Build {
             protocol_version: 13,
-            game_version: "0.1.3".into(),
+            game_version: "0.2.0".into(),
             game_commit: "abc".into(),
             release: true,
         },
@@ -36,7 +36,7 @@ fn summary() -> ListingSummary {
         protocol_version: 13,
         capacity: 8,
         phase: DiscoverPhase::Flying,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         name: "Friday night".into(),
         ..ListingSummary::default()

@@ -622,7 +622,7 @@ BUILD_COMMIT = re.compile(r"\(([0-9a-f]{7,64})\)\s*$")
 
 
 def server_commit(server: str) -> Optional[str]:
-    """The commit `tore-server --version` prints ("T.O.R.E server v0.1.3 (<commit>)"), or None when it prints
+    """The commit `tore-server --version` prints ("T.O.R.E server v0.2.0 (<commit>)"), or None when it prints
     none (a build outside git stamps "unknown")."""
     try:
         out = subprocess.run([server, "--version"], capture_output=True, text=True, timeout=30).stdout

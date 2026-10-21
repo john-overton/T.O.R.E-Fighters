@@ -126,7 +126,7 @@ pub(super) fn sample_entries() -> Vec<(PageEntry, ListingSummary)> {
                 players: sample.players.len() as u8,
                 capacity: sample.capacity,
                 session_id: id,
-                game_version: sample.other_build.unwrap_or("0.1.3").to_owned(),
+                game_version: sample.other_build.unwrap_or("0.2.0").to_owned(),
                 game_commit: "1a2b3c4d5e6f".into(),
                 name: sample.name.to_owned(),
                 mission: sample.mission.to_owned(),

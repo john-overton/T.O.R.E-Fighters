@@ -12,12 +12,12 @@
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.3, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 2 multiplayer, v0.2.0 release draft" src="https://img.shields.io/badge/milestone-M2%20multiplayer-orange"></a>
 </p>
 
 <p align="center">
   <a href="docs/formats/theater.md"><img alt="16 theaters" src="https://img.shields.io/badge/theaters-16-3c7a57"></a>
-  <a href="docs/FLIGHT-MODEL.md"><img alt="Thirteen aircraft" src="https://img.shields.io/badge/aircraft-13%20flyable-3c7a57"></a>
+  <a href="docs/FLIGHT-MODEL.md"><img alt="36 retail aircraft plus the F/A-XX concept" src="https://img.shields.io/badge/aircraft-37%20flyable-3c7a57"></a>
   <a href="docs/baselines/weapons-systems.md"><img alt="135 weapon definitions" src="https://img.shields.io/badge/weapon%20definitions-135-3c7a57"></a>
   <a href="AGENTS.md"><img alt="No retail game data in this repository" src="https://img.shields.io/badge/retail%20game%20data-none%20shipped-6b4fbb"></a>
   <a href="MODS.md"><img alt="Mods keep their own license" src="https://img.shields.io/badge/mods-your%20own%20license-6b4fbb"></a>
@@ -126,76 +126,107 @@ recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
 
 ## What works today
 
-Version 0.1.3 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
-a quick fight from the original main menu, through Quick Mission setup and
-flight, to the debrief.
+Version 0.2.0 is the [Milestone 2: Multiplayer](docs/ROADMAP.md#milestone-2-multiplayer)
+release. Build a Quick Mission with friends, fly together or against each other,
+and return to the lobby for the next round. It also brings ground attacks,
+defended surface targets, more aircraft and a fuller world to single player.
+The [draft release notes](docs/release/v0.2.0.md) describe the changes.
 
 **Menus.** The app launches into the original **Choose Activity** menu using
 artwork, button pieces, proportional fonts, sounds and recorded music imported
-from your own copy. The Quick Mission creator, the Load Ordnance screen and the
-mission debrief use the original art too. All briefing fields are editable, and
-mission systems that are not built yet are refused before launch.
-[Testing steps and remaining gaps](docs/baselines/creator-ordnance.md).
+from your own copy. The Quick Mission creator, Load Ordnance and debrief use the
+original art too. Quick Mission keeps your setup between launches and includes
+a planning map, ground targets, air defenses and ground starts for either side.
+Mission systems that are not built yet are refused before launch.
 
-**Aircraft and theaters.** Thirteen aircraft: F/A-18D, F-14D, A-4E, X-31 EFM,
-Rafale C, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N
-([roster and limits](docs/spec/roster-aircraft.md)). All 16 theaters, with
-original terrain, artwork, scenery, weather and day/night palettes. Every base theater has airports with runways, targetable
-buildings, tower radio and ILS guidance.
+**Multiplayer.** Open **Multi > Direct Connection** for a local game or a typed
+address, or **Multi > Internet Lobby** to browse online games. Press **New** to
+host, or **Join** to join. The King chooses the mission and rules; players take
+slots, choose their loadouts, mark themselves **Ready** and fly. Up to 30 humans
+can play co-op or PvP, with configurable sides, AI fill and respawn. Player
+Choice wings let each player choose an aircraft. Chat, shared flight contacts,
+observers, rejoin and host migration are built. A dedicated server can rotate
+missions while keeping its players connected. See the
+[multiplayer guide](docs/MULTIPLAYER.md) and
+[dedicated server guide](docs/DEDICATED-SERVER.md).
 
-**Flight.** Cockpit and HUD that adapt to the window shape, instrument windows,
-the retail view suite, and animated gear, flaps, airbrakes, hook and control
-surfaces. Stalls, spins, runway wind, autopilot, ground starts for your whole
-wing, and ejection. Simulation runs at a fixed 120 Hz, independent of rendering.
+**Aircraft and theaters.** Fly 36 reviewed retail aircraft plus the F/A-XX
+concept. The F/A-18D, Rafale C and other original roster aircraft are joined by
+Phantoms, the F-15C, F-16C, A-10, transports, radar aircraft, airliners and
+[the variety roster](docs/spec/aircraft-variety.md). All 16 theaters have their
+original terrain and scenery, with redrawn airports at real scale, runway and
+approach lights, tower radio and ILS guidance. City buildings, trees, bushes,
+rocks and grass fill out the landscape. Large fixed sites stand on level ground
+pads shared by the flight model and the view.
 
-**Combat.** Guns with tracers and 25 working weapons, including four missile
-guidance types with seeker search, pitbull activation, HUD cues and seeker
-tone ([missile plan](docs/missile-update-plan.md)). One shared radar and
-infrared sensor serves all thirteen aircraft from their own imported equipment:
-the scope, click-to-designate contacts, jammer noise, RWR and the radar cross
-section page ([what it models](docs/radar.md)). Chaff and flares that can
-decoy missiles, damage, smoke, debris, blackout and redout.
+**Flight.** Cockpit and HUD adapt to the window shape, with instrument windows,
+the original view suite and animated gear, flaps, airbrakes, hooks and control
+surfaces. Stalls, spins, runway wind, autopilot, wing ground starts and ejection
+are built. Simulation runs at a fixed 120 Hz, independent of rendering.
+Helicopters have rotor physics, collective and cyclic controls, trim and hover
+hold. The V-22 converts between helicopter and airplane flight, and the AV-8B
+and Yak-141 use vectored thrust. These powered-lift models include fitted
+handling and still need wider flight testing.
 
-**AI.** Up to six wings and 29 AI aircraft per Quick Mission, each with its
-own sensors, weapons, fuel and flight model, at four skill levels. They search,
-engage, defend against missiles, fly formation, follow wing orders, take off
-and land in turn, and head home when fuel runs low or the fight is won
-([AI spec](docs/spec/ai.md)).
+**Combat.** Guns fire tracers, and air-to-air missiles have seeker search,
+radar and infrared guidance, HUD cues and seeker tones. Aircraft use their
+imported sensor equipment, with radar scopes, jammer noise and radar-warning
+receivers. Air-to-ground radar, bomb sights, CCIP
+(the predicted impact point), level bombing, rockets, laser designation and
+buddy lasing support strikes on surface targets. Guided bombs, Mavericks, HARM,
+targeting pods and weapon seeker views work in single player and online.
+Loaded weapons and tanks appear on their stations and leave from those stations
+when fired or jettisoned. Chaff, flares, damage, smoke, debris, blackout and
+redout remain part of the fight. See the
+[air-to-ground guide](docs/spec/air-to-ground.md).
 
-**Sound.** Radio chatter and wingman replies, a two-seat crew voice, and
-in-flight music picked by the original's situation rules, all from your own
-copy's recordings.
+**Surface world.** Ground targets include moving columns, vehicles, ships,
+carriers and parked aircraft. SAM sites, anti-aircraft guns and flak defend
+them; supply trucks replenish defenses. Buildings burn, destroyed objects
+leave ruins and weapon craters stay for the mission. Carriers are defended
+surface targets; full carrier flight operations are still ahead.
 
-**Cheats.** The in-flight Cheat menu and the loadout Cheat button
-([cheats](docs/spec/cheats.md)).
+**AC-130 gunship.** Select or link the 25 mm, 40 mm and 105 mm guns, aim through
+the sensor and let the orbit autopilot fly while you work the full-screen
+console. It has white-hot, black-hot, TV and night-vision pictures, a ground
+radar map, target tracking and gamepad controls
+([gunship console](docs/spec/target-window.md#sensor-console)).
 
-**Replays.** A T.O.R.E addition: every flight records itself, and **Replays**
-on the main menu plays it back from any aircraft or a free drone camera,
-forwards or backwards from 1/8x to 16x. Panels show the AI's reasoning,
-flight-model telemetry and every radio call and order, with why each
-happened. Recordings export to mission logs and to a Tacview file, not yet
-checked in Tacview itself ([mission replays](docs/REPLAYS.md)).
+**AI.** Up to six wings and 29 AI aircraft per Quick Mission fly with their own
+sensors, weapons, fuel and flight model at four skill levels. They fight, defend,
+follow wing orders, take off and land, and return home. Strike wings attack
+ground targets; helicopters and VTOL aircraft can be wingmen or enemies and
+use vertical takeoff and landing. Wing contacts and target assignments are
+shared through the flight data link ([AI spec](docs/spec/ai.md)).
 
-**Multiplayer (in development, Milestone 2):** to host a game, open Choose
-Activity, Multi, **Direct Connection**, type a callsign and press **New**. You
-become the King of a lobby: **Mission...** builds the mission with the Quick
-Mission creator (press **Accept**), click a free slot to take an aircraft,
-**Loadout** arms it, **Ready** marks you set, and **Fly** starts the mission
-once everyone holding a slot is ready. Friends on the same network see your game
-in their Direct Connection list and press **Join** (or type your address in
-*Connect to*); they take a slot, arm and ready the same way. After the mission
-everyone returns to the lobby. A dedicated server (`tore-server`) can be joined
-the same way. Open UDP port 26900 on the host's firewall; the
-[multiplayer guide](docs/MULTIPLAYER.md) and the
-[dedicated server guide](docs/DEDICATED-SERVER.md) have the rest. The public
-lobby, replays of networked flights and the King's settings are not built yet.
+**Sky and lighting.** Dawn and dusk blend smoothly, with a moving moon and
+starfield at night. Fires, explosions and tracers glow after dark. Cockpit
+paint darkens with the sky and weather, red flood lights illuminate it, and
+HUD brightness and colour are adjustable separately from instruments. Shadows,
+vegetation, grass and frame rate have their own graphics settings.
 
-**Not yet:** surface AI (SAM sites, AAA, vehicles and ships as active
-opponents), the remaining weapons, carriers, missions, campaigns and the
-original's Replay Last Mission (flying it again). Multiplayer is
-[Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer); its
-[design](docs/MULTIPLAYER.md) and [delivery plan](docs/multiplayer-plan.md) say
-what is built.
+**Sound.** Radio chatter, wingman replies, crew voices and situation-based
+music come from your own copy. Distant explosions and other shooters' weapons
+are heard after sound travels to the listener, including in multiplayer and
+replays. Large blasts throw out dust, vapor or spray according to the setting.
+
+**Cheats.** The in-flight Cheat menu and the Load Ordnance Cheat button remain
+available ([cheats](docs/spec/cheats.md)); multiplayer follows the King's rules.
+
+**Replays.** A T.O.R.E addition: single-player flights record themselves, and
+network flights become replays after the session. Watch from any aircraft, a
+weapon or a free drone camera, forwards or backwards from 1/8x to 16x. The HUD
+camera has an old video-tape look; Sensor View includes the AC-130 console.
+New live recordings sample the HUD and console 24 times a second. Panels show
+AI decisions, flight telemetry, radio calls and orders. Older recordings still
+play. Exports include mission logs and Tacview files, not yet checked in Tacview
+itself ([mission replays](docs/REPLAYS.md)).
+
+**Not yet:** full carrier operations, the remaining unsupported weapons,
+standalone missions, campaigns and the original's Replay Last Mission (flying
+it again). Aircraft handling, multiplayer and visual features retain the
+validation limits recorded in the [feature matrix](docs/features.md). Retail
+comparison is unavailable; this release does not claim proven retail parity.
 
 ## Online play and anonymous statistics
 
@@ -283,7 +314,7 @@ older compatibility model, and `--native-flight-tables DIR` runs a restricted
 build from statically extracted tables. See [the flight model](docs/FLIGHT-MODEL.md).
 
 The development weapons range is `--live-fire --aircraft f18`, and accepts any of
-the thirteen imported aircraft. Space fires, semicolon selects a weapon, backslash
+the supported imported aircraft. Space fires, semicolon selects a weapon, backslash
 resets the range, and T or a click on the radar page designates a contact.
 
 ## Explore the theaters
@@ -294,7 +325,7 @@ The free-camera terrain diagnostic remains available from the command line:
 cargo run --locked -p tore-app -- --viewer
 ```
 
-Arrow keys move, **Shift** moves 8× faster, **Q/E** or **PageDown/PageUp** lower/raise altitude, **A/D** turn and **W/S** look up/down. **Escape** returns to the creator, then the main menu. All 16 theaters are selectable. Launch a particular theater directly with `--viewer --theater TVIET` (Vietnam), for example. Weather uses a fixed midday preview; sun, moon, stars and cloud shapes are extracted for further recovery but are not yet rendered. See [recovery findings](docs/formats/theater.md) and [viewer validation](docs/baselines/ukraine-viewer.md).
+Arrow keys move, **Shift** moves 8× faster, **Q/E** or **PageDown/PageUp** lower/raise altitude, **A/D** turn and **W/S** look up/down. **Escape** returns to the creator, then the main menu. All 16 theaters are selectable. Launch a particular theater directly with `--viewer --theater TVIET` (Vietnam), for example. The diagnostic uses a fixed midday preview; normal flights have the moving sun and moon, stars and changing daylight. See [recovery findings](docs/formats/theater.md) and [viewer validation](docs/baselines/ukraine-viewer.md).
 
 ## Extract assets for research
 

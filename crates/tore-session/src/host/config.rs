@@ -89,7 +89,7 @@ pub enum AfterEnd {
 /// (docs/ARCHITECTURE.md, "Joining, leaving and the end of a mission").
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuildId {
-    /// The version string, for example `0.1.3`, or `0.1.3-4-gabc1234` for a
+    /// The version string, for example `0.2.0`, or `0.2.0-4-gabc1234` for a
     /// build between tags.
     pub version: String,
     /// The commit the build stamps.
@@ -378,7 +378,7 @@ mod tests {
 
     fn build() -> BuildId {
         BuildId {
-            version: "0.1.3".into(),
+            version: "0.2.0".into(),
             commit: "abc".into(),
             release: true,
         }
@@ -513,21 +513,21 @@ mod tests {
     #[test]
     fn builds_match_by_commit_or_by_a_release_version() {
         let release = build();
-        assert!(release.matches("0.1.3", "abc"));
-        assert!(release.matches("0.1.3", "def"), "another tagged build");
+        assert!(release.matches("0.2.0", "abc"));
+        assert!(release.matches("0.2.0", "def"), "another tagged build");
         assert!(!release.matches("0.1.2", "def"));
-        assert!(!release.matches("0.1.3-4-gdef", "def"));
+        assert!(!release.matches("0.2.0-4-gdef", "def"));
         let dev = BuildId {
             release: false,
             ..build()
         };
-        assert!(dev.matches("0.1.3-4-gabc", "abc"));
-        assert!(!dev.matches("0.1.3", "def"));
+        assert!(dev.matches("0.2.0-4-gabc", "abc"));
+        assert!(!dev.matches("0.2.0", "def"));
         let unknown = BuildId {
             commit: "unknown".into(),
             release: false,
             ..build()
         };
-        assert!(!unknown.matches("0.1.3", "unknown"));
+        assert!(!unknown.matches("0.2.0", "unknown"));
     }
 }

@@ -453,7 +453,7 @@ mod tests {
         Own {
             protocol_version: V,
             build: BuildId {
-                version: "0.1.3-2-gabc".into(),
+                version: "0.2.0-2-gabc".into(),
                 commit: "abc".into(),
                 release: false,
             },
@@ -464,7 +464,7 @@ mod tests {
         DiscoverAnswer {
             nonce,
             protocol_version: V,
-            game_version: "0.1.3-2-gabc".into(),
+            game_version: "0.2.0-2-gabc".into(),
             game_commit: "abc".into(),
             session_id: session,
             name: name.into(),
@@ -657,9 +657,9 @@ mod tests {
         other_protocol.protocol_version = V + 1;
         let mut tagged = answer(0xABCD, 3, "Tagged");
         tagged.game_commit = "other".into();
-        tagged.game_version = "0.1.3".into();
+        tagged.game_version = "0.2.0".into();
         let mut local = own();
-        local.build.version = "0.1.3".into();
+        local.build.version = "0.2.0".into();
         for (found, expect) in [
             (&other_build, Compat::OtherBuild),
             (&other_protocol, Compat::OtherProtocol),
@@ -771,7 +771,7 @@ mod tests {
             fields,
             [
                 "192.168.1.20:26900",
-                "same build (0.1.3-2-gabc abc)",
+                "same build (0.2.0-2-gabc abc)",
                 "Friday night",
                 "UKR",
                 "1/4 players",

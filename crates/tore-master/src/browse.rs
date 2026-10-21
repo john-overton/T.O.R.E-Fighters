@@ -114,17 +114,17 @@ mod tests {
 
     #[test]
     fn the_build_rule_is_the_games() {
-        let release = build("0.1.3", "abc", true);
-        assert!(same_build(&release, &build("0.1.3", "abc", true)));
-        assert!(same_build(&release, &build("0.1.3", "def", true)));
+        let release = build("0.2.0", "abc", true);
+        assert!(same_build(&release, &build("0.2.0", "abc", true)));
+        assert!(same_build(&release, &build("0.2.0", "def", true)));
         assert!(!same_build(&release, &build("0.1.2", "def", true)));
-        assert!(!same_build(&release, &build("0.1.3-4-gdef", "def", false)));
-        let dev = build("0.1.3-4-gabc", "abc", false);
-        assert!(same_build(&dev, &build("0.1.3-4-gabc", "abc", false)));
-        assert!(!same_build(&dev, &build("0.1.3", "def", true)));
-        let unknown = build("0.1.3", "unknown", false);
-        assert!(!same_build(&unknown, &build("0.1.3", "unknown", false)));
-        let mut other_protocol = build("0.1.3", "abc", true);
+        assert!(!same_build(&release, &build("0.2.0-4-gdef", "def", false)));
+        let dev = build("0.2.0-4-gabc", "abc", false);
+        assert!(same_build(&dev, &build("0.2.0-4-gabc", "abc", false)));
+        assert!(!same_build(&dev, &build("0.2.0", "def", true)));
+        let unknown = build("0.2.0", "unknown", false);
+        assert!(!same_build(&unknown, &build("0.2.0", "unknown", false)));
+        let mut other_protocol = build("0.2.0", "abc", true);
         other_protocol.protocol_version = 8;
         assert!(!same_build(&other_protocol, &release));
     }

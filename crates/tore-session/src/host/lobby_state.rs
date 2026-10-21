@@ -414,7 +414,7 @@ mod tests {
             content: Some(PlayerContent {
                 build: Build::V102F,
                 importer: Some(Importer {
-                    version: "0.1.3".into(),
+                    version: "0.2.0".into(),
                     commit: "abc".into(),
                 }),
                 items: BTreeMap::from([
