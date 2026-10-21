@@ -2638,9 +2638,25 @@ fn validate_guns_only(
         if bridge.len() != 29 {
             return Err("guns-only validation lost wing members".into());
         }
+        let tank_fuel: f64 = load.configuration.external_fuel_lbs.iter().sum();
         for actor in bridge.mission().actors() {
             if actor.stations().len() != load.configuration.stations.len() {
                 return Err("guns-only validation lost stations".into());
+            }
+            // A default load's tanks start full and the systems know every
+            // engine, as the player's do (an F/A-18 or F-16C centreline tank).
+            let systems = &actor.flight().systems;
+            if systems.external_lbs() != tank_fuel
+                || systems.engine.count() != load.configuration.engines
+            {
+                return Err(format!(
+                    "{:?} AI default load starts with {:.0} lb external fuel and {} engines, not {tank_fuel:.0} lb and {}",
+                    load.aircraft,
+                    systems.external_lbs(),
+                    systems.engine.count(),
+                    load.configuration.engines
+                )
+                .into());
             }
             for (index, (actual, original)) in actor
                 .stations()
