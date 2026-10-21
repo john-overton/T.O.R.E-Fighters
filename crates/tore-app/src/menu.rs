@@ -384,6 +384,25 @@ impl Menu {
                     self.state.down();
                 }
             }
+            "bar-multi-hover"
+            | "bar-replays-hover"
+            | "bar-replays-pressed"
+            | "bar-replays-focus" => {
+                let bar = if name == "bar-multi-hover" {
+                    2
+                } else {
+                    REPLAYS_BAR
+                };
+                if name == "bar-replays-focus" {
+                    self.state.keyboard = true;
+                    self.state.focus = Some(Target::Bar(bar));
+                } else {
+                    self.state.hover = Some(Target::Bar(bar));
+                    if name == "bar-replays-pressed" {
+                        self.state.down();
+                    }
+                }
+            }
             "help" | "pref" | "multi" => {
                 let bar = match name {
                     "help" => 0,
@@ -395,7 +414,7 @@ impl Menu {
             }
             _ => {
                 return Err(
-                    "snapshot state must be normal, hover, pressed, help, pref, multi, or notice"
+                    "snapshot state must be normal, hover, pressed, help, pref, multi, notice, bar-multi-hover, bar-replays-hover, bar-replays-pressed, or bar-replays-focus"
                         .into(),
                 );
             }
@@ -583,7 +602,9 @@ impl Menu {
             if self.state.open == Some(i) || self.state.highlighted(Target::Bar(i)) {
                 canvas.rect(rect, [190, 200, 215, 255]);
             }
-            canvas.centered_text(menu_font, label, rect);
+            // Keep the imported font's shared baseline: Replays' descenders
+            // must not lift the whole word above Multi (presentation spec).
+            canvas.centered_text_by(menu_font, label, "Multi", rect);
         }
         let body = &self.sprites["ARMFONT.PIC"];
         // Opinionated (John, 2026-09-23): badge plus version, drawn before

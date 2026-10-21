@@ -78,6 +78,46 @@ class ImageCheckTests(unittest.TestCase):
         self.assertEqual(menus.scene_problems(0)("nothing here"), ["no capture written"])
 
 
+class ReplaysBarTests(unittest.TestCase):
+    def picture(self, directory, offset, raised=False, missing=False):
+        def pixel(x, y):
+            # Synthetic letter cores, never imported retail pixels.
+            if x == 161 + offset and 42 <= y <= 50:
+                return (24, 40, 154)
+            if not missing and x == 211 + offset and 42 - raised <= y <= 50 - raised:
+                return (24, 40, 154)
+            shade = 180 + (x + y) % 50
+            return (shade, shade, shade)
+        return write_ppm(directory, "bar.ppm", 640, 480, pixel)
+
+    def test_shared_baseline_on_every_bar_origin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for offset in (0, -6, 109):
+                path = self.picture(directory, offset)
+                self.assertEqual(menus.replays_bar_picture(offset)(f"Menu preview: {path}"), [])
+
+    def test_old_one_pixel_lift_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.picture(directory, 0, raised=True)
+            self.assertEqual(menus.replays_bar_picture()(f"Menu preview: {path}"),
+                             ["Replays baseline or letter weight differs from Multi"])
+
+    def test_missing_label_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.picture(directory, 0, missing=True)
+            self.assertEqual(menus.replays_bar_picture()(f"Menu preview: {path}"),
+                             ["Multi or Replays letter core is missing"])
+
+    def test_all_backgrounds_and_states_are_covered(self):
+        covered = {s.name for s in menus.scenarios() if s.name.startswith("menus-replays-bar-")}
+        self.assertEqual(covered, {
+            f"menus-replays-bar-{background}-{state}"
+            for background in ("choosev", "chooseu", "choosem", "chooseac", "choose3")
+            for state in ("normal", "bar-multi-hover", "bar-replays-hover",
+                          "bar-replays-pressed", "bar-replays-focus", "multi")
+        })
+
+
 
 class WingLoadoutRecordingTests(unittest.TestCase):
     def test_records_are_checked_for_every_plane_and_start(self):

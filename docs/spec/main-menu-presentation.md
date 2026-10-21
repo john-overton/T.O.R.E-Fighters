@@ -38,8 +38,13 @@ one-pixel movement with a pressed button remains shared by its label and art.
 **Opinionated** addition requested by John on 2026-09-26, like the version
 badge: the top bar gains a fourth entry, **Replays**, after Multi. The retail
 bar's three entries, ?, Pref and Multi, their dropdowns and positions are
-unchanged. Replays uses the same MENUFONT label, centered by its visible
-glyph bounds, and the same highlight. Its area is 66 by 19 pixels at y=38,
+unchanged. Replays uses the same imported MENUFONT glyphs and palette. All
+four labels share the vertical placement of Multi, centered using Multi's
+visible glyph bounds. The p and y descenders extend below that baseline
+instead of lifting the whole word. Horizontal centering stays per label.
+The normal, hover, keyboard-focus and pressed states keep this placement.
+Hover and focus use the existing filled highlight, with no added underline.
+Its area is 66 by 19 pixels at y=38,
 starting where Multi ends: x=180 on CHOOSEV, CHOOSEU and CHOOSEM, 174 on
 CHOOSEAC and 289 on CHOOSE3, following each background's bar origin. It has
 no dropdown: a click, or Enter with keyboard focus, opens the
@@ -49,3 +54,16 @@ open with no list showing, and moving back reopens that dropdown. Tab
 reaches it after Multi and before the activity buttons. The activity
 buttons are unchanged, including the disabled Replay Last Mission, which in
 the original means fly the last mission again.
+
+The alignment correction was requested by John on 2026-10-21. Using Multi as
+the common vertical reference is an agent implementation decision. On the
+imported 1.02F MENUFONT at 640 by 480, the dark letter core has a 9-pixel cap
+height (y=42..50), a 7-pixel x-height (y=44..50), and its last baseline row
+at y=50. Replays' descenders reach y=52. Including the imported edge shading,
+cap glyphs occupy y=41..52 and descenders reach y=54. The same font supplies
+all weight, colour and shading; no glyph scaling, recolouring or composed
+retail image is introduced. The visible Multi-to-Replays gap stays 8 pixels
+on the base canvas. These are measurements of the imported font in this
+renderer, not a claim of comparison with the original running game.
+
+[Pixel measurements and state checks](../baselines/menu-replays-label.md).

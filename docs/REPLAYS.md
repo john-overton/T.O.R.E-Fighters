@@ -1196,7 +1196,9 @@ like the Controls screen, with the imported font, colours, title strip,
 list rows and footer buttons. The entry and the screen are an opinionated
 addition requested by John on 2026-09-26; their layout, wording and
 behaviour are agent decisions (2026-09-26). The retail "Replay Last
-Mission" button is unrelated and stays disabled.
+Mission" button is unrelated and stays disabled. The entry shares Multi's
+baseline and imported font in every input state, as specified in
+[main-menu presentation](spec/main-menu-presentation.md#replays-entry).
 
 ### The list
 
