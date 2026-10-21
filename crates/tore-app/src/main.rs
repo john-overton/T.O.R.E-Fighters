@@ -12283,7 +12283,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             | "--terrain-filtering" | "--building-distance" | "--building-detail"
             | "--vegetation-texture" | "--vegetation-texture-distance"
             | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density"
-            | "--shadows") => {
+            | "--shadows" | "--shadow-distance") => {
                 let value = args.next().ok_or(format!("{flag} needs a value"))?;
                 graphics_flags.push((flag.to_owned(), value));
             }
@@ -14216,7 +14216,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 f.write_all(&p[..3])?;
             }
         } else if let Some(scroll) = match snapshot_state.as_str() {
-            "graphics" | "graphics-scale" => Some(0),
+            "graphics" | "graphics-scale" | "graphics-shadows" => Some(0),
             "graphics-middle" => Some(-4),
             "graphics-bottom" => Some(-100),
             _ => None,
@@ -14232,6 +14232,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
             editor.set_window(Some([3840, 2160]));
             editor.wheel(scroll);
+            if snapshot_state == "graphics-shadows" {
+                // Focus Shadow distance, bringing its whole group into view.
+                for _ in 0..10 {
+                    editor.key("ArrowDown", false);
+                }
+            }
             if snapshot_state == "graphics-scale" {
                 // The render scale row focused, its About note showing the sizes.
                 editor.key("ArrowDown", false);

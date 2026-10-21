@@ -1,13 +1,14 @@
 //! Player graphics choices for the 3D view: anti-aliasing, render scale, the
 //! spotting aid, terrain distance filtering, city fill distances, the
 //! exploratory vegetation distances, the frame rate and the frame-rate
-//! counter and the shadow quality. These are
+//! counter, shadow quality and shadow distance. These are
 //! opinionated host additions requested by John on 2026-09-22; the original
 //! game had none of them. The vegetation rows were added on 2026-10-16, and
 //! the frame-rate counter on 2026-10-17, and the frame rate choice on
 //! 2026-10-19 (John chose its steps and the V-sync default), and the shadow
 //! quality on 2026-10-20 (John asked for the setting; its levels and default
-//! are agent choices). The other values
+//! are agent choices). John requested separate shadow distance following
+//! trees on 2026-10-21; its fixed steps are agent choices. The other values
 //! and defaults are agent choices. They are saved in their own small file, `graphics-v1.conf`,
 //! beside the preferences.
 use std::path::Path;
@@ -391,6 +392,67 @@ impl ShadowQuality {
     }
 }
 
+/// Shadow reach independent of quality. Trees follows the current vegetation
+/// draw distance; fixed steps are nautical miles (agent choices, 2026-10-21).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShadowDistance {
+    #[default]
+    Trees,
+    Nm1,
+    Nm2,
+    Nm4,
+    Nm6,
+    Nm8,
+}
+impl ShadowDistance {
+    pub const ALL: [Self; 6] = [
+        Self::Trees,
+        Self::Nm1,
+        Self::Nm2,
+        Self::Nm4,
+        Self::Nm6,
+        Self::Nm8,
+    ];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Trees => "trees",
+            Self::Nm1 => "1",
+            Self::Nm2 => "2",
+            Self::Nm4 => "4",
+            Self::Nm6 => "6",
+            Self::Nm8 => "8",
+        }
+    }
+    pub fn label(self) -> String {
+        if self == Self::Trees {
+            "Trees".into()
+        } else {
+            format!("{} nm", self.key())
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    pub fn nautical_miles(self, trees_nm: u32) -> u32 {
+        match self {
+            Self::Trees => trees_nm,
+            Self::Nm1 => 1,
+            Self::Nm2 => 2,
+            Self::Nm4 => 4,
+            Self::Nm6 => 6,
+            Self::Nm8 => 8,
+        }
+    }
+    /// Like TORE_SHADOWS, a measuring override that does not change the file.
+    pub fn effective(self) -> Self {
+        std::env::var("TORE_SHADOW_DISTANCE")
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+            .unwrap_or(self)
+    }
+}
+
 /// How far the close-range ground detail reaches, nautical miles.
 pub const GROUND_TEXTURE_DISTANCES: [u32; 3] = [1, 2, 4];
 /// How far vegetation objects are drawn, nautical miles.
@@ -446,6 +508,8 @@ pub struct Options {
     pub frame_limit: FrameLimit,
     /// How detailed the geometric shadows are, and what casts them.
     pub shadow_quality: ShadowQuality,
+    /// Shadow reach, following trees by default.
+    pub shadow_distance: ShadowDistance,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -468,6 +532,7 @@ impl Default for Options {
             show_frame_rate: false,
             frame_limit: FrameLimit::default(),
             shadow_quality: ShadowQuality::default(),
+            shadow_distance: ShadowDistance::default(),
         }
     }
 }
@@ -495,6 +560,7 @@ impl Options {
             show_frame_rate: false,
             frame_limit: FrameLimit::default(),
             shadow_quality: ShadowQuality::default(),
+            shadow_distance: ShadowDistance::default(),
         }
     }
     pub fn scale(&self) -> f32 {
@@ -561,6 +627,9 @@ impl Options {
         if self.frame_limit != FrameLimit::default() {
             text += &format!("frame-limit {}\n", self.frame_limit.key());
         }
+        if self.shadow_distance != ShadowDistance::default() {
+            text += &format!("shadow-distance {}\n", self.shadow_distance.key());
+        }
         if self.shadow_quality != ShadowQuality::default() {
             text += &format!("shadows {}\n", self.shadow_quality.key());
         }
@@ -596,6 +665,7 @@ impl Options {
             "frame-rate",
             "frame-limit",
             "shadows",
+            "shadow-distance",
         ]
         .iter()
         .filter(|k| values.contains_key(*k))
@@ -679,6 +749,10 @@ impl Options {
                 None => FrameLimit::default(),
                 Some(v) => FrameLimit::parse(v).ok_or("invalid frame-limit")?,
             },
+            shadow_distance: match values.get("shadow-distance") {
+                None => ShadowDistance::default(),
+                Some(v) => ShadowDistance::parse(v).ok_or("invalid shadow-distance")?,
+            },
             shadow_quality: match values.get("shadows") {
                 None => ShadowQuality::default(),
                 Some(v) => ShadowQuality::parse(v).ok_or("invalid shadows")?,
@@ -749,6 +823,10 @@ impl Options {
                         .ok()
                         .filter(|n| VEGETATION_DETAILS.contains(n))
                         .ok_or("--vegetation-detail needs 1, 2, 3 or 4")?
+                }
+                "--shadow-distance" => {
+                    self.shadow_distance = ShadowDistance::parse(value)
+                        .ok_or("--shadow-distance needs trees, 1, 2, 4, 6 or 8")?
                 }
                 "--shadows" => {
                     self.shadow_quality = ShadowQuality::parse(value)
@@ -894,6 +972,7 @@ mod tests {
             show_frame_rate: true,
             frame_limit: FrameLimit::Fps100,
             shadow_quality: ShadowQuality::Low,
+            shadow_distance: ShadowDistance::Nm6,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
         // The default building and vegetation distances are not written, and
@@ -964,6 +1043,48 @@ mod tests {
             assert!(Options::parse(&format!("{old}frame-limit {bad}\n")).is_err());
         }
     }
+    #[test]
+    fn shadow_distance_roundtrips_and_follows_only_in_trees_mode() {
+        let old = Options::default().text();
+        assert!(!old.contains("shadow-distance"));
+        assert_eq!(
+            Options::parse(&old).unwrap().shadow_distance,
+            ShadowDistance::Trees
+        );
+        for distance in ShadowDistance::ALL {
+            let mut options = Options {
+                shadow_distance: distance,
+                ..Options::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap(), options);
+            for trees in VEGETATION_DISTANCES {
+                options.vegetation_distance_nm = trees;
+                let expected = if distance == ShadowDistance::Trees {
+                    trees
+                } else {
+                    distance.key().parse().unwrap()
+                };
+                assert_eq!(
+                    distance.nautical_miles(options.vegetation_distance_nm),
+                    expected
+                );
+            }
+            let flags = [("--shadow-distance".to_owned(), distance.key().to_owned())];
+            let mut cli = Options::default();
+            cli.apply_flags(&flags).unwrap();
+            assert_eq!(cli.shadow_distance, distance);
+        }
+        for bad in ["0", "3", "10", "4nm", "-1", "NaN", ""] {
+            assert!(Options::parse(&format!("{old}shadow-distance {bad}\n")).is_err());
+            assert!(
+                Options::default()
+                    .apply_flags(&[("--shadow-distance".into(), bad.into())])
+                    .is_err()
+            );
+        }
+        assert!(Options::parse(&format!("{old}shadow-distance 2\nshadow-distance 4\n")).is_err());
+    }
+
     #[test]
     fn shadow_quality_defaults_to_medium_and_roundtrips() {
         assert_eq!(Options::default().shadow_quality, ShadowQuality::Medium);

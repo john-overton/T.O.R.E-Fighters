@@ -100,9 +100,11 @@ The creator selects among all 16 base theaters. Scene replacement rebuilds the G
 The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses, and holds `Airframe`, which wraps the simulation's `AircraftType` (`aircraft_type.rs` in `tore-world`: the imported profile, flight model, sensors and engine outlet points, with no art) beside the drawn half. `instruments.rs` renders independent small rasters from flight/equipment state, each framed by the aircraft's own original instrument window picture (named by its HUD) and coloured every frame through the live cockpit palette, as the cockpit art is; page content draws in coordinates relative to the 138×114 screen ([bezel spec](spec/instrument-bezel.md)). The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
 
 `surface_lighting.rs` owns three geometric shadow maps and the shared light
-uniform. Its `Settings` turn the Graphics screen's shadow quality into the
-map size, cascade count, soft-edge sample count and the city building and
-tree caster distances. Static ground objects cast from their own chunked
+uniform. Its `Settings` turn the Graphics screen's shadow quality into map
+size, cascade count, soft-edge sample count and caster classes. The separate
+shadow distance determines cascade half-widths and city building/tree caster
+distances; its Trees default resolves the current vegetation distance on both
+creation and live changes ([rules](spec/graphics-options.md#shadows)). Static ground objects cast from their own chunked
 copy of the static batch (`terrain_chunks::placements`, 8,192 ft chunks,
 ground-level and see-through triangles dropped), culled per cascade like the
 terrain; the city fill and the vegetation cull pass write instanced caster
@@ -11625,8 +11627,10 @@ radius: beyond the draw distance, behind the eye, or outside one side of the
 view, with 16 ft plus 0.01% of the distance as slack for the shader's f32
 maths. The objects the pass keeps are therefore the same; only their list order,
 already atomic, can differ. `TORE_VEG_PAGE_CULL=0` dispatches every page, as a
-comparison aid. Trees cast no geometric shadows (the cull's caster binding is
-unused), so there is nothing to cull per cascade.
+comparison aid. At High and Ultra, retained pages also supply tree shadow
+cards within the [shadow distance](spec/graphics-options.md#shadows), before
+the shader's per-object view tests. The coarse page list still follows the
+camera view, so trees on discarded pages do not cast into it.
 
 The 64-byte candidate record is unchanged. The culled record is 96 bytes and the
 mesh table is 48 bytes, with top-card page, height and opaque half extents. Facing/cross/top

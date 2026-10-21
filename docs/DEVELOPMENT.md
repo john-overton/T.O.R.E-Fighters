@@ -1160,7 +1160,10 @@ server and the bot never read it, and a replay builds the fill its
 recording's `world.city_fill_scene` names. `TORE_CITY_FILL_CAP` changes the
 number of buildings in single player and the offline tools (online games
 ignore it) and
-`TORE_CITY_FILL_SHADOW_NM` the shadow distance. The offscreen aid
+`TORE_CITY_FILL_SHADOW_NM` overrides just the city caster distance for
+measurements. Use the Graphics Shadow distance row, `--shadow-distance
+trees|1|2|4|6|8` or `TORE_SHADOW_DISTANCE` for the shared map and caster reach
+([rules](spec/graphics-options.md#shadows)). The offscreen aid
 `--city-fill-dump OUT [THEATER]` (no window, nothing simulated; options in
 `crates/tore-app/src/city_fill_dump.rs`) writes mask and fill images and
 takes `--render` (a still, fill off and on), `--target` (the target
