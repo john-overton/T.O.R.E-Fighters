@@ -847,6 +847,24 @@ impl Radio {
     /// A projectile damaged something: hit, kill, "I'm hit" and
     /// friendly-fire calls.
     pub fn strike(&mut self, comms: &mut Comms, scene: &Scene, strike: &Strike) {
+        self.strike_with(comms, scene, strike, true);
+    }
+
+    /// One tick's strikes. A missile that bursts beside a formation damages
+    /// every aircraft its splash reaches, one strike each, but its shooter
+    /// makes one hit call for the shot, not one per aircraft (agent decision,
+    /// 2026-10-20): the first surviving victim in the tick is announced and
+    /// the shooter's other hits that tick are held. Kill calls and the
+    /// victims' own calls are unchanged.
+    pub fn strikes(&mut self, comms: &mut Comms, scene: &Scene, strikes: &[Strike]) {
+        let mut called = std::collections::BTreeSet::new();
+        for strike in strikes {
+            let first = strike.destroyed || called.insert(strike.owner);
+            self.strike_with(comms, scene, strike, first);
+        }
+    }
+
+    fn strike_with(&mut self, comms: &mut Comms, scene: &Scene, strike: &Strike, hit_call: bool) {
         let shooter = strike.owner;
         let victim = strike.victim;
         let same_side = scene.enemy(shooter) == scene.enemy(victim);
@@ -860,8 +878,30 @@ impl Radio {
             return;
         }
         if !same_side {
-            if speaks {
+            if speaks && hit_call {
                 self.hit(comms, scene, shooter, strike);
+            } else if speaks {
+                let rule = "one hit call per shooter per tick";
+                let reason = Reason::PerAircraft {
+                    rule,
+                    id: shooter,
+                    seconds: 0.,
+                    remaining: 0.,
+                };
+                let cause = Cause::Hit {
+                    victim,
+                    guided: strike.weapon_flags & 1 != 0,
+                };
+                held(
+                    comms,
+                    scene,
+                    shooter,
+                    cause,
+                    Vec::new(),
+                    rule,
+                    scene.now,
+                    reason,
+                );
             }
             if scene.aircraft(victim) {
                 self.damaged(comms, scene, victim, shooter, strike);
@@ -1493,9 +1533,7 @@ pub fn step(
             radio.release(comms, &scene, *aircraft, Release::of(weapon, target));
         }
     }
-    for strike in &strikes {
-        radio.strike(comms, &scene, strike);
-    }
+    radio.strikes(comms, &scene, &strikes);
     for event in &chatter {
         radio.chatter(comms, &scene, event);
     }
@@ -1894,6 +1932,35 @@ mod tests {
         assert_eq!(calls.len(), 2, "{calls:?}");
         // The enemy's "I'm hit" is unheard but still limited per aircraft.
         assert_eq!(radio.made, 2 + 2);
+    }
+
+    #[test]
+    fn one_shot_splashing_a_formation_makes_one_hit_call() {
+        let w = World::new();
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        // One missile: the struck aircraft and two more in its splash, all
+        // in the same tick.
+        let splash = [
+            strike(1, 3, 1, false),
+            strike(1, 3, 1, false),
+            strike(1, 3, 1, false),
+        ];
+        radio.strikes(&mut comms, &w.scene(0.), &splash);
+        let calls = lines(&mut comms, 5.);
+        assert_eq!(
+            calls.iter().filter(|l| l.starts_with("Red two")).count(),
+            1,
+            "{calls:?}"
+        );
+        // The next shot's hit, a tick later, is its own call.
+        radio.strikes(&mut comms, &w.scene(6.), &splash[..1]);
+        let calls = lines(&mut comms, 10.);
+        assert_eq!(
+            calls.iter().filter(|l| l.starts_with("Red two")).count(),
+            1,
+            "{calls:?}"
+        );
     }
 
     #[test]
