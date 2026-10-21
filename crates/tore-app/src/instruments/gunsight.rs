@@ -273,7 +273,7 @@ fn at_camera_limit(look: [f64; 2]) -> bool {
 
 /// "9:00 LO": the clock bearing of an offset from the nose and the Hi/Lo
 /// label against the level plane (the target window's rules).
-pub(super) fn bearing_label(offset: Vector, yaw: f64) -> String {
+pub(crate) fn bearing_label(offset: Vector, yaw: f64) -> String {
     let relative = offset[0].atan2(offset[2]) - yaw;
     let hour = (relative.rem_euclid(std::f64::consts::TAU) / (std::f64::consts::PI / 6.)).round()
         as u8

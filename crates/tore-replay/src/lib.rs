@@ -11,6 +11,7 @@ mod chunk;
 mod city;
 mod codec;
 pub mod display;
+mod display_detail;
 mod error;
 mod events;
 pub mod export;
@@ -41,12 +42,9 @@ pub use reader::{
 };
 pub use writer::{Writer, WriterOptions, partial_path};
 
-/// The newest format version this build writes and reads. A recording is
-/// written in the oldest version that holds it: version 3 only for a world
-/// with a ground target, a redrawn airfield scene or surface units (see
-/// [`World::needs_surface_format`]), version 2 for every other, byte for byte
-/// as before.
-pub const FORMAT_VERSION: u16 = 3;
+/// The newest readable format. Live recorders request version 4 for 24 Hz
+/// display samples. Synthetic and legacy writers can still request 2 or 3.
+pub const FORMAT_VERSION: u16 = 4;
 /// The format version a recording is written in unless its world needs more:
 /// the one from before the surface tracks.
 pub const BASE_FORMAT_VERSION: u16 = 2;

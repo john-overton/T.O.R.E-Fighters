@@ -420,7 +420,8 @@ pub(super) fn render_seat(
         let path = dir.join(format!("seat-{tag}t{seconds:05.1}s-{label}.png"));
         super::ai_render::write_png(&path, &pixels)?;
         println!(
-            "orbit-run: CONSOLE path={} light={light:.4} gain={:.2} zoom={} dots={} radar={} designated={:?} status={}",
+            "orbit-run: CONSOLE tick={} path={} light={light:.4} gain={:.2} zoom={} dots={} radar={} designated={:?} status={}",
+            snapshot.tick,
             path.display(),
             crt.gain,
             gunsight.zoom,

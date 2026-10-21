@@ -46,7 +46,7 @@ pub fn draw(
     config: &Configuration,
     sample: &HudSample,
     target: Option<TargetView>,
-    aim: Option<Vector>,
+    aim: Option<crate::aim_box::Marks>,
     font: &Font,
     color: [u8; 3],
     zoom: f64,
@@ -78,11 +78,6 @@ pub fn draw(
         readout: ReadoutSlot::ready(readout),
         tick_cues: &[],
     };
-    let marks = aim.map(|point| crate::aim_box::Marks {
-        style: crate::aim_box::Style::Tracked { friendly: false },
-        aim: point,
-        diamond: None,
-    });
     weapon_hud::draw(
         pixels,
         &frame,
@@ -91,9 +86,33 @@ pub fn draw(
         zoom,
         false,
         true,
-        marks.as_ref(),
+        aim.as_ref(),
         false,
     );
+}
+
+/// The same free, pinned or tracked aim box and unavailable-gun diamond as flight.
+pub fn aim_marks(sample: &SightSample) -> Option<crate::aim_box::Marks> {
+    use crate::aim_box::{Marks, Style};
+    let slot = (sample.lead < 3).then_some(usize::from(sample.lead));
+    let impact = sample.detail.as_ref().and_then(|detail| {
+        slot.filter(|i| detail.impacts[*i].is_some())
+            .or_else(|| {
+                (0..3).find(|i| sample.link & (1 << i) != 0 && detail.impacts[*i].is_some())
+            })
+            .filter(|i| crate::aim_box::cannot_hit(readiness(&sample.status[*i])))
+            .and_then(|i| detail.impacts[i])
+            .map(|i| i.point)
+    });
+    Some(Marks {
+        style: match sample.mode.as_str() {
+            "track" => Style::Tracked { friendly: false },
+            "point" => Style::Pinned,
+            _ => Style::Free,
+        },
+        aim: sample.point.or(sample.gun_lock)?,
+        diamond: impact,
+    })
 }
 
 /// The gun lines a recorded AC-130 sight shows. A slot with no status and no
@@ -125,6 +144,23 @@ pub fn pipper(
     tick: u64,
     ground: &impl Fn(f64, f64) -> f64,
 ) -> Option<Pipper> {
+    let slot = (sample.lead < 3).then_some(usize::from(sample.lead))?;
+    if let Some(detail) = &sample.detail {
+        let impact = detail.impacts[slot]?;
+        let weapon = weapons.get(slot)?.as_ref()?;
+        let maximum = f64::from(weapon.seeker.zones.first().map_or(1, |z| z.maximum_range)).max(1.);
+        let status = readiness(&sample.status[slot]);
+        return Some(Pipper {
+            point: impact.point,
+            range_arc: if impact.spent {
+                0.
+            } else {
+                tore_sim::combat::gunsight::range_arc_fraction(impact.range_ft, maximum)
+            },
+            dashed: impact.spent || matches!(status, Readiness::GunArc | Readiness::MaximumRange),
+            dot: !(impact.spent || status == Readiness::MaximumRange),
+        });
+    }
     let train = sample.train?;
     let slot = (sample.lead < 3).then_some(usize::from(sample.lead))?;
     let weapon = weapons.get(slot)?.as_ref()?;
@@ -176,7 +212,8 @@ pub fn pod_mode(sample: &SightSample) -> &'static str {
 pub fn console_mode(sample: &SightSample) -> sensor_console::Mode {
     match sample.mode.as_str() {
         "track" => sensor_console::Mode::Track,
-        "free" | "return" => sensor_console::Mode::Manual,
+        "return" => sensor_console::Mode::Returning,
+        "free" => sensor_console::Mode::Manual,
         _ => sensor_console::Mode::Point,
     }
 }
@@ -184,7 +221,7 @@ pub fn console_mode(sample: &SightSample) -> sensor_console::Mode {
 /// Use the recorded look for the camera: a gunship always, a fighter when
 /// the sight holds something. A free fighter sight keeps the derived line.
 pub fn use_look(sample: &SightSample) -> bool {
-    sample.notable()
+    sample.detail.is_some() || sample.notable()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -544,6 +581,7 @@ mod tests {
             launch: "cued".into(),
             seeker: "LOCK".into(),
             target: Some(7),
+            display_target: None,
             delivery: String::new(),
             readiness: "READY".into(),
             guidance: true,
@@ -610,6 +648,84 @@ mod tests {
     }
 
     #[test]
+    fn recorded_pipper_is_the_live_pipper_even_when_no_ballistic_recalculation_is_possible() {
+        use tore_sim::combat::gunship_impact::Impact;
+        let (combat, mut flight) = tore_world::combat::fixtures::loaded([200, 2]);
+        flight.position = [1000., 8000., 2000.];
+        let launcher = crate::combat::launcher(&flight);
+        let mut config = combat.own().configuration().clone();
+        config.stations[0].weapon.source = "C_25.JT".into();
+        let mut readout = combat.cockpit_readout(0, launcher, None, None).unwrap();
+        readout.stores.selected = 0;
+        readout.stores.gun_group = 1;
+        readout.gunsight = Some(tore_world::readout::GunsightReadout {
+            sight: tore_sim::combat::gunship::Sight::Pinned([-9000., 10., 2000.]),
+            look: [-1.5, -0.5],
+            zoom: 5,
+            returning: false,
+            aim: Some([-9000., 10., 2000.]),
+            impacts: [
+                Some(Impact::Air {
+                    point: [-9001.125, 10.25, 2002.75],
+                    range_ft: 12000.5,
+                    seconds: 1.25,
+                }),
+                None,
+                None,
+            ],
+            impacts_tick: 123,
+            status: [Readiness::GunSlewing; 3],
+            notice: None,
+            gun_lock: None,
+        });
+        let page = crate::instruments::gunsight::Page::new(&readout, &config, &flight).unwrap();
+        let live = sensor_console::Symbology::live(
+            &page,
+            None,
+            &readout,
+            &config,
+            &flight,
+            None,
+            0.,
+            sensor_console::SensorMode::WhiteHot,
+            1.,
+            None,
+            1,
+        );
+        let (_, sample) = tore_session::client::convert::display::from_readout(
+            &readout,
+            false,
+            1,
+            |i| config.stations.get(i).map(|s| s.weapon.source.clone()),
+            |i| config.stations.get(i).map(|s| s.mount),
+        );
+        let sample = SightSample::parse(&sample.unwrap().event(0)).unwrap();
+        let weapons = [Some(&config.stations[0].weapon), None, None];
+        let replay = pipper(&sample, &weapons, &launcher, 9999, &|_, _| {
+            panic!("a recorded impact must not be recomputed")
+        });
+        assert_eq!(replay, live.pipper);
+        let marks = aim_marks(&sample).unwrap();
+        assert_eq!(marks.style, crate::aim_box::Style::Pinned);
+        assert_eq!(marks.diamond, live.pipper.map(|p| p.point));
+        let camera = crate::gunsight_view::camera(&crate::gunsight_view::free_view(
+            &launcher, page.look, page.zoom,
+        ));
+        assert_eq!(
+            camera.locate([1920, 1080], replay.unwrap().point),
+            camera.locate([1920, 1080], live.pipper.unwrap().point)
+        );
+        let mut absent = sample;
+        absent.detail.as_mut().unwrap().impacts = [None; 3];
+        assert!(
+            pipper(&absent, &weapons, &launcher, 9999, &|_, _| panic!(
+                "missing means absent"
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
     fn an_ac130_sight_keeps_rounds_the_lead_gun_and_a_pipper() {
         let sample = SightSample {
             gunship: true,
@@ -627,6 +743,7 @@ mod tests {
             radar: true,
             range: 1,
             gun_lock: None,
+            detail: None,
         };
         let (guns, lead) = gun_lines(&sample);
         assert_eq!(lead, Some(0));

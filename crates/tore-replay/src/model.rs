@@ -16,10 +16,9 @@ pub const TICKS_PER_SECOND: u64 = 120;
 /// never depends on environment variables or settings at playback time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
-    /// The file's format version. The writer ignores this field and writes
-    /// the oldest version that holds the recording ([`World::needs_surface_format`]):
-    /// 2, or [`FORMAT_VERSION`] for a world with surface tracks. The reader
-    /// reports what the file holds.
+    /// Request 4 for fixed-cadence cockpit display records. Older requests
+    /// select 3 when the world needs surface tracks, otherwise 2. The reader
+    /// reports the file's actual version.
     pub format_version: u16,
     /// Game version, for example `0.1.0`.
     pub game_version: String,

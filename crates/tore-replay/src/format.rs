@@ -46,13 +46,13 @@ pub(crate) const SECTION_EFFECT_SCALES: u64 = 10;
 /// readers skip it and show the city whole.
 pub(crate) const SECTION_CITY: u64 = 11;
 
-/// The oldest format version that can hold `header`'s recording: 3 for a
-/// world with a ground target, a redrawn airfield scene or surface units
-/// (their tracks are format 3's), 2 for every other, which stays byte for
-/// byte what format 2 wrote.
+/// Display recorders request version 4 explicitly. Legacy writers retain
+/// version 3 for surface tracks and version 2 otherwise.
 pub(crate) fn version_for(header: &Header) -> u16 {
-    if header.world.needs_surface_format() {
+    if header.format_version >= 4 {
         FORMAT_VERSION
+    } else if header.world.needs_surface_format() {
+        3
     } else {
         2
     }

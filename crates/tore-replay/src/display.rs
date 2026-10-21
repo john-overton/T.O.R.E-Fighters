@@ -1,15 +1,14 @@
-//! The HUD and the sight, kept as change events (nr-replayhud, John
-//! 2026-10-16). A recording that never wrote them still loads: both maps
-//! stay empty and the viewer keeps the picture it derived before.
-//!
-//! Continuous numbers are compared with a step, so a dogfight does not grow
-//! a new event every tick. The recorder also waits twelve ticks between
-//! sight slews. Discrete changes (the mode, the weapon, the lock, the round
-//! counts) are written at once.
+//! HUD and sight samples. Human cockpits use a five-tick (24 Hz) grid.
+//! Older recordings and aircraft without a cockpit retain sparse change events.
+//! Camera pointing interpolates between adjacent new samples; symbols hold.
 
 use std::collections::BTreeMap;
 
 use crate::TimedEvent;
+pub use crate::display_detail::{ImpactSample, RadarContact, SightDetail, TargetSample};
+
+/// One display sample per five ticks at 120 Hz.
+pub const DISPLAY_TICKS: u64 = 5;
 use crate::model::{Event, Value};
 use crate::vocab::{field, kind};
 
@@ -38,6 +37,7 @@ pub struct HudSample {
     /// The seeker status label (`LOCK`, `ACTIVE SEARCH`, and the rest).
     pub seeker: String,
     pub target: Option<u32>,
+    pub display_target: Option<TargetSample>,
     /// Empty, `CCIP` or `LVL`.
     pub delivery: String,
     pub readiness: String,
@@ -66,6 +66,7 @@ impl Default for HudSample {
             launch: "cued".into(),
             seeker: "ACTIVE SEARCH".into(),
             target: None,
+            display_target: None,
             delivery: String::new(),
             readiness: "READY".into(),
             guidance: false,
@@ -135,6 +136,9 @@ impl HudSample {
                 .with(field::MOUNT_Y, self.mount[1])
                 .with(field::MOUNT_Z, self.mount[2]);
         }
+        if let Some(target) = &self.display_target {
+            event = target.write(event);
+        }
         event
     }
 
@@ -154,6 +158,7 @@ impl HudSample {
                 .unwrap_or("ACTIVE SEARCH")
                 .to_owned(),
             target: event.object,
+            display_target: TargetSample::parse(event),
             delivery: event.string(field::DELIVERY).unwrap_or("").to_owned(),
             readiness: event.string(field::READINESS).unwrap_or("READY").to_owned(),
             guidance: event.flag(field::GUIDANCE).unwrap_or(false),
@@ -194,6 +199,8 @@ pub struct SightSample {
     pub radar: bool,
     pub range: u8,
     pub gun_lock: Option<[f64; 3]>,
+    /// Absent in older, sparse recordings.
+    pub detail: Option<SightDetail>,
 }
 
 impl Default for SightSample {
@@ -214,6 +221,7 @@ impl Default for SightSample {
             radar: false,
             range: 1,
             gun_lock: None,
+            detail: None,
         }
     }
 }
@@ -306,6 +314,9 @@ impl SightSample {
                     .with("lock_z", lock[2]);
             }
         }
+        if let Some(detail) = &self.detail {
+            event = detail.write(event);
+        }
         event
     }
 
@@ -373,6 +384,7 @@ impl SightSample {
             radar: event.flag(field::RADAR).unwrap_or(false),
             range: u8_of(event, field::RANGE_STEP),
             gun_lock,
+            detail: SightDetail::parse(event),
         })
     }
 }
@@ -412,6 +424,35 @@ impl Track {
     /// The sight in force at `tick`.
     pub fn sight(&self, aircraft: u32, tick: u64) -> Option<&SightSample> {
         at(self.sight.get(&aircraft)?, tick)
+    }
+
+    /// Camera-only interpolation. Symbols and discrete changes remain on their sample.
+    /// Old sparse recordings hold their last look, as before.
+    pub fn look(&self, aircraft: u32, tick: u64, alpha: f64) -> Option<[f64; 2]> {
+        let list = self.sight.get(&aircraft)?;
+        let index = list.partition_point(|(at, _)| *at <= tick).checked_sub(1)?;
+        let (at, a) = &list[index];
+        let look = [a.az, a.el];
+        let Some((next, b)) = list.get(index + 1) else {
+            return Some(look);
+        };
+        if a.detail.is_none()
+            || b.detail.is_none()
+            || next - at > DISPLAY_TICKS
+            || a.mode != b.mode
+            || a.tracked != b.tracked
+            || a.zoom != b.zoom
+        {
+            return Some(look);
+        }
+        let mix = ((tick - at) as f64 + alpha.clamp(0., 1.)) / (next - at) as f64;
+        let dh = (b.az - a.az + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        // Large discontinuities are a reset, not a slew.
+        if dh.abs().max((b.el - a.el).abs()) > 0.5 {
+            return Some(look);
+        }
+        Some([a.az + dh * mix, a.el + (b.el - a.el) * mix])
     }
 
     pub fn is_empty(&self) -> bool {
@@ -467,6 +508,7 @@ mod tests {
             launch: "cued".into(),
             seeker: "LOCK".into(),
             target: Some(7),
+            display_target: None,
             delivery: String::new(),
             readiness: "READY".into(),
             guidance: true,
@@ -497,6 +539,7 @@ mod tests {
             radar: true,
             range: 2,
             gun_lock: Some([1_010., 18., 2_004.]),
+            detail: None,
         }
     }
 
@@ -507,6 +550,7 @@ mod tests {
         let path = dir.join("hud.tore-replay");
         let _ = std::fs::remove_file(&path);
         let header = Header {
+            format_version: crate::FORMAT_VERSION,
             world: World {
                 theater: "UKR".into(),
                 ..World::default()
@@ -515,7 +559,21 @@ mod tests {
         };
         let mut writer = Writer::create(&path, &header).unwrap();
         let hud = sample();
-        let guns = sight();
+        let mut guns = sight();
+        guns.detail = Some(SightDetail {
+            impacts: [Some(ImpactSample {
+                point: [1000.12345, 5.5, 2000.98765],
+                range_ft: 4000.25,
+                spent: false,
+            }); 3],
+            gimbal_limit: true,
+            mark: Some([1000., 5., 2000.]),
+            radar: vec![RadarContact {
+                position: [1234.5, 6., 8000.25],
+                symbol: 1,
+                selected: true,
+            }],
+        });
         writer
             .push(&Frame {
                 tick: 10,
@@ -532,6 +590,7 @@ mod tests {
             .unwrap();
         let path = writer.finish(&Footer::default()).unwrap();
         let recording = Recording::open(&path).unwrap();
+        assert_eq!(recording.header().format_version, 4);
         let track = Track::from_events(recording.events());
         let back = track.hud(4, 20).unwrap();
         assert_eq!(back.weapon, hud.weapon);
@@ -549,12 +608,18 @@ mod tests {
         assert_eq!(seen.tracked, Some(9));
         assert_eq!(seen.status[1], "CANNOT BEAR");
         assert!(seen.train.is_some());
+        assert_eq!(seen.detail, guns.detail);
+        assert!(guns.event(4).fields.len() <= crate::limits::MAX_FIELDS_PER_EVENT);
         assert!((seen.az - guns.az).abs() < 0.001);
         assert!(track.hud(4, 9).is_none());
 
         let bare = dir.join("old.tore-replay");
         let _ = std::fs::remove_file(&bare);
-        let mut writer = Writer::create(&bare, &header).unwrap();
+        let old_header = Header {
+            format_version: 2,
+            ..header
+        };
+        let mut writer = Writer::create(&bare, &old_header).unwrap();
         writer
             .push(&Frame {
                 tick: 1,
@@ -563,8 +628,72 @@ mod tests {
             .unwrap();
         let bare = writer.finish(&Footer::default()).unwrap();
         let old = Recording::open(&bare).unwrap();
+        assert_eq!(old.header().format_version, 2);
         assert!(Track::from_events(old.events()).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn camera_interpolates_shortest_arc_but_never_blends_modes_or_old_sparse_samples() {
+        let a = SightSample {
+            az: 3.13,
+            el: -0.5,
+            detail: Some(SightDetail::default()),
+            ..sight()
+        };
+        let b = SightSample {
+            az: -3.13,
+            el: -0.4,
+            ..a.clone()
+        };
+        let track = Track::from_events(&[
+            TimedEvent {
+                tick: 10,
+                event: a.event(4),
+            },
+            TimedEvent {
+                tick: 15,
+                event: b.event(4),
+            },
+        ]);
+        let middle = track.look(4, 12, 0.5).unwrap();
+        assert!((middle[0] - std::f64::consts::PI).abs() < 1e-9);
+        assert!((middle[1] + 0.45).abs() < 1e-9);
+        assert_eq!(track.sight(4, 14).unwrap().el, -0.5);
+        assert_eq!(track.look(4, 15, 0.).unwrap(), [b.az, b.el]);
+        for next in [
+            SightSample {
+                mode: "free".into(),
+                ..b.clone()
+            },
+            SightSample {
+                detail: None,
+                ..b.clone()
+            },
+        ] {
+            let track = Track::from_events(&[
+                TimedEvent {
+                    tick: 10,
+                    event: a.event(4),
+                },
+                TimedEvent {
+                    tick: 15,
+                    event: next.event(4),
+                },
+            ]);
+            assert_eq!(track.look(4, 14, 0.5).unwrap(), [a.az, a.el]);
+        }
+        let gap = Track::from_events(&[
+            TimedEvent {
+                tick: 10,
+                event: a.event(4),
+            },
+            TimedEvent {
+                tick: 30,
+                event: b.event(4),
+            },
+        ]);
+        assert_eq!(gap.look(4, 14, 0.5).unwrap(), [a.az, a.el]);
     }
 
     #[test]
@@ -613,6 +742,7 @@ mod tests {
             point: None,
             tracked: None,
             gun_lock: None,
+            detail: None,
             ..SightSample::default()
         };
         assert!(!free.notable());

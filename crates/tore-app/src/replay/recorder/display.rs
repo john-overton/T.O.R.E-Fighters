@@ -1,4 +1,4 @@
-//! The HUD and the sight of every aircraft, written when they change
+//! Human HUD and sight records at 24 Hz; existing sparse records for other aircraft
 //! (nr-replayhud). Reads are of state the tick already computed.
 //!
 //! An ownship is sampled from the cockpit readout the live HUD draws. An AI
@@ -212,6 +212,7 @@ fn ai_samples(
         launch: launch.into(),
         seeker: seeker.into(),
         target,
+        display_target: None,
         delivery,
         readiness: Readiness::Ready.label().into(),
         guidance: false,

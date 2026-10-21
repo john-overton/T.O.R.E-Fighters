@@ -414,7 +414,8 @@ pub mod kind {
     /// any changed (a release, a jettison, a rearm). Subject: the aircraft.
     /// Fields: `items` (Ids: one count a station, in layout order).
     pub const STORES_ITEMS: &str = "stores.items";
-    /// The HUD the aircraft was showing, written when it changes
+    /// The HUD the aircraft was showing, sampled at 24 Hz for human cockpits
+    /// and on changes for aircraft without a cockpit readout.
     /// (nr-replayhud, John 2026-10-16). Subject: the aircraft. Object: the
     /// display target, when there is one. Fields: `nav`, `armed`, `station`,
     /// `weapon` (Text: the source name), `rounds`, `launch` (Text: cued or
@@ -423,10 +424,12 @@ pub mod kind {
     /// percent), `max_ft`, `band_min`, `band_max` (`band_max` 0 means no
     /// band), `radar`, and `mount_x`, `mount_y`, `mount_z` when the station
     /// is not at the reference point. A recording made before this event
-    /// still plays: the HUD camera keeps the derived picture.
+    /// still plays: the HUD camera keeps the derived picture. Version 4
+    /// includes target_x/y/z and velocity_x/y/z from the displayed target,
+    /// including ground objects. See docs/formats/replay-display.md.
     pub const AIRCRAFT_HUD: &str = "aircraft.hud";
-    /// The targeting sight or the AC-130 gunsight, written when it changes
-    /// and, for a slew, at most ten times a second (nr-replayhud). Subject:
+    /// The targeting sight or AC-130 gunsight. Human cockpits use 24 Hz;
+    /// legacy and non-cockpit samples remain sparse. Subject:
     /// the aircraft. Object: the tracked object, when the sight tracks one.
     /// Fields: `gunship`, `az`, `el` (Num, radians), `zoom` (Int), `mode`
     /// (Text: free, point, track or return), `x_ft`, `y_ft`, `z_ft` when a
@@ -435,7 +438,10 @@ pub mod kind {
     /// `range` (the range step), `h0` `e0` `h1` `e1` `h2` `e2` (train
     /// radians, omitted when the trains were not known) and `lock_x`
     /// `lock_y` `lock_z` when the guns are locked. Absent on an older
-    /// recording: the Sensor View keeps the derived line of sight.
+    /// recording: the Sensor View keeps the derived line of sight. Version 4
+    /// adds display_24hz, gimbal_limit, impact0 through impact2 positions,
+    /// ranges and spent flags, mark coordinates and packed radar_dots.
+    /// See docs/formats/replay-display.md for their bounded grammar.
     pub const AIRCRAFT_SIGHT: &str = "aircraft.sight";
 
     /// Every kind above, in the order listed.

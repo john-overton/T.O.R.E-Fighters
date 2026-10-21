@@ -291,13 +291,20 @@ impl Viewer {
     ) -> Option<sensor_console::TargetLine> {
         let (name, at) = if let Some(id) = sample.tracked {
             let at = self
-                .target_view(picture, id)
-                .map(|target| target.position)
-                .or_else(|| self.object_at(picture, tick, id))?;
+                .display
+                .hud(self.selected, tick)
+                .filter(|hud| hud.target == Some(id))
+                .and_then(|hud| hud.display_target.as_ref())
+                .map(|t| t.position)
+                .or_else(|| self.target_view(picture, id).map(|target| target.position))
+                .or_else(|| self.object_at(picture, tick, id))
+                .or(sample.point)?;
             let name = self
-                .info
-                .get(&id)
-                .map(|info| info.label.clone())
+                .recording
+                .surface_info(id)
+                .map(|unit| unit.name.clone())
+                .filter(|name| !name.is_empty())
+                .or_else(|| self.info.get(&id).map(|info| info.label.clone()))
                 .unwrap_or_else(|| self.object_name(Target::Ground(id)));
             (name, at)
         } else {
@@ -306,7 +313,10 @@ impl Viewer {
         Some(sensor_console::TargetLine {
             name: tore_formats::text::upper(&name),
             range_ft: feet(state.position, at),
-            clock: String::new(),
+            clock: crate::instruments::gunsight::bearing_label(
+                std::array::from_fn(|i| at[i] - state.position[i]),
+                state.yaw,
+            ),
             bearing_deg: (at[0] - state.position[0])
                 .atan2(at[2] - state.position[2])
                 .to_degrees()
@@ -456,6 +466,7 @@ impl Viewer {
         &mut self,
         picture: &RenderSnapshot,
         tick: u64,
+        alpha: f64,
         size: [u32; 2],
     ) -> Option<Taped> {
         if self.drone.is_some() || !matches!(self.view, HUD_CAMERA | SENSOR) {
@@ -485,7 +496,9 @@ impl Viewer {
             Some(self.hud_camera(picture, tick, size, id, &state))
         } else {
             match self.sight_of(id) {
-                Some(sight) => Some(self.sensor_view(picture, tick, size, id, &state, &sight)),
+                Some(sight) => {
+                    Some(self.sensor_view(picture, tick, alpha, size, id, &state, &sight))
+                }
                 None => {
                     let who = self.label(id);
                     self.taped_failed(if who.is_empty() {
@@ -566,14 +579,34 @@ impl Viewer {
         if let Some(sample) = sample.as_ref()
             && let Some(config) = self.hud_config(id, sample)
         {
-            let target = sample
-                .target
-                .and_then(|target| self.target_view(picture, target));
+            let target = sample.target.and_then(|id| {
+                let pose = self.target_view(picture, id);
+                sample
+                    .display_target
+                    .as_ref()
+                    .map(|target| crate::replay::hud_play::TargetView {
+                        id,
+                        position: target.position,
+                        velocity: target.velocity,
+                        aircraft: pose.and_then(|p| p.aircraft),
+                    })
+                    .or(pose)
+                    .or_else(|| {
+                        self.object_at(picture, tick, id).map(|position| {
+                            crate::replay::hud_play::TargetView {
+                                id,
+                                position,
+                                velocity: [0.; 3],
+                                aircraft: None,
+                            }
+                        })
+                    })
+            });
             let aim = self
                 .display
                 .sight(id, tick)
                 .filter(|sight| sight.gunship)
-                .and_then(|sight| sight.point.or(sight.gun_lock));
+                .and_then(crate::replay::hud_play::aim_marks);
             let falling = self.marks.timeline_of(id).iter().find_map(|weapon| {
                 weapon
                     .landed
@@ -786,10 +819,12 @@ impl Viewer {
     /// The Sensor View: the world from the sight's eye along the line the
     /// recording gives, in the chosen picture, with the AC-130's console
     /// symbology or the aircraft's own.
+    #[allow(clippy::too_many_arguments)]
     fn sensor_view(
         &mut self,
         picture: &RenderSnapshot,
         tick: u64,
+        alpha: f64,
         size: [u32; 2],
         id: u32,
         state: &flight::State,
@@ -826,7 +861,9 @@ impl Viewer {
             .cloned()
             .filter(crate::replay::hud_play::use_look);
         let wanted = if let Some(sample) = &recorded {
-            [sample.az, sample.el]
+            self.display
+                .look(id, tick, alpha)
+                .unwrap_or([sample.az, sample.el])
         } else {
             line.point.map_or(default_look, |p| {
                 tore_sim::combat::sight::body_angles(
@@ -835,10 +872,13 @@ impl Viewer {
                 )
             })
         };
-        let (look, gimbal_limit) = match gimbal {
+        let (look, mut gimbal_limit) = match gimbal {
             None => (gunship::clamp_look(wanted), gunship::beyond_gimbal(wanted)),
             Some(g) => (g.clamp(wanted), g.beyond(wanted)),
         };
+        if let Some(detail) = recorded.as_ref().and_then(|s| s.detail.as_ref()) {
+            gimbal_limit = detail.gimbal_limit;
+        }
         // Where the line meets the ground when nothing gives a point: the
         // range and the gimbal graphic read from it.
         let terrain = |x: f64, z: f64| f64::from(self.world.height(x as f32, z as f32));
@@ -892,15 +932,22 @@ impl Viewer {
         let los_deg = f64::from(camera.yaw).to_degrees().rem_euclid(360.);
         let seconds = tick as f64 / 120.;
         let blink = tick % 60 < 30;
-        let designated = scene
-            .designations
-            .iter()
-            .find(|d| d.aircraft == id)
-            .and_then(|d| {
-                d.object
-                    .and_then(|o| self.object_at(picture, tick, o))
-                    .or(d.at)
-            });
+        let designated = if recorded.as_ref().is_some_and(|s| s.detail.is_some()) {
+            self.display
+                .hud(id, tick)
+                .and_then(|s| s.display_target.as_ref())
+                .map(|t| t.position)
+        } else {
+            scene
+                .designations
+                .iter()
+                .find(|d| d.aircraft == id)
+                .and_then(|d| {
+                    d.object
+                        .and_then(|o| self.object_at(picture, tick, o))
+                        .or(d.at)
+                })
+        };
         let target = scene
             .designations
             .iter()
@@ -969,12 +1016,46 @@ impl Viewer {
                     |sample| sensor_console::Radar {
                         on: sample.radar,
                         range_nm: sensor_console::radar_range_nm(usize::from(sample.range)),
-                        dots: Vec::new(),
+                        dots: sample
+                            .detail
+                            .as_ref()
+                            .map(|detail| {
+                                detail
+                                    .radar
+                                    .iter()
+                                    .map(|dot| sensor_console::RadarDot {
+                                        at: sensor_console::PlanPoint::of(
+                                            state.position,
+                                            state.yaw,
+                                            dot.position,
+                                        ),
+                                        symbol: match dot.symbol {
+                                            1 => tore_sim::sensors::track::GroundSymbol::Cross,
+                                            2 => tore_sim::sensors::track::GroundSymbol::Square,
+                                            _ => tore_sim::sensors::track::GroundSymbol::Dot,
+                                        },
+                                        selected: dot.selected,
+                                    })
+                                    .filter(|dot| {
+                                        dot.at.ground_ft
+                                            <= sensor_console::radar_range_nm(usize::from(
+                                                sample.range,
+                                            )) * tore_sim::sensors::FEET_PER_NAUTICAL_MILE
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                     },
                 );
-                let target = recorded_guns
-                    .and_then(|sample| self.sight_target(picture, state, tick, sample))
-                    .or(target);
+                let target = if let Some(sample) = recorded_guns.filter(|s| s.detail.is_some()) {
+                    sample
+                        .tracked
+                        .and_then(|_| self.sight_target(picture, state, tick, sample))
+                } else {
+                    recorded_guns
+                        .and_then(|sample| self.sight_target(picture, state, tick, sample))
+                        .or(target)
+                };
                 let orbit_status = orbit.map(|(centre, radius_ft, height_ft)| {
                     let across =
                         (state.position[0] - centre[0]).hypot(state.position[2] - centre[2]);
@@ -1002,24 +1083,47 @@ impl Viewer {
                     trains,
                     gimbal_limit,
                     pipper,
-                    others: Vec::new(),
-                    mark: recorded_guns
-                        .and_then(|sample| sample.point.or(sample.gun_lock))
-                        .or(line.point)
-                        .map(|p| {
-                            (
-                                p,
-                                recorded_guns.is_some_and(|sample| sample.mode == "track")
-                                    || line.source == Source::Designated,
-                            )
-                        }),
+                    others: recorded_guns
+                        .and_then(|s| s.detail.as_ref())
+                        .map(|detail| {
+                            (0..3)
+                                .filter(|slot| {
+                                    Some(*slot) != lead && guns[*slot].linked && guns[*slot].fitted
+                                })
+                                .filter_map(|slot| detail.impacts[slot].map(|i| i.point))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    mark: if let Some(detail) = recorded_guns.and_then(|s| s.detail.as_ref()) {
+                        detail
+                            .mark
+                            .map(|p| (p, recorded_guns.is_some_and(|s| s.mode == "track")))
+                    } else {
+                        recorded_guns
+                            .and_then(|sample| sample.point.or(sample.gun_lock))
+                            .or(line.point)
+                            .map(|p| {
+                                (
+                                    p,
+                                    recorded_guns.is_some_and(|sample| sample.mode == "track")
+                                        || line.source == Source::Designated,
+                                )
+                            })
+                    },
                     // No recorded sight: the status line says where the line
                     // of sight was derived from. A recorded sight shows the gun.
                     notice,
                     orbit: orbit_status,
                     designated,
                     radar,
-                    plan: sensor_console::Plan::new(launcher, agl_ft, look, trains, aim, None),
+                    plan: sensor_console::Plan::new(
+                        launcher,
+                        agl_ft,
+                        look,
+                        trains,
+                        aim,
+                        lead.or(guns.iter().position(|g| g.fitted)),
+                    ),
                     autopilot: None,
                     gun_lock,
                     blink,

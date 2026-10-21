@@ -3328,7 +3328,7 @@ impl Viewer {
         let taped = if held.is_some() {
             None
         } else {
-            self.taped_view(&picture, tick, renderer.flight_size())
+            self.taped_view(&picture, tick, self.clock.alpha(), renderer.flight_size())
         };
         let camera = match (&taped, &held) {
             (Some(t), _) => copy(&t.camera),

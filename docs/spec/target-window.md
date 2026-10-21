@@ -552,10 +552,25 @@ rules below are agent decisions (nr-replayviews, 2026-10-16).
 - **AC-130.** This console, unchanged. With an `aircraft.sight` sample
   (nr-replayhud, John 2026-10-16) the angles, zoom, rounds, selected gun,
   readiness, designated target and A-G radar state are the ones recorded,
-  and the pipper is worked out from the recorded gun trains. Without that
-  sample the rounds, readiness and pipper show empty, the radar reads
-  `A-G OFF`, and the status line says where the line of sight came from
-  (`LOS FROM ORBIT POINT`). Radar contact dots are not recorded.
+  and, in format 4, the pippers use the live displayed impacts. The lead
+  gun's sector and linked guns' marks use the recorded trains. The target
+  block includes name, slant range, true bearing and clock bearing. A-G radar
+  contacts retain their symbols and selection. Older sight records use the
+  train-based pipper fallback. Without a sight sample the rounds, readiness
+  and pipper show empty, the radar reads `A-G OFF`, and the status line says
+  where the line of sight came from (`LOS FROM ORBIT POINT`).
+- **Recording cadence.** Opinionated, requested by John on 2026-10-21:
+  human cockpit HUD and sensor displays are sampled every 5 simulation ticks,
+  exactly 24 Hz at 120 Hz, including idle, slow slews and gunfire. Free fighter
+  sights are recorded too. Overlay values hold until the next sample. Camera
+  azimuth interpolates by the shortest turn and elevation linearly, without
+  blending across mode, tracked-object or zoom changes, gaps, or resets over
+  0.5 radians (agent decisions). The HUD tape retains its 24 fps presentation.
+  Ground designations and displayed positions reach every aircraft's HUD.
+  Older recordings retain their sparse fallback. Network captures sample
+  received readouts at most once per five-tick interval; packet loss or a
+  lower host delivery rate cannot supply missing observations. Encoding is
+  specified in [replay display records](../formats/replay-display.md).
 - **Other aircraft.** The same reticle, angles, heading block, gimbal
   graphic (the sensor's arm on the plan, without guns or radar) and status
   and range lines, with the aircraft's own lines:

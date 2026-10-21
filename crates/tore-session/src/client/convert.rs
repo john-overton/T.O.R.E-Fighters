@@ -520,13 +520,13 @@ impl Conversion {
             replay::model::FUEL_WITH_EXTERNAL.into(),
         ));
         replay::Header {
+            format_version: replay::FORMAT_VERSION,
             game_version: game_version.into(),
             game_commit: game_commit.into(),
             recorded_at: recorded_at.into(),
             mission: replay::MissionKind::Other("Network flight".into()),
             world,
             extra,
-            ..replay::Header::default()
         }
     }
 
