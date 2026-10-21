@@ -1142,14 +1142,14 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 
 /// One instance record: position and yaw; height, width, ground slope;
 /// tint and rank; mesh, distance reach, radius in feet, hash.
-fn pack(i: &Inst, mesh: u16, radius: f32) -> [f32; 16] {
+fn pack(i: &Inst, mesh: u16, shape: &crate::vegetation_shapes::Mesh) -> [f32; 16] {
     let reach = Species::reach(i.species);
     [
         i.pos[0],
         i.pos[1],
         i.pos[2],
         i.yaw,
-        i.height,
+        i.height * shape.height_scale,
         i.width,
         i.grad[0],
         i.grad[1],
@@ -1159,7 +1159,7 @@ fn pack(i: &Inst, mesh: u16, radius: f32) -> [f32; 16] {
         i.rank,
         f32::from(mesh),
         reach,
-        radius * i.height * i.width,
+        shape.radius * shape.height_scale * i.height * i.width,
         f32::from(i.variant) / 255.,
     ]
 }

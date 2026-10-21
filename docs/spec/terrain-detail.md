@@ -191,16 +191,42 @@ is the branch default. Mixed keeps usable retail conifers and groves. Missing
 species in every mode use supplied cutouts. Sahara supplies acacias and bare
 trees, and desert palms, shrubs and rocks. No code-drawn tree, shrub or rock
 fallback remains. No current theater selects saguaro, cactus or prickly pear.
-Top cards use the corresponding supplied top view, including for a retail side
-silhouette. A retail grove receives a runtime composite of separate crowns at
-its constituent plants' centres, each sized from that plant's opaque side views.
-It never stretches one crown across the whole grove. The existing fitted plant
-grouping joins face centres within 18 source units; the whole grove retains all
-groups. The composite uses one horizontal card, with
-transparent gaps exposing the same lit forest floor and distant-canopy layer
-as billboard mode. Tops and crossed sides use the same seeded yaw convention
-as the baked side-view selection. The common canopy plane remains a **fitted agent choice**;
-it does not reproduce individual plant heights within a grove.
+John requested individual retail plants on 2026-10-21 (**opinionated**).
+Every retail grove is split into its constituent plants. Face centres within
+18 source units form a plant, retaining every group rather than just the three
+largest palms. Each plant gets a stable `SHAPE-crown-NN` name, its own aspect
+ratio and height relative to its source grove. The common seeded placement,
+card modes, distance coverage and shadow pass apply to each individual.
+Grove candidates use the same density-scaled jittered grid as other plants:
+80 ft for woodland and 110 ft for palms, replacing 160/220 ft clump spacing.
+These **fitted agent choices** replace about four crowns per old clump; the
+existing object quotas still cap the population. No source row offsets survive.
+
+The largest opaque horizontal projection supplies each retail side cutout.
+It is trimmed and packed into a 124 px cell with a two-pixel transparent gutter,
+using nearest-neighbour samples and the import's palette. A procedural top
+samples the region bounded by broad leafy rows (at least 45% of maximum
+width) into a rounded footprint. Its edge radius is 0.96 + 0.025 sin(7 angle) + 0.015 cos(11 angle),
+relative to the measured crown half-width. This is **fitted** crown geometry,
+not recovered original artwork. Two-dimensional texture sampling avoids rings;
+it keeps source colours and transparent margins. Retail tops
+use the common 35 to 65 degree transition, including conifers; supplied conifer
+art retains its existing upright-only treatment.
+
+An optional `<profile>/vegetation-overrides/SHAPE-crown-NN-top.png` replaces
+that plant's procedural top. Files are non-interlaced PNGs, at most 2048 by 2048
+pixels and 16 MiB each. Alpha below 128 is transparent; visible bounds are
+trimmed, nearest-neighbour sampled and matched to the theater palette without
+the supplied pack's brightness reduction. The opaque width/height ratio is
+preserved inside the measured crown span, so wide tops are not stretched square. Invalid files warn and retain the
+procedural top. Overrides are read on scene construction and their contents
+invalidate the local cache. Restart the mission after editing them. Extracted
+sides and generated tops are retail derivatives and remain local, never embedded
+or committed. `--vegetation-art OUT` writes the individual PNGs and size index;
+its reference sizes are fitted presentation feet, not original scale evidence.
+The index uses a 57 ft tree, 4 ft shrub or 12 ft rock before the measured
+relative height and transparent trim. Placed instances keep the existing
+seeded species heights instead.
 Rocks retain visible-pixel mean normalization and slope lighting.
 
 Each 2,048 ft patch has a fixed candidate set for its density and draw-distance
@@ -229,7 +255,9 @@ publishes only when complete; unchanged patches keep their bytes. Normal uploads
 remain capped at 256 KiB and 16 writes per frame. No incomplete detail ring is
 made visible. Available outer range expands at 6,000 ft/s after a teleport;
 a slow worker may shorten it. CPU checks do not prove every host keeps up.
-There are no vegetation shadow passes. See the
+Near plants cast sun-facing card shadows at High and Ultra shadow quality,
+within the configured shadow distance, using the same cutout as supplied
+sprites. See [shadows](graphics-options.md#shadows) and the
 [streaming design](../ARCHITECTURE.md#exploratory-vegetation-rendering).
 
 ### Distant forest canopy
@@ -312,7 +340,7 @@ These thresholds are colour/topology heuristics, not recovered coast geography.
 `--vegetation-preview OUT overlay` writes classification pictures. These are
 placement heuristics, not claims of original scenery or geographic river data.
 
-Conifer and pine-grove top disks are omitted in both top-card modes. Their
+Supplied conifer and pine-grove top disks are omitted in both top-card modes. Their
 upright sides retain full angular coverage, and all distance/population rules
 stay the same. The flat full-width disk through a tapered crown can appear
 separated from its tree during the side/top transition. Omitting that disk is

@@ -369,8 +369,10 @@ preset retains Facing.
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
 for a run and is not saved. Sprites have full distance opacity inside detail range. Distant forest coverage
 continues on the terrain. Top modes use complementary side/top coverage from
-35 to 65 degrees down, at the measured visual crown centre. Conifers and pine
-groves retain upright cards at all angles, with no horizontal top disk.
+35 to 65 degrees down, at the measured visual crown centre. Supplied conifers
+and pine groves retain upright cards at all angles, with no horizontal top disk.
+Individual retail conifers use their own procedural or locally overridden tops;
+see the [sprite specification](terrain-detail.md#sprites-and-cached-placement).
 
 **Vegetation density** is Low, Med, High or Ultra. John requested a one-step
 reduction on 2026-10-17: new Ultra equals previous High, High equals previous

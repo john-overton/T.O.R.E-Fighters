@@ -11557,14 +11557,23 @@ retail sprite bakes and placement chunks. Publication remains ordered.
 
 `vegetation_cache` stores bounded, checksummed files under the imported profile's
 `vegetation-cache/`. Keys include theater, import generation and decoded resource
-contents, effective terrain/runway/city exclusions, palette, sprite mode, page
-base and an automatically computed code/data version. The build hashes app,
+contents, local vegetation override names and contents, effective terrain/runway/city
+exclusions, palette, sprite mode, page base and an automatically computed code/data version. The build hashes app,
 world, simulation geometry, formats and workers sources plus supplied vegetation assets. Any change
 invalidates previous results. Missing, incompatible, truncated or corrupt entries
 are rebuilt. Atomic temporary-file renames publish complete entries; cache write
 failure leaves the load working. Runtime retail derivatives stay local. The
 coast mask uses one bit per cell. Canopy pages store 128 by 256 samples in each
 256-square index page, using every row and halving their former padded storage. `TORE_VEG_CACHE=0` bypasses caching for timings.
+
+Retail groves are split before baking. Each independent plant contributes one
+trimmed side cell and one procedural or locally overridden top cell to the same
+128 px cell layout as supplied sprites. Four orthographic source views are
+measured during the bake; only the largest silhouette is retained, so camera
+yaw no longer switches retail side art. Relative plant height is cached with
+the mesh and applied when packing instances and sizing distant canopy coverage.
+See the [sprite specification](spec/terrain-detail.md#sprites-and-cached-placement)
+for fitted dimensions, override limits and provenance.
 
 `tore_world::city::cache` keeps the city fill's placement (its cities, its
 buildings and the candidate count, 15 bytes a building, at most 7.5 MB) under

@@ -110,7 +110,8 @@ impl Map {
                             [usize::from(library.mesh_for(tree.species, (roll >> 24) as u8))];
                         // Expected projected crown area per 42 ft candidate cell.
                         let crown = std::f32::consts::PI
-                            * (tree.height * tree.width * mesh.radius * 0.85).powi(2)
+                            * (tree.height * mesh.height_scale * tree.width * mesh.radius * 0.85)
+                                .powi(2)
                             / (42. * 42.);
                         let weight = p * crown.min(4.);
                         cover += weight;

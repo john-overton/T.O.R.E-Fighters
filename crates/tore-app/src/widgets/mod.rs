@@ -65,7 +65,7 @@ mod kit;
 mod list;
 mod message_box;
 mod panel;
-mod png_read;
+pub(crate) mod png_read;
 #[cfg(test)]
 mod scroll_bar;
 mod text_field;
