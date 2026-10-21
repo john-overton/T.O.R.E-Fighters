@@ -4939,15 +4939,21 @@ impl AiActor {
         } else {
             MINIMUM_ALTITUDE_FT
         };
+        let limits = self.speed_limits();
+        let (positive_g, _negative_g) = self.g_limits();
+        // Above corner speed the envelope, not the pilot, limits the pull,
+        // so the look-ahead also covers the time that G needs to raise the
+        // flight path (see [`terrain_lookahead_ft`]). Rotorcraft keep theirs.
+        let pull_excess_g = (!super::rotor_adapter::flies(&self.flight)
+            && self.flight.speed > limits.corner.0)
+            .then_some(positive_g - 1.0);
         let (terrain_ahead, terrain_climb) = terrain_ahead_ft(
             self.flight.position,
             heading,
-            terrain_lookahead_ft(self.flight.speed),
+            terrain_lookahead_ft(self.flight.speed, pull_excess_g),
             minimum_altitude,
             ground,
         );
-        let limits = self.speed_limits();
-        let (positive_g, _negative_g) = self.g_limits();
         OwnState {
             position: self.flight.position,
             heading_deg: heading.to_degrees(),
@@ -5652,15 +5658,44 @@ pub const TERRAIN_LOOKAHEAD_MIN_FT: f64 = 1000.0;
 /// 32.174 times 1.2 G of excess). Six seconds therefore lets it clear a
 /// rising hillside it would otherwise meet 0.6 s after seeing it; at 440 kt
 /// it is 4,500 ft, and below 100 kt the retail 1,000 ft still applies.
+/// Above corner speed [`terrain_lookahead_ft`] may look further, see there.
 pub const TERRAIN_LOOKAHEAD_S: f64 = 6.0;
+/// Fitted (agent decision, 2026-10-20, fuzz seed 43): the roll level and
+/// the pitch loop's settling before the pull counts, seconds (the 2 s and
+/// 1 s of [`TERRAIN_LOOKAHEAD_S`]).
+pub const TERRAIN_SETTLE_S: f64 = 3.0;
+/// See [`TERRAIN_SETTLE_S`]: the steepest hillside the look-ahead plans to
+/// climb, degrees (as in [`TERRAIN_LOOKAHEAD_S`]).
+pub const TERRAIN_HILLSIDE_DEG: f64 = 14.0;
+/// See [`TERRAIN_SETTLE_S`]: the excess G assumed when the envelope leaves
+/// less, so the look-ahead stays bounded.
+pub const TERRAIN_EXCESS_G_MIN: f64 = 0.25;
+/// See [`TERRAIN_SETTLE_S`]: the longest look-ahead, seconds of travel.
+pub const TERRAIN_LOOKAHEAD_MAX_S: f64 = 20.0;
 /// Ground samples along the look-ahead, at most one per this many feet.
 const TERRAIN_SAMPLE_FT: f64 = 1000.0;
 /// At most this many samples, so long look-aheads stay cheap.
 const TERRAIN_SAMPLES_MAX: f64 = 12.0;
 
 /// How far ahead the B44 terrain floor looks at this speed, feet.
-pub fn terrain_lookahead_ft(speed_fps: f64) -> f64 {
-    (speed_fps.max(0.0) * TERRAIN_LOOKAHEAD_S).max(TERRAIN_LOOKAHEAD_MIN_FT)
+///
+/// `pull_excess_g` is the G above 1 the envelope leaves the aircraft, given
+/// above corner speed. Fitted (agent decision, 2026-10-20, fuzz seed 43):
+/// the look-ahead then covers [`TERRAIN_SETTLE_S`] plus the time that excess
+/// takes to raise the flight path by [`TERRAIN_HILLSIDE_DEG`] (angle times
+/// speed over 32.174 times the excess), between [`TERRAIN_LOOKAHEAD_S`] and
+/// [`TERRAIN_LOOKAHEAD_MAX_S`]. Near its top speed a loaded F-22N keeps only
+/// about 1.5 G; at 1,030 kt and 3,000 ft its six seconds (10,300 ft) saw a
+/// 17 degree escarpment too late, and it flew into it pulling full stick.
+pub fn terrain_lookahead_ft(speed_fps: f64, pull_excess_g: Option<f64>) -> f64 {
+    let speed = speed_fps.max(0.0);
+    let seconds = pull_excess_g.map_or(TERRAIN_LOOKAHEAD_S, |excess| {
+        (TERRAIN_SETTLE_S
+            + TERRAIN_HILLSIDE_DEG.to_radians() * speed
+                / (32.174 * excess.max(TERRAIN_EXCESS_G_MIN)))
+        .clamp(TERRAIN_LOOKAHEAD_S, TERRAIN_LOOKAHEAD_MAX_S)
+    });
+    (speed * seconds).max(TERRAIN_LOOKAHEAD_MIN_FT)
 }
 
 #[cfg(test)]
@@ -5668,10 +5703,26 @@ mod terrain_lookahead_tests {
     use super::*;
 
     #[test]
+    fn above_corner_the_look_ahead_covers_the_pull_the_envelope_leaves() {
+        // Fuzz seed 43: a loaded F-22N at 1,030 kt (1,740 ft/s) keeps about
+        // 1.5 G. Six seconds of travel was too short to raise its path over
+        // a 17 degree escarpment; the pull it has needs the full 20 s.
+        assert_eq!(terrain_lookahead_ft(1740.0, Some(0.5)), 1740.0 * 20.0);
+        // Plenty of G: never shorter than the six seconds.
+        assert_eq!(terrain_lookahead_ft(800.0, Some(6.0)), 800.0 * 6.0);
+        // In between: settle time plus the 14 degree pull.
+        let expected = 1800.0 * (3.0 + 14.0_f64.to_radians() * 1800.0 / (32.174 * 1.2));
+        assert!((terrain_lookahead_ft(1800.0, Some(1.2)) - expected).abs() < 1e-6);
+        // No excess at all is bounded, and slow flight keeps 1,000 ft.
+        assert_eq!(terrain_lookahead_ft(1740.0, Some(-0.3)), 1740.0 * 20.0);
+        assert_eq!(terrain_lookahead_ft(100.0, Some(0.0)), 1000.0);
+    }
+
+    #[test]
     fn the_look_ahead_scales_with_speed_and_sees_ridges_inside_it() {
         // John, 2026-09-29: 1,000 ft at low speed, six seconds of travel fast.
-        assert_eq!(terrain_lookahead_ft(100.0), 1000.0);
-        assert_eq!(terrain_lookahead_ft(1500.0), 9000.0);
+        assert_eq!(terrain_lookahead_ft(100.0, None), 1000.0);
+        assert_eq!(terrain_lookahead_ft(1500.0, None), 9000.0);
         // A 2,000 ft ridge 4,000 ft ahead of an aircraft at 1,000 ft, flying
         // north: seen, and the climb to clear it by 300 ft is the gradient.
         let ridge = |_: f64, z: f64| {
