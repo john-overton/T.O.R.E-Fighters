@@ -209,7 +209,7 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="render-nosewheel-hud-inactive",
             lane="flight",
-            args=["--free-flight", "--aircraft", "f18", "--ground-start", "1", "--maneuver", "takeoff", "--flight-probe-ticks", "1200", "--flight-view", "0", "--capture-flight", "{work}/nsw-inactive.ppm", "--no-audio"],
+            args=["--free-flight", "--aircraft", "f18", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1200", "--flight-view", "0", "--capture-flight", "{work}/nsw-inactive.ppm", "--no-audio"],
             window=True,
             outputs=["nsw-inactive.ppm"],
             expect=["Scene capture:"],
@@ -232,7 +232,7 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="render-runway-paint-calm",
             lane="flight",
-            args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "1", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],
+            args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],
             env={"TORE_WEATHER_TIME": "07:15", "TORE_WIND": "0,0"},
             window=True,
             outputs=["runway.ppm"],
