@@ -149,7 +149,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     # Menus lane.
-    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*")),
+    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
         ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-derived-stations", "menus-validate-creator", "menus-snap-quick-*"),
