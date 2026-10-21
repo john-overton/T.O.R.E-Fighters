@@ -4768,7 +4768,11 @@ mod tests {
         press(&mut v, "v");
         let tick = v.recording.first_tick().unwrap();
         let picture = v.playback.picture(tick, 1.);
-        let draw = |v: &mut Viewer| v.taped_view(&picture, tick, [640, 480]).unwrap().overlay;
+        let draw = |v: &mut Viewer| {
+            v.taped_view(&picture, tick, 0., [640, 480])
+                .unwrap()
+                .overlay
+        };
         let green = draw(&mut v);
         v.local_lighting.0.colour = 3;
         let cyan = draw(&mut v);
