@@ -3180,6 +3180,11 @@ again with an observer; the capture format did not change for it.
   their external tanks entering a fight and keep their weapons, shedding
   air-to-ground loads only to get home damaged, on fuel, or when losing a close
   fight, which changes AI behaviour and the simulation, so an older game must
+  not join;
+  60 since the battery AI fixes (slice bf-ai): a drop-launched missile spares its
+  launcher until a second after its motor lights, the AI's terrain look-ahead
+  grows with excess speed, and an AI approach on its glide path no longer holds
+  high over rising ground, which changes the simulation, so an older game must
   not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
