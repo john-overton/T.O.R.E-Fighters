@@ -74,10 +74,11 @@ until opaque bounds fill the 124 px usable area, since thin tips can disappear
 during the resize. This does not alter side cells. Individual PNGs, page PNGs, `review.png`, JSON metadata and
 `layout.rs` are review/rebuild artifacts. The Sahara palms, acacias, bare trees,
 shrubs and rocks are selected for desert equivalents. Saguaro remains excluded.
-Top modes use the corresponding supplied top cell; retail side silhouettes use
-a fitted equivalent from that sheet. Runtime grove composites stamp separate
-crowns at the imported plants' centres and opaque side widths, leaving gaps
-transparent. Those retail-derived composites remain in memory only. Local
-scale/width variation is unchanged.
+Supplied sprites use their corresponding supplied top cells. Retail shapes are
+split into independent plants and use locally baked procedural tops, with optional
+PNG replacements under `<profile>/vegetation-overrides/`. See the
+[vegetation specification](../../../../docs/spec/terrain-detail.md#sprites-and-cached-placement)
+for naming, limits, palette handling, sizing and cache invalidation. Extracted
+retail sides and AI tops derived from them must never be added to this pack.
 The whole contact sheet was reviewed against a contrasting background and the
 synthetic glow test passed. In-game GPU appearance still requires lead review.

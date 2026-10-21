@@ -1082,10 +1082,10 @@ impl Atlas {
                 Some(plant)
             });
         }
-        // Groves: one object for a clump of trees, deep in woodland, drawn
-        // where single trees have thinned with distance.
+        // Grove art supplies independently placed trees, with the same
+        // jittered, density-scaled grid and coverage as other species.
         if climate != 1 {
-            scatter(160., 400, &mut out, &|s, roll| {
+            scatter(grid(80.), 400, &mut out, &|s, roll| {
                 let p = if s.kind == Kind::Forest && s.wood > 0.7 {
                     self.tree_density(s) * 0.8
                 } else {
@@ -1106,7 +1106,7 @@ impl Atlas {
         }
         // Palm groves: the green belts along desert water, and palm country
         // in the tropics.
-        scatter(220., 450, &mut out, &|s, roll| {
+        scatter(grid(110.), 450, &mut out, &|s, roll| {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
             let p = match climate {
                 1 if green => 0.48 * s.near_water.powi(2),

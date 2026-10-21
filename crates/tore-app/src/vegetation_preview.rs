@@ -1810,6 +1810,7 @@ pub fn art() -> AppResult<()> {
         // The game falls back without them; this audit has nothing to read.
         return Err(VEGETATION_ART_MISSING.into());
     }
+    std::fs::create_dir_all(out.join("source"))?;
     let mut names: Vec<(&String, &Vec<u8>)> = art.iter().collect();
     names.extend(
         resources
@@ -1836,7 +1837,8 @@ pub fn art() -> AppResult<()> {
         println!("  {name}: {}x{}, cutout {cut}", pic.width, pic.height);
         let png = crate::replay::png::encode_rgba(pic.width as u32, pic.height as u32, &rgba)?;
         std::fs::write(
-            out.join(format!("{}.png", name.trim_end_matches(".PIC"))),
+            out.join("source")
+                .join(format!("{}.png", name.trim_end_matches(".PIC"))),
             png,
         )?;
     }
@@ -1899,95 +1901,89 @@ pub fn art() -> AppResult<()> {
         }
     }
     let mut pages = Vec::new();
-    let mut lib =
+    let lib =
         crate::vegetation_shapes::Library::build(&art, resources, &palette, &mut pages, |p| {
             p.len() / 65536
         });
-    for (i, mesh) in lib.meshes.iter().enumerate() {
-        let page = &pages[mesh.sprite_layer * 65536..][..65536];
-        let rgba: Vec<u8> = page
-            .iter()
-            .flat_map(|&index| {
-                if index == 255 {
-                    [0, 0, 0, 0]
-                } else {
-                    let c = palette[usize::from(index)];
-                    [c[0], c[1], c[2], 255]
-                }
-            })
-            .collect();
-        write_png(
-            out,
-            &format!("baked-{i}-{}", mesh.source),
-            [256, 256],
-            &rgba,
-        )?;
-        println!(
-            "baked {i} {} radius {:.4} opaque half {:?} crowns {} mean {:?} visible {} black {}",
-            mesh.source,
-            mesh.radius,
-            &mesh.top[2..],
-            mesh.crowns.len(),
-            mesh.recolour,
-            page.iter().filter(|&&p| p != 255).count(),
-            page.iter()
-                .filter(|&&p| p != 255 && palette[usize::from(p)].iter().all(|&c| c < 8))
-                .count()
-        );
-    }
-    let first = pages.len() / 65536;
-    lib.add_pack(
-        "mixed",
-        crate::vegetation::region("UKR"),
-        &palette,
-        &mut pages,
-        first,
+    let mut index = String::from(
+        "name\tshape\tcrown\treference_height_ft\treference_width_ft\taspect\theight_scale\n",
     );
     let mut crown_report =
         String::from("source\tcrowns\tgrove_width\tmax_crown_width\ttransparent_pixels\n");
-    for species in [
-        crate::vegetation::Species::Grove,
-        crate::vegetation::Species::PineGrove,
-        crate::vegetation::Species::PalmGrove,
-    ] {
-        for &id in &lib.variants[species as usize] {
-            let mesh = &lib.meshes[usize::from(id)];
-            if mesh.top[0] < 0. {
-                continue;
-            }
-            let page = &pages[mesh.top[0] as usize * 65536..][..65536];
-            let rgba: Vec<_> = page
-                .iter()
-                .flat_map(|&p| {
+    for mesh in &lib.meshes {
+        let (shape, crown) = mesh
+            .source
+            .split_once("-crown-")
+            .ok_or("unnamed retail crown")?;
+        // Fitted reference feet only. Original in-game vegetation scale is unknown.
+        let reference = if shape.starts_with("BUSH") {
+            4.
+        } else if shape.starts_with("ROCK") {
+            12.
+        } else {
+            57.
+        };
+        let h = reference * mesh.height_scale;
+        index.push_str(&format!(
+            "{}\t{shape}.SH\t{crown}\t{h:.5}\t{:.5}\t{:.5}\t{:.5}\n",
+            mesh.source,
+            h * 2. * mesh.radius,
+            2. * mesh.radius,
+            mesh.height_scale
+        ));
+        for top in [false, true] {
+            let (layer, tile) = if top {
+                let packed = (-mesh.top[0] - 1.) as usize;
+                (packed / 4, packed % 4)
+            } else {
+                (mesh.sprite_layer, usize::from(mesh.sprite_tile.unwrap()))
+            };
+            let page = &pages[layer * 65536..][..65536];
+            let width = if top {
+                124
+            } else {
+                (248. * mesh.radius).round().clamp(1., 2048.) as usize
+            };
+            let mut rgba = Vec::with_capacity(width * 124 * 4);
+            let mut transparent = 0;
+            for y in 0..124 {
+                for x in 0..width {
+                    let p =
+                        page[(tile / 2 * 128 + 2 + y) * 256 + tile % 2 * 128 + 2 + x * 124 / width];
                     if p == 255 {
-                        [0, 0, 0, 0]
+                        rgba.extend([0, 0, 0, 0]);
+                        transparent += 1;
                     } else {
                         let c = palette[usize::from(p)];
-                        [c[0], c[1], c[2], 255]
+                        rgba.extend([c[0], c[1], c[2], 255]);
                     }
-                })
-                .collect();
-            write_png(out, &format!("top-{id}-{}", mesh.source), [256, 256], &rgba)?;
-            println!(
-                "grove-top {} crowns {:?} transparent {}",
-                mesh.source,
-                mesh.crowns,
-                page.iter().filter(|&&p| p == 255).count()
-            );
-            crown_report.push_str(&format!(
-                "{}\t{}\t{:.5}\t{:.5}\t{}\n",
-                mesh.source,
-                mesh.crowns.len(),
-                2. * mesh.top[2].max(mesh.top[3]),
-                mesh.crowns
-                    .iter()
-                    .map(|c| 2. * c.half[0].max(c.half[1]))
-                    .fold(0., f32::max),
-                page.iter().filter(|&&p| p == 255).count()
-            ));
+                }
+            }
+            let png = crate::replay::png::encode_cutout_rgba(width as u32, 124, &rgba)?;
+            std::fs::write(
+                out.join(format!(
+                    "{}{}.png",
+                    mesh.source,
+                    if top { "-top" } else { "" }
+                )),
+                png,
+            )?;
+            if top {
+                crown_report.push_str(&format!(
+                    "{}\t1\t{:.5}\t{:.5}\t{transparent}\n",
+                    mesh.source,
+                    2. * mesh.top[2],
+                    2. * mesh.top[2]
+                ));
+            }
         }
     }
+    std::fs::write(out.join("index.tsv"), index)?;
     std::fs::write(out.join("top-crowns.tsv"), crown_report)?;
+    println!(
+        "individual retail sprites: {} independent side/top pairs",
+        lib.meshes.len()
+    );
     Ok(())
 }
 

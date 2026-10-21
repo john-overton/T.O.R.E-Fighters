@@ -144,7 +144,7 @@ impl Worker {
                                     for i in &objects {
                                         let mesh = library.mesh_for(i.species, i.variant);
                                         for value in
-                                            pack(i, mesh, library.meshes[usize::from(mesh)].radius)
+                                            pack(i, mesh, &library.meshes[usize::from(mesh)])
                                         {
                                             bytes.extend_from_slice(&value.to_le_bytes());
                                         }
@@ -672,6 +672,7 @@ mod tests {
             meshes: vec![crate::vegetation_shapes::Mesh {
                 range: 0..6,
                 radius: 0.5,
+                height_scale: 1.,
                 look: crate::vegetation_shapes::Look::Foliage,
                 recolour: None,
                 source: "synthetic".into(),
