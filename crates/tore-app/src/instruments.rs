@@ -506,6 +506,7 @@ pub struct Instruments {
     pub hud_color: [u8; 3],
     pub light_gain: f32,
     pub flood: f32,
+    pub ambient: f32,
     /// The live cockpit palette, set by the host each frame. It colours the
     /// window frame and its labels, as it colours the cockpit art.
     pub palette: [[u8; 3]; 256],
@@ -555,6 +556,7 @@ impl Default for Instruments {
             hud_color: [GREEN[0], GREEN[1], GREEN[2]],
             light_gain: 1.,
             flood: 0.,
+            ambient: 1.,
             palette: [[0; 3]; 256],
             target_preview: None,
             camera_target: None,
@@ -917,12 +919,42 @@ impl Instruments {
     /// The aircraft's frame with its title, number and button letters over
     /// a cleared screen, ready for page content in screen coordinates.
     fn window(&self, id: u8, panel: &Pic, f: &Font, hud: &tore_formats::hud::Hud) -> Raster {
-        let color = |index: u8| {
-            let [r, g, b] = self.palette[usize::from(index)];
-            [r, g, b, 255]
-        };
         let mut r = Raster::new();
         r.frame(panel, &self.palette);
+        self.bezel_labels(id, &mut r, f, hud, false);
+        // Pages clear their own screen, including over the F/A-18's green inset.
+        r.rect(
+            SCREEN.0,
+            SCREEN.1,
+            SCREEN.2,
+            SCREEN.3,
+            screen_background(id),
+        );
+        r.origin = (SCREEN.0, SCREEN.1);
+        r
+    }
+    /// The same generated text and pressed-button mark in either lighting pass.
+    fn bezel_labels(
+        &self,
+        id: u8,
+        r: &mut Raster,
+        f: &Font,
+        hud: &tore_formats::hud::Hud,
+        backlit: bool,
+    ) {
+        let color = |index: u8| {
+            let [r, g, b] = self.palette[usize::from(index)];
+            if backlit {
+                crate::cockpit_lighting::legend_ink(
+                    [r, g, b],
+                    self.ambient,
+                    self.flood * 0.65,
+                    self.light_gain,
+                )
+            } else {
+                [r, g, b, 255]
+            }
+        };
         let title = match id {
             0 => "RCS",
             1 => "ENVELOPE",
@@ -968,16 +1000,6 @@ impl Instruments {
                 r.rect(x + 10, BUTTON_Y + 6, 14, 14, color(hud.press_color));
             }
         }
-        // Pages clear their own screen, including over the F/A-18's green inset.
-        r.rect(
-            SCREEN.0,
-            SCREEN.1,
-            SCREEN.2,
-            SCREEN.3,
-            screen_background(id),
-        );
-        r.origin = (SCREEN.0, SCREEN.1);
-        r
     }
     pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
         let mut r = self.unlit_page(id, h, s);
@@ -987,14 +1009,20 @@ impl Instruments {
                 && x < SCREEN.0 + SCREEN.2
                 && y >= SCREEN.1
                 && y < SCREEN.1 + SCREEN.3;
-            if !screen && self.flood > 0. {
-                crate::cockpit_lighting::flood_pixel(pixel, self.flood * 0.65);
+            if !screen && (self.flood > 0. || self.ambient != 1.) {
+                crate::cockpit_lighting::surface_pixel(pixel, self.ambient, self.flood * 0.65);
             }
             if self.light_gain != 1. {
                 for channel in &mut pixel[..3] {
                     *channel = (f32::from(*channel) * self.light_gain).min(255.) as u8;
                 }
             }
+        }
+        if self.ambient < 1. {
+            let origin = r.origin;
+            r.origin = (0, 0);
+            self.bezel_labels(id, &mut r, &h.font, &h.hud, true);
+            r.origin = origin;
         }
         if matches!(id, 2 | 3) && self.cameras.contains_key(&id) {
             let f = &h.font;
@@ -2499,6 +2527,27 @@ mod link_cue_tests {
         }
         assert!(changed > 100);
         panels.flood = 0.;
+        panels.ambient = 0.065;
+        let ambient_key = panels.page_key(7, &state);
+        let dark = panels.page(7, &h, &state);
+        for (at, (before, after)) in plain
+            .pixels
+            .chunks_exact(4)
+            .zip(dark.pixels.chunks_exact(4))
+            .enumerate()
+        {
+            let (x, y) = ((at % WIDTH) as i32, (at / WIDTH) as i32);
+            if x >= SCREEN.0 && x < SCREEN.0 + SCREEN.2 && y >= SCREEN.1 && y < SCREEN.1 + SCREEN.3
+            {
+                assert_eq!(before, after, "ambient reached emissive display at {x},{y}");
+            } else {
+                assert!(after[0] <= before[0] && after[1] <= before[1] && after[2] <= before[2]);
+                assert_eq!(before[3], after[3]);
+            }
+        }
+        assert_ne!(dark.pixels, plain.pixels);
+        panels.ambient = 1.;
+        assert_ne!(ambient_key, panels.page_key(7, &state));
         panels.light_gain = 0.5;
         let dim = panels.page(7, &h, &state);
         for (before, after) in plain.pixels.chunks_exact(4).zip(dim.pixels.chunks_exact(4)) {

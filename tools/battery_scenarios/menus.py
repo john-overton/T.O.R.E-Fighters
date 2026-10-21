@@ -923,7 +923,7 @@ def scenarios() -> list[Scenario]:
                 expect=[r"window size outside 640x480\.\.3840x2160"],
             )
         )
-    for label, clock, lighting in [("day", "12:00", "4,0,0,0"), ("night", "00:00", "1,5,1,-64")]:
+    for label, clock, lighting in [("day", "12:00", "4,0,0,0"), ("night", "00:00", "4,3,0,0"), ("dusk", "19:24", "4,0,0,0")]:
         out.append(
             Scenario(
                 name=f"menus-window-cockpit-lighting-{label}",
