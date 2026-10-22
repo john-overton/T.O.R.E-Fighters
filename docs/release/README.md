@@ -122,7 +122,7 @@ These follow the [agent instructions](../../AGENTS.md).
 - **No em dashes or en dashes.** Use a comma, a colon, or a new sentence. For a
   range, write "1 to 5" or "Alt+2 to Alt+5". `tools/check_docs.py` enforces this
   for this folder.
-- **No emoji** and no exclamation marks.
+- **No emoji** and no exclamation marks (a release title John chose is the exception).
 - **Plain English** for a smart player: short sentences, no unexplained jargon.
   Lead with what a change means, not how it works.
 - **Be honest.** Say what has not been tested and what is still approximate.
