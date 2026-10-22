@@ -6,7 +6,8 @@ pipe_dir=$(mktemp -d)
 mkfifo "$pipe_dir/console"
 exec 3<>"$pipe_dir/console"
 rm -r "$pipe_dir"
-trap 'printf "quit\n" >&3' TERM INT
+interrupted=0
+trap 'interrupted=1; printf "quit\n" >&3' TERM INT
 # Explicit stdin redirection keeps a background cat from receiving /dev/null.
 cat <&0 >&3 &
 input_pid=$!
@@ -14,9 +15,11 @@ nice -n 5 tore-server "$@" <&3 &
 server_pid=$!
 status=0
 while :; do
+    interrupted=0
     wait "$server_pid" && status=0 || status=$?
-    # A signal interrupts wait before the server consumes quit.
-    kill -0 "$server_pid" 2>/dev/null || break
+    # A signal interrupts wait. Reap again even if the server already exited
+    # after consuming quit, so that its status replaces the interrupted wait's.
+    [ "$interrupted" -eq 1 ] || break
 done
 kill "$input_pid" 2>/dev/null || true
 wait "$input_pid" 2>/dev/null || true
