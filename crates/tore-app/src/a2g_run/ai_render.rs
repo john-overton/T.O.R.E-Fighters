@@ -65,7 +65,53 @@ pub(crate) fn render_world(
     camera.yaw = look[0].atan2(look[2]) as f32;
     camera.pitch = look[1].atan2(look[0].hypot(look[2])) as f32;
     camera.near_clip = 1.;
+    if std::env::var_os("TORE_SCENE_F12").is_some() {
+        let frame = world
+            .flight_frame(super::SEAT, None, &loaded.snapshot, &[])
+            .ok_or("the seat flies no plane")?;
+        let subjects = crate::flight_views::Scene::new(
+            &frame,
+            &loaded.seen_from,
+            &world.combat,
+            world.ai_wings.as_ref(),
+            None,
+        );
+        let mut rig = crate::flight_views::Rig::default();
+        camera = rig
+            .camera(
+                crate::flight_views::MISSILE,
+                &subjects,
+                Camera::new(),
+                [0.; 2],
+                1.,
+            )
+            .unwrap_or_else(|_| {
+                rig.select(crate::flight_views::Reference::Aircraft(observer.0));
+                rig.camera(0, &subjects, Camera::new(), [0.; 2], 1.)
+                    .expect("seat exists")
+            });
+        println!(
+            "probe F12: tick {} eye {:?} hidden {:?} weapons {:?}",
+            loaded.snapshot.tick,
+            camera.position,
+            camera.hidden_projectile,
+            loaded
+                .snapshot
+                .projectiles
+                .iter()
+                .filter(|p| !p.gun)
+                .map(|p| (p.id, p.owner, &p.shape))
+                .collect::<Vec<_>>()
+        );
+    }
     loaded.upload(world, &camera)?;
+    if std::env::var_os("TORE_SCENE_F12").is_some() {
+        // Weapon geometry uses the aircraft pass and its palette, even when
+        // the seat aircraft is outside this camera's picture.
+        let gpu = &mut loaded.gpu;
+        gpu.sim
+            .aircraft(&gpu.device, &gpu.queue, &loaded.observer_airframe, &[]);
+    }
     let pixels = loaded
         .gpu
         .pixels(&camera, &world.terrain, &loaded.scenery)?;
@@ -131,7 +177,16 @@ impl Loaded {
                 .ok_or("the seat plane has no ownship")?,
         )?;
         let scenery = Scenery::build(&resources, &world.terrain)?;
-        let art = render_snapshot::CombatArt::load(&resources)?;
+        let mut art = render_snapshot::CombatArt::load(&resources)?;
+        if std::env::var_os("TORE_SCENE_F12").is_some() {
+            art.add_shapes(
+                snapshot
+                    .projectiles
+                    .iter()
+                    .filter_map(|p| p.shape.as_deref()),
+                &resources,
+            );
+        }
         let gpu = pollster::block_on(Gpu::new(&scenery))?;
         Ok(Self {
             gpu,

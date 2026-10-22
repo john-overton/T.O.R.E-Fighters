@@ -150,6 +150,28 @@ def hud_state_problems(work: Path, output: str) -> list[str]:
     return out
 
 
+WEAPON_PLAN = (
+    "import sys; open(sys.argv[1], 'w').write(''.join("
+    "f'{t} 0 0 0 0 0 0 100 60 -1 {v} 1 -1\\n' "
+    "for t,v in [(3000,10),(5298,10),(5299,10),(5300,10),(3000,10),(3000,9),(5299,9)]))"
+)
+
+
+def weapon_problems(work: Path, output: str) -> list[str]:
+    frames = digests(work / "weapon")
+    if len(frames) != 7:
+        return [f"weapon chase wrote {len(frames)} frames, want 7"]
+    from battery_scenarios._replay_tools import ppm_problems
+    problems = ppm_problems(str(work / "f12-bomb.ppm"), expect_ui=False)
+    if frames[0] != frames[4]:
+        problems.append("weapon chase differs after reverse seek")
+    if frames[0] == frames[5]:
+        problems.append("weapon chase and seeker nose pictures are identical")
+    if frames[1] == frames[3]:
+        problems.append("weapon chase did not change across impact")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -177,6 +199,20 @@ def scenarios() -> list[Scenario]:
             check_work=hud_state_problems,
             notes="nr-replayhud: a scripted air-to-air lock and an AC-130 firing pass record the HUD "
                   "and the sight, and the HUD camera and Sensor View draw from those ticks.",
+        ),
+        Scenario(
+            name="replay-weapon-chase", lane="replay",
+            args=ARGS,
+            timeout=600,
+            then=[
+                Step(["python3", "-c", WEAPON_PLAN, "{work}/weapon-plan.txt"], app=False, timeout=30),
+                Step(["--replay-stills", "{work}/laser.tore-replay", "{work}/weapon-plan.txt", "{work}/weapon"], timeout=600),
+                Step(["--watch-replay", "{work}/laser.tore-replay", "--capture-replay", "{work}/f12-bomb.ppm",
+                      "--replay-tick", "3000", "--flight-view", "11", "--replay-clean", "--no-audio"], window=True, timeout=120),
+            ],
+            expect=[r"a2g-run: done"],
+            check_work=weapon_problems,
+            notes="Weapon chase follows a guided bomb to impact, restores it on reverse seek, and keeps the seeker nose view distinct.",
         ),
         Scenario(
             name="replay-taped-views", lane="replay",

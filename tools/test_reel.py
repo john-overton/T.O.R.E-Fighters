@@ -14,6 +14,20 @@ class ReelPlanTests(unittest.TestCase):
     def setUp(self):
         self.config = reel.read_config(ROOT / 'tools/reel/shots.toml')
 
+    def test_weapon_and_seeker_capture_views(self):
+        capture = dict(view='weapon', anchor=2, frames=3, in_tick=3000)
+        rows = [[float(v) for v in line.split()] for line in reel.frame_plan(capture).splitlines()]
+        self.assertEqual([r[0] for r in rows], [3000, 3002, 3004])
+        self.assertEqual(rows[0][1:5], [2, 0, 10, -30])
+        self.assertEqual(rows[0][10], 10)
+        capture.update(side=5, height=12, distance=45, fov=45)
+        row = [float(v) for v in reel.frame_plan(capture).splitlines()[0].split()]
+        self.assertEqual(row[2:5], [5, 12, -45])
+        self.assertEqual(row[8], 45)
+        capture['view'] = 'seeker'
+        row = [float(v) for v in reel.frame_plan(capture).splitlines()[0].split()]
+        self.assertEqual(row[10], 9)
+
     def test_exact_timeline_rosters_and_cutdown(self):
         shots = self.config['shot']
         reel_info = self.config['reel']

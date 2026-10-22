@@ -1575,9 +1575,12 @@ are agent choices (2026-09-28).
   at the aircraft and hide it (there is no cockpit in a replay); back looks
   from its pilot's eye over its spine and tails, as the player's own F2
   does; threat, wing, target and fly-by views work from it. Unmodified F12
-  cycles every active missile in stable projectile-id order, retaining a living
-  selection as others launch. An expired selection advances to the next live id
-  and wraps, falling back outside the aircraft when none remain. Missile views
+  cycles every active non-gun weapon in stable projectile-id order, including
+  missiles, bombs and rockets, retaining the selection as others launch.
+  It sits 30 feet behind and 10 feet above the weapon and draws its lit body.
+  On expiry it shows Forward on the selected aircraft, like live F12, retaining
+  the weapon identity so seeking backward restores it. Press F12 again to pick
+  another active weapon. Weapon views
   face their retained aircraft or standing ground target, otherwise their flight
   direction. F6
   pressed again moves to the next wingman and names it ("Wingman view: Enemy
@@ -1596,15 +1599,20 @@ are agent choices (2026-09-28).
   target by sight and let it go exactly as they did in flight. A recording
   from before view targets were recorded uses the player's designated
   target, which it notes with every command the player gives. A view that cannot be shown (no target, no wingman, no missile) says why
-  once and shows the aircraft from outside, coming back when it can be shown
+  once and shows the aircraft from outside (F12 uses Forward), coming back when it can be shown
   again (John's choice, 2026-09-28: the replay does not refuse the key or
   return to F1 as flight does); once the aircraft has left the recording (a
   wreck that exploded), the camera stays where it was. The viewer opens in
   the external view of the player.
+The reel director also exposes the F12 chase placement as `view = "weapon"`.
+Its `anchor` is the firing aircraft; it follows that aircraft's newest launch
+and returns to Forward at expiry. The separate `seeker` view stays available as
+a nose camera with the weapon hidden. See [capture options](../tools/reel/README.md#weapon-cameras).
+
 - **Active weapons in the object list.** Empty-space right-click lists aircraft
   and active missiles, bombs and rockets. It refreshes during playback and seeking,
   removes expired weapons, and preserves focus by object identity. Choosing a
-  weapon opens View from here. Guns are excluded. F12 cycles missiles only.
+  weapon opens View from here. Guns are excluded. F12 includes the same weapon classes.
   These replay choices were requested by John on 2026-10-01.
 - <a id="object-view"></a>**Object view.** A camera from any object to any
   other, at any range: aircraft, ground objects of the recorded world

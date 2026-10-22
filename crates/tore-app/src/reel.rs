@@ -15,6 +15,8 @@ use std::{
 };
 
 pub struct Gpu {
+    /// Seeker nose eye held after impact, matching the trailer capture view.
+    pub seeker_camera: Option<Camera>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub sim: crate::sim_renderer::SimRenderer,
@@ -97,6 +99,7 @@ impl Gpu {
         });
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, format);
         Ok(Self {
+            seeker_camera: None,
             cockpit,
             cockpit_aircraft: None,
             gun_sounds: Default::default(),

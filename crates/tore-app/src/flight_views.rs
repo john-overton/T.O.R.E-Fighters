@@ -803,6 +803,23 @@ pub(crate) fn relation(subject: Body, target: Vector) -> Camera {
     facing(eye, target, d)
 }
 
+/// The weapon chase camera. Zero offsets select F12's fitted placement;
+/// otherwise X is sideways, Y world-up and Z forward along the target line.
+pub(crate) fn weapon_camera(subject: Body, target: Vector, offset: Vector) -> Camera {
+    if offset == [0.; 3] {
+        return relation(subject, target);
+    }
+    let d = direction(subject.position, target, subject.basis.forward);
+    let right = unit([d[2], 0., -d[0]], subject.basis.right);
+    let eye = std::array::from_fn(|i| {
+        subject.position[i]
+            + right[i] * offset[0]
+            + d[i] * offset[2]
+            + if i == 1 { offset[1] } else { 0. }
+    });
+    facing(eye, target, d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

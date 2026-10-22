@@ -215,6 +215,51 @@ impl Viewer {
         if let Some(t) = &taped {
             camera = copy(&t.camera);
         }
+        // A clean full-frame view through the existing seeker nose camera.
+        // This uses the weapon's recorded pose and guided aim, not a new
+        // trajectory. The final eye is held as the impact appears.
+        if frame.view == 9 {
+            let weapon = picture
+                .projectiles
+                .iter()
+                .filter(|p| {
+                    p.owner == frame.anchor
+                        && !p.gun
+                        && !p.incoming
+                        && tore_sim::combat::missiles::has_seeker_view(&p.weapon)
+                })
+                .max_by_key(|p| p.id);
+            if let Some(weapon) = weapon {
+                let target = weapon
+                    .target
+                    .and_then(|id| {
+                        self.body_of(&picture, tick, Target::Aircraft(id))
+                            .or_else(|| self.body_of(&picture, tick, Target::Ground(id)))
+                    })
+                    .map(|body| body.position())
+                    .or_else(|| {
+                        self.marks
+                            .scene(tick)
+                            .weapons
+                            .iter()
+                            .find(|w| w.projectile == weapon.id)
+                            .and_then(|w| w.aim)
+                    });
+                camera = crate::gunsight_view::camera(&crate::seeker_view::view(weapon, target));
+                camera.hidden_projectile = Some(weapon.id);
+                gpu.seeker_camera = Some(copy(&camera));
+            } else {
+                camera = gpu
+                    .seeker_camera
+                    .as_ref()
+                    .map(copy)
+                    .ok_or("director seeker view requires a seeker weapon in flight")?;
+            }
+        }
+        if frame.view == 10 {
+            camera = self.director_weapon_camera(&picture, tick, frame.anchor, frame.eye);
+            camera.zoom = ((30f64).to_radians().tan() / (frame.fov / 2.).to_radians().tan()) as f32;
+        }
         // HUD/cockpit sound is heard inside the watched aircraft.
         let mut listener = copy(&camera);
         if cockpit_view {
@@ -597,5 +642,70 @@ impl Viewer {
             }
         }
         Ok(pixels)
+    }
+}
+
+impl Viewer {
+    /// F12's weapon relation camera, selected by the anchor's newest launch.
+    /// Read launch history so expiry cannot jump back to an older weapon and
+    /// direct seeks, reverse play and repeated captures choose the same shot.
+    pub(super) fn director_weapon_camera(
+        &self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        owner: u32,
+        offset: [f64; 3],
+    ) -> Camera {
+        let newest = self
+            .recording
+            .events_between(0, tick)
+            .iter()
+            .rev()
+            .find_map(|entry| {
+                let e = &entry.event;
+                if e.kind != "weapon.launch"
+                    || e.subject != Some(owner)
+                    || e.string("class") == Some("gun")
+                {
+                    return None;
+                }
+                let weapon = e
+                    .get("weapon")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|id| self.recording.weapon_info(id as u32));
+                if weapon.is_some_and(|w| w.class == WeaponClass::Gun) {
+                    return None;
+                }
+                e.get("projectile")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|id| u32::try_from(id).ok())
+            });
+        let weapon = picture
+            .projectiles
+            .iter()
+            .filter(|p| p.owner == owner && !p.gun && (owner != self.player || !p.incoming))
+            .filter(|p| newest.is_none_or(|id| id == p.id))
+            .max_by_key(|p| p.id);
+        if let Some(p) = weapon {
+            let body = Body::weapon(p, 1.);
+            let target = p
+                .target
+                .and_then(|id| {
+                    self.body_of(picture, tick, Target::Aircraft(id))
+                        .or_else(|| self.body_of(picture, tick, Target::Ground(id)))
+                })
+                .map_or_else(
+                    || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
+                    |b| b.position(),
+                );
+            return flight_views::weapon_camera(body, target, offset);
+        }
+        // Live F12 returns to Forward when its weapon ends. A replay has no
+        // cockpit overlay; its Forward camera hides the reference aircraft.
+        let scene = self.scene(picture, tick);
+        let mut rig = Rig::default();
+        rig.select(Reference::Aircraft(owner));
+        rig.camera(0, &scene, Camera::new(), [0.; 2], 1.)
+            .unwrap_or_else(|_| copy(&self.camera))
     }
 }
