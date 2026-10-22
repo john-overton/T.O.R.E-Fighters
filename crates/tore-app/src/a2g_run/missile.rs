@@ -338,7 +338,7 @@ pub(super) fn run(
             broke = true;
             println!("a2g-run: break t={t:.3} air-ground off");
         }
-        if ended_at.is_some_and(|at| t > at + 1.) {
+        if ended_at.is_some_and(|at| t > at + 1.) && !scene.scenes.active() {
             break;
         }
     }

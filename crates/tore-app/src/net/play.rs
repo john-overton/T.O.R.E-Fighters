@@ -1490,6 +1490,9 @@ impl TickPresenter<'_> {
         if let Some(audio) = self.audio {
             let scene =
                 flight_views::Scene::from_frame(frame, flight, self.world.ai_wings.as_ref());
+            let scene = self
+                .view_rig
+                .prepare(scene, *self.flight_view, &self.world.terrain);
             let listener_camera = self
                 .view_rig
                 .clone()
@@ -1572,6 +1575,9 @@ impl TickPresenter<'_> {
         let flight = frame.flight;
         let speed = flight.speed;
         let scene = flight_views::Scene::from_frame(frame, flight, self.world.ai_wings.as_ref());
+        let scene = self
+            .view_rig
+            .prepare(scene, *self.flight_view, &self.world.terrain);
         let weather_view = self
             .view_rig
             .camera(

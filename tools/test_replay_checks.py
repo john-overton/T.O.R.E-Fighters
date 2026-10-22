@@ -233,3 +233,24 @@ class UncuedSurfaceSarhTests(unittest.TestCase):
         self.assertEqual(uncued_sarh_problems(launch + search + lock), [])
         self.assertTrue(uncued_sarh_problems(launch + search))
         self.assertTrue(uncued_sarh_problems(launch + lock))
+
+
+class WeaponHoldTests(unittest.TestCase):
+    def test_hold_checker_rejects_early_return_and_unstable_reverse(self):
+        import tempfile
+        from battery_scenarios.replay_views import HOLD_TICKS, hold_problems
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            ppm = lambda value: b"P6\n1 1\n255\n" + bytes([value] * 3)
+            for tick in HOLD_TICKS:
+                (work / f"replay-{tick}.ppm").write_bytes(ppm(tick % 255))
+            (work / "reverse.ppm").write_bytes(ppm(2713 % 255))
+            (work / "interrupted.ppm").write_bytes(ppm(0))
+            output = "probe F12 stop: tick 2600 eye [0, 0, 0]\n"
+            output += "\n".join(f"a2g-run: F12 tick {t} eye {[0, 0, int(t < 2600 or t == 2833)]}" for t in HOLD_TICKS)
+            output += f"\nreplay F12 shot: {work}/reverse.ppm eye [0, 0, 0] yaw 0 pitch 0\nreplay F12 shot: {work}/replay-2713.ppm eye [0, 0, 0] yaw 0 pitch 0"
+            self.assertEqual(hold_problems(work, output), [])
+            early = output.replace("tick 2832 eye [0, 0, 0]", "tick 2832 eye [0, 0, 1]")
+            self.assertTrue(any("180 game ticks" in p for p in hold_problems(work, early)))
+            (work / "reverse.ppm").write_bytes(ppm(0))
+            self.assertTrue(any("reverse" in p for p in hold_problems(work, output)))

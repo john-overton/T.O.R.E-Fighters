@@ -172,8 +172,81 @@ def weapon_problems(work: Path, output: str) -> list[str]:
     return problems
 
 
+# Keep a real live rig and a real replay F12 selected across the bomb's end.
+# The release probe runs requested post-impact frames before it finishes.
+HOLD_TICKS = (2533, 2593, 2623, 2652, 2653, 2713, 2773, 2832, 2833)
+HOLD_SCRIPT = r"""
+import pathlib, sys
+work = pathlib.Path(sys.argv[1])
+ticks = (2533, 2593, 2623, 2652, 2653, 2713, 2773, 2832, 2833)
+lines = ["wait 1"]
+previous = ticks[0]
+for tick in ticks:
+    lines += ["key Right"] * (tick - previous)
+    lines += ["wait 1", f"shot {work}/replay-{tick}.ppm"]
+    previous = tick
+lines += ["key Left"] * (2833 - 2713)
+lines += ["wait 1", f"shot {work}/reverse.ppm", "key F10", "wait 1",
+          f"shot {work}/interrupted.ppm", "exit"]
+(work / "hold-input.txt").write_text("\n".join(lines) + "\n")
+"""
+
+
+def hold_problems(work: Path, output: str) -> list[str]:
+    import re
+    out = []
+    poses = {int(tick): eye for tick, eye in re.findall(r"a2g-run: F12 tick (\d+) eye (\[[^]]+\])", output)}
+    stopped = re.search(r"probe F12 stop: tick (\d+) eye (\[[^]]+\])", output)
+    if not stopped or not 2533 < int(stopped[1]) < 2653:
+        out.append("live F12 did not stop on the approach before impact")
+    if any(t not in poses for t in HOLD_TICKS):
+        out.append("live F12 did not capture every hold boundary")
+    elif stopped:
+        stopped_at, eye = int(stopped[1]), stopped[2]
+        if any(poses[t] != eye for t in HOLD_TICKS if stopped_at <= t < 2833) or poses[2833] == eye:
+            out.append("live F12 did not hold its stopped pose for exactly 180 game ticks after impact")
+        if poses[2533] == eye:
+            out.append("live F12 stopped before entering the approach")
+    paths = [work / f"replay-{t}.ppm" for t in HOLD_TICKS] + [work / "reverse.ppm", work / "interrupted.ppm"]
+    if any(not p.is_file() for p in paths):
+        out.append("replay F12 hold captures are missing")
+    else:
+        shots = {Path(path).name: pose for path, pose in re.findall(r"replay F12 shot: (.+?) eye (.+)", output)}
+        if "reverse.ppm" not in shots or shots.get("reverse.ppm") != shots.get("replay-2713.ppm"):
+            out.append("replay F12 camera changed after reverse seek")
+        # Interactive rendering can differ by a fraction of a
+        # colour level after a seek. Camera poses above must still be exact.
+        from battery_scenarios._replay_tools import read_ppm
+        aw, ah, a = read_ppm(str(work / "reverse.ppm"))
+        bw, bh, b = read_ppm(str(work / "replay-2713.ppm"))
+        if (aw, ah) != (bw, bh) or sum(abs(x - y) for x, y in zip(a, b)) / max(1, len(a)) > 0.5:
+            out.append("replay F12 picture changed after reverse seek")
+        if (work / "interrupted.ppm").read_bytes() == (work / "reverse.ppm").read_bytes():
+            out.append("F10 did not interrupt the replay hold")
+        if (work / "replay-2832.ppm").read_bytes() == (work / "replay-2833.ppm").read_bytes():
+            out.append("replay F12 did not return at the hold boundary")
+    return out
+
+
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="flight-f12-hold", lane="replay",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1",
+                  "--aircraft", "a4e", "--load", "MK82", "--count", "1", "--altitude", "3000",
+                  "--speed", "450", "--seconds", "26", "--record", "{work}/hold.tore-replay",
+                  "--render-scene", "{work}/live", "--scene-at",
+                  ",".join(str((t - 962 - 0.01) / 120) for t in HOLD_TICKS)],
+            env={"TORE_SCENE_F12": "1"}, timeout=600,
+            then=[
+                Step(["python3", "-c", HOLD_SCRIPT, "{work}"], app=False),
+                Step(["--watch-replay", "{work}/hold.tore-replay", "--replay-tick", "2533",
+                      "--flight-view", "11", "--replay-clean", "--window-size", "960x540",
+                      "--input-script", "{work}/hold-input.txt", "--no-audio"], window=True, timeout=300),
+            ],
+            check_work=hold_problems,
+            notes="Live and replay F12 stop on the 328-foot approach and hold a bomb impact for 180 game ticks, restore it on reverse seek, and allow view interruption.",
+        ),
         Scenario(
             name="replay-hud-state", lane="replay",
             args=[

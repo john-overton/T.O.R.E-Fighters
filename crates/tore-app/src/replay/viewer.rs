@@ -45,6 +45,13 @@ use tore_replay::{
     AircraftInfo, Event, Recording, Side, TimedEvent, TreeSample, WeaponClass, vocab,
 };
 
+#[derive(Clone, Copy, Default)]
+struct WeaponApproach {
+    scanned: u64,
+    target: Option<u32>,
+    stopped: Option<(u64, flight_views::WeaponStop)>,
+}
+
 /// Weather snapshots built ahead of the playhead each frame, in ticks:
 /// a ten-minute recording is ready in about a second.
 const WEATHER_BUDGET: u64 = 1_200;
@@ -830,6 +837,8 @@ pub struct Viewer {
     selected: u32,
     /// Stable projectile identity, never an index into a changing list.
     selected_missile: Option<u32>,
+    /// First 100 m crossing by weapon, indexed lazily from recorded history.
+    weapon_stops: BTreeMap<u32, WeaponApproach>,
     /// Where the object view starts from when it is not the selected
     /// aircraft: a ground object or a weapon chosen with View from here.
     from: Option<Target>,
@@ -1157,6 +1166,7 @@ impl Viewer {
             rig,
             selected,
             selected_missile: None,
+            weapon_stops: BTreeMap::new(),
             from: None,
             look_at: options.look_at,
             announce_wingman: false,
@@ -1418,6 +1428,9 @@ impl Viewer {
             self.camera_error = None;
             self.look = [0.; 2];
             self.panels.follow(id);
+            if self.view == flight_views::MISSILE && reference != Reference::Aircraft(id) {
+                self.show_view(self.view, reference);
+            }
         }
     }
 
@@ -1428,6 +1441,10 @@ impl Viewer {
             let advance = self.view == view
                 && self.drone.is_none()
                 && self.rig.reference == Reference::Aircraft(self.selected);
+            if advance && ids.is_empty() {
+                self.show_view(0, Reference::Aircraft(self.selected));
+                return;
+            }
             self.selected_missile = active_successor(self.selected_missile, &ids, advance);
         }
         self.show_view(view, Reference::Aircraft(self.selected));
@@ -1454,6 +1471,23 @@ impl Viewer {
         } else {
             // The fly-by point is chosen afresh each time the view is picked.
             self.rig.select(reference);
+        }
+        if view == flight_views::MISSILE && reference != Reference::Aircraft(self.selected) {
+            let tick = self.clock.tick();
+            let owner = match reference {
+                Reference::Target => self.view_target(tick),
+                Reference::Aircraft(id) => Some(id),
+                _ => Some(self.selected),
+            };
+            let picture = self.playback.picture(tick, 1.);
+            let active = picture
+                .projectiles
+                .iter()
+                .filter(|p| Some(p.owner) == owner && !p.gun)
+                .map(|p| p.id)
+                .max();
+            self.selected_missile =
+                active.or_else(|| owner.and_then(|owner| self.newest_weapon(tick, owner)));
         }
         self.announce_wingman = view == flight_views::WING;
     }
@@ -2765,6 +2799,173 @@ impl Viewer {
         )
     }
 
+    /// Find the first approach in recorded time, once per weapon. Keeping the
+    /// eye after a miss makes direct seeks and reverse playback independent of
+    /// viewing history, including a seek which skips the entire approach.
+    fn weapon_stop_at(&mut self, id: u32, tick: u64) -> Option<flight_views::WeaponStop> {
+        let approach = self.weapon_stops.get(&id).copied().unwrap_or_default();
+        if let Some((when, stop)) = approach.stopped {
+            return (when <= tick).then_some(stop);
+        }
+        let mut target = approach.target.or_else(|| {
+            self.recording
+                .events_between(0, tick)
+                .iter()
+                .find_map(|entry| {
+                    let event = &entry.event;
+                    (event.kind == "weapon.launch"
+                        && event.get("projectile").and_then(|v| v.as_i64()) == Some(i64::from(id)))
+                    .then_some(event.object)
+                    .flatten()
+                })
+        });
+        let launched = self
+            .playback
+            .frame(tick)
+            .and_then(|(frames, at)| {
+                frames[at]
+                    .projectiles
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| tick.saturating_sub(u64::from(p.age)))
+            })
+            .unwrap_or(0);
+        for before in approach.scanned.max(launched)..=tick {
+            let Some((frames, at)) = self.playback.frame(before) else {
+                continue;
+            };
+            let frame = &frames[at];
+            if frame.tick != before {
+                continue;
+            }
+            let Some(p) = frame.projectiles.iter().find(|p| p.id == id) else {
+                continue;
+            };
+            target = p.target.or(target);
+            let aim = self
+                .marks
+                .scene(before)
+                .weapons
+                .iter()
+                .find(|w| w.projectile == id)
+                .and_then(|w| w.aim)
+                .or_else(|| {
+                    target.and_then(|id| {
+                        frame
+                            .aircraft
+                            .iter()
+                            .find(|a| a.id == id)
+                            .map(|a| a.position)
+                            .or_else(|| {
+                                frame
+                                    .surface
+                                    .iter()
+                                    .find(|u| u.id == id)
+                                    .map(|u| u.position)
+                            })
+                            .or_else(|| {
+                                self.world
+                                    .airport_scene
+                                    .objects
+                                    .iter()
+                                    .find(|o| o.id == id)
+                                    .map(|o| o.bounds.center)
+                            })
+                    })
+                });
+            let d = p.direction;
+            let body = Body::missile(
+                p.id,
+                p.position,
+                d.map(|v| v * p.speed),
+                Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.),
+            );
+            if let Some(stop) =
+                flight_views::weapon_stop(body, aim, |x, z| self.world.surface(x, z).height)
+            {
+                self.weapon_stops.insert(
+                    id,
+                    WeaponApproach {
+                        scanned: before + 1,
+                        target,
+                        stopped: Some((before, stop)),
+                    },
+                );
+                return Some(stop);
+            }
+        }
+        self.weapon_stops.insert(
+            id,
+            WeaponApproach {
+                scanned: approach.scanned.max(tick + 1),
+                target,
+                stopped: None,
+            },
+        );
+        None
+    }
+
+    /// Chase placement from one recorded picture, also used for its final pose.
+    fn weapon_pose(&mut self, picture: &RenderSnapshot, tick: u64, id: u32) -> Option<Camera> {
+        let p = picture.projectiles.iter().find(|p| p.id == id && !p.gun)?;
+        let target = p
+            .target
+            .and_then(|id| {
+                self.body_of(picture, tick, Target::Aircraft(id))
+                    .or_else(|| self.body_of(picture, tick, Target::Ground(id)))
+            })
+            .map_or_else(
+                || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
+                |b| b.position(),
+            );
+        Some(self.weapon_stop_at(id, tick).map_or_else(
+            || flight_views::relation(Body::weapon(p, 1.), target),
+            |stop| flight_views::stopped_weapon_camera(stop, p.position),
+        ))
+    }
+
+    /// Reconstruct the hold from history, never from the direction of playback
+    /// or the previous rendered frame. The bounded search includes miss expiry
+    /// and self-destruct, which need not have an impact event.
+    fn weapon_chase(
+        &mut self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        id: Option<u32>,
+    ) -> Option<(u32, Camera)> {
+        if let Some(id) = id
+            && let Some(camera) = self.weapon_pose(picture, tick, id)
+        {
+            return Some((id, camera));
+        }
+        for before in (tick.saturating_sub(flight_views::weapon_hold_ticks())..tick).rev() {
+            let (frames, at) = self.playback.frame(before)?;
+            // Do not extend a pose across a missing recording interval.
+            if frames[at].tick != before {
+                continue;
+            }
+            let found = frames[at]
+                .projectiles
+                .iter()
+                .filter(|p| {
+                    id.is_none_or(|id| p.id == id)
+                        && self
+                            .recording
+                            .weapon_info(p.weapon)
+                            .is_some_and(|w| w.class != WeaponClass::Gun)
+                })
+                .map(|p| p.id)
+                .min();
+            if let Some(id) = found {
+                let last = self.playback.picture(before, 1.);
+                return self
+                    .weapon_pose(&last, before, id)
+                    .map(|camera| (id, camera));
+            }
+        }
+        None
+    }
+
     /// The camera for this frame: the drone, or the selected flight view.
     /// A view that cannot be shown (no target, no wingman) says why once and
     /// shows the aircraft from outside; an aircraft no longer recorded keeps
@@ -2795,6 +2996,7 @@ impl Viewer {
             return self.object_camera(picture, tick);
         }
         let scene = self.scene(picture, tick);
+        self.rig.observe(&scene);
         if matches!(self.view, tape_views::HUD_CAMERA | tape_views::SENSOR) {
             // The HUD camera and the Sensor View make their own camera
             // (viewer/views.rs); this is the view from outside they fall
@@ -2804,30 +3006,19 @@ impl Viewer {
                 .camera(EXTERNAL, &scene, Camera::new(), [0.; 2], 1.)
                 .unwrap_or_else(|_| copy(&self.camera));
         }
-        let result = if self.view == flight_views::MISSILE
-            && self.rig.reference == Reference::Aircraft(self.selected)
-        {
-            let ids = self.active_missiles(tick);
-            // Keep the chosen weapon through its end. Only another F12 press
-            // cycles to a different shot; rewinding can restore this one.
-            if self.selected_missile.is_none() {
-                self.selected_missile = active_successor(None, &ids, false);
+        let result = if self.view == flight_views::MISSILE {
+            let unmodified = self.rig.reference == Reference::Aircraft(self.selected);
+            if self.selected_missile.is_none() && unmodified {
+                self.selected_missile = active_successor(None, &self.active_missiles(tick), false);
             }
-            self.selected_missile
-                .and_then(|id| picture.projectiles.iter().find(|p| p.id == id))
-                .map(|p| {
-                    let body = Body::weapon(p, 1.);
-                    let target = p
-                        .target
-                        .and_then(|id| {
-                            self.body_of(picture, tick, Target::Aircraft(id))
-                                .or_else(|| self.body_of(picture, tick, Target::Ground(id)))
-                        })
-                        .map_or_else(
-                            || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
-                            |b| b.position(),
-                        );
-                    let mut camera = flight_views::relation(body, target);
+            let id = self.selected_missile;
+            (id.is_some() || unmodified)
+                .then(|| self.weapon_chase(picture, tick, id))
+                .flatten()
+                .map(|(id, mut camera)| {
+                    if self.rig.reference == Reference::Aircraft(self.selected) {
+                        self.selected_missile = Some(id);
+                    }
                     camera.zoom = self.zoom;
                     camera
                 })
@@ -3158,32 +3349,9 @@ impl Viewer {
             return Target::Aircraft(self.selected);
         }
         if self.view == flight_views::MISSILE {
-            let missile = match self.rig.reference {
-                Reference::Aircraft(id) if id == self.selected => self.selected_missile,
-                Reference::Target | Reference::Aircraft(_) => {
-                    let owner = match self.rig.reference {
-                        Reference::Target => self.view_target(tick),
-                        Reference::Aircraft(id) => Some(id),
-                        _ => None,
-                    };
-                    self.playback.frame(tick).and_then(|(frames, at)| {
-                        frames[at]
-                            .projectiles
-                            .iter()
-                            .filter(|p| {
-                                Some(p.owner) == owner
-                                    && self
-                                        .recording
-                                        .weapon_info(p.weapon)
-                                        .is_none_or(|w| w.class != WeaponClass::Gun)
-                            })
-                            .map(|p| p.id)
-                            .max()
-                    })
-                }
-                _ => self.rig.missile_subject(),
-            };
-            return missile.map_or(Target::Aircraft(self.selected), Target::Missile);
+            return self
+                .selected_missile
+                .map_or(Target::Aircraft(self.selected), Target::Missile);
         }
         if self.view == flight_views::WING {
             return Target::Aircraft(self.rig.wingman().unwrap_or(self.selected));
@@ -3805,7 +3973,7 @@ mod tests {
         assert_eq!(v.selected_missile, Some(9));
         let expired = frame_at(&mut v, 200);
         assert_eq!(v.selected_missile, Some(9));
-        assert_eq!(expired.hidden_target, Some(v.selected));
+        assert_eq!(expired.hidden_target, None); // The ended shot holds its chase pose.
         press(&mut v, "F12");
         assert_eq!(v.selected_missile, Some(11));
         press(&mut v, "F12");
@@ -3828,7 +3996,7 @@ mod tests {
         );
         frame_at(&mut v, 300);
         assert_eq!(v.selected_missile, Some(7));
-        frame_at(&mut v, 460);
+        frame_at(&mut v, 700);
         assert_eq!(v.selected_missile, Some(7));
         assert_eq!(v.camera_error, Some("No active weapon for this view"));
         frame_at(&mut v, 140); // Reverse seek rebuilds the active set.
@@ -3929,6 +4097,152 @@ mod tests {
         assert_eq!(post.hidden_target, Some(1));
         let backward = v.director_weapon_camera(&picture, 180, 1, [0.; 3]);
         assert_eq!(backward.position, director.position);
+    }
+
+    #[test]
+    fn f12_hold_reconstructs_exact_boundaries_reverse_and_view_interruptions() {
+        let dir = TempDir::new("f12-hold");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek((f::IMPACT - 1) as f64);
+        v.set_view(flight_views::MISSILE);
+        let last = frame_at(&mut v, f::IMPACT - 1);
+        let end = f::IMPACT + flight_views::weapon_hold_ticks();
+        for tick in [f::IMPACT, end - 1, f::IMPACT + 60, f::IMPACT + 60] {
+            let held = frame_at(&mut v, tick);
+            assert_eq!(held.position, last.position);
+            assert_eq!((held.yaw, held.pitch), (last.yaw, last.pitch));
+            assert!(v.camera_error.is_none());
+        }
+        assert_eq!(frame_at(&mut v, end).hidden_target, Some(v.selected));
+        assert_eq!(frame_at(&mut v, end - 1).position, last.position);
+        assert_ne!(frame_at(&mut v, f::IMPACT - 2).position, last.position);
+        frame_at(&mut v, f::IMPACT + 30);
+        press(&mut v, "F10");
+        assert_ne!(frame_at(&mut v, f::IMPACT + 30).position, last.position);
+        // Directly opening F12 inside the hold needs no previously drawn pose.
+        v.selected_missile = None;
+        v.clock.seek((f::IMPACT + 30) as f64);
+        v.set_view(flight_views::MISSILE);
+        assert_eq!(frame_at(&mut v, f::IMPACT + 30).position, last.position);
+        press(&mut v, "F12"); // No live successor: leave the hold immediately.
+        assert_eq!(v.view, 0);
+        assert_eq!(
+            frame_at(&mut v, f::IMPACT + 30).hidden_target,
+            Some(v.selected)
+        );
+    }
+
+    #[test]
+    fn f12_approach_is_identical_on_direct_seek_forward_and_reverse() {
+        let dir = TempDir::new("f12-approach");
+        let template = f::recording(dir.path(), "template");
+        let path = dir.path().join("approach.tore-replay");
+        let mut writer =
+            tore_replay::Writer::create(&path, &tore_replay::Header::default()).unwrap();
+        for aircraft in template.aircraft() {
+            writer.register_aircraft(aircraft).unwrap();
+        }
+        for weapon in template.weapons() {
+            writer.register_weapon(weapon).unwrap();
+        }
+        for tick in f::FIRST..=f::LAST {
+            let mut frame = f::frame(tick);
+            for p in &mut frame.projectiles {
+                if p.id == f::MISSILE {
+                    let target = frame.aircraft.iter().find(|a| a.id == 0).unwrap().position;
+                    p.position = [
+                        target[0],
+                        target[1],
+                        target[2] - (f::IMPACT - tick) as f64 * 4.,
+                    ];
+                    p.direction = [0., 0., 1.];
+                    p.speed = 480.;
+                    if tick > 200 {
+                        p.target = None;
+                    } // Lost guidance must not lose the camera's aim.
+                }
+            }
+            writer.push(&frame).unwrap();
+        }
+        writer.finish(&tore_replay::Footer::default()).unwrap();
+        let recording = Arc::new(Recording::open(path).unwrap());
+        let mut v = viewer_recording(recording.clone(), &Options::default());
+        v.clock.seek(247.);
+        v.set_view(flight_views::MISSILE);
+        let before = frame_at(&mut v, 247);
+        let stopped = frame_at(&mut v, 248); // 82 ticks * 4 feet = 328 feet.
+        assert_ne!(before.position, stopped.position);
+        let mut live = Rig::default();
+        live.follow_missiles_of(1);
+        live.select(Reference::Aircraft(1));
+        let launched = v.playback.picture(f::LAUNCH, 1.);
+        live.observe(&v.scene(&launched, f::LAUNCH));
+        let lost = v.playback.picture(248, 1.);
+        assert_eq!(lost.projectiles[0].target, None);
+        let scene = live.prepare(v.scene(&lost, 248), flight_views::MISSILE, &v.world);
+        let live_camera = live
+            .camera(flight_views::MISSILE, &scene, Camera::new(), [0.; 2], 1.)
+            .unwrap();
+        assert_eq!(live_camera.position, stopped.position);
+        for tick in [249, 329, 330, 509, 300, 248] {
+            assert_eq!(frame_at(&mut v, tick).position, stopped.position);
+        }
+        assert_eq!(frame_at(&mut v, 247).position, before.position);
+        assert_eq!(frame_at(&mut v, 510).hidden_target, Some(v.selected));
+        let mut seek = viewer_recording(
+            recording,
+            &Options {
+                tick: Some(350),
+                view: Some(flight_views::MISSILE),
+                ..Options::default()
+            },
+        );
+        assert_eq!(frame_at(&mut seek, 350).position, stopped.position);
+        assert_eq!(frame_at(&mut seek, 247).position, before.position);
+    }
+
+    #[test]
+    fn f12_hold_pause_and_playback_rate_use_recorded_time() {
+        let dir = TempDir::new("f12-clock-hold");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek((f::IMPACT - 1) as f64);
+        v.set_view(flight_views::MISSILE);
+        let last = frame_at(&mut v, f::IMPACT - 1);
+        v.clock.seek(f::IMPACT as f64);
+        v.clock.pause();
+        assert!(!v.clock.advance(10.));
+        let tick = v.clock.tick();
+        assert_eq!(frame_at(&mut v, tick).position, last.position);
+        assert!(v.clock.set_speed(2.));
+        v.clock.advance(0.5); // One game second.
+        let tick = v.clock.tick();
+        assert_eq!(tick, f::IMPACT + 120);
+        assert_eq!(frame_at(&mut v, tick).position, last.position);
+        v.clock.advance(0.25); // Exactly 1.5 game seconds.
+        let tick = v.clock.tick();
+        assert_eq!(frame_at(&mut v, tick).hidden_target, Some(v.selected));
+        assert!(v.clock.set_speed(-2.));
+        v.clock.advance(0.25);
+        let tick = v.clock.tick();
+        assert_eq!(frame_at(&mut v, tick).position, last.position);
+    }
+
+    #[test]
+    fn modified_f12_holds_its_owner_and_reselects_when_aircraft_changes() {
+        let dir = TempDir::new("f12-owner-hold");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek((f::IMPACT - 1) as f64);
+        v.select(1);
+        assert!(v.view_key("F12", false, true));
+        let last = frame_at(&mut v, f::IMPACT - 1);
+        assert_eq!(frame_at(&mut v, f::IMPACT + 60).position, last.position);
+        assert_eq!(
+            v.banner_subject(f::IMPACT + 60),
+            Target::Missile(f::MISSILE)
+        );
+        v.select(0); // This aircraft never fired a missile in the fixture.
+        assert_eq!(v.selected_missile, None);
+        assert_eq!(frame_at(&mut v, f::IMPACT + 60).hidden_target, Some(0));
     }
 
     #[test]
@@ -4505,6 +4819,8 @@ mod tests {
         camera(&mut v, f::LAUNCH + 20);
         assert_eq!(v.camera_error, None);
         camera(&mut v, f::IMPACT + 20);
+        assert_eq!(v.camera_error, None);
+        camera(&mut v, f::IMPACT + flight_views::weapon_hold_ticks());
         assert_eq!(v.camera_error, Some("No active weapon for this view"));
         // The front view sits in the aircraft and hides it.
         press(&mut v, "F1");

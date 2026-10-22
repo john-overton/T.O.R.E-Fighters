@@ -43,7 +43,7 @@ pub(super) fn render(
     let eye: Vector = std::array::from_fn(|i| {
         p[i] - forward[i] * BEHIND_FT + right[i] * BESIDE_FT + if i == 1 { ABOVE_FT } else { 0. }
     });
-    render_world(&mut scene.world, observer, eye, target, path)?;
+    render_world(&mut scene.world, observer, eye, target, path, None)?;
     println!("ai-strike: RENDER path={}", path.display());
     Ok(())
 }
@@ -57,6 +57,7 @@ pub(crate) fn render_world(
     eye: Vector,
     target: Vector,
     path: &Path,
+    f12: Option<Camera>,
 ) -> AppResult<()> {
     let mut loaded = Loaded::new(world, observer)?;
     let look = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
@@ -65,31 +66,8 @@ pub(crate) fn render_world(
     camera.yaw = look[0].atan2(look[2]) as f32;
     camera.pitch = look[1].atan2(look[0].hypot(look[2])) as f32;
     camera.near_clip = 1.;
-    if std::env::var_os("TORE_SCENE_F12").is_some() {
-        let frame = world
-            .flight_frame(super::SEAT, None, &loaded.snapshot, &[])
-            .ok_or("the seat flies no plane")?;
-        let subjects = crate::flight_views::Scene::new(
-            &frame,
-            &loaded.seen_from,
-            &world.combat,
-            world.ai_wings.as_ref(),
-            None,
-        );
-        let mut rig = crate::flight_views::Rig::default();
-        camera = rig
-            .camera(
-                crate::flight_views::MISSILE,
-                &subjects,
-                Camera::new(),
-                [0.; 2],
-                1.,
-            )
-            .unwrap_or_else(|_| {
-                rig.select(crate::flight_views::Reference::Aircraft(observer.0));
-                rig.camera(0, &subjects, Camera::new(), [0.; 2], 1.)
-                    .expect("seat exists")
-            });
+    if let Some(f12) = f12 {
+        camera = f12;
         println!(
             "probe F12: tick {} eye {:?} hidden {:?} weapons {:?}",
             loaded.snapshot.tick,
@@ -128,6 +106,50 @@ pub(crate) fn write_png(path: &Path, pixels: &[u8]) -> AppResult<()> {
         crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, pixels)?,
     )?;
     Ok(())
+}
+
+/// Tick the same F12 rig as live flight, even between requested captures.
+/// This is opt-in probe presentation and never advances the world.
+pub(crate) fn f12_camera(
+    world: &tore_world::world::World,
+    rig: &mut crate::flight_views::Rig,
+) -> Camera {
+    let frame = world
+        .flight_frame(super::SEAT, None, world.combat.render_snapshot(), &[])
+        .expect("the probe seat flies a plane");
+    let subjects = crate::flight_views::Scene::new(
+        &frame,
+        frame.flight,
+        &world.combat,
+        world.ai_wings.as_ref(),
+        None,
+    )
+    .at_tick(world.combat.state.tick());
+    let subjects = rig.prepare(subjects, crate::flight_views::MISSILE, &world.terrain);
+    let stopped = rig.weapon_stopped();
+    let camera = rig
+        .camera(
+            crate::flight_views::MISSILE,
+            &subjects,
+            Camera::new(),
+            [0.; 2],
+            1.,
+        )
+        .unwrap_or_else(|_| {
+            let mut forward = crate::flight_views::Rig::default();
+            forward.select(crate::flight_views::Reference::Aircraft(frame.plane.0));
+            forward
+                .camera(0, &subjects, Camera::new(), [0.; 2], 1.)
+                .expect("seat exists")
+        });
+    if !stopped && rig.weapon_stopped() {
+        println!(
+            "probe F12 stop: tick {} eye {:?}",
+            world.combat.state.tick(),
+            camera.position
+        );
+    }
+    camera
 }
 
 /// The world loaded for offscreen frames of one moment: the GPU, the

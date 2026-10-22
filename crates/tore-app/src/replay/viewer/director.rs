@@ -646,18 +646,8 @@ impl Viewer {
 }
 
 impl Viewer {
-    /// F12's weapon relation camera, selected by the anchor's newest launch.
-    /// Read launch history so expiry cannot jump back to an older weapon and
-    /// direct seeks, reverse play and repeated captures choose the same shot.
-    pub(super) fn director_weapon_camera(
-        &self,
-        picture: &RenderSnapshot,
-        tick: u64,
-        owner: u32,
-        offset: [f64; 3],
-    ) -> Camera {
-        let newest = self
-            .recording
+    pub(super) fn newest_weapon(&self, tick: u64, owner: u32) -> Option<u32> {
+        self.recording
             .events_between(0, tick)
             .iter()
             .rev()
@@ -679,7 +669,20 @@ impl Viewer {
                 e.get("projectile")
                     .and_then(|v| v.as_i64())
                     .and_then(|id| u32::try_from(id).ok())
-            });
+            })
+    }
+
+    /// F12's weapon relation camera, selected by the anchor's newest launch.
+    /// Read launch history so expiry cannot jump back to an older weapon and
+    /// direct seeks, reverse play and repeated captures choose the same shot.
+    pub(super) fn director_weapon_camera(
+        &self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        owner: u32,
+        offset: [f64; 3],
+    ) -> Camera {
+        let newest = self.newest_weapon(tick, owner);
         let weapon = picture
             .projectiles
             .iter()
@@ -700,7 +703,7 @@ impl Viewer {
                 );
             return flight_views::weapon_camera(body, target, offset);
         }
-        // Live F12 returns to Forward when its weapon ends. A replay has no
+        // The director retains its immediate return at expiry. A replay has no
         // cockpit overlay; its Forward camera hides the reference aircraft.
         let scene = self.scene(picture, tick);
         let mut rig = Rig::default();

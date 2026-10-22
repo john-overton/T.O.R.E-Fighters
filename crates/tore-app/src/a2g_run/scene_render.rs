@@ -39,7 +39,7 @@ impl Plan {
         }
     }
 
-    fn active(&self) -> bool {
+    pub(super) fn active(&self) -> bool {
         self.dir.is_some() && !self.pending.is_empty()
     }
 }
@@ -88,6 +88,9 @@ pub(crate) fn after_step(scene: &mut Scene) -> AppResult<()> {
     scene.motors.observe(&scene.world.combat.state);
     if !scene.scenes.active() {
         return Ok(());
+    }
+    if std::env::var_os("TORE_SCENE_F12").is_some() {
+        super::ai_render::f12_camera(&scene.world, &mut scene.scenes.rig);
     }
     let owner = scene.owner;
     let newest = scene
@@ -186,33 +189,7 @@ fn render(
     camera.near_clip = 1.;
     // An opt-in live F12 capture for comparison with the replay camera.
     if std::env::var_os("TORE_SCENE_F12").is_some() {
-        let frame = world
-            .flight_frame(super::SEAT, None, &snapshot, &[])
-            .ok_or("the seat flies no plane")?;
-        let subjects = crate::flight_views::Scene::new(
-            &frame,
-            &seen_from,
-            &world.combat,
-            world.ai_wings.as_ref(),
-            None,
-        );
-        camera = scene
-            .scenes
-            .rig
-            .camera(
-                crate::flight_views::MISSILE,
-                &subjects,
-                Camera::new(),
-                [0.; 2],
-                1.,
-            )
-            .unwrap_or_else(|_| {
-                let mut forward = crate::flight_views::Rig::default();
-                forward.select(crate::flight_views::Reference::Aircraft(plane.0));
-                forward
-                    .camera(0, &subjects, Camera::new(), [0.; 2], 1.)
-                    .expect("seat exists")
-            });
+        camera = super::ai_render::f12_camera(world, &mut scene.scenes.rig);
         println!(
             "a2g-run: F12 tick {} eye {:?} hidden {:?} projectiles {:?}",
             snapshot.tick,
