@@ -2373,7 +2373,7 @@ impl Viewer {
             .map(|p| p.id)
     }
 
-    /// F12 uses every active missile in the same recording tick as the object list.
+    /// F12 uses every active non-gun weapon in the same recording tick as the object list.
     fn active_missiles(&mut self, tick: u64) -> Vec<u32> {
         let Some((frames, at)) = self.playback.frame(tick) else {
             return Vec::new();
@@ -2384,7 +2384,7 @@ impl Viewer {
             .filter(|p| {
                 self.recording
                     .weapon_info(p.weapon)
-                    .is_some_and(|w| w.class == WeaponClass::Missile)
+                    .is_some_and(|w| w.class != WeaponClass::Gun)
             })
             .map(|p| p.id)
             .collect();
@@ -2808,7 +2808,11 @@ impl Viewer {
             && self.rig.reference == Reference::Aircraft(self.selected)
         {
             let ids = self.active_missiles(tick);
-            self.selected_missile = active_successor(self.selected_missile, &ids, false);
+            // Keep the chosen weapon through its end. Only another F12 press
+            // cycles to a different shot; rewinding can restore this one.
+            if self.selected_missile.is_none() {
+                self.selected_missile = active_successor(None, &ids, false);
+            }
             self.selected_missile
                 .and_then(|id| picture.projectiles.iter().find(|p| p.id == id))
                 .map(|p| {
@@ -2827,7 +2831,7 @@ impl Viewer {
                     camera.zoom = self.zoom;
                     camera
                 })
-                .ok_or("No active missile for this view")
+                .ok_or("No active weapon for this view")
         } else {
             self.rig
                 .camera(self.view, &scene, Camera::new(), self.look, self.zoom)
@@ -2858,6 +2862,13 @@ impl Viewer {
                 if self.camera_error != Some(reason) {
                     self.camera_error = Some(reason);
                     self.toast(reason);
+                }
+                if self.view == flight_views::MISSILE {
+                    let mut forward = Rig::default();
+                    forward.select(Reference::Aircraft(self.selected));
+                    return forward
+                        .camera(0, &scene, Camera::new(), [0.; 2], self.zoom)
+                        .unwrap_or_else(|_| copy(&self.camera));
                 }
                 // The aircraft from outside; if it has left the scene, the
                 // last camera shown, or at first the player from outside.
@@ -3792,8 +3803,21 @@ mod tests {
         assert_eq!(v.selected_missile, Some(9));
         frame_at(&mut v, 150); // New missile does not steal the view.
         assert_eq!(v.selected_missile, Some(9));
-        frame_at(&mut v, 200); // Follow the next live identity when 9 expires.
+        let expired = frame_at(&mut v, 200);
+        assert_eq!(v.selected_missile, Some(9));
+        assert_eq!(expired.hidden_target, Some(v.selected));
+        press(&mut v, "F12");
         assert_eq!(v.selected_missile, Some(11));
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(13)); // Bombs participate too.
+        assert_eq!(frame_at(&mut v, 200).hidden_projectile, None);
+        v.select(1);
+        assert!(v.view_key("F12", false, true));
+        assert_eq!(frame_at(&mut v, 200).hidden_projectile, None);
+        assert_eq!(v.rig.missile_subject(), Some(13));
+        assert!(v.view_key("F1", false, true));
+        assert_eq!(frame_at(&mut v, 200).hidden_projectile, Some(13));
+        v.set_view(flight_views::MISSILE);
         press(&mut v, "F12");
         assert_eq!(v.selected_missile, Some(7));
         frame_at(&mut v, 240);
@@ -3803,10 +3827,10 @@ mod tests {
                 .any(|i| i.action == Some(Action::ViewFrom(Target::Missile(13))))
         );
         frame_at(&mut v, 300);
-        assert_eq!(v.selected_missile, Some(11));
+        assert_eq!(v.selected_missile, Some(7));
         frame_at(&mut v, 460);
-        assert_eq!(v.selected_missile, None);
-        assert_eq!(v.camera_error, Some("No active missile for this view"));
+        assert_eq!(v.selected_missile, Some(7));
+        assert_eq!(v.camera_error, Some("No active weapon for this view"));
         frame_at(&mut v, 140); // Reverse seek rebuilds the active set.
         assert_eq!(v.selected_missile, Some(7));
         assert!(v.camera_error.is_none());
@@ -3854,12 +3878,57 @@ mod tests {
         assert!(weapons(v.object_list_items()).is_empty());
         let picture = v.playback.picture(v.clock.tick(), 1.);
         v.frame_camera(&picture, v.clock.tick(), 0., false);
-        assert_eq!(v.selected_missile, None);
-        // Seeking backward restores only objects active at that recorded time.
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
+        // Seeking backward restores the same followed weapon.
         v.clock.seek((f::LAUNCH + 1) as f64);
         let picture = v.playback.picture(v.clock.tick(), 1.);
         v.frame_camera(&picture, v.clock.tick(), 0., false);
         assert_eq!(v.selected_missile, Some(f::MISSILE));
+    }
+
+    #[test]
+    fn weapon_chase_matches_live_f12_and_director_through_expiry_and_reverse() {
+        let dir = TempDir::new("weapon-chase");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek(180.);
+        v.select(1);
+        v.set_view(flight_views::MISSILE);
+        let picture = v.playback.picture(180, 1.);
+        let replay = v.frame_camera(&picture, 180, 0., false);
+        let scene = v.scene(&picture, 180);
+        let mut live = Rig::default();
+        live.follow_missiles_of(1);
+        live.select(Reference::Aircraft(1));
+        let expected = live
+            .camera(flight_views::MISSILE, &scene, Camera::new(), [0.; 2], 1.)
+            .unwrap();
+        let director = v.director_weapon_camera(&picture, 180, 1, [0.; 3]);
+        for camera in [&replay, &director] {
+            assert_eq!(camera.position, expected.position);
+            assert_eq!(camera.yaw, expected.yaw);
+            assert_eq!(camera.pitch, expected.pitch);
+            assert_eq!(camera.hidden_projectile, None);
+            assert!(
+                camera
+                    .project([1920, 1080], picture.projectiles[0].position)
+                    .is_some()
+            );
+        }
+        let offset = v.director_weapon_camera(&picture, 180, 1, [6., 12., -40.]);
+        assert_ne!(offset.position, director.position);
+        assert!(
+            offset
+                .project([1920, 1080], picture.projectiles[0].position)
+                .is_some()
+        );
+        let mut ended = v.playback.picture(f::IMPACT, 1.);
+        let mut older = picture.projectiles[0].clone();
+        older.id = f::MISSILE - 1;
+        ended.projectiles.push(older); // Still flying, but must not take over.
+        let post = v.director_weapon_camera(&ended, f::IMPACT, 1, [0.; 3]);
+        assert_eq!(post.hidden_target, Some(1));
+        let backward = v.director_weapon_camera(&picture, 180, 1, [0.; 3]);
+        assert_eq!(backward.position, director.position);
     }
 
     #[test]
@@ -4436,7 +4505,7 @@ mod tests {
         camera(&mut v, f::LAUNCH + 20);
         assert_eq!(v.camera_error, None);
         camera(&mut v, f::IMPACT + 20);
-        assert_eq!(v.camera_error, Some("No active missile for this view"));
+        assert_eq!(v.camera_error, Some("No active weapon for this view"));
         // The front view sits in the aircraft and hides it.
         press(&mut v, "F1");
         let inside = camera(&mut v, 300);

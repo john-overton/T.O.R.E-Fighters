@@ -24,6 +24,7 @@ pub(crate) struct Plan {
     pending: Vec<f64>,
     /// The tick, position and travel direction of the first launch.
     launch: Option<(u64, Vector, Vector)>,
+    rig: crate::flight_views::Rig,
 }
 
 impl Plan {
@@ -34,6 +35,7 @@ impl Plan {
             dir,
             pending,
             launch: None,
+            rig: crate::flight_views::Rig::default(),
         }
     }
 
@@ -182,6 +184,48 @@ fn render(
     camera.yaw = d[0].atan2(d[2]) as f32;
     camera.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
     camera.near_clip = 1.;
+    // An opt-in live F12 capture for comparison with the replay camera.
+    if std::env::var_os("TORE_SCENE_F12").is_some() {
+        let frame = world
+            .flight_frame(super::SEAT, None, &snapshot, &[])
+            .ok_or("the seat flies no plane")?;
+        let subjects = crate::flight_views::Scene::new(
+            &frame,
+            &seen_from,
+            &world.combat,
+            world.ai_wings.as_ref(),
+            None,
+        );
+        camera = scene
+            .scenes
+            .rig
+            .camera(
+                crate::flight_views::MISSILE,
+                &subjects,
+                Camera::new(),
+                [0.; 2],
+                1.,
+            )
+            .unwrap_or_else(|_| {
+                let mut forward = crate::flight_views::Rig::default();
+                forward.select(crate::flight_views::Reference::Aircraft(plane.0));
+                forward
+                    .camera(0, &subjects, Camera::new(), [0.; 2], 1.)
+                    .expect("seat exists")
+            });
+        println!(
+            "a2g-run: F12 tick {} eye {:?} hidden {:?} projectiles {:?}",
+            snapshot.tick,
+            camera.position,
+            camera.hidden_projectile,
+            snapshot
+                .projectiles
+                .iter()
+                .filter(|p| !p.gun)
+                .map(|p| (p.id, &p.shape, p.position))
+                .collect::<Vec<_>>()
+        );
+    }
 
     scenery.resolve_palette(&world.terrain, camera.position[1]);
     scenery.set_origin(camera.position);

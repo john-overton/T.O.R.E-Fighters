@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'out/reel'
 APP = ROOT / ('target/debug/tore-app.exe' if os.name == 'nt' else 'target/debug/tore-app')
 FPS = 60
-VIEWS = {'external': 0, 'hud': 1, 'cockpit': 2, 'replay': 3}
+VIEWS = {'external': 0, 'hud': 1, 'cockpit': 2, 'replay': 3, 'seeker': 9, 'weapon': 10}
 TRANSITIONS = ['cut', 'flash', 'wobble', 'static', 'tape', 'slam', 'power-on']
 LAYOUTS = ['boot', 'full', 'aircraft', 'theater', 'cockpit', 'replay', 'end']
 
@@ -210,7 +210,12 @@ def fov_of(zoom):
 
 
 def frame_plan(capture):
-    keys = capture['camera']
+    keys = capture.get('camera')
+    if keys is None and capture.get('view') in ('weapon', 'seeker'):
+        eye = [capture.get('side', 0), capture.get('height', 10), -capture.get('distance', 30)]
+        keys = [dict(frame=i, eye=eye, target=[0, 0, 1000], fov=capture.get('fov', 60))
+                for i in (0, capture['frames'] - 1)]
+    assert keys, 'capture requires camera keys'
     assert keys[0]['frame'] == 0 and keys[-1]['frame'] == capture['frames'] - 1
     assert all(b['frame'] > a['frame'] for a, b in zip(keys, keys[1:]))
     mode = capture.get('interp', 'smoothstep')

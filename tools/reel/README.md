@@ -171,3 +171,43 @@ runway paint.
 See the [measured production baseline](../../docs/baselines/reel-production.md)
 for the current results, the evidence files and the platform and listening
 limits. Earlier cuts are preserved locally in `out/reel/previous*/`.
+
+## Weapon cameras
+
+`view = "weapon"` captures the live F12 chase placement: 30 feet behind and
+10 feet above the anchor aircraft's newest launched non-gun weapon, aimed at
+its retained target or along its flight direction. Missiles, guided and dumb
+bombs, and rockets are drawn with the normal weapon lighting. `anchor` is the
+**firing aircraft id**, not the projectile id. At expiry the picture returns to
+Forward on that aircraft, like live F12. An older weapon does not take over.
+Direct seeks and reverse playback resolve the same recorded launch history.
+
+Camera keys may be omitted for these views:
+
+```toml
+view = "weapon"
+anchor = 0
+in_tick = 3000
+frames = 120
+distance = 30 # feet behind along the target line
+height = 10   # feet world-up
+side = 0      # feet to the right
+fov = 60      # vertical degrees
+```
+
+If `camera` keys are supplied, their `eye = [side, height, -distance]` offsets
+and `fov` interpolate as usual; `target` and `eye_tick` are unused by this view.
+A zero eye selects the default F12 offsets. Keep the eye outside the weapon.
+The expanded frame-plan view number is **10**. A frame row at tick 3000 is
+`3000 0 0 10 -30 0 0 1000 60 -1 10 1 -1`.
+
+`view = "seeker"` (frame-plan view **9**) preserves the trailer's separate nose
+camera. It accepts weapons supported by the existing seeker window, hides the
+weapon body, and holds the last camera at impact. Start the capture while a
+supported seeker weapon is in flight. Its nose offset and zoom come from that
+window; chase offsets and `fov` do not override it. This is the view used by the
+reported LGB and Maverick trailer shots, not F12. No trailer recipes are changed.
+
+For live comparisons, `TORE_SCENE_F12=1` makes the existing offscreen
+`--a2g-run ... --render-scene DIR --scene-at 1,5,10` captures use the live F12
+rig and its Forward fallback. Times are seconds after the first launch.
