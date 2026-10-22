@@ -376,10 +376,12 @@ share a GUID.
 
 ### appimagetool
 
-`appimagetool` is published only under a moving `continuous` tag, so the script
-downloads it and checks it against a SHA-256 pinned in `package-linux.sh`. When
-upstream rebuilds the asset the hash stops matching and the script refuses to
-run it; review the new build and update the pin deliberately. If the tool is
+The script downloads `appimagetool` from its versioned 1.9.1 release (John,
+2026-10-22; the moving `continuous` tag was rebuilt on 2026-10-04 and broke the
+earlier pin) and checks it against a SHA-256 pinned in `package-linux.sh`, which
+matches the digest GitHub lists for that asset. If the download ever stops
+matching, the script refuses to run it; review the build and update the pin
+deliberately. If the tool is
 already on `PATH` that copy is used instead. Locally, no AppImage is a warning
 and the tar.gz still succeeds; in CI it is a failure.
 
