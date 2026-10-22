@@ -179,6 +179,8 @@ pub enum Location {
     /// store a side hangs on the outboard one (the Flankers' middle and
     /// outer underwing pylons, [`station_move`]).
     Separate,
+    /// Fitted Raptor bay magazines, forward store released first.
+    Magazine,
     /// A byte outside the six reviewed names.
     Other(u8),
 }
@@ -189,6 +191,8 @@ pub const SHOULDER_BYTE: u8 = 0x80;
 pub const TUNNEL_BYTE: u8 = 0x81;
 /// [`Location::Separate`]'s byte, outside the source's 0 to 5.
 pub const SEPARATE_BYTE: u8 = 0x82;
+/// Fitted internal magazine, retained in replay store layouts.
+pub const MAGAZINE_BYTE: u8 = 0x83;
 
 /// How far either side of a [`Location::Separate`] station its two pylons
 /// stand, feet: the Su-27's and Su-35's middle and outer underwing pylons,
@@ -211,6 +215,7 @@ impl Location {
             SHOULDER_BYTE => Self::Shoulder,
             TUNNEL_BYTE => Self::Tunnel,
             SEPARATE_BYTE => Self::Separate,
+            MAGAZINE_BYTE => Self::Magazine,
             other => Self::Other(other),
         }
     }
@@ -225,8 +230,15 @@ impl Location {
             Self::Shoulder => SHOULDER_BYTE,
             Self::Tunnel => TUNNEL_BYTE,
             Self::Separate => SEPARATE_BYTE,
+            Self::Magazine => MAGAZINE_BYTE,
             Self::Other(byte) => byte,
         }
+    }
+    pub fn bay(self) -> bool {
+        matches!(self, Self::InternalBay | Self::Magazine)
+    }
+    pub fn drawn(self) -> bool {
+        self.external() || self == Self::Magazine
     }
     /// Stores here hang outside the aircraft, on a pylon or rail.
     pub fn external(self) -> bool {
@@ -488,6 +500,16 @@ impl Rack {
         } else {
             1.
         };
+        if self.location() == Location::Magazine {
+            // Fitted tandem rails inside the Raptor's narrow model bays.
+            // Highest slot empties first, so the forward store leaves first.
+            let offset = (f64::from(slot) - f64::from(per_side - 1) / 2.) * (size.length + 0.25);
+            return [
+                mount[0] * mirror,
+                mount[1] + size.width.max(2. * size.top) / 2. + 0.08,
+                mount[2] + offset,
+            ];
+        }
         if !self.location().external() {
             return [mount[0] * mirror, mount[1], mount[2]];
         }
@@ -867,7 +889,9 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             F15_WING_FORWARD + 1.2,
             Hang::AsRecorded,
         ),
-        (AircraftId::F22, 8) => at(Location::Wing, 12., -6., Hang::FromBelow { up: -6. }),
+        (AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx, 8) => {
+            at(Location::Wing, 12., -6., Hang::FromBelow { up: -6. })
+        }
         (AircraftId::Mig29, 8) => at(Location::Centerline, 0., -2., Hang::FromBelow { up: -8. }),
         (AircraftId::Rafale, 9) => at(Location::Centerline, 0., -4., Hang::FromBelow { up: -8. }),
         (AircraftId::F16C, 9) => at(Location::Wing, 7., -1., Hang::FromBelow { up: -6. }),
@@ -1002,6 +1026,34 @@ pub fn placed_on(
     h: &Hardpoint,
     model: Option<&Underside>,
 ) -> (Vector, Rack) {
+    if matches!(id.source(), AircraftId::F22 | AircraftId::F22n)
+        && h.location == Location::InternalBay.byte()
+        && (5..=7).contains(&hardpoint)
+    {
+        // Both own shapes have the reviewed central belly at -3 ft. The
+        // side magazines sit inside their sloping intake skins. Coordinates
+        // and tandem fit: docs/spec/stores-on-pylons.md, F-22 naval stores.
+        let mount = match hardpoint {
+            5 => [-5. / 3., -3., 1.4],
+            6 => [1.5, -3., 1.4],
+            _ => [
+                3.9,
+                if id.source() == AircraftId::F22n {
+                    -1.05
+                } else {
+                    -1.2
+                },
+                1.7,
+            ],
+        };
+        return (
+            mount,
+            Rack {
+                location: MAGAZINE_BYTE,
+                ..Rack::from_source(h)
+            },
+        );
+    }
     let Some(moved) =
         station_move(id, hardpoint).filter(|m| m.location == Location::from_byte(h.location))
     else {
@@ -1289,6 +1341,48 @@ mod tests {
         top: 0.5,
         width: 2.,
     };
+
+    #[test]
+    fn raptor_magazines_fit_inside_the_bays_and_empty_from_the_front() {
+        for id in [AircraftId::F22, AircraftId::F22n] {
+            for (row, x, floor, count, flags, shape) in [
+                (5, -5. / 3., -3., 2, 0x5e0, "AMRAM.SH"),
+                (6, 1.5, -3., 2, 0x5e0, "MAVRK.SH"),
+                (7, 3.9, -1.2, 4, 0x5e4, "AM9X.SH"),
+            ] {
+                let floor = if row == 7 && id == AircraftId::F22n {
+                    -1.05
+                } else {
+                    floor
+                };
+                let mut h = hardpoint(3, flags);
+                h.count = count;
+                let (mount, rack) = placed_on(id, row, &h, None);
+                assert_eq!(mount, [x, floor, if row == 7 { 1.7 } else { 1.4 }]);
+                assert_eq!(rack.location(), Location::Magazine);
+                assert!(!rack.location().external());
+                assert!(rack.location().drawn() && rack.location().bay());
+                let size = StoreSize::of_shape(Some(shape));
+                let first = rack.release_point(mount, count as u16, count as u32 - 1, 1, size);
+                let last = rack.release_point(mount, count as u16, 0, 0, size);
+                assert!(first[2] > last[2]);
+                assert_eq!(first[1], last[1]);
+                let radius = size.width / 2.;
+                assert!(first[1] - radius > floor);
+                assert!(
+                    last[1] + radius
+                        < if row == 7 {
+                            if id == AircraftId::F22n { 0.6 } else { 0.4 }
+                        } else {
+                            -0.5
+                        }
+                );
+                if row == 7 {
+                    assert!(first[0] < 0. && last[0] > 0.);
+                }
+            }
+        }
+    }
 
     #[test]
     fn retail_flag_and_wing_rows_pair_and_guns_never_do() {

@@ -1,5 +1,6 @@
 use super::tests::{fixture, target};
 use super::*;
+use crate::combat::hardpoints;
 use missiles::{DWELL, MEMORY, Profile};
 fn weapon(name: &str) -> Weapon {
     let mut w = fixture(true).own().configuration().stations[0]
@@ -409,8 +410,35 @@ fn two_active_shots_own_targets_and_reacquire_without_support() {
 }
 
 #[test]
+fn wing_missiles_do_not_wait_for_or_open_the_raptor_bays() {
+    for (location, waits) in [
+        (hardpoints::Location::Wing, false),
+        (hardpoints::Location::Magazine, true),
+    ] {
+        let mut s = fixture(true);
+        s.own_mut().config.stations[0].weapon = weapon("AIM9M.JT");
+        s.own_mut().config.stations[0].rack.location = location.byte();
+        s.own_mut().launch_mode = LaunchMode::Boresight;
+        let mut launcher = range_launcher();
+        launcher.bay_ready = false;
+        let rounds = s.own().rounds(0);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher,
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.bay_demand(0), waits);
+        assert_eq!(s.own().rounds(0) == rounds, waits);
+    }
+}
+
+#[test]
 fn bay_safe_empty_and_failed_gates_survive_uncued_mode() {
     let mut s = fixture(true);
+    s.own_mut().config.stations[0].rack.location = hardpoints::Location::InternalBay.byte();
     s.own_mut().config.stations[0].weapon = weapon("AIM9M.JT");
     s.own_mut().launch_mode = LaunchMode::Boresight;
     let mut l = Launcher {
@@ -3000,6 +3028,7 @@ fn player_maximum_range_is_an_advisory_in_both_adapters() {
         s.targets.push(fleeing);
         let mut l = range_launcher();
         l.bay_ready = !closed_bay;
+        s.own_mut().config.stations[0].rack.location = hardpoints::Location::InternalBay.byte();
         for tick in 0..180 {
             s.step(
                 &[OwnshipInput {

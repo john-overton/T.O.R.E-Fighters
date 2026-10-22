@@ -149,8 +149,14 @@ pub fn faces(id: Id, f: &Face, s: &State) -> Vec<Face> {
     // 2026-09-22: it is the only F-22N skin at z=-9 covering the clip region's
     // right half aft of y=22).
     let bay_skin = match id {
-        Id::F22 => matches!(f.address, 0x35d7 | 0x3601 | 0x362f | 0x3cc0 | 0x3d03),
-        Id::F22n => matches!(f.address, 0x3755 | 0x36fd | 0x3716 | 0x39ae | 0x39dc),
+        Id::F22 => matches!(
+            f.address,
+            0x35d7 | 0x3601 | 0x362f | 0x3cc0 | 0x3d03 | 0x3901 | 0x391c | 0x3df1
+        ),
+        Id::F22n => matches!(
+            f.address,
+            0x3755 | 0x36fd | 0x3716 | 0x39ae | 0x39dc | 0x3e16 | 0x3e46 | 0x3e62
+        ),
         _ => false,
     };
     if bay_skin && s.bay > 0. {
@@ -421,31 +427,37 @@ pub fn brake(id: Id, f: &mut Face, fraction: f64) {
 /// F-22 main bays either side of the keel, as the source's open-bay walls
 /// place them: each bay's edges carry the hinges of its two doors.
 const BAYS: [(f32, f32); 2] = [(-8., -2.), (2., 7.)];
-const BAY_AFT: f32 = 7.;
+const BAY_AFT: f32 = -24.;
 const BAY_FORE: f32 = 51.;
 const BELLY: f32 = -9.;
-/// The source's open-bay walls hang this far below the belly; the fitted bay
-/// recess is as deep, and the doors close over it.
-const BAY_DEPTH: f32 = 3.;
+/// Fitted depth for default stores on tandem rails, 2.5 ft.
+const BAY_DEPTH: f32 = 7.5;
 
 fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
-    let mut remaining = vec![f.clone()];
-    let mut result = Vec::new();
-    // Two doors per bay, each half its width, hinged at the bay's edges.
     let doors = BAYS.into_iter().flat_map(|(left, right)| {
         let middle = (left + right) / 2.;
         [(left, middle, left, 1.), (middle, right, right, -1.)]
     });
+    cut_doors(f, fraction, doors, BAY_AFT, BAY_FORE, BELLY)
+}
+
+fn cut_doors(
+    f: &Face,
+    fraction: f64,
+    doors: impl IntoIterator<Item = (f32, f32, f32, f64)>,
+    aft: f32,
+    fore: f32,
+    height: f32,
+) -> Vec<Face> {
+    let mut remaining = vec![f.clone()];
+    let mut result = Vec::new();
     for (left, right, hinge, angle) in doors {
         let mut next = Vec::new();
         for candidate in remaining {
             let mut inside = vec![candidate];
-            for (axis, bound, sign) in [
-                (0, left, -1.),
-                (0, right, 1.),
-                (1, BAY_AFT, -1.),
-                (1, BAY_FORE, 1.),
-            ] {
+            for (axis, bound, sign) in
+                [(0, left, -1.), (0, right, 1.), (1, aft, -1.), (1, fore, 1.)]
+            {
                 let mut clipped = Vec::new();
                 for polygon in inside {
                     for part in split_surface(&polygon, [0.; 3], [1., 0., 0.], 0., |p| {
@@ -469,7 +481,7 @@ fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
             for mut door in inside {
                 turn(
                     &mut door,
-                    [hinge, BAY_AFT, BELLY],
+                    [hinge, aft, height],
                     [0., 1., 0.],
                     angle * std::f64::consts::FRAC_PI_2 * fraction,
                 );
@@ -479,6 +491,90 @@ fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
         remaining = next;
     }
     result.extend(remaining);
+    result
+}
+
+/// Own-model sloping intake skins that cover the fitted side magazines.
+/// The naval model split the right skin into different polygons.
+pub fn side_bay_skin(id: Id, address: usize) -> bool {
+    match id.source() {
+        Id::F22 => matches!(
+            address,
+            0x2c86 | 0x2ca7 | 0x2f5f | 0x2f79 | 0x300d | 0x370a | 0x3723 | 0x3746 | 0x37aa
+        ),
+        Id::F22n => matches!(
+            address,
+            0x2cab | 0x2d05 | 0x2d30 | 0x324a | 0x3266 | 0x37a3 | 0x37bc | 0x37dc | 0x382e
+        ),
+        _ => false,
+    }
+}
+
+pub fn side_bay_faces(id: Id, f: &Face, fraction: f64) -> Vec<Face> {
+    if fraction <= 0. {
+        return vec![f.clone()];
+    }
+    let sign = side(f);
+    let roof = if id.source() == Id::F22n { 1.8 } else { 1.2 };
+    let (left, right) = if sign > 0. { (9., 14.7) } else { (-14.7, -9.) };
+    let height = if sign > 0. { -2.8 } else { -3.8 };
+    let mut result = cut_doors(
+        f,
+        fraction,
+        [(left, right, sign * 14.7, -f64::from(sign))],
+        -18.,
+        46.,
+        height,
+    );
+    // One lining per side, using that aircraft's own skin material. Five
+    // inward-facing panels close the recess; no outside pylon is drawn.
+    let owner = match id.source() {
+        Id::F22 => matches!(f.address, 0x2c86 | 0x370a),
+        Id::F22n => matches!(f.address, 0x2d05 | 0x37a3),
+        _ => false,
+    };
+    if owner {
+        let floor = |x: f32| if x.abs() > 12. { height } else { -9. };
+        let panel = |points: [[f32; 3]; 4], normal| {
+            let mut face = f.clone();
+            face.positions = points.to_vec();
+            face.colors = vec![f.colors[0]; 4];
+            face.uv = vec![f.uv.first().copied().unwrap_or_default(); 4];
+            face.normal = Some(normal);
+            face
+        };
+        result.push(panel(
+            [
+                [left, -18., roof],
+                [left, 46., roof],
+                [right, 46., roof],
+                [right, -18., roof],
+            ],
+            [0., -32765., 0.],
+        ));
+        for (x, normal) in [(left, 32765.), (right, -32765.)] {
+            result.push(panel(
+                [
+                    [x, -18., floor(x)],
+                    [x, 46., floor(x)],
+                    [x, 46., roof],
+                    [x, -18., roof],
+                ],
+                [normal, 0., 0.],
+            ));
+        }
+        for (y, normal) in [(-18., 32765.), (46., -32765.)] {
+            result.push(panel(
+                [
+                    [left, y, floor(left)],
+                    [right, y, floor(right)],
+                    [right, y, roof],
+                    [left, y, roof],
+                ],
+                [0., 0., normal],
+            ));
+        }
+    }
     result
 }
 
@@ -700,8 +796,8 @@ mod tests {
         let source = face(
             0x35d7,
             vec![
-                [-10., 0., -9.],
-                [10., 0., -9.],
+                [-10., -27., -9.],
+                [10., -27., -9.],
                 [10., 55., -9.],
                 [-10., 55., -9.],
             ],
@@ -724,7 +820,7 @@ mod tests {
         };
         for fraction in [0., 0.5, 1.] {
             let pieces = bay_doors(&source, fraction);
-            assert!((pieces.iter().map(area).sum::<f32>() - 1100.).abs() < 0.01);
+            assert!((pieces.iter().map(area).sum::<f32>() - 1640.).abs() < 0.01);
             assert!(
                 pieces
                     .iter()
@@ -737,7 +833,7 @@ mod tests {
                         .iter()
                         .flat_map(|f| &f.positions)
                         .any(|p| (p[0] - hinge).abs() < 1e-5
-                            && (p[1] - 7.).abs() < 1e-5
+                            && (p[1] - BAY_AFT).abs() < 1e-5
                             && (p[2] + 9.).abs() < 1e-5)
                 );
             }
@@ -745,7 +841,7 @@ mod tests {
                 assert_eq!(f.positions.len(), f.uv.len());
                 assert!(
                     f.uv.iter()
-                        .all(|p| p[0] >= -10. && p[0] <= 10. && p[1] >= 0. && p[1] <= 55.)
+                        .all(|p| p[0] >= -10. && p[0] <= 10. && p[1] >= -27. && p[1] <= 55.)
                 );
             }
         }
@@ -767,7 +863,7 @@ mod tests {
             inward
                 .iter()
                 .flat_map(|f| &f.positions)
-                .all(|p| (-9. ..=-6.).contains(&p[2]) && (-8. ..=-5.).contains(&p[0]))
+                .all(|p| (-9. ..=-1.5).contains(&p[2]) && (-8. ..=-5.).contains(&p[0]))
         );
         // The side facing away would sit inside the fuselage.
         assert!(bay_lining(Id::F22, &wall(-8., -32765.)).is_empty());
@@ -789,10 +885,10 @@ mod tests {
         assert_eq!(
             ceiling[0].positions,
             vec![
-                [-2., 7., -6.],
-                [-2., 51., -6.],
-                [-8., 51., -6.],
-                [-8., 7., -6.]
+                [-2., BAY_AFT, BELLY + BAY_DEPTH],
+                [-2., 51., BELLY + BAY_DEPTH],
+                [-8., 51., BELLY + BAY_DEPTH],
+                [-8., BAY_AFT, BELLY + BAY_DEPTH]
             ]
         );
         assert_eq!(ceiling[0].uv, interior.uv);

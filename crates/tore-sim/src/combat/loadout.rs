@@ -246,7 +246,7 @@ impl Loadout {
                     self.configuration.tanks.get(slot).map(|s| s.hardpoint),
                 ) {
                     (AircraftId::F15, Some(6)) => 1,
-                    (AircraftId::F22, Some(8)) => 2,
+                    (AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx, Some(8)) => 2,
                     _ => 32766,
                 }
             })
@@ -339,7 +339,10 @@ impl Loadout {
             // Sparrow's, bombs) stay off them.
             if matches!(
                 (self.aircraft, row),
-                (AircraftId::F22, Some(8)) | (AircraftId::F15, Some(7))
+                (
+                    AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx,
+                    Some(8)
+                ) | (AircraftId::F15, Some(7))
             ) && !matches!(
                 w.source.as_str(),
                 "AIM120.JT" | "AIM9B.JT" | "AIM9M.JT" | "AIM9X.JT"

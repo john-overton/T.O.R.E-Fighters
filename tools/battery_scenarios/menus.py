@@ -395,6 +395,7 @@ def scenarios() -> list[Scenario]:
             r"derived stations F15.PT: 3 extra tanks, 12078 lb fuel, 1296 lb shells; feed, jettison, save and old load passed",
             r"derived stations F16C.PT: 2 extra tanks, 4884 lb fuel, 524 lb shells; feed, jettison, save and old load passed",
             r"derived stations F22.PT: 2 extra tanks, 7920 lb fuel, 850 lb shells; feed, jettison, save and old load passed",
+            r"derived stations F22N.PT: 2 extra tanks, 7920 lb fuel, 850 lb shells; feed, jettison, save and old load passed",
             r"derived stations MIG29.PT: 1 extra tanks, 2614 lb fuel, 281 lb shells; feed, jettison, save and old load passed",
             r"derived stations RAFALE.PT: 1 extra tanks, 3485 lb fuel, 374 lb shells; feed, jettison, save and old load passed",
             r"F-16C wingtip AIM-120: two a load \(one a tip\), saved, restored and fired guided from each tip edge; every other tip store unchanged",
@@ -409,7 +410,7 @@ def scenarios() -> list[Scenario]:
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 13 recovered weapon stations, 3407 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 14 recovered weapon stations, 3411 weapon placements, 180 tank placements, 78 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

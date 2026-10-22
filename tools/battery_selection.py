@@ -80,7 +80,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "flight-landing": ("approach and landing", ("flight-land-*", "flight-approach-*")),
     "flight-combat": (
-        "guns, missiles, bays, jettison, countermeasures, combat smoke and evidence",
+        "guns, missiles, F-22A/F-22N bays and live fire, jettison, countermeasures, combat smoke and evidence",
         (
             "flight-fight-*", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
             "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-missile-sag", "flight-jettison-*", "flight-bay-*",

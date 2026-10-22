@@ -544,6 +544,11 @@ ownship.
 
 ### Stores
 
+F-22 bay magazines use store location byte `0x83`, with the same layout and
+count event fields as other stores. Main and side stores retain their drawn
+release centres. Old recordings keep their recorded carrier locations; no
+file-schema change is required ([carriage contract](spec/stores-on-pylons.md#f-22-naval-stores)).
+
 Each aircraft's pylons and the stores still on them
 ([stores on pylons](spec/stores-on-pylons.md)) are recorded as events
 (slice BP3, John 2026-10-12), so the viewer draws them emptying as they did

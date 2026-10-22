@@ -3,7 +3,8 @@
 //! default loads: before (nothing drawn, as before B3), loaded, half spent
 //! and empty, from outside; and a release sequence, each released store shown
 //! a moment after it left its pylon. A development aid: no window opens,
-//! nothing is simulated, the stores are placed from the loadout by hand.
+//! ordinary poses place stores by hand. TORE_STORES_PREVIEW_FIRE also captures
+//! actual fixed-tick trigger, bay and projectile simulation.
 use crate::{
     AppResult,
     camera::Camera,
@@ -124,7 +125,20 @@ pub fn run() -> AppResult<()> {
         .into_iter()
         .filter(|(_, short)| only.as_ref().is_none_or(|o| o.iter().any(|s| s == short)))
     {
+        // Each exact identity owns its atlas, including the remodelled F-22N.
+        if let Some(gpu) = &mut gpu {
+            gpu.sim.clear_aircraft();
+        }
         let airframe = crate::aircraft::Airframe::load(resources, id)?;
+        if std::env::var_os("TORE_STORES_PREVIEW_GEOMETRY").is_some() {
+            let shape = tore_formats::shape::Shape::parse(&resources[&airframe.profile.shape])?;
+            for face in &shape.faces {
+                println!(
+                    "Preview face: {short} {:x} {:?} {:?}",
+                    face.address, face.normal, face.positions
+                );
+            }
+        }
         let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft record")?)?;
         let mut loadout = tore_sim::combat::loadout::Loadout::new(&profile, |name| {
             resources
@@ -234,7 +248,7 @@ pub fn run() -> AppResult<()> {
         {
             station.count = *count;
         }
-        let mut config = loadout.configuration;
+        let mut config = loadout.configuration.clone();
         // Preview only: compare new table entries to generic placement of
         // the recorded stations. This never changes flight configuration.
         if std::env::var("TORE_STORES_PREVIEW_RECORDED_STATIONS")
@@ -258,6 +272,27 @@ pub fn run() -> AppResult<()> {
                     tank.rack = rack;
                 }
             }
+        }
+        // Optional geometry-fit fixture: ROW=RIGHT,UP,FORWARD, feet.
+        if let Ok(value) = std::env::var("TORE_STORES_PREVIEW_MOUNT") {
+            let (row, point) = value
+                .split_once('=')
+                .ok_or("expected ROW=RIGHT,UP,FORWARD")?;
+            let row = row.parse::<usize>()?;
+            let point: Vec<f64> = point.split(',').map(str::parse).collect::<Result<_, _>>()?;
+            let point: [f64; 3] = point
+                .try_into()
+                .map_err(|_| "expected three mount coordinates")?;
+            if !point.iter().all(|v| v.is_finite()) {
+                return Err("nonfinite preview mount".into());
+            }
+            let slot = config
+                .hardpoint_slots
+                .get(row)
+                .copied()
+                .flatten()
+                .ok_or("missing fixture row")?;
+            config.stations[slot].mount = point;
         }
         // `TORE_STORES_PREVIEW_COUNTS=f18d:2=8,a10:1=6` loads those
         // stations with that many stores (a rack close-up); the output
@@ -374,6 +409,30 @@ pub fn run() -> AppResult<()> {
         state.yaw = 0.;
         state.pitch = 0.;
         state.bank = 0.;
+        state.bay = std::env::var("TORE_STORES_PREVIEW_BAY")
+            .ok()
+            .map(|value| value.parse::<f64>())
+            .transpose()?
+            .unwrap_or(0.)
+            .clamp(0., 1.);
+        if let Ok(row) = std::env::var("TORE_STORES_PREVIEW_FIRE") {
+            let row = row.parse::<usize>()?;
+            loadout.configuration = config.clone();
+            loadout.quantities = config.stations.iter().map(|s| s.count).collect();
+            firing_frames(
+                gpu.as_mut().ok_or("firing preview needs GPU rendering")?,
+                &mut scenery,
+                &world,
+                &art,
+                &airframe,
+                &loadout,
+                state,
+                row,
+                short,
+                out,
+            )?;
+            continue;
+        }
         if cpu {
             for (view, eye, look, fov) in VIEWS {
                 if ["below", "side-front", "ahead", "top"].contains(&view) && preview_view(view) {
@@ -426,7 +485,7 @@ pub fn run() -> AppResult<()> {
         let external: Vec<_> = config
             .stations
             .iter()
-            .filter(|s| s.rack.location().external() && !live::is_gun(&s.weapon) && s.count > 0)
+            .filter(|s| s.rack.location().drawn() && !live::is_gun(&s.weapon) && s.count > 0)
             .collect();
         let tip = external
             .iter()
@@ -517,7 +576,7 @@ pub fn run() -> AppResult<()> {
         let order: Vec<usize> = (0..config.stations.len())
             .filter(|i| {
                 let s = &config.stations[*i];
-                s.rack.location().external() && !live::is_gun(&s.weapon) && s.count > 0
+                s.rack.location().drawn() && !live::is_gun(&s.weapon) && s.count > 0
             })
             .collect();
         let mut frame = 0;
@@ -551,7 +610,8 @@ pub fn run() -> AppResult<()> {
                     powered: false,
                 }];
                 let stores = store_poses(&config, |i| rounds[i], loaded);
-                let (_, eye, look, fov) = VIEWS[0];
+                state.bay = f64::from(s.rack.location().bay());
+                let (_, eye, look, fov) = VIEWS[3];
                 render(
                     gpu,
                     &mut scenery,
@@ -562,7 +622,7 @@ pub fn run() -> AppResult<()> {
                     &stores,
                     &flying,
                     (eye, look, fov),
-                    &out.join(format!("{short}-release-{frame:02}.png")),
+                    &out.join(format!("{short}-release-slot{station}-{frame:02}.png")),
                 )?;
                 frame += 1;
             }
@@ -649,6 +709,107 @@ pub(crate) fn render(
         crate::replay::png::encode_rgba(WIDTH, HEIGHT, &pixels)?,
     )?;
     println!("Stores preview: {}", path.display());
+    Ok(())
+}
+
+/// Exercise the actual trigger, flight devices and projectile simulation.
+/// TORE_STORES_PREVIEW_FIRE is a hardpoint row, with the chosen preview load.
+#[allow(clippy::too_many_arguments)]
+fn firing_frames(
+    gpu: &mut Gpu,
+    scenery: &mut Scenery,
+    world: &Terrain,
+    art: &CombatArt,
+    airframe: &crate::aircraft::Airframe,
+    load: &tore_sim::combat::loadout::Loadout,
+    mut state: crate::flight::State,
+    row: usize,
+    short: &str,
+    out: &Path,
+) -> AppResult<()> {
+    let slot = load
+        .configuration
+        .hardpoint_slots
+        .get(row)
+        .copied()
+        .flatten()
+        .ok_or("missing firing row")?;
+    if load.quantities[slot] == 0 {
+        return Err("firing preview row is empty".into());
+    }
+    let bay = load.configuration.stations[slot].rack.location().bay();
+    let mut combat = crate::combat::Combat::with_loadout(airframe, load)?;
+    combat.reset(&mut state)?;
+    state.bay = 0.;
+    state.bay_open = false;
+    state.bay_auto_open = false;
+    for _ in 0..=load.configuration.stations.len() {
+        if combat.state.own().selected == slot && combat.state.own().armed {
+            break;
+        }
+        combat.command(
+            live::Command::NextSelection,
+            crate::combat::launcher(&state),
+        );
+    }
+    combat.command(
+        live::Command::ToggleSeekerMode,
+        crate::combat::launcher(&state),
+    );
+    let mut fired = None;
+    for tick in 0..=400 {
+        if tick > 0 {
+            combat.own_trigger().input.space(tick == 1, false, false);
+            state.step(&crate::flight::PilotInput::default(), |x, z| {
+                f64::from(world.height(x as f32, z as f32))
+            });
+            let events = combat.step(&mut state, world)?;
+            if events
+                .iter()
+                .any(|e| matches!(e, live::Event::Fired { station, .. } if *station == slot))
+            {
+                fired.get_or_insert(tick);
+                println!(
+                    "Stores firing: {short} row={row} tick={tick} bay={:.3} remaining={}",
+                    state.bay,
+                    combat.state.own().rounds(slot)
+                );
+                if bay && state.bay < 0.95 || !bay && state.bay > 0. {
+                    return Err("firing preview door gate differs".into());
+                }
+            }
+        }
+        if tick == 0
+            || tick == 60
+            || tick == 400
+            || fired.is_some_and(|first| [first, first + 3, first + 12].contains(&tick))
+        {
+            let own = combat.state.own();
+            let stores = store_poses(
+                own.configuration(),
+                |i| u32::from(own.rounds(i)),
+                |i| own.was_loaded(i),
+            );
+            let snapshot = combat.snapshot(combat.own_id(), &state, None);
+            let (_, eye, look, fov) = VIEWS[3];
+            render(
+                gpu,
+                scenery,
+                world,
+                art,
+                airframe,
+                &state,
+                &stores,
+                &snapshot.projectiles,
+                (eye, look, fov),
+                &out.join(format!("{short}-fire-row{row}-t{tick:03}.png")),
+            )?;
+        }
+    }
+    if fired.is_none() || state.bay > 0. {
+        return Err("firing preview failed to release and close".into());
+    }
+    println!("Stores firing: {short} row={row} PASS");
     Ok(())
 }
 

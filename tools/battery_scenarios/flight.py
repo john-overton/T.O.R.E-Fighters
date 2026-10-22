@@ -43,7 +43,7 @@ VARIANT_THEATERS = [t for t in AIRPORTS if t.startswith("~")]
 # rockets, not its pods (ffc8fff2: two LAU-61 or B-8M1 pods hold 38, two B-13L pods 10).
 # The A-4E's default load carries three tanks in place of retail's centreline Mk 82s, which
 # stay selectable at 0 (35023ad1). F22.PT row 8 is the optional inboard wing pair, empty by
-# default (30f69393); F22N.PT, which the F-22N and F/A-XX fly, has no such row.
+# default (30f69393); F22N.PT now shares that carrier and the bay classification.
 STATIONS = {
     "f18": [570, 2, 4, 4, 2],
     "rafale": [250, 4, 2, 2, 2],
@@ -58,7 +58,7 @@ STATIONS = {
     "su35": [150, 1, 2, 4, 2],
     "f22": [750, 2, 2, 4, 0],
 }
-STATIONS["f22n"] = [750, 2, 2, 4]
+STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
 
 
@@ -891,7 +891,7 @@ def check_slot(ac: str, slot: int):
 def slot_scenarios() -> list[Scenario]:
     out = []
     for ac, capacity in STATIONS.items():
-        if ac in {"f22n", "faxx"}:
+        if ac == "faxx":
             continue
         for slot in range(1, len(capacity) + 1):
             out.append(
@@ -904,6 +904,19 @@ def slot_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+    for ac in ("f22", "f22n"):
+        for row in (5, 7, 8):
+            out.append(Scenario(
+                name=f"flight-bay-fire-{ac}-row{row}", lane="flight",
+                args=["--stores-preview", "{work}/frames"], window=True,
+                env={"TORE_STORES_PREVIEW_AIRCRAFT": ac,
+                     "TORE_STORES_PREVIEW_FULL": "1",
+                     "TORE_STORES_PREVIEW_FIRE": str(row)},
+                expect=[f"Stores firing: {ac} row={row} PASS"],
+                outputs=[f"frames/{ac}-fire-row{row}-t000.png", f"frames/{ac}-fire-row{row}-t400.png"],
+                timeout=300,
+                notes="Actual one-press release, bay-only gate, hold and closing; main bay, side bay and wing, with rendered projectile frames.",
+            ))
     return out
 
 
@@ -955,7 +968,7 @@ def check_jettison(ac: str, slot: int):
 def jettison_scenarios() -> list[Scenario]:
     out = []
     for ac, capacity in STATIONS.items():
-        if ac in {"f22n", "faxx"}:
+        if ac == "faxx":
             continue
         for slot in range(2, len(capacity) + 1):
             if capacity[slot - 1] == 0:
@@ -1524,8 +1537,9 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for bay in ("0", "0.5", "1"):
-        add(f"bay-f22-{bay}", ["--free-flight", "--aircraft", "f22", "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
+    for ac in ("f22", "f22n"):
+        for bay in ("0", "0.5", "1"):
+            add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
 
 

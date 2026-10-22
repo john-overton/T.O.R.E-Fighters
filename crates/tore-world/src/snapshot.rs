@@ -208,7 +208,7 @@ fn drawn_store(weapon: &tore_formats::weapons::Weapon) -> bool {
 }
 
 /// The stations `config` draws, in station order, with the whole stores
-/// each holds now: every external station that is not a gun and was loaded
+/// each holds now: every drawn external or magazine station that is not a gun and was loaded
 /// at the start (`loaded`), whatever it holds now. `rounds` gives a
 /// station's rounds left. Tanks are not listed: they come from the loadout
 /// alone.
@@ -223,7 +223,7 @@ pub fn station_stores(
         .iter()
         .enumerate()
         .filter(|(index, station)| {
-            station.rack.location().external() && drawn_store(&station.weapon) && loaded(*index)
+            station.rack.location().drawn() && drawn_store(&station.weapon) && loaded(*index)
         })
         .filter_map(|(index, station)| {
             let per_item = live::pod_rounds(&station.weapon).max(1);
@@ -263,7 +263,7 @@ pub fn as_built_stores(config: &tore_sim::combat::live::Configuration) -> Vec<St
     )
 }
 
-/// The stores `config` carries as drawn: every external station loaded at
+/// The stores `config` carries as drawn: every external or magazine station loaded at
 /// the mission's start, each with the whole stores it holds now. `rounds`
 /// gives a station's rounds left and `loaded` whether it was loaded at the
 /// start.
@@ -277,7 +277,7 @@ pub fn store_poses(
 
 /// The stores `config` carries as drawn with `loads`, each listed station's
 /// whole stores ([`station_stores`]), plus the loadout's tanks. A listed
-/// station the loadout does not draw (out of range, internal, a gun) is
+/// station the loadout does not draw (out of range, an internal gun) is
 /// left out, so a load that does not fit the loadout draws nothing wrong.
 pub fn store_poses_of(
     config: &tore_sim::combat::live::Configuration,
@@ -295,7 +295,7 @@ pub fn store_poses_of(
         .filter_map(|load| {
             let index = usize::from(load.station);
             let station = config.stations.get(index)?;
-            if !station.rack.location().external() || !drawn_store(&station.weapon) {
+            if !station.rack.location().drawn() || !drawn_store(&station.weapon) {
                 return None;
             }
             let pod = live::is_gun_pod(&station.weapon);

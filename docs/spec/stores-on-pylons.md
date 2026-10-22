@@ -815,7 +815,7 @@ not evidence of original-game behaviour or a certification review.
 | MIG29.PT, Fulcrum-C | Rows 5 to 7 are three wing pairs; no centreline carrier | The [German MiG-29 flight manual](https://jasonblair.net/wp-content/uploads/2015/06/MIG29-Flight-Manual-Pt-1.pdf) describes a 1,500 litre centreline tank. C-variant gun-clearance restrictions remain unknown; the requested gameplay addition is specified below. |
 | A10.PT | Rows 5 to 8 are wing weapon groups; no centreline carrier and no tank permission bit on those rows | [USAF](https://www.127wg.ang.af.mil/Media/Articles/Article/865880/selfridge-angb-home-of-the-drop-tank/) confirms external tanks for long-distance flight. [Eglin](https://www.eglin.af.mil/News/Article-Display/Article/814477/40th-fts-expands-a-10-fuel-limitations-in-combat/) distinguishes the later 600 gallon combat-clearance work. Review period A-10A stations and ferry restrictions. |
 | RAFALE.PT, Rafale C | Centreline row 4 is occupied by AAS38.SEE and retained as equipment; wing rows 6/7 lack tank permission | [Dassault](https://www.dassault-aviation.com/en/defense/rafale/adapt-and-deliver/) specifies five heavy/wet stations. The addition below retains the sensor and adds an aft centreline tank carrier; exact period tank contours remain unknown. |
-| F22.PT | Only internal carrier rows 5 to 7; none has tank permission | [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/) specifies two external wing fuel tanks. The addition below fits the prototype model; F22N.PT and the opinionated FA-XX remain distinct. |
+| F22.PT | Only internal carrier rows 5 to 7; none has tank permission | [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/) specifies two external wing fuel tanks. The addition below fits the prototype model; The naval donor now shares this carrier under the [F-22 naval stores contract](#f-22-naval-stores). |
 
 F-14, F/A-18D, A-4E and F-4 family source groups already represent the
 centreline or independent tank positions relevant to this screen. A-7,
@@ -857,9 +857,8 @@ choices**. A-10 and all default loads remain unchanged.
 - RAFALE.PT row 9 adds one centreline carrier for a 2,000 litre tank, within
   4,000 lb. This uses one additional loadout row and supplies useful fuel
   capacity while preserving the existing AAS38 sensor equipment and wing loads.
-- F22N.PT is unchanged. Its source weapon rows 5 to 7 are external fuselage
-  carriers, unlike F22.PT's internal bays. It is a separate hypothetical naval
-  identity, not a substitute for the requested F-22 or evidence of certification.
+- F22N.PT now shares the bay and wing carriage below. Its original source
+  rows were external fuselage carriers; this is an explicit gameplay override.
 
 | Aircraft / appended row (zero based) | Real stations | Capacity | Origin, feet right / forward | Surface read upward from |
 | --- | --- | --- | --- | --- |
@@ -887,7 +886,7 @@ sensor equipment rather than fuel. MiG-29 and F-22 row 8 use bank 8.
 Fuel consumption, tank and selected-store jettison, AI mission loadouts,
 network configuration and replay poses use the shared loadout paths. Peers
 must agree on the new resources, compatibility, capacities and station poses.
-The lead assigns the protocol change; this slice leaves protocol 43 unchanged.
+Current compatibility is covered by the [protocol version rules](../formats/net-protocol.md#versions).
 
 Real-carriage context: [USAF F-22 fact sheet](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/)
 identifies two external wing tanks. The [German MiG-29 flight manual](https://jasonblair.net/wp-content/uploads/2015/06/MIG29-Flight-Manual-Pt-1.pdf)
@@ -991,3 +990,64 @@ record).
 row 3, one pod) and on the `Stores` event listing a gun pod station with one
 store while it hangs. A host and client that disagree refuse or misdraw a
 Phantom carrying a pod. The lead assigns the protocol change.
+
+## F-22 naval stores
+
+Implementation specification, **opinionated**, requested by John on 2026-10-21.
+F-22N uses the F-22A's three bay rows and optional wing pair. This is the
+requested game configuration, not a claim of retail parity or certification.
+The reviewed F22N.PT signature is checked before correcting rows 5 to 7 to
+internal bays (location 3, flags 0x5e0, 0x5e0, 0x5e4) and appending row 8.
+Edited source records keep their own definitions. Gun position, sensors,
+flight characteristics, hook and exact model identity stay aircraft-specific.
+The existing F/A-XX consumer inherits its F22N.PT donor's corrected carriage.
+
+Default loads remain 750 gun rounds, two AIM-120, two AGM-65G and four AIM-9X;
+the wing row starts empty. Row 8 offers four AIM-120 or AIM-9 missiles, or two
+600 gallon tanks, with the same 9,000 lb limit and mutually exclusive selection
+as the F-22A. Existing saved loads keep their row indices and new rows empty.
+Load Ordnance lists gun, left main bay, right main bay, paired side bays and
+wing pair in that order. Each identity keeps its own imported aircraft art.
+AI loadout construction uses the same corrected carrier definitions; autonomous
+flight and weapon-selection policy are unchanged.
+
+The following geometry is **fitted, agent-authored**. Both reviewed shapes have
+the central belly at 3 ft below the reference point. Their distinct belly and
+intake polygons are cut and animated using their own materials. Main bays retain
+the source lateral boundaries: left x -8/3 to -2/3 ft, right x 2/3 to 7/3 ft,
+forward -8 to 17 ft (extended aft to fit tandem stores). Their recess depth is
+2.5 ft to contain the default loads.
+Side openings are x +/-3 to +/-4.9 ft and forward -6 to 46/3 ft, cut from
+the sloping intake skins. Each side has one outward-opening door and a lined
+recess roof at 0.4 ft up on F-22A, 0.6 ft on F-22N. This side-bay fit is not
+recovered original animation.
+
+| Carrier | Magazine centre x / floor up / release origin forward, feet |
+| --- | --- |
+| Left main, row 5 | -5/3 / -3 / 1.4 |
+| Right main, row 6 | 1.5 / -3 / 1.4 |
+| F-22A paired sides, row 7 | +/-3.9 / -1.2 / 1.7 |
+| F-22N paired sides, row 7 | +/-3.9 / -1.05 / 1.7 |
+| Wing pair, row 8 | +/-12 / own model underside minus the 1 ft pylon and store radius / -6 |
+
+A bay magazine places two stores front to back, separated by their length
+plus 0.25 ft. Their common height is the floor plus half the larger of the
+fin span and body diameter, plus 0.08 ft. The forward store leaves first;
+the side pair alternates left then right. Stores keep their positions as
+the load empties. This fits the default/full candidate loads;
+larger alternative weapons, including normally compatible guided bombs,
+retain their eligibility but have not received enclosure-fit acceptance.
+The ordinary compatibility masks and quantities stay unchanged.
+
+Bay weapons are drawn inside, without exterior pylons, and leave from exactly
+the same centres. Fully closed doors occlude their drawing, including through
+masked pixels in the imported skin. Their counts and positions remain in
+network snapshots and replay records while hidden. The [bay trigger timing](aircraft-animation.md#f-22-main-weapon-bays)
+applies to bay weapons only. Wing missiles and the gun fire with doors closed
+and do not request opening. Main and side doors share that existing timing.
+Jettison still permits selected unfixed weapons, including bay stores, and
+retains the existing inert falling-store rule. Internal bay stores do not add
+external-store radar signature; wing stores and tanks do. The open-bay radar
+term remains unchanged. Network clients and replays carry the same store
+counts and magazine layout. Protocol 64 rejects incompatible live peers;
+existing replay records retain their recorded layouts and still load.

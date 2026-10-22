@@ -146,19 +146,22 @@ through them is immediate. The gun is not behind the doors. The 1-second hold
 and 3-second lapse are **fitted**. Designating a target no longer opens the
 bays. No weapon eligibility, mass, drag or damage rule changes.
 
-Clip the imported belly panels over the two reviewed source bay rectangles,
-retaining surrounding fuselage and the original material on moving doors. Each
+Clip the imported belly panels over the two fitted bay rectangles (the source
+bounds extended aft for stores), retaining surrounding fuselage and the original material on moving doors. Each
 bay has two doors, each half its width, hinged at the bay's outboard and inboard
 edges and swinging 90 degrees down; fully open they hang where the source's
-open-bay walls hang. Behind them is a recess 3 source units deep (**fitted,
-agent choice 2026-09-28**). The source's open-bay pose, which the shape switches
+open-bay walls hang. Behind them is a recess 2.5 ft deep (**fitted,
+agent choice 2026-10-21**) to hold the default tandem magazines. The source's
+open-bay pose, which the shape switches
 on while the bays are open, lines it: each wall's bay-facing side becomes a
 side of the recess and closes its half of the recess ends, and the F-22A's
 textured bay interior becomes the recess ceiling. F-22N and F/A-XX have no
 interior art (their texture repaints it), so their walls also roof the recess
 in the walls' grey. Drawn unmodified, that pose read as a second, instant set of
 open doors over a flat panel below the belly. This is a fitted main-bay
-presentation, not recovered original door sequencing or side-bay parity.
+presentation, not recovered original door sequencing. The [naval stores
+contract](stores-on-pylons.md#f-22-naval-stores) adds drawn main-bay magazines
+and fitted side bays on both own models. Wing missiles bypass the doors.
 `--flight-bay 0..1` provides an explicit inspection pose, rejected on other planes.
 
 ## F-22 canopy
@@ -182,7 +185,7 @@ No refraction or new cockpit geometry is introduced.
 Test fixed hinge points, rigid gear lengths, paired surface direction, split
 panel continuity, bay timing/reversal/interpolation, unsupported commands and
 input roundtrip. Inspect closed/partial/open views and F-22 cockpit/exterior
-views. Original schedules, exact mechanical linkage, side bays, original damage transitions, LOD
+views. Original schedules, exact mechanical linkage, original damage transitions, LOD
 variants and retail comparison remain unknown. Damaged body rendering follows
 the separate [damage and smoke specification](damage-smoke.md). Next research is source shape
 control consumers and authored fits can ship without claiming original parity.

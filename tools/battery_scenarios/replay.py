@@ -41,6 +41,8 @@ def scenarios() -> list[Scenario]:
             r"Replay stores: RAFALE.PT unfired shapes, live vertices, release origins and \d+ count states agree",
             r"Replay stores: F15.PT hardpoint=6 shape=Some",
             r"Replay stores: F22.PT hardpoint=8 shape=Some",
+            r"Replay stores: F22N.PT hardpoint=8 shape=Some",
+            r"Replay stores: F22N.PT unfired shapes, live vertices, release origins and \d+ count states agree",
             "Replay stores: F15.PT unfired shapes, live vertices, release origins and 10 count states agree",
             "Replay stores: F16C.PT unfired shapes, live vertices, release origins and 10 count states agree",
             "Replay stores: MI24.PT unfired shapes, live vertices, release origins and 5 count states agree",
@@ -70,7 +72,7 @@ def scenarios() -> list[Scenario]:
     ))
     # Not the Mi-24: its combat smoke fails on the base (the AT-2 guidance
     # probe reports NoTarget), unrelated to where its stores hang.
-    for aircraft in ("f15", "f16c"):
+    for aircraft in ("f15", "f16c", "f22", "f22n"):
         found.append(Scenario(
             name=f"replay-stores-release-{aircraft}",
             lane="replay",

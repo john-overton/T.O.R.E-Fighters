@@ -173,7 +173,17 @@ pub fn hung(store: &StorePose) -> Vec<Hung> {
                     side,
                     slot: *slot,
                     held: *slot < held[side],
-                    centre: std::array::from_fn(|i| pylon.point[i] + offset[i]),
+                    centre: if store.rack.location() == Location::Magazine {
+                        store.rack.store_point(
+                            store.mount,
+                            store.loaded.max(store.items),
+                            side,
+                            *slot,
+                            size,
+                        )
+                    } else {
+                        std::array::from_fn(|i| pylon.point[i] + offset[i])
+                    },
                     pylon: pylon.clone(),
                 });
             }
@@ -197,18 +207,15 @@ pub struct Hung {
 /// to the render origin) with `attitude` (yaw, pitch, bank), appended to
 /// `out`. `airframe` gives the surfaces the pylons meet; `palette` the
 /// shapes' colours.
-pub fn vertices(
+pub fn vertices<'a>(
     out: &mut Vec<f32>,
-    stores: &[StorePose],
+    stores: impl IntoIterator<Item = &'a StorePose>,
     position: Vector,
     [yaw, pitch, bank]: [f64; 3],
     airframe: Option<&Airframe>,
     art: &CombatArt,
     palette: &[[u8; 3]; 256],
 ) {
-    if stores.is_empty() {
-        return;
-    }
     let start = out.len();
     let basis = Basis::new(yaw, pitch, bank);
     let at = |offset: Vector| -> Vector {
@@ -240,7 +247,10 @@ pub fn vertices(
                 continue;
             }
             // A wingtip store sits on the tip itself: no pylon or rail.
-            if store.rack.location() != Location::Wingtip && !drawn.contains(&&place.pylon) {
+            if store.rack.location().external()
+                && store.rack.location() != Location::Wingtip
+                && !drawn.contains(&&place.pylon)
+            {
                 drawn.push(&place.pylon);
                 hanger(
                     out,
@@ -789,8 +799,15 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
     ]);
 }
 
-/// The stores of the flown aircraft drawn with `airframe` over its presented
-/// flight state, as a new vertex list: none once its wreck is gone.
+/// Closed doors occlude bay stores, including through masked texels in the
+/// imported skin. Counts and poses stay in snapshots and replay records.
+pub fn visible(stores: &[StorePose], bay: f64) -> impl Iterator<Item = &StorePose> {
+    stores
+        .iter()
+        .filter(move |store| bay > 0. || !store.rack.location().bay())
+}
+
+/// The stores of the flown aircraft, none once its wreck is gone.
 pub fn for_flown(
     stores: &[StorePose],
     state: &crate::flight::State,
@@ -802,7 +819,7 @@ pub fn for_flown(
     if !state.wreck_gone() {
         vertices(
             &mut out,
-            stores,
+            visible(stores, state.bay),
             scenery.relative(state.position),
             [state.yaw, state.pitch, state.bank],
             Some(airframe),
@@ -824,6 +841,40 @@ mod tests {
             paired: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn closed_bays_occlude_stores_without_losing_their_layout() {
+        let art = CombatArt::synthetic(Default::default());
+        let store = StorePose {
+            hardpoint: 7,
+            mount: [3.9, -1.05, 1.7],
+            rack: rack(tore_sim::combat::hardpoints::MAGAZINE_BYTE),
+            shape: None,
+            look: StoreLook::Store,
+            items: 4,
+            loaded: 4,
+            body: [0.; 2],
+        };
+        let stores = [store];
+        let draw = |bay| {
+            let mut out = Vec::new();
+            vertices(
+                &mut out,
+                visible(&stores, bay),
+                [0.; 3],
+                [0.; 3],
+                None,
+                &art,
+                &[[0; 3]; 256],
+            );
+            out
+        };
+        assert!(draw(0.).is_empty());
+        assert!(!draw(0.5).is_empty());
+        assert_eq!(draw(0.5), draw(1.));
+        assert_eq!(stores[0].items, 4);
+        assert_eq!(hung(&stores[0]).iter().filter(|s| s.held).count(), 4);
     }
 
     #[test]
