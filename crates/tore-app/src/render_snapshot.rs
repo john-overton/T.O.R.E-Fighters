@@ -174,7 +174,7 @@ fn target_vertices(
     if !pose.wreck_gone() {
         crate::pylons::vertices(
             &mut vertices,
-            &target.stores,
+            crate::pylons::visible(&target.stores, pose.bay),
             scenery.relative(pose.position),
             [pose.yaw, pose.pitch, pose.bank],
             Some(model),

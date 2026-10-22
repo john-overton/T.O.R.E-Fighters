@@ -114,12 +114,19 @@ the Tab gun, a held trigger firing from the pod's nose and the jettison.
 
 The [F-15C wing pylons of 2026-10-20](../spec/stores-on-pylons.md#the-f-15c-wing-pylons-2026-10-20)
 (John, "a wing pylon that only accepts tanks") take an AIM-120 or an AIM-9B,
-AIM-9M or AIM-9X in place of the tank, one a pylon. The audit now pins 13
-recovered weapon rows, 3,407 weapon placements (+4 on `F15.PT` row 7) and 168
-Cheat-only novelty placements (+2, Boulder and Moose on that row); tank
-placements and records are unchanged. It checks the row's capacity of two for each, the exclusion with the tank, the refusal of the
+AIM-9M or AIM-9X in place of the tank, one a pylon. That pass added four weapon placements and two Cheat-only novelty
+placements (Boulder and Moose on that row), with tank placements unchanged. It checks the row's capacity of two for each, the exclusion with the tank, the refusal of the
 Sparrow, the Archer, bombs and the Maverick, a save and restore, and an older
 saved load (one or two weapon slots short) restoring with the new rows empty.
+
+The current audit includes [F-22N carriage](../spec/stores-on-pylons.md#f-22-naval-stores):
+14 optional weapon rows, 3,411 weapon placements, 180 tank placements and
+170 Cheat-only novelty placements. The F-22N row adds four AIM-9/AIM-120
+choices, five tank choices and two novelty choices to the previous totals
+of 13, 3,407, 175 and 168. Weapon/tank record totals remain 78 and 9.
+Both Raptors report the same normal choices on row 8 and pass tank/weapon
+exclusion, fuel feed, jettison, save/load and old-load restoration. Their
+source default weapons and quantities remain unchanged.
 
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is

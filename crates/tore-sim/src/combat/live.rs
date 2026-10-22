@@ -2163,7 +2163,7 @@ impl Ownship {
                 .config
                 .stations
                 .get(self.selected)
-                .is_some_and(|s| !s.internal)
+                .is_some_and(|s| !s.internal && s.rack.location().bay())
     }
     /// The automatic bay request: a trigger press waiting on the doors, or the
     /// brief hold open after a bay release so the weapon clears them.
@@ -5118,7 +5118,7 @@ impl State {
                     }
                 }
                 if fired {
-                    if !station.internal && !gun {
+                    if station.rack.location().bay() && !gun {
                         own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
                     }
                     self.effect(launcher.position, EffectKind::Launch);
@@ -7039,6 +7039,7 @@ mod tests {
         for (id, row, flags, count, weight) in [
             (AircraftId::F15, 6, 0x3c1, 3, 45),
             (AircraftId::F22, 8, 0x2a5, 4, 90),
+            (AircraftId::F22n, 8, 0x2a5, 4, 90),
         ] {
             let mut config = fixture(false).own().configuration().clone();
             let mut weapon = config.stations[0].weapon.clone();
@@ -7254,6 +7255,7 @@ mod tests {
             (AircraftId::F15, 7, "F610.GAS", 2, 90),
             (AircraftId::F16C, 9, "F370.GAS", 2, 60),
             (AircraftId::F22, 8, "F600.GAS", 2, 90),
+            (AircraftId::F22n, 8, "F600.GAS", 2, 90),
             (AircraftId::Mig29, 8, "M396.GAS", 1, 30),
             (AircraftId::Rafale, 9, "R528.GAS", 1, 40),
         ] {
@@ -7265,7 +7267,7 @@ mod tests {
                 store: None,
                 count: match (id, row) {
                     (AircraftId::F15, 6) => 3,
-                    (AircraftId::F22, 8) => 4,
+                    (AircraftId::F22 | AircraftId::F22n, 8) => 4,
                     _ => count,
                 },
                 weight_class: limit,

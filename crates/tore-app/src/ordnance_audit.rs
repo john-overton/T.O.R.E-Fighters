@@ -18,13 +18,13 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 /// record why in `docs/baselines/ordnance-availability.md`, when the supported
 /// weapon list, the tank records or the aircraft change.
 const AIRCRAFT: usize = 36;
-const RECOVERED_STATIONS: usize = 13;
+const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
-const WEAPON_PLACEMENTS: usize = 3407;
-const TANK_PLACEMENTS: usize = 175;
+const WEAPON_PLACEMENTS: usize = 3411;
+const TANK_PLACEMENTS: usize = 180;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
-const NOVELTY_PLACEMENTS: usize = 168;
+const NOVELTY_PLACEMENTS: usize = 170;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 const POD_PLACEMENTS: usize = 65;
 
@@ -293,7 +293,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 } else if r27
                     || matches!(
                         (id, hardpoint),
-                        (AircraftId::F15, 6 | 7) | (AircraftId::F22, 8)
+                        (AircraftId::F15, 6 | 7) | (AircraftId::F22 | AircraftId::F22n, 8)
                     )
                 {
                     rows.iter()
@@ -620,11 +620,27 @@ fn extra_stations(
     let (rows, name, count, fuel, shell): (&[usize], _, _, _, _) = match aircraft.id {
         AircraftId::F15 => (&[6, 7], "F610.GAS", 3, 12078., 1296.),
         AircraftId::F16C => (&[9], "F370.GAS", 2, 4884., 524.),
-        AircraftId::F22 => (&[8], "F600.GAS", 2, 7920., 850.),
+        AircraftId::F22 | AircraftId::F22n => (&[8], "F600.GAS", 2, 7920., 850.),
         AircraftId::Mig29 => (&[8], "M396.GAS", 1, 2614., 281.),
         AircraftId::Rafale => (&[9], "R528.GAS", 1, 3485., 374.),
         _ => return Ok(()),
     };
+    if matches!(aircraft.id, AircraftId::F22 | AircraftId::F22n) {
+        let rows = standard.editable_stations();
+        let order: Vec<_> = standard
+            .station_display_order()
+            .into_iter()
+            .map(|i| rows[i].hardpoint)
+            .collect();
+        if order != [3, 5, 6, 7, 8] {
+            return Err("Raptor display order differs".into());
+        }
+        let config = &standard.configuration;
+        let signature = config.external_stores(|i| u32::from(standard.quantities[i]), |_| true);
+        if signature.count != 0. || signature.lbs != 0. {
+            return Err("Raptor bay stores counted as external signature".into());
+        }
+    }
     let mut full = standard.clone();
     let before_ammo = full.ammunition()?;
     let before_fuel = full.external_fuel_lbs();
@@ -673,7 +689,7 @@ fn extra_stations(
     let mut old = LoadoutSpec::of(standard);
     if matches!(
         aircraft.id,
-        AircraftId::F15 | AircraftId::F16C | AircraftId::F22
+        AircraftId::F15 | AircraftId::F16C | AircraftId::F22 | AircraftId::F22n
     ) {
         old.stations.pop();
     }
@@ -730,7 +746,9 @@ fn extra_stations(
             (7, "AIM9X.JT", 2),
         ],
         AircraftId::F16C => &[(9, "MK82.JT", 2), (9, "AGM65G.JT", 2)],
-        AircraftId::F22 => &[(8, "AIM120.JT", 4), (8, "AIM9M.JT", 4), (8, "AIM9X.JT", 4)],
+        AircraftId::F22 | AircraftId::F22n => {
+            &[(8, "AIM120.JT", 4), (8, "AIM9M.JT", 4), (8, "AIM9X.JT", 4)]
+        }
         _ => &[],
     };
     for &(row, weapon, quantity) in weapons {
@@ -770,7 +788,10 @@ fn extra_stations(
             return Err("tank selection retained weapons".into());
         }
     }
-    if matches!(aircraft.id, AircraftId::F15 | AircraftId::F22) {
+    if matches!(
+        aircraft.id,
+        AircraftId::F15 | AircraftId::F22 | AircraftId::F22n
+    ) {
         let row = if aircraft.id == AircraftId::F15 { 6 } else { 8 };
         let slot = standard.configuration.hardpoint_slots[row].unwrap();
         let rejected: &[&str] = if aircraft.id == AircraftId::F15 {

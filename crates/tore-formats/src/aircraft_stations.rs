@@ -1,5 +1,5 @@
 //! Opinionated extra stations requested by John, 2026-10-15 and 2026-10-16.
-//! Guarded additions only; source rows and their indices are preserved.
+//! Guarded additions and requested bay corrections; row indices are preserved.
 //! Contract and fitted coordinates: docs/spec/stores-on-pylons.md.
 use super::{AircraftId, Hardpoint};
 
@@ -60,7 +60,9 @@ pub fn extend_resources(resources: &mut std::collections::BTreeMap<String, Vec<u
             .iter()
             .zip(["F15.PT", "F16C.PT", "F22.PT", "MIG29.PT", "RAFALE.PT"])
     {
-        if resources.contains_key(carrier) {
+        if resources.contains_key(carrier)
+            || (carrier == "F22.PT" && resources.contains_key("F22N.PT"))
+        {
             resources
                 .entry((*name).into())
                 .or_insert_with(|| resource(name).expect("known authored tank"));
@@ -85,7 +87,9 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
     match name {
         "F610.GAS" => id == AircraftId::F15 && matches!(row, F15_CENTER | F15_WING_TANKS),
         "F370.GAS" => id == AircraftId::F16C && row == F16_WET,
-        "F600.GAS" => id == AircraftId::F22 && row == F22_WET,
+        "F600.GAS" => {
+            matches!(id, AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx) && row == F22_WET
+        }
         "M396.GAS" => id == AircraftId::Mig29 && row == MIG29_CENTER,
         "R528.GAS" => id == AircraftId::Rafale && row == RAFALE_CENTER,
         _ => true,
@@ -138,6 +142,16 @@ fn signature(id: AircraftId) -> &'static [Signature] {
             (3, 0x5e0, [-10, -25, 0], "AIM120.JT", 2, 40),
             (3, 0x5e0, [10, -25, 0], "AGM65G.JT", 2, 40),
             (3, 0x5e4, [27, -11, 0], "AIM9X.JT", 4, 8),
+        ],
+        AircraftId::F22n => &[
+            (1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "F22R.SEE", 1, 0),
+            (1, 0x8, [0, 0, -50], "F22.ECM", 1, 0),
+            (1, 0x8, [10, 3, 50], "M61.JT", 750, 0),
+            (3, 0x8, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (1, 0x5e1, [-10, -25, 0], "AIM120.JT", 2, 40),
+            (1, 0x5e1, [10, -25, 0], "AGM65G.JT", 2, 40),
+            (1, 0x5e5, [27, -11, 0], "AIM9X.JT", 4, 8),
         ],
         AircraftId::Mig29 => &[
             (1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
@@ -199,7 +213,17 @@ pub fn append(id: AircraftId, rows: &mut Vec<Hardpoint>) {
             rows.push(row(4, 0x2a5, [50, -20, -16], 2, 90));
         }
         AircraftId::F16C => rows.push(row(4, 0x3e5, [21, -18, -3], 2, 60)),
-        AircraftId::F22 => rows.push(row(4, 0x2a5, [36, -18, -18], 4, 90)),
+        AircraftId::F22 | AircraftId::F22n => {
+            // Requested 2026-10-21: the naval donor carries the same bay
+            // weapons. Its own gun, sensors, hook and flight record remain.
+            if id == AircraftId::F22n {
+                for bay in &mut rows[5..=7] {
+                    bay.location = 3;
+                    bay.flags &= !1;
+                }
+            }
+            rows.push(row(4, 0x2a5, [36, -18, -18], 4, 90));
+        }
         AircraftId::Mig29 => rows.push(row(0, 0x201, [0, -24, -6], 1, 30)),
         AircraftId::Rafale => rows.push(row(0, 0x201, [0, -24, -12], 1, 40)),
         _ => unreachable!(),
@@ -215,6 +239,7 @@ mod tests {
             (AircraftId::F15, 8),
             (AircraftId::F16C, 10),
             (AircraftId::F22, 9),
+            (AircraftId::F22n, 9),
             (AircraftId::Mig29, 9),
             (AircraftId::Rafale, 10),
         ] {
@@ -325,7 +350,8 @@ mod tests {
             assert_eq!(resources.len(), 2);
             assert!(resources.contains_key(TANKS[index].0));
         }
-        for id in [AircraftId::F22n, AircraftId::A10] {
+        {
+            let id = AircraftId::A10;
             let mut resources = std::collections::BTreeMap::from([(id.pt().into(), Vec::new())]);
             extend_resources(&mut resources);
             assert_eq!(resources.len(), 1);
@@ -334,6 +360,53 @@ mod tests {
             assert!(rows.is_empty());
             assert!(!tank_allowed(id, 8, "F600.GAS"));
         }
+    }
+
+    #[test]
+    fn naval_bays_keep_counts_and_match_the_raptors_carriage() {
+        let source = |id| {
+            signature(id)
+                .iter()
+                .map(|s| Hardpoint {
+                    location: s.0,
+                    flags: s.1,
+                    position: s.2,
+                    store: Some(s.3.into()),
+                    count: s.4,
+                    weight_class: s.5,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut air = source(AircraftId::F22);
+        let mut naval = source(AircraftId::F22n);
+        append(AircraftId::F22, &mut air);
+        append(AircraftId::F22n, &mut naval);
+        for (a, n) in air[5..].iter().zip(&naval[5..]) {
+            assert_eq!(
+                (
+                    a.location,
+                    a.flags,
+                    a.position,
+                    &a.store,
+                    a.count,
+                    a.weight_class
+                ),
+                (
+                    n.location,
+                    n.flags,
+                    n.position,
+                    &n.store,
+                    n.count,
+                    n.weight_class
+                )
+            );
+        }
+        assert_eq!(naval[3].position, [10, 3, 50]);
+        let mut pack = std::collections::BTreeMap::from([("F22N.PT".into(), Vec::new())]);
+        extend_resources(&mut pack);
+        assert!(pack.contains_key("F600.GAS"));
+        assert!(tank_allowed(AircraftId::F22n, 8, "F600.GAS"));
+        assert!(!tank_allowed(AircraftId::F22n, 7, "F600.GAS"));
     }
 
     #[test]

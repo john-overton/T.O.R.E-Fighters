@@ -546,6 +546,16 @@ review. Omit the aircraft filter to cover the selectable roster.
 the normal Load Ordnance capacity, preserving installed tanks on shared rows.
 `TORE_STORES_PREVIEW_CATALOG=1` prints compatible weapon and tank choices
 and capacities by source row for reproducing alternative loads.
+`TORE_STORES_PREVIEW_BAY=0..1` poses the doors. With GPU mode,
+`TORE_STORES_PREVIEW_FIRE=5` instead presses the trigger once for hardpoint
+row 5 and captures actual simulation at ticks 0, 60, release, release +3,
+release +12 and 400. It checks bay gating and closing; use row 7 for side
+bays or row 8 with `TORE_STORES_PREVIEW_FULL=1` for the wing missiles. Each aircraft's atlas is
+reset before a fleet capture. `TORE_STORES_PREVIEW_GEOMETRY=1` prints the
+source face vertices for local fitting, and `TORE_STORES_PREVIEW_MOUNT=7=3.9,-1.05,1.7`
+sets one preview-only mount in feet right/up/forward. These fixture overrides
+never change a flight or saved loadout.
+
 
 Set `TORE_STORES_PREVIEW_AUDIT=1` with CPU mode to print station and model
 chord measurements instead of images. Optional rows use their configured

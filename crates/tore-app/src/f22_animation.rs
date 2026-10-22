@@ -155,6 +155,9 @@ impl Rig {
         self.parts.get(&a) == Some(&Part::Flame)
     }
     pub fn faces(&self, f: &Face, s: &State) -> Vec<Face> {
+        if crate::roster_animation::side_bay_skin(self.id, f.address) {
+            return crate::roster_animation::side_bay_faces(self.id, f, s.bay);
+        }
         if self.parts.get(&f.address) == Some(&Part::Bay) {
             return crate::roster_animation::bay_lining(self.id.source(), f);
         }
@@ -170,12 +173,21 @@ impl Rig {
         // Only reviewed belly faces are handed to the old clipping path. Passing fin
         // or concept flap faces here would animate them a second time.
         let belly = if self.id.source() == Id::F22n {
-            matches!(f.address, 0x3755 | 0x36fd | 0x3716 | 0x39ae | 0x39dc)
+            matches!(
+                f.address,
+                0x3755 | 0x36fd | 0x3716 | 0x39ae | 0x39dc | 0x3e16 | 0x3e46 | 0x3e62
+            )
         } else {
-            matches!(f.address, 0x35d7 | 0x3601 | 0x362f | 0x3cc0 | 0x3d03)
+            matches!(
+                f.address,
+                0x35d7 | 0x3601 | 0x362f | 0x3cc0 | 0x3d03 | 0x3901 | 0x391c | 0x3df1
+            )
         };
         if belly {
             crate::roster_animation::faces(self.id.source(), f, s)
+                .into_iter()
+                .flat_map(|face| crate::roster_animation::side_bay_faces(self.id, &face, s.bay))
+                .collect()
         } else {
             vec![f.clone()]
         }
@@ -519,7 +531,10 @@ mod tests {
                     .into_iter()
                     .filter_map(|f| rig.animate(&f, &state))
                     .collect();
-                let expected = crate::roster_animation::faces(id.source(), &belly, &state);
+                let expected: Vec<_> = crate::roster_animation::faces(id.source(), &belly, &state)
+                    .into_iter()
+                    .flat_map(|face| crate::roster_animation::side_bay_faces(id, &face, state.bay))
+                    .collect();
                 assert_eq!(actual.len(), expected.len());
                 for (a, b) in actual.iter().zip(&expected) {
                     assert_eq!(a.positions, b.positions);

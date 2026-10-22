@@ -350,3 +350,11 @@ the guide becomes a proven procedure only after those examples pass.
 
 Retail comparison is unavailable. Host regression tests, visual review and
 source-derived checks must be reported separately from retail gameplay parity.
+
+## F-22N carriage
+
+The F-22N's requested F-22A bay and wing load is specified in
+[stores on pylons](stores-on-pylons.md#f-22-naval-stores). Its gun position,
+naval hook, flight profile and remodelled exterior remain its own. The main
+and side bay geometry is fitted to the respective skins. The F/A-XX continues
+to consume the naval donor's carriage; no autonomous pilot policy changes.

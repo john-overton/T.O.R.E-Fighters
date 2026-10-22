@@ -24,6 +24,7 @@ pub(crate) fn run() -> AppResult<()> {
         AircraftId::F15,
         AircraftId::F16C,
         AircraftId::F22,
+        AircraftId::F22n,
         AircraftId::Mig29,
         AircraftId::Rafale,
         AircraftId::Mi24,
@@ -36,6 +37,7 @@ pub(crate) fn run() -> AppResult<()> {
     check_load(AircraftId::F15, resources, Some((6, "MK82.JT")))?;
     check_load(AircraftId::F15, resources, Some((7, "AIM120.JT")))?;
     check_load(AircraftId::F22, resources, Some((8, "AIM120.JT")))?;
+    check_load(AircraftId::F22n, resources, Some((8, "AIM120.JT")))?;
     if let Some(file) = recording {
         check_recording(Path::new(file), resources, renders)?;
     }
@@ -69,14 +71,14 @@ fn check_load(
     let added: &[usize] = match id {
         AircraftId::F15 => &[6, 7],
         AircraftId::F16C => &[9],
-        AircraftId::F22 | AircraftId::Mig29 => &[8],
+        AircraftId::F22 | AircraftId::F22n | AircraftId::Mig29 => &[8],
         AircraftId::Rafale => &[9],
         _ => &[],
     };
     for &row in added {
         let name = match id {
             AircraftId::F15 => "F610.GAS",
-            AircraftId::F22 => "F600.GAS",
+            AircraftId::F22 | AircraftId::F22n => "F600.GAS",
             AircraftId::Mig29 => "M396.GAS",
             AircraftId::Rafale => "R528.GAS",
             _ => "F370.GAS",
@@ -113,8 +115,7 @@ fn check_load(
         .collect();
     let mut expected = vec![full.clone()];
     for (i, station) in config.stations.iter().enumerate() {
-        while rounds[i] > 0 && station.rack.location().external() && !live::is_gun(&station.weapon)
-        {
+        while rounds[i] > 0 && station.rack.location().drawn() && !live::is_gun(&station.weapon) {
             rounds[i] = rounds[i].saturating_sub(live::pod_rounds(&station.weapon));
             let now = store_poses(&config, |j| rounds[j], loaded);
             let tick = expected.len() as u64;
@@ -156,7 +157,10 @@ fn check_load(
         &crate::terrain::Overrides::default(),
     )?;
     let scenery = crate::scenery::Scenery::build(resources, &world)?;
-    let state = airframe.start(&world);
+    let mut state = airframe.start(&world);
+    if state.bay_available() {
+        state.bay = 1.;
+    }
     let track = StoreTrack::from_events(&events);
     // Reverse and forward seeks, including counts, fins, bars and pylons.
     for tick in (0..expected.len()).rev().chain(0..expected.len()) {
@@ -173,10 +177,11 @@ fn check_load(
             return Err(format!("{} replay stores differ at {tick}", id.pt()).into());
         }
     }
-    for (index, station) in
-        config.stations.iter().enumerate().filter(|(_, s)| {
-            s.rack.location().external() && !live::is_gun(&s.weapon) && s.count > 0
-        })
+    for (index, station) in config
+        .stations
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.rack.location().drawn() && !live::is_gun(&s.weapon) && s.count > 0)
     {
         let pose = full
             .iter()
