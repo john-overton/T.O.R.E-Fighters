@@ -1,0 +1,22 @@
+# Allow only build inputs. No imports, retail media or generated artifacts.
+**
+!Dockerfile
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!.cargo
+!.cargo/**
+!crates
+!crates/**
+!tools
+!tools/docker-entrypoint.sh
+target/
+.local/
+gameassets/
+dist/
+USNF-ATF/
+**/target/
+**/.local/
+**/gameassets/
+**/dist/
+**/*.pack

@@ -1,0 +1,25 @@
+services:
+  server:
+    image: tore-server:local
+    build:
+      context: .
+      args:
+        TORE_BUILD_COMMIT: ${TORE_BUILD_COMMIT:?Set TORE_BUILD_COMMIT to git rev-parse HEAD}
+    network_mode: host
+    user: "${TORE_UID:-1000}:${TORE_GID:-1000}"
+    volumes:
+      - ./server-data:/data
+      - ./server-config:/config:ro
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    stop_grace_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

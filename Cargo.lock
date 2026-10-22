@@ -2080,6 +2080,7 @@ version = "0.2.0"
 name = "tore-server"
 version = "0.2.0"
 dependencies = [
+ "tore-formats",
  "tore-import",
  "tore-master",
  "tore-net",

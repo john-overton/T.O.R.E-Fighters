@@ -1167,8 +1167,8 @@ foundation for later large battles and live campaigns.
 A dedicated server simulates flight models, terrain and weapons from the retail
 data, so its operator must import their own copy of Fighters Anthology, the same
 way the game does. Nothing derived from retail media is ever sent over the
-network. How to set one up and run it: [dedicated server guide](DEDICATED-SERVER.md)
-(stage D design, not built yet).
+network. How to set one up and run it: [dedicated server guide](DEDICATED-SERVER.md),
+including [Docker deployment](DEDICATED-SERVER.md#running-it-in-docker).
 
 ## Networking
 

@@ -183,6 +183,7 @@ pub fn prepare(options: &Options, data_dir: &Path) -> Result<Prepared, String> {
                 prepared.spec.summary()
             ));
             report.extend(crate::rotation::effective_settings(&entry.config));
+            report.extend(crate::check::defense_report(&prepared.world));
             if i == rotation.current {
                 first = Some(prepared);
             }
