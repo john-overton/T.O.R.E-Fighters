@@ -64,6 +64,8 @@ const PYLON_WIDTH: f64 = 2. * tore_sim::combat::hardpoints::PYLON_HALF_WIDTH;
 const SINK: f64 = 0.02;
 /// A rack's bar's depth at the foot of its pylon, feet.
 const RACK_DEPTH: f64 = tore_sim::combat::hardpoints::RACK_DEPTH;
+/// A short attachment plus the existing surface-following tolerance, feet.
+const NEAR_SURFACE: f64 = tore_sim::combat::hardpoints::PYLON_DEPTH + 1.5;
 
 /// The model surfaces stores meet, looked up once per point
 /// ([`Airframe::underside`], [`Airframe::tip_edge`]).
@@ -325,6 +327,56 @@ fn dims(store: &StorePose, shape: Option<&Shape>) -> Dims {
     }
 }
 
+/// Prefer a nearby wing/body over a distant surface directly overhead. The
+/// station sampler starts at the source record, but drawing starts at the
+/// raised store: that can bring a rotor into its 12 ft search and mask the
+/// stub wing inboard. Keep the existing search when no short attachment fits.
+fn hanger_surface(airframe: &Airframe, right: f64, forward: f64, from: f64) -> Option<f64> {
+    let surface = airframe.underside(right, forward, from, 6);
+    if surface.is_some_and(|h| h - from > NEAR_SURFACE) {
+        for step in 1..=6 {
+            let x = right.abs() - f64::from(step) * 0.5;
+            if x < 0. {
+                break;
+            }
+            if let Some(h) = airframe
+                .underside(x, forward, from, 0)
+                .filter(|h| h - from <= NEAR_SURFACE)
+            {
+                return Some(h);
+            }
+        }
+    }
+    surface
+}
+
+/// A mesh's middle can lie beyond the short wing even though its station
+/// origin is under it. Move only the hanger toward that origin, up to 12 ft
+/// in quarter-foot steps, until it reaches the same nearby surface.
+fn hanger_attachment(
+    airframe: &Airframe,
+    right: f64,
+    middle: f64,
+    origin: f64,
+    from: f64,
+) -> (f64, Option<f64>) {
+    let surface = hanger_surface(airframe, right, middle, from);
+    if surface.is_some_and(|h| h - from > NEAR_SURFACE) {
+        let distance = (origin - middle).abs();
+        let steps = (distance.min(12.) / 0.25).ceil() as u32;
+        for step in 1..=steps {
+            let forward =
+                middle + (origin - middle).signum() * (f64::from(step) * 0.25).min(distance);
+            if let Some(h) =
+                hanger_surface(airframe, right, forward, from).filter(|h| h - from <= NEAR_SURFACE)
+            {
+                return (forward, Some(h));
+            }
+        }
+    }
+    (middle, surface)
+}
+
 /// What holds a pylon's `on` stores of `dims` up: the pylon slab from the
 /// stores' lugs (or a rack's bar) into the model's underside, the small bar
 /// at its foot that two or more stores hang beside; or, with nothing above,
@@ -340,12 +392,13 @@ fn hanger(
 ) {
     let p = pylon.point;
     let lugs = p[1] + dims.top;
-    let middle = p[2] + dims.middle;
+    let desired_middle = p[2] + dims.middle;
+    let (middle, surface) = airframe.map_or((desired_middle, None), |a| {
+        hanger_attachment(a, p[0], desired_middle, p[2], lugs)
+    });
     // A pylon is longer than it is deep: at least twice its depth below
     // the surface over it, and no longer than most of the store.
-    let depth = airframe
-        .and_then(|a| a.underside(p[0], middle, lugs, 6))
-        .map_or(0., |surface| surface - lugs);
+    let depth = surface.map_or(0., |surface| surface - lugs);
     let length = (0.45 * dims.length)
         .max(2. * depth)
         .min(0.7 * dims.length.max(4.))
@@ -378,7 +431,7 @@ fn hanger(
         );
         return;
     };
-    match airframe.underside(p[0], middle, top_of_rack, 6) {
+    match hanger_surface(airframe, p[0], middle, top_of_rack) {
         Some(surface) if surface - top_of_rack <= 0.05 => {}
         Some(surface) => {
             // The slab runs fore and aft only as far as the surface over it
@@ -1045,6 +1098,85 @@ mod tests {
             assert!((f64::from(low) - f64::from(tank_top)).abs() < 1e-4);
             assert!(f64::from(high) >= 0. && f64::from(high) <= SINK + 1e-4);
         }
+    }
+
+    #[test]
+    fn a_rotor_above_the_station_does_not_hide_the_stub_wing_inboard() {
+        let mut airframe = flat_wing();
+        let mut rotor = airframe.poses[0].faces[0].clone();
+        for p in &mut rotor.positions {
+            p[2] = 19.;
+        }
+        // The stub wing ends half a foot inboard of the station. The rotor
+        // spans both, 6.33 ft above it, as in the reported Apache geometry.
+        for p in &mut airframe.poses[0].faces[0].positions {
+            p[0] = p[0].min(28.5);
+        }
+        airframe.poses[0].faces.push(rotor);
+        assert!(airframe.underside(10., 0., -1., 6).unwrap() > 6.);
+        for count in [2, 4] {
+            let mut store = plain([10., -20. / 3., 0.], 4, count);
+            store.rack.over = [Some(0.); 5];
+            let origins = hung(&store);
+            for items in [count, 1, 0] {
+                store.items = items;
+                let vertices = draw(std::slice::from_ref(&store), &airframe);
+                let pylon = grey(&vertices);
+                assert!(!pylon.is_empty(), "empty launchers retain their pylons");
+                let top = pylon.iter().map(|v| v[1]).reduce(f32::max).unwrap();
+                assert!((f64::from(top) - SINK).abs() < 1e-5);
+                assert!(pylon.iter().any(|v| v[0] < 0.));
+                assert!(pylon.iter().any(|v| v[0] > 0.));
+                for (before, after) in origins.iter().zip(hung(&store)) {
+                    assert_eq!(before.centre, after.centre, "store origins stay fixed");
+                }
+            }
+        }
+        // A genuine high wing with no lower surface keeps its attachment.
+        let mut high_wing = flat_wing();
+        for p in &mut high_wing.poses[0].faces[0].positions {
+            p[2] = 19.;
+        }
+        assert!(hanger_surface(&high_wing, 10., 0., -1.).unwrap() > 6.);
+    }
+
+    #[test]
+    fn a_mesh_middle_aft_of_the_stub_wing_keeps_its_hanger_on_the_wing() {
+        let mut airframe = flat_wing();
+        let mut rotor = airframe.poses[0].faces[0].clone();
+        for p in &mut rotor.positions {
+            p[2] = 19.;
+        }
+        for p in &mut airframe.poses[0].faces[0].positions {
+            p[0] = p[0].min(28.5);
+            p[1] = p[1].max(0.);
+        }
+        airframe.poses[0].faces.push(rotor);
+        let (middle, surface) = hanger_attachment(&airframe, 10., -0.75, 0., -1.);
+        assert_eq!(middle, 0.);
+        assert_eq!(surface, Some(0.));
+        let mut vertices = Vec::new();
+        hanger(
+            &mut vertices,
+            &|p| p,
+            Some(&airframe),
+            &PylonPlace {
+                point: [10., -1.45, 0.],
+                slots: vec![0],
+            },
+            &Dims {
+                middle: -0.75,
+                ..Dims::body(PLAIN)
+            },
+            1,
+            StoreSize::body(PLAIN),
+        );
+        let top = grey(&vertices)
+            .iter()
+            .map(|v| v[1])
+            .reduce(f32::max)
+            .unwrap();
+        assert!((f64::from(top) - SINK).abs() < 1e-5);
     }
 
     #[test]

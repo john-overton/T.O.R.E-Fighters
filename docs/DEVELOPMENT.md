@@ -542,6 +542,10 @@ front and top PNGs without a window or GPU (put the command on one line).
 It uses flight's airframe and pylon triangles with solid face colours and
 simple lighting, so textures and final GPU lighting still need offscreen
 review. Omit the aircraft filter to cover the selectable roster.
+`TORE_STORES_PREVIEW_FULL=1` fills each row with its current candidate up to
+the normal Load Ordnance capacity, preserving installed tanks on shared rows.
+`TORE_STORES_PREVIEW_CATALOG=1` prints compatible weapon and tank choices
+and capacities by source row for reproducing alternative loads.
 
 Set `TORE_STORES_PREVIEW_AUDIT=1` with CPU mode to print station and model
 chord measurements instead of images. Optional rows use their configured
