@@ -387,6 +387,10 @@ and a gamepad's View+stick defaults avoid the problem.
 | Mark replay moment | Ctrl+B | - | - |
 | Restart flight | - | - | - |
 | Keyboard help | F11 | - | - |
+| Multiplayer ? menu (controller Menu also opens it) | F1 | - | - |
+| Multiplayer ? menu: return to main menu | M | - | - |
+| Multiplayer ? menu: exit | X | - | - |
+| Lobby Settings: apply and close (Escape discards) | F10 | - | - |
 | Menu up | Up | - | D-pad up |
 | Menu down | Down | - | D-pad down |
 | Menu left | Left | - | D-pad left |

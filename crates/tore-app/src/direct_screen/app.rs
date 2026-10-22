@@ -75,11 +75,11 @@ impl App {
             Ok(_) => {
                 self.direct.building = Some(receive);
                 self.menu.state.toast = Some((
-                    "Opening Direct Connection...".to_owned(),
+                    "Opening Direct Network Lounge...".to_owned(),
                     std::time::Instant::now() + std::time::Duration::from_secs(30),
                 ));
             }
-            Err(error) => self.message(format!("Cannot open Direct Connection: {error}")),
+            Err(error) => self.message(format!("Cannot open Direct Network Lounge: {error}")),
         }
     }
 
@@ -114,12 +114,12 @@ impl App {
                 Ok(Err(error)) => {
                     self.direct.building = None;
                     self.menu.state.toast = None;
-                    self.message(format!("Cannot open Direct Connection: {error}"));
+                    self.message(format!("Cannot open Direct Network Lounge: {error}"));
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.direct.building = None;
-                    self.message("Cannot open Direct Connection: the pieces did not build.");
+                    self.message("Cannot open Direct Network Lounge: the pieces did not build.");
                 }
             }
         }

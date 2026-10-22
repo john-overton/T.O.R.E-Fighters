@@ -255,6 +255,12 @@ impl Host {
             // The password's setting is said in those words.
             changed.retain(|(n, _)| *n != number::PASSWORD);
         }
+        if change
+            .cheats
+            .is_some_and(|cheats| cheats != self.spec.cheats)
+        {
+            words.push("realism changed".into());
+        }
         if changed.is_empty() && words.is_empty() {
             return Ok(());
         }
@@ -279,7 +285,10 @@ impl Host {
         // (slice A1, plan 6.3): only the players its re-deal moves lose
         // theirs.
         let balance_on = self.settings.balanced() && !before.balanced();
-        if moved(number::MODE)
+        if change
+            .cheats
+            .is_some_and(|cheats| cheats != self.spec.cheats)
+            || moved(number::MODE)
             || moved(number::LOADOUTS)
             || (moved(number::LOCK_SIDES) && !balance_on)
         {
@@ -287,7 +296,10 @@ impl Host {
         }
         // Friendly fire and the loadout rule travel in the mission, so a
         // change of either goes to every player's copy.
-        let spec = with_settings(self.spec.clone(), &self.settings);
+        let mut spec = with_settings(self.spec.clone(), &self.settings);
+        if let Some(cheats) = change.cheats {
+            spec.cheats = cheats;
+        }
         if spec != self.spec
             && let Err(why) = self.respec(spec)
         {
@@ -378,6 +390,9 @@ impl Host {
     /// listing, PvP's settings in co-op, the name and the password.
     fn check_change(&self, change: &SettingsChange) -> Result<(), String> {
         let lobby = matches!(self.life, Life::Lobby);
+        if change.cheats.is_some() && !lobby {
+            return Err(IN_THE_LOBBY.into());
+        }
         let mode = change
             .values
             .iter()

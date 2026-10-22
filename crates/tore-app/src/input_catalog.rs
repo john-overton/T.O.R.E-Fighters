@@ -70,6 +70,8 @@ pub struct Entry {
     pub mouse: &'static [&'static str],
     /// Stock keys that the player cannot remove (menu, window, exit).
     pub fixed: bool,
+    /// Built-in shortcut active only on a menu screen.
+    pub menu_context: bool,
 }
 impl Entry {
     pub fn replay_only(&self) -> bool {
@@ -128,6 +130,7 @@ const fn e(
         keys,
         mouse: &[],
         fixed: false,
+        menu_context: false,
     }
 }
 const fn cmd(
@@ -152,6 +155,7 @@ const fn fixed(
         keys,
         mouse: &[],
         fixed: true,
+        menu_context: false,
     }
 }
 const fn mouse(
@@ -169,7 +173,13 @@ const fn mouse(
         keys,
         mouse,
         fixed: false,
+        menu_context: false,
     }
+}
+const fn menu_shortcut(label: &'static str, keys: &'static [&'static str]) -> Entry {
+    let mut entry = fixed("", label, Group::Game, keys);
+    entry.menu_context = true;
+    entry
 }
 use Group::*;
 use Kind::{Axis, Direction, Head, Hold, Lever};
@@ -1133,6 +1143,16 @@ pub const ENTRIES: &[Entry] = &[
     cmd("bookmark", "Mark replay moment", Game, &["Ctrl-b"]),
     cmd("restart", "Restart flight", Game, &[]),
     cmd("key:F11", "Keyboard help", Game, &["F11"]),
+    menu_shortcut(
+        "Multiplayer ? menu (controller Menu also opens it)",
+        &["F1"],
+    ),
+    menu_shortcut("Multiplayer ? menu: return to main menu", &["M"]),
+    menu_shortcut("Multiplayer ? menu: exit", &["X"]),
+    menu_shortcut(
+        "Lobby Settings: apply and close (Escape discards)",
+        &["F10"],
+    ),
     fixed("menu-up", "Menu up", Game, &["ArrowUp"]),
     fixed("menu-down", "Menu down", Game, &["ArrowDown"]),
     fixed("menu-left", "Menu left", Game, &["ArrowLeft"]),
@@ -1281,7 +1301,7 @@ pub fn stock_airframes(key: &str, action: &str) -> Airframes {
 /// Menu-only rows use the keyboard's built-in navigation; their stock keys are
 /// not flight shortcuts and are never disabled by remapping.
 pub fn menu_only(entry: &Entry) -> bool {
-    entry.action.starts_with("menu-")
+    entry.menu_context || entry.action.starts_with("menu-")
 }
 
 /// Human name of a keyboard shortcut in `Input::key` naming.

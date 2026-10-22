@@ -1355,3 +1355,11 @@ combination, so Ctrl+B marks a moment only in flight.
 During flight preparation, flight controls remain paused. Escape cancels a
 multiplayer join or pending content check and returns to the connection screen.
 Window close and resize remain available. See [loading screen](spec/loading-screen.md).
+
+### Multiplayer menu navigation
+
+The [multiplayer menu specification](spec/multiplayer-menus.md) defines the
+shared ? dropdown: F1 or controller Menu opens it, arrows and Enter/A choose,
+M returns to main and X exits while open. Controller Left/Right move between
+lounge controls; Up/Down scroll the focused Games or Players list. Settings
+Close/F10 applies its draft and Escape discards it.

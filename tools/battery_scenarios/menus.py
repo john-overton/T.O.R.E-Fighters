@@ -20,6 +20,7 @@ NORMAL_STATES = [
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "graphics-middle",
     "graphics-bottom", "graphics-scale", "graphics-shadows", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
+    "direct-help", "internet-help", "lobby-help", "lobby-internet", "lobby-internet-help", "lobby-internet-settings", "lobby-internet-players",
     "direct", "direct-games", "direct-trying", "direct-refused", "direct-options",
     "internet", "internet-games", "internet-joining", "internet-options", "internet-unreachable",
     # Stage K (slice K7b): the Rejoin mark, the Host row, standby marks, Release and a reserved slot.

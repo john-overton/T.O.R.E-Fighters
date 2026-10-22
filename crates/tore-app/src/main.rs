@@ -104,6 +104,7 @@ mod mig29_animation;
 mod mirrors;
 mod missile_acceptance;
 mod missile_sag;
+mod multiplayer_menu;
 mod navigation;
 mod net;
 mod night_glow;
@@ -513,6 +514,7 @@ struct App {
     internet: internet_screen::app::Internet,
     /// The lobby screen and the pages opened over it (EF8).
     lobby: lobby_screen::app::Lobby,
+    multiplayer_menu: multiplayer_menu::Menu,
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -1387,6 +1389,30 @@ impl App {
             "menu-back" | "menu" => Some("Escape"),
             _ => None,
         };
+        if self.multiplayer_menu_active() {
+            let menu_key = if name == "menu" { Some("F1") } else { key };
+            if let Some(action) = menu_key.and_then(|key| self.multiplayer_menu.key(key)) {
+                return action;
+            }
+            // Left and Right walk lounge controls, Up and Down operate their lists.
+            if (self.direct_open() || self.internet_open())
+                && matches!(key, Some("ArrowLeft" | "ArrowRight"))
+            {
+                let shift = key == Some("ArrowLeft");
+                if let Some(screen) = &mut self.direct.screen
+                    && self.lobby.screen.is_none()
+                {
+                    let outcome = screen.key("Tab", shift);
+                    return self.direct_outcome(outcome);
+                }
+                if let Some(screen) = &mut self.internet.screen
+                    && self.lobby.screen.is_none()
+                {
+                    let outcome = screen.key("Tab", shift);
+                    return self.internet_outcome(outcome);
+                }
+            }
+        }
         // Controller menu buttons work the Sound screen while it is open.
         if let Some(screen) = &mut self.sound_screen {
             let Some(key) = key else {
@@ -3110,6 +3136,7 @@ impl App {
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
             Action::Sound => self.open_sound(false),
+            Action::MultiplayerMain => self.multiplayer_main(event_loop),
             Action::Direct => self.open_direct(),
             Action::DirectClose => self.close_direct(),
             Action::DirectLeave => self.leave_direct_session(event_loop),
@@ -3365,10 +3392,10 @@ impl App {
                     "T.O.R.E-Fighters - Lobby".to_string()
                 }
                 Screen::Main if self.direct.screen.is_some() => {
-                    "T.O.R.E-Fighters - Direct Connection".to_string()
+                    "T.O.R.E-Fighters - Direct Network Lounge".to_string()
                 }
                 Screen::Main if self.internet.screen.is_some() => {
-                    "T.O.R.E-Fighters - Internet Lobby".to_string()
+                    "T.O.R.E-Fighters - Internet Lounge".to_string()
                 }
                 Screen::Main => "T.O.R.E-Fighters - Choose Activity".to_string(),
                 Screen::Quick => "T.O.R.E-Fighters - Quick Mission Creator".to_string(),
@@ -3642,6 +3669,14 @@ impl App {
                 self.toggle_fullscreen();
             }
             return Action::None;
+        }
+        if event.pressed
+            && self.multiplayer_menu_active()
+            && !((self.modifiers.alt_key() && name == "F4")
+                || (self.modifiers.super_key() && name == "q"))
+            && let Some(action) = self.multiplayer_menu.key(&name)
+        {
+            return action;
         }
         // The replay viewer takes the window's keys itself (`replay_event`);
         // a script's come here (the rest it leaves to this function, with
@@ -4218,6 +4253,29 @@ impl ApplicationHandler for App {
             let limit = renderer.frame_limit();
             let window = self.pace_window();
             self.next_frame = self.pacer.soonest(limit, window, Instant::now());
+        }
+        if self.multiplayer_menu_active()
+            && let WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } = &event
+        {
+            let point = self
+                .renderer
+                .as_ref()
+                .and_then(|r| self.pointer.and_then(|(x, y)| r.viewport().point(x, y)))
+                .map(|(x, y)| (x as i32, y as i32));
+            if let Some(action) = self
+                .multiplayer_menu
+                .pointer(point, *state == ElementState::Pressed)
+            {
+                self.action(event_loop, action);
+                if let Some(renderer) = &self.renderer {
+                    renderer.window.request_redraw();
+                }
+                return;
+            }
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -6448,6 +6506,20 @@ impl ApplicationHandler for App {
                 }
                 let compose_ms = frame_start.elapsed().as_secs_f64() * 1000. - simulation_ms;
                 let present_start = Instant::now();
+                if matches!(self.screen, Screen::Main | Screen::Quick)
+                    && (self.direct.screen.is_some()
+                        || self.internet.screen.is_some()
+                        || self.lobby.screen.is_some())
+                    && let Some(kit) = self.direct.kit()
+                {
+                    ui_text::begin();
+                    if let Some(layer) = &menu_text {
+                        ui_text::replay(layer);
+                    }
+                    self.multiplayer_menu
+                        .draw(&mut menu::Canvas(&mut self.menu.pixels), &kit);
+                    menu_text = ui_text::finish();
+                }
                 renderer.set_menu_text(menu_text.as_ref());
                 renderer.show_menu_text(menu_text.is_some());
                 let readout = if self.screen == Screen::Flight {
@@ -6538,9 +6610,7 @@ impl ApplicationHandler for App {
         // A session ends politely when the game does; a hosted one stops its
         // host, which ends the mission for everyone.
         if let Some(session) = &mut self.net {
-            let now = session.now();
-            session.client.disconnect(now);
-            session.flush();
+            session.disconnect();
         }
         self.net = None;
         // Release GPU backends while the event loop's display connection is alive.
@@ -15490,6 +15560,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         direct: Default::default(),
         internet: Default::default(),
         lobby: Default::default(),
+        multiplayer_menu: Default::default(),
         connect,
         launch_creator,
         quick_loadout: stripped_loadout.clone(),

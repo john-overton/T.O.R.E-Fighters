@@ -7,16 +7,10 @@
 //!
 //! A left click on a row turns it to its next value and a right click to the
 //! one before (the Quick Mission creator's text buttons); the keyboard does
-//! the same with Right and Left. Each turn is one [`Edit`] the lobby sends to
-//! the host, which checks it whole and refuses it in words (shown at the
-//! foot of the panel); the panel shows the value the host's lobby state
-//! carries, never a guess.
-//!
-//! The Game page also holds the game's name and its password, two text
-//! lines the King applies with Enter. The Realism page edits the lobby
-//! mission's cheats ([`tore_sim::cheats::Cheats`]) and sends the whole
-//! mission again as a mission change; nothing changes a flying mission's
-//! cheats, so every client's prediction runs the same rules.
+//! the same with Right and Left. Changes remain in a local draft across tabs.
+//! Close or F10 sends one SettingsChange, including Realism; Escape discards.
+//! Enter stages name and password text. The host validates the combined edit
+//! and rebuilds the mission once at most. Realism stays fixed during flight.
 //!
 //! Everything about which row is shown, greyed and what a click does lives in
 //! plain functions of a [`Context`] (tested without a window); the
@@ -622,7 +616,7 @@ pub fn apply_password(ctx: &Context, text: &str) -> Result<Edit, String> {
 pub enum Answer {
     None,
     Close,
-    Edit(Edit),
+    Apply(SettingsChange),
 }
 
 /// Where a row is drawn and hit: its whole rectangle, its label's place and
@@ -692,6 +686,8 @@ pub struct SettingsPanel {
     shown_name: String,
     notice: Option<String>,
     ctx: Context,
+    original: Context,
+    password_change: Option<PasswordChange>,
     /// The first row of the window. The host row scrolls in when the page
     /// is taller than the window.
     first: usize,
@@ -728,6 +724,8 @@ impl SettingsPanel {
             .with_hint("type a password and press Enter"),
             shown_name: ctx.name.clone(),
             notice: None,
+            original: ctx.clone(),
+            password_change: None,
             ctx,
             first: 0,
             bar: ArrowBar::vertical((BAR_X, ROWS_TOP), VIEW_BOTTOM - ROWS_TOP),
@@ -737,12 +735,35 @@ impl SettingsPanel {
         panel
     }
 
-    /// The lobby's state changed: the rows follow it.
+    /// Keep local edits across updates; discard when permissions or phase change.
     pub fn set_context(&mut self, ctx: Context) {
-        if ctx != self.ctx {
-            self.ctx = ctx;
-            self.refresh();
+        // Merge fresh authoritative values into untouched fields, preserving
+        // edited values. This also enables Realism if the mission arrives
+        // after the panel opened. Losing permission discards the draft.
+        if ctx.king != self.ctx.king || ctx.phase != self.ctx.phase {
+            self.ctx = ctx.clone();
+            self.password_change = None;
+            self.name.set_text(&ctx.name);
+            self.password.set_text("");
+        } else {
+            for &(number, value) in &ctx.settings {
+                if self.ctx.value(number) == self.original.value(number)
+                    && let Some((_, draft)) =
+                        self.ctx.settings.iter_mut().find(|(n, _)| *n == number)
+                {
+                    *draft = value;
+                }
+            }
+            if self.ctx.cheats == self.original.cheats {
+                self.ctx.cheats = ctx.cheats;
+            }
+            if self.ctx.name == self.original.name {
+                self.ctx.name.clone_from(&ctx.name);
+            }
+            self.ctx.players.clone_from(&ctx.players);
         }
+        self.original = ctx;
+        self.refresh();
     }
 
     fn refresh(&mut self) {
@@ -843,6 +864,9 @@ impl SettingsPanel {
     }
 
     fn reveal(&mut self) {
+        if self.selected == self.rows().len() {
+            return;
+        }
         let window = self.window();
         if self.selected < self.first {
             self.first = self.selected;
@@ -889,7 +913,7 @@ impl SettingsPanel {
 
     fn select(&mut self, index: usize) {
         let n = self.rows().len();
-        self.selected = index.min(n.saturating_sub(1));
+        self.selected = index.min(n);
         self.reveal();
     }
 
@@ -907,7 +931,8 @@ impl SettingsPanel {
                         if kind == Kind::Host && self.ctx.phase != LobbyPhase::Lobby {
                             self.notice = Some(PIN_IN_FLIGHT.into());
                         }
-                        Answer::Edit(edit)
+                        self.stage(edit);
+                        Answer::None
                     }
                     None => Answer::None,
                 }
@@ -927,7 +952,8 @@ impl SettingsPanel {
                 if kind == Kind::Password {
                     self.password.set_text("");
                 }
-                Answer::Edit(edit)
+                self.stage(edit);
+                Answer::None
             }
             Err(why) => {
                 self.notice = Some(why);
@@ -936,25 +962,113 @@ impl SettingsPanel {
         }
     }
 
+    fn stage(&mut self, edit: Edit) {
+        match edit {
+            Edit::Cheats(cheats) => self.ctx.cheats = Some(cheats),
+            Edit::Settings(change) => {
+                for (n, value) in change.values {
+                    if n == number::MODE && self.ctx.value(n) != Some(value) {
+                        let mode = settings::Mode::from_value(value).expect("row choice");
+                        for (id, current) in &mut self.ctx.settings {
+                            if let Some(setting) = settings::setting(*id)
+                                && setting.change == Change::InLobby
+                                && !matches!(*id, number::SNAPSHOT_RATE | number::MIN_PLAYERS)
+                            {
+                                *current = setting.default_in(mode);
+                            }
+                        }
+                    }
+                    if let Some((_, current)) =
+                        self.ctx.settings.iter_mut().find(|(id, _)| *id == n)
+                    {
+                        *current = value;
+                    }
+                }
+                if let Some(name) = change.name {
+                    self.ctx.name = name;
+                }
+                if let Some(password) = change.password {
+                    if let Some((_, value)) = self
+                        .ctx
+                        .settings
+                        .iter_mut()
+                        .find(|(n, _)| *n == number::PASSWORD)
+                    {
+                        *value = u32::from(matches!(password, PasswordChange::Set(_)));
+                    }
+                    self.password_change = Some(password);
+                }
+            }
+        }
+        self.refresh();
+    }
+
+    fn apply(&mut self) -> Answer {
+        let change = SettingsChange {
+            values: self
+                .ctx
+                .settings
+                .iter()
+                .copied()
+                .filter(|(n, v)| {
+                    *n != number::PASSWORD
+                        && self.original.value(*n) != Some(*v)
+                        && settings::setting(*n).is_none_or(|s| !s.pvp_only || self.ctx.pvp())
+                })
+                .collect(),
+            name: (self.ctx.name != self.original.name).then(|| self.ctx.name.clone()),
+            password: self.password_change.take(),
+            cheats: (self.ctx.cheats != self.original.cheats)
+                .then_some(self.ctx.cheats)
+                .flatten(),
+        };
+        if change == SettingsChange::default() {
+            Answer::Close
+        } else {
+            Answer::Apply(change)
+        }
+    }
+
     /// A key press by the window's name for it.
     pub fn key(&mut self, name: &str, shift: bool) -> Answer {
         let Some(kind) = self.kind() else {
-            return Answer::None;
+            return match name {
+                "Escape" => Answer::Close,
+                "F10" | "Enter" | "Space" | " " => self.apply(),
+                "ArrowUp" => {
+                    self.select(self.rows().len().saturating_sub(1));
+                    Answer::None
+                }
+                "ArrowDown" => {
+                    self.select(0);
+                    Answer::None
+                }
+                "Tab" => {
+                    self.go_to(self.page.step(!shift));
+                    Answer::None
+                }
+                _ => Answer::None,
+            };
         };
         let on_text = self.typing();
         match name {
             "Escape" => Answer::Close,
+            "F10" => self.apply(),
             "Tab" => {
                 self.go_to(self.page.step(!shift));
                 Answer::None
             }
             "ArrowDown" => {
-                self.select((self.selected + 1) % self.rows().len().max(1));
+                self.select(self.selected + 1);
                 Answer::None
             }
             "ArrowUp" => {
-                let n = self.rows().len().max(1);
-                self.select((self.selected + n - 1) % n);
+                let n = self.rows().len();
+                self.select(if self.selected == 0 {
+                    n
+                } else {
+                    self.selected - 1
+                });
                 Answer::None
             }
             "Enter" if on_text => self.apply_text(kind),
@@ -1054,7 +1168,7 @@ impl SettingsPanel {
             return Answer::None;
         }
         if self.close.release(point) == Outcome::Activated {
-            return Answer::Close;
+            return self.apply();
         }
         Answer::None
     }
@@ -1144,6 +1258,7 @@ impl SettingsPanel {
             self.kind()
                 .and_then(|kind| row_state(kind, &self.ctx).err())
         });
+        let foot = Some(foot.unwrap_or_else(|| "Close / F10 applies; Escape cancels.".into()));
         if let Some(foot) = foot {
             ui_text::text(
                 canvas,
@@ -1155,7 +1270,8 @@ impl SettingsPanel {
                 None,
             );
         }
-        self.close.draw(canvas, kit, false);
+        self.close
+            .draw(canvas, kit, self.selected == self.rows().len());
         self.bar.draw_rows(canvas, self.bar_rows());
     }
 }

@@ -1834,6 +1834,13 @@ impl NetSession {
         Some(build_mission(&spec, &self.resources))
     }
 
+    /// The shared polite disconnect used by Leave, Return to Main Menu and Exit.
+    pub fn disconnect(&mut self) {
+        let now = self.now();
+        self.client.disconnect(now);
+        self.flush();
+    }
+
     /// End Mission in flight. The hosting player, the King, ends the
     /// mission for everyone, who return to the lobby with their debriefs
     /// (and the King's game starts the next once the debrief is closed);

@@ -46,6 +46,8 @@ pub enum Action {
     DirectClose,
     /// Leaves the game session the Direct Connection screen started.
     DirectLeave,
+    /// Disconnect and return to the root menu.
+    MultiplayerMain,
     /// The Multi menu's Internet Lobby row: opens that screen (I4).
     Internet,
     /// Leaves the Internet Lobby screen.
@@ -123,10 +125,15 @@ impl State {
             // Authored rows (EF7, I4, agent decisions): the direct lobby for
             // friends and the public Internet Lobby. Retail's six rows (Serial,
             // Modem, IPX/SPX, TCP/IP, Disconnect, Airbase Assault) are not built.
-            2 => vec!["Direct Connection...".into(), "Internet Lobby...".into()],
+            2 => vec!["Direct Connection...".into(), "Internet...".into()],
             // Replays opens its screen directly.
             _ => vec![],
         }
+    }
+    pub fn hint(&self) -> Option<&'static str> {
+        (self.open == Some(2)
+            && (self.hover == Some(Target::Item(1)) || self.focus == Some(Target::Item(1))))
+        .then_some("Open the Internet Lounge to find or host a game.")
     }
     fn popup_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
         (
@@ -645,6 +652,15 @@ impl Menu {
                 }
                 canvas.text(menu_font, label, x + 9, y + 6 + row as i32 * 20, None);
             }
+        }
+        if self.state.toast.is_none()
+            && let Some(hint) = self.state.hint()
+        {
+            canvas.rect(
+                (14, 449, text_width(body, hint) + 20, 23),
+                [22, 31, 43, 255],
+            );
+            canvas.text(body, hint, 24, 453, Some([235, 239, 243]));
         }
         if let Some((message, _)) = &self.state.toast {
             let width = (text_width(body, message) + 20).min(610);

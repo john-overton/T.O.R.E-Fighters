@@ -1182,9 +1182,7 @@ impl App {
             .filter(|s| s.client.clone_stats().snapshots > 0)
             .map(|s| s.resources());
         if let Some(session) = &mut self.net {
-            let now = session.now();
-            session.client.disconnect(now);
-            session.flush();
+            session.disconnect();
         }
         if let Some(host) = self.net.as_mut().and_then(|s| s.hosting.take()) {
             // Host teardown may wait for an in-progress mission build. Keep

@@ -24,7 +24,7 @@ pub const PIECES: &[&str] = &[
     // Fonts: panel text (typed text too), its dim copy, list text, button
     // labels. Text fields are plain grey boxes (John, 2026-10-01), so the
     // retail edit control's `EDITL/M/R` and `WHEELFNT` are not in the kit.
-    "PANELFNT", "PANELFND", "SMLFONT", "FONTACT", "FONTACD", "FONTDFT", "FONTDFD",
+    "MENUFONT", "PANELFNT", "PANELFND", "SMLFONT", "FONTACT", "FONTACD", "FONTDFT", "FONTDFD",
     // Lists and the page box.
     "LISTLFT", "LISTMID", "LISTRT", "LISTHI", "PAGEBOX", // Check boxes.
     "CHECK00", "CHECK01", "CHECK02", "CHECK03", "CHECK04", "CHECK05", "CHECK06",
@@ -259,6 +259,7 @@ impl Kit {
         match title {
             super::header::Title::Direct => self.header.as_ref(),
             super::header::Title::Internet => self.internet_header.as_ref(),
+            super::header::Title::DirectGame | super::header::Title::InternetGame => None,
         }
     }
 
