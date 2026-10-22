@@ -702,6 +702,10 @@ The emission and point-light rules are in [night glow](../spec/explosions.md#nig
 
 `python3 tools/battery.py --scenario 'render-*' --windows 1` runs windowed captures
 (through the wrapper, one window at a time) that reproduce drawing faults.
+`render-ah64-stub-wing-pylons` and `render-ah64-stub-wing-at12` use the CPU stores
+audit to check that both Apache hanger rows meet the low stub wing rather than the rotor disk. They
+check actual rendered geometry and need an imported profile, with no window.
+
 The two `render-capture-*-deterministic` cases repeat a bare flight or terrain
 capture three times and compare complete PPM bytes. They fix launch time,
 disable controllers and keep focus-related pause presentation stable.

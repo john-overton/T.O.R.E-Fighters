@@ -136,7 +136,7 @@ Every number below is fitted (agent decision).
 | Stations drawn | External ones (Centerline, Fuselage, Wing, Wingtip) that held something at mission start; not guns or internal bays |
 | Store look | The weapon's own shape (the same mesh it flies with after release) refitted to the real store's size ([store sizes](#store-sizes)). Rocket pods: a grey-green eight-sided pod of the real pod's size (LAU-61 5.5 by 1.38 ft, LAU-10 8.3 by 1.25, B-8M1 8.9 by 1.71, B-13L 11.7 by 1.35; any other 8.5 by 1.4). Fuel tanks: a light grey pod 13 ft by 2 ft at 2,000 lb of fuel, scaled by the cube root of its fuel (a 330 US gallon tank is 13.3 by 2.05 ft; the real one is about 12.9 by 2.1). A store with no shape: a plain body 8 ft by 0.9 ft |
 | Stores on one pylon | One at the pylon point. Two hang off the sides of a small bar at the pylon's foot, one each side, their centre lines level with the bar's middle and at its ends, as a wingtip missile sits on the tip (John 2026-10-13: "the panel should be a small bar on the pylon and ordnance hangs to the side"): out from the pylon's middle by the pylon's half thickness (0.14 ft), a 0.1 ft gap and the store's body radius, or 0.36 of its width across the fins if more, so two sets of fins at 45 degrees clear each other (AIM-9 0.75 ft, Mk 82 0.69 ft, Maverick 0.85 ft). Three as a triple ejector rack: one each side of the bar and the third under it. Four as two pairs one behind another (a multiple ejector rack), the front pair first. More: triple racks one behind another, 1.05 store lengths apart. The layout keeps the loaded count's slots; the highest slot empties first. The simulation places them ([released from](#rules)) and the drawing hangs them there |
-| Pylon | A grey slab 0.28 ft thick, from the top of the store's body (its lugs, not its fin tips) or a rack's bar up into the model's underside (1 ft, see [pylon depth](#pylon-depth)), 0.02 ft into it (retail wings are single faces, so more would show on top). Its length is 0.45 store lengths, at least twice its depth and at most 0.7 store lengths (1.2 to 8 ft), cut short where the underside ends (a pylon does not run out ahead of a leading edge), and its top follows the underside from end to end. The underside is the lowest face of the clean model up to 12 ft above the lugs, straight above or up to 3 ft inboard |
+| Pylon | A grey slab 0.28 ft thick, from the top of the store's body (its lugs, not its fin tips) or a rack's bar up into the model's underside (1 ft, see [pylon depth](#pylon-depth)), 0.02 ft into it (retail wings are single faces, so more would show on top). Its length is 0.45 store lengths, at least twice its depth and at most 0.7 store lengths (1.2 to 8 ft), cut short where the underside ends (a pylon does not run out ahead of a leading edge), and its top follows the underside from end to end. The underside is the lowest face of the clean model up to 12 ft above the lugs, straight above or up to 3 ft inboard, preferring a nearby short attachment over a distant overhead surface ([Apache correction](#apache-stub-wing-pylon-attachment)) |
 | Rack | A bar 0.25 ft deep across the pylon's foot, reaching out to the centre lines of the stores beside it, 0.7 of the pylon's length (plus the racks one behind another) |
 | Fin roll | Every weapon shape is rolled about its body's centre line so its fins stand in an X, 45 degrees from straight out and straight up and down, so no fin points into the pylon, the wing or body above, or the store beside it (John 2026-10-13: "ordnance needs to be rotated 45 degrees to make sure fins don't clip and are perpendicular to pylons and the fuselage as best as possible"). The roll is measured per retail shape, not assumed: the fin tips' clock about the body (the corners more than 1.6 body half widths out, their angles averaged over a quarter turn). A "+" shape (clock 0) turns 45 degrees; a shape already in an X (clock about 45) is not turned; a shape whose tips agree on no clock (agreement under 0.5 of 1) is not turned. One roll serves every mount (under a pylon, beside a bar, on a wingtip, on a rail), since an X is the same seen from below or from the side. The rolled shape is the one drawn everywhere the store is: on the pylon, in flight after release (so it does not turn at release), for the player, AI aircraft, network peers, replays and previews. See [fin roll by shape](#fin-roll-by-shape). Opinionated, John 2026-10-13; the measuring rule and one roll per shape are agent decisions |
 | Wingtip | Nothing drawn under a wingtip store ([rules](#rules)) |
@@ -694,6 +694,46 @@ review request. The twin bar remains the game's simplified launcher;
 the [US Army Mi-24 reference](https://odin.t2com.army.mil/WEG/Asset/Mi-24_%28Hind%29_Russian_Attack_Helicopter)
 places the four AT-2s on two underwing rails. No rotor, flight controller,
 weapon capacity or guidance behaviour changes.
+
+### Apache stub-wing pylon attachment
+
+**Fitted**, agent correction under John's 2026-10-21 pylon review request.
+The renderer prefers a short attachment to the nearby wing over a distant
+surface directly overhead. If its first surface is more than 2.5 ft above
+the store lugs or rack bar, it checks up to 3 ft inboard in half-foot steps
+and takes the first surface within that height. The 2.5 ft threshold is the
+existing 1 ft wing depth plus the 1.5 ft surface-following tolerance. If
+the mesh middle still sees only the distant surface, the hanger moves toward
+the station origin in quarter-foot steps, up to 12 ft, stopping at the first
+short attachment. This also handles the Apache's AT-12 (`SWNGR.SH`), whose
+mesh middle is aft of the stub wing. The store itself never moves. When
+there is no such nearby surface, the existing attachment remains. The rule
+applies to every aircraft, including paired and empty pylons.
+
+On `AH64.PT` row 6, the station sampler correctly finds the stub wing at
+about -0.083 ft. Drawing starts higher, at the already placed missile, so
+the rotor at about +6.33 ft enters the renderer's 12 ft upward search.
+That directly overhead hit previously hid the nearby wing inboard, producing
+a slab about 7.4 ft tall. The short attachment now meets the stub wing;
+its top still sinks 0.02 ft into the model. Pylon length and surface-following
+use the same selected surface. Store positions, release points, capacities,
+weapon behaviour, simulation, protocol and replay formats are unchanged.
+
+The supported default Apache load is two `LAU61.JT` rocket pods and two
+`AIM9M.JT` missiles, plus its gun. Neither a Hellfire weapon nor an M299
+four-rail launcher or M261 pod is supported by this loadout. This correction
+does not relabel those weapons or add cosmetic missiles. Real Apache launcher
+support remains separate work; these are fitted pylons for the game's
+available stores, not a claim of exact real-aircraft carriage or retail parity.
+
+The CPU stores preview checks all 37 selectable aircraft with default and
+maximum current-candidate weapon loads, retaining installed tanks. This
+includes the Mi-24, CH-47, V-22, AV-8, Yak-141, A-10, Su-25, A-7, C-130,
+AC-130, Il-76, E-2 and E-3. Aircraft with no external weapon load stay clean;
+the roster has no AH-1. `render-ah64-stub-wing-pylons` and
+`render-ah64-stub-wing-at12` check the actual Apache hanger vertices. Synthetic
+tests cover paired and emptied racks with a rotor above a stub wing, an
+off-centre store mesh, and a genuine high wing without a lower surface.
 
 ### Derived smaller guided bomb models
 

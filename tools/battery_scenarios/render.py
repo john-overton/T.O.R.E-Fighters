@@ -5,6 +5,7 @@ They live apart from flight.py because their names start with `render-`, not
 compare repeated images byte for byte. See docs/testing/lane-flight.md#render-captures.
 """
 from pathlib import Path
+import re
 
 from battery import Scenario, Step
 from battery_scenarios.flight import frame_problems
@@ -36,6 +37,19 @@ def console_problems(output: str) -> list[str]:
     return problems
 
 
+def stub_wing_problems(output: str) -> list[str]:
+    """The Apache's actual hanger vertices meet the low stub wing, not its rotor."""
+    rows = {int(row): (float(low), float(high)) for row, low, high in re.findall(
+        r"Audit hanger: ah64 row=(\d+) bottom=(-?[\d.]+) top=(-?[\d.]+)", output)}
+    problems = []
+    for row in (5, 6):
+        if row not in rows:
+            problems.append(f"missing Apache hanger row {row}")
+        elif not (-1.5 <= rows[row][0] < rows[row][1] <= 1.0):
+            problems.append(f"Apache row {row} attaches beyond its stub wing: {rows[row]}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     """Windowed art inspections and exact repeated-capture checks."""
     stable = []
@@ -54,6 +68,25 @@ def scenarios() -> list[Scenario]:
             notes="Bare captures hold the prepared state, independent of startup and GPU initialization time.",
         ))
     return stable + [
+        Scenario(
+            name="render-ah64-stub-wing-pylons", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_AUDIT": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "ah64"},
+            expect=["Audit hanger: ah64 row=5", "Audit hanger: ah64 row=6"],
+            check=stub_wing_problems,
+            notes="Headless actual pylon geometry: the rotor must not hide the nearby stub wing.",
+        ),
+        Scenario(
+            name="render-ah64-stub-wing-at12", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_AUDIT": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "ah64",
+                 "TORE_STORES_PREVIEW_RECORDS": "5=AT12.JT:2,6=AT12.JT:2"},
+            expect=["Audit hanger: ah64 row=5", "Audit hanger: ah64 row=6"],
+            check=stub_wing_problems,
+            notes="An off-centre missile mesh keeps its pylon under the stub wing without moving the missile.",
+        ),
         Scenario(
             name="render-night-light-slots",
             lane="flight",

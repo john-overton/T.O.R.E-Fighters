@@ -135,6 +135,57 @@ pub fn run() -> AppResult<()> {
         // Opt-in to the existing ordnance-screen Cheat for geometry checks
         // of real carriage that the retail compatibility masks disallow.
         loadout.cheat = std::env::var_os("TORE_STORES_PREVIEW_CHEAT").is_some();
+        if std::env::var_os("TORE_STORES_PREVIEW_CATALOG").is_some() {
+            for row in loadout.editable_stations() {
+                if let Some(slot) = row.weapon {
+                    for name in tore_sim::combat::loadout::SUPPORTED_WEAPONS {
+                        let Some(bytes) = resources.get(*name) else {
+                            continue;
+                        };
+                        let weapon = tore_formats::weapons::Weapon::parse(name, bytes)?;
+                        let capacity = loadout.capacity(slot, &weapon);
+                        if capacity > 0 {
+                            println!(
+                                "Preview choice: {short} row={} {name}:{capacity}",
+                                row.hardpoint
+                            );
+                        }
+                    }
+                }
+                if let Some(slot) = row.tank {
+                    for (name, bytes) in resources.iter().filter(|(name, _)| name.ends_with(".GAS"))
+                    {
+                        let tank = live::TankStore::parse(name, bytes)?;
+                        let capacity = loadout.tank_capacity(slot, &tank);
+                        if capacity > 0 {
+                            println!(
+                                "Preview choice: {short} row={} {name}:{capacity}",
+                                row.hardpoint
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Fill each row with its current candidate through the same capacity
+        // rules as Load Ordnance. An installed tank keeps its shared row.
+        if std::env::var_os("TORE_STORES_PREVIEW_FULL").is_some() {
+            for row in loadout.editable_stations() {
+                if let Some(tank) = row
+                    .tank
+                    .filter(|&t| loadout.configuration.tanks[t].quantity > 0)
+                {
+                    if let Some(store) = loadout.configuration.tanks[tank].store.clone() {
+                        loadout.select_tank(tank, store)?;
+                    }
+                } else if let Some(slot) = row.weapon {
+                    let weapon = loadout.configuration.stations[slot].weapon.clone();
+                    if loadout.capacity(slot, &weapon) > 0 {
+                        loadout.select(slot, weapon)?;
+                    }
+                }
+            }
+        }
         // Development fixtures use the ordnance screen's compatibility and
         // selection path, keyed by source row, not by weapon-slot index.
         for entry in std::env::var("TORE_STORES_PREVIEW_RECORDS")
@@ -1217,6 +1268,11 @@ fn audit(
                 art,
                 &[[128; 3]; 256],
             );
+            let low = hangers.chunks_exact(10).map(|v| v[1]).reduce(f32::min);
+            let high = hangers.chunks_exact(10).map(|v| v[1]).reduce(f32::max);
+            if let (Some(low), Some(high)) = (low, high) {
+                println!("Audit hanger: {short} row={row} bottom={low:.3} top={high:.3}");
+            }
             for place in crate::pylons::hung(store)
                 .into_iter()
                 .filter(|p| p.held && p.side == 0)
@@ -1266,12 +1322,13 @@ fn audit(
                     .and_then(crate::store_sizes::body)
                     .map_or(store.size().length / 2., |b| b.along[1]);
                 let nose = place.centre[2] + nose_offset;
+                let ahead =
+                    chord.map_or_else(|| "unknown".to_owned(), |c| format!("{:.2}", nose - c[1]));
                 println!(
-                    "Audit pylon: {short} row={row} shape={} centre={:.2?} pylon={:.2?} chord={chord:.2?} hanger_front={front:.2?} store_front={nose:.2} ahead={:.2}",
+                    "Audit pylon: {short} row={row} shape={} centre={:.2?} pylon={:.2?} chord={chord:.2?} hanger_front={front:.2?} store_front={nose:.2} ahead={ahead}",
                     store.shape.as_deref().unwrap_or("body"),
                     place.centre,
                     place.pylon.point,
-                    chord.map_or(f64::NAN, |c| nose - c[1])
                 );
             }
         }
