@@ -1,0 +1,16 @@
+tore-mission 1
+# A starting Quick Mission for tore-server: two friendly wings against two
+# enemy wings over Ukraine. Every line is described in DEDICATED-SERVER.md,
+# "The mission file". Run `tore-server --config server.conf --check` after a
+# change to see the planes and confirm your import can fly it.
+theater UKR
+condition clear
+start airborne 20000
+separation-nm 20
+preset free
+guns-only no
+wing friendly 1 F18.PT 4 experienced
+wing friendly 2 F14.PT 2 average
+wing enemy 1 MIG29.PT 4 experienced
+wing enemy 2 SU27.PT 2 ace
+cheats none

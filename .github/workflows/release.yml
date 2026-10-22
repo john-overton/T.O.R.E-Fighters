@@ -101,6 +101,15 @@ jobs:
           echo "Build version $version"
       - name: Build release binaries
         run: cargo build --release --locked -p tore-app -p tore-extract
+      # The dedicated server (docs/DEDICATED-SERVER.md) ships as its own
+      # archive for Windows x86_64, both macOS architectures and Linux; the
+      # 32-bit Windows job does not build it (agent decision: the game's x86
+      # MSI is for old player machines, not servers). It is a cargo command of
+      # its own because one command for both would unify their dependencies'
+      # features, which could change the game's binaries.
+      - name: Build the dedicated server
+        if: ${{ !matrix.target }}
+        run: cargo build --release --locked -p tore-server
       - name: Check release binaries
         shell: bash
         run: |
@@ -128,17 +137,18 @@ jobs:
         run: |
           out="target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
           mkdir -p dist/symbols
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            cp "$out/tore_app.pdb" "$out/tore_extract.pdb" dist/symbols/
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            for binary in tore-app tore-extract; do
+          binaries=(tore-app tore-extract)
+          # The dedicated server, where this job built it (above).
+          if [ -z "${CARGO_BUILD_TARGET:-}" ]; then binaries+=(tore-server); fi
+          for binary in "${binaries[@]}"; do
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              cp "$out/${binary//-/_}.pdb" dist/symbols/
+            elif [ "$RUNNER_OS" = "macOS" ]; then
               dsymutil "$out/$binary" -o "dist/symbols/$binary.dSYM"
-            done
-          else
-            for binary in tore-app tore-extract; do
+            else
               objcopy --only-keep-debug "$out/$binary" "dist/symbols/$binary.debug"
-            done
-          fi
+            fi
+          done
           git rev-parse HEAD > dist/symbols/commit.txt
           echo "$TORE_BUILD_VERSION" > dist/symbols/version.txt
       - name: Upload matching debug symbols
@@ -178,6 +188,30 @@ jobs:
             dist/*.AppImage
             dist/*.dmg
             dist/*.msi
+
+      # tools/package/package_server.py stages the server with its guide, the
+      # license, the third-party notices and the sample server.conf and
+      # mission.txt; runs check_assets.py, check_runtime_dependencies.py (with
+      # the 2.35 glibc floor on Linux) and `tore-server --version`, which must
+      # print the stamped version; writes tore-server-<version>-<platform>
+      # (.tar.gz, or .zip on Windows) and its .sha256 into dist/server/; then
+      # scans the archive and runs `--version` again from an unpacked copy.
+      # dist/server/ keeps it out of the packages-* upload above. Unsigned,
+      # like the game.
+      - name: Package the dedicated server
+        if: ${{ !matrix.target }}
+        shell: bash
+        run: |
+          floor=()
+          if [ "$RUNNER_OS" = "Linux" ]; then floor=(--max-glibc 2.35); fi
+          python tools/package/package_server.py --version "$TORE_BUILD_VERSION" "${floor[@]}"
+      - name: Upload the dedicated server
+        if: ${{ !matrix.target }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-${{ matrix.os }}
+          if-no-files-found: error
+          path: dist/server/
 
       # The master server (docs/MASTER-SERVER.md) is a Linux program, so only
       # the Linux job builds it. It builds on the same Ubuntu 22.04 runner as
@@ -240,6 +274,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: master-*
+          merge-multiple: true
+          path: dist
+      # The dedicated server's archives (server-*), one per platform.
+      - name: Download the dedicated server
+        uses: actions/download-artifact@v8
+        with:
+          pattern: server-*
           merge-multiple: true
           path: dist
       - name: List packages
