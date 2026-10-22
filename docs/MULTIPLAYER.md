@@ -148,7 +148,7 @@ lobby has no King. The King's settings in the table above are phase 2.
 ([architecture](ARCHITECTURE.md#the-lobby))
 
 *Built (EF7, 2026-10-01): finding and joining.* Choose Activity's Multi menu
-opens the **Direct Connection** screen, the first half of the flow above. It
+opens the **Direct Network Lounge** screen, the first half of the flow above. It
 lists the games found on the local network (name, players, whether they are in
 the lobby or flying, a lock for a password, another build shown as such), shows
 the selected game's mission and players, joins the selected game or a typed
@@ -226,7 +226,10 @@ file sets every setting by name. How it works and each agent decision:
 *Built on the screen (F2-L, 2026-10-05):* **Settings...** opens the panel for
 every player (four pages: Game, Revival, Scoring and Realism; a click turns a
 row forward, a right click back; greyed for anyone but the King and for a row
-that does not apply). **Players...** (the King, for the player selected in
+that does not apply). Edits stay local across tabs. Close or F10 applies once;
+Escape discards. Realism, Friendly Fire and Loadouts share at most one mission
+refresh. The [menu specification](spec/multiplayer-menus.md) defines the
+names, list geometry, shortcuts and safe ? menu exits. **Players...** (the King, for the player selected in
 Players) gives the crown or kicks. The King's right click on a slot closes it,
 opens it again, or keeps it for the player selected in Players. While the
 mission flies the Loadout button reads **Watch**. The lobby's head sums the
@@ -286,7 +289,7 @@ is; Messages moves three lines a notch). The arrow keys and the controller
 still move the selection, and the list follows it. When everything fits, the
 arrows and the track are still drawn and the thumb is absent, so a click
 does nothing and nothing shifts. The Settings panel's pages use the same bar
-on the right of the rows. Direct Connection and the Internet Lobby use it
+on the right of the rows. Both lounges use it on Games, Players and Messages
 on their games lists, in place of the PREV and NEXT rocker, and on Messages.
 The bar is drawn by the game, not from slider pieces in the import.
 
@@ -1198,9 +1201,9 @@ the [last table of decisions](#decisions):* the [architecture](ARCHITECTURE.md#m
 the [master's wire](formats/master-protocol.md) and
 [running it](MASTER-SERVER.md).
 
-- **The Internet Lobby.** Choose Activity's Multi menu, *Internet
-  Lobby...*, opens a screen in Direct Connection's look whose title reads
-  INTERNET LOBBY. It lists the games on the master, refreshed every 15
+- **The Internet Lounge.** Choose Activity's Multi menu, *Internet...*,
+  opens a screen in the Direct Network Lounge's look whose title reads
+  INTERNET LOUNGE. It lists the games on the master, refreshed every 15
   seconds: a lock for a password, the name, players over capacity, *Lobby*
   or *Flying*, and a small mark when the master expects the relay. Games of
   another build are hidden unless "Show other versions" is ticked, and then
@@ -1653,7 +1656,7 @@ Made by John on 2026-10-01 for stages E and F
 | Observers and chat | John, 2026-10-01: observers cannot chat to the active players, but can talk amongst themselves. While a mission flies, a connection with no plane (in the lobby, not flying) is an observer. *The lead's reading of who hears whom, implemented in EF6:* an observer's lines go only to other observers, and their All reaches only the other plane-less connections; observers still receive the flying players' lines to All; flying players send and receive as before; with nothing flying everyone is in the lobby and All reaches everyone |
 | After a mission | Everyone returns to the lobby, still connected |
 | Text fields | John, 2026-10-01: no red and grey text areas. Every field a player types in on a multiplayer screen (the lobby's chat line and Kick reason, Connect to, the Options port, password and game name) is a plain grey recessed box with readable panel text, like NEWNET's Callsign field. Retail's red edit control (`EDITL/M/R`, wide-spaced `WHEELFNT`) is not used anywhere, and the widget kit no longer carries it |
-| Screen background | John, 2026-10-05, replacing the 2026-10-01 look (the red `MODEM CONNECTION` photograph with `NETIPX3`'s title bar over it): the screens draw `NETIPX3` alone, its grey photograph under its own title bar (its top 77 rows: the chrome, the badge, the "?" help bar). The retail lettering NETWORK CONNECTION is covered with a copy of the bar's own texture (from the player's import, in memory) and the lettering DIRECT NETWORK CONNECTION, shipped as `assets/direct-network-connection-title.png` (the words in Liberation Sans, open licensed, over a dark offset copy as a shadow, on a transparent background, no retail pixels; John first set it in Helvetica and swapped it for this on 2026-10-05 so it ships cleanly), is drawn over it, fixed to the bar's top right. A `DirectNetworkConnection.png` in the data folder, if there, is used instead of the shipped lettering (any size up to 640 wide, fixed to the top right, transparency honoured). That file is the player's own and is never in the repository or a package if it carries retail's badge or texture |
+| Screen background | John, 2026-10-05, replacing the 2026-10-01 look (the red `MODEM CONNECTION` photograph with `NETIPX3`'s title bar over it): the screens draw `NETIPX3` alone, its grey photograph under its own title bar (its top 77 rows: the chrome, the badge, the "?" help bar). The retail lettering NETWORK CONNECTION is covered with a copy of the bar's own texture (from the player's import, in memory) and the lettering DIRECT NETWORK LOUNGE, shipped as `assets/direct-network-connection-title.png` (the words in Liberation Sans, open licensed, over a dark offset copy as a shadow, on a transparent background, no retail pixels; John first set it in Helvetica and swapped it for this on 2026-10-05 so it ships cleanly), is drawn over it, fixed to the bar's top right. A `DirectNetworkConnection.png` in the data folder, if there, is used instead of the shipped lettering (any size up to 640 wide, fixed to the top right, transparency honoured). That file is the player's own and is never in the repository or a package if it carries retail's badge or texture |
 | Platform beside the name | John, 2026-10-05: the lobby shows each player's platform, a Windows, macOS or Linux mark, next to the player's name. *Built (agent decisions):* each game sends the system it was built for when it joins (Windows, macOS, Linux, or unknown for any other), and the host lists it with each player in the lobby state (protocol 7, [the wire](formats/net-protocol.md#connecting)). It is only shown; nothing in the session depends on it. Drawing the marks is the lobby screen's part, a separate change |
 | Three-machine test | John, 2026-10-05: ran the local three-platform test (macOS, Linux and Windows, protocol 7 builds from `48d62dac`) and confirmed it works. Recorded from his report: no logs, frame figures or list of what was flown were kept, and which machine hosted was not noted |
 
@@ -1676,7 +1679,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Port mapping | On by default while hosting, with a switch; the mapping is removed when hosting stops |
 | Relay cap | New relay channels are refused at 95 percent of 800 GB a month and open ones closed at 100 percent; the relay is on; a stalled relayed game stays connected (framed keepalives); John confirms the plan's transfer allowance on the account |
 | Master abuse limits | Approved as in the [master protocol's limits](formats/master-protocol.md) |
-| Internet Lobby title | Lettered like DIRECT NETWORK CONNECTION; a player's own `InternetLobby.png` takes its place |
+| Internet Lounge title | INTERNET LOUNGE, lettered like DIRECT NETWORK LOUNGE; a player's own `InternetLobby.png` takes its place. Game lobbies have their own origin-specific titles ([specification](spec/multiplayer-menus.md)) |
 | Master in releases | The release workflow also publishes a Linux `tore-master`, built on Ubuntu |
 | Respawn | Retail's revival (a new aircraft out of the battle, with the revival weapons), beside taking a free AI aircraft (`ai-slot`) and no respawn (`none`); pressing Join after a loss obeys the same rules |
 | Retail features in single player | U answers IFF, Show Target Info works (off by default), and the reply keys say "You lead this flight." when the player leads |
@@ -1788,9 +1791,9 @@ proposal the design is built on:
   hosting stops, and said in Messages.
 - **The relay's monthly cap.** *Agent proposal:* the relay stops taking new
   pairs at 95 percent of 800 GB a month, so the plan is never exceeded.
-- **The Internet Lobby's title.** *Agent proposal:* INTERNET LOBBY lettered
-  the way DIRECT NETWORK CONNECTION is (Liberation Sans with its shadow,
-  shipped), with a player's own `InternetLobby.png` taking its place.
+- **The Internet Lounge's title.** Resolved by John's 2026-10-22 request:
+  INTERNET LOUNGE, with origin-specific game lobby titles as defined in the
+  [menu specification](spec/multiplayer-menus.md).
 
 Raised by the stage L design (2026-10-05), each with the agent proposal the
 design is built on ([compatibility](ARCHITECTURE.md#compatibility)):

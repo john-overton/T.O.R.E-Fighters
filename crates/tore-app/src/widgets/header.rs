@@ -3,7 +3,7 @@
 //!
 //! The screens show retail's `NETIPX3` (the NETWORK CONNECTION picture, from
 //! the player's own import). The game covers the retail lettering with the
-//! bar's own texture and draws DIRECT NETWORK CONNECTION over it
+//! bar's own texture and draws DIRECT NETWORK LOUNGE over it
 //! ([`built_in`], `assets/direct-network-connection-title.png`: the words in
 //! Liberation Sans over a dark offset copy as a shadow, on a transparent
 //! background, no retail pixels; `tools/build_title_lettering.py` makes it). A player who wants other words saves a PNG named [`FILE`] in the
@@ -17,7 +17,7 @@
 //! repository or a package: a bar made from retail's carries retail's badge
 //! and stone texture (John, 2026-10-05, *opinionated*, requested).
 //!
-//! The Internet Lobby screen (slice I4) has its own words, INTERNET LOBBY
+//! The Internet Lobby screen (slice I4) has its own words, INTERNET LOUNGE
 //! ([`Title::Internet`], `assets/internet-lobby-title.png`, lettered the same
 //! way by `tools/build_title_lettering.py`), and its own player file,
 //! `InternetLobby.png`, which is read the same way.
@@ -34,10 +34,14 @@ const INTERNET_TITLE: &[u8] = include_bytes!("../../assets/internet-lobby-title.
 /// Which screen's words the title bar carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Title {
-    /// DIRECT NETWORK CONNECTION: the Direct Connection and lobby screens.
+    /// DIRECT NETWORK LOUNGE: the Direct Connection and lobby screens.
     Direct,
-    /// INTERNET LOBBY: the Internet Lobby screen.
+    /// INTERNET LOUNGE: the Internet Lobby screen.
     Internet,
+    /// DIRECT NETWORK GAME LOBBY.
+    DirectGame,
+    /// INTERNET GAME LOBBY.
+    InternetGame,
 }
 
 impl Title {
@@ -46,6 +50,8 @@ impl Title {
         match self {
             Self::Direct => FILE,
             Self::Internet => INTERNET_FILE,
+            Self::DirectGame => "DirectNetworkGameLobby.png",
+            Self::InternetGame => "InternetGameLobby.png",
         }
     }
 
@@ -53,6 +59,24 @@ impl Title {
     pub fn built_in(self) -> &'static Sprite {
         match self {
             Self::Direct => built_in(),
+            Self::DirectGame | Self::InternetGame => {
+                static DIRECT: OnceLock<Sprite> = OnceLock::new();
+                static INTERNET: OnceLock<Sprite> = OnceLock::new();
+                let (cache, bytes): (&OnceLock<Sprite>, &[u8]) = if self == Self::DirectGame {
+                    (
+                        &DIRECT,
+                        include_bytes!("../../assets/direct-game-lobby-title.png"),
+                    )
+                } else {
+                    (
+                        &INTERNET,
+                        include_bytes!("../../assets/internet-game-lobby-title.png"),
+                    )
+                };
+                cache.get_or_init(|| {
+                    sprite(decode_rows(bytes, WIDTH, ROWS).expect("game lobby title fits"))
+                })
+            }
             Self::Internet => {
                 static SPRITE: OnceLock<Sprite> = OnceLock::new();
                 SPRITE.get_or_init(|| {
@@ -219,7 +243,8 @@ mod tests {
         let rows: Vec<usize> = (0..title.height)
             .filter(|y| (0..title.width).any(|x| ink(x, *y)))
             .collect();
-        assert_eq!((columns[0], columns[columns.len() - 1]), (4, 445));
+        assert_eq!(columns[0], 4);
+        assert!(columns[columns.len() - 1] < 564);
         assert_eq!((rows[0], rows[rows.len() - 1]), (7, 30));
         assert_eq!(WIDTH - title.width + columns[0], 80);
     }
@@ -256,9 +281,38 @@ mod tests {
             .filter(|y| (0..title.width).any(|x| ink(x, *y)))
             .collect();
         // Starts where the other lettering does, x 80 on the canvas, and is
-        // the same height; INTERNET LOBBY is shorter than the other words.
+        // the same height; INTERNET LOUNGE is shorter than the other words.
         assert_eq!(WIDTH - title.width + columns[0], 80);
         assert_eq!((rows[0], rows[rows.len() - 1]), (7, 30));
         assert!(columns[columns.len() - 1] < 445);
+    }
+}
+
+#[cfg(test)]
+mod game_titles {
+    use super::*;
+    #[test]
+    fn four_distinct_titles_fit_inside_the_title_bar() {
+        let titles = [
+            Title::Direct,
+            Title::Internet,
+            Title::DirectGame,
+            Title::InternetGame,
+        ];
+        for (i, title) in titles.iter().enumerate() {
+            let image = title.built_in();
+            assert_eq!((image.width, image.height), (564, 36));
+            assert!(image.rgba.chunks_exact(4).any(|p| p[3] != 0));
+            for y in 0..image.height {
+                assert_eq!(
+                    image.rgba[(y * image.width + image.width - 1) * 4 + 3],
+                    0,
+                    "right edge clipped: {title:?}"
+                );
+            }
+            for other in &titles[..i] {
+                assert_ne!(image.rgba, other.built_in().rgba);
+            }
+        }
     }
 }

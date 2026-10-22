@@ -7,7 +7,8 @@ use crate::widgets::KitSource;
 use tore_net::packet::DiscoverAnswer;
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 6] = [
+pub const STATES: [&str; 7] = [
+    "direct-help",
     "direct",
     "direct-games",
     "direct-trying",
@@ -138,7 +139,7 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     screen.focus.set(Id::Callsign);
     screen.say("Searching for games on the local network (UDP port 26900)...");
     match state {
-        "direct" => {}
+        "direct" | "direct-help" => {}
         "direct-games" => {
             screen.full.set_checked(true);
             screen.set_found(sample_games());
@@ -204,5 +205,10 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     screen.refresh_buttons();
     let mut canvas = Canvas(pixels);
     screen.draw(&mut canvas);
+    if state == "direct-help" {
+        let mut menu = crate::multiplayer_menu::Menu::default();
+        menu.key("F1");
+        menu.draw(&mut Canvas(pixels), &screen.kit);
+    }
     Ok(())
 }

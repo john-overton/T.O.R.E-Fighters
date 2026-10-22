@@ -106,6 +106,7 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
         values: vec![(settings::number::FRIENDLY_FIRE, 0)],
         name: Some("Cobra's game".into()),
         password: Some(PasswordChange::Set("pw".into())),
+        cheats: None,
     };
 
     // The King's requests from anyone else: as EF4's.

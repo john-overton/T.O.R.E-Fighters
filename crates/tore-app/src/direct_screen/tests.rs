@@ -103,7 +103,7 @@ fn finish_lookup(s: &mut DirectScreen) -> Outcome {
 fn the_multi_menu_opens_this_screen() {
     use crate::menu::{Action, State};
     let mut menu = State::new(Vec::new());
-    assert_eq!(menu.items(2), ["Direct Connection...", "Internet Lobby..."]);
+    assert_eq!(menu.items(2), ["Direct Connection...", "Internet..."]);
     menu.open = Some(2);
     // The first row opens the screen.
     assert_eq!(menu.pointer(Some((150.0, 70.0))), Action::Hover);
@@ -125,7 +125,7 @@ fn tab_walks_the_controls_in_order_and_wraps() {
     // A first visit starts in the callsign.
     assert_eq!(s.focus.current(), Some(Id::Callsign));
     let mut seen = Vec::new();
-    for _ in 0..9 {
+    for _ in 0..10 {
         s.key("Tab", false);
         seen.push(s.focus.current().unwrap());
     }
@@ -135,6 +135,7 @@ fn tab_walks_the_controls_in_order_and_wraps() {
             Id::Address,
             Id::Full,
             Id::Games,
+            Id::Players,
             Id::Messages,
             Id::New,
             Id::Join,
@@ -290,7 +291,7 @@ fn full_games_show_only_when_asked_and_a_different_build_is_dimmed() {
     let mut s = with_games();
     // Five of six show: the full one is hidden.
     assert_eq!(s.games.len(), 5);
-    assert_eq!(s.games.pages(), 2);
+    assert_eq!(s.games.pages(), 1);
     let old = &s.games.rows()[3];
     assert!(old.dim, "another build is dimmed");
     assert_eq!(old.cells[3], Cell::Text("v0.1.2".into()));
@@ -954,4 +955,53 @@ fn a_loopback_address_and_a_network_address_with_one_port_are_one_game() {
     assert!(same_game(lan, lan));
     assert!(!same_game(lan, "192.168.1.21:5171".parse().unwrap()));
     assert!(!same_game(lan, "127.0.0.1:5172".parse().unwrap()));
+}
+
+#[test]
+fn lounge_lists_fill_the_boxes_and_scroll_by_all_inputs() {
+    let mut s = screen();
+    let rows: Vec<_> = (0..14).map(|i| Row::text(format!("Pilot {i}"))).collect();
+    s.games.set_rows(rows.clone());
+    s.players.set_rows(rows);
+    assert_eq!(s.games.visible_rows(), 5);
+    assert_eq!(s.players.visible_rows(), 5);
+    // Bottom row and the full-width right edge are inside each list.
+    assert!(s.games.row_at((290, 270)).is_some());
+    assert!(s.players.row_at((570, 270)).is_some());
+    for (id, x, bar) in [(Id::Games, 100., 303.), (Id::Players, 400., 581.)] {
+        s.players
+            .set_rows((0..14).map(|i| Row::text(format!("Pilot {i}"))).collect());
+        s.focus.set(id);
+        s.key("End", false);
+        let list = if id == Id::Games {
+            &s.games
+        } else {
+            &s.players
+        };
+        assert_eq!(list.first_row(), 9);
+        s.moved(Some((x, 220.)));
+        s.wheel(1);
+        let list = if id == Id::Games {
+            &s.games
+        } else {
+            &s.players
+        };
+        assert_eq!(list.first_row(), 8);
+        s.moved(Some((bar, 190.)));
+        s.button(true);
+        s.button(false);
+        let list = if id == Id::Games {
+            &s.games
+        } else {
+            &s.players
+        };
+        assert_eq!(list.first_row(), 7);
+        s.key("Home", false);
+        let list = if id == Id::Games {
+            &s.games
+        } else {
+            &s.players
+        };
+        assert_eq!(list.first_row(), 0);
+    }
 }

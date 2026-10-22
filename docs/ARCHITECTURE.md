@@ -5475,7 +5475,7 @@ The **Direct Connection** screen replaces the MULTI menu's stubs:
 
 The look (John, 2026-10-05; from 2026-10-01 it was `MODEM3`'s red photograph
 under `NETIPX3`'s title bar): `NETIPX3` alone, its grey photograph under its
-own title bar, which reads DIRECT NETWORK CONNECTION: the retail lettering is
+own title bar, which reads DIRECT NETWORK LOUNGE: the retail lettering is
 covered with a copy of the bar's own texture and the shipped lettering,
 `assets/direct-network-connection-title.png` (the words in Liberation Sans with
 a shadow, on a transparent background, no retail pixels), is drawn over it at
@@ -5588,7 +5588,7 @@ NEWNET's rectangles on `NETIPX3`, under its title bar or the player's. Everythin
 is an agent decision unless it is credited to John.
 
 - **Reaching it.** Choose Activity's Multi menu has two rows now, *Direct
-  Connection...* and *Internet Lobby...* (the public lobby of stage I: it still
+  Connection...* and *Internet...* (the public lobby of stage I: it still
   answers "coming soon"); retail's six rows (Serial, Modem, IPX/SPX, TCP/IP,
   Disconnect, Airbase Assault) are not built. The screen covers Choose
   Activity entirely, so the menu is not drawn under it; the window title reads
@@ -6697,8 +6697,8 @@ choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbe
 - **The game's name** is a text setting beside the numbers, changed any time.
 - **Realism** stays the mission's own cheats (John's spec: inherited from the
   Quick Mission settings and locked for every human). The Settings panel's
-  Realism page edits the lobby mission's cheats and sends it as a mission
-  change; nothing changes the mission's cheats in flight, so every client's
+  Realism page edits a local draft and applies it with other settings once
+  on Close, under protocol 65; nothing changes the mission's cheats in flight, so every client's
   prediction keeps running the same rules. *This replaces the earlier gap-fill*
   in the guide that gave the King the Cheat menu in flight (question 6).
 - **Stage I and K settings** are not here: what `public` does on the master
@@ -8200,10 +8200,9 @@ otherwise.
   ([the settings](#the-kings-settings)), each a label and a grey value box:
   a left click turns it to the next allowed value, a right click to the one
   before, wrapping round; Right, Left and Enter do the same from the keyboard,
-  Up and Down choose a row, Tab and Shift+Tab turn the page, Esc closes. A row
-  sends exactly one `SettingsChange` and shows the value the host's next lobby
-  state carries, never a guess; the host's refusal ("2 players are connected:
-  the limit cannot be lower.") reads at the foot of the panel. Rows turn
+  Up and Down choose a row, Tab and Shift+Tab turn the page. Edits stay local
+  across tabs. Close or F10 sends one combined `SettingsChange`; Escape discards.
+  A refusal after applying appears in lobby Messages. Rows turn
   through every allowed value in order, so the player limit takes up to 29
   clicks to cross its range (no step of five yet). A value off the list (a
   server's file gives a time limit of any whole minute) turns to the nearest
@@ -8222,10 +8221,9 @@ otherwise.
   has arrived. A click on a greyed row says why at the foot of the panel.
 - **Realism** is the lobby mission's own cheats: Damage (Normal, Invulnerable,
   Realistic), Enemy AI (Unchanged and the four levels) and the thirteen
-  switches of the in-flight Cheat menu that work. A click sends the whole
-  mission again with the changed cheats as a mission change (`Request::Cheats`,
-  `client.change_mission`); every player's copy rebuilds, and ready marks clear
-  as a mission change does. Guns only is the mission's own air combat setting
+  switches of the in-flight Cheat menu that work. The local draft is sent
+  once with the other settings on Close/F10. Every player's copy rebuilds at
+  most once and a Realism change clears ready marks. Guns only is the mission's own air combat setting
   and stays with Mission...; it is not a Realism row.
 - **Players.** For the selected player: **Give crown** (`pass_crown`, then the
   panel closes) and **Kick...**, which opens EF8's reason panel. The house is
@@ -8500,7 +8498,7 @@ A read-only survey of the code at `884f9916`, line numbers indicative:
 - **The simulator routes by address only.** `sim::SimNetwork` (`sim.rs`)
   delivers a datagram to the inbox bound at its destination; there is no
   translation, so routers must be added to it.
-- **The screen is a stub.** The Multi menu's second row, *Internet Lobby...*,
+- **The screen is a stub.** The Multi menu's second row, *Internet...*,
   answers "coming soon" (`menu.rs`, the toast branch for bar 2). The Direct
   Connection screen (`direct_screen/`), its search loop (`net/search.rs`,
   `Search`, `GameList`, `Compat`), the widget kit (`widgets/`) and the title
@@ -8732,9 +8730,9 @@ status lines and in its log.
 
 ### The Internet Lobby screen
 
-*Internet Lobby...* on the Multi menu opens it. It is the Direct Connection
+*Internet...* on the Multi menu opens it. It is the Direct Connection
 screen's sibling: the same `NETIPX3` background, panel, widgets and
-rectangles, with the title bar's lettering reading INTERNET LOBBY (a shipped
+rectangles, with the title bar's lettering reading INTERNET LOUNGE (a shipped
 `assets/internet-lobby-title.png`, made the way the Direct Connection
 lettering is, or the player's own `InternetLobby.png` in the data folder).
 
@@ -11756,3 +11754,12 @@ already fails the shader's distance test (same pixels). Legacy tufts remain inta
 in [the grass spec](spec/terrain-detail.md#grass).
 
 Nothing enters simulation, replays, checkpoints or networking.
+
+### Multiplayer menu drafts and exit destinations
+
+The current [menu specification](spec/multiplayer-menus.md) defines the lounge
+names and input. SettingsPanel keeps an original context and a local draft.
+Close emits one SettingsChange, including optional Realism. The host applies
+its existing validation and respec once. The shared multiplayer ? menu routes
+Return to Main Menu through end_session and Exit through the normal exiting
+callback, preserving the existing disconnect, host and listing teardown.

@@ -281,9 +281,7 @@ impl Game {
     /// The player leaves as the game's End does: a disconnect and a flush.
     fn leave(&mut self) {
         let session = self.session_mut();
-        let now = session.now();
-        session.client.disconnect(now);
-        session.flush();
+        session.disconnect();
     }
 
     fn closed(&self) -> Option<&CloseReason> {
@@ -630,4 +628,50 @@ fn the_join_path_reads_auto_direct_or_relay() {
     assert_eq!(JoinPath::parse(""), Some(JoinPath::Auto));
     assert_eq!(JoinPath::parse("ipx"), None);
     assert_eq!(JoinPath::default(), JoinPath::Auto);
+}
+
+#[test]
+fn both_multiplayer_menu_destinations_disconnect_the_client_and_free_its_seat() {
+    for (key, destination) in [
+        ("m", crate::menu::Action::MultiplayerMain),
+        ("x", crate::menu::Action::Exit),
+    ] {
+        let mut game = Game::start(&format!("menu-{key}"), JoinPath::Direct, false);
+        game.king.start_when_ready = false;
+        game.join();
+        assert!(
+            game.run_until(Duration::from_secs(10), |g| g.session().client.phase()
+                == ClientPhase::Lobby)
+        );
+        game.session_mut().client.take_any_slot();
+        assert!(game.run_until(Duration::from_secs(5), |g| {
+            g.session()
+                .client
+                .lobby()
+                .and_then(|l| l.me())
+                .is_some_and(|p| p.slot.is_some())
+        }));
+        let slot = game
+            .session()
+            .client
+            .lobby()
+            .unwrap()
+            .me()
+            .unwrap()
+            .slot
+            .unwrap();
+        let mut menu = crate::multiplayer_menu::Menu::default();
+        menu.key("F1");
+        assert_eq!(menu.key(key), Some(destination));
+        game.session_mut().disconnect();
+        game.session = None;
+        assert!(game.run_until(Duration::from_secs(5), |g| {
+            g.king.client.lobby().is_some_and(|l| {
+                !l.players.iter().any(|p| p.callsign == "Viper")
+                    && l.slots
+                        .iter()
+                        .any(|s| s.plane == slot && s.holder.is_none() && s.reserved.is_none())
+            })
+        }));
+    }
 }

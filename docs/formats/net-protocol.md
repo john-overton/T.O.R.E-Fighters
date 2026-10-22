@@ -1686,7 +1686,7 @@ Refused (kind 20) with its words.
 | Kind | Name | Direction | Body |
 | --- | --- | --- | --- |
 | 23 | Pass crown | the King to host | The player's lobby id (8 bits) |
-| 24 | Settings | the King to host | A count (varint, 0 to 64), then each setting's number (8 bits) and value (varint); a presence bit and the game's name (a string); a presence bit and the password: 1 bit (0 clear it, 1 set it, then a string of 1 to 255 bytes). The host applies all or none: the first that fails refuses the whole message |
+| 24 | Settings | the King to host | A count (varint, 0 to 64), then each setting's number (8 bits) and value (varint); a presence bit and the game's name (a string); a presence bit and the password: 1 bit (0 clear it, 1 set it, then a string of 1 to 255 bytes). Then a Realism presence bit; if present, Damage (2 bits: 0 normal, 1 invulnerable, 2 realistic), fifteen boolean flags in Cheats field order (unlimited ammo through easy physics, including guns only), and Enemy AI (3 bits: 0 unchanged, 1 novice, 2 average, 3 experienced, 4 ace). Invalid enum values are refused. The host applies all or none: the first that fails refuses the whole message |
 | 27 | Slot lock | the King to host | The mission's number (varint), the plane (varint), the lock (2 bits: 0 open, 1 closed, 2 reserved) and, when reserved, the callsign (a string) |
 | 28 | Revive | client to host | Mission number (varint), optional aircraft and optional loadout: fly again after a loss with an atomically validated choice |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
@@ -3198,7 +3198,9 @@ again with an observer; the capture format did not change for it.
   changing simulation checksums, so an older game must not join;
   64 since F-22N stores (2026-10-21): the naval donor gains the F-22A wing
   carrier and internal bays; both use drawn magazine release origins and
-  only bay weapons wait for doors, so an older game must not join.
+  only bay weapons wait for doors, so an older game must not join;
+  65 since deferred lobby Settings (2026-10-22): kind 24 gains optional
+  Realism, applied with ordinary settings in one mission rebuild.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

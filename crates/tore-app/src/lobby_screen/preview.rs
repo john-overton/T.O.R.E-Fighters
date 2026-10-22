@@ -15,7 +15,12 @@ use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 49] = [
+pub const STATES: [&str; 54] = [
+    "lobby-help",
+    "lobby-internet",
+    "lobby-internet-settings",
+    "lobby-internet-players",
+    "lobby-internet-help",
     "lobby-choice",
     "lobby-ai-off",
     "lobby-king",
@@ -297,6 +302,14 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         )
         .into());
     }
+    let internet = state.starts_with("lobby-internet");
+    let help = state.ends_with("-help");
+    let state = match state {
+        "lobby-internet-settings" => "lobby-settings-realism",
+        "lobby-internet-players" => "lobby-players",
+        "lobby-internet" | "lobby-internet-help" | "lobby-help" => "lobby-king",
+        other => other,
+    };
     let kit = Arc::new(source.build("MODEM3")?);
     let mut lobby = sample(1);
     let mut hosting = true;
@@ -524,6 +537,7 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         _ => {}
     }
     let mut screen = LobbyScreen::sample(Arc::clone(&kit), lobby.clone(), hosting);
+    screen.set_internet(internet);
     screen.set_cheats(Some(sample_cheats()));
     if lobby.players.len() > 1 && state != "lobby-server" {
         screen.say("Goose joined the game.");
@@ -658,5 +672,10 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     }
     let mut canvas = Canvas(pixels);
     screen.draw(&mut canvas);
+    if help {
+        let mut menu = crate::multiplayer_menu::Menu::default();
+        menu.key("F1");
+        menu.draw(&mut Canvas(pixels), &screen.kit);
+    }
     Ok(())
 }

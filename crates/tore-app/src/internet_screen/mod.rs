@@ -80,6 +80,7 @@ enum Id {
     Full,
     Other,
     Games,
+    Players,
     Messages,
     New,
     Join,
@@ -220,21 +221,21 @@ impl InternetScreen {
             },
             Column {
                 x: 14,
-                width: 84,
+                width: 129,
                 align: Align::Left,
             },
             Column {
-                x: 100,
+                x: 145,
                 width: 22,
                 align: Align::Right,
             },
             Column {
-                x: 126,
+                x: 171,
                 width: 36,
                 align: Align::Left,
             },
             Column {
-                x: 164,
+                x: 209,
                 width: 12,
                 align: Align::Centre,
             },
@@ -247,7 +248,7 @@ impl InternetScreen {
             },
             Column {
                 x: 14,
-                width: 210,
+                width: 187,
                 align: Align::Left,
             },
         ];
@@ -266,6 +267,7 @@ impl InternetScreen {
                 Id::Full,
                 Id::Other,
                 Id::Games,
+                Id::Players,
                 Id::Messages,
                 Id::New,
                 Id::Join,
@@ -285,10 +287,14 @@ impl InternetScreen {
             callsign,
             full,
             other,
-            games: List::new((48, 185), 200, 4)
-                .with_scroll_bar((252, 185))
+            games: List::new((48, 185), 245, 5)
+                .with_pitch(19)
+                .with_scroll_bar((296, 185))
                 .with_columns(games_columns),
-            players: List::new((346, 185), 242, 5).with_columns(players_columns),
+            players: List::new((346, 185), 225, 5)
+                .with_pitch(19)
+                .with_scroll_bar((574, 185))
+                .with_columns(players_columns),
             messages: MessageBox::newnet(),
             new: Button::new("New", (45, 419), 85).default_button(),
             join: Button::new("Join", (161, 419), 85),
@@ -316,7 +322,7 @@ impl InternetScreen {
             clock: tore_net::RealClock::new(),
             pointer: None,
             backdrop: Default::default(),
-            timing: std::env::var_os("TORE_DIRECT_TIMING").map(|_| Timing::new("Internet Lobby")),
+            timing: std::env::var_os("TORE_DIRECT_TIMING").map(|_| Timing::new("Internet Lounge")),
         };
         screen.notice();
         screen.load_tokens();
@@ -1195,6 +1201,10 @@ impl InternetScreen {
                         }
                     }
                 },
+                Id::Players => {
+                    self.players.key(name);
+                    Outcome::None
+                }
                 Id::Messages => {
                     if name == "Enter" {
                         self.press_default()
@@ -1270,6 +1280,8 @@ impl InternetScreen {
         }
         if let Some(p) = self.pointer {
             self.messages.drag(p);
+            self.games.drag(p);
+            self.players.drag(p);
         }
     }
 
@@ -1317,6 +1329,10 @@ impl InternetScreen {
                     Wo::None => {}
                 }
             }
+            if self.players.hit(p) {
+                self.focus.set(Id::Players);
+            }
+            self.players.press(p, now);
             if self.messages.hit(p) {
                 self.focus.set(Id::Messages);
             }
@@ -1334,6 +1350,7 @@ impl InternetScreen {
         }
         // Released.
         self.games.release(now);
+        self.players.release(now);
         self.messages.release();
         if self.full.release(p, now) == Wo::Changed || self.other.release(p, now) == Wo::Changed {
             self.filters_changed();
@@ -1364,6 +1381,7 @@ impl InternetScreen {
         let off = (-1, -1);
         let now = Instant::now();
         self.games.release(now);
+        self.players.release(now);
         self.messages.release();
         self.full.release(off, now);
         self.other.release(off, now);
@@ -1410,7 +1428,7 @@ impl InternetScreen {
         self.background.draw(canvas, kit);
         draw_panel(canvas, kit, (10, 80, 619, 395));
         let font = kit.sprite("PANELFNT");
-        let title = "Internet Lobby";
+        let title = "Internet Lounge";
         ui_text::text(
             canvas,
             kit,
@@ -1468,7 +1486,7 @@ impl InternetScreen {
         self.callsign.draw(canvas, kit, self.focus.is(Id::Callsign));
         self.full.draw(canvas, kit, marked(Id::Full));
         self.other.draw(canvas, kit, marked(Id::Other));
-        self.players.draw(canvas, kit, false);
+        self.players.draw(canvas, kit, marked(Id::Players));
         self.games.draw(canvas, kit, marked(Id::Games));
         self.messages.draw(canvas, kit, marked(Id::Messages));
         self.new.draw(canvas, kit, marked(Id::New));

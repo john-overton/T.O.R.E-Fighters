@@ -1,8 +1,8 @@
 """Regenerate the connection screens' title lettering, not retail data.
 
 `crates/tore-app/assets/direct-network-connection-title.png` is the words
-DIRECT NETWORK CONNECTION, and `internet-lobby-title.png` (the Internet Lobby
-screen, slice I4) the words INTERNET LOBBY, each in Liberation Sans Regular (SIL Open Font License
+DIRECT NETWORK LOUNGE, and `internet-lobby-title.png` (the Internet Lobby
+screen, slice I4) the words INTERNET LOUNGE, each in Liberation Sans Regular (SIL Open Font License
 1.1, a metric compatible open face) over a dark copy of the same words offset
 two pixels right and down, on a transparent background, 564 by 36 pixels. The
 game covers retail's own title lettering with the bar's texture and draws this
@@ -32,8 +32,10 @@ import subprocess
 
 ASSETS = Path(__file__).resolve().parents[1] / 'crates/tore-app/assets'
 TITLES = {
-    'direct': ('DIRECT NETWORK CONNECTION', ASSETS / 'direct-network-connection-title.png'),
-    'internet': ('INTERNET LOBBY', ASSETS / 'internet-lobby-title.png'),
+    'direct': ('DIRECT NETWORK LOUNGE', ASSETS / 'direct-network-connection-title.png'),
+    'direct-game': ('DIRECT NETWORK GAME LOBBY', ASSETS / 'direct-game-lobby-title.png'),
+    'internet-game': ('INTERNET GAME LOBBY', ASSETS / 'internet-game-lobby-title.png'),
+    'internet': ('INTERNET LOUNGE', ASSETS / 'internet-lobby-title.png'),
 }
 WIDTH, HEIGHT = 564, 36
 SUPER = 4  # the picture is drawn this many times as large, then averaged down

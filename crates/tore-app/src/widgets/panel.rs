@@ -107,7 +107,7 @@ fn cover_old_title(canvas: &mut Canvas, picture: &crate::menu::Sprite) {
 ///
 /// John's look for the connection screens, from 2026-10-05, is `NETIPX3`
 /// alone: its grey photograph under its own title bar, the retail lettering
-/// covered and DIRECT NETWORK CONNECTION drawn instead, or the player's own
+/// covered and DIRECT NETWORK LOUNGE drawn instead, or the player's own
 /// lettering. (On 2026-10-01 he approved `MODEM3`'s red photograph under
 /// `NETIPX3`'s bar; the red is no longer drawn.)
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,13 +136,24 @@ impl Background {
             title: super::header::Title::Direct,
         }
     }
-    /// The same, lettered INTERNET LOBBY (or with the player's own
+    /// The same, lettered INTERNET LOUNGE (or with the player's own
     /// `InternetLobby.png`): the Internet Lobby screen's.
     pub fn internet_lobby() -> Self {
         Self {
             base: "NETIPX3",
             header: true,
             title: super::header::Title::Internet,
+        }
+    }
+    pub fn game_lobby(internet: bool) -> Self {
+        Self {
+            base: "NETIPX3",
+            header: true,
+            title: if internet {
+                super::header::Title::InternetGame
+            } else {
+                super::header::Title::DirectGame
+            },
         }
     }
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit) {

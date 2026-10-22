@@ -135,11 +135,11 @@ impl App {
             Ok(_) => {
                 self.internet.building = Some(receive);
                 self.menu.state.toast = Some((
-                    "Opening the Internet Lobby...".to_owned(),
+                    "Opening the Internet Lounge...".to_owned(),
                     std::time::Instant::now() + Duration::from_secs(30),
                 ));
             }
-            Err(error) => self.message(format!("Cannot open the Internet Lobby: {error}")),
+            Err(error) => self.message(format!("Cannot open the Internet Lounge: {error}")),
         }
     }
 
@@ -170,12 +170,12 @@ impl App {
                 Ok(Err(error)) => {
                     self.internet.building = None;
                     self.menu.state.toast = None;
-                    self.message(format!("Cannot open the Internet Lobby: {error}"));
+                    self.message(format!("Cannot open the Internet Lounge: {error}"));
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.internet.building = None;
-                    self.message("Cannot open the Internet Lobby: the pieces did not build.");
+                    self.message("Cannot open the Internet Lounge: the pieces did not build.");
                 }
             }
         }
