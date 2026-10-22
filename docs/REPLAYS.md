@@ -1578,8 +1578,17 @@ are agent choices (2026-09-28).
   cycles every active non-gun weapon in stable projectile-id order, including
   missiles, bombs and rockets, retaining the selection as others launch.
   It sits 30 feet behind and 10 feet above the weapon and draws its lit body.
-  On expiry it shows Forward on the selected aircraft, like live F12, retaining
-  the weapon identity so seeking backward restores it. Press F12 again to pick
+  Within 328 feet of its target or predicted surface impact, the eye stops and
+  watches the weapon fly on. The first crossing is recovered from recorded
+  history, so a direct seek or reverse playback gives the same eye; rewinding
+  before the crossing restores the moving chase. The eye stays at least 10 feet
+  above terrain. A miss keeps the eye fixed until expiry. See the
+  [prediction and fallback rules](spec/flight-views.md#weapon-chase-captures).
+  On expiry it holds the last look for 1.5 seconds of recorded game time,
+  then shows Forward on the selected aircraft, like live F12. The world keeps
+  moving. It retains the weapon identity so seeking backward into the hold
+  restores that pose and seeking before impact restores the weapon. Pause and
+  playback speed apply to the hold; view keys interrupt it immediately. Press F12 again to pick
   another active weapon. Weapon views
   face their retained aircraft or standing ground target, otherwise their flight
   direction. F6
@@ -1606,7 +1615,8 @@ are agent choices (2026-09-28).
   the external view of the player.
 The reel director also exposes the F12 chase placement as `view = "weapon"`.
 Its `anchor` is the firing aircraft; it follows that aircraft's newest launch
-and returns to Forward at expiry. The separate `seeker` view stays available as
+and returns to Forward immediately at expiry, retaining its editorial capture
+behavior without the interactive F12 approach stop or post-impact hold. The separate `seeker` view stays available as
 a nose camera with the weapon hidden. See [capture options](../tools/reel/README.md#weapon-cameras).
 
 - **Active weapons in the object list.** Empty-space right-click lists aircraft

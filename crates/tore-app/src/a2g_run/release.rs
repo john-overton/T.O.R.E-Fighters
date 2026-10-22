@@ -308,7 +308,7 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
         }
         let presses_over =
             started.is_some_and(|at| t > at + o.repeat as f64 * (press + o.gap) + 0.5);
-        if presses_over && falling.is_empty() {
+        if presses_over && falling.is_empty() && !scene.scenes.active() {
             break;
         }
     }

@@ -846,6 +846,9 @@ impl TickPresenter<'_> {
             } else {
                 flight_views::Scene::lean(&frame, flight, &self.world.combat)
             };
+            let scene = self
+                .view_rig
+                .prepare(scene, *self.flight_view, &self.world.terrain);
             let listener_camera = self
                 .view_rig
                 .clone()
@@ -954,6 +957,9 @@ impl TickPresenter<'_> {
         } else {
             flight_views::Scene::lean(&frame, flight, &self.world.combat)
         };
+        let scene = self
+            .view_rig
+            .prepare(scene, *self.flight_view, &self.world.terrain);
         let weather_view = self
             .view_rig
             .camera(
@@ -2107,20 +2113,33 @@ impl App {
                 Action::Click
             }
             Command::View(_) | Command::ViewRelative(_, _) => {
-                let (view, reference) = match command {
+                let (mut view, reference) = match command {
                     Command::View(view) => (view, flight_views::Reference::Player),
                     Command::ViewRelative(view, reference) => (view, reference),
                     _ => unreachable!(),
                 };
                 let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
-                let scene = flight_views::Scene::new(
-                    &frame,
-                    &self.world.cockpits[OWN].flight,
-                    &self.world.combat,
-                    self.world.ai_wings.as_ref(),
-                    None,
-                );
+                let scene = if self.net_flight.is_some() {
+                    flight_views::Scene::from_frame(
+                        &frame,
+                        frame.flight,
+                        self.world.ai_wings.as_ref(),
+                    )
+                } else {
+                    flight_views::Scene::new(
+                        &frame,
+                        &self.world.cockpits[OWN].flight,
+                        &self.world.combat,
+                        self.world.ai_wings.as_ref(),
+                        None,
+                    )
+                };
+                let scene = self
+                    .view_rig
+                    .prepare(scene, self.flight_view, &self.world.terrain);
                 self.view_rig.observe(&scene);
+                let holding = self.view_rig.holding_weapon() || self.view_rig.weapon_stopped();
+                let previous = self.view_rig.missile_subject();
                 let mut candidate = self.view_rig.clone();
                 // Pressing F6 again moves on to the next wingman.
                 let cycle = view == flight_views::WING
@@ -2130,6 +2149,9 @@ impl App {
                     candidate.next_wingman();
                 } else {
                     candidate.select(reference);
+                    if holding && view == flight_views::MISSILE {
+                        candidate.next_live_weapon(&scene, previous);
+                    }
                 }
                 if let Err(reason) = candidate.camera(
                     view,
@@ -2140,7 +2162,11 @@ impl App {
                     1.,
                 ) {
                     self.flight_ui.message(reason);
-                    return Action::None;
+                    if !holding {
+                        return Action::None;
+                    }
+                    view = 0;
+                    candidate.select(flight_views::Reference::Player);
                 }
                 if view == flight_views::WING
                     && let Some(id) = candidate.wingman()
@@ -3555,6 +3581,18 @@ impl App {
                         // The 3D view with the cockpit, HUD and instruments as
                         // the last frame drew them; in the replay viewer (the
                         // observer screen too), its camera, world and scenery.
+                        if std::env::var_os("TORE_SCENE_F12").is_some()
+                            && let Some(replay) = &self.replay
+                        {
+                            let camera = replay.viewer.camera();
+                            println!(
+                                "replay F12 shot: {} eye {:?} yaw {} pitch {}",
+                                path.display(),
+                                camera.position,
+                                camera.yaw,
+                                camera.pitch
+                            );
+                        }
                         let result = match &self.replay {
                             Some(replay) => renderer.capture_sim(
                                 &path,
@@ -5222,6 +5260,9 @@ impl ApplicationHandler for App {
                                 Some(&self.combat_view),
                             )
                         };
+                        let scene =
+                            self.view_rig
+                                .prepare(scene, self.flight_view, &self.world.terrain);
                         let camera_keys = std::mem::take(&mut self.camera.keys);
                         let base =
                             self.hornet
@@ -9509,6 +9550,7 @@ fn probe_render(
     script: &ProbeScript,
     dir: &std::path::Path,
     tick: u64,
+    f12: Option<camera::Camera>,
 ) -> AppResult<()> {
     let flight = mission
         .ai_wings
@@ -9546,7 +9588,7 @@ fn probe_render(
         script.render_plane
     ));
     let observer = mission.cockpits[OWN].plane;
-    a2g_run::ai_render::render_world(mission, observer, eye, p, &path)?;
+    a2g_run::ai_render::render_world(mission, observer, eye, p, &path, f12)?;
     println!("t={tick} probe: RENDER {}", path.display());
     Ok(())
 }
@@ -9595,6 +9637,8 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
     }
     // CAP-only diagnostics keep ordinary probe output stable.
     let mut patrol = std::collections::BTreeMap::<u32, (Option<u64>, u64, f64)>::new();
+    let mut f12_rig = flight_views::Rig::default();
+    let capture_f12 = script.render.is_some() && std::env::var_os("TORE_SCENE_F12").is_some();
     for tick in 0..ticks as u64 {
         if let Some(recording) = &mut recording {
             recording.start_tick(None, &mut mission.combat);
@@ -9965,10 +10009,11 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
             &mission.cockpits[OWN].flight,
             &mission.terrain,
         );
+        let f12 = capture_f12.then(|| a2g_run::ai_render::f12_camera(&mission, &mut f12_rig));
         if let Some(dir) = &script.render
             && script.render_at.contains(&tick)
         {
-            probe_render(&mut mission, script, dir, tick)?;
+            probe_render(&mut mission, script, dir, tick, f12)?;
         }
         invariants.observe(
             tick,
