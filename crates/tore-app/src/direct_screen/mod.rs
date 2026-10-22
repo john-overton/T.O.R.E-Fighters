@@ -66,6 +66,7 @@ enum Id {
     Address,
     Full,
     Games,
+    Players,
     Messages,
     New,
     Join,
@@ -195,16 +196,16 @@ impl DirectScreen {
             },
             Column {
                 x: 14,
-                width: 84,
+                width: 129,
                 align: Align::Left,
             },
             Column {
-                x: 100,
+                x: 145,
                 width: 22,
                 align: Align::Right,
             },
             Column {
-                x: 126,
+                x: 171,
                 width: 46,
                 align: Align::Left,
             },
@@ -217,7 +218,7 @@ impl DirectScreen {
             },
             Column {
                 x: 14,
-                width: 210,
+                width: 187,
                 align: Align::Left,
             },
         ];
@@ -234,6 +235,7 @@ impl DirectScreen {
                 Id::Address,
                 Id::Full,
                 Id::Games,
+                Id::Players,
                 Id::Messages,
                 Id::New,
                 Id::Join,
@@ -252,10 +254,14 @@ impl DirectScreen {
             callsign,
             address: TextField::line((110, 136), 216, Filter::Address).with_hint("host or address"),
             full,
-            games: List::new((48, 185), 200, 4)
-                .with_scroll_bar((252, 185))
+            games: List::new((48, 185), 245, 5)
+                .with_pitch(19)
+                .with_scroll_bar((296, 185))
                 .with_columns(games_columns),
-            players: List::new((346, 185), 242, 5).with_columns(players_columns),
+            players: List::new((346, 185), 225, 5)
+                .with_pitch(19)
+                .with_scroll_bar((574, 185))
+                .with_columns(players_columns),
             messages: MessageBox::newnet(),
             new: Button::new("New", (106, 419), 85).default_button(),
             join: Button::new("Join", (229, 419), 85),
@@ -1007,6 +1013,10 @@ impl DirectScreen {
                         }
                     }
                 },
+                Id::Players => {
+                    self.players.key(name);
+                    Outcome::None
+                }
                 Id::Messages => {
                     if name == "Enter" {
                         self.press_default()
@@ -1105,6 +1115,8 @@ impl DirectScreen {
         }
         if let Some(p) = self.pointer {
             self.messages.drag(p);
+            self.games.drag(p);
+            self.players.drag(p);
         }
     }
 
@@ -1152,6 +1164,10 @@ impl DirectScreen {
                     Wo::None => {}
                 }
             }
+            if self.players.hit(p) {
+                self.focus.set(Id::Players);
+            }
+            self.players.press(p, now);
             if self.messages.hit(p) {
                 self.focus.set(Id::Messages);
             }
@@ -1168,6 +1184,7 @@ impl DirectScreen {
         }
         // Released.
         self.games.release(now);
+        self.players.release(now);
         self.messages.release();
         if self.full.release(p, now) == Wo::Changed {
             self.rebuild_games();
@@ -1202,6 +1219,7 @@ impl DirectScreen {
         let off = (-1, -1);
         let now = Instant::now();
         self.games.release(now);
+        self.players.release(now);
         self.messages.release();
         self.full.release(off, now);
         for button in [
@@ -1251,7 +1269,7 @@ impl DirectScreen {
         self.background.draw(canvas, kit);
         draw_panel(canvas, kit, (10, 80, 619, 395));
         let font = kit.sprite("PANELFNT");
-        let title = "TCP/IP Network connection";
+        let title = "Direct Network Lounge";
         ui_text::text(
             canvas,
             kit,
@@ -1305,7 +1323,7 @@ impl DirectScreen {
         self.callsign.draw(canvas, kit, self.focus.is(Id::Callsign));
         self.address.draw(canvas, kit, self.focus.is(Id::Address));
         self.full.draw(canvas, kit, marked(Id::Full));
-        self.players.draw(canvas, kit, false);
+        self.players.draw(canvas, kit, marked(Id::Players));
         self.games.draw(canvas, kit, marked(Id::Games));
         self.messages.draw(canvas, kit, marked(Id::Messages));
         self.new.draw(canvas, kit, marked(Id::New));

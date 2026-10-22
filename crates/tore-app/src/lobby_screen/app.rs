@@ -107,7 +107,11 @@ impl App {
             return;
         };
         self.lobby = Lobby {
-            screen: Some(LobbyScreen::new(kit, label, hosting)),
+            screen: Some({
+                let mut screen = LobbyScreen::new(kit, label, hosting);
+                screen.set_internet(self.internet.screen.is_some());
+                screen
+            }),
             ..Lobby::default()
         };
         self.menu.state.cancel();
@@ -370,13 +374,6 @@ impl App {
                 }
             }
             Request::Settings(change) => client.change_settings(change),
-            Request::Cheats(cheats) => {
-                // The lobby mission again, with its cheats changed.
-                if let Some(mut spec) = client.spec().cloned() {
-                    spec.cheats = cheats;
-                    client.change_mission(&spec);
-                }
-            }
             Request::PassCrown(player) => {
                 client.pass_crown(player);
             }

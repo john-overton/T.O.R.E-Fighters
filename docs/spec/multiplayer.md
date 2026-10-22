@@ -14,6 +14,9 @@ deliberately different in several places and lives in its own guide,
 [MULTIPLAYER.md](../MULTIPLAYER.md), which lists every departure from this
 page. Delivery stages are in the [multiplayer plan](../multiplayer-plan.md).
 
+T.O.R.E's current lounge names and menu interactions are specified separately
+in [multiplayer menus](multiplayer-menus.md).
+
 ## What the player sees and does
 
 **Connecting.** The Choose Activity screen's MULTI menu offers Serial (E),

@@ -207,6 +207,10 @@ impl List {
             enabled: true,
         }
     }
+    pub fn with_pitch(mut self, pitch: i32) -> Self {
+        self.pitch = pitch.max(BAR_HEIGHT);
+        self
+    }
     #[cfg(test)]
     pub fn with_pager(mut self, pager: Pager) -> Self {
         self.pager = Some(pager);

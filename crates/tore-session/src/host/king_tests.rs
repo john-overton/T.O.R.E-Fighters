@@ -290,6 +290,7 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
         values: values.to_vec(),
         name: Some("Night owls".into()),
         password: Some(PasswordChange::Set("pw".into())),
+        cheats: None,
     });
     assert!(rig.run_until(Duration::from_secs(2), |r| {
         [king, cobra]
@@ -873,6 +874,7 @@ fn the_password_the_limit_and_the_visibility_apply_to_the_next_joins() {
         values: vec![(number::MAX_PLAYERS, 2)],
         name: None,
         password: Some(PasswordChange::Set("swordfish".into())),
+        cheats: None,
     });
     rig.run(Duration::from_millis(200));
     assert_eq!(rig.host.status(rig.net.now()).capacity, 2);
@@ -1585,4 +1587,59 @@ fn the_king_cannot_change_the_minimum_players_and_a_mode_change_keeps_it() {
     rig.run(300 * MS);
     assert_eq!(rig.host.settings().mode(), Mode::Pvp);
     assert_eq!(rig.host.settings().min_players(), 2);
+}
+
+#[test]
+fn combined_settings_and_realism_rebuild_once_for_every_player() {
+    let mut rig = Rig::hosted(spec(2, 2));
+    let king = rig.join("Viper");
+    let guest = rig.join("Cobra");
+    rig.gather(&[king, guest]);
+    for player in &mut rig.players {
+        player.events.clear();
+    }
+    let cheats = tore_sim::cheats::Cheats {
+        no_crashes: true,
+        unlimited_ammo: true,
+        easy_aiming: true,
+        ..Default::default()
+    };
+    let change = SettingsChange {
+        values: vec![
+            (number::FRIENDLY_FIRE, 0),
+            (number::LOADOUTS, LoadoutRule::Any.value()),
+        ],
+        cheats: Some(cheats),
+        ..Default::default()
+    };
+    rig.client(king).change_settings(change.clone());
+    rig.run(Duration::from_secs(2));
+    assert!(rig.refusals(king).is_empty());
+    for player in &rig.players {
+        assert_eq!(
+            player
+                .events
+                .iter()
+                .filter(|e| matches!(e, ClientEvent::MissionLoaded))
+                .count(),
+            1
+        );
+        let spec = player.client.spec().unwrap();
+        assert_eq!(spec.cheats, cheats);
+        assert!(spec.cheat_loadouts);
+        assert!(!spec.friendly_fire);
+    }
+    // Reapplying the accepted values must not rebuild again.
+    rig.client(king).change_settings(change);
+    rig.run(Duration::from_secs(1));
+    for player in &rig.players {
+        assert_eq!(
+            player
+                .events
+                .iter()
+                .filter(|e| matches!(e, ClientEvent::MissionLoaded))
+                .count(),
+            1
+        );
+    }
 }

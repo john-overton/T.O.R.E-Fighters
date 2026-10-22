@@ -6,7 +6,8 @@ use crate::AppResult;
 use crate::widgets::KitSource;
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 6] = [
+pub const STATES: [&str; 7] = [
+    "internet-help",
     "internet",
     "internet-games",
     "internet-joining",
@@ -176,7 +177,7 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     screen.focus.set(Id::Callsign);
     screen.say("Asking the Internet Lobby at master.jroverton.com:26901 for games...");
     match state {
-        "internet" => {}
+        "internet" | "internet-help" => {}
         "internet-games" => {
             screen.full.set_checked(true);
             screen.set_listed(sample_entries());
@@ -228,5 +229,10 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     screen.refresh_buttons();
     let mut canvas = Canvas(pixels);
     screen.draw(&mut canvas);
+    if state == "internet-help" {
+        let mut menu = crate::multiplayer_menu::Menu::default();
+        menu.key("F1");
+        menu.draw(&mut Canvas(pixels), &screen.kit);
+    }
     Ok(())
 }

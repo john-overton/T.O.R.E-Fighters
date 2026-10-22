@@ -33,7 +33,7 @@ from battery_scenarios.net_screens import game_log, wait_log
 # The menu layer's clicks (640 by 480): Multi, Direct Connection, New; then the lobby's Settings... (the King's second
 # button), the Game type (a click moves to the next value: PvP), the "AI flies idle aircraft after" row (a right click
 # moves to the value before: 5 minutes, 2, 1), the Realism page's Damage (invulnerable, so that the enemy cannot shoot
-# down the aircraft the AI flies while the game is away), the panel closed by Escape, the first plane taken; later
+# down the aircraft the AI flies while the game is away), the draft applied by F10, the first plane taken; later
 # Ready and Fly. The waits are long: the machine is shared.
 HOST_LEAVE_SCRIPT = """wait 20
 movemenu 150 48
@@ -74,7 +74,7 @@ wait 0.6
 click
 wait 2
 snapshot SHOTS/hl-2-settings.ppm
-key Escape
+key F10
 wait 2
 movemenu 150 175
 wait 0.6
@@ -132,7 +132,7 @@ def host_leave_problems(game: str, bot: str, standby: bool) -> list[str]:
     everyone). Pure, unit tested in tools/test_battery_net.py."""
     problems = []
     for pattern, what in (
-        (r"Lobby: Settings: idle-ai 1 minute\.", "the idle time turned to 1 minute"),
+        (r"Lobby: Settings: [^\n]*idle-ai 1 minute", "the idle time turned to 1 minute"),
         (r"Network: away for the idle-ai time; the AI flies the plane", "the game saying it is away"),
         (r"Observer screen: watching the player's own aircraft", "the observer screen opening on its own plane"),
     ):

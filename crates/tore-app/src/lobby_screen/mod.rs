@@ -81,7 +81,7 @@ use crate::widgets::{
 use facts::{Buttons, DefaultButton, Facts, FlyAs, LoadoutAs, SlotClick};
 use modal::{Answer, Modal, Purpose};
 use players_panel::PlayersPanel;
-use settings_panel::{Context as SettingsContext, Edit, SettingsPanel};
+use settings_panel::{Context as SettingsContext, SettingsPanel};
 use sides::{BoxClick, SideBox};
 use std::sync::Arc;
 use std::time::Instant;
@@ -154,9 +154,6 @@ pub enum Request {
     /// The King changes settings, the name or the password (the Settings
     /// panel); the host checks it whole.
     Settings(SettingsChange),
-    /// The King sends the lobby mission again with these cheats (the
-    /// Settings panel's Realism page).
-    Cheats(Cheats),
     /// The King gives the crown to this lobby id.
     PassCrown(u8),
     /// The King opens, closes or reserves a slot (a right click on it).
@@ -251,6 +248,7 @@ mod layout {
 
 /// The screen.
 pub struct LobbyScreen {
+    internet: bool,
     kit: Arc<Kit>,
     /// What the game is called until its lobby state arrives.
     label: String,
@@ -413,6 +411,7 @@ impl LobbyScreen {
             picked: Id::Players,
             modal: None,
             settings_panel: None,
+            internet: false,
             players_panel: None,
             cheats: None,
             state: None,
@@ -995,8 +994,10 @@ impl LobbyScreen {
                 self.settings_panel = None;
                 None
             }
-            settings_panel::Answer::Edit(Edit::Settings(change)) => Some(Request::Settings(change)),
-            settings_panel::Answer::Edit(Edit::Cheats(cheats)) => Some(Request::Cheats(cheats)),
+            settings_panel::Answer::Apply(change) => {
+                self.settings_panel = None;
+                Some(Request::Settings(change))
+            }
         }
     }
 
@@ -1333,9 +1334,14 @@ impl LobbyScreen {
     /// The part of the screen that never changes: the composed background,
     /// the panel, the title, the frame lines, the headings and the boxes the
     /// lists sit in. Drawn once and kept.
+    pub fn set_internet(&mut self, internet: bool) {
+        self.internet = internet;
+        *self.backdrop.borrow_mut() = None;
+    }
+
     fn draw_backdrop(&self, canvas: &mut Canvas) {
         let kit = &*self.kit;
-        Background::direct_connection().draw(canvas, kit);
+        Background::game_lobby(self.internet).draw(canvas, kit);
         draw_panel(canvas, kit, (10, 80, 619, 395));
         let font = kit.sprite("PANELFNT");
         let title = "Lobby";

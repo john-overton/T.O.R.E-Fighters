@@ -415,6 +415,8 @@ pub struct SettingsChange {
     pub name: Option<String>,
     /// The password's change.
     pub password: Option<PasswordChange>,
+    /// Realism edits applied with the settings in one mission rebuild.
+    pub cheats: Option<tore_sim::cheats::Cheats>,
 }
 
 /// A change of the game's password.
@@ -1717,6 +1719,77 @@ fn read_choice<T>(
     from(r.read_bits(bits)? as u32).ok_or(WireError::Invalid(what))
 }
 
+fn write_settings_cheats(w: &mut BitWriter, cheats: tore_sim::cheats::Cheats) {
+    use tore_sim::{ai::Experience, cheats::Damage};
+    let damage = match cheats.damage {
+        Damage::Normal => 0,
+        Damage::Invulnerable => 1,
+        Damage::Realistic => 2,
+    };
+    let _ = w.write_bits(damage, 2);
+    w.write_bool(cheats.unlimited_ammo);
+    w.write_bool(cheats.unlimited_fuel);
+    w.write_bool(cheats.no_spins);
+    w.write_bool(cheats.no_turbulence);
+    w.write_bool(cheats.extra_g);
+    w.write_bool(cheats.ignore_weapon_weights);
+    w.write_bool(cheats.no_sun_whiteout);
+    w.write_bool(cheats.no_g_effects);
+    w.write_bool(cheats.no_screen_shake);
+    w.write_bool(cheats.no_crashes);
+    w.write_bool(cheats.easy_aiming);
+    w.write_bool(cheats.ignore_midair_collisions);
+    w.write_bool(cheats.easy_targeting);
+    w.write_bool(cheats.guns_only);
+    w.write_bool(cheats.easy_physics);
+    let skill = match cheats.enemy_ai {
+        None => 0,
+        Some(Experience::Novice) => 1,
+        Some(Experience::Average) => 2,
+        Some(Experience::Experienced) => 3,
+        Some(Experience::Ace) => 4,
+    };
+    let _ = w.write_bits(skill, 3);
+}
+
+fn read_settings_cheats(r: &mut BitReader<'_>) -> WireResult<tore_sim::cheats::Cheats> {
+    use tore_sim::{
+        ai::Experience,
+        cheats::{Cheats, Damage},
+    };
+    Ok(Cheats {
+        damage: match r.read_bits(2)? {
+            0 => Damage::Normal,
+            1 => Damage::Invulnerable,
+            2 => Damage::Realistic,
+            _ => return Err(WireError::Invalid("damage")),
+        },
+        unlimited_ammo: r.read_bool()?,
+        unlimited_fuel: r.read_bool()?,
+        no_spins: r.read_bool()?,
+        no_turbulence: r.read_bool()?,
+        extra_g: r.read_bool()?,
+        ignore_weapon_weights: r.read_bool()?,
+        no_sun_whiteout: r.read_bool()?,
+        no_g_effects: r.read_bool()?,
+        no_screen_shake: r.read_bool()?,
+        no_crashes: r.read_bool()?,
+        easy_aiming: r.read_bool()?,
+        ignore_midair_collisions: r.read_bool()?,
+        easy_targeting: r.read_bool()?,
+        guns_only: r.read_bool()?,
+        easy_physics: r.read_bool()?,
+        enemy_ai: match r.read_bits(3)? {
+            0 => None,
+            1 => Some(Experience::Novice),
+            2 => Some(Experience::Average),
+            3 => Some(Experience::Experienced),
+            4 => Some(Experience::Ace),
+            _ => return Err(WireError::Invalid("enemy AI")),
+        },
+    })
+}
+
 fn write_settings_change(w: &mut BitWriter, change: &SettingsChange) -> WireResult<()> {
     if change.values.len() > SETTINGS_LIMIT {
         return Err(WireError::TooMany {
@@ -1745,6 +1818,7 @@ fn write_settings_change(w: &mut BitWriter, change: &SettingsChange) -> WireResu
             write_str(w, password);
         }
     }
+    bits::write_option(w, change.cheats, write_settings_cheats);
     Ok(())
 }
 
@@ -1769,6 +1843,7 @@ fn read_settings_change(r: &mut BitReader<'_>) -> WireResult<SettingsChange> {
         values,
         name,
         password,
+        cheats: bits::read_option(r, read_settings_cheats)?,
     })
 }
 

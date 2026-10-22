@@ -867,7 +867,29 @@ fn the_hosting_player_leaving_ends_the_game_cleanly() {
 /// goodbye on its own connection and drops the host, which stops it.
 #[test]
 fn quitting_the_hosting_game_ends_the_game_cleanly() {
-    let (thread, link, server) = start_host(0);
+    use tore_net::master::{ListingState, MasterKind};
+    let master = LoopbackMaster::start();
+    let (mut thread, link) = HostThread::start_listed(
+        HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen: loopback(),
+            port: 0,
+        },
+        Some(Listing::listed(Some(&master.address.to_string()))),
+    )
+    .unwrap();
+    let server = thread.addresses()[0];
+    let mut reports = Vec::new();
+    assert!(wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_secs(10),
+        |reports| reports
+            .iter()
+            .any(|r| matches!(r, Report::Listing(ListingState::Listed { .. })))
+    ));
     let mut game = Game::join(link);
     assert!(game.fly_until(Duration::from_secs(10), |g| g.seated_tick.is_some()));
     let seated = Arc::new(AtomicBool::new(false));
@@ -888,6 +910,11 @@ fn quitting_the_hosting_game_ends_the_game_cleanly() {
     assert!(server_stopping(&guest.closed), "{:?}", guest.closed);
     assert!(guest.host_left, "{:?}", guest.events);
     assert!(port_is_free(server));
+    let until = Instant::now() + Duration::from_secs(5);
+    while master.count(MasterKind::Unregister) < 3 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(master.count(MasterKind::Unregister), 3);
 }
 
 /// Acceptance: a panic on the host thread ends the hosted game with a plain

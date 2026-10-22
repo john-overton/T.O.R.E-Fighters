@@ -535,7 +535,7 @@ fn the_realism_rows_edit_the_missions_cheats() {
 }
 
 #[test]
-fn a_cheat_edit_becomes_a_mission_change_request() {
+fn a_cheat_edit_is_deferred_until_the_combined_settings_apply() {
     let mut screen = screen_of(&king(), true);
     click(&mut screen, button_centre(1));
     screen
@@ -547,10 +547,13 @@ fn a_cheat_edit_becomes_a_mission_change_request() {
         Page::Realism,
         row_index(Page::Realism, Kind::Cheat(Flag::NoCrashes)),
     );
-    let Some(Request::Cheats(cheats)) = click(&mut screen, at) else {
-        panic!("a cheats request");
+    assert_eq!(click(&mut screen, at), None);
+    let Some(Request::Settings(change)) = screen.key("F10", false) else {
+        panic!("one combined settings request on close");
     };
+    let cheats = change.cheats.unwrap();
     assert!(cheats.no_crashes && cheats.no_spins);
+    assert!(screen.settings_open().is_none());
 }
 
 /// Easy flight physics changes the simulation, so in a session it is the
@@ -648,18 +651,7 @@ fn the_panel_turns_a_row_forward_on_left_and_back_on_right() {
         Page::Game,
         row_index(Page::Game, Kind::Setting(number::FRIENDLY_FIRE)),
     );
-    let want = |value| {
-        Some(Request::Settings(SettingsChange {
-            values: vec![(number::FRIENDLY_FIRE, value)],
-            ..SettingsChange::default()
-        }))
-    };
-    assert_eq!(click(&mut screen, at), want(0));
-    assert_eq!(right_click(&mut screen, at), want(0));
-    // The panel shows what the host says, so a lobby state turns the row.
-    let mut state = king();
-    set(&mut state, number::FRIENDLY_FIRE, 0);
-    screen.update(Some(&state), None);
+    assert_eq!(click(&mut screen, at), None);
     assert_eq!(
         row_value(
             Kind::Setting(number::FRIENDLY_FIRE),
@@ -667,7 +659,19 @@ fn the_panel_turns_a_row_forward_on_left_and_back_on_right() {
         ),
         "off"
     );
-    assert_eq!(click(&mut screen, at), want(1));
+    assert_eq!(right_click(&mut screen, at), None);
+    assert_eq!(
+        row_value(
+            Kind::Setting(number::FRIENDLY_FIRE),
+            screen.settings_open().unwrap().context()
+        ),
+        "on"
+    );
+    assert_eq!(
+        screen.key("F10", false),
+        None,
+        "reverted edits send nothing"
+    );
 }
 
 #[test]
@@ -742,27 +746,21 @@ fn the_keyboard_selects_and_turns_rows_and_types_in_the_lines() {
     screen.text_input("pack");
     let panel = screen.settings_open().unwrap();
     assert_eq!(panel.name_text(), "Maverick's pack");
-    assert_eq!(
-        screen.key("Enter", false),
-        Some(Request::Settings(SettingsChange {
-            name: Some("Maverick's pack".into()),
-            ..SettingsChange::default()
-        }))
-    );
-    // Down to Game type: Right turns it, Left turns it back.
+    assert_eq!(screen.key("Enter", false), None);
     screen.key("ArrowDown", false);
     assert!(!screen.typing());
-    let mode = |value| {
-        Some(Request::Settings(SettingsChange {
-            values: vec![(number::MODE, value)],
-            ..SettingsChange::default()
-        }))
-    };
-    assert_eq!(screen.key("ArrowRight", false), mode(1));
-    assert_eq!(screen.key("ArrowLeft", false), mode(1));
-    assert_eq!(screen.key("Enter", false), mode(1));
-    // Up wraps to the last row.
+    assert_eq!(screen.key("ArrowRight", false), None);
+    assert!(screen.settings_open().unwrap().context().pvp());
+    assert_eq!(screen.key("ArrowLeft", false), None);
+    assert!(!screen.settings_open().unwrap().context().pvp());
+    assert_eq!(screen.key("Enter", false), None);
+    // Up from the first row reaches Close, then the last setting.
     screen.key("ArrowUp", false);
+    screen.key("ArrowUp", false);
+    assert_eq!(
+        screen.settings_open().unwrap().selected(),
+        page_rows(Page::Game).len()
+    );
     screen.key("ArrowUp", false);
     assert_eq!(
         screen.settings_open().unwrap().selected(),
@@ -778,24 +776,24 @@ fn the_password_line_sets_and_clears() {
     assert_eq!(click(&mut screen, at), None);
     assert!(screen.typing());
     screen.text_input("swordfish");
+    assert_eq!(screen.key("Enter", false), None);
+    let Some(Request::Settings(change)) = screen.key("F10", false) else {
+        panic!("apply password");
+    };
     assert_eq!(
-        screen.key("Enter", false),
-        Some(Request::Settings(SettingsChange {
-            password: Some(PasswordChange::Set("swordfish".into())),
-            ..SettingsChange::default()
-        }))
+        change.password,
+        Some(PasswordChange::Set("swordfish".into()))
     );
-    // Sent: the line is empty again, and the host's state says it is set.
     let mut state = king();
     set(&mut state, number::PASSWORD, 1);
     screen.update(Some(&state), None);
-    assert_eq!(
-        screen.key("Enter", false),
-        Some(Request::Settings(SettingsChange {
-            password: Some(PasswordChange::Clear),
-            ..SettingsChange::default()
-        }))
-    );
+    click(&mut screen, button_centre(1));
+    click(&mut screen, at);
+    assert_eq!(screen.key("Enter", false), None);
+    let Some(Request::Settings(change)) = screen.key("F10", false) else {
+        panic!("clear password");
+    };
+    assert_eq!(change.password, Some(PasswordChange::Clear));
 }
 
 #[test]
@@ -1207,4 +1205,109 @@ fn the_minimum_players_row_shows_the_operators_value_and_nobody_turns_it() {
     lobby.settings.retain(|s| s.0 != number::MIN_PLAYERS);
     lobby.settings.push((number::MIN_PLAYERS, 0));
     assert_eq!(row_value(row, &ctx(&lobby)), "none");
+}
+
+#[test]
+fn settings_edits_apply_once_and_escape_discards_every_page() {
+    for cancel in [false, true] {
+        let mut screen = screen_of(&king(), true);
+        click(&mut screen, button_centre(1));
+        let fire = value_of(
+            Page::Game,
+            row_index(Page::Game, Kind::Setting(number::FRIENDLY_FIRE)),
+        );
+        assert_eq!(click(&mut screen, fire), None);
+        screen
+            .settings_panel
+            .as_mut()
+            .unwrap()
+            .show_page(Page::Realism);
+        for flag in [Flag::NoCrashes, Flag::UnlimitedAmmo, Flag::EasyAiming] {
+            assert_eq!(
+                click(
+                    &mut screen,
+                    value_of(Page::Realism, row_index(Page::Realism, Kind::Cheat(flag)))
+                ),
+                None
+            );
+        }
+        // A network tick must not overwrite the draft.
+        screen.update(Some(&king()), None);
+        let answer = screen.key(if cancel { "Escape" } else { "F10" }, false);
+        assert!(screen.settings_open().is_none());
+        if cancel {
+            assert_eq!(answer, None);
+        } else {
+            let Some(Request::Settings(change)) = answer else {
+                panic!("one apply");
+            };
+            assert_eq!(change.values, vec![(number::FRIENDLY_FIRE, 0)]);
+            let cheats = change.cheats.unwrap();
+            assert!(cheats.no_crashes && cheats.unlimited_ammo && cheats.easy_aiming);
+        }
+    }
+}
+
+#[test]
+fn lobby_title_follows_origin_for_hosts_joiners_and_panels() {
+    for hosting in [false, true] {
+        for internet in [false, true] {
+            let mut screen = screen_of(&king(), hosting);
+            screen.set_internet(internet);
+            let mut expected = crate::widgets::test_kit::blank();
+            Background::game_lobby(internet).draw(&mut Canvas(&mut expected), &screen.kit);
+            for panel in [None, Some(Id::Settings), Some(Id::PlayersPanel)] {
+                if let Some(id) = panel {
+                    if id == Id::PlayersPanel {
+                        screen.players.select(1);
+                        screen.refresh();
+                    }
+                    screen.focus.set(id);
+                    screen.key("Enter", false);
+                }
+                let mut pixels = crate::widgets::test_kit::blank();
+                screen.draw(&mut Canvas(&mut pixels));
+                assert_eq!(&pixels[..640 * 38 * 4], &expected[..640 * 38 * 4]);
+                if panel.is_some() {
+                    assert!(screen.overlaid());
+                    screen.key("Escape", false);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn settings_accept_late_mission_data_without_overwriting_local_edits() {
+    let mut context = ctx(&king());
+    context.cheats = None;
+    let mut panel = SettingsPanel::new(context.clone());
+    panel.show_page(Page::Realism);
+    assert_eq!(panel.key("ArrowRight", false), sp::Answer::None);
+    context.cheats = Some(Cheats::default());
+    panel.set_context(context.clone());
+    assert_eq!(panel.key("ArrowRight", false), sp::Answer::None);
+    assert_eq!(panel.context().cheats.unwrap().damage, Damage::Invulnerable);
+    context.name = "Host renamed the game".into();
+    panel.set_context(context);
+    assert_eq!(panel.context().cheats.unwrap().damage, Damage::Invulnerable);
+    let sp::Answer::Apply(change) = panel.key("F10", false) else {
+        panic!("apply draft");
+    };
+    assert!(change.name.is_none());
+    assert_eq!(change.cheats.unwrap().damage, Damage::Invulnerable);
+}
+
+#[test]
+fn controller_navigation_can_apply_settings_through_close() {
+    let mut panel = SettingsPanel::new(ctx(&king()));
+    panel.show_page(Page::Realism);
+    assert_eq!(panel.key("Enter", false), sp::Answer::None);
+    // These are the controller's Up and A events, without keyboard-only keys.
+    panel.key("ArrowUp", false);
+    assert_eq!(panel.selected(), page_rows(Page::Realism).len());
+    let sp::Answer::Apply(change) = panel.key("Enter", false) else {
+        panic!("Close applies");
+    };
+    assert_eq!(change.cheats.unwrap().damage, Damage::Invulnerable);
 }

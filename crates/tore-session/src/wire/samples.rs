@@ -1090,11 +1090,13 @@ pub fn phase_two_messages() -> Vec<Message> {
             values: vec![(1, 1), (10, 255), (16, 600)],
             name: Some("Viper's PvP".into()),
             password: Some(PasswordChange::Set("hunter2".into())),
+            cheats: Some(tore_sim::cheats::Cheats::default()),
         })),
         Message::Settings(Box::new(SettingsChange {
             values: Vec::new(),
             name: None,
             password: Some(PasswordChange::Clear),
+            cheats: None,
         })),
         Message::Settings(Box::default()),
         Message::SlotLock(Box::new(SlotLock {

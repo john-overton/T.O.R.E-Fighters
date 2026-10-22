@@ -22,7 +22,7 @@ import time
 
 from battery import Drive, DriveError, Scenario
 
-from battery_scenarios.net import GAME_FLAGS, LOCALHOST, NET_BAD, fresh_data, start_bots
+from battery_scenarios.net import GAME_FLAGS, LOCALHOST, NET_BAD, fresh_data, start_bots, start_server, stop_server
 
 # The script's clicks, in the 640 by 480 menu layer's pixels. The Multi menu, Direct Connection, New; then the
 # lobby: Settings... is the King's second button, Players... the third. The Settings panel's rows are at x 430,
@@ -72,8 +72,12 @@ wait 0.6
 click
 wait 2
 snapshot SHOTS/lobby-5-realism.ppm
-key Escape
+key F1
 wait 1
+snapshot SHOTS/lobby-settings-help.ppm
+key Escape
+key F10
+wait 35
 movemenu 100 176
 wait 0.6
 click right
@@ -95,8 +99,14 @@ wait 0.6
 click
 wait 4
 snapshot SHOTS/lobby-8-crowned.ppm
-wait 30
+wait 45
 snapshot SHOTS/lobby-9-back.ppm
+key F1
+wait 1
+snapshot SHOTS/lobby-help.ppm
+key m
+wait 3
+snapshot SHOTS/lobby-main.ppm
 exit
 """
 
@@ -126,7 +136,7 @@ movemenu 430 196
 wait 0.6
 click
 wait 3
-key Escape
+key F10
 wait 14
 movemenu 450 194
 wait 0.6
@@ -160,6 +170,7 @@ exit
 GAPS_PICTURES = ("gaps-1-lobby", "gaps-2-hint", "gaps-3-list", "gaps-4-notice", "gaps-5-back")
 
 PICTURES = (
+    "lobby-settings-help", "lobby-help", "lobby-main",
     "lobby-1-king", "lobby-2-settings", "lobby-3-game", "lobby-4-scoring", "lobby-5-realism", "lobby-6-closed",
     "lobby-7-players", "lobby-8-crowned", "lobby-9-back",
 )
@@ -207,8 +218,9 @@ def drive_lobby(d: Drive) -> None:
         if not game.alive() or time.time() > end:
             raise DriveError("the script never turned the Game type to PvP")
         d.sleep(0.5)
-    # The bot stays about 40 seconds: long enough to be given the crown and to leave while the script waits.
-    bot = start_bots(d, port, "bot", 40, "--callsign", "Bot")
+    # The bot imports after the deferred apply. Allow that startup before locking its explicit slot,
+    # then keep it long enough to receive the crown and leave during the final wait.
+    bot = start_bots(d, port, "bot", 65, "--callsign", "Bot", "--slot", "0")
     assert game is not None
     game.finish(150, 0)
     bot.finish(60, None)
@@ -218,9 +230,9 @@ def drive_lobby(d: Drive) -> None:
     for pattern, what in (
         (r"Lobby: Bot joined the game\.", "the bot joining"),
         (r"Lobby: Settings: mode pvp(, [^.\n]+)?\.", "the Game type turned to pvp"),
-        (r"Lobby: Settings: friendly-fire off\.", "Friendly fire turned off"),
-        (r"Lobby: Settings: kill-limit 7\.", "the Scoring page's kill limit turned"),
-        (r"Lobby: The mission is now: ", "the Realism page's cheat sent as a mission change"),
+        (r"Lobby: Settings: [^\n]*friendly-fire off", "Friendly fire turned off"),
+        (r"Lobby: Settings: [^\n]*kill-limit 7", "the Scoring page's kill limit turned"),
+        (r"Host: tick \d+: lobby: Viper changed the settings: [^\n]*realism changed", "Realism included in the single settings apply"),
         (r"Lobby: Plane 0's slot is closed: the AI flies it\.", "the slot closed by the right click"),
         (r"Lobby: Plane 0's slot is open\.", "the slot opened by the second right click"),
         (r"Lobby: Bot is the King now\.", "the crown given to the bot"),
@@ -229,6 +241,9 @@ def drive_lobby(d: Drive) -> None:
     ):
         if not re.search(pattern, log):
             d.problem(f"the game's log lacks {what}: /{pattern}/")
+    applies = re.findall(r"Host: tick \d+: lobby: Viper changed the settings:", log)
+    if len(applies) != 1:
+        d.problem(f"the King's draft produced {len(applies)} applies, expected exactly one")
     # What the bot, a second player, saw.
     bot.expect(r"^Bot: settings: .*mode pvp", "the King's change of mode")
     bot.expect(r"^Bot: settings: .*friendly-fire off", "the King's friendly fire")
@@ -299,8 +314,61 @@ def drive_gaps(d: Drive) -> None:
     game.forbid(NET_BAD, "a network problem")
 
 
+
+def drive_menu_disconnect(d: Drive) -> None:
+    """Return to main, rejoin the same free seat, then Exit through the ? menu."""
+    port = d.port()
+    server = start_server(d, port, empty_timeout=3600)
+    (d.data / "network-v1.conf").write_text(
+        f"tore-network 1\ncallsign Viper\nport {d.port()}\naddress {LOCALHOST}:{port}\n"
+    )
+    shots = d.work / "shots"
+    shots.mkdir(exist_ok=True)
+    join = """movemenu 150 48
+wait 1
+click
+wait 1
+movemenu 190 72
+click
+wait 6
+movemenu 200 145
+click
+key Up
+key Enter
+wait 18
+movemenu 150 175
+click
+wait 3
+key F1
+wait 1
+"""
+    script = d.work / "menu-disconnect.txt"
+    script.write_text("wait 20\n" + join + f"snapshot {shots}/return.ppm\nkey m\nwait 4\nsnapshot {shots}/main.ppm\n"
+                      + join + f"snapshot {shots}/exit.ppm\nkey Down\nkey Enter\nwait 5\nsnapshot {shots}/exit-failed.ppm\nexit\n")
+    game = d.start("game", [d.app, *GAME_FLAGS, "--input-script", script], window=True)
+    game.finish(180, 0)
+    text = server.text()
+    if len(re.findall(r"joined as Viper", text)) != 2:
+        d.problem("Return to Main Menu did not allow joining the server a second time")
+    if len(re.findall(r"Viper took the slot of plane 0", text)) != 2:
+        d.problem("the first disconnect did not free plane 0 for the second join")
+    if (shots / "exit-failed.ppm").exists():
+        d.problem("the ? menu Exit did not close the application")
+    for name in ("return", "main", "exit"):
+        if not (shots / f"{name}.ppm").exists():
+            d.problem(f"missing {name} menu capture")
+    if not server.alive():
+        d.problem("a client's menu exit stopped the server")
+    game.forbid(NET_BAD, "a network problem")
+    stop_server(d, server)
+
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="net-window-menu-disconnect", lane="net", args=[], driver=drive_menu_disconnect,
+            uses=("server",), window=True, timeout=240,
+            notes="the real ? menu returns a client to main, frees its seat for rejoin, and exits on the second visit",
+        ),
         Scenario(
             name="net-window-lobby", lane="net", args=[], driver=drive_lobby, uses=("bot",), window=True, timeout=420,
             notes="the lobby's Settings and Players panels and slot locks in the window: the King turns settings, "

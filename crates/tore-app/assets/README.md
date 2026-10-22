@@ -78,9 +78,9 @@ and Linux names and marks belong to their owners.
 
 ## Connection screens' title lettering
 
-`direct-network-connection-title.png` is the words DIRECT NETWORK CONNECTION, and
+`direct-network-connection-title.png` is the words DIRECT NETWORK LOUNGE, and
 `internet-lobby-title.png` (slice I4, the Internet Lobby screen) the words
-INTERNET LOBBY, each in
+INTERNET LOUNGE, each in
 **Liberation Sans Regular** (version 2.1.5, copyright 2010 Google Corporation
 and 2012 Red Hat, Inc., SIL Open Font License 1.1 in `OFL-LiberationSans.txt`,
 copied from the font's `LICENSE`) over a dark copy of the same words offset two
@@ -101,7 +101,10 @@ python3 tools/build_title_lettering.py /path/to/LiberationSans-Regular.ttf
 python3 tools/build_title_lettering.py --title internet /path/to/LiberationSans-Regular.ttf
 ```
 
-Both are lettered the same way and start at x 80 on the bar; a player's own
+`direct-game-lobby-title.png` and `internet-game-lobby-title.png` carry
+DIRECT NETWORK GAME LOBBY and INTERNET GAME LOBBY. Generate these with
+`--title direct-game` and `--title internet-game`. All four are lettered the
+same way and start at x 80 on the bar; a player's own
 `DirectNetworkConnection.png` or `InternetLobby.png` in the data folder replaces
 the one for its screen.
 

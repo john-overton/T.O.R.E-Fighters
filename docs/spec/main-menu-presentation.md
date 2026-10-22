@@ -67,3 +67,8 @@ on the base canvas. These are measurements of the imported font in this
 renderer, not a claim of comparison with the original running game.
 
 [Pixel measurements and state checks](../baselines/menu-replays-label.md).
+
+## Multiplayer entries
+
+The Multi menu's authored entries and Internet hint follow the
+[multiplayer menu specification](multiplayer-menus.md#names-and-navigation).

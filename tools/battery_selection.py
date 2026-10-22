@@ -264,7 +264,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-migrate-relay",),
     ),
     "net-window": (
-        "the game itself over the network: a joined game that stalls, a hosted game",
+        "the game itself over the network, including menu disconnect and seat reuse",
         ("net-window-*",),
     ),
     "net-surface": (
@@ -773,6 +773,7 @@ RULES: tuple[Rule, ...] = (
         windowed=True,
     ),
     _r("crates/tore-app/src/widgets/*", ("menus-screens", "net-window"), "the multiplayer widget kit; the Direct Connection and Internet Lobby screens draw it (menus-snap-direct*, menus-snap-internet*)", windowed=True),
+    _r("crates/tore-app/src/multiplayer_menu.rs", ("menus-screens", "net-window"), "multiplayer exit menu and safe return to main", windowed=True),
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens", "net-window"), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
     _r("crates/tore-app/src/internet_screen/*", ("menus-screens", "net-window", "net-listing"), "the Internet Lobby screen; its snapshot states are menus-snap-internet*; `--browse` is judged by net-master-listing", windowed=True),
     _r("crates/tore-app/src/lobby_screen/*", ("menus-screens", "net-window"), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),

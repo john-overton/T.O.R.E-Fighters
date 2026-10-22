@@ -254,10 +254,7 @@ fn a_pin_made_in_flight_says_it_applies_when_the_lobby_returns() {
     }
     assert_eq!(panel.selected(), page_rows(Page::Game).len() - 1);
     let answer = panel.key("ArrowRight", false);
-    assert!(
-        matches!(answer, sp::Answer::Edit(Edit::Settings(_))),
-        "{answer:?}"
-    );
+    assert!(matches!(answer, sp::Answer::None), "{answer:?}");
     assert_eq!(
         panel.notice(),
         Some("A pin made in flight applies when the lobby returns.")
@@ -278,14 +275,15 @@ fn the_host_row_is_sent_from_the_screen_as_a_pin() {
     let mut screen = screen_of(&state, true);
     click(&mut screen, button_centre(1));
     let at = centre(sp::place(Page::Game, page_rows(Page::Game).len() - 1).value);
-    match click(&mut screen, at) {
+    assert_eq!(click(&mut screen, at), None);
+    match screen.key("F10", false) {
         Some(Request::Settings(change)) => {
             assert_eq!(change.values, vec![(number::HOST, 2)]);
         }
         other => panic!("a pin: {other:?}"),
     }
-    // The host refused it in words: they are at the panel's foot.
-    assert!(screen.refused_in_panel("Viper connects through the relay and cannot host."));
+    // The panel is closed; a refusal now belongs in the lobby Messages.
+    assert!(!screen.refused_in_panel("Viper connects through the relay and cannot host."));
 }
 
 #[test]
