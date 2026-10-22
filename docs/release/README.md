@@ -7,7 +7,7 @@ pushed ([releasing](../RELEASING.md)).
 
 | Release | Title |
 | --- | --- |
-| [v0.2.0](v0.2.0.md) | Multiplayer and the Living Battlefield (Working Title) |
+| [v0.2.0](v0.2.0.md) | Wake up, dear, multiplayer is here! |
 | [v0.1.3](v0.1.3.md) | Bug Bash, Overspeed, World Edge and Loaded Takeoffs |
 | [v0.1.2](v0.1.2.md) | Explosions, Sound Prefs, Smarter AI and Flight Views |
 | [v0.1.1](v0.1.1.md) | Replays, Flares, Chaff and Quality of Life |
@@ -122,7 +122,7 @@ These follow the [agent instructions](../../AGENTS.md).
 - **No em dashes or en dashes.** Use a comma, a colon, or a new sentence. For a
   range, write "1 to 5" or "Alt+2 to Alt+5". `tools/check_docs.py` enforces this
   for this folder.
-- **No emoji** and no exclamation marks.
+- **No emoji** and no exclamation marks (a release title John chose is the exception).
 - **Plain English** for a smart player: short sentences, no unexplained jargon.
   Lead with what a change means, not how it works.
 - **Be honest.** Say what has not been tested and what is still approximate.
