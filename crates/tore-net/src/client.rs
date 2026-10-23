@@ -522,7 +522,9 @@ impl Client {
             | PacketKind::DiscoverAnswer
             | PacketKind::Punch
             | PacketKind::Reach
-            | PacketKind::ReachAnswer => {
+            | PacketKind::ReachAnswer
+            | PacketKind::ReservationQuery
+            | PacketKind::ReservationAnswer => {
                 // A game's peers router (stage K) takes Reach packets before
                 // the client sees any.
                 self.counters.unexpected += 1;

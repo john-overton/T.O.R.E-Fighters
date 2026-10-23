@@ -88,6 +88,42 @@ its sockets and router mappings are released. Return closes any lobby page
 and both lounges and shows the root main menu. Exit closes the application.
 Unsaved Settings edits are discarded by either destination.
 
+## Callsign when returning to a game
+
+**Opinionated**, clean-leave reset requested by John on 2026-10-23.
+Leave, Return to Main Menu and Exit discard that session's rejoin identity
+on the client and host. Joining again uses the current lounge Callsign field
+and starts as a new player. Ending only a flight while staying connected in
+the lobby does not discard the identity.
+
+Agent decision for an unclean drop: the saved token still restores the same
+player, scores, lives, locked side and kept aircraft, but uses the callsign
+entered for the new join. The usual 15-character limit and duplicate suffix
+rules still apply. The slot's reservation label uses the new name too.
+This applies to hosted and dedicated games. The reservation check below uses
+protocol 70.
+See [rejoin](../MULTIPLAYER.md#rejoin-and-observers).
+
+**Opinionated**, server confirmation requested by John on 2026-10-23.
+A saved token may label a game Rejoin, but does not promise its previous slot.
+While that game is selected, the lounge asks its server every 2 seconds.
+Only a reply matching the address, session and request nonce can name the
+return slot. A reply is usable for at most 3 seconds from the request, and
+changing selection or clearing identity removes it immediately. Poll and
+freshness intervals are agent decisions.
+
+A confirmed reply names the side, wing and member, with the earliest current
+return deadline: token expiry, the mission time limit, or an active empty
+mission timeout. The UI says "up to" this remaining time and warns that loss,
+release or an earlier mission end can end the hold. It adds no new hold timer. A confirmed absence reads
+"No reserved slot is available for your return." Silence, timeout or
+an unconfirmed reply shows no reservation message. These rules apply to both
+lounges. Direct uses the selected server address. Internet uses the saved
+address for that session; if it is no longer reachable, including a moved or
+relay-only host, it shows no promise. No token is sent to a broadcast address
+or to the master listing service. The check does not join or occupy a slot.
+
+
 ## Settings draft
 
 Agent decision: Game, Revival, Scoring and Realism share one local draft, so

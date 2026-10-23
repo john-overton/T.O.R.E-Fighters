@@ -80,12 +80,42 @@ fn the_selection_line_and_the_join_carry_the_token() {
         .position(|row| row.cells.contains(&Cell::Text("Goose and co".into())))
         .unwrap();
     s.select_game(index);
-    let line = s.selection_line().expect("a line");
-    assert!(line.starts_with("You were in this game as Viper"), "{line}");
+    assert!(
+        s.selection_line().is_none(),
+        "a saved token does not prove a slot"
+    );
+    let target = s.rejoin_target().unwrap();
+    s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(
+        target,
+        Some(tore_net::packet::ReservedSlot {
+            plane: 1,
+            enemy: false,
+            wing: 0,
+            member: 1,
+            token_seconds: 86_400,
+            return_seconds: 192,
+        }),
+    );
+    let line = s.selection_line().unwrap();
+    assert!(line.contains("Blue Wing 1 #2"), "{line}");
+    s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(target, None);
+    assert_eq!(
+        s.selection_line().as_deref(),
+        Some("No reserved slot is available for your return.")
+    );
+    s.rejoin_check = Default::default();
+    assert!(
+        s.selection_line().is_none(),
+        "unconfirmed or timed-out queries promise nothing"
+    );
     s.focus.set(Id::Games);
     let Outcome::Join(request) = s.key("Enter", false) else {
         panic!("a join: {}", s.message_lines().join("\n"));
     };
+    assert_eq!(
+        request.callsign, "Maverick",
+        "the field wins over the kept Viper token"
+    );
     assert_eq!(request.token, Some(Token(0xfeed_0003)));
     assert_eq!(
         request.address,
@@ -156,6 +186,7 @@ fn a_game_reached_by_a_typed_address_is_joined_with_the_token_kept_for_it() {
             _ => std::thread::sleep(Duration::from_millis(20)),
         }
     };
+    assert_eq!(request.callsign, "Maverick");
     assert_eq!(request.address, live);
     assert_eq!(request.token, Some(Token(0xfeed_0009)));
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -205,5 +236,19 @@ fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     s.key("Space", false);
     s.key("Escape", false);
     assert!(s.settings.may_host);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn returning_to_the_lounge_reloads_cleared_rejoin_identity() {
+    let dir = scratch("cleared");
+    let mut s = with_tokens(&dir);
+    assert_eq!(state_of(&s, "Goose and co"), "Rejoin");
+    s.open_options();
+    s.session = true;
+    Store::default().save(&dir).unwrap();
+    s.update_at(Duration::from_millis(1), false);
+    assert!(s.tokens.entries.is_empty());
+    assert_ne!(state_of(&s, "Goose and co"), "Rejoin");
     let _ = std::fs::remove_dir_all(dir);
 }

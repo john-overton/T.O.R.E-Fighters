@@ -18,6 +18,13 @@ const MS: Duration = Duration::from_millis(1);
 struct Shelf(Arc<Mutex<Vec<KeptToken>>>);
 
 impl TokenStore for Shelf {
+    fn forget(&mut self, session_id: u64) {
+        self.0
+            .lock()
+            .unwrap()
+            .retain(|kept| kept.session_id != session_id);
+    }
+
     fn keep(&mut self, kept: &KeptToken) {
         self.0.lock().unwrap().push(kept.clone());
     }
@@ -62,13 +69,13 @@ fn the_granted_token_is_kept_with_the_session_and_handed_to_the_store() {
         shelf.0.lock().unwrap().as_slice(),
         std::slice::from_ref(&kept)
     );
-    // The connection ends: the token's 24 hours start from now.
+    // A clean departure clears the token instead of saving it again.
     let now = rig.net.now();
     rig.players[viper].client.leave_game(now);
     assert!(rig.run_until(Duration::from_secs(4), |r| r.closed(viper)));
     let kept_list = shelf.0.lock().unwrap().clone();
-    assert!(kept_list.len() >= 2, "kept again at the close");
-    assert_eq!(kept_list.last().unwrap().token, kept.token);
+    assert!(kept_list.is_empty());
+    assert!(rig.players[viper].client.token().is_none());
 }
 
 #[test]
@@ -608,4 +615,65 @@ fn a_laser_pass_dropped_mid_run_is_finished_by_the_ai_and_found_on_the_rejoin() 
     if standing {
         assert_eq!(own.designated(), Some(target));
     }
+}
+
+#[test]
+fn disconnect_forgets_only_this_session_and_ignores_delayed_grants() {
+    let mut rig = rig();
+    let shelf = Shelf::default();
+    let viper = flier(&mut rig, "Viper", None);
+    rig.players[viper]
+        .client
+        .set_token_store(Box::new(shelf.clone()));
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(viper)));
+    let grant = rig.players[viper].client.token().unwrap().clone();
+    let mut other = grant.clone();
+    other.session_id ^= 1;
+    shelf.clone().keep(&other);
+    let now = rig.net.now();
+    rig.players[viper].client.disconnect(now);
+    rig.players[viper]
+        .client
+        .rejoin_token(crate::wire::migration::TokenGrant {
+            token: grant.token,
+            life_seconds: grant.life_seconds,
+        });
+    rig.players[viper].client.rejoin_closed();
+    assert!(rig.players[viper].client.token().is_none());
+    assert_eq!(*shelf.0.lock().unwrap(), vec![other]);
+}
+
+#[test]
+fn ending_only_the_flight_keeps_rejoin_identity() {
+    let mut rig = rig();
+    let viper = flier(&mut rig, "Viper", None);
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(viper)));
+    let token = rig.players[viper].client.token().unwrap().token;
+    rig.players[viper].client.leave(rig.net.now());
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.players[viper].client.phase()
+            == ClientPhase::Lobby)
+    );
+    assert_eq!(rig.players[viper].client.token().unwrap().token, token);
+    assert_eq!(rig.host.token_of_for_test("Viper"), Some(token));
+}
+
+#[test]
+fn cleanup_after_connection_loss_keeps_the_rejoin_token() {
+    let mut rig = rig();
+    let shelf = Shelf::default();
+    let viper = flier(&mut rig, "Viper", None);
+    rig.players[viper]
+        .client
+        .set_token_store(Box::new(shelf.clone()));
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(viper)));
+    let token = rig.players[viper].client.token().unwrap().token;
+    rig.players[viper]
+        .client
+        .net
+        .disconnect(tore_net::DisconnectReason::Timeout);
+    assert!(rig.run_until(Duration::from_secs(1), |r| r.closed(viper)));
+    rig.players[viper].client.disconnect(rig.net.now());
+    assert_eq!(rig.players[viper].client.token().unwrap().token, token);
+    assert_eq!(shelf.0.lock().unwrap().last().unwrap().token, token);
 }

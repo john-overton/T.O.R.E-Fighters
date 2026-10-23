@@ -24,6 +24,7 @@ from battery import Drive, DriveError, Scenario
 
 from battery_scenarios.net import GAME_FLAGS, LOCALHOST, NET_BAD, fresh_data, start_bots, start_server, stop_server
 
+# Coordinate-driven runs pin CHOOSEM: CHOOSE3 shifts the main menu bar by 109 pixels.
 # The script's clicks, in the 640 by 480 menu layer's pixels. The Multi menu, Direct Connection, New; then the
 # lobby: Settings... is the King's second button, Players... the third. The Settings panel's rows are at x 430,
 # 19 pixels apart on the Game page (twelve rows since stage K's Host row) from y 175: Game type is the second row, at 194,
@@ -203,7 +204,7 @@ def drive_lobby(d: Drive) -> None:
             old.unlink()
         script = d.work / f"lobby{attempt}.txt"
         script.write_text(LOBBY_SCRIPT.replace("SHOTS", str(shots)).replace("wait 10\n", f"wait {start_wait}\n", 1))
-        game = d.start(f"game{attempt}", [d.app, *GAME_FLAGS, "--input-script", script], window=True)
+        game = d.start(f"game{attempt}", [d.app, *GAME_FLAGS, "--background", "CHOOSEM", "--input-script", script], window=True)
         # The lobby opens some seconds after New is clicked; the hosting thread's line says it listens.
         end = time.time() + (start_wait + 45) * d.scale
         while not re.search(r"Hosting Viper's game on UDP port", game_log(d)):
@@ -353,7 +354,7 @@ wait 1
     script = d.work / "menu-disconnect.txt"
     script.write_text("wait 20\n" + join + f"snapshot {shots}/return.ppm\nkey m\nwait 4\nsnapshot {shots}/main.ppm\n"
                       + join + f"snapshot {shots}/exit.ppm\nkey Down\nkey Enter\nwait 5\nsnapshot {shots}/exit-failed.ppm\nexit\n")
-    game = d.start("game", [d.app, *GAME_FLAGS, "--input-script", script], window=True)
+    game = d.start("game", [d.app, *GAME_FLAGS, "--background", "CHOOSEM", "--input-script", script], window=True)
     game.finish(180, 0)
     text = server.text()
     if len(re.findall(r"joined as Viper", text)) != 2:
@@ -370,8 +371,60 @@ wait 1
     game.forbid(NET_BAD, "a network problem")
     stop_server(d, server)
 
+def drive_callsign_rejoin(d: Drive) -> None:
+    """Leave, rename in the lounge, rejoin; repeat through Return to Main Menu."""
+    port = d.port()
+    server = start_server(d, port, empty_timeout=3600)
+    (d.data / "network-v1.conf").write_text(
+        f"tore-network 1\ncallsign Viper\nport {d.port()}\naddress {LOCALHOST}:{port}\n"
+    )
+    shots = d.work / "shots"
+    shots.mkdir(exist_ok=True)
+    lounge = "movemenu 150 48\nclick\nwait 1\nmovemenu 190 72\nclick\nwait 6\n"
+    join = "movemenu 200 145\nclick\nkey Up\nkey Enter\nwait 30\n"
+    def rename(name: str) -> str:
+        return ("movemenu 140 110\nclick\nkey End\n" + "key Backspace\n" * 15
+                + "".join(f"key {c}\n" for c in name))
+    script = d.work / "callsign-rejoin.txt"
+    script.write_text(
+        "wait 20\n" + lounge + join.replace("wait 30\n", "wait 60\n") + f"shot {shots}/before-viper.ppm\n"
+        + "key Escape\nwait 5\n" + rename("maverick") + join
+        + f"shot {shots}/after-leave-maverick.ppm\n"
+        + "key F1\nkey m\nwait 5\n" + lounge + rename("goose") + join
+        + f"shot {shots}/after-main-goose.ppm\nkey F1\nkey x\n"
+    )
+    game = d.start("game", [d.app, *GAME_FLAGS, "--background", "CHOOSEM", "--input-script", script], window=True)
+    game.finish(360, 0)
+    text = server.text()
+    for name in ("Viper", "maverick", "goose"):
+        if not re.search(rf"joined as {name}\b", text):
+            d.problem(f"the lobby did not accept the field's callsign {name}")
+    lobby_lines = [line for path in sorted((d.data / "logs").glob("tore-*.log"))
+                   for line in path.read_text(errors="replace").splitlines()
+                   if "Network: lobby: Lobby," in line]
+    (d.work / "lobby-names.txt").write_text("\n".join(lobby_lines) + "\n")
+    for name in ("Viper", "maverick", "goose"):
+        if not any(re.search(rf": {name} no slot$", line) for line in lobby_lines):
+            d.problem(f"the client never received the renamed lobby player {name}")
+    if "rejoined with its token" in text:
+        d.problem("a clean leave retained the old rejoin identity")
+    kept = d.data / "rejoin-v1.conf"
+    if kept.exists() and "token " in kept.read_text():
+        d.problem("Exit kept the session's rejoin token")
+    for name in ("before-viper", "after-leave-maverick", "after-main-goose"):
+        if not (shots / f"{name}.ppm").exists():
+            d.problem(f"missing {name} lobby capture")
+    game.forbid(NET_BAD, "a network problem")
+    stop_server(d, server)
+
+
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="net-window-callsign-rejoin", lane="net", args=[], driver=drive_callsign_rejoin,
+            uses=("server",), window=True, timeout=420,
+            notes="clean Leave and Return to Main Menu clear identity; rejoining uses the changed lounge callsign",
+        ),
         Scenario(
             name="net-window-menu-disconnect", lane="net", args=[], driver=drive_menu_disconnect,
             uses=("server",), window=True, timeout=240,

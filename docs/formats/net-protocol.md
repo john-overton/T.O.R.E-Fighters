@@ -108,6 +108,8 @@ version.
 | 11 | [Punch](#punch) (protocol 9) | host to client | versioned |
 | 12 | [Reach](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
 | 13 | [Reach answer](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
+| 14 | [Reservation query](#reservation-preflight-protocol-70) | lounge to host | versioned |
+| 15 | [Reservation answer](#reservation-preflight-protocol-70) | host to lounge | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -323,6 +325,33 @@ Ten bytes since protocol 28 (nine before), smaller than the empty Payload
   counted as from an unknown address, stale or malformed, and keeps nothing
   alive. A joined game's peers router passes it to the client (it dropped
   the kind before protocol 28).
+
+## Reservation preflight (protocol 70)
+
+These private, connectionless packets use the versioned `TORE-NET` checksum.
+Discovery kinds 8 and 9 and the master protocol are unchanged. No player is
+admitted and no slot is occupied by a query. Queries are unicast only, and
+share discovery's per-IP and global rate limit. Replies never exceed their
+37-byte queries. A token is never returned or written to a client-facing log.
+
+After the standard 5-byte checksum/kind header, little-endian fields are:
+
+| Kind | Fields | Total bytes |
+| --- | --- | --- |
+| 14 | nonce u64, session id u64, token u128 (low u64 first) | 37 |
+| 15, unavailable | nonce u64, requested session id u64, presence u8 = 0 | 22 |
+| 15, held | nonce u64, requested session id u64, presence u8 = 1, plane u32, enemy u8 (0 or 1), wing u8 (0 to 2), member u8 (zero based), token seconds u32 (0 to 86400), return seconds u32 (0 to token seconds) | 37 |
+
+Other presence/side values, out-of-range wing/time, trailing bytes and short
+packets are rejected. Invalid tokens and foreign sessions return unavailable.
+A held reply requires a valid token and a living aircraft reserved for it, or
+its still-present connection's reclaimable aircraft before the drop timeout.
+It never promotes a remembered lobby slot to a reservation. Token seconds is remaining identity validity. Return seconds is the minimum
+of that and any current mission time limit or active empty-mission timeout.
+It is an upper bound, not a promise of aircraft survival or unchanged settings.
+The caller checks source, session, nonce and freshness; the lounge's 2-second
+polling and 3-second freshness limit are in the
+[menu specification](../spec/multiplayer-menus.md#callsign-when-returning-to-a-game).
 
 ## Discovery
 
@@ -3203,7 +3232,10 @@ again with an observer; the capture format did not change for it.
   Realism, applied with ordinary settings in one mission rebuild;
   67 adds dedicated feedback (2026-10-22): Lobby begins with a feedback
   enabled bit, kind 80 submits feedback, and kind 81 returns the accepted
-  flag to its sender. Protocol 66 is reserved for the parallel lobby change.
+  flag to its sender. Protocol 66 is reserved for the parallel lobby change;
+  70 adds private reservation preflight packets 14 and 15 (2026-10-23), so the
+  lounges confirm a reclaimable slot instead of trusting a saved token.
+  Protocols 68 and 69 belong to parallel changes.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
