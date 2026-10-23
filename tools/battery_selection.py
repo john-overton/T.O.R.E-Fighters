@@ -150,7 +150,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     # Menus lane.
     "replay-feedback": ("dedicated feedback form and authoritative recordings", ("net-replay-feedback-*",)),
-    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*")),
+    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*", "menus-updates-bar-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
         ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-derived-stations", "menus-validate-creator", "menus-snap-quick-*"),
@@ -687,6 +687,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/pause_menu.rs", ("windowed-menus", "replay-live"), "pause menu", windowed=True),
     # tore-app: menus.
     _r("crates/tore-app/src/menu.rs", MENU_FAMILIES, "menus", windowed=True),
+    _r("crates/tore-app/src/updates*", ("menus-screens",), "main-menu release checks and fixtures"),
     _r("crates/tore-app/src/rocker.rs", MENU_FAMILIES, "menu rockers", windowed=True),
     _r("crates/tore-app/src/locate.rs", ("menus-screens", "replay-settings"), "locate screen", windowed=True),
     _r("crates/tore-app/src/quick_mission.rs", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),

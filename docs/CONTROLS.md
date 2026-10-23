@@ -396,6 +396,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Multiplayer ? menu: return to main menu | M | - | - |
 | Multiplayer ? menu: exit | X | - | - |
 | Lobby Settings: apply and close (Escape discards) | F10 | - | - |
+| Main menu: select Leave Feedback, Update Available or Pref update check | Tab or Enter | - | - |
 | Menu up | Up | - | D-pad up |
 | Menu down | Down | - | D-pad down |
 | Menu left | Left | - | D-pad left |

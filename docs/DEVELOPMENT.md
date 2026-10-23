@@ -463,9 +463,28 @@ are outside application logging. See [diagnostic evidence](baselines/startup-dia
 - No graphics adapter or display: run from a logged-in desktop session with working drivers. Compilation and tests do not require a window; the smoke test does.
 - Missing reference folder: the Rust app does not need it. Missing media: an existing valid cache still runs; otherwise import your own media. See [REFERENCES.md](REFERENCES.md).
 
+### Release-check dependency
+
+The optional [main-menu update check](spec/main-menu-presentation.md#updates-and-project-feedback)
+uses `ureq` with defaults off and only its `rustls` feature, on a blocking worker.
+This agent choice avoids an async runtime and system OpenSSL libraries. Its
+bundled WebPKI roots and ring crypto backend preserve HTTPS certificate checking.
+`serde_json` parses bounded API/cache input and `semver` compares release
+precedence, including prereleases. `Cargo.lock` pins the resolved versions and
+[third-party notices](../THIRD_PARTY_NOTICES.md#release-check-dependencies) records
+their licences. No dependency is added to formats, simulation or synthesis.
+Keep the runtime dependency check, including the release host's glibc 2.35
+ceiling, when updating this stack. A binary linked on a newer Linux host still
+needs validation in the release build environment.
+
 ### Menu presentation checks
 
-The main menu uses the [badge and button-label layout](spec/main-menu-presentation.md).
+The main menu uses the [badge, button and project-link layout](spec/main-menu-presentation.md).
+Use `--snapshot-state update-available`, `update-focus` or `updates-off` with
+`--snapshot PATH` to inspect the release links and preference without networking.
+The ignored `updates::tests::live_api_manual_check` test makes one real request;
+set `TORE_UPDATE_CHECK_EVIDENCE` to an ignored JSON output path before running it
+explicitly with `--ignored --nocapture`. Normal tests use a local JSON fixture.
 The first debrief page centers its result sentence under the heading.
 `--quick-mission --snapshot-state debrief-success --snapshot PATH` previews the
 success case; `debrief-1` retains the failed-mission preview. These CPU snapshots

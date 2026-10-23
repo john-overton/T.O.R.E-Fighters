@@ -167,6 +167,7 @@ mod terrain_colors;
 mod terrain_seams;
 mod ui_text;
 mod ui_text_renderer;
+mod updates;
 mod v22_animation;
 mod variety_animation;
 mod variety_rotors;
@@ -435,6 +436,7 @@ struct App {
     /// The open `TORE_FORMATION_TRACE` file for the mission in flight.
     formation_trace: Option<formation_trace::FormationTrace>,
     menu: Menu,
+    updates: updates::Updates,
     audio: Option<audio::Audio>,
     renderer: Option<Renderer>,
     /// Graphics choices for the 3D view, applied to the renderer.
@@ -3175,6 +3177,37 @@ impl App {
             return;
         }
         match action {
+            Action::LeaveFeedback | Action::OpenUpdate => {
+                let url = if action == Action::LeaveFeedback {
+                    Some(updates::FEEDBACK_URL)
+                } else {
+                    self.updates.available.as_ref().map(|r| r.url.as_str())
+                };
+                if let Some(url) = url
+                    && let Err(error) = updates::open_page(url)
+                {
+                    self.menu.state.toast =
+                        Some((format!("Could not open browser: {error}"), Instant::now()));
+                }
+            }
+            Action::ToggleUpdates => match self.updates.toggle() {
+                Ok(()) => {
+                    self.menu.state.updates_enabled = self.updates.enabled;
+                    let version = self
+                        .updates
+                        .available
+                        .as_ref()
+                        .filter(|_| self.updates.enabled)
+                        .map(|r| r.version.to_string());
+                    self.menu.update_link(version.as_deref());
+                }
+                Err(error) => {
+                    self.menu.state.toast = Some((
+                        format!("Could not save update setting: {error}"),
+                        Instant::now(),
+                    ))
+                }
+            },
             Action::Replays => self.open_replays("Main menu"),
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
@@ -6812,6 +6845,17 @@ impl ApplicationHandler for App {
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.screen == Screen::Main && self.updates.poll() {
+            let version = self
+                .updates
+                .available
+                .as_ref()
+                .map(|r| r.version.to_string());
+            self.menu.update_link(version.as_deref());
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+        }
         // The Graphics screen's changes apply once they settle; this also
         // keeps its window size current after a resize.
         self.settle_graphics(false);
@@ -15731,7 +15775,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     } else {
         None
     };
+    let updates = updates::Updates::new(if ordinary_start {
+        Some(assets::data_directory()?)
+    } else {
+        None
+    });
+    menu.state.updates_enabled = updates.enabled;
     let mut app = App {
+        updates,
         creator_loading_view: None,
         network_loading_stage: None,
         loading_heartbeat: None,

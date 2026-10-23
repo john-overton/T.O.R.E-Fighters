@@ -56,6 +56,13 @@ open it again. The next build fixes the missing bundle seal. See
 the fallback on other builds; recent macOS no longer has the right-click Open
 bypass.
 
+The main menu's **Update Available** link opens a newer GitHub release, including
+prereleases. **Leave Feedback** opens the project's issues page. Automatic
+checks run in the background at most once a day per profile. They send an
+anonymous request to `api.github.com`; disable them with **Pref > Check for
+updates: Off**. Downloads and installation are manual. See the
+[update-check details](docs/spec/main-menu-presentation.md#updates-and-project-feedback).
+
 ### 2. Point it at your game
 
 On first launch T.O.R.E opens the **Locate Fighters Anthology** screen. There

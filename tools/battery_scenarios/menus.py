@@ -17,6 +17,7 @@ AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su2
 NORMAL_STATES = [
     "loading", "loading-thunderbirds",
     "respawn-loadout", "respawn-aircraft",
+    "update-available", "update-focus", "updates-off",
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "graphics-middle",
     "graphics-bottom", "graphics-scale", "graphics-shadows", "sound",
@@ -584,6 +585,17 @@ def scenarios() -> list[Scenario]:
                 timeout=120,
                 expect=[r"Menu preview:"],
                 check=replays_bar_picture(offset),
+            ))
+    for background in ("CHOOSEV", "CHOOSEU", "CHOOSEM", "CHOOSEAC", "CHOOSE3"):
+        for state in ("update-available", "update-focus"):
+            out.append(Scenario(
+                name=f"menus-updates-bar-{background.lower()}-{state}",
+                lane="menus",
+                args=["--background", background, "--snapshot", "{work}/shot.ppm",
+                      "--snapshot-state", state, "--no-audio"],
+                timeout=120,
+                expect=[r"Menu preview:"],
+                check=menu_picture(),
             ))
     for state in QUICK_STATES:
         out.append(
