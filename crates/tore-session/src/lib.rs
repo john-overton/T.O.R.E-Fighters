@@ -49,3 +49,5 @@ pub use host::{
     LeaveReason, OpenPlanes, Phase, PlayerStatus, StartMode,
 };
 pub use tore_sim::ai::test_settings::AiTestSettings;
+
+pub mod recording;

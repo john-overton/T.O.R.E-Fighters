@@ -11770,3 +11770,13 @@ Close emits one SettingsChange, including optional Realism. The host applies
 its existing validation and respec once. The shared multiplayer ? menu routes
 Return to Main Menu through end_session and Exit through the normal exiting
 callback, preserving the existing disconnect, host and listing teardown.
+
+Dedicated recording uses `tore-session::recording`, with the ordinary
+`tore-replay::Writer`. Pose conversion, world identity and frame bounds are
+shared with the app's recorder. The host reads each completed authoritative
+tick; with no occupied cockpit it builds the observer's full-world picture,
+including recording-only stores and effects. Recording is opt-in and does not
+change the simulation. Named feedback events travel on the reliable session
+channel, are stamped with host identity and kept by the client capture's
+observer during conversion. See [the behavior spec](spec/replay-feedback.md)
+and [event layout](formats/replay-feedback.md).

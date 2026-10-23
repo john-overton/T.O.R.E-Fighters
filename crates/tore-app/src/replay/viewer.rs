@@ -695,9 +695,14 @@ fn markers(events: &[TimedEvent]) -> Vec<Marker> {
                 vocab::kind::COMBAT_DESTROYED => MarkerKind::Kill,
                 vocab::kind::COMMS_ORDER | vocab::kind::AI_STRIKE => MarkerKind::Order,
                 vocab::kind::PLAYER_BOOKMARK => MarkerKind::Bookmark,
+                tore_replay::feedback::KIND => MarkerKind::Feedback,
                 _ => return None,
             };
-            Some(Marker { tick: e.tick, kind })
+            Some(Marker {
+                tick: tore_replay::feedback::Feedback::from_event(&e.event)
+                    .map_or(e.tick, |f| f.tick),
+                kind,
+            })
         })
         .collect()
 }
@@ -798,6 +803,10 @@ pub struct Viewer {
     sound: ReplaySound,
     pub clock: Clock,
     info: BTreeMap<u32, AircraftInfo>,
+    feedback_flags: Vec<tore_replay::feedback::Feedback>,
+    feedback_open: bool,
+    feedback_selected: usize,
+    feedback_scroll: usize,
     markers: Vec<Marker>,
     /// Unique marker ticks, for PageUp and PageDown.
     marker_ticks: Vec<u64>,
@@ -1140,6 +1149,10 @@ impl Viewer {
             player,
             clock,
             info,
+            feedback_flags: Vec::new(),
+            feedback_open: false,
+            feedback_selected: 0,
+            feedback_scroll: 0,
             markers: Vec::new(),
             marker_ticks: Vec::new(),
             comms: Vec::new(),
@@ -1217,7 +1230,9 @@ impl Viewer {
     /// the chaff and flares. Read again when a growing recording has more.
     fn read_events(&mut self) {
         let events = self.recording.events();
+        self.feedback_flags = self.recording.feedback().collect();
         self.markers = markers(events);
+        self.markers.sort_by_key(|m| m.tick);
         self.marker_ticks = self.markers.iter().map(|m| m.tick).collect();
         self.marker_ticks.dedup();
         self.comms = events
@@ -1949,6 +1964,27 @@ impl Viewer {
     /// (letters lower case, `` ` `` for the backquote key). While the
     /// Escape menu is open it takes every key.
     pub fn key(&mut self, name: &str, pressed: bool, repeat: bool, shift: bool) -> Command {
+        if self.feedback_open {
+            if pressed {
+                let count = self.feedback_flags.len();
+                match name {
+                    "Escape" => self.feedback_open = false,
+                    "ArrowDown" if count > 0 => {
+                        self.feedback_scroll = 0;
+                        self.feedback_selected = (self.feedback_selected + 1) % count
+                    }
+                    "ArrowUp" if count > 0 => {
+                        self.feedback_scroll = 0;
+                        self.feedback_selected = (self.feedback_selected + count - 1) % count
+                    }
+                    "PageDown" => self.scroll_feedback(20),
+                    "PageUp" => self.scroll_feedback(-20),
+                    "Enter" => self.seek_feedback(),
+                    _ => {}
+                }
+            }
+            return Command::None;
+        }
         if self.pause.is_open() {
             if !pressed {
                 return Command::None;
@@ -2092,6 +2128,9 @@ impl Viewer {
         repeat: bool,
         modifiers: winit::keyboard::ModifiersState,
     ) -> bool {
+        if self.feedback_open {
+            return false;
+        }
         if pressed && repeat && !self.drone_input.claimed(name) {
             return false;
         }
@@ -2251,6 +2290,20 @@ impl Viewer {
             return self.pause_choice(choice);
         }
         let layer = self.layer_point(point, size);
+        if self.feedback_open
+            && let Some((x, y)) = layer
+            && (8. ..632.).contains(&x)
+            && (32. ..426.).contains(&y)
+        {
+            if !pressed && x < 248. && (40. ..232.).contains(&y) {
+                let index = self.feedback_selected / 8 * 8 + ((y - 40.) / 24.) as usize;
+                if index < self.feedback_flags.len() {
+                    self.feedback_selected = index;
+                    self.seek_feedback();
+                }
+            }
+            return Command::None;
+        }
         let at = self.panel_point(point, size);
         if pressed {
             let owner = if let Some(menu) = &mut self.menu {
@@ -2300,6 +2353,10 @@ impl Viewer {
                 Control::Camera => self.next_camera(),
                 Control::Aircraft => self.cycle_aircraft(true),
                 Control::HideUi => self.ui.hidden = true,
+                Control::Feedback if self.recording.flagged() => {
+                    self.feedback_open = !self.feedback_open;
+                    self.clock.pause();
+                }
                 _ => {}
             }
         }
@@ -2340,6 +2397,10 @@ impl Viewer {
     /// Mouse wheel notches: a menu or panel under the pointer scrolls,
     /// otherwise the drone's speed, or zoom in a flight view.
     pub fn wheel(&mut self, notches: i32) {
+        if self.feedback_open {
+            self.scroll_feedback(-notches * 3);
+            return;
+        }
         if self.pause.is_open() {
             return;
         }
@@ -3425,6 +3486,10 @@ impl Viewer {
             _ => self.label(self.selected),
         };
         Model {
+            feedback: self.feedback_flags.clone(),
+            feedback_open: self.feedback_open,
+            feedback_selected: self.feedback_selected,
+            feedback_scroll: self.feedback_scroll,
             first: self.clock.first(),
             last: self.clock.last(),
             position: self.clock.position(),
@@ -3915,6 +3980,27 @@ impl Viewer {
     }
 }
 
+impl Viewer {
+    fn scroll_feedback(&mut self, delta: i32) {
+        if let Some(f) = self.feedback_flags.get(self.feedback_selected) {
+            let max = overlay::feedback_lines(&self.ownship.font, f)
+                .len()
+                .saturating_sub(27);
+            self.feedback_scroll = self
+                .feedback_scroll
+                .saturating_add_signed(delta as isize)
+                .min(max);
+        }
+    }
+    fn seek_feedback(&mut self) {
+        self.feedback_scroll = 0;
+        if let Some(f) = self.feedback_flags.get(self.feedback_selected) {
+            self.clock.seek(f.tick as f64);
+            self.clock.pause();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4390,6 +4476,52 @@ mod tests {
         // A fresh press, with any previous press of this key released first.
         viewer.key(key, false, false, false);
         viewer.key(key, true, false, false)
+    }
+
+    #[test]
+    fn feedback_marker_and_list_seek_to_opening_tick_not_submit() {
+        let dir = TempDir::new("viewer-feedback");
+        let path = dir.path().join("feedback.tore-replay");
+        let mut writer =
+            tore_replay::Writer::create(&path, &tore_replay::Header::default()).unwrap();
+        for tick in 0..=120 {
+            let mut frame = tore_replay::Frame {
+                tick,
+                ..Default::default()
+            };
+            if tick == 120 {
+                frame.events.push(
+                    tore_replay::feedback::Feedback {
+                        tick: 12,
+                        submit_tick: 120,
+                        text: "bump".into(),
+                        ..Default::default()
+                    }
+                    .event(),
+                );
+            }
+            writer.push(&frame).unwrap();
+        }
+        writer.finish(&tore_replay::Footer::default()).unwrap();
+        let mut v = viewer_recording(
+            Arc::new(Recording::open(path).unwrap()),
+            &Options::default(),
+        );
+        assert_eq!(
+            v.markers,
+            vec![Marker {
+                tick: 12,
+                kind: MarkerKind::Feedback
+            }]
+        );
+        v.feedback_open = true;
+        v.clock.end();
+        press(&mut v, "Enter");
+        assert_eq!(v.clock.tick(), 12);
+        assert!(v.clock.paused());
+        assert_eq!(v.model(12).feedback[0].text, "bump");
+        press(&mut v, "Escape");
+        assert!(!v.feedback_open);
     }
 
     #[test]

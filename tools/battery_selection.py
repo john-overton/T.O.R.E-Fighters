@@ -149,6 +149,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     # Menus lane.
+    "replay-feedback": ("dedicated feedback form and authoritative recordings", ("net-replay-feedback-*",)),
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
@@ -839,6 +840,10 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/_replay_*.py", LANE_SMOKE["replay"], "replay scenarios", unit_tests=("test_replay_checks",)),
     _r("tools/battery_scenarios/replay.py", LANE_SMOKE["replay"], "replay scenarios", unit_tests=("test_replay_checks",)),
     _r("tools/test_replay_checks.py", (), "replay check tests", unit_tests=("test_replay_checks",)),
+    _r("tools/battery_scenarios/replay_feedback.py", ("replay-feedback",), "feedback window flows", unit_tests=("test_battery_selection",)),
+    _r("crates/tore-app/src/feedback.rs", ("replay-feedback",), "feedback form"),
+    _r("crates/tore-session/src/recording/*", ("replay-feedback", "net-convert"), "authoritative replay recording"),
+    _r("crates/tore-replay/src/feedback.rs", ("replay-feedback",), "feedback event layout"),
     _r("tools/battery_scenarios/net.py", LANE_SMOKE["net"], "net scenarios", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_lobby.py", ("net-window",), "the lobby panels scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_observe.py", ("net-window",), "the observer screen scenario", windowed=True, unit_tests=("test_battery_net",)),

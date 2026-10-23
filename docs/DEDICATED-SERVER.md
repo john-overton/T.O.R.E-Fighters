@@ -1167,3 +1167,41 @@ implemented in this slice. Changing aircraft on a late join or revival and the
 in-flight Load Ordnance overlay are still unfinished. Do not treat this as the
 complete Player Choice feature. The requested behavior is specified in the
 [creator specification](spec/quick-mission-menu.md#multiplayer-player-choice).
+
+## Recording and feedback
+
+These settings apply to the whole server, including every rotation entry:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `record-replays off|on` | `off` | Record each authoritative mission as an ordinary replay |
+| `feedback off|on` | `off` | Offer Feedback... to flying players |
+| `replays-kept N` | `10` | Keep this many complete unflagged server recordings, from 0 to 100,000 |
+| `replays-folder PATH` | data folder's `replays/` | Destination; explicit relative paths start at the configuration file's folder |
+
+`feedback on` requires `record-replays on`. Startup refuses that combination
+when recording is off. Players see the button only on enabled dedicated
+servers, never in single player or player-hosted games. The host logs each
+accepted submission as `Feedback from Viper at 12:34: ...`, with the flag's
+mission minute and second. The player's local recording also keeps it.
+
+Files are named `server-<UTC seconds>-<nanoseconds>.tore-replay`; a `.log` with
+the same stem holds mission combat and server events. Normal mission end,
+rotation and console `quit` finish the recording. An interrupted process can
+leave a recoverable `.partial` recording.
+
+After a mission finishes, rotation deletes the oldest complete, readable,
+unflagged `server-*.tore-replay` files above the limit, and their companion
+logs. Flagged recordings never count toward the limit and are never deleted.
+A limit of 0 keeps only flagged recordings. Incomplete, damaged, unreadable
+and non-server files are left for the operator. Player recording retention
+is unchanged. See [feedback behavior](spec/replay-feedback.md) and
+[replay exports](REPLAYS.md#player-feedback-flags).
+
+For Docker, persist the configured replays folder in a volume as well as the
+imported data and logs. The default lives under the data volume's `replays/`.
+Flagged recordings and incomplete files can grow without a retention limit.
+
+Disk use varies with the mission. See the measured
+[12-aircraft recording examples](baselines/replay-feedback.md) for replay and
+companion-log sizes, and the inherited per-file size limit.

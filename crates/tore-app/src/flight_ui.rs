@@ -64,6 +64,7 @@ pub enum Command {
     /// Request the passive infrared channel.
     SensorInfrared,
     ControlsOpen,
+    FeedbackOpen,
     /// Pref > Sound...: the Sound/Music Prefs screen over the paused flight.
     SoundOpen,
     /// Pref > Graphics...: the Graphics options screen over the paused flight.
@@ -850,6 +851,7 @@ impl FlightUi {
                 self.message(format!("AI test settings: {}", self.ai_test.describe()));
                 Command::Click
             }
+            "Feedback..." => Command::FeedbackOpen,
             "Sound..." => Command::SoundOpen,
             "Graphics..." => Command::GraphicsOpen,
             "1x" | "2x" | "4x" | "8x" | "Slow-motion" => {

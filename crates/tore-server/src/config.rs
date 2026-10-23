@@ -83,6 +83,10 @@ pub enum AfterEnd {
 /// The settings of a server.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
+    pub record_replays: bool,
+    pub feedback: bool,
+    pub replays_kept: usize,
+    pub replays_folder: Option<PathBuf>,
     pub name: String,
     pub port: u16,
     pub address: Listen,
@@ -134,6 +138,10 @@ impl Config {
     /// mission path is taken against.
     pub fn defaults(base: &Path) -> Self {
         Self {
+            record_replays: false,
+            feedback: false,
+            replays_kept: 10,
+            replays_folder: None,
             name: "T.O.R.E server".into(),
             port: 26900,
             address: Listen::Any,
@@ -202,6 +210,15 @@ impl Config {
                 message: "`mission` and `rotation` are mutually exclusive".into(),
             });
         }
+        if config.feedback && !config.record_replays {
+            return Err(ConfigError {
+                line: lines
+                    .iter()
+                    .find(|(_, n)| *n == "feedback")
+                    .map_or(0, |(l, _)| *l),
+                message: "`feedback on` requires `record-replays on`".into(),
+            });
+        }
         config.check_king_settings(&lines)?;
         Ok(config)
     }
@@ -255,6 +272,10 @@ impl Config {
 
     pub(crate) fn set(&mut self, name: &str, value: &str, base: &Path) -> Result<(), String> {
         match name {
+            "record-replays" => self.record_replays = switch(name, value)?,
+            "feedback" => self.feedback = switch(name, value)?,
+            "replays-kept" => self.replays_kept = number(name, value, 0, 100_000)? as usize,
+            "replays-folder" => self.replays_folder = Some(base.join(value)),
             "name" => {
                 let length = value.chars().count();
                 if length > NAME_LIMIT || value.chars().any(char::is_control) {
@@ -412,7 +433,11 @@ impl Config {
 
 /// Every setting's name, in the guide's order: the server's own, then the
 /// King's (stage F phase 2) by their registry names.
-pub const SETTINGS: [&str; 41] = [
+pub const SETTINGS: [&str; 45] = [
+    "record-replays",
+    "feedback",
+    "replays-kept",
+    "replays-folder",
     "name",
     "port",
     "address",
@@ -570,6 +595,21 @@ mod tests {
 
     fn refused(text: &str) -> String {
         parse(text).expect_err("the file is refused").to_string()
+    }
+
+    #[test]
+    fn feedback_recording_settings_are_opt_in_and_server_wide() {
+        let c = parse("").unwrap();
+        assert!(!c.record_replays && !c.feedback);
+        assert_eq!(c.replays_kept, 10);
+        assert!(c.replays_folder.is_none());
+        assert!(refused("feedback on").contains("requires `record-replays on`"));
+        let c =
+            parse("feedback on\nrecord-replays on\nreplays-kept 0\nreplays-folder flags").unwrap();
+        assert!(c.record_replays && c.feedback);
+        assert_eq!(c.replays_kept, 0);
+        assert!(c.replays_folder.unwrap().ends_with("flags"));
+        assert!(parse("replays-kept -1").is_err());
     }
 
     #[test]
@@ -964,6 +1004,10 @@ mod tests {
     fn every_setting_is_in_the_name_list() {
         // Keeps `SETTINGS` and `set` in step: each name must parse somewhere.
         let samples = [
+            "record-replays on",
+            "feedback off",
+            "replays-kept 10",
+            "replays-folder captures",
             "name x",
             "port 1",
             "address any",

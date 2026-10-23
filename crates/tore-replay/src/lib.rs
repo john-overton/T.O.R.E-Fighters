@@ -15,6 +15,7 @@ mod display_detail;
 mod error;
 mod events;
 pub mod export;
+pub mod feedback;
 mod format;
 mod frames;
 pub mod limits;

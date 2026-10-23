@@ -2215,6 +2215,11 @@ impl Client {
                 }
             }
             Message::Notice(text) => self.event(ClientEvent::Notice(text)),
+            Message::FeedbackAccepted(f) => {
+                if let Some(observed) = &mut self.observed {
+                    observed.feedback(f);
+                }
+            }
             Message::ChatLine(line) => {
                 self.log("chat", &[&line.log_text()]);
                 self.event(ClientEvent::Chat(line));
@@ -3484,4 +3489,16 @@ fn ground_poses(world: &World) -> Vec<AircraftPose> {
             stores: Vec::new(),
         })
         .collect()
+}
+
+impl Client {
+    pub fn send_feedback(&mut self, feedback: tore_replay::feedback::Feedback) {
+        if self
+            .lobby
+            .as_ref()
+            .is_some_and(|l| l.feedback && l.host.is_none())
+        {
+            self.request(self.now, Message::FeedbackSend(feedback));
+        }
+    }
 }

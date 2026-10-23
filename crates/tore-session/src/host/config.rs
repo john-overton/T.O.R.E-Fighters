@@ -119,6 +119,8 @@ impl BuildId {
 /// A host's settings. [`HostConfig::new`] gives the server guide's defaults.
 #[derive(Clone, Debug)]
 pub struct HostConfig {
+    pub feedback: bool,
+    pub recording: Option<crate::recording::Options>,
     /// Shown to joining players.
     pub name: String,
     /// A password players must give, or `None`.
@@ -198,6 +200,8 @@ impl HostConfig {
             password: None,
             max_players: MAX_PLAYERS,
             open_planes: OpenPlanes::Friendly,
+            feedback: false,
+            recording: None,
             snapshot_rate: DEFAULT_SNAPSHOT_RATE,
             start: StartMode::FirstPlayer,
             time_limit: None,

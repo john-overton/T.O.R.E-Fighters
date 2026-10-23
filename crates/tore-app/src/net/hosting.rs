@@ -1615,6 +1615,9 @@ pub fn log_line(entry: &HostLog) -> String {
         }
         HostLog::Fault { text, .. } => format!("fault: {text}"),
         HostLog::Note { text, .. } => text.clone(),
+        HostLog::Feedback(f) => {
+            format!("Feedback from {} at {}: {}", f.player, f.tick / 120, f.text)
+        }
         HostLog::Stopped { .. } => "stopped".to_owned(),
         HostLog::Lobby {
             callsign, event, ..

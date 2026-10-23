@@ -572,6 +572,8 @@ impl Host {
             tracker: _,
             stream: _,
             out: _,
+            recording: _,
+            recording_failed: _,
             logs: _,
             costs: _,
             overloads: _,

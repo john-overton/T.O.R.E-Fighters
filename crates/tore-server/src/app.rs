@@ -179,6 +179,10 @@ pub fn serve_with(
         log.log(timer.unix_seconds(), &rotation.heading());
         log.log(timer.unix_seconds(), &rotation.current_line());
     }
+    let mut config = config;
+    if config.replays_folder.is_none() {
+        config.replays_folder = Some(data_dir.join("replays"));
+    }
     let mut host = start_host(HostSetup {
         rotation,
         config,

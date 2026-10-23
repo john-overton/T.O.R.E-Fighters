@@ -952,6 +952,21 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
                 }],
             },
         }),
+        Message::FeedbackSend(tore_replay::feedback::Feedback {
+            tick: 120,
+            text: "Runway bump é".into(),
+            ..Default::default()
+        }),
+        Message::FeedbackAccepted(tore_replay::feedback::Feedback {
+            tick: 120,
+            submit_tick: 480,
+            player: "Viper".into(),
+            seat: 2,
+            plane: 3,
+            aircraft: "F18.PT".into(),
+            text: "Runway bump é".into(),
+            ..Default::default()
+        }),
         Message::ChatSend(ChatSend::typed(
             Receiver::Friendlies,
             "Break left, bandit high",
@@ -1207,6 +1222,7 @@ pub fn phase_two_messages() -> Vec<Message> {
 /// are PvP's defaults (protocol 8).
 pub fn lobby() -> LobbyState {
     LobbyState {
+        feedback: false,
         name: "Viper's game".into(),
         summary: "UKR, clear, airborne at 20000 ft: F/A-18D Hornet x4 against nobody".into(),
         mission: 7,

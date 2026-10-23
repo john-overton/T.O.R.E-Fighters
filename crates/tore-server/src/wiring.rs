@@ -94,6 +94,11 @@ pub fn start_host_with(
         commit,
         release: is_release(),
     });
+    config.feedback = c.feedback;
+    config.recording = c.record_replays.then(|| tore_session::recording::Options {
+        folder: c.replays_folder.unwrap_or_else(|| "replays".into()),
+        kept: c.replays_kept,
+    });
     config.name = c.name;
     config.password = c.password;
     config.max_players = usize::from(c.max_players);
@@ -398,6 +403,13 @@ impl SessionHost {
                 entry @ HostLog::Loaded { .. } => {
                     Event::Note(entry.loading_text().unwrap_or_default())
                 }
+                HostLog::Feedback(f) => Event::Note(format!(
+                    "Feedback from {} at {:02}:{:02}: {}",
+                    f.player,
+                    f.tick / 7200,
+                    f.tick / 120 % 60,
+                    f.text.replace(['\n', '\r'], " ")
+                )),
                 HostLog::Chat {
                     callsign,
                     receiver,

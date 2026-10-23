@@ -162,6 +162,7 @@ pub(crate) fn sample(you: u8) -> LobbyState {
     let mut goose = player(2, "Goose", Some(1));
     goose.ready = true;
     LobbyState {
+        feedback: false,
         name: "Maverick's game".into(),
         summary: SUMMARY.into(),
         mission: 3,

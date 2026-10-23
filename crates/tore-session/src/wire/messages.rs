@@ -55,6 +55,8 @@ use tore_world::world::revive::Spawn;
 
 /// Message kinds, the transport's kind byte.
 pub mod kind {
+    pub const FEEDBACK_SEND: u8 = 80;
+    pub const FEEDBACK_ACCEPTED: u8 = 81;
     pub const MISSION: u8 = 1;
     pub const CONTENT_REFUSED: u8 = 2;
     pub const READY: u8 = 3;
@@ -740,6 +742,8 @@ pub struct ContentGaps {
 /// The lobby as the host has it (host to client, whenever it changes).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LobbyState {
+    /// Dedicated server feedback is enabled by its operator.
+    pub feedback: bool,
     /// The hosting game's name.
     pub name: String,
     /// The mission's one-line summary.
@@ -966,6 +970,8 @@ pub struct MissionEnded {
 /// Any reliable message of the game.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    FeedbackSend(super::feedback::Feedback),
+    FeedbackAccepted(super::feedback::Feedback),
     Mission(Mission),
     ContentRefused(ContentRefused),
     TakePlane(TakePlane),
@@ -1274,6 +1280,7 @@ fn read_wing(r: &mut BitReader<'_>) -> WireResult<WingId> {
 
 fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
     let LobbyState {
+        feedback,
         name,
         summary,
         mission,
@@ -1297,6 +1304,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
             return Err(WireError::TooMany { what, limit });
         }
     }
+    w.write_bool(*feedback);
     write_str(w, name);
     write_str(w, summary);
     w.write_varint(u64::from(*mission));
@@ -1409,6 +1417,7 @@ fn read_id(r: &mut BitReader<'_>) -> WireResult<u8> {
 }
 
 fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
+    let feedback = r.read_bool()?;
     let name = read_str(r)?;
     let summary = read_str(r)?;
     let mission = read_u32(r)?;
@@ -1476,6 +1485,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
         }
     })?;
     Ok(LobbyState {
+        feedback,
         name,
         summary,
         mission,
@@ -2500,6 +2510,8 @@ impl Message {
             Self::Goodbye(_) => kind::GOODBYE,
             Self::FlightLoadouts(_) => kind::FLIGHT_LOADOUTS,
             Self::ChatSend(_) => kind::CHAT_SEND,
+            Self::FeedbackSend(_) => kind::FEEDBACK_SEND,
+            Self::FeedbackAccepted(_) => kind::FEEDBACK_ACCEPTED,
             Self::ChatLine(_) => kind::CHAT_LINE,
             Self::PassCrown(_) => kind::PASS_CROWN,
             Self::Settings(_) => kind::SETTINGS,
@@ -2550,6 +2562,7 @@ impl Message {
                 | Self::Start
                 | Self::Kick(_)
                 | Self::EndMission
+                | Self::FeedbackSend(_)
                 | Self::ChatSend(_)
                 | Self::PassCrown(_)
                 | Self::Settings(_)
@@ -2731,6 +2744,7 @@ impl Message {
                 write_manifest(&mut w, &flight.manifest)?;
             }
             Self::ChatSend(send) => send.write(&mut w),
+            Self::FeedbackSend(f) | Self::FeedbackAccepted(f) => super::feedback::write(&mut w, f)?,
             Self::ChatLine(line) => line.write(&mut w),
             Self::PassCrown(player) => {
                 let _ = w.write_bits(u64::from(*player), 8);
@@ -2961,6 +2975,8 @@ impl Message {
                 })
             }
             kind::CHAT_SEND => Self::ChatSend(ChatSend::read(r)?),
+            kind::FEEDBACK_SEND => Self::FeedbackSend(super::feedback::read(r)?),
+            kind::FEEDBACK_ACCEPTED => Self::FeedbackAccepted(super::feedback::read(r)?),
             kind::CHAT_LINE => Self::ChatLine(ChatLine::read(r)?),
             kind::GOODBYE => Self::Goodbye(match r.read_bits(2)? {
                 0 => Goodbye::Kicked(read_str(r)?),

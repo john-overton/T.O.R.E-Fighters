@@ -1370,3 +1370,9 @@ shared ? dropdown: F1 or controller Menu opens it, arrows and Enter/A choose,
 M returns to main and X exits while open. Controller Left/Right move between
 lounge controls; Up/Down scroll the focused Games or Players list. Settings
 Close/F10 applies its draft and Escape discards it.
+
+
+The dedicated-server [feedback form](spec/replay-feedback.md) uses existing
+menu inputs, with Tab between field and buttons and Escape to cancel. Its
+on-screen keyboard accepts the controller's existing menu directions and
+accept/back buttons. No global flight binding is added.
