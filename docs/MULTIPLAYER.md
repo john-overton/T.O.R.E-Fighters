@@ -1170,7 +1170,8 @@ data, so its operator must import their own copy of Fighters Anthology, the same
 way the game does. Nothing derived from retail media is ever sent over the
 network. Each release publishes the server for Windows, macOS and Linux as its
 own download. How to set one up and run it: [dedicated server
-guide](DEDICATED-SERVER.md).
+guide](DEDICATED-SERVER.md), including
+[Docker deployment](DEDICATED-SERVER.md#running-it-in-docker).
 
 ## Networking
 

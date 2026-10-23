@@ -42,6 +42,7 @@ proposal unless it is credited to John.
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
 - [Running it as a service](#running-it-as-a-service)
+- [Running it in Docker](#running-it-in-docker)
 - [Performance](#performance)
 - [Security](#security)
 - [Not in stage D](#not-in-stage-d)
@@ -374,11 +375,22 @@ for it, flown by the AI, like any other. With `ai off`, no AI replacement appear
 
 
 *Status of the ground target lines:* they are read, checked against the
-theater's targets, carried to every player and shown in the lobby's creator,
-but the surface units themselves (the target's buildings, vehicles, SAMs and
-guns) are the next slices of the [surface defenses spec](spec/surface-defenses.md).
-Until they land, a mission with a target flies without them and the server's
-log says so when it builds the mission.
+theater's targets, carried to every player and shown in the lobby's creator.
+The world builds the targets, defenses and both sides' starts under the
+[surface defenses spec](spec/surface-defenses.md#start-placement).
+
+`--check` reports every aircraft's nearest hostile AAA or SAM unit in
+horizontal nautical miles (6,076.12 ft). `Defense start` includes base-layout,
+target and area defenses; `Mission defense start` excludes base-layout units.
+Friendly and neutral defenses never count. The latter lets operators check
+a co-op target/area clearance rule separately from existing airfield cover.
+With rotation it prints these measurements for every entry.
+These are initial positions, not a promise about flight paths or revivals.
+Use a nonzero `surface-seed` to keep the measured layout in live rounds;
+otherwise the host draws a new seed at flight start. A large `separation-nm`
+alone proves nothing about clearance: Red airborne starts are by the target,
+and airfields can have their own defenses. Player Choice aircraft or loadouts
+that alter ground parking need a fresh check of the actual selected mission.
 
 Planes are numbered as in the game: plane 0 is the lead of friendly wing 1,
 then every other aircraft in wing order. `--check` prints the list. Every
@@ -1159,6 +1171,60 @@ WantedBy=multi-user.target
 
 On Windows and macOS it runs in a terminal; a service wrapper is not planned
 for stage D.
+
+## Running it in Docker
+
+The repository's multi-stage `Dockerfile` builds `tore-server` with the pinned
+Rust toolchain, `--locked` and the release profile. Its Debian 12 runtime has
+glibc 2.36. The image contains no game data. The build context allows source
+inputs only, excluding retail media, imports, `.local/`, `target/` and `dist/`.
+
+On Linux with Docker Compose, copy `docker-compose.example.yml` to
+`compose.yml`. Create `server-config/` with `server.conf`, its mission files
+and any rotation file, and create `server-data/` for the import. The mounted
+data folder must be writable by the configured user (1000:1000 by default;
+set `TORE_UID` and `TORE_GID` for another account).
+
+```sh
+export TORE_BUILD_COMMIT=$(git rev-parse HEAD)
+docker compose build
+# Mount your installed game or disc folder for this one import only.
+docker compose run --rm -v /path/to/FIGHTERS:/media:ro server \
+  --data-dir /data --import /media
+docker compose run --rm server --config /config/server.conf --check
+docker compose up -d
+docker compose logs -f server
+```
+
+The example uses host networking, one container per server and
+`restart: unless-stopped`. For several servers, duplicate the service with
+distinct config/data mounts and a distinct UDP port in each `server.conf`.
+Use separate writable data copies: loading prunes import generations, city
+cache temporary names include process IDs that can repeat across containers,
+and logs and installation identities belong to each server. Do not import or
+update a running server's data. Host networking has no Compose `ports` block;
+allow and forward each server's UDP port on the host firewall and router.
+
+The console stays open through `stdin_open` and `tty`. Attach with
+`docker attach --sig-proxy=false "$(docker compose ps -q server)"`, then type
+`status`, `rotation` or another [console command](#console-status-and-logs).
+Detach with Ctrl+P, Ctrl+Q. `docker exec` opens a separate process and does
+not connect to the server's console.
+
+Stop with `docker compose stop` or `docker compose down`. The entrypoint
+turns SIGTERM into the server's `quit` command and waits for it, allowing
+player disconnects, Internet Lobby withdrawal and port-mapping removal.
+The example gives it 120 seconds, including a mission build in progress.
+Avoid `docker kill` or a zero-second stop, which skips that cleanup.
+The container preserves the server's exit status. Docker logs are bounded;
+the server also writes dated logs in the mounted data folder.
+
+After updating the source, rebuild with its new `TORE_BUILD_COMMIT`, then
+run `docker compose up -d --force-recreate`. Development clients must match
+the build commit and protocol; this image does not label an untagged build
+as an official release. Check each rotation after an update before making
+the servers public. Set `broadcast on` and `port-mapping on` only when ready
+to list the server and ask the router to forward its port.
 
 ## Performance
 

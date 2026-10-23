@@ -3,11 +3,99 @@
 //! and the runway numbers are the ones `start ground` takes.
 
 use crate::prepare::Prepared;
+use tore_formats::surface_unit::class;
 use tore_session::host::content::{GameContent, report_lines};
 use tore_world::{
     mission::{EnemyStart, MissionSpec, RUNWAY_OBJECT_BASE, Start},
     terrain::Terrain,
+    world::World,
 };
+
+/// Horizontal start clearance from hostile AAA/SAM units, with and without
+/// base-layout defenses. Friendly and neutral units never constrain clearance.
+/// Altitude must not make a start above a defense look safely distant.
+pub fn defense_report(world: &World) -> Vec<String> {
+    let defenses: Vec<_> = world
+        .terrain
+        .surface
+        .units
+        .iter()
+        .filter(|unit| unit.class & (class::AAA | class::SAM) != 0)
+        .collect();
+    let mut lines = vec![format!(
+        "Defense clearance: {} AAA/SAM units, horizontal nautical miles to hostile units",
+        defenses.len()
+    )];
+    for plane in world.roster.planes() {
+        let side = if plane.slot.wing.side.is_enemy() {
+            "enemy"
+        } else {
+            "friendly"
+        };
+        let Some((start, _)) = world.plane_pose(plane.id) else {
+            lines.push(format!(
+                "  Defense start plane {} {side}: unknown position",
+                plane.id.0
+            ));
+            continue;
+        };
+        let hostile = if plane.slot.wing.side.is_enemy() {
+            tore_world::ai_wings::FRIENDLY_SIDE
+        } else {
+            tore_world::ai_wings::ENEMY_SIDE
+        };
+        for (label, include_layout) in [("Defense", true), ("Mission defense", false)] {
+            let nearest = defenses
+                .iter()
+                .filter(|unit| unit.side == hostile)
+                .filter(|unit| {
+                    include_layout
+                        || !matches!(unit.origin, tore_world::surface::Origin::Layout { .. })
+                })
+                .map(|unit| {
+                    let distance = (start[0] - f64::from(unit.position[0]))
+                        .hypot(start[2] - f64::from(unit.position[2]))
+                        / 6076.12;
+                    (distance, unit)
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let result = nearest.map_or_else(
+                || "none".into(),
+                |(distance, unit)| {
+                    format!("{distance:.6} nm, unit {} {}", unit.id.0, unit.resource)
+                },
+            );
+            lines.push(format!(
+                "  {label} start plane {} {side}: {result}",
+                plane.id.0
+            ));
+        }
+    }
+    for (label, side) in [
+        ("friendly", tore_world::ai_wings::FRIENDLY_SIDE),
+        ("enemy", tore_world::ai_wings::ENEMY_SIDE),
+    ] {
+        let count = |kind, layout| {
+            defenses
+                .iter()
+                .filter(|unit| {
+                    unit.side == side
+                        && unit.class & kind != 0
+                        && matches!(unit.origin, tore_world::surface::Origin::Layout { .. })
+                            == layout
+                })
+                .count()
+        };
+        lines.push(format!(
+            "Defense inventory {label}: layout AAA {} SAM {}; mission AAA {} SAM {}",
+            count(class::AAA, true),
+            count(class::SAM, true),
+            count(class::AAA, false),
+            count(class::SAM, false)
+        ));
+    }
+    lines
+}
 
 /// Why a mission's explicit ground start cannot be flown: `start ground N`
 /// parks the friendly wing (Blue) on runway N, and an airport takes its
@@ -93,6 +181,12 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
         String::new(),
         "Planes (the numbers open-planes and --slot use):".into(),
     ];
+    if spec.lays_out_surface() && spec.surface_seed == 0 {
+        lines.push(
+            "Defense clearance is a preview: set a nonzero surface-seed to reproduce it in flight."
+                .into(),
+        );
+    }
     for plane in planes {
         let wing = &spec.wings[MissionSpec::wing_index(plane.slot.wing)];
         let side = if plane.slot.wing.side.is_enemy() {
@@ -116,6 +210,7 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
             wing.skill.name()
         ));
     }
+    lines.extend(defense_report(&prepared.world));
     lines.push(String::new());
     lines.push(format!(
         "Runways of {} (the numbers start ground and enemy-start ground take):",
@@ -172,6 +267,48 @@ mod tests {
     };
     use std::fs;
     use tore_world::test_support::resources::owned_airport_resources;
+
+    #[test]
+    fn defense_clearance_measures_every_start_and_ignores_altitude_and_non_defenses() {
+        use tore_world::test_support::surface::surface_resources;
+        let dir = data_folder_with("check-defense", true, surface_resources());
+        fs::write(dir.join("mission.txt"), MISSION).unwrap();
+        let mut prepared = prepare(&Options::default(), &dir).unwrap();
+        let world = &mut prepared.world;
+        let start = world.plane_pose(world.roster.planes()[0].id).unwrap().0;
+        let mut aaa = world.terrain.surface.units[0].clone();
+        aaa.class = class::AAA;
+        aaa.side = tore_world::ai_wings::ENEMY_SIDE;
+        aaa.origin = tore_world::surface::Origin::Layout { ordinal: 0 };
+        aaa.position = [
+            (start[0] + 3. * 6076.12) as i32,
+            0,
+            (start[2] + 4. * 6076.12) as i32,
+        ];
+        let mut tank = aaa.clone();
+        tank.class = class::TANK;
+        tank.position = [start[0] as i32, 0, start[2] as i32];
+        world.terrain.surface.units = vec![aaa.clone(), tank];
+        let lines = defense_report(world);
+        assert_eq!(lines.len(), 11);
+        assert!(lines[0].contains("1 AAA/SAM"));
+        assert!(lines[1].contains("plane 0 friendly: 4.999"), "{}", lines[1]);
+        assert!(lines[7].contains("plane 3 enemy: none"));
+        assert!(lines[2].ends_with(": none"));
+        // Friendly defenses never constrain Blue, but do constrain Red.
+        aaa.class = class::SAM;
+        aaa.resource = "SYNTHETIC-SAM.NT".into();
+        aaa.side = tore_world::ai_wings::FRIENDLY_SIDE;
+        aaa.position = [start[0] as i32, -100_000, start[2] as i32];
+        world.terrain.surface.units.push(aaa);
+        assert!(!defense_report(world)[1].contains("SYNTHETIC-SAM.NT"));
+        assert!(defense_report(world)[7].contains("SYNTHETIC-SAM.NT"));
+        world.terrain.surface.units[0].origin = tore_world::surface::Origin::Added;
+        assert!(!defense_report(world)[2].ends_with(": none"));
+        world.terrain.surface.units.clear();
+        assert!(defense_report(world)[1].ends_with(": none"));
+        let _ = fs::remove_dir_all(dir);
+    }
 
     /// A ground start on the synthetic field, owned by `nationality2`.
     fn ground_start_at(name: &str, nationality2: Option<u8>) -> Result<Prepared, String> {
