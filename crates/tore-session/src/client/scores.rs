@@ -1,6 +1,6 @@
 //! The scores a player's game keeps (stage F phase 2, slice F2-S;
 //! docs/ARCHITECTURE.md, "Scoring"): the newest Scores message the host
-//! sent, with the time left counted down from its arrival, and the words the
+//! sent, with the time left derived from the host mission clock, and the words the
 //! score board and the bots use for them.
 
 use super::Client;
@@ -9,11 +9,10 @@ use crate::wire::messages::{Scores, Winner};
 use std::time::Duration;
 use tore_sim::ai::launch::Side;
 
-/// The newest scores and when they arrived (the client's clock).
+/// The newest scores from the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Kept {
     pub scores: Scores,
-    pub received: Duration,
 }
 
 impl Client {
@@ -22,16 +21,45 @@ impl Client {
         self.scores.as_ref().map(|kept| &kept.scores)
     }
 
-    /// The seconds left of the mission's time limit: the scores' figure,
-    /// counted down since they arrived. `None` without a time limit or
-    /// scores.
-    pub fn seconds_left(&self) -> Option<u32> {
-        let kept = self.scores.as_ref()?;
-        let gone = self.now.saturating_sub(kept.received).as_secs();
-        kept.scores
-            .seconds_left
-            .map(|left| left.saturating_sub(u32::try_from(gone).unwrap_or(u32::MAX)))
+    /// The authoritative lobby time limit, including a server rotation override.
+    pub fn time_limit_seconds(&self) -> Option<u32> {
+        self.lobby
+            .as_ref()?
+            .settings
+            .iter()
+            .find(|(number, _)| *number == crate::settings::number::TIME_LIMIT)
+            .map(|(_, seconds)| *seconds)
+            .filter(|seconds| *seconds != 0)
     }
+
+    /// Remaining mission time, rounded up from the estimated present host tick.
+    /// No per-client stopwatch: late joins, rejoin and migration share the same
+    /// mission tick. Delayed observers add the stream's advertised delay.
+    pub fn seconds_left(&self) -> Option<u32> {
+        let limit = self.time_limit_seconds()?;
+        if let Some(kept) = &self.scores
+            && (kept.scores.winner != Winner::NoneYet || kept.scores.seconds_left == Some(0))
+        {
+            return kept.scores.seconds_left;
+        }
+        let round_trip = self.net.stats().map_or(Duration::ZERO, |s| s.round_trip);
+        let tick = self.render_clock.present(self.now, round_trip)?;
+        let delay = self
+            .watching()
+            .and_then(|w| w.flight)
+            .map_or(0, |flight| u64::from(flight.delay_seconds) * 120);
+        remaining_seconds(Some(limit), (tick.floor() as u64).saturating_add(delay))
+    }
+}
+
+/// The host's deadline starts at mission tick zero, at 120 ticks per second.
+/// Round up so 00:00 first appears on the tick that ends the mission.
+pub fn remaining_seconds(limit: Option<u32>, tick: u64) -> Option<u32> {
+    limit.map(|seconds| {
+        (u64::from(seconds) * 120)
+            .saturating_sub(tick)
+            .div_ceil(120) as u32
+    })
 }
 
 /// The score board's heading for a tally, retail's three.
@@ -184,6 +212,23 @@ mod tests {
     }
 
     #[test]
+    fn the_deadline_rounds_up_and_has_no_timer_without_a_limit() {
+        for (tick, expected) in [
+            (0, 360),
+            (119, 360),
+            (120, 359),
+            (7199, 301),
+            (7200, 300),
+            (43199, 1),
+            (43200, 0),
+            (u64::MAX, 0),
+        ] {
+            assert_eq!(remaining_seconds(Some(360), tick), Some(expected));
+            assert_eq!(remaining_seconds(None, tick), None);
+        }
+    }
+
+    #[test]
     fn the_words_for_scores() {
         let mut scores = scores();
         assert_eq!(
@@ -230,6 +275,62 @@ mod rig_tests {
     use tore_net::sim::LinkConfig;
 
     const MS: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn late_join_and_rejoin_use_the_ongoing_host_deadline() {
+        let mut rig = Rig::with_config(
+            spec(3, 1, 200),
+            LinkConfig::for_round_trip(40 * MS, 0., 0., 0.),
+            29,
+            |c| {
+                c.time_limit = Some(Duration::from_secs(360));
+            },
+        );
+        let first = rig.join(|_| {}, super::super::tests::level_script());
+        assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(first)));
+        rig.run(Duration::from_millis(2500));
+        let late = rig.join(
+            |c| c.callsign = "Late".into(),
+            super::super::tests::level_script(),
+        );
+        assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(late)));
+        rig.run(Duration::from_millis(500));
+        let expected = remaining_seconds(Some(360), rig.host.world().tick());
+        assert_eq!(rig.players[first].client.seconds_left(), expected);
+        assert_eq!(rig.players[late].client.seconds_left(), expected);
+        let token = rig.players[first].client.token().unwrap().token;
+        rig.players[first].stalled = true;
+        rig.run(Duration::from_secs(6));
+        let back = rig.join(
+            |c| c.token = Some(token),
+            super::super::tests::level_script(),
+        );
+        assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(back)));
+        rig.run(Duration::from_millis(500));
+        let expected = remaining_seconds(Some(360), rig.host.world().tick());
+        assert_eq!(rig.players[back].client.seconds_left(), expected);
+        assert_eq!(rig.players[late].client.seconds_left(), expected);
+        // Delay/jitter aside, the estimate follows the host within one tick.
+        let c = &rig.players[back].client;
+        let tick = c
+            .render_clock
+            .present(c.now, c.net.stats().unwrap().round_trip)
+            .unwrap();
+        assert!(
+            (tick - rig.host.world().tick() as f64).abs() <= 1.,
+            "{tick} vs {}",
+            rig.host.world().tick()
+        );
+    }
+
+    #[test]
+    fn an_unlimited_flight_has_no_client_countdown() {
+        let mut rig = Rig::with_config(spec(1, 1, 200), LinkConfig::one_way(10 * MS), 30, |_| {});
+        let player = rig.join(|_| {}, super::super::tests::level_script());
+        assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(player)));
+        rig.run(Duration::from_secs(1));
+        assert_eq!(rig.players[player].client.seconds_left(), None);
+    }
 
     #[test]
     fn the_client_keeps_the_newest_scores_and_counts_the_time_down() {

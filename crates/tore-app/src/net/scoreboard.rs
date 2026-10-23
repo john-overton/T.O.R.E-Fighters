@@ -10,7 +10,7 @@
 //!   the chat window colours them (the viewer's side green, the other red,
 //!   no side yet grey) and the viewer's own row marked;
 //! - in PvP by sides, each side's kills and losses;
-//! - the kill limit, the time left (counted down between messages) and,
+//! - the kill limit, the time left (derived from the host mission clock) and,
 //!   once the mission is decided, the winner.
 //!
 //! It is drawn over the middle of the flight view in the HUD's font, over a

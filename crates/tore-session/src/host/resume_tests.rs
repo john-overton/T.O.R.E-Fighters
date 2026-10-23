@@ -2215,3 +2215,41 @@ fn a_host_that_lagged_before_the_cut_corrects_no_plane_at_the_resume() {
         assert_eq!(counts.inherited, 0, "{callsign}: {counts:?}");
     }
 }
+
+#[test]
+fn the_mission_countdown_keeps_its_deadline_through_handover() {
+    let mut rig = Rig::new(crowd_spec(200));
+    rig.games[0]
+        .client
+        .change_settings(crate::wire::messages::SettingsChange {
+            values: vec![(crate::settings::number::TIME_LIMIT, 600)],
+            ..Default::default()
+        });
+    rig.run(Duration::from_millis(200));
+    assert_eq!(rig.host().settings().time_limit_seconds(), Some(600));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    rig.fly();
+    rig.run(Duration::from_millis(2500));
+    let before = rig.games[1].client.seconds_left().unwrap();
+    rig.host_mut().hand_over().unwrap();
+    assert!(rig.run_until(Duration::from_secs(1), |r| r.host().handed_over()));
+    rig.games[0].gone = true;
+    assert!(rig.run_until(Duration::from_secs(1), |r| !r.takeovers.is_empty()));
+    let (game, took_at, _, _) = rig.takeovers[0].clone();
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        (1..r.games.len()).all(|g| r.games[g].snapshot_after(took_at).is_some())
+    }));
+    rig.run(Duration::from_millis(500));
+    let host = rig.host_of(game);
+    let expected = crate::client::scores::remaining_seconds(
+        host.settings().time_limit_seconds(),
+        host.world().tick(),
+    )
+    .unwrap();
+    assert!(expected <= before && before - expected <= 3);
+    for g in 1..rig.games.len() {
+        assert_eq!(rig.games[g].client.seconds_left(), Some(expected));
+    }
+}

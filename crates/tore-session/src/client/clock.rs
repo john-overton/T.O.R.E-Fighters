@@ -277,6 +277,7 @@ pub struct RenderClock {
     /// The newest snapshot tick is about `now` in ticks plus this.
     offset: Option<f64>,
     newest: Option<u32>,
+    newest_at: Option<Duration>,
     delay: f64,
     target: f64,
     /// The newest snapshot tick less the arrival estimate, over 2 seconds:
@@ -299,6 +300,7 @@ impl RenderClock {
         Self {
             offset: None,
             newest: None,
+            newest_at: None,
             delay: DELAY_START,
             target: DELAY_START,
             slack: MinWindow::default(),
@@ -323,12 +325,20 @@ impl RenderClock {
         self.render
     }
 
+    /// Estimate the current host tick without the picture's interpolation delay.
+    /// Snapshots describe the completed tick, so the host is at its next tick.
+    pub fn present(&self, now: Duration, round_trip: Duration) -> Option<f64> {
+        let elapsed = now.saturating_sub(self.newest_at?) + round_trip / 2;
+        Some(f64::from(self.newest?) + 1. + ticks_of(elapsed))
+    }
+
     /// A snapshot of `tick` arrived at `now`.
     pub fn snapshot(&mut self, now: Duration, tick: u32) {
         if self.newest.is_some_and(|newest| tick <= newest) {
             return;
         }
         self.newest = Some(tick);
+        self.newest_at = Some(now);
         let sample = f64::from(tick) - ticks_of(now);
         self.offset = Some(match self.offset {
             Some(offset) if (sample - offset).abs() <= JUMP_TICKS => {
@@ -394,6 +404,21 @@ mod tests {
     use super::*;
 
     const MS: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn mission_time_compensates_transit_and_resets_for_a_new_flight() {
+        let mut a = RenderClock::new();
+        let mut b = RenderClock::new();
+        // The same completed host tick reaches two players with different delays.
+        a.snapshot(Duration::from_millis(10010), 1199);
+        b.snapshot(Duration::from_millis(10050), 1199);
+        assert_eq!(a.present(Duration::from_secs(11), 20 * MS), Some(1320.));
+        assert_eq!(b.present(Duration::from_secs(11), 100 * MS), Some(1320.));
+        b = RenderClock::new();
+        assert_eq!(b.present(Duration::from_secs(11), 100 * MS), None);
+        b.snapshot(Duration::from_secs(12), 0);
+        assert_eq!(b.present(Duration::from_secs(12), Duration::ZERO), Some(1.));
+    }
 
     #[test]
     fn the_input_clock_settles_on_its_margin_within_its_rate_limits() {

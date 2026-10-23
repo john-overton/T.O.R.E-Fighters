@@ -137,6 +137,15 @@ builds a mission as usual, then opens its slots to humans.
 | Scoring | PvP: retail's fight type (sides or free for all), kill tally (total kills, total damage or kill ratio), time limit (1 to 30 minutes), kill limit (1 to 10) and kill owner (total, one side or one player) |
 | Difficulty and realism | Inherits the Quick Mission settings, locked for all humans |
 
+Timed missions show **Mission Timer: MM:SS** in the in-flight Escape menu.
+The countdown also appears at the upper right during the final five minutes,
+in cockpit, external views and Watch, turning amber in the last minute.
+Hour-long limits use H:MM:SS. Unlimited missions show no countdown. The clock
+uses the host's mission tick and current time limit, including late joins,
+rejoins and host migration. Watch shows the live deadline while its picture
+is delayed or scrubbed back. See the [countdown rules](spec/hud-layout.md#mission-countdown)
+for rounding, placement and network clock accuracy. Protocol remains 67.
+
 Settings a player may not change are shown grayed out, as in retail. The
 revival and scoring ranges are retail's ([numbers](spec/multiplayer.md#numbers)).
 

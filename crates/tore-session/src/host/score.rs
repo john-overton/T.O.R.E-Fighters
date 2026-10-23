@@ -404,10 +404,8 @@ impl Host {
     /// The Scores message as things stand, with `winner`.
     fn scores(&self, winner: Winner) -> Scores {
         let ticks = self.world.tick();
-        let seconds_left = self.settings.time_limit_seconds().map(|limit| {
-            let left = (u64::from(limit) * TICKS_PER_SECOND).saturating_sub(ticks);
-            u32::try_from(left.div_ceil(TICKS_PER_SECOND)).unwrap_or(u32::MAX)
-        });
+        let seconds_left =
+            crate::client::scores::remaining_seconds(self.settings.time_limit_seconds(), ticks);
         Scores {
             tally: self.settings.tally(),
             fight: self.fight(),

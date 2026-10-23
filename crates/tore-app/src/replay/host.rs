@@ -443,6 +443,10 @@ impl App {
         } else {
             None
         };
+        viewer.mission_timer = self
+            .net
+            .as_ref()
+            .and_then(|net| crate::mission_timer::Timer::from_client(&net.client));
         let result = viewer.frame(
             renderer,
             &mut self.flight_canvas,

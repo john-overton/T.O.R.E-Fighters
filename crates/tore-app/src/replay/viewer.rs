@@ -759,6 +759,7 @@ pub(crate) fn city_index(
 }
 
 pub struct Viewer {
+    pub mission_timer: Option<crate::mission_timer::Timer>,
     local_lighting: (crate::cockpit_lighting::Lighting, i16),
     pub path: PathBuf,
     recording: Arc<Recording>,
@@ -1098,6 +1099,7 @@ impl Viewer {
             pause::Menu::new(&ownship.flight_menu)
         };
         let mut viewer = Self {
+            mission_timer: None,
             local_lighting: (Default::default(), 0),
             path: path.to_path_buf(),
             scanner: if growth.is_some() {
@@ -3924,6 +3926,35 @@ impl Viewer {
                     .map(|bearing| (&self.ownship.hud_font, hud_color, bearing)),
             },
         );
+        if self.live()
+            && !self.pause.is_open()
+            && !self.ui.hidden
+            && let Some(timer) = self.mission_timer
+        {
+            let mut blocks: Vec<[f64; 4]> = drawn.iter().map(Label::rect).collect();
+            let [w, h] = size.map(f64::from);
+            let scale = (w / 640.).min(h / 480.);
+            blocks.extend(panel_rects.iter().map(|&(x, y, pw, ph)| {
+                [
+                    (w - 640. * scale) / 2. + f64::from(x) * scale,
+                    (h - 480. * scale) / 2. + f64::from(y) * scale,
+                    f64::from(pw) * scale,
+                    f64::from(ph) * scale,
+                ]
+            }));
+            if self.view == tape_views::HUD_CAMERA {
+                blocks.push([w * 0.70, h * 0.07, w * 0.26, 24.]);
+            }
+
+            blocks.push(crate::mission_timer::counter_rect(
+                size,
+                crate::frame_rate::Surface::Replay {
+                    right_panel: self.panels.right_open(),
+                    hud_camera: self.view == tape_views::HUD_CAMERA,
+                },
+            ));
+            timer.draw_corner(canvas, &self.ownship.hud_font, &blocks);
+        }
         // The Escape menu goes over everything, the hidden interface too,
         // where flight draws its own.
         if self.pause.is_open() {
@@ -3936,6 +3967,11 @@ impl Viewer {
                 self.pause.look(),
                 &|label| pause::state(&ui, label),
             );
+            if self.live()
+                && let Some(timer) = self.mission_timer
+            {
+                timer.draw_menu(&mut self.layer, &self.ownship.font);
+            }
             canvas.legacy_layer(&self.layer, 1.);
         }
     }

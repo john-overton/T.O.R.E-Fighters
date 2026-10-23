@@ -845,6 +845,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-session/src/recording/*", ("replay-feedback", "net-convert"), "authoritative replay recording"),
     _r("crates/tore-replay/src/feedback.rs", ("replay-feedback",), "feedback event layout"),
     _r("tools/battery_scenarios/net.py", LANE_SMOKE["net"], "net scenarios", unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_timer.py", ("net-window",), "mission countdown and deadline captures", windowed=True),
+    _r("crates/tore-app/src/mission_timer.rs", ("net-window",), "mission countdown presentation", windowed=True),
     _r("tools/battery_scenarios/net_lobby.py", ("net-window",), "the lobby panels scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_observe.py", ("net-window",), "the observer screen scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_datalink.py", ("net-window", "link-cues"), "the data link's cues in a multiplayer flight (stage G, slice G10)", windowed=True, unit_tests=("test_battery_net",)),

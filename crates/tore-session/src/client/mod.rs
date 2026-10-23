@@ -2289,7 +2289,6 @@ impl Client {
                 self.log("scores", &[&scores::summary(&scores)]);
                 self.scores = Some(scores::Kept {
                     scores: (*scores).clone(),
-                    received: self.now,
                 });
                 self.event(ClientEvent::Scores(scores));
             }
