@@ -492,6 +492,7 @@ impl Host for SessionHost {
             aircraft: s.aircraft,
             load_percent: s.load * 100.0,
             tick_ms: s.tick_cost_mean.as_secs_f64() * 1000.0,
+            worst_tick_ms: s.tick_cost_max.as_secs_f64() * 1000.0,
             up_bytes_per_second: s.bytes_up_per_second as f64,
             down_bytes_per_second: s.bytes_down_per_second as f64,
         }

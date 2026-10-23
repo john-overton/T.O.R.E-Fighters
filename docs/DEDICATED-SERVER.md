@@ -1054,11 +1054,15 @@ console thread only reads lines, and the run loop acts on them within 4 ms.
 A status line every `status-interval` seconds:
 
 ```text
-00:12:30 tick 90000 players 2/15 aircraft 30 load 11% (1.1 ms a tick) up 64 KB/s down 7 KB/s
+00:12:30 tick 90000 players 2/15 aircraft 30 load 11% (1.1 ms a tick) up 64 KB/s down 7 KB/s, worst 52.3 ms
 ```
 
-While the server broadcasts, the line ends with where its listing stands,
-for example `, broadcast: listed, seen at 203.0.113.5:26900` (I3).
+While the server broadcasts, the line includes where its listing stands,
+for example `, broadcast: listed, seen at 203.0.113.5:26900` (I3), before
+`worst`. Both periodic lines and console `status` append the slowest tick
+since the previous status call, in milliseconds. With no ticks it is zero.
+The mean tick cost and load still cover the same interval; a low mean can
+hide a large pause, so use `worst` to see individual spikes.
 
 The log (`logs/server-<date>.log` in the data folder) records the start,
 every connection, refusal, seat change and departure with its reason, the
@@ -1395,6 +1399,20 @@ Files are named `server-<UTC seconds>-<nanoseconds>.tore-replay`; a `.log` with
 the same stem holds mission combat and server events. Normal mission end,
 rotation and console `quit` finish the recording. An interrupted process can
 leave a recoverable `.partial` recording.
+
+Replay encoding, writes, syncs and companion-log writes run on a dedicated
+writer thread. Flight hands off frames without waiting for the disk. Chunk
+size and durability are unchanged: 120-frame chunks, a sync every 3,600
+written frames, and a final sync on finish. To preserve the previous crash
+exposure, the queue and writer chunk share a 120-frame unwritten budget.
+When that budget fills, the server logs `Recording failed: replay writer
+queue full`, stops recording and disables feedback for the rest of this
+mission. Flight continues. Accepted frames drain to a recoverable `.partial`
+file with its companion log; the file is never labeled complete. Even a
+short disk stall at a chunk boundary can trigger this conservative policy.
+The next mission starts a fresh recording. Mission end, rotation, host
+handover, Stop and graceful shutdown wait for the writer to flush and join.
+See the [recording policy](spec/replay-feedback.md) for the precise bounds.
 
 After a mission finishes, rotation deletes the oldest complete, readable,
 unflagged `server-*.tore-replay` files above the limit, and their companion

@@ -4563,7 +4563,8 @@ impl Host {
         {
             self.recording_failed = true;
             self.lobby_dirty = true;
-            self.finish_recording();
+            // Keep ownership until mission end: joining a stalled disk
+            // writer here would put the I/O stall back on the tick thread.
             self.log(HostLog::Note {
                 tick: self.world.tick(),
                 text: format!("Recording failed: {error}"),

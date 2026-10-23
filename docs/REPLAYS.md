@@ -2725,6 +2725,10 @@ this remains compatible with replay format 4. The complete behavior is in
 [the feedback specification](spec/replay-feedback.md).
 
 Dedicated servers can save authoritative recordings with their mission logs.
+Their disk worker never waits on the flight tick. A full writer budget stops
+recording with a logged warning and keeps a recoverable incomplete file;
+[the server guide](DEDICATED-SERVER.md#recording-and-feedback) explains the
+bounds, unchanged sync cadence and shutdown behavior.
 They have no local cockpit display or heard radio track. See
 [server recording and retention](DEDICATED-SERVER.md#recording-and-feedback).
 
