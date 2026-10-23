@@ -271,7 +271,7 @@ fn a_game_that_cannot_be_joined_says_why_and_the_screen_stays() {
     s.full.set_checked(true);
     s.rebuild_games();
     // Row 3 (the old build) and row 4 (the full one).
-    for (index, words) in [(3, "another version"), (4, "is full")] {
+    for (index, words) in [(3, "compatibility code"), (4, "is full")] {
         s.select_game(index);
         s.focus.set(Id::Games);
         assert_eq!(s.key("Enter", false), Outcome::None, "{words}");
@@ -322,10 +322,10 @@ fn the_players_of_the_selected_game_show_with_the_crown() {
         Cell::Text("and 2 more".into())
     );
     // The mission shows under the box, or why the game cannot be joined.
-    assert!(s.selection_line().unwrap().starts_with("Mission: KOLA"));
+    assert!(s.selection_line().unwrap().contains("Mission: KOLA"));
     s.set_found(sample_games());
     s.select_game(3);
-    assert!(s.selection_line().unwrap().contains("another version"));
+    assert!(s.selection_line().unwrap().contains("Code 00000000"));
 }
 
 #[test]
@@ -615,6 +615,7 @@ fn games_the_search_finds_fill_the_list_and_messages() {
     answer.protocol_version = own.protocol_version;
     answer.game_version = own.build.version.clone();
     answer.game_commit = own.build.commit.clone();
+    answer.compatibility = own.build.compatibility;
     let bytes = Packet::DiscoverAnswer(answer)
         .encode(own.protocol_version)
         .unwrap();

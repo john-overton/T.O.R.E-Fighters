@@ -891,18 +891,12 @@ impl Gate for HostGate {
     fn accept(&mut self, details: &ConnectDetails) -> Decision {
         let refusal = if let Some(text) = &self.closed {
             Some((RefuseReason::ShuttingDown, text.clone()))
-        } else if !self
-            .build
-            .matches(&details.game_version, &details.game_commit)
-        {
+        } else if !self.build.matches(details.compatibility) {
             Some((
                 RefuseReason::GameBuild,
                 format!(
-                    "The server runs version {} (commit {}); your game is {} (commit {}).",
-                    self.build.version,
-                    self.build.commit,
-                    details.game_version,
-                    details.game_commit
+                    "The server's compatibility code is {:08X}; yours is {:08X}.",
+                    self.build.compatibility, details.compatibility
                 ),
             ))
         } else if self
@@ -953,7 +947,7 @@ impl Host {
     pub fn new(
         spec: MissionSpec,
         resources: Arc<BTreeMap<String, Vec<u8>>>,
-        config: HostConfig,
+        mut config: HostConfig,
     ) -> Result<Host, HostError> {
         config.validate()?;
         // The settings the mission carries (friendly fire, the loadout
@@ -981,6 +975,8 @@ impl Host {
             .content
             .clone()
             .unwrap_or_else(|| content::GameContent::shared(&resources));
+        config.build.compatibility = crate::compatibility::current(&own.content);
+        server.set_compatibility(config.build.compatibility);
         let compat = content::Compat::new(own, &resources);
         let mut host = Host {
             sequence: None,

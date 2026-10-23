@@ -32,6 +32,8 @@ pub const MOVE_INTERVAL: Duration = Duration::from_secs(60);
 /// One listed game.
 #[derive(Debug, Clone)]
 pub struct Listing {
+    /// The registration transport version, retained across heartbeats and moves.
+    pub master_version: u16,
     /// Public: what browsers name it by.
     pub id: u64,
     /// Secret: what the host proves itself with.
@@ -228,6 +230,7 @@ mod tests {
     fn listing(id: u64, address: &str, heard: u64) -> Listing {
         let address: SocketAddr = address.parse().unwrap();
         Listing {
+            master_version: tore_net::master::MASTER_VERSION,
             id,
             token: id + 1_000,
             nonce: 1,

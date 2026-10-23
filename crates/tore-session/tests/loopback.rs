@@ -31,6 +31,7 @@ use tore_world::test_support::resources::{THEATER, resources};
 /// The same build identity the `tore-bot` program computes.
 fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: option_env!("TORE_BUILD_VERSION")
             .unwrap_or(env!("CARGO_PKG_VERSION"))
             .to_owned(),

@@ -618,50 +618,6 @@ def missing_binaries(scenarios: list[Scenario], opts: argparse.Namespace) -> lis
     return [path for kind, path in wanted.items() if any(kind in s.uses for s in scenarios) and not Path(path).exists()]
 
 
-BUILD_COMMIT = re.compile(r"\(([0-9a-f]{7,64})\)\s*$")
-
-
-def server_commit(server: str) -> Optional[str]:
-    """The commit `tore-server --version` prints ("T.O.R.E server v0.2.0 (<commit>)"), or None when it prints
-    none (a build outside git stamps "unknown")."""
-    try:
-        out = subprocess.run([server, "--version"], capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    found = BUILD_COMMIT.search(out.strip())
-    return found.group(1) if found else None
-
-
-def carries_text(path: str, text: str) -> bool:
-    """Whether the program file holds `text` (the commit the build script stamps into it as a string)."""
-    import mmap
-
-    with open(path, "rb") as f:
-        if os.fstat(f.fileno()).st_size == 0:
-            return False
-        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
-            return m.find(text.encode()) != -1
-
-
-def mismatched_builds(scenarios: list[Scenario], opts: argparse.Namespace) -> list[str]:
-    """Problems when the net lane's programs come from different commits. A server refuses a bot or game of
-    another commit ("The server runs version ... your game is ..."), so a run beside stale binaries only fails
-    with "the mission never started". The server prints its commit; the bot and the game must carry the same one."""
-    if not any(s.lane == "net" or s.uses for s in scenarios):
-        return []
-    commit = server_commit(opts.server_bin)
-    if not commit:
-        return []
-    others = {"tore-bot": opts.bot_bin, "tore-app": opts.bin}
-    stale = [name for name, path in others.items() if Path(path).exists() and not carries_text(path, commit)]
-    if not stale:
-        return []
-    return [
-        f"tore-server is from commit {commit[:12]}, but {', '.join(stale)} {'is' if len(stale) == 1 else 'are'} not "
-        "(the server refuses a program of another commit). Rebuild them together: cargo build --locked --workspace --bins"
-    ]
-
-
 def write_summary(run_dir: Path, results: list[Result], started: float) -> None:
     (run_dir / "results.json").write_text(json.dumps([dataclasses.asdict(r) for r in results], indent=1))
     failed = [r for r in results if not r.ok]
@@ -769,9 +725,6 @@ def main(argv: list[str]) -> int:
     os.environ["TORE_BATTERY_BIN"] = str(Path(opts.bin).resolve())
     for path in missing_binaries(scenarios, opts):
         print(f"binary not found: {path} (cargo build --locked -p tore-server -p tore-session)", file=sys.stderr)
-        return 2
-    for problem in mismatched_builds(scenarios, opts):
-        print(f"binaries disagree: {problem}", file=sys.stderr)
         return 2
     if not (Path(opts.profile) / "media-source.txt").exists():
         print(f"{opts.profile} is not an imported data folder; import once with --import ... --import-only", file=sys.stderr)

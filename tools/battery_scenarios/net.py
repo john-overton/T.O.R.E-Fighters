@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from battery import ROOT, Drive, DriveError, Proc, Scenario
+from battery_scenarios._master_compat import drive_master_mixed
 
 GUIDE = ROOT / "docs" / "DEDICATED-SERVER.md"
 LOCALHOST = "127.0.0.1"
@@ -1146,7 +1147,7 @@ def rejoin_problems(text: str, name: str, plane: int) -> list[str]:
 
 
 def reservation_answer(data: bytes, nonce: int, session: int, protocol: int) -> dict:
-    """Decode the bounded protocol-70 preflight reply, including its correlation and checksum."""
+    """Decode the bounded protocol-71 preflight reply, including its correlation and checksum."""
     if len(data) not in (22, 37) or data[4] != 15:
         raise ValueError("not a reservation answer")
     crc, = struct.unpack_from("<I", data)
@@ -1591,7 +1592,7 @@ def drive_discovery(d: Drive) -> None:
     server = start_server(d, port, name="Battery discovery")
     found = d.run("find", [d.app, "--find-games", "3", "--port", str(port)], timeout=40)
     found.expect(
-        rf"^\S+:{port}\tsame build \([^)]+\)\tBattery discovery\tUKR, clear, airborne at 20000 ft: .*\t0/6 players\tlobby\tking -\topen\tnot full$",
+        rf"^\S+:{port}\tmatching code \([^)]+\)\tBattery discovery\tUKR, clear, airborne at 20000 ft: .*\t0/6 players\tlobby\tking -\topen\tnot full$",
         "the server's line",
     )
     nothing = d.run("empty", [d.app, "--find-games", "1.5", "--port", str(d.port())], timeout=40)
@@ -1654,7 +1655,7 @@ def drive_host(d: Drive) -> None:
     wait_for_listener(d, port, host, 90)
     seen = d.run("find", [d.app, "--find-games", "3", "--port", str(port)], timeout=40)
     seen.expect(
-        rf"^\S+:{port}\tsame build \([^)]+\)\tBattery host\t.*\t\d+/6 players\t(lobby|flying)\tking (Host|-)\topen\tnot full$",
+        rf"^\S+:{port}\tmatching code \([^)]+\)\tBattery host\t.*\t\d+/6 players\t(lobby|flying)\tking (Host|-)\topen\tnot full$",
         "the hosted game's line",
     )
     bot = start_bots(d, port, "bot", 90, "--callsign", "Joiner")
@@ -1773,7 +1774,7 @@ def drive_master_listing(d: Drive) -> None:
     # The Internet Lobby's own listing (slice I4): `tore-app --browse` lists the server with its details.
     browsed = d.run("browse", [d.app, "--browse", "4", "--master", f"{LOCALHOST}:{mport}"], timeout=60)
     browsed.expect(
-        r'^"T\.O\.R\.E server"  0/6 players, lobby, open, not full, this build, dedicated server; '
+        r'^"T\.O\.R\.E server"  0/6 players, lobby, open, not full, matching code, Code [0-9A-F]{8}, dedicated server; '
         r'mission "UKR, [^"]*"; king -; players -$',
         "the server's line in the Internet Lobby",
     )
@@ -2275,38 +2276,20 @@ def drive_content_builds(d: Drive) -> None:
 
 
 def drive_content_missing(d: Drive) -> None:
-    """A bot whose import lacks the Su-27 joins the guide's mission (which flies it): every player gets the gap, the
-    bot is unable with the words and leaves, another bot flies, and the server's log names the gap and its end."""
+    """A missing playable aircraft changes the compatibility code and is refused before admission."""
     port = d.port()
     server = start_server(d, port, guide_mission(separation_nm=5), empty_timeout=3)
-    hawk = start_bots(d, port, "hawk", 15, "--callsign", "Hawk", "--drop-resource", "SU27.PT", "--expect-unable")
-    viper = start_bots(d, port, "viper", 35, "--callsign", "Viper")
-    hawk.finish(60, 0)
+    hawk = start_bots(d, port, "hawk", 10, "--callsign", "Hawk", "--drop-resource", "SU27.PT")
+    viper = start_bots(d, port, "viper", 15, "--callsign", "Viper")
+    hawk.finish(60, None)
     viper.finish(90, 0)
     server.finish(40, 0)
     hawk.expect(r"^dropped SU27\.PT from the import$", "the dropped profile")
-    hawk.expect(
-        r"^Hawk: Your game has no Su-27[^,]*, which this mission flies\. .*Re-import Fighters Anthology \(Pref, "
-        r"Re-import\) to add it\. \(",
-        "its own words",
-    )
-    hawk.expect(r"^Hawk: gaps: aircraft SU27\.PT \(Hawk lacks it\)$", "the gap")
-    hawk.expect(r"^Hawk: Your game differs from the host's: no Su-27[^.]*\.$", "its own difference line")
-    hawk.expect(r"^Hawk: The connection ended: the player left\.$", "a clean leave")
+    hawk.expect(r"The server's compatibility code is [0-9A-F]{8}; yours is [0-9A-F]{8}\.", "the compatibility refusal")
     hawk.forbid(r"^Hawk: seat \d+", "a seating")
-    viper.expect(r"^Viper: gaps: aircraft SU27\.PT \(Hawk lacks it\)$", "the gap")
-    viper.expect(r"^Viper: Hawk's game differs from the host's: no Su-27[^.]*\.$", "Hawk's difference line")
-    viper.expect(r"^Viper: lobby: .*Hawk no slot unable", "Hawk unable in the lobby")
-    viper.expect(r"^Viper: seat \d+, plane \d+, at tick \d+$", "a seating")
-    viper.expect(r"^Viper: debrief: ", "a debrief")
+    viper.expect(r"^Viper: seat \d+, plane \d+, at tick \d+$", "a matching import joining")
     viper.forbid(NET_BAD, "a network problem")
-    log_must(
-        d, server_log(d), r"joined as Hawk", r"joined as Viper",
-        r"content Hawk: .*; lacks aircraft SU27\.PT$",
-        r"gaps: aircraft SU27\.PT \(Hawk lacks it\)$",
-        r"Hawk cannot play the mission: Hawk's game has no Su-27[^,]*, which this mission flies\.",
-        r"gaps: none$",
-    )
+    log_must(d, server_log(d), r"joined as Viper", forbid=r"joined as Hawk")
 
 
 def drive_slow_load(d: Drive) -> None:
@@ -2700,6 +2683,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-window-host", lane="net", args=[], driver=drive_host, uses=("bot",), window=True, timeout=300,
             notes="a hosted game answers the search, a bot joins, and the host leaving ends the game for it",
+        ),
+        Scenario(
+            name="net-master-mixed", lane="net", args=[], driver=drive_master_mixed, timeout=60,
+            notes="released protocol-1 and current protocol-2 registrations and browsers share one master with isolated listings and details",
         ),
         Scenario(
             name="net-master-flood", lane="net", args=[], driver=drive_master_flood, timeout=120,

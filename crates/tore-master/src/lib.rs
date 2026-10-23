@@ -40,3 +40,6 @@ mod introduce_tests;
 mod master_tests;
 #[cfg(test)]
 mod relay_tests;
+
+#[cfg(test)]
+mod mixed_tests;

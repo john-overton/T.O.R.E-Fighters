@@ -38,6 +38,9 @@ pub const HEADER_LEN: usize = 5;
 pub const PAYLOAD_HEADER_LEN: usize = HEADER_LEN + 4 + 2 + 2 + 4 + 2;
 /// A section's kind and length.
 pub const SECTION_HEADER_LEN: usize = 3;
+/// First combined protocol whose handshake and discovery carry compatibility codes.
+pub const COMPATIBILITY_PROTOCOL_VERSION: u16 = 71;
+
 /// The longest refusal text, in bytes.
 pub const MAX_REFUSE_TEXT: usize = 200;
 /// The longest callsign, in characters (printable ASCII, so also bytes).
@@ -111,7 +114,7 @@ pub enum PacketKind {
     /// Game to game, 22 bytes, never longer than the Reach it answers: the
     /// Reach's nonce, the session and whether the answerer hosts it now.
     ReachAnswer = 13,
-    /// Private reservation preflight, protocol 70.
+    /// Private reservation preflight, protocol 71.
     ReservationQuery = 14,
     ReservationAnswer = 15,
 }
@@ -237,6 +240,7 @@ pub struct ConnectRequest {
     pub game_version: String,
     /// The commit the client's build stamps. Empty as above.
     pub game_commit: String,
+    pub compatibility: u32,
 }
 
 /// Challenge: the host's cookie. 21 bytes.
@@ -263,6 +267,7 @@ pub struct ChallengeAnswer {
     pub game_version: String,
     /// Repeated from the request.
     pub game_commit: String,
+    pub compatibility: u32,
     /// The operating system the player's game runs on (protocol 7).
     pub platform: Platform,
     /// How the player reached the host (protocol 9): the byte after the
@@ -452,6 +457,7 @@ pub struct DiscoverAnswer {
     pub game_version: String,
     /// The commit its build stamps.
     pub game_commit: String,
+    pub compatibility: u32,
     /// The host's session id, which names one game across addresses.
     pub session_id: u64,
     /// The game's name.
@@ -512,7 +518,12 @@ impl DiscoverAnswer {
     fn fixed_len(&self) -> usize {
         // Header 5, nonce 8, protocol 2, flags 1, players 1, capacity 1,
         // session 8, five strings with their length bytes, the count.
-        5 + 8
+        (if self.protocol_version >= COMPATIBILITY_PROTOCOL_VERSION {
+            4
+        } else {
+            0
+        }) + 5
+            + 8
             + 2
             + 1
             + 1
@@ -638,6 +649,7 @@ impl Packet {
             Self::ConnectRequest(p) => {
                 w.write_bits(u64::from(p.protocol_version), 16).ok();
                 w.write_bits(p.nonce, 64).ok();
+                w.write_bits(u64::from(p.compatibility), 32).ok();
                 put_str(&mut w, &p.game_version)?;
                 put_str(&mut w, &p.game_commit)?;
                 pad(&mut w)?;
@@ -656,6 +668,7 @@ impl Packet {
                 put_str(&mut w, &p.password)?;
                 put_str(&mut w, &p.game_version)?;
                 put_str(&mut w, &p.game_commit)?;
+                w.write_bits(u64::from(p.compatibility), 32).ok();
                 w.write_bits(u64::from(p.platform.code()), 8).ok();
                 w.write_bits(u64::from(p.path.code()), 8).ok();
                 match p.token {
@@ -719,6 +732,9 @@ impl Packet {
                 w.write_bits(p.session_id, 64).ok();
                 put_str(&mut w, &p.game_version)?;
                 put_str(&mut w, &p.game_commit)?;
+                if p.protocol_version >= COMPATIBILITY_PROTOCOL_VERSION {
+                    w.write_bits(u64::from(p.compatibility), 32).ok();
+                }
                 put_str(&mut w, &p.name)?;
                 put_str(&mut w, &p.summary)?;
                 put_str(&mut w, &p.king)?;
@@ -895,12 +911,19 @@ pub fn decode_connect_request(
     let mut r = BitReader::new(body);
     let protocol_version = u16_of(&mut r)?;
     let nonce = r.read_bits(64)?;
+    let compatibility =
+        if protocol_version >= COMPATIBILITY_PROTOCOL_VERSION || protocol_version == version {
+            r.read_bits(32)? as u32
+        } else {
+            0
+        };
     if protocol_version != version {
         return Ok(ConnectRequest {
             protocol_version,
             nonce,
             game_version: String::new(),
             game_commit: String::new(),
+            compatibility,
         });
     }
     let game_version = r.read_str()?;
@@ -911,6 +934,7 @@ pub fn decode_connect_request(
         nonce,
         game_version,
         game_commit,
+        compatibility,
     })
 }
 
@@ -948,6 +972,11 @@ pub fn decode_discover_answer(body: &[u8]) -> Result<DiscoverAnswer, PacketError
     let session_id = r.read_bits(64)?;
     let game_version = r.read_str()?;
     let game_commit = r.read_str()?;
+    let compatibility = if protocol_version >= COMPATIBILITY_PROTOCOL_VERSION {
+        r.read_bits(32)? as u32
+    } else {
+        0
+    };
     let name = r.read_str()?;
     let summary = r.read_str()?;
     let king = r.read_str()?;
@@ -966,6 +995,7 @@ pub fn decode_discover_answer(body: &[u8]) -> Result<DiscoverAnswer, PacketError
         protocol_version,
         game_version,
         game_commit,
+        compatibility,
         session_id,
         name,
         summary,
@@ -1006,6 +1036,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
     let password = r.read_str()?;
     let game_version = r.read_str()?;
     let game_commit = r.read_str()?;
+    let compatibility = r.read_bits(32)? as u32;
     let platform = Platform::from_code(u8_of(&mut r)?).ok_or(PacketError::Malformed)?;
     let path = Path::from_code(u64::from(u8_of(&mut r)?)).ok_or(PacketError::Malformed)?;
     let token = match u8_of(&mut r)? {
@@ -1021,6 +1052,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
         password,
         game_version,
         game_commit,
+        compatibility,
         platform,
         path,
         token,
@@ -1203,6 +1235,7 @@ mod tests {
                 nonce: 0x0123_4567_89AB_CDEF,
                 game_version: "0.1.3".into(),
                 game_commit: "fb9c2ec".into(),
+                compatibility: 0,
             }),
             Packet::Challenge(Challenge {
                 nonce: 1,
@@ -1215,6 +1248,7 @@ mod tests {
                 password: "secret".into(),
                 game_version: "0.1.3".into(),
                 game_commit: "fb9c2ec".into(),
+                compatibility: 0,
                 platform: Platform::MacOs,
                 path: Path::Punched,
                 token: Some(Token(0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210)),
@@ -1286,6 +1320,7 @@ mod tests {
             protocol_version: V,
             game_version: "0.1.3".into(),
             game_commit: "fb9c2ec".into(),
+            compatibility: 0,
             session_id: 0x1122_3344_5566_7788,
             name: "Friday night".into(),
             summary:
@@ -1378,7 +1413,8 @@ mod tests {
             panic!("not an answer")
         };
         // The token byte follows the path byte.
-        let at = 5
+        let at = 4
+            + 5
             + 8
             + 8
             + [
@@ -1524,11 +1560,44 @@ mod tests {
         assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
     }
 
-    /// The discovery packets' encodings, one line each: their layout never
-    /// changes under their kinds (a later layout is a later kind), so they
-    /// have a golden file of their own, outside the protocol version's. Refresh
-    /// it with `TORE_UPDATE_DISCOVER_GOLDEN=1 cargo test -p tore-net
-    /// discover_golden`, only when adding a line.
+    #[test]
+    fn protocol_70_requests_have_no_code_but_later_requests_report_it() {
+        for (protocol, expected) in [(70u16, 0u32), (72, 0x3FA9C21B)] {
+            let mut body = Vec::from(protocol.to_le_bytes());
+            body.extend_from_slice(&99u64.to_le_bytes());
+            if protocol >= COMPATIBILITY_PROTOCOL_VERSION {
+                body.extend_from_slice(&expected.to_le_bytes());
+            }
+            body.extend_from_slice(b"\x050.2.0\x06legacy");
+            body.resize(PADDED_LEN - HEADER_LEN, 0);
+            let request = decode_connect_request(PADDED_LEN, &body, 71).unwrap();
+            assert_eq!(request.protocol_version, protocol);
+            assert_eq!(request.nonce, 99);
+            assert_eq!(request.compatibility, expected);
+        }
+    }
+
+    #[test]
+    fn discovery_reads_legacy_answers_and_preserves_new_codes() {
+        for protocol in [67, 70, 71, 72] {
+            let mut sample = answer(&["Viper"]);
+            sample.protocol_version = protocol;
+            sample.compatibility = if protocol >= COMPATIBILITY_PROTOCOL_VERSION {
+                0x3FA9C21B
+            } else {
+                0
+            };
+            let packet = Packet::DiscoverAnswer(sample);
+            assert_eq!(
+                Packet::decode(&packet.encode(71).unwrap(), 71).unwrap(),
+                packet
+            );
+        }
+    }
+
+    /// Discovery's HELLO checksum stays version independent. Protocol 71
+    /// adds a code to answers; older layouts remain readable. Golden samples
+    /// cover both layouts. Refresh with TORE_UPDATE_DISCOVER_GOLDEN=1.
     #[test]
     fn discover_golden() {
         use std::fmt::Write as _;
@@ -1540,13 +1609,21 @@ mod tests {
         };
         let mut text = String::from(
             "# T.O.R.E discovery golden: kinds 8 and 9, checked with the TORE-HELLO id.\n\
-             # Version-free: these bytes never change.\n",
+             # HELLO checksum, with legacy and protocol-71 answer layouts.\n",
         );
         let samples = samples();
         for (name, packet) in [
             ("discover", &samples[7]),
             ("answer", &samples[8]),
             ("answer-empty", &Packet::DiscoverAnswer(answer(&[]))),
+            (
+                "answer-compat71",
+                &Packet::DiscoverAnswer(DiscoverAnswer {
+                    protocol_version: 71,
+                    compatibility: 0x3FA9C21B,
+                    ..answer(&["Viper"])
+                }),
+            ),
         ] {
             // The query is zeros after its first 15 bytes; the line keeps the
             // head and the length.
@@ -1589,7 +1666,8 @@ mod tests {
         };
         // Header 5, nonce 8, cookie 8, then four strings with their length
         // bytes; the platform byte follows them.
-        let at = 5
+        let at = 4
+            + 5
             + 8
             + 8
             + [
@@ -1679,6 +1757,7 @@ mod tests {
                 password: String::new(),
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
                 platform: Platform::Unknown,
                 path: Path::ByAddress,
                 token: None,
@@ -1734,7 +1813,8 @@ mod tests {
             panic!("not an answer")
         };
         // The path byte follows the platform byte.
-        let at = 5
+        let at = 4
+            + 5
             + 8
             + 8
             + [

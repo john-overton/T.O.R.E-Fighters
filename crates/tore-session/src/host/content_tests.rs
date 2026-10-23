@@ -32,6 +32,7 @@ fn host_address() -> SocketAddr {
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
@@ -155,7 +156,16 @@ impl Rig {
         };
         configure(&mut config);
         self.next_port += 1;
-        let client = Client::connect(config, Arc::new(import), self.net.now()).unwrap();
+        // These tests exercise the detailed check even if a short code collides.
+        let import = Arc::new(import);
+        let content = config
+            .content
+            .clone()
+            .unwrap_or_else(|| GameContent::shared(&import));
+        config.content = Some(Arc::new(self.host.content().clone()));
+        let mut client =
+            Client::connect(config, Arc::clone(&self.host.resources), self.net.now()).unwrap();
+        client.collide_content_for_test(import, content);
         self.players.push(Player {
             socket,
             client,

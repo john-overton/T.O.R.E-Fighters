@@ -100,6 +100,7 @@ impl World {
         ClientConfig {
             game_version: "0.2.0".into(),
             game_commit: "5b7b9fd".into(),
+            compatibility: 0,
             entropy: Entropy::Seeded(self.seed.wrapping_mul(31).wrapping_add(u64::from(n))),
             ..ClientConfig::new(VERSION, callsign)
         }

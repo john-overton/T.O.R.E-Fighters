@@ -267,9 +267,8 @@ def drive_lobby(d: Drive) -> None:
 
 
 def drive_gaps(d: Drive) -> None:
-    """The game hosts from Direct Connection's New; a bot lacking the Rafale joins as an observer. The window shows
-    the selected bot's system, the creator's dimmed Rafale and the refusal of choosing it, and the game's
-    log holds the host's content and gaps lines and the lines its Messages show."""
+    """The game hosts from Direct Connection's New; a bot lacking the Rafale is refused by its code.
+    Existing captures show that the refused bot never joins the lobby."""
     port = d.port()
     fresh_data(d)
     (d.data / "network-v1.conf").write_text(f"tore-network 1\ncallsign Viper\nport {port}\n")
@@ -306,21 +305,13 @@ def drive_gaps(d: Drive) -> None:
     game.finish(150, 0)
     bot.finish(60, None)
     log = game_log(d)
-    for pattern, what in (
-        (r"Lobby: Bot joined the game\.", "the bot joining"),
-        (r"Lobby: Bot's game differs from the host's: no Rafale C\.", "the line about the bot's game in Messages"),
-        (r"Host: tick \d+: content Bot: [^\n]*lacks aircraft RAFALE\.PT", "the host's content line for the bot"),
-        (r"Host: tick \d+: gaps: aircraft RAFALE\.PT \(Bot lacks it\)", "the host's gaps line"),
-    ):
-        if not re.search(pattern, log):
-            d.problem(f"the game's log lacks {what}: /{pattern}/")
+    if "Bot joined the game." in log:
+        d.problem("a bot with a different compatibility code joined")
     bot.expect(r"^dropped RAFALE\.PT from the import$", "the dropped profile")
-    bot.expect(r"^Bot: gaps: aircraft RAFALE\.PT \(Bot lacks it\)$", "the gap")
-    bot.forbid(NET_BAD, "a network problem")
+    bot.expect(r"The server's compatibility code is [0-9A-F]{8}; yours is [0-9A-F]{8}\.", "the compatibility refusal")
     for name in GAPS_PICTURES:
         if not (shots / f"{name}.ppm").exists():
             d.problem(f"the script's {name}.ppm was not written")
-    game.forbid(NET_BAD, "a network problem")
 
 
 

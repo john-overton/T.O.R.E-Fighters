@@ -38,6 +38,7 @@ fn game(
                 "0.1.2".into()
             },
             game_commit: "1a2b3c4d5e6f".into(),
+            compatibility: 0,
             session_id: u64::from(n),
             name: name.into(),
             summary: summary.into(),

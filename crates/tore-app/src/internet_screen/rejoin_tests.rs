@@ -71,7 +71,7 @@ fn a_listed_game_whose_session_the_player_holds_a_token_for_says_rejoin() {
             .unwrap(),
     );
     assert!(
-        s.selection_line().is_none(),
+        s.selection_line().as_deref() == Some("Code 00000000"),
         "the listing does not confirm a slot"
     );
     let target = s.rejoin_target().unwrap();
@@ -86,15 +86,16 @@ fn a_listed_game_whose_session_the_player_holds_a_token_for_says_rejoin() {
             return_seconds: 192,
         }),
     );
+    assert!(s.selection_line().unwrap().starts_with("Code 00000000. "));
     assert!(s.selection_line().unwrap().contains("Blue Wing 1 #2"));
     s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(target, None);
     assert_eq!(
         s.selection_line().as_deref(),
-        Some("No reserved slot is available for your return.")
+        Some("Code 00000000. No reserved slot is available for your return.")
     );
     s.rejoin_check = Default::default();
     assert!(
-        s.selection_line().is_none(),
+        s.selection_line().as_deref() == Some("Code 00000000"),
         "unconfirmed or timed-out queries promise nothing"
     );
     // Before the master has said which session it is, nothing is marked.

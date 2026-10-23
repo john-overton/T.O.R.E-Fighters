@@ -22,6 +22,7 @@ fn host_address() -> SocketAddr {
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
@@ -1457,17 +1458,15 @@ fn choice_revive_loads_a_new_type_on_host_and_both_clients() {
         checksum(cobra),
         "both clients built the accepted runtime type and loadout identically"
     );
-    // A later entrant without the runtime type stays unable in the lobby.
+    // A later entrant without the runtime type has a different compatibility code.
     let mut missing = (*rig.resources).clone();
     missing.remove("AC130.PT");
     rig.resources = Arc::new(missing);
     let late = rig.join("Missing");
     rig.run(Duration::from_secs(1));
     assert!(
-        rig.lobby(late)
-            .and_then(|l| l.me())
-            .and_then(|p| p.unable.as_ref())
-            .is_some()
+        rig.players[late].events.iter().any(|event| matches!(event,
+            ClientEvent::Closed(tore_net::CloseReason::Refused { text, .. }) if text.contains("compatibility code")))
     );
 }
 

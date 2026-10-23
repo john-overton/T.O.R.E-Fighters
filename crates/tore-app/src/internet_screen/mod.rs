@@ -824,24 +824,36 @@ impl InternetScreen {
         let entry = self.selected_entry()?;
         if let Some(version) = &entry.other_build {
             return Some(format!(
-                "{} runs another version ({version}) and cannot be joined.",
-                entry.name
+                "{}: Code {:08X} ({version}) cannot be joined.",
+                entry.name, entry.compatibility
             ));
         }
         if self.rejoin_as(entry).is_some() {
-            return self
+            let confirmed = self
                 .rejoin_target()
                 .and_then(|target| self.rejoin_check.line(target));
+            return Some(match confirmed {
+                Some(line) => format!("Code {:08X}. {line}", entry.compatibility),
+                None => format!("Code {:08X}", entry.compatibility),
+            });
         }
-        let mission = self
-            .details
-            .get(&entry.listing_id)
-            .map(|summary| format!("Mission: {}", summary.mission));
+        let mission = self.details.get(&entry.listing_id).map(|summary| {
+            format!(
+                "Code {:08X} ({} {}). Mission: {}",
+                entry.compatibility,
+                summary.game_version,
+                summary.game_commit.chars().take(9).collect::<String>(),
+                summary.mission
+            )
+        });
         match (mission, entry.relay_likely) {
             (Some(mission), true) => Some(format!("{mission} (may need the relay)")),
             (Some(mission), false) => Some(mission),
-            (None, true) => Some("This game's router may need the relay.".into()),
-            (None, false) => None,
+            (None, true) => Some(format!(
+                "Code {:08X}. This game's router may need the relay.",
+                entry.compatibility
+            )),
+            (None, false) => Some(format!("Code {:08X}", entry.compatibility)),
         }
     }
 
@@ -993,9 +1005,11 @@ impl InternetScreen {
                 .for_session(summary.session_id)
                 .map(|found| found.kept.token)
         });
-        let problem = if let Some(version) = &entry.other_build {
+        let problem = if entry.other_build.is_some() {
             Some(format!(
-                "{name} runs another version ({version}); it cannot be joined."
+                "The server's compatibility code is {:08X}; yours is {:08X}.",
+                entry.compatibility,
+                crate::net::session::compatibility_code()
             ))
         } else if entry.phase == DiscoverPhase::Closed {
             Some(format!("{name} is closing; try again soon."))

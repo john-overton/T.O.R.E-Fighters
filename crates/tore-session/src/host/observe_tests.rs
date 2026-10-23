@@ -30,6 +30,9 @@ fn host_address() -> SocketAddr {
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: crate::compatibility::current(
+            &crate::host::content::GameContent::of(&resources()).content,
+        ),
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
@@ -96,6 +99,7 @@ impl Watcher {
         let config = tore_net::ClientConfig {
             game_version: build().version,
             game_commit: build().commit,
+            compatibility: build().compatibility,
             entropy: Entropy::Seeded(u64::from(port)),
             ..tore_net::ClientConfig::new(PROTOCOL_VERSION, "Owl")
         };

@@ -81,7 +81,7 @@ fn the_selection_line_and_the_join_carry_the_token() {
         .unwrap();
     s.select_game(index);
     assert!(
-        s.selection_line().is_none(),
+        s.selection_line().as_deref() == Some("Code 00000000"),
         "a saved token does not prove a slot"
     );
     let target = s.rejoin_target().unwrap();
@@ -97,15 +97,16 @@ fn the_selection_line_and_the_join_carry_the_token() {
         }),
     );
     let line = s.selection_line().unwrap();
+    assert!(line.starts_with("Code 00000000. "), "{line}");
     assert!(line.contains("Blue Wing 1 #2"), "{line}");
     s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(target, None);
     assert_eq!(
         s.selection_line().as_deref(),
-        Some("No reserved slot is available for your return.")
+        Some("Code 00000000. No reserved slot is available for your return.")
     );
     s.rejoin_check = Default::default();
     assert!(
-        s.selection_line().is_none(),
+        s.selection_line().as_deref() == Some("Code 00000000"),
         "unconfirmed or timed-out queries promise nothing"
     );
     s.focus.set(Id::Games);
@@ -147,7 +148,7 @@ fn a_game_with_no_token_joins_without_one() {
         panic!("a join");
     };
     assert_eq!(request.token, None);
-    assert!(s.selection_line().unwrap().starts_with("Mission:"));
+    assert!(s.selection_line().unwrap().contains("Mission:"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -11610,7 +11610,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         return Ok(Outcome::Done);
     }
     diagnostics::stage("argument parsing and startup options");
-    if matches!(session, Session::First) {
+    if matches!(session, Session::First)
+        && !std::env::args().any(|arg| arg == "--version" || arg == "-V")
+    {
         // `--find-games` and `--browse` keep stdout for the games they list.
         if std::env::args().any(|a| a == "--find-games" || a == "--browse" || a == "--map-port") {
             eprintln!("{}", version::label());
@@ -12750,7 +12752,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--original-graphics" => graphics_flags.push((arg.clone(), String::new())),
             "--no-audio" => no_audio = true,
             "--version" | "-V" => {
-                println!("T.O.R.E-Fighters v{}", version::version());
+                println!("{}", version::compatibility_label());
                 return Ok(Outcome::Done);
             }
             "--import-only" => import_only = true,

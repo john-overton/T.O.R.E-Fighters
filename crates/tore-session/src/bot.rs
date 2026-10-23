@@ -1522,6 +1522,7 @@ mod tests {
 
     fn build() -> crate::BuildId {
         crate::BuildId {
+            compatibility: 0,
             version: "test".into(),
             commit: "test".into(),
             release: false,

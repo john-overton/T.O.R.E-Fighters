@@ -47,6 +47,7 @@ impl Write for Shared {
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,

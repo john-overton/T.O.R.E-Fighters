@@ -654,6 +654,7 @@ mod integration_tests {
         );
         let rotation = Arc::new(Mutex::new(prepared.rotation.unwrap()));
         let mut config = HostConfig::new(BuildId {
+            compatibility: 0,
             version: "test".into(),
             commit: "test".into(),
             release: false,
@@ -713,6 +714,7 @@ mod integration_tests {
         assert!(!prepared.spec.friendly_fire);
         let rotation = Arc::new(Mutex::new(prepared.rotation.unwrap()));
         let mut config = HostConfig::new(BuildId {
+            compatibility: 0,
             version: "test".into(),
             commit: "test".into(),
             release: false,

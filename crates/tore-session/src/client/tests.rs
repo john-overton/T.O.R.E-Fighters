@@ -16,6 +16,7 @@ pub(super) fn host_address() -> SocketAddr {
 
 pub(super) fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
@@ -377,8 +378,11 @@ fn a_different_import_is_refused_with_the_names_that_differ() {
     let mut other = resources();
     let name = other.keys().find(|k| k.ends_with(".PT")).unwrap().clone();
     other.get_mut(&name).unwrap().push(0);
-    rig.resources = Arc::new(other);
     let player = rig.join(|_| {}, weave_script());
+    // A short-code collision must not bypass the detailed manifest check.
+    rig.players[player].client.resources = Arc::new(other);
+    rig.players[player].client.content =
+        crate::host::content::GameContent::shared(&rig.players[player].client.resources);
     // The player is told why and stays in the lobby, marked unable.
     assert!(rig.run_until(Duration::from_secs(3), |r| {
         r.players[player]

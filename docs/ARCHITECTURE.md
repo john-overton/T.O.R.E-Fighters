@@ -4624,12 +4624,51 @@ sequenceDiagram
   developer option for the whole process: a server refuses to start with it
   and a client refuses to join with it, so every machine flies one
   configuration.
-- **Builds.** John's rule is that the build must match
-  ([guide](MULTIPLAYER.md#compatibility-handshake)). *Agent decision on what
-  that means:* two tagged release builds match when their versions are equal;
-  any other build must have the same commit, since compile-time tuning (for
-  example the stall reference fractions) changes the simulation and would make
-  every prediction wrong.
+- **Compatibility.** The protocol and [compatibility code](#compatibility-code) must match. Version labels and commits are information only.
+
+### Compatibility code
+
+Implementation mode, opinionated, requested by John on 2026-10-23. Peers
+match by protocol and content, never by commit, tag or version label. The
+code is eight uppercase hexadecimal digits. A mismatch says: "The server's
+compatibility code is 1234ABCD; yours is 3FA9C21B."
+
+Agent decision: the code covers the **whole playable import**, so changing
+missions does not change it. Missing or changed unused aircraft, theaters or
+weapons also change the code. Cosmetic resources outside these manifests,
+importer versions and retail build labels do not. The existing per-mission
+manifest remains the authoritative detailed check after admission, with its
+existing missing-aircraft and shared-flight-data messages. The short hash is
+not authentication and collisions are possible.
+
+The exact algorithm lives in `tore_session::compatibility`: FNV-1a/32, initial
+value `0x811C9DC5`, XOR each byte then multiply by `0x01000193` modulo 2^32.
+Its byte stream is `TORE-COMPAT-1` followed by a zero byte, protocol `u16`,
+simulation version `u32`, item count `u32`, then the existing content items in
+kind/key order. Each item has kind `u8` (aircraft 0, theater 1, weapon 2,
+shared 3), UTF-8 key length `u32`, key bytes, and its existing manifest digest
+`u64`. All integers are little endian. The content probes, rather than a new
+file list, determine the items and fingerprints.
+
+`SIMULATION_VERSION` starts at 1. Raise it and the network protocol whenever
+simulation, rules, checkpoint or replay interpretation changes can make
+peers disagree, including compile-time tuning. Raise the protocol for wire
+changes too. Documentation, UI-only changes, commits and release tags do not
+change either version. This version discipline replaces the previous implicit
+assumption that identical commits guaranteed identical rules.
+
+The host and client derive the code from their loaded resources; migration
+keeps it. LAN discovery, master registration, browsing and introductions use
+it. The master serves both master protocols 1 and 2. Released 0.2.0 games
+(master 1, game protocol 67) keep their original packet layout and legacy
+matching rule. Master-2/game-68+ listings use the code and form a separate
+population, even with Show other versions. Replies use the request's version;
+introductions, retries and relay channels retain that version. See
+[master versions](formats/master-protocol.md#compatibility-codes-master-protocol-2).
+Protocol 71 and older games cannot join each other. The selected game's
+lounge details, lobby header, discovery commands, startup log and `--version`
+show the code. Version commands use the selected data profile; without an
+import they explicitly label the empty-content code "no imported content".
 
 ### A stalled game stays connected (EF-K)
 
@@ -5517,7 +5556,7 @@ and the internet are stage J. *Agent decision.*
   the kind as an unknown one either way); a separate rate limiter with the
   joins' limits, so queries cannot use up the joins' allowance; the answer
   carries the commit and the session id beside what the brief listed, the
-  commit so the screen can tell the same build from another and the session id
+  commit for information, and compatibility code so the screen can tell compatible games from others and the session id
   so one game answering from two addresses is listed once.
 - **The host's answer.** `Server::receive` rate-limits a query and hands it up
   as `ServerEvent::Discover`; `Host::pump` calls `answer_discover`
@@ -5536,7 +5575,7 @@ and the internet are stage J. *Agent decision.*
   `SearchEvent::Added`, `Changed` or `Dropped` for each change (a repeated
   identical answer is no event); `games()` is the list, by name, each game once
   at its best address (a network address before a loopback one) with a
-  `Compat` that says the same build, another build or another protocol
+  `Compat` that says matching code, another code or another protocol
   version; `poll_event()` takes the events. Dropping the `Search` stops it.
   *Agent decision (the lead's, 2026-10-01):* the search socket is bound to the
   game port itself when that port is free (`Search::start`), and to an
@@ -10350,16 +10389,7 @@ In short:
 
 Read at `d7244b0c` (the `multiplayer` tip):
 
-- **The build rule.** The handshake refuses another protocol version (code
-  1) or another T.O.R.E build (code 2: two tagged releases match by version,
-  anything else by commit; `tore_session::host::config`,
-  `builds_match_by_commit_or_by_a_release_version`). Direct Connection and the
-  Internet Lobby already show a game of another build dimmed and say "runs
-  another version (...) and cannot be joined" (`direct_screen/mod.rs`,
-  `internet_screen/mod.rs`); the master filters by build
-  (`tore_master::browse::same_build`). Two players who can join each other
-  therefore run the same code, the same aircraft list and the same theater
-  list. Stage L leaves this alone.
+- **Compatibility rule.** Since protocol 71 the handshake and lounge filters compare the [compatibility code](#compatibility-code), with version and commit retained for information. Stage L keeps the detailed mission check.
 - **The content check.** `tore_world::resources::ResourceReads` notes every
   resource a build asks for; `Manifest` is the sorted names with an FNV-1a 64
   hash each, `Manifest::digest` one number for it, `Manifest::differences` the
@@ -11258,7 +11288,7 @@ keeps its planes in the same table.
   the lobby finds its slot and loadout, as the lobby keeps them.
 - **Dedicated servers** do all of this the same way.
 
-The lounges use the [protocol-70 reservation preflight](formats/net-protocol.md#reservation-preflight-protocol-70)
+The lounges use the [protocol-71 reservation preflight](formats/net-protocol.md#reservation-preflight-protocol-71)
 for slot promises. `net::rejoin_check` polls a selected server without joining;
 the host answers from the live reservation/connection and token tables. An
 unreachable saved Internet address produces no claim. Detailed retention and

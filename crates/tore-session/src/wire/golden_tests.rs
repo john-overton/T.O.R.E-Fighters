@@ -91,6 +91,7 @@ fn lines(version: u16) -> Vec<(String, String)> {
             password: "secret".into(),
             game_version: "0.1.3".into(),
             game_commit: "fb9c2ec".into(),
+            compatibility: 0,
             platform: super::Platform::Linux,
             path: tore_net::master::Path::Punched,
             // The rejoin token since protocol 13 (stage K).

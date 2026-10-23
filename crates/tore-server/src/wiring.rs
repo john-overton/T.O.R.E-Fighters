@@ -80,6 +80,9 @@ pub fn start_host_with(
             protocol_version: tore_session::wire::PROTOCOL_VERSION,
             game_version: version.clone(),
             game_commit: commit.clone(),
+            compatibility: tore_session::compatibility::current(
+                &tore_session::host::content::GameContent::shared(&resources).content,
+            ),
             release: is_release(),
         },
         dedicated: true,
@@ -90,6 +93,9 @@ pub fn start_host_with(
     let mut listing = HostListing::new(&c.master, rendezvous, port, Duration::ZERO)?;
     listing.set_listed(c.broadcast, Duration::ZERO);
     let mut config = HostConfig::new(BuildId {
+        compatibility: tore_session::compatibility::current(
+            &tore_session::host::content::GameContent::shared(&resources).content,
+        ),
         version,
         commit,
         release: is_release(),

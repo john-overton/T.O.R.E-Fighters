@@ -60,6 +60,7 @@ pub struct ConnectDetails {
     pub game_version: String,
     /// The commit its build stamps.
     pub game_commit: String,
+    pub compatibility: u32,
     /// 1 to 15 printable ASCII characters. Making it unique (`Viper_2`) is
     /// the caller's job.
     pub callsign: String,
@@ -255,6 +256,7 @@ impl ReachLimiter {
 /// tick), send what [`Server::poll_transmit`] gives, and handle
 /// [`Server::poll_event`].
 pub struct Server {
+    compatibility: u32,
     config: ServerConfig,
     rng: Rng,
     cookie_key: CookieKey,
@@ -276,11 +278,16 @@ pub struct Server {
 }
 
 impl Server {
+    pub fn set_compatibility(&mut self, code: u32) {
+        self.compatibility = code;
+    }
+
     /// A host with no connections.
     pub fn new(config: ServerConfig) -> Self {
         let mut rng = Rng::new(config.entropy);
         let cookie_key = CookieKey::new(config.entropy, &mut rng);
         Self {
+            compatibility: 0,
             config,
             rng,
             cookie_key,
@@ -609,8 +616,8 @@ impl Server {
         }
         if request.protocol_version != version {
             let text = format!(
-                "This server uses network protocol version {version}, and your game uses version {}. Both must be the same.",
-                request.protocol_version
+                "The server's compatibility code is {:08X}; yours is {:08X}. This server uses network protocol version {version}, and your game uses version {}.",
+                self.compatibility, request.compatibility, request.protocol_version
             );
             self.refuse(from, request.nonce, RefuseReason::ProtocolVersion, &text);
             return;
@@ -672,6 +679,7 @@ impl Server {
             protocol_version: self.config.protocol_version,
             game_version: answer.game_version,
             game_commit: answer.game_commit,
+            compatibility: answer.compatibility,
             callsign: answer.callsign,
             password: answer.password,
             platform: answer.platform,
@@ -911,6 +919,7 @@ mod tests {
             protocol_version: V,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
             session_id: 7,
             name: "Game".into(),
             summary: "UKR".into(),
@@ -1014,6 +1023,7 @@ mod tests {
             nonce: 5,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
         })
         .encode(V)
         .unwrap();
@@ -1068,6 +1078,7 @@ mod tests {
                 nonce: 5,
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
             })
             .encode(V)
             .unwrap();
@@ -1084,6 +1095,7 @@ mod tests {
                 password: String::new(),
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
                 platform: Platform::Linux,
                 path: said,
                 token: None,
@@ -1203,6 +1215,7 @@ mod tests {
             nonce: 5,
             game_version: String::new(),
             game_commit: String::new(),
+            compatibility: 0,
         })
         .encode(V)
         .unwrap();
@@ -1235,6 +1248,7 @@ mod tests {
                 nonce: 5,
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
             })
             .encode(V)
             .unwrap();
@@ -1260,6 +1274,7 @@ mod tests {
                 password: String::new(),
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
                 platform: Platform::Linux,
                 path: Path::ByAddress,
                 token,

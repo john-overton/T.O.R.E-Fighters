@@ -51,6 +51,7 @@ fn build() -> Build {
         protocol_version: tore_session::wire::PROTOCOL_VERSION,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         release: false,
     }
 }
@@ -64,6 +65,7 @@ fn summary(players: u8) -> ListingSummary {
         session_id: 7,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         name: "Friday night".into(),
         mission: "UKR, 2 v 2".into(),
         callsigns: (0..players).map(|n| format!("Pilot{n}")).collect(),

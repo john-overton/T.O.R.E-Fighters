@@ -108,8 +108,8 @@ version.
 | 11 | [Punch](#punch) (protocol 9) | host to client | versioned |
 | 12 | [Reach](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
 | 13 | [Reach answer](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
-| 14 | [Reservation query](#reservation-preflight-protocol-70) | lounge to host | versioned |
-| 15 | [Reservation answer](#reservation-preflight-protocol-70) | host to lounge | versioned |
+| 14 | [Reservation query](#reservation-preflight-protocol-71) | lounge to host | versioned |
+| 15 | [Reservation answer](#reservation-preflight-protocol-71) | host to lounge | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -161,9 +161,9 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (22), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (16), client nonce (64), compatibility code (32, since 71), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
-| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
+| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), compatibility code (32, since 71), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
 | Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
 | Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
@@ -224,8 +224,9 @@ makes the answer malformed, and it is dropped. The host only shows the
 platform; nothing in the session depends on it. Its byte, its codes and the
 lobby's 3 bits are agent decisions. With a callsign of `c` bytes, a password
 of `p`, a game version of `v` and a commit of `m`, the byte is at offset
-`25 + c + p + v + m` of the packet (checksum 4, kind 1, nonce 8, cookie 8 and
-the four strings' length bytes), and zero padding follows it.
+`29 + c + p + v + m` in protocol 71 (checksum 4, kind 1, nonce 8, cookie 8,
+four strings' length bytes and compatibility code 4). The path and token
+fields follow it, then zero padding.
 
 The **cookie** is a keyed hash of the client's address and port, its nonce
 and the current 10-second time slot, with a key drawn at host start from the
@@ -326,11 +327,12 @@ Ten bytes since protocol 28 (nine before), smaller than the empty Payload
   alive. A joined game's peers router passes it to the client (it dropped
   the kind before protocol 28).
 
-## Reservation preflight (protocol 70)
+## Reservation preflight (protocol 71)
 
 These private, connectionless packets use the versioned `TORE-NET` checksum.
-Discovery kinds 8 and 9 and the master protocol are unchanged. No player is
-admitted and no slot is occupied by a query. Queries are unicast only, and
+Discovery kinds 8 and 9 and the master protocol remain separate; the combined
+protocol-71 discovery layout also carries the compatibility code described
+below. No player is admitted and no slot is occupied by a query. Queries are unicast only, and
 share discovery's per-IP and global rate limit. Replies never exceed their
 37-byte queries. A token is never returned or written to a client-facing log.
 
@@ -379,7 +381,7 @@ sequenceDiagram
 | Packet | Fields |
 | --- | --- |
 | Discover query | asker's protocol version (16), asker's nonce (64), zero padding to exactly 1,000 bytes. The padding must be zero when the asker's version is the host's; another version may put fields in it, which this build ignores |
-| Discover answer | nonce (64, the query's), protocol version (16, the host's), flags (8), players (8), capacity (8), session id (64), game version, game commit, game name, mission summary, King's callsign (each a string), count (8), then that many callsigns (strings) |
+| Discover answer | nonce (64, the query's), protocol version (16, the host's), flags (8), players (8), capacity (8), session id (64), game version and game commit (strings), compatibility code (32, since 71), game name, mission summary, King's callsign (strings), count (8), then that many callsigns (strings) |
 
 The answer's flags, from the least significant bit: password needed, full (no
 place for another player), the callsign list is truncated, then two bits of
@@ -3232,10 +3234,18 @@ again with an observer; the capture format did not change for it.
   Realism, applied with ordinary settings in one mission rebuild;
   67 adds dedicated feedback (2026-10-22): Lobby begins with a feedback
   enabled bit, kind 80 submits feedback, and kind 81 returns the accepted
-  flag to its sender. Protocol 66 is reserved for the parallel lobby change;
-  70 adds private reservation preflight packets 14 and 15 (2026-10-23), so the
-  lounges confirm a reclaimable slot instead of trusting a saved token.
-  Protocols 68 and 69 belong to parallel changes.
+  flag to its sender. Protocol 66 is reserved for the parallel lobby change.
+  71 combines the compatibility-code handshake from the parallel 68 branch
+  and private reservation preflight from the parallel 70 branch (2026-10-23).
+  Connect request adds a 32-bit compatibility code after its nonce;
+  Challenge answer and Discover answer add it after the commit.
+  Protocol 71 replaces commit/tag admission with protocol, simulation and
+  content identity and adds transport packets 14 and 15, so lounges confirm
+  a reclaimable slot instead of trusting a saved token. Earlier 68 through
+  70 development numbers are superseded by this combined layout.
+  A protocol 71 or later Connect request keeps the code immediately after
+  its nonce so a mismatched protocol can still report both codes. Earlier
+  requests have no code and report `00000000` in that diagnostic.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
@@ -3247,13 +3257,12 @@ again with an observer; the capture format did not change for it.
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the
   version, and refreshing changed bytes under the same version is refused.
-  The [discovery](#discovery) packets, which no version changes, have their own
+  The [discovery](#discovery) packets have their own
   golden file.
-- The **game build** is the version string and the commit the build stamps.
-  John's rule is that the build must match ([guide](../MULTIPLAYER.md#compatibility-handshake)).
-  *Agent decision:* two tagged release builds match when their versions are
-  equal; any other build must have the same commit, since compile-time tuning
-  changes the simulation and every prediction would be corrected.
+- The **game build** is the informational version string and commit. Admission
+  uses the [compatibility code](../ARCHITECTURE.md#compatibility-code), including
+  an explicit simulation version. Simulation and replay changes that can make
+  peers disagree raise both that version and the protocol, even without new bytes.
 - The **content** is checked after the mission loads, from the manifest in
   the Mission message ([architecture](../ARCHITECTURE.md#a-mission-with-no-window)).
 

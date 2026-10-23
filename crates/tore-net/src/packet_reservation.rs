@@ -1,4 +1,4 @@
-//! Private, unicast rejoin reservation checks, protocol 70. No connection is made.
+//! Private, unicast rejoin reservation checks, protocol 71. No connection is made.
 use super::{PacketError, Token, end, u8_of, u32_of};
 use tore_codec::{BitReader, BitWriter};
 
@@ -149,12 +149,12 @@ mod tests {
             }),
         ];
         for packet in packets {
-            let bytes = packet.encode(70).unwrap();
+            let bytes = packet.encode(71).unwrap();
             assert!(bytes.len() <= RESERVATION_QUERY_LEN);
-            assert_eq!(Packet::decode(&bytes, 70).unwrap(), packet);
+            assert_eq!(Packet::decode(&bytes, 71).unwrap(), packet);
             assert!(Packet::decode(&bytes, 69).is_err());
             for len in 0..bytes.len() {
-                assert!(Packet::decode(&bytes[..len], 70).is_err());
+                assert!(Packet::decode(&bytes[..len], 71).is_err());
             }
         }
     }

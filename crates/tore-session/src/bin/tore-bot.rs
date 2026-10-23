@@ -755,8 +755,11 @@ fn load(
     Ok((resources, content))
 }
 
+static COMPATIBILITY: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+
 fn build() -> BuildId {
     BuildId {
+        compatibility: COMPATIBILITY.get().copied().unwrap_or(0),
         version: option_env!("TORE_BUILD_VERSION")
             .unwrap_or(env!("CARGO_PKG_VERSION"))
             .to_owned(),
@@ -773,6 +776,7 @@ fn master_build(build: &BuildId) -> Build {
         protocol_version: tore_session::wire::PROTOCOL_VERSION,
         game_version: build.version.clone(),
         game_commit: build.commit.clone(),
+        compatibility: build.compatibility,
         release: build.release,
     }
 }
@@ -1285,6 +1289,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let _ = COMPATIBILITY.set(tore_session::compatibility::current(&content.content));
     if options.content_report {
         for line in report_lines(&content) {
             println!("{line}");
