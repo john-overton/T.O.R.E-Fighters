@@ -76,11 +76,6 @@ pub struct Facts {
     pub waiting: Vec<String>,
     /// How many players hold a slot.
     pub holders: usize,
-    /// With AI off, the open slots no ready player holds yet.
-    pub ai_waiting: usize,
-    /// With AI off, the open slots nobody holds. A force start waits for
-    /// these; a player who holds one and is not ready still holds it.
-    pub unheld: usize,
     /// Ready players holding a slot whose game can play.
     pub ready_holders: usize,
     /// Seconds left on a force start, from the host. None when none runs.
@@ -117,8 +112,6 @@ impl Facts {
                 unable: unable.map(str::to_owned),
                 waiting: Vec::new(),
                 holders: 0,
-                ai_waiting: 0,
-                unheld: 0,
                 ready_holders: 0,
                 force_seconds: None,
                 min_waiting: 0,
@@ -146,6 +139,7 @@ impl Facts {
             .filter(|s| s.lock != Lock::Closed)
             .count();
         let min_players = setting(number::MIN_PLAYERS)
+            .max(usize::from(setting(number::AI) == 0))
             .min(open)
             .min(setting(number::MAX_PLAYERS));
         let ready_holders = holders
@@ -172,35 +166,8 @@ impl Facts {
                 .map(|p| p.callsign.clone())
                 .collect(),
             holders: holders.len(),
-            unheld: if lobby.settings.iter().any(|s| s.0 == number::AI && s.1 == 0) {
-                lobby
-                    .slots
-                    .iter()
-                    .filter(|s| {
-                        s.lock != Lock::Closed
-                            && !lobby.players.iter().any(|p| p.slot == Some(s.plane))
-                    })
-                    .count()
-            } else {
-                0
-            },
             ready_holders,
             force_seconds: lobby.force_seconds,
-            ai_waiting: if lobby.settings.iter().any(|s| s.0 == number::AI && s.1 == 0) {
-                lobby
-                    .slots
-                    .iter()
-                    .filter(|s| {
-                        s.lock != Lock::Closed
-                            && !lobby
-                                .players
-                                .iter()
-                                .any(|p| p.slot == Some(s.plane) && p.ready && p.unable.is_none())
-                    })
-                    .count()
-            } else {
-                0
-            },
             min_waiting: min_players.saturating_sub(ready_holders),
             min_players,
             pvp: sides::is_pvp(lobby),
@@ -213,20 +180,18 @@ impl Facts {
 
     /// The King's Start is accepted now (the host's own rule).
     pub fn all_ready(&self) -> bool {
-        self.holders > 0 && self.waiting.is_empty() && self.ai_waiting == 0 && self.min_waiting == 0
+        self.holders > 0 && self.waiting.is_empty() && self.min_waiting == 0
     }
 
     /// The King's Fly would be refused because someone holding a slot is
     /// not ready, and a force start is allowed: at least one slot holder is
-    /// ready, the minimum is met, and with the AI off every open slot is
-    /// held. *Agent decision*: the minimum and an unheld plane are not
-    /// overridden.
+    /// ready and the minimum is met, with AI on or off. Empty slots do
+    /// not block a start. The ready-player minimum cannot be overridden.
     pub fn force_start(&self) -> bool {
         self.phase == LobbyPhase::Lobby
             && self.ready_holders >= 1
             && !self.waiting.is_empty()
             && self.min_waiting == 0
-            && self.unheld == 0
     }
 }
 
@@ -444,8 +409,7 @@ pub fn hint(facts: &Facts) -> String {
         return reason.clone();
     }
     if facts.phase == LobbyPhase::Lobby
-        && let Some(wait) =
-            settings::start_wait_text(facts.ai_waiting, facts.min_waiting, facts.min_players)
+        && let Some(wait) = settings::start_wait_text(facts.min_waiting, facts.min_players)
     {
         return wait;
     }

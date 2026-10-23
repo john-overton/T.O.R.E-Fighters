@@ -200,8 +200,8 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `kill-limit` | `none`, `5` | PvP only: `none`, 1, 2, 3, 5, 7 or 10 |
 | `kill-owner` | `side` | PvP only: `total`, `side` or `player` |
 | `observer-delay` | `0` | PvP only, seconds: 0 (`none`), 10, 30 or 60 |
-| `ai` | `on` | `on` or `off`. Off waits until every open human slot is ready, disables AI aircraft, AI respawn and idle handoff. Closed slots and the enemy side in co-op are empty. Ground defenses remain. No force-start bypass. |
-| `min-players` | `0` | 0 (`none`) to `max-players`: the mission does not start until at least this many players hold slots and are ready ([how it works](#minimum-players)). A server and rotation setting only: the King cannot change it. *Opinionated, requested by John on 2026-10-16* |
+| `ai` | `on` | `on` or `off`. Off disables AI aircraft, AI respawn and idle handoff. Unfilled slots stay empty; the same ready-player minimum and Force Start rules apply as with AI on. Ground defenses remain. |
+| `min-players` | AI on: `0`; AI off: PvP `2`, co-op `1` | 0 (`none`) to `max-players`: starts require this many ready slot holders. Set in the server file or rotation, or by a King with `king-mission open`. See [minimum players](#minimum-players). |
 | `ai-respawn` | `on` | `off` or `on`: whether a lost AI aircraft comes back under the revival rules (`lives`, counted per original aircraft, and `revive-delay`), at its flight's original spawn point, as a wingman of its flight. No effect while `respawn` is `none` (John, 2026-10-09). The log has a line for each AI loss and respawn |
 | `idle-ai` | `5` | Minutes a player's game is away before the AI flies its aircraft: `never`, 1, 2, 5 or 10 (written in minutes, as `time-limit` is; John, 2026-10-06, slice F2-O4) |
 
@@ -532,27 +532,30 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
 
 ### Minimum players
 
-*Opinionated, requested by John on 2026-10-16.* `min-players N` keeps the
-mission in the lobby until at least N players hold slots and are ready. It
-counts the same players as `start first-player` and `ai off`: a player who holds
-a slot, is ready, can play the mission and is not leaving. One host rule serves
-all three, and the stricter wins. The lobby screen and the server log say
-why it waits, in one style:
+*Opinionated, requested by John on 2026-10-16 and extended on 2026-10-22.*
+`min-players N` keeps the mission in the lobby until N players hold slots,
+are ready, can play the mission and are not leaving. AI on and off use the
+same gate; unfilled slots with AI off stay empty and allow later joins when
+`join-in-progress on`. The lobby and log say, for example:
 
 ```text
 Waiting for 2 more ready players (minimum 4).
-Waiting for 3 more ready players: AI is off.
 ```
 
-When both waits apply, the one that needs more players is the one said (with
-`ai off` every open slot must be ready, so its wait is never shorter than the
-minimum's).
+When unset, the initial minimum is 2 for AI-off PvP, 1 for AI-off co-op,
+and 0 for AI-on. These defaults are agent decisions. An explicit 0 (`none`)
+requires no extra minimum beyond one ready player, except AI-on `start now`
+can still start empty. Lobby changes to AI or mode keep the displayed minimum.
+A player-hosted lobby's King can edit **Minimum players** in Settings > Revival.
+A dedicated server's King needs `king-mission open`; with `locked` the operator
+retains control. The row applies once on Close/F10; Escape discards the draft.
+See the [behaviour specification](spec/multiplayer-menus.md#minimum-players).
 
 | `start` | `min-players` | The mission starts |
 | --- | --- | --- |
 | `first-player` | 0 or 1 | When the first player holding a slot is ready (0 and 1 are the same) |
 | `first-player` | N, 2 or more | When the Nth such player is ready |
-| `now` | 0 | At once, with nobody in it |
+| `now` | 0 | AI on: at once, with nobody in it. AI off: after one player is ready |
 | `now` | N, 1 or more | Like `first-player` with that minimum: it waits in the lobby, and a restart or the next rotation entry waits again |
 | `king first-player` | any | When the King presses Fly and the minimum is met; the King's Fly is refused with the wait line until then. Force Start (a 10 second countdown when someone holding a slot is not ready) is available to that King on the same terms as a player who hosts, and it does not start the mission while the minimum is unmet |
 
@@ -578,10 +581,10 @@ Rules and decisions (agent decisions unless noted):
 - **Only the start.** The minimum gates the start and nothing else. Once the
   mission flies, players who leave do not stop or pause it, and players who
   join later take a free plane in flight as before.
-- **Not the King's.** A King on a server (or in a game a player hosts) cannot
-  change it: the registry carries it, so the lobby's Revival settings page
-  shows it greyed ("The server operator sets the minimum players."), and a
-  King's mode change keeps it. In a game a player hosts it is always 0.
+- **King permission.** The player-hosted King can change the minimum. A
+  dedicated server permits it with `king-mission open`; `locked` preserves
+  the operator's value and greys the row. A mode change keeps the minimum,
+  capped at the new human capacity.
 - **Log lines.** The wait is a plain log line, never a `fault:` line. The
   server logs it once each time the reason changes (a fresh lobby that waits
   for two or more players, then after each ready player's attempt), and again
@@ -916,8 +919,7 @@ the lobby pass's lines about the AI and the lead (*built, R1 and R2*: "Red
 at its original spawn, x 81.2 nm, z 40.0 nm", "waits for room to respawn", "no
 lives left"; "Blue 1 lead belongs to Viper", "passes to plane 1 (AI), standing
 in for Viper", "goes back to Viper in plane 12", "has no owner now"; and
-Autobalance's seating, "Alpha took the slot of plane 6"), the wait to start ("Waiting for 2 more ready players (minimum 4)." and the AI-off
-version), the removal of a departed player's plane when AI is off, and once a minute
+Autobalance's seating, "Alpha took the slot of plane 6"), the wait to start ("Waiting for 2 more ready players (minimum 4).", with AI on or off), the removal of a departed player's plane when AI is off, and once a minute
 each player's figures: the same round trip,
 loss, snapshot arrival spread, input margin, inputs repeated and bytes each
 way that a player's game writes to its own
@@ -1152,11 +1154,10 @@ planes are not handed to AI. A live departure removes the aircraft without a
 kill or loss and opens its slot. A new player enters at revive placement without
 spending a revival. Agent decisions: co-op is allowed without enemy aircraft;
 AI defaults remain mandatory so enabling AI never invalidates the mission;
-neither King nor console bypasses the full-ready requirement. `start now` with
-AI off waits like `first-player`. The wait is logged as a plain line, `Waiting
-for 3 more ready players: AI is off.`; an earlier build logged it with a
-`fault:` prefix because the start routine reported every refusal to start as a
-fault, which this wait is not. When AI is off and a player leaves a flying
+neither King nor console bypasses the ready-player minimum. `start now` with
+AI off waits like `first-player`. Empty slots do not block Fly or Force Start.
+The wait is a plain log line, such as `Waiting for 1 more ready player (minimum 2).`
+When AI is off and a player leaves a flying
 mission, the log says `Bravo left: plane 1 removed (AI is off)`. See
 [minimum players](#minimum-players) for `min-players`, which uses the same
 ready count and wait text.

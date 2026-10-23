@@ -480,28 +480,38 @@ fn setting_25_min_players_is_zero_to_thirty_and_a_mode_change_keeps_it() {
 }
 
 #[test]
-fn the_start_wait_is_said_in_one_style_and_the_stricter_wait_wins() {
-    assert_eq!(start_wait_text(0, 0, 4), None);
+fn the_start_wait_is_said_in_one_style() {
+    assert_eq!(start_wait_text(0, 4), None);
     assert_eq!(
-        start_wait_text(0, 2, 4).as_deref(),
+        start_wait_text(2, 4).as_deref(),
         Some("Waiting for 2 more ready players (minimum 4).")
     );
     assert_eq!(
-        start_wait_text(0, 1, 2).as_deref(),
+        start_wait_text(1, 2).as_deref(),
         Some("Waiting for 1 more ready player (minimum 2).")
     );
-    assert_eq!(
-        start_wait_text(3, 0, 0).as_deref(),
-        Some("Waiting for 3 more ready players: AI is off.")
-    );
-    // AI off needs more than the minimum: AI off is said.
-    assert_eq!(
-        start_wait_text(3, 2, 4).as_deref(),
-        Some("Waiting for 3 more ready players: AI is off.")
-    );
-    // The minimum needs more: the minimum is said.
-    assert_eq!(
-        start_wait_text(1, 2, 4).as_deref(),
-        Some("Waiting for 2 more ready players (minimum 4).")
-    );
+}
+
+#[test]
+fn unset_minimum_defaults_follow_ai_and_mode_but_explicit_none_wins() {
+    for mode in [Mode::Coop, Mode::Pvp] {
+        for ai in [false, true] {
+            let mut config = HostConfig::new(crate::host::BuildId {
+                version: "0.2.0".into(),
+                commit: "test".into(),
+                release: false,
+            });
+            config.settings = vec![(number::MODE, mode.value()), (number::AI, u32::from(ai))];
+            let expected = if ai {
+                0
+            } else if mode == Mode::Pvp {
+                2
+            } else {
+                1
+            };
+            assert_eq!(Store::from_config(&config).min_players(), expected);
+            config.settings.push((number::MIN_PLAYERS, 0));
+            assert_eq!(Store::from_config(&config).min_players(), 0);
+        }
+    }
 }

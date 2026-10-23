@@ -49,10 +49,9 @@ const PIN_IN_FLIGHT: &str = "A pin made in flight applies when the lobby returns
 /// Why a dedicated server's snapshot rate row is greyed (slice R1): its
 /// operator sets it in the configuration file.
 const RATE_IS_THE_SERVERS: &str = "This server's snapshot rate is set by its operator.";
-/// Why the minimum players row is greyed: the server's operator sets it in
-/// the configuration file or the rotation (John, 2026-10-16); nobody in the
-/// lobby changes it.
-const MIN_IS_THE_OPERATORS: &str = "The server operator sets the minimum players.";
+/// A dedicated server keeps its operator's minimum while settings are locked.
+const MIN_IS_THE_OPERATORS: &str =
+    "The server operator sets the minimum players (king-mission locked).";
 /// Why the AI respawn row is greyed: with revival `none` nothing comes back.
 pub const AI_RESPAWN_NEEDS_REVIVAL: &str = "With Revival none, no aircraft comes back.";
 /// The most bytes of a game's name (the host's rule).
@@ -262,7 +261,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::OBSERVER_DELAY => "Observer delay",
             number::IDLE_AI => "AI flies idle aircraft after",
             number::SNAPSHOT_RATE => "Snapshot rate",
-            number::MIN_PLAYERS => "Players, at least",
+            number::MIN_PLAYERS => "Minimum players",
             number::AI_RESPAWN => "AI respawn",
             number::AI => "AI aircraft",
             _ => "",
@@ -276,6 +275,9 @@ pub fn row_label(kind: Kind) -> &'static str {
 pub struct Context {
     /// The receiving player is the King.
     pub king: bool,
+    pub mission_locked: bool,
+    /// Open human seats, before the player limit is applied.
+    pub open_slots: u32,
     pub phase: LobbyPhase,
     /// The settings by number, as the lobby state carries them.
     pub settings: Vec<(u8, u32)>,
@@ -301,6 +303,12 @@ impl Context {
     pub fn of(lobby: &LobbyState, cheats: Option<Cheats>) -> Self {
         Self {
             king: lobby.is_king(),
+            mission_locked: lobby.mission_locked,
+            open_slots: lobby
+                .slots
+                .iter()
+                .filter(|s| s.lock != tore_session::wire::messages::Lock::Closed)
+                .count() as u32,
             phase: lobby.phase,
             settings: lobby.settings.clone(),
             cheats,
@@ -372,6 +380,11 @@ impl Context {
         self.players.iter().any(|p| p.house)
     }
 
+    fn capacity(&self) -> u32 {
+        self.open_slots
+            .min(self.value(number::MAX_PLAYERS).unwrap_or(0))
+    }
+
     fn password_set(&self) -> bool {
         self.value(number::PASSWORD) == Some(1)
     }
@@ -383,7 +396,7 @@ pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     if !ctx.king {
         return Err("Only the King may change the settings.".into());
     }
-    if kind == Kind::Setting(number::MIN_PLAYERS) {
+    if kind == Kind::Setting(number::MIN_PLAYERS) && ctx.mission_locked {
         return Err(MIN_IS_THE_OPERATORS.into());
     }
     let in_lobby_only = match kind {
@@ -431,6 +444,12 @@ pub fn row_value(kind: Kind, ctx: &Context) -> String {
             Some(1) => "Locked once flown".into(),
             Some(2) => "Balanced by the host".into(),
             _ => "...".into(),
+        },
+        Kind::Setting(number::MIN_PLAYERS) => match ctx.value(number::MIN_PLAYERS) {
+            Some(value) => settings::setting(number::MIN_PLAYERS)
+                .unwrap()
+                .text(value.min(ctx.capacity())),
+            None => "...".into(),
         },
         Kind::Setting(n) => match (settings::setting(n), ctx.value(n)) {
             (Some(setting), Some(value)) => setting.text(value),
@@ -534,7 +553,12 @@ pub fn click(kind: Kind, ctx: &Context, forward: bool) -> Option<Edit> {
         Kind::Setting(n) => {
             let setting = settings::setting(n)?;
             let now = ctx.value(n)?;
-            let next = turn(&choices(setting), now, forward)?;
+            let values = if n == number::MIN_PLAYERS {
+                (0..=ctx.capacity()).collect()
+            } else {
+                choices(setting)
+            };
+            let next = turn(&values, now, forward)?;
             Some(setting_edit(n, next))
         }
         Kind::Name | Kind::Password => None,
@@ -740,7 +764,10 @@ impl SettingsPanel {
         // Merge fresh authoritative values into untouched fields, preserving
         // edited values. This also enables Realism if the mission arrives
         // after the panel opened. Losing permission discards the draft.
-        if ctx.king != self.ctx.king || ctx.phase != self.ctx.phase {
+        if ctx.king != self.ctx.king
+            || ctx.phase != self.ctx.phase
+            || ctx.mission_locked != self.ctx.mission_locked
+        {
             self.ctx = ctx.clone();
             self.password_change = None;
             self.name.set_text(&ctx.name);
@@ -761,6 +788,7 @@ impl SettingsPanel {
                 self.ctx.name.clone_from(&ctx.name);
             }
             self.ctx.players.clone_from(&ctx.players);
+            self.ctx.open_slots = ctx.open_slots;
         }
         self.original = ctx;
         self.refresh();

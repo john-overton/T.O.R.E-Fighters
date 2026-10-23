@@ -13,7 +13,7 @@
 //! Every rule below that the design leaves open is an agent decision, named
 //! as such in docs/ARCHITECTURE.md's "Built (F2-1)" notes.
 
-use super::config::{MIN_IS_THE_FILES, PUBLIC_IS_BROADCAST, RATE_IS_THE_FILES};
+use super::config::{PUBLIC_IS_BROADCAST, RATE_IS_THE_FILES};
 use super::{ConnectionId, CrownRule, Host, HostError, Life, LobbyEvent, Stage, StartMode};
 use crate::settings::{self, Change, LoadoutRule, Mode, Store, number};
 use crate::wire::messages::{Lock, Message, PasswordChange, SettingsChange};
@@ -224,6 +224,14 @@ impl Host {
         self.check_change(change)?;
         let before = self.settings.clone();
         self.settings.apply(&change.values)?;
+        if change
+            .values
+            .iter()
+            .any(|(n, _)| matches!(*n, number::MIN_PLAYERS | number::MAX_PLAYERS | number::MODE))
+        {
+            let minimum = self.settings.min_players().min(self.capacity()) as u32;
+            self.settings.apply(&[(number::MIN_PLAYERS, minimum)])?;
+        }
         if let Some(name) = &change.name {
             self.settings.set_name(name);
         }
@@ -431,12 +439,7 @@ impl Host {
                             self.config.max_players
                         ));
                     }
-                    let min = self.settings.min_players();
-                    if (value as usize) < min {
-                        return Err(format!("min-players is {min}: the limit cannot be lower."));
-                    }
                 }
-                number::MIN_PLAYERS => return Err(MIN_IS_THE_FILES.into()),
                 number::HOST => self.host_pin_refusal(value)?,
                 number::VISIBILITY
                     if value == settings::Visibility::Public.value() && !self.config.listable =>

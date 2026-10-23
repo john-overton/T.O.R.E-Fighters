@@ -58,6 +58,12 @@ wait 2
 snapshot SHOTS/lobby-3-game.ppm
 key Tab
 wait 0.5
+snapshot SHOTS/lobby-minimum-before.ppm
+movemenu 430 196
+wait 0.5
+click
+wait 0.5
+snapshot SHOTS/lobby-minimum-after.ppm
 key Tab
 wait 0.5
 movemenu 430 238
@@ -170,7 +176,7 @@ exit
 GAPS_PICTURES = ("gaps-1-lobby", "gaps-2-hint", "gaps-3-list", "gaps-4-notice", "gaps-5-back")
 
 PICTURES = (
-    "lobby-settings-help", "lobby-help", "lobby-main",
+    "lobby-settings-help", "lobby-help", "lobby-main", "lobby-minimum-before", "lobby-minimum-after",
     "lobby-1-king", "lobby-2-settings", "lobby-3-game", "lobby-4-scoring", "lobby-5-realism", "lobby-6-closed",
     "lobby-7-players", "lobby-8-crowned", "lobby-9-back",
 )
@@ -223,6 +229,8 @@ def drive_lobby(d: Drive) -> None:
     bot = start_bots(d, port, "bot", 65, "--callsign", "Bot", "--slot", "0")
     assert game is not None
     game.finish(150, 0)
+    if not re.search(r"Lobby: Settings: .*min-players 1", game_log(d)):
+        d.problem("the deferred minimum edit did not apply with the other settings")
     bot.finish(60, None)
     log = game_log(d)
     # What the game's Messages said, from its log: the bot joining, the King's own settings and slot locks, the

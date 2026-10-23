@@ -499,6 +499,31 @@ def drive_results(d: Drive) -> None:
     server.forbid(NET_BAD, "a network problem")
 
 
+def drive_min_players(d: Drive) -> None:
+    """AI-off PvP starts with two ready humans in twelve seats; a third joins in flight."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(), mode="pvp", ai="off", min_players=2,
+                          join_in_progress="on", time_limit=0, kill_limit="none", empty_timeout=30)
+    first = start_bots(d, port, "first", 25, "--callsign", "First", "--slot", "0")
+    if not server.wait_for(r"Waiting for 1 more ready player \(minimum 2\)", 60):
+        raise DriveError("the server did not wait for the second ready player")
+    first.forbid(r"^First: seat ", "a flight before the minimum")
+    second = start_bots(d, port, "second", 25, "--callsign", "Second", "--slot", "6")
+    for bot, name in ((first, "First"), (second, "Second")):
+        if not bot.wait_for(rf"^{name}: seat ", 60):
+            raise DriveError(f"{name} did not fly at the minimum")
+    third = start_bots(d, port, "third", 8, "--callsign", "Third", "--slot", "1")
+    if not third.wait_for(r"^Third: seat ", 60):
+        raise DriveError("the late player did not join an empty AI-off slot")
+    for bot in (third, first, second):
+        bot.finish(75, 0)
+        bot.forbid(NET_BAD, "a network problem")
+    stop_server(d, server)
+    server.forbid(NET_BAD, "a network problem")
+    log_must(d, server_log(d), r"First took plane 0\b", r"Second took plane 6\b",
+             r"Third took plane \d+\b", forbid=NET_BAD)
+
+
 def drive_king(d: Drive) -> None:
     """A server whose first player wears the crown (`king first-player`, slice F2-1): the King bot changes the
     settings (PvP, friendly fire off, a one-minute time limit, three lives) and starts the mission; a second bot then
@@ -2453,6 +2478,11 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-results", lane="net", args=[], driver=drive_results, uses=("server", "bot"), timeout=300,
             notes="PvP with a one-minute time limit: each bot hears the results, a row for every aircraft, and the winner",
+        ),
+        Scenario(
+            name="net-server-min-players", lane="net", args=[], driver=drive_min_players,
+            uses=("server", "bot"), timeout=240,
+            notes="AI-off PvP waits for two ready players, starts with empty seats, and admits a third in flight",
         ),
         Scenario(
             name="net-server-king", lane="net", args=[], driver=drive_king, uses=("server", "bot"), timeout=300,

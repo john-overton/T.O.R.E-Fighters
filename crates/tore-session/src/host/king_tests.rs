@@ -1165,22 +1165,22 @@ fn each_human_flight_shares_its_load_on_host_clients_and_ai_respawn() {
 }
 
 #[test]
-fn ai_off_waits_for_full_ready_slots_and_despawns_unheld_enemy_aircraft() {
+fn ai_off_waits_for_the_minimum_and_despawns_unheld_enemy_aircraft() {
     let mut rig = Rig::hosted(spec(2, 2));
     let king = rig.join("Viper");
     let cobra = rig.join("Cobra");
     rig.gather(&[king, cobra]);
-    rig.change(king, &[(number::AI, 0)]);
+    rig.change(king, &[(number::AI, 0), (number::MIN_PLAYERS, 2)]);
     rig.client(king).take_slot(0);
     rig.client(king).set_ready(true);
     rig.run(300 * MS);
-    assert!(rig.host.ai_wait_reason().unwrap().contains("1 more"));
+    assert!(rig.host.start_wait_reason().unwrap().contains("1 more"));
     rig.host.start_now();
     assert!(matches!(rig.host.life, Life::Lobby));
     rig.client(cobra).take_slot(1);
     rig.client(cobra).set_ready(true);
     rig.run(300 * MS);
-    assert_eq!(rig.host.ai_wait_reason(), None);
+    assert_eq!(rig.host.start_wait_reason(), None);
     rig.client(king).start_mission();
     assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(king)
         && r.seated(cobra)));
@@ -1562,31 +1562,68 @@ fn choice_late_join_replaces_ai_and_departure_returns_the_default() {
 }
 
 #[test]
-fn the_king_cannot_change_the_minimum_players_and_a_mode_change_keeps_it() {
-    let mut rig = Rig::new(spec(2, 0), |config| {
-        config.settings = vec![(number::MIN_PLAYERS, 2)];
-        config.crown = CrownRule::FirstPlayer;
-        config.start = StartMode::FirstPlayer;
-    });
+fn the_operator_controls_whether_the_king_can_change_the_minimum() {
+    for locked in [false, true] {
+        let mut rig = Rig::new(spec(4, 0), |config| {
+            config.settings = vec![(number::MIN_PLAYERS, 2)];
+            config.crown = CrownRule::FirstPlayer;
+            config.start = StartMode::FirstPlayer;
+            config.mission_locked = locked;
+        });
+        let king = rig.join("Viper");
+        rig.gather(&[king]);
+        rig.change(king, &[(number::MIN_PLAYERS, 1)]);
+        rig.run(300 * MS);
+        assert_eq!(
+            rig.host.settings().min_players(),
+            if locked { 2 } else { 1 }
+        );
+        assert_eq!(rig.refusals(king).is_empty(), !locked);
+    }
+}
+
+#[test]
+fn hosted_king_changes_minimum_once_and_mode_changes_keep_it() {
+    let mut rig = Rig::hosted(spec(4, 0));
     let king = rig.join("Viper");
-    let cobra = rig.join("Cobra");
-    rig.gather(&[king, cobra]);
-    assert_eq!(rig.host.settings().min_players(), 2);
-    rig.change(king, &[(number::MIN_PLAYERS, 1)]);
+    rig.gather(&[king]);
+    rig.change(king, &[(number::MIN_PLAYERS, 3)]);
     rig.run(300 * MS);
-    assert_eq!(rig.host.settings().min_players(), 2);
-    assert!(
-        rig.refusals(king)
-            .iter()
-            .any(|r| r.1.contains("min-players")),
-        "{:?}",
-        rig.refusals(king)
-    );
-    // A mode change keeps the operator's minimum.
+    assert_eq!(rig.host.settings().min_players(), 3);
+    let changed = |rig: &Rig| {
+        rig.logs.iter().filter(|log| matches!(log,
+        HostLog::Lobby { event: LobbyEvent::SettingsChanged(text), .. } if text.contains("min-players 3"))).count()
+    };
+    assert_eq!(changed(&rig), 1);
+    rig.change(king, &[(number::MIN_PLAYERS, 3)]);
+    rig.run(300 * MS);
+    assert_eq!(changed(&rig), 1);
     rig.change(king, &[(number::MODE, 1)]);
     rig.run(300 * MS);
-    assert_eq!(rig.host.settings().mode(), Mode::Pvp);
+    assert_eq!(rig.host.settings().min_players(), 3);
+}
+
+#[test]
+fn minimum_changes_use_the_final_player_limit_and_reject_non_kings() {
+    let mut rig = Rig::hosted(spec(4, 2));
+    let king = rig.join("Viper");
+    let guest = rig.join("Cobra");
+    rig.gather(&[king, guest]);
+    rig.change(guest, &[(number::MIN_PLAYERS, 2)]);
+    rig.run(300 * MS);
+    assert_eq!(rig.host.settings().min_players(), 0);
+    assert!(!rig.refusals(guest).is_empty());
+    rig.change(king, &[(number::MIN_PLAYERS, 30)]);
+    rig.run(300 * MS);
+    assert_eq!(rig.host.settings().min_players(), 4);
+    // Both directions use the final values, independent of edit ordering.
+    rig.change(king, &[(number::MAX_PLAYERS, 2), (number::MIN_PLAYERS, 3)]);
+    rig.run(300 * MS);
     assert_eq!(rig.host.settings().min_players(), 2);
+    rig.change(king, &[(number::MIN_PLAYERS, 4), (number::MAX_PLAYERS, 4)]);
+    rig.run(300 * MS);
+    assert_eq!(rig.host.settings().min_players(), 4);
+    assert!(rig.refusals(king).is_empty(), "{:?}", rig.refusals(king));
 }
 
 #[test]

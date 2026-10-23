@@ -340,11 +340,6 @@ pub const PUBLIC_IS_BROADCAST: &str =
 pub const RATE_IS_THE_FILES: &str =
     "A dedicated server's snapshot rate is set by its operator's `snapshot-rate`.";
 
-/// Why the King's change of the minimum players is refused: a dedicated
-/// server's operator sets it (John, 2026-10-16).
-pub const MIN_IS_THE_FILES: &str =
-    "The minimum players is set by the server operator's `min-players`.";
-
 /// Why a host could not start.
 #[derive(Debug)]
 pub enum HostError {
