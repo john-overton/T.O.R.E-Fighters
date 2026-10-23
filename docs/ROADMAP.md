@@ -1207,6 +1207,9 @@ them.
 **Goal:** players create and fly Quick Missions together through the existing
 Quick Mission creator.
 
+**Status:** delivered in [v0.2.0](release/v0.2.0.md) on 2026-10-23. Milestone 3,
+single missions and campaigns, is in development.
+
 Sequencing requested by John on 2026-09-23. Multiplayer starts here, then
 expands in this order as the underlying modes are implemented:
 
