@@ -2727,3 +2727,15 @@ this remains compatible with replay format 4. The complete behavior is in
 Dedicated servers can save authoritative recordings with their mission logs.
 They have no local cockpit display or heard radio track. See
 [server recording and retention](DEDICATED-SERVER.md#recording-and-feedback).
+
+## Human target selection
+
+Human Enter and Apostrophe picks are recorded as explicit visual target identities
+(protocol 71, 2026-10-23), with the resulting target state in mission recordings.
+The replay viewer's keys retain their existing meanings. Combat tapes accept
+`designate-visual-id:ID`; older `designate`, `designate-previous`,
+`designate-visual` and `designate-id:ID` commands retain their legacy semantics.
+Old mission recordings remain readable; replay container and pose layouts did
+not change. Network captures still require their matching protocol build for
+conversion. New sensor checkpoints require the matching protocol. See
+[target selection](spec/radar.md#target-selection-keys).

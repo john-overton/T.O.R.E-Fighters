@@ -160,7 +160,9 @@ the target window's upper-case lines, and the HUD's one-line messages
 ([radar](spec/radar.md), [target window](spec/target-window.md)).
 
 A link track can be looked at but not designated in stage G: the designation
-keys still cycle the player's own contacts. Retail let a player designate a
+keys cycle only the player's own displayed TWS radar contacts, including
+friendlies; Enter and Apostrophe use the player's own visual observations.
+See [target selection](spec/radar.md#target-selection-keys). Retail let a player designate a
 sentry aircraft's remote contacts ([below](#relation-to-fighters-anthology)),
 so designating link tracks is a likely follow-up.
 

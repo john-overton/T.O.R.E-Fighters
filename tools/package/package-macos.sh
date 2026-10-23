@@ -118,7 +118,10 @@ python3 "$root/tools/check_startup_diagnostics.py" "$app/Contents/MacOS/tore-app
 # integrity seal, not Developer ID signing or notarization. Do not modify the
 # bundle after this point, including its nested executables.
 echo "Ad-hoc signing the executables and complete app bundle"
-for binary in tore-app tore-extract; do
+# tore-extract first: signing the bundle's main executable (tore-app) checks
+# the other code in Contents/MacOS, and on Intel the linker leaves tore-extract
+# unsigned ("code object is not signed at all, in subcomponent").
+for binary in tore-extract tore-app; do
     codesign --force --sign - "$app/Contents/MacOS/$binary"
 done
 codesign --force --sign - "$app"

@@ -610,3 +610,12 @@ simulation types and stores outside their mission identity and manifest. Their
 models are available before decoding a checkpoint, so a fresh build can restore
 an aircraft absent from the starting wings. Selected content still requires the
 host's common-content check. No retail bytes are embedded in commands or tapes.
+
+## Human visual designation
+
+Protocol 71 (target-select, 2026-10-23) adds `visual_selection`, a boolean after
+`selected` in `Sensors` and `Picks`. It distinguishes a human visual designation
+from sensor-dependent selection. Resetting pages for an AI handoff clears the
+flag. Seat combat command 37 carries `DesignateVisualTarget` and a target id.
+Same-build checkpoints preserve visual retention across host migration; older
+protocol checkpoints are not compatible with this state layout.

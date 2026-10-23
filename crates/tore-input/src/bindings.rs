@@ -234,6 +234,7 @@ impl Action {
                 | "designate"
                 | "designate-previous"
                 | "designate-visual"
+                | "designate-centre"
                 | "clear-designation"
                 | "master-arm"
                 | "jettison"

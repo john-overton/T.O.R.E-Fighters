@@ -161,6 +161,7 @@ mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
+mod target_select;
 mod terrain_audit;
 mod terrain_chunks;
 mod terrain_colors;
@@ -1564,6 +1565,7 @@ impl App {
             "designate" => Command::Target,
             "designate-previous" => Command::TargetPrevious,
             "designate-visual" => Command::TargetVisual,
+            "designate-centre" => Command::TargetCentre,
             "clear-designation" => {
                 Command::Combat(tore_sim::combat::live::Command::ClearDesignation)
             }
@@ -2012,13 +2014,65 @@ impl App {
             Command::Target | Command::TargetPrevious if self.console_showing() => {
                 self.console_target_key(command == Command::Target)
             }
-            Command::Target | Command::TargetPrevious | Command::TargetVisual => {
+            Command::Target | Command::TargetPrevious => {
                 use tore_sim::combat::live::Command as Live;
-                self.queue(seats::SeatCommand::Combat(match command {
-                    Command::Target => Live::Designate,
-                    Command::TargetPrevious => Live::DesignatePrevious,
-                    _ => Live::DesignateVisual,
-                }));
+                let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+                let sensors = &frame.readout.sensors;
+                let controls = self.instruments.controls();
+                // Preserve the ground and HARM pages' existing cycle.
+                let command = if sensors.air_ground
+                    || controls.channel != tore_sim::sensors::Channel::Radar
+                {
+                    Some(if command == Command::Target {
+                        Live::Designate
+                    } else {
+                        Live::DesignatePrevious
+                    })
+                } else {
+                    target_select::radar(sensors, controls, command == Command::Target)
+                        .map(Live::DesignateTarget)
+                };
+                log::info!(
+                    "Target selection: radar before={:?} requested={:?} range={}",
+                    sensors.selected,
+                    command,
+                    controls.range_nmi()
+                );
+                drop(frame);
+                if let Some(command) = command {
+                    self.queue(seats::SeatCommand::Combat(command));
+                } else {
+                    self.flight_ui.message("No selectable radar contacts");
+                }
+                Action::None
+            }
+            Command::TargetVisual | Command::TargetCentre => {
+                let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+                let centre = command == Command::TargetCentre;
+                let mut forward = self.hornet.camera(frame.flight, 0, Default::default());
+                forward.zoom = self.flight_ui.zoom;
+                let camera = if centre { &forward } else { &self.camera };
+                let picked = target_select::visual(
+                    &frame.readout.visual,
+                    frame.readout.targets.designated,
+                    camera,
+                    self.window_size,
+                    centre,
+                );
+                log::info!(
+                    "Target selection: visual centre={} before={:?} requested={:?}",
+                    centre,
+                    frame.readout.targets.designated,
+                    picked
+                );
+                drop(frame);
+                if let Some(id) = picked {
+                    self.queue(seats::SeatCommand::Combat(
+                        tore_sim::combat::live::Command::DesignateVisualTarget(id),
+                    ));
+                } else {
+                    self.flight_ui.message("No visible aircraft");
+                }
                 Action::None
             }
             Command::RangeReset => {

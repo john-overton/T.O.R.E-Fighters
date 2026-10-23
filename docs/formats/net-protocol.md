@@ -1136,6 +1136,11 @@ the gun fires whatever store is selected; [the gun
 key](../spec/air-to-ground.md#the-gun-key)), also with no fields. The host
 keeps the key's state per aircraft; a trigger release (`ReleaseTrigger`) and a
 resume start it up.
+Extended code 5 is `JettisonTanks`. Protocol 71 adds code 6,
+`DesignateVisualTarget`, followed by an unsigned-varint aircraft id. Only a
+current ownship visual contact is accepted; the selection is marked visual
+for retention, independently of radar support. Unknown extended codes are
+refused.
 The seat's slew and zoom in the gunsight block steer the targeting sight of
 every aircraft with a laser designator or a FLIR too, and codes 28 and 29
 work it as they do the AC-130's ([the air-to-ground groups](#the-air-to-ground-groups)).
@@ -3246,6 +3251,11 @@ again with an observer; the capture format did not change for it.
   A protocol 71 or later Connect request keeps the code immediately after
   its nonce so a mismatched protocol can still report both codes. Earlier
   requests have no code and report `00000000` in that diagnostic.
+  72 adds human visual designation (target-select, 2026-10-23): extended combat
+  command 6 carries the target id as an unsigned varint. The host validates its
+  ownship's visual contact and keeps a separate visual-selection flag in sensor
+  checkpoints and saved pilot picks. AI selection is unchanged. It follows 71
+  in 0.2.1rc-1.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

@@ -662,7 +662,12 @@ pub const ENTRIES: &[Entry] = &[
         Hold,
         &["Alt-ArrowDown"],
     ),
-    cmd("designate", "Next radar target", Weapons, &["t"]),
+    cmd(
+        "designate",
+        "Next own-radar target (friendlies included)",
+        Weapons,
+        &["t"],
+    ),
     cmd(
         "designate-previous",
         "Previous radar target",
@@ -671,9 +676,15 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd(
         "designate-visual",
-        "Select visual target",
+        "Cycle visible aircraft left to right",
         Weapons,
-        &["Enter", "'"],
+        &["Enter"],
+    ),
+    cmd(
+        "designate-centre",
+        "Select visible aircraft nearest forward-view centre",
+        Weapons,
+        &["'"],
     ),
     cmd(
         "clear-designation",
@@ -1811,7 +1822,7 @@ mod tests {
         // The keys they sit beside keep their own meaning: the plain
         // apostrophe and semicolon still pick and clear a target, Shift+L is
         // still the landing request, and no other Alt+arrow is stock.
-        assert_eq!(owners("'"), ["designate-visual"]);
+        assert_eq!(owners("'"), ["designate-centre"]);
         assert_eq!(owners(";"), ["clear-designation"]);
         assert_eq!(owners("l"), ["clear-designation"]);
         assert!(

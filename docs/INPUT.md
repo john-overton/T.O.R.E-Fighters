@@ -1399,3 +1399,11 @@ The dedicated-server [feedback form](spec/replay-feedback.md) uses existing
 menu inputs, with Tab between field and buttons and Escape to cancel. Its
 on-screen keyboard accepts the controller's existing menu directions and
 accept/back buttons. No global flight binding is added.
+
+## Air target selection
+
+T and Shift+T cycle the displayed own-radar TWS contacts, friendlies included.
+Enter cycles visible aircraft left to right; Apostrophe selects the aircraft
+nearest the centre of the forward view. The two visual actions can be rebound
+separately. Neither requires a radar return. See the full
+[target-selection rules](spec/radar.md#target-selection-keys).
