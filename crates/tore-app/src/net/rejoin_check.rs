@@ -136,7 +136,17 @@ mod tests {
             "saved identity is not confirmation"
         );
         let mut buf = [0; tore_net::MAX_DATAGRAM];
-        let (n, client) = server.recv_datagram(&mut buf).unwrap().unwrap();
+        // Loopback delivery is not instant everywhere (macOS CI): wait for
+        // each datagram rather than reading once.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let (n, client) = loop {
+            if let Some(got) = server.recv_datagram(&mut buf).unwrap() {
+                break got;
+            }
+            assert!(std::time::Instant::now() < deadline, "no reservation query");
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        let settle = || std::thread::sleep(Duration::from_millis(50));
         let Packet::ReservationQuery(query) = Packet::decode(&buf[..n], PROTOCOL_VERSION).unwrap()
         else {
             panic!("reservation query");
@@ -162,9 +172,11 @@ mod tests {
         server
             .send_datagram(client, &reply(query.nonce ^ 1))
             .unwrap();
+        settle();
         check.update(Duration::from_millis(1), Some(target));
         assert!(check.line(target).is_none(), "wrong nonce ignored");
         server.send_datagram(client, &reply(query.nonce)).unwrap();
+        settle();
         check.update(Duration::from_secs(1), Some(target));
         let line = check.line(target).unwrap();
         assert!(line.contains("Blue Wing 1 #2"));
@@ -177,6 +189,7 @@ mod tests {
         .encode(PROTOCOL_VERSION)
         .unwrap();
         server.send_datagram(client, &gone).unwrap();
+        settle();
         check.update(Duration::from_secs(2), Some(target));
         assert_eq!(
             check.line(target).as_deref(),
