@@ -223,13 +223,15 @@ mod layout {
     /// (the map's arrow bar, 16 wide, the list's height).
     pub const SLOTS_FRAME: Rect = (40, 164, 335, 97);
     pub const SLOTS_LIST: Point = (45, 168);
-    pub const SLOTS_WIDTH: i32 = 286;
+    /// The rows run to 3 pixels short of the scroll bar, as in the lounges
+    /// (John, 2026-10-22).
+    pub const SLOTS_WIDTH: i32 = 307;
     pub const SLOTS_BAR: Point = (355, 168);
     /// The Players box (filled), its frame, the list and its scroll bar.
     pub const PLAYERS_BOX: Rect = (380, 165, 224, 95);
     pub const PLAYERS_FRAME: Rect = (379, 164, 226, 97);
     pub const PLAYERS_LIST: Point = (384, 168);
-    pub const PLAYERS_WIDTH: i32 = 186;
+    pub const PLAYERS_WIDTH: i32 = 198;
     pub const PLAYERS_BAR: Point = (585, 168);
     /// The hint line under the lists.
     pub const HINT: Point = (45, 266);
@@ -324,7 +326,7 @@ impl LobbyScreen {
             },
             Column {
                 x: 204,
-                width: 78,
+                width: 99,
                 align: Align::Left,
             },
         ];
@@ -358,7 +360,7 @@ impl LobbyScreen {
             },
             Column {
                 x: 66,
-                width: 118,
+                width: 130,
                 align: Align::Left,
             },
         ];

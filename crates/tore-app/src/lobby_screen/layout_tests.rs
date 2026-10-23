@@ -81,6 +81,8 @@ fn the_lists_and_their_bars_fit_inside_their_frames_and_the_screen() {
         assert!(inside_rect(list, frame), "the rows sit in their frame");
         assert!(inside_rect(bar, frame), "the bar sits in the same frame");
         assert!(list.0 + list.2 <= bar.0, "the bar is beside the rows");
+        // The rows run up to the bar, as in the lounges (John, 2026-10-22).
+        assert!(bar.0 - (list.0 + list.2) <= 3, "the rows reach the bar");
         // The bar fills the frame's inside to its right edge, give or take the
         // line.
         assert!(frame.0 + frame.2 - (bar.0 + bar.2) <= 6);
