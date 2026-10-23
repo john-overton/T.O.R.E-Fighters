@@ -614,6 +614,7 @@ class HostLeaveTests(unittest.TestCase):
     HANDOVER_GAME = (
         COMMON
         + "Host: a ready standby: true\n"
+        + "Leave confirmation: Another player will take over hosting. Are you sure?\n"
         + "Network: Leave Game (handing the game over)\n"
         + "Host: handing the game over to player 1\n"
         + "Host: handed the game over to player 1 after tick 11610\n"
@@ -627,6 +628,7 @@ class HostLeaveTests(unittest.TestCase):
     CONFIRM_GAME = (
         COMMON
         + "Host: a ready standby: false\n"
+        + "Leave confirmation: Leaving ends the game for everyone. Are you sure?\n"
         + "Network: Leave Game (ending the game)\n"
         + "Host: tick 13289: mission ended: the host left the game\n"
     )
@@ -739,11 +741,13 @@ class AcceptScenarioTests(unittest.TestCase):
         for name in net_accept.AWAY_LOST_PICTURES:
             self.assertIn(f"{name}.ppm", net_accept.AWAY_LOST_SCRIPT)
 
-    def test_the_second_enter_is_in_the_script_only_with_no_standby(self):
+    def test_both_host_roles_use_the_shared_confirmation(self):
         with_standby = net_accept.host_leave_script("/s", True)
         without = net_accept.host_leave_script("/s", False)
-        self.assertEqual(with_standby.count("key Enter"), 1)
+        self.assertEqual(with_standby.count("key Enter"), 2)
         self.assertEqual(without.count("key Enter"), 2)
+        self.assertIn("key Tab\nkey Enter", with_standby)
+        self.assertIn("key Tab\nkey Enter", without)
         self.assertNotIn("CONFIRM", without)
         self.assertNotIn("JOINWAIT", without)
 

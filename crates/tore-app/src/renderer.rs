@@ -1,3 +1,4 @@
+mod leave_dialog;
 use crate::{
     AppResult,
     menu::{HEIGHT, WIDTH},
@@ -155,6 +156,7 @@ pub struct Renderer {
     /// screen up wants it drawn.
     ui_text: crate::ui_text_renderer::UiTextRenderer,
     menu_text_visible: bool,
+    leave_dialog: Option<leave_dialog::Overlay>,
     /// Frame times for the optional corner readout. Drawn only in this
     /// window pass, never into a capture.
     frame_rate: crate::frame_rate::Meter,
@@ -696,6 +698,7 @@ impl Renderer {
             cockpit,
             ui_text,
             menu_text_visible: false,
+            leave_dialog: None,
             frame_rate: crate::frame_rate::Meter::default(),
             frame_gpu: crate::frame_gpu::Timer::new(&device, &queue),
             frame_cpu: None,
@@ -1021,6 +1024,7 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.draw(0..3, 0..1);
+            self.draw_leave_dialog(&mut pass, [width, height]);
         }
         let stride = (width * 4).div_ceil(256) * 256;
         let buffer = self
@@ -1214,6 +1218,9 @@ impl Renderer {
         canvas_rows: Option<&mut crate::canvas_rows::RowSet>,
         readout: crate::frame_rate::Surface,
     ) -> AppResult<bool> {
+        if self.leave_dialog.is_some() {
+            self.window.set_cursor_visible(true);
+        }
         let frame_started = std::time::Instant::now();
         self.first_frame.begin("game first frame presentation");
         let s = self.window.inner_size();
@@ -1444,6 +1451,7 @@ impl Renderer {
             if flight_size.is_none() && self.menu_text_visible {
                 self.ui_text.draw(&mut pass);
             }
+            self.draw_leave_dialog(&mut pass, [s.width, s.height]);
             // After every other layer, over the whole window, and only on the
             // window. Captures read the scene or the CPU canvas and never this.
             if let Some(glyphs) = counter {

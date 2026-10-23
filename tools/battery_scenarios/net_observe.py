@@ -188,6 +188,10 @@ shot SHOTS/away-8-menu.ppm
 key Down
 wait 1
 key Enter
+wait 2
+shot SHOTS/away-8-confirm.ppm
+key Tab
+key Enter
 wait 8
 shot SHOTS/away-9-left.ppm
 exit
@@ -195,7 +199,7 @@ exit
 
 AWAY_PICTURES = (
     "away-1-flying", "away-2-menu", "away-3-watching", "away-4-watching-later", "away-5-still-watching",
-    "away-6-menu", "away-7-back", "away-8-menu", "away-9-left",
+    "away-6-menu", "away-7-back", "away-8-menu", "away-8-confirm", "away-9-left",
 )
 
 
@@ -207,7 +211,7 @@ def away_watch_problems(game: str, server: str) -> list[str]:
         (r"Network: away for the idle-ai time; the AI flies the plane", 2, "the game saying it is away"),
         (r"Observer screen: watching the player's own aircraft", 2, "the observer screen opening on its own plane"),
         (r"Network: Take Back Flight; taking the aircraft back from the AI", 1, "Take Back Flight taking the plane back"),
-        (r"Network: Leave Game \(not the host\)", 1, "Leave Game, with no handover or confirmation for a joined game"),
+        (r"Network: Leave Game \(not the host\)", 1, "Leave Game, with no handover for a joined game"),
         (r"Observer screen: back to the flight", 1, "the observer screen closing onto the flight, once for the return"),
         (r"Network: seated in plane 0", 2, "a seating in plane 0, and one more after the handoff"),
     ):
@@ -252,6 +256,8 @@ def drive_away_watch(d: Drive) -> None:
     game.finish(330, 0)
     server.send("quit")
     server.finish(30, None)
+    if "Leave confirmation: Are you sure?" not in game_log(d):
+        d.problem("the ordinary observer did not receive the plain leave confirmation")
     for problem in away_watch_problems(game_log(d), server_log(d)):
         d.problem(problem)
     for name in AWAY_PICTURES:

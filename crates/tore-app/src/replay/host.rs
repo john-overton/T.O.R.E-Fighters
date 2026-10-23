@@ -212,7 +212,7 @@ impl App {
                 self.away_spawn();
                 self.action(event_loop, Action::Click);
             }
-            Command::LeaveGame => self.away_leave_game(event_loop),
+            Command::LeaveGame => self.action(event_loop, Action::AwayLeave),
             // Escape > ? > Exit to Desktop quits as flight's does.
             Command::Exit => self.action(event_loop, Action::Exit),
             // Escape > Pref: the screens open over the paused replay and

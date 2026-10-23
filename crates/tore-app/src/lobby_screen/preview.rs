@@ -15,7 +15,7 @@ use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 54] = [
+pub const STATES: [&str; 59] = [
     "lobby-help",
     "lobby-internet",
     "lobby-internet-settings",
@@ -30,6 +30,11 @@ pub const STATES: [&str; 54] = [
     "lobby-server",
     "lobby-kick",
     "lobby-leave",
+    "lobby-leave-client",
+    "lobby-leave-king",
+    "lobby-leave-alone",
+    "lobby-leave-handover",
+    "lobby-leave-observer",
     "lobby-ready",
     // Stage F phase 2 (slice F2-L): the Settings panel's four pages as the
     // King and as a joiner, in PvP, and with the mission flying; the Players
@@ -315,6 +320,19 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     let mut lobby = sample(1);
     let mut hosting = true;
     match state {
+        "lobby-leave-client" | "lobby-leave-observer" => {
+            lobby.host = None;
+            lobby.you = 2;
+            lobby.players[1].observing = state == "lobby-leave-observer";
+            hosting = false;
+        }
+        "lobby-leave-king" => {
+            lobby.host = None;
+            hosting = false;
+        }
+        "lobby-leave-alone" => {
+            lobby.players.retain(|p| p.id == lobby.you);
+        }
         "lobby-choice" | "lobby-ai-off" => {
             for slot in &mut lobby.slots {
                 slot.choice = Some(AircraftId::F18);
@@ -583,8 +601,17 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             screen.refresh();
             screen.modal = Some(modal::Modal::kick(2, "Goose"));
         }
-        "lobby-leave" => {
-            screen.press(Id::Leave);
+        "lobby-leave"
+        | "lobby-leave-client"
+        | "lobby-leave-king"
+        | "lobby-leave-alone"
+        | "lobby-leave-handover"
+        | "lobby-leave-observer" => {
+            screen.modal = Some(Modal::leave(crate::net::leave::lines(
+                Some(&lobby),
+                hosting,
+                state == "lobby-leave-handover",
+            )));
         }
         "lobby-king" => {
             screen.slots.select(2);

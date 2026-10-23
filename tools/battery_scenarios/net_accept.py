@@ -7,8 +7,8 @@ scenarios here cover what it cannot:
 (so it is the King), the script turns the lobby's "AI flies idle aircraft after" to 1 minute, a `tore-bot` that only
 watches (`--observe none`) joins, and the King flies. The script opens the flight menu (the controls go neutral),
 waits out the minute, and on the observer screen of its own aircraft chooses Leave Game. With a ready standby (the bot
-stands by) the game hands the game over to it; with none (the bot does not stand by) the menu asks twice and the
-second Enter ends the game for everyone.
+stands by) the confirmation says another player takes over; with none (the bot does not stand by) it warns that
+leaving ends the game for everyone. Both use Leave / Cancel.
 
 `net-window-away-lost`: a game joins a `tore-server` whose AI wings fly free and whose King allows revival; the game
 goes away, the AI flies its aircraft until the enemy shoots it down, and the observer menu's first row is Spawn in
@@ -104,6 +104,7 @@ key Down
 wait 1
 key Enter
 wait 3
+snapshot SHOTS/hl-8-confirmation.ppm
 shot SHOTS/hl-8-after-first-enter.ppm
 CONFIRM
 wait 8
@@ -113,22 +114,22 @@ exit
 
 HOST_LEAVE_PICTURES = (
     "hl-1-lobby", "hl-2-settings", "hl-3-ready", "hl-4-flying", "hl-5-menu", "hl-6-watching", "hl-7-observer-menu",
-    "hl-8-after-first-enter", "hl-9-left",
+    "hl-8-after-first-enter", "hl-8-confirmation", "hl-9-left",
 )
 
 
 def host_leave_script(shots: str, standby: bool) -> str:
-    """The script, with the second Enter only where the menu asks twice (a host with no standby)."""
+    """Both host roles confirm with the shared Leave / Cancel panel."""
     return (
         HOST_LEAVE_SCRIPT.replace("SHOTS", shots)
         .replace("JOINWAIT", "60")
-        .replace("CONFIRM\n", "wait 1\nkey Enter\n" if not standby else "")
+        .replace("CONFIRM\n", "wait 1\nkey Tab\nkey Enter\n")
     )
 
 
 def host_leave_problems(game: str, bot: str, standby: bool) -> list[str]:
     """What the hosting game's log and the pilot bot's lines must hold after the host's Leave Game on the observer
-    menu, with a ready standby (it hands the game over) or with none (the menu asks twice and the game ends for
+    menu, with a ready standby (it hands the game over) or with none (the panel warns that the game ends for
     everyone). Pure, unit tested in tools/test_battery_net.py."""
     problems = []
     for pattern, what in (
@@ -138,6 +139,9 @@ def host_leave_problems(game: str, bot: str, standby: bool) -> list[str]:
     ):
         if not re.search(pattern, game):
             problems.append(f"the game's log lacks {what}: /{pattern}/")
+    message = "Another player will take over hosting." if standby else "Leaving ends the game for everyone."
+    if f"Leave confirmation: {message} Are you sure?" not in game:
+        problems.append("the host confirmation did not describe its actual departure")
     leaves = re.findall(r"Network: Leave Game \(([^)]*)\)", game)
     want = "handing the game over" if standby else "ending the game"
     if leaves != [want]:
@@ -482,7 +486,7 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-window-host-leave-confirm", lane="net", args=[], driver=drive_host_leave_confirm,
             uses=("bot",), window=True, timeout=700,
-            notes="a hosting game's away player chooses Leave Game with no standby: the menu asks twice and the game "
+            notes="a hosting game's away player chooses Leave Game with no standby: the panel confirms and the game "
             "ends for everyone (slice F2-X)",
         ),
         Scenario(

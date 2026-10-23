@@ -81,12 +81,55 @@ controller Menu button opens it; Up/Down select and A accepts. Keyboard
 Up/Down or Tab select, Enter accepts, M returns to main, X exits, and Escape
 closes the dropdown. M and X act only while the dropdown is open.
 
-Both destinations use the existing client disconnect and host shutdown path.
+Both destinations use the [session departure confirmation](#leaving-a-session)
+and the shared client disconnect and host handover path.
 A client tells its host and releases its seat. A host uses the same shutdown
 and succession behaviour as Leave/host quit. Its listing is withdrawn and
 its sockets and router mappings are released. Return closes any lobby page
 and both lounges and shows the root main menu. Exit closes the application.
 Unsaved Settings edits are discarded by either destination.
+
+## Leaving a session
+
+Implementation mode. **Opinionated**, requested by John on 2026-10-23.
+The shared panel keeps the title **Leave the game**, the existing art and
+**Leave / Cancel** buttons. Cancel has initial keyboard focus. Enter on
+Cancel or Escape dismisses the panel without disconnecting.
+
+| Current role and consequence | Text above the buttons |
+| --- | --- |
+| Ordinary client, including an observer, on either kind of server | Are you sure? |
+| Player host, alone, with no ready standby | Leaving ends the game. / Are you sure? |
+| Player host with a ready standby | Another player will take over hosting. / Are you sure? |
+| Player host with other players but no ready standby | Leaving ends the game for everyone. / Are you sure? |
+| King who is not hosting, with another player connected | The crown passes to <callsign>. / Are you sure? |
+| King on a dedicated server, alone | Are you sure? |
+
+Slashes above separate lines. Hosting and the crown are independent. The
+running local host determines host wording, including after migration and
+when someone else holds the crown. A standby must actually be ready; another
+connected player alone does not guarantee handover. The crown goes to the
+longest-connected remaining player, using the server's roster order. A King
+on a dedicated server never receives an end-game warning.
+
+Lobby Leave and Escape, the lounge or lobby **?** menu's **Return to Main
+Menu** and **Exit**, the away observer's **Leave Game**, **Exit to Desktop**,
+and window close (including Alt+F4) use this panel while connected. This also
+covers lobby sub-pages, flying, revival wait and debrief. A command-line
+client's End Mission disconnects and therefore asks the same question.
+The away observer's old second-choice confirmation is replaced by this panel.
+Agent decision: every actual session departure asks once, including ordinary
+clients. A change of consequence while the panel is open refreshes its text
+and returns focus to Cancel before accepting another response.
+
+End Mission in a lounge-started flight keeps its existing meaning and does
+not use the session-departure panel: a hosting player's request ends the
+round if permitted by the King rule; a joined player returns to the lobby.
+The lobby King's End Mission also ends only the round. **Stop Watching**
+returns to the lobby and stays connected. Neither action says the game ends.
+A confirmed host departure hands over before disconnecting when a standby is
+ready. Existing partial reports are retained, including Exit's report before
+the application closes. No protocol or simulation rule changes are required.
 
 ## Callsign when returning to a game
 
