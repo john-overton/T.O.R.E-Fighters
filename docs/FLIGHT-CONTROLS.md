@@ -800,3 +800,8 @@ the pilot and parachute while the abandoned aircraft falls independently.
 Low or inverted escapes can be fatal. See [ejection behaviour](spec/ejection.md)
 for timing, survival and the AI recovery assessment. Undamaged AI aircraft above
 200 feet AGL never eject automatically, as requested by John on 2026-09-23.
+
+In a network flight, K shows human and AI scores. While that board is open,
+Ctrl+PageUp and Ctrl+PageDown turn its pages; ordinary flight controls apply
+when it is closed. See [the controls list](CONTROLS.md) and
+[multiplayer statistics](MULTIPLAYER.md#debrief).

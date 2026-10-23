@@ -475,6 +475,7 @@ def drive_scores(d: Drive) -> None:
     server.finish(40, 0)
     for problem in scores_problems(bots.text(), ["Bot1", "Bot2"]):
         d.problem(problem)
+    bots.expect(r"\(AI\) \((?:friendly|enemy)\) [1-9]\d*/\d+ ", "an AI kill in the live scores")
     bots.forbid(NET_BAD, "a network problem")
     server.forbid(NET_BAD, "a network problem")
 
@@ -484,7 +485,7 @@ def drive_results(d: Drive) -> None:
     bot hears one Results message, before the mission's end, with a row for every aircraft (the players' callsigns on
     their planes, the AI on the rest) and the winner of the final scores."""
     port = d.port()
-    server = start_server(d, port, guide_mission(separation_nm=5), mode="pvp", time_limit=1)
+    server = start_server(d, port, guide_mission(separation_nm=5), mode="pvp", time_limit=1, kill_limit=0)
     blue = start_bots(d, port, "blue", 100, "--callsign", "Blue", "--slot", "0")
     red = start_bots(d, port, "red", 100, "--callsign", "Red", "--slot", "6")
     if not server.wait_for(r"^mission ended: the time limit$", 150):

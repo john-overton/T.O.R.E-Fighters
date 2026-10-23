@@ -125,6 +125,7 @@ pub mod kind {
     /// The King starts or cancels a force start (nr-lobbyui). The lead
     /// numbers the protocol; the kind is the next free one.
     pub const FORCE_START: u8 = 55;
+    pub const FLIGHT_REPORT: u8 = 56;
 }
 
 /// The limits of stage L's messages (protocol 10; net-protocol.md, "Limits").
@@ -162,7 +163,7 @@ const LOADOUTS_LIMIT: usize = 64;
 /// Objectives in a debrief.
 const OBJECTIVES_LIMIT: usize = 64;
 /// Players in a Scores message (phase 2).
-const SCORE_PLAYERS_LIMIT: usize = 64;
+const SCORE_PLAYERS_LIMIT: usize = 1_024;
 /// Rows in a Results message: every plane a mission had (phase 2).
 const RESULT_ROWS_LIMIT: usize = 1_024;
 /// The most lives a Revival message says are left; more are unlimited.
@@ -460,6 +461,12 @@ pub struct Spawned {
 /// One player's score.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlayerScore {
+    /// Tracked air-to-air, air-to-ground, gun and bomb hits, across lives.
+    pub hits: u32,
+    /// AI lineage root; absent for a human identified by its lobby id.
+    pub ai: Option<u32>,
+    /// The human has left; its mission contribution remains.
+    pub left: bool,
     /// The player's lobby id.
     pub id: u8,
     pub callsign: String,
@@ -474,6 +481,7 @@ pub struct PlayerScore {
 /// One side's score.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SideScore {
+    pub hits: u32,
     pub kills: u32,
     pub losses: u32,
     /// Thousandths of an aircraft.
@@ -488,6 +496,7 @@ pub enum Winner {
     Side(Side),
     /// The player with this lobby id.
     Player(u8),
+    Aircraft(u32),
     Draw,
 }
 
@@ -501,7 +510,7 @@ pub struct Scores {
     /// The kill limit, 0 for none (at most 15).
     pub kill_limit: u8,
     pub kill_owner: KillOwner,
-    /// At most 64.
+    /// At most 1,024, including AI and departed humans.
     pub players: Vec<PlayerScore>,
     /// The friendly side's, then the enemy side's.
     pub sides: [SideScore; 2],
@@ -529,6 +538,7 @@ pub struct Shots {
 /// One plane's row of the results.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResultRow {
+    pub left: bool,
     pub plane: u32,
     pub wing: WingId,
     pub member: u8,
@@ -944,6 +954,15 @@ pub struct Debrief {
     pub wingman: Option<DebriefPilot>,
 }
 
+/// An ongoing report retained locally, independent of the final debrief.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlightReport {
+    pub tick: u32,
+    pub plane: u32,
+    pub debrief: Debrief,
+    pub results: Results,
+}
+
 /// Why the mission ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EndReason {
@@ -1047,6 +1066,7 @@ pub enum Message {
     Scores(Box<Scores>),
     /// Every plane's results at the mission's end (host to client).
     Results(Box<Results>),
+    FlightReport(Box<FlightReport>),
     /// Start or stop watching (client to host).
     Observe(Observe),
     /// The observer flight starts or ends (host to client).
@@ -1112,6 +1132,59 @@ pub struct FlightLoadouts {
     /// not (a loadout's other weapons), with their hashes: a player
     /// compares its own as at the mission's content check.
     pub manifest: Manifest,
+}
+
+fn write_debrief(w: &mut BitWriter, d: &Debrief) -> WireResult<()> {
+    w.write_bool(d.success);
+    if d.objectives.len() > OBJECTIVES_LIMIT {
+        return Err(WireError::TooMany {
+            what: "objectives",
+            limit: OBJECTIVES_LIMIT,
+        });
+    }
+    write_count(w, d.objectives.len());
+    for objective in &d.objectives {
+        let (protect, done, total) = match *objective {
+            DebriefObjective::Destroy { destroyed, total } => (false, destroyed, total),
+            DebriefObjective::Protect { protected, total } => (true, protected, total),
+        };
+        w.write_bool(protect);
+        w.write_varint(u64::from(done));
+        w.write_varint(u64::from(total));
+    }
+    w.write_varint(d.elapsed_seconds);
+    write_pilot(w, &d.player);
+    bits::write_option(w, d.wingman.as_ref(), write_pilot);
+    Ok(())
+}
+
+fn read_debrief(r: &mut BitReader<'_>) -> WireResult<Debrief> {
+    let success = r.read_bool()?;
+    let count = read_count(r, OBJECTIVES_LIMIT, "objectives")?;
+    let mut objectives = Vec::with_capacity(count);
+    for _ in 0..count {
+        let protect = r.read_bool()?;
+        let done = read_u32(r)?;
+        let total = read_u32(r)?;
+        objectives.push(if protect {
+            DebriefObjective::Protect {
+                protected: done,
+                total,
+            }
+        } else {
+            DebriefObjective::Destroy {
+                destroyed: done,
+                total,
+            }
+        });
+    }
+    Ok(Debrief {
+        success,
+        objectives,
+        elapsed_seconds: r.read_varint()?,
+        player: read_pilot(r)?,
+        wingman: bits::read_option(r, read_pilot)?,
+    })
 }
 
 fn write_tally(w: &mut BitWriter, t: &Tally) {
@@ -1962,30 +2035,36 @@ fn write_scores(w: &mut BitWriter, scores: &Scores) -> WireResult<()> {
     for player in players {
         let _ = w.write_bits(u64::from(player.id), 8);
         write_str(w, &player.callsign);
+        w.write_bool(player.left);
+        bits::write_option(w, player.ai, |w, id| w.write_varint(u64::from(id)));
         bits::write_option(w, player.side, write_side);
-        for value in [player.kills, player.losses, player.damage] {
+        for value in [player.kills, player.losses, player.damage, player.hits] {
             w.write_varint(u64::from(value));
         }
     }
     for side in sides {
-        for value in [side.kills, side.losses, side.damage] {
+        for value in [side.kills, side.losses, side.damage, side.hits] {
             w.write_varint(u64::from(value));
         }
     }
     match winner {
         Winner::NoneYet => {
-            let _ = w.write_bits(0, 2);
+            let _ = w.write_bits(0, 3);
         }
         Winner::Side(side) => {
-            let _ = w.write_bits(1, 2);
+            let _ = w.write_bits(1, 3);
             write_side(w, *side);
         }
         Winner::Player(id) => {
-            let _ = w.write_bits(2, 2);
+            let _ = w.write_bits(2, 3);
             let _ = w.write_bits(u64::from(*id), 8);
         }
+        Winner::Aircraft(root) => {
+            let _ = w.write_bits(3, 3);
+            w.write_varint(u64::from(*root));
+        }
         Winner::Draw => {
-            let _ = w.write_bits(3, 2);
+            let _ = w.write_bits(4, 3);
         }
     }
     Ok(())
@@ -2003,10 +2082,13 @@ fn read_scores(r: &mut BitReader<'_>) -> WireResult<Scores> {
         players.push(PlayerScore {
             id: read_id(r)?,
             callsign: read_str(r)?,
+            left: r.read_bool()?,
+            ai: bits::read_option(r, read_u32)?,
             side: bits::read_option(r, read_side)?,
             kills: read_u32(r)?,
             losses: read_u32(r)?,
             damage: read_u32(r)?,
+            hits: read_u32(r)?,
         });
     }
     let mut sides = [SideScore::default(); 2];
@@ -2015,13 +2097,16 @@ fn read_scores(r: &mut BitReader<'_>) -> WireResult<Scores> {
             kills: read_u32(r)?,
             losses: read_u32(r)?,
             damage: read_u32(r)?,
+            hits: read_u32(r)?,
         };
     }
-    let winner = match r.read_bits(2)? {
+    let winner = match r.read_bits(3)? {
         0 => Winner::NoneYet,
         1 => Winner::Side(read_side(r)?),
         2 => Winner::Player(read_id(r)?),
-        _ => Winner::Draw,
+        3 => Winner::Aircraft(read_u32(r)?),
+        4 => Winner::Draw,
+        _ => return Err(WireError::Invalid("score winner")),
     };
     Ok(Scores {
         tally,
@@ -2053,6 +2138,7 @@ fn write_results(w: &mut BitWriter, results: &Results) -> WireResult<()> {
         let _ = w.write_bits(u64::from(row.member), 8);
         let _ = w.write_bits(aircraft_code(row.aircraft), 6);
         bits::write_option(w, row.callsign.as_deref(), write_str);
+        w.write_bool(row.left);
         let status = match row.status {
             ResultStatus::Alive => 0,
             ResultStatus::Ejected => 1,
@@ -2103,6 +2189,7 @@ fn read_results(r: &mut BitReader<'_>) -> WireResult<Results> {
         let member = r.read_bits(8)? as u8;
         let aircraft = read_aircraft(r)?;
         let callsign = bits::read_option(r, read_str)?;
+        let left = r.read_bool()?;
         let status = match r.read_bits(2)? {
             0 => ResultStatus::Alive,
             1 => ResultStatus::Ejected,
@@ -2114,6 +2201,7 @@ fn read_results(r: &mut BitReader<'_>) -> WireResult<Results> {
             return Err(WireError::Invalid("result damage"));
         }
         rows.push(ResultRow {
+            left,
             plane,
             wing,
             member,
@@ -2521,6 +2609,7 @@ impl Message {
             Self::Spawned(_) => kind::SPAWNED,
             Self::Scores(_) => kind::SCORES,
             Self::Results(_) => kind::RESULTS,
+            Self::FlightReport(_) => kind::FLIGHT_REPORT,
             Self::Observe(_) => kind::OBSERVE,
             Self::Observing(_) => kind::OBSERVING,
             Self::Away => kind::AWAY,
@@ -2635,27 +2724,12 @@ impl Message {
                 write_strings(&mut w, &names.names, limits::NAMES, "names")?;
             }
             Self::Leave => {}
-            Self::Debrief(d) => {
-                w.write_bool(d.success);
-                if d.objectives.len() > OBJECTIVES_LIMIT {
-                    return Err(WireError::TooMany {
-                        what: "objectives",
-                        limit: OBJECTIVES_LIMIT,
-                    });
-                }
-                write_count(&mut w, d.objectives.len());
-                for objective in &d.objectives {
-                    let (protect, done, total) = match *objective {
-                        DebriefObjective::Destroy { destroyed, total } => (false, destroyed, total),
-                        DebriefObjective::Protect { protected, total } => (true, protected, total),
-                    };
-                    w.write_bool(protect);
-                    w.write_varint(u64::from(done));
-                    w.write_varint(u64::from(total));
-                }
-                w.write_varint(d.elapsed_seconds);
-                write_pilot(&mut w, &d.player);
-                bits::write_option(&mut w, d.wingman.as_ref(), write_pilot);
+            Self::Debrief(d) => write_debrief(&mut w, d)?,
+            Self::FlightReport(report) => {
+                w.write_varint(u64::from(report.tick));
+                w.write_varint(u64::from(report.plane));
+                write_debrief(&mut w, &report.debrief)?;
+                write_results(&mut w, &report.results)?;
             }
             Self::MissionEnded(m) => {
                 write_end_reason(&mut w, m.reason);
@@ -2884,34 +2958,13 @@ impl Message {
             }
             kind::NOTICE => Self::Notice(read_str(r)?),
             kind::LEAVE => Self::Leave,
-            kind::DEBRIEF => {
-                let success = r.read_bool()?;
-                let count = read_count(r, OBJECTIVES_LIMIT, "objectives")?;
-                let mut objectives = Vec::with_capacity(count);
-                for _ in 0..count {
-                    let protect = r.read_bool()?;
-                    let done = read_u32(r)?;
-                    let total = read_u32(r)?;
-                    objectives.push(if protect {
-                        DebriefObjective::Protect {
-                            protected: done,
-                            total,
-                        }
-                    } else {
-                        DebriefObjective::Destroy {
-                            destroyed: done,
-                            total,
-                        }
-                    });
-                }
-                Self::Debrief(Box::new(Debrief {
-                    success,
-                    objectives,
-                    elapsed_seconds: r.read_varint()?,
-                    player: read_pilot(r)?,
-                    wingman: bits::read_option(r, read_pilot)?,
-                }))
-            }
+            kind::DEBRIEF => Self::Debrief(Box::new(read_debrief(r)?)),
+            kind::FLIGHT_REPORT => Self::FlightReport(Box::new(FlightReport {
+                tick: read_u32(r)?,
+                plane: read_u32(r)?,
+                debrief: read_debrief(r)?,
+                results: read_results(r)?,
+            })),
             kind::MISSION_ENDED => {
                 let reason = read_end_reason(r)?;
                 Self::MissionEnded(MissionEnded {

@@ -83,13 +83,13 @@ fn an_ai_loss_respawns_at_its_original_spawn_after_the_delay() {
         !r.clients[cobra].spawned.is_empty()
     }));
     // A minute after the loss was noted, plane 4 in the lost one's wing as
-    // its next member, the AI's.
+    // its original member, the AI's.
     let spawned = rig.clients[cobra].spawned[0].clone();
     assert_eq!(u64::from(spawned.tick), since + 60 * TICKS_PER_SECOND);
     assert_eq!(spawned.plane, 4);
     assert_eq!(
         (spawned.wing.side, spawned.wing.index, spawned.member),
-        (Side::Friendly, 0, 2)
+        (Side::Friendly, 0, 1)
     );
     assert_eq!(spawned.aircraft, AircraftId::F18);
     rig.run(Duration::from_millis(50));
@@ -111,7 +111,7 @@ fn an_ai_loss_respawns_at_its_original_spawn_after_the_delay() {
         "{lines:?}"
     );
     assert!(
-        lines[1].starts_with("Blue 1-3 respawned in plane 4 at its original spawn, x "),
+        lines[1].starts_with("Blue 1-2 respawned in plane 4 at its original spawn, x "),
         "{lines:?}"
     );
     // A late joiner hears of it with the mission.
@@ -140,7 +140,7 @@ fn lives_count_per_lineage() {
     assert!(
         revival_lines(&rig)
             .iter()
-            .any(|l| l == "Blue 1-3 lost plane 4: no lives left, the AI does not respawn it"),
+            .any(|l| l == "Blue 1-2 lost plane 4: no lives left, the AI does not respawn it"),
         "{:?}",
         revival_lines(&rig)
     );
@@ -278,12 +278,93 @@ fn a_revival_and_a_respawn_in_one_tick_each_get_their_own_plane() {
     assert_eq!(spawned_planes(&rig, cobra), [4, 5]);
     assert_eq!(
         (spawned[0].wing.side, spawned[0].member),
-        (Side::Friendly, 2)
+        (Side::Friendly, 0)
     );
-    assert_eq!((spawned[1].wing.side, spawned[1].member), (Side::Enemy, 2));
+    assert_eq!((spawned[1].wing.side, spawned[1].member), (Side::Enemy, 1));
     assert!(reseated(&mut rig, viper, 0));
     assert_eq!(plane_of(&rig, viper), 4);
     assert_eq!(pilot(&rig, 5), Pilot::Ai);
     assert_eq!(rig.host.world().lineage_head(PlaneId(3)), PlaneId(5));
     assert!(rig.faults().is_empty(), "{:?}", rig.faults());
+}
+
+#[test]
+fn ai_scores_and_original_callsign_survive_respawn_and_count_toward_the_limit() {
+    use tore_sim::combat::ledger::Kill;
+    let (mut rig, viper, _) = two_sides(
+        2,
+        4,
+        &[
+            respawn(Respawn::Revive),
+            (number::KILL_LIMIT, 0),
+            (number::LIVES, 255),
+        ],
+    );
+    let kill = |rig: &mut Rig, owner, victim| {
+        use tore_sim::combat::ledger::{Resolution, ShotKind};
+        rig.host.world.combat.state.ledger.launch(
+            100 + victim,
+            owner,
+            Some(victim),
+            ShotKind::AirToAir,
+        );
+        rig.host
+            .world
+            .combat
+            .state
+            .ledger
+            .resolve(100 + victim, Resolution::Hit(100));
+        rig.host.world.combat.state.ledger.kill(Kill {
+            owner,
+            victim,
+            category: 0x8000,
+            aircraft: true,
+        });
+        destroy_ai(rig, victim);
+    };
+    kill(&mut rig, 1, 3);
+    rig.run(Duration::from_millis(1200));
+    destroy_ai(&mut rig, 1);
+    assert!(rig.run_until(
+        Duration::from_secs(2),
+        |r| r.host.world.lineage_head(PlaneId(1)) != PlaneId(1)
+    ));
+    let revived = rig.host.world.lineage_head(PlaneId(1));
+    assert_eq!(rig.host.world.roster.plane(revived).unwrap().slot.member, 1);
+    assert_eq!(rig.host.flight_callsign(revived), "Red 2");
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        r.clients[viper]
+            .spawned
+            .iter()
+            .any(|s| s.plane == revived.0 && s.member == 1)
+    }));
+    kill(&mut rig, revived.0, 4);
+    rig.run(Duration::from_millis(1200));
+    let scores = rig.clients[viper].scores.last().unwrap();
+    let ai = scores.players.iter().find(|p| p.ai == Some(1)).unwrap();
+    assert_eq!((ai.callsign.as_str(), ai.kills, ai.losses), ("Red 2", 2, 1));
+    assert_eq!(scores.sides[0].kills, 2);
+    assert_eq!((ai.hits, scores.sides[0].hits), (2, 2));
+    // Every listed combatant obeys the individual limit, AI lineages too.
+    rig.host
+        .settings
+        .apply(&[
+            (
+                number::KILL_OWNER,
+                crate::settings::KillOwner::Player.value(),
+            ),
+            (number::KILL_LIMIT, 2),
+        ])
+        .unwrap();
+    rig.run(Duration::from_millis(200));
+    let result = rig.clients[viper].results.last().unwrap();
+    assert_eq!(result.reason, EndReason::KillLimit);
+    assert_eq!(result.scores.as_ref().unwrap().sides[0].kills, 2);
+    assert!(
+        result
+            .rows
+            .iter()
+            .filter(|r| r.plane == 1 || r.plane == revived.0)
+            .all(|r| r.member == 1)
+    );
 }

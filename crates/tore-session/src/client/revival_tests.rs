@@ -77,7 +77,7 @@ fn a_game_flies_again_in_the_plane_its_copy_of_the_mission_adds() {
         let world = client.mission().unwrap();
         let entry = world.roster.plane(PlaneId(4)).expect("the spawned plane");
         assert_eq!(entry.slot.wing.side, tore_sim::ai::launch::Side::Friendly);
-        assert_eq!(entry.slot.member, 2);
+        assert_eq!(entry.slot.member, 0);
         assert!(world.ai_wings.as_ref().unwrap().configuration(4).is_some());
     }
     // Viper heard of the plane before it was seated in it.

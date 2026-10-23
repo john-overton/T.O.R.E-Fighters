@@ -215,8 +215,8 @@ impl Rejoin {
             .collect()
     }
 
-    /// Whether the host still keeps the player `order` for its token: its
-    /// scores stay while it does.
+    /// Whether the host still keeps the player `order` for its token.
+    #[cfg(test)]
     pub(super) fn keeps(&self, order: u64, now: Duration) -> bool {
         self.players
             .get(&order)

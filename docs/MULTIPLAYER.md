@@ -557,11 +557,11 @@ flowchart TD
   hands their aircraft's lineage to the AI.
 - **Room.** A mission holds 64 aircraft at once. Human revivals are made first
   each tick, and an AI respawn takes the room they leave, retiring the oldest
-  wreck that has rested 30 seconds, or waits. A flight that has used its 254th
-  member number stops respawning.
+  wreck that has rested 30 seconds, or waits. Respawns reuse their original
+  flight positions, so repeated lives do not exhaust callsign numbers.
 - **Nothing is said** on the radio or the HUD for an AI respawn. The server's
   log and the hosting game's say "Red 2-5 respawned in plane 14 at its original
-  spawn" and the like. Respawns add to nobody's score, and killing a respawned
+  spawn" and the like. Respawning itself adds to nobody's score, and killing a respawned
   aircraft counts as any AI kill does.
 
 With AI respawn and unlimited lives, a co-op mission ends only on its time
@@ -959,43 +959,50 @@ The bytes are in [the wire's air-to-ground round](formats/net-protocol.md#the-ai
 
 ## Debrief
 
-The debrief shows every human and AI aircraft on one results screen: kills, hit
-percentages, damage and pilot status for each. The retail single-player debrief
-shows only the player and one wingman, so this is a new layout. In PvP it also
-shows the scores under the lobby's scoring settings. As in retail, only aircraft
-and helicopters count toward a score, and shooting down a human player before
-they eject counts as two kills. *Retail gap-fill (agent):* retail's INCOMPLETE outcome, used only in
-multiplayer, applies when the King ends a mission early, and every player can
-open a score board in flight, as retail's host could with Show Player Scores.
-*Built (F2-S, 2026-10-05):* K opens it in a network flight: the players ranked
-by the game's tally, the sides, the kill limit, the time left and, at a
-limit's end in PvP, the winner. A kill limit ends a PvP mission. The debrief's
-scores page is slice F2-D's ([scoring as built](ARCHITECTURE.md#scoring)).
+K opens the live score board for every player. It lists human players and AI
+by flight callsign, with kills, losses, hits, damage and ratio. AI is marked **AI**;
+departed humans are marked **left**. Your numbers accumulate across revivals.
+A player leaving, dropping or handing an aircraft to AI does not remove their
+contribution from the side totals or the kill limit. Host migration carries
+these records too. A different player taking the same lobby number starts
+with their own record.
 
-*Built (EF-F, agent decisions):* the first page of a networked debrief does not
-call a mission that somebody ended a failure. When the mission's objectives
-decided it, the retail page stands: **MISSION SUCCESS**, or **MISSION
-FAILURE** when the player's pilot was lost or a friendly objective destroyed.
-Otherwise the page reads **MISSION ENDED** with who ended it ("You left the
-mission.", "The King ended the mission.", "The server ended the mission.",
-"The time limit ended the mission.", "The host left the game."), and the
-outcome line reads **INCOMPLETE**, retail's word for it. Single player's
-debrief is unchanged ([how it works](ARCHITECTURE.md#smoke-test-fixes-ef-f)).
-A player who ended its own flight can press Join and fly it again, any number
-of times; a player the server removes reads "The server removed you from the
-game: REASON" (a game a player hosts says "The King").
+AI kills count under the same weighting as human kills: one for an aircraft,
+or two for a human killed with the pilot aboard. Aircraft and helicopters
+count toward scores; ground kills remain in the debrief's kill categories.
+In PvP, both humans and AI count toward the total, side or individual kill
+limit. The individual limit applies to one human or one AI lineage. Co-op
+has no kill limit or winner. AI work after taking over a human's plane goes
+to the AI row; the human's earlier contribution stays with the human.
 
-*Built (F2-D, phase 2):* a networked debrief adds, after its first page,
-**SCORES** (PvP: the winner and each player's kills, losses, damage and ratio)
-and **RESULTS** (every aircraft, human and AI, with its pilot, status, kills,
-hit percentage and damage). Kills count as retail counts them: aircraft only,
-two for a human shot down with the pilot aboard. The **K** key opens the score
-board in flight for every player. After a loss a player's Join counts as flying
-again under the respawn rules, so leaving cannot dodge the lives
-([architecture](ARCHITECTURE.md#scoring)). Agent decisions: the RESULTS pages
-list each side apart, fifteen aircraft to a page, with the aircraft shot down
-(not the other kills) in the kills column, and SCORES appears in PvP only
-([how it works](ARCHITECTURE.md#the-multiplayer-debrief)).
+The debrief adds **SCORES** and **RESULTS** to the retail pages. SCORES keeps
+all listed combatants and side totals, in co-op too. RESULTS lists every
+human and AI aircraft, including earlier lives, by side and wing, with type,
+status, kills, hit percentage and damage. Compact tables mark AI with **A**
+and departed humans with **L**, explained on the page. K displays 12 ranked rows per page; Ctrl+PageUp and Ctrl+PageDown show the rest. A revived aircraft retains
+its original flight position, so Red 2 returns as Red 2, for human and AI
+pilots alike. Its internal aircraft id still changes.
+
+Leaving before the host ends the mission opens a **PARTIAL REPORT** from the
+client's own session record: "You left at 12:34; the mission continued".
+Connection failure says "Connection lost". Leave, End Mission, the `?` menu's
+Return to Main Menu and Exit all preserve this report. Exit closes the game
+after the report is dismissed. The report includes each life and its aircraft,
+spawn time and observed ending, revivals, cumulative kills by category,
+weapons fired and hits, losses and scores, objectives, aircraft results and
+received mission messages. It names the latest statistics time, so a network
+outage does not imply knowledge of later events.
+
+A normal mission end uses the full host results. The PLAYER kill and weapon
+columns include all the player's lives; physical status describes the latest
+life. The wingman column and single-player debrief are unchanged. Full
+mission outcome wording still follows objectives; a partial report always
+says INCOMPLETE. A player who ends their flight can Join again under the
+existing revival and lives rules.
+
+The feature changes follow John's requests of 2026-10-23. Agent presentation
+choices and limits have one home in the [debrief spec](spec/debrief.md#multiplayer-mission-record).
+
 
 ## Architecture
 

@@ -27,10 +27,10 @@ use tore_session::wire::messages::Scores;
 use tore_sim::ai::launch::Side;
 
 /// The board's width, in 640 by 480 layer units (the HUD's own).
-const WIDTH: f64 = 360.;
+const WIDTH: f64 = 404.;
 /// Where each column starts, layer units from the board's left edge: rank,
 /// pilot, side, kills, losses, damage, ratio.
-const COLUMNS: [f64; 7] = [0., 18., 132., 196., 236., 280., 324.];
+const COLUMNS: [f64; 8] = [0., 18., 132., 196., 236., 280., 324., 368.];
 /// The board's top edge, layer units.
 const TOP: f64 = 96.;
 /// The translucent band behind the text.
@@ -70,7 +70,17 @@ pub fn toggle(flight: &mut Option<NetFlight>) -> bool {
 
 /// The board's lines for `scores` (or none yet), as `you` (the viewer's
 /// lobby id) sees them, with `seconds_left` of the time limit.
+#[cfg(test)]
 pub fn lines(scores: Option<&Scores>, you: Option<u8>, seconds_left: Option<u32>) -> Vec<Line> {
+    lines_at(scores, you, seconds_left, 0)
+}
+
+fn lines_at(
+    scores: Option<&Scores>,
+    you: Option<u8>,
+    seconds_left: Option<u32>,
+    page: usize,
+) -> Vec<Line> {
     let Some(scores) = scores else {
         return vec![
             Line::text("SCORES", HEADING),
@@ -80,7 +90,7 @@ pub fn lines(scores: Option<&Scores>, you: Option<u8>, seconds_left: Option<u32>
     let viewer = scores
         .players
         .iter()
-        .find(|p| Some(p.id) == you)
+        .find(|p| Some(p.id) == you && !p.left && p.ai.is_none())
         .and_then(|p| p.side);
     let colour = |side: Option<Side>| match (side, viewer) {
         (None, _) => tone::SYSTEM,
@@ -92,31 +102,51 @@ pub fn lines(scores: Option<&Scores>, you: Option<u8>, seconds_left: Option<u32>
     let mut lines = vec![
         Line::text(heading(scores.tally), HEADING),
         Line {
-            cells: ["", "PILOT", "SIDE", "KILLS", "LOSSES", "DAMAGE", "RATIO"]
-                .map(str::to_owned)
-                .to_vec(),
+            cells: [
+                "", "PILOT", "SIDE", "KILLS", "LOSSES", "HITS", "DAMAGE", "RATIO",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
             colour: tone::SYSTEM,
         },
     ];
-    for (n, player) in scores.players.iter().enumerate() {
+    let pages = scores.players.len().div_ceil(12).max(1);
+    let page = page.min(pages - 1);
+    for (n, player) in scores.players.iter().enumerate().skip(page * 12).take(12) {
         lines.push(Line {
             cells: vec![
                 format!("{}", n + 1),
-                player.callsign.clone(),
+                if player.ai.is_some() {
+                    format!("{} (AI)", player.callsign)
+                } else if player.left {
+                    format!(
+                        "{} (left)",
+                        player.callsign.chars().take(12).collect::<String>()
+                    )
+                } else {
+                    player.callsign.clone()
+                },
                 player
                     .side
                     .map_or("-".to_owned(), |s| side_name(s).to_uppercase()),
                 player.kills.to_string(),
                 player.losses.to_string(),
+                player.hits.to_string(),
                 format!("{:.2}", f64::from(player.damage) / 1000.),
                 format!("{:.2}", ratio(player.kills, player.losses)),
             ],
-            colour: if Some(player.id) == you {
+            colour: if Some(player.id) == you && !player.left && player.ai.is_none() {
                 YOU
             } else {
                 colour(player.side)
             },
         });
+    }
+    if scores.players.len() > 12 {
+        lines.push(Line::text(
+            format!("Page {}/{}: Ctrl+PgUp/PgDn", page + 1, pages),
+            tone::SYSTEM,
+        ));
     }
     if scores.players.is_empty() {
         lines.push(Line::text("No players", tone::SYSTEM));
@@ -130,6 +160,7 @@ pub fn lines(scores: Option<&Scores>, you: Option<u8>, seconds_left: Option<u32>
                     String::new(),
                     tally.kills.to_string(),
                     tally.losses.to_string(),
+                    tally.hits.to_string(),
                     format!("{:.2}", f64::from(tally.damage) / 1000.),
                     format!("{:.2}", ratio(tally.kills, tally.losses)),
                 ],
@@ -152,6 +183,21 @@ pub fn lines(scores: Option<&Scores>, you: Option<u8>, seconds_left: Option<u32>
     lines
 }
 
+/// Pages the live board without changing flight controls outside it.
+pub(crate) fn page_key(flight: &mut Option<NetFlight>, key: &str, players: usize) -> bool {
+    let Some(flight) = flight.as_mut().filter(|f| f.score_board) else {
+        return false;
+    };
+    match key {
+        "PageUp" => flight.score_page = flight.score_page.saturating_sub(1),
+        "PageDown" => {
+            flight.score_page = (flight.score_page + 1).min(players.div_ceil(12).saturating_sub(1))
+        }
+        _ => return false,
+    }
+    true
+}
+
 /// Draws the board when it is open in a networked flight.
 pub(crate) fn draw(
     flight: Option<&NetFlight>,
@@ -170,7 +216,12 @@ pub(crate) fn draw(
     draw_lines(
         canvas,
         font,
-        &lines(client.scores(), you, client.seconds_left()),
+        &lines_at(
+            client.scores(),
+            you,
+            client.seconds_left(),
+            flight.score_page,
+        ),
     );
 }
 
@@ -183,23 +234,40 @@ pub fn draw_lines(canvas: &mut FlightCanvas, font: &Font, lines: &[Line]) {
     let left = (w - WIDTH * layer) / 2.;
     let top = TOP * layer;
     let pad = 4. * layer;
+    // HUD glyphs deliberately avoid opaque instrument pixels. Compose the
+    // board separately, then place it over those pixels as a menu overlay.
+    let size = [
+        (WIDTH * layer + 2. * pad).ceil() as u32,
+        (lines.len() as f64 * line_height + 2. * pad).ceil() as u32,
+    ];
+    let mut overlay = FlightCanvas::default();
+    overlay.clear(size);
     darken(
-        canvas,
-        (
-            left - pad,
-            top - pad,
-            left + WIDTH * layer + pad,
-            top + lines.len() as f64 * line_height + pad,
-        ),
+        &mut overlay,
+        (0., 0., f64::from(size[0]), f64::from(size[1])),
     );
     for (row, line) in lines.iter().enumerate() {
-        let y = top + row as f64 * line_height;
+        let y = pad + row as f64 * line_height;
         for (cell, column) in line.cells.iter().zip(COLUMNS) {
             if !cell.is_empty() {
-                canvas.text(font, cell, [left + column * layer, y], scale, line.colour);
+                overlay.text(font, cell, [pad + column * layer, y], scale, line.colour);
             }
         }
     }
+    canvas.blit(
+        &crate::menu::Sprite {
+            width: size[0] as usize,
+            height: size[1] as usize,
+            rgba: overlay.pixels,
+            glyphs: vec![],
+        },
+        (
+            left - pad,
+            top - pad,
+            f64::from(size[0]),
+            f64::from(size[1]),
+        ),
+    );
 }
 
 /// Darkens the band (left, top, right, bottom), screen pixels.
@@ -236,6 +304,9 @@ mod tests {
 
     fn player(id: u8, callsign: &str, side: Option<Side>, kills: u32, losses: u32) -> PlayerScore {
         PlayerScore {
+            hits: 0,
+            ai: None,
+            left: false,
             id,
             callsign: callsign.into(),
             side,
@@ -259,11 +330,13 @@ mod tests {
             ],
             sides: [
                 SideScore {
+                    hits: 0,
                     kills: 2,
                     losses: 0,
                     damage: 2000,
                 },
                 SideScore {
+                    hits: 0,
                     kills: 4,
                     losses: 1,
                     damage: 4000,
@@ -283,10 +356,13 @@ mod tests {
             .collect();
         assert_eq!(texts[0], ["PLAYERS RANKED BY KILLS"]);
         assert_eq!(texts[1][1], "PILOT");
-        assert_eq!(texts[2], ["1", "Hawk", "ENEMY", "4", "1", "4.00", "4.00"]);
+        assert_eq!(
+            texts[2],
+            ["1", "Hawk", "ENEMY", "4", "1", "0", "4.00", "4.00"]
+        );
         assert_eq!(
             texts[3],
-            ["2", "Viper", "FRIENDLY", "2", "0", "2.00", "2.00"]
+            ["2", "Viper", "FRIENDLY", "2", "0", "0", "2.00", "2.00"]
         );
         assert_eq!(texts[4][2], "-");
         assert_eq!(texts[5][1], "FRIENDLY SIDE");
@@ -325,6 +401,30 @@ mod tests {
     }
 
     #[test]
+    fn scores_draw_over_opaque_instruments_and_every_rank_has_a_page() {
+        let mut canvas = FlightCanvas::default();
+        canvas.blank([1280, 960]);
+        canvas.fill_opaque([30, 40, 50]);
+        let mut scores = scores();
+        scores.players = (0..25)
+            .map(|n| player(n, "Pilot", Some(Side::Friendly), u32::from(n), 0))
+            .collect();
+        let last = lines_at(Some(&scores), Some(0), None, 2);
+        assert!(
+            last.iter()
+                .any(|line| line.cells.first().is_some_and(|cell| cell == "25"))
+        );
+        assert!(
+            !last
+                .iter()
+                .any(|line| line.cells.first().is_some_and(|cell| cell == "1"))
+        );
+        draw_lines(&mut canvas, &font(), &last);
+        assert!(canvas.pixels.chunks_exact(4).any(|p| p[..3] == HEADING));
+        canvas.assert_drawn_rows_noted();
+    }
+
+    #[test]
     fn a_headless_render_draws_the_board_in_the_middle_in_its_colours() {
         let mut canvas = FlightCanvas::default();
         canvas.blank([1280, 960]);
@@ -353,10 +453,10 @@ mod tests {
         for want in [HEADING, YOU, tone::ENEMY, tone::OWN_SIDE, tone::SYSTEM] {
             assert!(colours.contains(&want), "{want:?} in {colours:?}");
         }
-        // Centred: 360 layer units wide at twice the 640 by 480 layer.
-        assert!((1280 / 2 - 370..=1280 / 2 - 360).contains(&left), "{left}");
+        // Centred: 404 layer units wide at twice the 640 by 480 layer.
+        assert!((1280 / 2 - 414..=1280 / 2 - 404).contains(&left), "{left}");
         assert!(
-            (1280 / 2 + 360..=1280 / 2 + 370).contains(&right),
+            (1280 / 2 + 404..=1280 / 2 + 414).contains(&right),
             "{right}"
         );
         assert_eq!(top, (TOP * 2. - 8.) as usize);

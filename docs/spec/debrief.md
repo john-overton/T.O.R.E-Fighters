@@ -41,19 +41,73 @@ right-clicking it turns back, each with a matching tap of the rocker. Requested
 by John on 2026-09-23 (`opinionated`). OK, Enter, Space or Escape close the debrief. Cancel is
 never available. `?` offers Exit to Desktop, like the Quick Mission creator.
 
-A networked flight's debrief (multiplayer) changes only the first page and the
-outcome line, and only when nobody's objectives decided the mission: the page
-reads **MISSION ENDED** and says who ended it, and page 2 reads **MISSION
-OUTCOME : INCOMPLETE**, retail's word for a multiplayer mission cut short
-(`agent decision`, EF-F; [details](../ARCHITECTURE.md#smoke-test-fixes-ef-f)).
-Single player never shows it.
+A networked flight adds SCORES and RESULTS pages. A normal mission end keeps
+its objective-based outcome and the existing player and wingman tables.
+An early departure always opens **PARTIAL REPORT**, with the last observed
+mission time and "the mission continued", even after a death or an objective
+success. A lost connection says "Connection lost". The outcome line reads
+**INCOMPLETE**. Single player never shows these pages.
+
+### Multiplayer mission record
+
+`opinionated`, requested by John on 2026-10-23: contributions belong to a
+player for the whole mission, across revivals, leaving, disconnection, AI
+takeover and host migration. A fresh mission clears the record. A different
+player reusing a lobby number does not inherit it.
+
+- The PLAYER kill and weapon tables add every life. Pilot status, damage and
+  landing grade describe the latest life. The wingman table keeps its existing
+  one-aircraft meaning: the latest aircraft of the first different flight
+  member. An earlier life of the player is never its wingman (agent decision).
+  A player taking an existing aircraft starts at its
+  current counters, excluding the previous pilot's work.
+- K, SCORES and side totals include humans and AI. AI rows use the original
+  flight callsign, marked AI, and accumulate across that aircraft lineage's
+  respawns. A departed human stays listed, marked left. AI work after taking
+  over is booked to its own row, while the former human's contribution stays.
+- Aircraft kills score one, or two when the victim is a human with the pilot
+  still aboard, for both human and AI shooters. Damage is measured in whole
+  aircraft and ratio is kills divided by losses, or kills with no losses.
+  K and SCORES also show cumulative tracked hits, including ground and friendly
+  hits as the weapon tables do; side hit totals retain their original side.
+  Ground kills remain in the kill table, outside the score. Friendly kills
+  retain the existing side/free-for-all rule. AI losses count once per life.
+- In PvP, AI kills count toward total and side limits. Agent decision: the
+  player limit also applies to each AI lineage, using the same threshold,
+  so every listed combatant follows the same rule. Co-op still has no kill
+  limit or winner, but its debrief includes the scores and side totals.
+- A revived human or AI keeps its original wing and position number in the
+  roster, spawn message, radio, HUD, data link, results, recording and server
+  log. Its internal plane id remains new; old wrecks remain distinct rows.
+  The current AI leader stays in charge; [later succession](ai.md#lead-hold-in-games-with-revival)
+  uses the retained original numbers.
+- Leave, End Mission, Return to Main Menu, Exit and connection failure can
+  show the client's locally retained record without a final host response.
+  Exit displays the report before closing on dismissal. The explicit test
+  script `exit` remains an automation terminator.
+- A partial report adds each sortie's aircraft, spawn time, observed end and
+  the number of revivals. It includes the latest received scores, aircraft
+  results and objectives, the kill categories and weapon tables, and the
+  mission messages received during the player's time there. Mission-wide
+  scores are the state observed, including any earlier contributions.
+
+Agent decisions for transport and presentation: the host supplies an ongoing
+report once per simulated second, on seating and before a clean departure.
+The client keeps it independently of its current aircraft and final results.
+A disconnected report stops at the last received state, never extrapolating
+unseen kills. It names both the departure time and the latest statistics time.
+Sortie loss times are the time the client first observed the reported loss,
+within the report interval plus network delay. Up to 1,024 sorties and the most
+recent 4,096 mission messages are retained locally. Score messages list up to
+1,024 combatants; side totals include every contribution. K shows 12 ranked rows per page; Ctrl+PageUp and Ctrl+PageDown turn pages.
+The compact debrief uses `A = AI` and `L = left the mission` legends.
 
 When a SAM site, gun or ship shot the pilot's aircraft down, page 2's pilot
 status table gains a **Shot down by** row with the unit's short name (SA-6,
 ZSU-23-4); the flight shows the same name in a message ("Shot down by SA-6")
 when its aircraft is destroyed. Neither appears for an aircraft's kill or when
 the pilot is flying (`opinionated`, agent decision, 2026-10-10; the networked
-debrief does not carry the name yet).
+debrief carries the same name).
 
 Closing the debrief returns to the **Quick Mission creator with every setting
 of the mission just flown**, not to the ordnance screen. Requested by John on
@@ -99,7 +153,7 @@ Quick Mission (medium confidence, see the research).
 | Landing grade | Average landing score as `NN%`, `-` with no landings | retail format; scoring fitted, below |
 | Elapsed time | Simulated seconds as `M:SS`; minutes do not wrap | retail |
 | WINGMAN column | One aircraft: the lowest-numbered AI member of Friendly Wing 1. All `-` when the player flies alone | retail |
-| PLAYER and WINGMAN columns in multiplayer | Each seat has its own debrief. Its PLAYER column is the plane that seat flies and its WINGMAN column is the first other member of that plane's wing, human or AI. Alone in its wing, the column is all `-`. With one seat this is the row above | agent decision, 2026-09-29 |
+| PLAYER and WINGMAN columns in multiplayer | Each player has its own debrief. Its PLAYER column accumulates the player's lives; physical status is the current plane and its WINGMAN column is the first other member of that plane's wing, human or AI. Alone in its wing, the column is all `-`. Single player retains its original columns | column selection: agent decision; cumulative PLAYER: John, 2026-10-23 |
 
 ### Weapon classes
 
@@ -222,8 +276,7 @@ succeed; what it counts is unknown, so this rule is not applied.
 A multiplayer game can bring a lost aircraft back: a player's revival, or the
 AI's respawn of its own aircraft. Each aircraft the mission started with is
 the root of a *lineage*, and every aircraft a revival or a respawn adds
-continues one (docs/ARCHITECTURE.md, "Death, revival and lives"). Retail has
-no respawns, so every rule here is an agent decision of the lobby pass's
+continues one (docs/ARCHITECTURE.md, "Death, revival and lives"). These objective-lineage rules are agent decisions of the lobby pass's
 follow-up F1, 2026-10-09; he asked that a respawned objective aircraft
 "should still say objective" and on 2026-10-10 found the counting rules below
 fine.

@@ -384,6 +384,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | End mission | Ctrl+Q | - | - |
 | Valkyries music | Ctrl+V | - | - |
 | Score board (network games) | K | - | - |
+| Score board: previous / next page (while open) | Ctrl+Page Up or Ctrl+Page Down | - | - |
 | Mark replay moment | Ctrl+B | - | - |
 | Restart flight | - | - | - |
 | Keyboard help | F11 | - | - |

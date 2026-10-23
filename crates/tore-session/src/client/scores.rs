@@ -117,6 +117,16 @@ pub fn winner_text(scores: &Scores) -> Option<String> {
             || "A player who left wins".to_owned(),
             |p| format!("{} wins", p.callsign),
         )),
+        Winner::Aircraft(root) => Some(
+            scores
+                .players
+                .iter()
+                .find(|p| p.ai == Some(root))
+                .map_or_else(
+                    || "An AI aircraft wins".into(),
+                    |p| format!("{} (AI) wins", p.callsign),
+                ),
+        ),
         Winner::Draw => Some("A draw".to_owned()),
     }
 }
@@ -133,7 +143,13 @@ pub fn summary(scores: &Scores) -> String {
             format!(
                 "{} {}{} {}/{} {:.2}",
                 n + 1,
-                p.callsign,
+                if p.ai.is_some() {
+                    format!("{} (AI)", p.callsign)
+                } else if p.left {
+                    format!("{} (left)", p.callsign)
+                } else {
+                    p.callsign.clone()
+                },
                 p.side
                     .map_or(String::new(), |s| format!(" ({})", side_name(s))),
                 p.kills,
@@ -183,6 +199,9 @@ mod tests {
             kill_owner: KillOwner::Side,
             players: vec![
                 PlayerScore {
+                    hits: 0,
+                    ai: None,
+                    left: false,
                     id: 2,
                     callsign: "Hawk".into(),
                     side: Some(Side::Enemy),
@@ -191,6 +210,9 @@ mod tests {
                     damage: 2_250,
                 },
                 PlayerScore {
+                    hits: 0,
+                    ai: None,
+                    left: false,
                     id: 0,
                     callsign: "Viper".into(),
                     side: None,
@@ -202,6 +224,7 @@ mod tests {
             sides: [
                 SideScore::default(),
                 SideScore {
+                    hits: 0,
                     kills: 3,
                     losses: 1,
                     damage: 2_250,
@@ -356,7 +379,12 @@ mod rig_tests {
         }));
         let client = &rig.players[viper].client;
         let scores = client.scores().unwrap();
-        let mut callsigns: Vec<&str> = scores.players.iter().map(|p| p.callsign.as_str()).collect();
+        let mut callsigns: Vec<&str> = scores
+            .players
+            .iter()
+            .filter(|p| p.ai.is_none())
+            .map(|p| p.callsign.as_str())
+            .collect();
         callsigns.sort_unstable();
         assert_eq!(callsigns, ["Hawk", "Viper"]);
         assert_eq!(scores.winner, Winner::NoneYet);

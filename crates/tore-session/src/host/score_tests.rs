@@ -149,7 +149,7 @@ fn a_human_shot_down_with_the_pilot_aboard_counts_two_and_an_ai_aircraft_one() {
         }
     );
     assert_eq!(rig.host.score.side(Side::Friendly).kills, 3);
-    assert_eq!(rig.host.score.side(Side::Enemy).losses, 1);
+    assert_eq!(rig.host.score.side(Side::Enemy).losses, 2);
     // Everyone flying hears within a second, ranked by kills.
     rig.run(Duration::from_millis(1100));
     for client in [viper, cobra] {
@@ -161,6 +161,7 @@ fn a_human_shot_down_with_the_pilot_aboard_counts_two_and_an_ai_aircraft_one() {
             scores
                 .players
                 .iter()
+                .filter(|p| p.ai.is_none())
                 .map(|p| (p.callsign.as_str(), p.side, p.kills, p.losses))
                 .collect::<Vec<_>>(),
             [
@@ -169,7 +170,7 @@ fn a_human_shot_down_with_the_pilot_aboard_counts_two_and_an_ai_aircraft_one() {
             ]
         );
         assert_eq!(scores.sides[0].kills, 3);
-        assert_eq!(scores.sides[1].losses, 1);
+        assert_eq!(scores.sides[1].losses, 2);
         assert_eq!(scores.winner, Winner::NoneYet);
         // The PvP default time limit, ten minutes, counts down.
         assert!(scores.seconds_left.is_some_and(|s| s <= 600 && s > 590));
@@ -179,7 +180,7 @@ fn a_human_shot_down_with_the_pilot_aboard_counts_two_and_an_ai_aircraft_one() {
 }
 
 #[test]
-fn a_human_who_ejected_counts_one_and_an_ai_shooter_scores_nothing() {
+fn a_human_who_ejected_counts_one_and_an_ai_shooter_scores_for_its_side() {
     let (mut rig, _, _) = two_sides(Mode::Pvp, &[(number::KILL_LIMIT, 0)]);
     // Cobra is hit by Viper, then ejects: one kill, the pilot not aboard.
     rig.host.world.combat.state.ledger.damaged(Kill {
@@ -196,7 +197,7 @@ fn a_human_who_ejected_counts_one_and_an_ai_shooter_scores_nothing() {
         .find(|c| c.plane.0 == ENEMY_HUMAN)
         .unwrap();
     cockpit.flight.systems.pilot.ejected = true;
-    // The enemy AI shoots Viper down: a loss, and nobody's kill.
+    // The enemy AI shoots Viper down: two kills for the AI and its side.
     shoot_down(&mut rig.host, ENEMY_AI, FRIENDLY_HUMAN);
     rig.run(Duration::from_millis(50));
     assert_eq!(
@@ -207,7 +208,7 @@ fn a_human_who_ejected_counts_one_and_an_ai_shooter_scores_nothing() {
         (tally(&rig, "Cobra").kills, tally(&rig, "Cobra").losses),
         (0, 1)
     );
-    assert_eq!(rig.host.score.side(Side::Enemy).kills, 0);
+    assert_eq!(rig.host.score.side(Side::Enemy).kills, 2);
     assert_eq!(tally(&rig, "Viper").ratio(), 1.);
     assert_eq!(tally(&rig, "Cobra").ratio(), 0.);
 }
@@ -221,14 +222,14 @@ fn damage_counts_against_opponents_only_and_a_free_for_all_makes_one_side_oppone
         damage(&rig, FRIENDLY_HUMAN, ENEMY_AI, 0.5),
         // Its own side's AI aircraft: no damage to an opponent.
         damage(&rig, FRIENDLY_HUMAN, FRIENDLY_AI, 0.4),
-        // The AI's hits count for nobody.
+        // The AI's hits count for its own row and side.
         damage(&rig, ENEMY_AI, FRIENDLY_HUMAN, 0.3),
     ] {
         rig.host.tally(fact, &seats);
     }
     assert_eq!(tally(&rig, "Viper").damage, 0.75);
     assert_eq!(rig.host.score.side(Side::Friendly).damage, 0.75);
-    assert_eq!(rig.host.score.side(Side::Enemy).damage, 0.);
+    assert_eq!(rig.host.score.side(Side::Enemy).damage, 0.3);
     assert_eq!(super::score::Tally::default().ratio(), 0.);
 
     // Free for all: another human of one's own side is an opponent, its AI
@@ -460,9 +461,9 @@ fn scores_go_out_at_most_once_a_second_and_only_when_they_change() {
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(late)));
     rig.run(Duration::from_millis(1100));
     let scores = last_scores(&rig, late);
-    assert_eq!(scores.players.len(), 3);
+    assert_eq!(scores.players.iter().filter(|p| p.ai.is_none()).count(), 3);
     assert!(scores.players.iter().any(|p| p.callsign == "Hawk"));
-    // A player who leaves leaves the list.
+    // A player who leaves stays in the mission history, marked as left.
     rig.clients[cobra].leave();
     assert!(rig.run_until(Duration::from_secs(4), |r| r.closed(cobra)));
     rig.run(Duration::from_millis(1100));
@@ -470,7 +471,70 @@ fn scores_go_out_at_most_once_a_second_and_only_when_they_change() {
         last_scores(&rig, viper)
             .players
             .iter()
-            .all(|p| p.callsign != "Cobra")
+            .any(|p| p.callsign == "Cobra" && p.left)
     );
     assert!(rig.clients.iter().all(|c| c.errors.is_empty()));
+}
+
+#[test]
+fn leave_and_drop_keep_side_contributions_through_ai_takeover_and_token_expiry() {
+    for dropped in [false, true] {
+        let (mut rig, viper, cobra) = two_sides(
+            Mode::Pvp,
+            &[(number::KILL_LIMIT, 0), (number::AI_RESPAWN, 0)],
+        );
+        shoot_down(&mut rig.host, FRIENDLY_HUMAN, ENEMY_AI);
+        let seats = seats_of(&rig);
+        rig.host
+            .tally(damage(&rig, FRIENDLY_HUMAN, ENEMY_HUMAN, 0.5), &seats);
+        rig.run(Duration::from_millis(1200));
+        let order = order(&rig, "Viper");
+        let remaining = if dropped {
+            let _silent = rig.clients.remove(viper);
+            assert!(rig.run_until(Duration::from_secs(8), |r| {
+                !r.host.peers.values().any(|p| p.callsign == "Viper")
+            }));
+            cobra - 1
+        } else {
+            rig.clients[viper].leave();
+            assert!(rig.run_until(Duration::from_secs(4), |r| r.closed(viper)));
+            cobra
+        };
+        rig.run(Duration::from_millis(1200));
+        assert_eq!(
+            rig.host.world.roster.plane(PlaneId(0)).unwrap().pilot,
+            Pilot::Ai
+        );
+        // Even an expired/forgotten return token cannot erase mission history.
+        rig.host.rejoin.players.clear();
+        rig.run(Duration::from_millis(1200));
+        let scores = last_scores(&rig, remaining);
+        let departed = scores
+            .players
+            .iter()
+            .find(|p| p.callsign == "Viper")
+            .unwrap();
+        assert_eq!(
+            (departed.kills, departed.damage, departed.left),
+            (1, 500, true)
+        );
+        assert_eq!((scores.sides[0].kills, scores.sides[0].damage), (1, 500));
+        assert_eq!(rig.host.score.player(order).unwrap().tally.kills, 1);
+        // AI work after takeover is not charged to its former pilot.
+        shoot_down(&mut rig.host, FRIENDLY_HUMAN, ENEMY_HUMAN);
+        rig.run(Duration::from_millis(1200));
+        assert_eq!(rig.host.score.player(order).unwrap().tally.kills, 1);
+        assert_eq!(rig.host.score.side(Side::Friendly).kills, 3);
+        assert_eq!(rig.host.score.ai[&PlaneId(0)].kills, 2);
+        rig.host.end_mission(EndReason::EndedByServer, None);
+        rig.run(Duration::from_millis(300));
+        let final_results = rig.clients[remaining].results.last().unwrap();
+        assert!(
+            final_results
+                .rows
+                .iter()
+                .any(|r| r.plane == 0 && r.left && r.callsign.as_deref() == Some("Viper"))
+        );
+        assert_eq!(final_results.scores.as_ref().unwrap().sides[0].kills, 3);
+    }
 }

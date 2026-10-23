@@ -113,7 +113,11 @@ impl crate::App {
         self.close_direct();
         self.close_internet();
         self.multiplayer_menu = Menu::default();
-        self.screen = crate::Screen::Main;
+        self.screen = if self.quick.debrief.is_some() {
+            crate::Screen::Quick
+        } else {
+            crate::Screen::Main
+        };
         self.menu.state.cancel();
     }
 }

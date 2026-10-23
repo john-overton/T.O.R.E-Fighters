@@ -2359,9 +2359,8 @@ mission start: same slot, the seed rule (its rank among the wing's member
 numbers no human holds), fresh awareness, neutral, home the nearest runway its
 side may use. It leads if it is its wing's leader, and otherwise takes the
 lowest formation slot no living AI wingman of its wing holds (the lobby pass's
-slice R1, agent decision: its member number, which grows with every revival
-and respawn, could pass slot 9 and fail the AI step, and a rank could share a
-slot with a wingman in a wing with gaps). A new aircraft (a revival's or a
+slice R1, agent decision: formation slots are independent of the displayed
+member number, so gaps and older recordings with high numbers remain valid). A new aircraft (a revival's or a
 respawn's, `AiWings::insert_new`) is seeded by its plane id instead of the rank
 (`new_actor_seed`, apart from every mission seed), flies its wing's mission
 skill and takes its wing's orders. `ActorInsert::from_removed` puts an actor back as it left. The
@@ -6991,7 +6990,7 @@ GiveBack):
   it.
 - `MissionCommand::Revive { seat, spawn }` abandons the seat's lost plane and
   seats it in a **new plane**: the next plane id after every plane the mission
-  has had, in the old plane's wing with the next free member number, the same
+  has had, in the old plane's wing with its original member number, the same
   aircraft, at the spawn's position, heading and speed, with the spawn's
   loadout and full fuel. It is built as the mission builds an AI aircraft with
   a lobby loadout (`plane_loadouts`), then taken by the existing handoff, so
@@ -7059,8 +7058,8 @@ build settled, each an agent decision unless the design above says it:
   players' orphans, and a held or abandoned plane is refused to anyone else
   ("Plane 0 is destroyed or has lost its pilot.").
 - **The new plane** takes the next id (one past every plane the mission has
-  had, retired ones included, and past any combat row) and the next member of
-  the old plane's wing (one past the wing's highest). Its combat row is made
+  had, retired ones included, and past any combat row) and retains the original
+  member number of its lineage. Its combat row is made
   as the mission's other aircraft are and given that id; the AI aircraft is
   built as an AI aircraft with a lobby loadout is (the stores, fuel and
   payload, fresh sensors from its configuration's profiles, the flares and
@@ -7190,15 +7189,15 @@ a wingman of its current lead). Agent decisions unless marked:
   (`ai_wings::new_actor_seed`), apart from every mission seed.
 - **The command.** `MissionCommand::Respawn { root, spawn }` (journal
   variant 6) adds an AI plane of the lineage's aircraft in its wing with the
-  next plane id and member number (`World::respawn_plane`). Every connection
+  next plane id and original member number (`World::respawn_plane`). Every connection
   is sent Spawned, as for a revival; a joiner gets it with the others. The
   host builds each Spawned from the plane the step made, so a revival and a
   respawn in one tick each name their own plane.
 - **Joining the flight.** An aircraft that joins a wing (`AiMission::
   insert_actor`) takes the lowest formation slot no living AI wingman holds,
-  never its member number, which grows with every revival and respawn and
-  once passed slot 9, failing the AI step. Its member number puts it last in
-  line for the lead.
+  independently of its displayed member number. The original member number
+  is retained across revival and respawn; the existing lead-hold and succession
+  rules still decide who leads.
 - **Retiring AI wrecks.** The AI wreck a respawn replaces joins the wrecks
   waiting to retire; it rests once combat's falling wreck has landed and its
   pilot's escape is over, and a later revival or respawn may retire it after
@@ -7335,7 +7334,7 @@ reach the kill limit.
   opponents (in aircraft: a whole aircraft's hit points is 1.0), losses, and the
   ratio (kills over losses, kills alone with no loss). A kill is credited to the
   player flying the shooter's plane at the kill's tick; a lost plane's late
-  missile credits the player who flew it; an AI shooter scores nothing.
+  missile credits the player who flew it; an AI shooter scores against its lineage, and both human and AI contributions count for the side.
   Opponents are the other side's aircraft under `sides`, and every aircraft
   but one's own under `free-for-all` (the AI on one's own side does not count;
   `free-for-all` changes the scoring only, never who can hit whom).
@@ -7369,9 +7368,9 @@ unless the design above says it:
   `aircraft` false. Each target's end is recorded once: the set of recorded
   targets is the recorder's only state between ticks.
 - **Tallies.** The host keeps them by connection (its join order, never
-  reused), so a lobby id given out again starts afresh; a player who leaves
-  leaves the list, and what it scored stays in its side's tally. A side's
-  tally is its players' only: the AI scores nothing, for its side either.
+  reused), so a lobby id given out again starts afresh. Departed players remain
+  listed, marked left, and their contributions stay in their side's tally.
+  AI lineages have their own rows and also contribute to side totals.
   Kills and damage count against opponents only; a kill of one's own side
   takes nothing away (retail's penalty, if any, is unknown).
 - **Co-op.** Scores go out in co-op too, so K works there, but the scoring
@@ -7408,6 +7407,18 @@ unless the design above says it:
 
 ##### The multiplayer debrief
 
+The multiplayer mission record is specified in
+[the debrief spec](spec/debrief.md#multiplayer-mission-record). `host/flight_report.rs`
+keeps human counter deltas by stable join order, AI counters by lineage, and
+hit totals by the side where each contribution happened. It samples before ownership
+changes and when producing reports; AI time is excluded from the former human's
+counters. `host/score.rs` retains human history, AI lineage tallies and side
+totals for the whole mission. The Scores checkpoint part carries all of them.
+Protocol 69's FlightReport supplies an ongoing debrief and results to the
+client once a second and at seating/departure. `client/flight_report.rs` keeps
+that report, sortie starts and received messages across aircraft changes and
+connection loss. The app's early-exit path reads it without needing final Results.
+
 `tore_world::debrief::results(&World)` gives a row for every plane the mission
 had, retired planes included, from the same `Ending::pilot` rule each seat's
 report uses: status, damage, kills by the ten rows summed, friendly fire,
@@ -7416,12 +7427,12 @@ or AI, and every callsign that flew it), the scores and the winner, and sends
 **Results** (message 32) to every connection at the mission's end, observers
 and players in the lobby included.
 
-The debrief keeps the retail pages for the player's own plane and, in a
-networked game, adds after the first page: **SCORES** (PvP only: the winner,
+The debrief keeps the retail pages, with cumulative human counters across
+lives, and adds after the first page: **SCORES** (co-op and PvP: any winner,
 the ranking with each player's kills, losses, damage and ratio) and
 **RESULTS** (every aircraft by side and wing, fifteen to a page:
 callsign or AI, aircraft, status, kills, hit percentage, damage). Single
-player's debrief is unchanged: the pages appear only with a Results message.
+player's debrief is unchanged. Early exits use the locally retained ongoing report.
 
 *Built (F2-D, 2026-10-05).* What the build settled, each an agent decision
 unless the design above says it:
@@ -7447,17 +7458,17 @@ unless the design above says it:
   human who flew the plane, remembered by the plane when its player leaves
   (`Scoring::callsigns`, noted every tick and again at the end); the wire
   holds one callsign, so a plane flown by several players names the last. The
-  final scores ride along in PvP only: co-op sends none.
+  final scores ride along in co-op and PvP.
 - **The client** keeps the newest Results (`Client::results`) until the next
   mission or flight starts, logs a `results` line (the words of
   `tore_session::client::results::summary`), and `tore-bot` prints it
   (`NAME: results: ...`).
 - **The pages** (`net/debrief.rs`, drawn by `debrief.rs`): the debrief screen
   turns **SCORES** and **RESULTS** in after the first page when the client
-  holds Results, in that order, then the retail pages 2 to 5. SCORES is PvP
-  only: the winner (or "No winner was named."), the heading of the tally, then
-  rank, pilot, side, kills, lost, damage in aircraft and ratio for fifteen
-  players a page, and each side's totals under the last when the fight is by
+  holds Results, in that order, then the retail pages 2 to 5. SCORES covers
+  co-op and PvP: any winner, the heading of the tally, then rank, pilot, side,
+  kills, lost, tracked hits, damage in aircraft and ratio for fifteen
+  combatants a page, and each side's totals under the last when the fight is by
   sides. RESULTS lists every aircraft fifteen to a page, **a page never mixing
   the two sides** (so 20 against 10 is three pages, not two), headed
   "RESULTS : FRIENDLY SIDE" or "ENEMY SIDE": wing and member, callsign or AI,

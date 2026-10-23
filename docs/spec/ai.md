@@ -502,8 +502,8 @@ plane for it), or flying back after a revival. Single player, and a game with
   plane: from the start, by taking it, or by succeeding a lost AI lead. When
   an AI lead is lost while every human in the flight waits to revive, the
   lowest of them owns the lead. "Lowest" is the member number of the human's
-  current plane, then the seat, the order the rule above uses; a revived
-  human's new plane has a higher member number than its old one.
+  current plane, then the seat, the order the rule above uses. Revival now
+  retains that original number (John, 2026-10-23).
 - **The stand-in.** While the owner does not fly, the flight is led by a
   stand-in chosen by the rule above (the lowest flying human, else the lowest
   flying AI member). Everything that follows a leader follows the stand-in.
@@ -532,9 +532,10 @@ plane for it), or flying back after a revival. Single player, and a game with
   revival puts it in another flight, has left the flight the same way; one
   who leaves with a lost plane keeps its held seat and the lead.
 - **AI-only flights** keep the rule above: the lead passes down the flight
-  as aircraft are lost, and an AI aircraft that respawns joins as the last
-  wingman of the current lead, so the loop goes on for as long as the
-  mission does.
+  as aircraft are lost. A respawn joins behind the current lead in the lowest
+  free formation slot and does not displace it. Agent decision applying John's
+  numbering request of 2026-10-23: later succession uses the retained original
+  member number, under the existing lowest-numbered-member rule.
 
 ### AI respawn in networked games
 
@@ -562,8 +563,8 @@ back. Single player never respawns.
 - **Joining the flight.** It is the flight's last wingman: it takes the lowest
   formation slot no living wingman holds (never above slot 9) and flies to its
   lead; a flight in a mission of opportunity gives it free engagement like the
-  rest. Its member number is one past the flight's highest, so it is last in
-  line for the lead.
+  rest. Its original member number and callsign are retained (John,
+  2026-10-23); formation slots remain separate from those labels.
 - **Silent.** No radio call and no HUD line for an AI respawn.
 
 ### Mission of opportunity after a lost human leader

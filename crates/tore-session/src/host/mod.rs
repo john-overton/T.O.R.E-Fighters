@@ -52,6 +52,7 @@ pub mod content;
 #[cfg(test)]
 mod content_tests;
 mod discover;
+mod flight_report;
 pub mod inputs;
 mod king;
 #[cfg(test)]
@@ -825,9 +826,8 @@ pub fn unique_callsign<'a>(callsign: &str, taken: impl Iterator<Item = &'a str> 
     unreachable!("some suffix is free")
 }
 
-/// The wire's debrief for a seat's report.
-pub fn debrief_message(report: &debrief::Report) -> Debrief {
-    let pilot = |p: &debrief::Pilot| DebriefPilot {
+pub(super) fn debrief_pilot(p: &debrief::Pilot) -> DebriefPilot {
+    DebriefPilot {
         status: match p.status {
             debrief::Status::Alive => PilotStatus::Alive,
             debrief::Status::Ejected => PilotStatus::Ejected,
@@ -847,7 +847,11 @@ pub fn debrief_message(report: &debrief::Report) -> Debrief {
         enemy_gun: p.enemy_gun,
         enemy_aaa: p.enemy_aaa,
         shot_down_by: p.shot_down_by.clone(),
-    };
+    }
+}
+
+/// The wire's debrief for a seat's report.
+pub fn debrief_message(report: &debrief::Report) -> Debrief {
     Debrief {
         success: report.outcome == debrief::Outcome::Success,
         objectives: report
@@ -863,8 +867,8 @@ pub fn debrief_message(report: &debrief::Report) -> Debrief {
             })
             .collect(),
         elapsed_seconds: report.elapsed_seconds,
-        player: pilot(&report.player),
-        wingman: report.wingman.as_ref().map(pilot),
+        player: debrief_pilot(&report.player),
+        wingman: report.wingman.as_ref().map(debrief_pilot),
     }
 }
 
@@ -3037,6 +3041,8 @@ impl Host {
     /// AI at the next tick, then it is back in the lobby, still connected,
     /// its slot and loadout kept and its ready mark cleared.
     fn leave(&mut self, connection: ConnectionId) {
+        self.report_update();
+        self.send_flight_report(connection);
         let Some(peer) = self.peers.get(&connection) else {
             return;
         };
@@ -3044,8 +3050,8 @@ impl Host {
             Stage::Seated => {
                 let seat = peer.seat.expect("a seated player has a seat");
                 let callsign = peer.callsign.clone();
-                if let Some(report) = debrief::capture(&self.world, seat) {
-                    let message = Message::Debrief(Box::new(debrief_message(&report)));
+                if let Some(report) = self.player_report(connection) {
+                    let message = Message::Debrief(Box::new(report));
                     self.send(connection, &message);
                 }
                 self.gives.push((seat, callsign));
@@ -3740,6 +3746,9 @@ impl Host {
         // driver, which adds the changes made since the last step and drains
         // the world after it, as a standby replays it.
         let mut out = std::mem::take(&mut self.out);
+        if !takes.is_empty() || !given.is_empty() || !journal.mission.is_empty() {
+            self.report_update();
+        }
         let notes = match self.world.step(journal, &mut out) {
             Ok((journal, notes)) => {
                 self.record_tick(&journal.inputs);
@@ -3787,6 +3796,7 @@ impl Host {
         self.sort_seats(tick, &out, &wide);
         // Stage F phase 2: the tick's score facts.
         self.score_tick(tick, &out);
+        self.report_tick(tick);
         if std::mem::take(&mut self.roster_dirty) {
             self.broadcast_roster();
         }
@@ -3876,7 +3886,9 @@ impl Host {
             destroyed: self.tracker.destroyed().iter().copied().collect(),
             surface_digest: self.world.terrain.surface.digest(),
         }));
+        self.report_seated(connection, plane);
         self.send(connection, &seated);
+        self.send_flight_report(connection);
         self.log(HostLog::Seated {
             tick,
             seat: seat.0,
@@ -4255,6 +4267,7 @@ impl Host {
         let now = self.now;
         // Stage F phase 2: the final scores, the observers stop watching,
         // and every plane's results go out, before Mission ended.
+        self.report_update();
         self.score_end(reason);
         self.observe_end();
         self.away_end();
@@ -4270,14 +4283,12 @@ impl Host {
                 continue;
             }
             let report = match peer.stage {
-                Stage::Seated => peer
-                    .seat
-                    .and_then(|seat| debrief::capture(&self.world, seat)),
+                Stage::Seated => self.player_report(id),
                 _ => None,
             };
             self.send(id, &ended);
             if let Some(report) = report {
-                self.send(id, &Message::Debrief(Box::new(debrief_message(&report))));
+                self.send(id, &Message::Debrief(Box::new(report)));
             }
             if let Some(peer) = self.peers.get_mut(&id) {
                 peer.lobby.ready = false;

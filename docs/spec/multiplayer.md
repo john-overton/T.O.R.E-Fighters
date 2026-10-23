@@ -448,3 +448,10 @@ A new round rebuilds from the lobby and applies the humans' current choices.
 No message layout changes; QMC mission text gains `share-flight-loadout yes`.
 Older mission parsers do not understand that key, so the lead must account for
 compatibility when assigning the next protocol number.
+
+## Mission statistics and revival identity
+
+John's additions of 2026-10-23 are specified in the
+[debrief mission record](debrief.md#multiplayer-mission-record): cumulative human
+and AI statistics, departed players retained, partial reports on early exits,
+AI scoring toward limits, and original flight positions kept across respawns.

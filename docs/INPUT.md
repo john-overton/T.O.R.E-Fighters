@@ -1382,3 +1382,7 @@ The dedicated-server [feedback form](spec/replay-feedback.md) uses existing
 menu inputs, with Tab between field and buttons and Escape to cancel. Its
 on-screen keyboard accepts the controller's existing menu directions and
 accept/back buttons. No global flight binding is added.
+
+While the multiplayer score board (K) is open, Ctrl+PageUp and Ctrl+PageDown
+page through its human and AI rows. These shortcuts leave ordinary flight
+controls unchanged when the board is closed. See [multiplayer](MULTIPLAYER.md#debrief).

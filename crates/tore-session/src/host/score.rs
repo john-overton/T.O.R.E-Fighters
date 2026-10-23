@@ -8,7 +8,7 @@
 //! - **Kills**: an opponent's aircraft lost and credited to a plane a player
 //!   flies at the kill's tick, or flew last when the plane itself is lost (a
 //!   late missile). A human's plane lost with its pilot aboard counts two, any
-//!   other aircraft one; ground objects, the AI's kills and kills of one's own
+//!   other aircraft one; ground objects and kills of one's own
 //!   side's aircraft count nothing.
 //! - **Damage**: the fractions of an opponent aircraft's full hit points a
 //!   player's hits took, so a whole aircraft is 1.0.
@@ -18,8 +18,8 @@
 //! Opponents are the other side's aircraft under `sides`; under
 //! `free-for-all` they are also the other humans of one's own side (the AI of
 //! one's own side never counts). Each side's tally is its players' (those
-//! who left included). Players are tallied by their connection, so a lobby
-//! id given out again starts afresh; a player who leaves leaves the list.
+//! who left included) plus its AI lineages. Players are tallied by stable join order. Departed players stay
+//! in the mission history, independently of rejoin token expiry or reused lobby ids.
 //!
 //! In PvP a kill limit ends the mission ([`EndReason::KillLimit`]) at the
 //! tick the kills of every player together (`total`), of one side (`side`)
@@ -49,7 +49,7 @@ use tore_world::world::TickOutput;
 /// The fewest ticks between two Scores messages: one second.
 pub const SCORES_INTERVAL_TICKS: u64 = TICKS_PER_SECOND;
 /// The most players a Scores message lists (the wire's limit).
-const LISTED_PLAYERS: usize = 64;
+const LISTED_PLAYERS: usize = 1_024;
 
 /// One player's or one side's tally.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -91,6 +91,7 @@ impl Tally {
 
     fn wire(&self) -> SideScore {
         SideScore {
+            hits: 0,
             kills: self.kills,
             losses: self.losses,
             damage: thousandths(self.damage),
@@ -114,6 +115,9 @@ pub(super) struct Player {
 /// The host's scoring for the mission flying: reset when a mission starts.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Scoring {
+    pub(super) accounts: super::flight_report::Accounts,
+    members: BTreeMap<u64, (u8, String)>,
+    pub(super) ai: BTreeMap<PlaneId, Tally>,
     /// By the player's connection (its `Entry::order`, which no later
     /// connection reuses).
     players: BTreeMap<u64, Player>,
@@ -121,19 +125,28 @@ pub(super) struct Scoring {
     sides: [Tally; 2],
     /// The connection that flew each plane last, for a lost plane's late
     /// kills.
-    flyers: BTreeMap<PlaneId, u64>,
+    pub(super) flyers: BTreeMap<PlaneId, u64>,
     /// The callsign of the last human who flew each plane, for the results
     /// (`results.rs`), kept after the player leaves.
     pub(super) callsigns: super::results::Callsigns,
     /// The tallies changed since Scores last went out.
-    changed: bool,
+    pub(super) changed: bool,
     /// The players and sides the last Scores listed.
-    listed: Vec<(u64, Option<Side>)>,
+    listed: Vec<(u64, Option<Side>, bool)>,
     /// Raised each time the scores change; each connection's last.
     version: u64,
     sent: BTreeMap<ConnectionId, u64>,
     /// The tick Scores last went out.
     last_sent: Option<u64>,
+}
+
+struct ScoreEntry {
+    ai: Option<u32>,
+    order: u64,
+    id: u8,
+    callsign: String,
+    left: bool,
+    player: Player,
 }
 
 impl Scoring {
@@ -170,6 +183,9 @@ impl Host {
         // Who flies what now: each seat's connection, and each plane's last.
         let mut seats: BTreeMap<SeatId, u64> = BTreeMap::new();
         for peer in self.peers.values() {
+            self.score
+                .members
+                .insert(peer.lobby.order, (peer.lobby.id, peer.callsign.clone()));
             if let Some(seat) = peer.seat {
                 seats.insert(seat, peer.lobby.order);
             }
@@ -183,14 +199,11 @@ impl Host {
         for fact in facts.facts {
             self.tally(fact, &seats);
         }
-        // A player whose token still works (slice K5) keeps its tally: it
-        // may come back.
-        let connected: Vec<u64> = self.peers.values().map(|p| p.lobby.order).collect();
-        let now = self.token_clock();
-        let rejoin = &self.rejoin;
-        self.score
-            .players
-            .retain(|order, _| connected.contains(order) || rejoin.keeps(*order, now));
+        if tick.is_multiple_of(TICKS_PER_SECOND) {
+            self.report_update();
+        }
+        // Mission history outlives rejoin tokens and lobby ids. Only a new
+        // mission clears it; side totals already follow that same rule.
         if self.kill_limit_reached() {
             let next = self.after_end();
             self.end_mission(EndReason::KillLimit, next);
@@ -231,7 +244,18 @@ impl Host {
 
     /// The side `plane` flies for.
     fn side_of(&self, plane: PlaneId) -> Option<Side> {
-        self.world.roster.plane(plane).map(|p| p.slot.wing.side)
+        self.world
+            .roster
+            .planes()
+            .iter()
+            .chain(self.world.revival.retired())
+            .find(|p| p.id == plane)
+            .map(|p| p.slot.wing.side)
+    }
+
+    fn ai_tally(&mut self, plane: PlaneId) -> &mut Tally {
+        let root = self.world.revival.root_of(plane);
+        self.score.ai.entry(root).or_default()
     }
 
     /// The fight in force: by sides in co-op, whatever the setting says.
@@ -284,39 +308,50 @@ impl Host {
         // counts for nobody.
         let credit = |host: &Self, shooter: Option<Flown>, victim: &Victim| {
             let (shooter, flown) = (shooter?, victim.flown?);
-            if shooter.pilot == Pilot::Ai
-                || !victim.aircraft
-                || !host.opponents(shooter.plane, flown)
-            {
+            if !victim.aircraft || !host.opponents(shooter.plane, flown) {
                 return None;
             }
             let side = host.side_of(shooter.plane)?;
-            Some((host.credited(shooter, seats), side, flown))
+            Some((host.credited(shooter, seats), side, flown, shooter.plane))
         };
         let changed = match fact {
             Fact::Kill {
                 shooter,
                 victim,
                 pilot_aboard,
-            } => credit(self, shooter, &victim).map(|(player, side, flown)| {
-                let kills = if pilot_aboard && matches!(flown.pilot, Pilot::Human(_)) {
-                    2
-                } else {
-                    1
-                };
-                self.score.sides[side_index(side)].kills += kills;
-                if let Some(player) = player {
-                    self.score.players.entry(player).or_default().tally.kills += kills;
+            } => {
+                if let Some(flown) = victim.flown
+                    && flown.pilot == Pilot::Ai
+                    && let Some(side) = self.side_of(flown.plane)
+                {
+                    self.ai_tally(flown.plane).losses += 1;
+                    self.score.sides[side_index(side)].losses += 1;
+                    self.score.changed = true;
                 }
-            }),
+                credit(self, shooter, &victim).map(|(player, side, flown, shooter)| {
+                    let kills = if pilot_aboard && matches!(flown.pilot, Pilot::Human(_)) {
+                        2
+                    } else {
+                        1
+                    };
+                    self.score.sides[side_index(side)].kills += kills;
+                    if let Some(player) = player {
+                        self.score.players.entry(player).or_default().tally.kills += kills;
+                    } else {
+                        self.ai_tally(shooter).kills += kills;
+                    }
+                })
+            }
             Fact::Damage {
                 shooter,
                 victim,
                 fraction,
-            } => credit(self, shooter, &victim).map(|(player, side, _)| {
+            } => credit(self, shooter, &victim).map(|(player, side, _, shooter)| {
                 self.score.sides[side_index(side)].damage += fraction;
                 if let Some(player) = player {
                     self.score.players.entry(player).or_default().tally.damage += fraction;
+                } else {
+                    self.ai_tally(shooter).damage += fraction;
                 }
             }),
             Fact::Loss { plane, seat } => self.side_of(plane).map(|side| {
@@ -342,7 +377,10 @@ impl Host {
         match self.settings.kill_owner() {
             KillOwner::Total => friendly.kills + enemy.kills >= limit,
             KillOwner::Side => friendly.kills >= limit || enemy.kills >= limit,
-            KillOwner::Player => self.score.players.values().any(|p| p.tally.kills >= limit),
+            KillOwner::Player => {
+                self.score.players.values().any(|p| p.tally.kills >= limit)
+                    || self.score.ai.values().any(|p| p.kills >= limit)
+            }
         }
     }
 
@@ -362,12 +400,12 @@ impl Host {
             Fight::FreeForAll => {
                 let ranked = self.ranked();
                 match ranked.as_slice() {
-                    [(best, first), rest @ ..]
-                        if rest.first().is_none_or(|(_, second)| {
-                            first.tally.value(tally) > second.tally.value(tally)
+                    [first, rest @ ..]
+                        if rest.first().is_none_or(|second| {
+                            first.player.tally.value(tally) > second.player.tally.value(tally)
                         }) =>
                     {
-                        Winner::Player(best.lobby.id)
+                        first.ai.map_or(Winner::Player(first.id), Winner::Aircraft)
                     }
                     _ => Winner::Draw,
                 }
@@ -375,28 +413,83 @@ impl Host {
         }
     }
 
-    /// The connected players with their tallies, best first by the tally,
-    /// then in lobby order.
-    fn ranked(&self) -> Vec<(&super::Peer, Player)> {
-        let tally = self.settings.tally();
-        let mut players: Vec<(&super::Peer, Player)> = self
+    pub(super) fn flight_callsign(&self, plane: PlaneId) -> String {
+        let planes: Vec<_> = self
+            .world
+            .roster
+            .planes()
+            .iter()
+            .chain(self.world.revival.retired())
+            .collect();
+        let Some(own) = planes.iter().find(|p| p.id == plane) else {
+            return format!("Aircraft {}", plane.0);
+        };
+        crate::client::results::flight_label_for(
+            planes.iter().map(|p| p.slot.wing),
+            own.slot.wing,
+            own.slot.member,
+        )
+    }
+
+    pub(super) fn score_left(&self, order: u64) -> bool {
+        !self
             .peers
             .values()
-            .filter(|peer| !matches!(peer.stage, Stage::Closing { .. }))
-            .map(|peer| {
-                let player = self
-                    .score
-                    .players
-                    .get(&peer.lobby.order)
-                    .copied()
-                    .unwrap_or_default();
-                (peer, player)
+            .any(|p| p.lobby.order == order && !matches!(p.stage, Stage::Closing { .. }))
+    }
+
+    /// Includes departed players, keyed by join order, never a reused lobby id.
+    fn ranked(&self) -> Vec<ScoreEntry> {
+        let mut members = self.score.members.clone();
+        for peer in self.peers.values() {
+            members.insert(peer.lobby.order, (peer.lobby.id, peer.callsign.clone()));
+        }
+        let mut players: Vec<_> = members
+            .into_iter()
+            .map(|(order, (id, callsign))| ScoreEntry {
+                ai: None,
+                order,
+                id,
+                callsign,
+                left: self.score_left(order),
+                player: self.score.players.get(&order).copied().unwrap_or_default(),
             })
             .collect();
-        players.sort_by(|(a, pa), (b, pb)| {
-            pa.tally
-                .rank(&pb.tally, tally)
-                .then(a.lobby.order.cmp(&b.lobby.order))
+        for root in self.world.lineage_roots() {
+            let head = self.world.lineage_head(root);
+            let active_ai = self
+                .world
+                .roster
+                .plane(head)
+                .is_some_and(|p| p.pilot == Pilot::Ai);
+            let tally = self.score.ai.get(&root).copied().unwrap_or_default();
+            if !active_ai
+                && tally == Tally::default()
+                && self
+                    .score
+                    .accounts
+                    .ai
+                    .get(&root.0)
+                    .map_or(0, super::flight_report::hits)
+                    == 0
+            {
+                continue;
+            }
+            let side = self.side_of(root);
+            players.push(ScoreEntry {
+                ai: Some(root.0),
+                order: u64::MAX / 2 + u64::from(root.0),
+                id: 0,
+                callsign: self.flight_callsign(root),
+                left: false,
+                player: Player { tally, side },
+            });
+        }
+        players.sort_by(|a, b| {
+            a.player
+                .tally
+                .rank(&b.player.tally, self.settings.tally())
+                .then(a.order.cmp(&b.order))
         });
         players
     }
@@ -418,16 +511,26 @@ impl Host {
                 .ranked()
                 .into_iter()
                 .take(LISTED_PLAYERS)
-                .map(|(peer, player)| PlayerScore {
-                    id: peer.lobby.id,
-                    callsign: peer.callsign.clone(),
-                    side: player.side,
-                    kills: player.tally.kills,
-                    losses: player.tally.losses,
-                    damage: thousandths(player.tally.damage),
+                .map(|entry| PlayerScore {
+                    hits: match entry.ai {
+                        Some(root) => self.score.accounts.ai.get(&root),
+                        None => self.score.accounts.totals.get(&entry.order),
+                    }
+                    .map_or(0, super::flight_report::hits),
+                    ai: entry.ai,
+                    left: entry.left,
+                    id: entry.id,
+                    callsign: entry.callsign,
+                    side: entry.player.side,
+                    kills: entry.player.tally.kills,
+                    losses: entry.player.tally.losses,
+                    damage: thousandths(entry.player.tally.damage),
                 })
                 .collect(),
-            sides: self.score.sides.map(|side| side.wire()),
+            sides: std::array::from_fn(|index| SideScore {
+                hits: self.score.accounts.side_hits[index],
+                ..self.score.sides[index].wire()
+            }),
             winner,
         }
     }
@@ -442,10 +545,10 @@ impl Host {
         {
             return;
         }
-        let listed: Vec<(u64, Option<Side>)> = self
+        let listed: Vec<(u64, Option<Side>, bool)> = self
             .ranked()
             .iter()
-            .map(|(peer, player)| (peer.lobby.order, player.side))
+            .map(|entry| (entry.order, entry.player.side, entry.left))
             .collect();
         if std::mem::take(&mut self.score.changed) || listed != self.score.listed {
             self.score.version += 1;
