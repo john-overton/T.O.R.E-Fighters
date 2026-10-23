@@ -14,9 +14,10 @@ use std::{
 };
 use tore_replay::{self as replay, Frame, Writer};
 
-// Agent decision: bound ALL unflushed frames, not only the channel. Together
-// with the unchanged 120-frame chunks this preserves the old crash-loss bound.
-const PENDING_FRAMES: u64 = 120;
+// The lead requested 60 seconds of headroom on 2026-10-23 so multi-second
+// disk stalls do not end recording. This bounds the queue AND current chunk;
+// pending frames are volatile. The writer's 3,600-frame sync cadence is unchanged.
+const PENDING_FRAMES: u64 = 60 * replay::model::TICKS_PER_SECOND;
 const BACKLOG: &str = "replay writer queue full: disk fell behind; recording stopped, incomplete .partial file retained";
 
 #[derive(Default)]
@@ -328,6 +329,7 @@ mod tests {
 
     #[test]
     fn blocked_disk_exhausts_budget_without_waiting_then_drains_to_partial_and_joins() {
+        assert_eq!(PENDING_FRAMES, 7_200);
         let folder = folder("blocked");
         let path = folder.join("server-blocked.tore-replay");
         let output = path.clone();
@@ -352,7 +354,7 @@ mod tests {
         for n in 0..PENDING_FRAMES {
             worker.push(tick(n)).unwrap();
         }
-        assert_eq!(worker.push(tick(120)).unwrap_err(), BACKLOG);
+        assert_eq!(worker.push(tick(PENDING_FRAMES)).unwrap_err(), BACKLOG);
         assert!(!joined.load(Ordering::Acquire));
         release.send(()).unwrap();
         assert!(worker.finish(0).unwrap_err().contains("incomplete"));
@@ -361,7 +363,7 @@ mod tests {
         let partial = replay::partial_path(&path);
         let r = replay::Recording::open(&partial).unwrap();
         assert!(!r.complete());
-        assert_eq!(r.frame_count(), 120);
+        assert_eq!(r.frame_count(), PENDING_FRAMES);
         assert!(
             path.with_extension("log").exists(),
             "incomplete recordings bypass retention"
@@ -370,11 +372,77 @@ mod tests {
     }
 
     #[test]
+    fn five_seconds_without_writer_progress_keeps_every_frame_and_feedback() {
+        let folder = folder("five-second-stall");
+        let path = folder.join("server-stall.tore-replay");
+        let output = path.clone();
+        let options = Options {
+            folder: folder.clone(),
+            kept: 0,
+        };
+        let (release, gate) = mpsc::channel();
+        let mut worker = Worker::spawn(move |rx, progress| {
+            gate.recv().unwrap();
+            let writer = Writer::create(&output, &replay::Header::default()).unwrap();
+            let log = BufWriter::new(File::create(output.with_extension("log")).unwrap());
+            write(rx, progress, writer, log, vec![], options)
+        })
+        .unwrap();
+        // Simulate five seconds at 120 Hz with a completely stalled writer,
+        // without a wall-clock sleep. Include the chunk whose fsync is pending.
+        let frames = 120 + 5 * replay::model::TICKS_PER_SECOND;
+        let queued = (0..frames).try_for_each(|n| {
+            let mut t = tick(n);
+            if n == 300 {
+                t.frame.events.push(
+                    replay::feedback::Feedback {
+                        tick: n,
+                        text: "feedback during disk stall".into(),
+                        ..Default::default()
+                    }
+                    .event(),
+                );
+            }
+            worker.push(t)
+        });
+        let flushed_while_stalled = worker.flushed.load(Ordering::Acquire);
+        // Release before asserting so a regressed budget fails without
+        // leaving Drop waiting for this test's own gate.
+        release.send(()).unwrap();
+        queued.unwrap();
+        assert_eq!(flushed_while_stalled, 0);
+        assert!(worker.failure.is_none());
+        // A later frame and Finish follow every frame queued during the stall.
+        worker.push(tick(frames)).unwrap();
+        assert_eq!(worker.finish(1).unwrap(), path);
+        let r = replay::Recording::open(&path).unwrap();
+        assert!(r.complete());
+        assert!(r.problems().is_empty());
+        assert_eq!(r.frame_count(), frames + 1);
+        assert_eq!(
+            r.frames(0, frames)
+                .map(|f| f.unwrap().tick)
+                .collect::<Vec<_>>(),
+            (0..=frames).collect::<Vec<_>>()
+        );
+        let feedback: Vec<_> = r.feedback().collect();
+        assert_eq!(feedback.len(), 1);
+        assert_eq!(feedback[0].text, "feedback during disk stall");
+        assert!(
+            fs::read_to_string(path.with_extension("log"))
+                .unwrap()
+                .contains("feedback during disk stall")
+        );
+        assert!(path.exists(), "flagged recording survives kept=0");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn budget_includes_frames_already_received_but_not_flushed() {
         let (seen, received) = mpsc::channel();
         let (release, gate) = mpsc::channel();
         let mut worker = Worker::spawn(move |rx, _progress| {
-            for _ in 0..120 {
+            for _ in 0..PENDING_FRAMES {
                 assert!(matches!(rx.recv().unwrap(), Message::Tick(_)));
             }
             seen.send(()).unwrap();
@@ -383,12 +451,12 @@ mod tests {
             Err("incomplete".into())
         })
         .unwrap();
-        for n in 0..120 {
+        for n in 0..PENDING_FRAMES {
             worker.push(tick(n)).unwrap();
         }
         received.recv().unwrap();
         // The channel is empty but the chunk is not on disk yet.
-        assert_eq!(worker.push(tick(120)).unwrap_err(), BACKLOG);
+        assert_eq!(worker.push(tick(PENDING_FRAMES)).unwrap_err(), BACKLOG);
         release.send(()).unwrap();
         assert!(worker.finish(0).is_err());
     }
@@ -399,10 +467,10 @@ mod tests {
         let joined = Arc::new(AtomicBool::new(false));
         let done = joined.clone();
         let mut worker = Worker::spawn(move |rx, progress| {
-            for _ in 0..120 {
+            for _ in 0..PENDING_FRAMES {
                 assert!(matches!(rx.recv().unwrap(), Message::Tick(_)));
             }
-            progress.store(120, Ordering::Release);
+            progress.store(PENDING_FRAMES, Ordering::Release);
             seen.send(()).unwrap();
             assert!(matches!(rx.recv().unwrap(), Message::Tick(_)));
             assert!(rx.recv().is_err());
@@ -410,11 +478,11 @@ mod tests {
             Err("incomplete".into())
         })
         .unwrap();
-        for n in 0..120 {
+        for n in 0..PENDING_FRAMES {
             worker.push(tick(n)).unwrap();
         }
         received.recv().unwrap();
-        worker.push(tick(120)).unwrap();
+        worker.push(tick(PENDING_FRAMES)).unwrap();
         drop(worker);
         assert!(joined.load(Ordering::Acquire));
     }

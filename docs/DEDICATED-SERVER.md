@@ -1402,14 +1402,19 @@ leave a recoverable `.partial` recording.
 
 Replay encoding, writes, syncs and companion-log writes run on a dedicated
 writer thread. Flight hands off frames without waiting for the disk. Chunk
-size and durability are unchanged: 120-frame chunks, a sync every 3,600
-written frames, and a final sync on finish. To preserve the previous crash
-exposure, the queue and writer chunk share a 120-frame unwritten budget.
-When that budget fills, the server logs `Recording failed: replay writer
-queue full`, stops recording and disables feedback for the rest of this
-mission. Flight continues. Accepted frames drain to a recoverable `.partial`
-file with its companion log; the file is never labeled complete. Even a
-short disk stall at a chunk boundary can trigger this conservative policy.
+size and sync cadence are unchanged: 120-frame chunks, a sync every 3,600
+written frames, and a final sync on finish. The queue and writer chunk share
+a 7,200-frame unwritten budget, about 60 seconds at 120 Hz. Multi-second disk
+stalls can therefore clear without ending the recording or disabling feedback.
+A process crash can lose these unwritten frames. A machine or power failure
+can also lose written frames from the current unsynced interval. The sync
+cadence counts written frames, not wall-clock time while disk work is stalled.
+This added crash exposure is accepted to preserve recording through realistic
+I/O delays. See [measured memory use](baselines/recorder-io.md) for sizing.
+When the full minute's budget is exhausted, the server logs
+`Recording failed: replay writer queue full`, stops recording and disables
+feedback for the rest of this mission. Flight continues. Accepted frames drain to a recoverable `.partial`
+file with its companion log; the file is never labeled complete.
 The next mission starts a fresh recording. Mission end, rotation, host
 handover, Stop and graceful shutdown wait for the writer to flush and join.
 See the [recording policy](spec/replay-feedback.md) for the precise bounds.

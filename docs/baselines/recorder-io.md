@@ -8,70 +8,98 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation validation on Linux, 2026-10-23. Both binaries use the
-`recorder-io` worktree based on `ab532b17d` (0.2.1rc-1). The before binary
-adds only worst-tick reporting. The after binary also moves recording to the
-worker described in [the behavior spec](../spec/replay-feedback.md).
-Protocol 72 and replay format 4 are unchanged. The imported profile identifies
-Fighters Anthology 1.02F. This is a host-feature test, not retail comparison.
+Implementation validation on Linux x86-64, 2026-10-23. The synchronous
+reference uses `ab532b17d` (0.2.1rc-1) plus worst-tick reporting. The first
+asynchronous build is the implementation committed as `d786cf48`; the
+7,200-frame measurement build adds the lead-requested budget to that commit.
+All three measured binaries use protocol 72 and replay format 4. The buffer
+change itself needs no protocol or replay-format revision. The imported profile identifies Fighters
+Anthology 1.02F. This is a host-feature test, not a retail comparison.
+
+The [behavior spec](../spec/replay-feedback.md) is authoritative for the
+buffer, crash exposure, sync cadence and saturation policy.
 
 ## Local disk-load comparison
 
 Each run starts a dedicated co-op server on an ephemeral localhost UDP port,
 with recording on, broadcasting and telemetry off. The authored Ukraine
 mission has 24 AI aircraft: four each of F/A-18D, F-14, Rafale C, MiG-29,
-Su-27 and MiG-21, starting at 20,000 ft and 20 nm separation. The controller
-waits 300 wall-clock seconds, then sends `status` and `quit`. Startup and final
-flush are included in elapsed time. No human client is connected.
+Su-27 and MiG-21, starting at 20,000 ft and 20 nm separation. No human client
+is connected. The same controller waits 300 wall-clock seconds, then sends
+`status` and `quit`. Startup and final flush are included in elapsed time.
 
 A parallel writer repeatedly overwrites a bounded 256 MiB scratch file using
-1 MiB writes, then calls fsync. It wrote 32,366 MiB before and 29,184 MiB after.
+1 MiB writes, then calls fsync. It wrote 32,366 MiB in the synchronous run,
+29,184 MiB with the small buffer, and 52,403 MiB with the 60-second buffer.
 The machine also ran development builds and tests. These are real contention
-samples on a shared machine, not a controlled disk benchmark.
+samples on a shared machine, not a controlled disk-throughput benchmark.
 
-| Measurement | Before | After |
-| --- | ---: | ---: |
-| UDP port | 51333 | 57920 |
-| Elapsed including shutdown | 308.3 s | 301.6 s |
-| Overload messages | 44 | 1 |
-| Ticks discarded by overload handling | 4,456 | 48 |
-| Worst measured tick | 7,291.1 ms | 7.8 ms |
-| Final simulation tick | 30,009 | 34,284 |
-| Exit status | 0 | 0 |
+| Measurement | Synchronous reference | 120-frame budget | 7,200-frame budget |
+| --- | ---: | ---: | ---: |
+| UDP port | 51333 | 57920 | 36795 |
+| Elapsed including shutdown | 308.3 s | 301.6 s | 306.2 s |
+| Overload messages | 44 | 1 | 0 |
+| Worst measured tick | 7,291.1 ms | 7.8 ms | 19.6 ms |
+| Final simulation tick | 30,009 | 34,284 | 34,483 |
+| Saved frames | 30,009 | 240 | 34,483 |
+| Recording state | Complete | Incomplete | Complete |
+| Exit status | 0 | 0 | 0 |
 
-Before: the recording finishes normally with 30,009 frames. After: disk
-pressure exhausts the shared unwritten-frame budget at tick 241; the server
-warns, disables this mission's recorder, and continues flying. Its recovered
-partial contains all 240 accepted frames and its companion log. The after
-run's one overload appears before the first status line. Since the measured
-maximum is only 7.8 ms, the log does not establish a tick-body stall as its
-cause. Startup, scheduling and other run-loop work are outside that maximum.
+The small budget stopped recording at the second chunk under disk pressure.
+Its low tick cost therefore did not demonstrate sustained recording. With
+7,200 frames, the recording survives the same load procedure for the whole
+mission, keeps every tick from 1 through 34,483, and finishes normally with
+288 chunks, 7,159,219 replay bytes and its companion log. No recorder failure
+or overload was logged. Neither sync cadence nor chunk size changed.
 
-This demonstrates that saturated replay I/O no longer forces flight to wait.
-It does **not** demonstrate continuous recording on an overloaded disk. A
-100-second follow-up without the deliberate load also stopped recording at
-360 frames while other builds and tests were running, with zero overloads
-and a 20.4 ms worst tick. The conservative budget can stop a recording on a
-short chunk-write spike; that operational tradeoff is explicit in the spec.
+## Memory per queued frame
 
-A second 100-second follow-up, after compilation ended and while the replay
-battery ran, finishes its recording normally with zero overloads and a 5.8 ms
-worst tick. It crosses both the 3,600- and 7,200-frame sync boundaries. The
-normal path therefore keeps recording and flushes its final chunk on quit;
-the saturated path is tested separately above.
+A separate, temporary instrumented binary sampled the actual owned `Tick`
+values handed to the writer in the same 24-aircraft mission. It counted the
+inline value plus every vector's allocated capacity and every owned string's
+capacity, including nested identities, event fields and tree nodes. It counted
+unencoded frames before the worker applies format bounds. The payload sample
+is therefore different from the much smaller serialized replay-file size.
+
+Over 17,520 sampled frames on Linux x86-64:
+
+| Quantity | Measured payload |
+| --- | ---: |
+| Mean per frame | 18,618.2 bytes, 18.2 KiB |
+| Largest single frame | 143,540 bytes, 140.2 KiB |
+| Largest rolling 7,200-frame window | 154,135,078 bytes, 147.0 MiB |
+| Mean per frame in that busiest window | 21,407.6 bytes, 20.9 KiB |
+| Inline `Tick` value, included above | 392 bytes |
+| 7,200 message values, separate from payload | 115,200 bytes, 112.5 KiB |
+
+Thus a full minute of this workload can retain about 147 MiB of frame payload,
+plus channel synchronization storage, allocator overhead and the ordinary
+world/writer state. This measures the payload of a possible full queue, not
+process RSS or a universal maximum. More aircraft, projectiles, effects or
+events can use more memory. The bound is on frame count, not bytes.
+
+The probe emitted per-second samples and tracked the largest rolling window;
+it was used only for memory accounting, not performance figures. Its temporary
+source hook was removed and the production server rebuilt before validation.
+The shipped binary contains no memory-probe code.
 
 ## Validation and evidence
 
-Synthetic worker tests cover ordered output and byte equality with the old
-synchronous write sequence over 7,205 frames, including both sync boundaries
-and the final partial chunk. Companion logs are byte-identical too. A gated
-writer proves that saturation returns without waiting, accepted frames drain
-to a partial, and cleanup joins. Tests also cover the unwritten budget after
-the receiver has emptied the channel, replenishment after chunk completion,
-I/O errors, panic cleanup, retention, mission restart, Stop, migration step
-down and host destruction. The underlying writer checks 120-frame chunks and
-3,600-frame periodic syncs. Status tests cover interval maxima, reset, the
-periodic line and console output after existing listing fields.
+Worker tests simulate five seconds at 120 Hz with no writer progress, in
+addition to the chunk awaiting sync. Every frame and a feedback flag survive;
+the completed flagged recording survives a retention limit of zero. The test
+uses a gate instead of a wall-clock sleep. At 7,200 outstanding frames, the
+next handoff still returns without waiting, accepted frames drain to a partial
+and cleanup joins. Budget replenishment, frames already received but not yet
+flushed, errors and shutdown remain covered.
+
+The byte-equality test compares 7,205 frames and companion-log output against
+the original synchronous write sequence, across both sync boundaries and the
+final partial chunk. The underlying writer checks unchanged 120-frame chunks
+and 3,600-frame syncs. Host tests cover rotation, Stop, migration step-down,
+destruction and worst-tick interval reset. The headless battery checks restart
+and quit, and the multiplayer feedback scenarios check both enabled and
+disabled feedback, retention, exports and playback.
 
 The 2,400-tick, 15-versus-15 AI probe keeps checksum `cbd959d1f838e9db` at the
 default observation rate and `bcdea9dc8f961940` with `--ai-observe-hz 120`.
@@ -80,8 +108,9 @@ Windows and macOS runtime execution were not tested.
 
 Evidence is local under
 `/home/john/Development/T.O.R.E-Fighters/.local/next-round/recorder-io/`:
-`measure.py`, the two saved binaries, `before/` and `after/` contain exact
-configs, stdout, disk-load totals, summaries, recordings and reader reports.
-`healthy/` and `healthy2/` contain the follow-ups. The session `report.md` records the final
-check results, battery paths and commit identities. Retail-derived recordings
-and imported media remain uncommitted.
+`measure.py`, the saved binaries, `before/`, `after/` and `budget60/` contain
+exact configs, stdout, disk-load totals, summaries, recordings and reader
+reports. `budget60-memory/` holds the instrumented memory run;
+`follow-up/memory_probe.rs` and `follow-up/memory-summary.json` describe the
+accounting. The session `report.md` records final checks and commit identities.
+Retail-derived recordings and imported media remain uncommitted.

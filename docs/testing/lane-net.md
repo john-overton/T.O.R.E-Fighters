@@ -197,8 +197,9 @@ recording enabled, then restarts and quits. Both replays must finish normally,
 keep their companion logs and include the final lifecycle event. Status lines
 must expose the worst tick. The `replay-feedback` family includes this scenario.
 The deterministic blocked-writer tests in `tore-session::recording::worker`
-cover saturation without relying on a machine's disk speed; the replay writer
-unit test checks the unchanged 120-frame chunks and 3,600-frame sync cadence.
+cover a five-second writer stall with feedback retained, plus saturation at
+7,200 outstanding frames, without relying on a machine's disk speed. The replay
+writer unit test checks the unchanged 120-frame chunks and 3,600-frame sync cadence.
 
 
 ## How a scenario works
