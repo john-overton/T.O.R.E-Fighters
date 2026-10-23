@@ -64,7 +64,11 @@ runner sets `TORE_NO_PORT_MAPPING=1` for every scenario, `quick_check.py` and
 There is no scenario for port mapping itself: a real one would change a real
 router, so it is the manual `tore-app --map-port SECONDS` check (slice IJ7);
 the keeper, the hosts and the server are tested against fake gateways on
-loopback in the crates.
+loopback in the crates. The PCP and NAT-PMP exchange also uses a simulated clock
+and silent I/O to check every retry deadline, the budget boundary and late
+wakes. Real-clock timeout checks allow five seconds of scheduler delay and
+assert no exact retry or SSDP packet counts. Successful exchanges allow extra
+retry packets while still checking the mapping, protocol, renewal and removal.
 
 ## What each scenario checks
 
