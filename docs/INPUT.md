@@ -1377,6 +1377,11 @@ M returns to main and X exits while open. Controller Left/Right move between
 lounge controls; Up/Down scroll the focused Games or Players list. Settings
 Close/F10 applies its draft and Escape discards it.
 
+Internet Lounge Options uses Tab and Shift+Tab between fields and buttons.
+The Master server field is followed by Default; Enter or Space on Default
+restores the public address in the draft. Enter in a field or OK saves, and
+Escape or Cancel discards the draft. These are the existing menu inputs.
+
 
 The dedicated-server [feedback form](spec/replay-feedback.md) uses existing
 menu inputs, with Tab between field and buttons and Escape to cancel. Its

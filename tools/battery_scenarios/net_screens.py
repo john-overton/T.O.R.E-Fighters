@@ -29,7 +29,7 @@ from battery import Drive, DriveError, Scenario
 
 from battery_scenarios.net import (
     GAME_FLAGS, LOCALHOST, NET_BAD, SNAPSHOTS_AGAIN_MS, fresh_data, guide_mission, log_must, migrate_problems,
-    rejoin_problems, server_log, start_master, start_server,
+    rejoin_problems, server_log, start_master, start_server, stop_server,
 )
 
 # The game flies about four seconds and leaves (only reached when it is not killed first).
@@ -298,8 +298,92 @@ def drive_migrate_smoke(d: Drive) -> None:
         d.problem("the hosting game wrote fewer than 3 pictures of its fight")
 
 
+
+def drive_master_setting(d: Drive) -> None:
+    """Edit the real Options field, browse and host on its master, then restore Default."""
+    master, mport = start_master(d)
+    server = start_server(d, d.port(), broadcast="on", master=f"{LOCALHOST}:{mport}")
+    dead_port = d.port()
+    (d.data / "network-v1.conf").write_text(
+        f"tore-network 1\ncallsign Viper\nport {d.port()}\nmaster {LOCALHOST}:{dead_port}\n"
+        "port-forward no\n"
+    )
+    shots = d.work / "shots"
+    shots.mkdir(exist_ok=True)
+
+    def click(x: int, y: int) -> str:
+        return f"movemenu {x} {y}\nwait 0.4\nclick\nwait 0.4\n"
+
+    def keys(*names: str) -> str:
+        return "".join(f"key {name}\n" for name in names)
+
+    def master_field() -> str:
+        return click(430, 430) + keys("Tab", "Tab", "Tab", "End")
+
+    script = d.work / "master-setting.txt"
+    script.write_text(
+        "wait 15\n" + click(150, 48) + click(150, 90)
+        + "wait 12\nsnapshot SHOTS/unreachable.ppm\n"
+        + master_field() + keys(*(["Backspace"] * len(str(dead_port))), "b", "a", "d", "Enter")
+        + "snapshot SHOTS/invalid.ppm\n"
+        + keys("End", "Backspace", "Backspace", "Backspace", *str(mport))
+        + "snapshot SHOTS/custom-options.ppm\n" + keys("Enter")
+        + "wait 12\nsnapshot SHOTS/custom-listed.ppm\n"
+        + click(80, 432) + "wait 20\nsnapshot SHOTS/custom-hosted.ppm\n"
+        + keys("Escape") + "wait 1\n" + keys("Tab", "Enter") + "wait 4\n"
+        + master_field() + keys("Tab", "Enter")
+        + "snapshot SHOTS/default-draft.ppm\n" + keys("Escape")
+        + "wait 1\nsnapshot SHOTS/default-cancelled.ppm\n"
+        + master_field() + click(495, 237)
+        + keys("Tab")  # Mouse focused Default; forward is next. Click OK to accept.
+        + click(225, 420) + "wait 2\nsnapshot SHOTS/default-restored.ppm\nexit\n"
+    )
+    script.write_text(script.read_text().replace("SHOTS", str(shots)))
+    # Main-menu bar coordinates vary by background; keep this UI script deterministic.
+    game = d.start(
+        "game", [d.app, *GAME_FLAGS, "--background", "CHOOSEV", "--input-script", script], window=True,
+    )
+    if not wait_log(d, "Internet Lobby: 1 game is listed on the Internet Lobby.", 100):
+        d.problem("the edited master did not list the dedicated server")
+    else:
+        expected = f"master {LOCALHOST}:{mport}\n"
+        if expected not in (d.data / "network-v1.conf").read_text():
+            d.problem("the accepted custom master was not saved")
+    hosted = r'^listed id=[0-9a-f]{16} from=127\.0\.0\.1:\d+ name="Viper\'s game"'
+    if not master.wait_for(hosted, 60):
+        d.problem("New did not register on the edited master")
+    else:
+        # No --master here: the saved setting must select the same master.
+        browsed = d.run("saved-browse", [d.app, "--browse", "3"], timeout=30)
+        browsed.expect(r'^"Viper\'s game"', "the game hosted from the edited lounge")
+        browsed.expect(r'^"T\.O\.R\.E server"', "the dedicated server on the same master")
+    game.finish(180, 0)
+    log = game_log(d)
+    for text in (
+        f"The Internet Lobby at {LOCALHOST}:{dead_port} does not answer.",
+        f"Asking the Internet Lobby at {LOCALHOST}:{mport} for games...",
+        "Asking the Internet Lobby at master.jroverton.com:26901 for games...",
+    ):
+        if text not in log:
+            d.problem(f"game log missing: {text}")
+    if re.search(r"^master ", (d.data / "network-v1.conf").read_text(), re.M):
+        d.problem("Default did not persist the public default")
+    for name in ("unreachable", "invalid", "custom-options", "custom-listed", "custom-hosted",
+                 "default-draft", "default-cancelled", "default-restored"):
+        if not (shots / f"{name}.ppm").exists():
+            d.problem(f"missing capture {name}")
+    stop_server(d, server)
+    master.send("quit")
+    master.finish(20, 0)
+
+
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="net-window-master-setting", lane="net", args=[], driver=drive_master_setting,
+            uses=("server",), window=True, timeout=360,
+            notes="Options validates and saves a private master, lists and hosts there, then restores Default",
+        ),
         Scenario(
             name="net-window-rejoin", lane="net", args=[], driver=drive_rejoin_window, uses=("server",), window=True,
             timeout=360,

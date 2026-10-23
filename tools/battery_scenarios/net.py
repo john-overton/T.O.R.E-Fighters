@@ -1860,7 +1860,7 @@ def drive_internet(d: Drive) -> None:
         d.log(f"attempt {attempt}: the scripted clicks did not open the screen")
     # The screen's own lines are in the game's log (its text is drawn over the picture, not in the snapshots).
     for pattern, what in (
-        (r"Internet Lobby: This game sends anonymous statistics to the Internet Lobby\. Turn them off in Options\.", "the one-time notice"),
+        (r"Internet Lobby: This game sends anonymous statistics to the chosen master server\. Turn them off in Options\.", "the one-time notice"),
         (rf"Internet Lobby: Asking the Internet Lobby at {re.escape(LOCALHOST)}:{mport} for games\.\.\.", "the browse starting"),
         (r"Internet Lobby: 1 game is listed on the Internet Lobby\.", "the count"),
         (r"Internet Lobby: Asking the Internet Lobby to introduce you to 'T\.O\.R\.E server'\.\.\.", "Join asking"),

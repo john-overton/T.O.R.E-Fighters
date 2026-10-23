@@ -1178,6 +1178,10 @@ pub const ENTRIES: &[Entry] = &[
     fixed("menu-left", "Menu left", Game, &["ArrowLeft"]),
     fixed("menu-right", "Menu right", Game, &["ArrowRight"]),
     fixed("menu-accept", "Menu select", Game, &["Enter"]),
+    menu_shortcut(
+        "Internet Options: restore master (Default focused)",
+        &["Enter", "Space"],
+    ),
     fixed("menu-back", "Menu back", Game, &["Escape"]),
     fixed("", "Fullscreen / window", Game, &["Alt-Enter"]),
     fixed("", "Exit to desktop", Game, &["Alt-F4"]),

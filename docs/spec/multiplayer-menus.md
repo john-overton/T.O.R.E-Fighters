@@ -40,6 +40,39 @@ Tab reaches Players after Games. Up/Down, Home/End and PageUp/PageDown move
 the selected row and reveal it. On a controller, Left/Right move between
 lounge controls and Up/Down operate the selected list.
 
+## Internet Lounge master server
+
+Implementation mode. **Opinionated**, requested by John in the master-setting
+task on 2026-10-23. The Options placement and editing rules are agent decisions.
+Use the existing imported panel, text fields, button pieces and fonts.
+
+Options has a **Master server** field and a **Default** button beside it.
+The initial value and Default are `master.jroverton.com:26901`. Accept a DNS
+host name, IPv4 address or IPv6 address, with port 26901 when omitted. An IPv6
+address with a port uses brackets, for example `[::1]:26911`. Ports are 1 to
+65535. The whole field is limited to 255 ASCII characters. DNS labels contain
+letters, digits and internal hyphens, at most 63 characters each and 253 in
+total, with an optional final dot. Single-label
+hosts are accepted. Trim surrounding spaces. A blank field retains the earlier
+default behavior. Invalid syntax leaves Options open with a clear error and
+keeps the last accepted setting. An unreachable but valid address is accepted;
+Messages names that address when lookup fails or the master does not answer.
+
+Default edits the draft. OK or Enter in a field saves it; Cancel or Escape
+discards it. Tab reaches Default immediately after the master field; Enter
+or Space activates it. No new shortcut is assigned. Saving a changed master
+clears the previous games and re-queries the chosen master. The lounge's
+"Games listed by ..." line shows the accepted address. The existing
+`network-v1.conf` master entry persists it without a format change.
+
+The same master lists games, registers games hosted with New, introduces
+players, supplies NAT traversal and relay, and receives enabled anonymous
+statistics. Both the statistics notice and Options say that statistics go
+to the chosen master. Command-line `--browse` and `--host FILE --list` retain
+their existing `--master` override for that invocation without saving it.
+`--browse` otherwise uses the saved choice; command-line listed hosting
+otherwise uses the public default. There is no `TORE_MASTER` override.
+
 ## The ? menu
 
 Every lounge, its Options panel, game lobby, and lobby sub-screen offers

@@ -38,6 +38,7 @@ proposal unless it is credited to John.
 - [Hosting from the game](#hosting-from-the-game)
 - [Finding games from the command line](#finding-games-from-the-command-line)
 - [Broadcasting on the Internet Lobby](#broadcasting-on-the-internet-lobby)
+  - [Running your own master](#running-your-own-master)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
@@ -961,6 +962,49 @@ connectivity](ARCHITECTURE.md#master-server-and-connectivity).
 To try it on one machine, run a master on loopback ([testing on one
 machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`
 and `master 127.0.0.1:26911` in `server.conf`.
+
+### Running your own master
+
+Private environments and forks can run `tore-master` and have both servers and
+players use it. Releases ship a separate Linux
+`tore-master-<version>-linux-x86_64.tar.gz` archive, with a checksum, on the
+[releases page](https://github.com/john-overton/T.O.R.E-Fighters/releases).
+See [download instructions](MASTER-SERVER.md#downloading-a-release) or
+[build it from source](MASTER-SERVER.md#building-it).
+
+On the machine running the master, create `master.conf`:
+
+```text
+listen 0.0.0.0
+port 26901
+probe-port 26902
+state-dir state
+```
+
+Run `tore-master --config master.conf --check-config`, then
+`tore-master --config master.conf`. Allow incoming UDP 26901 and 26902 through
+the firewall and point your DNS name at that machine. The second port tests
+routers; relay traffic uses the main port. For a custom main port, use its
+port plus one for `probe-port`. The [master guide](MASTER-SERVER.md) covers
+IPv6 listeners, service installation, relay limits and logs.
+
+On each dedicated server, set these entries in `server.conf`:
+
+```text
+broadcast on
+master master.example.org:26901
+```
+
+Players open **Multi > Internet... > Options**, enter the same address in
+**Master server**, and press **OK**. Browsing, hosting with New, introductions,
+NAT traversal, relay and enabled anonymous statistics then use that master.
+**Default**, followed by **OK**, returns to `master.jroverton.com:26901`.
+Command-line players can use `tore-app --browse 5 --master master.example.org`
+or `tore-app --host mission.txt --list --master master.example.org` for a
+temporary override; it does not rewrite their preferences. For loopback tests,
+use a free pair such as 26911 and 26912 and enter `127.0.0.1:26911` on both
+server and player. Forks still need mutually compatible clients and servers;
+choosing a different master does not bypass the game's compatibility checks.
 
 ## Console, status and logs
 
