@@ -263,6 +263,9 @@ fn airfield_tile(allegiance: Allegiance, own: Side) -> Tile {
 #[derive(Default)]
 pub struct Map {
     pub open: bool,
+    pub mission_tab: bool,
+    pub brief: Option<crate::mission_brief::Brief>,
+    tab_pressed: Option<bool>,
     filters: Filters,
     /// Made on the first draw, when the theater's size is known.
     view: Option<PlanView>,
@@ -275,6 +278,31 @@ impl Map {
     /// A click of the left button at `point`: the scroll bars and the zoom
     /// rocker take it first, then the layer buttons.
     pub fn pointer(&mut self, point: Option<(f64, f64)>, down: bool) {
+        let tab = point.and_then(|(x, y)| {
+            if (438. ..468.).contains(&y) && (180. ..410.).contains(&x) {
+                Some(x >= 300.)
+            } else {
+                None
+            }
+        });
+        if down && tab.is_some() {
+            self.tab_pressed = tab;
+            return;
+        }
+        if !down && let Some(pressed) = self.tab_pressed.take() {
+            if tab == Some(pressed) {
+                self.mission_tab = pressed;
+            }
+            return;
+        }
+        if self.mission_tab {
+            if let Some(brief) = &mut self.brief
+                && brief.pointer(point, down)
+            {
+                self.open = false;
+            }
+            return;
+        }
         if let Some(view) = &mut self.view {
             view.pointer(point);
             if (down && view.down()) || (!down && view.up()) {
@@ -285,11 +313,21 @@ impl Map {
     }
     /// The pointer moved: drags a held scroll thumb.
     pub fn moved(&mut self, point: Option<(f64, f64)>) {
+        if self.mission_tab {
+            if let Some(brief) = &mut self.brief {
+                brief.moved(point);
+            }
+            return;
+        }
         if let Some(view) = &mut self.view {
             view.pointer(point);
         }
     }
     pub fn cancel_press(&mut self) {
+        self.tab_pressed = None;
+        if let Some(brief) = &mut self.brief {
+            brief.cancel_press();
+        }
         self.filters.pressed = None;
         if let Some(view) = &mut self.view {
             view.up();
@@ -297,11 +335,47 @@ impl Map {
     }
 
     pub fn key(&mut self, key: &str) {
+        if key == "Enter" {
+            self.cancel_press();
+            self.mission_tab = !self.mission_tab;
+            return;
+        }
+        if self.mission_tab {
+            if let Some(brief) = &mut self.brief {
+                brief.key(key);
+            }
+            return;
+        }
         match &mut self.view {
             Some(view) => view.key(key),
             None if self.pending.len() < 64 => self.pending.push(key.to_owned()),
             None => {}
         }
+    }
+    fn draw_tabs(&self, pixels: &mut [u8], sprites: &std::collections::BTreeMap<String, Sprite>) {
+        let mut c = Canvas(pixels);
+        for (mission, x, label) in [(false, 200, "Map"), (true, 320, "Mission")] {
+            c.action_button(
+                sprites,
+                label,
+                (x, 441, 88),
+                self.mission_tab == mission,
+                self.tab_pressed == Some(mission),
+            );
+        }
+        let font = &sprites["QUICKFONT"];
+        c.rect((0, 468, 640, 12), [72, 72, 72, 255]);
+        c.text(
+            font,
+            if self.mission_tab {
+                "Enter / pad A: tab   Up/Down: scroll   Esc / pad B: close"
+            } else {
+                "Enter / pad A: tab   +/-: zoom   Arrows: pan   Home: follow   Esc: close"
+            },
+            12,
+            468,
+            None,
+        );
     }
     /// The view, made for `world`'s theater the first time it is wanted.
     fn view_for(&mut self, world: &Terrain) -> &mut PlanView {
@@ -399,6 +473,15 @@ impl Map {
         sprites: &std::collections::BTreeMap<String, Sprite>,
         markup: Option<&Plan>,
     ) {
+        if self.mission_tab {
+            if let Some(brief) = &self.brief {
+                brief.draw(pixels, sprites);
+            }
+            // The tab strip occupies the same place on both pages.
+            Canvas(pixels).rect((18, 438, 460, 42), [72, 72, 72, 255]);
+            self.draw_tabs(pixels, sprites);
+            return;
+        }
         Canvas(pixels).rect((0, 0, 640, 480), [72, 72, 72, 255]);
         let view = self.view_for(world);
         view.follow([state.position[0], state.position[2]]);
@@ -661,12 +744,7 @@ impl Map {
             436,
             443,
         );
-        p.text(
-            font,
-            "SHIFT-M / ESC: CLOSE   +/-: ZOOM   ARROWS: PAN   HOME: FOLLOW",
-            12,
-            463,
-        );
+        self.draw_tabs(pixels, sprites);
     }
 }
 /// Everything the theater picture under the plot is made from.
@@ -1350,6 +1428,38 @@ fn draw_placed(
         if item.off_map {
             off_map_label(pixels, font, item.at, labels);
         }
+    }
+}
+
+#[cfg(test)]
+mod brief_tests {
+    use super::*;
+    #[test]
+    fn tabs_preserve_map_pan_zoom_filters_and_brief_scroll() {
+        let mut map = Map {
+            view: Some(PlanView::flight([600. * NMI, 600. * NMI], FLIGHT_ROCKER)),
+            ..Default::default()
+        };
+        map.key("ArrowRight");
+        map.key("+");
+        let scale = map.view.as_ref().unwrap().scale_nmi();
+        let center = map.view.as_ref().unwrap().projection().center;
+        map.filters.visible[0] = false;
+        map.key("Enter");
+        assert!(map.mission_tab);
+        map.key("ArrowDown");
+        map.key("+");
+        map.pointer(Some((230., 449.)), true);
+        map.pointer(Some((230., 449.)), false);
+        assert!(!map.mission_tab);
+        assert_eq!(map.view.as_ref().unwrap().scale_nmi(), scale);
+        assert_eq!(map.view.as_ref().unwrap().projection().center, center);
+        assert!(!map.filters.visible[0]);
+        map.pointer(Some((350., 449.)), true);
+        map.pointer(Some((350., 449.)), false);
+        assert!(map.mission_tab);
+        map.key("Enter");
+        assert!(!map.mission_tab);
     }
 }
 

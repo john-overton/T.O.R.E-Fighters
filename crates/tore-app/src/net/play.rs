@@ -669,6 +669,7 @@ impl App {
         }
         let stash = flight.stash;
         self.mission_markup = stash.markup;
+        self.flight_ui.map.brief = None;
         self.world.0 = Some(stash.world);
         self.combat_view = stash.combat_view;
         self.hornet = stash.hornet;
@@ -810,6 +811,7 @@ impl App {
     pub(crate) fn finish_session_loading(&mut self, parts: crate::loading::NetParts) {
         let _timing = crate::loading::timing("multiplayer flight installation");
         let (world, markup, hornet, view, scenery, graphics) = parts;
+        self.flight_ui.map.brief = None;
         let plane = world.picture_plane().0;
         // Single player's state waits aside.
         let stash = Stash {
@@ -1200,6 +1202,7 @@ impl App {
         if let Some(flight) = self.net_flight.take() {
             let stash = flight.stash;
             self.mission_markup = stash.markup;
+            self.flight_ui.map.brief = None;
             self.world.0 = Some(stash.world);
             self.combat_view = stash.combat_view;
             self.hornet = stash.hornet;

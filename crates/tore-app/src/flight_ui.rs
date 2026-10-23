@@ -956,6 +956,10 @@ impl FlightUi {
                         | "ArrowUp"
                         | "ArrowDown"
                         | "Home"
+                        | "Enter"
+                        | "PageUp"
+                        | "PageDown"
+                        | "End"
                 )
             {
                 self.map.key(key);
@@ -1790,6 +1794,12 @@ mod tests {
         assert_eq!(ui.key("m", true, false, false, &[]), Command::Click);
         assert!(ui.map.open);
         assert!(!ui.frozen());
+        assert_eq!(ui.key("Enter", false, false, false, &[]), Command::None);
+        assert!(ui.map.mission_tab);
+        assert!(!ui.frozen());
+        assert_eq!(ui.key("PageDown", false, false, false, &[]), Command::None);
+        assert_eq!(ui.key("Enter", false, false, false, &[]), Command::None);
+        assert!(!ui.map.mission_tab);
         assert_eq!(ui.key("ArrowUp", false, false, false, &[]), Command::None);
         assert_eq!(ui.key("Escape", false, false, false, &[]), Command::Click);
         assert!(!ui.map.open);

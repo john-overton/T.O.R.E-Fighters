@@ -31,7 +31,9 @@
 //! [`List`](super::List) (a scroll mode: `with_scroll_bar`) and
 //! [`MessageBox`](super::MessageBox) do all of that themselves; a screen
 //! passes them the pointer events and nothing more.
-use super::{Kit, Point, Rect, draw::blit_part, inside};
+#[cfg(test)]
+use super::Kit;
+use super::{Point, Rect, draw::blit_part, inside};
 use crate::menu::Canvas;
 
 /// The track art is 34 wide: `SLIDETOP`, `SLIDEMID` and `SLIDEBOT` all are.
@@ -215,13 +217,24 @@ impl ScrollBar {
 
     /// Draws the track in the retail pieces, or flat when the import has not
     /// kept them, and the knob over it when `view` scrolls.
+    #[cfg(test)]
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit, view: View) {
+        self.draw_art(canvas, view, |name| kit.has(name).then(|| kit.sprite(name)));
+    }
+
+    /// The same retail pieces from a menu's sprite collection.
+    pub fn draw_art<'a>(
+        &self,
+        canvas: &mut Canvas,
+        view: View,
+        art: impl Fn(&str) -> Option<&'a crate::menu::Sprite>,
+    ) {
         let (x, y, w, h) = self.bounds();
-        if TRACK_PIECES.iter().all(|name| kit.has(name)) {
+        if TRACK_PIECES.iter().all(|name| art(name).is_some()) {
             let (top, middle, bottom) = (
-                kit.sprite("SLIDETOP"),
-                kit.sprite("SLIDEMID"),
-                kit.sprite("SLIDEBOT"),
+                art("SLIDETOP").unwrap(),
+                art("SLIDEMID").unwrap(),
+                art("SLIDEBOT").unwrap(),
             );
             let clip = self.bounds();
             blit_part(
@@ -259,8 +272,9 @@ impl ScrollBar {
         } else {
             flat(canvas, (x, y, w, h));
         }
-        if let Some((kx, ky, _, _)) = self.knob(view) {
-            let knob = kit.sprite("SLIDERV");
+        if let Some((kx, ky, _, _)) = self.knob(view)
+            && let Some(knob) = art("SLIDERV")
+        {
             canvas.blit(knob, (kx, ky), 0, knob.width, 1.0);
         }
     }

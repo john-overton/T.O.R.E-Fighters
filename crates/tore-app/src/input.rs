@@ -361,9 +361,10 @@ pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
     gamepad_roles: [bool; 4],
+    pub map_navigation: bool,
     /// The roles and the binding set ([`binding_set_hash`]) the aircraft
     /// filter last ran for: it runs again when either changes.
-    filter_signature: Option<([bool; 4], bool, u64)>,
+    filter_signature: Option<([bool; 4], bool, bool, u64)>,
     pub observed: Vec<Event>,
     profile_path: Option<std::path::PathBuf>,
     pub devices: BTreeMap<String, Device>,
@@ -450,6 +451,7 @@ impl Input {
             resolver,
             automatic,
             gamepad_roles: [false; 4],
+            map_navigation: false,
             filter_signature: None,
             observed: vec![],
             profile_path: path.map(Path::to_path_buf),
@@ -854,7 +856,12 @@ impl Input {
         // its own layout ([`CONSOLE_PAD`]).
         let console = gunship && self.console.open;
         self.add_console_pads();
-        let signature = (roles, console, binding_set_hash(&self.resolver.profile));
+        let signature = (
+            roles,
+            console,
+            self.map_navigation,
+            binding_set_hash(&self.resolver.profile),
+        );
         if self.filter_signature == Some(signature) {
             return;
         }
@@ -919,7 +926,14 @@ impl Input {
                 .map(|b| b.control.clone())
                 .collect::<BTreeSet<_>>(),
         );
+        let navigation = self.map_navigation;
         let changed = self.resolver.filter_bindings(|binding| {
+            // The map owns A/B and the D-pad, including in the gunship console.
+            // Axes and the other flight controls remain available.
+            if navigation && gamepads.contains(&device_of(binding))
+                && matches!(binding.control.as_str(), "button:304" | "button:305" | "axis:16" | "axis:17") {
+                return matches!(&binding.action, Action::Ui(name) if name.starts_with("menu-"));
+            }
             if let Some(enabled) =
                 console_takeover(binding, console, gamepads.contains(&device_of(binding)), &owned)
             {
@@ -2439,6 +2453,59 @@ bind keyboard Shift-q flare press -1 0 1 0 1 1 10
     /// The AC-130 sensor console's gamepad layout (John, 2026-10-14) on the
     /// real button path: with the console open each button gives its console
     /// action instead of its flight one; closed, the flight meanings return.
+    #[test]
+    fn mission_brief_controller_navigation_does_not_operate_aircraft() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input("");
+        i.resolver = Resolver::new(gamepad_defaults(&device));
+        i.devices.insert(device.id.clone(), device.clone());
+        i.context(false, true);
+        for console in [false, true] {
+            i.console.open = console;
+            i.map_navigation = true;
+            i.aircraft_controls(false, false, false, true);
+            for (control, value, wanted) in [
+                ("button:304", 1., "menu-accept"),
+                ("button:305", 1., "menu-back"),
+                ("axis:16", 1., "menu-right"),
+                ("axis:17", -1., "menu-up"),
+            ] {
+                for value in [0., value] {
+                    i.resolver.event(Event {
+                        device: device.id.clone(),
+                        control: control.into(),
+                        value,
+                        baseline: false,
+                    });
+                }
+                let actions: Vec<_> = i.resolver.drain().into_iter().map(|(_, a)| a).collect();
+                assert_eq!(actions, vec![Action::Ui(wanted.into())]);
+                assert!(!i.resolver.held("fire"));
+                i.resolver.event(Event {
+                    device: device.id.clone(),
+                    control: control.into(),
+                    value: 0.,
+                    baseline: false,
+                });
+                i.resolver.drain();
+            }
+        }
+        i.console.open = false;
+        i.map_navigation = false;
+        i.aircraft_controls(false, false, false, false);
+        i.resolver.event(Event {
+            device: device.id,
+            control: "button:304".into(),
+            value: 1.,
+            baseline: false,
+        });
+        assert!(
+            i.resolver
+                .drain()
+                .iter()
+                .any(|(_, a)| *a == Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Gear)))
+        );
+    }
     #[test]
     fn the_console_gamepad_layout_replaces_the_flight_buttons_only_in_the_console() {
         let device = crate::controls_editor::preview_device();

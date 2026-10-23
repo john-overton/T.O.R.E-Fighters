@@ -388,6 +388,10 @@ and a gamepad's View+stick defaults avoid the problem.
 | Restart flight | - | - | - |
 | Keyboard help | F11 | - | - |
 | Multiplayer ? menu (controller Menu also opens it) | F1 | - | - |
+| In-flight Map/Mission: switch tab (controller A) | Enter | - | - |
+| Mission brief: scroll (controller D-pad up/down) | Up or Down or Page Up or Page Down or Home or End | - | - |
+| In-flight respawn: mission brief (or select Mission...) | M | - | - |
+| Mission brief: close (controller B; A also closes respawn brief) | Esc | - | - |
 | Multiplayer ? menu: return to main menu | M | - | - |
 | Multiplayer ? menu: exit | X | - | - |
 | Lobby Settings: apply and close (Escape discards) | F10 | - | - |

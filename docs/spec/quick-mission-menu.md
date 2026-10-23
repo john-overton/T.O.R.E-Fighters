@@ -731,6 +731,10 @@ load exists, lookup reconstructs equivalent old airport-list positions by
 source ID, including either former half and shifted STOL entries. If both
 old halves have saved loads, the most recently flown compatible load wins.
 
+The accepted creator sentences are also available in flight through the
+[Mission brief](flight-map.md#mission-brief-tab), which uses this same sentence
+builder. Pre-flight Load Ordnance and lobby Loadout remain unchanged.
+
 ## Multiplayer Player Choice
 
 Opinionated requirements from John, 2026-10-16:

@@ -66,8 +66,7 @@ mod list;
 mod message_box;
 mod panel;
 pub(crate) mod png_read;
-#[cfg(test)]
-mod scroll_bar;
+pub(crate) mod scroll_bar;
 mod text_field;
 
 #[cfg(test)]

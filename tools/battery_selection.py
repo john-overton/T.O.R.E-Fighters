@@ -664,6 +664,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/flight_canvas.rs", RENDER_FAMILIES, "flight canvas", windowed=True),
     _r("crates/tore-app/src/flight_map.rs", RENDER_FAMILIES + ("menus-screens", "menus-creator"), "flight map", windowed=True),
     _r("crates/tore-app/src/flight_map/*", RENDER_FAMILIES + ("menus-screens", "menus-creator"), "flight map view", windowed=True),
+    _r("crates/tore-app/src/mission_brief.rs", ("menus-screens", "menus-creator") + RENDER_FAMILIES, "mission brief", windowed=True),
     _r("crates/tore-app/src/flight_map_preview.rs", ("menus-screens",), "flight map preview"),
     _r("crates/tore-app/src/scope.rs", RENDER_FAMILIES + ("link-cues",), "radar scope", windowed=True),
     _r("crates/tore-app/src/canvas_present.rs", RENDER_FAMILIES, "presentation", windowed=True),
