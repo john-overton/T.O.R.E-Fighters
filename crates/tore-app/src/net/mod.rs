@@ -18,6 +18,7 @@ pub mod debrief;
 pub mod files;
 pub mod guns;
 pub mod hosting;
+pub mod leave;
 pub mod lobby_chat;
 pub mod lookup;
 pub mod observe;

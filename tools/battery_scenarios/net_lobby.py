@@ -112,6 +112,9 @@ key F1
 wait 1
 snapshot SHOTS/lobby-help.ppm
 key m
+wait 1
+key Tab
+key Enter
 wait 3
 snapshot SHOTS/lobby-main.ppm
 exit
@@ -318,7 +321,7 @@ def drive_gaps(d: Drive) -> None:
 def drive_menu_disconnect(d: Drive) -> None:
     """Return to main, rejoin the same free seat, then Exit through the ? menu."""
     port = d.port()
-    server = start_server(d, port, empty_timeout=3600)
+    server = start_server(d, port, empty_timeout=3600, king="first-player")
     (d.data / "network-v1.conf").write_text(
         f"tore-network 1\ncallsign Viper\nport {d.port()}\naddress {LOCALHOST}:{port}\n"
     )
@@ -343,8 +346,16 @@ key F1
 wait 1
 """
     script = d.work / "menu-disconnect.txt"
-    script.write_text("wait 20\n" + join + f"snapshot {shots}/return.ppm\nkey m\nwait 4\nsnapshot {shots}/main.ppm\n"
-                      + join + f"snapshot {shots}/exit.ppm\nkey Down\nkey Enter\nwait 5\nsnapshot {shots}/exit-failed.ppm\nexit\n")
+    script.write_text(
+        "wait 20\n" + join
+        + f"key Escape\nkey Escape\nwait 2\nsnapshot {shots}/leave-confirm.ppm\nkey Enter\n"
+        + f"key Alt+F4\nwait 2\nsnapshot {shots}/close-confirm.ppm\nkey Enter\nkey F1\n"
+        + f"snapshot {shots}/return.ppm\nkey m\nwait 2\nsnapshot {shots}/return-confirm.ppm\n"
+        + "key Escape\nwait 1\nkey F1\nkey m\nwait 1\nkey Tab\nkey Enter\nwait 4\n"
+        + f"snapshot {shots}/main.ppm\n" + join
+        + f"snapshot {shots}/exit.ppm\nkey Down\nkey Enter\nwait 2\nsnapshot {shots}/exit-confirm.ppm\n"
+        + "key Tab\nkey Enter\nwait 5\n" + f"snapshot {shots}/exit-failed.ppm\nexit\n"
+    )
     game = d.start("game", [d.app, *GAME_FLAGS, "--background", "CHOOSEM", "--input-script", script], window=True)
     game.finish(180, 0)
     text = server.text()
@@ -354,9 +365,12 @@ wait 1
         d.problem("the first disconnect did not free plane 0 for the second join")
     if (shots / "exit-failed.ppm").exists():
         d.problem("the ? menu Exit did not close the application")
-    for name in ("return", "main", "exit"):
+    for name in ("return", "main", "exit", "leave-confirm", "close-confirm", "return-confirm", "exit-confirm"):
         if not (shots / f"{name}.ppm").exists():
             d.problem(f"missing {name} menu capture")
+    confirmations = re.findall(r"Leave confirmation: ([^\n]+)", game_log(d))
+    if confirmations != ["Are you sure?"] * 5:
+        d.problem(f"dedicated client confirmations were {confirmations!r}")
     if not server.alive():
         d.problem("a client's menu exit stopped the server")
     game.forbid(NET_BAD, "a network problem")
@@ -379,10 +393,10 @@ def drive_callsign_rejoin(d: Drive) -> None:
     script = d.work / "callsign-rejoin.txt"
     script.write_text(
         "wait 20\n" + lounge + join.replace("wait 30\n", "wait 60\n") + f"shot {shots}/before-viper.ppm\n"
-        + "key Escape\nwait 5\n" + rename("maverick") + join
+        + "key Escape\nwait 1\nkey Tab\nkey Enter\nwait 5\n" + rename("maverick") + join
         + f"shot {shots}/after-leave-maverick.ppm\n"
-        + "key F1\nkey m\nwait 5\n" + lounge + rename("goose") + join
-        + f"shot {shots}/after-main-goose.ppm\nkey F1\nkey x\n"
+        + "key F1\nkey m\nwait 1\nkey Tab\nkey Enter\nwait 5\n" + lounge + rename("goose") + join
+        + f"shot {shots}/after-main-goose.ppm\nkey F1\nkey x\nwait 1\nkey Tab\nkey Enter\n"
     )
     game = d.start("game", [d.app, *GAME_FLAGS, "--background", "CHOOSEM", "--input-script", script], window=True)
     game.finish(360, 0)

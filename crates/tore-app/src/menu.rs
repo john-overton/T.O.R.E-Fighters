@@ -49,6 +49,8 @@ pub enum Action {
     DirectClose,
     /// Leaves the game session the Direct Connection screen started.
     DirectLeave,
+    /// Leave from the away observer, after the shared confirmation.
+    AwayLeave,
     /// Disconnect and return to the root menu.
     MultiplayerMain,
     /// The Multi menu's Internet Lobby row: opens that screen (I4).

@@ -195,13 +195,16 @@ mission, and says "Not ready: Hawk." otherwise. When Fly would be refused
 only because someone holding a slot is not ready, and at least one slot
 holder is ready, the button reads **Force Start** instead (below); **Kick** (the King, on a
 selected player; since F2-L inside **Players...**) asks for the reason the player will see; **Leave** returns to
-Direct Connection, and asks "Leaving ends the game for everyone. Leave?" of the
-King. While a mission flies the lobby stays open to a late joiner or to a
+Direct Connection after the [role-aware confirmation](spec/multiplayer-menus.md#leaving-a-session).
+Ordinary clients see "Are you sure?"; hosts see whether the game ends or
+another player takes over. A dedicated server's King can pass the crown by
+leaving without ending the game. While a mission flies the lobby stays open to a late joiner or to a
 player who ended their flight: take a slot and press **Join** to fly at once,
 with the standard stores; the King's Fly then reads **End Mission**. After a
 mission each player reads the debrief and returns to the lobby, still
 connected, slots and loadouts kept and ready cleared. A dedicated server's
-lobby is the same without the King's buttons (its Mission... is read only). How it works, the layout and
+lobby has the King's buttons only when its operator enables a player King;
+otherwise Mission... is read only. How it works, the layout and
 what was measured:
 [architecture](ARCHITECTURE.md#the-lobby-screen-as-built-ef8).
 
@@ -216,8 +219,8 @@ network's search, or public once stage I lists games) change at any time; the
 rest only in the lobby. The King passes the crown from
 **Players...**, which also kicks; a King who leaves passes it to the
 longest-connected player. The *house*, the game that runs the host, is apart
-from the crown: its leaving still ends a game a player hosts, until host
-migration (stage K). Difficulty and realism stay the mission's own cheats, set
+from the crown: its leaving hands over to a ready standby, or ends the game
+when none is ready. See [host migration](#host-migration). Difficulty and realism stay the mission's own cheats, set
 by the King in the lobby and fixed for the flight. Not in phase 2: the Host row
 (pinned or calculated) and releasing a reserved aircraft (stage K), and what
 public visibility does on the master server (stage I).

@@ -524,6 +524,8 @@ struct App {
     /// The lobby screen and the pages opened over it (EF8).
     lobby: lobby_screen::app::Lobby,
     multiplayer_menu: multiplayer_menu::Menu,
+    leave_dialog: Option<net::leave::Dialog>,
+    leave_approved: Option<Action>,
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -1363,6 +1365,9 @@ impl App {
     }
     fn input_action(&mut self, action: tore_input::Action) -> Action {
         use flight_ui::Command;
+        if self.leave_dialog.is_some() && !matches!(action, tore_input::Action::Ui(_)) {
+            return Action::None;
+        }
         let name = match action {
             tore_input::Action::Pilot(command) => {
                 if self.screen == Screen::Flight && !self.flight_ui.frozen() && !self.respawn_open()
@@ -1398,6 +1403,9 @@ impl App {
             "menu-back" | "menu" => Some("Escape"),
             _ => None,
         };
+        if self.leave_dialog.is_some() {
+            return key.map_or(Action::None, |key| self.leave_dialog_key(key));
+        }
         if self.multiplayer_menu_active() {
             let menu_key = if name == "menu" { Some("F1") } else { key };
             if let Some(action) = menu_key.and_then(|key| self.multiplayer_menu.key(key)) {
@@ -3217,6 +3225,9 @@ impl App {
     }
 
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
+        if self.confirm_session_leave(&action) {
+            return;
+        }
         if action == Action::Exit
             && self
                 .net
@@ -3285,6 +3296,7 @@ impl App {
             Action::Direct => self.open_direct(),
             Action::DirectClose => self.close_direct(),
             Action::DirectLeave => self.leave_direct_session(event_loop),
+            Action::AwayLeave => self.away_leave_game(event_loop),
             Action::Internet => self.open_internet(),
             Action::InternetClose => self.close_internet(),
             Action::WatchReplay(ref path) => self.watch_replay(path),
@@ -3729,7 +3741,9 @@ impl App {
                         }
                         let mut file = std::fs::File::create(&path)?;
                         write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
-                        for pixel in self.menu.pixels.chunks_exact(4) {
+                        let mut pixels = self.menu.pixels.clone();
+                        self.leave_dialog_snapshot(&mut pixels);
+                        for pixel in pixels.chunks_exact(4) {
                             file.write_all(&pixel[..3])?;
                         }
                         Ok(())
@@ -3808,6 +3822,13 @@ impl App {
         };
         if self.screen == Screen::Flight {
             name = flight_key(event.physical, &name);
+        }
+        if self.leave_dialog.is_some() {
+            return if event.pressed {
+                self.leave_dialog_key(&name)
+            } else {
+                Action::None
+            };
         }
         if self.screen == Screen::Flight
             && event.pressed
@@ -4256,6 +4277,15 @@ impl ApplicationHandler for App {
             && self.flight_ui.map.brief.is_none()
         {
             self.prepare_mission_brief();
+        }
+        if self.leave_dialog_event(event_loop, &event) {
+            return;
+        }
+        // Loading screens have their own event loop branch, so route a
+        // connected window close before that branch can quit directly.
+        if self.net.is_some() && matches!(event, WindowEvent::CloseRequested) {
+            self.action(event_loop, Action::Exit);
+            return;
         }
         self.note_menu_input(&event);
         // With the frame-rate counter under a capped rate, the timer draws
@@ -6968,8 +6998,8 @@ impl ApplicationHandler for App {
         self.input.context(paused, self.focused);
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        // A session ends politely when the game does; a hosted one stops its
-        // host, which ends the mission for everyone.
+        // A session ends politely when the game does, handing hosting over
+        // first when a standby is ready.
         if let Some(session) = &mut self.net {
             session.disconnect();
         }
@@ -15972,6 +16002,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         internet: Default::default(),
         lobby: Default::default(),
         multiplayer_menu: Default::default(),
+        leave_dialog: None,
+        leave_approved: None,
         connect,
         launch_creator,
         quick_loadout: stripped_loadout.clone(),

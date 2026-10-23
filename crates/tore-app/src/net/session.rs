@@ -1128,7 +1128,7 @@ impl NetSession {
         })
     }
 
-    /// Whether this game hosts the session: its player is the King.
+    /// Whether this game currently runs the host, independently of the crown.
     pub fn hosting(&self) -> bool {
         self.hosting.is_some()
     }
@@ -1862,6 +1862,7 @@ impl NetSession {
 
     /// The shared polite disconnect used by Leave, Return to Main Menu and Exit.
     pub fn disconnect(&mut self) {
+        self.hand_over_for_leave();
         let now = self.now();
         self.client.disconnect(now);
         self.flush();

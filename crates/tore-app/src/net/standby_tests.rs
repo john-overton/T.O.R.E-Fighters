@@ -367,10 +367,8 @@ fn a_hosting_game_that_leaves_hands_the_game_over() {
     assert_eq!(host.end(), Some(&End::HandedOver));
 }
 
-/// Leave Game on an away player's menu (slice F2-O4): only the game that
-/// hosts the session asks to confirm, and only with no ready standby; a game
-/// that joined one (a dedicated server's, a friend's) just leaves; and a
-/// hosting game with a ready standby hands the game over as it leaves.
+/// A confirmed clean departure hands over before disconnecting. The new host's
+/// wording follows its actual hosting role, even if it joined as a client.
 #[test]
 fn only_a_hosting_game_with_no_ready_standby_ends_the_game_by_leaving() {
     let mut rig = Rig::start();
@@ -391,11 +389,33 @@ fn only_a_hosting_game_with_no_ready_standby_ends_the_game_by_leaving() {
     assert!(!rig.games[HOST].session.leaving_ends_game());
     // Leaving with it hands the game over.
     let left = Instant::now();
-    rig.games[HOST].session.hand_over_for_leave();
+    rig.games[HOST].session.disconnect();
     rig.games[HOST].gone = true;
     let hosts = rig.run_until(Duration::from_secs(5), |r| r.games[VIPER].session.hosting());
     assert!(hosts, "Viper takes the game over: {}", rig.state());
     rig.back_after(left, Duration::from_secs(5));
+    assert!(
+        rig.run_until(Duration::from_secs(5), |r| {
+            r.games[VIPER]
+                .session
+                .client
+                .lobby()
+                .is_some_and(|l| l.players.len() >= 2)
+        }),
+        "the migrated host receives its roster: {:?}",
+        rig.games[VIPER].session.client.lobby()
+    );
+    let session = &mut rig.games[VIPER].session;
+    session.set_standby_ready_for_test(false);
+    assert_eq!(
+        crate::net::leave::lines(session.client.lobby(), session.hosting(), false),
+        ["Leaving ends the game for everyone.", "Are you sure?"]
+    );
+    let client = &rig.games[COBRA].session;
+    assert_eq!(
+        crate::net::leave::lines(client.client.lobby(), client.hosting(), true),
+        ["Are you sure?"]
+    );
 }
 
 #[test]

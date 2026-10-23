@@ -22,9 +22,8 @@ pub const TAKE_BACK_FLIGHT: &str = "Take Back Flight";
 pub const SPAWN: &str = "Spawn in Aircraft";
 pub const LEAVE_GAME: &str = "Leave Game";
 /// What the Leave Game row says beside it for a host that has no ready
-/// standby, and once the first choice has asked to confirm.
+/// standby. The shared app dialog confirms the departure.
 pub const ENDS_THE_GAME: &str = "Ends the game for everyone";
-pub const CONFIRM_LEAVE: &str = "Choose again to end it";
 /// The retail `?` row that quits the game, shown as Exit to Desktop.
 pub const EXIT: &str = "Exit to Windows";
 /// Authored Pref rows: the same switches as the N, T, R and C keys.
@@ -240,14 +239,14 @@ pub struct AwayRows {
     /// now (no revival, no lives left, the delay not over, no room).
     pub spawn_blocked: Option<String>,
     /// Leaving ends the game for everyone: the player hosts it and no
-    /// standby is ready to take it over. The row asks to be chosen twice.
+    /// standby is ready to take it over. The app confirms the departure.
     pub leave_ends_game: bool,
 }
 
 impl AwayRows {
     /// The rows, with the words beside them. A dimmed row's reason is its
     /// readout.
-    pub fn rows(&self, confirming: bool) -> Vec<MenuNode> {
+    pub fn rows(&self) -> Vec<MenuNode> {
         let mut rows = Vec::new();
         if self.own_aircraft {
             rows.push(row(TAKE_BACK_FLIGHT, ""));
@@ -256,10 +255,10 @@ impl AwayRows {
         }
         rows.push(row(
             LEAVE_GAME,
-            match (self.leave_ends_game, confirming) {
-                (false, _) => "",
-                (true, false) => ENDS_THE_GAME,
-                (true, true) => CONFIRM_LEAVE,
+            if self.leave_ends_game {
+                ENDS_THE_GAME
+            } else {
+                ""
             },
         ));
         rows
@@ -315,8 +314,6 @@ pub struct Menu {
     away: Option<AwayRows>,
     /// The menu of a live view ([`LIVE_LOOK`]).
     live: bool,
-    /// Leave Game was chosen once and waits for a second choice.
-    confirming: bool,
 }
 
 impl Menu {
@@ -328,7 +325,6 @@ impl Menu {
             was_live: false,
             away: None,
             live: false,
-            confirming: false,
         }
     }
 
@@ -361,10 +357,6 @@ impl Menu {
         if self.away == rows {
             return;
         }
-        let on_leave = rows.as_ref().is_some_and(|r| !r.leave_ends_game);
-        if on_leave {
-            self.confirming = false;
-        }
         self.away = rows;
         let Some(tab) = self.tree.first_mut() else {
             return;
@@ -384,7 +376,7 @@ impl Menu {
             .collect();
         tab.children = match &self.away {
             Some(away) => {
-                let mut rows = away.rows(self.confirming);
+                let mut rows = away.rows();
                 rows.extend(rest);
                 rows
             }
@@ -442,18 +434,9 @@ impl Menu {
         }
     }
 
-    /// Forgets a first choice of Leave Game that asked to confirm.
-    fn disarm(&mut self) {
-        if std::mem::take(&mut self.confirming) {
-            let rows = self.away.take();
-            self.set_away(rows);
-        }
-    }
-
     /// Closes the menu; playback goes on in the speed and direction it had,
     /// or stays paused if it was.
     pub fn close(&mut self, clock: &mut Clock) {
-        self.disarm();
         if let Some(play) = self.open.take()
             && play
             && clock.paused()
@@ -582,14 +565,6 @@ impl Menu {
             SPAWN => {
                 self.close(clock);
                 Choice::Spawn
-            }
-            LEAVE_GAME
-                if self.away.as_ref().is_some_and(|a| a.leave_ends_game) && !self.confirming =>
-            {
-                self.confirming = true;
-                let rows = self.away.take();
-                self.set_away(rows);
-                Choice::Click
             }
             LEAVE_GAME => Choice::LeaveGame,
             EXIT => Choice::Exit,
@@ -816,7 +791,7 @@ mod tests {
             Choice::TakeBack
         );
         assert!(!menu.is_open(), "the menu closes as the aircraft is taken");
-        // A joined game (a dedicated server's) leaves at once, no confirm.
+        // A joined game's row delegates to the shared app confirmation.
         assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::LeaveGame);
         // Lost, and the rules allow a new aircraft.
         let (mut menu, mut clock) = away_menu(AwayRows::default());
@@ -832,34 +807,13 @@ mod tests {
     }
 
     #[test]
-    fn a_host_with_no_standby_confirms_before_it_ends_the_game() {
+    fn host_leave_delegates_to_the_shared_confirmation() {
         let (mut menu, mut clock) = away_menu(AwayRows {
             own_aircraft: true,
             leave_ends_game: true,
             ..AwayRows::default()
         });
-        assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::Click);
-        assert_eq!(
-            shown(&menu)[1],
-            "Leave Game  Choose again to end it".to_owned()
-        );
-        assert_eq!(menu.activate(LEAVE_GAME, &mut clock), Choice::LeaveGame);
-        // Closing the menu forgets the first choice.
-        let (mut menu, mut clock) = away_menu(AwayRows {
-            own_aircraft: true,
-            leave_ends_game: true,
-            ..AwayRows::default()
-        });
-        choose(&mut menu, &mut clock, LEAVE_GAME);
-        menu.close(&mut clock);
-        assert_eq!(shown(&menu)[1], "Leave Game  Ends the game for everyone");
-        assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::Click);
-        // A standby that became ready in the meantime: no confirm needed.
-        menu.set_away(Some(AwayRows {
-            own_aircraft: true,
-            ..AwayRows::default()
-        }));
-        assert_eq!(menu.activate(LEAVE_GAME, &mut clock), Choice::LeaveGame);
+        assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::LeaveGame);
     }
 
     #[test]
