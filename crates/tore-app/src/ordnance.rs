@@ -21,10 +21,38 @@ const CARD_WIDTH: i32 = 109;
 const CARD_HEIGHT: i32 = 23;
 const STATIONS_PER_PAGE: usize = 6;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CatalogEntry {
+pub(crate) enum CatalogEntry {
     Weapon(usize),
     Tank(usize),
     Designator(usize),
+}
+/// Shared weapon-name ordering, applied once when a catalog is loaded.
+pub(crate) fn sort_weapons(weapons: &mut [Weapon]) {
+    weapons.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(&b.source)));
+}
+
+/// Shared display order for the pre-flight catalog and respawn station picker.
+/// The weapon catalog is already name-sorted; tanks retain their imported order.
+pub(crate) fn catalog_entries(
+    weapons: &[Weapon],
+    tanks: &[tore_sim::combat::live::TankStore],
+    pods: &[DesignatorStore],
+    category: usize,
+) -> Vec<CatalogEntry> {
+    let weapons = weapons
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| usize::from(w.flags & 0x10000 == 0) == category)
+        .map(|(index, _)| CatalogEntry::Weapon(index));
+    if category == 1 {
+        (0..tanks.len())
+            .map(CatalogEntry::Tank)
+            .chain((0..pods.len()).map(CatalogEntry::Designator))
+            .chain(weapons)
+            .collect()
+    } else {
+        weapons.collect()
+    }
 }
 #[derive(Clone, Copy)]
 enum RetainedKind {
@@ -188,7 +216,7 @@ impl Ordnance {
             display(&mut station.weapon);
         }
         drop(display);
-        weapons.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(&b.source)));
+        sort_weapons(&mut weapons);
         let tanks = data
             .iter()
             .filter(|(name, _)| name.ends_with(".GAS"))
@@ -613,22 +641,14 @@ impl Ordnance {
         }
     }
     fn page_entries(&self) -> Vec<CatalogEntry> {
-        let weapons = self
-            .catalog
-            .iter()
-            .enumerate()
-            .filter(|(_, w)| usize::from(w.flags & 0x10000 == 0) == self.category)
-            .map(|(index, _)| CatalogEntry::Weapon(index));
-        if self.category == 1 {
-            (0..self.tank_catalog.len())
-                .map(CatalogEntry::Tank)
-                .chain((0..self.designator_catalog.len()).map(CatalogEntry::Designator))
-                .chain(weapons)
-                .collect()
-        } else {
-            weapons.collect()
-        }
+        catalog_entries(
+            &self.catalog,
+            &self.tank_catalog,
+            &self.designator_catalog,
+            self.category,
+        )
     }
+
     pub fn pointer(&mut self, p: Option<(f64, f64)>) {
         self.pointer = p;
         if let (Some(drag), Some(p)) = (&mut self.drag, p) {

@@ -1156,8 +1156,32 @@ pub const ENTRIES: &[Entry] = &[
         &["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"],
     ),
     menu_shortcut(
-        "In-flight respawn: mission brief (or select Mission...)",
+        "In-flight respawn: mission brief outside search focus (or select Mission...)",
         &["m"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: focus search/results (type to filter when focused)",
+        &["Tab"],
+    ),
+    menu_shortcut(
+        "In-flight respawn search: erase last character",
+        &["Backspace"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: navigate results (controller D-pad up/down)",
+        &["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: select result (controller A)",
+        &["Enter", "Space"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: switch tab (controller D-pad left/right)",
+        &["ArrowLeft", "ArrowRight"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: clear search, close station sub-menu, then cancel page (controller B)",
+        &["Escape"],
     ),
     menu_shortcut(
         "Multiplayer respawn: fly again after delay, with menus closed (controller A)",

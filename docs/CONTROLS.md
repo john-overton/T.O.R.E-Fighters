@@ -390,7 +390,13 @@ and a gamepad's View+stick defaults avoid the problem.
 | Multiplayer ? menu (controller Menu also opens it) | F1 | - | - |
 | In-flight Map/Mission: switch tab (controller A) | Enter | - | - |
 | Mission brief: scroll (controller D-pad up/down) | Up or Down or Page Up or Page Down or Home or End | - | - |
-| In-flight respawn: mission brief (or select Mission...) | M | - | - |
+| In-flight respawn: mission brief outside search focus (or select Mission...) | M | - | - |
+| In-flight respawn: focus search/results (type to filter when focused) | Tab | - | - |
+| In-flight respawn search: erase last character | Backspace | - | - |
+| In-flight respawn: navigate results (controller D-pad up/down) | Up or Down or Home or End or Page Up or Page Down | - | - |
+| In-flight respawn: select result (controller A) | Enter or Space | - | - |
+| In-flight respawn: switch tab (controller D-pad left/right) | Left or Right | - | - |
+| In-flight respawn: clear search, close station sub-menu, then cancel page (controller B) | Esc | - | - |
 | Multiplayer respawn: fly again after delay, with menus closed (controller A) | Enter | - | - |
 | Mission brief: close (controller B; A also closes respawn brief) | Esc | - | - |
 | Multiplayer ? menu: return to main menu | M | - | - |

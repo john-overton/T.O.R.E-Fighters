@@ -1949,9 +1949,18 @@ reservation ends (the King's Release).
 
 With `respawn revive`, the flight continues beneath a menu while waiting, using the in-flight
 Escape menu widget. Loadout lists stations in Load Ordnance display order, then
-internal fuel, Standard load and Done. Enter or a click cycles a station's legal
-stores and quantities; arrows and the wheel move through rows. Choice slots also
-have a paged Aircraft tab. The menu uses the existing controller menu bindings.
+internal fuel, Standard load and Done. Select a station to open its compatible
+stores and quantities, grouped and ordered like the pre-flight Load Ordnance
+catalog. Player Choice slots have one complete Aircraft list in creator/lobby
+order. Both lists have a red scroll bar and a case-insensitive search by name
+or designation: `120`, `16` and `hornet` are examples. Click Search or press Tab
+to type; Tab switches search/results focus. Up/Down or the controller D-pad
+moves through results, Enter/A or a click selects. Home/End and Page Up/Down,
+the wheel, track clicks and dragging scroll the list. Escape/B clears search
+first, then closes a station sub-menu, then discards unsaved edits. M opens
+Mission outside search focus; the Mission... button always remains available.
+See the [selector specification](spec/quick-mission-menu.md#multiplayer-player-choice)
+for counts and presentation decisions.
 Done saves the aircraft and loadout for the next Enter-to-revive request.
 Close the page and press Escape to open the flight menu: **Loadout...** stays
 available for the entire wait, and **Aircraft...** appears for Player Choice

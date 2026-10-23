@@ -21,9 +21,35 @@ key m
 wait 0.5
 shot SHOTS/02-mission.ppm
 key Escape
-key ArrowRight
+key ArrowDown
 key ArrowDown
 key Enter
+key End
+wait 0.5
+shot SHOTS/12-station-scrolled.ppm
+key Tab
+key 1
+key 2
+key 0
+wait 0.5
+shot SHOTS/13-station-filtered.ppm
+key Enter
+key ArrowRight
+movemenu 543 96
+press
+movemenu 543 378
+release
+wheel 2
+wheel -20
+key End
+wait 0.5
+shot SHOTS/14-aircraft-scrolled.ppm
+key Tab
+key r
+key a
+key f
+wait 0.5
+shot SHOTS/15-aircraft-filtered.ppm
 key Enter
 movemenu 80 460
 click
@@ -51,9 +77,13 @@ key ArrowUp
 key Enter
 wait 0.5
 shot SHOTS/07-reopened-aircraft.ppm
-key ArrowDown
-key ArrowDown
-key Enter
+key Tab
+key t
+key o
+key m
+key c
+key a
+key t
 key Enter
 movemenu 80 460
 click
@@ -82,7 +112,8 @@ exit
 PICTURES = (
     "01-waiting", "02-mission", "03-early-enter", "04-reopened-loadout", "05-still-waiting",
     "06-escape-choices", "07-reopened-aircraft", "08-last-loadout", "09-mission-again",
-    "10-respawned", "11-alive-menu",
+    "10-respawned", "11-alive-menu", "12-station-scrolled", "13-station-filtered",
+    "14-aircraft-scrolled", "15-aircraft-filtered",
 )
 
 
@@ -106,7 +137,7 @@ def drive_respawn_menu(d: Drive) -> None:
     server.finish(30, None)
     log = game_log(d)
     for pattern in (
-        r"Respawn: saved choice Rafale", r"Respawn: opened Loadout for Rafale",
+        r"Respawn: selected station .*AIM120", r"Respawn: saved choice Rafale", r"Respawn: opened Loadout for Rafale",
         r"Respawn: opened Aircraft for Rafale", r"Respawn: saved choice F14",
         r"Respawn: opened Loadout for F14", r"Respawn: confirmed choice F14",
     ):
@@ -128,5 +159,5 @@ def scenarios() -> list[Scenario]:
     return [Scenario(
         name="net-window-respawn-menu", lane="net", args=[], driver=drive_respawn_menu,
         uses=("server", "bot"), window=True, timeout=420,
-        notes="Eject, edit and reopen Choice aircraft and ordnance across a revival delay, reopen Mission, then confirm once.",
+        notes="Eject, edit and search, scroll and reopen Choice aircraft and ordnance across a revival delay, reopen Mission, then confirm once.",
     )]
