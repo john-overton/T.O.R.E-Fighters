@@ -103,17 +103,17 @@ already imported it: the server reads the game's data folder by default), then
 start it from that folder:
 
 ```sh
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-server-0.2.0-linux-x86_64.tar.gz
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-server-0.2.0-linux-x86_64.tar.gz.sha256
-sha256sum -c tore-server-0.2.0-linux-x86_64.tar.gz.sha256
-tar -xzf tore-server-0.2.0-linux-x86_64.tar.gz
-cd tore-server-0.2.0-linux-x86_64
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-server-0.2.1-linux-x86_64.tar.gz
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-server-0.2.1-linux-x86_64.tar.gz.sha256
+sha256sum -c tore-server-0.2.1-linux-x86_64.tar.gz.sha256
+tar -xzf tore-server-0.2.1-linux-x86_64.tar.gz
+cd tore-server-0.2.1-linux-x86_64
 ./tore-server --import /path/to/FIGHTERS
 ./tore-server --config server.conf --check
 ./tore-server --config server.conf
 ```
 
-(`v0.2.0` stands for the release you want; on macOS, `shasum -a 256 -c` checks
+(`v0.2.1` stands for the release you want; on macOS, `shasum -a 256 -c` checks
 the file.) On Windows, unzip it and run the three `tore-server` lines in PowerShell or
 a Command Prompt, as `.\tore-server.exe`; `Get-FileHash` prints the SHA-256 to
 compare with the `.sha256` file. Then see

@@ -236,7 +236,7 @@ Build the release binaries first, stamping the same version the package will
 carry:
 
 ```sh
-TORE_BUILD_VERSION=0.2.0 cargo build --release --locked -p tore-app -p tore-extract
+TORE_BUILD_VERSION=0.2.1 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
 For the 32-bit Windows package, run `rustup target add i686-pc-windows-msvc`
@@ -423,7 +423,7 @@ xattr -dr com.apple.quarantine /Applications/T.O.R.E-Fighters.app
 The **0.2.0 macOS download** needs this fallback when it says the app "is
 damaged and can't be opened". That release has linker-signed executables but
 no bundle seal covering its metadata and resources. The missing seal is fixed
-in the next build; it does not mean the 0.2.0 game data needs reinstalling.
+in 0.2.1; it does not mean the 0.2.0 game data needs reinstalling.
 
 Packaging signs the nested executables first, then the assembled bundle, and
 does not modify it afterwards. It requires `Contents/_CodeSignature/CodeResources`

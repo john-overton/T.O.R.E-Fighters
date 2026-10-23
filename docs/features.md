@@ -220,8 +220,8 @@ feature and stays unavailable.
 
 ## Multiplayer
 
-Quick Mission multiplayer is built for the Milestone 2 release, version 0.2.0
-(draft). The rows below retain the remaining validation and feature limits.
+Quick Mission multiplayer shipped in the Milestone 2 release, version 0.2.0,
+and continues in 0.2.1. The rows below retain the remaining validation and feature limits.
 John wrote the feature spec on 2026-09-28. The
 [multiplayer guide](MULTIPLAYER.md) holds the design, the
 [plan](multiplayer-plan.md) the stages, and the
