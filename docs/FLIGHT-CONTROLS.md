@@ -233,7 +233,7 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized, and the
 
 Tab (gun), M's HARM seeker, Z/X wing sweep, Ctrl + arrows thrust vectoring and / and \ laser designation have no T.O.R.E binding yet ([key placement](INPUT.md#key-placement)).
 
-Space now holds the selected player trigger. Bracket keys select the previous/next weapon or NAV; T cycles radar targets, Shift-T cycles back and Enter selects a visible one. `--live-fire` enables the
+Space now holds the selected player trigger. Bracket keys select the previous/next weapon or NAV; T cycles displayed own-radar TWS targets, Shift-T cycles back, Enter cycles visible aircraft left to right and Apostrophe picks nearest the forward-view centre. `--live-fire` enables the
 explicit PT-default test range; backslash resets its target at a suitable range
 for the selected weapon. Ordinary free flight loads the aircraft's supported default weapons. Airborne
 starts select and arm the canonical gun; ground starts enter NAV with weapons disarmed. [Startup rules](spec/hud-layout.md). The restricted native research adapter stays clean.
@@ -425,12 +425,14 @@ There is no separate master-arm control. **L** clears designation and **K**
 jettisons the selected external group in any flight (the AC-130, which carries nothing external, is unchanged). Class and station-fault
 fixtures remain available through the controls editor and command-line setup.
 Restart repairs/reloads. Selection releases the trigger before another press.
-T cycles current radar contacts nearest first and Shift-T backwards, skipping
-friendly aircraft and wrecks. Enter selects the visible radar or infrared
-contact nearest the nose. A mouse click on the scope designates a contact
-directly. A target the scope loses drops completely
-([rules](spec/radar.md#target-selection-keys)); only the F4, F7 and F8 views
-keep following it while it is within visual range (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range advisories are shown
+T cycles displayed own-radar TWS contacts nearest first and Shift-T backwards,
+including friendlies. Enter cycles on-screen aircraft left to right; Apostrophe
+picks the aircraft nearest the forward-view centre. Visual picks need no radar
+return and stay while the ownship sees the aircraft, without granting radar
+support. A mouse click on the scope designates a contact directly. Radar/click
+selections still drop with their sensor contact. See the complete
+[target-selection rules](spec/radar.md#target-selection-keys). F4, F7 and F8 keep
+their separate visual following rule (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range advisories are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).

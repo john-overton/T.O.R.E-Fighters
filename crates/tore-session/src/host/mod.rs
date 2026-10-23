@@ -514,6 +514,8 @@ enum Stage {
 struct Peer {
     address: SocketAddr,
     callsign: String,
+    /// This connection's requested name, before duplicate suffixes. Local only.
+    requested_callsign: String,
     /// The operating system its game said it runs on when it joined.
     platform: Platform,
     /// How it reached the host (protocol 9): its Challenge answer's path,
@@ -893,18 +895,12 @@ impl Gate for HostGate {
     fn accept(&mut self, details: &ConnectDetails) -> Decision {
         let refusal = if let Some(text) = &self.closed {
             Some((RefuseReason::ShuttingDown, text.clone()))
-        } else if !self
-            .build
-            .matches(&details.game_version, &details.game_commit)
-        {
+        } else if !self.build.matches(details.compatibility) {
             Some((
                 RefuseReason::GameBuild,
                 format!(
-                    "The server runs version {} (commit {}); your game is {} (commit {}).",
-                    self.build.version,
-                    self.build.commit,
-                    details.game_version,
-                    details.game_commit
+                    "The server's compatibility code is {:08X}; yours is {:08X}.",
+                    self.build.compatibility, details.compatibility
                 ),
             ))
         } else if self
@@ -955,7 +951,7 @@ impl Host {
     pub fn new(
         spec: MissionSpec,
         resources: Arc<BTreeMap<String, Vec<u8>>>,
-        config: HostConfig,
+        mut config: HostConfig,
     ) -> Result<Host, HostError> {
         config.validate()?;
         // The settings the mission carries (friendly fire, the loadout
@@ -983,6 +979,8 @@ impl Host {
             .content
             .clone()
             .unwrap_or_else(|| content::GameContent::shared(&resources));
+        config.build.compatibility = crate::compatibility::current(&own.content);
+        server.set_compatibility(config.build.compatibility);
         let compat = content::Compat::new(own, &resources);
         let mut host = Host {
             sequence: None,
@@ -1552,6 +1550,10 @@ impl Host {
                     connection, reason, ..
                 } => self.closed(connection, reason),
                 ServerEvent::Discover { from, query } => self.answer_discover(from, &query),
+                ServerEvent::Reservation { from, query } => {
+                    let answer = self.reservation_answer(query);
+                    self.server.answer_reservation(from, answer);
+                }
                 ServerEvent::Connection { connection, event } => match event {
                     Event::Message { kind, body } => self.message(connection, kind, &body),
                     Event::Payload { sections, .. } => {
@@ -1638,6 +1640,7 @@ impl Host {
             Peer {
                 address: details.address,
                 callsign: callsign.clone(),
+                requested_callsign: details.callsign.clone(),
                 platform: details.platform,
                 path: details.path,
                 stage: Stage::Lobby,

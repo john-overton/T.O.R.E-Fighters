@@ -38,6 +38,7 @@ proposal unless it is credited to John.
 - [Hosting from the game](#hosting-from-the-game)
 - [Finding games from the command line](#finding-games-from-the-command-line)
 - [Broadcasting on the Internet Lobby](#broadcasting-on-the-internet-lobby)
+  - [Running your own master](#running-your-own-master)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
@@ -181,7 +182,7 @@ tore-server --config server.conf
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
 | `--check` | Validate the configuration and import; with rotation, build every entry and report its summary/settings. Print the selected mission's aircraft, runways, manifest and import content. Exit without opening the port |
 | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` | AI test settings (slices S7b and S9), for measuring and trying, not for play: `N` is how often AI aircraft observe, 120, 60 (default since optimization round 2), 40, 30 or 20, staggered across ticks, and lean sensors (on by default; a bare flag means on, `off` runs the full sensors) have AI aircraft skip the visual channel and build the received-radar list only when a warning needs it, which decides exactly as full ones do. The server's setting governs the simulation and no player is told; a server running another rate or full sensors appoints no standby. See [AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors) |
-| `--help`, `--version` | Print the options, or the version and commit, and exit |
+| `--help`, `--version` | Print the options, or the version, compatibility code and commit for the selected data profile, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
 defaults apply (a configuration file named with `--config` must exist); a
@@ -216,7 +217,7 @@ server reads its Fighters Anthology build from the `FA.EXE:` line of
 `import-report.txt` beside the pack, and the importer is unknown
 ("imported by an unknown T.O.R.E"). No re-import is needed.
 
-At start it prints the version and commit, the data folder, a summary of the
+At start it prints the version, commit and compatibility code, the data folder, a summary of the
 mission, the port it listens on, whether it broadcasts on the Internet Lobby
 (`Broadcast: off ...` or `Broadcast: on, to the Internet Lobby at ...`) and
 "Waiting for players". It refuses to start,
@@ -797,8 +798,12 @@ manifest with the server's: the names and hashes of every resource the
 simulation reads for that mission (aircraft, weapons, theater, radio phrases).
 A 1.0 disc import and a 1.02F import play together, since they differ only in
 menu and HUD resources. A difference is refused with the names of the files
-that differ. The game version and protocol must match as well
-([wire protocol](formats/net-protocol.md#versions)). *Decided with the lead, 2026-09-30:* a build is a tagged release when the build stamped `TORE_BUILD_VERSION` at compile time (`option_env!("TORE_BUILD_VERSION").is_some()`, as the game's `version::version()` already tests); release builds match by version and other builds by commit. The server's rule is `app::is_release` in `crates/tore-server/src/app.rs`, and the game's `--connect` must use the same test.
+that differ. The protocol and [compatibility code](ARCHITECTURE.md#compatibility-code)
+must match as well. Different commits, release tags and version strings can
+join with the same code. `tore-server --data-dir /path/to/profile --version`
+prints the code of that import; without an import it labels an empty-content
+code explicitly. The code covers the whole playable import, so a change to
+an unused item also prevents joining.
 
 ## Hosting from the game
 
@@ -896,8 +901,7 @@ tore-app --find-games 8 [--port 26900]
 
 It looks for games on the local network for that many seconds (0.1 to 3600)
 and prints each game when it first answers, one line each on stdout, fields
-separated by tabs: address, whether the build matches (`same build`, `other
-build` or `other protocol`, with the host's version and commit), name, mission
+separated by tabs: address, whether the code matches (`matching code`, `other code` or `other protocol`, with the host's code, version and commit), name, mission
 summary, players and capacity, phase (`lobby`, `flying`, `closed`), the King
 (`-` for a dedicated server), `password` or `open`, `full` or `not full`.
 When nothing answers it prints `No games found.` and exits 0 all the same;
@@ -961,6 +965,65 @@ connectivity](ARCHITECTURE.md#master-server-and-connectivity).
 To try it on one machine, run a master on loopback ([testing on one
 machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`
 and `master 127.0.0.1:26911` in `server.conf`.
+
+### Running your own master
+
+Private environments and forks can run `tore-master` and have both servers and
+players use it. Releases ship a separate Linux
+`tore-master-<version>-linux-x86_64.tar.gz` archive, with a checksum, on the
+[releases page](https://github.com/john-overton/T.O.R.E-Fighters/releases).
+See [download instructions](MASTER-SERVER.md#downloading-a-release) or
+[build it from source](MASTER-SERVER.md#building-it).
+
+On the machine running the master, create `master.conf`:
+
+```text
+listen 0.0.0.0
+port 26901
+probe-port 26902
+state-dir state
+```
+
+Run `tore-master --config master.conf --check-config`, then
+`tore-master --config master.conf`. Allow incoming UDP 26901 and 26902 through
+the firewall and point your DNS name at that machine. The second port tests
+routers; relay traffic uses the main port. For a custom main port, use its
+port plus one for `probe-port`. The [master guide](MASTER-SERVER.md) covers
+IPv6 listeners, service installation, relay limits and logs.
+
+On each dedicated server, set these entries in `server.conf`:
+
+```text
+broadcast on
+master master.example.org:26901
+```
+
+Players open **Multi > Internet... > Options**, enter the same address in
+**Master server**, and press **OK**. Browsing, hosting with New, introductions,
+NAT traversal, relay and enabled anonymous statistics then use that master.
+**Default**, followed by **OK**, returns to `master.jroverton.com:26901`.
+Command-line players can use `tore-app --browse 5 --master master.example.org`
+or `tore-app --host mission.txt --list --master master.example.org` for a
+temporary override; it does not rewrite their preferences. For loopback tests,
+use a free pair such as 26911 and 26912 and enter `127.0.0.1:26911` on both
+server and player. Forks still need mutually compatible clients and servers;
+choosing a different master does not bypass the game's compatibility checks.
+
+### Running a master for old and new games
+
+The updated `tore-master` serves released 0.2.0 hosts and clients (master
+protocol 1, game protocol 67) alongside code-based hosts and clients (master
+protocol 2, game protocol 71 and later). Upgrade the master first. Existing
+0.2.0 servers can keep running and broadcasting without a game/server update.
+Old requests receive the old layout and only old-generation listings; new
+requests receive codes and only new-generation listings. Show other versions
+does not cross that boundary. Direct introductions and relay setup also stay
+within the generation. No new port or configuration setting is needed.
+
+See [running and updating the master](MASTER-SERVER.md#updating) and the
+[wire rules](formats/master-protocol.md#compatibility-codes-master-protocol-2).
+This supports a gradual rollout; it does not make game protocols 67 and 71
+play together.
 
 ## Console, status and logs
 

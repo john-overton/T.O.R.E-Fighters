@@ -733,6 +733,9 @@ fn cue(action: Action) -> Option<&'static str> {
         Action::Click
         | Action::QuickMission
         | Action::FreeFlight
+        | Action::LeaveFeedback
+        | Action::OpenUpdate
+        | Action::ToggleUpdates
         | Action::Replays
         | Action::Back => Some("&BUTTON.11K"),
         Action::Toggle => Some("&SWITCH.11K"),

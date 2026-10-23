@@ -150,6 +150,15 @@ struct ScoreEntry {
 }
 
 impl Scoring {
+    /// A token claim replaces an unflown provisional identity and may rename
+    /// the returning player, which must refresh the live score board.
+    pub(super) fn rejoined(&mut self, fresh: u64, order: u64) {
+        if fresh != order {
+            self.members.remove(&fresh);
+        }
+        self.changed = true;
+    }
+
     #[cfg(test)]
     pub(super) fn player(&self, order: u64) -> Option<&Player> {
         self.players.get(&order)

@@ -40,6 +40,39 @@ Tab reaches Players after Games. Up/Down, Home/End and PageUp/PageDown move
 the selected row and reveal it. On a controller, Left/Right move between
 lounge controls and Up/Down operate the selected list.
 
+## Internet Lounge master server
+
+Implementation mode. **Opinionated**, requested by John in the master-setting
+task on 2026-10-23. The Options placement and editing rules are agent decisions.
+Use the existing imported panel, text fields, button pieces and fonts.
+
+Options has a **Master server** field and a **Default** button beside it.
+The initial value and Default are `master.jroverton.com:26901`. Accept a DNS
+host name, IPv4 address or IPv6 address, with port 26901 when omitted. An IPv6
+address with a port uses brackets, for example `[::1]:26911`. Ports are 1 to
+65535. The whole field is limited to 255 ASCII characters. DNS labels contain
+letters, digits and internal hyphens, at most 63 characters each and 253 in
+total, with an optional final dot. Single-label
+hosts are accepted. Trim surrounding spaces. A blank field retains the earlier
+default behavior. Invalid syntax leaves Options open with a clear error and
+keeps the last accepted setting. An unreachable but valid address is accepted;
+Messages names that address when lookup fails or the master does not answer.
+
+Default edits the draft. OK or Enter in a field saves it; Cancel or Escape
+discards it. Tab reaches Default immediately after the master field; Enter
+or Space activates it. No new shortcut is assigned. Saving a changed master
+clears the previous games and re-queries the chosen master. The lounge's
+"Games listed by ..." line shows the accepted address. The existing
+`network-v1.conf` master entry persists it without a format change.
+
+The same master lists games, registers games hosted with New, introduces
+players, supplies NAT traversal and relay, and receives enabled anonymous
+statistics. Both the statistics notice and Options say that statistics go
+to the chosen master. Command-line `--browse` and `--host FILE --list` retain
+their existing `--master` override for that invocation without saving it.
+`--browse` otherwise uses the saved choice; command-line listed hosting
+otherwise uses the public default. There is no `TORE_MASTER` override.
+
 ## The ? menu
 
 Every lounge, its Options panel, game lobby, and lobby sub-screen offers
@@ -54,6 +87,43 @@ and succession behaviour as Leave/host quit. Its listing is withdrawn and
 its sockets and router mappings are released. Return closes any lobby page
 and both lounges and shows the root main menu. Exit closes the application.
 Unsaved Settings edits are discarded by either destination.
+
+## Callsign when returning to a game
+
+**Opinionated**, clean-leave reset requested by John on 2026-10-23.
+Leave, Return to Main Menu and Exit discard that session's rejoin identity
+on the client and host. Joining again uses the current lounge Callsign field
+and starts as a new player. Ending only a flight while staying connected in
+the lobby does not discard the identity.
+
+Agent decision for an unclean drop: the saved token still restores the same
+player, scores, lives, locked side and kept aircraft, but uses the callsign
+entered for the new join. The usual 15-character limit and duplicate suffix
+rules still apply. The slot's reservation label uses the new name too.
+This applies to hosted and dedicated games. The reservation check below uses
+protocol 71.
+See [rejoin](../MULTIPLAYER.md#rejoin-and-observers).
+
+**Opinionated**, server confirmation requested by John on 2026-10-23.
+A saved token may label a game Rejoin, but does not promise its previous slot.
+While that game is selected, the lounge asks its server every 2 seconds.
+Only a reply matching the address, session and request nonce can name the
+return slot. A reply is usable for at most 3 seconds from the request, and
+changing selection or clearing identity removes it immediately. Poll and
+freshness intervals are agent decisions.
+
+A confirmed reply names the side, wing and member, with the earliest current
+return deadline: token expiry, the mission time limit, or an active empty
+mission timeout. The UI says "up to" this remaining time and warns that loss,
+release or an earlier mission end can end the hold. It adds no new hold timer. A confirmed absence reads
+"No reserved slot is available for your return." Silence, timeout or
+an unconfirmed reply shows no reservation message. The compatibility code
+stays visible while confirmation is pending and precedes a confirmed result. These rules apply to both
+lounges. Direct uses the selected server address. Internet uses the saved
+address for that session; if it is no longer reachable, including a moved or
+relay-only host, it shows no promise. No token is sent to a broadcast address
+or to the master listing service. The check does not join or occupy a slot.
+
 
 ## Settings draft
 
@@ -119,3 +189,13 @@ The lobby and server log share the wait text, for example:
 The minimum gates mission start only; departures in flight do not pause it.
 Existing settings messages and `mission_locked` carry everything needed, so
 this change does not extend the wire format.
+
+## Compatibility display and admission
+
+Opinionated, requested by John on 2026-10-23. Games with matching protocol
+and eight-digit uppercase compatibility codes can see and join one another
+regardless of source commit or release label. Show other versions includes
+incompatible games but leaves them unjoinable. The selected game's details
+and game lobby header show `Code XXXXXXXX`. A mismatch names both codes.
+The [code definition](../ARCHITECTURE.md#compatibility-code) records the agent's
+whole-import scope and hash choice. The detailed per-mission check remains.

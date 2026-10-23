@@ -767,13 +767,42 @@ and proceeds to its ordnance page; cancelling ordnance sends nothing.
 Current implementation uses a Fixed/Player choice control beside each wing's
 existing aircraft field, which serves as its AI default, and an AI aircraft
 control above the wing rows when hosting. The in-flight menu uses station display
-order from the shared loadout model, cycles legal stores and quantities, and
-provides internal fuel, Standard load and Done. Capacity and weight validation
-use the same loadout code as the lobby and host. The host applies revive-weapons
-to the accepted choice. Agent presentation decision: aircraft lists use pages of
-12; quantities cycle in single units up to a capacity of 20, otherwise in
-ten-percent steps. Internal fuel cycles from 10 to 100 percent in ten-percent
-steps. Done stages a choice for the normal revive request; Escape discards edits.
+order from the shared loadout model and provides internal fuel, Standard load
+and Done. Capacity and weight validation use the same loadout code as the lobby
+and host. The host applies revive-weapons to the accepted choice. Quantities
+use single units up to a capacity of 20, otherwise ten-percent steps. Internal
+fuel cycles from 10 to 100 percent in ten-percent steps. Done stages a choice
+for the normal revive request; Escape at the top level discards edits.
+
+John requested searchable scrolling respawn selectors on 2026-10-23, an
+**opinionated** presentation addition. Selecting a station opens its stores
+sub-menu. Its two groups and ordering share the pre-flight
+[Load Ordnance catalog](ordnance-presentation.md): Air-to-air, then
+Air-to-surface, with tanks and designator pods before surface weapons. Each
+store's quantities stay together in increasing order. Empty is first. Only
+compatible, valid choices appear, including shared-content, weight and
+revive-weapons restrictions. Displayed ammunition counts include the revival
+cut; the host still applies that cut once to the submitted full quantity.
+
+Aircraft is one complete scrolling list in the creator/lobby's display-name
+order (exact selection key breaks ties), restricted to available shared aircraft. Search matches a
+case-insensitive substring of the aircraft name/designation or the store's
+names/designation. For example, `16` finds F-16C, `hornet` finds F/A-18D and
+`120` finds AIM-120. No matches shows an empty result and Enter does nothing.
+
+Agent presentation decisions: both lists show 16 rows at once, including group
+headings, in the existing flight font and colours with the retail red slider.
+Click Search or press Tab to focus it; Tab toggles between search and results.
+Typing edits the focused search, including M and spaces; Backspace removes a
+character. Search is limited to 64 characters and edits reset to the first
+result. Up/Down or controller D-pad moves through results, skipping headings;
+Enter or controller A selects. Home/End reaches the ends, Page Up/Down moves
+16 results, the wheel scrolls three rows per notch, and the red bar supports
+track clicks and dragging. A result click selects it. Left/Right switches tabs.
+Escape or controller B clears a nonempty search first, then closes the station
+sub-menu, then cancels the unsaved page. In Aircraft, Escape after clearing
+search cancels the page. M opens Mission only outside search focus; Mission...
+remains available as a button in every view. Done and Cancel keep their meaning.
 
 John requested persistent access on 2026-10-22, an **opinionated** multiplayer
 addition. While waiting under `respawn revive` with lives remaining, the

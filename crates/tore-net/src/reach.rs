@@ -133,6 +133,7 @@ pub fn probe(
         nonce,
         game_version: String::new(),
         game_commit: String::new(),
+        compatibility: 0,
     })
     .encode(protocol_version)
     .map_err(io::Error::other)?;

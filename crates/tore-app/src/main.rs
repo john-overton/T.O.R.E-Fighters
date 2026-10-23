@@ -161,12 +161,14 @@ mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
+mod target_select;
 mod terrain_audit;
 mod terrain_chunks;
 mod terrain_colors;
 mod terrain_seams;
 mod ui_text;
 mod ui_text_renderer;
+mod updates;
 mod v22_animation;
 mod variety_animation;
 mod variety_rotors;
@@ -435,6 +437,7 @@ struct App {
     /// The open `TORE_FORMATION_TRACE` file for the mission in flight.
     formation_trace: Option<formation_trace::FormationTrace>,
     menu: Menu,
+    updates: updates::Updates,
     audio: Option<audio::Audio>,
     renderer: Option<Renderer>,
     /// Graphics choices for the 3D view, applied to the renderer.
@@ -1563,6 +1566,7 @@ impl App {
             "designate" => Command::Target,
             "designate-previous" => Command::TargetPrevious,
             "designate-visual" => Command::TargetVisual,
+            "designate-centre" => Command::TargetCentre,
             "clear-designation" => {
                 Command::Combat(tore_sim::combat::live::Command::ClearDesignation)
             }
@@ -2011,13 +2015,65 @@ impl App {
             Command::Target | Command::TargetPrevious if self.console_showing() => {
                 self.console_target_key(command == Command::Target)
             }
-            Command::Target | Command::TargetPrevious | Command::TargetVisual => {
+            Command::Target | Command::TargetPrevious => {
                 use tore_sim::combat::live::Command as Live;
-                self.queue(seats::SeatCommand::Combat(match command {
-                    Command::Target => Live::Designate,
-                    Command::TargetPrevious => Live::DesignatePrevious,
-                    _ => Live::DesignateVisual,
-                }));
+                let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+                let sensors = &frame.readout.sensors;
+                let controls = self.instruments.controls();
+                // Preserve the ground and HARM pages' existing cycle.
+                let command = if sensors.air_ground
+                    || controls.channel != tore_sim::sensors::Channel::Radar
+                {
+                    Some(if command == Command::Target {
+                        Live::Designate
+                    } else {
+                        Live::DesignatePrevious
+                    })
+                } else {
+                    target_select::radar(sensors, controls, command == Command::Target)
+                        .map(Live::DesignateTarget)
+                };
+                log::info!(
+                    "Target selection: radar before={:?} requested={:?} range={}",
+                    sensors.selected,
+                    command,
+                    controls.range_nmi()
+                );
+                drop(frame);
+                if let Some(command) = command {
+                    self.queue(seats::SeatCommand::Combat(command));
+                } else {
+                    self.flight_ui.message("No selectable radar contacts");
+                }
+                Action::None
+            }
+            Command::TargetVisual | Command::TargetCentre => {
+                let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+                let centre = command == Command::TargetCentre;
+                let mut forward = self.hornet.camera(frame.flight, 0, Default::default());
+                forward.zoom = self.flight_ui.zoom;
+                let camera = if centre { &forward } else { &self.camera };
+                let picked = target_select::visual(
+                    &frame.readout.visual,
+                    frame.readout.targets.designated,
+                    camera,
+                    self.window_size,
+                    centre,
+                );
+                log::info!(
+                    "Target selection: visual centre={} before={:?} requested={:?}",
+                    centre,
+                    frame.readout.targets.designated,
+                    picked
+                );
+                drop(frame);
+                if let Some(id) = picked {
+                    self.queue(seats::SeatCommand::Combat(
+                        tore_sim::combat::live::Command::DesignateVisualTarget(id),
+                    ));
+                } else {
+                    self.flight_ui.message("No visible aircraft");
+                }
                 Action::None
             }
             Command::RangeReset => {
@@ -3190,6 +3246,37 @@ impl App {
             return;
         }
         match action {
+            Action::LeaveFeedback | Action::OpenUpdate => {
+                let url = if action == Action::LeaveFeedback {
+                    Some(updates::FEEDBACK_URL)
+                } else {
+                    self.updates.available.as_ref().map(|r| r.url.as_str())
+                };
+                if let Some(url) = url
+                    && let Err(error) = updates::open_page(url)
+                {
+                    self.menu.state.toast =
+                        Some((format!("Could not open browser: {error}"), Instant::now()));
+                }
+            }
+            Action::ToggleUpdates => match self.updates.toggle() {
+                Ok(()) => {
+                    self.menu.state.updates_enabled = self.updates.enabled;
+                    let version = self
+                        .updates
+                        .available
+                        .as_ref()
+                        .filter(|_| self.updates.enabled)
+                        .map(|r| r.version.to_string());
+                    self.menu.update_link(version.as_deref());
+                }
+                Err(error) => {
+                    self.menu.state.toast = Some((
+                        format!("Could not save update setting: {error}"),
+                        Instant::now(),
+                    ))
+                }
+            },
             Action::Replays => self.open_replays("Main menu"),
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
@@ -3893,7 +3980,23 @@ impl App {
         }
         if self.screen == Screen::Flight && self.respawn_open() {
             if event.pressed {
+                // Text belongs to the focused search field, including Space and M.
+                let searching = !self.respawn_brief_open()
+                    && self
+                        .net_flight
+                        .as_ref()
+                        .and_then(|f| f.respawn_menu.as_ref())
+                        .is_some_and(|m| m.searching());
                 let action = self.respawn_key(&name);
+                if searching
+                    && let Some(text) = &event.text
+                    && let Some(menu) = self
+                        .net_flight
+                        .as_mut()
+                        .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.text(text);
+                }
                 self.action(event_loop, action);
             }
             return Action::None;
@@ -4432,6 +4535,13 @@ impl ApplicationHandler for App {
                 self.internet_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
+                if let Some(menu) = self
+                    .net_flight
+                    .as_mut()
+                    .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.moved(None);
+                }
                 self.live_debug.release();
                 self.camera.keys.clear();
                 self.release_trigger();
@@ -4462,11 +4572,22 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .is_some_and(|f| f.respawn_menu.is_some())
                 {
-                    if self.respawn_brief_open()
+                    if self
+                        .net_flight
+                        .as_ref()
+                        .and_then(|f| f.respawn_menu.as_ref())
+                        .is_some_and(|m| m.brief_open)
                         && let Some(brief) = &mut self.flight_ui.map.brief
                     {
                         brief.moved(point);
+                    } else if let Some(menu) = self
+                        .net_flight
+                        .as_mut()
+                        .and_then(|f| f.respawn_menu.as_mut())
+                    {
+                        menu.moved(point);
                     }
+                    renderer.window.request_redraw();
                     return;
                 }
                 if let Some(editor) = &mut self.graphics_screen {
@@ -4544,7 +4665,18 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if self.screen == Screen::Flight && self.respawn_open() {
-                    self.respawn_key(if notches > 0 { "ArrowUp" } else { "ArrowDown" })
+                    if self.respawn_brief_open() {
+                        self.respawn_key(if notches > 0 { "ArrowUp" } else { "ArrowDown" })
+                    } else {
+                        if let Some(menu) = self
+                            .net_flight
+                            .as_mut()
+                            .and_then(|f| f.respawn_menu.as_mut())
+                        {
+                            menu.wheel(notches);
+                        }
+                        Action::None
+                    }
                 } else if self.screen == Screen::Flight
                     && self.flight_ui.map.open
                     && self.flight_ui.map.mission_tab
@@ -4590,6 +4722,13 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.pointer = None;
+                if let Some(menu) = self
+                    .net_flight
+                    .as_mut()
+                    .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.moved(None);
+                }
                 self.live_debug.release();
                 self.quick.pointer(None);
                 direct_screen::app::pointer_moved(&mut self.lobby, &mut self.direct, None);
@@ -4641,6 +4780,13 @@ impl ApplicationHandler for App {
                 self.internet_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
+                if let Some(menu) = self
+                    .net_flight
+                    .as_mut()
+                    .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.moved(None);
+                }
                 self.live_debug.release();
                 self.camera.keys.clear();
                 self.release_trigger();
@@ -6611,7 +6757,12 @@ impl ApplicationHandler for App {
                                 .as_ref()
                                 .and_then(|s| s.client.revival_prompt())
                                 .unwrap_or_default();
-                            menu.draw(&mut self.menu.pixels, &self.hornet.font, &prompt);
+                            menu.draw(
+                                &mut self.menu.pixels,
+                                &self.hornet.font,
+                                &prompt,
+                                &self.menu.quick_sprites,
+                            );
                             if menu.brief_open
                                 && let Some(brief) = &self.flight_ui.map.brief
                             {
@@ -6845,6 +6996,17 @@ impl ApplicationHandler for App {
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.screen == Screen::Main && self.updates.poll() {
+            let version = self
+                .updates
+                .available
+                .as_ref()
+                .map(|r| r.version.to_string());
+            self.menu.update_link(version.as_deref());
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+        }
         // The Graphics screen's changes apply once they settle; this also
         // keeps its window size current after a resize.
         self.settle_graphics(false);
@@ -11535,7 +11697,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         return Ok(Outcome::Done);
     }
     diagnostics::stage("argument parsing and startup options");
-    if matches!(session, Session::First) {
+    if matches!(session, Session::First)
+        && !std::env::args().any(|arg| arg == "--version" || arg == "-V")
+    {
         // `--find-games` and `--browse` keep stdout for the games they list.
         if std::env::args().any(|a| a == "--find-games" || a == "--browse" || a == "--map-port") {
             eprintln!("{}", version::label());
@@ -12675,7 +12839,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--original-graphics" => graphics_flags.push((arg.clone(), String::new())),
             "--no-audio" => no_audio = true,
             "--version" | "-V" => {
-                println!("T.O.R.E-Fighters v{}", version::version());
+                println!("{}", version::compatibility_label());
                 return Ok(Outcome::Done);
             }
             "--import-only" => import_only = true,
@@ -14701,13 +14865,30 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 let sky = 55 + (index / 640 / 8) as u8;
                 pixel.copy_from_slice(&[sky, sky + 20, sky + 35, 255]);
             }
-            if snapshot_state == "respawn-aircraft" {
+            if snapshot_state.starts_with("respawn-aircraft") {
                 overlay.preview_aircraft();
+            } else if snapshot_state.starts_with("respawn-station") {
+                // The F/A-18D missile station, after its gun and tank.
+                overlay.key("ArrowDown", &theater_resources, &spec);
+                overlay.key("ArrowDown", &theater_resources, &spec);
+                overlay.key("Enter", &theater_resources, &spec);
+            }
+            if snapshot_state.ends_with("-scrolled") {
+                overlay.key("End", &theater_resources, &spec);
+            }
+            if snapshot_state.ends_with("-filtered") {
+                overlay.key("Tab", &theater_resources, &spec);
+                overlay.text(if snapshot_state.starts_with("respawn-aircraft") {
+                    "hornet"
+                } else {
+                    "120"
+                });
             }
             overlay.draw(
                 &mut menu.pixels,
                 &hornet.font,
                 "You can fly again in 0:25 (2 lives left)",
+                &menu.quick_sprites,
             );
             use std::io::Write;
             let mut f = std::fs::File::create(&path)?;
@@ -15764,7 +15945,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     } else {
         None
     };
+    let updates = updates::Updates::new(if ordinary_start {
+        Some(assets::data_directory()?)
+    } else {
+        None
+    });
+    menu.state.updates_enabled = updates.enabled;
     let mut app = App {
+        updates,
         creator_loading_view: None,
         network_loading_stage: None,
         loading_heartbeat: None,

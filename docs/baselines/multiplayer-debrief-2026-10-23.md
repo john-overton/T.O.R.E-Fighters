@@ -10,7 +10,7 @@
 
 Implementation mode. This validates the requested [mission record](../spec/debrief.md#multiplayer-mission-record),
 including both follow-up requests. The starting T.O.R.E revision was
-`b87f1ebc66285c53cc814214849bfb5df1e208c5`, protocol 67. The change uses protocol 69.
+`b87f1ebc66285c53cc814214849bfb5df1e208c5`, protocol 67. The original validation used protocol 69. The integrated change uses protocol 73.
 Validation ran on Linux with the pinned Rust toolchain and locked dependencies.
 Retail game behavior was not compared.
 

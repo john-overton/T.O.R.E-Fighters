@@ -50,6 +50,7 @@ pub fn build() -> Build {
         protocol_version: tore_session::wire::PROTOCOL_VERSION,
         game_version: id.version,
         game_commit: id.commit,
+        compatibility: id.compatibility,
         release: id.release,
     }
 }
@@ -87,10 +88,22 @@ pub struct Browse<D: Datagrams = ServerSocket> {
 impl Browse {
     /// A browse of the master at `master` (`HOST` or `HOST:PORT`) on a new
     /// socket. Refused at once when the address is not one.
-    pub fn start(master: &str, other_builds: bool, full_games: bool) -> Result<Self, String> {
+    pub fn start(
+        master: &str,
+        other_builds: bool,
+        full_games: bool,
+        build: Build,
+    ) -> Result<Self, String> {
         let socket = ServerSocket::bind(Listen::Any, 0)
             .map_err(|error| format!("Cannot open a socket for the Internet Lobby: {error}"))?;
-        Self::with(socket, master, other_builds, full_games, Entropy::System)
+        Self::with(
+            socket,
+            master,
+            other_builds,
+            full_games,
+            Entropy::System,
+            build,
+        )
     }
 }
 
@@ -102,6 +115,7 @@ impl<D: Datagrams> Browse<D> {
         other_builds: bool,
         full_games: bool,
         entropy: Entropy,
+        build: Build,
     ) -> Result<Self, String> {
         if !crate::net::settings::master_ok(master) {
             return Err(format!(
@@ -110,7 +124,6 @@ impl<D: Datagrams> Browse<D> {
             ));
         }
         let (host, port) = parse_master(master)?;
-        let build = build();
         let browser = Browser::new(
             BrowserConfig {
                 build: build.clone(),
@@ -285,7 +298,12 @@ impl MasterJoin {
     /// A join of `listing_id` on the master at `masters` (as the browse
     /// found them), from a new dual-stack socket whose port is the one the
     /// master will see and the host will punch.
-    pub fn start(masters: &[SocketAddr], listing_id: u64, now: Duration) -> Result<Self, String> {
+    pub fn start(
+        masters: &[SocketAddr],
+        listing_id: u64,
+        now: Duration,
+        build: Build,
+    ) -> Result<Self, String> {
         if masters.is_empty() {
             return Err("the Internet Lobby's address is not known yet".into());
         }
@@ -294,7 +312,7 @@ impl MasterJoin {
         let port = socket.local_addresses().first().map_or(0, SocketAddr::port);
         let mut joiner = Joiner::new(
             JoinConfig {
-                build: build(),
+                build,
                 listing_id,
                 entropy: Entropy::System,
             },
@@ -338,16 +356,17 @@ pub fn entry_line(entry: &PageEntry, summary: Option<&ListingSummary>) -> String
         tore_net::packet::DiscoverPhase::Closed => "closed",
     };
     let build = match &entry.other_build {
-        None => "this build".to_owned(),
+        None => "matching code".to_owned(),
         Some(version) => format!("version {version}"),
     };
     let mut line = format!(
-        "{}  {}/{} players, {phase}, {}, {}, {build}",
+        "{}  {}/{} players, {phase}, {}, {}, {build}, Code {:08X}",
         quote(&entry.name),
         entry.players,
         entry.capacity,
         if entry.password { "password" } else { "open" },
         if entry.full { "full" } else { "not full" },
+        entry.compatibility,
     );
     if entry.dedicated {
         line += ", dedicated server";
@@ -415,9 +434,11 @@ pub fn browse_master(
 pub fn browse_games(seconds: f64, master: &str, other_builds: bool) -> io::Result<()> {
     use std::io::Write;
     use std::time::Instant;
+    // Loading the compatibility identity is setup, not part of the browse timeout.
+    let mut browse =
+        Browse::start(master, other_builds, true, build()).map_err(io::Error::other)?;
     let clock = Instant::now();
     let now = || clock.elapsed();
-    let mut browse = Browse::start(master, other_builds, true).map_err(io::Error::other)?;
     let mut out = io::stdout().lock();
     let end = Duration::from_secs_f64(seconds);
     let mut details: Vec<(u64, Option<ListingSummary>)> = Vec::new();
@@ -505,6 +526,31 @@ pub(crate) mod testing {
     use tore_net::master::{MasterPacket, Register};
     use tore_net::packet::DiscoverPhase;
 
+    /// A synthetic import shared by the test master, browsers and lounges.
+    /// Never reads the installed profile or the process-wide content cache.
+    pub fn build() -> Build {
+        let own = own();
+        Build {
+            protocol_version: own.protocol_version,
+            game_version: own.build.version,
+            game_commit: own.build.commit,
+            compatibility: own.build.compatibility,
+            release: own.build.release,
+        }
+    }
+
+    pub fn own() -> crate::net::search::Own {
+        crate::net::search::Own {
+            protocol_version: tore_session::wire::PROTOCOL_VERSION,
+            build: tore_session::host::BuildId {
+                compatibility: tore_session::compatibility::current(&Default::default()),
+                version: "test".into(),
+                commit: "synthetic".into(),
+                release: false,
+            },
+        }
+    }
+
     /// `config`'s master bound on 127.0.0.1 with its probe port at the main
     /// port + 1, as the game takes it to be (`tore_net::master::probe_address`).
     /// With no probe port, the next socket a test binds can take the main
@@ -591,6 +637,7 @@ pub(crate) mod testing {
                 session_id: 7,
                 game_version: build.game_version.clone(),
                 game_commit: build.game_commit.clone(),
+                compatibility: build.compatibility,
                 name: name.to_owned(),
                 mission: format!("{name}: KOLA, clear"),
                 king: "Iceman".into(),
@@ -648,7 +695,7 @@ pub(crate) mod testing {
 
 #[cfg(test)]
 mod tests {
-    use super::testing::LoopbackMaster;
+    use super::testing::{LoopbackMaster, build};
     use super::*;
     use std::time::Instant;
 
@@ -679,7 +726,7 @@ mod tests {
     fn a_browse_lists_a_masters_games_and_asks_for_the_details_of_one() {
         let mut master = LoopbackMaster::start();
         let (id, _host) = master.list("Friday night", 3, 8, false);
-        let mut browse = Browse::start(&master.text(), false, false).unwrap();
+        let mut browse = Browse::start(&master.text(), false, false, build()).unwrap();
         let news = run(&mut master, &mut browse, |_, news| {
             news.iter()
                 .any(|n| matches!(n, News::Browse(BrowseEvent::Refreshed { .. })))
@@ -727,7 +774,7 @@ mod tests {
         let mut master = LoopbackMaster::start();
         let (_a, _host_a) = master.list("Room to spare", 1, 8, false);
         let (_b, _host_b) = master.list("Packed", 8, 8, true);
-        let mut browse = Browse::start(&master.text(), false, false).unwrap();
+        let mut browse = Browse::start(&master.text(), false, false, build()).unwrap();
         run(&mut master, &mut browse, |b, _| b.games().len() == 1);
         assert_eq!(browse.games().len(), 1);
         assert_eq!(browse.games()[0].name, "Room to spare");
@@ -737,9 +784,43 @@ mod tests {
     }
 
     #[test]
+    fn the_supplied_compatibility_code_filters_browsing_and_gates_introductions() {
+        let mut master = LoopbackMaster::start();
+        let (id, _host) = master.list("Synthetic host", 1, 8, false);
+        let mut other = build();
+        other.compatibility ^= 1;
+        let mut browse = Browse::start(&master.text(), false, false, other.clone()).unwrap();
+        let news = run(&mut master, &mut browse, |_, news| {
+            news.iter()
+                .any(|n| matches!(n, News::Browse(BrowseEvent::Refreshed { .. })))
+        });
+        assert!(
+            news.iter()
+                .any(|n| matches!(n, News::Browse(BrowseEvent::Refreshed { .. })))
+        );
+        assert!(browse.games().is_empty());
+        browse.set_filters(true, false, Duration::ZERO);
+        run(&mut master, &mut browse, |b, _| b.games().len() == 1);
+        assert_eq!(browse.games()[0].compatibility, build().compatibility);
+        assert!(browse.games()[0].other_build.is_some());
+        let clock = Instant::now();
+        let mut join = MasterJoin::start(&[master.main], id, Duration::ZERO, other).unwrap();
+        let mut refused = None;
+        assert!(master.pump(|| {
+            for event in join.update(clock.elapsed()) {
+                if let JoinEvent::Refused { text, .. } = event {
+                    refused = Some(text);
+                }
+            }
+            refused.is_some()
+        }));
+        assert!(refused.unwrap().contains("compatibility code"));
+    }
+
+    #[test]
     fn a_master_that_cannot_be_found_is_told_once_and_looked_up_again_later() {
         // The reserved .invalid name never resolves (RFC 6761).
-        let mut browse = Browse::start("master.invalid:26901", false, false).unwrap();
+        let mut browse = Browse::start("master.invalid:26901", false, false, build()).unwrap();
         let clock = Instant::now();
         let mut news = Vec::new();
         while clock.elapsed() < Duration::from_secs(10) {
@@ -774,7 +855,10 @@ mod tests {
     #[test]
     fn a_master_address_that_is_not_one_is_refused_at_once() {
         for bad in ["", "two words", "host:0", "[::1"] {
-            assert!(Browse::start(bad, false, false).is_err(), "{bad:?}");
+            assert!(
+                Browse::start(bad, false, false, build()).is_err(),
+                "{bad:?}"
+            );
         }
     }
 
@@ -784,7 +868,7 @@ mod tests {
         let (id, host) = master.list("Friday night", 1, 8, false);
         let masters = [master.main];
         let clock = Instant::now();
-        let mut join = MasterJoin::start(&masters, id, clock.elapsed()).unwrap();
+        let mut join = MasterJoin::start(&masters, id, clock.elapsed(), build()).unwrap();
         let mut introduced = None;
         let mut mapping = None;
         master.pump(|| {
@@ -814,7 +898,7 @@ mod tests {
     fn a_game_the_master_does_not_list_is_refused_in_its_words_and_a_dead_master_goes_silent() {
         let mut master = LoopbackMaster::start();
         let clock = Instant::now();
-        let mut join = MasterJoin::start(&[master.main], 99, clock.elapsed()).unwrap();
+        let mut join = MasterJoin::start(&[master.main], 99, clock.elapsed(), build()).unwrap();
         let mut refused = None;
         master.pump(|| {
             for event in join.update(clock.elapsed()) {
@@ -827,7 +911,7 @@ mod tests {
         assert_eq!(refused.as_deref(), Some("That game is no longer listed."));
         // A master nothing listens on: on virtual time, silent after six tries.
         let dead = address("127.0.0.1:9");
-        let mut join = MasterJoin::start(&[dead], 1, Duration::ZERO).unwrap();
+        let mut join = MasterJoin::start(&[dead], 1, Duration::ZERO, build()).unwrap();
         let mut silent = false;
         for step in 1..=12 {
             for event in join.update(Duration::from_millis(1_100) * step) {
@@ -835,12 +919,13 @@ mod tests {
             }
         }
         assert!(silent);
-        assert!(MasterJoin::start(&[], 1, Duration::ZERO).is_err());
+        assert!(MasterJoin::start(&[], 1, Duration::ZERO, build()).is_err());
     }
 
     #[test]
     fn a_listed_game_reads_as_one_line_with_its_details() {
         let entry = PageEntry {
+            compatibility: 0,
             listing_id: 9,
             password: true,
             full: false,
@@ -856,7 +941,7 @@ mod tests {
         let bare = entry_line(&entry, None);
         assert_eq!(
             bare,
-            "\"Say 'hi'\"  2/8 players, flying, password, not full, this build, dedicated server, relay likely"
+            "\"Say 'hi'\"  2/8 players, flying, password, not full, matching code, Code 00000000, dedicated server, relay likely"
         );
         let summary = ListingSummary {
             mission: "UKR, clear".into(),

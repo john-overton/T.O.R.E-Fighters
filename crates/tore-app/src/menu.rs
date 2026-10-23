@@ -37,6 +37,9 @@ pub enum Action {
     ReimportMedia,
     /// The top bar's Replays entry: opens the Replays screen.
     Replays,
+    LeaveFeedback,
+    OpenUpdate,
+    ToggleUpdates,
     Controls,
     Graphics,
     Sound,
@@ -67,6 +70,9 @@ pub struct State {
     glow: Vec<f32>,
     last_frame: Instant,
     bar_offset: i32,
+    bar_height: i32,
+    extra_bars: Vec<(String, i32)>,
+    pub updates_enabled: bool,
 }
 fn enabled(index: usize) -> bool {
     !matches!(index, 3 | 6)
@@ -107,6 +113,9 @@ impl State {
             glow: vec![0.0; count],
             last_frame: Instant::now(),
             bar_offset: 0,
+            bar_height: 19,
+            extra_bars: vec![("Leave Feedback".into(), 120)],
+            updates_enabled: true,
         }
     }
     pub fn items(&self, bar: usize) -> Vec<String> {
@@ -121,6 +130,10 @@ impl State {
                 "Sound...".into(),
                 "Controls...".into(),
                 "Re-import media...".into(),
+                format!(
+                    "Check for updates: {}",
+                    if self.updates_enabled { "On" } else { "Off" }
+                ),
             ],
             // Authored rows (EF7, I4, agent decisions): the direct lobby for
             // friends and the public Internet Lobby. Retail's six rows (Serial,
@@ -138,18 +151,26 @@ impl State {
     fn popup_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
         (
             self.bar_rect(bar).0,
-            59,
-            if bar == 0 { 240 } else { 190 },
+            40 + self.bar_height,
+            if bar <= 1 { 240 } else { 190 },
             self.items(bar).len() as i32 * 20 + 8,
         )
     }
     fn bar_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
-        let (x, y, w, h) = BARS[bar];
-        (x + self.bar_offset, y, w, h)
+        let extra_width: i32 = self.extra_bars.iter().map(|(_, width)| width).sum();
+        let right_start = 632 - extra_width;
+        if bar < BARS.len() {
+            let (x, y, w, _) = BARS[bar];
+            (x + self.bar_offset, y, w, self.bar_height)
+        } else {
+            let index = bar - BARS.len();
+            let x = right_start + self.extra_bars[..index].iter().map(|(_, w)| w).sum::<i32>();
+            (x, 38, self.extra_bars[index].1, self.bar_height)
+        }
     }
     pub fn hit(&self, point: Option<(f64, f64)>) -> Option<Target> {
         let p = point?;
-        for i in 0..BARS.len() {
+        for i in 0..BARS.len() + self.extra_bars.len() {
             if in_rect(p, self.bar_rect(i)) {
                 return Some(Target::Bar(i));
             }
@@ -158,8 +179,8 @@ impl State {
             let rect = self.popup_rect(bar);
             // Hovering Replays while a dropdown is open keeps the menu open
             // with no list showing, as a menu bar does.
-            if !self.items(bar).is_empty() && in_rect(p, rect) && p.1 >= 63.0 {
-                let row = ((p.1 - 63.0) / 20.0) as usize;
+            if !self.items(bar).is_empty() && in_rect(p, rect) && p.1 >= f64::from(rect.1 + 4) {
+                let row = ((p.1 - f64::from(rect.1 + 4)) / 20.0) as usize;
                 if row < self.items(bar).len() {
                     return Some(Target::Item(row));
                 }
@@ -209,6 +230,14 @@ impl State {
                 self.cancel();
                 return Action::Replays;
             }
+            Target::Bar(4 | 5) => {
+                self.cancel();
+                return if target == Target::Bar(4) {
+                    Action::LeaveFeedback
+                } else {
+                    Action::OpenUpdate
+                };
+            }
             Target::Bar(bar) => {
                 self.open = if self.open == Some(bar) {
                     None
@@ -244,6 +273,10 @@ impl State {
                     if bar == 1 && row == 3 {
                         self.cancel();
                         return Action::ReimportMedia;
+                    }
+                    if bar == 1 && row == 4 {
+                        self.cancel();
+                        return Action::ToggleUpdates;
                     }
                     if bar == 2 && row == 0 {
                         self.cancel();
@@ -300,7 +333,7 @@ impl State {
                 Action::Hover
             }
             "Tab" | "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" => {
-                let targets: Vec<_> = (0..BARS.len())
+                let targets: Vec<_> = (0..BARS.len() + self.extra_bars.len())
                     .map(Target::Bar)
                     .chain(
                         (0..self.buttons.len())
@@ -378,9 +411,63 @@ pub struct Menu {
     background: String,
 }
 impl Menu {
+    /// Measure both links in the same imported font used to draw them.
+    pub fn update_link(&mut self, version: Option<&str>) {
+        let font = &self.sprites["MENUFONT.PIC"];
+        let wrapped = self.background == "CHOOSE3.PIC" && version.is_some();
+        self.state.bar_height = if wrapped { 38 } else { 19 };
+        let feedback = if wrapped {
+            "Leave\nFeedback"
+        } else {
+            "Leave Feedback"
+        };
+        let width = |label: &str| {
+            label
+                .lines()
+                .map(|line| text_width(font, line))
+                .max()
+                .unwrap_or(0)
+        };
+        self.state.extra_bars = vec![(feedback.into(), width(feedback) + 12)];
+        if let Some(version) = version {
+            let mut label = if wrapped {
+                format!("Update Available:\nv{version}")
+            } else {
+                format!("Update Available: v{version}")
+            };
+            // Reserve the native left group and keep all glyphs at their
+            // original size. Long prereleases end in an ellipsis.
+            let limit = 632 - (246 + self.state.bar_offset) - 4 - self.state.extra_bars[0].1 - 12;
+            if width(&label) > limit {
+                while width(&format!("{label}...")) > limit
+                    && label.len() > "Update Available: v".len()
+                {
+                    label.pop();
+                }
+                label.push_str("...");
+            }
+            let measured = width(&label) + 12;
+            self.state.extra_bars.push((label, measured));
+        }
+        // A result arriving during a click must not activate a moved target.
+        self.state.cancel();
+    }
     pub fn preview_state(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" => {}
+            "update-available" | "update-focus" => {
+                self.update_link(Some("0.2.1"));
+                if name == "update-focus" {
+                    self.state.keyboard = true;
+                    self.state.focus = Some(Target::Bar(5));
+                }
+            }
+            "updates-off" => {
+                self.state.updates_enabled = false;
+                self.state.open = Some(1);
+                self.state.focus = Some(Target::Item(4));
+                self.state.keyboard = true;
+            }
             "notice" => {
                 self.state.activate(Target::Button(0));
             }
@@ -552,19 +639,40 @@ impl Menu {
                 glyphs: vec![],
             },
         );
-        Ok(Self {
+        let mut menu = Self {
             state,
             kit_source,
             sprites,
             quick_sprites,
             pixels: vec![0; WIDTH * HEIGHT * 4],
             background,
-        })
+        };
+        menu.update_link(None);
+        Ok(menu)
     }
     pub fn render(&mut self) -> bool {
         let active = self.state.animate();
         self.pixels
             .copy_from_slice(&self.sprites[&self.background].rgba);
+        // Extend the imported bar's blank horizontal texture to the right.
+        // CHOOSE3 needs two lines for the project links, below its header art.
+        let background = &self.sprites[&self.background];
+        let left = self.state.bar_rect(0).0 - 6;
+        let sample_x = (self.state.bar_rect(2).0 + 10) as usize;
+        let bottom = 41 + self.state.bar_height;
+        for y in 36..bottom {
+            let source_y = if y >= bottom - 3 {
+                57 + y - (bottom - 3)
+            } else {
+                y.min(56)
+            };
+            for x in left..636 {
+                let source = (source_y as usize * WIDTH + sample_x) * 4;
+                let target = (y as usize * WIDTH + x as usize) * 4;
+                self.pixels[target..target + 4]
+                    .copy_from_slice(&background.rgba[source..source + 4]);
+            }
+        }
         let mut canvas = Canvas(&mut self.pixels);
         for (i, b) in self.state.buttons.iter().enumerate() {
             let pressed = self.state.pressed == Some(Target::Button(i))
@@ -604,14 +712,33 @@ impl Menu {
             }
         }
         let menu_font = &self.sprites["MENUFONT.PIC"];
-        for (i, label) in BAR_LABELS.iter().enumerate() {
+        for (i, label) in BAR_LABELS
+            .iter()
+            .copied()
+            .chain(
+                self.state
+                    .extra_bars
+                    .iter()
+                    .map(|(label, _)| label.as_str()),
+            )
+            .enumerate()
+        {
             let rect = self.state.bar_rect(i);
             if self.state.open == Some(i) || self.state.highlighted(Target::Bar(i)) {
                 canvas.rect(rect, [190, 200, 215, 255]);
             }
             // Keep the imported font's shared baseline: Replays' descenders
             // must not lift the whole word above Multi (presentation spec).
-            canvas.centered_text_by(menu_font, label, "Multi", rect);
+            let lines = label.lines().count() as i32;
+            for (row, line) in label.lines().enumerate() {
+                let line_rect = (
+                    rect.0,
+                    rect.1 + row as i32 * rect.3 / lines,
+                    rect.2,
+                    rect.3 / lines,
+                );
+                canvas.centered_text_by(menu_font, line, "Multi", line_rect);
+            }
         }
         let body = &self.sprites["ARMFONT.PIC"];
         // Opinionated (John, 2026-09-23): badge plus version, drawn before
@@ -1121,7 +1248,7 @@ mod tests {
                 Target::Bar(1),
                 Target::Bar(2),
                 Target::Bar(3),
-                Target::Button(0),
+                Target::Bar(4),
             ]
         );
         s.key("Tab", true);
@@ -1176,6 +1303,48 @@ mod tests {
         }
     }
     #[test]
+    fn project_links_are_right_aligned_and_never_overlap_existing_entries() {
+        for offset in [-6, 0, 109] {
+            for update in [false, true] {
+                let mut s = state();
+                s.bar_offset = offset;
+                if update {
+                    if offset == 109 {
+                        s.bar_height = 38;
+                        s.extra_bars[0] = ("Leave\nFeedback".into(), 90);
+                        s.extra_bars.push(("Update Available:\nv0.2.1".into(), 170));
+                    } else {
+                        s.extra_bars.push(("Update Available: v0.2.1".into(), 220));
+                    }
+                }
+                let count = BARS.len() + s.extra_bars.len();
+                for i in 0..count {
+                    let (x, y, w, h) = s.bar_rect(i);
+                    assert!(x >= 0 && x + w <= WIDTH as i32);
+                    if i > 0 {
+                        let previous = s.bar_rect(i - 1);
+                        assert!(previous.0 + previous.2 <= x);
+                    }
+                    let middle = (f64::from(x + w / 2), f64::from(y + h / 2));
+                    assert_eq!(s.hit(Some(middle)), Some(Target::Bar(i)));
+                }
+                assert_eq!(s.bar_rect(0).0, 78 + offset, "native origin stays put");
+                let right = s.bar_rect(count - 1);
+                assert_eq!(right.0 + right.2, 632);
+                s.focus = Some(Target::Bar(3));
+                s.key("Tab", false);
+                assert_eq!(s.key("Enter", false), Action::LeaveFeedback);
+                if update {
+                    s.focus = Some(Target::Bar(4));
+                    s.key("ArrowRight", false);
+                    assert_eq!(s.key("Enter", false), Action::OpenUpdate);
+                }
+                s.open = Some(1);
+                assert_eq!(s.activate(Target::Item(4)), Action::ToggleUpdates);
+            }
+        }
+    }
+    #[test]
     fn pref_lists_sound_and_opens_it() {
         let mut s = state();
         s.open = Some(1);
@@ -1185,7 +1354,8 @@ mod tests {
                 "Graphics...",
                 "Sound...",
                 "Controls...",
-                "Re-import media..."
+                "Re-import media...",
+                "Check for updates: On"
             ]
         );
         assert_eq!(s.activate(Target::Item(1)), Action::Sound);

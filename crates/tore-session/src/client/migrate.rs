@@ -611,6 +611,7 @@ impl Client {
         let config = tore_net::ClientConfig {
             game_version: self.config.build.version.clone(),
             game_commit: self.config.build.commit.clone(),
+            compatibility: self.config.build.compatibility,
             password: self.config.password.clone(),
             platform: self.config.platform,
             token,

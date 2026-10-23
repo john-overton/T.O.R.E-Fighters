@@ -58,3 +58,28 @@ from https://gitlab.com/openfa/openfa. They retain their GPL notices; the full
 GPL-3.0 license and source hashes are alongside them. The local static-export
 patch is a T.O.R.E agent-authored modification, not an upstream release.
 OpenFA is built separately under `.local/`, not linked into the game.
+
+## Release-check dependencies
+
+The app's background release check uses [ureq](https://github.com/algesten/ureq)
+3.5.0 (MIT OR Apache-2.0), with default features disabled and `rustls` enabled.
+[serde_json](https://github.com/serde-rs/json) 1.0.154 and
+[semver](https://github.com/dtolnay/semver) 1.0.28 are MIT OR Apache-2.0.
+`Cargo.lock` is the version authority. Transitive additions are:
+
+| Packages | Licence |
+| --- | --- |
+| ureq-proto, base64, getrandom, http, httparse, itoa, rustls-pki-types, utf8-zero | MIT OR Apache-2.0 |
+| rustls | Apache-2.0 OR ISC OR MIT |
+| ring | Apache-2.0 AND ISC |
+| rustls-webpki, untrusted | ISC |
+| subtle | BSD-3-Clause |
+| webpki-roots (Mozilla trust anchors) | CDLA-Permissive-2.0 |
+| zeroize | Apache-2.0 OR MIT |
+| zmij | MIT |
+| wasi (target-specific getrandom dependency) | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+
+ring includes upstream cryptographic source notices in its
+[LICENSE](https://github.com/briansmith/ring/blob/0.17.14/LICENSE).
+The other packages retain their upstream licence texts in their crate source
+archives. No OpenSSL or other system TLS library is linked by this feature.

@@ -538,3 +538,79 @@ fn leave_and_drop_keep_side_contributions_through_ai_takeover_and_token_expiry()
         assert_eq!(final_results.scores.as_ref().unwrap().sides[0].kills, 3);
     }
 }
+
+#[test]
+fn renamed_rejoin_preserves_dropped_history_but_clean_leave_starts_a_new_player() {
+    for (clean, late) in [(false, false), (false, true), (true, false)] {
+        let (mut rig, viper, _) = two_sides(
+            Mode::Pvp,
+            &[(number::KILL_LIMIT, 0), (number::AI_RESPAWN, 0)],
+        );
+        shoot_down(&mut rig.host, FRIENDLY_HUMAN, ENEMY_AI);
+        rig.run(Duration::from_millis(1200));
+        let original = order(&rig, "Viper");
+        let token = rig.clients[viper].tokens.last().unwrap().token;
+        if clean {
+            rig.clients[viper].leave();
+            assert!(rig.run_until(Duration::from_secs(4), |r| r.closed(viper)));
+        } else {
+            let _silent = rig.clients.remove(viper);
+            assert!(rig.run_until(Duration::from_secs(8), |r| {
+                !r.host.peers.values().any(|p| p.callsign == "Viper")
+            }));
+        }
+        let back = rig.join(|c| {
+            c.callsign = "Maverick".into();
+            c.token = (!late).then_some(token);
+        });
+        rig.clients[back].ready = None;
+        assert!(rig.run_until(Duration::from_secs(3), |r| {
+            r.host.peers.values().any(|p| p.callsign == "Maverick")
+        }));
+        if late {
+            // The provisional lobby identity has already reached a score tick.
+            rig.run(Duration::from_millis(1200));
+            rig.clients[back].send(&Message::Rejoin(token));
+            assert!(rig.run_until(Duration::from_secs(3), |r| {
+                r.host
+                    .peers
+                    .values()
+                    .any(|p| p.callsign == "Maverick" && p.lobby.order == original)
+            }));
+        }
+        rig.run(Duration::from_millis(1200));
+        let current = order(&rig, "Maverick");
+        let scores = rig.host.final_scores(EndReason::EndedByServer);
+        let renamed = scores
+            .players
+            .iter()
+            .find(|p| p.callsign == "Maverick")
+            .unwrap();
+        assert_eq!(
+            scores
+                .players
+                .iter()
+                .filter(|p| p.callsign == "Maverick")
+                .count(),
+            1
+        );
+        assert_eq!(scores.sides[0].kills, 1);
+        assert!(!renamed.left);
+        if clean {
+            assert_ne!(current, original);
+            assert_eq!(renamed.kills, 0);
+            let departed = scores
+                .players
+                .iter()
+                .find(|p| p.callsign == "Viper")
+                .unwrap();
+            assert!(departed.left);
+            assert_eq!(departed.kills, 1);
+        } else {
+            assert_eq!(current, original);
+            assert_eq!(renamed.kills, 1);
+            assert!(!scores.players.iter().any(|p| p.callsign == "Viper"));
+        }
+        assert_eq!(rig.host.score.player(original).unwrap().tally.kills, 1);
+    }
+}

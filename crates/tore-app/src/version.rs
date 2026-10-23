@@ -22,6 +22,22 @@ pub fn label() -> String {
     format!("T.O.R.E - v{}", version())
 }
 
+/// Profile-aware version output; no installed content is stated explicitly.
+pub fn compatibility_label() -> String {
+    let code = tore_import::data_directory()
+        .map_err(|e| e.to_string())
+        .and_then(|dir| tore_session::compatibility::installed(&dir));
+    match code {
+        Ok(code) => format!("{} (code {code:08X}, commit {})", label(), commit()),
+        Err(_) => format!(
+            "{} (code {:08X}, no imported content, commit {})",
+            label(),
+            tore_session::compatibility::current(&Default::default()),
+            commit()
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

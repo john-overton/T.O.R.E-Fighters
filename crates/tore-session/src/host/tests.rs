@@ -45,6 +45,9 @@ fn spec(friendly: usize, enemy: usize, separation_nm: u32) -> MissionSpec {
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: crate::compatibility::current(
+            &content::GameContent::of(&resources()).content,
+        ),
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
@@ -146,6 +149,7 @@ impl TestClient {
         let mut config = ClientConfig {
             game_version: build().version,
             game_commit: build().commit,
+            compatibility: build().compatibility,
             entropy: Entropy::Seeded(u64::from(port)),
             ..ClientConfig::new(PROTOCOL_VERSION, "Viper")
         };
@@ -456,7 +460,10 @@ impl Rig {
     }
 
     fn join(&mut self, configure: impl FnOnce(&mut ClientConfig)) -> usize {
-        let client = TestClient::new(&self.net, self.next_port, configure);
+        let client = TestClient::new(&self.net, self.next_port, |c| {
+            c.compatibility = self.host.config().build.compatibility;
+            configure(c);
+        });
         self.next_port += 1;
         self.clients.push(client);
         self.clients.len() - 1
@@ -1027,14 +1034,29 @@ fn refusals_reach_the_client_with_their_reason() {
     let (rig, client) = try_join(locked, |c| c.password = "secret".into());
     assert!(rig.seated(client), "the right password joins");
 
-    // A different build.
+    // Different commits and release labels with the same code join.
+    let (rig, client) = try_join(config(), |c| {
+        c.game_version = "different-version".into();
+        c.game_commit = "different-commit".into();
+    });
+    assert!(rig.seated(client));
+
+    // A different compatibility code.
     let (rig, client) = try_join(config(), |c| {
         c.game_version = "0.1.2".into();
         c.game_commit = "other".into();
+        c.compatibility ^= 1;
     });
     let (reason, text) = refused(&rig, client);
     assert_eq!(reason, RefuseReason::GameBuild);
-    assert!(text.contains("0.2.0-1-gtest"), "{text}");
+    assert_eq!(
+        text,
+        format!(
+            "The server's compatibility code is {:08X}; yours is {:08X}.",
+            build().compatibility,
+            build().compatibility ^ 1
+        )
+    );
 
     // A game of protocol 7, before stage F phase 2's messages, is refused
     // by its version, naming both, before it can send an answer.

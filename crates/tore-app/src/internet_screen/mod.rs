@@ -150,6 +150,8 @@ struct Joining {
 /// The screen.
 pub struct InternetScreen {
     kit: Arc<Kit>,
+    /// Supplies this game's identity; tests supply their synthetic import.
+    own: fn() -> tore_net::master::Build,
     background: Background,
     callsign: TextField,
     full: CheckBox,
@@ -177,6 +179,7 @@ pub struct InternetScreen {
     /// session one belongs to is marked "Rejoin" once the master has said
     /// which session it is (the selected game's details).
     tokens: Store,
+    rejoin_check: crate::net::rejoin_check::Check,
     browse: Option<Browse>,
     /// The master the browse runs on, to tell when Options changed it.
     browsed: String,
@@ -283,6 +286,7 @@ impl InternetScreen {
         }
         let mut screen = Self {
             kit,
+            own: crate::net::browse::build,
             background: Background::internet_lobby(),
             callsign,
             full,
@@ -309,6 +313,7 @@ impl InternetScreen {
             entries: Vec::new(),
             details: BTreeMap::new(),
             tokens: Store::default(),
+            rejoin_check: Default::default(),
             browse: None,
             browsed: String::new(),
             browse_failed: false,
@@ -490,6 +495,8 @@ impl InternetScreen {
         self.last = now;
         if self.session && !session {
             // The session ended (the game said why in Messages).
+            self.load_tokens();
+            self.rebuild_games();
             self.browse_failed = false;
         }
         self.session = session;
@@ -506,6 +513,8 @@ impl InternetScreen {
         if let Some(panel) = &mut self.panel {
             panel.advance();
         }
+        let target = if session { None } else { self.rejoin_target() };
+        self.rejoin_check.update(now, target);
         self.refresh_buttons();
         outcome
     }
@@ -539,7 +548,12 @@ impl InternetScreen {
     /// Starts the browse on the master, saying in Messages what it asks.
     pub fn start_browse(&mut self) {
         let master = self.master_text();
-        match Browse::start(&master, self.other.checked(), self.full.checked()) {
+        match Browse::start(
+            &master,
+            self.other.checked(),
+            self.full.checked(),
+            (self.own)(),
+        ) {
             Ok(browse) => {
                 self.say(&format!(
                     "Asking the Internet Lobby at {} for games...",
@@ -800,29 +814,54 @@ impl InternetScreen {
         self.players.set_rows(rows);
     }
 
+    fn rejoin_target(&self) -> Option<crate::net::rejoin_check::Target> {
+        let entry = self.selected_entry()?;
+        if entry.other_build.is_some() || entry.phase == DiscoverPhase::Closed {
+            return None;
+        }
+        let session = self.details.get(&entry.listing_id)?.session_id;
+        let kept = self.tokens.for_session(session)?;
+        // A remembered reachable address can be checked without joining. A
+        // migrated or relay-only address may time out: then promise nothing.
+        Some((kept.address.parse().ok()?, session, kept.kept.token))
+    }
+
     /// The selected game's mission, or why it cannot be joined, for the line
     /// under the Games box.
     fn selection_line(&self) -> Option<String> {
         let entry = self.selected_entry()?;
         if let Some(version) = &entry.other_build {
             return Some(format!(
-                "{} runs another version ({version}) and cannot be joined.",
-                entry.name
+                "{}: Code {:08X} ({version}) cannot be joined.",
+                entry.name, entry.compatibility
             ));
         }
+        if self.rejoin_as(entry).is_some() {
+            let confirmed = self
+                .rejoin_target()
+                .and_then(|target| self.rejoin_check.line(target));
+            return Some(match confirmed {
+                Some(line) => format!("Code {:08X}. {line}", entry.compatibility),
+                None => format!("Code {:08X}", entry.compatibility),
+            });
+        }
         let mission = self.details.get(&entry.listing_id).map(|summary| {
-            match self.rejoin_as(entry) {
-                Some(callsign) => format!(
-                    "You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies."
-                ),
-                None => format!("Mission: {}", summary.mission),
-            }
+            format!(
+                "Code {:08X} ({} {}). Mission: {}",
+                entry.compatibility,
+                summary.game_version,
+                summary.game_commit.chars().take(9).collect::<String>(),
+                summary.mission
+            )
         });
         match (mission, entry.relay_likely) {
             (Some(mission), true) => Some(format!("{mission} (may need the relay)")),
             (Some(mission), false) => Some(mission),
-            (None, true) => Some("This game's router may need the relay.".into()),
-            (None, false) => None,
+            (None, true) => Some(format!(
+                "Code {:08X}. This game's router may need the relay.",
+                entry.compatibility
+            )),
+            (None, false) => Some(format!("Code {:08X}", entry.compatibility)),
         }
     }
 
@@ -974,9 +1013,11 @@ impl InternetScreen {
                 .for_session(summary.session_id)
                 .map(|found| found.kept.token)
         });
-        let problem = if let Some(version) = &entry.other_build {
+        let problem = if entry.other_build.is_some() {
             Some(format!(
-                "{name} runs another version ({version}); it cannot be joined."
+                "The server's compatibility code is {:08X}; yours is {:08X}.",
+                entry.compatibility,
+                (self.own)().compatibility
             ))
         } else if entry.phase == DiscoverPhase::Closed {
             Some(format!("{name} is closing; try again soon."))
@@ -1001,7 +1042,7 @@ impl InternetScreen {
             return Outcome::None;
         }
         let now = self.last;
-        let through = match MasterJoin::start(&masters, listing_id, now) {
+        let through = match MasterJoin::start(&masters, listing_id, now, (self.own)()) {
             Ok(through) => through,
             Err(problem) => {
                 self.say(&problem);
@@ -1116,6 +1157,11 @@ impl InternetScreen {
                 match values.name {
                     Some(name) => self.settings.remember_game_name(&name),
                     None => self.settings.game_name = None,
+                }
+                if self.settings.master != values.master {
+                    // A failed socket start must not prevent a new choice
+                    // from being queried on the screen's next turn.
+                    self.browse_failed = false;
                 }
                 self.settings.master = values.master;
                 self.settings.port_forward = values.port_forward;

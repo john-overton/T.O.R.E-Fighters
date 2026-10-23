@@ -182,6 +182,7 @@ impl Ids {
 /// The master server.
 #[derive(Debug)]
 pub struct Master {
+    request_version: u16,
     settings: Settings,
     key: CookieKey,
     ids: Ids,
@@ -203,6 +204,7 @@ impl Master {
     /// `day` (days since 1970-01-01, UTC).
     pub fn new(settings: Settings, entropy: Entropy, day: i64) -> Self {
         Self {
+            request_version: tore_net::master::MASTER_VERSION,
             key: CookieKey::new(entropy),
             ids: Ids::new(entropy),
             sources: Sources::new(settings.rates, settings.max_sources),
@@ -391,6 +393,7 @@ impl Master {
             Ok(packet) => packet,
             Err(error) => return self.refuse(now, port, from, bytes.len(), error),
         };
+        self.request_version = u16::from_le_bytes([bytes[5], bytes[6]]);
         let len = bytes.len();
         match (port, packet) {
             (_, MasterPacket::Probe(probe)) => self.probe(now, port, from, probe, len),
@@ -403,15 +406,28 @@ impl Master {
             (_, MasterPacket::Details(request)) => self.details(now, from, request, len),
             (_, MasterPacket::Report(report)) => self.report(now, from, report),
             (_, MasterPacket::Introduce(request)) => self.introduce(now, from, request, len),
-            (_, MasterPacket::MeetAck(ack)) => {
+            (_, MasterPacket::MeetAck(ack))
+                if self
+                    .introductions
+                    .ends(ack.introduction_id)
+                    .is_some_and(|ends| ends.master_version == self.request_version) =>
+            {
                 self.introductions.meet_ack(now, from, &ack, &self.listings)
             }
             (_, MasterPacket::RelayRequest(request)) => self.relay_request(now, from, request),
-            (_, MasterPacket::RelayOpenAck(ack)) => {
+            (_, MasterPacket::RelayOpenAck(ack))
+                if self
+                    .relays
+                    .channel_version_matches(ack.channel, self.request_version) =>
+            {
                 self.relays.open_ack(now, from, &ack, &self.listings);
                 self.send_relays();
             }
-            (_, MasterPacket::RelayClose(close)) => {
+            (_, MasterPacket::RelayClose(close))
+                if self
+                    .relays
+                    .channel_version_matches(close.channel, self.request_version) =>
+            {
                 self.relays.close(now, from, &close);
                 self.send_relays();
             }
@@ -472,7 +488,7 @@ impl Master {
         }
     }
 
-    /// Queues an answer in the master's version from the main port.
+    /// Queues an answer in the current request's version from the main port.
     fn answer(
         &mut self,
         now: Duration,
@@ -481,7 +497,7 @@ impl Master {
         request_len: usize,
         quiet: bool,
     ) {
-        let version = tore_net::master::MASTER_VERSION;
+        let version = self.request_version;
         self.answer_in(
             now,
             MasterPort::Main,
@@ -522,6 +538,12 @@ impl Master {
     }
 
     fn register(&mut self, now: Duration, from: SocketAddr, register: Register, len: usize) {
+        if !browse::supports_game(self.request_version, register.build.protocol_version)
+            || register.build.protocol_version != register.summary.protocol_version
+        {
+            self.counters.unexpected += 1;
+            return;
+        }
         let Some(quiet) = self.limit(now, from, Limit::Register) else {
             return;
         };
@@ -537,7 +559,7 @@ impl Master {
         let expiry = self.settings.expiry;
         if let Some(existing) = self.listings.at_address(from) {
             let id = existing.id;
-            if existing.nonce == register.nonce {
+            if existing.nonce == register.nonce && existing.master_version == self.request_version {
                 // The same game again: the same Listed, and the newest facts.
                 let mapping = self.mapping_of(now, from, &register.candidates);
                 let listing = self
@@ -572,6 +594,7 @@ impl Master {
         let token = self.fresh_number();
         let mapping = self.mapping_of(now, from, &register.candidates);
         let listing = Listing {
+            master_version: self.request_version,
             id,
             token,
             nonce: register.nonce,
@@ -662,6 +685,9 @@ impl Master {
         };
         let expiry = self.settings.expiry;
         let listing = self.listings.get(id)?;
+        if listing.master_version != self.request_version {
+            return None;
+        }
         let moving = listing.address != from;
         if moving
             && listing
@@ -703,6 +729,17 @@ impl Master {
     }
 
     fn heartbeat(&mut self, now: Duration, from: SocketAddr, beat: Heartbeat, len: usize) {
+        if !browse::supports_game(self.request_version, beat.summary.protocol_version) {
+            return;
+        }
+        if let Some(id) = self.listings.id_of_token(beat.token)
+            && self
+                .listings
+                .get(id)
+                .is_some_and(|l| l.build.protocol_version != beat.summary.protocol_version)
+        {
+            return;
+        }
         let Some(id) = self.beat(now, from, beat.token, len) else {
             return;
         };
@@ -734,6 +771,13 @@ impl Master {
             self.counters.unknown_tokens += 1;
             return;
         };
+        if self
+            .listings
+            .get(id)
+            .is_some_and(|l| l.master_version != self.request_version)
+        {
+            return;
+        }
         if let Some(listing) = self.listings.remove(id, self.settings.expiry) {
             self.unlisted(&listing, Gone::Unregistered);
         }
@@ -750,7 +794,12 @@ impl Master {
             return;
         };
         self.counters.browses += 1;
-        let page = MasterPacket::Page(browse::page(&self.listings, &request, len));
+        let page = MasterPacket::Page(browse::page(
+            &self.listings,
+            &request,
+            len,
+            self.request_version,
+        ));
         self.answer(now, from, &page, len, quiet);
     }
 
@@ -765,6 +814,7 @@ impl Master {
             summary: self
                 .listings
                 .get(request.listing_id)
+                .filter(|l| l.master_version == self.request_version)
                 .map(|l| l.summary.clone()),
         }
         .fit(len);
@@ -799,7 +849,7 @@ impl Master {
             port: which,
             seen: from,
         });
-        let version = tore_net::master::MASTER_VERSION;
+        let version = self.request_version;
         self.answer_in(now, port, from, version, &answer, len, quiet);
     }
 
@@ -819,9 +869,9 @@ impl Master {
             self.answer(now, from, &challenge, len, quiet);
             return;
         }
-        let introduction = self
-            .introductions
-            .introduce(now, from, &request, &self.listings);
+        let introduction =
+            self.introductions
+                .introduce(now, from, &request, &self.listings, self.request_version);
         if let Some(introduction) = introduction {
             let packet = MasterPacket::Introduction(introduction);
             self.answer(now, from, &packet, len, true);
@@ -841,6 +891,7 @@ impl Master {
         let ends = self
             .introductions
             .ends(request.introduction_id)
+            .filter(|ends| ends.master_version == self.request_version)
             .map(|mut ends| {
                 if let Some(listing) = self.listings.get(ends.listing_id) {
                     ends.host = listing.address;

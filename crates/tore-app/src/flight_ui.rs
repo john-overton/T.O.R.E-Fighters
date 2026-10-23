@@ -24,6 +24,7 @@ pub enum Command {
     TargetPrevious,
     /// Enter: the visible sensor contact nearest the nose.
     TargetVisual,
+    TargetCentre,
     RangeReset,
     /// Backslash: designate whatever is under the AC-130 gunsight's
     /// crosshair, an object or else the ground.
@@ -1234,7 +1235,8 @@ impl FlightUi {
             "i" => Command::SensorInfrared,
             "m" => Command::Mode,
 
-            "Enter" | "'" => Command::TargetVisual,
+            "Enter" => Command::TargetVisual,
+            "'" => Command::TargetCentre,
             // FA.EXE: scan codes 0x52 and 0x53 release chaff and flares.
             "Insert" => Command::Chaff,
             "Delete" => Command::Flare,
@@ -1877,7 +1879,7 @@ mod tests {
         );
         assert_eq!(
             ui.key("'", false, false, false, &tree()),
-            Command::TargetVisual
+            Command::TargetCentre
         );
     }
     #[test]

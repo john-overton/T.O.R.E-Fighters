@@ -42,7 +42,7 @@ use tore_net::master::{
 };
 use tore_net::{Entropy, SplitMix64};
 
-use crate::browse::same_build;
+use crate::browse::matches_in;
 use crate::limits::{Bucket, Rate, SourceKey};
 use crate::listings::Listings;
 use crate::relay::Ends;
@@ -59,6 +59,7 @@ const BUCKET_IDLE: Duration = Duration::from_secs(60);
 /// One introduction under way.
 #[derive(Debug, Clone)]
 struct Intro {
+    master_version: u16,
     listing_id: u64,
     host: SocketAddr,
     player: SocketAddr,
@@ -143,12 +144,14 @@ impl Introductions {
         from: SocketAddr,
         request: &Introduce,
         listings: &Listings,
+        version: u16,
     ) -> Option<Introduction> {
         let from = canonical(from);
         if let Some(intro) = self
             .by_player
             .get(&(from, request.nonce))
             .and_then(|id| self.by_id.get(id))
+            .filter(|intro| intro.master_version == version)
         {
             self.repeated += 1;
             return Some(intro.answer.clone());
@@ -157,11 +160,21 @@ impl Introductions {
         if !take(&mut self.per_source, source, now, PER_SOURCE) {
             return Some(self.refusal(from, request, IntroductionResult::TooMany));
         }
-        let Some(listing) = listings.get(request.listing_id) else {
+        let Some(listing) = listings
+            .get(request.listing_id)
+            .filter(|l| l.master_version == version)
+        else {
             return Some(self.refusal(from, request, IntroductionResult::NoListing));
         };
-        if !same_build(&listing.build, &request.build) {
-            return Some(self.refusal(from, request, IntroductionResult::OtherBuild));
+        if !matches_in(version, &listing.build, &request.build) {
+            let mut refusal = self.refusal(from, request, IntroductionResult::OtherBuild);
+            if version >= 2 {
+                refusal.text = format!(
+                    "The server's compatibility code is {:08X}; yours is {:08X}.",
+                    listing.build.compatibility, request.build.compatibility
+                );
+            }
+            return Some(refusal);
         }
         if listing.summary.full {
             return Some(self.refusal(from, request, IntroductionResult::Full));
@@ -207,7 +220,7 @@ impl Introductions {
                 &[CandidateKind::GlobalIpv6, CandidateKind::Local],
             ),
         })
-        .encode()
+        .encode_in(version)
         .ok()?;
         self.out.push_back((listing.address, meet.clone()));
         self.meets += 1;
@@ -217,6 +230,7 @@ impl Introductions {
         self.by_id.insert(
             id,
             Intro {
+                master_version: version,
                 listing_id: listing.id,
                 host: listing.address,
                 player: from,
@@ -327,6 +341,7 @@ impl Introductions {
     /// Relay request names (slice J3).
     pub fn ends(&self, id: u64) -> Option<Ends> {
         self.by_id.get(&id).map(|intro| Ends {
+            master_version: intro.master_version,
             listing_id: intro.listing_id,
             host: intro.host,
             player: intro.player,

@@ -909,6 +909,16 @@ fn ticks_time(ticks: u64) -> Duration {
 }
 
 impl Client {
+    #[cfg(test)]
+    pub(crate) fn collide_content_for_test(
+        &mut self,
+        resources: Arc<BTreeMap<String, Vec<u8>>>,
+        content: Arc<crate::host::content::GameContent>,
+    ) {
+        self.resources = resources;
+        self.content = content;
+    }
+
     /// Starts joining `config.server` at `now`, with the game data
     /// `resources` the mission will be built from. Refuses a callsign or
     /// strings the protocol cannot carry, and the retail stall-speed switch.
@@ -922,7 +932,7 @@ impl Client {
     }
 
     pub(crate) fn start(
-        config: ClientConfig,
+        mut config: ClientConfig,
         resources: Arc<BTreeMap<String, Vec<u8>>>,
         now: Duration,
         seed: u64,
@@ -930,9 +940,15 @@ impl Client {
         if config.retail_stall_speeds || tore_sim::flight::retail_stall_speeds() {
             return Err(ClientError::RetailStallSpeeds);
         }
+        let content = config
+            .content
+            .clone()
+            .unwrap_or_else(|| crate::host::content::GameContent::shared(&resources));
+        config.build.compatibility = crate::compatibility::current(&content.content);
         let net_config = tore_net::ClientConfig {
             game_version: config.build.version.clone(),
             game_commit: config.build.commit.clone(),
+            compatibility: config.build.compatibility,
             password: config.password.clone(),
             platform: config.platform,
             token: config.token,
@@ -950,10 +966,6 @@ impl Client {
             None => tore_net::Client::connect(net_config, config.server, now),
         }
         .map_err(|error| ClientError::Config(error.to_string()))?;
-        let content = config
-            .content
-            .clone()
-            .unwrap_or_else(|| crate::host::content::GameContent::shared(&resources));
         Ok(Client {
             content,
             gaps: None,
@@ -1321,6 +1333,7 @@ impl Client {
     /// client quits once the debrief is in (the caller gives it a few
     /// seconds); anywhere else it quits at once.
     pub fn leave_game(&mut self, now: Duration) {
+        self.rejoin_forget();
         if let Some(capture) = &mut self.capture {
             capture.leave_game(now);
         }
@@ -1679,6 +1692,7 @@ impl Client {
 
     /// Quits at once: Disconnect goes to the host three times.
     pub fn disconnect(&mut self, now: Duration) {
+        self.rejoin_forget();
         if let Some(capture) = &mut self.capture {
             capture.disconnect(now);
         }

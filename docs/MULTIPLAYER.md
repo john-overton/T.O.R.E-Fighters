@@ -687,24 +687,78 @@ credited):*
 - **The token** is 128 random bits, sent when a player first joins and kept
   by the game in its data folder (at most 32). It is good only in the session
   that issued it, whichever machine hosts that session now, and for 24 hours
-  after its player was last connected (John, 2026-09-28). A kick voids it. The
+  after its player was last connected (John, 2026-09-28). A kick voids it.
+  A clean Leave, Return to Main Menu or Exit clears it on the client and host
+  (John, 2026-10-23). Ending only a flight while staying in the lobby keeps it. The
   game sends it by itself when it joins that session again: from Direct
   Connection's list or the Internet Lobby, which mark such a game "Rejoin", or
   at the address it came from.
-- **Reserved.** A player who drops (silence, a crash, quitting without ending
-  the flight) leaves its aircraft to the AI, reserved for it while it is
+- **Reserved.** A player who drops (silence or a crash) leaves its aircraft to the AI, reserved for it while it is
   alive: its slot reads "AI (Viper away)" and nobody else takes it (John,
   2026-09-28). A player who ends its own flight frees its aircraft. The King's
   "Release reserved aircraft" in the Players panel frees one. A mission's end
   clears them all.
-- **Coming back.** With its token the player is itself again: its callsign,
+- **Coming back.** With its token the player is itself again: its
   scores, lives, side and, in flight, its reserved aircraft, even when the
-  game is full. Messages say "Welcome back, Viper: your aircraft is waiting."
+  game is full. Agent decision: it uses the current Callsign field, with the
+  existing duplicate suffix rules, and the reservation label changes with it.
+  A clean departure instead makes the next join a new player.
+  [Callsign rules](spec/multiplayer-menus.md#callsign-when-returning-to-a-game).
+  Messages say "Welcome back, Viper: your aircraft is waiting."
   If the aircraft was lost meanwhile, the revival rules apply with the lives
   the player had; with none (co-op's default), it watches until the mission
   ends, John's rule.
 - A dedicated server holds reservations and takes tokens the same way, for as
   long as it runs.
+
+**What is actually kept (2026-10-23).** Identity is a random 128-bit token
+scoped to the host's session. The host maps it to the player's join order,
+not an install id, address or callsign. The client remembers an address only
+to find the token and query the server. Hosting and dedicated servers use the
+same rules:
+
+- A clean Leave, Return to Main Menu or Exit clears identity and frees the
+  aircraft. Ending just the flight, while staying in the lobby, keeps identity
+  but releases the aircraft.
+- After an unclean drop the host normally notices 5 seconds without a packet.
+  With AI aircraft enabled, a living aircraft is reserved for that token.
+  A reconnect before the timeout can replace its still-present connection and
+  reclaim the same aircraft. Other players cannot take a reserved aircraft.
+- The reservation has **no independent age countdown**. Return, loss of the
+  aircraft, the King's Release, a kick, or mission end clears it. With AI off
+  no dropped aircraft is reserved. The token is valid for 86,400 seconds after
+  its player was last connected. Expiry blocks reclaiming; it does not itself
+  remove the reservation table entry. Release, aircraft loss or mission end
+  still clears that entry. The host's record cap can evict its longest-gone
+  identities sooner; the client also keeps only its 32 most recent tokens.
+  Local expiry counts 24 hours from its last saved grant or handled disconnect;
+  an abrupt crash can therefore leave less local time than the host allows.
+  [Record limits](ARCHITECTURE.md#rejoin-tokens-and-reservations-as-built-k5).
+- Mission deadlines can be much earlier. A dedicated server's default
+  `empty-timeout` is 60 seconds, configurable from 0 to 86,400. Hosted games
+  use 0. The empty timer starts once nobody is flying, away, awaiting revival
+  or resuming, after someone has flown. Reserved aircraft and ordinary
+  observers do not keep the mission active. The King's mission time limit
+  can also end the round. The server reports the earliest current deadline
+  among these limits and token expiry, without adding a new hold timer.
+- A departed player's old **lobby slot is remembered, not reserved**. A token
+  join attempts to restore it and its loadout only if it is still free and
+  allowed. Another player may take it first.
+- Mission end, restart or rotation clears aircraft reservations. Tokens remain
+  valid in that server session, and a remembered lobby slot is still only a
+  best-effort choice in the new mission. A server process restart creates a
+  new session and knows none of the old tokens. Host migration carries the
+  existing session, tokens, reservations and expiry clock.
+
+**The lounge checks before promising a slot.** On selecting a previous game,
+the client sends a private, read-only reservation query to the server. A fresh
+reply names the side, wing and member, with the current maximum **return
+window** from those deadlines. It says that loss, release or an earlier
+mission end can end the hold first. A
+confirmed unavailable slot gets a neutral message. No reply means no promise.
+A still-valid token without an aircraft may restore scores and lives, so the
+neutral message does not falsely promise a new player identity either.
+[Polling, timeouts and address limits](spec/multiplayer-menus.md#callsign-when-returning-to-a-game).
 
 *Built (K5, 2026-10-05):* the host's and the client's side of all of this, on
 the simulator and in the net lane: tokens, the gate, reservations, Release
@@ -1225,13 +1279,28 @@ the [master's wire](formats/master-protocol.md) and
   INTERNET LOUNGE. It lists the games on the master, refreshed every 15
   seconds: a lock for a password, the name, players over capacity, *Lobby*
   or *Flying*, and a small mark when the master expects the relay. Games of
-  another build are hidden unless "Show other versions" is ticked, and then
+  another compatibility code or protocol are hidden unless "Show other versions" is ticked, and then
   shown dimmed, as Direct Connection shows them. Selecting a game shows its
   mission and players. **Join** joins it ([connection path](#connection-path)),
   **New** hosts a game that is listed, **Refresh** asks again, **Options**
   holds the port, password and game name (shared with Direct Connection),
-  the master's address, "Forward the game port on my router" and "Send
-  anonymous statistics". *Built (slice I4, 2026-10-05):* the screen is in the
+  **Master server**, "Forward the game port on my router" and "Send
+  anonymous statistics". Master server accepts a host name, IPv4 or IPv6
+  address with an optional port (26901 when omitted; use `[::1]:26911` for
+  IPv6 with a port). **Default** restores `master.jroverton.com:26901` in
+  the field. **OK** saves the choice and queries that master; **Cancel**
+  discards the edit. Invalid text keeps Options open and preserves the last
+  accepted choice. A valid but unreachable address is named in Messages.
+  "Games listed by ..." shows the current master. The saved choice covers
+  browsing, hosting with New, introductions, NAT traversal, relay and enabled
+  anonymous statistics. See [running your own master](DEDICATED-SERVER.md#running-your-own-master)
+  and the [editing rules](spec/multiplayer-menus.md#internet-lounge-master-server).
+  Command-line `--master HOST[:PORT]` takes precedence for `--browse` or
+  `--host FILE --list` for that invocation, without changing the saved choice.
+  Without it, `--browse` uses the saved choice and command-line listed hosting
+  uses the public default. `--master` alone is not a lounge override, and
+  there is no `TORE_MASTER` environment override.
+  *Built (slice I4, 2026-10-05):* the screen is in the
   game; Join asks the master to introduce the player and races the host's
   addresses from the same socket (J2); *built (J5):* when no address answers
   within 3 seconds the game asks for the relay and joins through it, and
@@ -1453,7 +1522,7 @@ secret from someone who can watch the network.
 
 On join, the game compares:
 
-- The T.O.R.E build and protocol version, which must match.
+- The protocol and eight-digit [compatibility code](ARCHITECTURE.md#compatibility-code), which must match. Commits and release versions are information only.
 - A manifest of content hashes per aircraft, theater and weapon set.
 
 T.O.R.E imports only Fighters Anthology, from the disc's 1.0 build or the 1.02F
@@ -1461,11 +1530,13 @@ patch ([first-run import](spec/first-run-import.md)). USNF-only and ATF Gold
 installs cannot run it, so today's differences come from the FA build and, later,
 from mods and custom aircraft such as the [F/A-XX](spec/fa-xx.md). The lobby
 only offers aircraft and theaters that every human in the session has. A player
-missing something sees why in plain language instead of a failed join.
+with a different playable import is refused with both compatibility codes. The detailed mission check still explains differences after admission.
 
-*Built (stage D):* a game of another T.O.R.E build is refused at the door and
-shown dimmed, "runs another version", in Direct Connection and the Internet
-Lobby. The content is checked once a mission loads: each game builds the
+Since protocol 71, different commits and tags can see and join each other
+when their codes match. **Show other versions** includes games whose code
+or protocol differs, dimmed and not joinable. The selected game's details
+and game lobby show **Code XXXXXXXX**. The code covers the whole playable
+import, including unused items, and remains stable when the mission changes. The content is checked once a mission loads: each game builds the
 mission from its own import and compares the files it read with the host's. A
 1.0 import and a 1.02F import pass it, since every file the simulation reads
 is the same in both (slice D3a, [the comparison](formats/esa-installer.md#the-import-pack-under-both-builds)).
@@ -1536,7 +1607,9 @@ desync report. Replays also record slot changes, joins, drops, host migrations
 and data link events.
 
 **Telemetry.** The heartbeat and the session end report anonymously to the
-master server:
+master selected in Internet Lounge Options, including a privately operated
+master. A listed dedicated server uses its `master` setting; command-line
+listed hosting uses its `--master` choice or the public default:
 
 - An anonymous install ID.
 - Session length and human count.
@@ -1582,7 +1655,7 @@ these places:
 | Connections | Serial, modem, IPX LAN, TCP/IP by typed address | Server browser, NAT traversal and relay; direct connect by address | Opinionated, John 2026-09-28 |
 | Players | 2 to 8 | Up to 30 humans | Opinionated, John 2026-09-28 |
 | Host leaves | Game ends for everyone | Host migration | Opinionated, John 2026-09-28 |
-| Client leaves | Game continues | Game continues; AI flies the aircraft, reserved for rejoin | Opinionated, John 2026-09-28 |
+| Client leaves | Game continues | Game continues; a clean departure frees the identity and aircraft, an unclean drop keeps them for rejoin | Opinionated, John 2026-09-28 |
 | Mission types | Single Mission, Quick Mission, Airbase Assault | Quick Mission only | Scope, John 2026-09-28 |
 | Pause | Any player pauses everyone | No pause | Opinionated, John 2026-09-28 |
 | Time compression | None | None | Matches retail |
@@ -1939,9 +2012,18 @@ reservation ends (the King's Release).
 
 With `respawn revive`, the flight continues beneath a menu while waiting, using the in-flight
 Escape menu widget. Loadout lists stations in Load Ordnance display order, then
-internal fuel, Standard load and Done. Enter or a click cycles a station's legal
-stores and quantities; arrows and the wheel move through rows. Choice slots also
-have a paged Aircraft tab. The menu uses the existing controller menu bindings.
+internal fuel, Standard load and Done. Select a station to open its compatible
+stores and quantities, grouped and ordered like the pre-flight Load Ordnance
+catalog. Player Choice slots have one complete Aircraft list in creator/lobby
+order. Both lists have a red scroll bar and a case-insensitive search by name
+or designation: `120`, `16` and `hornet` are examples. Click Search or press Tab
+to type; Tab switches search/results focus. Up/Down or the controller D-pad
+moves through results, Enter/A or a click selects. Home/End and Page Up/Down,
+the wheel, track clicks and dragging scroll the list. Escape/B clears search
+first, then closes a station sub-menu, then discards unsaved edits. M opens
+Mission outside search focus; the Mission... button always remains available.
+See the [selector specification](spec/quick-mission-menu.md#multiplayer-player-choice)
+for counts and presentation decisions.
 Done saves the aircraft and loadout for the next Enter-to-revive request.
 Close the page and press Escape to open the flight menu: **Loadout...** stays
 available for the entire wait, and **Aircraft...** appears for Player Choice

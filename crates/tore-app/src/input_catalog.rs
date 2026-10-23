@@ -662,7 +662,12 @@ pub const ENTRIES: &[Entry] = &[
         Hold,
         &["Alt-ArrowDown"],
     ),
-    cmd("designate", "Next radar target", Weapons, &["t"]),
+    cmd(
+        "designate",
+        "Next own-radar target (friendlies included)",
+        Weapons,
+        &["t"],
+    ),
     cmd(
         "designate-previous",
         "Previous radar target",
@@ -671,9 +676,15 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd(
         "designate-visual",
-        "Select visual target",
+        "Cycle visible aircraft left to right",
         Weapons,
-        &["Enter", "'"],
+        &["Enter"],
+    ),
+    cmd(
+        "designate-centre",
+        "Select visible aircraft nearest forward-view centre",
+        Weapons,
+        &["'"],
     ),
     cmd(
         "clear-designation",
@@ -1160,8 +1171,32 @@ pub const ENTRIES: &[Entry] = &[
         &["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"],
     ),
     menu_shortcut(
-        "In-flight respawn: mission brief (or select Mission...)",
+        "In-flight respawn: mission brief outside search focus (or select Mission...)",
         &["m"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: focus search/results (type to filter when focused)",
+        &["Tab"],
+    ),
+    menu_shortcut(
+        "In-flight respawn search: erase last character",
+        &["Backspace"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: navigate results (controller D-pad up/down)",
+        &["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: select result (controller A)",
+        &["Enter", "Space"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: switch tab (controller D-pad left/right)",
+        &["ArrowLeft", "ArrowRight"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: clear search, close station sub-menu, then cancel page (controller B)",
+        &["Escape"],
     ),
     menu_shortcut(
         "Multiplayer respawn: fly again after delay, with menus closed (controller A)",
@@ -1177,11 +1212,19 @@ pub const ENTRIES: &[Entry] = &[
         "Lobby Settings: apply and close (Escape discards)",
         &["F10"],
     ),
+    menu_shortcut(
+        "Main menu: select Leave Feedback, Update Available or Pref update check",
+        &["Tab", "Enter"],
+    ),
     fixed("menu-up", "Menu up", Game, &["ArrowUp"]),
     fixed("menu-down", "Menu down", Game, &["ArrowDown"]),
     fixed("menu-left", "Menu left", Game, &["ArrowLeft"]),
     fixed("menu-right", "Menu right", Game, &["ArrowRight"]),
     fixed("menu-accept", "Menu select", Game, &["Enter"]),
+    menu_shortcut(
+        "Internet Options: restore master (Default focused)",
+        &["Enter", "Space"],
+    ),
     fixed("menu-back", "Menu back", Game, &["Escape"]),
     fixed("", "Fullscreen / window", Game, &["Alt-Enter"]),
     fixed("", "Exit to desktop", Game, &["Alt-F4"]),
@@ -1783,7 +1826,7 @@ mod tests {
         // The keys they sit beside keep their own meaning: the plain
         // apostrophe and semicolon still pick and clear a target, Shift+L is
         // still the landing request, and no other Alt+arrow is stock.
-        assert_eq!(owners("'"), ["designate-visual"]);
+        assert_eq!(owners("'"), ["designate-centre"]);
         assert_eq!(owners(";"), ["clear-designation"]);
         assert_eq!(owners("l"), ["clear-designation"]);
         assert!(

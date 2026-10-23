@@ -416,6 +416,7 @@ mod tests {
 
     fn entry(id: u64, players: u8) -> PageEntry {
         PageEntry {
+            compatibility: 0,
             listing_id: id,
             password: false,
             full: false,

@@ -53,7 +53,11 @@ success. A lost connection says "Connection lost". The outcome line reads
 `opinionated`, requested by John on 2026-10-23: contributions belong to a
 player for the whole mission, across revivals, leaving, disconnection, AI
 takeover and host migration. A fresh mission clears the record. A different
-player reusing a lobby number does not inherit it.
+player reusing a lobby number does not inherit it. A dropped player returning
+with its token retains the record under its newly requested callsign. A clean
+departure releases that identity: joining again creates a fresh player, while
+the departed contribution remains in history and side totals. A late token
+claim replaces the provisional lobby identity without adding a duplicate row.
 
 - The PLAYER kill and weapon tables add every life. Pilot status, damage and
   landing grade describe the latest life. The wingman table keeps its existing

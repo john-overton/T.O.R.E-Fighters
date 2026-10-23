@@ -363,7 +363,7 @@ impl Host {
 
     /// Whether the AI keeps `plane` for a player: it flies it with its pilot
     /// aboard, or the hand-over to it is still on its way.
-    fn plane_kept(&self, plane: PlaneId) -> bool {
+    pub(super) fn plane_kept(&self, plane: PlaneId) -> bool {
         match self.world.roster.plane(plane).map(|entry| entry.pilot) {
             Some(Pilot::Ai) => self.world.can_take(NOBODY, plane).is_ok(),
             Some(Pilot::Human(_)) => true,

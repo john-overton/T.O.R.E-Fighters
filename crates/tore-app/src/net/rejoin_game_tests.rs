@@ -198,13 +198,14 @@ fn a_token_kept_by_address_brings_the_player_back() {
     drop(first);
     hosted.run_until(&mut [], Duration::from_secs(1), |_, _| false);
 
-    let mut second = hosted.join(&data, "Viper");
+    let mut second = hosted.join(&data, "Maverick");
     assert!(
         hosted.run_until(&mut [&mut second], Duration::from_secs(10), |_, seen| {
-            welcomed(seen)
+            seen.iter().any(|event| matches!(event, ClientEvent::Notice(text) if text.starts_with("Welcome back, Maverick")))
         }),
         "the player is welcomed back"
     );
+    assert_eq!(second.client.token().unwrap().callsign, "Maverick");
     assert_eq!(
         second.client.token().map(|t| t.token),
         Some(entry.kept.token),
@@ -239,10 +240,10 @@ fn a_token_found_only_by_session_is_sent_after_the_join() {
     store.save(&data.0).unwrap();
     assert!(store.for_address(&hosted.server.to_string()).is_none());
 
-    let mut second = hosted.join(&data, "Viper");
+    let mut second = hosted.join(&data, "Maverick");
     assert!(
         hosted.run_until(&mut [&mut second], Duration::from_secs(10), |_, seen| {
-            welcomed(seen)
+            seen.iter().any(|event| matches!(event, ClientEvent::Notice(text) if text.starts_with("Welcome back, Maverick")))
         }),
         "the player is welcomed back after the join"
     );
@@ -311,4 +312,49 @@ fn a_game_with_no_token_joins_as_a_new_player() {
     );
     assert!(!greeted, "nobody welcomed a new player back");
     assert_eq!(Store::load(&data.0, unix_now()).entries.len(), 1);
+}
+
+#[test]
+fn clean_disconnect_removes_saved_identity_and_renamed_join_uses_field() {
+    let data = Data::new("clean-rename");
+    let mut hosted = Hosted::start();
+    let mut first = hosted.join(&data, "Viper");
+    assert!(
+        hosted.run_until(&mut [&mut first], Duration::from_secs(10), |s, _| {
+            s[0].client.token().is_some()
+        })
+    );
+    let old = first.client.token().unwrap().clone();
+    first.disconnect();
+    assert!(first.client.token().is_none());
+    assert!(
+        Store::load(&data.0, unix_now())
+            .for_session(old.session_id)
+            .is_none()
+    );
+    drop(first);
+    hosted.run_until(&mut [], Duration::from_millis(300), |_, _| false);
+    let mut second = hosted.join(&data, "Maverick");
+    let mut greeted = false;
+    assert!(
+        hosted.run_until(&mut [&mut second], Duration::from_secs(10), |s, events| {
+            greeted |= welcomed(events);
+            s[0].client
+                .lobby()
+                .and_then(|l| l.me())
+                .is_some_and(|p| p.callsign == "Maverick")
+                && s[0].client.token().is_some()
+        })
+    );
+    assert!(!greeted);
+    assert_ne!(second.client.token().unwrap().token, old.token);
+    assert_eq!(
+        Store::load(&data.0, unix_now())
+            .for_session(old.session_id)
+            .unwrap()
+            .kept
+            .callsign,
+        "Maverick"
+    );
+    second.disconnect();
 }

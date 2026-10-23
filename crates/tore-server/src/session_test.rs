@@ -4,7 +4,7 @@
 //! takes a plane, flies, leaves, and the console's `quit` ends the server.
 
 use crate::{
-    app::{commit, serve_with, version},
+    app::{serve_with, version},
     clock::RealTimer,
     config::Listen,
     console::Command,
@@ -162,7 +162,8 @@ fn a_scripted_client_joins_flies_and_leaves_and_quit_ends_the_server() {
     let socket = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
     let config = ClientConfig {
         game_version: version().to_owned(),
-        game_commit: commit().to_owned(),
+        game_commit: "a-different-commit".to_owned(),
+        compatibility: tore_session::compatibility::installed(&dir).unwrap(),
         entropy: Entropy::System,
         ..ClientConfig::new(PROTOCOL_VERSION, "Viper")
     };

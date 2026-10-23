@@ -334,6 +334,8 @@ pub struct Sensors {
     pub profiles: SensorProfiles,
     pub controls: Controls,
     selected: Option<u32>,
+    /// Set only by a human visual designation. AI selection never sets it.
+    visual_selection: bool,
     acquired: Option<u32>,
     acquisition: u32,
     active: Option<Channel>,
@@ -381,6 +383,7 @@ impl Sensors {
             profiles,
             controls: Controls::default(),
             selected: None,
+            visual_selection: false,
             acquired: None,
             acquisition: 0,
             active: None,
@@ -523,11 +526,15 @@ impl Sensors {
     /// stable identity. Re-selecting the same target does not restart acquisition.
     pub fn designate(&mut self, id: u32) -> bool {
         if self.selected == Some(id) {
+            if self.contact(id).is_some() || self.ground_contact(id).is_some() {
+                self.visual_selection = false;
+            }
             return true;
         }
         if self.contact(id).is_none() && self.ground_contact(id).is_none() {
             return false;
         }
+        self.visual_selection = false;
         self.selected = Some(id);
         self.acquired = None;
         self.acquisition = 0;
@@ -535,16 +542,34 @@ impl Sensors {
         self.ground_retained = None;
         true
     }
+    /// Accept a human pilot's screen pick only if this ownship can see it.
+    /// This never adds a radar contact or grants weapon support.
+    pub fn designate_visual_contact(&mut self, id: u32) -> bool {
+        if !self.visual.iter().any(|c| c.id == id) {
+            return false;
+        }
+        if self.selected != Some(id) {
+            self.acquired = None;
+            self.acquisition = 0;
+        }
+        self.selected = Some(id);
+        self.visual_selection = true;
+        self.held = None;
+        self.ground_retained = None;
+        true
+    }
     pub fn clear_selection(&mut self) {
+        self.visual_selection = false;
         self.selected = None;
         self.acquired = None;
         self.acquisition = 0;
         self.held = None;
         self.ground_retained = None;
     }
-    /// T and Shift-T: step through current radar contacts, nearest first,
-    /// including present wrecks, skipping identities `skip` rejects (friendlies).
-    /// Search-only RWS contacts stay selectable, as John requested.
+    /// Shared legacy cycle: current radar contacts, nearest first, including
+    /// present wrecks, skipping identities rejected by the caller. The human
+    /// UI filters the displayed scope separately and sends an explicit id.
+    /// This path retains the AI and old combat-tape contract.
     pub fn cycle(&mut self, forward: bool, skip: impl Fn(u32) -> bool) -> bool {
         if self.ground_page.is_some() {
             return self.cycle_ground(forward, skip);
@@ -825,11 +850,14 @@ impl Sensors {
                 || self.ground_contact(id).is_some()
         };
         if let Some(id) = self.selected
-            && self.contact(id).is_none()
-            && !kept(id)
-            && !ground_kept(id)
+            && if self.visual_selection {
+                !self.visual.iter().any(|c| c.id == id)
+            } else {
+                self.contact(id).is_none() && !kept(id) && !ground_kept(id)
+            }
         {
             self.selected = None;
+            self.visual_selection = false;
             self.acquisition = 0;
             if let Some(acquired) = self.acquired.take() {
                 events.push(Event::TrackReleased(acquired));

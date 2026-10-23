@@ -149,6 +149,7 @@ fn rendezvous(build: &BuildId) -> HostRendezvous {
             protocol_version: tore_session::wire::PROTOCOL_VERSION,
             game_version: build.version.clone(),
             game_commit: build.commit.clone(),
+            compatibility: build.compatibility,
             release: build.release,
         },
         dedicated: false,
@@ -269,6 +270,7 @@ impl Mig {
         })?;
         let mut host = Host::new(setup.spec, Arc::clone(resources), config.clone())
             .map_err(|error| format!("The game could not be hosted: {error}"))?;
+        let config = host.config().clone();
         host.set_standbys_enabled(setup.standbys);
         host.set_slow_build(setup.slow_build);
         let sock = Sock::Server(socket);

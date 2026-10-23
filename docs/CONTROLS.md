@@ -187,9 +187,10 @@ and a gamepad's View+stick defaults avoid the problem.
 | Sight: slew right | Alt+Right | - | - |
 | Sight: slew up | Alt+Up | - | - |
 | Sight: slew down | Alt+Down | - | - |
-| Next radar target | T | - | View + A or Y (in the AC-130 console) |
+| Next own-radar target (friendlies included) | T | - | View + A or Y (in the AC-130 console) |
 | Previous radar target | Shift+T | - | View + D-pad right (in the AC-130 console) |
-| Select visual target | Enter or Apostrophe | - | - |
+| Cycle visible aircraft left to right | Enter | - | - |
+| Select visible aircraft nearest forward-view centre | Apostrophe | - | - |
 | Clear designation | Semicolon or L | - | View + B or View + Y (in the AC-130 console) |
 | Delivery mode (CCIP/LVL, bore/cued) | Ctrl+M | - | - |
 | Sight: next visible object | / | - | - |
@@ -391,17 +392,25 @@ and a gamepad's View+stick defaults avoid the problem.
 | Multiplayer ? menu (controller Menu also opens it) | F1 | - | - |
 | In-flight Map/Mission: switch tab (controller A) | Enter | - | - |
 | Mission brief: scroll (controller D-pad up/down) | Up or Down or Page Up or Page Down or Home or End | - | - |
-| In-flight respawn: mission brief (or select Mission...) | M | - | - |
+| In-flight respawn: mission brief outside search focus (or select Mission...) | M | - | - |
+| In-flight respawn: focus search/results (type to filter when focused) | Tab | - | - |
+| In-flight respawn search: erase last character | Backspace | - | - |
+| In-flight respawn: navigate results (controller D-pad up/down) | Up or Down or Home or End or Page Up or Page Down | - | - |
+| In-flight respawn: select result (controller A) | Enter or Space | - | - |
+| In-flight respawn: switch tab (controller D-pad left/right) | Left or Right | - | - |
+| In-flight respawn: clear search, close station sub-menu, then cancel page (controller B) | Esc | - | - |
 | Multiplayer respawn: fly again after delay, with menus closed (controller A) | Enter | - | - |
 | Mission brief: close (controller B; A also closes respawn brief) | Esc | - | - |
 | Multiplayer ? menu: return to main menu | M | - | - |
 | Multiplayer ? menu: exit | X | - | - |
 | Lobby Settings: apply and close (Escape discards) | F10 | - | - |
+| Main menu: select Leave Feedback, Update Available or Pref update check | Tab or Enter | - | - |
 | Menu up | Up | - | D-pad up |
 | Menu down | Down | - | D-pad down |
 | Menu left | Left | - | D-pad left |
 | Menu right | Right | - | D-pad right |
 | Menu select | Enter | - | A |
+| Internet Options: restore master (Default focused) | Enter or Space | - | - |
 | Menu back | Esc | - | B |
 | Fullscreen / window | Alt+Enter | - | - |
 | Exit to desktop | Alt+F4 | - | - |
@@ -421,7 +430,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Networked flight (not single player) | Backquote (~), the key above Tab | Open the chat line. It is not rebindable and only a flight joined to a host has it; single player never opens it, and its Controls screen row says so |
 | Chat line open | Typed characters, Backspace | Type the line: printable ASCII, up to 80 characters. Every flight key you were holding is let go and the keyboard types instead of flying; the joystick and the mouse still fly |
 | Chat line open | Tab / Shift+Tab | Choose the receiver: All, Friendlies, Enemies, Wing, Target, round (Shift+Tab goes back) |
-| Chat line open | Enter | Send the line to the receiver and close the line (an empty line just closes). Closed, Enter designates the nearest visible aircraft as before |
+| Chat line open | Enter | Send the line to the receiver and close the line (an empty line just closes). Closed, Enter cycles visible aircraft from left to right |
 | Chat line open | Esc | Close the line without sending |
 | Chat line open | F1 to F12 | Send the matching line of `CHAT.TXT`, to the line's own receiver or the one chosen, and close the line. Closed, the F keys are the views |
 | Live map open | + / - | Zoom the map |

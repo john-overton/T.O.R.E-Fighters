@@ -192,6 +192,10 @@ fn save_live(s: &mut Saver, command: Live) -> Result<(), CheckpointError> {
         Live::ToggleArm => put(s, 16),
         Live::Jettison => put(s, 17),
         Live::JettisonTanks => put(s, 36),
+        Live::DesignateVisualTarget(id) => {
+            put(s, 37);
+            id.save(s, None)?;
+        }
         Live::ReplaceTarget => put(s, 18),
         Live::CycleClass => put(s, 19),
         Live::FailStation => put(s, 20),
@@ -235,6 +239,7 @@ fn load_live(l: &mut Loader<'_>) -> Result<Live, CheckpointError> {
         16 => Live::ToggleArm,
         17 => Live::Jettison,
         36 => Live::JettisonTanks,
+        37 => Live::DesignateVisualTarget(Checkpoint::load(l, None)?),
         18 => Live::ReplaceTarget,
         19 => Live::CycleClass,
         20 => Live::FailStation,
@@ -651,6 +656,7 @@ mod tests {
             Live::DesignatePrevious,
             Live::DesignateVisual,
             Live::DesignateTarget(1_000_003),
+            Live::DesignateVisualTarget(1_000_003),
             Live::ClearDesignation,
             Live::ToggleArm,
             Live::Jettison,

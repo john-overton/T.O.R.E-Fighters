@@ -424,8 +424,12 @@ fn a_joiner_whose_import_lacks_the_content_is_told_and_stays() {
     let normal = Arc::clone(&rig.resources);
     let mut lacking = resources();
     lacking.remove("AIM9M.JT");
-    rig.resources = Arc::new(lacking);
     let cobra = manual(&mut rig, "Cobra");
+    // Simulate a short-code collision: the handshake was prepared from normal
+    // content, but the detailed check must still reject these different bytes.
+    rig.players[cobra].client.resources = Arc::new(lacking);
+    rig.players[cobra].client.content =
+        crate::host::content::GameContent::shared(&rig.players[cobra].client.resources);
     rig.resources = normal;
     gathered(&mut rig, &[king, cobra]);
     assert!(rig.run_until(Duration::from_secs(1), |r| {
@@ -971,8 +975,11 @@ fn a_loadouts_other_weapon_is_checked_at_the_start_and_the_player_may_try_again(
     // only the flight's exact check finds it.
     let mut other = import.clone();
     other.get_mut("AIM9X.JT").unwrap().push(0);
-    rig.resources = Arc::new(other);
     let cobra = manual(&mut rig, "Cobra");
+    // A colliding short code does not bypass the later mission manifest.
+    rig.players[cobra].client.resources = Arc::new(other);
+    rig.players[cobra].client.content =
+        crate::host::content::GameContent::shared(&rig.players[cobra].client.resources);
     rig.resources = Arc::new(import.clone());
     gathered(&mut rig, &[king, cobra]);
     assert!(me(&rig, cobra).unwrap().unable.is_none());
