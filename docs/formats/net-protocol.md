@@ -3200,7 +3200,10 @@ again with an observer; the capture format did not change for it.
   carrier and internal bays; both use drawn magazine release origins and
   only bay weapons wait for doors, so an older game must not join;
   65 since deferred lobby Settings (2026-10-22): kind 24 gains optional
-  Realism, applied with ordinary settings in one mission rebuild.
+  Realism, applied with ordinary settings in one mission rebuild;
+  67 adds dedicated feedback (2026-10-22): Lobby begins with a feedback
+  enabled bit, kind 80 submits feedback, and kind 81 returns the accepted
+  flag to its sender. Protocol 66 is reserved for the parallel lobby change.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
@@ -3298,3 +3301,19 @@ same common-content check as weapons and designator pods. Spawned retains its
 existing aircraft and accepted spawn/loadout fields. No tape header or frame
 format changes; existing replay files retain their grammar. The wire golden and
 protocol number are refreshed by the lead at integration.
+
+
+## Dedicated feedback messages (67)
+
+Lobby kind 19 begins with one boolean, the operator's feedback enable flag.
+Only dedicated servers advertise it. Player-hosted games leave it false.
+Kinds 80 (player to host) and 81 (host to sender) use six unsigned varints:
+flag tick, submit tick, opened-at Unix milliseconds, submitted-at Unix
+milliseconds, seat, plane. Three length-prefixed UTF-8 strings follow:
+player (128 bytes), aircraft (64 bytes), and text (4,000 bytes, at most 1,000
+Unicode scalar values). Empty text and control characters other than newline
+and tab are rejected. The host ignores the supplied identity and submit tick,
+replaces them with its own, and accepts only seated players while feedback is
+enabled. The shared chat rate limit applies. These messages use the ordinary
+reliable channel and are captured for local replay conversion. See
+[the replay event](replay-feedback.md).

@@ -165,6 +165,13 @@ pub fn write_summary(
     options: &SummaryOptions,
     mut out: impl Write,
 ) -> Result<()> {
+    if recording.flagged() {
+        writeln!(
+            out,
+            "Flagged: {} feedback reports",
+            recording.feedback().count()
+        )?;
+    }
     let names = Names::new(recording);
     let header = recording.header();
     let w = &header.world;

@@ -82,6 +82,7 @@ pub struct SeenEvent {
 /// One flight of the connection: from its first section to its end.
 #[derive(Clone, Debug, Default)]
 pub struct FlightSeen {
+    pub feedback: Vec<tore_replay::feedback::Feedback>,
     /// The connection's flight number.
     pub flight: u8,
     /// Client time the flight began and, when it did, ended.
@@ -124,6 +125,11 @@ pub struct Observed {
 }
 
 impl Observed {
+    pub(crate) fn feedback(&mut self, f: tore_replay::feedback::Feedback) {
+        if let Some(flight) = self.current() {
+            flight.feedback.push(f);
+        }
+    }
     fn current(&mut self) -> Option<&mut FlightSeen> {
         self.flights.last_mut().filter(|f| f.ended.is_none())
     }

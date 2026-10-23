@@ -1931,3 +1931,19 @@ Explicit choices retain their selected internal fuel; an unedited legacy revive
 still starts with full fuel. The host distributes the accepted spawn and every
 peer prepares the same simulation resources, including checkpoint restores.
 See the [requirements and decisions](spec/quick-mission-menu.md#multiplayer-player-choice).
+
+## Feedback to a dedicated server
+
+An operator can enable **Feedback...** under the first tab of the in-flight
+Escape menu. It appears only on dedicated servers with `feedback on`, which
+also requires server recording. It is hidden in player-hosted games and
+single player. The form keeps multiplayer running, and marks the tick at
+which it opened. Submit sends up to 1,000 Unicode characters to the host.
+The host supplies your callsign, seat and aircraft, logs the feedback and
+keeps it in its recording; your local recording also gets the accepted flag.
+
+The form uses the controls editor's frame and buttons. Tab selects Submit or
+Cancel, Escape cancels, and the controller can type through an on-screen
+keyboard. See [replay flags and export](REPLAYS.md#player-feedback-flags) and
+[server settings](DEDICATED-SERVER.md#recording-and-feedback). Protocol 67
+carries the operator's flag and reliable feedback messages.

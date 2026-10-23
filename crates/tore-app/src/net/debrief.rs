@@ -538,6 +538,7 @@ mod tests {
 
     fn lobby(king: Option<u8>, you: u8) -> LobbyState {
         LobbyState {
+            feedback: false,
             name: String::new(),
             summary: String::new(),
             mission: 1,

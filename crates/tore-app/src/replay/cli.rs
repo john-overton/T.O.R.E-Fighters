@@ -51,6 +51,13 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
     let recording = open(path)?;
     let header = recording.header();
     let world = &header.world;
+    if recording.flagged() {
+        writeln!(
+            out,
+            "Feedback    {} reports (flagged)",
+            recording.feedback().count()
+        )?;
+    }
     writeln!(out, "Recording   {}", path.display())?;
     writeln!(
         out,
@@ -293,6 +300,9 @@ pub fn log(path: &Path, options: &LogOptions) -> AppResult<PathBuf> {
     file.flush()?;
     let mut file = BufWriter::new(create(&folder.join("summary.txt"))?);
     export::write_summary(&recording, &export::SummaryOptions::default(), &mut file)?;
+    file.flush()?;
+    let mut file = BufWriter::new(create(&folder.join("feedback.jsonl"))?);
+    export::feedback::write(&recording, &path.display().to_string(), &mut file)?;
     file.flush()?;
     Ok(folder)
 }

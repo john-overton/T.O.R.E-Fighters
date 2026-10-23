@@ -2700,3 +2700,30 @@ For a still with the ordinary object-view camera and its banner, use
 `aircraft:ID` / `ground:ID`). Use a plan row with view 3 and an aircraft
 anchor that exists at the chosen tick. This offscreen command needs a GPU;
 `--replay-banner-check` does not. It leaves existing director plans unchanged.
+
+## Player feedback flags
+
+On a dedicated server with feedback enabled, **Escape > ? > Feedback...**
+opens a text form. It flags the moment the form opens, even if the player
+spends time typing while the multiplayer flight continues. Submit records the
+text, player, aircraft, opening tick and time, and submission tick and time.
+The host records it and returns it to the sender's local replay capture.
+Single player and player-hosted games do not show this button.
+
+A recording containing feedback is flagged. Pink timeline markers show the
+opening ticks. **Feedback (N)** in the viewer opens a list. Click a row to seek
+there and read the text, or use Up/Down and Enter. PageUp/PageDown or the
+mouse wheel scroll long reports. Escape closes the list.
+The replay viewer cannot submit new feedback.
+
+`--recording-log FILE --out FOLDER` now also writes `feedback.jsonl`, one JSON
+object per flag. An unflagged recording produces an empty file. The export
+contains the source file, tick, mission time in seconds, UTC wall-clock
+milliseconds, submit tick and time, callsign, seat, aircraft, theater and text.
+[The event layout](formats/replay-feedback.md) documents the fields and why
+this remains compatible with replay format 4. The complete behavior is in
+[the feedback specification](spec/replay-feedback.md).
+
+Dedicated servers can save authoritative recordings with their mission logs.
+They have no local cockpit display or heard radio track. See
+[server recording and retention](DEDICATED-SERVER.md#recording-and-feedback).

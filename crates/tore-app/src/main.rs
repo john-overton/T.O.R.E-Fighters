@@ -58,6 +58,7 @@ mod f15_animation;
 mod f16_animation;
 mod f22_animation;
 mod f4_animation;
+mod feedback;
 mod fill_renderer;
 mod flak_pass;
 mod flight;
@@ -452,6 +453,7 @@ struct App {
     /// The input configuration screen, open over the main menu or the
     /// paused flight menu. One component serves both.
     controls: Option<controls_editor::Editor>,
+    feedback: Option<feedback::Form>,
     /// The Graphics options screen, open over the main menu.
     graphics_screen: Option<graphics_screen::Editor>,
     /// The Sound/Music Prefs screen, open over the main menu or the paused
@@ -2070,6 +2072,18 @@ impl App {
                 self.release_trigger();
                 self.flight_clock.remainder = 0.;
                 self.open_graphics("Flight paused");
+                Action::Click
+            }
+            Command::FeedbackOpen => {
+                if self.feedback_enabled() {
+                    let tick = self
+                        .net_flight
+                        .as_ref()
+                        .and_then(|f| f.frame.as_ref())
+                        .map_or(0, |f| f.tick);
+                    self.feedback = Some(feedback::Form::new(tick));
+                    self.release_trigger();
+                }
                 Action::Click
             }
             Command::ControlsOpen => {
@@ -3697,11 +3711,31 @@ impl App {
         if event.pressed
             && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
                 || (self.modifiers.alt_key() && name == "F4"))
-            && (self.controls.is_some()
+            && (self.feedback.is_some()
+                || self.controls.is_some()
                 || self.sound_screen.is_some()
                 || self.graphics_screen.is_some())
         {
             self.action(event_loop, Action::Exit);
+            return Action::None;
+        }
+        if self.feedback.is_some() {
+            if event.pressed {
+                let form = self.feedback.as_mut().expect("checked");
+                let result = if !self.modifiers.control_key()
+                    && !self.modifiers.alt_key()
+                    && event
+                        .text
+                        .as_ref()
+                        .is_some_and(|t| t.chars().any(|c| !c.is_control()))
+                {
+                    form.text(event.text.as_ref().unwrap());
+                    feedback::Outcome::None
+                } else {
+                    form.key(&name)
+                };
+                self.feedback_result(result);
+            }
             return Action::None;
         }
         // The controls screen takes every key press while it is open,
@@ -4527,6 +4561,20 @@ impl ApplicationHandler for App {
                 };
                 self.sound_result(outcome)
             }
+            WindowEvent::MouseInput { state, button, .. } if self.feedback.is_some() => {
+                let point = self
+                    .pointer
+                    .and_then(|(x, y)| renderer.viewport().point(x, y));
+                if button == MouseButton::Left {
+                    let result = self
+                        .feedback
+                        .as_mut()
+                        .unwrap()
+                        .pointer(point, state == ElementState::Pressed);
+                    self.feedback_result(result);
+                }
+                Action::None
+            }
             WindowEvent::MouseInput { state, button, .. } if self.controls.is_some() => {
                 let point = self
                     .pointer
@@ -4835,6 +4883,9 @@ impl ApplicationHandler for App {
                                 || self.direct.is_building()
                                 || self.internet.is_building()
                         };
+                        if let Some(form) = &self.feedback {
+                            form.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
@@ -6411,6 +6462,9 @@ impl ApplicationHandler for App {
                                 .unwrap_or_default();
                             menu.draw(&mut self.menu.pixels, &self.hornet.font, &prompt);
                         }
+                        if let Some(form) = &self.feedback {
+                            form.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
@@ -6898,6 +6952,13 @@ impl ApplicationHandler for App {
                 self.frame_time = Instant::now();
             } else {
                 for action in actions {
+                    if let Some(form) = &mut self.feedback {
+                        if let tore_input::Action::Ui(name) = &action {
+                            let result = form.controller(name);
+                            self.feedback_result(result);
+                        }
+                        continue;
+                    }
                     // Controller menu buttons navigate the controls screen,
                     // except in the poll that completed a capture with them.
                     if let Some(editor) = &mut self.controls {
@@ -12520,7 +12581,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons.\nScripted input: --input-script FILE feeds key presses and mouse clicks to a windowed run through the window's own handlers, for tests (steps: wait, waittick, key, down, up, move, movemenu, click, press, release, wheel, snapshot, exit; see docs/DEVELOPMENT.md)."
                 );
                 println!(
-                    "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --convert-capture CAPTURE [--out REPLAY] turns a networked flight's capture (replays/*.tore-capture) into a replay, smoothed through every update received; it needs the import and takes the replay's name from the capture unless --out names it. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
+                    "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl, summary.txt and feedback.jsonl. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --convert-capture CAPTURE [--out REPLAY] turns a networked flight's capture (replays/*.tore-capture) into a replay, smoothed through every update received; it needs the import and takes the replay's name from the capture unless --out names it. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission (which refuses an enemy airfield; a STOL strip is allowed). The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe. --enemy-ground-start N parks Enemy Wing 1 at Redfor airport N (the creator's Enemy start).\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport. --airport-allegiance lists every base theater's ground-start airports for Blue and for Redfor and checks that none is the other side's.
@@ -15671,6 +15732,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         capture_terrain,
         reimport: None,
         controls: None,
+        feedback: None,
         graphics_screen: None,
         sound_screen: None,
         replay,

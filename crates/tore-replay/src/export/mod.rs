@@ -21,3 +21,5 @@ pub use anomaly::{Anomaly, Thresholds, detect};
 pub use diff::{CompareOptions, Comparison, compare, write_diff};
 pub use jsonl::{JsonlOptions, JsonlStats, write_jsonl};
 pub use summary::{SummaryOptions, write_summary};
+
+pub mod feedback;

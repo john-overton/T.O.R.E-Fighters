@@ -215,6 +215,7 @@ pub enum LeaveReason {
 /// Something for the console and the log, each with the host tick.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostLog {
+    Feedback(tore_replay::feedback::Feedback),
     /// A join was accepted.
     Connected {
         tick: u64,
@@ -259,21 +260,39 @@ pub enum HostLog {
         reason: LeaveReason,
     },
     /// The mission started flying.
-    MissionStarted { tick: u64 },
+    MissionStarted {
+        tick: u64,
+    },
     /// The mission ended.
-    MissionEnded { tick: u64, reason: EndReason },
+    MissionEnded {
+        tick: u64,
+        reason: EndReason,
+    },
     /// A fresh copy of the mission was built.
-    MissionRestarted { tick: u64 },
+    MissionRestarted {
+        tick: u64,
+    },
     /// The host fell behind real time by more than it catches up.
-    Overloaded { tick: u64, ticks_behind: u64 },
+    Overloaded {
+        tick: u64,
+        ticks_behind: u64,
+    },
     /// The mission could not go on (a step or a rebuild failed).
-    Fault { tick: u64, text: String },
+    Fault {
+        tick: u64,
+        text: String,
+    },
     /// Something the host did on purpose that is neither a fault nor a
     /// player's doing: why the mission waits to start, a departed player's
     /// aircraft removed because AI is off.
-    Note { tick: u64, text: String },
+    Note {
+        tick: u64,
+        text: String,
+    },
     /// The host stopped.
-    Stopped { tick: u64 },
+    Stopped {
+        tick: u64,
+    },
     /// Something a player did in the lobby, or that happened to it there.
     Lobby {
         tick: u64,
@@ -336,6 +355,7 @@ impl HostLog {
             | Self::Stalled { tick, .. }
             | Self::Resumed { tick, .. }
             | Self::Loaded { tick, .. } => *tick,
+            Self::Feedback(f) => f.submit_tick,
         }
     }
 
@@ -585,6 +605,8 @@ struct Costs {
 
 /// The host session. See the module documentation.
 pub struct Host {
+    recording: Option<crate::recording::Recorder>,
+    recording_failed: bool,
     sequence: Option<Box<dyn sequence::MissionSequence>>,
     config: HostConfig,
     /// The King's settings in force (stage F phase 2): the configuration's
@@ -1010,6 +1032,8 @@ impl Host {
             force_shown: None,
             court,
             settings,
+            recording: None,
+            recording_failed: false,
             config,
         };
         if host.start_rule() == StartMode::Now {
@@ -1400,6 +1424,18 @@ impl Host {
     // ----- Joins and messages --------------------------------------------
 
     fn log(&mut self, entry: HostLog) {
+        if let Some(recorder) = &mut self.recording {
+            recorder.note(&entry);
+        }
+        if matches!(
+            &entry,
+            HostLog::MissionEnded { .. } | HostLog::Stopped { .. }
+        ) {
+            self.finish_recording();
+        }
+        if matches!(&entry, HostLog::MissionRestarted { .. }) {
+            self.recording_failed = false;
+        }
         self.logs.push_back(entry);
     }
 
@@ -1853,6 +1889,7 @@ impl Host {
                 };
                 self.answer(connection, kind::KICK, "a kick", result);
             }
+            Message::FeedbackSend(f) => self.feedback(connection, f),
             Message::ChatSend(send) => self.chat(connection, send),
             Message::EndMission => {
                 let result = if matches!(self.life, Life::Flying) {
@@ -3152,6 +3189,7 @@ impl Host {
             .find(|peer| peer.king)
             .map(|peer| peer.lobby.id);
         LobbyState {
+            feedback: self.config.feedback && !self.config.listable && !self.recording_failed,
             name: self.settings.name().to_owned(),
             summary: self.spec.summary(),
             mission: self.number,
@@ -3750,6 +3788,7 @@ impl Host {
         let mut out = std::mem::take(&mut self.out);
         let notes = match self.world.step(journal, &mut out) {
             Ok((journal, notes)) => {
+                self.record_tick(&journal.inputs);
                 self.journal_ticked(journal);
                 notes
             }
@@ -3760,6 +3799,9 @@ impl Host {
             }
         };
 
+        if let Some(recorder) = &mut self.recording {
+            recorder.combat_events(&out.events);
+        }
         if !given.is_empty() || !takes.is_empty() {
             self.roster_dirty = true;
         }
@@ -4479,5 +4521,108 @@ fn carried_loadout(
                 }
             })
             .collect(),
+    }
+}
+
+impl Host {
+    fn feedback(&mut self, connection: ConnectionId, mut f: tore_replay::feedback::Feedback) {
+        if !self.config.feedback
+            || self.config.listable
+            || !matches!(self.life, Life::Flying)
+            || !tore_replay::feedback::Feedback::valid_text(&f.text)
+        {
+            return;
+        }
+        if self.recording_failed {
+            self.send(
+                connection,
+                &Message::Notice("Feedback is unavailable: the server recording failed.".into()),
+            );
+            return;
+        }
+        let Some(peer) = self.peers.get_mut(&connection) else {
+            return;
+        };
+        let Some(seat) = peer.seat else {
+            return;
+        };
+        if peer.stage != Stage::Seated {
+            return;
+        }
+        if !peer.chat_rate.allow(self.now) {
+            self.send(
+                connection,
+                &Message::Notice(
+                    "Feedback was not saved: please wait before submitting again.".into(),
+                ),
+            );
+            return;
+        }
+        let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) else {
+            return;
+        };
+        f.tick = f.tick.min(self.world.combat.render_snapshot().tick);
+        f.submit_tick = self.world.combat.render_snapshot().tick;
+        f.player = peer.callsign.clone();
+        f.seat = seat.0;
+        f.plane = plane.0;
+        f.aircraft = self
+            .world
+            .aircraft_of(plane)
+            .map_or(String::new(), |a| a.selection_key().into());
+        self.send(connection, &Message::FeedbackAccepted(f.clone()));
+        self.log(HostLog::Feedback(f));
+    }
+}
+
+impl Host {
+    fn record_tick(&mut self, inputs: &[tore_world::seats::SeatInput]) {
+        let Some(options) = &self.config.recording else {
+            return;
+        };
+        if self.recording_failed {
+            return;
+        }
+        if self.recording.is_none() {
+            match crate::recording::Recorder::start(
+                options.clone(),
+                &self.world,
+                &self.config.build,
+            ) {
+                Ok(recorder) => self.recording = Some(recorder),
+                Err(error) => {
+                    self.recording_failed = true;
+                    self.lobby_dirty = true;
+                    self.log(HostLog::Note {
+                        tick: self.world.tick(),
+                        text: format!("Recording failed: {error}"),
+                    });
+                    return;
+                }
+            }
+        }
+        if let Some(recorder) = &mut self.recording
+            && let Err(error) = recorder.tick(&self.world, inputs)
+        {
+            self.recording_failed = true;
+            self.lobby_dirty = true;
+            self.finish_recording();
+            self.log(HostLog::Note {
+                tick: self.world.tick(),
+                text: format!("Recording failed: {error}"),
+            });
+        }
+    }
+    fn finish_recording(&mut self) {
+        if let Some(recorder) = self.recording.take() {
+            let text = match recorder.finish() {
+                Ok(path) => format!("Replay saved: {}", path.display()),
+                Err(error) => format!("Recording failed: {error}"),
+            };
+            self.logs.push_back(HostLog::Note {
+                tick: self.world.tick(),
+                text,
+            });
+        }
     }
 }

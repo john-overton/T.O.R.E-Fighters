@@ -651,6 +651,12 @@ impl Conversion {
             .collect();
         for tick in first..=last {
             let mut frame = replay::Frame {
+                events: seen
+                    .feedback
+                    .iter()
+                    .filter(|f| f.submit_tick.clamp(first, last) == tick)
+                    .map(|f| f.event())
+                    .collect(),
                 tick,
                 ..replay::Frame::default()
             };

@@ -33,6 +33,7 @@ pub enum Control {
     Camera,
     Aircraft,
     HideUi,
+    Feedback,
 }
 
 /// The transport buttons, left to right.
@@ -72,6 +73,7 @@ pub fn rect(control: Control) -> Rect {
         Control::Camera => CAMERA,
         Control::Aircraft => AIRCRAFT,
         Control::HideUi => HIDE,
+        Control::Feedback => (490, 4, 142, 22),
         _ => {
             let index = TRANSPORT.iter().position(|c| *c == control).unwrap_or(0) as i32;
             (8 + index * (BUTTON_WIDTH + 2), ROW, BUTTON_WIDTH, 20)
@@ -88,6 +90,7 @@ pub fn hit(point: (f64, f64)) -> Option<Control> {
             Control::Camera,
             Control::Aircraft,
             Control::HideUi,
+            Control::Feedback,
         ])
         .find(|control| inside(point, rect(*control)))
 }
@@ -161,7 +164,11 @@ pub fn transport(control: Control, clock: &mut Clock) -> bool {
         Control::FastForward => clock.fast_forward(),
         Control::StepForward => clock.step(1),
         Control::End => clock.end(),
-        Control::Timeline | Control::Camera | Control::Aircraft | Control::HideUi => return false,
+        Control::Timeline
+        | Control::Camera
+        | Control::Aircraft
+        | Control::HideUi
+        | Control::Feedback => return false,
     }
     true
 }
@@ -223,6 +230,7 @@ pub enum MarkerKind {
     Kill,
     Order,
     Bookmark,
+    Feedback,
 }
 
 impl MarkerKind {
@@ -232,6 +240,7 @@ impl MarkerKind {
             Self::Kill => [240, 82, 70, 255],
             Self::Order => [96, 176, 255, 255],
             Self::Bookmark => [120, 214, 140, 255],
+            Self::Feedback => [255, 120, 240, 255],
         }
     }
 }
@@ -245,6 +254,10 @@ pub struct Marker {
 /// Everything the interface shows for one frame, as plain data.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Model {
+    pub feedback: Vec<tore_replay::feedback::Feedback>,
+    pub feedback_open: bool,
+    pub feedback_selected: usize,
+    pub feedback_scroll: usize,
     pub first: u64,
     pub last: u64,
     pub position: f64,
@@ -446,6 +459,90 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
         let y = 12 + font.height as i32 + 10;
         caption(pixels, font, &fit(font, readout, 420), 320, y, PALE);
     }
+    if !model.feedback.is_empty() {
+        labelled(
+            pixels,
+            font,
+            rect(Control::Feedback),
+            &format!("Feedback ({})", model.feedback.len()),
+            model.feedback_open,
+        );
+        if model.feedback_open {
+            draw_feedback(pixels, font, model);
+        }
+    }
+}
+
+fn draw_feedback(pixels: &mut [u8], font: &Font, model: &Model) {
+    Canvas(pixels).rect((8, 32, 624, 394), [24, 34, 45, 255]);
+    let page = model.feedback_selected / 8 * 8;
+    for (i, f) in model.feedback.iter().enumerate().skip(page).take(8) {
+        let r = (12, 40 + (i - page) as i32 * 24, 236, 22);
+        labelled(
+            pixels,
+            font,
+            r,
+            &fit(
+                font,
+                &format!(
+                    "{:02}:{:02}  {}",
+                    f.tick / 7200,
+                    f.tick / 120 % 60,
+                    f.player
+                ),
+                228,
+            ),
+            i == model.feedback_selected,
+        );
+    }
+    Editor::text(
+        pixels,
+        font,
+        (12, 240, 236, 40),
+        TITLE,
+        "Up/Down: flags. Enter: seek.",
+        (12, 248),
+    );
+    Editor::text(
+        pixels,
+        font,
+        (12, 280, 236, 40),
+        TITLE,
+        "PgUp/Dn: text. Escape: close.",
+        (12, 288),
+    );
+    if let Some(f) = model.feedback.get(model.feedback_selected) {
+        for (i, line) in feedback_lines(font, f)
+            .iter()
+            .skip(model.feedback_scroll)
+            .take(27)
+            .enumerate()
+        {
+            Editor::text(
+                pixels,
+                font,
+                (264, 36, 360, 386),
+                WHITE,
+                line,
+                (264, 42 + i as i32 * 14),
+            );
+        }
+    }
+}
+
+/// Wrapped lines shared by drawing and scroll bounds.
+pub fn feedback_lines(font: &Font, f: &tore_replay::feedback::Feedback) -> Vec<String> {
+    let text = format!("{}  {}\n{}", f.player, f.aircraft, f.text);
+    let mut lines = vec![String::new()];
+    for c in text.chars() {
+        if c == '\n' || text_width(font, lines.last().unwrap()) > 346 {
+            lines.push(String::new());
+        }
+        if c != '\n' {
+            lines.last_mut().unwrap().push(c);
+        }
+    }
+    lines
 }
 
 #[cfg(test)]

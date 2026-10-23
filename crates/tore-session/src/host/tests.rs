@@ -134,6 +134,7 @@ struct TestClient {
     notices: Vec<String>,
     /// System and player lines, so a force-start announcement is not an error.
     chat: Vec<String>,
+    feedback: Vec<tore_replay::feedback::Feedback>,
     /// Every Token message (stage K, slice K5).
     tokens: Vec<crate::wire::migration::TokenGrant>,
 }
@@ -185,6 +186,7 @@ impl TestClient {
             observing: Vec::new(),
             notices: Vec::new(),
             chat: Vec::new(),
+            feedback: Vec::new(),
             tokens: Vec::new(),
         }
     }
@@ -347,6 +349,7 @@ impl TestClient {
             }
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(text) => self.notices.push(text),
+            Message::FeedbackAccepted(f) => self.feedback.push(f),
             Message::ChatLine(line) => self.chat.push(line.text),
             Message::Token(grant) => self.tokens.push(grant),
             Message::Scores(scores) => self.scores.push(*scores),
@@ -1793,3 +1796,6 @@ mod force_start_tests;
 
 #[path = "picture_tests.rs"]
 mod picture_tests;
+
+#[path = "feedback_tests.rs"]
+mod feedback_tests;

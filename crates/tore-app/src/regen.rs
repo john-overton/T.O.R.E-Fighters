@@ -11,19 +11,7 @@
 use crate::terrain::Terrain;
 use tore_sim::combat::{countermeasures::Devices, live::EffectKind};
 
-/// One chaff cartridge or flare as a recording or the network keeps it: the
-/// releasing aircraft, the kind, the aircraft's exact position, velocity and
-/// attitude when it left, its number, which sets its look, and the combat
-/// tick after whose step it left.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DeviceRelease {
-    pub owner: u32,
-    /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
-    pub kind: EffectKind,
-    pub release: tore_sim::combat::countermeasures::Release,
-    pub number: u64,
-    pub tick: u64,
-}
+pub use tore_session::recording::convert::DeviceRelease;
 
 /// Lets `release` go: numbering continues after the releases before it, so
 /// the device has the look it had where it was released.

@@ -542,6 +542,7 @@ impl App {
                 self.message(text);
             }
             ClientEvent::Lobby => {
+                self.refresh_feedback();
                 if let Some(line) = self.net.as_mut().and_then(|s| s.lobby_change()) {
                     log::info!("Network: lobby: {line}");
                 }
@@ -658,6 +659,7 @@ impl App {
     /// in the lobby): the flight is put away and single player's state put
     /// back, as when a session ends.
     pub(crate) fn end_net_flight(&mut self) {
+        self.feedback = None;
         let Some(flight) = self.net_flight.take() else {
             return;
         };
@@ -874,7 +876,14 @@ impl App {
         self.net_flight = Some(NetFlight {
             stash,
             frame: None,
-            menu: crate::flight_ui::session_menu(&self.hornet.flight_menu),
+            menu: {
+                let mut tree = crate::flight_ui::session_menu(&self.hornet.flight_menu);
+                crate::feedback::menu(
+                    &mut tree,
+                    crate::feedback::enabled(self.net.as_ref().and_then(|s| s.client.lobby())),
+                );
+                tree
+            },
             last_tick: 0,
             weather_steps: 0,
             was_dead: false,
@@ -1161,6 +1170,7 @@ impl App {
     /// the player sees the debrief the host sent, or the reason in plain
     /// words on the main menu.
     pub(crate) fn end_session(&mut self, event_loop: &ActiveEventLoop) {
+        self.feedback = None;
         self.pending_join = None;
         self.pending_host = None;
         let reason = self.net_ending.take().unwrap_or_default();
