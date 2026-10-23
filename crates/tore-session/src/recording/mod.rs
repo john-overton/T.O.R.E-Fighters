@@ -3,15 +3,17 @@
 pub mod bounds;
 pub mod convert;
 pub mod identity;
+mod worker;
 use crate::{BuildId, HostLog};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
-    io::{BufWriter, Write},
+    fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tore_replay::{self as replay, Frame, Writer};
+#[cfg(test)]
+use tore_replay::Writer;
+use tore_replay::{self as replay, Frame};
 use tore_world::{seats::PlaneId, world::World};
 
 #[derive(Clone, Debug)]
@@ -21,10 +23,8 @@ pub struct Options {
 }
 
 pub struct Recorder {
-    writer: Writer,
-    pending: Option<Frame>,
-    options: Options,
-    log: BufWriter<File>,
+    writer: Option<worker::Worker>,
+    pending: Option<worker::Tick>,
     registered: BTreeSet<u32>,
     weapons: BTreeMap<String, u32>,
     effects: convert::EffectWatch,
@@ -37,7 +37,6 @@ pub struct Recorder {
 }
 impl Recorder {
     pub fn start(options: Options, world: &World, build: &BuildId) -> Result<Self, String> {
-        fs::create_dir_all(&options.folder).map_err(|e| e.to_string())?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -62,20 +61,15 @@ impl Recorder {
                 extra
             },
         };
-        let mut writer = Writer::create(path, &header).map_err(|e| e.to_string())?;
-        for info in crate::client::convert::surface_infos(world) {
-            writer
-                .register_surface_unit(&info)
-                .map_err(|e| e.to_string())?;
-        }
-        let log = BufWriter::new(
-            File::create(options.folder.join(format!("{stem}.log"))).map_err(|e| e.to_string())?,
-        );
-        Ok(Self {
-            writer,
-            pending: None,
+        let writer = worker::Worker::start(
             options,
-            log,
+            path,
+            header,
+            crate::client::convert::surface_infos(world),
+        )?;
+        Ok(Self {
+            writer: Some(writer),
+            pending: None,
             registered: BTreeSet::new(),
             weapons: BTreeMap::new(),
             effects: Default::default(),
@@ -88,7 +82,8 @@ impl Recorder {
         })
     }
     pub fn combat_events(&mut self, events: &[tore_sim::combat::live::Event]) {
-        if let Some(frame) = &mut self.pending {
+        if let Some(tick) = &mut self.pending {
+            let frame = &mut tick.frame;
             frame.events.extend(
                 events
                     .iter()
@@ -97,7 +92,8 @@ impl Recorder {
         }
     }
     pub fn note(&mut self, entry: &HostLog) {
-        if let Some(frame) = &mut self.pending {
+        if let Some(tick) = &mut self.pending {
+            let frame = &mut tick.frame;
             if let HostLog::Feedback(f) = entry {
                 frame.events.push(f.event());
                 self.feedback_count += 1;
@@ -109,21 +105,8 @@ impl Recorder {
         }
     }
     fn flush(&mut self) -> Result<(), String> {
-        if let Some(mut frame) = self.pending.take() {
-            bounds::fit(&mut frame);
-            for event in &frame.events {
-                writeln!(
-                    self.log,
-                    "tick {}: {} {}",
-                    frame.tick,
-                    event.kind,
-                    replay::feedback::Feedback::from_event(event)
-                        .map_or_else(|| event.text.clone(), |f| f.text)
-                        .replace(['\n', '\r'], " ")
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            self.writer.push(&frame).map_err(|e| e.to_string())?;
+        if let Some(tick) = self.pending.take() {
+            self.writer.as_mut().expect("active recorder").push(tick)?;
         }
         Ok(())
     }
@@ -133,6 +116,7 @@ impl Recorder {
         inputs: &[tore_world::seats::SeatInput],
     ) -> Result<(), String> {
         self.flush()?;
+        let mut tick = worker::Tick::default();
         let s = picture(world);
         let mut frame = Frame {
             tick: s.tick,
@@ -148,25 +132,23 @@ impl Recorder {
             };
             if self.registered.insert(pose.id) {
                 let id = pose.aircraft.expect("filtered");
-                self.writer
-                    .register_aircraft(&replay::AircraftInfo {
-                        id: pose.id,
-                        pt: id.selection_key().into(),
-                        name: id.label().into(),
-                        label: world
-                            .roster
-                            .plane_callsign(plane.id)
-                            .map_or_else(|| format!("Plane {}", plane.id.0), str::to_owned),
-                        human: world.roster.seat_of(plane.id).is_some(),
-                        side: match plane.slot.wing.side {
-                            tore_sim::ai::launch::Side::Friendly => replay::Side::Friendly,
-                            tore_sim::ai::launch::Side::Enemy => replay::Side::Enemy,
-                        },
-                        wing: u16::from(plane.slot.wing.index),
-                        member: u16::from(plane.slot.member),
-                        ..Default::default()
-                    })
-                    .map_err(|e| e.to_string())?;
+                tick.aircraft.push(replay::AircraftInfo {
+                    id: pose.id,
+                    pt: id.selection_key().into(),
+                    name: id.label().into(),
+                    label: world
+                        .roster
+                        .plane_callsign(plane.id)
+                        .map_or_else(|| format!("Plane {}", plane.id.0), str::to_owned),
+                    human: world.roster.seat_of(plane.id).is_some(),
+                    side: match plane.slot.wing.side {
+                        tore_sim::ai::launch::Side::Friendly => replay::Side::Friendly,
+                        tore_sim::ai::launch::Side::Enemy => replay::Side::Enemy,
+                    },
+                    wing: u16::from(plane.slot.wing.index),
+                    member: u16::from(plane.slot.member),
+                    ..Default::default()
+                });
             }
             let actor = world
                 .ai_wings
@@ -242,9 +224,7 @@ impl Recorder {
                     },
                     |w| convert::weapon_info(id, w),
                 );
-                self.writer
-                    .register_weapon(&info)
-                    .map_err(|e| e.to_string())?;
+                tick.weapons.push(info);
                 self.weapons.insert(p.weapon.clone(), id);
                 id
             };
@@ -293,19 +273,30 @@ impl Recorder {
             .tick
             .is_multiple_of(120)
             .then(|| replay::state_checksum(&frame.aircraft));
-        self.pending = Some(frame);
+        tick.frame = frame;
+        self.pending = Some(tick);
         Ok(())
     }
     pub fn finish(mut self) -> Result<PathBuf, String> {
-        self.flush()?;
-        self.log.flush().map_err(|e| e.to_string())?;
-        let footer = replay::Footer {
-            end_tick: self.writer.last_tick().unwrap_or(0),
-            result: vec![("feedback".into(), self.feedback_count.to_string())],
-        };
-        let path = self.writer.finish(&footer).map_err(|e| e.to_string())?;
-        retain(&self.options.folder, self.options.kept)?;
-        Ok(path)
+        self.finish_inner()
+    }
+
+    fn finish_inner(&mut self) -> Result<PathBuf, String> {
+        let mut writer = self.writer.take().expect("recorder finished once");
+        if let Some(tick) = self.pending.take() {
+            // Even if delivery fails, finish still joins and reports the
+            // writer's actual error after its cleanup has completed.
+            let _ = writer.push_final(tick);
+        }
+        writer.finish(self.feedback_count)
+    }
+}
+
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        if self.writer.is_some() {
+            let _ = self.finish_inner();
+        }
     }
 }
 

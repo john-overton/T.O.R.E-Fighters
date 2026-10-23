@@ -10,7 +10,10 @@
 
 Implementation mode. This validates the requested [mission record](../spec/debrief.md#multiplayer-mission-record),
 including both follow-up requests. The starting T.O.R.E revision was
-`b87f1ebc66285c53cc814214849bfb5df1e208c5`, protocol 67. The original validation used protocol 69. The integrated change uses protocol 73.
+`b87f1ebc66285c53cc814214849bfb5df1e208c5`, protocol 67. The original comparison
+used protocol 69. The integrated tree includes `0.2.1rc-1` at `ccb2c3af`,
+including the recorder worker, with protocol 73 and compatibility simulation
+version 2. The wire history has one entry for these additions on top of 72.
 Validation ran on Linux with the pinned Rust toolchain and locked dependencies.
 Retail game behavior was not compared.
 
@@ -22,7 +25,7 @@ enemies. The client fired, ejected, revived, fired again and left before the
 mission ended. All ports were allocated on loopback; the production servers
 were outside the test.
 
-| Observation | Starting revision | Changed build |
+| Observation | Starting revision | Initial changed build |
 | --- | --- | --- |
 | Player kills on K after two lives | 2 | 2 |
 | PLAYER kills in the early-exit debrief | 1 | 2 |
@@ -59,18 +62,41 @@ Evidence is local, not committed retail art. The task scratch directory is
 
 | Check | Result |
 | --- | --- |
-| `cargo test --workspace --locked --no-fail-fast` | 7,046 passed, 0 failed, 104 ignored by default |
+| `cargo test --workspace --locked --no-fail-fast` | 7,106 passed, 0 failed, 106 ignored by default |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed |
 | `cargo fmt --all -- --check` | Passed |
 | `cargo build --workspace --locked` | Passed |
 | Python tools tests | 504 run, 5 skipped, no failures |
 | Source and app/extract binary asset checks | Passed |
 | Documentation checks | Passed |
-| Retail-art debrief layout test, explicitly run with imported profile | Passed for all sample pages and columns |
+| Initial retail-art debrief layout test, explicitly run with imported profile | Passed for all sample pages and columns |
 | Windowed GPU smoke through `tools/agent-run.sh` | Passed |
-| Final live partial-debrief, score and result scenarios | 3/3 passed |
-| Live revival and AI-respawn scenarios | Passed |
-| Final live host-loss migration | Passed; `battery/20261023-111533-migration-final/` |
+| Protocol 73 live partial-debrief, scores, results, respawn menu and callsign rejoin | 5/5 passed |
+| Initial live revival and AI-respawn scenarios | Passed |
+| Initial live host-loss migration | Passed; `battery/20261023-111533-migration-final/` |
+
+The protocol 73 runs are in `battery/20261023-120941-protocol73/`. The new
+partial-report captures again show 2 kills, 4 hits, 1 loss, 2 sorties and
+1 revival. The remaining observer retains Viper marked left and lists a
+separate AI row after takeover. Its spawn log keeps Friendly 1-1 and Enemy
+1-2 at their original positions. The score scenario requires nonzero AI kills.
+The window tests also retain the upstream searchable respawn menus and
+clean-leave/new-callsign flow. All five requested scenarios passed.
+
+Both exact AI probes passed with zero invariant anomalies: 2,400 ticks,
+15:15 aircraft, separation 5, attack 600:10, no audio. The default checksum
+remains `cbd959d1f838e9db`; adding `--ai-observe-hz 120` remains
+`bcdea9dc8f961940`. The member-number change did not change these runs.
+Logs are `merge-ai-default.log` and `merge-ai-120.log` in the task scratch.
+
+The protocol 73 wire golden was regenerated. Discovery and master goldens
+were regenerated without further changes; replay export goldens passed.
+The compatibility version is 2 because the new rules and checkpoint state
+must participate in the upstream compatibility contract. A new integration
+regression proves renamed early and late token claims keep dropped-player
+history, while a clean departure starts a fresh identity without erasing its
+historical contribution. Late claims discard their unused provisional score
+row and refresh the displayed name.
 
 The regressions exercise three human lives, cumulative kills/hits/losses,
 early leave without final Results, connection loss without any Debrief,
@@ -84,19 +110,20 @@ opaque instruments. K's new paging keys are in the generated controls list.
 Commands used `CARGO_BUILD_JOBS=8`, `nice -n 5`, and battery `--jobs 4 --windows 1`.
 The new scenario is `net-window-partial-debrief`; the score scenario also
 requires a nonzero AI kill, and the window scenario checks retained human and
-AI position numbers. Those added assertions were checked against the final
-live logs.
+AI position numbers. Those assertions ran in the protocol 73 live scenarios.
 
 ## Remaining validation limits
 
-A planned-handover probe resumed all three clients and delivered final results,
+Before integration, a planned-handover probe resumed all three clients and delivered final results,
 but later backup-host checkpoint continuity warnings made that battery run
 fail (`battery/20261023-101016-handover-isolated/`). The unmodified starting
 revision also failed the planned-handover probe, with resume refusals
 (`battery/20261023-104553-handover-baseline/`). These are different symptoms;
 the comparison does not prove that the checkpoint warning has the same cause.
 This separate handover reliability issue is not claimed fixed. The dedicated
-statistics handover regression and live host-loss migration passed.
+statistics handover regression and initial live host-loss migration passed.
+The final integrated workspace run passes the statistics handover regression;
+the separate planned-handover live probe was not repeated in this pass.
 
 Windows and macOS builds were not run. Default-ignored hardware and extended
 retail tests were not all run. A dropped connection can only report data

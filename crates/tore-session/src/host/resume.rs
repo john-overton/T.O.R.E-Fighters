@@ -1240,6 +1240,7 @@ impl Host {
         for connection in everyone {
             self.send(connection, &moving);
         }
+        self.finish_recording();
         self.resuming.handed_to = Some(standby);
         self.resuming
             .notes

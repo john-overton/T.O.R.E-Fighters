@@ -149,7 +149,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     # Menus lane.
-    "replay-feedback": ("dedicated feedback form and authoritative recordings", ("net-replay-feedback-*",)),
+    "replay-feedback": ("dedicated feedback form, recording lifecycle and writer recovery", ("net-replay-feedback-*",)),
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*", "menus-updates-bar-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",

@@ -4,7 +4,7 @@
 `--record` and `--verify-render`: the Ukraine armored column (`~QUCOL`, seed 1),
 heavy defenses, a straight pass over the site by an invulnerable player, a Mk 82
 on each flagged tank, and then eight more minutes so the supply trucks rearm the
-launchers the pass emptied. The recording is a format 3 file, and the run reads
+launchers the pass emptied. The recording is a format 4 file, and the run reads
 it back and compares every one of its 67,000 ticks with the picture the run drew
 (poses of the tanks that drive, debris pieces, flak, craters and fires, the
 aircraft, the rounds). The scenario then checks what the recording says in the
@@ -72,8 +72,8 @@ def verify_problems(run: str, label: str, least_ticks: int) -> list[str]:
 def long_run_problems(work: Path, s: dict[int, str]) -> list[str]:
     problems = verify_problems(s[0], "the column run", 60_000)
     info = s.get(1, "")
-    if "format 3" not in info:
-        problems.append("the recording is not a format 3 file")
+    if "format 4" not in info:
+        problems.append("the recording is not a format 4 file")
     if not re.search(r"^Ground +target QUCOL with AAA 3 and SAM 3, surface seed 1", info, re.M):
         problems.append("recording-info does not name the ground target and its settings")
     named = re.search(r"^Surface +(\d+) units named, (\d+) of them enemy", info, re.M)
@@ -89,7 +89,7 @@ def long_run_problems(work: Path, s: dict[int, str]) -> list[str]:
     target = header and header["world"].get("ground_target")
     if not target or (target["stem"], target["seed"], target["aaa"], target["sam"]) != ("QUCOL", 1, 3, 3):
         problems.append(f"the header's ground target is {target}")
-    if header and header.get("format") != 3:
+    if header and header.get("format") != 4:
         problems.append(f"the header says format {header.get('format')}")
     units = {d["id"]: d for d in lines if d["type"] == "surface_unit"}
     names = {d["name"] for d in units.values()}
@@ -258,6 +258,6 @@ def scenarios() -> list[Scenario]:
                 Step(["--recording-log", "{work}/c.tore-replay", "--out", "{work}/log-down"]),  # 12
             ],
             check_work=check,
-            notes="a format 3 ground target recording replays tick for tick, names its units, and still opens format 2",
+            notes="a format 4 ground target recording replays tick for tick, names its units, and still opens format 2",
         )
     ]

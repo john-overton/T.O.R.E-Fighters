@@ -158,6 +158,8 @@ pub struct Status {
     pub load_percent: f64,
     /// The recent cost of one tick, in milliseconds.
     pub tick_ms: f64,
+    /// Slowest tick since the previous status call, in milliseconds.
+    pub worst_tick_ms: f64,
     pub up_bytes_per_second: f64,
     pub down_bytes_per_second: f64,
 }
@@ -324,6 +326,7 @@ pub mod scripted {
                 aircraft: 30,
                 load_percent: 11.0,
                 tick_ms: 1.1,
+                worst_tick_ms: 52.3,
                 up_bytes_per_second: 64_000.0,
                 down_bytes_per_second: 7_000.0,
             }

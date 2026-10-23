@@ -93,6 +93,8 @@ pub struct Writer {
     frames: u64,
     index: Vec<IndexEntry>,
     unsynced_ticks: u64,
+    #[cfg(test)]
+    periodic_syncs: u64,
     stopped: Option<Stop>,
 }
 
@@ -145,6 +147,8 @@ impl Writer {
             frames: 0,
             index: Vec::new(),
             unsynced_ticks: 0,
+            #[cfg(test)]
+            periodic_syncs: 0,
             stopped: None,
         })
     }
@@ -160,6 +164,13 @@ impl Writer {
     /// Frames accepted so far.
     pub fn frames(&self) -> u64 {
         self.frames
+    }
+
+    /// Frames in completed chunks. A caller can bound queued frames plus
+    /// the current chunk without changing the chunk or sync cadence.
+    /// After a failed push this is not a durability acknowledgement.
+    pub fn flushed_frames(&self) -> u64 {
+        self.frames - u64::from(self.chunk.frames)
     }
 
     /// Bytes written to disk so far (the chunk being filled is not included).
@@ -386,6 +397,10 @@ impl Writer {
             {
                 self.stopped = Some(Stop::Failed(format!("syncing failed: {error}")));
                 return Err(error.into());
+            }
+            #[cfg(test)]
+            {
+                self.periodic_syncs += 1;
             }
         }
         Ok(())
@@ -689,4 +704,47 @@ fn validate(frame: &Frame) -> Result<usize> {
         bound += tree_bound(tree)?;
     }
     Ok(bound)
+}
+
+#[cfg(test)]
+mod cadence_tests {
+    use super::*;
+
+    #[test]
+    fn default_chunks_flush_every_120_frames_and_sync_every_3600() {
+        let path = std::env::temp_dir().join(format!(
+            "tore-writer-cadence-{}.tore-replay",
+            std::process::id()
+        ));
+        let mut writer = Writer::create(&path, &Header::default()).unwrap();
+        assert_eq!(
+            writer.options,
+            WriterOptions {
+                chunk_ticks: 120,
+                sync_ticks: 3_600
+            }
+        );
+        for tick in 0..7_205 {
+            writer
+                .push(&Frame {
+                    tick,
+                    ..Default::default()
+                })
+                .unwrap();
+            let frames = tick + 1;
+            assert_eq!(writer.flushed_frames(), frames / 120 * 120);
+            assert_eq!(writer.periodic_syncs, frames / 3_600);
+            assert_eq!(writer.unsynced_ticks, (frames / 120 * 120) % 3_600);
+        }
+        writer
+            .finish(&Footer {
+                end_tick: 7_204,
+                ..Default::default()
+            })
+            .unwrap();
+        let r = crate::Recording::open(&path).unwrap();
+        assert!(r.complete());
+        assert_eq!(r.frame_count(), 7_205);
+        std::fs::remove_file(path).unwrap();
+    }
 }

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from battery import Drive, Scenario
-from battery_scenarios.net import GAME_FLAGS, LOCALHOST, server_log, start_server, stop_server
+from battery_scenarios.net import (
+    GAME_FLAGS, LOCALHOST, fresh_data, server_log, start_server, stop_server, write_server_files,
+)
 
 
 def drive_feedback(d: Drive, enabled: bool) -> None:
@@ -73,9 +76,46 @@ def drive_feedback(d: Drive, enabled: bool) -> None:
     d.run("viewer", [d.app, "--watch-replay", replay, *GAME_FLAGS, "--input-script", view], timeout=90, window=True)
 
 
+def drive_recorder_lifecycle(d: Drive) -> None:
+    """Headless recording across a restart and quit, including the last chunk."""
+    fresh_data(d)
+    folder = d.work / "server-replays"
+    config = write_server_files(d, d.port(), start="now", record_replays="on",
+                                replays_folder=folder, replays_kept=10,
+                                after_end="restart", empty_timeout=120,
+                                status_interval=1, broadcast="off", telemetry="off")
+    server = d.start("server", [d.server, "--config", config], stdin=True)
+    if not server.wait_for(r"tick [3-9][0-9]{2} .*worst [0-9.]+ ms", 60):
+        d.problem("the first recording did not reach its third chunk with worst-tick status")
+    server.send("restart")
+    if not server.wait_for(r"Replay saved:", 30):
+        d.problem("restart did not finish the first recording")
+    d.sleep(3)
+    server.send("status")
+    stop_server(d, server)
+    if "Recording failed:" in server_log(d):
+        d.problem("recording failed during the headless lifecycle")
+    paths = sorted(folder.glob("*.tore-replay"))
+    if len(paths) != 2 or list(folder.glob("*.partial")):
+        d.problem(f"expected two finished recordings and no pending writers, got {paths}")
+    for n, path in enumerate(paths):
+        info = d.run(f"info-{n}", [d.app, "--recording-info", path], timeout=60)
+        info.expect(r"^State +finished normally$", "a completed recording")
+        if not path.with_suffix(".log").exists():
+            d.problem("a finished replay lost its companion log")
+            continue
+        log = path.with_suffix(".log").read_text()
+        if not re.search(r"MissionEnded|Stopped", log):
+            d.problem("the final pending frame omitted its lifecycle event")
+
+
 def scenarios() -> list[Scenario]:
     return [Scenario(name=f"net-replay-feedback-{name}", lane="net", args=[], window=True,
                      uses=("server",), timeout=360, env={"TORE_RECORD_MISSIONS": "1", "TORE_SCRIPT_OUT": "{work}"},
                      driver=lambda d, enabled=enabled: drive_feedback(d, enabled),
                      notes="Real dedicated feedback form, local and server replay exports, retention and viewer.")
-            for name, enabled in [("on", True), ("off", False)]]
+            for name, enabled in [("on", True), ("off", False)]] + [
+                Scenario(name="net-replay-feedback-recorder-lifecycle", lane="net", args=[],
+                         uses=("server",), timeout=180, driver=drive_recorder_lifecycle,
+                         notes="Headless dedicated recorder flush, restart, quit, companion logs and worst tick.")
+            ]
