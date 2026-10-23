@@ -34,7 +34,7 @@ fn with_tokens(dir: &std::path::Path) -> DirectScreen {
     store.keep(kept(3, "Viper"), "192.168.1.23:26900");
     store.keep(kept(4, "Viper"), "192.168.1.24:26900");
     store.save(dir).unwrap();
-    let mut s = DirectScreen::new(
+    let mut s = super::tests::test_screen(
         Arc::new(test_kit::kit()),
         Vec::new(),
         Some(dir.to_path_buf()),
@@ -161,7 +161,7 @@ fn an_expired_token_marks_nothing() {
     store.keep(old, "192.168.1.23:26900");
     // The file keeps what it was given; the screen reads it as the game does.
     store.save(&dir).unwrap();
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     s.set_found(sample_games());
     assert_eq!(state_of(&s, "Goose and co"), "Lobby");
     let _ = std::fs::remove_dir_all(dir);
@@ -174,7 +174,7 @@ fn a_game_reached_by_a_typed_address_is_joined_with_the_token_kept_for_it() {
     let mut store = Store::default();
     store.keep(kept(9, "Viper"), &live.to_string());
     store.save(&dir).unwrap();
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     s.callsign.set_text("Maverick");
     s.focus.set(Id::Address);
     s.text_input(&live.to_string());
@@ -198,7 +198,7 @@ fn a_game_reached_by_a_typed_address_is_joined_with_the_token_kept_for_it() {
 #[test]
 fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     let dir = scratch("switch");
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     assert!(s.settings.may_host, "on by default");
     s.open_options();
     // Port, Password, Name, Forward, then the switch: Space turns it off;

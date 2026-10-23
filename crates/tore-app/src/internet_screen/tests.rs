@@ -19,15 +19,22 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// Synthetic identity shared with LoopbackMaster, without loading an installed import.
+pub(super) fn test_screen(kit: Arc<Kit>, data: Option<PathBuf>) -> InternetScreen {
+    let mut s = InternetScreen::new(kit, data);
+    s.own = crate::net::browse::testing::build;
+    s
+}
+
 fn screen() -> InternetScreen {
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(NOBODY.into());
     s
 }
 
 /// A screen kept in `dir`, on a master nothing listens on.
 fn kept_in(dir: &std::path::Path) -> InternetScreen {
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
+    let mut s = test_screen(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
     s.settings.master = Some(NOBODY.into());
     s
 }
@@ -329,7 +336,7 @@ fn on_dead_master() -> (InternetScreen, Duration) {
 fn join_goes_through_the_masters_introduction_to_a_race_of_the_hosts_addresses() {
     let mut master = LoopbackMaster::start();
     let (_id, host) = master.list("Friday night", 1, 8, false);
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     s.password = "secret".into();
@@ -383,7 +390,7 @@ fn join_goes_through_the_masters_introduction_to_a_race_of_the_hosts_addresses()
 #[test]
 fn a_game_the_master_no_longer_lists_is_a_line_in_messages_and_the_screen_goes_on() {
     let mut master = LoopbackMaster::start();
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     // The first (empty) list has arrived; then the screen is shown a game the
@@ -487,7 +494,7 @@ fn new_lists_a_game_on_the_master_after_checking_the_callsign() {
 #[test]
 fn the_built_in_master_is_used_only_when_no_other_is_chosen() {
     // Never turned: the screen would browse the built-in master.
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     assert_eq!(s.master_text(), tore_net::master::DEFAULT_MASTER);
     s.settings.master = Some("master.example.org:26911".into());
     assert_eq!(s.master_text(), "master.example.org:26911");
@@ -498,10 +505,10 @@ fn the_built_in_master_is_used_only_when_no_other_is_chosen() {
 #[test]
 fn the_notice_is_said_the_first_time_and_never_again() {
     let dir = scratch("notice");
-    let first = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let first = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert_eq!(first.message_lines(), [telemetry::NOTICE]);
     assert!(Remembered::load(&dir).telemetry_notice);
-    let second = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let second = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert!(second.message_lines().is_empty());
     // With statistics already off there is nothing to tell.
     let off = scratch("notice-off");
@@ -510,7 +517,7 @@ fn the_notice_is_said_the_first_time_and_never_again() {
         ..Remembered::default()
     };
     kept.save(&off).unwrap();
-    let third = InternetScreen::new(Arc::new(test_kit::kit()), Some(off.clone()));
+    let third = test_screen(Arc::new(test_kit::kit()), Some(off.clone()));
     assert!(third.message_lines().is_empty());
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::fs::remove_dir_all(off);
@@ -684,7 +691,7 @@ fn default_restores_the_public_master_as_a_cancellable_draft_by_mouse_and_keyboa
     assert!(!s.options_open());
     assert_eq!(s.master_text(), tore_net::master::DEFAULT_MASTER);
     assert_eq!(Remembered::load(&dir).master, None);
-    let again = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let again = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert_eq!(again.master_text(), tore_net::master::DEFAULT_MASTER);
     // Do not turn either screen: tests never query the public master.
     let _ = std::fs::remove_dir_all(dir);
@@ -723,7 +730,7 @@ fn editing_the_master_replaces_games_and_persists_the_hosting_and_browsing_choic
     assert_eq!(request.listing.master, chosen.text());
     assert!(request.listing.listed);
     assert!(request.listing.install_id.is_some());
-    let again = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let again = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert_eq!(again.master_text(), chosen.text());
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -756,7 +763,7 @@ fn the_check_boxes_filter_the_list_and_are_remembered() {
     assert_eq!(names(&s).len(), 7);
     let kept = Remembered::load(&dir);
     assert!(kept.show_full && kept.show_other);
-    let again = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let again = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert!(again.full.checked() && again.other.checked());
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -815,7 +822,7 @@ fn the_screen_lists_the_games_a_real_master_lists_with_their_players() {
     let mut master = LoopbackMaster::start();
     let (_a, _host_a) = master.list("Friday night", 3, 8, false);
     let (_b, _host_b) = master.list("Packed", 8, 8, true);
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     assert!(master.pump(|| {
@@ -845,10 +852,11 @@ fn the_screen_lists_the_games_a_real_master_lists_with_their_players() {
         !s.players.is_empty()
     }));
     assert_eq!(s.players.rows()[0].cells[0], Cell::Icon(Icon::Crown));
-    assert!(s.selection_line().unwrap().starts_with(&format!(
-        "Code {:08X}",
-        crate::net::browse::build().compatibility
-    )));
+    assert!(
+        s.selection_line()
+            .unwrap()
+            .starts_with(&format!("Code {:08X}", (s.own)().compatibility))
+    );
     assert!(
         s.selection_line()
             .unwrap()
