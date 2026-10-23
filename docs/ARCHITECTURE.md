@@ -11820,9 +11820,11 @@ with each frame onto `recording::worker`'s bounded sync channel. That worker
 owns file creation, frame bounds, encoding, replay and companion-log writes,
 all syncs, finishing and retention. It uses the client's channel pattern;
 the server's stop-on-saturation policy is distinct. An atomic completed-chunk
-count bounds queued frames plus the current chunk to 120. A pending sync
-returns no budget until it completes. On saturation the host closes the
-sender without joining; accepted frames drain to a synced partial file.
+count bounds queued frames plus the current chunk to 7,200, 60 seconds at
+120 Hz. A pending sync returns no budget until it completes. This volatile
+buffer allows multi-second stalls without disabling recording; it increases
+crash exposure while preserving the writer's 3,600-frame sync cadence. On
+saturation the host closes the sender without joining; accepted frames drain to a synced partial file.
 Mission boundaries and graceful destruction flush the final pending frame
 and join, including migration handover. Recording is opt-in and does not
 change the simulation. The [recording policy](spec/replay-feedback.md)

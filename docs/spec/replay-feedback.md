@@ -42,10 +42,14 @@ dedicated servers whose operator enables it.
   events. The ordinary viewer opens the recording.
 - Recording must not pause flight while files are written or synced. Chunks
   remain 120 frames; syncs remain every 3,600 written frames and at finish.
-- At most 120 accepted frames may await a completed chunk write, excluding
-  the host's existing one-frame event staging. A chunk that is syncing still
-  counts against this limit until its sync completes. This preserves the
-  previous crash exposure without adding more unwritten frames.
+- At most 7,200 accepted frames, 60 seconds at 120 Hz, may await a completed
+  chunk write, excluding the host's existing one-frame event staging. A chunk
+  that is syncing still counts against this limit until its sync completes.
+  Recording and feedback remain available through a five-second disk stall.
+  This buffer is volatile: a process crash can lose up to 60 seconds of
+  unwritten frames. A machine or power failure can also lose written frames
+  from the current unsynced interval. Syncs are every 3,600 written frames,
+  not a guarantee of at most 30 seconds of wall time while the disk is stalled.
   If a handoff would exceed the budget, the host never waits: it logs a
   recording failure immediately, disables feedback for this mission, and
   stops recording. Accepted frames are written and synced to a recoverable
@@ -67,11 +71,13 @@ dedicated servers whose operator enables it.
   beside `logs/`. An explicit relative path is relative to the configuration
   file. Local player recording and retention settings are unchanged.
 
-The 120-frame shared budget and stopping the recording on saturation are
-opinionated agent decisions, 2026-10-23. A slow chunk write or sync can end a
-recording even when disk throughput averaged over the mission would suffice.
-This deliberately favors uninterrupted flight and the existing crash-loss
-bound. The host's pending event frame is unchanged.
+The lead requested the 7,200-frame budget on 2026-10-23, relayed by John, to
+keep recordings and feedback through the measured multi-second disk stalls.
+The larger crash-loss exposure is accepted for that purpose. Stopping only
+when the budget fills remains an agent decision: a disk that makes no
+progress for about a minute must not block flight or consume unbounded
+memory. Frame sizes vary with mission activity; [measured memory and disk
+behavior](../baselines/recorder-io.md) describe the tested workload.
 
 The 1,000-character limit, controller keyboard, startup rejection, timestamp
 units, prefix-scoped retention and conservative handling of damaged files are
