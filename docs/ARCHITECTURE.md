@@ -7390,8 +7390,9 @@ unless the design above says it:
 - **The time limit** the host ends a mission at is now the settings store's
   (`time-limit`, which starts as the configuration's), so the King's change
   applies.
-- **The client** keeps the newest Scores (`Client::scores`) and counts the
-  time left down from its arrival (`Client::seconds_left`); a new mission or
+- **The client** keeps the newest Scores (`Client::scores`) and derives the
+  time left from the host mission tick and lobby limit (`Client::seconds_left`),
+  using the [mission countdown rules](spec/hud-layout.md#mission-countdown). A new mission or
   a flight's start clears them. Each one is a `scores` line in the game's net
   log, and `tore-bot` prints it (`NAME: scores: ...`, the words of
   `tore_session::client::scores::summary`).

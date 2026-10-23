@@ -226,3 +226,35 @@ marked with a 12 by 8 reference pixel box, and laser range, buddy-spot and time
 to impact text join the weapon rows. The warnings LOW and FRAG appear in the
 readiness slot. All positions follow this page's weapon rows; the air-to-ground
 spec holds the behaviour and numbers.
+
+## Mission countdown
+
+Opinionated addition requested by John on 2026-10-22. A multiplayer mission
+with a time limit shows `Mission Timer: MM:SS` in the Escape menu's bottom
+status strip (reference y=432..446, above the buttons at y=448). Without a limit there is no countdown. Limits of an hour or more
+use `H:MM:SS`, including once less than an hour remains.
+
+The same text appears at the upper right of cockpit and external flight views
+only with 300 seconds or less remaining: hidden at 05:01, visible at 05:00,
+and clamped to 00:00 at the deadline. Round fractional seconds up, so zero is
+never shown before the deadline. Use the flight overlay font and scale, a dark
+backing, and a right margin of eight reference pixels. Place it below any
+instrument, diagnostic panel or frame-rate readout occupying that corner.
+If a tall Watch panel fills that column, move left into the nearest free space.
+Agent presentation decision: steady white text, amber for the final 60 seconds,
+without pulsing. The menu text uses its existing font and colours.
+
+The deadline uses the host's mission tick starting at zero and the current
+lobby time-limit setting, including the King's preflight changes and each
+server rotation entry. The client estimates the present host tick from the
+latest snapshot, elapsed time and half the measured round trip, as host
+migration already does. Late joins and rejoins use the ongoing mission tick,
+never a new local stopwatch. Network delay and jitter can affect the clock
+estimate; a local clock cannot guarantee one-tick agreement on arbitrary links.
+The host's final result fixes the display at zero when time expires.
+
+Watch shows the live deadline even while its picture is delayed or scrubbed
+back: add the stream's advertised delay to its snapshot clock. Its Escape menu
+also shows the countdown. Saved replay playback has no live deadline.
+Single-player missions currently have no mission-ending time limit and show
+no countdown. Their existing simulation clock stops while paused.

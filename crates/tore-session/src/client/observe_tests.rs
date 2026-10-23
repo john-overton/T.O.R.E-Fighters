@@ -207,3 +207,36 @@ fn a_refused_watch_leaves_the_game_not_watching() {
     let now = rig.net.now();
     assert!(rig.players[owl].client.observer_frame(now).is_none());
 }
+
+#[test]
+fn the_delayed_watch_countdown_uses_the_live_deadline() {
+    let mut rig = Rig::with_config(
+        spec(2, 1, 200),
+        LinkConfig::for_round_trip(40 * MS, 0., 0., 0.),
+        35,
+        |c| {
+            c.start = StartMode::Now;
+            c.time_limit = Some(Duration::from_secs(360));
+            c.settings = vec![
+                (crate::settings::number::MODE, 1),
+                (crate::settings::number::OBSERVER_DELAY, 10),
+            ];
+        },
+    );
+    let pilot = rig.join(|c| c.plane = Some(0), level_script());
+    let owl = rig.join(
+        |c| {
+            c.auto_ready = false;
+            c.callsign = "Owl".into();
+        },
+        level_script(),
+    );
+    assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(pilot)
+        && r.players[owl].client.phase() == ClientPhase::Lobby));
+    rig.players[owl].client.watch(Subject::Aircraft(0));
+    let frames = watch_for(&mut rig, owl, Duration::from_millis(14500));
+    assert_eq!(frames.last().unwrap().flight.delay_seconds, 10);
+    let expected = super::scores::remaining_seconds(Some(360), rig.host.world().tick());
+    assert_eq!(rig.players[pilot].client.seconds_left(), expected);
+    assert_eq!(rig.players[owl].client.seconds_left(), expected);
+}

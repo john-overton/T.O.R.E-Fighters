@@ -106,6 +106,7 @@ mod mirrors;
 mod missile_acceptance;
 mod missile_sag;
 mod mission_brief;
+mod mission_timer;
 mod multiplayer_menu;
 mod navigation;
 mod net;
@@ -6477,6 +6478,54 @@ impl ApplicationHandler for App {
                             &self.hornet.hud_font,
                             self.instruments.layout,
                         );
+                        let mission_timer = self
+                            .net_flight
+                            .as_ref()
+                            .and(self.net.as_ref())
+                            .and_then(|net| mission_timer::Timer::from_client(&net.client));
+                        if !self.flight_ui.menu
+                            && !map_open
+                            && let Some(timer) = mission_timer
+                        {
+                            let size = self.flight_canvas.size;
+                            let mut blocks: Vec<[f64; 4]> = self
+                                .instruments
+                                .window_rects(size.map(f64::from))
+                                .into_iter()
+                                .map(|(x, y, w, h)| [x, y, w, h])
+                                .collect();
+                            blocks.push(mission_timer::counter_rect(
+                                size,
+                                frame_rate::Surface::Flight {
+                                    right_panel: self.live_debug.panels.right_open(),
+                                },
+                            ));
+                            if self.live_debug.panels.right_open() {
+                                let [w, h] = size.map(f64::from);
+                                let scale = (w / 640.).min(h / 480.);
+                                blocks.push([
+                                    w / 2. + 60. * scale,
+                                    28. * scale,
+                                    254. * scale,
+                                    h - 28. * scale,
+                                ]);
+                            }
+                            if self.instruments.weapon_debug {
+                                let layer =
+                                    (f64::from(size[0]) / 640.).min(f64::from(size[1]) / 480.);
+                                blocks.push([
+                                    f64::from(size[0]) - 258. * layer,
+                                    8. * layer,
+                                    250. * layer,
+                                    96. * layer,
+                                ]);
+                            }
+                            timer.draw_corner(
+                                &mut self.flight_canvas,
+                                &self.hornet.hud_font,
+                                &blocks,
+                            );
+                        }
                         net::scoreboard::draw(
                             self.net_flight.as_ref(),
                             self.net.as_ref(),
@@ -6498,6 +6547,11 @@ impl ApplicationHandler for App {
                             &self.hornet.font,
                             net::play::menu(&self.hornet, &self.net_flight),
                         );
+                        if self.flight_ui.menu
+                            && let Some(timer) = mission_timer
+                        {
+                            timer.draw_menu(&mut self.menu.pixels, &self.hornet.font);
+                        }
                         if let Some(menu) = self
                             .net_flight
                             .as_ref()

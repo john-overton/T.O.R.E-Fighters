@@ -1100,3 +1100,33 @@ fn a_client_behind_the_host_jumps_ahead_and_recovers() {
     let margin = end.input_margin.unwrap();
     assert!((2..=8).contains(&margin), "input margin {margin}");
 }
+
+#[test]
+fn the_kings_preflight_time_limit_is_the_clients_mission_deadline() {
+    let mut rig = kings_rig(1);
+    let king = manual(&mut rig, "King");
+    gathered(&mut rig, &[king]);
+    rig.players[king]
+        .client
+        .change_settings(crate::wire::messages::SettingsChange {
+            values: vec![
+                (crate::settings::number::MODE, 1),
+                (crate::settings::number::TIME_LIMIT, 300),
+            ],
+            ..Default::default()
+        });
+    rig.run(Duration::from_millis(200));
+    assert_eq!(rig.host.settings().time_limit_seconds(), Some(300));
+    assert_eq!(rig.players[king].client.time_limit_seconds(), Some(300));
+    rig.players[king].client.take_slot(0);
+    rig.run(Duration::from_millis(200));
+    rig.players[king].client.set_ready(true);
+    rig.run(Duration::from_millis(200));
+    rig.players[king].client.start_mission();
+    assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(king)));
+    rig.run(Duration::from_millis(500));
+    assert_eq!(
+        rig.players[king].client.seconds_left(),
+        super::scores::remaining_seconds(Some(300), rig.host.world().tick())
+    );
+}
