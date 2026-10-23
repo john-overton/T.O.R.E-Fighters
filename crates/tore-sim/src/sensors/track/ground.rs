@@ -25,6 +25,8 @@ use crate::sensors::profile::{FEET_PER_NAUTICAL_MILE, Volume};
 pub struct Picks {
     /// The designated target.
     pub selected: Option<u32>,
+    /// A human visual selection, retained only while seen.
+    pub visual_selection: bool,
     /// The targeting sight's track holds the designation.
     pub held: Option<u32>,
     /// The ground rules kept the designation at the last step.
@@ -227,6 +229,7 @@ impl Sensors {
     /// for as long as the track holds it.
     pub fn hold(&mut self, id: u32) {
         if self.selected != Some(id) {
+            self.visual_selection = false;
             self.selected = Some(id);
             self.acquired = None;
             self.acquisition = 0;
@@ -244,6 +247,7 @@ impl Sensors {
     pub fn picks(&self) -> Picks {
         Picks {
             selected: self.selected,
+            visual_selection: self.visual_selection,
             held: self.held,
             ground_retained: self.ground_retained,
             air_ground: self.air_ground,
@@ -260,6 +264,7 @@ impl Sensors {
             self.acquired = None;
             self.acquisition = 0;
         }
+        self.visual_selection = picks.visual_selection && picks.selected.is_some();
         self.held = picks.held.filter(|id| picks.selected == Some(*id));
         self.ground_retained = picks
             .ground_retained
@@ -270,6 +275,7 @@ impl Sensors {
     /// (radar, default range, no history), the A-G page off and no sight
     /// hold. The designation stays, for the next step's rules.
     pub fn reset_pages(&mut self) {
+        self.visual_selection = false;
         self.controls = super::Controls::default();
         self.air_ground = false;
         self.held = None;
@@ -278,6 +284,7 @@ impl Sensors {
     /// Ctrl+X under Easy targeting: designate `id` directly. Easy targeting
     /// keeps it while the object stands.
     pub fn select_ground(&mut self, id: u32) {
+        self.visual_selection = false;
         if self.selected != Some(id) {
             self.selected = Some(id);
             self.acquired = None;
@@ -318,6 +325,7 @@ impl Sensors {
         }
         self.ground_retained = None;
         if let Some(id) = self.selected
+            && !self.visual_selection
             && self.contact(id).is_none()
         {
             let object = objects.iter().find(|o| o.id == id);

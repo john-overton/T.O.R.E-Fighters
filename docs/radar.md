@@ -373,7 +373,7 @@ mouse, re-clicking or periodically re-designating. Empty clicks leave it alone;
 explicit clear or clicking another current contact changes it. Selection supplies
 the existing target view and its gamified identification. It is not a weapon lock.
 
-Selection clears when the active sensor no longer has a current observation:
+A radar/click selection clears when the active sensor no longer has a current observation:
 notch, look-down, jamming, terrain masking, range/angle exit, power/failure, crash
 ending airborne existence, or removal. Loss of weapon tracking alone does not
 clear a still-observed search contact. A missile-envelope failure also does not
@@ -384,10 +384,12 @@ The visual sensor is collected in parallel with the selected scope channel, keep
 the existing geometric contract with no signature scaling or interference, is not
 part of the channel cycle, and never supplies radar weapon support. It does
 honour its own damage state: a destroyed visual sensor removes visual contacts.
-Seeing a target does not keep it selected: since 2026-09-23 a selection clears
-as soon as the scope channel loses it, and a visual-only aircraft cannot be
-selected. Enter selects a visible aircraft only when it is also a scope contact.
-[Target selection keys](spec/radar.md#target-selection-keys).
+Human visual designation is independent of radar/IR: Enter cycles the visible
+aircraft left to right, and Apostrophe picks nearest the forward-view centre.
+Such a selection stays only while the ownship sees the aircraft, without
+inventing radar support. Radar selection and AI selection retain their existing
+sensor-contact rules. T uses only displayed own-radar TWS contacts and includes
+friendlies. See [target selection keys](spec/radar.md#target-selection-keys).
 
 A display zoom that moves a still-observed contact outside the plotted range does
 not itself lose the sensor observation or selection. RWS/TWS changes preserve

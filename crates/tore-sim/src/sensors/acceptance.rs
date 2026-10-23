@@ -935,7 +935,7 @@ fn the_same_scripted_scenario_produces_the_same_trace_every_time() {
 }
 
 #[test]
-fn t_cycles_radar_contacts_nearest_first_and_skips_friendlies() {
+fn shared_cycle_keeps_its_explicit_friendly_filter_for_ai_and_legacy_callers() {
     let air = clear_air();
     let o = observer();
     let targets = [ahead(1, 8.), ahead(2, 3.), ahead(3, 5.), ahead(4, 4.)];
@@ -953,7 +953,7 @@ fn t_cycles_radar_contacts_nearest_first_and_skips_friendlies() {
 }
 
 #[test]
-fn enter_selects_the_visible_sensor_contact_nearest_the_nose() {
+fn legacy_visual_select_keeps_the_sensor_contact_nearest_the_nose() {
     let air = clear_air();
     let o = observer();
     let targets = [
@@ -972,7 +972,7 @@ fn enter_selects_the_visible_sensor_contact_nearest_the_nose() {
 }
 
 #[test]
-fn radar_off_drops_a_close_target_even_while_it_is_visible() {
+fn radar_designation_drops_with_radar_even_while_visible() {
     let air = clear_air();
     let o = observer();
     let mut off = observer();
@@ -998,7 +998,7 @@ fn radar_off_drops_a_close_target_even_while_it_is_visible() {
 }
 
 #[test]
-fn visual_only_contacts_cannot_be_selected_and_stay_out_of_the_scope() {
+fn ai_designation_rejects_visual_only_contacts_and_keeps_them_out_of_scope() {
     let air = clear_air();
     let o = observer();
     // No ordinary radar return at any distance, so only the eye sees it.
@@ -1015,6 +1015,16 @@ fn visual_only_contacts_cannot_be_selected_and_stay_out_of_the_scope() {
 
     assert!(!s.designate(1));
     assert!(!s.select_visual(o.position, o.basis, |_| false));
+    let mut human = s.clone();
+    assert!(human.designate_visual_contact(1));
+    run(&mut human, &o, &targets, ACQUIRE * 5);
+    assert_eq!(human.selected(), Some(1));
+    assert_eq!(human.acquired(), None);
+    assert_eq!(human.support(1), Support::NoObservation);
+    assert!(
+        human.contacts().is_empty(),
+        "a visual pick does not add radar returns"
+    );
     run(&mut s, &o, &targets, ACQUIRE * 5);
     assert_eq!(s.selected(), None);
     assert_eq!(s.acquired(), None);
@@ -1241,4 +1251,63 @@ fn without_the_visual_channel_the_other_channels_are_unchanged() {
         assert_eq!(full.tick(), lean.tick());
     }
     assert!(saw_visual, "the full sensors do see something to leave out");
+}
+
+#[test]
+fn human_visual_selection_needs_visibility_but_never_grants_radar_support() {
+    let o = Observer {
+        radar_powered: false,
+        ..observer()
+    };
+    let targets = [ahead(1, 3.), ahead(2, 6.)];
+    let mut human = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 5.));
+    human.step(&o, &targets, &clear_air());
+    assert!(!human.designate_visual_contact(2), "beyond visual range");
+    assert!(!human.designate_visual_contact(999), "unknown identity");
+    assert!(
+        human.designate_visual_contact(1),
+        "friendly or hostile uses the same rule"
+    );
+    run(&mut human, &o, &targets, ACQUIRE * 2);
+    assert_eq!(human.selected(), Some(1));
+    assert_eq!(human.acquired(), None);
+    assert_eq!(human.support(1), Support::RadarOff);
+    assert!(human.contacts().is_empty());
+    let copy =
+        crate::checkpoint::round_trip(&human, &crate::checkpoint::Models::default()).unwrap();
+    assert_eq!(copy, human, "visual retention survives a host checkpoint");
+    let masked = Environment {
+        ground: &GROUND,
+        obscured: &MASKED,
+    };
+    let events = human.step(&o, &targets, &masked);
+    assert_eq!(human.selected(), None, "terrain masks the target");
+    assert!(selection_cleared(&events));
+    human.step(&o, &targets, &clear_air());
+    assert!(human.designate_visual_contact(1));
+    human.step(&o, &[ahead(1, 6.)], &clear_air());
+    assert_eq!(human.selected(), None, "leaving visual range drops it");
+}
+
+#[test]
+fn human_visual_retention_is_distinct_from_ai_and_radar_selection() {
+    let o = observer();
+    let off = Observer {
+        radar_powered: false,
+        ..o
+    };
+    let targets = [ahead(1, 3.)];
+    let mut human = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 5.));
+    human.step(&o, &targets, &clear_air());
+    let mut ai = human.clone();
+    assert!(ai.designate(1));
+    assert!(human.designate_visual_contact(1));
+    ai.step(&off, &targets, &clear_air());
+    human.step(&off, &targets, &clear_air());
+    assert_eq!(ai.selected(), None, "AI-facing selection rule is unchanged");
+    assert_eq!(human.selected(), Some(1));
+    assert_eq!(human.acquired(), None);
+    human.reset_pages(); // the human gives the plane back to the AI
+    human.step(&off, &targets, &clear_air());
+    assert_eq!(human.selected(), None);
 }

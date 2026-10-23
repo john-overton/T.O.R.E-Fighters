@@ -257,7 +257,8 @@ pub fn path_words(path: Path) -> &'static str {
 /// 64 since F-22N bay/wing carriage, magazine release origins and bay-only trigger gating.
 /// 71 combines compatibility-code handshakes with private reservation preflight
 /// packets 14 and 15 for confirmed lounge return slots.
-pub const PROTOCOL_VERSION: u16 = 71;
+/// 72 adds human visual designation and its checkpoint retention state.
+pub const PROTOCOL_VERSION: u16 = 72;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
