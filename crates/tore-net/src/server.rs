@@ -156,9 +156,12 @@ pub enum ServerEvent {
         /// What.
         event: Event,
     },
-    /// Someone asked who is hosting here (slice EF5). The caller answers with
-    /// [`Server::answer_discover`], or ignores it. The query has passed the
-    /// rate limit.
+    /// A versioned, rate-limited private reservation preflight.
+    Reservation {
+        from: SocketAddr,
+        query: packet::ReservationQuery,
+    },
+    /// Someone asked who is hosting here. The query has passed the rate limit.
     Discover {
         /// Who asked.
         from: SocketAddr,
@@ -503,21 +506,36 @@ impl Server {
             PacketKind::Discover => self.on_discover(now, from, datagram.len(), body),
             PacketKind::Keepalive => self.on_keepalive(now, from, body),
             PacketKind::Reach => self.on_reach(now, from, body),
+            PacketKind::ReservationQuery => {
+                let Ok(query) = packet::decode_reservation_query(body) else {
+                    self.counters.malformed += 1;
+                    return;
+                };
+                if self.discover_limiter.allow(now, from.ip()) {
+                    self.events
+                        .push_back(ServerEvent::Reservation { from, query });
+                } else {
+                    self.counters.rate_limited += 1;
+                }
+            }
             PacketKind::Challenge
             | PacketKind::Accepted
             | PacketKind::Refuse
             | PacketKind::DiscoverAnswer
             | PacketKind::Punch
-            | PacketKind::ReachAnswer => {
+            | PacketKind::ReachAnswer
+            | PacketKind::ReservationAnswer => {
                 self.counters.unexpected += 1;
             }
         }
     }
 
-    /// A Reach (stage K): answered as the host of the session it names,
-    /// never longer than itself. One for another session, or to a host that
-    /// answers none, is counted as unexpected; one past 10 a second from its
-    /// address as rate limited.
+    /// Answers a private reservation preflight, without admitting a player.
+    pub fn answer_reservation(&mut self, to: SocketAddr, answer: packet::ReservationAnswer) {
+        self.send(to, &Packet::ReservationAnswer(answer));
+    }
+
+    /// A Reach for this host's session, rate limited and no larger than its query.
     fn on_reach(&mut self, now: Duration, from: SocketAddr, body: &[u8]) {
         let Ok(reach) = packet::decode_reach(body) else {
             self.counters.malformed += 1;

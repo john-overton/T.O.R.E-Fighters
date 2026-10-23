@@ -109,7 +109,7 @@ fn received(socket: &mut SimSocket) -> Vec<(MasterPacket, usize)> {
 
 fn build() -> Build {
     Build {
-        protocol_version: 68,
+        protocol_version: 71,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         compatibility: 0,
@@ -119,7 +119,7 @@ fn build() -> Build {
 
 fn other_build() -> Build {
     Build {
-        protocol_version: 68,
+        protocol_version: 71,
         game_version: "0.1.4-2-gdef".into(),
         game_commit: "def".into(),
         compatibility: 1,
@@ -129,7 +129,7 @@ fn other_build() -> Build {
 
 fn summary(name: &str, players: u8, phase: DiscoverPhase) -> ListingSummary {
     ListingSummary {
-        protocol_version: 68,
+        protocol_version: 71,
         players,
         capacity: 8,
         phase,

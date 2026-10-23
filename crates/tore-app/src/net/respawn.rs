@@ -17,7 +17,14 @@ const LOOK: Look = Look {
     buttons: &["Done", "Cancel", "Mission..."],
     help: |_| vec![],
 };
-const PAGE: usize = 12;
+mod list;
+use list::{Entry, List};
+
+struct Picker {
+    station: Option<usize>,
+    list: List,
+    candidates: Vec<Loadout>,
+}
 pub(crate) const AIRCRAFT: &str = "Aircraft...";
 pub(crate) const LOADOUT: &str = "Loadout...";
 
@@ -71,8 +78,7 @@ pub struct Menu {
     weapons: Vec<Weapon>,
     tanks: Vec<TankStore>,
     pods: Vec<DesignatorStore>,
-    page: usize,
-    cycles: BTreeMap<usize, usize>,
+    picker: Option<Picker>,
     rule: RevivalWeapons,
     pub message: Option<String>,
 }
@@ -85,18 +91,30 @@ pub enum Outcome {
 impl Menu {
     pub fn new(
         aircraft: AircraftId,
-        allowed: Vec<AircraftId>,
+        mut allowed: Vec<AircraftId>,
         data: &BTreeMap<String, Vec<u8>>,
         spec: &MissionSpec,
         rule: RevivalWeapons,
         gap: impl Fn(&str) -> bool,
     ) -> AppResult<Self> {
         let load = Self::standard(aircraft, data, spec)?;
-        let weapons = data
+        // The creator and lobby sort by display name, then exact selection key.
+        allowed.sort_by(|a, b| {
+            a.label()
+                .cmp(b.label())
+                .then(a.selection_key().cmp(b.selection_key()))
+        });
+        let mut weapons: Vec<_> = data
             .iter()
             .filter(|(name, _)| tore_sim::combat::loadout::supported(name) && !gap(name))
             .filter_map(|(name, bytes)| Weapon::parse(name, bytes).ok())
             .collect();
+        let font = crate::ordnance::label_font();
+        let display = crate::ordnance::weapon_label(data, &font);
+        for weapon in &mut weapons {
+            display(weapon);
+        }
+        crate::ordnance::sort_weapons(&mut weapons);
         let tanks = data
             .iter()
             .filter(|(name, _)| name.ends_with(".GAS") && !gap(name))
@@ -116,8 +134,7 @@ impl Menu {
             weapons,
             tanks,
             pods,
-            page: 0,
-            cycles: BTreeMap::new(),
+            picker: None,
             rule,
             message: None,
         };
@@ -230,7 +247,7 @@ impl Menu {
                 } else {
                     "Empty".into()
                 };
-                row(format!("{heading}: {store}"))
+                row(format!("{heading}: {store} >"))
             })
             .collect();
         loads.push(row(format!(
@@ -246,12 +263,9 @@ impl Menu {
             children: loads,
         }];
         if !self.aircraft.is_empty() {
-            let start = self.page * PAGE;
             let mut rows = self
                 .aircraft
                 .iter()
-                .skip(start)
-                .take(PAGE)
                 .map(|id| {
                     row(format!(
                         "{}{}",
@@ -260,9 +274,6 @@ impl Menu {
                     ))
                 })
                 .collect::<Vec<_>>();
-            if self.aircraft.len() > PAGE {
-                rows.push(row("Next aircraft page".into()));
-            }
             rows.push(row("Mission...".into()));
             self.tree.push(MenuNode {
                 label: "Aircraft".into(),
@@ -297,21 +308,13 @@ impl Menu {
         }
         self.message = None;
         if self.widget.root == 1 {
-            self.cycles.clear();
-            if let Some(id) = self
-                .aircraft
-                .get(self.page * PAGE + index)
-                .copied()
-                .filter(|_| index < PAGE)
-            {
+            if let Some(id) = self.aircraft.get(index).copied() {
                 match Self::standard(id, data, spec) {
                     Ok(load) => self.load = load,
                     Err(e) => self.message = Some(e.to_string()),
                 }
+                self.picker = None;
                 self.widget.show_tab(0);
-            } else {
-                self.page = (self.page + 1) % self.aircraft.len().div_ceil(PAGE);
-                self.widget.show_tab(1);
             }
         } else {
             let order = self.load.station_display_order();
@@ -319,9 +322,6 @@ impl Menu {
                 return self.done(data, spec);
             }
             let mut candidate = self.load.clone();
-            if index >= order.len() {
-                self.cycles.clear();
-            }
             if index == order.len() + 1 {
                 match Self::standard(self.load.aircraft, data, spec) {
                     Ok(load) => candidate = load,
@@ -335,71 +335,10 @@ impl Menu {
                         .min(candidate.internal_capacity_lbs)
                 };
             } else if let Some(&station) = order.get(index) {
-                let editable = self.load.editable_stations()[station];
-                let mut candidates = Vec::new();
-                if let Some(slot) = editable.weapon {
-                    let mut empty = candidate.clone();
-                    empty.quantities[slot] = 0;
-                    let _ = empty.unload_designator(slot);
-                    candidates.push(empty);
-                    for weapon in &self.weapons {
-                        let mut next = candidate.clone();
-                        if next.select(slot, weapon.clone()).is_ok()
-                            && self.rule.cut(weapon, next.quantities[slot]) > 0
-                        {
-                            let maximum = next.quantities[slot];
-                            let quantities: Vec<u16> = if maximum <= 20 {
-                                (1..=maximum).collect()
-                            } else {
-                                (1..=10)
-                                    .map(|step| (u32::from(maximum) * step / 10) as u16)
-                                    .collect()
-                            };
-                            for quantity in quantities {
-                                let mut amount = next.clone();
-                                amount.quantities[slot] = quantity;
-                                candidates.push(amount);
-                            }
-                        }
-                    }
-                    for pod in &self.pods {
-                        let mut next = candidate.clone();
-                        if next.load_designator(slot, pod.clone()).is_ok() {
-                            candidates.push(next);
-                        }
-                    }
-                }
-                if let Some(slot) = editable.tank {
-                    let mut empty = candidate.clone();
-                    let _ = empty.unload_tank(slot);
-                    candidates.push(empty);
-                    for tank in &self.tanks {
-                        let mut next = candidate.clone();
-                        if next.select_tank(slot, tank.clone()).is_ok() {
-                            for quantity in 1..=next.configuration.tanks[slot].quantity {
-                                let mut amount = next.clone();
-                                amount.configuration.tanks[slot].quantity = quantity;
-                                candidates.push(amount);
-                            }
-                        }
-                    }
-                }
-                for load in &mut candidates {
-                    let _ = load.refresh_equipment();
-                }
-                let current = LoadoutSpec::of(&candidate);
-                let at = self.cycles.get(&index).copied().unwrap_or_else(|| {
-                    candidates
-                        .iter()
-                        .position(|c| LoadoutSpec::of(c) == current)
-                        .unwrap_or(0)
-                });
-                let next_index = (at + 1) % candidates.len().max(1);
-                self.cycles.insert(index, next_index);
-                if let Some(next) = candidates.get(next_index) {
-                    candidate = next.clone();
-                }
+                self.open_station(station, data, spec);
+                return Outcome::Click;
             }
+
             match self.check(&candidate, data, spec) {
                 Ok(()) => self.load = candidate,
                 Err(e) => self.message = Some(e.to_string()),
@@ -407,6 +346,218 @@ impl Menu {
         }
         self.refresh();
         Outcome::Click
+    }
+    fn open_station(
+        &mut self,
+        station: usize,
+        data: &BTreeMap<String, Vec<u8>>,
+        spec: &MissionSpec,
+    ) {
+        use crate::ordnance::{CatalogEntry, catalog_entries};
+        let editable = self.load.editable_stations()[station];
+        let mut entries = Vec::new();
+        let mut candidates = Vec::new();
+        let mut offer = |mut load: Loadout, label: String, search: String, group: &'static str| {
+            if load.refresh_equipment().is_ok() && self.check(&load, data, spec).is_ok() {
+                entries.push(Entry {
+                    label,
+                    search,
+                    group,
+                });
+                candidates.push(load);
+            }
+        };
+        let mut empty = self.load.clone();
+        if let Some(slot) = editable.weapon {
+            empty.quantities[slot] = 0;
+            let _ = empty.unload_designator(slot);
+        }
+        if let Some(slot) = editable.tank {
+            let _ = empty.unload_tank(slot);
+        }
+        offer(empty, "Empty".into(), "Empty".into(), "");
+        for category in [0, 1] {
+            let group = if category == 0 {
+                "Air-to-air"
+            } else {
+                "Air-to-surface"
+            };
+            for entry in catalog_entries(&self.weapons, &self.tanks, &self.pods, category) {
+                match entry {
+                    CatalogEntry::Weapon(i) => {
+                        if let Some(slot) = editable.weapon {
+                            let weapon = &self.weapons[i];
+                            let mut next = self.load.clone();
+                            if next.select(slot, weapon.clone()).is_ok()
+                                && self.rule.cut(weapon, next.quantities[slot]) > 0
+                            {
+                                let maximum = next.quantities[slot];
+                                let quantities: Vec<u16> = if maximum <= 20 {
+                                    (1..=maximum).collect()
+                                } else {
+                                    (1..=10)
+                                        .map(|step| (u32::from(maximum) * step / 10) as u16)
+                                        .collect()
+                                };
+                                let names = data
+                                    .get(&weapon.source)
+                                    .and_then(|b| tore_formats::aircraft::Brf::parse(b).ok())
+                                    .and_then(|b| b.strings("si_names").ok())
+                                    .unwrap_or_default()
+                                    .join(" ");
+                                let search = format!(
+                                    "{} {} {} {names}",
+                                    weapon.name, weapon.hud_name, weapon.source
+                                );
+                                for quantity in quantities {
+                                    let mut amount = next.clone();
+                                    amount.quantities[slot] = quantity;
+                                    offer(
+                                        amount,
+                                        format!(
+                                            "{} ({}) x{}",
+                                            weapon.name,
+                                            weapon.hud_name,
+                                            self.rule.cut(weapon, quantity)
+                                        ),
+                                        search.clone(),
+                                        group,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    CatalogEntry::Tank(i) => {
+                        if let Some(slot) = editable.tank {
+                            let tank = &self.tanks[i];
+                            let mut next = self.load.clone();
+                            if next.select_tank(slot, tank.clone()).is_ok() {
+                                for quantity in 1..=next.configuration.tanks[slot].quantity {
+                                    let mut amount = next.clone();
+                                    amount.configuration.tanks[slot].quantity = quantity;
+                                    offer(
+                                        amount,
+                                        format!("{} x{quantity}", tank.name),
+                                        format!("{} {}", tank.name, tank.source),
+                                        group,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    CatalogEntry::Designator(i) => {
+                        if let Some(slot) = editable.weapon {
+                            let pod = &self.pods[i];
+                            let mut next = self.load.clone();
+                            if next.load_designator(slot, pod.clone()).is_ok() {
+                                offer(
+                                    next,
+                                    format!("{} x1", pod.name),
+                                    format!("{} {}", pod.name, pod.source),
+                                    group,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.picker = Some(Picker {
+            station: Some(station),
+            list: List::new(entries),
+            candidates,
+        });
+    }
+    fn choose(
+        &mut self,
+        index: usize,
+        data: &BTreeMap<String, Vec<u8>>,
+        spec: &MissionSpec,
+    ) -> Outcome {
+        if let Some(picker) = &self.picker
+            && picker.station.is_some()
+        {
+            if let Some(candidate) = picker.candidates.get(index) {
+                match self.check(candidate, data, spec) {
+                    Ok(()) => {
+                        self.load = candidate.clone();
+                        log::info!(
+                            "Respawn: selected station {}: {:?}",
+                            picker.station.unwrap(),
+                            LoadoutSpec::of(&self.load)
+                        );
+                    }
+                    Err(error) => {
+                        self.message = Some(error.to_string());
+                        return Outcome::Click;
+                    }
+                }
+            }
+            self.picker = None;
+            self.refresh();
+            return Outcome::Click;
+        }
+        self.select(index, data, spec)
+    }
+    fn show_tab(&mut self, index: usize) {
+        self.widget.show_tab(index);
+        self.picker = (index == 1).then(|| Picker {
+            station: None,
+            candidates: vec![],
+            list: List::new(
+                self.aircraft
+                    .iter()
+                    .map(|id| Entry {
+                        label: format!(
+                            "{}{}",
+                            if *id == self.load.aircraft { "* " } else { "" },
+                            id.label()
+                        ),
+                        search: format!(
+                            "{} {} {}",
+                            id.label(),
+                            id.label().replace(' ', ""),
+                            id.selection_key()
+                        ),
+                        group: "",
+                    })
+                    .collect(),
+            ),
+        });
+    }
+    pub fn text(&mut self, text: &str) {
+        if let Some(picker) = &mut self.picker {
+            picker.list.text(text);
+        }
+    }
+    pub fn searching(&self) -> bool {
+        self.picker.as_ref().is_some_and(|p| p.list.searching)
+    }
+    pub fn moved(&mut self, point: Option<(f64, f64)>) {
+        if let Some(picker) = &mut self.picker {
+            picker.list.moved(point);
+        }
+        if point.is_none() {
+            self.widget.cancel_press();
+        }
+    }
+    pub fn wheel(&mut self, notches: i32) {
+        if let Some(picker) = &mut self.picker {
+            picker.list.wheel(notches);
+        } else {
+            self.widget.key(
+                if notches > 0 { "ArrowUp" } else { "ArrowDown" },
+                &self.tree,
+            );
+        }
+    }
+    // Keep tabs and bottom buttons, but let the picker own its entire viewport.
+    fn shell(&self) -> Vec<MenuNode> {
+        let mut tree = self.tree.clone();
+        if self.picker.is_some() {
+            tree[self.widget.root].children.clear();
+        }
+        tree
     }
     fn done(&mut self, data: &BTreeMap<String, Vec<u8>>, spec: &MissionSpec) -> Outcome {
         match self.check(&self.load, data, spec) {
@@ -432,11 +583,15 @@ impl Menu {
             }
             Event::Button(_) => Outcome::Cancel,
             Event::Tab(index) => {
-                self.widget.show_tab(index);
+                self.show_tab(index);
+                Outcome::Click
+            }
+            Event::Switched(index) => {
+                self.show_tab(index);
                 Outcome::Click
             }
             Event::None => Outcome::None,
-            _ => Outcome::Click,
+            Event::Click => Outcome::Click,
         }
     }
     pub fn key(
@@ -445,12 +600,36 @@ impl Menu {
         data: &BTreeMap<String, Vec<u8>>,
         spec: &MissionSpec,
     ) -> Outcome {
+        if key == "Escape" {
+            if let Some(picker) = &mut self.picker {
+                if !picker.list.query.is_empty() {
+                    picker.list.clear();
+                } else if picker.station.is_some() {
+                    self.picker = None;
+                } else {
+                    return Outcome::Cancel;
+                }
+                return Outcome::Click;
+            }
+            return Outcome::Cancel;
+        }
+        if let Some(picker) = &mut self.picker {
+            if matches!(key, "ArrowLeft" | "ArrowRight") {
+                let tab = (self.widget.root + 1) % self.tree.len();
+                self.show_tab(tab);
+                return Outcome::Click;
+            }
+            if picker.list.searching || !matches!(key, "m" | "M") {
+                return if let Some(index) = picker.list.key(key) {
+                    self.choose(index, data, spec)
+                } else {
+                    Outcome::None
+                };
+            }
+        }
         if key == "m" || key == "M" {
             self.brief_open = true;
             return Outcome::Click;
-        }
-        if key == "Escape" {
-            return Outcome::Cancel;
         }
         let event = self.widget.key(key, &self.tree);
         self.event(event, data, spec)
@@ -462,17 +641,51 @@ impl Menu {
         data: &BTreeMap<String, Vec<u8>>,
         spec: &MissionSpec,
     ) -> Outcome {
-        let event = self.widget.pointer(&self.tree, &LOOK, point, down);
+        if let Some(picker) = &mut self.picker
+            && let Some(index) = picker.list.pointer(point, down)
+        {
+            return self.choose(index, data, spec);
+        }
+        let event = self.widget.pointer(&self.shell(), &LOOK, point, down);
         self.event(event, data, spec)
     }
     pub fn preview_aircraft(&mut self) {
         if self.tree.len() > 1 {
-            self.widget.show_tab(1);
+            self.show_tab(1);
         }
     }
 
-    pub fn draw(&self, pixels: &mut [u8], font: &Font, prompt: &str) {
-        self.widget.draw(pixels, font, &self.tree, &LOOK, &|_| None);
+    pub fn draw(
+        &self,
+        pixels: &mut [u8],
+        font: &Font,
+        prompt: &str,
+        sprites: &BTreeMap<String, crate::menu::Sprite>,
+    ) {
+        self.widget
+            .draw(pixels, font, &self.shell(), &LOOK, &|_| None);
+        if let Some(picker) = &self.picker {
+            let title = picker.station.map_or_else(
+                || "AIRCRAFT".into(),
+                |station| {
+                    let row = self
+                        .load
+                        .station_display_order()
+                        .iter()
+                        .position(|i| *i == station)
+                        .unwrap_or(0);
+                    format!(
+                        "{} > STORES",
+                        self.tree[0].children[row]
+                            .label
+                            .split(':')
+                            .next()
+                            .unwrap_or("Station")
+                    )
+                },
+            );
+            picker.list.draw(pixels, font, sprites, &title);
+        }
         let prompt = prompt.strip_prefix("Press Enter").map_or_else(
             || prompt.to_owned(),
             |rest| format!("Close this page, then Enter / A{rest}"),
@@ -843,7 +1056,14 @@ mod tests {
         };
         let mut menu = open();
         menu.preview_aircraft();
-        menu.select(1, &data, &spec);
+        menu.select(
+            menu.aircraft
+                .iter()
+                .position(|id| *id == AircraftId::Ac130)
+                .unwrap(),
+            &data,
+            &spec,
+        );
         menu.select(menu.load.station_display_order().len(), &data, &spec);
         menu.select(0, &data, &spec);
         let Outcome::Done(aircraft, selected) = menu.done(&data, &spec) else {
@@ -927,6 +1147,225 @@ mod tests {
         }
     }
 
+    #[test]
+    fn aircraft_results_are_complete_in_creator_order_and_search_names_and_designations() {
+        let (data, spec) = setup();
+        let mut menu = Menu::new(
+            AircraftId::F18,
+            AircraftId::SELECTABLE.to_vec(),
+            &data,
+            &spec,
+            RevivalWeapons::Missiles,
+            |_| false,
+        )
+        .unwrap();
+        menu.preview_aircraft();
+        let mut expected = AircraftId::SELECTABLE.to_vec();
+        expected.sort_by_key(|id| (id.label(), id.selection_key()));
+        assert_eq!(menu.aircraft, expected);
+        let list = &mut menu.picker.as_mut().unwrap().list;
+        for i in 0..expected.len() {
+            assert_eq!(list.key("Enter"), Some(i));
+            list.key("ArrowDown");
+        }
+        list.key("Tab");
+        list.text("HoRnEt");
+        assert_eq!(
+            list.key("Enter").map(|i| expected[i]),
+            Some(AircraftId::F18)
+        );
+        list.clear();
+        list.text("16");
+        assert_eq!(
+            list.key("Enter").map(|i| expected[i]),
+            Some(AircraftId::F16C)
+        );
+        list.clear();
+        list.text("F-16C");
+        assert_eq!(
+            list.key("Enter").map(|i| expected[i]),
+            Some(AircraftId::F16C)
+        );
+        list.clear();
+        list.text("does not exist");
+        assert_eq!(list.key("Enter"), None);
+    }
+    #[test]
+    fn escape_clears_search_then_closes_station_then_discards_and_m_types_when_focused() {
+        let (data, spec) = setup();
+        let mut menu = Menu::new(
+            AircraftId::F18,
+            vec![],
+            &data,
+            &spec,
+            RevivalWeapons::Missiles,
+            |_| false,
+        )
+        .unwrap();
+        let before = LoadoutSpec::of(&menu.load);
+        menu.key("Enter", &data, &spec);
+        assert!(menu.picker.is_some());
+        menu.key("Tab", &data, &spec);
+        menu.key("m", &data, &spec);
+        menu.text("m");
+        assert!(!menu.brief_open);
+        assert_eq!(menu.picker.as_ref().unwrap().list.query, "m");
+        assert!(matches!(menu.key("Escape", &data, &spec), Outcome::Click));
+        assert_eq!(menu.picker.as_ref().unwrap().list.query, "");
+        assert!(matches!(menu.key("Escape", &data, &spec), Outcome::Click));
+        assert!(menu.picker.is_none());
+        assert!(matches!(menu.key("Escape", &data, &spec), Outcome::Cancel));
+        assert_eq!(LoadoutSpec::of(&menu.load), before);
+    }
+    #[test]
+    fn every_offered_quantity_is_valid_and_revival_cuts_and_gaps_are_preserved() {
+        let (data, spec) = setup();
+        for aircraft in [AircraftId::F18, AircraftId::Ac130] {
+            for rule in [
+                RevivalWeapons::Missiles,
+                RevivalWeapons::NoMissiles,
+                RevivalWeapons::Guns,
+                RevivalWeapons::HalfGuns,
+            ] {
+                let mut menu = Menu::new(aircraft, vec![], &data, &spec, rule, |name| {
+                    name == "AIM9M.JT"
+                })
+                .unwrap();
+                for station in menu.load.station_display_order() {
+                    menu.open_station(station, &data, &spec);
+                    let picker = menu.picker.as_ref().unwrap();
+                    assert!(!picker.candidates.is_empty());
+                    let slot = menu.load.editable_stations()[station].weapon.unwrap();
+                    for candidate in &picker.candidates {
+                        menu.check(candidate, &data, &spec).unwrap();
+                        let weapon = &candidate.configuration.stations[slot].weapon;
+                        let quantity = candidate.quantities[slot];
+                        if quantity > 0 {
+                            assert_ne!(weapon.source, "AIM9M.JT");
+                            assert!(rule.cut(weapon, quantity) > 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn station_order_matches_shared_catalog_for_aircraft_and_capacity_variants() {
+        use crate::ordnance::{CatalogEntry, catalog_entries};
+        let (mut data, spec) = setup();
+        tore_world::test_support::resources::add_a2g_stores(&mut data);
+        for aircraft in [AircraftId::F18, AircraftId::Ac130] {
+            for cheat in [false, true] {
+                let mut spec = spec.clone();
+                spec.cheat_loadouts = cheat;
+                let mut menu = Menu::new(
+                    aircraft,
+                    vec![],
+                    &data,
+                    &spec,
+                    RevivalWeapons::Missiles,
+                    |_| false,
+                )
+                .unwrap();
+                let order: Vec<_> = [0, 1]
+                    .into_iter()
+                    .flat_map(|category| {
+                        catalog_entries(&menu.weapons, &menu.tanks, &menu.pods, category)
+                    })
+                    .filter_map(|entry| match entry {
+                        CatalogEntry::Weapon(i) => Some(menu.weapons[i].source.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                for station in menu.load.station_display_order() {
+                    menu.open_station(station, &data, &spec);
+                    let slot = menu.load.editable_stations()[station].weapon.unwrap();
+                    let mut previous = None;
+                    for load in &menu.picker.as_ref().unwrap().candidates {
+                        if load.quantities[slot] == 0 || load.designator(slot).is_some() {
+                            continue;
+                        }
+                        let source = &load.configuration.stations[slot].weapon.source;
+                        let at = order.iter().position(|s| s == source).unwrap();
+                        assert!(previous.is_none_or(|before| before <= at));
+                        previous = Some(at);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the isolated imported TORE_DATA_DIR profile"]
+    fn imported_respawn_catalogs_keep_shared_order_for_three_aircraft() {
+        use crate::ordnance::{CatalogEntry, catalog_entries};
+        let dir = crate::assets::data_directory().unwrap();
+        let assets = crate::assets::Assets::load(&dir).unwrap();
+        let data = &assets.theater_resources;
+        for aircraft in [AircraftId::F18, AircraftId::Rafale, AircraftId::F14] {
+            let spec = MissionSpec::new("UKR", aircraft);
+            let mut menu = Menu::new(
+                aircraft,
+                vec![],
+                data,
+                &spec,
+                RevivalWeapons::Missiles,
+                |_| false,
+            )
+            .unwrap();
+            let order: Vec<_> = [0, 1]
+                .into_iter()
+                .flat_map(|category| {
+                    catalog_entries(&menu.weapons, &menu.tanks, &menu.pods, category)
+                })
+                .map(|entry| match entry {
+                    CatalogEntry::Weapon(i) => menu.weapons[i].source.clone(),
+                    CatalogEntry::Tank(i) => menu.tanks[i].source.clone(),
+                    CatalogEntry::Designator(i) => menu.pods[i].source.clone(),
+                })
+                .collect();
+            let mut offered = 0;
+            for station in menu.load.station_display_order() {
+                menu.open_station(station, data, &spec);
+                let editable = menu.load.editable_stations()[station];
+                let mut previous = None;
+                for load in &menu.picker.as_ref().unwrap().candidates {
+                    menu.check(load, data, &spec).unwrap();
+                    let source = editable
+                        .tank
+                        .and_then(|slot| {
+                            let tank = &load.configuration.tanks[slot];
+                            tank.store
+                                .as_ref()
+                                .filter(|_| tank.quantity > 0)
+                                .map(|t| &t.source)
+                        })
+                        .or_else(|| {
+                            editable.weapon.and_then(|slot| {
+                                if let Some(pod) = load.designator(slot) {
+                                    Some(&pod.source)
+                                } else if load.quantities[slot] > 0 {
+                                    Some(&load.configuration.stations[slot].weapon.source)
+                                } else {
+                                    None
+                                }
+                            })
+                        });
+                    if let Some(source) = source {
+                        let at = order.iter().position(|s| s == source).unwrap();
+                        assert!(
+                            previous.is_none_or(|before| before <= at),
+                            "{aircraft:?} station {station}: {source}"
+                        );
+                        previous = Some(at);
+                        offered += 1;
+                    }
+                }
+            }
+            assert!(offered > 0, "{aircraft:?}");
+        }
+    }
+
     fn setup() -> (BTreeMap<String, Vec<u8>>, MissionSpec) {
         (
             tore_world::test_support::resources::gunship_resources(),
@@ -984,7 +1423,14 @@ mod tests {
         assert!(matches!(menu.key("Escape", &data, &spec), Outcome::Cancel));
         assert_eq!(LoadoutSpec::of(&menu.load), before);
         menu.widget.show_tab(1);
-        menu.select(1, &data, &spec);
+        menu.select(
+            menu.aircraft
+                .iter()
+                .position(|id| *id == AircraftId::Ac130)
+                .unwrap(),
+            &data,
+            &spec,
+        );
         assert_eq!(menu.load.aircraft, AircraftId::Ac130);
         assert!(matches!(
             menu.done(&data, &spec),

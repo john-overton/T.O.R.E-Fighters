@@ -946,3 +946,23 @@ class StoresTests(unittest.TestCase):
         self.assertEqual((scenario.lane, scenario.window), ("net", False))
         self.assertIn("wing enemy 1 MIG29.PT 2 average", net_a2g.STORES_MISSION)
         self.assertIn("damage=invulnerable", net_a2g.STORES_MISSION)
+
+
+class ReservationReplyTests(unittest.TestCase):
+    def test_live_probe_reads_the_rust_wire_golden_and_rejects_unrelated_replies(self):
+        golden = (battery.ROOT / "crates/tore-session/wire-golden.txt").read_text()
+        protocol = int(re.search(r"(?m)^version (\d+)$", golden).group(1))
+        def sample(name):
+            return bytes.fromhex(re.search(rf"(?m)^{name} ([0-9a-f]+)$", golden).group(1))
+        held = sample("transport-reservation-held")
+        nonce, session = 0x99AABBCCDDEEFF00, 0x1122334455667788
+        self.assertEqual(net.reservation_answer(held, nonce, session, protocol), {
+            "held": True, "plane": 1, "side": "blue", "wing": 1, "member": 2, "token_seconds": 86400, "return_seconds": 192,
+        })
+        self.assertEqual(net.reservation_answer(sample("transport-reservation-none"), nonce, session, protocol), {"held": False})
+        for data, n, sid, version in [(held[:-1], nonce, session, protocol),
+                                      (held, nonce ^ 1, session, protocol),
+                                      (held, nonce, session ^ 1, protocol),
+                                      (held, nonce, session, protocol - 1)]:
+            with self.assertRaises(ValueError):
+                net.reservation_answer(data, n, sid, version)

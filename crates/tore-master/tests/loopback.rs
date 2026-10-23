@@ -15,7 +15,7 @@ use tore_net::{Datagrams, Entropy, Listen, bind_udp};
 
 fn build() -> Build {
     Build {
-        protocol_version: 68,
+        protocol_version: 71,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         compatibility: 0,
@@ -59,7 +59,7 @@ fn a_host_registers_and_a_browser_finds_it_on_real_sockets() {
     // The host: Register, Challenge, Register with the cookie, Listed.
     let mut host = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
     let summary = ListingSummary {
-        protocol_version: 68,
+        protocol_version: 71,
         players: 1,
         capacity: 8,
         game_version: "0.2.0".into(),
@@ -225,7 +225,7 @@ fn mixed_released_and_current_populations_on_real_udp() {
     for version in [1, 2] {
         let mut host = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
         let mut identity = build();
-        identity.protocol_version = if version == 1 { 67 } else { 68 };
+        identity.protocol_version = if version == 1 { 67 } else { 71 };
         identity.compatibility = if version == 1 { 0 } else { 0x3FA9C21B };
         let summary = ListingSummary {
             protocol_version: identity.protocol_version,

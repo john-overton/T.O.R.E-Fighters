@@ -1,4 +1,4 @@
-//! Released master-1/game-67 and current master-2/game-68 populations sharing
+//! Released master-1/game-67 and current master-2/game-71 populations sharing
 //! one master. Every request and reply crosses the real wire codec.
 use crate::{Master, MasterPort, Settings};
 use std::{net::SocketAddr, time::Duration};
@@ -9,7 +9,7 @@ fn addr(port: u16) -> SocketAddr {
 }
 fn build(version: u16) -> Build {
     Build {
-        protocol_version: if version == 1 { 67 } else { 68 },
+        protocol_version: if version == 1 { 67 } else { 71 },
         game_version: "0.2.0".into(),
         game_commit: "host-commit".into(),
         compatibility: if version == 1 { 0 } else { 0x3FA9C21B },
@@ -331,7 +331,7 @@ fn mixed_introductions_retries_and_relays_keep_their_original_version() {
 #[test]
 fn registrations_cannot_put_a_game_in_the_other_generation() {
     let mut r = Rig::new();
-    for (version, game_version) in [(1, 68), (2, 67)] {
+    for (version, game_version) in [(1, 71), (2, 70)] {
         let mut identity = build(version);
         identity.protocol_version = game_version;
         let mut data = summary(version, "Wrong generation");

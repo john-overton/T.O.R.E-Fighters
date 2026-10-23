@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Template for T.O.R.E-Fighters.app. package-macos.sh substitutes @VERSION@ and
-  copies the result to Contents/Info.plist. Nothing here is signed.
+  copies the result to Contents/Info.plist before sealing the bundle ad hoc.
 -->
 <plist version="1.0">
 <dict>

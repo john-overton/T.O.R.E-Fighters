@@ -146,6 +146,7 @@ pub struct DirectScreen {
     /// session one belongs to is marked "Rejoin". Read when the screen opens
     /// and with each answer of the search.
     tokens: Store,
+    rejoin_check: crate::net::rejoin_check::Check,
     /// The password to send or host with, from Options. Never stored.
     password: String,
     quick: Vec<QuickMessage>,
@@ -275,6 +276,7 @@ impl DirectScreen {
             password: String::new(),
             quick,
             tokens: Store::default(),
+            rejoin_check: Default::default(),
             panel: None,
             found: Vec::new(),
             search: None,
@@ -414,6 +416,8 @@ impl DirectScreen {
     fn turn(&mut self, now: Duration, session: bool) -> Outcome {
         if self.session && !session {
             // The session ended (the game said why in Messages).
+            self.load_tokens();
+            self.rebuild_games();
             self.search_failed = false;
             self.left = self.session_with.take();
         }
@@ -428,6 +432,8 @@ impl DirectScreen {
         if let Some(panel) = &mut self.panel {
             panel.advance();
         }
+        let target = if session { None } else { self.rejoin_target() };
+        self.rejoin_check.update(now, target);
         self.refresh_buttons();
         outcome
     }
@@ -668,25 +674,39 @@ impl DirectScreen {
         self.players.set_rows(rows);
     }
 
+    fn rejoin_target(&self) -> Option<crate::net::rejoin_check::Target> {
+        let game = self.selected_game()?;
+        if game.compat != Compat::Same || game.answer.phase == DiscoverPhase::Closed {
+            return None;
+        }
+        let entry = self.tokens.for_session(game.answer.session_id)?;
+        Some((game.address, entry.kept.session_id, entry.kept.token))
+    }
+
     /// The selected game's mission, or why it cannot be joined, for the line
     /// under the Games box.
     fn selection_line(&self) -> Option<String> {
         let game = self.selected_game()?;
         let a = &game.answer;
         Some(match game.compat {
-            Compat::Same => match self.rejoin_as(game) {
-                Some(callsign) => format!(
-                    "Code {:08X}. You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies.",
-                    a.compatibility
-                ),
-                None => format!(
+            Compat::Same => {
+                if self.rejoin_as(game).is_some() {
+                    let confirmed = self
+                        .rejoin_target()
+                        .and_then(|target| self.rejoin_check.line(target));
+                    return Some(match confirmed {
+                        Some(line) => format!("Code {:08X}. {line}", a.compatibility),
+                        None => format!("Code {:08X}", a.compatibility),
+                    });
+                }
+                format!(
                     "Code {:08X} ({} {}). Mission: {}",
                     a.compatibility,
                     a.game_version,
                     a.game_commit.chars().take(9).collect::<String>(),
                     a.summary
-                ),
-            },
+                )
+            }
             _ => format!(
                 "{}: Code {:08X} ({} {}) cannot be joined.",
                 a.name,

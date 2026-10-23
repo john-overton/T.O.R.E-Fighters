@@ -31,7 +31,7 @@ use tore_net::{
     Server, ServerConfig, ServerEvent,
 };
 
-const VERSION: u16 = 68;
+const VERSION: u16 = 71;
 const MAIN: &str = "198.51.100.1:26901";
 const PROBE: &str = "198.51.100.1:26902";
 const OLD_HOST: &str = "203.0.113.10:26900";

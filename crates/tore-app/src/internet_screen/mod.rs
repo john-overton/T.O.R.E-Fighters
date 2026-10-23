@@ -177,6 +177,7 @@ pub struct InternetScreen {
     /// session one belongs to is marked "Rejoin" once the master has said
     /// which session it is (the selected game's details).
     tokens: Store,
+    rejoin_check: crate::net::rejoin_check::Check,
     browse: Option<Browse>,
     /// The master the browse runs on, to tell when Options changed it.
     browsed: String,
@@ -309,6 +310,7 @@ impl InternetScreen {
             entries: Vec::new(),
             details: BTreeMap::new(),
             tokens: Store::default(),
+            rejoin_check: Default::default(),
             browse: None,
             browsed: String::new(),
             browse_failed: false,
@@ -490,6 +492,8 @@ impl InternetScreen {
         self.last = now;
         if self.session && !session {
             // The session ended (the game said why in Messages).
+            self.load_tokens();
+            self.rebuild_games();
             self.browse_failed = false;
         }
         self.session = session;
@@ -506,6 +510,8 @@ impl InternetScreen {
         if let Some(panel) = &mut self.panel {
             panel.advance();
         }
+        let target = if session { None } else { self.rejoin_target() };
+        self.rejoin_check.update(now, target);
         self.refresh_buttons();
         outcome
     }
@@ -800,6 +806,18 @@ impl InternetScreen {
         self.players.set_rows(rows);
     }
 
+    fn rejoin_target(&self) -> Option<crate::net::rejoin_check::Target> {
+        let entry = self.selected_entry()?;
+        if entry.other_build.is_some() || entry.phase == DiscoverPhase::Closed {
+            return None;
+        }
+        let session = self.details.get(&entry.listing_id)?.session_id;
+        let kept = self.tokens.for_session(session)?;
+        // A remembered reachable address can be checked without joining. A
+        // migrated or relay-only address may time out: then promise nothing.
+        Some((kept.address.parse().ok()?, session, kept.kept.token))
+    }
+
     /// The selected game's mission, or why it cannot be joined, for the line
     /// under the Games box.
     fn selection_line(&self) -> Option<String> {
@@ -810,13 +828,23 @@ impl InternetScreen {
                 entry.name, entry.compatibility
             ));
         }
+        if self.rejoin_as(entry).is_some() {
+            let confirmed = self
+                .rejoin_target()
+                .and_then(|target| self.rejoin_check.line(target));
+            return Some(match confirmed {
+                Some(line) => format!("Code {:08X}. {line}", entry.compatibility),
+                None => format!("Code {:08X}", entry.compatibility),
+            });
+        }
         let mission = self.details.get(&entry.listing_id).map(|summary| {
-            match self.rejoin_as(entry) {
-                Some(callsign) => format!(
-                    "Code {:08X}. You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies.", entry.compatibility
-                ),
-                None => format!("Code {:08X} ({} {}). Mission: {}", entry.compatibility, summary.game_version, summary.game_commit.chars().take(9).collect::<String>(), summary.mission),
-            }
+            format!(
+                "Code {:08X} ({} {}). Mission: {}",
+                entry.compatibility,
+                summary.game_version,
+                summary.game_commit.chars().take(9).collect::<String>(),
+                summary.mission
+            )
         });
         match (mission, entry.relay_likely) {
             (Some(mission), true) => Some(format!("{mission} (may need the relay)")),
@@ -1121,6 +1149,11 @@ impl InternetScreen {
                 match values.name {
                     Some(name) => self.settings.remember_game_name(&name),
                     None => self.settings.game_name = None,
+                }
+                if self.settings.master != values.master {
+                    // A failed socket start must not prevent a new choice
+                    // from being queried on the screen's next turn.
+                    self.browse_failed = false;
                 }
                 self.settings.master = values.master;
                 self.settings.port_forward = values.port_forward;

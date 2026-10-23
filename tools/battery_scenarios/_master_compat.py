@@ -50,7 +50,7 @@ def packet(kind, version, body, length):
 
 
 def identity(bits, version, commit):
-    bits.put(67 if version == 1 else 68, 16)
+    bits.put(67 if version == 1 else 71, 16)
     bits.text("0.2.0")
     bits.text(commit)
     if version == 2:
@@ -67,7 +67,7 @@ def registration(version, cookie):
     bits.put(0, 64)  # No install ID.
     bits.put(3, 8)  # Linux.
     bits.put(0, 4)  # No candidates.
-    bits.put(67 if version == 1 else 68, 16)
+    bits.put(67 if version == 1 else 71, 16)
     bits.put(0, 8)  # Lobby, open, not full.
     bits.put(0, 8)
     bits.put(6, 8)

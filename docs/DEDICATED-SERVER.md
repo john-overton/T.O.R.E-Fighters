@@ -38,6 +38,7 @@ proposal unless it is credited to John.
 - [Hosting from the game](#hosting-from-the-game)
 - [Finding games from the command line](#finding-games-from-the-command-line)
 - [Broadcasting on the Internet Lobby](#broadcasting-on-the-internet-lobby)
+  - [Running your own master](#running-your-own-master)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
@@ -118,18 +119,21 @@ a Command Prompt, as `.\tore-server.exe`; `Get-FileHash` prints the SHA-256 to
 compare with the `.sha256` file. Then see
 [ports and firewalls](#ports-and-firewalls) to let players in.
 
-Nothing is signed, as with the game
+There is no developer signing or notarization, as with the game
 ([first launch](DEVELOPMENT.md#unsigned-builds-and-first-launch)):
 
 - **Linux.** Built on Ubuntu 22.04 and checked not to need a newer C library
   than its glibc 2.35, so it runs on Ubuntu 22.04 or later and other
   distributions of that age or newer.
-- **macOS.** A file a browser downloaded is quarantined, and macOS refuses to
-  run the unsigned server ("cannot be verified"). In the unpacked folder,
-  `xattr -d com.apple.quarantine tore-server` clears it; or run it once, then
-  choose **Allow Anyway** for it under System Settings, Privacy & Security, and
-  run it again. A download made with `curl` is not quarantined. Needs macOS 11
-  or later, as the game does.
+- **macOS.** The binary is ad-hoc signed for integrity, without Developer ID
+  or notarization. A browser download is quarantined and may be blocked
+  ("cannot be verified"). Try running it from the unpacked folder, then if
+  blocked choose **System Settings > Privacy & Security > Open Anyway** and
+  run it again. Recent macOS no longer has the right-click Open bypass. For a
+  trusted project download that remains blocked, run
+  `xattr -dr com.apple.quarantine tore-server` in that folder and retry. A
+  download made with `curl` is not quarantined. Needs macOS 11 or later, as
+  the game does.
 - **Windows.** A zip a browser downloaded is marked as coming from the
   internet, and Windows may warn before the server first runs. Before
   unzipping, open the zip's Properties and tick **Unblock** (or run
@@ -962,11 +966,54 @@ To try it on one machine, run a master on loopback ([testing on one
 machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`
 and `master 127.0.0.1:26911` in `server.conf`.
 
+### Running your own master
+
+Private environments and forks can run `tore-master` and have both servers and
+players use it. Releases ship a separate Linux
+`tore-master-<version>-linux-x86_64.tar.gz` archive, with a checksum, on the
+[releases page](https://github.com/john-overton/T.O.R.E-Fighters/releases).
+See [download instructions](MASTER-SERVER.md#downloading-a-release) or
+[build it from source](MASTER-SERVER.md#building-it).
+
+On the machine running the master, create `master.conf`:
+
+```text
+listen 0.0.0.0
+port 26901
+probe-port 26902
+state-dir state
+```
+
+Run `tore-master --config master.conf --check-config`, then
+`tore-master --config master.conf`. Allow incoming UDP 26901 and 26902 through
+the firewall and point your DNS name at that machine. The second port tests
+routers; relay traffic uses the main port. For a custom main port, use its
+port plus one for `probe-port`. The [master guide](MASTER-SERVER.md) covers
+IPv6 listeners, service installation, relay limits and logs.
+
+On each dedicated server, set these entries in `server.conf`:
+
+```text
+broadcast on
+master master.example.org:26901
+```
+
+Players open **Multi > Internet... > Options**, enter the same address in
+**Master server**, and press **OK**. Browsing, hosting with New, introductions,
+NAT traversal, relay and enabled anonymous statistics then use that master.
+**Default**, followed by **OK**, returns to `master.jroverton.com:26901`.
+Command-line players can use `tore-app --browse 5 --master master.example.org`
+or `tore-app --host mission.txt --list --master master.example.org` for a
+temporary override; it does not rewrite their preferences. For loopback tests,
+use a free pair such as 26911 and 26912 and enter `127.0.0.1:26911` on both
+server and player. Forks still need mutually compatible clients and servers;
+choosing a different master does not bypass the game's compatibility checks.
+
 ### Running a master for old and new games
 
 The updated `tore-master` serves released 0.2.0 hosts and clients (master
 protocol 1, game protocol 67) alongside code-based hosts and clients (master
-protocol 2, game protocol 68 and later). Upgrade the master first. Existing
+protocol 2, game protocol 71 and later). Upgrade the master first. Existing
 0.2.0 servers can keep running and broadcasting without a game/server update.
 Old requests receive the old layout and only old-generation listings; new
 requests receive codes and only new-generation listings. Show other versions
@@ -975,7 +1022,7 @@ within the generation. No new port or configuration setting is needed.
 
 See [running and updating the master](MASTER-SERVER.md#updating) and the
 [wire rules](formats/master-protocol.md#compatibility-codes-master-protocol-2).
-This supports a gradual rollout; it does not make game protocols 67 and 68
+This supports a gradual rollout; it does not make game protocols 67 and 71
 play together.
 
 ## Console, status and logs

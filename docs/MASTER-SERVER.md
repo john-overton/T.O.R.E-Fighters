@@ -419,7 +419,7 @@ month, UTC:
 
 The current master serves master protocols 1 and 2 together. Released 0.2.0
 clients and servers keep working on protocol 1 with their original matching
-rule. Protocol-2 clients see the separate game-protocol-68+ population and
+rule. Protocol-2 clients see the separate game-protocol-71+ population and
 match compatibility codes. Replies and relay setup use the appropriate
 version. Upgrade this master before rolling out new games, without forcing
 existing 0.2.0 servers to upgrade. No extra listener or configuration switch

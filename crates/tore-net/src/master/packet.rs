@@ -2921,7 +2921,7 @@ mod tests {
     #[test]
     fn a_summary_is_the_discovery_answer_without_its_nonce() {
         let mut summary = summary(&["Viper", "Maverick 1"]);
-        summary.protocol_version = 68;
+        summary.protocol_version = 71;
         summary.compatibility = 0x3FA9C21B;
         let answer = summary.to_discover_answer(99);
         assert_eq!(answer.nonce, 99);

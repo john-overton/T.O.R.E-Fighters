@@ -24,6 +24,7 @@ pub mod observe;
 pub mod options;
 pub mod pace;
 pub mod play;
+pub mod rejoin_check;
 pub mod rejoin_store;
 pub mod respawn;
 pub mod scoreboard;

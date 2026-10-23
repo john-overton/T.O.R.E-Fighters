@@ -150,7 +150,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     # Menus lane.
     "replay-feedback": ("dedicated feedback form and authoritative recordings", ("net-replay-feedback-*",)),
-    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*")),
+    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*", "menus-updates-bar-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
         ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-derived-stations", "menus-validate-creator", "menus-snap-quick-*"),
@@ -246,7 +246,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "the master server on this machine: mixed released/current populations, its limits under the flood tool, a server listing itself",
         ("net-master-*",),
     ),
-    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing",)),
+    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing", "net-window-master-setting")),
     "net-introduce": (
         "a bot joining a listed dedicated server through an introduction from a master on this machine",
         ("net-master-introduce",),
@@ -687,6 +687,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/pause_menu.rs", ("windowed-menus", "replay-live"), "pause menu", windowed=True),
     # tore-app: menus.
     _r("crates/tore-app/src/menu.rs", MENU_FAMILIES, "menus", windowed=True),
+    _r("crates/tore-app/src/updates*", ("menus-screens",), "main-menu release checks and fixtures"),
     _r("crates/tore-app/src/rocker.rs", MENU_FAMILIES, "menu rockers", windowed=True),
     _r("crates/tore-app/src/locate.rs", ("menus-screens", "replay-settings"), "locate screen", windowed=True),
     _r("crates/tore-app/src/quick_mission.rs", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),
@@ -755,6 +756,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/replay/net_convert.rs", ("net-convert",), "converting a capture into a replay"),
     _r("crates/tore-app/src/replay/net_effects.rs", ("net-convert",), "the smoke, contrails and gun rounds a converted capture carries"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
+    _r("crates/tore-app/src/net/rejoin_check.rs", ("net-fly", "net-window"), "server-confirmed return-slot checks and timeouts", unit_tests=("test_battery_net",)),
     _r("crates/tore-app/src/net/observe.rs", ("net-window", "replay-live"), "the observer screen's recording and watch; the window scenario watches a server", windowed=True),
     _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
     _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),

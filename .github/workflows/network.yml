@@ -16,8 +16,19 @@ name: Network loopback
 # meets (docs/ARCHITECTURE.md, "Real-time tests on shared runners").
 
 on:
+  # Run by hand against any branch (Actions > Network loopback > Run workflow, or
+  # `gh workflow run network.yml --ref BRANCH`) and on release tags. Pushes and
+  # pull requests do not start it: the pre-push hook covers each push locally
+  # (John, 2026-10-23, after a backed-up GitHub queue held runs for hours).
+  workflow_dispatch:
   push:
-  pull_request:
+    tags:
+      - 'v*'
+
+# A newer run for the same branch or tag replaces one still waiting or running.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

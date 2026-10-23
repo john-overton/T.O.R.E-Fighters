@@ -41,7 +41,7 @@ pub const INSTALL_ID_FILE: &str = "install-id";
 
 /// The one line of the notice, as Messages shows it.
 pub const NOTICE: &str =
-    "This game sends anonymous statistics to the Internet Lobby. Turn them off in Options.";
+    "This game sends anonymous statistics to the chosen master server. Turn them off in Options.";
 
 /// The install id: read from the data folder, or drawn and written the first
 /// time, while statistics are `on`. With them off there is none and the file

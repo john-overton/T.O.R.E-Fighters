@@ -6,15 +6,16 @@
 //!   ([`tore_net::TokenSource`]) and sent in a Token message. A token is good
 //!   in this session only, whichever host runs the session now, for 24 hours
 //!   after its player was last connected (the host's clock, which a migration
-//!   carries over). A kick voids it; leaving does not.
+//!   carries over). A kick voids it; a clean departure removes it.
 //! - **The gate.** A game that sends a token that works in its Challenge
 //!   answer is admitted whatever the room ([`super::HostGate`]); a game that
 //!   joined without one may send it afterwards in a Rejoin message. A token
 //!   that no longer works is answered in words, and the game joins as a new
 //!   player.
 //! - **Rejoining.** The connection becomes that player again: its join order
-//!   (so its scores and lives are its own), its callsign and lobby id when
-//!   free, its slot and loadout in the lobby, its side under lock sides (the
+//!   (so its scores and lives are its own), its lobby id when free and its
+//!   newly requested callsign, its slot and loadout in the lobby, its side
+//!   under lock sides (the
 //!   court keeps sides by callsign). A player still connected under the token
 //!   (its game restarted before the host noticed) is replaced by the new
 //!   connection.
@@ -352,6 +353,7 @@ impl Host {
             return;
         };
         let fresh = me.lobby.order;
+        let requested_callsign = me.requested_callsign.clone();
         // Its game restarted before the host noticed the old connection
         // went: the old one goes as a drop would, and the crown moves.
         let crown = match self.connection_of(order).filter(|old| *old != connection) {
@@ -370,7 +372,7 @@ impl Host {
                 others.iter().map(|peer| peer.lobby.id).collect(),
             )
         };
-        let callsign = unique_callsign(&record.callsign, callsigns.iter().map(String::as_str));
+        let callsign = unique_callsign(&requested_callsign, callsigns.iter().map(String::as_str));
         let Some(peer) = self.peers.get_mut(&connection) else {
             return;
         };
@@ -393,6 +395,13 @@ impl Host {
             record.left = None;
             record.callsign = callsign.clone();
             record.lobby_id = id;
+        }
+        // A renamed returning player keeps its side restriction and its
+        // reservation, with the name other players now see in the lobby.
+        self.court.rejoin_callsign(&record.callsign, &callsign);
+        if let Some(reserved) = self.rejoin.reserved.get_mut(&order) {
+            reserved.callsign = callsign.clone();
+            reserved.lobby_id = id;
         }
         // The lobby keeps its place: the slot it held, with its loadout,
         // when the slot is still free and its rules allow it.
@@ -517,11 +526,17 @@ impl Host {
 
     /// A connection ended (the hook in `Host::closed`, `peer` already out of
     /// the table): the player's token starts its 24 hours, or is voided by a
-    /// kick, and a plane it was flying is kept for it.
+    /// kick. A clean departure removes its identity and reservation.
     pub(super) fn rejoin_left(&mut self, peer: &Peer, reason: LeaveReason) {
         let order = peer.lobby.order;
         // Its game came back first: the new connection is the player now.
         if self.peers.values().any(|other| other.lobby.order == order) {
+            return;
+        }
+        if reason == LeaveReason::Left {
+            self.rejoin.players.remove(&order);
+            self.rejoin.reserved.remove(&order);
+            self.lobby_dirty = true;
             return;
         }
         let now = self.token_clock();
@@ -541,15 +556,7 @@ impl Host {
                 self.rejoin.reserved.remove(&order);
                 self.lobby_dirty = true;
             }
-            // An away player whose game says goodbye has left on purpose
-            // (its flight ended when the plane went to the AI): the plane
-            // stays the AI's.
-            LeaveReason::Left if self.rejoin.reserved.get(&order).is_some_and(|r| r.away) => {
-                self.rejoin.reserved.remove(&order);
-                self.lobby_dirty = true;
-            }
-            // A drop (silence, a crash, quitting without ending the
-            // flight): the plane is kept for the player.
+            // Silence or a crash keeps the plane for the player.
             LeaveReason::Left
             | LeaveReason::Silent
             | LeaveReason::Replaced
@@ -622,6 +629,73 @@ impl Host {
             .map_err(|refusal| refusal.words().to_owned())?;
         self.restore(connection, order);
         Ok(())
+    }
+
+    /// A read-only answer for the lounge. A remembered lobby slot is not a
+    /// reservation: only the live aircraft reserved for this token qualifies.
+    pub(super) fn reservation_answer(
+        &self,
+        query: tore_net::packet::ReservationQuery,
+    ) -> tore_net::packet::ReservationAnswer {
+        use tore_net::packet::ReservedSlot;
+        let held = (|| {
+            if query.session_id != self.session_id || !matches!(self.life, Life::Flying) {
+                return None;
+            }
+            let now = self.token_clock();
+            let order = self.rejoin.claim(query.token, now).ok()?;
+            let record = self.rejoin.players.get(&order)?;
+            let plane = match self.rejoin.reserved.get(&order) {
+                Some(reserved) if !reserved.returning => reserved.plane,
+                Some(_) => return None,
+                None => {
+                    // A restarted client can beat the host's drop timeout.
+                    // Its token will supersede the still-present connection.
+                    if !self.settings.ai() {
+                        return None;
+                    }
+                    let peer = self.peers.get(&self.connection_of(order)?)?;
+                    if peer.stage != Stage::Seated {
+                        return None;
+                    }
+                    self.world.can_give_back(peer.seat?).ok()?;
+                    peer.plane?
+                }
+            };
+            if !self.plane_kept(plane) {
+                return None;
+            }
+            let slot = self.world.roster.plane(plane)?.slot;
+            let remaining =
+                TOKEN_LIFE.saturating_sub(now.saturating_sub(record.left.unwrap_or(now)));
+            let mut return_for = remaining;
+            if let Some(since) = self.empty_since {
+                return_for = return_for.min(
+                    self.config
+                        .empty_timeout
+                        .saturating_sub(self.now.saturating_sub(since)),
+                );
+            }
+            if let Some(limit) = self.settings.time_limit_seconds() {
+                return_for = return_for.min(
+                    Duration::from_secs(u64::from(limit))
+                        .saturating_sub(super::ticks_time(self.world.tick())),
+                );
+            }
+            Some(ReservedSlot {
+                plane: plane.0,
+                enemy: slot.wing.side == tore_sim::ai::launch::Side::Enemy,
+                wing: slot.wing.index,
+                member: slot.member,
+                token_seconds: remaining.as_secs().min(u64::from(u32::MAX)) as u32,
+                return_seconds: return_for.as_secs().min(u64::from(u32::MAX)) as u32,
+            })
+        })();
+        tore_net::packet::ReservationAnswer {
+            nonce: query.nonce,
+            session_id: query.session_id,
+            held,
+        }
     }
 
     /// Moves the session's clock `by` on, as if that long had passed (tests

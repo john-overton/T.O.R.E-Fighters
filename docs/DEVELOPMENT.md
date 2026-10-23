@@ -122,7 +122,7 @@ Git hooks live in `.git/hooks/`, which is not version controlled, so every clone
 needs this step. A single push can skip the hook with `git push --no-verify`.
 
 The hook runs everything the CI job runs that a single machine can run. Other
-platforms stay in CI, which builds and tests four targets on every push:
+platforms stay in CI, which builds and tests four targets when it is run:
 Ubuntu 22.04, Windows 2022, macOS 14 on Apple Silicon, and macOS 15 on Intel.
 Linux stays on the oldest supported Ubuntu LTS because the binary uses the
 player's own glibc; a newer build host makes a program that will not start on
@@ -209,6 +209,16 @@ master server, [operations](MASTER-SERVER.md#downloading-a-release); and the
 four `server-*` artifacts, the dedicated server's archives,
 [downloading it](DEDICATED-SERVER.md#downloading-it)).
 `workflow_dispatch` does the same once the workflow exists on `main`.
+
+CI (`ci.yml`, Rust baseline, and `network.yml`, Network loopback) no longer runs
+on every push or pull request (John, 2026-10-23): the pre-push hook covers each
+push locally, and the full matrix runs when it is wanted. Start it against any
+branch from GitHub (Actions, the workflow, **Run workflow**, choose the branch)
+or with `gh workflow run ci.yml --ref BRANCH` and `gh workflow run network.yml
+--ref BRANCH`; watch it with `gh run watch`. Both also run on every `v*` tag. A
+newer run for the same branch replaces one that is still queued or running.
+Release packaging keeps its own triggers: `v*` tags, `release-test/...` branches
+and `workflow_dispatch`.
 
 Every script takes the version from `--version`, then from the tag the workflow
 is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
@@ -387,18 +397,42 @@ and the tar.gz still succeeds; in CI it is a failure.
 
 ### Unsigned builds and first launch
 
-Nothing is signed or notarized. Signing is a later change that does not alter
-the package layout.
+No release uses Developer ID signing or notarization. macOS packaging applies
+an ad-hoc signature to each executable and then the completed app bundle. This
+seals its contents but does not identify a trusted developer. The standalone
+macOS server is also ad-hoc signed. Windows and Linux packages remain unsigned.
 
-- **macOS**: double-clicking an unsigned app is refused. The first launch is
-  right-click (or Control-click) on `T.O.R.E-Fighters.app`, choose **Open**,
-  then **Open** again in the dialog. After that it launches normally.
+- **macOS**: copy `T.O.R.E-Fighters.app` from the DMG to Applications and open
+  it. If blocked, use **System Settings > Privacy & Security > Open Anyway**,
+  then confirm **Open**. Recent macOS versions removed the right-click Open
+  bypass. See [Apple's first-launch guidance](https://support.apple.com/en-us/102445).
 - **Windows**: the executable links the C runtime statically
   (`.cargo/config.toml`), so no Visual C++ Redistributable is needed.
   SmartScreen warns about an unrecognized publisher. Choose
   **More info**, then **Run anyway**. This applies to the MSI itself.
 - **Linux**: mark the AppImage executable (`chmod +x`) if the browser cleared
   the bit.
+
+For a trusted project download that still will not open, remove its download
+quarantine in Terminal, then open the app again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/T.O.R.E-Fighters.app
+```
+
+The **0.2.0 macOS download** needs this fallback when it says the app "is
+damaged and can't be opened". That release has linker-signed executables but
+no bundle seal covering its metadata and resources. The missing seal is fixed
+in the next build; it does not mean the 0.2.0 game data needs reinstalling.
+
+Packaging signs the nested executables first, then the assembled bundle, and
+does not modify it afterwards. It requires `Contents/_CodeSignature/CodeResources`
+and runs `codesign --verify --deep --strict --verbose=2` on both the staged app
+and the app mounted from the finished DMG; `codesign -dv --verbose=4` records
+the signature details in CI. Server packaging verifies the staged binary and
+the unpacked tarball copy the same way. Either verification failing stops the
+release job. Agent decision: no hardened runtime (`--options runtime`), since
+this repair needs an integrity seal without adding runtime restrictions.
 
 ### What CI validates, and what it does not
 
@@ -439,9 +473,28 @@ are outside application logging. See [diagnostic evidence](baselines/startup-dia
 - No graphics adapter or display: run from a logged-in desktop session with working drivers. Compilation and tests do not require a window; the smoke test does.
 - Missing reference folder: the Rust app does not need it. Missing media: an existing valid cache still runs; otherwise import your own media. See [REFERENCES.md](REFERENCES.md).
 
+### Release-check dependency
+
+The optional [main-menu update check](spec/main-menu-presentation.md#updates-and-project-feedback)
+uses `ureq` with defaults off and only its `rustls` feature, on a blocking worker.
+This agent choice avoids an async runtime and system OpenSSL libraries. Its
+bundled WebPKI roots and ring crypto backend preserve HTTPS certificate checking.
+`serde_json` parses bounded API/cache input and `semver` compares release
+precedence, including prereleases. `Cargo.lock` pins the resolved versions and
+[third-party notices](../THIRD_PARTY_NOTICES.md#release-check-dependencies) records
+their licences. No dependency is added to formats, simulation or synthesis.
+Keep the runtime dependency check, including the release host's glibc 2.35
+ceiling, when updating this stack. A binary linked on a newer Linux host still
+needs validation in the release build environment.
+
 ### Menu presentation checks
 
-The main menu uses the [badge and button-label layout](spec/main-menu-presentation.md).
+The main menu uses the [badge, button and project-link layout](spec/main-menu-presentation.md).
+Use `--snapshot-state update-available`, `update-focus` or `updates-off` with
+`--snapshot PATH` to inspect the release links and preference without networking.
+The ignored `updates::tests::live_api_manual_check` test makes one real request;
+set `TORE_UPDATE_CHECK_EVIDENCE` to an ignored JSON output path before running it
+explicitly with `--ignored --nocapture`. Normal tests use a local JSON fixture.
 The first debrief page centers its result sentence under the heading.
 `--quick-mission --snapshot-state debrief-success --snapshot PATH` previews the
 success case; `debrief-1` retains the failed-mission preview. These CPU snapshots

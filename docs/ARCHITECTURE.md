@@ -4665,7 +4665,7 @@ matching rule. Master-2/game-68+ listings use the code and form a separate
 population, even with Show other versions. Replies use the request's version;
 introductions, retries and relay channels retain that version. See
 [master versions](formats/master-protocol.md#compatibility-codes-master-protocol-2).
-Protocol 68 and older games cannot join each other. The selected game's
+Protocol 71 and older games cannot join each other. The selected game's
 lounge details, lobby header, discovery commands, startup log and `--version`
 show the code. Version commands use the selected data profile; without an
 import they explicitly label the empty-content code "no imported content".
@@ -8803,7 +8803,7 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
   `tore_net::master::Browser` state machine, `update(now)` every frame,
   events for added, changed and dropped games. It never blocks a frame.
 - The first time the screen opens it writes one line about telemetry in
-  Messages: "This game sends anonymous statistics to the Internet Lobby. Turn
+  Messages: "This game sends anonymous statistics to the chosen master server. Turn
   them off in Options." (John: on by default, with a switch and a one-time
   notice).
 - When the master cannot be reached the list stays empty and Messages says
@@ -10389,7 +10389,7 @@ In short:
 
 Read at `d7244b0c` (the `multiplayer` tip):
 
-- **Compatibility rule.** Since protocol 68 the handshake and lounge filters compare the [compatibility code](#compatibility-code), with version and commit retained for information. Stage L keeps the detailed mission check.
+- **Compatibility rule.** Since protocol 71 the handshake and lounge filters compare the [compatibility code](#compatibility-code), with version and commit retained for information. Stage L keeps the detailed mission check.
 - **The content check.** `tore_world::resources::ResourceReads` notes every
   resource a build asks for; `Manifest` is the sorted names with an FNV-1a 64
   hash each, `Manifest::digest` one number for it, `Manifest::differences` the
@@ -11257,10 +11257,13 @@ dependency is needed (John's open question on `getrandom`).
   Internet Lobby whose session id matches (both show it); or the address the
   token came from. A game that joined by a typed address with no token and
   learns the session from Accepted sends it in a Rejoin message instead.
-- **A kick voids** the player's token; leaving does not.
+- **A kick voids** the player's token. A clean disconnect removes its host
+  record and reservation, and `TokenStore::forget` removes only that session
+  from the client's file. Delayed grants cannot save it again. Ending a flight
+  while remaining connected keeps the token.
+  [Behaviour](spec/multiplayer-menus.md#callsign-when-returning-to-a-game).
 
-**Reservations.** When a seated player is **dropped** (silence, a crash,
-quitting without ending the flight), its plane goes to the AI as today, but
+**Reservations.** When a seated player is **dropped** (silence or a crash), its plane goes to the AI as today, but
 **reserved** for that player while the plane is alive: nobody else takes it,
 and its slot reads "AI (Viper away)". A player who **ends its flight** (End
 Mission) frees the plane: a reservation is for someone who did not mean to
@@ -11268,7 +11271,7 @@ go. The idle-player rule ([F2-A](#the-ai-flies-an-idle-players-aircraft))
 keeps its planes in the same table.
 
 - **Rejoining** with a valid token, the player is that player again: its lobby
-  id when free, its callsign, its join order (so its scores and lives are its
+  id when free, its current requested callsign, its join order (so its scores and lives are its
   own), its side under lock sides, and in flight its reserved plane, taken
   back by its Join at the next tick (a Seated, a new flight; *as built, K5:*
   the game's Join, once its mission is built). A reservation admits its
@@ -11284,6 +11287,12 @@ keeps its planes in the same table.
 - **The end** of a mission clears every reservation; a player who rejoins in
   the lobby finds its slot and loadout, as the lobby keeps them.
 - **Dedicated servers** do all of this the same way.
+
+The lounges use the [protocol-71 reservation preflight](formats/net-protocol.md#reservation-preflight-protocol-71)
+for slot promises. `net::rejoin_check` polls a selected server without joining;
+the host answers from the live reservation/connection and token tables. An
+unreachable saved Internet address produces no claim. Detailed retention and
+expiry rules have one home in [the multiplayer guide](MULTIPLAYER.md#rejoin-and-observers).
 
 #### Rejoin tokens and reservations, as built (K5)
 
@@ -11319,16 +11328,16 @@ decision unless the design above or John's decisions say it.
   still connected (the game restarted before the host's 5 seconds of silence)
   is admitted too: the old connection is dropped as a drop would (its plane
   reserved, its crown moved) and the new one becomes the player.
-- **Drop, leave, kick.** A seated player whose connection ends by silence, a
-  crash or a disconnect that did not end its flight is dropped: its plane
-  goes to the AI at the next tick and is reserved (the log says "Viper dropped
+- **Drop, leave, kick.** A seated player whose connection ends by silence or a
+  crash is dropped: its plane goes to the AI at the next tick and is reserved (the log says "Viper dropped
   out: the AI flies plane 0, kept for it"). Leave (End Mission in the game),
   a kick, the host leaving and the mission's end keep nothing. An away player
   whose game says goodbye (disconnect Left) has left on purpose and frees its
-  plane; its silence or crash keeps it. A kick voids the token.
-- **Coming back.** The new connection is the player: its join order, callsign
-  and lobby id when free, in the lobby its slot and loadout when the slot is
-  still free, and "Welcome back, Viper: your aircraft is waiting." The plane is
+  plane; its silence or crash keeps it. Any clean disconnect removes its
+  token record too. A kick voids the token.
+- **Coming back.** The new connection is the player: its join order and
+  lobby id when free, with its newly requested callsign made unique, and in
+  the lobby its slot and loadout when the slot is still free, and "Welcome back, Viper: your aircraft is waiting." The plane is
   taken by the player's Join (the game's automatic ready sends it once its
   mission is built), at the next tick as a new flight, not by the host on its
   own: a Seated message before the game has built the mission would find

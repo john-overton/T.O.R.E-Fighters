@@ -20,11 +20,11 @@ pub fn same_build(host: &Build, asker: &Build) -> bool {
     host.protocol_version == asker.protocol_version && host.compatibility == asker.compatibility
 }
 
-/// Released games use master 1, while protocol 68 and later use master 2.
+/// Released games use master 1, while protocol 71 and later use master 2.
 pub fn supports_game(master_version: u16, game_protocol: u16) -> bool {
     match master_version {
-        1 => game_protocol <= 67,
-        2 => game_protocol >= 68,
+        1 => game_protocol < tore_net::packet::COMPATIBILITY_PROTOCOL_VERSION,
+        2 => game_protocol >= tore_net::packet::COMPATIBILITY_PROTOCOL_VERSION,
         _ => false,
     }
 }
@@ -127,7 +127,7 @@ mod tests {
 
     fn build(version: &str, commit: &str, release: bool) -> Build {
         Build {
-            protocol_version: 68,
+            protocol_version: 71,
             game_version: version.into(),
             game_commit: commit.into(),
             compatibility: 0,

@@ -832,7 +832,7 @@ Browse, Page, Listing details and Introduce. The frozen released bytes in
 golden remains unchanged by this backward-compatibility support.
 
 Registrations retain their master version. Protocol 1 accepts game protocols
-through 67; protocol 2 accepts 68 and later. Registration build and summary
+through 70; protocol 2 accepts 71 and later. Registration build and summary
 protocols must agree, and heartbeats cannot change the generation. Browsing
 and Details expose only the requester's generation, including when Show
 other versions is on. Within protocol 1 the original matching rule remains:

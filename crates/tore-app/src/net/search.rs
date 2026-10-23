@@ -443,7 +443,7 @@ mod tests {
     use std::rc::Rc;
     use tore_net::packet::DiscoverPhase;
 
-    const V: u16 = 68;
+    const V: u16 = 71;
 
     fn own() -> Own {
         Own {

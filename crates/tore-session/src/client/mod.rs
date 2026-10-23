@@ -1330,6 +1330,7 @@ impl Client {
     /// client quits once the debrief is in (the caller gives it a few
     /// seconds); anywhere else it quits at once.
     pub fn leave_game(&mut self, now: Duration) {
+        self.rejoin_forget();
         if let Some(capture) = &mut self.capture {
             capture.leave_game(now);
         }
@@ -1688,6 +1689,7 @@ impl Client {
 
     /// Quits at once: Disconnect goes to the host three times.
     pub fn disconnect(&mut self, now: Duration) {
+        self.rejoin_forget();
         if let Some(capture) = &mut self.capture {
             capture.disconnect(now);
         }

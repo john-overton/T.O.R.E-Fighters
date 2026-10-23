@@ -513,6 +513,8 @@ enum Stage {
 struct Peer {
     address: SocketAddr,
     callsign: String,
+    /// This connection's requested name, before duplicate suffixes. Local only.
+    requested_callsign: String,
     /// The operating system its game said it runs on when it joined.
     platform: Platform,
     /// How it reached the host (protocol 9): its Challenge answer's path,
@@ -1544,6 +1546,10 @@ impl Host {
                     connection, reason, ..
                 } => self.closed(connection, reason),
                 ServerEvent::Discover { from, query } => self.answer_discover(from, &query),
+                ServerEvent::Reservation { from, query } => {
+                    let answer = self.reservation_answer(query);
+                    self.server.answer_reservation(from, answer);
+                }
                 ServerEvent::Connection { connection, event } => match event {
                     Event::Message { kind, body } => self.message(connection, kind, &body),
                     Event::Payload { sections, .. } => {
@@ -1630,6 +1636,7 @@ impl Host {
             Peer {
                 address: details.address,
                 callsign: callsign.clone(),
+                requested_callsign: details.callsign.clone(),
                 platform: details.platform,
                 path: details.path,
                 stage: Stage::Lobby,
