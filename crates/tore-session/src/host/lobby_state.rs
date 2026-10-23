@@ -111,6 +111,8 @@ impl PlayerState {
             // resumed player starts a new flight), the lobby's send times,
             // the request and chat rates, the refusal last logged, and
             // whether the gaps went out (the new host sends them again).
+            // A resumed connection already has its accepted name.
+            requested_callsign: _,
             wire: _,
             inputs: _,
             unforeseen: _,
@@ -188,6 +190,7 @@ impl PlayerState {
         } = self;
         Peer {
             address,
+            requested_callsign: callsign.clone(),
             callsign,
             platform,
             path,

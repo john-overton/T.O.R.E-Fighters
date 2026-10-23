@@ -55,6 +55,13 @@ pub(super) struct Court {
 }
 
 impl Court {
+    /// A token restores the same side restriction under its new display name.
+    pub(super) fn rejoin_callsign(&mut self, old: &str, new: &str) {
+        if let Some(side) = self.side_of(old) {
+            self.sides.insert(new.to_owned(), side);
+        }
+    }
+
     /// The court of a host built from `config` for its mission `spec`.
     pub(super) fn new(config: &super::HostConfig, spec: &MissionSpec) -> Self {
         Self {

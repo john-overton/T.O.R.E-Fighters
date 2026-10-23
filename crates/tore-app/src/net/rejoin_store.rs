@@ -218,6 +218,16 @@ impl GameStore {
 }
 
 impl TokenStore for GameStore {
+    fn forget(&mut self, session_id: u64) {
+        let mut store = Store::load(&self.data, unix_now());
+        store
+            .entries
+            .retain(|entry| entry.kept.session_id != session_id);
+        if let Err(error) = store.save(&self.data) {
+            log::warn!("Rejoin token not removed: {error}");
+        }
+    }
+
     fn keep(&mut self, kept: &KeptToken) {
         let mut store = Store::load(&self.data, unix_now());
         store.keep(kept.clone(), &self.address);
@@ -317,6 +327,22 @@ mod tests {
         assert_eq!(entry.address, "10.0.0.2:26900");
         assert_eq!(entry.kept.token, kept(7, now, "Viper").token);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn forgetting_one_session_preserves_other_games() {
+        let dir = scratch("forget");
+        let now = unix_now();
+        let mut game = GameStore::new(&dir, "127.0.0.1:31000");
+        game.keep(&kept(1, now, "Viper"));
+        let mut other = GameStore::new(&dir, "127.0.0.1:31001");
+        other.keep(&kept(2, now, "Hawk"));
+        game.forget(1);
+        let saved = Store::load(&dir, now);
+        assert!(saved.for_session(1).is_none());
+        assert_eq!(saved.entries.len(), 1);
+        assert_eq!(saved.for_session(2).unwrap().kept.callsign, "Hawk");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

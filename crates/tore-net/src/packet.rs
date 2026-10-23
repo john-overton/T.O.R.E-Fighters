@@ -14,6 +14,13 @@
 //! Decoding is strict: a field outside its limits, trailing bytes, or padding
 //! that is not zero rejects the packet.
 
+#[path = "packet_reservation.rs"]
+mod reservation;
+pub use reservation::{
+    RESERVATION_QUERY_LEN, ReservationAnswer, ReservationQuery, ReservedSlot,
+    decode_reservation_answer, decode_reservation_query,
+};
+
 use std::fmt;
 
 use tore_codec::{BitReader, BitWriter, CodecError, Crc32};
@@ -59,7 +66,7 @@ pub const MAX_DISCOVER_NAME: usize = 64;
 /// The longest mission summary a discover answer carries, in bytes.
 pub const MAX_DISCOVER_SUMMARY: usize = 200;
 
-/// The thirteen packet kinds.
+/// The fifteen packet kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PacketKind {
@@ -104,6 +111,9 @@ pub enum PacketKind {
     /// Game to game, 22 bytes, never longer than the Reach it answers: the
     /// Reach's nonce, the session and whether the answerer hosts it now.
     ReachAnswer = 13,
+    /// Private reservation preflight, protocol 70.
+    ReservationQuery = 14,
+    ReservationAnswer = 15,
 }
 
 impl PacketKind {
@@ -123,6 +133,8 @@ impl PacketKind {
             11 => Self::Punch,
             12 => Self::Reach,
             13 => Self::ReachAnswer,
+            14 => Self::ReservationQuery,
+            15 => Self::ReservationAnswer,
             _ => return None,
         })
     }
@@ -193,6 +205,8 @@ pub enum EncodeError {
     BadString,
     /// A section of kind 0.
     BadSectionKind,
+    /// A reservation contains an invalid wing or token lifetime.
+    BadReservation,
 }
 
 impl fmt::Display for EncodeError {
@@ -201,6 +215,7 @@ impl fmt::Display for EncodeError {
             Self::TooLarge => "packet too large",
             Self::BadString => "string too long or callsign invalid",
             Self::BadSectionKind => "section kind 0",
+            Self::BadReservation => "invalid reservation",
         })
     }
 }
@@ -579,6 +594,8 @@ pub enum Packet {
     Reach(Reach),
     /// Kind 13.
     ReachAnswer(ReachAnswer),
+    ReservationQuery(ReservationQuery),
+    ReservationAnswer(ReservationAnswer),
 }
 
 impl Packet {
@@ -598,6 +615,8 @@ impl Packet {
             Self::Punch(_) => PacketKind::Punch,
             Self::Reach(_) => PacketKind::Reach,
             Self::ReachAnswer(_) => PacketKind::ReachAnswer,
+            Self::ReservationQuery(_) => PacketKind::ReservationQuery,
+            Self::ReservationAnswer(_) => PacketKind::ReservationAnswer,
         }
     }
 
@@ -721,6 +740,8 @@ impl Packet {
                 w.write_bits(p.nonce, 64).ok();
                 w.write_bits(u64::from(p.from), 8).ok();
             }
+            Self::ReservationQuery(p) => p.write(&mut w),
+            Self::ReservationAnswer(p) => p.write(&mut w)?,
             Self::ReachAnswer(p) => {
                 w.write_bits(p.nonce, 64).ok();
                 w.write_bits(p.session_id, 64).ok();
@@ -754,6 +775,10 @@ impl Packet {
             PacketKind::Punch => Self::Punch(decode_punch(body)?),
             PacketKind::Reach => Self::Reach(decode_reach(body)?),
             PacketKind::ReachAnswer => Self::ReachAnswer(decode_reach_answer(body)?),
+            PacketKind::ReservationQuery => Self::ReservationQuery(decode_reservation_query(body)?),
+            PacketKind::ReservationAnswer => {
+                Self::ReservationAnswer(decode_reservation_answer(body)?)
+            }
         })
     }
 }

@@ -35,7 +35,7 @@ fn kept(session: u64, callsign: &str) -> KeptToken {
 /// the sample list, whose summary names session 2).
 fn with_token(dir: &std::path::Path) -> InternetScreen {
     let mut store = Store::default();
-    store.keep(kept(2, "Viper"), "");
+    store.keep(kept(2, "Viper"), "127.0.0.1:31000");
     store.save(dir).unwrap();
     let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
     s.settings.master = Some(NOBODY.into());
@@ -70,8 +70,33 @@ fn a_listed_game_whose_session_the_player_holds_a_token_for_says_rejoin() {
             .position(|row| row.cells.contains(&Cell::Text("Friday night".into())))
             .unwrap(),
     );
-    let line = s.selection_line().expect("a line");
-    assert!(line.starts_with("You were in this game as Viper"), "{line}");
+    assert!(
+        s.selection_line().is_none(),
+        "the listing does not confirm a slot"
+    );
+    let target = s.rejoin_target().unwrap();
+    s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(
+        target,
+        Some(tore_net::packet::ReservedSlot {
+            plane: 1,
+            enemy: false,
+            wing: 0,
+            member: 1,
+            token_seconds: 86_400,
+            return_seconds: 192,
+        }),
+    );
+    assert!(s.selection_line().unwrap().contains("Blue Wing 1 #2"));
+    s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(target, None);
+    assert_eq!(
+        s.selection_line().as_deref(),
+        Some("No reserved slot is available for your return.")
+    );
+    s.rejoin_check = Default::default();
+    assert!(
+        s.selection_line().is_none(),
+        "unconfirmed or timed-out queries promise nothing"
+    );
     // Before the master has said which session it is, nothing is marked.
     s.details.clear();
     s.rebuild_games();
@@ -84,7 +109,7 @@ fn the_join_carries_the_token_kept_for_the_games_session() {
     let dir = scratch("join");
     let mut master = LoopbackMaster::start();
     let mut store = Store::default();
-    store.keep(kept(2, "Viper"), "");
+    store.keep(kept(2, "Viper"), "127.0.0.1:31000");
     store.save(&dir).unwrap();
     let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
     s.settings.master = Some(master.text());
@@ -162,5 +187,53 @@ fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     assert!(!s.options_open());
     assert!(s.settings.may_host);
     assert!(Remembered::load(&dir).may_host);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn introduced_join_uses_the_callsign_field_not_the_saved_token_name() {
+    use tore_net::Target;
+    use tore_net::master::candidate::MappingType;
+    use tore_net::master::join::Introduced;
+    use tore_net::master::packet::{Hint, Path};
+    let dir = scratch("field");
+    let mut s = with_token(&dir);
+    let address = "127.0.0.1:31000".parse().unwrap();
+    let joining = Joining {
+        name: "Game".into(),
+        asked: Duration::ZERO,
+        through: None,
+        token: Some(Token(0xbeef_0002)),
+    };
+    let found = Introduced {
+        introduction_id: 1,
+        hint: Hint::Race,
+        seen: address,
+        host_mapping: MappingType::Unknown,
+        targets: vec![Target {
+            address,
+            path: Path::LocalNetwork,
+        }],
+    };
+    let Outcome::Join(request) = s.start_join(joining, found, Duration::ZERO) else {
+        panic!("introduced join");
+    };
+    assert_eq!(request.join.callsign, "Maverick");
+    assert_eq!(request.join.token, Some(Token(0xbeef_0002)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn returning_to_the_lounge_reloads_cleared_rejoin_identity() {
+    let dir = scratch("cleared");
+    let mut s = with_token(&dir);
+    s.set_listed(sample_entries());
+    assert_eq!(state_of(&s, "Friday night"), "Rejoin");
+    s.open_options();
+    s.session = true;
+    Store::default().save(&dir).unwrap();
+    s.update_at(Duration::from_millis(1), false);
+    assert!(s.tokens.entries.is_empty());
+    assert_ne!(state_of(&s, "Friday night"), "Rejoin");
     let _ = std::fs::remove_dir_all(dir);
 }

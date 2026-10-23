@@ -45,6 +45,8 @@ impl KeptToken {
 /// the connection ends (the last time it was connected).
 pub trait TokenStore: Send {
     fn keep(&mut self, kept: &KeptToken);
+    /// Remove only this session after an intentional departure.
+    fn forget(&mut self, session_id: u64);
 }
 
 /// Seconds since the Unix epoch, 0 if the clock is before it.
@@ -80,6 +82,12 @@ impl FileStore {
 }
 
 impl TokenStore for FileStore {
+    fn forget(&mut self, session_id: u64) {
+        if Self::load(&self.path).is_some_and(|kept| kept.session_id == session_id) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     fn keep(&mut self, kept: &KeptToken) {
         // A failure to write is the game's to ignore: it plays on, and the
         // player loses only the way back.
@@ -116,6 +124,7 @@ pub fn parse(text: &str) -> Option<KeptToken> {
 #[derive(Default)]
 pub(super) struct Kept {
     pub(super) session_id: u64,
+    leaving: bool,
     pub(super) kept: Option<KeptToken>,
     pub(super) store: Option<Box<dyn TokenStore>>,
 }
@@ -151,6 +160,9 @@ impl Client {
 
     /// The host granted this player's token (message 39).
     pub(super) fn rejoin_token(&mut self, grant: TokenGrant) {
+        if self.rejoin.leaving {
+            return;
+        }
         let kept = KeptToken {
             token: grant.token,
             session_id: self.rejoin.session_id,
@@ -169,6 +181,21 @@ impl Client {
             store.keep(&kept);
         }
         self.rejoin.kept = Some(kept);
+    }
+
+    /// Forget immediately, before delayed grants or the close can save it again.
+    pub(super) fn rejoin_forget(&mut self) {
+        // The app also disconnects during teardown after a lost connection.
+        // That cleanup must not turn an unclean drop into a clean departure.
+        if self.phase == super::ClientPhase::Closed {
+            return;
+        }
+        self.rejoin.leaving = true;
+        self.rejoin.kept = None;
+        self.config.token = None;
+        if let Some(store) = &mut self.rejoin.store {
+            store.forget(self.rejoin.session_id);
+        }
     }
 
     /// The connection ended: the token's 24 hours start from now.
@@ -233,6 +260,10 @@ mod tests {
         fresh.last_seen_unix = unix_now();
         store.keep(&fresh);
         assert_eq!(FileStore::load(&path), Some(fresh.clone()));
+        store.forget(fresh.session_id ^ 1);
+        assert_eq!(FileStore::load(&path), Some(fresh.clone()));
+        store.forget(fresh.session_id);
+        assert!(!path.exists());
         let mut old = fresh;
         old.last_seen_unix = unix_now().saturating_sub(90_000);
         store.keep(&old);

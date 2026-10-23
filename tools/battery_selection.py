@@ -755,6 +755,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/replay/net_convert.rs", ("net-convert",), "converting a capture into a replay"),
     _r("crates/tore-app/src/replay/net_effects.rs", ("net-convert",), "the smoke, contrails and gun rounds a converted capture carries"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
+    _r("crates/tore-app/src/net/rejoin_check.rs", ("net-fly", "net-window"), "server-confirmed return-slot checks and timeouts", unit_tests=("test_battery_net",)),
     _r("crates/tore-app/src/net/observe.rs", ("net-window", "replay-live"), "the observer screen's recording and watch; the window scenario watches a server", windowed=True),
     _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
     _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),

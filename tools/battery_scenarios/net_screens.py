@@ -20,6 +20,7 @@ through the master with its token, is welcomed back into the aircraft the new ho
 from __future__ import annotations
 
 import os
+import json
 import re
 import signal
 import time
@@ -29,7 +30,7 @@ from battery import Drive, DriveError, Scenario
 
 from battery_scenarios.net import (
     GAME_FLAGS, LOCALHOST, NET_BAD, SNAPSHOTS_AGAIN_MS, fresh_data, guide_mission, log_must, migrate_problems,
-    rejoin_problems, server_log, start_master, start_server,
+    rejoin_problems, server_log, start_master, start_server, weapons_hold, query_reservation,
 )
 
 # The game flies about four seconds and leaves (only reached when it is not killed first).
@@ -86,7 +87,7 @@ def kill_game(d: Drive, proc) -> None:
 def drive_rejoin_window(d: Drive) -> None:
     """The window's rejoin: killed in flight, started again, welcomed back in plane 0."""
     port = d.port()
-    server = start_server(d, port, guide_mission(), empty_timeout=90)
+    server = start_server(d, port, weapons_hold(guide_mission(50)), empty_timeout=90)
     script = d.work / "rejoin.txt"
     script.write_text(REJOIN_SCRIPT)
     argv = [d.app, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Viper", "--slot", "0", *GAME_FLAGS,
@@ -106,6 +107,12 @@ def drive_rejoin_window(d: Drive) -> None:
     if not server.wait_for(r"Viper \(plane 0\) left: no packet for 5 seconds$", 20):
         d.problem("the server did not see the killed game go silent (did it leave cleanly instead?)")
     d.sleep(1)
+    token_text = next(line for line in kept.read_text().splitlines() if line.startswith("token "))
+    reservation = query_reservation(port, token_text)
+    (d.work / "reservation-before-rejoin.json").write_text(json.dumps(reservation, indent=2) + "\n")
+    if (not reservation or not reservation.get("held") or reservation.get("plane") != 0
+            or not 0 < reservation.get("return_seconds", 0) <= 90):
+        d.problem(f"the server did not confirm the slot inside its empty-mission deadline: {reservation}")
     before = len(game_log(d))
     second = d.start("game2", argv, window=True)
     second.finish(150, 0)
