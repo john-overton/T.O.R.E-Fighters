@@ -49,17 +49,19 @@ pub fn prompt(revival: &Revival, seconds_left: u32) -> String {
         Some(NO_ROOM) => return NO_ROOM.to_owned(),
         _ => {}
     }
-    if seconds_left > 0 {
-        return format!(
+    let action = if seconds_left > 0 {
+        format!(
             "You can fly again in {}:{:02}",
             seconds_left / 60,
             seconds_left % 60
-        );
-    }
+        )
+    } else {
+        "Press Enter to fly again".to_owned()
+    };
     match revival.lives {
-        None => "Press Enter to fly again".to_owned(),
-        Some(1) => "Press Enter to fly again (1 life left)".to_owned(),
-        Some(lives) => format!("Press Enter to fly again ({lives} lives left)"),
+        None => action,
+        Some(1) => format!("{action} (1 life left)"),
+        Some(lives) => format!("{action} ({lives} lives left)"),
     }
 }
 
@@ -159,6 +161,12 @@ mod tests {
     #[test]
     fn the_prompt_says_what_the_player_may_do() {
         let cases = [
+            (
+                revival(Respawn::Revive, Some(2), 30, None),
+                25,
+                "You can fly again in 0:25 (2 lives left)",
+                false,
+            ),
             (
                 revival(Respawn::Revive, Some(2), 0, None),
                 0,

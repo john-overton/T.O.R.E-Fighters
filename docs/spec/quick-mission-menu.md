@@ -774,3 +774,25 @@ to the accepted choice. Agent presentation decision: aircraft lists use pages of
 12; quantities cycle in single units up to a capacity of 20, otherwise in
 ten-percent steps. Internal fuel cycles from 10 to 100 percent in ten-percent
 steps. Done stages a choice for the normal revive request; Escape discards edits.
+
+John requested persistent access on 2026-10-22, an **opinionated** multiplayer
+addition. While waiting under `respawn revive` with lives remaining, the
+in-flight Escape menu offers **Loadout...**, and **Aircraft...** only for a
+Player Choice slot. These entries remain available throughout the delay and
+until the player actually respawns. The initial loadout page has no timeout.
+Done saves the aircraft and ordnance together; reopening either page restores
+that saved choice, including fuel. Cancel or Escape discards only the current
+unsaved edits. **Mission...** continues to open the same read-only brief.
+
+Agent decisions: close the menus, then press Enter or controller A to request
+revival. Enter inside a page selects its focused row; Done never respawns.
+Enter before the delay ends is ignored, with no request queued. Holding Enter
+cannot carry a menu selection into a revival confirmation. The countdown and
+ready prompt show remaining lives when finite. Waiting spends no life. There
+is no maximum wait and no automatic revival. The existing idle rules exclude
+lost aircraft, so AI never takes a dead player's slot, even after the away
+time; idle handoff still applies to live aircraft after revival. Ending the
+mission or leaving the game still ends the wait. Lives, weapon restrictions,
+loadout validation, `ai-slot`, and single-player end-of-flight rules are
+unchanged. The existing revival request carries the saved choice, with no
+protocol change.

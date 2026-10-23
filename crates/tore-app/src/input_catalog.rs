@@ -1160,6 +1160,10 @@ pub const ENTRIES: &[Entry] = &[
         &["m"],
     ),
     menu_shortcut(
+        "Multiplayer respawn: fly again after delay, with menus closed (controller A)",
+        &["Enter"],
+    ),
+    menu_shortcut(
         "Mission brief: close (controller B; A also closes respawn brief)",
         &["Escape"],
     ),

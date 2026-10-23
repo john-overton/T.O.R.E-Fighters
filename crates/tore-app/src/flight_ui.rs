@@ -65,6 +65,8 @@ pub enum Command {
     SensorInfrared,
     ControlsOpen,
     FeedbackOpen,
+    RespawnAircraft,
+    RespawnLoadout,
     /// Pref > Sound...: the Sound/Music Prefs screen over the paused flight.
     SoundOpen,
     /// Pref > Graphics...: the Graphics options screen over the paused flight.
@@ -852,6 +854,8 @@ impl FlightUi {
                 Command::Click
             }
             "Feedback..." => Command::FeedbackOpen,
+            crate::net::respawn::AIRCRAFT => Command::RespawnAircraft,
+            crate::net::respawn::LOADOUT => Command::RespawnLoadout,
             "Sound..." => Command::SoundOpen,
             "Graphics..." => Command::GraphicsOpen,
             "1x" | "2x" | "4x" | "8x" | "Slow-motion" => {

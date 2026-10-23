@@ -391,6 +391,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | In-flight Map/Mission: switch tab (controller A) | Enter | - | - |
 | Mission brief: scroll (controller D-pad up/down) | Up or Down or Page Up or Page Down or Home or End | - | - |
 | In-flight respawn: mission brief (or select Mission...) | M | - | - |
+| Multiplayer respawn: fly again after delay, with menus closed (controller A) | Enter | - | - |
 | Mission brief: close (controller B; A also closes respawn brief) | Esc | - | - |
 | Multiplayer ? menu: return to main menu | M | - | - |
 | Multiplayer ? menu: exit | X | - | - |
