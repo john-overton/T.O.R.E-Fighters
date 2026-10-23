@@ -11815,8 +11815,18 @@ Dedicated recording uses `tore-session::recording`, with the ordinary
 `tore-replay::Writer`. Pose conversion, world identity and frame bounds are
 shared with the app's recorder. The host reads each completed authoritative
 tick; with no occupied cockpit it builds the observer's full-world picture,
-including recording-only stores and effects. Recording is opt-in and does not
-change the simulation. Named feedback events travel on the reliable session
-channel, are stamped with host identity and kept by the client capture's
+including recording-only stores and effects. The host batches new identities
+with each frame onto `recording::worker`'s bounded sync channel. That worker
+owns file creation, frame bounds, encoding, replay and companion-log writes,
+all syncs, finishing and retention. It uses the client's channel pattern;
+the server's stop-on-saturation policy is distinct. An atomic completed-chunk
+count bounds queued frames plus the current chunk to 120. A pending sync
+returns no budget until it completes. On saturation the host closes the
+sender without joining; accepted frames drain to a synced partial file.
+Mission boundaries and graceful destruction flush the final pending frame
+and join, including migration handover. Recording is opt-in and does not
+change the simulation. The [recording policy](spec/replay-feedback.md)
+defines durability, error handling and lifecycle behavior. Named feedback
+events travel on the reliable session channel, are stamped with host identity and kept by the client capture's
 observer during conversion. See [the behavior spec](spec/replay-feedback.md)
 and [event layout](formats/replay-feedback.md).

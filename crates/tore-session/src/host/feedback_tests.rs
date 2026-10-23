@@ -132,3 +132,53 @@ fn feedback_recording_continues_without_cockpits_and_rotates_each_mission() {
     );
     std::fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn recording_finishes_and_joins_on_migration_step_down_and_host_drop() {
+    for how in ["migration", "drop"] {
+        let folder =
+            std::env::temp_dir().join(format!("tore-recording-{how}-{}", std::process::id()));
+        let mut rig = Rig::new(
+            spec(2, 0, 20),
+            HostConfig {
+                start: StartMode::Now,
+                recording: Some(crate::recording::Options {
+                    folder: folder.clone(),
+                    kept: 10,
+                }),
+                ..config()
+            },
+            LinkConfig::one_way(MS),
+        );
+        rig.run(Duration::from_millis(300));
+        if how == "migration" {
+            rig.host.step_down();
+        }
+        drop(rig);
+        let paths: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "tore-replay"))
+            .collect();
+        assert_eq!(paths.len(), 1);
+        let r = tore_replay::Recording::open(&paths[0]).unwrap();
+        assert!(r.complete());
+        assert!(r.frame_count() > 20);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+}
+
+#[test]
+fn status_worst_tick_is_interval_maximum_and_resets() {
+    let mut rig = Rig::new(spec(1, 0, 20), config(), LinkConfig::one_way(MS));
+    rig.host.costs.ticks = 3;
+    rig.host.costs.total = Duration::from_millis(60);
+    rig.host.costs.max = Duration::from_micros(52_300);
+    let status = rig.host.status(Duration::ZERO);
+    assert_eq!(status.tick_cost_mean, Duration::from_millis(20));
+    assert_eq!(status.tick_cost_max, Duration::from_micros(52_300));
+    assert_eq!(
+        rig.host.status(Duration::ZERO).tick_cost_max,
+        Duration::ZERO
+    );
+}

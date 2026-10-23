@@ -423,8 +423,8 @@ def scenarios() -> list[Scenario]:
         problems += verify_problems(s.get(again, ""), "the second pack run", 2_000)
         if "Verdict: the recordings match" not in s.get(diff, ""):
             problems.append("two identical pack runs made recordings that differ")
-        if "format 3" not in s.get(info, "") or not re.search(r"^Weapon +0 MK-82AIR7 \(MK82AIR\.JT, bomb\)", s.get(info, ""), re.M):
-            problems.append("recording-info does not show a format 3 file with the pack's bomb class")
+        if "format 4" not in s.get(info, "") or not re.search(r"^Weapon +0 MK-82AIR7 \(MK82AIR\.JT, bomb\)", s.get(info, ""), re.M):
+            problems.append("recording-info does not show a format 4 file with the pack's bomb class")
         if "format 2" not in s.get(old, "") or "Problem " in s.get(old, ""):
             problems.append("the format 2 recording does not open")
         return problems

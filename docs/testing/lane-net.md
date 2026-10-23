@@ -174,6 +174,17 @@ runs its reach and upload tests before it has two ready standbys, and the fight)
 A debug build on a busy machine steps the new host's fast-forward slowly: see the
 note in `net-migrate-kill`'s row.
 
+## Dedicated recorder lifecycle
+
+`net-replay-feedback-recorder-lifecycle` runs a headless AI mission with
+recording enabled, then restarts and quits. Both replays must finish normally,
+keep their companion logs and include the final lifecycle event. Status lines
+must expose the worst tick. The `replay-feedback` family includes this scenario.
+The deterministic blocked-writer tests in `tore-session::recording::worker`
+cover saturation without relying on a machine's disk speed; the replay writer
+unit test checks the unchanged 120-frame chunks and 3,600-frame sync cadence.
+
+
 ## How a scenario works
 
 A net scenario sets `driver=` to a Python function instead of `args`. The runner
