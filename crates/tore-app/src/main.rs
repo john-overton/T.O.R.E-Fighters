@@ -3860,7 +3860,23 @@ impl App {
         }
         if self.screen == Screen::Flight && self.respawn_open() {
             if event.pressed {
+                // Text belongs to the focused search field, including Space and M.
+                let searching = !self.respawn_brief_open()
+                    && self
+                        .net_flight
+                        .as_ref()
+                        .and_then(|f| f.respawn_menu.as_ref())
+                        .is_some_and(|m| m.searching());
                 let action = self.respawn_key(&name);
+                if searching
+                    && let Some(text) = &event.text
+                    && let Some(menu) = self
+                        .net_flight
+                        .as_mut()
+                        .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.text(text);
+                }
                 self.action(event_loop, action);
             }
             return Action::None;
@@ -4399,6 +4415,13 @@ impl ApplicationHandler for App {
                 self.internet_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
+                if let Some(menu) = self
+                    .net_flight
+                    .as_mut()
+                    .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.moved(None);
+                }
                 self.live_debug.release();
                 self.camera.keys.clear();
                 self.release_trigger();
@@ -4429,11 +4452,22 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .is_some_and(|f| f.respawn_menu.is_some())
                 {
-                    if self.respawn_brief_open()
+                    if self
+                        .net_flight
+                        .as_ref()
+                        .and_then(|f| f.respawn_menu.as_ref())
+                        .is_some_and(|m| m.brief_open)
                         && let Some(brief) = &mut self.flight_ui.map.brief
                     {
                         brief.moved(point);
+                    } else if let Some(menu) = self
+                        .net_flight
+                        .as_mut()
+                        .and_then(|f| f.respawn_menu.as_mut())
+                    {
+                        menu.moved(point);
                     }
+                    renderer.window.request_redraw();
                     return;
                 }
                 if let Some(editor) = &mut self.graphics_screen {
@@ -4511,7 +4545,18 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if self.screen == Screen::Flight && self.respawn_open() {
-                    self.respawn_key(if notches > 0 { "ArrowUp" } else { "ArrowDown" })
+                    if self.respawn_brief_open() {
+                        self.respawn_key(if notches > 0 { "ArrowUp" } else { "ArrowDown" })
+                    } else {
+                        if let Some(menu) = self
+                            .net_flight
+                            .as_mut()
+                            .and_then(|f| f.respawn_menu.as_mut())
+                        {
+                            menu.wheel(notches);
+                        }
+                        Action::None
+                    }
                 } else if self.screen == Screen::Flight
                     && self.flight_ui.map.open
                     && self.flight_ui.map.mission_tab
@@ -4557,6 +4602,13 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.pointer = None;
+                if let Some(menu) = self
+                    .net_flight
+                    .as_mut()
+                    .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.moved(None);
+                }
                 self.live_debug.release();
                 self.quick.pointer(None);
                 direct_screen::app::pointer_moved(&mut self.lobby, &mut self.direct, None);
@@ -4608,6 +4660,13 @@ impl ApplicationHandler for App {
                 self.internet_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
+                if let Some(menu) = self
+                    .net_flight
+                    .as_mut()
+                    .and_then(|f| f.respawn_menu.as_mut())
+                {
+                    menu.moved(None);
+                }
                 self.live_debug.release();
                 self.camera.keys.clear();
                 self.release_trigger();
@@ -6578,7 +6637,12 @@ impl ApplicationHandler for App {
                                 .as_ref()
                                 .and_then(|s| s.client.revival_prompt())
                                 .unwrap_or_default();
-                            menu.draw(&mut self.menu.pixels, &self.hornet.font, &prompt);
+                            menu.draw(
+                                &mut self.menu.pixels,
+                                &self.hornet.font,
+                                &prompt,
+                                &self.menu.quick_sprites,
+                            );
                             if menu.brief_open
                                 && let Some(brief) = &self.flight_ui.map.brief
                             {
@@ -14668,13 +14732,30 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 let sky = 55 + (index / 640 / 8) as u8;
                 pixel.copy_from_slice(&[sky, sky + 20, sky + 35, 255]);
             }
-            if snapshot_state == "respawn-aircraft" {
+            if snapshot_state.starts_with("respawn-aircraft") {
                 overlay.preview_aircraft();
+            } else if snapshot_state.starts_with("respawn-station") {
+                // The F/A-18D missile station, after its gun and tank.
+                overlay.key("ArrowDown", &theater_resources, &spec);
+                overlay.key("ArrowDown", &theater_resources, &spec);
+                overlay.key("Enter", &theater_resources, &spec);
+            }
+            if snapshot_state.ends_with("-scrolled") {
+                overlay.key("End", &theater_resources, &spec);
+            }
+            if snapshot_state.ends_with("-filtered") {
+                overlay.key("Tab", &theater_resources, &spec);
+                overlay.text(if snapshot_state.starts_with("respawn-aircraft") {
+                    "hornet"
+                } else {
+                    "120"
+                });
             }
             overlay.draw(
                 &mut menu.pixels,
                 &hornet.font,
                 "You can fly again in 0:25 (2 lives left)",
+                &menu.quick_sprites,
             );
             use std::io::Write;
             let mut f = std::fs::File::create(&path)?;
