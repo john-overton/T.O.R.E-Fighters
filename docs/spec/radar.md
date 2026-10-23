@@ -108,42 +108,66 @@ lead, not authority for FA-specific controls or numbers.
 
 ## Target selection keys
 
-John's recollection of retail, given on 2026-09-23. Retail comparison is
-unavailable.
+Implementation specification, updated 2026-10-23. John approved these human-pilot
+rules on that date. Manual evidence is Fighters Anthology, printed p. 112,
+"Targeting" (1999 chapter 5, supplied manual text lines 7452-7498). No retail
+execution was available. The manual distinguishes Enter from Apostrophe and
+requires TWS for air-radar cycling. It does not exclude friendly aircraft.
+These rules supersede the earlier sensor-dependent visual-selection proposal.
 
-- **T** cycles through current radar contacts only. **Shift-T** cycles
-  backwards.
-- **Enter** selects an aircraft the pilot can see, but only one that is also a
-  current radar or infrared contact.
-- When the radar or infrared scope loses the contact, the target drops and the
-  track is lost completely, however it was selected, including by clicking it
-  on the scope. Seeing the aircraft does not keep it, and the HUD does not
-  remember a dropped target. Only the [Easy targeting cheat](cheats.md) keeps
-  it: the selection then stays set while the aircraft is off the scope, without
-  radar support.
-- The target views F4, F7 and F8 keep following a dropped target while the
-  target is within visual range, 10 nmi (John, 2026-09-28). The selection and
-  everything else above still drop; see
-  [flight views](flight-views.md#target-views-and-visual-range).
+- **T** cycles the pilot's own current air-radar contacts that fit the displayed
+  range and projection, including friendlies. **Shift+T** cycles backwards.
+  Air radar must be operating in TWS. RWS search contacts may still be clicked,
+  but T cannot acquire one. Data-link-only contacts and stale history plots are
+  excluded. No eligible contact leaves the current selection unchanged.
+- The cycle is nearest first, with aircraft identity breaking equal-distance
+  ties, recomputed on each press. This order is an agent decision approved in
+  John's 2026-10-23 task. Projection is the radar display's: distance at most
+  the selected 5, 10, 25, 50, 100 or 150 nmi scale and bearing within 90 degrees
+  of the nose. Sensor detection separately enforces scan angle, signature,
+  physical range and terrain masking. A smaller display scale does not erase
+  existing observations or selections.
+- **Enter** cycles the aircraft currently visible on screen, left to right,
+  wrapping after the rightmost aircraft. It uses the current camera, window
+  aspect and zoom. **Apostrophe** picks the visible aircraft nearest the centre
+  of the forward view, using the current zoom. These are separate rebindable
+  actions. Both include friendly and hostile aircraft and need no radar/IR
+  return. Equal screen positions or distances use aircraft identity as an
+  agent-chosen deterministic tie-breaker. No candidate leaves selection alone.
+- Selection requires the ownship's current visual observation as well as the
+  screen projection. The installed visual sensor supplies the existing range
+  and angular limits; terrain obstruction and visual-sensor damage are checked.
+  Aircraft weather/night range scaling is not added by this change. Manual
+  p. 111 gives visual range multipliers, but their integration into this
+  aircraft visual model remains unimplemented, not a claim of retail parity.
+- A human visual designation stays while the aircraft remains a visual
+  contact of that ownship. It drops when visual range, terrain, damage or loss
+  removes that observation, even if radar still detects it. Looking away from
+  the screen alone does not erase the ownship's visual observation. This
+  retention boundary is an agent implementation choice. A radar/click
+  designation instead keeps its existing sensor-contact retention rule and
+  Easy targeting exception. Visual designation alone grants no radar lock,
+  illumination or radar weapon support. Actual radar/IR observations still
+  govern acquisition and weapon support independently.
+- Airborne wrecks remain candidates while the sensor still lists them, as
+  before. No new wreck-detection or display rule is introduced.
+- The AC-130 console retains its sensor-view ground-target cycle. A-G, IR-ground
+  and HARM page cycling keeps its existing rules, including friendly filtering.
+  The independent targeting-sight controls are unchanged. These visual keys
+  select aircraft; the legacy ground visual command remains for developer
+  probes and old combat tapes.
+- In multiplayer, the closed chat line leaves Enter to targeting. The key above
+  Tab opens chat; Enter sends/closes an open line. Enter's fly-again handling
+  after a loss is unchanged. The same authoritative ownship validation applies
+  to remote human aircraft and AI aircraft as targets. AI pilots' selection,
+  retention and support rules are unchanged.
+- Replay-viewer keys remain viewer controls, including T for its timer.
+  Recordings retain the resulting target selections. Gamepad South (A) keeps
+  its radar-designate action; visual actions have no default gamepad button.
 
-Clicking a contact on the scope still selects it at once, including a
-search-only RWS contact, as John requested on 2026-09-16; it now drops with the
-contact.
-
-**Proposed**, as agent decisions awaiting John's review:
-
-| Rule | Proposed |
-| --- | --- |
-| T order | nearest first; the order is taken again at each press |
-| Skipped by T and Enter | friendly aircraft and wrecks |
-| T with the infrared channel selected | selects nothing; infrared contacts are for Enter |
-| Enter's view | the forward view at 1x zoom around the nose: 60 degrees tall and 4:3 wide |
-| Enter's choice | the eligible aircraft nearest the nose |
-| Gamepad | South (A) is T; Enter and Shift-T have no default button |
-
-These replace an agent decision under which a selection survived radar loss
-while the aircraft stayed inside the roughly 10-nmi visual envelope, and the
-fitted HUD memory of a target after sensor loss.
+The target views F4, F7 and F8 keep their separate dropped-target viewing rule,
+10 nmi (John, 2026-09-28): see
+[flight views](flight-views.md#target-views-and-visual-range).
 
 ## Look-down and detection
 

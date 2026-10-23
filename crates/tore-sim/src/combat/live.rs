@@ -294,6 +294,8 @@ pub enum Command {
     DesignateVisual,
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
+    /// A human screen pick, validated against this ownship's visual contacts.
+    DesignateVisualTarget(u32),
     ClearDesignation,
     /// Ctrl+R or Shift+R: the radar's air-to-ground page on or off. It turns
     /// the air radar off and never touches the designated target
@@ -3782,6 +3784,11 @@ impl State {
             Command::Designate => own.designate_next(true),
             Command::DesignatePrevious => own.designate_next(false),
             Command::DesignateVisual => own.designate_visual(launcher),
+            Command::DesignateVisualTarget(id) => {
+                if own.sensors.designate_visual_contact(id) {
+                    own.selection_changed();
+                }
+            }
             Command::DesignateTarget(id) => {
                 if own.sensors.designate(id) {
                     own.hud_selection = Some(id);
@@ -11747,6 +11754,33 @@ mod pair_tests {
             "the other ownship is a contact of the cockpit"
         );
         assert!(s.view(1).unwrap().display_target().is_none());
+    }
+
+    #[test]
+    fn human_visual_pick_of_a_remote_friendly_survives_without_radar() {
+        let (mut s, mut l) = pair_of_sides(6000., Side(1));
+        l[0].radar = false;
+        for _ in 0..2 {
+            step(&mut s, &l, [false; 2]);
+        }
+        assert!(s.own().sensors.contacts().is_empty());
+        assert!(s.own().sensors.visual().iter().any(|c| c.id == 1));
+        s.command(0, Command::DesignateVisualTarget(1), l[0]);
+        for _ in 0..120 {
+            step(&mut s, &l, [false; 2]);
+        }
+        assert_eq!(s.own().designated(), Some(1));
+        assert_eq!(s.own().sensors.acquired(), None);
+        assert_eq!(s.view(0).unwrap().display_target().map(|t| t.id), Some(1));
+        s.command(0, Command::DesignateVisualTarget(999), l[0]);
+        assert_eq!(
+            s.own().designated(),
+            Some(1),
+            "invalid picks leave the selection alone"
+        );
+        l[1].position[2] = 200. * 6076.;
+        step(&mut s, &l, [false; 2]);
+        assert_eq!(s.own().designated(), None);
     }
 
     #[test]

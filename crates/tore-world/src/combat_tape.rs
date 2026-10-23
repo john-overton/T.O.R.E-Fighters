@@ -41,6 +41,9 @@ pub fn command_name(c: Command) -> String {
     if let Command::TargetHeat(value) = c {
         return format!("target-heat:{value}");
     }
+    if let Command::DesignateVisualTarget(id) = c {
+        return format!("designate-visual-id:{id}");
+    }
     if let Command::DesignateTarget(id) = c {
         return format!("designate-id:{id}");
     }
@@ -80,7 +83,9 @@ pub fn command_name(c: Command) -> String {
         Command::ToggleTargetJammer => "target-jammer",
         Command::ReleaseChaff => "chaff",
         Command::ReleaseFlare => "flare",
-        Command::DesignateTarget(_) => unreachable!("handled above"),
+        Command::DesignateTarget(_) | Command::DesignateVisualTarget(_) => {
+            unreachable!("handled above")
+        }
     }
     .into()
 }
@@ -98,6 +103,9 @@ pub fn command(s: &str) -> Option<Command> {
             .ok()
             .filter(|v| *v <= 4)
             .map(Command::TargetHeat);
+    }
+    if let Some(id) = s.strip_prefix("designate-visual-id:") {
+        return id.parse().ok().map(Command::DesignateVisualTarget);
     }
     if let Some(id) = s.strip_prefix("designate-id:") {
         return id.parse().ok().map(Command::DesignateTarget);
@@ -200,5 +208,13 @@ mod tests {
         assert_eq!(command("designate-id:7"), Some(Command::DesignateTarget(7)));
         assert_eq!(command("designate-id:x"), None);
         assert_eq!(command_name(Command::DesignateTarget(7)), "designate-id:7");
+        assert_eq!(
+            command("designate-visual-id:7"),
+            Some(Command::DesignateVisualTarget(7))
+        );
+        assert_eq!(
+            command_name(Command::DesignateVisualTarget(7)),
+            "designate-visual-id:7"
+        );
     }
 }

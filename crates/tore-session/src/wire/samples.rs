@@ -74,6 +74,7 @@ pub fn commands() -> Vec<Command> {
             airport::Command::CancelApproach,
         ))),
         Command::Seat(S::Combat(live::Command::DesignateTarget(77))),
+        Command::Seat(S::Combat(live::Command::DesignateVisualTarget(77))),
         Command::Seat(S::Combat(live::Command::Designate)),
         Command::Seat(S::Manual(live::Command::ToggleArm)),
         Command::Seat(S::Manual(live::Command::TargetHeat(3))),

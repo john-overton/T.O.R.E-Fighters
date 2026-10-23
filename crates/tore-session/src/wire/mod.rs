@@ -255,7 +255,8 @@ pub fn path_words(path: Path) -> &'static str {
 /// 52 since min-players and the King's force start (slices nr-minplayers, nr-lobbyui): the lobby settings list gains min-players, and the Lobby message gains the force-start seconds, so an older game must not join.
 /// 63 since shared ground-pad foundations change terrain contact and placement.
 /// 64 since F-22N bay/wing carriage, magazine release origins and bay-only trigger gating.
-pub const PROTOCOL_VERSION: u16 = 67;
+/// 71 adds human visual designation and its checkpoint retention state.
+pub const PROTOCOL_VERSION: u16 = 71;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
