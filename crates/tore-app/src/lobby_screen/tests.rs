@@ -271,42 +271,17 @@ fn ready_toggles_and_says_when_the_standard_stores_are_flown() {
 }
 
 #[test]
-fn the_kings_leave_asks_first_and_a_joiners_does_not() {
-    let state = king();
-    let mut screen = screen_of(&state, true);
-    assert_eq!(click(&mut screen, button_centre(6)), None);
-    assert!(screen.modal_open());
-    assert!(screen.modal.as_ref().is_some_and(|m| {
-        m.lines()
-            .iter()
-            .any(|l| l == "Leaving ends the game for everyone.")
-    }));
-    // Enter on the panel is Cancel (it has the focus); the game goes on.
-    assert_eq!(screen.key("Enter", false), None);
-    assert!(!screen.modal_open());
-    // Esc is Leave: asks again; Esc closes the panel; the second Esc asks.
-    assert_eq!(screen.key("Escape", false), None);
-    assert!(screen.modal_open());
-    assert_eq!(screen.key("Escape", false), None);
-    assert!(!screen.modal_open());
-    // Leave on the panel.
-    screen.key("Escape", false);
-    assert_eq!(screen.key("Tab", true), None);
-    assert_eq!(screen.key("Enter", false), Some(Request::Leave));
-    assert!(!screen.modal_open());
-
-    let mut joiner = screen_of(&sample(2), false);
-    assert_eq!(click(&mut joiner, button_centre(6)), Some(Request::Leave));
-    assert_eq!(joiner.key("Escape", false), Some(Request::Leave));
-}
-
-#[test]
-fn a_host_that_has_not_answered_yet_is_still_asked_before_leaving() {
-    let mut screen = LobbyScreen::new(Arc::new(test_kit::kit()), "Maverick's game", true);
-    assert_eq!(screen.key("Escape", false), None);
-    assert!(screen.modal_open());
-    let mut joining = LobbyScreen::new(Arc::new(test_kit::kit()), "Friday night", false);
-    assert_eq!(joining.key("Escape", false), Some(Request::Leave));
+fn every_lobby_leave_requests_the_shared_session_confirmation() {
+    for (state, hosting) in [(king(), true), (sample(2), false), (king(), false)] {
+        let mut screen = screen_of(&state, hosting);
+        assert_eq!(click(&mut screen, button_centre(6)), Some(Request::Leave));
+        assert_eq!(screen.key("Escape", false), Some(Request::Leave));
+        assert!(!screen.modal_open());
+    }
+    for hosting in [false, true] {
+        let mut screen = LobbyScreen::new(Arc::new(test_kit::kit()), "Connecting", hosting);
+        assert_eq!(screen.key("Escape", false), Some(Request::Leave));
+    }
 }
 
 #[test]
@@ -726,7 +701,7 @@ fn the_screen_draws_with_and_without_a_lobby_and_panels() {
     screen.update(Some(&state), None);
     screen.draw(&mut Canvas(&mut pixels));
     screen.focus.set(Id::Slots);
-    screen.press(Id::Leave);
+    screen.modal = Some(Modal::leave(vec!["Are you sure?".into()]));
     screen.draw(&mut Canvas(&mut pixels));
     assert!(screen.modal_open());
 }

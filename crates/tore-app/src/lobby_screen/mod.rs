@@ -41,8 +41,7 @@
 //! - **Panels**: Settings... (four pages of the King's settings, see
 //!   [`settings_panel`]), Players... (the King's Give crown and Kick for the
 //!   player selected in Players, see [`players_panel`]), Kick (with the
-//!   reason the player sees) and the King's Leave ("Leaving ends the game
-//!   for everyone. Leave?").
+//!   reason the player sees). Leave uses the shared session confirmation.
 //! - **Slot locks**: the King's right click on a slot closes it to the AI,
 //!   opens it again, or, with a player selected in Players, keeps it for that
 //!   player.
@@ -59,7 +58,7 @@ pub mod facts;
 mod k7b_tests;
 #[cfg(test)]
 mod layout_tests;
-mod modal;
+pub(crate) mod modal;
 #[cfg(test)]
 mod phase2_tests;
 pub mod players_panel;
@@ -176,7 +175,7 @@ pub enum Request {
     /// The King frees the aircraft kept for a player, this plane (stage K,
     /// message 53).
     Release(u32),
-    /// Leave the game: back to Direct Connection. The King has been asked.
+    /// Ask the app to confirm leaving for Direct Connection.
     Leave,
 }
 
@@ -255,7 +254,6 @@ pub struct LobbyScreen {
     /// What the game is called until its lobby state arrives.
     label: String,
     /// This player's game runs the host: leaving ends the game.
-    hosting: bool,
     slots: List,
     players: List,
     /// The Bluefor and Redfor check boxes' lamps (PvP only): their checked
@@ -305,9 +303,9 @@ pub struct LobbyScreen {
 
 impl LobbyScreen {
     /// A lobby screen on `kit` (in `MODEM3`'s palette). `label` names the
-    /// game while the lobby's state is on its way; `hosting` says this game
-    /// runs the host, so the player is the King and Leave asks first.
-    pub fn new(kit: Arc<Kit>, label: &str, hosting: bool) -> Self {
+    /// game while the lobby's state is on its way. Departure roles come from
+    /// the live session when the app confirms Leave.
+    pub fn new(kit: Arc<Kit>, label: &str, _hosting: bool) -> Self {
         let slot_columns = vec![
             Column {
                 x: 0,
@@ -389,7 +387,6 @@ impl LobbyScreen {
         let mut screen = Self {
             kit,
             label: label.to_owned(),
-            hosting,
             slots: List::new(layout::SLOTS_LIST, layout::SLOTS_WIDTH, 5)
                 .with_scroll_bar(layout::SLOTS_BAR)
                 .with_wheel_rows(layout::WHEEL_ROWS)
@@ -448,7 +445,7 @@ impl LobbyScreen {
     pub fn side_boxes(&self) -> Option<&[SideBox; 2]> {
         self.side_boxes.as_ref()
     }
-    /// A panel (Kick, or the King's Leave) is open.
+    /// A lobby panel is open. The app owns the session departure panel.
     #[cfg(test)]
     pub fn modal_open(&self) -> bool {
         self.modal.is_some()
@@ -939,15 +936,9 @@ impl LobbyScreen {
         }
     }
 
-    /// Leave, and Esc: the King is asked first, since the game ends for
-    /// everyone.
+    /// The app confirms using the current session, including host migration.
     fn leave_pressed(&mut self) -> Option<Request> {
-        if self.facts.king || (self.hosting && !self.facts.connected) {
-            self.modal = Some(Modal::leave());
-            None
-        } else {
-            Some(Request::Leave)
-        }
+        Some(Request::Leave)
     }
 
     fn press_default(&mut self) -> Option<Request> {

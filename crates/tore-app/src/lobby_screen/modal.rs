@@ -1,6 +1,4 @@
-//! The two small panels the lobby opens over itself: the King's Kick, which
-//! asks for the reason the player will see, and the King's Leave, which asks
-//! before it ends the game for everyone. One panel serves both: a title,
+//! The shared Kick and Leave panels: a title,
 //! some lines of words, an optional edit line, and two buttons.
 use crate::menu::{Canvas, text_width};
 use crate::ui_text;
@@ -33,7 +31,7 @@ pub enum Answer {
 pub enum Purpose {
     /// Kick this player (lobby id and callsign).
     Kick(u8, String),
-    /// The King leaves and the game ends.
+    /// The player confirms leaving the session.
     Leave,
 }
 
@@ -72,18 +70,14 @@ impl Modal {
         }
     }
 
-    /// The King's Leave panel: a question and Leave and Cancel (Cancel has
-    /// the keyboard, so a stray Enter does not end everyone's game).
-    pub fn leave() -> Self {
+    /// Leave and Cancel, with Cancel focused so a stray Enter stays in the game.
+    pub fn leave(lines: Vec<String>) -> Self {
         let mut focus = Focus::new(vec![Id::Ok, Id::Cancel], None);
         focus.set(Id::Cancel);
         Self {
             purpose: Purpose::Leave,
             title: "Leave the game".to_owned(),
-            lines: vec![
-                "Leaving ends the game for everyone.".to_owned(),
-                "Leave?".to_owned(),
-            ],
+            lines,
             reason: None,
             ok: Button::new("Leave", (PANEL.0 + 100, PANEL.1 + 120), 85),
             cancel: Button::new("Cancel", (PANEL.0 + 235, PANEL.1 + 120), 85).default_button(),
@@ -121,6 +115,12 @@ impl Modal {
     pub fn key(&mut self, name: &str, shift: bool) -> Answer {
         if name == "Escape" {
             return Answer::Cancel;
+        }
+        if self.purpose == Purpose::Leave
+            && matches!(name, "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown")
+        {
+            self.focus.step(true, |_| true);
+            return Answer::None;
         }
         match self.focus.key(name, shift, |_| true) {
             Route::Moved | Route::Ignored => Answer::None,

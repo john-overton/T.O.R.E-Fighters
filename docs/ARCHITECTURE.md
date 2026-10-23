@@ -6166,8 +6166,8 @@ shows "Connecting to the game..." until the host's first lobby state arrives.
 The client's `auto_ready` is off, the King's game never starts a mission by
 itself and a joiner's End Mission in flight returns that player to the lobby
 (`client.leave`) instead of leaving the game. `--connect` and `--host` are
-unchanged. The lobby ends with the session: Leave (the King is asked first:
-"Leaving ends the game for everyone. Leave?"), a kick, the host leaving or a
+unchanged. The lobby ends with the session: Leave (after the shared
+[role-aware confirmation](spec/multiplayer-menus.md#leaving-a-session)), a kick, the host leaving or a
 connection that fails put its reason (`close_text`) in Direct Connection's
 Messages, and the search starts again. The window title reads "Lobby".
 
@@ -6234,7 +6234,8 @@ that player alone.
 
 **A dedicated server's lobby** has no King (unless its file says `king
 first-player`): no Players... or Fly, the crown column is empty, Mission... is
-read only, and the start rule is in the ready hint. Leave never asks.
+read only, and the start rule is in the ready hint. Leave uses the shared
+[session departure confirmation](spec/multiplayer-menus.md#leaving-a-session).
 
 **The creator in Accept mode** (the King's Mission...). The single-player
 creator opened on `Screen::Quick` with `QuickMission::lobby` set: its OK button
@@ -6767,9 +6768,9 @@ of the game. Phase 2 separates the two roles the guide already names:
 - **The King** is a player. In a hosted game it starts as the house. **Pass
   the crown** (message 23, the King only) gives it to another connected player.
   A King who leaves, or is dropped, passes it to the longest-connected player
-  (in a hosted game that is the house). The King's Leave asks "Leaving ends
-  the game for everyone." only of the house; a King who is not the house is
-  told "The crown passes to Hawk."
+  (in a hosted game that may be the house). The shared
+  [departure panel](spec/multiplayer-menus.md#leaving-a-session) distinguishes
+  the crown from the host and accounts for a ready standby.
 - **Only the King** changes the mission and the settings, locks slots, starts
   and ends the mission, kicks and passes the crown (EF4's refusal "Only the
   King may do that." stands). The house without the crown is an ordinary player
@@ -8117,11 +8118,12 @@ flowchart TD
   rules -->|yes| revive["Revive (a lost aircraft)<br/>or any free aircraft (a release)"]
   rules -->|no| dim["row dimmed, the reason<br/>beside it and on choosing it"]
   esc --> leave["Leave Game"]
-  leave --> host{"this game hosts?"}
-  host -->|"no (a dedicated server's,<br/>or a friend's game)"| gone["leaves: nothing to hand over,<br/>no confirmation"]
+  leave --> confirm["shared role-aware Leave / Cancel panel"]
+  confirm --> host{"this game hosts?"}
+  host -->|"no (a dedicated server's,<br/>or a friend's game)"| gone["leaves: nothing to hand over"]
   host -->|yes| standby{"a standby is ready?"}
   standby -->|yes| hand["the hosting thread hands the<br/>game over, then the game leaves"]
-  standby -->|no| confirm["asks twice: leaving ends<br/>the game for everyone"]
+  standby -->|no| ended["leaving ends the game"]
 ```
 
 - **The idle time (John).** `idle-ai` is never, 1, 2, 5 or 10 minutes, 5 by
@@ -8164,15 +8166,15 @@ flowchart TD
   frees an away player's reservation when its goodbye is a leave on purpose
   (`LeaveReason::Left`), so the aircraft stays with the AI, free for others.
   This is John's 2026-10-05 rule (End Mission releases; only a drop keeps the
-  aircraft) applied to leaving on purpose. **A game that only joined** (a
-  dedicated server's, a friend's) never hosts: it just leaves, with no
-  handover and no confirmation (John, 2026-10-06). **A hosting game** hands
+  aircraft) applied to leaving on purpose. **A game that is not currently
+  hosting** (a dedicated server's or a friend's client) leaves without
+  handover after the shared confirmation. **A hosting game** hands
   the game over to a ready standby: the hosting thread is stopped first, which
   hands over (`Host::hand_over`) before the game's own connection says
   goodbye, since the house leaving ends a game that has not handed over. With
-  no ready standby the row asks twice: its first choice reads "Choose again to
-  end it" beside the row, and the second leaves, which ends the game for
-  everyone. The game learns whether a standby is ready from the hosting
+  no ready standby the shared panel warns that leaving ends the game.
+  The [departure specification](spec/multiplayer-menus.md#leaving-a-session)
+  defines the current words for each role and destination. The game learns whether a standby is ready from the hosting
   thread's report ([`Report::Standby`](../crates/tore-app/src/net/hosting.rs)).
 - **The live menu's words.** The menu of a live view (an away player's own
   aircraft, or an observer's) no longer says "REPLAY PAUSED" or "Resume
