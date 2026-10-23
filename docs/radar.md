@@ -523,14 +523,73 @@ Agent-authored signature model: the unit direction from target aircraft to
 observing radar is transformed into the target's body axes. With f, r and u its
 forward, right and up components:
 
-`effective_signature = PT_radar_signature * (f*f + 2*r*r + 4*u*u) * configuration`
+`effective_signature = (PT_radar_signature + stores) * (f*f + 2*r*r + 4*u*u) * configuration`
 
 The configuration multiplier is
 `(1 + 0.25*gear) * (1 + 0.15*flaps) * (1 + 0.50*bay_open)`, using actual deployed
 fractions 0..1, not command switches. Components absent from an aircraft contribute
 zero deployment. These weights are agent-authored gameplay tuning, not recovered
 RCS measurements. They are profile fields with common defaults, not extra
-hardcoded rules for named aircraft. External-store modifiers remain deferred.
+hardcoded rules for named aircraft. The deployment term is applied on the RCS page
+only so far: aircraft rows seen by other radars carry no gear, flap or bay
+deployment yet, while they do carry the store term below.
+
+### External stores
+
+John asked on 2026-10-16 that ordnance raise detectability, noting that an F-22
+with tanks was no easier to find than a clean one. Stores carried outside the
+aircraft add to the PT radar signature before the aspect factor:
+
+`stores = 3 * store_count + 2 * store_lbs / 1000`
+
+Both weights are profile fields with these common defaults (agent decision,
+fitted gameplay tuning, not measured cross sections). What counts:
+
+| Counted | Not counted |
+| --- | --- |
+| Selected external tanks, at full weight (shell plus fuel capacity, so burning fuel does not shrink them) | Stores in an internal bay (source location 3), whatever they are; an open bay is the existing `bay_open` term |
+| Each bomb, missile or AGM a station on a centreline, fuselage, wing, wingtip, shoulder, tunnel or separate pylon still holds | Internal guns and fixed-slot equipment, which the PT value already includes |
+| Rocket pods while they have a rocket left (the same count jettison drops) | A station in an unreviewed location byte, treated as internal |
+| Gun pods while fitted, and designator pods | |
+
+The count follows the live loadout: a store that is fired, dropped or jettisoned
+stops counting on that tick. An aircraft flying with no external stores fitted
+carries none. A zero PT signature, which is how radar is kept from seeing an
+aircraft on the ground, stays zero whatever it carries.
+
+The term is additive on purpose. Under the square-root range law a tank matters
+a great deal on a signature-10 F-22 and little on a signature-100 F-15C, which is
+the physically sensible direction. With a 90-nmi search radar, nose-on, in clear
+air (look-down, notch and jamming factors 1), these loads give:
+
+| Aircraft and load | Signature | Detection range | Change |
+| --- | ---: | ---: | ---: |
+| F-22A clean (bay stores only) | 10.0 | 28.5 nmi | |
+| F-22A, two 600 gallon tanks | 33.5 | 52.1 nmi | 1.83x |
+| F-22A, two 500 gallon tanks | 30.5 | 49.7 nmi | 1.75x |
+| F-22A, four AIM-120 on the wing pylons | 24.8 | 44.8 nmi | 1.57x |
+| F-22N, its fuselage AIM-120, AGM-65 and AIM-9X | 79.6 | 80.3 nmi (63.6 clean) | 1.26x |
+| Rafale C, 2,000 litre centreline tank | 60.7 | 70.1 nmi (63.6 clean) | 1.10x |
+| F-15C, three 600 gallon tanks, four AIM-120, four AIM-9 | 163.6 | 90 nmi (cap) | 1.00x |
+| F-15C, the same under look-down factor 0.5 | 163.6 | 57.6 nmi (45 clean) | 1.28x |
+| A-10, 8 Mk 82, 4 Mk 84, 2 LAU-61, 2 AIM-9, look-down 0.5 | 173.6 | 59.3 nmi (45 clean) | 1.32x |
+| Su-25, 8 FAB-500, 2 AA-8, look-down 0.5 | 148.1 | 54.8 nmi (45 clean) | 1.22x |
+
+A signature-100 aircraft is already at the radar's nominal cap nose-on in clear
+air, so its load shows only once look-down, notch or jamming shorten the range,
+or as a later burn-through against its jammer. A loaded striker low over the
+ground, seen from above, is exactly that case. These are gameplay results, not
+real-aircraft detection claims.
+
+One count serves every consumer, from the simulation's shared state: AI
+aircraft rows (refreshed with their pose each tick), human seats both as rows
+other players' radars and missiles see and as the AI's world objects, radar
+search and track for players and AI, the jammer interference comparison, radar
+and active missile seekers (air-to-air and surface-launched), the air-to-ground
+page's object signature and the RCS page contour. Surface air-defence radars
+detect by their records' range bands and read no signature at all, so neither a
+clean F-22 nor a loaded one changes what a SAM site sees. IR signature is out of
+scope (deferred to the damage-model pass).
 
 At clean configuration, nose/tail is 1x, side is 2x, top/bottom is 4x the PT base.
 A radar abeam sees the factor rise from 2x to 4x as the aircraft banks from level
@@ -538,8 +597,9 @@ to 90 degrees. A radar directly on the longitudinal axis does not receive that
 same bank bonus. This ties exposure to what that observer can see rather than
 making every turn globally increase signature. At 180-degree roll the clean
 level-side factor returns to 2x. This applies to targets as well as ownship.
-The square-root detection law and the jammer return comparison both use
-this same effective signature. IR uses its own base-signature policy above.
+The square-root detection law, the jammer return comparison and radar missile
+seekers all use this same effective signature. IR uses its own base-signature
+policy above.
 
 The contour samples this function around ownship at 5-degree bearing steps
 against a documented, level reference radar: 25 nmi nominal search range,
@@ -587,7 +647,11 @@ recorded here as the player guide.
 Covered by tests: the same PT viewed nose/side/top gives 1/2/4 factors; abeam
 bank changes exposure but nose-on roll does not; lowering gear adds 25 percent
 smoothly; clearing gear/flaps/bays restores baseline; the RCS contour and the
-radar/jammer calculations sample the identical signature function; passive
+radar/jammer calculations sample the identical signature function; bay stores
+and internal guns add nothing while external tanks and rail missiles do, and
+fired or jettisoned stores stop counting (F-22 clean 28.5 nmi, two tanks 52.1
+nmi); an AI aircraft's row and a human seat's row carry the same live count the
+RCS page draws; passive
 reception works with own radar off; a jammer-only bearing leaks no ranged dot;
 and an inside-contour contact implies no lock.
 

@@ -79,7 +79,7 @@ These differ from the USNF/ATF records described in the older menu port. Runtime
 - **EALIB:** validates magic, directory bounds, monotonic offsets, flags, and terminal sentinel. Flag 0 reads stored content; flag 4 reads a size prefix and DCL stream. Lookup is case-insensitive, last duplicate wins. No resource paths are used for extraction.
 - **DCL:** raw literals (mode 0), dictionary bits 4–6, canonical length/distance codes, overlapping back-references, explicit terminator, and exact output size. The menu uses a 16 MiB output cap; the general extractor has a configurable cap. All 7,372 compressed entries advertise `00 06` and were successfully decompressed by the general extractor. The 22 menu resources also matched independent reference output byte for byte. Coded-literal mode 1 is rejected. See [third-party notices](../../THIRD_PARTY_NOTICES.md).
 - **PIC:** bounded raw rasters and span sprites, 6-bit palette expansion, row-offset checks, span terminator/coverage checks, and 256 glyph records. Menu images are capped at 4,194,304 pixels. Font-strip index 255 is transparent; ordinary sprite transparency comes from span coverage, not a universal palette key.
-- **DLG:** narrow CHOOSEAC reader. Parses PE/PL sections and relocation records as data, identifies plausible relocated label fields, and validates eight in-bounds button records. This is not a general widget/thunk-class decoder. It never executes x86 resource code.
+- **DLG:** `tore_formats::ui::dialog` parses PE/PL sections and relocation records as data and identifies draw records by their relocated imported draw thunks. It reads actions, list boxes, rockers, text, edit boxes and check boxes, and a size-zero dialog's picture name (see [Multiplayer connection screens](#multiplayer-connection-screens-dlg-records-panels-and-widget-pieces-ef0-2026-10-01)). It does not decode sliders, dials or the setup thunk's work. It never executes x86 resource code.
 - **MNU:** reference decoder recovers some labels, including `Exit to Windows` with `Alt-F4` in `MAINMENU.MNU` and `Pref`, `Graphics...`, `Sound...`, `Multi` in `FMENUD.MNU`. Tree flags, exact activity-menu composition, and native dropdown drawing are unresolved.
 - **PCM:** unsigned 8-bit mono; `.11K` is treated as 11,025 Hz and `.5K` as 5,512 Hz following the reference convention. The application uses original sample bytes with linear resampling and authored gains, loop, and cue scheduling. No XMI synthesizer or instrument bank has been implemented.
 
@@ -101,7 +101,7 @@ The app previews that original PCM recording at low volume and allows disabling 
 - The six available activity buttons stay on the menu and briefly announce “coming soon.” Replay/continue are inert.
 - `?` contains stub Help/About and working Exit to Desktop (portable wording for the recovered Windows exit action).
 - `Pref` contains Graphics..., Sound..., Controls... and Re-import media.... Sound... opens the retail [Sound/Music Prefs](../spec/sound-prefs.md) dialog.
-- `Multi` contains stub Host Game/Join Game/Player Setup. These labels/groupings and dropdown chrome are authored scaffolding, not a claimed decoded retail tree.
+- `Multi` contains two authored rows (EF7, 2026-10-01): *Direct Connection...*, which opens the [Direct Connection screen](#the-direct-connection-screen-as-built-ef7), and *Internet Lobby...*, a stub that announces "coming soon" (the public lobby of stage I). They replace the earlier stub Host Game/Join Game/Player Setup. These labels/groupings and dropdown chrome are authored scaffolding, not a claimed decoded retail tree (retail's six rows are listed below).
 - Tab/arrows and Enter navigate; Escape dismisses; Command-Q/Alt-F4 and window close exit.
 
 ## Provenance and reproduction
@@ -185,3 +185,527 @@ native text compositor supplies separate briefing rectangles. This supersedes
 using stale QUICKB strings as active choices. See [the source contract](quick-mission.md)
 and [validation](../baselines/menu-options-geometry.md). Screen rendering and
 runtime inline hit regions remain unimplemented by this research step.
+
+## Multiplayer connection screens: DLG records, panels and widget pieces (EF0, 2026-10-01)
+
+Research mode. This section holds the facts behind the retail connection
+screens a player sees in multiplayer; the player-visible behaviour is in the
+[multiplayer spec](../spec/multiplayer.md#retail-connection-screens). The
+stage E and F slices that import and draw these screens read both.
+
+Build identity: installed game `FA.EXE` 1.02F, SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`;
+`FA_2.LIB` SHA-256 begins `fb8b30216e739292` and `FA_1.LIB` `657254c5bb3bcf36`.
+The 1.0 disc (`disc1/SETUP.ESA`) holds the same pictures byte for byte and
+dialogs that differ by four bytes (the module link timestamp, file offsets 137
+to 140); the decoded geometry is identical.
+
+Evidence labels: **R** read from a retail resource with a repository reader,
+**S** static reading of `FA.EXE` (addresses are virtual addresses), **M**
+measured on John's retail screenshot of 2026-10-01 (`NETWORK CONNECTION`, taken
+at 2403 by 1801 pixels), **I** inference, **U** unknown.
+
+### Screenshot registration (M)
+
+The screenshot is the 640 by 480 screen enlarged by 3.770 horizontally and
+3.768 vertically and cropped, not 2403 divided by 640. Registering it on the
+`NETIPX3.PIC` background (its top 80 rows are untouched by the dialog; the fit
+reaches a correlation of 0.998) gives x = 3.770 (px + 0.5) - 4.25 and
+y = 3.768 (py + 0.5) - 2.0. After that every rectangle below matches a whole
+pixel, and the dialog rectangle from the header (10, 80, 619 by 395) is exact.
+Anyone measuring a screenshot of the game must register it first; with the
+nominal scale every edge is off by up to two pixels.
+
+### DLG records (R, S)
+
+All DLGs are PE-style modules whose CODE section holds the data; the reader
+returns, per draw record, its static local position. Positions are local to the
+dialog origin.
+
+Header (code offsets):
+
+| Offset | Meaning |
+| --- | --- |
+| 0 | Pointer to a setup thunk, or zero. `_MultiPreload` on `NEWNET`, `NETNEW`, `NETJOIN`, `NETTCP`, `NETIPX2`, `NETDIR`, `FORTAIRB`; `_ChoosePreload` on `CHOOSEAC` and `MC_DLG`. The loader calls it when the dialog opens (S, `0x487c35`). What it does is not decoded (U) |
+| 4, 6 | Origin x, y (signed 16 bit) |
+| 8, 10 | Width, height. **Zero means the dialog is a picture** (see below) |
+| 12 | Zero |
+| 14 | For a size-zero dialog, the name of the picture, a NUL-terminated string (`MODEM`, `MODEMCOM`, `SERIAL`, `COM`, `NETIPX`, `NETDIR`, `MC`). For a sized dialog the bytes are `ff 00 00 00` (meaning unknown) |
+
+A sized dialog gets the **generic panel** of that size drawn at its origin
+(recipe below). A size-zero dialog draws the named `.PIC` at its origin and
+nothing else. `MODEMSTS` is the one exception to the rule: it has a size
+(360 by 190) and a `MODEMSTS.PIC` (361 by 192) exists (U which is drawn).
+
+Draw records, found through relocated pointers to import thunks. Offsets are
+within the record:
+
+| Draw | Fields |
+| --- | --- |
+| `_DrawAction` (24 bytes) | +4 x, +6 y, +17 action id, +18 width, +20 label pointer. Id 1 is the default (blue) button, 2 is Cancel, 0 any other. A label pointing at an import thunk is `_okString` (OK) or `_cancelString` (Cancel); otherwise it is a string. Width 0 leaves the width to the toolkit (`CALLSIGN`, `EDITSIGN`, the `MC_*` dialogs; the value is not established, U) |
+| `_DrawListBox` | +4 x, +6 y, +8 width in pixels, +16 **row count** (visible rows). `NEWNET` 4 (confirmed by four rows on the screenshot, M), `NETNEW` and `NETJOIN` 8, `MODLIST` and `COMLIST` 10, `CALLSIGN` 14 |
+| `_DrawRocker` | +4 x, +6 y. The vertical PREV/NEXT rocker that pages the list. Position (0, 0) on `MODLIST` and `COMLIST` means the toolkit places it |
+| `_DrawText` (18 to 22 bytes) | +4 label pointer (zero when the game fills the words in), +12 x, +14 y, +16 a 16 bit value of unknown meaning: 9 on a text that another record follows, 10 on the last text of a dialog, 3 on the text beside a check box (I: it looks like the type of the record that follows) |
+| `_DrawEditBox` | +4 x, +6 y, +8 a value, 40 on every network prompt and 25 on the pilot name (`MC_NAME`). The edit routine sizes the field as ten pixels a character plus 16 and 24 high (S, `0x48c710`), so the value is probably the longest entry (I; but 40 characters would not fit `NETEDT`'s 295 pixel panel, so this is U) |
+| `_DrawCheck` | +4 x, +6 y (repeated at +8, +10), +12, +14 the size, 19 by 19 |
+| `_DrawSliderHoriz`, `_DrawSliderVert`, `_DrawDial` | Not decoded (`MC_DLG` holds both sliders, `GRAFPREF` and `LOADORD` the dial) |
+
+Texts and inline words that are not in the DLG are drawn by the screen's own
+code (the labels of `NEWNET`, the list rows, the status words).
+
+Decoded dialogs (origin, size or picture, controls in file order; all rows R):
+
+| Dialog | Origin | Size or picture | Controls |
+| --- | --- | --- | --- |
+| `NEWNET` | 10, 80 | 619 by 395 | New (96, 339, default), Join (219, 339), Options (342, 339), Cancel (465, 339), all 85 wide; list (38, 105) 200 wide, 4 rows; rocker (270, 120) |
+| `NETNEW` (host's players) | 10, 100 | 619 by 375 | Start (138, 319, default), Reject (282, 319), Cancel (426, 319), 85 wide; list (35, 46) 549 wide, 8 rows |
+| `NETJOIN` (joiner's players) | 10, 100 | 619 by 375 | Cancel (267, 319); list (35, 46) 549 wide, 8 rows |
+| `NETTCP` | 89, 80 | 465 by 395 | OK (113, 339), Default (208, 339), Cancel (303, 339), 85 wide |
+| `NETIPX2` | 89, 80 | 465 by 275 | OK (113, 219), Default (208, 219), Cancel (303, 219) |
+| `NETCEDT` (message prompt) | 10, 200 | 620 by 124 | OK (60, 75), Cancel (155, 75); edit box (56, 20) |
+| `NETEDT`, `NETBEDT` | 172, 200 and 60, 200 | 295 and 514 by 124 | OK (60, 75), Cancel (150, 75) and (155, 75); edit box (20, 40) and (42, 40) |
+| `EDITSIGN` (callsign prompt) | 168, 148 | 303 by 125 | OK (66, 90), Cancel (200, 90); edit box (25, 20); text "Enter your callsign:" (38, 20) |
+| `CALLSIGN` (callsign list) | 230, 80 | 220 by 370 | OK (52, 337), Cancel (120, 337); list (30, 35) 160 wide, 14 rows; rocker (160, 295); text "Choose your callsign." (43, 10) |
+| `MODEM` | 80, 84 | picture `MODEM` | Call (335, 322, default), Answer (335, 287), Cancel (335, 252), 118 wide; texts "Player name" (106, 32) and "Phone number" (286, 32) |
+| `MODEMCOM` | 86, 96 | picture `MODEMCOM` | OK (253, 300), Cancel (348, 300); eight texts: "AT command strings:" (39, 90), "Initialization:" (66, 110), "Dial prefix:" (66, 176), "Listen for caller prefix:" (66, 210), "Hangup prefix:" (66, 244), "Dial suffix:" (243, 176), "Listen for caller suffix:" (243, 210), "Hangup suffix:" (243, 244) |
+| `MODEMSTS` | 140, 174 | 360 by 190 | text "Connection status" (135, 35) |
+| `MODLIST`, `COMLIST` | 138, 125 and 170, 125 | 364 and 300 by 270 | OK (32, 237), Cancel (127, 237); list (20, 20) 324 and 260 wide, 10 rows; rocker |
+| `SERIAL` | 139, 98 | picture `SERIAL` | Call (53, 293, default), Answer (152, 293), Cancel (247, 293), 85 wide; text "Connection status" (135, 184) |
+| `COM` | 146, 150 | picture `COM` | OK (225, 189), Cancel (225, 154) |
+| `NETIPX`, `NETDIR` | 140, 92 and 89, 80 | pictures `NETIPX`, `NETDIR` | Left over from the earlier game; the 1.02F executable never names them (S) |
+
+The mission-setting dialogs `MC_*` (the host's, listed in the
+[spec](../spec/multiplayer.md#the-hosts-mission-setting-dialogs)) are all sized
+panels of 220 by 220 (the single-list ones), 220 by 380 (`MC_NAT2`), 250 by 190
+(`MC_SCR`), 380 by 95 (`MC_NAME`), 520 by 235 and 620 by 404 (`MC_NAT`,
+`MC_NATF`, with check boxes), and `MC_DLG`, a picture (`MC`) at (0, 77) with OK
+(482, 373) and Cancel (563, 373), 75 wide, two sliders and a rocker. All decode
+with the reader.
+
+### The generic panel (S, M)
+
+The routine at `0x487e90` takes (x, y, w, h) and builds the panel from six
+pieces plus a fill, all drawn in the screen's own embedded palette (never the
+flight palette). On `NEWNET` the rectangle is the DLG header's (10, 80, 619 by
+395) (M, whole-pixel scan against the registered screenshot).
+
+1. **Fill.** `PANEL.PIC` (640 by 480, grey scratched texture, almost flat: palette
+   entries 73 and 81) blitted into the rectangle. It fits whole; whether it tiles
+   for a larger panel is not established (U).
+2. **Corners.** `EDGETL` (31 by 35) at (x, y), `EDGETR` (30 by 35) at
+   (x + w - 30, y), `EDGEBL` (31 by 35) at (x, y + h - 35), `EDGEBR` (30 by 35)
+   at (x + w - 30, y + h - 35). Only `EDGETL` and `EDGEBR` carry a bolt head,
+   which matches the screenshot (bolts at the top left and bottom right).
+3. **Edges.** `EDGETB` (47 by 4): its top two rows tile along the top edge from
+   x + 31 to x + w - 31 and its bottom two rows along the bottom edge (at
+   y + h - 2). `EDGELR` (4 by 26): its left two columns tile down the left edge
+   from y + 35 to y + h - 34 and its right two columns down the right edge, in
+   25 pixel steps. The frame is two pixels thick.
+
+The screenshot matches this recipe by eye and by a per-region difference of 2.9
+grey levels over the panel (the remainder is resampling blur).
+
+### What `NEWNET` adds on top of the panel (S, M)
+
+Everything else on the NETWORK CONNECTION screen is drawn by the screen function
+at `0x492740`. Coordinates are absolute on the 640 by 480 canvas; `(x, y)` of a
+text is where its glyph strip starts.
+
+| Item | Rectangle or position | Notes |
+| --- | --- | --- |
+| Background | `NETIPX3.PIC`, no panel | Its own 256 colour palette |
+| Menu bar | "?" at (84, 40) | `MULTI.MNU`: `?` and `Exit to Windows [Alt-F4]` (R) |
+| Title | `PANELFNT`, centred in the dialog, top at y 87 (x 255 for "TCP/IP Network connection", 128 wide) | The text is `%s Network connection` with `TCP/IP` or `IPX/SPX`; y is the dialog's y + 7 (S, `0x493db0`) |
+| Inner frame | outline (30, 100) to (608, 454), one pixel | The dialog inset by 20 on every side (S, `0x493d60`); colour is palette entry 94 (value 198) (S) |
+| "Callsign:" | `PANELFNT` at (45, 110) | x is the dialog's x + 35, y its y + 30 (S) |
+| Callsign field | (88, 108), 139 by 13, flat fill (grey 97) | The game's inline field markup `Callsign:  .button` + 69 spaces + `..button`: 69 spaces of `PANELFNT` are 138 pixels. Empty, it is a flat lighter bar without the `EDIT*` pieces. Its text font while typing is not established (U; next step in "Unknowns") |
+| "Games" | `PANELFNT` at (45, 165) | |
+| Games box | outline (45, 180) to (313, 284), 269 by 105 | One pixel, colour as the inner frame; no fill |
+| List rows | 4 rows at (48, 185 + 18 i), 200 wide | Row bar `LISTLFT` (30 by 17), `LISTMID` (20 by 17) tiled, `LISTRT` (30 by 17); row pitch 18 pixels (S, add `0x12` per row at `0x48afc7`, and M). Row text is drawn in `SMLFONT` (S, `0x48b233`); the selected row is painted with `LISTHI` (24 by 12 striped) 12 pixels high, starting 4 pixels in (S) |
+| Rocker | `ROCKER02` at (280, 200) | The idle frame; the DLG position (270, 120) plus the origin |
+| "PREV", "NEXT" | `PANELFNT` at (252, 201) and (252, 224) | `PANELFND` (the dim face) when disabled (S) |
+| "PAGE" | `PANELFNT` at (91, 265) | Drawn by the list widget (S, `0x48b02e`) |
+| Page box | `PAGEBOX` (50 by 17) at (120, 261) | Drawn at (x - 1, y - 4) of the counter's origin (S, `0x48b294`) |
+| Page counter | `SMLFONT`, at y 264 | `"%d "` (the current page; no trailing space from 10 up) then `" of  %d"` (two spaces before the count; one from 10 up) joined into one string; the string starts at the counter's x + 15 minus the width of the first part, so the current page number is right aligned and "1  of  0" starts at x 129 (S, `0x48a7d0`, and M). The dark fill is palette entry 118 (value 12) |
+| "Players" | `PANELFNT` at (340, 165) | |
+| Players box | outline (340, 180) to (593, 284), 254 by 105 | Filled flat grey 81 (nearest palette entry 109) (M) |
+| "Messages" | `PANELFNT` at (45, 304) | The retail heading line also holds a Send Message button (the string `Messages` + 25 spaces + `.button Send Message ..button`, S); it is not on the screenshot, taken before any connection (U when it shows) |
+| Messages area | outline (45, 319) to (593, 406), 549 by 88, flat grey 81 | Eight lines of `PANELFNT` at its line height of 10 pixels plus 8 (S, `0x47f100`: height = 8 lines + 8); x = dialog x + 35, width = dialog width - 70 |
+| Buttons | New face (106, 416) with the default cap `ACTDFLT` (20 by 27) at (86, 416); Join (229, 419), Options (352, 419), Cancel (475, 419); 85 wide | The DLG positions plus the origin. Retail and `Menu::action_button` draw the default button three pixels higher with its cap to the left; the multiplayer screens draw its face and the outline rows on top of its pieces where retail does, but of the cap only its first four columns (the outline's left side) 6 pixels left of the face and its last two (the face's own left rim) 2 pixels left of it, so the outline closes round the button about four pixels off its edge and the striped box is gone (*opinionated*, John, 2026-10-05) |
+| Button labels | New in `FONTDFT` (bluish glyphs, brightest pixel about 223), the others in `FONTACT` (greenish, about 215) | Centred in the face: x = button x + (73 - text width) / 2 rounded down (the default button's label 1 pixel further left); glyph strip top at y + 6 (default: face y + 10) (M, fit; the two fonts score 24.2 and 24.4 against the next best 27 to 30, and the glyph colours settle it) |
+
+A render of the whole screen made only from these numbers, beside the
+screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
+
+### Fonts (S, M)
+
+| Font (all `FA_1.LIB` PIC glyph strips, 256 records) | Height | Draws |
+| --- | --- | --- |
+| `PANELFNT` (`PANELFND` the dim copy) | 10, line height 10 | Panel title, labels, headings, "PAGE", "PREV", "NEXT", the Messages area; each connection function loads `PANELFNT.PIC` (S: `0x49284e`, `0x4931a3`, `0x4937ec` and others). Widths: "TCP/IP Network connection" 128, "Callsign:" 40, "Games" 28, "Players" 34, "Messages" 43, all matching the screenshot to a pixel |
+| `SMLFONT` | 12 | List row text and the page counter |
+| `FONTACT` (`FONTACD` dim), `FONTDFT` (`FONTDFD` dim) | 12 | Button labels, normal and default |
+| `WHEELFNT` | 14, ten pixels a glyph (monospaced) | Text in the `EDIT*` fields (S: `0x48c78a` loads it in the edit routine; the caret moves 10 pixels a character, `0x48bec0`). Kept by the import since EF1 (it was not in the survey's list) |
+| `MPFONT` | 9 | The connected-state status window (below) |
+| `PANLFNT2`, `FONT4X6`, `MFONT320` | | Present in `FA_1.LIB`, not used by these screens (U) |
+
+### Widget pieces (R, S)
+
+- **Edit field** `EDITL` (8 by 24), `EDITM` (20 by 24, tiled), `EDITR` (8 by 24):
+  a recessed dark bar with a lighter red half, 24 high; the field is the
+  entry count times 10 plus 16 wide (S). The caret is a white (palette 10)
+  vertical line 12 high at the field's x + 8 + 10 times the cursor index, 5
+  below its top; it is erased by blitting a one pixel slice of `EDITM`.
+  *The game's screens do not draw it* (John, 2026-10-01: no red and grey text
+  areas): every field the player types in on a multiplayer screen is the
+  flat grey box NEWNET's Callsign field is (grey 97, `PANELFNT` text, a one
+  pixel white caret 12 high, 13 pixels high for the callsign and 18 for the
+  other fields), and the kit does not carry `EDITL/M/R` or `WHEELFNT`.
+- **List** `LISTLFT` (30 by 17), `LISTMID` (20 by 17), `LISTRT` (30 by 17),
+  `LISTHI` (24 by 12): see the table above. The `LISTMID` rows are: row 0 a
+  light edge (73), rows 1 and 2 dark, rows 3 to 13 near black (12), rows 14 to 16
+  a light bevel.
+- **List row fill** (lobby pass L3, 2026-10-09): a taken PvP slot paints the well
+  of its bar in its side's colour (royal blue 36, 81, 186 or bright red 210, 36,
+  40) under white text. The fill covers rows 1 to 13 of the 17 row bar, between
+  the light edge (row 0) and the bevel (rows 14 to 16), and stops 2 pixels short
+  of each end. `Row::filled` carries it; the row's own text colour is unchanged.
+- **Check box in a list's heading row** (lobby pass L3): the PvP side boxes use
+  `CHECK00` to `CHECK06` at 28 pixels, the label drawn by the screen in the
+  side's light colour (134, 182, 223 or 206, 113, 121); a disabled lamp is
+  drawn at half brightness.
+- **Scroll bar** (lobby pass L1, 2026-10-09): retail has no list scroll bar, its
+  lists page with the PREV/NEXT rocker. The red bar John remembers is the Sound
+  Prefs slider (`docs/spec/sound-prefs.md`, "Each slider is a track and a
+  knob"), and the kit reuses it as a scroll bar (*opinionated*, requested by
+  John). The pieces are `SLIDETOP` (34 by 9, 468 bytes), `SLIDEMID` (34 by 8,
+  743) and `SLIDEBOT` (34 by 15, 636) for the track and `SLIDERV` (26 by 30,
+  1,158) for the knob, all in `FA_1.LIB`. Recipe (`_DrawSliderVert`, `0x48bc60`,
+  as the Sound Prefs notes record it): the top cap at the track's first row, the
+  middle tiles from 8 rows down to where the bottom cap starts (the last tile cut
+  short), the bottom cap 15 rows above the track's end, the knob 6 pixels in
+  from the left. The track is the Sound screen's 90 pixels at its tallest; the
+  kit stretches it to any height of at least 41 by tiling `SLIDEMID` (so a list's
+  89 pixels and a Messages box's 76 to 86 work). The knob is never stretched.
+  What the kit adds (*agent decisions*):
+  - Knob travel is the track's height less 41: 6 pixels of margin above the knob
+    and 5 below, which is retail's 49 pixels on a 90 pixel track. The knob's top
+    is `top + travel * first / (total - visible)`, rounded to the nearest pixel,
+    where `first` is the first line shown; a pointer position maps back by
+    rounding to the nearest line.
+  - A press on the knob holds it at the grip's offset (the knob does not jump to
+    the pointer, unlike the Sound screen's track click) and it follows the
+    pointer's height, also outside the bar; a press on the track above or below
+    the knob pages toward the press (a list's window, a Messages box's page less a
+    line); the wheel is the owner's (a list slides its window a row a notch, a
+    Messages box three lines).
+  - With everything on one page the track is drawn and the knob is not, and the
+    track does not react, so the layout never shifts.
+  - **Flat fallback.** `SLIDETOP`, `SLIDEMID` and `SLIDEBOT` are not in any
+    required import list (`selection::SLIDER_ART`, kept from `FA_1.LIB` with the
+    menu art, 1,847 bytes in all), so a pack imported before the lobby pass still
+    loads: the kit skips a missing piece (`kit::OPTIONAL_PIECES`) and the bar
+    draws the same layout flat, from the greys measured on a middle row of the
+    pieces: the panel's 81 for the face, a slot with a 12 groove 2 pixels wide
+    down the middle (57 on its left, 113 on its right) and a 24 then 12 left
+    edge, a 57 and 113 right edge. The slot's top is a bar four rows deep (a 57
+    bevel line, 32, 12, 12, a 40 fade) that joins the left wall in one corner,
+    as `SLIDETOP` does; until L5 the wall began a row above a two row bar and
+    showed as a small black lip at the top left. The same stepped corner is in
+    the retail art itself (the Sound Prefs picture and `SLIDETOP`), so with the
+    real pieces nothing was wrong. The knob (`SLIDERV`) is a menu piece every
+    import has. A re-import adds the real track; nobody is forced to.
+  - Where it is used: the Messages box on every connection screen (inside the box's
+    frame, flush right, 34 wide; the text stops 3 pixels short of it, so a 549
+    wide box has 507 for text), and the kit's `List` in its scrolling mode (the
+    lobby's slots and players lists, by slice L2).
+- **Check box** `CHECK00` to `CHECK06` (28 to 33 square). Frame order (S, `0x48b320`):
+  `CHECK00` is the box off at rest, `CHECK06` the box on at rest. When the
+  animation is on, switching on plays `CHECK01` to `CHECK06` and switching off plays
+  `CHECK05` back to `CHECK00`, one frame per screen update; with the animation off
+  only `CHECK00` or `CHECK06` is drawn. So 00 to 03 are unlit and 04 to 06 lit amber
+  because the lamp warms up and cools down through the middle frames. `CHECK320`
+  (48 by 12) is the 320 by 200 mode's version.
+- **Rockers** `ROCKER00` to `ROCKER04` vertical (27 by 40 with the shadow), the
+  idle frame `ROCKER02`; `ROCKERH0` to `ROCKERH4` horizontal (39 by 29), unused by the
+  screens here (S: the code builds `ROCKERH%d`, U where it is used).
+- **Buttons** `ACTION0L/M/R` green, `ACTDFT0L/M/R` blue default,
+  `ACTIOD0L/M/R` and `ACTDFD0L/M/R` the disabled copies, `ACTDFLT`/`ACTDFLD` the
+  20 by 27 cap. The disabled default pieces are needed wherever Start or Call
+  can be unavailable. The default pieces are 33 rows tall: the top three are a
+  navy outline and a grey gap above the face. The widget kit draws them, and of
+  the cap (a frame round a striped box) only its first four columns (a navy
+  line, a grey border and two clear columns that carry the top and bottom lines
+  across) 6 pixels left of the face, and its last two (a grey border and a dark
+  navy line, the face's left rim) 2 pixels left of it. The outline stands about
+  four pixels off the button's edge, as the top line's end does beyond the
+  shadow on the right. The striped box in between is not drawn (*opinionated*,
+  John, 2026-10-05; he had the outline taken out, put back, then asked for the
+  rim and the spacing).
+- **Ghosted text** is drawn 1.275 times as bright as the first widgets drew it
+  (*opinionated*, John, 2026-10-05: first 50 percent brighter, then 15 percent
+  darker than that): an empty field's hint (tint 150 to 191), a disabled
+  field's text (120 to 153), a dimmed list row (118 to 150) and the disabled
+  button labels (`FONTACD`, `FONTDFD`, lifted by the same factor but no
+  brighter than the live labels' body, 206). `PANELFND` (dim PREV and NEXT,
+  disabled check box labels, notes) is left as retail has it: its body is
+  already about 70 percent of the live font's, so more would put dimmed text
+  above live text.
+
+### What the import keeps for these screens (EF1, 2026-10-01)
+
+Implementation mode. The lists are `MULTIPLAYER_ART` (`FA_1.LIB`, 35 pictures)
+and `MULTIPLAYER_DATA` (`FA_2.LIB`, 26 dialogs and menus) in
+`crates/tore-import/src/selection.rs`, and the game's pack check
+(`crates/tore-app/src/assets.rs`) requires every name and reads each picture,
+dialog and menu with the existing readers. The checked sizes below are the
+installed game's; the 1.0 disc gives the same sizes, and its dialogs and menus
+differ by the four timestamp bytes described above. The whole addition is
+about 1.44 MB (1,438,167 bytes of resources) on a 178 MB pack, 63 resources including the two below.
+
+| Group | Names and sizes in bytes |
+| --- | --- |
+| Backgrounds | `MODEM3`, `NETIPX3` (each 309,952) |
+| Panel kit | `PANEL` 309,184; `EDGETL` 810; `EDGETR` 562; `EDGEBL` 552; `EDGEBR` 810; `EDGELR` 280; `EDGETB` 272 |
+| Lists, fields | `LISTLFT` 740; `LISTMID` 484; `LISTRT` 756; `LISTHI` 400; `EDITL` 506; `EDITM` 640; `EDITR` 506; `PAGEBOX` 1,092 |
+| Scroll bar track (optional, `SLIDER_ART`) | `SLIDETOP` 468; `SLIDEMID` 743; `SLIDEBOT` 636 (the knob, `SLIDERV` 1,158, is menu art) |
+| Check boxes | `CHECK00` 1,234; `CHECK01` 1,138; `CHECK02` 1,022; `CHECK03` 944; `CHECK04` 1,022; `CHECK05` 1,138; `CHECK06` 1,234 |
+| Fonts | `PANELFND` 10,944; `FONTDFT` 14,432; `FONTDFD` 14,432; `MPFONT` 9,360; `WHEELFNT` 23,536 |
+| Disabled default button | `ACTDFD0L` 1,146; `ACTDFD0M` 650; `ACTDFD0R` 1,300; `ACTDFLD` 1,154 |
+| Status window | `MPSTATUS` 27,024 (333 by 80) |
+| `MC_DLG`'s picture | `MC` 260,364 (640 by 403) |
+| Network dialogs | `NEWNET`, `NETNEW`, `NETJOIN`, `NETTCP`, `NETCEDT`, `NETEDT`, `NETBEDT`, `CALLSIGN`, `EDITSIGN`, `MODEM` (`.DLG`) (each 4,608) |
+| Mission-setting dialogs | `MC_DELAY`, `MC_DIST`, `MC_DLG`, `MC_KILLS`, `MC_KILLT`, `MC_LIVES`, `MC_NAME`, `MC_NAT2`, `MC_NAT`, `MC_SCR`, `MC_TIME`, `MC_WETH` (`.DLG`, each 4,608); `MC_NATF.DLG` 8,704 |
+| Menus | `CHOOSEM.MNU` and `MULTI.MNU` (each 4,608); `MC_MENU.MNU` 8,704 |
+| Quick messages | `TORE_CHAT_V1` (the retail `CHAT.TXT`, see below) |
+| Marker | `TORE_MULTIPLAYER_V1` (see [the pack contract](../spec/import-cache.md#markers)) |
+
+Agent decisions, 2026-10-01:
+
+- `MC.PIC` is kept because `MC_DLG` is a size-zero dialog that draws it.
+- `MC_MENU.MNU` is kept: it is the mission creator's menu bar, and its
+  Multiplayer menu (Time limit, Number of kills, End scenario conditions,
+  Number of revives, Revive time delay, Revive distance) is what opens the
+  `MC_*` dialogs. The brief named `MC_*` without saying whether the menu counts;
+  it costs 8,704 bytes.
+- Left out because no screen in the design shows them: `SERIAL3` and the modem
+  and serial dialog panels (`MODEM`, `MODEMCOM`, `MODEMSTS`, `SERIAL`, `COM`,
+  `MODEM2`, `SERIAL2` pictures), the dialogs `SERIAL`, `MODEMCOM`, `MODEMSTS`,
+  `MODLIST` and `COMLIST`, the IPX dialogs and pictures (`NETIPX2` and
+  `NETIPX`, the latter left over from the earlier game), `NETDIR`, `FORTAIRB`
+  (Airbase Assault, phase 2 at the earliest), the horizontal rocker `ROCKERH0`
+  to `4` (no screen of ours uses it, EF0) and `CHECK320` (the 320 by 200
+  mode's check box). `MODEM3` is kept because the widget kit decodes its pieces in `MODEM3`'s
+  palette, though the screens no longer draw its red photograph (2026-10-05).
+
+The game keeps these resources in `Assets::multiplayer_resources`, apart from
+`theater_resources` (*agent decision*). The combat tapes fingerprint every
+resource in `theater_resources`, so folding the new art into it would have made
+every recorded tape of the single-player baseline refuse to replay (a changed
+fingerprint, not a changed flight); kept apart, the tapes and the baseline are
+unchanged and the screens read the pieces from their own map.
+
+**`CHAT.TXT`** is a loose file in no archive. The importer reads it from the
+installed folder's root (any letter case), and from the disc's installer
+container (`SETUP.ESA`, the `FA_MISC` entry, 336 stored and 591 decoded bytes)
+by the container reader's DCL decoder, which is cheap: it decodes that one
+entry in memory (`MediaSource::loose_file`). On the retail media both give the
+same 591 bytes. The pack holds the bytes as read under `TORE_CHAT_V1`
+(*agent decision*: a name of its own in the `TORE_*` family, so it can never
+collide with an archive resource), and `tore_formats::chat::parse` reads them.
+Absent or unreadable media files are not an import failure: the import report
+and the summary say "quick chat messages unavailable" and chat has no quick
+messages. The reader's rules (spec: [CHAT.TXT](../spec/multiplayer.md#chattxt)):
+the first twelve lines before the Ctrl-Z byte, CRLF or LF, a line cut at 159
+characters, the five receiver keywords matched without regard to case (and
+trimmed, *agent decision*), a last field taken as the sound when it is at most
+12 characters and ends in `.5K` or `.11K` and upper-cased, text cut at 50
+characters. A blank line in the middle keeps its slot so F keys stay aligned
+with lines (*agent decision*; retail's handling is unknown).
+
+### Corrections to the notes above (EF0)
+
+- The Choose Activity menu bar is `CHOOSEM.MNU`, not `MAINMENU.MNU`: the setup
+  code at `0x4a0966` pushes `CHOOSEM` (`0x502834`) for all five backgrounds (S).
+  Its Multi menu holds `Serial... [e]`, `Modem... [m]`, `IPX/SPX Network... [x]`,
+  `TCP/IP  Network... [t]` (two spaces), `Disconnect... [d]` and `Airbase Assault
+  [a]` (R). `MAINMENU.MNU` (`?`, `Campaign` with Replay This Mission and Exit
+  Campaign) has five other references and is a campaign-mode menu (I).
+  "Disconnect is grayed out until connected" is the manual's; the tree has no
+  state bytes (U).
+- The authored Multi rows (now *Direct Connection...* and *Internet Lobby...*,
+  see "Stub behavior") are scaffolding; the retail tree is the one listed here.
+
+### Settled while building the widget kit (EF2, 2026-10-01)
+
+- **PREV and NEXT on an empty list are bright (M).** John's screenshot draws
+  both labels in `PANELFNT`, not the dim `PANELFND`, with "1 of 0" and no rows.
+  The note above that `PANELFND` is the disabled face stays (S), but "no page to
+  turn to" is not what disables it; when retail dims them is U (next step: the
+  enable calls around `0x48b02e`). The kit dims PREV on the first page and NEXT
+  on the last page of a list that has rows, and leaves both bright when it is
+  empty.
+- **`LISTHI` is two 12 by 12 stripes side by side (R):** blue and white on the
+  left half, gold and black on the right. Which one retail paints on the selected
+  row, and whether it is a marker or a bar, is U. The kit puts the gold half as a
+  marker 4 pixels in from the row's left edge, 1 below its top, with the row text
+  starting at 20 (agent decision; the creator's selector list marks its current
+  row gold too).
+- **The kit's render of NETWORK CONNECTION** (every widget placed at the
+  rectangles in the table above, nothing else) is the same picture as EF0's
+  render of those numbers: none of the 307,200 pixels differs. It therefore scores
+  as EF0's does against the screenshot: a mean grey difference of 2.9 over the
+  panel and 4.5 over the whole screen below the title bar, after a one pixel blur
+  of the render (the rest is the screenshot's resampling).
+
+### The Direct Connection screen as built (EF7, 2026-10-01)
+
+Implementation mode, from the rectangles above. The screen is
+`crates/tore-app/src/direct_screen/`; its behaviour is in
+[the architecture notes](../ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+Everything on it is made of the widget kit at NEWNET's rectangles on `NETIPX3`: its grey photograph under its own title bar, its top 77 rows (John, 2026-10-05; from 2026-10-01 to then the screens drew `MODEM3`'s red photograph under `NETIPX3`'s bar, which the pictures' identical rows 0 to 76 allowed). The bar's retail lettering NETWORK CONNECTION and its shadow (lettering x 80 to 350, y 7 to 28, shadow x 83 to 354, y 9 to 32 on the imported picture; the help bar starts at row 36) are covered by a copy of the bar's own texture from the clean strip to their right (columns 364 to 639, the same rows, repeated; the texture's mean is 79 to 82 in every row, so no seam shows), and the lettering DIRECT NETWORK CONNECTION is drawn over that: `assets/direct-network-connection-title.png`, 564 by 36, the words in Liberation Sans 2.1.5 (SIL OFL 1.1) over a sharp dark copy offset 2 pixels right and down, on a transparent background with nothing under the clear pixels (made by `tools/build_title_lettering.py`: 29 points drawn 4.9 percent narrower, fitted to the Helvetica lettering John first supplied, 439 by 21 pixels), fixed to the bar's top right so its ink starts at x 80 where the retail lettering did. A player can use other words: the top 36 or 77 rows of `DirectNetworkConnection.png` in the data folder, a PNG at most 640 wide and fixed to the same corner, replace the shipped lettering with their transparency honoured (a whole 640 by 480 picture is fine), and a missing or unusable file leaves the shipped one (the log says why). That file is the player's own and never part of the repository or a package when it carries retail's badge or texture. The Internet Lobby screen (slice I4) has the same bar lettered INTERNET LOBBY (`assets/internet-lobby-title.png`, made by the same script with `--title internet`) and its own player file, `InternetLobby.png`, read the same way. The widgets' pieces keep `MODEM3`'s palette. With these placements
+(agent decisions where the table above has no retail counterpart):
+
+| Item | Rectangle or position | Notes |
+| --- | --- | --- |
+| Background, panel, title, frame, headings | as the NEWNET table | The panel title still reads "TCP/IP Network connection" |
+| Callsign | field (88, 108), 139 by 13 | Flat `PANELFNT` bar; hint "your callsign" when empty |
+| Connect to | label (45, 139); grey field at (110, 136), 216 by 18 | An address or a name with an optional port; hint "host or address" |
+| Show full games | `CHECK0n` lamp at (330, 130) with its label | Kept in the settings; off hides full games |
+| Games | list at (48, 185), 200 wide, four rows; rocker, PREV/NEXT, PAGE and the page box as NEWNET | Columns from the row's text origin: lock (centred, 11 wide), name (x 14, 84 wide), players over capacity (x 100, 22 wide, right aligned), state (x 126, 46 wide: Lobby, Flying, Closed, or `vVERSION` for another build) |
+| Mission line | `PANELFNT` at (45, 290), up to 549 wide | The selected game's mission summary, or why the game cannot be joined; between the Games box (ends y 285) and the Messages heading (y 304) |
+| Players | list at (346, 185), 242 wide, five rows, no pager | Crown, then the callsign |
+| Messages | NEWNET's box, (45, 319), 549 by 88 | Grey system lines in the kit's colours |
+| Buttons | New, Join, Options, Cancel at NEWNET's positions | The blue default face (its outline kept all round, the striped box removed, John 2026-10-05) is on Join once a game is selected or an address typed, on New otherwise; Cancel reads *Leave* while a session runs |
+| Options panel | panel (80, 100), 480 by 360; grey fields at (240, 139) 60 wide (port), (240, 169) and (240, 199) 216 wide, all 18 high; quick messages box (115, 262), 410 by 128; OK (190, 408) and Cancel (330, 408) | Port (five digits), password (asterisks), game name; the box shows `F1  text  (to all)` lines |
+
+Headless renders, `--snapshot-state` `direct` (empty, searching), `direct-games`
+(six games on two pages, the last selected, with its players), `direct-trying`
+(an address being tried), `direct-refused` (refusals in Messages) and
+`direct-options`, are in the lead's notes (`.local/mp-notes/stage-ef/ef7/`),
+beside EF2's mock.
+
+### Sharp text (2026-10-05)
+
+The menu is a 640 by 480 canvas the renderer stretches to the window with
+nearest pixels, so the retail bitmap fonts (capitals 8 to 9 pixels tall) break
+into uneven blocks at full screen. While the game draws a multiplayer screen
+for its window, the screen's text calls (`ui_text::text`) are recorded, not
+drawn into the canvas, and the renderer draws the glyphs at the window's own
+resolution over the stretched canvas, in the same render pass
+(`ui_text_renderer.rs`, `ui_text.wgsl`). Headless snapshots, the previews and
+the tests do not record, so they still show the retail fonts. John asked for
+this on 2026-10-05: easier to read, the same size, not fuzzy (*opinionated*).
+
+- **Shapes.** Noto Sans Medium, open licensed and not retail, rendered at 48
+  pixels to the em into `crates/tore-app/assets/ui-text.bin` by
+  `tools/build_ui_text_atlas.py` (138 glyphs, ASCII and the CP437 letters
+  above 0x7F). The GPU keeps three mipmap levels.
+- **Size and place.** Each retail font the screens use (`PANELFNT`,
+  `PANELFND`, `SMLFONT`, the four button fonts) is measured on its capital H:
+  the sharp capitals are that tall on that baseline, narrowed to the retail
+  letters' narrowness (about 0.76 for `PANELFNT`), in the font's brightest
+  colour times 0.94, times the call's tint. A run starts where the retail text
+  would and ends where it would: the face's own letter spacing is spread (at
+  most 1 pixel tighter or 1.5 looser a letter) so the retail widths, which the
+  screens centre, align and cut off with, still hold. The retail letters sit in
+  near fixed width cells that look gappy in another face. Typed text
+  (`text_cells`) keeps every glyph in its retail cell so the caret, which a
+  field places from the retail widths, stays between the letters.
+- **Icons.** The marks in list rows (padlock, crown, ready tick, house, the
+  player's own arrow, the unable cross, the Windows, macOS and Linux
+  platform marks, the relay mark of slice J6, two dots joined through a hub, and the standby mark of slice K7b, the house drawn as an outline) are hand drawn minimalist SVGs in one colour
+  (`assets/icons/*.svg`, John, 2026-10-05, *opinionated*), baked at 64 by 64 into
+  the same atlas and drawn the same way: recorded and drawn sharp over the
+  canvas, 12 pixels square, in one light grey (a dimmed row's tint darkens
+  them, a row's own colour does not). Without the sharp layer the atlas's
+  picture is averaged down to 12 by 12 into the canvas. They replace the first
+  set of pixel pictures in six colours.
+- **Pop-ups.** The text is on top of the canvas, so a panel drawn over earlier
+  text (Options, Kick, Leave) records its rectangle (`draw_panel`) and the
+  earlier glyphs are cut to what shows round it. A screen's backdrop is drawn
+  once and kept, so its text is kept and replayed with it.
+- **Checks.** `ui_text_renderer::tests` (ignored, needs a GPU adapter) draws
+  recorded text through the real pipeline into an offscreen target and compares
+  it with `ui_text::composite`, the CPU stand-in that the review pictures use:
+  `cargo test -p tore-app --locked ui_text -- --ignored --nocapture`.
+  `TORE_DATA_DIR=... TORE_MOCK_OUT=... cargo test -p tore-app --locked
+  ui_text::tests::render_review_pictures -- --ignored` writes every screen at
+  3 times size, sharp and as before.
+
+### The lobby screen as built (EF8, 2026-10-01)
+
+Implementation mode. The screen is `crates/tore-app/src/lobby_screen/`; its
+behaviour, who may press which button and what was measured are in
+[the architecture notes](../ARCHITECTURE.md#the-lobby-screen-as-built-ef8). It
+reuses Direct Connection's background (`NETIPX3` and the player's title bar picture, if any),
+panel (10, 80, 619 by 395), frame lines and grey text fields, with these
+placements (all agent decisions; retail's `NETNEW` is a reference, not a
+template):
+
+| Item | Rectangle or position | Notes |
+| --- | --- | --- |
+| Title | "Lobby" centred on the panel at y 87 | |
+| Game, Rules | `PANELFNT` lines at (45, 102) and (45, 115), up to 549 wide | The game's name and, since F2-L, "Rules: " and the King's settings in words. EF8 also drew the mission's summary at (45, 115) and the start rule in `PANELFND` at (45, 128), with Rules at (45, 141); the lobby pass (John, 2026-10-09) removed both lines, so the mission is read on Mission... and the start rule is in the ready hint |
+| Slots | heading (45, 140); list (45, 168), 286 wide, five rows, scrolling; frame (40, 164, 335, 97); scroll bar art (336, 168), 34 wide; PvP side boxes on the heading's row (lamps (100, 128) and (215, 128), 28 pixel art, labels at y 140) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 126) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242; the lobby pass slice L5 dropped the tick, the Players list carries it, and gave its room to the holder). EF8's pager (PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240)) was replaced by the scroll bar in the lobby pass; the wing cell reads "Blue 1 #2" or "Red 1 #2" in PvP |
+| Players | heading (380, 140); list (384, 168), 186 wide, five rows, scrolling; grey box (380, 165, 224, 95), frame (379, 164, 226, 97); scroll bar art (570, 168) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 118). The state words (Ready, Slot, Armed, Away and the rest) that followed the callsign until the lobby pass slice L5 are gone: the ticks, the cross, the dimmed or red row and the Slots list's "AI (Viper away)" say the same. The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
+| Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
+| Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | The scroll bar sits flush right inside the box's frame (34 wide); the text is 507 wide |
+| Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |
+| Ready hint | `PANELFND` at (45, 400), up to 549 wide | The lobby pass's line of what to do next ("Press Ready so the King can start the mission."); it ends above the blue button's raised top at 416 |
+| Buttons | y 419, 75 wide, x 45, 124, 203, 282, 361, 440, 519 (a 79 pitch; EF8 had six 85 wide at 45 to 510) | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Others: Mission... (203), Settings... (282), Loadout (361), Ready (440), Leave (519). While the mission flies Loadout reads Watch (Stop Watch while watching). Kick moved into the Players panel |
+| Settings panel | panel (45, 100), 550 by 362, over the screen | Title; four page buttons at y 132 (x 67, 159, 251, 343, 88 wide); rows from y 166 on a 21 pitch (19 on the Game page, which has twelve rows since the Host row of K7b), the label at x 69 and the value box (x 295, 270 wide, 18 high; the Game page's name and password are grey text lines there); Realism is two columns of eight (labels x 67 and 329, 160 wide, value boxes 88 wide); the notice or the selected row's reason at y 400; Close (278, 422) |
+| Players panel | panel (110, 150), 420 by 180 (Kick's place) | Two lines of words; Give crown (150, 282, 105 wide), Kick... (270, 282) and Close (370, 282, blue, the keyboard) |
+| Kick and Leave panels | panel (110, 150), 420 by 180, over the screen | Kick: a grey line (132, 234), 376 by 18, for the reason (60 characters); Kick (210, 282) and Cancel (345, 282). Leave: Leave (210, 270) and Cancel (345, 270), Cancel has the blue face and the keyboard |
+
+New pixel icons (authored, no retail art): the house (9 by 8), the player's own
+arrow (7 by 7) and the unable cross (7 by 7), beside the crown, lock and ready
+tick of EF2.
+
+**The creator in Accept mode** (the King's Mission... in the lobby) is the creator page of
+this file's Quick Mission notes with one change of label:
+OK (387, 419) reads **Accept** (until slice CL-R, 2026-10-11, Start, field 33,
+and its airport, 34, were also locked to Airborne; both sides' start rows are
+offered since, and the opening notice reads "Multiplayer: Accept sends this
+mission to the lobby."), and the notice box sits at the lower left (30, 438 less its height), 340 wide and
+up to three lines, so it does not cover the Start line. **Load Ordnance in
+lobby mode** reads **Accept** on Fly (493, 414) and **Cancel** on Select Plane
+(363, 414), and its menu's Cheat row reads "Cheat  Off (not allowed)". Single
+player's two pages draw and behave as before. **The creator read only** (everyone
+else's Mission..., the King's while the mission flies or on a locked server;
+lobby pass L4 and K1): the same page with "View only" at the right of the title
+bar, OK's place reading **Back** and no Cancel, the nationalities and the
+situation dimmed in a darker well (158, 165, 167 text on 58, 63, 65) reading "as
+the King's", and every click on a field answering in the notice box.
+
+Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
+`lobby-unable`, `lobby-flying`, `lobby-server`, `lobby-kick`, `lobby-leave` and
+`lobby-ready`, and (F2-L) `lobby-settings`, `lobby-settings-revival`,
+`lobby-settings-scoring`, `lobby-settings-realism`, `lobby-settings-joiner`,
+`lobby-settings-pvp`, `lobby-settings-flying`, `lobby-players`,
+`lobby-players-house`, `lobby-locks`, `lobby-watch` and `lobby-pvp`, and (J6)
+`lobby-relay` (a relayed player selected: the relay mark and the hint line's
+path) and `lobby-away` (a slot reading "AI (Goose away)"), and (K7b) `lobby-host-row`
+(the Settings panel's Host row with a pinned player), `lobby-standby` (the
+outlined house beside a player who stands by to host, the line saying so),
+`lobby-release` (the Players panel's Release for a player who is away) and
+`lobby-reserved` (a plane kept for a player who dropped, with the lock mark, and
+the panel opened on it), and (L4, renamed `lobby-gaps` in L5) `lobby-gaps` (a
+player selected, its system in the hint line, and the Messages line about how a
+second player's game differs from the host's), and with
+`--quick-mission` `lobby-creator`, `lobby-creator-refused`, `lobby-ordnance`,
+`lobby-ordnance-refused` and `lobby-ordnance-cheat` (in the lead's notes) and, from L4,
+`lobby-creator-gaps` (the aircraft list with items not everyone has dimmed),
+`lobby-creator-gap-notice` (a choice of one refused, with the host's words in the
+notice), `lobby-creator-gap-theaters` and `lobby-ordnance-gaps` (weapon cards darkened, the
+first one refused)
+(`.local/mp-notes/stage-ef/ef8/`). The lobby pass added `lobby-scroll`,
+`lobby-scroll-top` (more rows than show, scrolled and at the top),
+`lobby-king-hint`, `lobby-joiner-noslot-hint`, `lobby-joiner-hint`,
+`lobby-joiner-ready-hint`, `lobby-pvp-hint` and `lobby-coop-hint` (the ready
+hint), `lobby-pvp-colours`, `lobby-pvp-colours-red`, `lobby-pvp-bluefor`,
+`lobby-pvp-redfor`, `lobby-pvp-open`, `lobby-pvp-full`, `lobby-pvp-locked`,
+`lobby-balanced`, `lobby-pvp-balanced-wait` and `lobby-pvp-unable` (the sides
+and the side boxes in each state), and with `--quick-mission`
+`lobby-creator-view`, `lobby-creator-view-gaps`, `lobby-creator-view-click`,
+`lobby-creator-view-changed`, `lobby-creator-view-flying` and
+`lobby-creator-view-locked` (the read-only page).

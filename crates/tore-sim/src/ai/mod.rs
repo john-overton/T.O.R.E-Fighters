@@ -19,7 +19,9 @@
 //! - The simulation runs at a fixed 120 Hz; nominal timings are simulation
 //!   seconds on a quarter-second clock ([`QUARTER_SECOND_TICKS`]).
 pub mod airfield;
+// Exact checkpoints (docs/formats/checkpoint.md).
 pub mod awareness;
+mod checkpoint;
 pub mod controller;
 pub mod damage;
 pub mod defense;
@@ -29,18 +31,30 @@ pub mod fitted;
 pub mod formation;
 pub mod geometry;
 pub mod gunnery;
+pub mod helicopter_defense;
+pub mod helicopter_threat;
 pub mod incoming_fire;
+pub mod jet_lift;
 pub mod launch;
+pub mod link;
 pub mod mission;
 pub mod motion;
+pub mod opportunity;
 pub mod pursuit;
+pub mod rotor_adapter;
+mod rotor_checkpoint;
+pub mod rotor_probe;
 pub mod route;
 pub mod steering;
 pub mod steering_adapter;
+pub mod strike;
+pub mod surface;
 pub mod tactics;
 pub mod targeting;
+pub mod test_settings;
 pub mod thought;
 pub mod threat;
+pub mod threat_route;
 pub mod weapon_service;
 pub mod wing;
 
@@ -331,3 +345,5 @@ mod tests {
         assert!((0..1000).all(|_| r.chance(100)));
     }
 }
+
+pub mod jettison;

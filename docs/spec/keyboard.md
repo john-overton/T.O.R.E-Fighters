@@ -58,6 +58,14 @@ afterburner off, so 7 from afterburner gives 96 percent.
 The keyboard throttle and rudder keys work only while Keyboard is the chosen
 throttle or rudder device in the Control menu.
 
+On the AV-8 and Yak-141 the manual (pp. 62 and 70 to 71) gives Z and X as the
+nozzles' 10-degree steps up and down, Shift+X as vertical (a second press is the
+100-degree braking stop) and Shift+Z as aft (or back to vertical from the
+stop). The handler review above found one variable-geometry handler, so the
+sweep and nozzle meanings are most likely the same keys acting on whatever the
+aircraft can move. T.O.R.E follows the manual on those two jets and keeps Z and
+X as a rudder pair elsewhere ([key placement](../INPUT.md#key-placement)).
+
 ## Weapons and countermeasures
 
 | Key | Action | Confidence |
@@ -77,6 +85,22 @@ throttle or rudder device in the Control menu.
 
 Ctrl+A, Ctrl+Z and Ctrl+X are the find-nearest-objects cheat that the Multi
 menu can allow.
+
+T.O.R.E binds Tab, Shift+R, Ctrl+R, `/` and Ctrl+X to the actions `fire-gun`,
+`a-g-radar`, `sight-next` and `nearest-ground`, and adds Ctrl+L (laser, `laze`)
+and Ctrl+M (delivery mode) on keys the original leaves free. All of them work:
+Tab (held, fires the gun whatever is selected: [the gun
+key](air-to-ground.md#the-gun-key)), Shift+R and Ctrl+R (the A-G page), Ctrl+X
+(the nearest hostile ground target, Easy targeting only), `/` (the targeting
+sight's next visible ground object) and Ctrl+L (the laser by hand)
+([key placement](../INPUT.md#key-placement)). `/` and
+Backslash act on every aircraft with a laser designator or a FLIR, not only with
+an advanced targeting option ([the targeting sight](air-to-ground.md#the-targeting-sight)).
+The sight's other keys (Shift+Backslash to pin the ground, Alt with the arrows
+to slew, L as a second clear key, Shift+' and Shift+; to zoom) are T.O.R.E
+placements on keys the original leaves free or shares, listed in [key
+placement](../INPUT.md#key-placement); each is a catalog action the controls
+screen can move.
 
 ## Sensors and navigation
 
@@ -132,8 +156,8 @@ menu can allow.
 | Alt+8 / Alt+9 | Approach target low / high | Confirmed |
 | Alt+E | Engage my target; also sets loose formation | Confirmed |
 | Alt+R | Engage my target from formation; also sets at least medium formation | Confirmed |
-| Alt+F | Engage the IR/laser-designated target | Confirmed |
-| Alt+W | Engage every target of my target's class (`Attack bandits`, `Attack SAMs`, ...) | Confirmed |
+| Alt+F | Engage the IR/laser contact (the one chosen with `/` and `\` while IR/Laser advanced targeting is on), air or ground; with no hostile contact the wingmen are freed to attack on contact, which is what the manual describes. TORE follows it (John, decision 7, 2026-10-11); taking the contact from TORE's sight track, laser spot or pin is opinionated. Built in the AI strike round | Confirmed |
+| Alt+W | Engage every target of my target's class (`Attack bandits`, `Attack SAMs`, ...). TORE: the designated ground object's class (SAMs, AAA, tanks, vehicles, ships, structures), nearest first; a designated aircraft or no designation is `Attack bandits`. Restored on 2026-10-11 (John), after TORE had put attack on contact on the key | Confirmed |
 | Alt+P | Clear my six | Confirmed |
 | Alt+D | Disengage | Confirmed |
 | Alt+B | Bug out | Confirmed |
@@ -142,8 +166,12 @@ menu can allow.
 | Alt+H | Tighten up / combat spread | Confirmed |
 | Alt+V | Formation high / level / low | Confirmed |
 
-Every order goes to the whole flight; there is no key to address one wingman.
-The approach orders (Alt+6 to Alt+9) first send the engage order and add the
+In the original every order goes to the whole flight; there is no key to
+address one wingman (T.O.R.E adds Alt+0 and Alt+Shift+1 to 4,
+[key placement](../INPUT.md#key-placement)). T.O.R.E also adds Alt+G, "Lase my
+target" (John, 2026-10-11): a wingman with a designator lases the ground target
+you designated. Alt+E, Alt+R, Alt+F and Alt+W take a ground target as well as an
+aircraft ([AI strike orders](ai-strike.md#orders-from-the-flight-lead)). The approach orders (Alt+6 to Alt+9) first send the engage order and add the
 approach only when a hostile target exists.
 
 ## Keys the original leaves free

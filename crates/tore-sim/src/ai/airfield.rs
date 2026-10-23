@@ -138,6 +138,24 @@ pub enum Phase {
     TaxiClear,
     /// [0x1a] Parked for good.
     Parked,
+    /// [0xa] A vertical type on its spot, 5 s before it lifts off (slice H2).
+    VerticalHold,
+    /// [0xb] Climbing straight up at 25 ft/s.
+    VerticalClimb,
+    /// [0xc] A vectoring jet accelerating from its vertical climb into
+    /// wingborne flight.
+    Transition,
+    /// [0x18] A vertical type slowing from the last approach gate to a hover
+    /// over the landing point.
+    HoverApproach,
+    /// [0x18] The vertical descent to the landing point, or onto a parking
+    /// slot at the end of an air taxi.
+    VerticalDescent,
+    /// [0x18] On the ground at the landing point, 5 s before it moves on.
+    Settle,
+    /// A helicopter or the V-22 air taxiing to its parking slot (the lead's
+    /// default, accepted by John on 2026-10-12).
+    AirTaxi,
 }
 
 impl Phase {
@@ -146,16 +164,65 @@ impl Phase {
     pub fn flight_state(self) -> super::threat::FlightState {
         use super::threat::FlightState;
         match self {
-            Self::Waiting | Self::Taxi | Self::LineUp | Self::TakeoffRoll | Self::ClimbOut => {
-                FlightState::TakingOff
-            }
+            Self::Waiting
+            | Self::Taxi
+            | Self::LineUp
+            | Self::TakeoffRoll
+            | Self::ClimbOut
+            | Self::VerticalHold
+            | Self::VerticalClimb
+            | Self::Transition => FlightState::TakingOff,
             Self::Inbound => FlightState::Free,
             Self::Marshal | Self::Approach => FlightState::EarlyApproach,
-            Self::Final | Self::Rollout | Self::TaxiClear | Self::Parked => {
-                FlightState::LateLanding
-            }
+            Self::Final
+            | Self::Rollout
+            | Self::TaxiClear
+            | Self::Parked
+            | Self::HoverApproach
+            | Self::VerticalDescent
+            | Self::Settle
+            | Self::AirTaxi => FlightState::LateLanding,
         }
     }
+}
+
+/// How an aircraft takes off and lands (slice H2, docs/spec/ai-airfield.md
+/// "Vertical takeoff and landing"). Retail sends a helicopter (type flag 8)
+/// and a STOVL jet to their own takeoff and landing states.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lift {
+    /// A runway takeoff and landing.
+    #[default]
+    Conventional,
+    /// The helicopters and the V-22: a vertical takeoff from where it
+    /// stands, with no taxi, and a vertical landing at the landing point
+    /// followed by an air taxi to its parking slot.
+    Rotor,
+    /// An AV-8 or Yak-141 light enough to hover: it taxis to the takeoff
+    /// spot and takes off vertically, lands vertically at the landing point
+    /// and taxis to its parking slot.
+    Jet,
+    /// An AV-8 or Yak-141 too heavy to hover: retail's short takeoff
+    /// (nozzles 60, 40 and 20 degrees) and a runway landing.
+    ShortJet,
+}
+
+impl Lift {
+    /// Takes off and lands vertically.
+    pub fn vertical(self) -> bool {
+        matches!(self, Self::Rotor | Self::Jet)
+    }
+}
+
+/// Lift controls an airfield phase sets directly, on top of its control:
+/// the collective of a helicopter or the V-22 and the nozzle angle of a
+/// vectoring jet, degrees from aft, and the engine switch (a parked
+/// helicopter shuts down, slice HF1). `None` leaves the demand where it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LiftDemand {
+    pub collective: Option<f64>,
+    pub nozzle_deg: Option<f64>,
+    pub engine: Option<bool>,
 }
 
 /// Why an aircraft is landing.
@@ -246,6 +313,110 @@ pub const CLIMB_OUT_TIMEOUT_S: f64 = 90.0;
 /// Spec-derived: the human player counts as on its takeoff roll (state
 /// 0x11) from this ground speed.
 pub const PLAYER_ROLLING_FPS: f64 = 7.0;
+
+// ---------------------------------------------------------------------------
+// Vertical takeoff and landing numbers (slice H2).
+
+/// Spec-derived (state 0xa): a vertical type holds 5 s on its spot before
+/// it lifts off, and (state 0x18) 5 s on the ground after a vertical
+/// landing.
+pub const VERTICAL_HOLD_S: f64 = 5.0;
+/// Spec-derived (state 0xb): the vertical climb, ft/s, and where it ends
+/// above the ground: 500 ft for a helicopter, which then finishes, and
+/// 800 ft for a jet, which accelerates.
+pub const VERTICAL_CLIMB_FPS: f64 = 25.0;
+pub const ROTOR_CLIMB_AGL_FT: f64 = 500.0;
+pub const JET_CLIMB_AGL_FT: f64 = 800.0;
+/// Fitted: the climb counts as done this close below its height, and ends
+/// this long after liftoff in any case.
+pub const CLIMB_REACHED_FT: f64 = 25.0;
+pub const VERTICAL_CLIMB_TIMEOUT_S: f64 = 60.0;
+/// Spec-derived (state 0xc): a jet accelerates to its minimum speed plus
+/// 73 ft/s before it is wingborne. Fitted: it gives up after this long.
+pub const TRANSITION_MARGIN_FPS: f64 = 73.0;
+/// Fitted (agent decision, slice H2): the jet's hover law holds the nozzles
+/// at 60 degrees or more, which cannot carry it to wingborne speed, so at
+/// this share of its minimum speed the wingborne steering takes over, at
+/// full power on a gentle climb, and the nozzles go aft from 60 degrees to
+/// none as the speed builds to the end of the transition.
+pub const TRANSITION_HANDOVER_SHARE: f64 = 0.6;
+pub const TRANSITION_CLIMB_DEG: f64 = 2.0;
+pub const TRANSITION_TIMEOUT_S: f64 = 60.0;
+/// Spec-derived short takeoff (states 0xd..0x10): a 10 degree climb to
+/// 250 ft above the ground, nozzles at 60, 40 and 20 degrees.
+pub const SHORT_CLIMB_DEG: f64 = 10.0;
+pub const SHORT_CLIMB_AGL_FT: f64 = 250.0;
+pub const SHORT_NOZZLES_DEG: [f64; 3] = [60.0, 40.0, 20.0];
+/// Fitted: on the short takeoff roll the nozzles come down to their first
+/// angle at this share of the minimum speed (retail rolls to the minimum
+/// speed with them down already; the hybrid jet would then lift off at a
+/// crawl and settle back).
+pub const SHORT_NOZZLE_SPEED_SHARE: f64 = 0.7;
+/// Fitted (agent decision, 2026-10-12): a jet hovers when its engines hold
+/// its weight vertically at no more than this throttle; heavier, it makes
+/// a short takeoff or a runway landing (the manual: "fully loaded ... never
+/// be able to fully hover").
+pub const HOVER_THROTTLE_LIMIT: f64 = 0.9;
+/// Spec-derived: nozzles vertical for the hold, aft once wingborne.
+pub const HOVER_NOZZLE_DEG: f64 = 90.0;
+/// Spec-derived (state 0x13): a helicopter's marshal square has corners
+/// 10,000 ft out (inside half that, the +X+Z corner), and it holds at
+/// (3 maximum + corner) / 4.
+pub const ROTOR_MARSHAL_DISTANCE_FT: f64 = 10_000.0;
+pub const ROTOR_MARSHAL_INNER_FT: f64 = 5_000.0;
+/// Fitted (agent decision, 2026-10-12): a helicopter holds this high above
+/// the airfield, plus [`ROTOR_MARSHAL_STEP_FT`] per wing position. Retail's
+/// helicopter marshal height is not recovered; the fighters' 6,000 ft plus
+/// 1,000 ft per position would send a helicopter up to 8,000 ft to land.
+pub const ROTOR_MARSHAL_AGL_FT: f64 = 2_000.0;
+pub const ROTOR_MARSHAL_STEP_FT: f64 = 500.0;
+/// Spec-derived (state 0x14 for vertical types): the gates stand 500 ft
+/// higher, a fourth gate stands 6,000 ft out, and a helicopter flies them
+/// at no more than 146 ft/s (86 kt).
+pub const VERTICAL_GATE_RAISE_FT: f64 = 500.0;
+pub const FOURTH_GATE_FT: f64 = 6_000.0;
+pub const VERTICAL_GATE_SPEED_FPS: f64 = 146.0;
+/// Fitted: the gate a helicopter's approach begins at ([`Sequence::first_gate`]).
+pub const ROTOR_FIRST_GATE: usize = 2;
+/// Fitted: from the last gate a vertical type slows to a hover over the
+/// landing point at this deceleration, and starts down within this of it
+/// and this slow.
+pub const HOVER_DECELERATION_FPS2: f64 = 4.0;
+pub const OVER_POINT_FT: f64 = 50.0;
+pub const OVER_POINT_FPS: f64 = 10.0;
+/// Spec-derived (state 0x18): retail's vertical descent is 50 ft/s.
+/// Fitted (agent decision, slice H2): the hybrid physics cannot arrest that
+/// near the ground (an AH-64 at full collective makes 1.05 g and touched
+/// down at 28 ft/s, an AV-8 at 26 ft/s), so every vertical type comes down
+/// at no more than [`JET_DESCENT_FPS`], 20 ft/s, sinks no faster than a
+/// twentieth of its wheel height a second, and no slower than 5 ft/s, so it
+/// arrives at half the shared touchdown rule's 10 ft/s
+/// (docs/spec/touchdown.md).
+pub const VERTICAL_DESCENT_FPS: f64 = 50.0;
+pub const JET_DESCENT_FPS: f64 = 20.0;
+/// Fitted: the descent's sink builds up at this rate, ft/s², from the
+/// hover, so the throttle or collective is not chopped at once.
+pub const DESCENT_RAMP_FPS2: f64 = 5.0;
+pub const DESCENT_SHARE_PER_S: f64 = 0.05;
+pub const TOUCHDOWN_SINK_FPS: f64 = 5.0;
+/// Fitted: below this wheel height the descent goes on only while the
+/// shared touchdown rule would accept a touchdown now; otherwise it holds
+/// its height until it would.
+pub const TOUCHDOWN_CHECK_FT: f64 = 30.0;
+/// Fitted: the descent is set at this wheel height below the ground, so
+/// it ends on the wheels.
+pub const SET_DOWN_FT: f64 = -10.0;
+/// Fitted: the air taxi to parking flies this high, at most this fast
+/// (15 kt), and sets down within this of the slot.
+pub const AIR_TAXI_AGL_FT: f64 = 20.0;
+pub const AIR_TAXI_FPS: f64 = 25.0;
+pub const AIR_TAXI_REACHED_FT: f64 = 15.0;
+/// Fitted: a vertical type holds its heading toward a target farther than
+/// this, and the target's heading closer in.
+pub const AIR_TAXI_TURN_FT: f64 = 100.0;
+/// Fitted: the hover laws close a vertical climb's or descent's point at
+/// no more than this, ft/s.
+pub const HOVER_CREEP_FPS: f64 = 10.0;
 
 // ---------------------------------------------------------------------------
 // Landing numbers.
@@ -362,6 +533,12 @@ pub const TERRAIN_IGNORED_FT: f64 = 300.0;
 pub const ROLLOUT_ELEVATOR: f64 = -0.5;
 /// Spec-derived: the rollout ends below 1 ft/s.
 pub const ROLLOUT_STOPPED_FPS: f64 = 1.0;
+/// Fitted (agent decision, slice CL-AP 2026-10-11): approaching an anchor
+/// it stops at, a taxiing aircraft holds the speed from which this
+/// deceleration stops it there (never below [`SLOW_TAXI_FPS`]). At full
+/// taxi speed the stop used to run about 90 ft past the anchor, off the end
+/// of a taxiway corner.
+pub const STOP_APPROACH_DECEL_FPS2: f64 = 2.0;
 /// Fitted: a taxi-in anchor counts as reached within this distance.
 pub const ANCHOR_REACHED_FT: f64 = 30.0;
 /// Spec-derived: throttle closed within 200 ft of the parking slot.
@@ -387,8 +564,31 @@ const NOSEWHEEL_YAW_RATE_RAD_S: f64 = 0.3;
 const NOSEWHEEL_FULL_SPEED_FPS: f64 = 40.0;
 /// Fitted: ground heading error, degrees, to requested turn rate, deg/s.
 const GROUND_HEADING_GAIN: f64 = 1.0;
+/// Fitted (agent decision, slice CL-AP 2026-10-11): on the ground a held
+/// heading error builds a rudder trim at this rate per degree per second,
+/// up to [`GROUND_TRIM_LIMIT`], so a steady crosswind on the takeoff roll,
+/// the rollout or the taxiway no longer leaves the aircraft holding a
+/// heading 7 degrees off and running onto the grass (a Vladivostok takeoff
+/// drifted 158 ft off the centre line). It learns only while rolling and
+/// within [`GROUND_TRIM_ERROR_DEG`] of the heading it wants, so a turn onto
+/// the next taxiway does not wind it up. The first value, 0.02, still let a
+/// Redfor wingman at Burevestnik (KURILE 3) creep 110 ft east of the centre
+/// line before the trim built up, so it is 0.06.
+pub const GROUND_TRIM_GAIN: f64 = 0.06;
+pub const GROUND_TRIM_LIMIT: f64 = 0.6;
+pub const GROUND_TRIM_ERROR_DEG: f64 = 15.0;
+/// Below this ground speed the rudder trim is held, feet per second.
+const GROUND_TRIM_SPEED_FPS: f64 = 5.0;
 /// Fitted: taxi pure-pursuit look-ahead.
 const TAXI_LOOKAHEAD_FT: f64 = 80.0;
+/// Fitted (agent decision, slice CL-AP 2026-10-11, for John's "ensure AI
+/// actually taxi on taxiways instead of grass"): taxiing along a leg the
+/// aircraft aims at the point this far ahead of it on the line from the
+/// leg's start to its anchor, not at the anchor itself. Aiming at an anchor
+/// thousands of feet away turned a steady nosewheel bias (a crosswind) into
+/// a drift of over 100 ft off the runway or taxiway; along the line it is a
+/// few feet. 120 ft keeps the heading loop well damped at taxi speed.
+pub const TAXI_LEG_LOOKAHEAD_FT: f64 = 120.0;
 
 /// What the aircraft knows about itself and its clearances this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -435,6 +635,19 @@ pub struct Situation {
     pub wing_landed: bool,
     /// The parking slot this aircraft may hold, if any is free.
     pub free_slot: Option<u32>,
+    /// A vertical type: the shared touchdown rule
+    /// ([`crate::touchdown`]) would accept a touchdown now, at this sink
+    /// and ground speed on the ground below (slice H2). Always true for a
+    /// conventional aircraft, which never reads it.
+    pub touchdown_safe: bool,
+    /// A vectoring jet: its engines hold its weight, stores included, in a
+    /// hover at no more than [`HOVER_THROTTLE_LIMIT`] (slice H2). Read at
+    /// the takeoff spot to choose the vertical or the short takeoff.
+    pub hover_capable: bool,
+    /// A helicopter or the V-22 flying home past threat rings it knows: the
+    /// point it flies to first, world X/Z (slice H2, the H4 follow-up).
+    /// `None` flies straight home.
+    pub detour: Option<[f64; 2]>,
 }
 
 /// Direct inputs for a supported aircraft, or guidance for an airborne one.
@@ -447,6 +660,10 @@ pub enum Control {
         yaw: f64,
     },
     Air(AirGuidance),
+    /// A hover or slow flight (slice H1, for the vertical sequences of
+    /// slice H2): flown by the rotor adapter on a helicopter or the V-22
+    /// and by the jet-lift law on the AV-8 and Yak-141.
+    Hover(super::rotor_adapter::HoverGuidance),
 }
 
 /// Airborne guidance, flown through the ordinary steering adapter.
@@ -473,6 +690,8 @@ pub struct Command {
     pub brakes: bool,
     pub afterburner: bool,
     pub activity: Activity,
+    /// Collective and nozzle set directly (vertical types only).
+    pub lift: LiftDemand,
 }
 
 /// What [`Sequence::step`] produced.
@@ -524,6 +743,12 @@ pub struct Sequence {
     climb_away: Option<u64>,
     /// A hazard was judged not catastrophic: abort at the next step.
     abort: bool,
+    /// Rudder trim learned on the ground ([`GROUND_TRIM_GAIN`]).
+    ground_trim: f64,
+    /// How it takes off and lands (slice H2).
+    lift: Lift,
+    /// A vertical phase's held heading, degrees (slice H2).
+    hover_heading: f64,
 }
 
 impl Sequence {
@@ -633,7 +858,32 @@ impl Sequence {
             go_arounds: 0,
             climb_away: None,
             abort: false,
+            ground_trim: 0.0,
+            lift: Lift::Conventional,
+            hover_heading: 0.0,
         }
+    }
+
+    /// Take off or land as `lift` says (slice H2). A helicopter's departure
+    /// lifts off from where it stands, so it has no taxi queue.
+    pub fn with_lift(mut self, lift: Lift) -> Self {
+        self.lift = lift;
+        if lift == Lift::Rotor && self.is_departure() {
+            self.queue_leg = None;
+        }
+        self
+    }
+
+    pub fn lift(&self) -> Lift {
+        self.lift
+    }
+
+    /// The sequence put straight into `phase` (tests of later phases).
+    #[cfg(test)]
+    pub(crate) fn at_phase(mut self, phase: Phase, heading_deg: f64) -> Self {
+        self.phase = phase;
+        self.hover_heading = heading_deg;
+        self
     }
 
     /// Ask for an abort instead of an ejection (opinionated, John
@@ -655,6 +905,15 @@ impl Sequence {
                 | Phase::Approach
                 | Phase::Final
                 | Phase::Rollout
+                // A hover or a slow descent near the ground is the plan, not
+                // a hazard (slice H2).
+                | Phase::VerticalHold
+                | Phase::VerticalClimb
+                | Phase::Transition
+                | Phase::HoverApproach
+                | Phase::VerticalDescent
+                | Phase::Settle
+                | Phase::AirTaxi
         )
     }
 
@@ -705,10 +964,11 @@ impl Sequence {
         self.go_arounds
     }
 
-    /// Takeoff spot for a departure; the airport's own spot otherwise.
+    /// Takeoff spot for a departure; the airport's own spot otherwise. A
+    /// helicopter lifts off where it stands, so it keeps no spot clear.
     pub fn takeoff_spot(&self) -> Option<[f64; 3]> {
         if self.is_departure() {
-            Some(self.spot)
+            (self.lift != Lift::Rotor).then_some(self.spot)
         } else {
             self.runway.anchors.map(|a| a.takeoff_spot)
         }
@@ -725,7 +985,10 @@ impl Sequence {
     }
 
     /// Retail runway-free gate: states 2, 3, 6..0x11, 0x14..0x19 and 0x1b
-    /// keep the runway busy. Taxiing clear counts as free at once.
+    /// keep the runway busy. Taxiing clear counts as free at once. Of the
+    /// vertical states, the hold (0xa) and the vertical landing (0x18,
+    /// with its 5 s on the ground) block; the climb (0xb), the
+    /// acceleration (0xc) and the air taxi to parking do not.
     pub fn blocks_runway(&self) -> bool {
         match self.phase {
             Phase::Taxi => self.queue_leg.is_some() || self.leg <= 1,
@@ -733,9 +996,25 @@ impl Sequence {
             | Phase::TakeoffRoll
             | Phase::Approach
             | Phase::Final
-            | Phase::Rollout => true,
+            | Phase::Rollout
+            | Phase::VerticalHold
+            | Phase::HoverApproach
+            | Phase::Settle => true,
+            Phase::VerticalDescent => self.park.is_none() || self.lift != Lift::Rotor,
             _ => false,
         }
+    }
+
+    /// Down at this airport after a landing: on its wheels or air taxiing
+    /// to its slot (a later wing member may then come in).
+    pub fn landed(&self) -> bool {
+        !self.is_departure()
+            && (matches!(
+                self.phase,
+                Phase::Rollout | Phase::TaxiClear | Phase::Parked | Phase::Settle | Phase::AirTaxi
+            ) || (self.phase == Phase::VerticalDescent
+                && self.lift == Lift::Rotor
+                && self.park.is_some()))
     }
 
     /// Landing point: the player's ILS aim point on the landing end,
@@ -795,23 +1074,60 @@ impl Sequence {
         }
     }
 
-    /// Approach gate `k` (0..3): on the approach path back from the landing point.
+    /// Approach gate `k` (0..3, and 3 for a vertical type's fourth): on the
+    /// approach path back from the landing point. A vertical type's gates
+    /// stand [`VERTICAL_GATE_RAISE_FT`] higher (retail state 0x14).
     pub fn gate(&self, k: usize) -> [f64; 3] {
-        let distance = APPROACH_GATES_FT[k.min(2)];
+        let vertical = self.lift.vertical();
+        let distance = if vertical && k >= 3 {
+            FOURTH_GATE_FT
+        } else {
+            APPROACH_GATES_FT[k.min(2)]
+        };
         let mut p = self.point(self.landing_point(), -distance, 0.0);
         p[1] = self.landing_point()[1]
             + crate::airport::glide_path_height_ft(
                 distance - crate::airport::AIM_PAST_THRESHOLD_FT,
-            );
+            )
+            + if vertical {
+                VERTICAL_GATE_RAISE_FT
+            } else {
+                0.0
+            };
         p
     }
 
+    /// How many approach gates this aircraft flies: three, four for a
+    /// vertical type.
+    pub fn gates(&self) -> usize {
+        if self.lift.vertical() { 4 } else { 3 }
+    }
+
+    /// The first approach gate flown. Fitted (agent decision, slice H2): a
+    /// helicopter flies only the gates inside its 10,000 ft marshal square
+    /// (8,800 and 6,000 ft out); flying out to the 35,200 ft gate at 86 kt
+    /// and back took nine minutes.
+    pub fn first_gate(&self) -> usize {
+        if self.lift == Lift::Rotor {
+            ROTOR_FIRST_GATE
+        } else {
+            0
+        }
+    }
+
     /// Marshal corner for a position: by the aircraft's octant around the
-    /// landing point, so the hold circulates +Z, +X, -Z, -X.
+    /// landing point, so the hold circulates +Z, +X, -Z, -X. A helicopter's
+    /// square is the smaller retail one, and lower (fitted).
     pub fn marshal_corner(&self, position: [f64; 3], wing_position: u8) -> [f64; 3] {
         let center = self.landing_point();
+        let rotor = self.lift == Lift::Rotor;
+        let (distance, inner) = if rotor {
+            (ROTOR_MARSHAL_DISTANCE_FT, ROTOR_MARSHAL_INNER_FT)
+        } else {
+            (MARSHAL_DISTANCE_FT, MARSHAL_INNER_FT)
+        };
         let (dx, dz) = (position[0] - center[0], position[2] - center[2]);
-        let (sx, sz) = if dx.hypot(dz) <= MARSHAL_INNER_FT {
+        let (sx, sz) = if dx.hypot(dz) <= inner {
             (1.0, 1.0)
         } else {
             match dx.atan2(dz).to_degrees().rem_euclid(360.0) {
@@ -821,12 +1137,16 @@ impl Sequence {
                 _ => (-1.0, 1.0),
             }
         };
-        let altitude = (MARSHAL_ALTITUDE_FT + MARSHAL_STEP_FT * f64::from(wing_position))
-            .max(center[1] + MARSHAL_FLOOR_FT);
+        let altitude = if rotor {
+            center[1] + ROTOR_MARSHAL_AGL_FT + ROTOR_MARSHAL_STEP_FT * f64::from(wing_position)
+        } else {
+            (MARSHAL_ALTITUDE_FT + MARSHAL_STEP_FT * f64::from(wing_position))
+                .max(center[1] + MARSHAL_FLOOR_FT)
+        };
         [
-            center[0] + sx * MARSHAL_DISTANCE_FT,
+            center[0] + sx * distance,
             altitude,
-            center[2] + sz * MARSHAL_DISTANCE_FT,
+            center[2] + sz * distance,
         ]
     }
 
@@ -848,11 +1168,22 @@ impl Sequence {
 
     fn enter(&mut self, phase: Phase, s: &Situation) {
         self.phase = phase;
+        // Each ground phase learns its own trim: the wind acts on a rolling
+        // and a taxiing aircraft differently.
+        self.ground_trim = 0.0;
         self.leg = 0;
         self.leg_origin = s.position;
         self.stopping = false;
         self.timer = None;
         self.next_check = s.tick;
+    }
+
+    /// Enter a vertical phase (slice H2): its clock starts now, and it
+    /// holds `heading_deg`.
+    fn enter_vertical(&mut self, phase: Phase, s: &Situation, heading_deg: f64) {
+        self.enter(phase, s);
+        self.timer = Some(s.tick);
+        self.hover_heading = heading_deg;
     }
 
     fn next_leg(&mut self, s: &Situation) {
@@ -880,12 +1211,25 @@ impl Sequence {
         }
         // Phase transitions first, so the command matches the new phase.
         match self.phase {
+            Phase::Waiting if self.lift == Lift::Rotor => {
+                // Retail state 1 to 0xa: a helicopter lifts off where it
+                // stands, on its turn with the runway free.
+                if due && s.turn_clear && s.runway_free {
+                    self.enter_vertical(Phase::VerticalHold, s, s.heading_deg);
+                }
+            }
             Phase::Waiting => {
                 let anchored = self.runway.anchors.is_some();
                 let near = anchored && to_spot <= SPOT_SHORTCUT_FT;
                 if due && s.turn_clear && ((near && self.queue_leg.is_none()) || s.runway_free) {
+                    // Fitted (agent decision, slice CL-AP 2026-10-11): an
+                    // aircraft queued on the taxi-out legs taxis them out
+                    // even when it waits within the shortcut distance of
+                    // the spot. The fourth of a wing waits on the parallel
+                    // taxiway abeam the spot, and went straight to the
+                    // takeoff roll from there, on the taxiway.
                     self.enter(
-                        if anchored && !near {
+                        if anchored && (!near || self.queue_leg.is_some()) {
                             Phase::Taxi
                         } else {
                             Phase::LineUp
@@ -901,7 +1245,7 @@ impl Sequence {
             }
             Phase::Taxi => {
                 let anchors = self.runway.anchors.expect("taxi legs need anchors");
-                if to_spot <= SPOT_SHORTCUT_FT || self.leg > 3 {
+                if (to_spot <= SPOT_SHORTCUT_FT && self.queue_leg.is_none()) || self.leg > 3 {
                     self.enter(Phase::LineUp, s);
                 } else if self.stopping {
                     if stopped {
@@ -938,7 +1282,24 @@ impl Sequence {
                         self.stopping = true;
                     }
                     if self.stopping && stopped {
-                        self.enter(Phase::TakeoffRoll, s);
+                        // A jet decides at the spot, with its stores on: a
+                        // vertical takeoff if it can hover, else retail's
+                        // short takeoff.
+                        if matches!(self.lift, Lift::Jet | Lift::ShortJet) {
+                            self.lift = if s.hover_capable {
+                                Lift::Jet
+                            } else {
+                                Lift::ShortJet
+                            };
+                        }
+                        if self.lift == Lift::Jet {
+                            // Retail: a STOVL jet on the takeoff spot
+                            // takes off vertically (0xa).
+                            let course = self.takeoff_course().to_degrees();
+                            self.enter_vertical(Phase::VerticalHold, s, course);
+                        } else {
+                            self.enter(Phase::TakeoffRoll, s);
+                        }
                     }
                 }
             }
@@ -953,7 +1314,15 @@ impl Sequence {
             }
             Phase::ClimbOut => {
                 let since = seconds(s.tick - self.liftoff_tick.unwrap_or(s.tick));
-                if s.agl_ft >= CLIMB_OUT_COMPLETE_AGL_FT || since >= CLIMB_OUT_TIMEOUT_S {
+                // Retail short takeoff (0xd..0x10): done at its minimum
+                // speed plus 73 ft/s once 250 ft up.
+                let short_done = self.lift == Lift::ShortJet
+                    && s.agl_ft >= SHORT_CLIMB_AGL_FT
+                    && s.speed_fps >= s.minimum_speed_fps + TRANSITION_MARGIN_FPS;
+                if short_done
+                    || s.agl_ft >= CLIMB_OUT_COMPLETE_AGL_FT
+                    || since >= CLIMB_OUT_TIMEOUT_S
+                {
                     complete = true;
                     self.flaps_up = true;
                     self.slot = None;
@@ -976,6 +1345,7 @@ impl Sequence {
                     if s.runway_free && s.wing_landed && slot.is_some() {
                         self.slot = slot;
                         self.enter(Phase::Approach, s);
+                        self.leg = self.first_gate();
                     }
                 }
             }
@@ -990,10 +1360,14 @@ impl Sequence {
                 } else if distance <= GATE_CAPTURE_FT
                     || (ahead <= 0.0 && distance <= GATE_PASSED_FT)
                 {
-                    if self.leg == 2 {
-                        self.enter(Phase::Final, s);
-                    } else {
+                    if self.leg + 1 < self.gates() {
                         self.next_leg(s);
+                    } else if self.lift.vertical() {
+                        // Retail 0x18: a vertical type comes to a hover.
+                        let course = self.landing_course().to_degrees();
+                        self.enter_vertical(Phase::HoverApproach, s, course);
+                    } else {
+                        self.enter(Phase::Final, s);
                     }
                 }
             }
@@ -1036,6 +1410,13 @@ impl Sequence {
                 }
             }
             Phase::Parked => {}
+            Phase::VerticalHold
+            | Phase::VerticalClimb
+            | Phase::Transition
+            | Phase::HoverApproach
+            | Phase::VerticalDescent
+            | Phase::Settle
+            | Phase::AirTaxi => complete = self.vertical_transition(s),
         }
         if go_around {
             self.go_arounds += 1;
@@ -1076,6 +1457,23 @@ impl Sequence {
         )
     }
 
+    /// Fitted (agent decision, 2026-10-20): a fixed-wing aircraft past its
+    /// first gate flies down the extended centerline to gates on the 3
+    /// degree path, and while its wheels are no more than [`PATH_LOST_FT`]
+    /// below that path the terrain hold and climb stand down, as on the
+    /// final. Where ground rises toward the gates the path itself can pass
+    /// only 150 to 500 ft above it (VLA Petrovka from the south), inside the
+    /// 1,000 ft hold and the 500 ft climb, and holding the aircraft that
+    /// far above the ground brought it to the last gate 900 ft above the
+    /// path, too high for the final to recover.
+    fn on_centerline_path(&self, s: &Situation) -> bool {
+        if self.phase != Phase::Approach || self.lift.vertical() || self.leg <= self.first_gate() {
+            return false;
+        }
+        let (path, height) = self.final_path(s);
+        height >= path - PATH_LOST_FT
+    }
+
     /// Fitted (agent decision, 2026-09-29): a final that has sunk more than
     /// [`PATH_LOST_FT`] below its path while still above
     /// [`PATH_LOST_FLOOR_FT`] goes around while it has height to climb away,
@@ -1097,6 +1495,32 @@ impl Sequence {
                 anchors.parking[self.slot.unwrap_or(0).min(PARKING_SLOTS - 1) as usize]
             }
             None => self.park.unwrap_or(self.spot),
+        }
+    }
+
+    /// Rudder for a ground heading: the proportional rudder plus the trim
+    /// a held error has built up ([`GROUND_TRIM_GAIN`]).
+    fn steer(&mut self, s: &Situation, heading_deg: f64) -> f64 {
+        let error = wrap_deg(heading_deg - s.heading_deg);
+        if horizontal(s.velocity) >= GROUND_TRIM_SPEED_FPS && error.abs() < GROUND_TRIM_ERROR_DEG {
+            self.ground_trim = (self.ground_trim + GROUND_TRIM_GAIN * error / 120.0)
+                .clamp(-GROUND_TRIM_LIMIT, GROUND_TRIM_LIMIT);
+        }
+        (ground_yaw(s, heading_deg) + self.ground_trim).clamp(-1.0, 1.0)
+    }
+
+    /// Where the current taxi leg starts: the previous anchor, or for the
+    /// first leg out the start position and for the first leg in the
+    /// landing point (so the rollout end is reached along the runway's
+    /// centre line). Without anchors, where the leg began.
+    fn taxi_leg_start(&self) -> [f64; 3] {
+        match (self.phase, self.runway.anchors) {
+            (Phase::Taxi, Some(anchors)) if self.leg > 0 => anchors.taxi_out[self.leg.min(4) - 1],
+            (Phase::TaxiClear, Some(anchors)) if self.leg > 0 => {
+                anchors.taxi_in[self.leg.min(4) - 1]
+            }
+            (Phase::TaxiClear, Some(_)) => self.landing_point(),
+            _ => self.leg_origin,
         }
     }
 
@@ -1128,9 +1552,27 @@ impl Sequence {
             brakes: true,
             afterburner: false,
             activity: self.activity(),
+            lift: LiftDemand::default(),
         };
         match self.phase {
-            Phase::Waiting | Phase::Parked => {}
+            // A helicopter waits with its engines governed and the
+            // collective down (the throttle is its engines' power lever);
+            // parked for good it shuts down (slice H2).
+            Phase::Waiting if self.lift == Lift::Rotor => {
+                command.control = ground(1.0, 0.0, 0.0);
+                command.lift.collective = Some(0.0);
+            }
+            // Parked for good, every aircraft shuts down: engines off (and
+            // a helicopter's collective down, so its rotor runs down)
+            // (slice HF1; opinionated, John 2026-10-13, helicopters first,
+            // then fixed-wing "when they finish too").
+            Phase::Parked => {
+                if self.lift == Lift::Rotor {
+                    command.lift.collective = Some(0.0);
+                }
+                command.lift.engine = Some(false);
+            }
+            Phase::Waiting => {}
             Phase::Taxi | Phase::TaxiClear => {
                 let target = if self.phase == Phase::Taxi {
                     self.runway
@@ -1139,17 +1581,38 @@ impl Sequence {
                 } else {
                     self.taxi_in_target()
                 };
-                let heading = bearing_deg(s.position, target);
+                let aim = leg_aim(
+                    s.position,
+                    self.taxi_leg_start(),
+                    target,
+                    TAXI_LEG_LOOKAHEAD_FT,
+                );
+                let heading = bearing_deg(s.position, aim);
                 let error = wrap_deg(heading - s.heading_deg).abs();
                 let parking_close = self.phase == Phase::TaxiClear
                     && self.parking_leg()
                     && horizontal_distance(s.position, target) <= PARK_THROTTLE_OFF_FT;
                 if self.stopping || parking_close {
-                    command.control = ground(0.0, 0.0, ground_yaw(s, heading));
+                    command.control = ground(0.0, 0.0, self.steer(s, heading));
                 } else {
-                    let speed = taxi_speed(error);
+                    let mut speed = taxi_speed(error);
+                    // Slow for an anchor it stops at (the first one out,
+                    // every one in), so it stops there, not 90 ft on.
+                    let stops = if self.phase == Phase::Taxi {
+                        self.leg == 0
+                    } else {
+                        !self.parking_leg()
+                    };
+                    if stops {
+                        let d = horizontal_distance(s.position, target);
+                        speed = speed.min(
+                            (2.0 * STOP_APPROACH_DECEL_FPS2 * d)
+                                .sqrt()
+                                .max(SLOW_TAXI_FPS),
+                        );
+                    }
                     let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed);
-                    command.control = ground(throttle, 0.0, ground_yaw(s, heading));
+                    command.control = ground(throttle, 0.0, self.steer(s, heading));
                     command.brakes = brakes;
                 }
                 if self.phase == Phase::TaxiClear {
@@ -1171,15 +1634,28 @@ impl Sequence {
                     (heading, speed)
                 } else {
                     let distance = horizontal_distance(s.position, self.spot);
-                    let aim = self.point(self.spot, -(distance - LINEUP_AIM_STEP_FT).max(0.0), 0.0);
+                    let mut back = (distance - LINEUP_AIM_STEP_FT).max(0.0);
+                    // Fitted (agent decision, slice CL-AP 2026-10-11): never
+                    // aim farther back than the last taxi anchor, which
+                    // stands on the centre line behind the spot where the
+                    // taxiway meets it. Aiming as far back as it was away
+                    // took a wingman queued on that taxiway across the
+                    // grass behind it.
+                    if let Some(anchors) = self.runway.anchors {
+                        let (along, cross) = self.frame(anchors.taxi_out[3], self.spot);
+                        if along < 0.0 && cross.abs() <= CENTERLINE_TOLERANCE_FT {
+                            back = back.min(-along);
+                        }
+                    }
+                    let aim = self.point(self.spot, -back, 0.0);
                     let heading = bearing_deg(s.position, aim);
                     (heading, taxi_speed(wrap_deg(heading - s.heading_deg).abs()))
                 };
                 if self.stopping {
-                    command.control = ground(0.0, 0.0, ground_yaw(s, heading));
+                    command.control = ground(0.0, 0.0, self.steer(s, heading));
                 } else {
                     let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed);
-                    command.control = ground(throttle, 0.0, ground_yaw(s, heading));
+                    command.control = ground(throttle, 0.0, self.steer(s, heading));
                     command.brakes = brakes;
                 }
             }
@@ -1209,17 +1685,36 @@ impl Sequence {
                 };
                 let (along, cross) = self.frame(s.position, self.spot);
                 let heading = course + (-cross).atan2(400.0).to_degrees().clamp(-5.0, 5.0);
-                command.control = ground(1.0, pitch, ground_yaw(s, heading));
+                command.control = ground(1.0, pitch, self.steer(s, heading));
                 command.brakes = false;
                 command.flaps_down = true;
                 command.afterburner = s.has_afterburner
                     && along > self.runway.length_ft * BURNER_RUNWAY_FRACTION
                     && s.speed_fps < s.minimum_speed_fps;
+                if self.lift == Lift::ShortJet {
+                    // Retail short takeoff: the nozzles come down for the
+                    // last of the roll (fitted share of the minimum speed).
+                    command.lift.nozzle_deg = Some(
+                        if s.speed_fps >= SHORT_NOZZLE_SPEED_SHARE * s.minimum_speed_fps {
+                            SHORT_NOZZLES_DEG[0]
+                        } else {
+                            0.0
+                        },
+                    );
+                }
             }
             Phase::ClimbOut => {
+                let short = self.lift == Lift::ShortJet;
+                // Retail short takeoff: 10 degrees with the nozzles at 40
+                // up to 250 ft, then at 20 while it gathers speed.
+                let low = short && s.agl_ft < SHORT_CLIMB_AGL_FT;
                 command.control = Control::Air(AirGuidance {
                     heading_deg: course,
-                    flight_path_pitch_deg: CLIMB_OUT_PITCH_DEG,
+                    flight_path_pitch_deg: if low {
+                        SHORT_CLIMB_DEG
+                    } else {
+                        CLIMB_OUT_PITCH_DEG
+                    },
                     speed_fps: s.maximum_speed_fps,
                     wings_level: height < WINGS_LEVEL_HEIGHT_FT,
                     terrain_floor: false,
@@ -1229,9 +1724,22 @@ impl Sequence {
                 command.gear_down = !complete;
                 command.flaps_down = !complete;
                 command.afterburner = s.has_afterburner && s.speed_fps < s.minimum_speed_fps;
+                if short {
+                    command.lift.nozzle_deg = Some(if complete {
+                        0.0
+                    } else if low {
+                        SHORT_NOZZLES_DEG[1]
+                    } else {
+                        SHORT_NOZZLES_DEG[2]
+                    });
+                }
             }
             Phase::Inbound => {
-                let (target, speed) = self.inbound_target(s);
+                let (mut target, speed) = self.inbound_target(s);
+                // Round the threat rings it knows (slice H2).
+                if let Some([x, z]) = s.detour {
+                    target = [x, target[1], z];
+                }
                 command.control = Control::Air(fly_to(s, target, speed));
                 command.gear_down = false;
                 command.flaps_down = false;
@@ -1259,15 +1767,19 @@ impl Sequence {
                 let target = self
                     .marshal_target
                     .unwrap_or_else(|| self.marshal_corner(s.position, s.wing_position));
-                command.control = Control::Air(fly_to(s, target, marshal_speed(s)));
+                command.control = Control::Air(fly_to(s, target, self.marshal_speed(s)));
                 command.gear_down = false;
                 command.flaps_down = false;
             }
             Phase::Approach => {
-                let speed = if self.leg == 0 {
-                    marshal_speed(s)
-                } else {
-                    marshal_speed(s).min(GATE_SPEED_LIMIT_FPS)
+                let speed = match self.lift {
+                    // Retail: a helicopter at most 146 ft/s on the gates.
+                    Lift::Rotor => self.marshal_speed(s).min(VERTICAL_GATE_SPEED_FPS),
+                    // A jet slows to its final speed for the fourth gate,
+                    // where it comes to the hover.
+                    Lift::Jet if self.leg >= 3 => final_speed(s),
+                    _ if self.leg == 0 => self.marshal_speed(s),
+                    _ => self.marshal_speed(s).min(GATE_SPEED_LIMIT_FPS),
                 };
                 command.control = Control::Air(fly_to(s, self.gate(self.leg), speed));
                 self.flaps_up = self.flaps_up && s.speed_fps >= FLAPS_SPEED_FPS;
@@ -1331,9 +1843,20 @@ impl Sequence {
             Phase::Rollout => {
                 let (_, cross) = self.frame(s.position, self.landing_point());
                 let heading = course + (-cross).atan2(500.0).to_degrees().clamp(-10.0, 10.0);
-                command.control = ground(0.0, ROLLOUT_ELEVATOR, ground_yaw(s, heading));
+                command.control = ground(0.0, ROLLOUT_ELEVATOR, self.steer(s, heading));
                 command.flaps_down = true;
             }
+            Phase::VerticalHold
+            | Phase::VerticalClimb
+            | Phase::Transition
+            | Phase::HoverApproach
+            | Phase::VerticalDescent
+            | Phase::Settle
+            | Phase::AirTaxi => self.vertical_command(s, complete, &mut command),
+        }
+        if self.phase == Phase::TaxiClear && self.lift == Lift::Jet {
+            // After a vertical landing a jet taxis in with its nozzles aft.
+            command.lift.nozzle_deg = Some(0.0);
         }
         // Fitted (agent decision, 2026-09-29): on the approach the ground
         // that counts is the ground on the way to the gate being flown to,
@@ -1354,6 +1877,7 @@ impl Sequence {
                 Phase::ClimbOut | Phase::Inbound | Phase::Marshal | Phase::Approach
             )
             && terrain > self.landing_point()[1] + TERRAIN_IGNORED_FT
+            && !self.on_centerline_path(s)
         {
             let clearance = s.position[1] - terrain;
             if clearance < TERRAIN_CLIMB_FT || (!approach && clearance < TERRAIN_HOLD_FT) {
@@ -1397,7 +1921,14 @@ impl Sequence {
     fn inbound_target(&self, s: &Situation) -> ([f64; 3], f64) {
         let target = self.landing_point();
         let distance = horizontal_distance(s.position, target);
-        let (altitude, speed) = self.route.unwrap_or((target[1], s.cruise_speed_fps));
+        let (altitude, speed) = match self.route {
+            // A helicopter goes home at its own cruise and at its marshal
+            // height over the field, not on the fighters' route (fitted,
+            // slice H2; the cruise is slice H3's).
+            _ if self.lift == Lift::Rotor => (target[1] + ROTOR_MARSHAL_AGL_FT, s.cruise_speed_fps),
+            Some(route) => route,
+            None => (target[1], s.cruise_speed_fps),
+        };
         let command = super::route::route_command(
             &super::route::RouteInputs {
                 waypoint: Some(super::route::Waypoint {
@@ -1428,19 +1959,33 @@ impl Sequence {
     fn activity(&self) -> Activity {
         match self.phase {
             Phase::Waiting => Activity::Waiting,
-            Phase::Taxi | Phase::LineUp | Phase::TaxiClear => Activity::Taxiing,
-            Phase::TakeoffRoll | Phase::ClimbOut => Activity::TakingOff,
+            Phase::Taxi | Phase::LineUp | Phase::TaxiClear | Phase::AirTaxi => Activity::Taxiing,
+            Phase::TakeoffRoll
+            | Phase::ClimbOut
+            | Phase::VerticalHold
+            | Phase::VerticalClimb
+            | Phase::Transition => Activity::TakingOff,
             Phase::Inbound => Activity::ReturningToBase,
             Phase::Marshal => Activity::HoldingMarshal,
-            Phase::Approach | Phase::Final | Phase::Rollout => Activity::Landing,
+            Phase::Approach
+            | Phase::Final
+            | Phase::Rollout
+            | Phase::HoverApproach
+            | Phase::VerticalDescent
+            | Phase::Settle => Activity::Landing,
             Phase::Parked => Activity::Landed,
         }
     }
-}
 
-/// Spec-derived marshal and first-gate speed: (maximum + corner) / 2.
-fn marshal_speed(s: &Situation) -> f64 {
-    (s.maximum_speed_fps + s.corner_speed_fps) / 2.0
+    /// Spec-derived marshal and first-gate speed: (maximum + corner) / 2;
+    /// a helicopter's (3 maximum + corner) / 4.
+    fn marshal_speed(&self, s: &Situation) -> f64 {
+        if self.lift == Lift::Rotor {
+            (3.0 * s.maximum_speed_fps + s.corner_speed_fps) / 4.0
+        } else {
+            (s.maximum_speed_fps + s.corner_speed_fps) / 2.0
+        }
+    }
 }
 
 /// Final speed: the fitted multiple of minimum speed under the retail cap.
@@ -1557,6 +2102,19 @@ fn ground_yaw(s: &Situation, heading_deg: f64) -> f64 {
     (rate / authority.max(0.05)).clamp(-1.0, 1.0)
 }
 
+/// The point `lookahead` feet ahead of `position`'s projection on the line
+/// from `from` to `to`, never past `to` (see [`TAXI_LEG_LOOKAHEAD_FT`]).
+fn leg_aim(position: [f64; 3], from: [f64; 3], to: [f64; 3], lookahead: f64) -> [f64; 3] {
+    let leg = sub(to, from);
+    let length = horizontal(leg);
+    if length < 1.0 {
+        return to;
+    }
+    let along = (dot2(sub(position, from), leg) / length).clamp(0.0, length);
+    let at = ((along + lookahead) / length).min(1.0);
+    [from[0] + leg[0] * at, to[1], from[2] + leg[2] * at]
+}
+
 fn recheck_ticks(seconds: f64) -> u64 {
     (seconds * 120.0).round() as u64
 }
@@ -1665,6 +2223,9 @@ mod tests {
             runway_free: true,
             wing_landed: true,
             free_slot: Some(0),
+            touchdown_safe: true,
+            hover_capable: true,
+            detour: None,
         }
     }
 
@@ -1727,6 +2288,47 @@ mod tests {
         assert!(pitch >= 0. && !level);
         // Close above them: climb, wings level.
         let (_, pitch, level) = guide(1_200., 0.);
+        assert!(pitch >= TERRAIN_CLIMB_DEG && level);
+    }
+
+    #[test]
+    fn past_the_first_gate_the_path_over_rising_ground_is_flown_down() {
+        // 2026-10-20: at VLA Petrovka the 3 degree path runs 150 to 500 ft
+        // above rising ground under the gates; the terrain hold kept an
+        // F/A-18D 1,000 ft above it and it crossed the threshold 579 ft up.
+        let path = |out: f64| out * APPROACH_PATH_DEG.to_radians().tan();
+        let guide = |leg: usize, above_path: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Approach;
+            seq.leg = leg;
+            let out = 16_000.;
+            let height = path(out) + above_path;
+            let mut s = on_final(&seq, out, height, 360.);
+            // Ground 300 ft under the aircraft on the way to the gate, more
+            // than 300 ft above the runway: inside the hold and the climb.
+            s.terrain_to_gate_ft = s.position[1] - 300.;
+            match seq.step(&s).command.control {
+                Control::Air(g) => (g.flight_path_pitch_deg, g.wings_level),
+                other => panic!("{other:?}"),
+            }
+        };
+        // On the centreline legs, above the path or a little below it, the
+        // aircraft keeps descending toward its gate on the path.
+        for above in [300., 0., -PATH_LOST_FT + 10.] {
+            let (pitch, level) = guide(2, above);
+            if above > 0. {
+                assert!(pitch < 0., "{above} ft above the path: {pitch}");
+            }
+            assert!(
+                pitch < TERRAIN_CLIMB_DEG && !level,
+                "{above}: {pitch} {level}"
+            );
+        }
+        // Well below the path the terrain climb still applies.
+        let (pitch, level) = guide(2, -PATH_LOST_FT - 50.);
+        assert!(pitch >= TERRAIN_CLIMB_DEG && level);
+        // On the way to the first gate, off the centerline, it applies too.
+        let (pitch, level) = guide(0, 300.);
         assert!(pitch >= TERRAIN_CLIMB_DEG && level);
     }
 
@@ -1900,6 +2502,9 @@ mod tests {
             runway_free: false,
             wing_landed: true,
             free_slot: None,
+            touchdown_safe: true,
+            hover_capable: true,
+            detour: None,
         };
         let step = s.step(&situation);
         assert_eq!(step.command.activity, Activity::Waiting);
@@ -1916,4 +2521,503 @@ mod tests {
         s.step(&situation);
         assert_eq!(s.phase(), Phase::LineUp);
     }
+
+    /// A field laid out like the redrawn base plans: parallel taxiway 450 ft
+    /// right, cross taxiway 190 ft behind the threshold, apron beyond.
+    fn anchored() -> RunwayView {
+        let p = |x: f64, z: f64| [x, 0., z];
+        RunwayView {
+            center: [0., 0., 4000.],
+            anchors: Some(AirfieldAnchors {
+                taxi_out: [p(450., 1300.), p(450., -190.), p(225., -190.), p(0., -190.)],
+                takeoff_spot: p(0., 0.),
+                takeoff_heading: 0.,
+                landing_point: p(0., 1000.),
+                landing_heading: 0.,
+                taxi_in: [p(0., 7750.), p(225., 7750.), p(420., 7750.), p(450., 4600.)],
+                parking: std::array::from_fn(|k| p(900., 2000. + 250. * k as f64)),
+                parking_heading: -std::f64::consts::FRAC_PI_2,
+            }),
+            ..runway()
+        }
+    }
+
+    fn on_ground(position: [f64; 3], heading_deg: f64, speed_fps: f64) -> Situation {
+        let h = heading_deg.to_radians();
+        Situation {
+            position,
+            velocity: [speed_fps * h.sin(), 0., speed_fps * h.cos()],
+            heading_deg,
+            speed_fps,
+            on_ground: true,
+            agl_ft: 8.,
+            ..on_final(&landing(), 0., 0., speed_fps)
+        }
+    }
+
+    /// Slice CL-AP: taxiing along a leg the aircraft aims a little ahead on
+    /// the leg's line, so a sideways error is steered out within a few
+    /// hundred feet instead of being carried toward an anchor far away.
+    #[test]
+    fn taxiing_aims_along_the_leg_not_at_its_far_anchor() {
+        let from = [0., 0., 0.];
+        let to = [0., 0., 3000.];
+        let aim = leg_aim([60., 0., 500.], from, to, TAXI_LEG_LOOKAHEAD_FT);
+        assert_eq!(aim, [0., 0., 620.]);
+        // Past the end it aims at the anchor.
+        assert_eq!(
+            leg_aim([0., 0., 2950.], from, to, TAXI_LEG_LOOKAHEAD_FT),
+            to
+        );
+        // From the side of the line, the heading back to it is steep.
+        let heading = bearing_deg([60., 0., 500.], aim);
+        assert!(heading < -25., "{heading}");
+    }
+
+    /// Slice CL-AP: a heading error held on the ground (a crosswind on the
+    /// roll) builds rudder trim; a large error (a turn) does not.
+    #[test]
+    fn a_held_heading_error_on_the_ground_builds_rudder_trim() {
+        let start = GroundStart {
+            runway: anchored(),
+            end: ApproachEnd::Near,
+            order: 1,
+        };
+        let mut seq = Sequence::departure(start, [0., 0., -100.], None);
+        let s = on_ground([0., 0., 500.], 355., 150.);
+        let first = seq.steer(&s, 0.);
+        for _ in 0..240 {
+            seq.steer(&s, 0.);
+        }
+        let later = seq.steer(&s, 0.);
+        assert!(later > first + 0.1, "{first} -> {later}");
+        assert!(seq.ground_trim <= GROUND_TRIM_LIMIT);
+        let mut turning = Sequence::departure(start, [0., 0., -100.], None);
+        for _ in 0..240 {
+            turning.steer(&on_ground([0., 0., 500.], 270., 20.), 0.);
+        }
+        assert_eq!(turning.ground_trim, 0.0);
+    }
+
+    /// Slice CL-AP: the fourth of a wing waits on the parallel taxiway
+    /// abeam the takeoff spot, inside the leg shortcut distance. It taxis
+    /// its legs out; it neither lines up nor rolls from the taxiway.
+    #[test]
+    fn a_wingman_queued_abeam_the_spot_taxis_its_legs() {
+        let start = GroundStart {
+            runway: anchored(),
+            end: ApproachEnd::Near,
+            order: 3,
+        };
+        let position = [450., 0., -4.];
+        let mut seq = Sequence::departure(start, position, None);
+        let s = on_ground(position, 180., 0.);
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::Taxi);
+        assert_eq!(seq.leg(), 1);
+        let s = Situation {
+            tick: 2,
+            ..on_ground([450., 0., -60.], 180., 20.)
+        };
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::Taxi, "the shortcut skipped its legs");
+    }
+
+    /// Slice CL-AP: lining up from the cross taxiway the aircraft aims no
+    /// farther back than the anchor where that taxiway meets the centre
+    /// line, so it stays on the taxiway rather than cutting behind it.
+    #[test]
+    fn lining_up_aims_no_farther_back_than_the_last_anchor() {
+        let start = GroundStart {
+            runway: anchored(),
+            end: ApproachEnd::Near,
+            order: 1,
+        };
+        let position = [-400., 0., -190.];
+        let mut seq = Sequence::departure(start, position, None);
+        seq.queue_leg = None;
+        let s = on_ground(position, 90., 10.);
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::LineUp);
+        let step = seq.step(&Situation { tick: 2, ..s });
+        let Control::Ground { yaw, .. } = step.command.control else {
+            panic!("ground control");
+        };
+        // Heading 90 toward (0, -190) needs no turn; the old aim 350 ft
+        // behind the spot asked for a right turn toward the grass.
+        assert!(yaw.abs() < 0.05, "{yaw}");
+    }
+
+    /// Slice CL-AP: approaching an anchor it stops at, a taxiing aircraft
+    /// slows so it stops there rather than 90 ft on.
+    #[test]
+    fn taxiing_slows_for_the_anchor_it_stops_at() {
+        let mut seq = landing();
+        seq.runway = anchored();
+        seq.phase = Phase::TaxiClear;
+        seq.leg = 2;
+        seq.slot = Some(0);
+        seq.leg_origin = [225., 0., 7750.];
+        let ground = |seq: &mut Sequence, s: &Situation| {
+            let step = seq.step(s);
+            match step.command.control {
+                Control::Ground { throttle, .. } => (throttle, step.command.brakes),
+                Control::Air(_) | Control::Hover(_) => panic!("ground control"),
+            }
+        };
+        let near = on_ground([380., 0., 7750.], 90., 50.);
+        assert!(
+            ground(&mut seq.clone(), &near).1,
+            "no brakes 40 ft before the stop at 50 ft/s"
+        );
+        let mut far = seq.clone();
+        far.leg = 1;
+        far.leg_origin = [0., 0., 7750.];
+        let (throttle, brakes) = ground(&mut far, &on_ground([-300., 0., 7750.], 90., 40.));
+        assert!(!brakes && throttle > 0.0, "{throttle} {brakes}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice H2: the vertical phases.
+
+    fn hover_of(command: &Command) -> crate::ai::rotor_adapter::HoverGuidance {
+        match command.control {
+            Control::Hover(h) => h,
+            other => panic!("hover control, got {other:?}"),
+        }
+    }
+
+    fn departure(lift: Lift, position: [f64; 3]) -> Sequence {
+        let start = GroundStart {
+            runway: runway(),
+            end: ApproachEnd::Near,
+            order: 1,
+        };
+        Sequence::departure(start, position, None).with_lift(lift)
+    }
+
+    /// Retail 1 to 0xa to 0xb: a helicopter lifts off where it stands on
+    /// its turn with the runway free (no taxi), holds 5 s with the
+    /// collective down and its engines governed, climbs straight up at
+    /// 25 ft/s over its spot, and finishes at 500 ft.
+    #[test]
+    fn a_helicopter_lifts_off_where_it_stands_holds_five_seconds_and_climbs_to_500_ft() {
+        let spot = [300., 8., -3000.];
+        let mut seq = departure(Lift::Rotor, spot);
+        let mut s = on_ground(spot, 90., 0.);
+        s.tick = 0;
+        let step = seq.step(&s);
+        assert_eq!(seq.phase(), Phase::VerticalHold);
+        assert!(step.command.brakes && step.command.lift.collective == Some(0.0));
+        assert!(
+            matches!(step.command.control, Control::Ground { throttle, .. } if throttle == 1.0)
+        );
+        assert!(seq.blocks_runway() && !seq.holds_followers());
+        for tick in 1..600 {
+            s.tick = tick;
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::VerticalHold, "{tick}");
+        }
+        s.tick = 600;
+        let step = seq.step(&s);
+        assert_eq!(seq.phase(), Phase::VerticalClimb);
+        assert!(!seq.blocks_runway(), "retail 0xb leaves the runway free");
+        let h = hover_of(&step.command);
+        assert_eq!(h.point, [300., -3000.]);
+        assert_eq!(h.height_agl_ft, ROTOR_CLIMB_AGL_FT);
+        assert_eq!(h.max_climb_fps, VERTICAL_CLIMB_FPS);
+        assert_eq!(h.heading_deg, 90.);
+        assert_eq!(step.command.activity, Activity::TakingOff);
+        // 470 ft up: still climbing; 475 ft: done, gear up.
+        s.on_ground = false;
+        s.agl_ft = 470. + s.ground_clearance_ft;
+        s.tick = 700;
+        assert!(!seq.step(&s).complete);
+        s.agl_ft = ROTOR_CLIMB_AGL_FT - CLIMB_REACHED_FT + s.ground_clearance_ft;
+        let step = seq.step(&s);
+        assert!(step.complete && !step.command.gear_down);
+    }
+
+    /// A hovering jet taxis to the takeoff spot, then takes off vertically
+    /// (nozzles down for the hold), climbs to 800 ft and accelerates to its
+    /// minimum speed plus 73 ft/s, the nozzles going aft at the end.
+    #[test]
+    fn a_hovering_jet_lines_up_then_takes_off_vertically_to_800_ft_and_accelerates() {
+        let mut seq = departure(Lift::Jet, [40., 0., -3500.]);
+        seq.phase = Phase::LineUp;
+        seq.stopping = true;
+        let s = on_ground(seq.spot, 0., 0.);
+        let step = seq.step(&s);
+        assert_eq!(seq.phase(), Phase::VerticalHold);
+        assert_eq!(step.command.lift.nozzle_deg, Some(HOVER_NOZZLE_DEG));
+        let mut s = Situation {
+            tick: s.tick + 600,
+            ..s
+        };
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::VerticalClimb);
+        s.on_ground = false;
+        s.agl_ft = JET_CLIMB_AGL_FT;
+        s.tick = 700;
+        let step = seq.step(&s);
+        assert!(!step.complete);
+        assert_eq!(seq.phase(), Phase::Transition);
+        let h = hover_of(&seq.step(&s).command);
+        let target = s.minimum_speed_fps + TRANSITION_MARGIN_FPS;
+        assert!((h.velocity_fps[1] - target).abs() < 1e-9 && h.velocity_fps[0].abs() < 1e-9);
+        s.speed_fps = target;
+        let step = seq.step(&s);
+        assert!(step.complete);
+        assert_eq!(step.command.lift.nozzle_deg, Some(0.0));
+    }
+
+    /// A jet decides at the takeoff spot, stores on: too heavy to hover, it
+    /// rolls for the short takeoff instead of holding for a vertical one.
+    #[test]
+    fn a_jet_too_heavy_at_the_spot_rolls_for_the_short_takeoff() {
+        let mut seq = departure(Lift::Jet, [40., 0., -3500.]);
+        seq.phase = Phase::LineUp;
+        seq.stopping = true;
+        let s = Situation {
+            hover_capable: false,
+            ..on_ground(seq.spot, 0., 0.)
+        };
+        seq.step(&s);
+        assert_eq!(
+            (seq.phase(), seq.lift()),
+            (Phase::TakeoffRoll, Lift::ShortJet)
+        );
+    }
+
+    /// Retail's short takeoff for a jet too heavy to hover: nozzles down to
+    /// 60 degrees late in the roll, 40 to 250 ft at a 10 degree climb, then
+    /// 20 until it is fast enough, then aft.
+    #[test]
+    fn a_heavy_jet_makes_the_retail_short_takeoff() {
+        let mut seq = departure(Lift::ShortJet, [40., 0., -3500.]);
+        seq.phase = Phase::TakeoffRoll;
+        let nozzle = |seq: &mut Sequence, s: &Situation| seq.step(s).command.lift.nozzle_deg;
+        let mut s = on_ground(seq.spot, 0., 50.);
+        assert_eq!(nozzle(&mut seq, &s), Some(0.0));
+        s.speed_fps = SHORT_NOZZLE_SPEED_SHARE * s.minimum_speed_fps;
+        assert_eq!(nozzle(&mut seq, &s), Some(SHORT_NOZZLES_DEG[0]));
+        s.on_ground = false;
+        s.agl_ft = 100.;
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::ClimbOut);
+        let step = seq.step(&s);
+        assert_eq!(step.command.lift.nozzle_deg, Some(SHORT_NOZZLES_DEG[1]));
+        assert!(matches!(step.command.control,
+            Control::Air(g) if g.flight_path_pitch_deg == SHORT_CLIMB_DEG));
+        s.agl_ft = 300.;
+        assert_eq!(nozzle(&mut seq, &s), Some(SHORT_NOZZLES_DEG[2]));
+        s.speed_fps = s.minimum_speed_fps + TRANSITION_MARGIN_FPS;
+        let step = seq.step(&s);
+        assert!(step.complete && step.command.lift.nozzle_deg == Some(0.0));
+    }
+
+    fn vertical_landing(lift: Lift) -> Sequence {
+        landing().with_lift(lift)
+    }
+
+    /// Retail 0x13/0x14 for vertical types: a helicopter's marshal square
+    /// is 10,000 ft, lower (fitted); four gates 500 ft higher, the fourth
+    /// 6,000 ft out, at most 146 ft/s for a helicopter.
+    #[test]
+    fn a_vertical_type_flies_four_raised_gates_and_a_helicopter_a_small_marshal_square() {
+        let fixed = landing();
+        let heli = vertical_landing(Lift::Rotor);
+        assert_eq!((fixed.gates(), heli.gates()), (3, 4));
+        assert_eq!(
+            (fixed.first_gate(), heli.first_gate()),
+            (0, ROTOR_FIRST_GATE)
+        );
+        assert_eq!(vertical_landing(Lift::Jet).first_gate(), 0);
+        // Cleared from the marshal, a helicopter starts at the 8,800 ft gate.
+        let mut cleared = heli.clone();
+        cleared.step(&on_final(&heli, 60_000., 2_500., 140.));
+        assert_eq!((cleared.phase(), cleared.leg()), (Phase::Approach, 2));
+        for k in 0..3 {
+            assert!((heli.gate(k)[1] - fixed.gate(k)[1] - VERTICAL_GATE_RAISE_FT).abs() < 1e-9);
+        }
+        let aim = heli.landing_point();
+        assert!((heli.gate(3)[2] - (aim[2] - FOURTH_GATE_FT)).abs() < 1e-9);
+        let corner = heli.marshal_corner([aim[0], 3000., aim[2] + 60_000.], 1);
+        assert_eq!(
+            corner,
+            [
+                aim[0] + ROTOR_MARSHAL_DISTANCE_FT,
+                aim[1] + ROTOR_MARSHAL_AGL_FT + ROTOR_MARSHAL_STEP_FT,
+                aim[2] + ROTOR_MARSHAL_DISTANCE_FT
+            ]
+        );
+        let mut seq = heli.clone();
+        seq.phase = Phase::Approach;
+        let s = on_final(&seq, 40_000., 2_000., 140.);
+        let Control::Air(g) = seq.step(&s).command.control else {
+            panic!("air guidance");
+        };
+        assert!(g.speed_fps <= VERTICAL_GATE_SPEED_FPS);
+        // The last gate leads to the hover approach, not the final.
+        seq.leg = 3;
+        let gate = seq.gate(3);
+        let s = Situation {
+            position: [gate[0], gate[1] + 8., gate[2]],
+            ..s
+        };
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::HoverApproach);
+        assert!(seq.blocks_runway());
+    }
+
+    /// Retail 0x18: over the landing point, slow, it comes straight down,
+    /// at 50 ft/s high up and 5 ft/s at the wheels; within 30 ft of the
+    /// ground it goes on only while the shared touchdown rule would accept
+    /// a touchdown; down, it sits 5 s, then a helicopter air taxis to its
+    /// slot, sets down there and shuts down, and a jet taxis in.
+    #[test]
+    fn the_vertical_landing_comes_down_over_the_point_sits_and_goes_to_parking() {
+        for lift in [Lift::Rotor, Lift::Jet] {
+            let mut seq = vertical_landing(lift).at_phase(Phase::HoverApproach, 0.);
+            seq.slot = Some(2);
+            let aim = seq.landing_point();
+            let mut s = on_ground([aim[0] + 30., 0., aim[2]], 0., 0.);
+            s.on_ground = false;
+            s.agl_ft = 700.;
+            s.velocity = [0., 0., 20.];
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::HoverApproach, "too fast to start down");
+            s.velocity = [0., 0., 5.];
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::VerticalDescent, "{lift:?}");
+            // The sink builds up from the hover.
+            let h = hover_of(&seq.step(&s).command);
+            assert_eq!(h.max_descent_fps, TOUCHDOWN_SINK_FPS);
+            assert_eq!(h.height_agl_ft, SET_DOWN_FT);
+            s.tick += 20 * 120;
+            let h = hover_of(&seq.step(&s).command);
+            assert_eq!(h.max_descent_fps, JET_DESCENT_FPS);
+            s.agl_ft = 20. + s.ground_clearance_ft;
+            let h = hover_of(&seq.step(&s).command);
+            assert_eq!(h.max_descent_fps, TOUCHDOWN_SINK_FPS);
+            // The touchdown rule would refuse: it holds its height.
+            s.touchdown_safe = false;
+            let h = hover_of(&seq.step(&s).command);
+            assert!((h.height_agl_ft - 20.).abs() < 1e-9, "{h:?}");
+            s.touchdown_safe = true;
+            s.on_ground = true;
+            s.agl_ft = s.ground_clearance_ft;
+            s.tick = 1_000;
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::Settle);
+            assert!(seq.blocks_runway() && seq.landed());
+            s.tick = 1_000 + 599;
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::Settle);
+            s.tick = 1_600;
+            let step = seq.step(&s);
+            if lift == Lift::Jet {
+                assert_eq!(seq.phase(), Phase::TaxiClear);
+                assert_eq!(step.command.lift.nozzle_deg, Some(0.0));
+                continue;
+            }
+            assert_eq!(seq.phase(), Phase::AirTaxi);
+            assert!(!seq.blocks_runway() && seq.landed());
+            let slot = seq.park.unwrap();
+            // Straight up over the landing point first.
+            let h = hover_of(&step.command);
+            assert_eq!(
+                (h.point, h.height_agl_ft),
+                ([s.position[0], s.position[2]], AIR_TAXI_AGL_FT)
+            );
+            assert_eq!(step.command.activity, Activity::Taxiing);
+            // Up: on to the slot.
+            s.on_ground = false;
+            s.agl_ft = AIR_TAXI_AGL_FT + s.ground_clearance_ft;
+            let h = hover_of(&seq.step(&s).command);
+            assert_eq!(
+                (h.point, h.height_agl_ft),
+                ([slot[0], slot[2]], AIR_TAXI_AGL_FT)
+            );
+            assert_eq!(h.max_speed_fps, AIR_TAXI_FPS);
+            // Over the slot: down, then parked with the engines shut down.
+            s.on_ground = false;
+            s.position = [slot[0] + 5., 30., slot[2]];
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::VerticalDescent);
+            assert!(!seq.blocks_runway());
+            let h = hover_of(&seq.step(&s).command);
+            assert_eq!(h.point, [slot[0], slot[2]]);
+            s.on_ground = true;
+            seq.step(&s);
+            assert_eq!(seq.phase(), Phase::Parked);
+            let step = seq.step(&s);
+            assert_eq!(step.command.lift.collective, Some(0.0));
+            assert_eq!(step.command.lift.engine, Some(false));
+            assert!(
+                matches!(step.command.control, Control::Ground { throttle, .. } if throttle == 0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn the_descent_rate_runs_from_twenty_down_to_five_feet_a_second() {
+        use super::vertical::{descent_limit, descent_rate};
+        assert_eq!(descent_rate(1_200.), JET_DESCENT_FPS);
+        assert_eq!(descent_rate(200.), 10.);
+        assert_eq!(descent_rate(10.), TOUCHDOWN_SINK_FPS);
+        assert_eq!(descent_limit(800., 1., false), TOUCHDOWN_SINK_FPS);
+        assert_eq!(descent_limit(800., 3., false), 15.);
+        assert_eq!(descent_limit(800., 20., false), JET_DESCENT_FPS);
+        assert_eq!(descent_limit(800., 0., true), TOUCHDOWN_SINK_FPS);
+    }
+
+    #[test]
+    fn the_vertical_phases_guard_ejection_and_map_to_flight_states() {
+        use Phase::*;
+        let mut seq = vertical_landing(Lift::Rotor);
+        for phase in [VerticalHold, VerticalClimb, Transition] {
+            assert_eq!(phase.flight_state(), FlightState::TakingOff);
+            seq.phase = phase;
+            assert!(seq.guards_ejection());
+        }
+        for phase in [HoverApproach, VerticalDescent, Settle, AirTaxi] {
+            assert_eq!(phase.flight_state(), FlightState::LateLanding);
+            seq.phase = phase;
+            assert!(seq.guards_ejection());
+        }
+    }
+
+    /// The inbound leg flies to the detour point the mission found round a
+    /// threat ring, at the route's height.
+    #[test]
+    fn the_inbound_leg_flies_to_the_detour_point() {
+        let mut seq = Sequence::landing(
+            LandingOrder {
+                runway: runway(),
+                reason: LandingReason::Ordered,
+            },
+            [0., 2000., -200_000.],
+            [0.; 3],
+            20_000.,
+            Some((2000., 200.)),
+        )
+        .with_lift(Lift::Rotor);
+        let mut s = on_final(&seq, 197_000., 2000., 200.);
+        let straight = seq.step(&s).command.control;
+        s.detour = Some([-50_000., -150_000.]);
+        let Control::Air(g) = seq.step(&s).command.control else {
+            panic!("air");
+        };
+        assert_ne!(Control::Air(g), straight);
+        assert!((g.heading_deg - (-45.)).abs() < 0.5, "{}", g.heading_deg);
+    }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "airfield_checkpoint.rs"]
+mod checkpoint;
+
+// The vertical takeoff and landing phases (slice H2).
+#[path = "airfield_vertical.rs"]
+pub mod vertical;

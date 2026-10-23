@@ -8,6 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+Cockpit lighting captures may set `TORE_COCKPIT_LIGHTING=4,3,0,0`: instrument
+level 1..5, flood 0..5, HUD colour 0..3 (green, amber, white, cyan), and HUD
+brightness -256..256. This overrides local preferences for the run. Use
+`TORE_WEATHER_TIME=12:00` or `00:00` with `--capture-flight`, through
+`tools/agent-run.sh`. [Lighting spec](spec/cockpit-lighting.md).
+
 ## Baseline
 
 Clone this repository and enter its root before running Cargo commands. Source code is under `crates/`, project documentation under `docs/`, and developer scripts under `tools/`. User-owned media belongs under ignored `gameassets/`; optional reference code under ignored `USNF-ATF/`; research output under ignored `.local/`. See [README](../README.md) for the short run workflow and [EXTRACTION](EXTRACTION.md) for the shared extraction script.
@@ -78,6 +84,8 @@ Cache locations:
 
 `TORE_DATA_DIR` overrides this directory for isolated checks, e.g. `TORE_DATA_DIR=.local/test-profile cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only`. Each import creates a versioned `menu-*.pack`; the latest valid pack is loaded, with fallback to earlier valid packs if a write was interrupted. `import-report.txt` records resource names and offsets. After a successful import or startup load, older numbered packs are automatically removed. An import is read back and validated before cleanup; failed imports leave earlier packs available. Cleanup leaves newer generations and unrelated files alone. See [cache retention](spec/import-cache.md). Imported resources never go into the executable.
 
+The import keeps the Quick Mission ground target data (templates, surface units and their shapes) under their retail names ([contract](spec/import-cache.md#ground-target-data-slice-im1)). To prove a source imports completely, run `cargo test -p tore-import --test surface_data -- --ignored --nocapture` (about a minute each): it imports the install (`TORE_GAME_DIR`, default the `gameassets` link) and the 1.0 disc (`TORE_DISC_DIR`, default its `disc1` folder) into scratch folders under `TMPDIR` and checks that every template resolves.
+
 ## Linux and Windows
 
 Linux: install rustup and a native toolchain. On Ubuntu 24.04:
@@ -129,6 +137,11 @@ Run the window smoke test on a display-capable host for rendering changes.
 
 ## Everyday checks
 
+While you work, iterate with the quick check, which runs only what your change can
+affect in about five minutes: `python3 tools/quick_check.py`. See
+[testing tiers](testing/README.md#testing-tiers). The list below is what must pass
+before a merge or a push.
+
 Run from the repository root:
 
 ```sh
@@ -172,7 +185,9 @@ cargo run --locked -p tore-app -- --snapshot .local/exploration/menu.ppm
 cargo run --locked -p tore-app -- --snapshot .local/exploration/pref.ppm --snapshot-state pref
 ```
 
-The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`, and `controls`, `controls-keyboard`, `controls-mouse` and `controls-head` for the input configuration screen with a synthetic Xbox-layout gamepad, `controls-search` (the gamepad's actions searched for "fire") and `controls-search-keys` (keyboard actions on Shift keys), `graphics` for the Graphics options screen with the default settings (with no GPU to ask, it shows Off, 2x and 4x anti-aliasing as available and 8x as unavailable), and `sound` for the Sound/Music Prefs dialog with sample levels and the swap switch at YES. `replays`, `replays-settings` and `replays-delete` show the Replays screen over a synthetic list of recordings (no recordings are read), with the auto-delete settings or the delete confirmation open. Snapshots default to CHOOSEV for repeatability; `--background` overrides it. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
+The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`, and `controls`, `controls-keyboard`, `controls-mouse` and `controls-head` for the input configuration screen with a synthetic Xbox-layout gamepad, `controls-search` (the gamepad's actions searched for "fire") and `controls-search-keys` (keyboard actions on Shift keys), `graphics` for the Graphics options screen with the default settings (with no GPU to ask, it shows Off, 2x and 4x anti-aliasing as available and 8x as unavailable, and a 3840x2160 window for the render scale's sizes), `graphics-middle` and `graphics-bottom` with its list scrolled, `graphics-scale` with the render scale row focused, and `sound` for the Sound/Music Prefs dialog with sample levels and the swap switch at YES. `replays`, `replays-settings` and `replays-delete` show the Replays screen over a synthetic list of recordings (no recordings are read), with the auto-delete settings or the delete confirmation open. `bar-multi-hover`, `bar-replays-hover`, `bar-replays-pressed` and
+`bar-replays-focus` inspect the main-menu top-bar alignment and highlight.
+Snapshots default to CHOOSEV for repeatability; `--background` overrides it. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
 
 For the general extractor, use `python3 tools/extract_assets.py --dry-run` followed by `python3 tools/extract_assets.py`. It runs the standalone Rust tool in release mode without the app's window/audio dependencies. See [EXTRACTION.md](EXTRACTION.md) for filters, alternate source directories, and reports.
 
@@ -188,7 +203,11 @@ The release packages are built by `.github/workflows/release.yml` when a `v*`
 tag is pushed, and by the same three scripts when a developer runs them by
 hand. A push to any branch named `release-test/...` runs the build half only,
 so the packaging path can be exercised without publishing anything; download
-the five `packages-*` artifacts from that run with `gh run download`.
+the five `packages-*` artifacts from that run with `gh run download`
+(and `master-ubuntu-22.04`, the Linux `tore-master` for the Internet Lobby's
+master server, [operations](MASTER-SERVER.md#downloading-a-release); and the
+four `server-*` artifacts, the dedicated server's archives,
+[downloading it](DEDICATED-SERVER.md#downloading-it)).
 `workflow_dispatch` does the same once the workflow exists on `main`.
 
 Every script takes the version from `--version`, then from the tag the workflow
@@ -207,7 +226,7 @@ Build the release binaries first, stamping the same version the package will
 carry:
 
 ```sh
-TORE_BUILD_VERSION=0.1.3 cargo build --release --locked -p tore-app -p tore-extract
+TORE_BUILD_VERSION=0.2.0 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
 For the 32-bit Windows package, run `rustup target add i686-pc-windows-msvc`
@@ -220,6 +239,7 @@ script the same target.
 | macOS | `tools/package/package-macos.sh` | `dist/*.dmg` holding `T.O.R.E-Fighters.app` |
 | Windows | `pwsh tools/package/package-windows.ps1` | `dist/*-windows-x86_64.msi` |
 | Windows 32-bit | `pwsh tools/package/package-windows.ps1 -Target i686-pc-windows-msvc` | `dist/*-windows-x86.msi` |
+| Dedicated server, any of the three | `python3 tools/package/package_server.py [--max-glibc 2.35]` after `cargo build --release --locked -p tore-server` | `dist/server/tore-server-<version>-<platform>.tar.gz` (`.zip` on Windows) and its `.sha256` |
 
 What each package contains:
 
@@ -242,6 +262,19 @@ What each package contains:
   The 32-bit MSI installs into `%ProgramFiles(x86)%\T.O.R.E-Fighters`
   instead; the two share the `UpgradeCode`, so installing either replaces the
   other. The installer's pages and its shortcut choices are described below.
+- **Dedicated server archive**: one folder named like the archive, holding
+  `tore-server` (`tore-server.exe`), `server.conf` and `mission.txt` (the
+  samples in `crates/tore-server/samples/`, which a `tore-server` test parses),
+  `DEDICATED-SERVER.md`, `LICENSE` and `THIRD_PARTY_NOTICES.md`. The release
+  workflow builds it on the Windows x86_64, both macOS and the Linux jobs, with
+  a cargo command of its own so the game's binaries are built exactly as
+  before, and uploads it as `server-<runner>` from `dist/server/`, apart from
+  the game's packages. The script scans the staged folder and the archive,
+  checks the runtime libraries, and runs `--version` (which must carry
+  `TORE_BUILD_VERSION` when it is set) from the stage and from an unpacked
+  copy. `tools/check_assets.py` scans a `.zip` member by member, as it does a
+  tarball. The guide's [download section](DEDICATED-SERVER.md#downloading-it)
+  is the operator's side.
 
 None of these contain retail media. The app imports the player's own Fighters
 Anthology copy at runtime; see [first-run import](spec/first-run-import.md).
@@ -343,10 +376,12 @@ share a GUID.
 
 ### appimagetool
 
-`appimagetool` is published only under a moving `continuous` tag, so the script
-downloads it and checks it against a SHA-256 pinned in `package-linux.sh`. When
-upstream rebuilds the asset the hash stops matching and the script refuses to
-run it; review the new build and update the pin deliberately. If the tool is
+The script downloads `appimagetool` from its versioned 1.9.1 release (John,
+2026-10-22; the moving `continuous` tag was rebuilt on 2026-10-04 and broke the
+earlier pin) and checks it against a SHA-256 pinned in `package-linux.sh`, which
+matches the digest GitHub lists for that asset. If the download ever stops
+matching, the script refuses to run it; review the build and update the pin
+deliberately. If the tool is
 already on `PATH` that copy is used instead. Locally, no AppImage is a warning
 and the tar.gz still succeeds; in CI it is a failure.
 
@@ -368,11 +403,14 @@ the package layout.
 ### What CI validates, and what it does not
 
 The release workflow runs formatting, Clippy, workspace tests, Python tool
-and Windows resource-layout tests, documentation and asset checks. Both it and
+and Windows resource-layout tests, documentation and asset checks. `ci.yml`
+also scans the debug `tore-server` and checks its runtime libraries (the 2.35
+glibc floor on Linux) on all five jobs, since it ships too. Both it and
 `ci.yml` run a fifth job on `windows-2022` for 32-bit Windows, which sets
 `CARGO_BUILD_TARGET=i686-pc-windows-msvc` so every crate is linted, tested and
 built for that target. The release workflow builds release binaries with
-matching debug information and retains PDB, dSYM or ELF symbols in separate
+matching debug information and retains PDB, dSYM or ELF symbols (the dedicated
+server's too, on the jobs that build it) in separate
 `symbols-*` workflow artifacts labelled by source commit.
 These artifacts are not added to the retail-free game packages.
 
@@ -474,7 +512,7 @@ The quick-mission snapshot is a headless CPU image. `--capture-terrain` requires
 
 Controls: arrows move horizontally, Shift accelerates translation 8×, Q/E or PageDown/PageUp lower/raise, A/D turn, W/S pitch. Camera movement uses elapsed time with a 50 ms cap, clamps to the theater and stays at least 100 feet above the rendered surface. It is an inspection camera, not aircraft physics. Focus loss clears held keys. Escape returns to the creator, then Choose Activity. The viewer schedules frames while active; menus remain idle when no redraw is needed.
 
-`terrain.rs` owns renderer-independent surface/camera data; `sim_renderer.rs` and `terrain.wgsl` own the depth-tested GPU scene and sky. Follow [the recovery notes](formats/theater.md) before extending source semantics; record approximations and native evidence. The initial renderer builds the whole selected theater mesh at startup, including when entering through the main menu. Streaming, LOD, object rendering and complete weather remain open.
+`terrain.rs` (in `tore-world`) owns the renderer-independent surface, airport and weather data (`Terrain`), `camera.rs` the free camera, `scenery.rs` the art, mesh and camera weather built from it (`Scenery`); `sim_renderer.rs` and `terrain.wgsl` own the depth-tested GPU scene and sky. Follow [the recovery notes](formats/theater.md) before extending source semantics; record approximations and native evidence. The initial renderer builds the whole selected theater mesh at startup, including when entering through the main menu. Streaming, LOD, object rendering and complete weather remain open.
 
 ### All-theater selection and text
 
@@ -506,12 +544,55 @@ Instrument window numbers: 0 radar cross section, 1 envelope, 2 front view, 3 ot
 
 The full-height cockpit and live HUD can be captured with `--capture-flight .local/cockpit.ppm`. Add `--flight-menu` to capture the paused Escape menu. `--flight-view 0|1|2|3|4` selects front/chase/oblique/back/up for inspection. These flags require a display for GPU capture. See [cockpit/control validation](baselines/cockpit-controls.md).
 
+Scene captures hold the prepared flight and weather state while the window and
+GPU initialize. Startup time does not advance the captured simulation. Use
+`--flight-probe-ticks` to capture an explicitly stepped state; a plain capture
+uses the launch state. This also applies to `--capture-terrain`.
+
 
 Flight UI now adapts to drawable aspect ratio independently of menu letterboxing. Use `--window-size 1280x720` (or resize normally) to inspect widescreen behavior. `--capture-flight` preserves the current aspect and writes at the flight overlay resolution, capped proportionally at 1920×1080. The original `--capture-terrain` remains 960×720. Small instruments resample directly from their native rasters; HUD readouts have transparent backgrounds. See [responsive-flight checks](baselines/responsive-flight-ui.md).
 
 A mission replay frame is captured the same way with `--watch-replay FILE --capture-replay OUT.ppm --replay-tick N`, optionally with `--flight-view`, `--replay-aircraft`, `--replay-drone`, `--replay-ui`, `--replay-panels`, `--replay-look-at` (the object view), `--replay-clean` and `--replay-menu '?'|pref|time|help|graphics|sound|controls` (the Esc pause menu at that page, or that screen over it); `--replay-speed` with `TORE_PERF_FRAMES` times playback. See [replay captures](REPLAYS.md#captures-and-timing). `--debug-panels` and `--flight-panels thought,telemetry,guidance,comms,menu` show the [debug panels](REPLAYS.md#captures) in a `--capture-flight` capture.
 
 ## Headless development
+
+The stores preview also has a CPU-only geometry mode. On a private imported
+profile, `TORE_STORES_PREVIEW_CPU=1 TORE_STORES_PREVIEW_AIRCRAFT=f15,f16c
+ target/debug/tore-app --stores-preview OUT_DIR` writes below, side-front,
+front and top PNGs without a window or GPU (put the command on one line).
+It uses flight's airframe and pylon triangles with solid face colours and
+simple lighting, so textures and final GPU lighting still need offscreen
+review. Omit the aircraft filter to cover the selectable roster.
+`TORE_STORES_PREVIEW_FULL=1` fills each row with its current candidate up to
+the normal Load Ordnance capacity, preserving installed tanks on shared rows.
+`TORE_STORES_PREVIEW_CATALOG=1` prints compatible weapon and tank choices
+and capacities by source row for reproducing alternative loads.
+`TORE_STORES_PREVIEW_BAY=0..1` poses the doors. With GPU mode,
+`TORE_STORES_PREVIEW_FIRE=5` instead presses the trigger once for hardpoint
+row 5 and captures actual simulation at ticks 0, 60, release, release +3,
+release +12 and 400. It checks bay gating and closing; use row 7 for side
+bays or row 8 with `TORE_STORES_PREVIEW_FULL=1` for the wing missiles. Each aircraft's atlas is
+reset before a fleet capture. `TORE_STORES_PREVIEW_GEOMETRY=1` prints the
+source face vertices for local fitting, and `TORE_STORES_PREVIEW_MOUNT=7=3.9,-1.05,1.7`
+sets one preview-only mount in feet right/up/forward. These fixture overrides
+never change a flight or saved loadout.
+
+
+Set `TORE_STORES_PREVIEW_AUDIT=1` with CPU mode to print station and model
+chord measurements instead of images. Optional rows use their configured
+candidate store and are labelled `loaded=0`. Set
+`TORE_STORES_PREVIEW_RECORDS=4=AIM7.JT:4` to select a source row's store and
+count through the normal ordnance compatibility checks.
+`TORE_STORES_PREVIEW_CHEAT=1` opts into the existing ordnance-screen Cheat
+for explicitly labelled geometry checks of unsupported combinations. A preview-only
+comparison, `TORE_STORES_PREVIEW_RECORDED_STATIONS=f15,f16c`, bypasses the
+per-aircraft station table for those aircraft and uses the generic source
+placement. It does not change flight, the import or saved loadouts.
+For a short GPU review, `TORE_STORES_PREVIEW_LOADED_ONLY=1` skips empty
+loads, close-ups and release frames, while `TORE_STORES_PREVIEW_VIEWS=below,side-front,ahead`
+limits the camera list.
+See [the stores specification](spec/stores-on-pylons.md#the-f-16c-and-fleet-rail-audit)
+for the audit's limits.
 
 For many runs at once with automatic checks (menus, flight, AI fights up to 15 against 15, replays) use the battery in [testing](testing/README.md).
 
@@ -544,6 +625,29 @@ the isolated flight-model probe, not a complete rendered mission. Keep the
 default researched flight adapter unless the task explicitly concerns another
 adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 
+The powered-lift aircraft (`av8`, `yak141`, `v22`, `ah64`, `mi24`, `ch47`) start in
+trimmed forward flight. `--maneuver hover` starts one at rest in the air in its own
+hover trim (hands off it holds), and `--replay-input TAPE` flies a `tore-pilot 3`
+tape from there. `--maneuver settle:SINK_FPS` starts a powered-lift aircraft 60 ft over flat open ground in its hover trim and holds that sink rate on the collective (the throttle on the jets) until it is down, then prints a `touchdown:` line, the probe of the [touchdown rule](spec/touchdown.md); the battery's `flight-powered-*` scenarios do exactly this
+([flight lane](testing/lane-flight.md#powered-lift-scenarios-vtol-overhaul)).
+
+For an individual aircraft's actual surface geometry, before broad integration
+checks:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --aircraft a7 --animation-probe .local/animation-probes/a7 --no-audio
+```
+
+This exits before window initialization. It writes actual transformed OBJ poses,
+`report.json`, `index.txt` and CPU orthographic contact sheets. Missing required
+motion, new planar crossings, reversed hook stow or a reviewed attachment/
+direction failure returns an error after writing
+evidence. Raw candidate seams still need source review. Keep these user-owned
+geometry derivatives ignored. `--headless-flight` alone does not test rendered
+control surfaces. Reports distinguish `motion-survey` from
+`reviewed-controls-and-attachments`; a passing generic survey is not acceptance.
+See the [aircraft animation audit](baselines/aircraft-animations.md).
+
 For a CPU-rendered Ordnance screen capture:
 
 ```sh
@@ -552,6 +656,14 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --sn
 
 The snapshot command also exits without a display or audio device. Other menu
 states, including `ordnance-empty` and `ordnance-drag`, use the same command.
+`ordnance-tanks` previews air-to-surface with compatible tanks first, using the
+same source station rows as air-to-air. The name is retained as a snapshot alias.
+For a source-backed F-14 tank selection, mass and accepted-restart check without
+a display, run `cargo run --locked -p tore-app -- --validate-tanks --aircraft f14
+--no-audio` with an imported development profile.
+For all 36 retail aircraft, `--validate-ordnance --no-audio` checks supported
+weapon and tank compatibility, source station coverage, old loadouts and
+accepted-load restoration. The battery scenario is `menus-ordnance-availability`.
 Keep captures, logs and imported media under ignored directories. When using
 `target/debug/tore-app` directly, first rebuild with
 `cargo build --locked -p tore-app` so the binary matches the source.
@@ -592,6 +704,7 @@ rightly ignores most keys then). One step per line, `#` for comments:
 
 ```text
 wait 1.5           seconds of wall clock
+stall 8            block the game's whole main loop this long (at most 600 s), as a held window does
 waittick 600 [90]  until the flight has run this many 120 Hz ticks, or 90 s (default)
 key g              press and release: Shift+e, Ctrl+B, F10, Space, Escape, Enter, Up, ]
 down Up            hold a key          up Up     release it
@@ -599,15 +712,36 @@ move 320 240       mouse to window pixels   movemenu 320 240   to the 640 by 480
 click [left|right] press and release   press / release   hold a button
 wheel 3            wheel notches, negative for down
 snapshot out.ppm   the menu layer as drawn now (menu screens); relative paths go in $TORE_SCRIPT_OUT
+shot out.ppm       the flight as drawn now, cockpit, HUD and instruments included (same path rule)
 exit               quit
 ```
 
+`stall` is for the multiplayer keepalive: a joined game's loop stops for the time, its
+keepalive thread keeps it connected (the host logs "game stalled" and "game back after"), and
+its plane flies neutral. Stopping the process with SIGSTOP cannot test that, since it freezes
+the keepalive thread too.
+
+In a networked flight (`--connect`) `waittick` counts the client's ticks. To try the game
+against a server on this machine, import a profile for both, start `tore-server` on a spare
+port with its data folder (`tore-server --port 26911`; a `server.conf` with `empty-timeout
+3600` keeps the mission up between runs), start the game through `tools/agent-run.sh` with
+`--connect 127.0.0.1:26911 --slot 1 --windowed --no-audio --input-script FILE`, and a
+`tore-bot --connect 127.0.0.1:26911 --slot 0 --seconds 200` for company. Build the server,
+the bot and the game at one commit: a build must match to join.
+
+`tore-bot --capture FILE` keeps the bot's capture (`FILE-1`, `FILE-2` with `--count`), and
+`tore-app --convert-capture FILE` turns it into a replay
+([network flights](REPLAYS.md#network-flights)); the battery scenario `net-convert-capture`
+does both against a real server.
+
 `Down` is nose up and `Up` nose down, as in the game. Set `TORE_RECORD_MISSIONS=1` to record the
 flight. The battery's hand-flown scenarios (`replay-script-*`, scripts in
-`tools/battery_scenarios/scripts/`) use it. The replay viewer takes its own events, so scripted
-keys do not reach it; its mouse events do. `tools/battery_scenarios/_replay_drive.py`, which
-sends keys to a window through Hyprland by process id, remains for the viewer and for
-quitting with Alt+F4; see the [replay lane](testing/lane-replay.md#how-the-checks-work).
+`tools/battery_scenarios/scripts/`) use it. The replay viewer takes its own events, but a script's
+keys reach it too since the observer screen (slice F2-O2: the same names, `Escape`, `End`, `Tab`,
+`Enter` and the letters, with no Alt or Command), and `shot` writes the viewer's picture there.
+`tools/battery_scenarios/_replay_drive.py`, which sends keys to a window through Hyprland by
+process id, remains for the replay lane and for quitting with Alt+F4; see the
+[replay lane](testing/lane-replay.md#how-the-checks-work).
 
 In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
 set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
@@ -616,11 +750,14 @@ same Cargo commands. Remove the environment override after the session with
 
 ## Graphics options
 
-Pref → Graphics... sets anti-aliasing, render scale, the spotting aid and terrain filtering; see [graphics options](spec/graphics-options.md). For one run, without saving, use `--anti-aliasing off|2x|4x|8x`, `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong` and `--terrain-filtering on|off`; `--original-graphics` turns every addition off at 100%. Flags apply in order. Captures and smoke tests ignore the saved `graphics-v1.conf` and use the defaults plus any flags, so compare `--original-graphics` against no flag for matched before/after images.
+Pref → Graphics... sets anti-aliasing, render scale, the spotting aid, the frame rate, terrain filtering and the frame-rate counter; see [graphics options](spec/graphics-options.md). `TORE_SHOW_FPS=1` shows the counter for one run without saving it. `TORE_TRACE_PRESENT=1` logs (at info level, to the diagnostics log) each change of the presented screen kind, menu, loading, flight or replay, with the frames drawn of the one before, to catch a screen flashing between two others; the battery's `replay-script-ordnance-no-flash` uses it. `TORE_FRAME_LIMIT=off|vsync|60|100|200` sets the [frame rate](spec/graphics-options.md#frame-rate) for one run; `off` is uncapped rendering for benchmarks. Scripted runs, `TORE_PERF_FRAMES` measurements, captures and smoke tests are uncapped unless it is set. For one run, without saving, use `--anti-aliasing off|2x|4x|8x`, `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong` and `--terrain-filtering on|off`; `--original-graphics` turns every addition off at 100%. Flags apply in order. Captures and smoke tests ignore the saved `graphics-v1.conf` and use the defaults plus any flags, so compare `--original-graphics` against no flag for matched before/after images.
 
 ## Flight performance
 
-Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and requests uncapped Immediate presentation, then Mailbox, with FIFO only as a supported-mode fallback and one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.
+For the fixed-work before/after threading battery, see
+[performance validation](testing/performance.md).
+
+Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses at the Graphics screen's [frame rate](spec/graphics-options.md#frame-rate) (V-sync by default, with one requested queued frame). Performance measurements (`TORE_PERF_FRAMES`) draw uncapped with Immediate presentation, as before, unless `TORE_FRAME_LIMIT` names a rate; set `TORE_FRAME_LIMIT=vsync` or `60` to measure a capped run.
 
 Run a bounded desktop measurement (macOS/Linux shell):
 
@@ -629,7 +766,7 @@ TORE_PERF_FRAMES=330 TORE_PERF_ACTIVE=1 TORE_PERF_VIEWS=1 cargo run --locked -p 
 TORE_PERF_FRAMES=180 TORE_PERF_ACTIVE=1 cargo run --locked -p tore-app -- --free-flight --no-audio --instrument-page 3
 ```
 
-On PowerShell, set `$env:TORE_PERF_FRAMES="330"`, `$env:TORE_PERF_ACTIVE="1"`, and `$env:TORE_PERF_VIEWS="1"`, run the same Cargo command, then remove those environment variables. `TORE_PERF_FRAMES` accepts 60–100000 frames (0/off by default), prints mean/p50/p95/max milliseconds and exits after that many flight, terrain-viewer or replay-viewer frames. The first 30 are excluded. Presence of `TORE_PERF_VIEWS` cycles front/back/up/chase/oblique every 30 frames; omit it to measure the selected view or switch views manually. Use `--free-flight` for aircraft measurements or `--viewer` with a fixed `TORE_WEATHER_VIEW` for terrain measurements. Avoid concurrent GPU workloads when comparing runs. Presence of `TORE_PERF_ACTIVE` explicitly keeps the bounded flight benchmark unpaused even if automation steals focus (it does not dismiss menus). Omit it for normal pause behavior and interactive pause measurements. The report includes paused frames and completed live camera readbacks; check these before interpreting a run as active flight. Presence of `TORE_PERF_VEIL` forces the G-effect blackout on for alternating 30-frame blocks (off first) and reports the two groups separately, to time the vignette in any aircraft; the veil is drawn by the canvas shader, so the two groups should match.
+On PowerShell, set `$env:TORE_PERF_FRAMES="330"`, `$env:TORE_PERF_ACTIVE="1"`, and `$env:TORE_PERF_VIEWS="1"`, run the same Cargo command, then remove those environment variables. `TORE_PERF_FRAMES` accepts 60–100000 frames (0/off by default), prints mean/p50/p95/max milliseconds and exits after that many flight, terrain-viewer or replay-viewer frames. The first 30 are excluded. Presence of `TORE_PERF_VIEWS` cycles front/back/up/chase/oblique every 30 frames; omit it to measure the selected view or switch views manually. Use `--free-flight` for aircraft measurements or `--viewer` with a fixed `TORE_WEATHER_VIEW` for terrain measurements. Avoid concurrent GPU workloads when comparing runs. Presence of `TORE_PERF_ACTIVE` explicitly keeps the bounded flight benchmark unpaused even if automation steals focus (it does not dismiss menus). Omit it for normal pause behavior and interactive pause measurements. The report includes paused frames and completed live camera readbacks; check these before interpreting a run as active flight. A flight run that ran any simulation ticks adds one line after the paused-frames line: `simulated: N ticks in S s, R x real time (asked for Kx); ticks per frame mean M, max X`. It counts the 120 Hz ticks the recorded frames ran against the wall time those frames covered, since the time compression last changed, so a run that steps up to 8x reports the 8x alone. It shows the rate time compression really reached (`R`) beside the one chosen in the game (`K`), and how many ticks a frame ran. When `R` falls short of `K`, the frame loop has hit its 0.25 s limit on a frame's time (see [the frame loop under load](ARCHITECTURE.md#the-frame-loop-under-load)). To measure it, press `C` in the script (`--input-script`, `key c`) once for each step of time compression: 2x, 4x, 8x, and let the run go on for many frames after the last press. Presence of `TORE_PERF_VEIL` forces the G-effect blackout on for alternating 30-frame blocks (off first) and reports the two groups separately, to time the vignette in any aircraft; the veil is drawn by the canvas shader, so the two groups should match.
 
 The report separates frame-start intervals, simulation/camera work, UI composition, and submission/presentation. These are CPU wall-clock measurements: presentation includes VSync/backpressure, and frame intervals are not verified display scanout times or GPU timestamps. A short run does not establish sustained thermal performance. See [measured baseline and remaining work](baselines/flight-performance.md).
 
@@ -659,7 +796,7 @@ every that many ticks. These are development harness options, not game behaviour
 - `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
   aircraft at that tick through the normal fault path and adds a `systems:` line.
 - `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-g-effects`, `no-spins`, `no-crashes`,
-  `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
+  `unlimited-fuel`, `unlimited-ammo`, `easy-physics`, `invulnerable` or `realistic-damage`. It also applies to
   `--live-fire` captures.
 - `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
 - `--loadout none|guns` now also applies to a headless ground start (payload and fuel systems follow
@@ -685,9 +822,11 @@ decision, 2026-09-28):
 | `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:`, `landing:` and `ils_probe:` (what the player's ILS read along the approach) |
 | `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
 | `climb` | Full afterburner climb holding a climb speed, then whatever the aircraft does at the top; reports the highest altitude against the 1 G envelope's ceiling. | `climb:` |
-| `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the overspeed loss for an aircraft that reaches 1.5 times its top speed first. | `extremes:` and `loss:` |
-| `overspeed` | Level at 20,000 feet at 1.6 times the top speed there: the aircraft must be lost on the first step. | `loss: cause=overspeed` |
-| `takeoff-gear-early`, `takeoff-gear-airborne` | With `--ground-start N`: the `takeoff` roll with the gear brought up at 80 knots with the wheels still down (an aircraft too slow to fly settles on its belly), or once 50 feet above the runway (a normal retraction). | `gear_pulled=`, `belly_wear_percent=` |
+| `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the time-based overspeed loss. | `extremes:` and `loss:` |
+| `overspeed` | Starts at 20,000 feet and holds 1.1 times the current top speed to isolate the failure timer: one 25% roll at 6, 7, 8 and 9 seconds, guaranteed loss at 10. This is a timing fixture, not natural acceleration. | `overspeed_ticks=` and `loss: cause=overspeed` |
+| `rudder` | Engine-off flight with full right rudder, checking flight-path turning and roll coupling. | `lateral:` |
+| `nosewheel` | With `--ground-start N`: rolling at 10 mph, throttle closed, full right rudder, checking taxi steering and wheel articulation. | `lateral:` |
+| `takeoff-gear-early`, `takeoff-gear-airborne` | With `--ground-start N`: the `takeoff` roll with the gear key pressed at 80 knots with the wheels still down (the ground sensor refuses it), or once 50 feet above the runway (a normal retraction). | `gear_pulled=`, `ground_sensor_refusals=`, `gear=` |
 | `sprint` | Full afterburner in level flight at 5,000 feet, altitude held by the autopilot. | `extremes:` |
 | `autopilot` | Starts in a 25 degree bank with heading and altitude hold engaged. | `extremes:` |
 | `waypoint` | Waypoint autopilot toward a waypoint 60,000 feet out, 60 degrees right of north. | `final_position:` |
@@ -775,8 +914,11 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --sn
 and `debrief-1` through `debrief-5` (the retail reference result on DEBSCV);
 they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
 support CPU snapshots for inspecting card outlines and the carried thumbnail.
-`ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
-the single-line notice's ellipsis and fitted background width.
+`ordnance-pod` and `ordnance-pod-yellow` hang the Pave Spike on the first station that takes it with the station's blink held on its red or yellow phase, and `ordnance-authored-tank` loads the first authored tank (the F-16C's 370 gallon one); `ordnance-gun-pod` loads the SUU-16 gun pod on the first station that takes it (the F-4B's centreline); `ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
+the single-line notice's ellipsis and fitted background width. `ordnance-laser` (and
+`lobby-ordnance-laser`) load a laser missile or bomb to show the laser warning and the
+sensor helper line; `first-load` shows the creator as a first load draws it, every
+aircraft slot random from a fixed seed ([first load](spec/quick-mission-menu.md#first-load-and-the-saved-draft)).
 Old caches re-import when local media is present. Aircraft switching refreshes
 GPU atlas/cockpit resources, camera previews and instruments before launch.
 See [validation and remaining parity](baselines/rafale-quick-mission.md).
@@ -807,11 +949,11 @@ exterior stays hidden from the forward cockpit camera. Mirrors share cockpit
 pan, zoom and fade. Source silhouettes are flood-filled at runtime from reviewed
 opaque fills; optics and viewpoint are fitted. See [mirror evidence](baselines/mirrors.md).
 
-Presentation requests Immediate, then Mailbox if Immediate is unavailable, then
-FIFO as the portable fallback. Uncapped modes omit Wayland frame callbacks that
-otherwise throttle redraw requests to compositor refresh. No compositor settings
-are changed. Platforms/drivers may still pace presentation; the selected mode is
-printed at startup. Physics remains fixed at 120 Hz.
+Presentation follows the [frame rate](spec/graphics-options.md#frame-rate)
+choice: FIFO for V-sync (with Wayland frame callbacks), Mailbox then Immediate
+with a timer for 60, 100 and 200, and Immediate then Mailbox for
+`TORE_FRAME_LIMIT=off`. No compositor settings are changed. The selected mode
+is logged at startup and on every change. Physics remains fixed at 120 Hz.
 
 For a matched diagnostic without mirrors, set `TORE_MIRRORS=0` at launch; original
 flat fills remain. Omit it for normal live mirrors. Combine with
@@ -933,15 +1075,16 @@ porting an aircraft's sensors. For repeatable headless captures,
 `--scope-history` set the scope before the capture. See
 [the component guide](radar.md) and [its validation](baselines/radar.md).
 
-The Quick Mission ground-target/AAA/SAM sentence is unavailable. Clicking it
-opens a small notice instead of changing settings; OK, Enter, Space or Escape
-closes the notice. The enemy-distance choices include 100 and 150 nautical miles
-between 50 and 200. `--separation` accepts the same choices. See the
-[creator contract](spec/quick-mission-menu.md#unavailable-ground-target-controls).
-Preview the notice or distance list without a display:
+The Quick Mission ground-target/AAA/SAM sentence is live: the target list is the
+theater's, the strengths read "not", "lightly", "moderately" and "heavily", and
+the mission text carries them (`ground-target`, `defenses`). The enemy-distance
+choices include 100 and 150 nautical miles between 50 and 200. `--separation`
+accepts the same choices. See the
+[creator contract](spec/quick-mission-menu.md#ground-target-and-defenses).
+Preview a theater's target line or the distance list without a display:
 
 ```sh
-TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --snapshot-state ground-targets-unavailable --snapshot .local/ground-targets-unavailable.ppm --no-audio
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --theater EGY --snapshot-state ground-target --snapshot .local/ground-target.ppm --no-audio
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --snapshot-state field-17 --snapshot .local/separation-choices.ppm --no-audio
 ```
 
@@ -1028,6 +1171,52 @@ commands, explicit weather poses and result codes for the continuation captures.
 Weather sky/ocean, moon and cloud textures now use source point-index samples;
 float GPU projection remains qualified against native coverage/behavior.
 
+Every airport is drawn and flown from its runway type's real-size redrawn
+plan ([redrawn airports](formats/redrawn-airports.md)), the default since
+protocol 24. `TORE_REDRAWN_AIRPORTS=0` is a developer escape hatch: single
+player launches and the offline tools (`--surface-dump`, `--surface-parked`,
+the previews, `--validate-maps`, `--validate-ils`, `--airport-allegiance`)
+build the retail airfield shapes instead; unset or `1` keeps the redraw.
+Online sessions, the dedicated server and the bot never read it (every game of
+a session flies the redraw), and a replay builds the airfields its recording
+names, whatever the switch says.
+`--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]` renders one redrawn
+airport of each plan (`--all`: every one) overhead, oblique, from short final,
+along the parking row, toward the runway's far end and over a taxiway junction;
+with `TORE_REDRAWN_AIRPORTS=0` it renders the same views of
+the retail airfields. Redrawn airports carry runway, approach, PAPI and taxiway
+lights; `TORE_AIRFIELD_LIGHTS=0` hides them.
+`--airfield-audit [--svg DIRECTORY] [--track FILE ...] [--field CODE:AIRPORT ...] [THEATER ...]`
+(imported media, no display) walks every AI ground route of every redrawn
+runway object of every layout (or the theaters or fields named) against the
+drawn pavement, checks every runway end is reachable from parking and every
+runway line (the ILS) lies on a drawn runway, and prints `PROBLEM` lines and a
+closing count; `--svg` draws each airfield overhead with its routes and
+`--track` adds AI probe tracks. `--airfield-audit --parked` checks the Quick
+Mission templates' parked aircraft against the pavement instead
+([audit](formats/redrawn-airports.md#audit)).
+
+The [city fill](features.md) is on by default everywhere since protocol 25.
+`TORE_CITY_FILL=0` is a developer escape hatch like the airports' one: single
+player launches and the offline tools build no fill; online sessions, the
+server and the bot never read it, and a replay builds the fill its
+recording's `world.city_fill_scene` names. `TORE_CITY_FILL_CAP` changes the
+number of buildings in single player and the offline tools (online games
+ignore it) and
+`TORE_CITY_FILL_SHADOW_NM` overrides just the city caster distance for
+measurements. Use the Graphics Shadow distance row, `--shadow-distance
+trees|1|2|4|6|8` or `TORE_SHADOW_DISTANCE` for the shared map and caster reach
+([rules](spec/graphics-options.md#shadows)). The offscreen aid
+`--city-fill-dump OUT [THEATER]` (no window, nothing simulated; options in
+`crates/tore-app/src/city_fill_dump.rs`) writes mask and fill images and
+takes `--render` (a still, fill off and on), `--target` (the target
+display's view), `--sequence` (every frame along a path, for watching
+transitions), `--sweep` (a still camera with one tier moving: building
+detail, building distance or smallest size, printing the pixels that pop per
+step) and `--bench` / `--target-bench` (frame times fill off then on, 4K by
+default); `--burn NAME@X,Z,H,PITCH,YAW,RADIUS,FRAMES` knocks every building within RADIUS ft flat, draws the burning city and times FRAMES frames with the fires drawn and with them off. `TORE_CITY_DUMP_TIME=HH:MM` sets the dump's time of day (noon by default), for the burning city at night (nr-fx3). `--city-fires THEATER X,Z,RADIUS [--repeat N]` (no window, no GPU) prints how many burn and what a frame draws and costs on the CPU; `TORE_NO_CITY_FIRES=1` stops drawing the fires (a developer aid like `TORE_CITY_FILL=0`). The fade work was measured with `--sweep` and `--bench` over Kiev
+(UKR, `--bench 671744,1330000,500,0,100,600`).
+
 `TORE_WEATHER_SMOOTH=0|1` selects stepped or smooth weather presentation (default
 1). Smooth mode blends source time/altitude colors and neighboring horizon/fog
 shades. It uses fractional mission time, freezes on pause and does not change
@@ -1039,6 +1228,9 @@ and per-pixel angular lighting on sky-deck textures and cloud sheets. Its visual
 sun arc runs continuously through the day, with symmetric dawn/dusk twilight
 gradients rather than a 19:00 drawing cutoff. The Sunset preset remains 19:01.
 The sun and moon use half their previous apparent diameter (shared scale 2).
+Decks, horizon gradients, haze tables, stars and moon fade through the dawn
+and dusk record overlaps; the night sky turns, with a procedural starfield and
+a moon that rises and sets ([spec](spec/sun-glow.md#night-sky)).
 The trial orange-rim grade is removed; the earlier atmospheric glow remains. Smooth-mode glare
 is gentler near the horizon and drops rapidly to zero by 0.5 degrees below it.
 See [sun glow specification](spec/sun-glow.md).
@@ -1169,6 +1361,10 @@ bounded to 1..1,000,000 feet. Version-4 tapes record these commands, full world
 velocity and bay permission. Use fresh tape paths because recording never
 overwrites an existing file. [Missile acceptance](baselines/missiles.md).
 
+`--missile-sag --no-audio` measures coasting A2A and SAM motion without a window.
+Use a private profile copy. [Probe and battery contract](testing/lane-flight.md),
+[before/after measurements](baselines/missile-sag.md).
+
 For a rendered formation check, use `--dummy-aircraft f18,5 --dummy-aircraft rafale,5`
 with `--capture-flight .local/formation.ppm`. This repeatable diagnostic uses the
 same dummy creation/rendering as the creator, one mile ahead. It accepts a count
@@ -1207,17 +1403,29 @@ heading/bank rates, and
 reports sensor fit, stores, launches and dropped launches. This is separate
 from synthetic tests and is not a retail comparison or visual acceptance.
 The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.
+It runs the live game's whole mission tick (`World::step`, see
+[Mission core and seats](ARCHITECTURE.md#mission-core-and-seats)), driven by
+the scripted pilot, attack, wing orders and threat fixtures instead of a
+player. Compared with the reduced probe it replaced, it now steps the weather
+clock, turbulence on the scripted player, building contact, the airport
+service, the crew voice, the jolts and destruction of a hit without needing the
+attack script, and the runway surface with wind for airborne flight. The
+scripted player's world-edge loss is the tick's, checked after turbulence. Wing
+orders and threat fixtures land at the start of their tick. It has no audio,
+HUD or rumble. Its numbers changed once for this in the commit that switched
+it; probe outputs from before that commit are not comparable with later ones.
 For ground operations, combine it with `--ground-start AIRPORT`,
 `--probe-wing-size 1..5` and `--maneuver takeoff`. Add `--probe-wing-only`
 to omit the other wings. Those two wing options also apply to
 `--launch-quick-mission` for matching creator captures. Schedule an order with
-`--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`
-or `TICK:engage-my-target`; `--probe-trace SECONDS`
-prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
+`--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`,
+`TICK:engage-my-target` or `TICK:sort` (the lead deals each wingman a bandit from the data link's picture), each with an optional `@MEMBER` (1 to 4, the first wingman is 1) to order one wingman; `--probe-player-lock TICK:ID` has the scripted leader designate aircraft `ID` at that tick, so the sensors lock it when they can; `--probe-data-link` and `--probe-player-lock` print a `t=T data link:` line for each plane's radar flag and each lock taken or dropped in the flight data link's picture; `--probe-blind-wing` takes the radar, infrared sensor and eyes from the player's wingmen, so only the data link can show them an enemy; `--probe-trace SECONDS`
+prints each wingman's airfield phase and position. At a redrawn airport an AI aircraft on its wheels in an airfield phase off the drawn pavement is an `off the pavement` anomaly; `--probe-pavement` also prints `AI probe pavement: ground_samples=N off_pavement=M`, and `--probe-track FILE` writes every sixth such tick as `tick label phase leg x z on|off hdg= track= fps=` for `--airfield-audit --track`. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
+`--probe-lose-player TICK` crashes the scripted leader's aircraft at that tick, so that a probe can test the wing's new lead (test harness only).
 `--separation 200` or `300` also exercises the expanded enemy-distance choices.
-`--probe-fight FRIENDLY:ENEMY` sizes a whole battle, 1 to 15 aircraft a side filled five to a wing (the scripted leader counts as one friendly), and `--probe-friendly-aircraft ID` picks the friendly AI aircraft; `--probe-enemy-aircraft` and `--probe-enemy-skill` still choose the enemy. Fifteen against fifteen is the creator's own limit.
-The scripted leader is only a test harness and can hit terrain on a long cruise.
+`--probe-fight FRIENDLY:ENEMY` sizes a whole battle, 1 to 15 aircraft a side filled five to a wing (the scripted leader counts as one friendly), and `--probe-friendly-aircraft ID` picks the friendly AI aircraft; `--probe-enemy-aircraft` and `--probe-enemy-skill` still choose the enemy. Fifteen against fifteen is the creator's own limit. With `--launch-quick-mission` the same option sets the creator's wings instead, so a window can fly the whole battle: it is a developer measurement option, used to time the frame loop with the biggest mission the creator allows (`--launch-quick-mission --probe-fight 15:15`, [windowed runs through `tools/agent-run.sh`](#windowed-runs-from-scripts-and-agents)).
+The scripted leader is only a test harness. It holds the runway line on the roll, keeps its speed over the aircraft's own 1 G minimum in the climb, clears the terrain ahead and climbs again from its cruise if the ground rises to meet it ([the scripted pilot](testing/lane-ai.md)).
 [Reproduction and limits](baselines/ground-start.md#whole-wing-ground-start-2026-09-23).
 
 Quick Mission AI leaders can release their wings on a currently observed hostile
@@ -1250,14 +1458,18 @@ recovery phase and physical throttle/power/temperature. [Validation](baselines/a
 `--probe-guns` keeps the player attack script on its gun.
 `--probe-ai-guns-only` restricts AI stores to their carried gun without changing
 the player script. It is useful for sustained [gun-employment checks](baselines/ai-gun-implementation.md). `--probe-trace SECONDS` also
-prints enemy observation sources, permission, target and incoming-fire cues.
+prints enemy observation sources, permission, target and incoming-fire cues. `--probe-fuel-trace SECONDS` prints one `AI fuel:` line per AI aircraft at that interval (tick, aircraft, fuel, endurance, time home, fuel state, activity). `--probe-fuel POUNDS` starts every AI aircraft with that much internal fuel, so a return on low fuel can be probed in a minute. `--probe-rotor-trace SECONDS` prints one `AI rotor:` line per AI helicopter or V-22 at that interval: height over the ground, speed, climb, pitch, bank, heading, nacelles, collective, rotor speed, the rotor adapter's regime and commanded heading, path, speed, climb and nacelles, the requested path, the terrain floor and the envelope maximum (slice HF1).
 Every probe prints first visual acquisition, first release, first gun/hit defense
 and peak bank for each enemy.
 
 The airborne probe retains its legacy adapter unless explicitly given
 `--probe-flight-model researched`, which enables the researched adapter for the
-scripted player and every AI actor. `legacy` selects the earlier path. These
-probe flags do not change normal game defaults or the native-table research path.
+scripted player and every AI actor. `legacy` selects the earlier path.
+`--probe-ai-flight-model standard|all-hybrid` sets the mission's AI flight model
+on its own: `standard` (the default) is single player as it is, and `all-hybrid`
+puts every AI aircraft on the researched adapter at mission start, seeded the
+same way. These probe flags do not change normal game defaults or the
+native-table research path.
 
 `--probe-threat TICK:hit|gun|aaa` adds a controlled event against the first enemy.
 `hit` removes one hit point and supplies the same victim event as weapon damage.
@@ -1275,13 +1487,46 @@ TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
   --record-mission .local/su27-ground-fire.tore-replay --verify-render --no-audio
 ```
 
-`--probe-matrix NEW_DIR` runs and records **1,008 encounters** with one imported
-world: F-22A/F-22N/F/A-XX by all 14 opponents, four skills, three initial headings
+`--probe-matrix NEW_DIR` runs and records one encounter per case with one imported
+world: F-22A/F-22N/F/A-XX by every opponent the AI can fly (31 of the 37 selectable
+aircraft, see [AI wingmen](spec/variety-flight.md#ai-wingmen)), four skills, three initial headings
 and both flight adapters. Use `--ai-probe-ticks 360 --separation 1 --verify-render`
 for close-contact acquisition, or a larger tick budget and the attack options
 for firing. It refuses an existing output directory. The usual actor, trace and
 verification lines are grouped under `AI probe matrix: CASE`. This is an
 explicit development batch, not a retail comparison or automated balance score.
+
+### AI test settings in the probe
+
+`--ai-observe-hz 120|60|40|30|20` and `--ai-lean-sensors [on|off]` run the probe
+with the AI test settings described under
+[AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors):
+AI aircraft observe at that rate (staggered across ticks; their controllers and
+flight stay at 120 Hz), and with lean sensors (the default; a bare flag means
+on, `off` gives the full sensors) skip the visual channel and build the
+received-radar list only when a warning needs it. The default rate is 60 Hz
+since optimization round 2 (a matrix of 240 fights behaved at 60 Hz as at
+120 Hz within the fights' own chaos; see
+[the baseline](baselines/performance-threads.md#ai-observation-rate-matrix)), so
+a run without either flag differs from a build before that change;
+`--ai-observe-hz 120` gives the earlier run, its stdout and its checksum (lean
+sensors decide as full ones do). With a setting off its default the probe adds
+an `AI probe test settings:` line. Compare
+runs by the probe's own outcome lines: `AI probe attack:` (`lost_friendly`,
+`lost_enemy`, `destroyed`, `decoys_used`), `AI probe encounter:`
+(`first_visual`, `first_engage`, `first_gun_defense` per aircraft), the
+`AI probe debrief:` line and the `destroyed:` and `ejected` lines. The same
+two settings are in the flight menu's Debug tab (Escape, then Debug).
+
+The probe runs its ticks flat out, so the load-aware shared workers (see
+[shared scoped workers](ARCHITECTURE.md#shared-scoped-workers)) stay serial
+unless `TORE_WORKERS=N` forces a count; the checksum is the same either way.
+
+```sh
+TORE_DATA_DIR="$PWD/.local/dev-profile" target/release/tore-app --ai-probe-ticks 2400 \
+  --probe-fight 15:15 --separation 5 --probe-attack 600:10 --no-audio \
+  --ai-observe-hz 30 --ai-lean-sensors off
+```
 
 ## Mission recordings for debugging
 
@@ -1295,7 +1540,7 @@ TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
   --record-mission .local/headless/attack.tore-replay --verify-render --no-audio
 ```
 
-The probe's own output is unchanged by recording; `--verify-render` adds one
+Recording does not change the probe's output; `--verify-render` adds one
 line saying whether every recorded tick rebuilds the picture the probe drew,
 within the format's precision, and the released chaff and flares exactly. Then read the recording back without media:
 
@@ -1325,7 +1570,7 @@ set `TORE_FORMATION_TRACE` to a local CSV path before starting the application:
 TORE_FORMATION_TRACE=.local/formation-flight.csv cargo run --locked -p tore-app
 ```
 
-The parent directory must exist. The bridge appends a header at each mission
+The parent directory must exist. The app appends a header at each mission
 start and samples every 12 simulation ticks (10 Hz), flushing every second.
 Rows contain the decision phase, its duration, slot error, closure, altitude error, predicted
 minimum separation, yielding actor, steering target, achieved position/speed/
@@ -1368,6 +1613,14 @@ shadows versus distant casters, and a five-second low-sun stability sequence
 with small camera movements and sunglare disabled. The glare test checks
 every channel of a synthetic gradient under two flare circles against continuous
 optical composition. Both tests use no retail media.
+
+## Powered-lift HUD fixtures
+
+`--hud-snapshot PATH --aircraft ah64 --hud-snapshot-state hover` (or `forward`, or `converting`: a V-22 hovering at 140 knots, so its conversion protection is driving the nacelles forward, or `low`: the hover 45 feet over the ground at stability Off, which shows the radar height and the stability label)
+draws the HUD of the selected aircraft headless, as a PPM over a flat sky and
+ground split at the horizon. A powered-lift aircraft is started in trimmed
+forward flight or in a hover, 3,000 feet over a plain, and flown a second.
+Layout is in the [HUD layout spec](spec/hud-layout.md#powered-lift-cluster).
 
 ## Systems instrument fixtures
 
@@ -1419,8 +1672,383 @@ TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --
 TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --free-flight --capture-flight .local/effects/ground.ppm --flight-view 1 --flight-look 0,40 --flight-zoom 2.5 --no-audio
 ```
 
+`TORE_EFFECT_PREVIEW=hill` instead starts 2,600 feet short of the nearest even
+12 to 20 degree hillside, facing uphill, with six craters (sizes 3, 9 and 18) on
+it and nothing else, to check ground marks against sloping terrain
+(`--flight-view 1`; try `--flight-look 0,0` and `0,-35`).
+
 A cache made before the explosion sounds and sheets were added re-imports on
 first start, as any stale cache does. See [the evidence](baselines/explosions.md).
+
+`--blast-preview OUT_DIR` (first argument) renders the shockwave ring of a
+large ground explosion offscreen, without a window: a type 35 blast with a
+Mk 84 crater at 0.1, 0.35, 0.7, 1.2 and 1.7 seconds from a strike aircraft's
+height, from low beside it and from overhead, by day (and the low view at
+dusk), plus a type 21 blast and a type 34 sea blast. `TORE_PREVIEW_THEATER`
+picks the theater (default UKR):
+
+```sh
+TORE_DATA_DIR=.local/surface-data target/debug/tore-app --blast-preview .local/tmp/blast
+```
+
+`--impact-preview OUT_DIR` (first argument) renders weapon impacts side by
+side offscreen, each with its own record's land explosion, its
+[size by weapon](spec/explosions.md#size-by-weapon) and its
+[light and sparks](spec/explosions.md#impact-light-and-sparks): a row of a
+20 mm, a 105 mm, a 250 lb, a 500 lb and a 2,000 lb impact 900 ft apart at
+0.1, 0.3, 0.6 and 1 second, close views of the 20 mm and 105 mm, and an
+eight-round 20 mm burst, by day and at night. `TORE_CITY_FILL=0` keeps the
+city fill out of the row:
+
+```sh
+TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/impacts
+```
+
+Add `night-range` after the folder for the [night
+glow](spec/explosions.md#night-glow) set (nr-fx3): a 250 lb, a 500 lb and a
+2,000 lb bomb 1,200 ft apart with a 24 ft, a 90 ft and a 160 ft fire behind
+them, at night, seen from 0.3, 2, 5, 10, 20 and 30 nm (3,000 ft up, 800 ft a
+mile farther out) 0.15 s and 1 s after the bombs (`night-RR.Rnm-tS.SSs.png`);
+each picture also prints the night haze ramp. The set also writes
+`fire-compare-024ft.png`, `fire-compare-090ft.png` and `fire-compare-160ft.png`:
+a close fire on the left and a single burning flare on the right at a fixed
+camera distance. The battery's `render-night-effect-lights` scenario captures
+these in Egypt, plus the range set, for visual inspection. `TORE_NIGHT_GLOW=0`
+draws them without the glow points and sustained fire/fireball light, for
+comparison.
+
+Add `shockwave` after the folder for the [climate](spec/explosions.md#climate)
+set: a 500 lb bomb, a 2,000 lb bomb and an AGM-65G 1,300 ft apart on open
+land near the theater's start, seen from low beside the row at 0.1, 0.5, 2,
+10, 30 and 60 seconds, by day and at night (`shock-tSSS.Ss-day.png`), with
+their shockwave ring, condensation cloud or dust and craters.
+`TORE_PREVIEW_THEATER` picks the theater and so its humidity (`TVIET` humid,
+`EGY` arid):
+
+```sh
+TORE_CITY_FILL=0 TORE_PREVIEW_THEATER=EGY TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/shock-egy shockwave
+```
+
+The AI probe's `--probe-render DIR --probe-render-at TICK,...` draws the
+world offscreen at 1080p (no window) at those ticks, framing AI plane
+`--probe-render-plane ID` from `--probe-render-view chase` (260 ft behind,
+140 ft right), `wide` (420 ft behind, 330 ft right) or `ground` (from the
+ground beside it, looking up), as `DIR/tTICK-planeID-VIEW.png` (slice H2: the
+vertical takeoff and landing renders).
+
+On a player's `--a2g-run`, `--render-scene DIR --scene-at S,...` draws the
+world offscreen S seconds after the first rocket, missile or bomb leaves,
+chasing the newest one from just behind and beside it (`DIR/scene-tS.png`),
+and `--condition night` flies the run at night: the way to look at motor
+smoke, the motor flame ending at burnout and impacts in a real run:
+
+```sh
+TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --a2g-run UKR QUCOL --attack release --from 1 --aircraft a4e --load LAU61 --altitude 1500 --dive 10 --speed 400 --hold 1.5 --render-scene .local/tmp/rockets --scene-at 0.6,1.5,3
+```
+
+`--cockpit-sheet OUT_DIR [ID,ID,...]` (first argument) renders every flyable
+aircraft's cockpit with live mirrors, its cockpit art with the mirror masks
+tinted (centre red, left green, right blue) and two contact sheets, offscreen;
+`summary.txt` lists each picture's mirror regions. `--dome-sheet OUT_DIR`
+renders the E-3, IL-76 and E-2 from above and behind at six ticks (50 degrees
+of dome turn apart). Both read `TORE_DATA_DIR`, like `--blast-preview`
+([mirror review](baselines/mirrors.md#2026-10-12-review-of-every-cockpit-picture),
+[radar domes](formats/objects-and-shapes.md#airborne-radar-domes-fitted-2026-10-12)).
+
+## Surface unit inspection
+
+`--surface-dump` prints a theater's surface units as a mission resolves and
+places them ([surface defenses](spec/surface-defenses.md)): each unit's id,
+type, side, position, destroyed look and whether the scene can draw it (added
+trucks and radars marked `added`), the removed defense slots, the template's
+anchor and group move, every SAM battery (its radar, adopted or added, its
+launchers and truck), every supply truck with the unit it serves and its gap,
+the starts (target point, Red's and Blue's starts, Blue's heading, the ranked airfields), what
+the layout could not add, and the surface digest. Name a ground target
+template to add its units; defenses default to heavy and the enemy to the
+theater's own and the enemy distance to 20 nm (`--separation N`). `--no-jitter` and `--no-relocate` show the retail spot.
+`--all` resolves every offered template at every defense level, which the
+`surface-resolve-all` battery scenario checks against the retail survey.
+`--sweep [--seeds N] [THEATER ...]` places every offered template with seeds
+1 to N (20) and reports each base layout's batteries and every placement's
+anchor, move, broken site rules and digest (`surface-relocate-sweep`).
+`--classes [--seeds N] [THEATER ...]` checks the terrain class rule over
+every base layout and every template placement and lists each moved unit on
+the wrong class (`surface-class-sweep`).
+`--starts [THEATER ...]` builds one mission per theater with a ground target
+and reports where Blue and Red start (`surface-start-placement`).
+`--grounding [TYPE ...]` is the grounding audit: every OT, NT and PT (or the
+types named) stood on flat ground and drawn through the scenery's own code,
+with its shape's lowest and highest point about its origin, the share below
+it, its F2 ground offset, the lift that stands it on the ground, and the
+lowest drawn point of its faces, its hit box and its man sprites or cards near and
+far, in world feet at its drawn size; anything sunk or floating is listed as
+a problem ([grounding](formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape),
+`surface-grounding`).
+`--ground-pads [THEATER ...]` builds the actual theater layouts and objectives,
+authored and relocated, and checks flat shapes and broad fixed footprints against the finished
+terrain. It prints old burial and current support error; `surface-ground-pads`
+is the matching battery scenario.
+`--damage [TYPE ...]` lists every OT (or the types named) with where retail
+keeps its destroyed look: its `~` variant, the damage branch inside its shape
+(intact and damaged face counts and heights) or neither
+([destroyed looks of buildings](formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)).
+`--faces TYPE [...]` lists every face of each named type's main shape, intact
+and damaged: its texture (and whether the pack has it), colour slots, record
+kind and extent, which is how a missing texture or a stray palette colour
+shows (the bridge's magenta patch was a colour 6 shadow quad, [ground shadow
+decals](formats/objects-and-shapes.md#ground-shadow-decals-2026-10-13)).
+`--surface-sheets` renders each template from above and closer, heavy
+defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
+adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
+Blue, a white ring for a target, yellow parked aircraft, green supply trucks,
+cyan battery radars, orange battery launchers, magenta a unit whose shape does
+not read yet. No window opens.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump TVIET QTSAM --defenses 2 3 --surface-seed 7
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump UKR QUNUKE --no-relocate
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --all
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --sweep --seeds 5 CUB TVIET
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --starts
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-sheets .local/surface-sheets --variants UKR:QUCITY TVIET
+```
+
+The import does not keep the templates or the unit types only they name yet,
+so both commands read what the pack lacks from the retail media at runtime:
+`TORE_GAME_DIR`, else the source the data directory remembers, else the
+checkout's `gameassets/fighters-anthology` link.
+
+`--surface-battle --survey [THEATER ...] [--seeds N]` builds every base layout
+and offered ground target at heavy defenses (seed 1, or seeds 1 to N) and lists
+every pair of opposing units within a weapon's reach of each other, with the
+nearest pair out of reach; `--surface-battle THEATER [STEM] [--blue
+ORDINAL,...] [--no-front] [--seconds S] [--twice]` runs the mission with the
+player parked and prints what surface units do to each other: engagements of
+ground units and ships, shots, hits with the unit credited, kills, columns
+halting and driving on, a summary and an end-state digest. `--blue` hands
+template objects to Blue first (a test mission: retail never stands opposing
+units in reach), and `--twice` reruns it and compares the digests
+([surface against surface](spec/surface-defenses.md#surface-against-surface)).
+A mission with a ground target carries its [front
+line](spec/surface-defenses.md#the-front-line) as in the game; `--no-front`
+leaves it out (the survey always does, since it measures retail's layout).
+`--surface-battle --front-survey [THEATER ...] [--seeds N]` builds each offered
+target with the front line (seeds 1 to N, 2 by default) and lists its units,
+the pairs in sight and reach, and its distance from the targets. `--surface-objective` and
+`--surface-dump` take `--no-front` too. `--surface-trace` and the weapon, radar
+and drive probes (`--a2g-run`, `--a2g-radar`, `--surface-parked`,
+`--surface-drive` and the previews) build the target without the front line,
+since they measure one unit or one weapon (`--surface-trace --front` adds it).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-battle --survey --seeds 20
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-battle UKR QUCOL --blue 0,1,2,3 --seconds 120 --twice
+```
+
+`--surface-trace THEATER [STEM]` flies the player on a scripted straight line
+past one armed unit (`--over TYPE [--index N]` or `--unit ID`) at
+`--altitude` feet above it, `--speed` knots, `--pass` feet to its side,
+starting `--from` nm short, for `--seconds`, and prints what the surface
+controllers do: phase changes, shots and gun bursts with their rate, magazine
+swaps, radar on and off, HARM shutdown rolls and battery changes, the RWR's
+ground squares, locks and tone, decoy rolls, hits, the unit's stock and a
+summary line. `--chaff S` and `--flares S` dispense while a missile is in
+flight at the jet, `--harm-at NM` puts an AGM-88 in flight at the unit's
+radar, `--kill-at S` destroys that radar, `--player-side red` flies for
+Redfor, `--condition night` darkens the sky, `--skill N` and `--rng N` fix the
+experience and the random draws, and `--near FT` follows the unit's
+neighbours too. For resupply, `--drain` empties the followed units' rails and
+magazines at the start, `--drain-reserve` their spare magazines too, and
+`--kill-truck-at S` destroys the supply trucks within 0.1 mile of the unit; the
+trace prints `rearm` and `refill` lines and the final stock of every followed
+unit. `--no-relocate` traces the template at its retail spot. A launcher in a SAM battery is traced with its battery's radar
+and launchers. It reads the same retail records, weapons and sensors too.
+The `surface-*` engagement battery scenarios run it.
+
+`--surface-dump --grounding-sites` extends the flat type audit to actual
+theater and mission placements and every offered Quick Mission template
+plus the three unused Ukraine templates, both authored and seed 1 relocated, at heavy defenses. It reports per-theater
+coverage, missing geometry, footing exceptions and before/after clearance.
+`surface-grounding-sites` runs it in the battery. The separate
+`surface-grounding-radar-render` scenario captures a radar objective offscreen.
+
+`--surface-scene OUT_DIR THEATER STEM` renders a ground target as the game
+draws it, offscreen at 1080p (no window): it steps the whole world
+`--seconds S` (`--surface-only` steps just the moving units, for long
+marches), optionally destroys units (`--kill all`, or a comma list of
+template ordinals, unit types such as `SA3.NT`, `within:FEET` of the
+framed units and `runways`, every runway object within the framed distance,
+the layout's too) and lets them burn for `--burn S` seconds, sets every
+launcher's rails to at most `--rails N` rounds, then writes one PNG per view
+(`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
+framing `--focus` (`routed`, `parked`, ordinals or types) within
+`--distance FT`. It draws the static scene with its wrecks and rails, the
+moving units, men and deck crew, explosions, fires and smoke. Units aim as
+in the game, stepped every tick; `--no-aim` draws them unturned.
+`--intruder EAST,UP,NORTH` holds the player's aircraft (invulnerable)
+circling that far from the focus so the defenses lock on and fire, `--blue
+ORDINALS` hands template objects to Blue so units fight each other, and each
+focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
+The scene's other static objects are named `object:TYPE` (`object:HANGR.OT`)
+in `--focus` and `--kill` (and `within:FEET` takes them), `near:ITEM` frames
+only the one ITEM nearest the template, `--flatten FEET` knocks the city fill's buildings within FEET of the focus flat so they burn and `--frames N` times N more frames of each view (nr-fx2), `--bomb-runway N` drops N Mk 82s
+along the runway nearest the focus, `--until-flash` steps on after `--seconds` (up to five
+minutes) until a gun within 300 ft of the focus has just fired so the picture has its muzzle
+flash (nr-flak: `--focus 0 --distance 45 --until-flash --intruder 3000,6000,2000 --look 90,-8`
+shows where a KS-12's flash starts), and `--time HH:MM` sets the start time
+(night views); with no focus left the run lists every place by type (B16).
+`--surface-preview
+OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
+read from the records, and the four carriers with their damaged islands.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 1300 --surface-only --focus routed --distance 110 --look 300,-35
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 30 --focus 10 --views close --distance 40 --intruder 5000,3000,2000
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUSTRIP --kill within:600 --focus near:object:BRDMID.OT --distance 700 --time 23:00
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUSTRIP --bomb-runway 8 --focus 0 --distance 1200
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
+```
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --over SA6 --altitude 15000 --from 20 --seconds 150
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
+```
+
+`--hud-a2g-preview OUT_DIR` draws the HUD's bomb and rocket sights
+([air-to-ground HUD](spec/air-to-ground.md#the-hud-in-air-to-ground-modes))
+without a window: for each frame it builds the TVIET truck park's Quick
+Mission, places the aircraft, steps the world so combat solves the sight, and
+draws the flight HUD and the weapon HUD over a plain sky and ground with the
+target marked. It writes each frame twice its size (`NAME.png`: CCIP beyond,
+near and inside the range, off the HUD, LOW, FRAG and IMP on an F/A-18D, the
+dot trail on an F-16C, the level "T" far out, at 10 s, 2 s and the release,
+off track and OVERFLY on an F-4B, the rocket pipper on an A-4E) and contact
+sheets `sheet-N.png`. `--a2g-run` flies the same sights through the trigger
+(`--attack ccip`, `level`, `rocket`; [flight lane](testing/lane-flight.md#air-to-ground-weapons)).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --hud-a2g-preview .local/hud-a2g
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --a2g-run UKR QUCOL --aircraft f4b --load MK82 --attack level --altitude 5000 --speed 450 --from 2
+```
+
+`--hud-guided-preview OUT_DIR` draws the guided weapons' release range scale
+([guided bomb release range indicator](spec/air-to-ground.md#guided-bomb-release-range-indicator))
+the same way: an F-16C's GBU-30 far out, at the far edge of its reach, in the
+middle, inside the near edge and with nothing designated, its GBU-10 lasing
+and with the laser off, and an Su-25's AS-14 (`NAME.png` and
+`guided-sheet-N.png`). `--a2g-run` flies the guided weapons with `--attack
+laser`, `jdam` and `at2`, which designate through the A-G page (T, else Easy
+targeting's Ctrl+X), release on the HUD's IN RNG cue and follow each weapon
+to its end; `--laser-off S` turns the laser off S seconds after the release,
+`--buddy ID` puts a second aircraft on a second seat to lase for the
+attacker, `--turn-away S` turns the attacker away after the release and
+`--condition clear|cloudy|foggy|night` sets the weather. Guided attacks accept
+`--release cue` (the default, a quarter of the way into the reach),
+`--release bar` (hold for the level T) and `--release max` (98% of the range
+interval, for a near-limit check). The `flight-measured` line reports release
+TTI, elapsed flight time, their difference in ticks, and arrival speed in knots.
+The `a2g-bomb-flight-*` battery cases record the four shared-model acceptance
+passes and verify replay transforms on the CPU.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --hud-guided-preview .local/hud-guided
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --a2g-run UKR QUCOL --aircraft f16c --load GBU10 --station 2 --count 2 --attack laser --altitude 15000 --speed 480 --from 6 --seconds 120
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --a2g-run UKR QUCOL --aircraft f18 --load GBU10 --station 2 --count 2 --attack laser --altitude 12000 --from 6 --seconds 120 --buddy su25
+```
+
+`--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
+look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
+KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and
+`zsu57` (muzzle flash, firing light and tracers beside a gun), `troops` (an
+airfield squad's soldiers and tracers) and `squadkill` (the same squad killed
+as it opens fire), `sam` (an SA-6
+leaving its rail, at the pad and up its path), `wreck` (a destroyed ZSU-23
+smoking) and `map` (the flight map over the same target). Each scene is the
+real game: it builds the mission, flies the player past the unit, steps the
+whole world and draws the frame the first flak burst, round, launch or kill
+makes through the same picture, tracker and renderer the game uses. The names
+of the frames say the scene, the light, the view and the ticks after the
+trigger. `--ground-target STEM [--defenses AAA SAM] [--surface-seed N]` sets
+the creator's ground target for a launched flight or capture
+(`--launch-quick-mission`, `--smoke-test`).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh target/debug/tore-app --surface-fx-preview .local/tmp/fx flak sam
+```
+
+`--surface-objective THEATER STEM` checks a ground target's objectives and the
+debrief in the whole world. The player flies a scripted pass at the target's
+defenses (`--from` nm out, `--altitude` feet above the ground, 400 knots,
+invulnerable, so its SAMs and guns fire), then a Mk 82 is placed on every
+target every two seconds until it is down (`--kill-friendly` also bombs a
+friendly unit that is not a target). It prints the target list, the
+objectives, the outcome and the debrief's tallies at the start and at the end:
+SAM and AAA hits and launches, the kill rows, friendly fire and who shot the
+player down. `--redfor` builds the multiplayer mission and seats the human in
+the first enemy plane, so the targets are a Protect objective and a Blue plane
+drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
+`surface-objective-*` battery scenarios run it. An `end runway` line gives each
+runway within 20,000 ft of a target with its hit points and whether it is
+redrawn (`redrawn PLAN`) or `retail`; `--runway-art` also builds the scenery on
+the CPU and adds the vertex floats the runway draws now (`drawn N`), and
+`--retail-airfields` builds the retail airfield shapes instead of the redraw.
+The `surface-runway-stays` scenario uses them (B15: bombs on `~QUSTRIP`'s
+buildings bring its 750 hit point runway down, and it stays drawn).
+
+`--record PATH` records the run as a mission recording (a format 3 file, see
+[Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads
+it back and compares every tick with the picture the run drew, printing
+`surface-objective: verify-render: PASS ticks=... missing=0 differing=0` or the
+first difference. `--run-on` keeps the run going to `--seconds` after every
+target is down, so supply trucks rearm the emptied launchers, and
+`--vulnerable` takes the player's invulnerability away, so the defenses can
+shoot it down. The `replay-surface` scenario uses all four.
+
+`--city-strike N` (nr-fx3) also drops N Mk 84s, four a pass from the first
+pass, on the standing city fill buildings nearest the target (at least 600 ft
+apart), printing each aim point and, at the end, `surface-objective: city
+flattened N buildings`. With `--record` the recording keeps them in its city
+section. The `replay-city-strike` scenario records one and draws it back:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --surface-seed 1 --from 2 --run-on --seconds 40 --city-strike 12 --record .local/tmp/city.tore-replay --verify-render
+```
+
+`--replay-stills REPLAY FRAME_PLAN OUT_DIR` (first argument) draws a
+recording's frames offscreen through the replay viewer, as PNG files
+(`still-NN-tTICK.png`), with no window, no audio written and no ffmpeg. The
+plan is the reel director's (`--reel-render`, one frame a line: tick,
+anchor, eye, target, field of view, visual time in minutes of the day (a fraction steps the clock on to the second) or -1, view,
+rate, fixed-eye tick or -1); anchor 4294967294 puts the eye and target in
+world feet. A plan's rows may jump backwards, which is how the stills check a
+seek. When the city fill has burning buildings a frame also prints a `Replay
+city smoke: tick T burning N fires F puffs P tallest H ft digest D` line: what
+the burning city drew in numbers (the digest covers every puff), so a seek and
+a play-through can be compared as text (nr-fx4, scenario
+`replay-city-smoke-seek`). `TORE_REPLAY_CITY_CLOCK=0` ages the columns on the
+wall clock from the moment each is first seen, as before nr-fx4 (a developer
+aid for before pictures).
+
+The per-theater acceptance run ([baseline](baselines/surface-defenses.md)) adds
+`--shuttle` (fly the line back and forth across the site for the whole run, so
+the defenses keep firing and the trucks rearm them), `--follow-terrain` (hold
+`--altitude` above the ground under the aircraft, so a line over hills does not
+fly into them) and `--no-relocate` (`--no-jitter`) for the retail spot. The run
+then ends with a `surface-objective: layout` line (the template's units, SAM,
+AAA and ship counts, batteries, supply trucks, parked aircraft, anchor and how
+far it moved) and a `surface-objective: summary` line (missiles, gun rounds and
+flak shells fired by the template's units and by the base layout's, refused
+rounds, magazine swaps, rearms, refills, kills, the first shot, the first
+missile, the last target's fall, a crash, and rounds by weapon record).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --redfor
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective TVIET QTAAA --shuttle --run-on --follow-terrain --seconds 900 --no-relocate
+```
 
 ## Flight view inspection
 
@@ -1448,9 +2076,11 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KUR
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
 ```
 
-`--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
+`--airport-allegiance` (imported media, no display) lists, for every base theater and for Blue and for Redfor, the ground-start airports the creator offers and checks them, the automatic ground start and the AI's home runway against the built world: none may be the other side's ([allegiance](spec/airports.md#allegiance)). `--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
-indexed artwork size, and exits with an error on construction failure. The
+indexed artwork size (without the flight vegetation, whose pages
+`--vegetation-preview DIR limits-check` checks through the mission loader), and
+exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the
 `TORE_TERRAIN_V2` dependency set. Use the existing isolated import workflow
 above; never write extracted retail resources into tracked assets.
@@ -1458,3 +2088,58 @@ above; never write extracted retail resources into tracked assets.
 Variants are static source scenery lists, with the
 [documented fitted grid/composition rule](spec/terrain-detail.md#host-presentation-where-the-source-rule-is-incomplete).
 They do not start a campaign or add autonomous ground behavior.
+
+
+## Ground colour regression
+
+`--terrain-colors` (first argument) checks all sixteen theaters and six weather
+choices at 0, 6,000 and 30,000 feet without a window or GPU. It prints the mean
+land-cell RGB and compares every terrain palette entry with the weather family
+independently read from the retail base MM. A mismatch fails the command.
+The battery scenario is `render-terrain-colors`.
+
+`--terrain-colors OUT_DIR THEATER` also writes four offscreen 1080p PNGs:
+`THEATER-day-near.png`, `THEATER-day-far.png`, `THEATER-night-near.png` and
+`THEATER-night-far.png`. The cameras sit 1,800 and 18,000 feet above the central
+land cell and look down 0.65 radians. City fill and scattered clouds are off
+for this repeatable terrain fixture. Use a private profile copy and never
+write over an earlier capture directory. This is a developer fixture, not a
+retail screenshot comparison.
+
+Add `--cpu` after THEATER for an unlit orthographic software render of the
+actual terrain mesh and its indexed textures. The near/far views span 32,768
+and 262,144 feet vertically, sampled through the live palette at the same
+camera altitudes. This mode needs no GPU. It omits objects, lighting, fog and
+GPU distance filtering, so it verifies artwork and palette colours only.
+
+### CAP and strike order regression counters
+
+AI probes with CAP assignments print `AI probe CAP` per aircraft: its first
+target tick, launch-request count and greatest distance from station in NM.
+The AI strike driver accepts `--quick-wing --clear-air-at SECONDS` to remove
+the last bandit during an explicitly ordered ground strike. See the
+[CAP and strike checks](testing/lane-ai.md#cap-orders-and-unfinished-strikes).
+
+## CPU paired-airfield comparison
+
+`TORE_DATA_DIR=<isolated profile> tore-app --airfield-sheets <output directory> --cpu-merged`
+produces eight windowless diagnostic PNGs: Southampton and Spassk Dalniy,
+before and after merging, overhead and from an orthographic approach angle.
+It reads the real terrain and static scenery buffers and indexed texture
+pages. It omits GPU lighting, city-fill instances, weather and moving objects.
+Use it when the graphics backend cannot create an offscreen renderer; it
+checks layout and artwork, not full GPU presentation.
+
+The headless AI probe accepts up to 288,000 ticks (40 simulation minutes).
+This allows four-ship landing and parking checks on the 12,000 ft merged
+fields to finish their long taxi returns; normal flight duration is unchanged.
+
+### QMC wing loadout probe
+
+`TORE_DATA_DIR=<private-profile> target/debug/tore-app --validate-wing-loadout <output-directory> --no-audio`
+builds a QMC four-ship F-16C flight with Mk 82s, AIM-9s, no tanks and 60 percent
+internal fuel. It writes mission text and tick-zero recordings under the output
+directory, first with the previous default-wing policy and then with sharing.
+It asserts the accepted load survives airborne and ground starts and restart.
+The battery scenario is `qmc-wing-loadout`. This probe requires imported media
+but no display; do not point it at a shared profile.

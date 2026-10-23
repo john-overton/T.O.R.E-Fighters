@@ -1,0 +1,150 @@
+# T.O.R.E redrawn airport plan: STRIP5A.OT (RNWY5A.SH, the west tile of STRIP5 fields). Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: redraw the airports at real size from retail
+# airport textures; one plan per runway shape type; larger airports keep
+# their strips, with parking and taxiways on both sides). Sizes and positions
+# are agent choices at real-world scale (fitted); runway centrelines follow
+# the retail ones. The default; TORE_REDRAWN_AIRPORTS=0 turns it off.
+# Feet in the runway frame: x right of the retail runway centreline, z along
+# it from its near threshold (STRIP anchor 0x11). Keys:
+# docs/formats/redrawn-airports.md.
+
+applies_to = "STRIP5A.OT"
+runway_length_ft = 6492
+ils_runway = false
+grass_margin_ft = 150
+
+[[material]]
+name = "runway_plain"
+pic = "_RNWY5A.PIC"
+rect = [151, 109, 97, 97]
+tile_ft = [0, 200]
+paint = ["edges"]
+
+[[material]]
+name = "runway_centreline"
+pic = "_RNWY5A.PIC"
+rect = [151, 109, 97, 97]
+tile_ft = [0, 200]
+paint = ["edges", "centre"]
+
+[[material]]
+name = "runway_touchdown"
+pic = "_RNWY5A.PIC"
+rect = [151, 3, 97, 101]
+tile_ft = [0, 200]
+paint = ["edges", "centre"]
+
+[[material]]
+name = "runway_threshold"
+pic = "_RNWY5A.PIC"
+rect = [151, 109, 97, 97]
+tile_ft = [0, 150]
+paint = ["threshold"]
+
+[[material]]
+name = "taxiway"
+pic = "_RNWY5A.PIC"
+rect = [1, 153, 56, 121]
+tile_ft = [0, 150]
+along = "v"
+paint = ["taxiway"]
+
+[[material]]
+name = "apron"
+pic = "_RNWY5A.PIC"
+rect = [1, 3, 146, 144]
+tile_ft = [100, 100]
+
+[[material]]
+name = "fillet"
+pic = "_RNWY5A.PIC"
+rect = [163, 263, 38, 44]
+tile_ft = [50, 50]
+
+[[runway]]
+name = "R0"
+from = [1632, 1320]
+heading = 90
+length = 5512
+width = 150
+pad = 220
+touchdown = 1500
+marked_far = false
+
+[[runway]]
+name = "R1"
+from = [2526, 2884]
+heading = 45
+length = 4787
+width = 150
+pad = 0
+touchdown = 1500
+
+[[taxiway]]
+name = "north"
+width = 75
+points = [[996, 1770], [7144, 1770]]
+
+[[taxiway]]
+name = "south"
+width = 75
+points = [[996, 870], [7144, 870]]
+
+[[taxiway]]
+name = "west"
+width = 75
+points = [[996, 870], [996, 5000]]
+
+[[taxiway]]
+name = "diagonal"
+width = 75
+points = [[996, 2884], [2526, 2884]]
+
+[[taxiway]]
+name = "near cross"
+width = 75
+points = [[1442, 870], [1442, 1770]]
+
+[[taxiway]]
+name = "far cross"
+width = 75
+points = [[6894, 870], [6894, 1770]]
+
+[[apron]]
+name = "ai apron"
+min = [3032, 1807.5]
+max = [6075, 2607.5]
+
+[[line]]
+from = [3032, 2607.5]
+to = [6075, 2607.5]
+out = [0, 1]
+
+[[apron]]
+name = "apron"
+min = [200, 3500]
+max = [958.5, 5000]
+
+[[line]]
+from = [200, 3500]
+to = [200, 5000]
+out = [-1, 0]
+
+# AI points (slice CL-AP, 2026-10-11, agent: John asked that the AI taxi on
+# taxiways, not grass): the base plans' pattern turned to this tile's main
+# runway. A cross taxiway 190 ft behind its near threshold (a 220 ft paved
+# pad), the parallel taxiway on its left, an apron for the nine parking slots
+# beside it, and a cross taxiway 250 ft before its far end. Coordinates are
+# in the tile's frame; parking_heading is against the frame.
+[anchors]
+taxi_out = [[3032, 1770], [1442, 1770], [1442, 1545], [1442, 1320]]
+takeoff = [1632, 1320]
+landing = [2632, 1320]
+taxi_in = [[6894, 1320], [6894, 1545], [6894, 1740], [6075, 1770]]
+parking = [[3554, 2208], [3804, 2208], [4054, 2208], [4304, 2208], [4554, 2208], [4804, 2208], [5054, 2208], [5304, 2208], [5554, 2208]]
+parking_heading = 180
+
+[extras]
+hangars = 3
+vehicles = false

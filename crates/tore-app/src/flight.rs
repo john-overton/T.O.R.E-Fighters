@@ -5,136 +5,7 @@ pub use tore_sim::flight::*;
 pub(crate) mod animation_tests {
     use super::*;
     use crate::attitude::dot;
-    use std::collections::BTreeMap;
-    use tore_formats::aircraft::{Aircraft, Envelope, Token};
-    fn base_profile() -> Aircraft {
-        let fields = [
-            ("weight", 10000),
-            ("internalFuel", 1000),
-            ("thrust", 8000),
-            ("aftThrust", 12000),
-            ("fuelConsumption", 2),
-            ("aftFuelConsumption", 10),
-            ("maxTakeoffWeight", 15000),
-            ("gearDrag", 23),
-            ("flapsDrag", 70),
-            ("airBrakesDrag", 256),
-            ("loadedElevator", 40),
-            ("loadedDrag", 0),
-            ("_gpullDrag", 0),
-        ]
-        .into_iter()
-        .map(|(k, v)| {
-            (
-                k.into(),
-                Token {
-                    kind: "dword".into(),
-                    value: v.to_string(),
-                    scaled: false,
-                },
-            )
-        })
-        .collect();
-        Aircraft {
-            id: tore_formats::aircraft::AircraftId::F18,
-            name: "F/A-18D".into(),
-            shape: "F18.SH".into(),
-            fields,
-            object: BTreeMap::new(),
-            hardpoints: vec![],
-            sounds: BTreeMap::new(),
-            envelopes: (-2..=6)
-                .map(|g| Envelope {
-                    g,
-                    points: vec![[200., 0.], [250., 50000.], [1300., 50000.], [1800., 0.]],
-                })
-                .collect(),
-        }
-    }
-    pub(crate) fn profile() -> Aircraft {
-        let mut a = base_profile();
-        for prefix in ["_brv.x", "puffRot.x", "puffRot.y", "puffRot.z"] {
-            for (suffix, value) in [("min", -90), ("max", 90), ("acc", 200), ("dacc", 400)] {
-                a.fields.insert(
-                    format!("{prefix}.{suffix}"),
-                    Token {
-                        kind: "word".into(),
-                        value: value.to_string(),
-                        scaled: false,
-                    },
-                );
-            }
-        }
-
-        for key in [
-            "flapsLift",
-            "turbulencePercent",
-            "rudderDrag",
-            "bayDrag",
-            "wheelBrakesDrag",
-            "stallWarningDelay",
-            "stallDelay",
-            "stallSeverity",
-            "stallPitchDown",
-            "spinEntry",
-            "spinExit",
-            "spinYawLow",
-            "spinYawHigh",
-            "spinAOALow",
-            "spinAOAHigh",
-            "spinBankLow",
-            "spinBankHigh",
-            "crashSpeedForward",
-            "crashSpeedSide",
-            "crashSpeedVertical",
-            "crashPitch",
-            "crashRoll",
-            "flags",
-        ] {
-            a.fields.insert(
-                key.into(),
-                Token {
-                    kind: "word".into(),
-                    value: "0".into(),
-                    scaled: false,
-                },
-            );
-        }
-        for key in ["gearDrag", "flapsDrag", "airBrakesDrag"] {
-            a.fields.get_mut(key).unwrap().kind = "word".into();
-        }
-        for axis in ["x", "y", "z"] {
-            for suffix in ["min", "max", "acc", "dacc"] {
-                a.fields.insert(
-                    format!("_bv.{axis}.{suffix}"),
-                    Token {
-                        kind: "word".into(),
-                        value: if suffix == "min" { "-100" } else { "100" }.into(),
-                        scaled: false,
-                    },
-                );
-            }
-        }
-        for (key, value) in [
-            ("_brv.x.max", 100),
-            ("crashSpeedForward", 330),
-            ("crashSpeedSide", 50),
-            ("crashSpeedVertical", 30),
-            ("crashPitch", 25),
-            ("crashRoll", 10),
-            ("spinExit", -2),
-        ] {
-            a.fields.insert(
-                key.into(),
-                Token {
-                    kind: "word".into(),
-                    value: value.to_string(),
-                    scaled: false,
-                },
-            );
-        }
-        a
-    }
+    use tore_world::test_support::profile;
     #[test]
     fn animated_source_faces_preserve_deployed_endpoints_and_uvs() {
         use crate::aircraft_animation::animate;
@@ -144,13 +15,38 @@ pub(crate) mod animation_tests {
         s.brake = 1.;
         s.hook = 1.;
         s.exhaust = 1.;
-        for address in [0x5059, 0x4a03, 0x4bfa, 0x4d33, 0x4f64, 0x5310] {
+        for address in [
+            0x5059, 0x4a03, 0x4bfa, 0x4d33, 0x4f64, 0x4ee1, 0x4b69, 0x4abe, 0x4e86, 0x5310,
+        ] {
+            let door = matches!(address, 0x4b69 | 0x4abe | 0x4e86);
+            let positions = if matches!(address, 0x4b69 | 0x4abe) {
+                let (lower, upper) = if address == 0x4b69 {
+                    (-5., -3.)
+                } else {
+                    (6., 4.)
+                };
+                // Synthetic untextured leaf with the fit's own attachment plane.
+                vec![
+                    [lower, -9., -15.],
+                    [lower, -1., -15.],
+                    [upper, -1., -6.],
+                    [upper, -9., -6.],
+                ]
+            } else {
+                vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]]
+            };
+            let count = positions.len();
+            let uv = if count == 4 {
+                vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]]
+            } else {
+                vec![[0., 0.], [1., 0.], [0., 1.]]
+            };
             let f = Face {
                 fog: tore_formats::shape::FogMode::Enabled,
                 address,
-                positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
-                colors: vec![20; 3],
-                uv: vec![[0., 0.], [1., 0.], [0., 1.]],
+                positions,
+                colors: vec![20; count],
+                uv,
                 texture: "SYNTHETIC".into(),
                 subtype: 0x4c,
                 normal: Some([0., 1., 0.]),
@@ -159,7 +55,7 @@ pub(crate) mod animation_tests {
             assert_eq!(open.positions, f.positions);
             assert_eq!(open.uv, f.uv);
             let mut half = s.clone();
-            half.gear = 0.5;
+            half.gear = if door { 0.125 } else { 0.5 };
             half.brake = 0.5;
             half.hook = 0.5;
             half.exhaust = 0.5;
@@ -171,7 +67,41 @@ pub(crate) mod animation_tests {
             closed.brake = 0.;
             closed.hook = 0.;
             closed.exhaust = 0.;
-            assert!(animate(&f, &closed).is_none());
+            if matches!(address, 0x4bfa | 0x4d33) {
+                // The fitted closed main joints remain visible continuously.
+                let stowed = animate(&f, &closed).unwrap();
+                assert_ne!(stowed.positions, f.positions);
+                assert_eq!(stowed.uv, f.uv);
+                assert_eq!(stowed.colors, f.colors);
+                let distance = |a: [f32; 3], b: [f32; 3]| {
+                    a.iter()
+                        .zip(b)
+                        .map(|(a, b)| (a - b).powi(2))
+                        .sum::<f32>()
+                        .sqrt()
+                };
+                for i in 0..count {
+                    for j in i + 1..count {
+                        assert!(
+                            (distance(f.positions[i], f.positions[j])
+                                - distance(stowed.positions[i], stowed.positions[j]))
+                            .abs()
+                                < 1e-4
+                        );
+                    }
+                }
+                let mut near = closed.clone();
+                near.gear = 1e-6;
+                let near = animate(&f, &near).unwrap();
+                assert!(
+                    near.positions
+                        .iter()
+                        .zip(&stowed.positions)
+                        .all(|(a, b)| distance(*a, *b) < 1e-4)
+                );
+            } else {
+                assert!(animate(&f, &closed).is_none());
+            }
         }
     }
     #[test]

@@ -1,6 +1,31 @@
 //! Spec-derived mode behavior with fitted control gains. See docs/spec/autopilot.md.
-use crate::flight::{PilotInput, State, Switch};
+//!
+//! Four modes: off, heading and altitude (A), waypoint (Ctrl+A) and hover
+//! hold (Ctrl+Alt+A, the helicopters and the V-22 only; VTOL overhaul slice
+//! P9). Every mode flies by rewriting the pilot's inputs for the tick, before
+//! the flight model sees them: the stick and pedals on every aircraft, and
+//! the collective on the rotorcraft. Nothing moves the aircraft directly, so a
+//! tick flown on the autopilot and the same inputs flown by hand are the same
+//! flight.
+//!
+//! The heading and waypoint modes fly two laws. Conventional aircraft and the
+//! vectoring jets keep the fixed-wing law (a bank command through the roll
+//! rate, a climb command through the load factor), the jets only at flying
+//! speed. The helicopters and the V-22 fly attitude loops through their
+//! cyclic instead, since their stick commands a disk tilt, not a load factor,
+//! and only at 40 kt and above, where hover hold stops. The helicopters, and
+//! the V-22 with its nacelles up, hold the height on the collective and the
+//! speed on the cyclic, as a helicopter's coupled autopilot does; the V-22
+//! with its nacelles down holds the height on the pitch and leaves its power
+//! lever to the pilot, as the throttle is on every other aircraft.
+pub mod orbit;
+pub mod rotor_law;
+
+use crate::flight::{FlightAxis, PilotCommand, PilotInput, State, Switch, trace::Release};
 use crate::models::FlightModel;
+use crate::models::variety::LiftKind;
+use rotor_law::angle;
+use tore_input::{LiftCommand, TrimAxis};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -8,6 +33,16 @@ pub enum Mode {
     Off,
     Heading,
     Waypoint,
+    /// Hover hold: the helicopters and the V-22 hold a ground point, the
+    /// heading and a height above the ground (design 5.4).
+    Hover,
+    /// The AC-130's sensor console's autopilot ([`orbit`]): it circles the
+    /// point the targeting sight holds (ORBIT), or flies straight and level
+    /// on the console's commanded heading, altitude and speed while the
+    /// sight is free (SEARCH). Engaged and fed by the host through
+    /// [`State::engage_console`] and [`State::engage_orbit`], never by a
+    /// switch.
+    Orbit,
 }
 
 /// Selected mission waypoint. Coordinates use simulation world X/Z in feet.
@@ -20,13 +55,154 @@ pub struct NavigationTarget {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Autopilot {
     mode: Mode,
+    /// Heading held, rad: the A modes' and hover hold's.
     heading: f64,
+    /// Altitude held by the A modes, ft.
     altitude: f64,
     target: Option<NavigationTarget>,
+    /// The powered-lift loops' memory; default on every other aircraft.
+    loops: Loops,
+    /// Orbit hold's plan and memory, while it is engaged.
+    orbit: Option<orbit::Orbit>,
 }
 
-fn angle(value: f64) -> f64 {
-    (value + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+/// What the rotorcraft loops remember from tick to tick: hover hold, and the
+/// heading and waypoint modes on the helicopters and the V-22. Reset at every
+/// engagement and coded with the autopilot in the exact flight state, so
+/// snapshots and checkpoints restore a hold mid-flight.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Loops {
+    /// Set on the first tick the loops fly after an engagement.
+    pub(crate) started: bool,
+    /// Hover hold: the ground point held, world X/Z ft. None while the
+    /// drift is still being braked.
+    pub(crate) point: Option<[f64; 2]>,
+    /// Hover hold: the wheel height above the ground held, ft.
+    pub(crate) height: f64,
+    /// Hover hold: the pilot's collective (or throttle) lever position when
+    /// the hold first saw it. Moving it 2 percent from there cancels.
+    pub(crate) lever: Option<f64>,
+    /// Outer loop integrators, rad: hover hold's forward and right tilt
+    /// that holds the ground velocity, or the A modes' pitch attitude [0].
+    pub(crate) tilt: [f64; 2],
+    /// Attitude loop integrators: the stick and pedal travel that holds the
+    /// commanded attitude and heading, [pitch, roll, yaw].
+    pub(crate) stick: [f64; 3],
+    /// The collective lever, 0..1, of hover hold and the rotorcraft A
+    /// modes: their height loop's integrator.
+    pub(crate) collective: f64,
+    /// The rotorcraft A modes: whether they fly the collective (the
+    /// helicopters, and the V-22 with its nacelles up).
+    pub(crate) coupled: bool,
+    /// The rotorcraft A modes: the ground speed along the heading they hold
+    /// while they fly the collective, ft/s.
+    pub(crate) speed: f64,
+}
+
+/// Which law the heading and waypoint modes fly on an aircraft.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Airframe {
+    /// Fixed-wing aircraft, and every aircraft off the hybrid model.
+    Conventional,
+    /// The AV-8 and Yak-141: the fixed-wing law, with flying speed.
+    Jet,
+    /// The helicopters and the V-22: attitude loops through the cyclic.
+    Rotorcraft,
+}
+
+impl Airframe {
+    fn of(s: &State) -> Self {
+        if s.research.is_none() || s.native.is_some() {
+            return Self::Conventional;
+        }
+        match s.model().powered_lift().map(|lift| lift.kind) {
+            Some(LiftKind::Helicopter | LiftKind::Tiltrotor) => Self::Rotorcraft,
+            Some(LiftKind::VectorJet) => Self::Jet,
+            None => Self::Conventional,
+        }
+    }
+}
+
+/// ft/s per knot.
+const KT: f64 = crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
+/// Standard gravity, ft/s².
+const GRAVITY: f64 = 32.174;
+/// Hover hold engages below this ground speed, and the rotorcraft heading
+/// and waypoint modes at or above it, kt (design 5.4; the A modes' floor is
+/// an agent decision so the two never overlap).
+pub const HOVER_SPEED_KT: f64 = 40.;
+/// The rotorcraft heading and waypoint modes let go below this ground
+/// speed, kt (fitted).
+pub const ROTORCRAFT_RELEASE_KT: f64 = 30.;
+/// The jets' heading and waypoint modes engage at their 1 G stall speed and
+/// let go below this share of it (fitted).
+pub const JET_RELEASE_STALL_SHARE: f64 = 0.85;
+/// Hover hold needs the V-22's nacelles at this angle or more, degrees
+/// (design 5.4).
+pub const HOVER_NACELLE_DEGREES: f64 = 75.;
+/// The lowest wheel height hover hold holds, ft (design 5.4).
+pub const HOVER_MIN_HEIGHT_FT: f64 = 10.;
+/// Hover hold's pitch and bank command limit, degrees (design 5.4, fitted).
+pub const HOVER_TILT_DEGREES: f64 = 15.;
+/// Hover hold's climb and sink limit, ft/min (design 5.4, fitted).
+pub const HOVER_CLIMB_FPM: f64 = 500.;
+/// The ground speed below which hover hold takes the point it holds, kt
+/// (design A1: drift below 1 kt).
+pub const HOVER_CAPTURE_KT: f64 = 1.;
+/// A trim key tap moves the held point this far, ft (design 5.4).
+pub const HOVER_NUDGE_FT: f64 = 10.;
+/// A cyclic trim key tap moves the speed the rotorcraft A modes hold, kt
+/// (fitted; agent decision).
+pub const A_NUDGE_KT: f64 = 2.;
+/// A collective or throttle lever moving this share of travel cancels hover
+/// hold (design 5.4).
+pub const HOVER_LEVER_MOVE: f64 = 0.02;
+/// The rotorcraft heading and waypoint modes' pitch command limit, degrees
+/// (fitted, as hover hold's).
+const ROTORCRAFT_PITCH_DEGREES: f64 = 15.;
+/// The rotorcraft heading and waypoint modes' climb and sink limit, ft/min
+/// (fitted: the fixed-wing law's 20 m/s is beyond these aircraft).
+const ROTORCRAFT_CLIMB_FPM: f64 = 1_000.;
+
+// The fitted loop gains of the rotorcraft laws live in [`rotor_law`].
+
+/// The 1 G stall speed at the aircraft's altitude, ft/s (900 without a
+/// 1 G envelope row there).
+fn stall_speed(s: &State) -> f64 {
+    s.model()
+        .configuration()
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(s.position[1]))
+        .map_or(900., |p| p.0)
+}
+
+/// Ground speed along the ground, ft/s.
+fn ground_speed(s: &State) -> f64 {
+    s.velocity[0].hypot(s.velocity[2])
+}
+
+/// Whether the heading and waypoint modes have lost the speed they fly at
+/// on this aircraft.
+fn too_slow(s: &State) -> bool {
+    match Airframe::of(s) {
+        Airframe::Conventional => false,
+        Airframe::Jet => s.speed < JET_RELEASE_STALL_SHARE * stall_speed(s),
+        Airframe::Rotorcraft => ground_speed(s) < ROTORCRAFT_RELEASE_KT * KT,
+    }
+}
+
+/// Whether the heading and waypoint modes fly the collective on this
+/// aircraft now: on the helicopters, and on the V-22 with its nacelles at 75
+/// degrees or more (hover hold always does). Elsewhere the collective, the
+/// V-22's power lever, is the pilot's, as the throttle is.
+fn collective_coupled(s: &State) -> bool {
+    Airframe::of(s) == Airframe::Rotorcraft
+        && s.model().powered_lift().is_some_and(|lift| {
+            lift.kind == LiftKind::Helicopter || s.nacelle_degrees() >= HOVER_NACELLE_DEGREES - 1e-9
+        })
 }
 
 impl Autopilot {
@@ -40,7 +216,18 @@ impl Autopilot {
             Mode::Waypoint => self
                 .target
                 .map_or_else(|| "WP --".into(), |target| format!("WP {}", target.number)),
+            Mode::Hover => "HOVER".into(),
+            Mode::Orbit => match &self.orbit {
+                Some(orbit) if !orbit.pinned => "SEARCH".into(),
+                _ => "ORBIT".into(),
+            },
         }
+    }
+    /// Hover hold's ground point, world X/Z ft, once the drift is braked.
+    pub fn hover_point(&self) -> Option<[f64; 2]> {
+        (self.mode == Mode::Hover)
+            .then_some(self.loops.point)
+            .flatten()
     }
     /// Future route selection supplies its waypoint number and world X/Z in feet, or None.
     /// This changes guidance immediately without recapturing the held altitude.
@@ -49,6 +236,36 @@ impl Autopilot {
     }
     pub fn disengage(&mut self) {
         self.mode = Mode::Off;
+        self.orbit = None;
+    }
+    /// Orbit hold's plan and memory, while it is engaged.
+    pub fn orbit(&self) -> Option<&orbit::Orbit> {
+        self.orbit.as_ref().filter(|_| self.mode == Mode::Orbit)
+    }
+    /// Engage orbit hold with `orbit` (built by [`State::engage_orbit`]).
+    pub(crate) fn engage_orbit(&mut self, orbit: orbit::Orbit) {
+        self.mode = Mode::Orbit;
+        self.loops = Loops::default();
+        self.orbit = Some(orbit);
+    }
+    /// The point the console's autopilot circles: the pin or (`tracked`)
+    /// the ground under the tracked object the sight holds now. From the
+    /// search it joins the orbit about it; already orbiting, the orbit
+    /// slides there ([`orbit::CENTRE_SPEED_FPS`]), a moved pin after
+    /// [`orbit::CENTRE_PAUSE_S`] standing still.
+    pub fn set_orbit_point(&mut self, point: [f64; 3], tracked: bool) {
+        if self.mode == Mode::Orbit
+            && let Some(orbit) = &mut self.orbit
+        {
+            orbit.pin(point, tracked);
+        }
+    }
+    /// Replace the console autopilot's plan and memory (its commands and a
+    /// release, through [`State`]).
+    pub(crate) fn set_orbit(&mut self, orbit: orbit::Orbit) {
+        if self.mode == Mode::Orbit {
+            self.orbit = Some(orbit);
+        }
     }
     pub(crate) fn select(
         &mut self,
@@ -60,6 +277,7 @@ impl Autopilot {
         let wanted = match switch {
             Switch::Autopilot => Mode::Heading,
             Switch::WaypointAutopilot => Mode::Waypoint,
+            Switch::HoverHold => Mode::Hover,
             _ => return,
         };
         if !setting.unwrap_or(self.mode != wanted) {
@@ -68,11 +286,62 @@ impl Autopilot {
             }
             return;
         }
-        if self.mode == Mode::Off {
+        if self.mode == wanted {
+            return;
+        }
+        // From off, or across hover hold and the A modes, the mode captures
+        // anew; between the A modes it keeps the capture.
+        if matches!(self.mode, Mode::Off | Mode::Hover | Mode::Orbit) || wanted == Mode::Hover {
             self.heading = heading;
             self.altitude = altitude;
+            self.loops = Loops::default();
         }
         self.mode = wanted;
+        self.orbit = None;
+    }
+    /// Hover hold takes a cyclic trim key as a nudge of the point it holds:
+    /// a tap (2 percent of travel) moves it 10 ft forward, back, left or
+    /// right of the heading (design 5.4). Returns whether `command` was
+    /// taken; the trim does not move. Pedal trim and the other trim
+    /// commands pass to the trim, except Trim set, which hover hold and the
+    /// rotorcraft A modes take and drop: its latch would hide their stick.
+    pub(crate) fn intercept(&mut self, command: PilotCommand, s: &State) -> bool {
+        let rotorcraft = Airframe::of(s) == Airframe::Rotorcraft;
+        match command {
+            PilotCommand::Lift(LiftCommand::TrimSet) => rotorcraft && self.mode != Mode::Off,
+            PilotCommand::Lift(LiftCommand::TrimAdjust(TrimAxis::Pitch, amount))
+                if matches!(self.mode, Mode::Heading | Mode::Waypoint)
+                    && self.loops.coupled
+                    && collective_coupled(s) =>
+            {
+                // Forward trim (negative pitch) is faster.
+                if amount.is_finite() {
+                    let knots = -amount / tore_input::trim_keys::TAP * A_NUDGE_KT;
+                    self.loops.speed = (self.loops.speed + knots * KT).max(HOVER_SPEED_KT * KT);
+                }
+                true
+            }
+            PilotCommand::Lift(LiftCommand::TrimAdjust(axis, amount))
+                if self.mode == Mode::Hover && axis != TrimAxis::Pedal =>
+            {
+                if amount.is_finite()
+                    && let Some(point) = &mut self.loops.point
+                {
+                    let feet = amount / tore_input::trim_keys::TAP * HOVER_NUDGE_FT;
+                    let (sin, cos) = s.yaw.sin_cos();
+                    // Forward trim (nose down) is negative pitch.
+                    let [x, z] = if axis == TrimAxis::Pitch {
+                        [-feet * sin, -feet * cos]
+                    } else {
+                        [feet * cos, -feet * sin]
+                    };
+                    point[0] += x;
+                    point[1] += z;
+                }
+                true
+            }
+            _ => false,
+        }
     }
     fn bearing(&self, position: [f64; 3]) -> f64 {
         if self.mode == Mode::Waypoint
@@ -88,75 +357,333 @@ impl Autopilot {
         }
         self.heading
     }
-    pub(crate) fn apply(&mut self, s: &State, ground: f64, input: &mut PilotInput) {
+    /// [`Self::apply_over`] over still terrain at height `ground`.
+    #[cfg(test)]
+    pub(crate) fn apply(
+        &mut self,
+        s: &State,
+        ground: f64,
+        input: &mut PilotInput,
+    ) -> Option<Release> {
+        self.apply_over(s, &crate::research::Surface::terrain(ground), input)
+    }
+    /// One tick of the engaged mode over the `surface` under the aircraft
+    /// (its height, and the wind the rotorcraft modes read): lets go when the
+    /// pilot or the aircraft asks it to, else rewrites `input` with the
+    /// stick, pedals and, on the rotorcraft, the collective the mode flies.
+    /// Returns why it let go, if it did.
+    pub(crate) fn apply_over(
+        &mut self,
+        s: &State,
+        surface: &crate::research::Surface,
+        input: &mut PilotInput,
+    ) -> Option<Release> {
+        let ground = surface.height;
         let c = s.model().configuration();
-        if s.crashed
+        let release = if s.crashed
             || s.position[1] <= ground + c.equipment.ground_clearance_ft
-            || input.pitch.abs().max(input.roll.abs()).max(input.yaw.abs()) > 0.15
+            || (self.mode == Mode::Hover && s.weight_on_wheels())
         {
+            Some(Release::Ground)
+        } else if self.mode != Mode::Orbit
+            && input.pitch.abs().max(input.roll.abs()).max(input.yaw.abs()) > 0.15
+        {
+            // Orbit hold ignores the stick: the sensor console owns the
+            // aircraft until it closes (agent decision, 2026-10-13).
+            Some(Release::PilotOverride)
+        } else if self.mode == Mode::Hover {
+            self.coupled_release(s, input)
+        } else if self.mode != Mode::Off {
+            if too_slow(s) {
+                Some(Release::TooSlow)
+            } else if collective_coupled(s) {
+                self.coupled_release(s, input)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if release.is_some() {
             self.disengage();
         }
-        if self.mode == Mode::Off {
-            return;
+        match (self.mode, Airframe::of(s)) {
+            (Mode::Off, _) => {}
+            (Mode::Hover, _) => self.hover(s, ground, input),
+            (Mode::Orbit, _) => match &mut self.orbit {
+                Some(orbit) => orbit.fly(s, ground, input),
+                None => self.disengage(),
+            },
+            (_, Airframe::Rotorcraft) => self.rotorcraft(s, surface.wind, input),
+            _ => self.conventional(s, input),
         }
+        release
+    }
+    /// The heading and waypoint modes on conventional aircraft and the
+    /// vectoring jets: a bank command through the roll rate and a climb
+    /// command through the load factor (the module documentation's law).
+    fn conventional(&self, s: &State, input: &mut PilotInput) {
         let bank = (angle(self.bearing(s.position) - s.yaw) * 1.5)
             .clamp(-30_f64.to_radians(), 30_f64.to_radians());
-        let roll_rate = angle(bank - s.bank);
-        let stall = c
-            .aerodynamics
-            .envelopes
-            .iter()
-            .find(|e| e.g == 1)
-            .and_then(|e| e.speeds(s.position[1]))
-            .map_or(900., |p| p.0);
-        let authority = (s.speed / stall.max(1.)).powi(2).clamp(0., 1.);
-        let roll_limit = if let Some(p) = c.controls {
-            let axis = if s.research.is_some() {
-                p.hybrid_roll.unwrap_or(p.roll)
-            } else {
-                p.roll
-            };
-            let bound = if roll_rate < 0. {
-                -f64::from(axis.minimum)
-            } else {
-                f64::from(axis.maximum)
-            };
-            bound.to_radians() * (s.speed / (2. * stall.max(1.))).clamp(0., 1.)
-        } else if s.research.is_some() {
-            c.aerodynamics.roll_limit_rad_per_second.clamp(0.1, 6.) * authority
-        } else {
-            c.tuning.legacy_roll_limit_rad_per_second * authority
-        };
-        input.roll = (roll_rate / roll_limit.max(0.01)).clamp(-1., 1.);
+        input.roll = roll_for_bank(s, bank);
         let climb = ((self.altitude - s.position[1]) / 10.).clamp(-20. / 0.3048, 20. / 0.3048);
-        let desired_g = (1. + (climb - s.vertical_speed) / (3. * 32.174)) / s.bank.cos().max(0.5);
-        let (mut low, mut high) = (-1_f64, 1_f64);
-        for e in &c.aerodynamics.envelopes {
-            if let Some((min, max)) = e.speeds(s.position[1])
-                && s.speed >= min
-                && s.speed <= max
-            {
-                low = low.min(e.g as f64);
-                high = high.max(e.g as f64);
-            }
-        }
-        let loading = 1.
-            + (s.fuel + s.carried_lbs()) / c.mass.empty_lbs
-                * c.aerodynamics.loaded_elevator_percent
-                / 100.;
-        low /= loading;
-        high /= loading;
-        let delta = desired_g / authority.max(0.01) - 1.;
-        input.pitch = (delta
-            / if delta > 0. {
-                (high - 1.).max(0.01)
-            } else {
-                (1. - low).max(0.01)
-            })
-        .clamp(-1., 1.);
+        input.pitch = pitch_for_climb(s, climb);
         input.yaw = 0.;
     }
+
+    /// Why hover hold, or a rotorcraft A mode flying the collective, lets go
+    /// this tick on the pilot's `input` or the aircraft's state, besides the
+    /// ground and the stick (design 5.4): any collective input, an engine
+    /// failure or the loss of the hydraulics.
+    fn coupled_release(&mut self, s: &State, input: &PilotInput) -> Option<Release> {
+        let collective_command = input.commands.iter().any(|command| {
+            matches!(
+                command,
+                PilotCommand::SetAxis(FlightAxis::Collective, _)
+                    | PilotCommand::AdjustAxis(FlightAxis::Collective, _)
+                    | PilotCommand::Throttle(_)
+                    | PilotCommand::AdjustThrottle(_)
+            )
+        });
+        let lever = input.collective.or(input.throttle);
+        let moved = match (lever, self.loops.lever) {
+            (Some(now), Some(then)) => (now - then).abs() > HOVER_LEVER_MOVE,
+            _ => false,
+        };
+        if lever.is_some() && self.loops.lever.is_none() {
+            self.loops.lever = lever;
+        }
+        if collective_command || moved || input.collective_rate != 0. || input.throttle_rate != 0. {
+            return Some(Release::PilotCollective);
+        }
+        let starved = s.fuel + s.systems.external_lbs() <= 0. && !s.cheats.unlimited_fuel;
+        if !s.engine || s.systems.power_available() <= 0. || starved {
+            return Some(Release::EngineFailure);
+        }
+        if s.systems.fluids.hydraulic <= 0. {
+            return Some(Release::HydraulicsLost);
+        }
+        None
+    }
+    /// Hover hold (design 5.4): brakes the drift, then holds the point it
+    /// stopped at, the heading at engagement and the wheel height above the
+    /// ground at engagement (at least 10 ft), through [`rotor_law::hover`].
+    fn hover(&mut self, s: &State, ground: f64, input: &mut PilotInput) {
+        let clearance = s.model().configuration().equipment.ground_clearance_ft;
+        let height = s.position[1] - ground - clearance;
+        let loops = &mut self.loops;
+        if !loops.started {
+            loops.height = height.max(HOVER_MIN_HEIGHT_FT);
+        }
+        if loops.point.is_none() && s.velocity[0].hypot(s.velocity[2]) < HOVER_CAPTURE_KT * KT {
+            loops.point = Some([s.position[0], s.position[2]]);
+        }
+        let climb_limit = HOVER_CLIMB_FPM / 60.;
+        let target = rotor_law::HoverTarget {
+            point: loops.point,
+            velocity: None,
+            height: loops.height,
+            heading: self.heading,
+            climb_limit,
+            descent_limit: climb_limit,
+            close_speed: rotor_law::POSITION_SPEED_FPS,
+            tilt_limit: HOVER_TILT_DEGREES.to_radians(),
+        };
+        rotor_law::hover(s, ground, &target, loops, input);
+    }
+    /// The heading and waypoint modes on the helicopters and the V-22: the
+    /// fixed-wing law's bank command and its climb command toward the held
+    /// altitude (10 s, here within 1,000 ft/min), flown by
+    /// [`rotor_law::forward`]. While the mode flies the collective
+    /// ([`collective_coupled`]) the climb goes to the collective and the
+    /// pitch holds the ground speed along the heading taken at engagement
+    /// (at least 40 kt; the pitch trim keys move it 2 kt a tap). Otherwise
+    /// the climb becomes a pitch attitude by the flight path error.
+    fn rotorcraft(&mut self, s: &State, wind: [f64; 3], input: &mut PilotInput) {
+        let bearing = self.bearing(s.position);
+        let coupled = collective_coupled(s);
+        if coupled && !self.loops.coupled {
+            // The speed is held from here.
+            self.loops.speed = rotor_law::speed_along(s).max(HOVER_SPEED_KT * KT);
+        }
+        let bank = (angle(bearing - s.yaw) * 1.5).clamp(-30_f64.to_radians(), 30_f64.to_radians());
+        let climb_limit = ROTORCRAFT_CLIMB_FPM / 60.;
+        let climb = ((self.altitude - s.position[1]) / 10.).clamp(-climb_limit, climb_limit);
+        let target = rotor_law::ForwardTarget {
+            bank,
+            climb,
+            speed: self.loops.speed,
+            pitch_limit: ROTORCRAFT_PITCH_DEGREES.to_radians(),
+            coupled,
+        };
+        rotor_law::forward(s, &target, wind, &mut self.loops, input);
+    }
 }
+
+/// The fixed-wing law's roll stick toward `bank` (radians, left negative):
+/// a roll rate of the bank error a second, scaled by the roll the aircraft
+/// has at its speed.
+pub(crate) fn roll_for_bank(s: &State, bank: f64) -> f64 {
+    let c = s.model().configuration();
+    let roll_rate = angle(bank - s.bank);
+    let stall = stall_speed(s);
+    let authority = (s.speed / stall.max(1.)).powi(2).clamp(0., 1.);
+    let roll_limit = if let Some(p) = c.controls {
+        let axis = if s.research.is_some() {
+            p.hybrid_roll.unwrap_or(p.roll)
+        } else {
+            p.roll
+        };
+        let bound = if roll_rate < 0. {
+            -f64::from(axis.minimum)
+        } else {
+            f64::from(axis.maximum)
+        };
+        bound.to_radians() * (s.speed / (2. * stall.max(1.))).clamp(0., 1.)
+    } else if s.research.is_some() {
+        c.aerodynamics.roll_limit_rad_per_second.clamp(0.1, 6.) * authority
+    } else {
+        c.tuning.legacy_roll_limit_rad_per_second * authority
+    };
+    (roll_rate / roll_limit.max(0.01)).clamp(-1., 1.)
+}
+
+/// The fixed-wing law's pitch stick for a `climb` rate (ft/s): the load
+/// factor that closes the climb error in 3 s, through the envelope's pull.
+pub(crate) fn pitch_for_climb(s: &State, climb: f64) -> f64 {
+    let c = s.model().configuration();
+    let stall = stall_speed(s);
+    let authority = (s.speed / stall.max(1.)).powi(2).clamp(0., 1.);
+    let desired_g = (1. + (climb - s.vertical_speed) / (3. * 32.174)) / s.bank.cos().max(0.5);
+    let (mut low, mut high) = (-1_f64, 1_f64);
+    for e in &c.aerodynamics.envelopes {
+        if let Some((min, max)) = e.speeds(s.position[1])
+            && s.speed >= min
+            && s.speed <= max
+        {
+            low = low.min(e.g as f64);
+            high = high.max(e.g as f64);
+        }
+    }
+    // The flight model's fast-side hold, so the autopilot scales its
+    // stick for the pull the aircraft actually has near top speed.
+    if s.research.is_some()
+        && let Some(hold) =
+            crate::flight::fast_side_hold(&c.aerodynamics.envelopes, s.position[1], s.speed)
+    {
+        high = high.max(hold.g);
+    }
+    let loading = 1.
+        + (s.fuel + s.carried_lbs()) / c.mass.empty_lbs * c.aerodynamics.loaded_elevator_percent
+            / 100.;
+    low /= loading;
+    high /= loading;
+    let delta = desired_g / authority.max(0.01) - 1.;
+    (delta
+        / if delta > 0. {
+            (high - 1.).max(0.01)
+        } else {
+            (1. - low).max(0.01)
+        })
+    .clamp(-1., 1.)
+}
+
+impl State {
+    /// Why the autopilot `switch` cannot engage now, as the message the
+    /// pilot reads, or None (turning a mode off is never refused).
+    pub(crate) fn autopilot_refusal(
+        &self,
+        switch: Switch,
+        setting: Option<bool>,
+    ) -> Option<&'static str> {
+        let mode = match switch {
+            Switch::Autopilot => Mode::Heading,
+            Switch::WaypointAutopilot => Mode::Waypoint,
+            Switch::HoverHold => Mode::Hover,
+            _ => return None,
+        };
+        let current = self.autopilot.mode();
+        if !setting.unwrap_or(current != mode) || current == mode {
+            return None;
+        }
+        let airframe = Airframe::of(self);
+        if mode == Mode::Hover {
+            let lift = self.model().powered_lift().map(|lift| lift.kind);
+            if airframe != Airframe::Rotorcraft {
+                return Some("Hover hold is not available on this aircraft");
+            }
+            if lift == Some(LiftKind::Tiltrotor)
+                && self.nacelle_degrees() < HOVER_NACELLE_DEGREES - 1e-9
+            {
+                return Some("Hover hold needs the nacelles at 75 degrees or more");
+            }
+            if self.weight_on_wheels() {
+                return Some("Hover hold is not available on the ground");
+            }
+            if ground_speed(self) >= HOVER_SPEED_KT * KT {
+                return Some("Hover hold needs less than 40 knots");
+            }
+            let starved =
+                self.fuel + self.systems.external_lbs() <= 0. && !self.cheats.unlimited_fuel;
+            if !self.engine || self.systems.power_available() <= 0. || starved {
+                return Some("Hover hold needs engine power");
+            }
+            if self.systems.fluids.hydraulic <= 0. {
+                return Some("Hover hold needs hydraulic power");
+            }
+            return None;
+        }
+        match airframe {
+            Airframe::Conventional => None,
+            Airframe::Jet => {
+                (self.speed < stall_speed(self)).then_some("Autopilot needs flying speed")
+            }
+            Airframe::Rotorcraft => (ground_speed(self) < HOVER_SPEED_KT * KT)
+                .then_some("Autopilot needs 40 knots; Ctrl+Alt+A holds a hover"),
+        }
+    }
+}
+
+crate::flight::exact::exact_enum!(Mode {
+    Off = 0,
+    Heading = 1,
+    Waypoint = 2,
+    Hover = 3,
+    Orbit = 4,
+});
+crate::flight::exact::exact_struct!(NavigationTarget { number, position });
+crate::flight::exact::exact_struct!(Loops {
+    started,
+    point,
+    height,
+    lever,
+    tilt,
+    stick,
+    collective,
+    coupled,
+    speed,
+});
+// The AI's rotor and jet-lift laws keep their own Loops (slice H1), coded
+// with the AI actor (docs/formats/checkpoint.md).
+crate::checkpoint_struct!(Loops {
+    started,
+    point,
+    height,
+    lever,
+    tilt,
+    stick,
+    collective,
+    coupled,
+    speed,
+});
+crate::flight::exact::exact_struct!(Autopilot {
+    mode,
+    heading,
+    altitude,
+    target,
+    loops,
+    orbit,
+});
 
 #[cfg(test)]
 mod tests {

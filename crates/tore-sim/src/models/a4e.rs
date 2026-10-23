@@ -26,6 +26,8 @@ impl A4EFlightModel {
             alignment_rate: 0.7,
             rudder_rate: 0.12,
             sideslip_drag: 0.5,
+            sideslip_force: 0.8,
+            sideslip_roll: 0.35,
             trim_degrees: 2.,
             pull_aoa_degrees_per_g: 1.25,
             thrust_lapse_feet: 70000.,

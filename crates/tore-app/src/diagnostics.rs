@@ -553,10 +553,16 @@ pub fn report_panic(interactive: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A fresh directory for one test. The counter keeps two tests apart
+    /// when they ask in the same clock step: macOS's clock counts whole
+    /// microseconds, and two tests that shared a directory took each
+    /// other's maintenance lock (a WouldBlock on the macOS CI runner).
     fn directory() -> PathBuf {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
-            "tore-diagnostics-test-{}-{}",
+            "tore-diagnostics-test-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()

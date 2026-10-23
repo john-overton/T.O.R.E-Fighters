@@ -3,18 +3,22 @@
 //! Its body is a list of sections: strings, entities, frames, spawns, events,
 //! trees and checksums. Readers skip section ids they do not know.
 
-use crate::codec::{In, put_uv};
+use crate::city::{CityCoder, apply_city, get_city};
+use crate::codec::{In, put_iv, put_uv, put_xf64};
 use crate::error::{Result, corrupt};
 use crate::events::{ChecksumCoder, EventCoder, get_checksums, get_events};
 use crate::format::{
-    KIND_DATA, SECTION_CHECKSUMS, SECTION_ENTITIES, SECTION_EVENTS, SECTION_FRAMES, SECTION_SPAWNS,
+    KIND_DATA, SECTION_CHECKSUMS, SECTION_CITY, SECTION_DISK_TILT, SECTION_EFFECT_SCALES,
+    SECTION_ENTITIES, SECTION_EVENTS, SECTION_FRAMES, SECTION_ROTORS, SECTION_SPAWNS,
     SECTION_STRINGS, SECTION_TREES, chunk, put_section, section,
 };
 use crate::frames::FrameCoder;
-use crate::limits::MAX_REGISTERED;
-use crate::model::{AircraftInfo, Frame, Side, WeaponClass, WeaponInfo};
-use crate::spawns::{SpawnCoder, get_spawns};
+use crate::limits::{MAX_REGISTERED, MAX_REGISTERED_SURFACE};
+use crate::model::{AircraftInfo, Frame, Side, SurfaceInfo, WeaponClass, WeaponInfo};
+use crate::rotors::{RotorCoder, apply_rotors, get_rotors};
+use crate::spawns::{ScaleCoder, SpawnCoder, apply_scales, get_spawns};
 use crate::strings::{Interner, StringTable};
+use crate::tilts::{TiltCoder, apply_tilts, get_tilts};
 use crate::trees::{TreeCoder, get_trees};
 
 /// Writer state for the chunk being filled.
@@ -25,13 +29,19 @@ pub(crate) struct ChunkEncoder {
     frame_coder: FrameCoder,
     frames_buf: Vec<u8>,
     spawns: SpawnCoder,
+    scales: ScaleCoder,
     events: EventCoder,
     trees: TreeCoder,
     checksums: ChecksumCoder,
+    rotors: RotorCoder,
+    tilts: TiltCoder,
+    city: CityCoder,
     aircraft: Vec<u8>,
     aircraft_count: u64,
     weapons: Vec<u8>,
     weapon_count: u64,
+    surface_units: Vec<u8>,
+    surface_unit_count: u64,
 }
 
 impl ChunkEncoder {
@@ -42,9 +52,13 @@ impl ChunkEncoder {
         let index = self.frames;
         self.frame_coder.put(&mut self.frames_buf, frame);
         self.spawns.put(index, &frame.new_effects, &frame.new_puffs);
+        self.scales.put(index, &frame.new_effects);
         self.events.put(index, &frame.events, strings);
         self.trees.put(index, &frame.trees, strings);
         self.checksums.put(index, frame.checksum);
+        self.rotors.put(index, &frame.aircraft);
+        self.tilts.put(index, &frame.aircraft);
+        self.city.put(index, frame);
         self.frames += 1;
     }
 
@@ -78,19 +92,40 @@ impl ChunkEncoder {
         self.weapon_count += 1;
     }
 
+    pub fn add_surface_unit(&mut self, info: &SurfaceInfo, strings: &mut Interner) {
+        let buf = &mut self.surface_units;
+        put_uv(buf, u64::from(info.id));
+        strings.put(buf, &info.name);
+        strings.put(buf, &info.label);
+        buf.push(info.side.code());
+        put_iv(buf, i64::from(info.hit_points));
+        for v in info.position {
+            put_xf64(buf, v);
+        }
+        self.surface_unit_count += 1;
+    }
+
     /// True when there is nothing to write.
     pub fn is_empty(&self) -> bool {
-        self.frames == 0 && self.aircraft_count == 0 && self.weapon_count == 0
+        self.frames == 0
+            && self.aircraft_count == 0
+            && self.weapon_count == 0
+            && self.surface_unit_count == 0
     }
 
     /// Bytes the body holds so far, not counting pending strings.
     pub fn size(&self) -> usize {
         self.frames_buf.len()
             + self.spawns.len()
+            + self.scales.len()
             + self.events.len()
             + self.trees.len()
+            + self.rotors.len()
+            + self.tilts.len()
+            + self.city.len()
             + self.aircraft.len()
             + self.weapons.len()
+            + self.surface_units.len()
             + 16 * self.frames as usize
             + 64
     }
@@ -102,12 +137,20 @@ impl ChunkEncoder {
         if let Some(payload) = strings.take_section() {
             put_section(&mut body, SECTION_STRINGS, &payload);
         }
-        if self.aircraft_count + self.weapon_count > 0 {
-            let mut payload = Vec::with_capacity(self.aircraft.len() + self.weapons.len() + 8);
+        if self.aircraft_count + self.weapon_count + self.surface_unit_count > 0 {
+            let mut payload = Vec::with_capacity(
+                self.aircraft.len() + self.weapons.len() + self.surface_units.len() + 12,
+            );
             put_uv(&mut payload, self.aircraft_count);
             payload.extend_from_slice(&self.aircraft);
             put_uv(&mut payload, self.weapon_count);
             payload.extend_from_slice(&self.weapons);
+            // Format 3: the surface units follow the weapons; a chunk with
+            // none ends there, as format 2's did.
+            if self.surface_unit_count > 0 {
+                put_uv(&mut payload, self.surface_unit_count);
+                payload.extend_from_slice(&self.surface_units);
+            }
             put_section(&mut body, SECTION_ENTITIES, &payload);
         }
         if self.frames > 0 {
@@ -115,6 +158,9 @@ impl ChunkEncoder {
         }
         if let Some(payload) = self.spawns.section() {
             put_section(&mut body, SECTION_SPAWNS, &payload);
+        }
+        if let Some(payload) = self.scales.section() {
+            put_section(&mut body, SECTION_EFFECT_SCALES, &payload);
         }
         if let Some(payload) = self.events.section() {
             put_section(&mut body, SECTION_EVENTS, &payload);
@@ -125,6 +171,15 @@ impl ChunkEncoder {
         if let Some(payload) = self.checksums.section() {
             put_section(&mut body, SECTION_CHECKSUMS, &payload);
         }
+        if let Some(payload) = self.rotors.section() {
+            put_section(&mut body, SECTION_ROTORS, &payload);
+        }
+        if let Some(payload) = self.tilts.section() {
+            put_section(&mut body, SECTION_DISK_TILT, &payload);
+        }
+        if let Some(payload) = self.city.section() {
+            put_section(&mut body, SECTION_CITY, &payload);
+        }
         chunk(
             KIND_DATA,
             self.frames,
@@ -134,10 +189,10 @@ impl ChunkEncoder {
     }
 }
 
-pub(crate) fn get_entities(
-    payload: &[u8],
-    strings: &StringTable,
-) -> Result<(Vec<AircraftInfo>, Vec<WeaponInfo>)> {
+/// The entities a chunk registers.
+pub(crate) type Entities = (Vec<AircraftInfo>, Vec<WeaponInfo>, Vec<SurfaceInfo>);
+
+pub(crate) fn get_entities(payload: &[u8], strings: &StringTable) -> Result<Entities> {
     let mut input = In::new(payload);
     let n = input.count(MAX_REGISTERED, "registered aircraft")?;
     let mut aircraft = Vec::with_capacity(n);
@@ -184,10 +239,31 @@ pub(crate) fn get_entities(
             class,
         });
     }
+    let mut surface = Vec::new();
+    if !input.done() {
+        let n = input.count(MAX_REGISTERED_SURFACE, "registered surface units")?;
+        for _ in 0..n {
+            let id = input.u32v()?;
+            let name = strings.read(&mut input)?;
+            let label = strings.read(&mut input)?;
+            let side = Side::from_code(input.u8()?);
+            let hit_points = i32::try_from(input.iv()?)
+                .map_err(|_| corrupt("a surface unit's hit points are out of range"))?;
+            let position = [input.xf64()?, input.xf64()?, input.xf64()?];
+            surface.push(SurfaceInfo {
+                id,
+                name,
+                label,
+                side,
+                hit_points,
+                position,
+            });
+        }
+    }
     if !input.done() {
         return Err(corrupt("the entities section has trailing bytes"));
     }
-    Ok((aircraft, weapons))
+    Ok((aircraft, weapons, surface))
 }
 
 /// Decodes every frame of a data chunk from its sections.
@@ -196,6 +272,7 @@ pub(crate) fn decode_frames(
     first_tick: u64,
     frames: u32,
     strings: &StringTable,
+    version: u16,
 ) -> Result<Vec<Frame>> {
     let mut out: Vec<Frame> = (0..frames)
         .map(|i| Frame {
@@ -211,13 +288,17 @@ pub(crate) fn decode_frames(
     let mut input = In::new(payload);
     let mut coder = FrameCoder::default();
     for frame in &mut out {
-        coder.get(&mut input, frame)?;
+        coder.get(&mut input, frame, version)?;
     }
     if !input.done() {
         return Err(corrupt("the frames section has trailing bytes"));
     }
     if let Some(payload) = section(sections, SECTION_SPAWNS) {
-        for (i, effects, puffs) in get_spawns(payload, frames)? {
+        let mut spawns = get_spawns(payload, frames)?;
+        if let Some(scales) = section(sections, SECTION_EFFECT_SCALES) {
+            apply_scales(scales, frames, &mut spawns)?;
+        }
+        for (i, effects, puffs) in spawns {
             let frame = &mut out[i as usize];
             frame.new_effects = effects;
             frame.new_puffs = puffs;
@@ -237,6 +318,15 @@ pub(crate) fn decode_frames(
         for (i, checksum) in get_checksums(payload, frames)? {
             out[i as usize].checksum = Some(checksum);
         }
+    }
+    if let Some(payload) = section(sections, SECTION_ROTORS) {
+        apply_rotors(&mut out, get_rotors(payload, frames)?);
+    }
+    if let Some(payload) = section(sections, SECTION_DISK_TILT) {
+        apply_tilts(&mut out, get_tilts(payload, frames)?);
+    }
+    if let Some(payload) = section(sections, SECTION_CITY) {
+        apply_city(&mut out, get_city(payload, frames)?);
     }
     Ok(out)
 }

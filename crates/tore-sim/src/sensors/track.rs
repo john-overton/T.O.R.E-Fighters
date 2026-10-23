@@ -3,15 +3,22 @@
 //! history and the received interference used by both detection and the scope.
 //! Timings are the authored values in docs/radar.md at the fixed 120 Hz cadence.
 use super::detection::{
-    Sighting, angular_coupling, clutter_exposure, effective_range_ft, infrared_range_ft,
-    interference_quotient, jammer_factor, look_down_factor, notch_factor, notch_speed_fps,
-    received,
+    LazySighting, Sighting, angular_coupling, clutter_exposure, effective_range_ft,
+    infrared_range_ft, interference_quotient, jammer_factor, look_down_factor, notch_factor,
+    notch_speed_fps, received,
 };
 use super::profile::{
     DEFAULT_RANGE_INDEX, JammerProfile, RANGE_LADDER_NMI, RadarProfile, SensorProfiles,
 };
 use super::signature::{Configuration, SignatureProfile};
 use crate::attitude::{Basis, Vector, dot};
+
+mod ground;
+pub use ground::{
+    AG_CAP_FT, GROUND_REBUILD_STEPS, GROUND_REFRESH_STEPS, GroundContact, GroundObject,
+    GroundSymbol, HARM_CAP_FT, HARM_REBUILD_STEPS, LISTED_FLAG, MAX_GROUND_CONTACTS,
+    MIN_VISIBILITY, PAGE_CAP_FT, Picks, VISIBILITY_UNIT_FT, Weather, WeatherBand, class, selector,
+};
 
 /// Weapon-track acquisition, 0.5 seconds of consecutive valid steps.
 pub const ACQUISITION_STEPS: u32 = 60;
@@ -32,6 +39,10 @@ pub enum Channel {
     /// Always available alongside the selected scope channel. It is not part of
     /// the scope channel cycle and never supplies radar weapon support.
     Visual,
+    /// The HARM page: the anti-radiation seeker of a weapon aboard, listing
+    /// emitters only (docs/spec/air-to-ground.md, "The HARM scope page").
+    /// Passive: the air radar does not emit while it is selected.
+    Harm,
 }
 impl Channel {
     pub fn label(self) -> &'static str {
@@ -39,6 +50,7 @@ impl Channel {
             Self::Radar => "RADAR",
             Self::Infrared => "IR",
             Self::Visual => "VISUAL",
+            Self::Harm => "HARM",
         }
     }
 }
@@ -50,6 +62,11 @@ pub enum Mode {
     Rws,
     Tws,
     Infrared,
+    /// The air-to-ground page (Ctrl+R): the radar lists ground objects and
+    /// the air radar is off (docs/spec/air-to-ground.md).
+    AirGround,
+    /// The HARM page: emitters the anti-radiation seeker receives.
+    Harm,
 }
 impl Mode {
     pub fn label(self) -> &'static str {
@@ -57,11 +74,13 @@ impl Mode {
             Self::Rws => "RWS",
             Self::Tws => "TWS",
             Self::Infrared => "IR",
+            Self::AirGround => "A-G",
+            Self::Harm => "HARM",
         }
     }
     /// Only TWS and infrared can hold a fire-control track.
     pub fn tracks(self) -> bool {
-        self != Self::Rws
+        matches!(self, Self::Tws | Self::Infrared)
     }
 }
 
@@ -136,10 +155,27 @@ impl Observable {
 }
 
 /// Terrain services supplied by the host, so this component never samples a
-/// world of its own.
+/// world of its own. Queries are pure for the duration of a step: identical
+/// endpoints have identical visibility, independent of query count or order.
 pub struct Environment<'a> {
     pub ground: &'a dyn Fn(f64, f64) -> f64,
     pub obscured: &'a dyn Fn(Vector, Vector) -> bool,
+}
+
+/// Reuse one target's first sampled segment only for identical ordered endpoint
+/// bits. A different segment queries the terrain service without replacing that
+/// first result or allocating another cache entry.
+fn cached_obscured(query: &dyn Fn(Vector, Vector) -> bool) -> impl Fn(Vector, Vector) -> bool + '_ {
+    let first = std::cell::OnceCell::new();
+    move |from: Vector, to: Vector| {
+        let key = [from[0], from[1], from[2], to[0], to[1], to[2]].map(f64::to_bits);
+        let (cached_key, blocked) = first.get_or_init(|| (key, query(from, to)));
+        if *cached_key == key {
+            *blocked
+        } else {
+            query(from, to)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -182,6 +218,29 @@ pub struct Strobe {
     pub half_width_rad: f64,
     pub sidelobe_floor: f64,
     line_of_sight: Vector,
+}
+impl Strobe {
+    /// A strobe as a display draws it, from what a networked client
+    /// receives. It has no line of sight, which only the host's sensors use
+    /// to couple strobes and contacts, so it never goes back into sensors.
+    pub fn presented(
+        id: u32,
+        bearing_rad: f64,
+        elevation_rad: f64,
+        received: f64,
+        half_width_rad: f64,
+        sidelobe_floor: f64,
+    ) -> Self {
+        Self {
+            id,
+            bearing_rad,
+            elevation_rad,
+            received,
+            half_width_rad,
+            sidelobe_floor,
+            line_of_sight: [0.; 3],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -250,6 +309,26 @@ pub struct MapContact {
 const FORWARD_VIEW_HALF_HEIGHT: f64 = std::f64::consts::FRAC_PI_6;
 const FORWARD_VIEW_HALF_WIDTH: f64 = 0.656_053; // atan(4/3 * tan 30 degrees)
 
+/// How one [`Sensors::step_with`] differs from the plain 120 Hz step. Only the
+/// AI test settings use anything but [`StepOptions::NORMAL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepOptions {
+    /// How many 120 Hz ticks this step stands for: 1 for a step every tick.
+    pub elapsed: u32,
+    /// Whether the visual channel and the map list are worked out. An AI
+    /// aircraft's visual list is read only by the player's wing orders,
+    /// which the lean setting answers another way.
+    pub visual: bool,
+}
+
+impl StepOptions {
+    /// One step per tick with every channel: what [`Sensors::step`] does.
+    pub const NORMAL: Self = Self {
+        elapsed: 1,
+        visual: true,
+    };
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sensors {
     pub profiles: SensorProfiles,
@@ -276,6 +355,25 @@ pub struct Sensors {
     /// Easy targeting: the selection stays set while its aircraft is off the
     /// scope, for as long as it is still flying. It grants no weapon support.
     pub keep_selection: bool,
+    /// The A-G flag (Ctrl+R). It shows only while the radar is the scope
+    /// channel; selecting another channel turns it off.
+    air_ground: bool,
+    /// The anti-radiation seeker the HARM page uses: of the anti-radiation
+    /// weapons aboard, the one with the shortest search range. Set by the host
+    /// before each step; `None` without one.
+    harm_seeker: Option<super::profile::Volume>,
+    /// The page list: the A-G page's, the IR page's ground objects or the
+    /// HARM page's emitters, nearest first, at most [`MAX_GROUND_CONTACTS`].
+    ground: Vec<GroundContact>,
+    /// The page the list was built for, and the step it was rebuilt on.
+    ground_page: Option<Mode>,
+    ground_built: u64,
+    /// A selection the targeting sight's track holds, whatever the channels
+    /// see (the AC-130's pod track).
+    held: Option<u32>,
+    /// A selection the ground rules kept at the last ground step: on the
+    /// page list, in view, or kept by Easy targeting.
+    ground_retained: Option<u32>,
 }
 impl Sensors {
     pub fn new(profiles: SensorProfiles) -> Self {
@@ -300,6 +398,13 @@ impl Sensors {
             history: Vec::new(),
             tick: 0,
             keep_selection: false,
+            air_ground: false,
+            harm_seeker: None,
+            ground: Vec::new(),
+            ground_page: None,
+            ground_built: 0,
+            held: None,
+            ground_retained: None,
         }
     }
     pub fn map_contacts(&self) -> &[MapContact] {
@@ -352,6 +457,7 @@ impl Sensors {
     pub fn observation(&self, id: u32) -> Option<&Contact> {
         self.contact(id)
             .or_else(|| self.visual.iter().find(|c| c.id == id))
+            .or_else(|| self.ground_contact(id).map(|g| &g.contact))
     }
     /// Recorded observations for one target on the currently active channel.
     /// Samples from different channels stay separate even for the same object.
@@ -370,6 +476,7 @@ impl Sensors {
             Channel::Radar => self.profiles.radar.is_some(),
             Channel::Infrared => self.profiles.infrared.is_some(),
             Channel::Visual => self.profiles.visual.is_some(),
+            Channel::Harm => self.harm_seeker.is_some(),
         }
     }
     fn resolved_channel(&self) -> Option<Channel> {
@@ -389,8 +496,11 @@ impl Sensors {
     pub fn mode_for(&self, channel: Channel, controls: &Controls) -> Option<Mode> {
         match channel {
             Channel::Infrared | Channel::Visual => Some(Mode::Infrared),
+            Channel::Harm => Some(Mode::Harm),
             Channel::Radar => self.profiles.radar.as_ref().map(|r| {
-                if controls.range_nmi() <= r.track.maximum_nmi() {
+                if self.air_ground {
+                    Mode::AirGround
+                } else if controls.range_nmi() <= r.track.maximum_nmi() {
                     Mode::Tws
                 } else {
                     Mode::Rws
@@ -406,6 +516,7 @@ impl Sensors {
                 Channel::Radar => self.radar_powered && !self.radar_failed,
                 Channel::Infrared => !self.infrared_failed,
                 Channel::Visual => !self.visual_failed,
+                Channel::Harm => true,
             }
     }
     /// Immediate persistent selection of a current radar or infrared contact's
@@ -414,27 +525,34 @@ impl Sensors {
         if self.selected == Some(id) {
             return true;
         }
-        if self.contact(id).is_none() {
+        if self.contact(id).is_none() && self.ground_contact(id).is_none() {
             return false;
         }
         self.selected = Some(id);
         self.acquired = None;
         self.acquisition = 0;
+        self.held = None;
+        self.ground_retained = None;
         true
     }
     pub fn clear_selection(&mut self) {
         self.selected = None;
         self.acquired = None;
         self.acquisition = 0;
+        self.held = None;
+        self.ground_retained = None;
     }
     /// T and Shift-T: step through current radar contacts, nearest first,
-    /// skipping wrecks and any identity `skip` rejects (friendly aircraft).
+    /// including present wrecks, skipping identities `skip` rejects (friendlies).
     /// Search-only RWS contacts stay selectable, as John requested.
     pub fn cycle(&mut self, forward: bool, skip: impl Fn(u32) -> bool) -> bool {
+        if self.ground_page.is_some() {
+            return self.cycle_ground(forward, skip);
+        }
         let mut ranked: Vec<(f64, u32)> = self
             .contacts
             .iter()
-            .filter(|c| c.channel == Channel::Radar && !c.destroyed && !skip(c.id))
+            .filter(|c| c.channel == Channel::Radar && !skip(c.id))
             .map(|c| (c.distance_ft, c.id))
             .collect();
         ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -461,10 +579,23 @@ impl Sensors {
         basis: Basis,
         skip: impl Fn(u32) -> bool,
     ) -> bool {
+        // Aircraft keep their rule; with none in view the visible ground
+        // contacts of the page are next (docs/spec/air-to-ground.md).
+        if self.select_visual_air(position, basis, &skip) {
+            return true;
+        }
+        self.select_visual_ground(position, basis, &skip)
+    }
+    fn select_visual_air(
+        &mut self,
+        position: Vector,
+        basis: Basis,
+        skip: &impl Fn(u32) -> bool,
+    ) -> bool {
         let best = self
             .visual
             .iter()
-            .filter(|c| !c.destroyed && !skip(c.id) && self.contact(c.id).is_some())
+            .filter(|c| !skip(c.id) && self.contact(c.id).is_some())
             .filter_map(|c| {
                 let d = std::array::from_fn(|i| c.position[i] - position[i]);
                 let z = dot(d, basis.forward);
@@ -485,7 +616,11 @@ impl Sensors {
         if self.radar_failed {
             return Support::RadarFailed;
         }
-        if !self.radar_powered || self.active != Some(Channel::Radar) {
+        // The A-G page turns the air radar off (retail).
+        if !self.radar_powered
+            || self.active != Some(Channel::Radar)
+            || self.mode == Some(Mode::AirGround)
+        {
             return Support::RadarOff;
         }
         if self.acquired == Some(id) {
@@ -535,18 +670,66 @@ impl Sensors {
         targets: &[Observable],
         environment: &Environment<'_>,
     ) -> Vec<Event> {
+        self.step_with(observer, targets, environment, StepOptions::NORMAL)
+    }
+
+    /// [`Self::step`] with the AI test settings' options: one step standing
+    /// for several 120 Hz ticks (every count below advances by that many, so
+    /// a track takes the same time to acquire, a plot to go stale and a
+    /// trail sample to be taken), and no visual channel for an aircraft whose
+    /// visual list nothing reads. [`StepOptions::NORMAL`] is exactly `step`.
+    pub fn step_with(
+        &mut self,
+        observer: &Observer,
+        targets: &[Observable],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        self.step_targets(observer, targets, environment, options)
+    }
+
+    /// [`Self::step_with`] over references to the observables, for a caller
+    /// that holds them elsewhere (the AI reads its world's observables
+    /// without copying them).
+    pub fn step_with_refs(
+        &mut self,
+        observer: &Observer,
+        targets: &[&Observable],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        self.step_targets(observer, targets, environment, options)
+    }
+
+    fn step_targets(
+        &mut self,
+        observer: &Observer,
+        targets: &[impl std::borrow::Borrow<Observable>],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        let elapsed = options.elapsed.max(1);
         let mut events = Vec::new();
         self.radar_powered = observer.radar_powered;
         self.radar_failed = observer.radar_failed;
         self.infrared_failed = observer.infrared_failed;
         self.visual_failed = observer.visual_failed;
+        // Selecting another channel turns the A-G page off.
+        if self.controls.channel != Channel::Radar {
+            self.air_ground = false;
+        }
         let channel = self.resolved_channel().filter(|c| match c {
             Channel::Radar => observer.radar_powered && !observer.radar_failed,
             Channel::Infrared => !observer.infrared_failed,
             // The scope channel never resolves to the visual sensor.
             Channel::Visual => false,
+            // A passive receiver: nothing here fails it.
+            Channel::Harm => true,
         });
         let mode = channel.and_then(|c| self.resolved_mode(c));
+        // The air radar is off on the A-G and HARM pages: no air contacts, no
+        // received noise.
+        let air_picture = !matches!(mode, Some(Mode::AirGround | Mode::Harm));
         // Changing channel or leaving TWS releases the old fire-control track
         // immediately and restarts acquisition. A still observed selection is
         // preserved by the ordinary observation test below.
@@ -557,7 +740,7 @@ impl Sensors {
             self.acquisition = 0;
             // Coasting plots belong to the channel that observed them, so a
             // channel change retires them rather than replotting them here.
-            if channel != self.active {
+            if channel != self.active || !air_picture {
                 self.plots.clear();
             }
         }
@@ -565,7 +748,9 @@ impl Sensors {
         self.mode = mode;
         let previous = std::mem::take(&mut self.contacts);
         self.strobes.clear();
-        if let (Some(Channel::Radar), Some(radar)) = (channel, self.profiles.radar.as_ref()) {
+        if let (Some(Channel::Radar), Some(radar), true) =
+            (channel, self.profiles.radar.as_ref(), air_picture)
+        {
             self.strobes = strobes(observer, targets, radar, environment);
         }
         // Presentation keeps a briefly fading copy of each emitter. Losing the
@@ -577,26 +762,40 @@ impl Sensors {
             }
         }
         let live: Vec<u32> = self.strobes.iter().map(|s| s.id).collect();
-        let emitting = channel == Some(Channel::Radar);
+        let emitting = channel == Some(Channel::Radar) && air_picture;
         self.fading.retain_mut(|(strobe, age)| {
             if live.contains(&strobe.id) {
                 return true;
             }
-            *age += 1;
+            *age += elapsed;
             emitting && *age <= NOISE_FADE_STEPS
         });
-        let mut sorted: Vec<&Observable> = targets.iter().collect();
+        let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
         sorted.sort_by_key(|t| t.id);
         self.visual.clear();
         self.map_contacts.clear();
-        let visual = !observer.visual_failed;
+        let visual = !observer.visual_failed && options.visual;
         for target in &sorted {
-            let sensed =
-                channel.and_then(|channel| self.observe(observer, target, channel, environment));
+            // Channels share a result only for the same ordered endpoint bits.
+            // The local cache never crosses a tick, observer or worker.
+            let obscured = cached_obscured(environment.obscured);
+            let query = Environment {
+                ground: environment.ground,
+                obscured: &obscured,
+            };
+            let environment = &query;
+            // Both channels read one sighting, worked out only if a range
+            // test leaves the target in reach.
+            let sighting = LazySighting::new(observer.position, &observer.basis, target.position);
+            let sensed = channel.filter(|_| air_picture).and_then(|channel| {
+                self.observe(observer, target, channel, &sighting, environment)
+            });
             let seen = visual
-                .then(|| self.observe(observer, target, Channel::Visual, environment))
+                .then(|| self.observe(observer, target, Channel::Visual, &sighting, environment))
                 .flatten();
-            if let Some(contact) = seen.as_ref().or(sensed.as_ref()) {
+            if options.visual
+                && let Some(contact) = seen.as_ref().or(sensed.as_ref())
+            {
                 self.map_contacts.push(MapContact {
                     contact: *contact,
                     identified: seen.is_some(),
@@ -611,11 +810,24 @@ impl Sensors {
         }
         // Selection survives only while the radar or infrared scope still
         // holds the contact; seeing it no longer keeps it (John, 2026-09-23).
-        let kept =
-            |id: u32| self.keep_selection && targets.iter().any(|t| t.id == id && t.airborne);
+        let kept = |id: u32| {
+            self.keep_selection
+                && targets
+                    .iter()
+                    .map(|t| t.borrow())
+                    .any(|t| t.id == id && t.airborne)
+        };
+        // The ground rules (the page list, the sight's track, a ground object
+        // in view) keep a ground selection; `step_ground` decides them.
+        let ground_kept = |id: u32| {
+            self.held == Some(id)
+                || self.ground_retained == Some(id)
+                || self.ground_contact(id).is_some()
+        };
         if let Some(id) = self.selected
             && self.contact(id).is_none()
             && !kept(id)
+            && !ground_kept(id)
         {
             self.selected = None;
             self.acquisition = 0;
@@ -629,7 +841,7 @@ impl Sensors {
                 && self.contact(id).is_some_and(|c| c.track_eligible)
         });
         if eligible {
-            self.acquisition = self.acquisition.saturating_add(1);
+            self.acquisition = self.acquisition.saturating_add(elapsed);
             if self.acquisition >= ACQUISITION_STEPS && self.acquired != self.selected {
                 self.acquired = self.selected;
                 events.push(Event::TrackAcquired(self.selected.expect("selected")));
@@ -646,6 +858,9 @@ impl Sensors {
         {
             events.push(Event::ContactLost(lost.id));
             self.plots.retain(|p| p.id != lost.id);
+            if !air_picture {
+                continue;
+            }
             self.plots.push(Plot {
                 id: lost.id,
                 channel: lost.channel,
@@ -657,21 +872,23 @@ impl Sensors {
             });
         }
         for plot in &mut self.plots {
-            plot.age += 1;
+            plot.age += elapsed;
         }
         self.plots
             .retain(|p| p.age <= STALE_STEPS && !self.contacts.iter().any(|c| c.id == p.id));
-        self.record_history(channel);
-        self.tick += 1;
+        self.record_history(channel, elapsed);
+        self.tick += u64::from(elapsed);
         events
     }
-    fn record_history(&mut self, channel: Option<Channel>) {
+    fn record_history(&mut self, channel: Option<Channel>, elapsed: u32) {
         // History is collected whether or not it is displayed, so enabling it
-        // shows the recent observations immediately.
+        // shows the recent observations immediately. A step standing for
+        // several ticks takes the sample of the interval mark it passed.
+        let mark = (self.tick..self.tick + u64::from(elapsed))
+            .find(|tick| tick.is_multiple_of(HISTORY_INTERVAL_STEPS));
         if let Some(channel) = channel
-            && self.tick.is_multiple_of(HISTORY_INTERVAL_STEPS)
+            && let Some(tick) = mark
         {
-            let tick = self.tick;
             for contact in &self.contacts {
                 let trail = match self
                     .history
@@ -710,17 +927,27 @@ impl Sensors {
         observer: &Observer,
         target: &Observable,
         channel: Channel,
+        sighting: &LazySighting<'_>,
         environment: &Environment<'_>,
     ) -> Option<Contact> {
-        let sighting = Sighting::new(observer.position, &observer.basis, target.position);
-        if !sighting.distance_ft.is_finite()
-            || (environment.obscured)(observer.position, target.position)
-        {
+        let distance_ft = sighting.distance_ft;
+        if !distance_ft.is_finite() {
             return None;
         }
+        // Every effective range is at most its volume's nominal maximum (or
+        // zero), and a contact needs the distance within the search or the
+        // track range: a target beyond both maxima is never a contact, and
+        // nothing below would change that, so the angles are not worked out.
+        let beyond = |search: &super::profile::Volume, track: &super::profile::Volume| {
+            distance_ft > search.maximum_ft.max(0.) && distance_ft > track.maximum_ft.max(0.)
+        };
         let (search, track) = match channel {
             Channel::Radar => {
                 let radar = self.profiles.radar.as_ref()?;
+                if beyond(&radar.search, &radar.track) {
+                    return None;
+                }
+                let sighting = sighting.get();
                 let to_observer: Vector =
                     std::array::from_fn(|i| observer.position[i] - target.position[i]);
                 let effective = target.signature.effective_radar(
@@ -734,12 +961,12 @@ impl Sensors {
                 let relative = effective / 100.;
                 let height = target.position[1]
                     - (environment.ground)(target.position[0], target.position[2]);
-                let clutter = clutter_exposure(&sighting, height);
+                let clutter = clutter_exposure(sighting, height);
                 let look_down = look_down_factor(radar.look_down, clutter);
                 let notch = notch_factor(
                     &radar.notch,
                     clutter,
-                    notch_speed_fps(&sighting, target.velocity),
+                    notch_speed_fps(sighting, target.velocity),
                 );
                 let coupled: f64 = self
                     .strobes
@@ -785,6 +1012,9 @@ impl Sensors {
             }
             Channel::Infrared => {
                 let infrared = self.profiles.infrared.as_ref()?;
+                if beyond(&infrared.search, &infrared.track) {
+                    return None;
+                }
                 let signature = target.signature.infrared;
                 (
                     (
@@ -801,12 +1031,18 @@ impl Sensors {
             // signature scaling, no interference and no weapon support.
             Channel::Visual => {
                 let visual = self.profiles.visual.as_ref()?;
+                if beyond(&visual.search, &visual.track) {
+                    return None;
+                }
                 (
                     (&visual.search, visual.search.maximum_ft),
                     (&visual.track, visual.track.maximum_ft),
                 )
             }
+            // The HARM page lists its emitters in the ground list.
+            Channel::Harm => return None,
         };
+        let sighting = sighting.get();
         let admits = |(volume, effective): (&super::profile::Volume, f64)| {
             volume.admits_geometry(
                 sighting.azimuth_rad,
@@ -821,6 +1057,11 @@ impl Sensors {
         // never acquire an unseen target there.
         let retained = self.selected == Some(target.id) && self.acquired == Some(target.id);
         if !(admits(search) || (retained && in_track)) {
+            return None;
+        }
+        // Terrain is a pure query. Reject targets outside both sensor envelopes
+        // before sampling the line of sight, without changing any contact.
+        if (environment.obscured)(observer.position, target.position) {
             return None;
         }
         Some(Contact {
@@ -841,11 +1082,11 @@ impl Sensors {
 /// still interferes; nothing here requires the emitter to be a known target.
 fn strobes(
     observer: &Observer,
-    targets: &[Observable],
+    targets: &[impl std::borrow::Borrow<Observable>],
     radar: &RadarProfile,
     environment: &Environment<'_>,
 ) -> Vec<Strobe> {
-    let mut sorted: Vec<&Observable> = targets.iter().collect();
+    let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
     sorted.sort_by_key(|t| t.id);
     let mut strobes = Vec::new();
     for target in sorted {
@@ -879,3 +1120,12 @@ fn strobes(
     }
     strobes
 }
+
+#[cfg(test)]
+mod ground_tests;
+#[cfg(test)]
+mod performance_tests;
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "track_checkpoint.rs"]
+mod checkpoint;

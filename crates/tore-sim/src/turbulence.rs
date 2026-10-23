@@ -249,6 +249,16 @@ impl Turbulence {
     }
 }
 
+crate::flight::exact::exact_struct!(Turbulence {
+    next_update,
+    start,
+    end,
+    cycle,
+    vertical,
+    amplitudes,
+    shake,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

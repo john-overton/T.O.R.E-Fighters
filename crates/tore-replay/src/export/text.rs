@@ -100,6 +100,17 @@ impl<'a> Names<'a> {
         match self.recording.aircraft_info(id) {
             Some(info) if !info.label.is_empty() => info.label.clone(),
             Some(info) if !info.name.is_empty() => format!("{} {id}", info.name),
+            // A surface unit the recording (format 3) names.
+            _ if self
+                .recording
+                .surface_info(id)
+                .is_some_and(|u| !u.label.is_empty()) =>
+            {
+                self.recording
+                    .surface_info(id)
+                    .map(|u| u.label.clone())
+                    .unwrap_or_default()
+            }
             _ if id >= SURFACE_IDS => format!("surface object {id:#x}"),
             _ => format!("aircraft {id}"),
         }
@@ -141,6 +152,15 @@ pub(crate) fn fields_text(event: &Event) -> String {
         .map(|(name, value)| format!("{name}={}", value_text(value)))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// "Enemy 1-2's", and "your" for the player's `You`.
+fn possessive(name: &str) -> String {
+    if name == "You" {
+        "your".to_owned()
+    } else {
+        format!("{name}'s")
+    }
 }
 
 fn opt(event: &Event, name: &str) -> Option<String> {
@@ -259,6 +279,18 @@ pub(crate) fn comms_text(event: &Event, names: &Names) -> String {
     comms(event, names, false)
 }
 
+/// The chaff or flare a missile followed. The release's number, when the
+/// recording has it, says which one: `chaff #7`. Older recordings carry no
+/// number and say `chaff` or `a flare`.
+fn decoy_text(kind: Option<String>, number: Option<f64>) -> String {
+    match (kind, number) {
+        (Some(d), Some(n)) => format!("{d} #{}", num(n, 0)),
+        (Some(d), None) if d == "chaff" => d,
+        (Some(d), None) => format!("a {d}"),
+        (None, _) => "a decoy".into(),
+    }
+}
+
 /// A one-line plain-English description of any event.
 pub(crate) fn describe(event: &Event, names: &Names) -> String {
     let s = event
@@ -271,6 +303,12 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             .object
             .map(|id| format!(" {word} {}", names.who(id)))
             .unwrap_or_default()
+    };
+    // The other party, for the data link's lines.
+    let object = || {
+        event
+            .object
+            .map_or_else(|| "an aircraft".into(), |id| names.who(id))
     };
     let weapon = event.id(field::WEAPON).map(|id| names.weapon(id));
     let shot = event
@@ -305,11 +343,7 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             format!("{shot} from {s} lost track{}{}", to("of"), because(event))
         }
         kind::WEAPON_DECOYED => {
-            let decoy = match opt(event, field::DECOY) {
-                Some(d) if d == "chaff" => d,
-                Some(d) => format!("a {d}"),
-                None => "a decoy".into(),
-            };
+            let decoy = decoy_text(opt(event, field::DECOY), event.num(field::NUMBER));
             let roll = match (event.num(field::ROLL), event.num(field::THRESHOLD)) {
                 (Some(r), Some(t)) => format!(" (roll {} < {})", num(r, 0), num(t, 0)),
                 _ => String::new(),
@@ -352,7 +386,109 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             if let Some(weapon) = weapon {
                 line.push_str(&format!(" ({weapon})"));
             }
-            line + &because(event)
+            // "it was shot down by an SA-6" repeats a killer the line names;
+            // it is kept when the line could only say "surface object 0x...".
+            let named = event
+                .object
+                .is_some_and(|id| !names.who(id).starts_with("surface object"));
+            match event.string(field::REASON) {
+                Some(reason) if named && reason.starts_with("it was shot down by ") => line,
+                _ => line + &because(event),
+            }
+        }
+        kind::WEAPON_RELEASE => {
+            let count = event.num(field::COUNT).unwrap_or(1.);
+            let rounds = if count > 1. {
+                format!("{} x ", num(count, 0))
+            } else {
+                String::new()
+            };
+            let mut line = format!(
+                "{s} released {rounds}{}",
+                weapon.unwrap_or_else(|| "a weapon".into())
+            );
+            if let Some(station) = opt(event, field::STATION) {
+                line.push_str(&format!(" from station {station}"));
+            }
+            line.push_str(&to("at"));
+            if let Some(range) = event.num(field::RANGE_FT) {
+                line.push_str(&format!(" at {} nm", nm(range)));
+            }
+            if let Some(how) = opt(event, field::DELIVERY) {
+                line.push_str(&format!(" ({how}"));
+                if let Some(salvo) = event.num(field::SALVO) {
+                    line.push_str(&format!(", rocket {} of the salvo", num(salvo, 0)));
+                }
+                line.push(')');
+            }
+            if let Some(left) = opt(event, field::LEFT) {
+                line.push_str(&format!(", {left} left"));
+            }
+            line
+        }
+        kind::WEAPON_DUD => format!("{shot} from {s} was a dud{}", because(event)),
+        kind::WEAPON_CLUSTER => format!("{shot} from {s} burst and scattered its submunitions"),
+        kind::WEAPON_IMPACT => format!(
+            "{shot} from {s} landed{}",
+            opt(event, field::REASON)
+                .map(|r| format!(": {r}"))
+                .unwrap_or_default()
+        ),
+        kind::WEAPON_AIM => format!("{shot} from {s} steering point moved"),
+        kind::PLAYER_LASER_SPOT => format!("{s} laser spot moved"),
+        kind::PLAYER_ORBIT => {
+            if event.flag(field::ON) == Some(true) {
+                format!("{s} sensor console: orbit hold circling its point")
+            } else {
+                format!("{s} sensor console closed")
+            }
+        }
+        kind::WEAPON_GUIDED => {
+            let mode = opt(event, field::MODE).unwrap_or_else(|| "?".into());
+            let follows = event
+                .id(field::SPOT_OWNER)
+                .map(|id| {
+                    if event.flag(field::OWN) == Some(true) {
+                        " on the shooter's own laser".to_owned()
+                    } else {
+                        format!(" on {} laser", possessive(&names.who(id)))
+                    }
+                })
+                .unwrap_or_default();
+            if event.flag(field::RELEASED) == Some(true) {
+                format!("{shot} from {s} left {mode}{follows}{}", because(event))
+            } else {
+                format!(
+                    "{shot} from {s} guidance {} -> {mode}{because}",
+                    opt(event, field::FROM).unwrap_or_else(|| "?".into()),
+                    because = because(event)
+                )
+            }
+        }
+        kind::PLAYER_LASER => {
+            let state = opt(event, field::STATE).unwrap_or_else(|| "?".into());
+            let mask = opt(event, field::MASK)
+                .map(|m| format!(" ({m})"))
+                .unwrap_or_default();
+            let on = event
+                .object
+                .map(|id| format!(" on {}", names.who(id)))
+                .unwrap_or_default();
+            format!("{s} laser {state}{mask}{on}")
+        }
+        kind::PLAYER_DESIGNATE => {
+            let channel = opt(event, field::CHANNEL).unwrap_or_else(|| "?".into());
+            match (event.object, channel.as_str()) {
+                (_, "cleared") => format!(
+                    "{s} gave up its ground designation{}",
+                    event
+                        .id(field::FROM)
+                        .map(|id| format!(" of {}", names.who(id)))
+                        .unwrap_or_default()
+                ),
+                (Some(id), _) => format!("{s} designated {} ({channel})", names.who(id)),
+                (None, _) => format!("{s} pinned a ground point"),
+            }
         }
         kind::COMBAT_AIRBURST => format!("{shot} from {s} burst{}", to("near")),
         kind::COMBAT_GROUND_IMPACT => format!("{shot} from {s} hit the ground"),
@@ -444,6 +580,17 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             because(event)
         ),
         kind::AI_FALLBACK => format!("{s} fell back {}{}", from_to(), because(event)),
+        kind::AI_STRIKE => format!(
+            "{s} strike decision: {}{}{}{}",
+            opt(event, field::DECISION).unwrap_or_else(|| "?".into()),
+            opt(event, field::WEAPON)
+                .map(|w| format!(" with {w}"))
+                .unwrap_or_default(),
+            to("on"),
+            opt(event, field::REASON)
+                .map(|r| format!(" [{r}]"))
+                .unwrap_or_default()
+        ),
         kind::AI_AIRFIELD_PHASE => format!("{s} airfield phase {}{}", from_to(), because(event)),
         kind::AI_EJECTION => format!(
             "{s} ejection check: {}{}",
@@ -451,6 +598,91 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             because(event)
         ),
         k if k.starts_with("comms.") || k == kind::AUDIO_MUSIC => comms_text(event, names),
+        kind::DATALINK_MEMBER => format!(
+            "{s} joined the data link, {}",
+            if event.flag(field::RADAR) == Some(false) {
+                "with no radar"
+            } else {
+                "with a radar"
+            }
+        ),
+        kind::DATALINK_LOCK => format!("{s} locked {}", object()),
+        kind::DATALINK_UNLOCK => format!("{s} let go of its lock on {}", object()),
+        kind::DATALINK_ASSIGN => format!(
+            "{s} assigned {} to attack {}{}",
+            object(),
+            event
+                .id(field::TARGET)
+                .map_or_else(|| "a target".into(), |id| names.who(id)),
+            opt(event, field::ORDER)
+                .map(|order| format!(" ({order})"))
+                .unwrap_or_default()
+        ),
+        kind::DATALINK_CLEAR => format!("{s}'s assignment on {} ended{}", object(), because(event)),
+        kind::DATALINK_ACKNOWLEDGE => {
+            format!("{s} locked its assigned target {}", object())
+        }
+        kind::DATALINK_SORT_WARNING => format!(
+            "Sort warning to {s}: {} holds the same lock on {}",
+            event
+                .id(field::OTHER)
+                .map_or_else(|| "a flightmate".into(), |id| names.who(id)),
+            object()
+        ),
+        kind::SURFACE_BURST => {
+            let rounds = opt(event, field::ROUNDS).unwrap_or_else(|| "?".into());
+            let flak = if event.flag(field::FLAK) == Some(true) {
+                " of flak"
+            } else {
+                ""
+            };
+            let opening = if event.flag(field::OPENING) == Some(true) {
+                " (opening barrage)"
+            } else {
+                ""
+            };
+            let record = opt(event, field::WEAPON)
+                .map(|w| format!(" from {w}"))
+                .unwrap_or_default();
+            format!(
+                "{s} fired {rounds} rounds{flak}{record}{}{opening}",
+                to("at")
+            )
+        }
+        kind::SURFACE_PHASE => format!(
+            "{s} engagement {}{}",
+            opt(event, field::TO).unwrap_or_else(|| "changed".into()),
+            to("on")
+        ),
+        kind::SURFACE_REARM => {
+            let loaded = opt(event, field::LOADED)
+                .map(|n| format!(", {n} on the rails"))
+                .unwrap_or_default();
+            format!("{s} was rearmed by a supply truck{loaded}")
+        }
+        kind::SURFACE_REFILL => {
+            let reserve = opt(event, field::RESERVE)
+                .map(|n| format!(", {n} spare magazines"))
+                .unwrap_or_default();
+            format!("{s} was given a magazine by a supply truck{reserve}")
+        }
+        kind::SURFACE_RADAR => format!(
+            "{s} radar {}{}",
+            if event.flag(field::ON) == Some(false) {
+                "off"
+            } else {
+                "on"
+            },
+            because(event)
+        ),
+        kind::SURFACE_WRECK => {
+            let fire = match (event.flag(field::BURNING), event.num(field::FIRE_FT)) {
+                (Some(true), Some(width)) => format!(", burning with a {} ft fire", num(width, 0)),
+                (Some(true), None) => ", burning".into(),
+                _ => String::new(),
+            };
+            format!("{s} was destroyed{}{fire}{}", to("by"), because(event))
+        }
         kind::PLAYER_COMMAND => format!(
             "{s} command {}{}",
             opt(event, field::COMMAND).unwrap_or_default(),
@@ -515,6 +747,17 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_followed_decoy_names_its_number_when_the_recording_has_one() {
+        let kind = |k: &str| Some(k.to_owned());
+        assert_eq!(decoy_text(kind("chaff"), Some(7.)), "chaff #7");
+        assert_eq!(decoy_text(kind("flare"), Some(12.)), "flare #12");
+        // Recordings made before the number was kept read as they did.
+        assert_eq!(decoy_text(kind("chaff"), None), "chaff");
+        assert_eq!(decoy_text(kind("flare"), None), "a flare");
+        assert_eq!(decoy_text(None, None), "a decoy");
+    }
 
     #[test]
     fn clocks_and_numbers_read_naturally() {

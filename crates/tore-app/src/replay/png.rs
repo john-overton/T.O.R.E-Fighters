@@ -75,6 +75,16 @@ pub fn zlib_stored(data: &[u8]) -> Vec<u8> {
 /// A PNG file for an 8-bit RGBA picture, `width` by `height`, rows top
 /// first. The alpha channel is dropped: screenshots are opaque.
 pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    encode(width, height, rgba, false)
+}
+
+/// Local sprite exports preserve alpha, unlike opaque replay screenshots.
+pub(crate) fn encode_cutout_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    encode(width, height, rgba, true)
+}
+
+fn encode(width: u32, height: u32, rgba: &[u8], alpha: bool) -> Result<Vec<u8>, String> {
+    let channels = if alpha { 4 } else { 3 };
     let (w, h) = (width as usize, height as usize);
     if width == 0 || height == 0 || rgba.len() != w * h * 4 {
         return Err(format!(
@@ -84,19 +94,18 @@ pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Stri
         ));
     }
     // Every row starts with filter type 0: the bytes as they are.
-    let mut raw = Vec::with_capacity(h * (w * 3 + 1));
+    let mut raw = Vec::with_capacity(h * (w * channels + 1));
     for row in rgba.chunks_exact(w * 4) {
         raw.push(0);
         for pixel in row.chunks_exact(4) {
-            raw.extend_from_slice(&pixel[..3]);
+            raw.extend_from_slice(&pixel[..channels]);
         }
     }
     let mut header = Vec::with_capacity(13);
     header.extend_from_slice(&width.to_be_bytes());
     header.extend_from_slice(&height.to_be_bytes());
-    // Bit depth 8, colour type 2 (RGB), deflate, adaptive filtering, no
-    // interlace.
-    header.extend_from_slice(&[8, 2, 0, 0, 0]);
+    // Bit depth 8, RGB or RGBA, deflate, adaptive filtering, no interlace.
+    header.extend_from_slice(&[8, if alpha { 6 } else { 2 }, 0, 0, 0]);
     let mut out = Vec::with_capacity(raw.len() + raw.len() / STORED_BLOCK * 5 + 64);
     out.extend_from_slice(&SIGNATURE);
     chunk(&mut out, b"IHDR", &header);

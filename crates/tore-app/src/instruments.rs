@@ -1,7 +1,12 @@
 //! Small independent raster instruments. Layout fitted to supplied retail captures;
 //! data is live, unsupported native sensors/camera modes are explicit.
+mod aim_marks;
 mod envelope;
 pub mod front_view;
+mod page_key;
+pub use page_key::PageKey;
+pub mod gunsight;
+pub mod targeting;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
 use tore_formats::text::GlyphCodes;
 use tore_formats::{Pic, font::Font};
@@ -12,6 +17,8 @@ pub const HEIGHT: usize = 160;
 /// The page screen inside the window: x, y, width, height. Page content is
 /// drawn in screen coordinates, with (0, 0) at this rectangle's top-left.
 pub const SCREEN: (i32, i32, i32, i32) = (12, 20, 138, 114);
+/// Scope channels the M key cycles: radar, infrared and the HARM page.
+pub const CHANNELS: usize = 3;
 /// Left edges of the four button click areas, which share one top edge and size.
 const BUTTON_X: [i32; 4] = [18, 48, 78, 108];
 const BUTTON_Y: i32 = 134;
@@ -25,6 +32,9 @@ const GREEN: [u8; 4] = [132, 193, 126, 255];
 const CRT_SCREEN: [u8; 4] = [4, 18, 6, 255];
 const DIM: [u8; 4] = [48, 83, 44, 255];
 const BRIGHT: [u8; 4] = [206, 240, 200, 255];
+/// Remote link tracks: a peach, as retail drew contacts a sentry aircraft
+/// gave the player. Fitted; no retail value is recorded.
+const PEACH: [u8; 4] = [236, 172, 132, 255];
 pub struct Raster {
     pub pixels: Vec<u8>,
     /// Window position of drawing coordinate (0, 0).
@@ -311,6 +321,56 @@ pub fn project(bearing_rad: f64, distance_ft: f64, range_nmi: f64) -> Option<(f6
     ))
 }
 
+/// The pixel width of `text` in `font`.
+fn text_width(font: &Font, text: &str) -> i32 {
+    text.glyph_codes()
+        .map(|ch| font.glyphs[ch as usize].advance as i32)
+        .sum()
+}
+
+/// The link's numbers for a contact: up to two, then a plus.
+fn link_numbers(numbers: &[u8]) -> String {
+    let mut text: String = numbers.iter().take(2).map(u8::to_string).collect();
+    if numbers.len() > 2 {
+        text.push('+');
+    }
+    text
+}
+
+/// Draws the flight data link's marks around the contact square at `(x, y)`:
+/// the numbers of the flightmates that locked it to its right, of the ones it
+/// was assigned to to its left, and a diamond when the lead assigned it to the
+/// player, blinking until the player has locked it.
+fn draw_link_marks(
+    r: &mut Raster,
+    font: &Font,
+    (x, y): (i32, i32),
+    marks: &scope::LinkMarks,
+    tick: u64,
+    colour: [u8; 4],
+) {
+    let top = y - font.height as i32 / 2;
+    if !marks.locked_by.is_empty() {
+        r.text(font, &link_numbers(&marks.locked_by), x + 9, top, colour);
+    }
+    if !marks.assigned_to.is_empty() {
+        let text = link_numbers(&marks.assigned_to);
+        r.text(font, &text, x - 8 - text_width(font, &text), top, colour);
+    }
+    if let Some(acknowledged) = marks.assigned
+        && (acknowledged || scope::link_blink_on(tick))
+    {
+        for (a, b) in [
+            ((0, -5), (5, 0)),
+            ((5, 0), (0, 5)),
+            ((0, 5), (-5, 0)),
+            ((-5, 0), (0, -5)),
+        ] {
+            r.line((x + a.0, y + a.1), (x + b.0, y + b.1), colour);
+        }
+    }
+}
+
 /// Deterministic display texture. It uses the simulation tick and an
 /// independent display seed, never the combat RNG, so noise cannot change
 /// detection or replay.
@@ -335,14 +395,18 @@ impl Layout {
     pub fn capacity(self) -> usize {
         if self == Self::Large { 4 } else { 6 }
     }
+    /// A window's rectangle on a `size` canvas. Slot [`capacity`](Self::capacity)
+    /// is the pop-up window ([`Self::rect`]).
     pub fn rect_on(self, slot: usize, size: [f64; 2]) -> (f64, f64, f64, f64) {
         let scale = (size[0] / 640.).min(size[1] / 480.);
         let (x, y, w, h) = self.rect(slot);
-        let right = match self {
-            Self::Large => slot >= 2,
-            Self::Small => slot >= 3,
-        };
-        let bottom = self == Self::Small || matches!(slot, 1 | 2);
+        let popup = slot == self.capacity();
+        let right = popup
+            || match self {
+                Self::Large => slot >= 2,
+                Self::Small => slot >= 3,
+            };
+        let bottom = !popup && (self == Self::Small || matches!(slot, 1 | 2));
         (
             if right {
                 size[0] - (640 - x) as f64 * scale
@@ -358,14 +422,32 @@ impl Layout {
             h as f64 * scale,
         )
     }
+    /// A window's rectangle in the 640x480 reference canvas. The slots are
+    /// the layout's windows in order; slot `capacity` is the pop-up that the
+    /// seeker view opens when every window is taken
+    /// (docs/spec/target-window.md, "Seeker window"):
+    ///
+    /// - small windows: the top right corner, eight pixels in from the
+    ///   edges (the row of six sits along the bottom);
+    /// - large windows: at the top, one window width and an eight pixel gap
+    ///   to the left of the top-right window.
+    ///
+    /// Opinionated, John 2026-10-12.
     pub fn rect(self, slot: usize) -> (i32, i32, i32, i32) {
-        assert!(slot < self.capacity());
+        assert!(slot <= self.capacity());
         match self {
             Self::Large => {
-                let (x, y) = [(8, 8), (8, 312), (470, 312), (470, 8)][slot];
+                let (x, y) = if slot == self.capacity() {
+                    (470 - 8 - WIDTH as i32, 8)
+                } else {
+                    [(8, 8), (8, 312), (470, 312), (470, 8)][slot]
+                };
                 (x, y, WIDTH as i32, HEIGHT as i32)
             }
             Self::Small => {
+                if slot == self.capacity() {
+                    return (640 - 8 - 96, 8, 96, 95);
+                }
                 let x = [8, 110, 212, 332, 434, 536][slot];
                 (x, 377, 96, 95)
             }
@@ -375,14 +457,30 @@ impl Layout {
 #[derive(Default)]
 pub struct CombatReadout {
     pub weapons: Vec<(String, u32, bool)>,
+    pub gun_group: Option<String>,
     pub chaff: u8,
     pub flares: u8,
     pub target: Option<crate::target_window::Readout>,
+    /// The AC-130's gunsight page; `None` on every other aircraft.
+    pub gunsight: Option<gunsight::Page>,
+    /// The targeting page of an aircraft with a laser or FLIR sight, or the
+    /// buddy form of it; `None` when the display is the plain target window.
+    pub targeting: Option<targeting::Page>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
     pub rwr: scope::Rwr,
     pub rwr_failed: bool,
     pub envelope_target: Option<Vec<tore_formats::aircraft::Envelope>>,
+    /// What the flight data link says under the target window's activity line.
+    pub target_link: TargetLink,
+}
+
+/// The target window's link lines: a tag about the displayed target, and the
+/// state of the displayed target when it is a flightmate.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TargetLink {
+    pub tag: Option<String>,
+    pub state: Vec<String>,
 }
 pub struct Instruments {
     pub navigation: crate::navigation::Navigation,
@@ -400,8 +498,15 @@ pub struct Instruments {
     /// Flight data sampled with the requested and the shown forward-view frames.
     pub front_pending: Option<front_view::Symbology>,
     pub front_shown: Option<front_view::Symbology>,
+    /// The AC-130's aim-point marks for the Front View and Other View pages,
+    /// projected with the requested and the shown picture's camera.
+    pub aim_pending: std::collections::BTreeMap<u8, crate::aim_box::Layout>,
+    pub aim_shown: std::collections::BTreeMap<u8, crate::aim_box::Layout>,
     /// The HUD's primary color, shared by the forward-view symbology.
     pub hud_color: [u8; 3],
+    pub light_gain: f32,
+    pub flood: f32,
+    pub ambient: f32,
     /// The live cockpit palette, set by the host each frame. It colours the
     /// window frame and its labels, as it colours the cockpit art.
     pub palette: [[u8; 3]; 256],
@@ -409,7 +514,7 @@ pub struct Instruments {
     /// used by the radar scope and, capped at 50 miles, by the RWR.
     pub radar_range: usize,
     pub rcs_range: usize,
-    /// Requested scope channel: 0 radar, 1 infrared.
+    /// Requested scope channel: 0 radar, 1 infrared, 2 the HARM page.
     pub channel: usize,
     pub history: bool,
     pub pressed: Option<(usize, usize)>,
@@ -420,7 +525,17 @@ pub struct Instruments {
     pub weapon_debug: bool,
     /// One pending designation request, drained by the host each frame.
     pub designation: Option<u32>,
+    /// The AC-130 target camera's bloom from a 105 mm shot, 0 to 1
+    /// ([`crate::gun_flash::BLOOM`]); the host sets it each frame.
+    pub sight_bloom: f64,
+    /// The target camera window (page [`TARGET_PAGE`]) is open because a
+    /// seeker weapon launched, and closes when its view ends
+    /// (docs/spec/target-window.md, "Seeker window"). Cleared when the
+    /// player closes the window or clears the designation.
+    pub seeker_opened: bool,
 }
+/// The target camera's page, Shift+4 (docs/FLIGHT-CONTROLS.md).
+pub const TARGET_PAGE: u8 = 4;
 impl Default for Instruments {
     fn default() -> Self {
         Self {
@@ -436,7 +551,12 @@ impl Default for Instruments {
             cameras: Default::default(),
             front_pending: None,
             front_shown: None,
+            aim_pending: Default::default(),
+            aim_shown: Default::default(),
             hud_color: [GREEN[0], GREEN[1], GREEN[2]],
+            light_gain: 1.,
+            flood: 0.,
+            ambient: 1.,
             palette: [[0; 3]; 256],
             target_preview: None,
             camera_target: None,
@@ -450,6 +570,8 @@ impl Default for Instruments {
             crosshair: None,
             weapon_debug: false,
             designation: None,
+            sight_bloom: 0.,
+            seeker_opened: false,
         }
     }
 }
@@ -472,7 +594,13 @@ impl Instruments {
         self.crosshair = None;
         self.designation = None;
     }
+    /// Switch between the large and the small windows. A pop-up window does
+    /// not carry over (it has no place in the other layout), except that a
+    /// seeker view still running opens its window again in the new layout.
     pub fn toggle_layout(&mut self) {
+        let seeker = self.seeker_opened;
+        self.close_for_seeker();
+        self.close_popup();
         self.selected = 0;
         self.pressed = None;
         self.pressed_contact = None;
@@ -482,6 +610,9 @@ impl Instruments {
         } else {
             Layout::Large
         };
+        if seeker {
+            self.open_for_seeker();
+        }
     }
 
     pub fn toggle(&mut self, page: u8) {
@@ -490,21 +621,113 @@ impl Instruments {
         self.pressed_contact = None;
         if let Some(i) = self.pages.iter().position(|p| *p == page) {
             self.pages.remove(i);
-        } else {
-            if self.pages.len() == self.layout.capacity() {
-                self.pages.remove(0);
+            if page == TARGET_PAGE {
+                self.seeker_opened = false;
             }
-            self.pages.push(page);
+        } else {
+            let capacity = self.layout.capacity();
+            if self.pages.len() >= capacity {
+                // The oldest regular window goes. A pop-up stays last, so the
+                // new window goes in before it.
+                let popup = self.pages.len() > capacity;
+                self.pages.remove(0);
+                if popup {
+                    self.pages.insert(capacity - 1, page);
+                } else {
+                    self.pages.push(page);
+                }
+            } else {
+                self.pages.push(page);
+            }
         }
+    }
+    /// Whether a window sits in the pop-up place: every regular slot is
+    /// taken and one more window is shown.
+    pub fn popup_shown(&self) -> bool {
+        self.pages.len() > self.layout.capacity()
+    }
+    fn close_popup(&mut self) {
+        if self.popup_shown() {
+            self.pages.pop();
+        }
+    }
+    /// A seeker weapon launched: open the target camera window if it is not
+    /// open (docs/spec/target-window.md, "Seeker window"). It takes the next
+    /// free slot; with every slot taken it pops up beside them
+    /// ([`Layout::rect`]) and no other window is closed. The window closes
+    /// again with [`Self::close_for_seeker`]. Returns whether it opened.
+    pub fn open_for_seeker(&mut self) -> bool {
+        if self.pages.contains(&TARGET_PAGE) {
+            return false;
+        }
+        self.pages.push(TARGET_PAGE);
+        self.seeker_opened = true;
+        true
+    }
+    /// The seeker view ended (the weapon landed): close the window a launch
+    /// opened, leaving every other window as it was. A window the player
+    /// opened, or kept, stays.
+    pub fn close_for_seeker(&mut self) {
+        if !std::mem::take(&mut self.seeker_opened) {
+            return;
+        }
+        if let Some(i) = self.pages.iter().position(|p| *p == TARGET_PAGE) {
+            self.pages.remove(i);
+            self.selected = self.selected.min(self.pages.len().saturating_sub(1));
+        }
+    }
+    /// The player sent the page back to the targeting pod (Clear
+    /// designation): the window stays open, now the player's own.
+    pub fn keep_seeker_window(&mut self) {
+        self.seeker_opened = false;
+    }
+    /// `--window-layout-preview` (review captures): every slot of the layout
+    /// taken without the target camera, then as `mode` says: `before` as it
+    /// is, `launch` after a seeker launch opened the camera, `free` the same
+    /// with only two windows open, `landed` after the weapon landed.
+    pub fn preview_window_layout(&mut self, mode: &str) {
+        let filler = [7u8, 5, 9, 8, 1, 6];
+        self.pages = filler[..self.layout.capacity()].to_vec();
+        self.selected = 0;
+        match mode {
+            "launch" | "landed" => {
+                self.open_for_seeker();
+                if mode == "landed" {
+                    self.close_for_seeker();
+                }
+            }
+            "free" => {
+                self.pages.truncate(2);
+                self.open_for_seeker();
+            }
+            _ => {}
+        }
+    }
+    /// The windows the player chose, for the preferences file: the window a
+    /// launch opened and any pop-up are not part of the choice.
+    pub fn chosen_pages(&self) -> Vec<u8> {
+        let mut pages = self.pages.clone();
+        if self.seeker_opened {
+            pages.retain(|p| *p != TARGET_PAGE);
+        }
+        pages.truncate(self.layout.capacity());
+        pages
     }
     /// Reserve the upper-right weapon diagnostic area, when that panel is
     /// shown, without changing pointer transforms.
     pub fn screen_rect(&self, slot: usize, size: [f64; 2]) -> (f64, f64, f64, f64) {
         let (x, mut y, w, h) = self.layout.rect_on(slot, size);
-        if self.weapon_debug && self.layout == Layout::Large && slot == 3 {
+        let popup = slot == self.layout.capacity();
+        if self.weapon_debug && (popup || self.layout == Layout::Large && slot == 3) {
             y += 104. * (size[0] / 640.).min(size[1] / 480.);
         }
         (x, y, w, h)
+    }
+    /// Where the shown windows sit on a `size` canvas: x, y, width, height.
+    pub fn window_rects(&self, size: [f64; 2]) -> Vec<(f64, f64, f64, f64)> {
+        (0..self.pages.len())
+            .map(|slot| self.screen_rect(slot, size))
+            .collect()
     }
     pub fn screen_pointer(
         &mut self,
@@ -669,18 +892,18 @@ impl Instruments {
             .min(tore_sim::sensors::RANGE_LADDER_NMI.len() - 1)]
         .min(RWR_MAX_SCALE_NMI)
     }
-    /// The on-screen M button cycles the available radar and infrared
-    /// channels. Availability is decided by the simulation, not here.
+    /// The on-screen M button cycles the radar, infrared and HARM channels.
+    /// Availability is decided by the simulation, not here.
     pub fn cycle_channel(&mut self) {
-        self.channel = (self.channel + 1) % 2;
+        self.channel = (self.channel + 1) % CHANNELS;
         self.pressed_contact = None;
     }
     pub fn controls(&self) -> tore_sim::sensors::Controls {
         tore_sim::sensors::Controls {
-            channel: if self.channel == 0 {
-                tore_sim::sensors::Channel::Radar
-            } else {
-                tore_sim::sensors::Channel::Infrared
+            channel: match self.channel {
+                0 => tore_sim::sensors::Channel::Radar,
+                1 => tore_sim::sensors::Channel::Infrared,
+                _ => tore_sim::sensors::Channel::Harm,
             },
             range_index: self
                 .radar_range
@@ -696,12 +919,42 @@ impl Instruments {
     /// The aircraft's frame with its title, number and button letters over
     /// a cleared screen, ready for page content in screen coordinates.
     fn window(&self, id: u8, panel: &Pic, f: &Font, hud: &tore_formats::hud::Hud) -> Raster {
-        let color = |index: u8| {
-            let [r, g, b] = self.palette[usize::from(index)];
-            [r, g, b, 255]
-        };
         let mut r = Raster::new();
         r.frame(panel, &self.palette);
+        self.bezel_labels(id, &mut r, f, hud, false);
+        // Pages clear their own screen, including over the F/A-18's green inset.
+        r.rect(
+            SCREEN.0,
+            SCREEN.1,
+            SCREEN.2,
+            SCREEN.3,
+            screen_background(id),
+        );
+        r.origin = (SCREEN.0, SCREEN.1);
+        r
+    }
+    /// The same generated text and pressed-button mark in either lighting pass.
+    fn bezel_labels(
+        &self,
+        id: u8,
+        r: &mut Raster,
+        f: &Font,
+        hud: &tore_formats::hud::Hud,
+        backlit: bool,
+    ) {
+        let color = |index: u8| {
+            let [r, g, b] = self.palette[usize::from(index)];
+            if backlit {
+                crate::cockpit_lighting::legend_ink(
+                    [r, g, b],
+                    self.ambient,
+                    self.flood * 0.65,
+                    self.light_gain,
+                )
+            } else {
+                [r, g, b, 255]
+            }
+        };
         let title = match id {
             0 => "RCS",
             1 => "ENVELOPE",
@@ -747,18 +1000,45 @@ impl Instruments {
                 r.rect(x + 10, BUTTON_Y + 6, 14, 14, color(hud.press_color));
             }
         }
-        // Pages clear their own screen, including over the F/A-18's green inset.
-        r.rect(
-            SCREEN.0,
-            SCREEN.1,
-            SCREEN.2,
-            SCREEN.3,
-            screen_background(id),
-        );
-        r.origin = (SCREEN.0, SCREEN.1);
-        r
     }
     pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
+        let mut r = self.unlit_page(id, h, s);
+        for (at, pixel) in r.pixels.chunks_exact_mut(4).enumerate() {
+            let (x, y) = ((at % WIDTH) as i32, (at / WIDTH) as i32);
+            let screen = x >= SCREEN.0
+                && x < SCREEN.0 + SCREEN.2
+                && y >= SCREEN.1
+                && y < SCREEN.1 + SCREEN.3;
+            if !screen && (self.flood > 0. || self.ambient != 1.) {
+                crate::cockpit_lighting::surface_pixel(pixel, self.ambient, self.flood * 0.65);
+            }
+            if self.light_gain != 1. {
+                for channel in &mut pixel[..3] {
+                    *channel = (f32::from(*channel) * self.light_gain).min(255.) as u8;
+                }
+            }
+        }
+        if self.ambient < 1. {
+            let origin = r.origin;
+            r.origin = (0, 0);
+            self.bezel_labels(id, &mut r, &h.font, &h.hud, true);
+            r.origin = origin;
+        }
+        if matches!(id, 2 | 3) && self.cameras.contains_key(&id) {
+            let f = &h.font;
+            if id == 2
+                && !s.systems.has(31)
+                && let Some(symbology) = &self.front_shown
+            {
+                front_view::draw(&mut r, f, symbology, self.hud_color);
+            }
+            if let Some(layout) = self.aim_shown.get(&id) {
+                aim_marks::draw(&mut r, layout, self.hud_color);
+            }
+        }
+        r
+    }
+    fn unlit_page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
         let f = &h.font;
         let mut r = self.window(id, &h.panel, f, &h.hud);
         let text = |r: &mut Raster, t: &str, x, y| r.text(f, t, x, y, GREEN);
@@ -1048,7 +1328,23 @@ impl Instruments {
                                 continue;
                             }
                             let colour = if contact.selected { BRIGHT } else { GREEN };
-                            r.rect(x - 2, y - 2, 5, 5, colour);
+                            match contact.symbol {
+                                tore_sim::sensors::GroundSymbol::Square => {
+                                    r.rect(x - 2, y - 2, 5, 5, colour)
+                                }
+                                tore_sim::sensors::GroundSymbol::Dot => {
+                                    r.rect(x - 1, y - 1, 2, 2, colour)
+                                }
+                                tore_sim::sensors::GroundSymbol::Cross => {
+                                    for d in -2..=2 {
+                                        r.rect(x + d, y + d, 1, 1, colour);
+                                        r.rect(x + d, y - d, 1, 1, colour);
+                                    }
+                                }
+                            }
+                            if let Some(marks) = scope.marks_on(contact.id) {
+                                draw_link_marks(&mut r, f, (x, y), marks, scope.tick, colour);
+                            }
                             if scope.mode == Some("TWS")
                                 && let Some(heading) = contact.heading_rad
                             {
@@ -1058,13 +1354,32 @@ impl Instruments {
                                 );
                                 r.line((x, y), tip, colour);
                             }
-                            if contact.selected {
+                            if contact.selected && contact.wide_bars {
                                 r.rect(x - 7, y - 3, 2, 7, colour);
                                 r.rect(x + 6, y - 3, 2, 7, colour);
+                            } else if contact.selected {
+                                // Bars 10 pixels apart around a ground dot.
+                                r.rect(x - 5, y - 3, 2, 7, colour);
+                                r.rect(x + 4, y - 3, 2, 7, colour);
                             } else if self.hovered == Some(contact.id) {
                                 for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
                                     r.rect(x + dx, y + dy, 1, 1, colour);
                                 }
+                            }
+                        }
+                        for track in &scope.remote {
+                            let Some((x, y)) = project(track.bearing_rad, track.distance_ft, range)
+                            else {
+                                continue;
+                            };
+                            let (x, y) = (x as i32, y as i32);
+                            // A hollow square: a track, not a return.
+                            r.rect(x - 2, y - 2, 5, 1, PEACH);
+                            r.rect(x - 2, y + 2, 5, 1, PEACH);
+                            r.rect(x - 2, y - 1, 1, 3, PEACH);
+                            r.rect(x + 2, y - 1, 1, 3, PEACH);
+                            if let Some(marks) = scope.marks_on(track.id) {
+                                draw_link_marks(&mut r, f, (x, y), marks, scope.tick, PEACH);
                             }
                         }
                         text(&mut r, scope.mode.unwrap_or(scope.channel), 6, 4);
@@ -1124,6 +1439,9 @@ impl Instruments {
                         r.text(f, &count, 48 - width as i32, y, colour);
                         let name = fit_width(f, name, 80);
                         r.text(f, &name, 54, y, colour);
+                    }
+                    if let Some(group) = &c.gun_group {
+                        text(&mut r, &fit_width(f, group, 130), 4, 88);
                     }
                     text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
                     let flare = format!("{} FLARE", c.flares);
@@ -1206,22 +1524,34 @@ impl Instruments {
                     text(&mut r, "ETA --:--", 41, 101);
                 }
             }
+            // The flight model's own polygons (fitted top speeds included),
+            // before weight scaling, so the window shows the limits the
+            // aircraft flies to.
             1 => envelope::draw(
                 &mut r,
                 f,
-                &h.profile.envelopes,
+                s.retail_envelopes(),
                 s,
                 self.envelope_mode,
                 self.combat.as_ref(),
             ),
             4 => {
-                if let Some(target) = self.combat.as_ref().and_then(|c| c.target.as_ref()) {
+                let gunsight = self.combat.as_ref().and_then(|c| c.gunsight.as_ref());
+                let targeting = self.combat.as_ref().and_then(|c| c.targeting.as_ref());
+                let shown = self
+                    .combat
+                    .as_ref()
+                    .and_then(|c| c.target.as_ref().map(|target| (target, &c.target_link)));
+                if shown.is_some() || gunsight.is_some() || targeting.is_some() {
                     r.rect(0, 0, SCREEN.2, SCREEN.3, [185, 185, 185, 255]);
-                    if self.camera_target == Some(target.id)
+                    if self.camera_target == shown.map(|(target, _)| target.id)
                         && let Some(pixels) = self.cameras.get(&4)
                     {
                         let mut gray = pixels.clone();
-                        crate::target_window::monochrome(&mut gray);
+                        crate::target_preview::monochrome(&mut gray);
+                        // A 105 mm shot whites the sensor out for a moment; the
+                        // overlay drawn after it stays readable.
+                        crate::gun_flash::BLOOM.lift(&mut gray, 138, 114, self.sight_bloom);
                         r.sprite(
                             &Sprite {
                                 width: 138,
@@ -1235,6 +1565,12 @@ impl Instruments {
                             SCREEN.3,
                         );
                     }
+                }
+                if let Some(page) = gunsight {
+                    gunsight::draw(&mut r, f, page, shown);
+                } else if let Some(page) = targeting {
+                    targeting::draw(&mut r, f, page, shown);
+                } else if let Some((target, link)) = shown {
                     let ink = [20, 20, 20, 255];
                     let fit = |value: &str, limit: usize| {
                         let mut width = 0;
@@ -1257,6 +1593,13 @@ impl Instruments {
                     r.text(f, &label, 1 + (119 - width(&label)) / 2, 3, ink);
                     let activity = fit(&target.activity, 119);
                     r.text(f, &activity, 1 + (119 - width(&activity)) / 2, 16, ink);
+                    // The flight data link's lines sit under the activity.
+                    let mut line = 28;
+                    for text in link.tag.iter().chain(&link.state) {
+                        let text = fit(text, 119);
+                        r.text(f, &text, 1 + (119 - width(&text)) / 2, line, ink);
+                        line += 11;
+                    }
                     r.text(f, target.goal, 124, 3, ink);
                     if target.player_goal {
                         r.rect(124, 13, 6, 1, ink);
@@ -1295,12 +1638,6 @@ impl Instruments {
                         SCREEN.2,
                         SCREEN.3,
                     );
-                    if id == 2
-                        && !s.systems.has(31)
-                        && let Some(symbology) = &self.front_shown
-                    {
-                        front_view::draw(&mut r, f, symbology, self.hud_color);
-                    }
                 } else {
                     text(&mut r, "CAMERA LOADING", 19, 52);
                 }
@@ -1550,6 +1887,195 @@ mod tests {
             assert!(i.pages.len() <= 6);
         }
     }
+
+    /// A full set of windows without the target camera, in `layout`.
+    fn full_without_target(layout: Layout) -> Instruments {
+        let mut i = Instruments::new(layout, None);
+        i.toggle(TARGET_PAGE);
+        i.toggle(1);
+        assert_eq!(i.pages.len(), layout.capacity());
+        assert!(!i.pages.contains(&TARGET_PAGE));
+        i
+    }
+
+    #[test]
+    fn the_popup_sits_where_john_asked_and_clear_of_every_window() {
+        // John 2026-10-12: small windows, all six active: top right; large
+        // windows: to the left of the right window.
+        assert_eq!(Layout::Small.rect(6), (536, 8, 96, 95));
+        let (x, y, w, _) = Layout::Large.rect(4);
+        let right = Layout::Large.rect(3);
+        assert_eq!((x + w + 8, y), (right.0, right.1));
+        for layout in [Layout::Large, Layout::Small] {
+            let capacity = layout.capacity();
+            let (x, y, w, h) = layout.rect(capacity);
+            assert!(x >= 8 && y >= 8 && x + w <= 632 && y + h <= 472);
+            for j in 0..capacity {
+                let (a, b, c, d) = layout.rect(j);
+                assert!(x >= a + c || a >= x + w || y >= b + d || b >= y + h);
+            }
+            // On any canvas it hugs the same edges the other windows do.
+            for size in
+                [[640., 480.], [1920., 1080.], [3440., 1440.], [1024., 768.]] as [[f64; 2]; 4]
+            {
+                let scale = (size[0] / 640.).min(size[1] / 480.);
+                let (px, py, pw, ph) = layout.rect_on(capacity, size);
+                assert!((py - 8. * scale).abs() < 1e-9 && (pw - w as f64 * scale).abs() < 1e-9);
+                assert!(px + pw <= size[0] && py + ph <= size[1]);
+                assert!((size[0] - (px + pw) - (640 - x - w) as f64 * scale).abs() < 1e-9);
+                for j in 0..capacity {
+                    let (a, b, c, d) = layout.rect_on(j, size);
+                    assert!(
+                        px >= a + c - 1e-9
+                            || a >= px + pw - 1e-9
+                            || py >= b + d - 1e-9
+                            || b >= py + ph - 1e-9,
+                        "{layout:?} {size:?} slot {j}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_seeker_launch_pops_the_target_camera_up_when_every_slot_is_taken() {
+        for layout in [Layout::Large, Layout::Small] {
+            let mut i = full_without_target(layout);
+            let before = i.pages.clone();
+            assert!(i.open_for_seeker());
+            // Nothing was closed to make room; the window is the last slot.
+            assert_eq!(i.pages.len(), layout.capacity() + 1);
+            assert_eq!(i.pages[..layout.capacity()], before[..]);
+            assert_eq!(i.pages.last(), Some(&TARGET_PAGE));
+            assert!(i.popup_shown() && i.seeker_opened);
+            assert_eq!(
+                i.screen_rect(layout.capacity(), [640., 480.]),
+                layout.rect_on(layout.capacity(), [640., 480.])
+            );
+            // The view ends: the windows are as they were.
+            i.close_for_seeker();
+            assert_eq!(i.pages, before);
+            assert!(!i.popup_shown() && !i.seeker_opened);
+        }
+    }
+
+    #[test]
+    fn a_seeker_launch_takes_a_free_slot_before_it_pops_up() {
+        // Agent decision: with a slot free the window goes in it.
+        let mut i = Instruments::new(Layout::Large, Some(9));
+        assert!(i.open_for_seeker());
+        assert_eq!(i.pages, [9, TARGET_PAGE]);
+        assert!(!i.popup_shown());
+        i.close_for_seeker();
+        assert_eq!(i.pages, [9]);
+    }
+
+    #[test]
+    fn an_open_target_camera_stays_open_after_the_seeker_view() {
+        let mut i = Instruments::default();
+        assert!(i.pages.contains(&TARGET_PAGE));
+        let before = i.pages.clone();
+        assert!(!i.open_for_seeker());
+        assert!(!i.seeker_opened);
+        i.close_for_seeker();
+        assert_eq!(i.pages, before);
+    }
+
+    #[test]
+    fn the_player_can_still_close_open_and_clear_the_window() {
+        let mut i = full_without_target(Layout::Large);
+        let before = i.pages.clone();
+        // Closed by hand during the view: it stays closed.
+        i.open_for_seeker();
+        i.toggle(TARGET_PAGE);
+        assert_eq!(i.pages, before);
+        assert!(!i.seeker_opened);
+        i.close_for_seeker();
+        assert_eq!(i.pages, before);
+        // Clear designation keeps it as the player's own.
+        i.open_for_seeker();
+        i.keep_seeker_window();
+        i.close_for_seeker();
+        assert_eq!(i.pages.len(), 5);
+        assert_eq!(i.pages.last(), Some(&TARGET_PAGE));
+        // A kept pop-up is not saved in the preferences' choice.
+        assert_eq!(i.chosen_pages(), before);
+        // The player closes it with the key.
+        i.toggle(TARGET_PAGE);
+        assert_eq!(i.pages, before);
+    }
+
+    #[test]
+    fn toggling_other_windows_with_the_popup_up_leaves_it_in_place() {
+        let mut i = full_without_target(Layout::Large);
+        i.open_for_seeker();
+        let oldest = i.pages[0];
+        // Opening a window the popup's layout lacks replaces the oldest
+        // regular one, and the popup stays last.
+        let new = (0..10).find(|p| !i.pages.contains(p)).unwrap();
+        i.toggle(new);
+        assert_eq!(i.pages.len(), 5);
+        assert!(!i.pages.contains(&oldest));
+        assert_eq!(i.pages[3], new);
+        assert_eq!(i.pages.last(), Some(&TARGET_PAGE));
+        // Closing a regular window frees a slot: the camera takes it.
+        i.toggle(new);
+        assert_eq!(i.pages.len(), 4);
+        assert!(i.pages.contains(&TARGET_PAGE) && i.seeker_opened);
+        i.close_for_seeker();
+        assert!(!i.pages.contains(&TARGET_PAGE));
+    }
+
+    #[test]
+    fn switching_layouts_during_the_view_reopens_the_window_in_the_new_one() {
+        let mut i = full_without_target(Layout::Large);
+        let large = i.pages.clone();
+        i.other_pages = vec![7, 5, 6, 9, 8, 1];
+        let small = i.other_pages.clone();
+        i.open_for_seeker();
+        i.toggle_layout();
+        // The small layout is full too, so the camera pops up there; the
+        // large choice was not disturbed.
+        assert_eq!(i.layout, Layout::Small);
+        assert!(i.popup_shown() && i.seeker_opened);
+        assert_eq!(i.other_pages, large);
+        // The view ends: the small windows are as they were.
+        i.close_for_seeker();
+        assert_eq!(i.pages, small);
+        i.toggle_layout();
+        assert_eq!(i.pages, large);
+    }
+
+    #[test]
+    fn a_kept_popup_does_not_follow_a_layout_change() {
+        let mut i = full_without_target(Layout::Large);
+        i.open_for_seeker();
+        i.keep_seeker_window();
+        let large = i.chosen_pages();
+        i.toggle_layout();
+        assert_eq!(i.other_pages, large);
+        assert!(!i.popup_shown());
+    }
+
+    #[test]
+    fn the_popup_stays_below_the_weapon_diagnostic_panel() {
+        let mut i = full_without_target(Layout::Large);
+        i.open_for_seeker();
+        let size = [640., 480.];
+        let normal = i.screen_rect(4, size);
+        i.weapon_debug = true;
+        let moved = i.screen_rect(4, size);
+        assert_eq!((moved.0, moved.1 - normal.1), (normal.0, 104.));
+        // Hit testing still maps the shifted window onto its raster.
+        let (x, y, w, h) = moved;
+        assert_eq!(
+            i.canvas_point(Some((x + w / 2., y + h / 2.)), size),
+            Some((
+                (Layout::Large.rect(4).0 + Layout::Large.rect(4).2 / 2) as f64,
+                (Layout::Large.rect(4).1 + Layout::Large.rect(4).3 / 2) as f64
+            ))
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1772,6 +2298,8 @@ mod picking_tests {
             acquired: false,
             stale: false,
             trail: vec![],
+            symbol: tore_sim::sensors::GroundSymbol::Square,
+            wide_bars: true,
         }
     }
     fn readout(contacts: Vec<scope::Contact>) -> CombatReadout {
@@ -1928,5 +2456,479 @@ mod input_selection_tests {
         i.pages.clear();
         assert!(!i.cycle_selection(1));
         assert!(!i.control(0, 0));
+    }
+}
+
+/// The flight data link's cues on the radar page and the target window,
+/// rendered through the page rasters (docs/DATALINK.md, "What the player
+/// sees"), headless like every page raster.
+#[cfg(test)]
+mod link_cue_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use tore_formats::font::Glyph;
+
+    fn airframe() -> Airframe {
+        let mut airframe = crate::combat_view::render_hash_tests::hornet_airframe(false);
+        // Every letter and digit is a solid 5x7 block with an advance of 6, so
+        // where a cue draws is easy to find.
+        airframe.font = Font {
+            height: 7,
+            glyphs: (0..256)
+                .map(|character| Glyph {
+                    advance: 6,
+                    pixels: if character == 32 {
+                        vec![]
+                    } else {
+                        (0..7).flat_map(|y| (0..5).map(move |x| (x, y))).collect()
+                    },
+                })
+                .collect(),
+        };
+        airframe.panel = Pic {
+            width: 81,
+            height: 80,
+            pixels: vec![0; 81 * 80],
+            mask: vec![true; 81 * 80],
+            palette: Vec::new(),
+            glyphs: Vec::new(),
+        };
+        airframe
+    }
+
+    #[test]
+    fn lighting_preserves_screen_colours_and_dims_the_complete_instrument() {
+        let h = airframe();
+        let state = h.start(&tore_world::test_support::terrain());
+        let mut panels = Instruments {
+            palette: [[90, 100, 110]; 256],
+            ..Default::default()
+        };
+        let plain = panels.page(7, &h, &state);
+        assert_eq!(plain.pixels, panels.unlit_page(7, &h, &state).pixels);
+        let key = panels.page_key(7, &state);
+        panels.flood = 0.6;
+        assert_ne!(key, panels.page_key(7, &state));
+        let flooded = panels.page(7, &h, &state);
+        let mut changed = 0;
+        for (at, (before, after)) in plain
+            .pixels
+            .chunks_exact(4)
+            .zip(flooded.pixels.chunks_exact(4))
+            .enumerate()
+        {
+            let (x, y) = ((at % WIDTH) as i32, (at / WIDTH) as i32);
+            if x >= SCREEN.0 && x < SCREEN.0 + SCREEN.2 && y >= SCREEN.1 && y < SCREEN.1 + SCREEN.3
+            {
+                assert_eq!(before, after, "flood reached display at {x},{y}");
+            } else if before != after {
+                changed += 1;
+            }
+        }
+        assert!(changed > 100);
+        panels.flood = 0.;
+        panels.ambient = 0.065;
+        let ambient_key = panels.page_key(7, &state);
+        let dark = panels.page(7, &h, &state);
+        for (at, (before, after)) in plain
+            .pixels
+            .chunks_exact(4)
+            .zip(dark.pixels.chunks_exact(4))
+            .enumerate()
+        {
+            let (x, y) = ((at % WIDTH) as i32, (at / WIDTH) as i32);
+            if x >= SCREEN.0 && x < SCREEN.0 + SCREEN.2 && y >= SCREEN.1 && y < SCREEN.1 + SCREEN.3
+            {
+                assert_eq!(before, after, "ambient reached emissive display at {x},{y}");
+            } else {
+                assert!(after[0] <= before[0] && after[1] <= before[1] && after[2] <= before[2]);
+                assert_eq!(before[3], after[3]);
+            }
+        }
+        assert_ne!(dark.pixels, plain.pixels);
+        panels.ambient = 1.;
+        assert_ne!(ambient_key, panels.page_key(7, &state));
+        panels.light_gain = 0.5;
+        let dim = panels.page(7, &h, &state);
+        for (before, after) in plain.pixels.chunks_exact(4).zip(dim.pixels.chunks_exact(4)) {
+            assert_eq!(
+                after[..3],
+                before[..3].iter().map(|c| c / 2).collect::<Vec<_>>()
+            );
+            assert_eq!(before[3], after[3]);
+        }
+    }
+
+    fn marked_contact(id: u32) -> scope::Contact {
+        scope::Contact {
+            id,
+            bearing_rad: 0.,
+            distance_ft: 5. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+            heading_rad: None,
+            track_eligible: true,
+            destroyed: false,
+            selected: false,
+            acquired: false,
+            stale: false,
+            trail: vec![],
+            symbol: tore_sim::sensors::GroundSymbol::Square,
+            wide_bars: true,
+        }
+    }
+
+    /// Where a 10-mile scope draws a contact at bearing 0 and 5 miles, in
+    /// window pixels.
+    fn contact_point() -> (i32, i32) {
+        let (x, y) = project(0., 5. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE, 10.).unwrap();
+        (x as i32 + SCREEN.0, y as i32 + SCREEN.1)
+    }
+
+    fn render(page: u8, combat: CombatReadout) -> Raster {
+        let airframe = airframe();
+        let state = airframe.start(&tore_world::test_support::terrain());
+        let mut panels = Instruments::new(Layout::Large, None);
+        panels.palette = airframe.palette;
+        panels.combat = Some(combat);
+        panels.page(page, &airframe, &state)
+    }
+
+    fn scope_with(
+        tick: u64,
+        contacts: Vec<scope::Contact>,
+        marks: Vec<scope::LinkMarks>,
+        remote: Vec<scope::RemoteTrack>,
+    ) -> CombatReadout {
+        CombatReadout {
+            scope: scope::Scope {
+                tick,
+                channel: "RADAR",
+                range_nmi: 10.,
+                operating: true,
+                contacts,
+                marks,
+                remote,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// The window pixels where `a` differs from `b`.
+    fn differing(a: &Raster, b: &Raster) -> BTreeSet<(i32, i32)> {
+        a.pixels
+            .chunks_exact(4)
+            .zip(b.pixels.chunks_exact(4))
+            .enumerate()
+            .filter(|(_, (x, y))| x != y)
+            .map(|(i, _)| ((i % WIDTH) as i32, (i / WIDTH) as i32))
+            .collect()
+    }
+
+    fn marks() -> scope::LinkMarks {
+        scope::LinkMarks {
+            id: 1,
+            locked_by: vec![2, 3, 4],
+            assigned_to: vec![2],
+            assigned: Some(false),
+        }
+    }
+
+    #[test]
+    fn flightmates_numbers_sit_beside_the_contact_and_the_assignment_diamond_blinks() {
+        let (x, y) = contact_point();
+        let plain = render(9, scope_with(0, vec![marked_contact(1)], vec![], vec![]));
+        let lit = |tick: u64, assigned: Option<bool>| {
+            let marks = scope::LinkMarks {
+                assigned,
+                ..marks()
+            };
+            let drawn = render(
+                9,
+                scope_with(tick, vec![marked_contact(1)], vec![marks], vec![]),
+            );
+            differing(&drawn, &plain)
+        };
+        let on = lit(0, Some(false));
+        // The numbers: "23+" to the right (two numbers, then a plus), "2" to
+        // the left, each a solid block of seven rows centred on the square.
+        let right: Vec<i32> = on
+            .iter()
+            .filter(|(px, _)| *px >= x + 9)
+            .map(|(px, _)| *px)
+            .collect();
+        assert_eq!(
+            (right.iter().min(), right.iter().max()),
+            (Some(&(x + 9)), Some(&(x + 9 + 3 * 6 - 2))),
+            "three glyphs"
+        );
+        assert!(
+            on.iter()
+                .filter(|(px, _)| *px >= x + 9)
+                .all(|(_, py)| (y - 3..y + 4).contains(py))
+        );
+        let left: Vec<i32> = on
+            .iter()
+            .filter(|(px, _)| *px <= x - 8)
+            .map(|(px, _)| *px)
+            .collect();
+        assert_eq!(
+            (left.iter().min(), left.iter().max()),
+            (Some(&(x - 14)), Some(&(x - 10))),
+            "one glyph"
+        );
+        // The diamond is lit in the first half second and dark in the second,
+        // until the assignment is acknowledged, then it is steady.
+        let diamond = [(x + 5, y), (x - 5, y), (x, y - 5), (x, y + 5)];
+        for tick in [0, 59, 120] {
+            assert!(
+                diamond.iter().all(|p| lit(tick, Some(false)).contains(p)),
+                "tick {tick}"
+            );
+        }
+        for tick in [60, 119, 180] {
+            assert!(
+                diamond.iter().all(|p| !lit(tick, Some(false)).contains(p)),
+                "tick {tick}"
+            );
+        }
+        for tick in [0, 60, 119] {
+            assert!(
+                diamond.iter().all(|p| lit(tick, Some(true)).contains(p)),
+                "tick {tick}"
+            );
+        }
+        // A target nobody assigned to the player has no diamond.
+        assert!(diamond.iter().all(|p| !lit(0, None).contains(p)));
+    }
+
+    #[test]
+    fn a_remote_track_is_a_hollow_peach_square_with_its_marks() {
+        let (x, y) = contact_point();
+        let track = scope::RemoteTrack {
+            id: 9,
+            bearing_rad: 0.,
+            distance_ft: 5. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+        };
+        let plain = render(9, scope_with(0, vec![], vec![], vec![]));
+        let bare = render(9, scope_with(0, vec![], vec![], vec![track]));
+        let drawn = differing(&bare, &plain);
+        let square: BTreeSet<(i32, i32)> = (-2..=2)
+            .flat_map(|dx: i32| (-2..=2).map(move |dy: i32| (dx, dy)))
+            .filter(|(dx, dy): &(i32, i32)| dx.abs() == 2 || dy.abs() == 2)
+            .map(|(dx, dy)| (x + dx, y + dy))
+            .collect();
+        assert_eq!(drawn, square, "a hollow 5 by 5 square");
+        for (px, py) in &square {
+            assert_eq!(
+                bare.pixels[(*py as usize * WIDTH + *px as usize) * 4..][..4],
+                PEACH
+            );
+        }
+        // Its marks are peach too.
+        let mut with_marks = marks();
+        with_marks.id = 9;
+        with_marks.assigned = None;
+        let marked = render(9, scope_with(0, vec![], vec![with_marks], vec![track]));
+        let extra: Vec<(i32, i32)> = differing(&marked, &bare).into_iter().collect();
+        assert!(!extra.is_empty());
+        for (px, py) in extra {
+            assert_eq!(
+                marked.pixels[(py as usize * WIDTH + px as usize) * 4..][..4],
+                PEACH
+            );
+        }
+        // Past the scope's range it is not drawn.
+        let far = scope::RemoteTrack {
+            distance_ft: 11. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+            ..track
+        };
+        let beyond = render(9, scope_with(0, vec![], vec![], vec![far]));
+        assert!(differing(&beyond, &plain).is_empty());
+    }
+
+    fn window(tag: Option<&str>, state: &[&str]) -> CombatReadout {
+        CombatReadout {
+            target: Some(crate::target_window::Readout {
+                id: 7,
+                name: "F/A-18D HORNET".into(),
+                damage: 0.,
+                bearing: "12:00".into(),
+                metric: "10.0 NM".into(),
+                objective: None,
+                activity: "ENGAGE".into(),
+                goal: "A",
+                player_goal: false,
+                skill: None,
+            }),
+            target_link: TargetLink {
+                tag: tag.map(str::to_string),
+                state: state.iter().map(|line| line.to_string()).collect(),
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_target_window_gets_a_tag_and_a_state_under_the_activity() {
+        let plain = render(4, window(None, &[]));
+        // "ASSIGNED TO 2" is 13 glyphs, 78 pixels wide, centred under the
+        // activity line at row 28 of the screen.
+        let tagged = differing(&render(4, window(Some("ASSIGNED TO 2"), &[])), &plain);
+        let rows: BTreeSet<i32> = tagged.iter().map(|(_, y)| *y - SCREEN.1).collect();
+        assert_eq!(rows, (28..35).collect());
+        let columns: Vec<i32> = tagged.iter().map(|(x, _)| *x - SCREEN.0).collect();
+        // The space is blank, so the first and last glyph set the extent.
+        assert_eq!(*columns.iter().min().unwrap(), 1 + (119 - 78) / 2);
+        // A mate's state follows, a line each, eleven pixels apart.
+        let both = differing(
+            &render(4, window(Some("2 LOCKED"), &["FUEL BINGO", "GUNS ONLY"])),
+            &plain,
+        );
+        let rows: BTreeSet<i32> = both.iter().map(|(_, y)| *y - SCREEN.1).collect();
+        assert_eq!(rows, (28..35).chain(39..46).chain(50..57).collect());
+        // Nothing above the tag moves, and a window with no link lines is the
+        // window it was.
+        assert!(rows.iter().all(|row| *row >= 28));
+        assert!(differing(&render(4, window(None, &[])), &plain).is_empty());
+    }
+
+    /// The readout of a scene the player's radar holds one contact of, with
+    /// the link as given, through the same builder the flight screen uses.
+    fn scene(radar: bool, linked: bool) -> CombatReadout {
+        use tore_world::readout::{LinkAssigned, LinkMark, LinkMate, LinkReadout, LinkTrack};
+        let (combat, flight) = tore_world::combat::fixtures::loaded([1, 1]);
+        let mut ro = combat
+            .cockpit_readout(
+                combat.own_id(),
+                crate::combat::launcher(&flight),
+                None,
+                None,
+            )
+            .expect("the fixture's plane has an ownship");
+        ro.sensors.available = [true; 3];
+        ro.sensors.operating = [true; 3];
+        let ahead = [
+            flight.position[0],
+            flight.position[1],
+            flight.position[2] + 30_000.,
+        ];
+        let contact = tore_sim::sensors::Contact {
+            id: 1,
+            channel: tore_sim::sensors::Channel::Radar,
+            bearing_rad: 0.,
+            elevation_rad: 0.,
+            distance_ft: 30_000.,
+            position: ahead,
+            velocity: [0.; 3],
+            track_eligible: true,
+            destroyed: false,
+        };
+        ro.sensors.contacts = vec![contact];
+        ro.targets.display = Some(tore_world::readout::TargetRow {
+            id: 1,
+            aircraft: None,
+            position: ahead,
+            velocity: [0.; 3],
+            damage: tore_world::snapshot::Damage {
+                hp: 100,
+                initial_hp: 100,
+                sections: [0; 6],
+                structural: None,
+            },
+        });
+        if linked {
+            ro.link = LinkReadout {
+                radar,
+                assigned: Some(LinkAssigned {
+                    target: 1,
+                    by: 0,
+                    acknowledged: false,
+                }),
+                tracks: vec![LinkTrack {
+                    target: 2,
+                    position: [ahead[0] + 5_000., ahead[1], ahead[2] + 20_000.],
+                    velocity: [0.; 3],
+                    source: tore_world::datalink::TrackSource::Flight,
+                }],
+                marks: vec![LinkMark {
+                    target: 1,
+                    lockers: 0b10,
+                    net_lock: None,
+                    assigned_to: 0,
+                }],
+                mates: vec![LinkMate {
+                    plane: 1,
+                    member: 1,
+                    fuel: tore_world::datalink::Fuel::Normal,
+                    weapons: tore_world::datalink::Weapons::Missiles,
+                    damage: tore_world::datalink::Damage::None,
+                }],
+            };
+        }
+        crate::combat_view::readout(
+            &combat,
+            combat.state.own().configuration(),
+            &ro,
+            &flight,
+            flight.sensors,
+            1.,
+        )
+    }
+
+    #[test]
+    fn a_linked_scene_draws_its_cues_and_one_with_no_radar_has_none_on_its_scope() {
+        let pages = [9, 4];
+        let draw = |radar, linked| pages.map(|page| render(page, scene(radar, linked)));
+        let unlinked = draw(true, false);
+        let with_radar = draw(true, true);
+        let without_radar = draw(false, true);
+        // The radar page: a remote track and the flightmate's number. The
+        // target window: the tag.
+        for (page, (linked, plain)) in with_radar.iter().zip(&unlinked).enumerate() {
+            assert!(
+                !differing(linked, plain).is_empty(),
+                "page {} shows nothing of the link",
+                pages[page]
+            );
+        }
+        // John, 2026-10-05: an aircraft with no radar has no scope marks, so
+        // its radar page is the unlinked one, but its target window keeps the
+        // tag, exactly as an aircraft with a radar draws it.
+        assert!(
+            differing(&without_radar[0], &unlinked[0]).is_empty(),
+            "the radar page draws a link cue with no radar"
+        );
+        assert!(
+            !differing(&without_radar[1], &unlinked[1]).is_empty(),
+            "the target window lost its tag"
+        );
+        assert!(
+            differing(&without_radar[1], &with_radar[1]).is_empty(),
+            "the target window differs with the radar flag"
+        );
+        if let Some(dir) = std::env::var_os("TORE_LINK_CAPTURE_DIR") {
+            // A look for the slice report: the raster of each page in each
+            // state, as PPMs.
+            for (name, set) in [
+                ("unlinked", &unlinked),
+                ("linked", &with_radar),
+                ("no-radar", &without_radar),
+            ] {
+                for (page, raster) in pages.iter().zip(set) {
+                    let mut ppm = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                    ppm.extend(
+                        raster
+                            .pixels
+                            .chunks_exact(4)
+                            .flat_map(|p| [p[0], p[1], p[2]]),
+                    );
+                    std::fs::write(
+                        std::path::Path::new(&dir).join(format!("{name}-page{page}.ppm")),
+                        ppm,
+                    )
+                    .unwrap();
+                }
+            }
+        }
     }
 }

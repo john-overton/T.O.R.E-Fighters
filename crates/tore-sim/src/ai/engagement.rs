@@ -27,6 +27,56 @@ pub enum GroupObjective {
     Escort(super::launch::WingId),
     SelfDefense,
     Hold,
+    /// Strike the mission's ground target (slice ST-O): the wing's air
+    /// orders are the mission's own (as for `Inherit`) and its aircraft take
+    /// the [`StrikeRole::Strike`] role. Offered for a friendly wing with a
+    /// ground target set.
+    Strike,
+}
+
+/// A wing's air-to-ground role (docs/spec/ai-strike.md, "Who strikes").
+/// **CAP** is every wing's behaviour before the strike round and stays the
+/// default, so nothing changes unless a mission asks for **Strike**. Side
+/// neutral: any side's wing may strike (opinionated, John, 2026-10-11).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StrikeRole {
+    #[default]
+    Cap,
+    Strike,
+}
+
+/// A striker whose briefed targets are gone attacks hostile ground objects it
+/// has seen within this distance of the objective (docs/spec/ai-strike.md,
+/// "What the AI knows": 10 nm, fitted).
+pub const OPPORTUNITY_RADIUS_FT: f64 = 10. * FEET_PER_NAUTICAL_MILE;
+/// The objective's air defences a SEAD striker is briefed on: hostile armed
+/// units and radars within this distance of the objective point (5 nm, the
+/// distance Quick Mission's Red defends its target within; fitted).
+pub const SEAD_BRIEFING_RADIUS_FT: f64 = 5. * FEET_PER_NAUTICAL_MILE;
+
+/// What a strike actor's briefing names: its **Strike objective**
+/// (docs/spec/ai-strike.md, "Who strikes" and "What the AI knows"). Briefed
+/// objects are known from the start, without a sensor: this is the briefing.
+/// Anything else must be seen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StrikeObjective {
+    /// The targets the mission names: Quick Mission's ground objective
+    /// objects (flagged 0x80) on another side, or a mission's own orders.
+    /// Ascending id.
+    pub targets: Vec<u32>,
+    /// The objective's air defences, for a SEAD striker (an anti-radiation
+    /// store aboard); empty otherwise. Ascending id.
+    pub defenses: Vec<u32>,
+    /// Where the objective is: the centre of its targets as briefed, feet.
+    /// `None` with no targets (an order alone).
+    pub point: Option<[f64; 3]>,
+}
+
+impl StrikeObjective {
+    /// Whether `id` is one of the briefed targets or defences.
+    pub fn names(&self, id: u32) -> bool {
+        self.targets.contains(&id) || self.defenses.contains(&id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +129,47 @@ pub struct Assignment {
     /// escort itself is present in the current observation list.
     pub hostile_escorts: Vec<HostileEscort>,
     pub patrol: Option<PatrolRegion>,
+}
+
+impl Assignment {
+    /// `new` continues the lineage of the planes `lineage` (a respawn or a
+    /// revival in a multiplayer game; the lobby pass's follow-up F1): every
+    /// list that names a plane of the lineage names `new` too, and every
+    /// escort relationship with a plane of it gains one with `new` in its
+    /// place. The lists keep their order, `new` added at the end once.
+    /// Returns whether anything changed.
+    pub fn join_lineage(&mut self, new: u32, lineage: &[u32]) -> bool {
+        let named = |ids: &[u32]| ids.iter().any(|id| lineage.contains(id)) && !ids.contains(&new);
+        let mut changed = false;
+        for ids in [&mut self.destroy_ids, &mut self.protected_ids] {
+            if named(ids) {
+                ids.push(new);
+                changed = true;
+            }
+        }
+        let mut gained = Vec::new();
+        for relation in &self.hostile_escorts {
+            if lineage.contains(&relation.principal_id) {
+                gained.push(HostileEscort {
+                    principal_id: new,
+                    escort_id: relation.escort_id,
+                });
+            }
+            if lineage.contains(&relation.escort_id) {
+                gained.push(HostileEscort {
+                    principal_id: relation.principal_id,
+                    escort_id: new,
+                });
+            }
+        }
+        for relation in gained {
+            if !self.hostile_escorts.contains(&relation) {
+                self.hostile_escorts.push(relation);
+                changed = true;
+            }
+        }
+        changed
+    }
 }
 
 impl Default for Assignment {
@@ -339,6 +430,59 @@ impl Policy {
                 a_score.total_cmp(b_score).then_with(|| a.id.cmp(&b.id))
             })
             .map(|(selection, _)| selection)
+    }
+
+    /// [`Self::select`] and [`Self::explain`] in one pass: the explanation
+    /// classifies every target once, and its choice is exactly what
+    /// `select` returns (the same eligibility, priorities, kept current
+    /// target, B41 score and id order).
+    #[allow(clippy::too_many_arguments)]
+    pub fn select_explained(
+        &mut self,
+        own_id: u32,
+        own_side: targeting::Side,
+        own_position: [f64; 3],
+        assignment: &Assignment,
+        targets: &[TargetView],
+        protected: &[ProtectedView],
+        reports: &[ThreatReport],
+        current_target: Option<u32>,
+        assignment_allowance: u32,
+    ) -> (Option<Selection>, Explanation) {
+        // Every test that selects checks the shared pass against `select`.
+        #[cfg(test)]
+        let mut reference = self.clone();
+        #[cfg(test)]
+        let expected = reference.select(
+            own_id,
+            own_side,
+            own_position,
+            assignment,
+            targets,
+            protected,
+            reports,
+            current_target,
+            assignment_allowance,
+        );
+        self.update_leash(own_position, assignment, protected);
+        let explanation = self.explain(
+            own_id,
+            own_side,
+            own_position,
+            assignment,
+            targets,
+            protected,
+            reports,
+            current_target,
+            assignment_allowance,
+        );
+        let selection = explanation.chosen;
+        #[cfg(test)]
+        {
+            assert_eq!(selection, expected);
+            assert_eq!(*self, reference);
+        }
+        (selection, explanation)
     }
 
     /// Why [`Self::select`] chose what it did, for the replay debug panels.
@@ -702,6 +846,7 @@ mod tests {
 
     fn target(id: u32, distance: f64) -> TargetView {
         TargetView {
+            infrared_strength: 1.,
             id,
             side: targeting::Side(2),
             position: [distance, 0., 0.],
@@ -718,6 +863,7 @@ mod tests {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: true,
+            link_track: false,
         }
     }
 
@@ -1362,4 +1508,57 @@ mod tests {
             None
         );
     }
+
+    /// The lobby pass's follow-up F1: a plane added to a lineage joins every
+    /// list and relationship that names a plane of it, once, at the end.
+    #[test]
+    fn a_new_plane_joins_the_lists_that_name_its_lineage() {
+        let mut assignment = Assignment {
+            destroy_ids: vec![7, 2, 9],
+            protected_ids: vec![4],
+            hostile_escorts: vec![
+                HostileEscort {
+                    principal_id: 2,
+                    escort_id: 5,
+                },
+                HostileEscort {
+                    principal_id: 8,
+                    escort_id: 2,
+                },
+            ],
+            ..Assignment::default()
+        };
+        assert!(assignment.join_lineage(12, &[2, 10]));
+        assert_eq!(assignment.destroy_ids, [7, 2, 9, 12]);
+        assert_eq!(assignment.protected_ids, [4]);
+        assert_eq!(
+            assignment.hostile_escorts[2..],
+            [
+                HostileEscort {
+                    principal_id: 12,
+                    escort_id: 5,
+                },
+                HostileEscort {
+                    principal_id: 8,
+                    escort_id: 12,
+                },
+            ]
+        );
+        // Once only, and a lineage nobody names changes nothing.
+        let joined = assignment.clone();
+        assert!(!assignment.join_lineage(12, &[2, 10, 12]));
+        assert!(!assignment.join_lineage(13, &[3]));
+        assert_eq!(assignment, joined);
+        let mut protect = Assignment {
+            protected_ids: vec![3],
+            ..Assignment::default()
+        };
+        assert!(protect.join_lineage(20, &[3]));
+        assert_eq!(protect.protected_ids, [3, 20]);
+        assert!(protect.destroy_ids.is_empty());
+    }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "engagement_checkpoint.rs"]
+mod checkpoint;

@@ -10,6 +10,7 @@ use super::motion::Bank;
 use super::steering::{
     self, AuthorityModifiers, AxisRates, SteeringRequest, SteeringState, TurnDirection,
 };
+use super::strike::Handling;
 use super::{AiError, Experience, Result, ScalarSpeed, SpeedLimits, experience};
 use crate::flight::State;
 use crate::models::FlightModel;
@@ -50,6 +51,9 @@ pub struct AdapterOutput {
 pub struct ControlAdapter {
     last_requested: Option<SteeringState>,
     gun_aim: Option<super::gunnery::Aim>,
+    /// A striker's attack handling this step (slice ST-T2); plain for every
+    /// other motion.
+    strike_handling: Handling,
 }
 
 impl ControlAdapter {
@@ -57,12 +61,23 @@ impl ControlAdapter {
         Self {
             last_requested: None,
             gun_aim: None,
+            strike_handling: Handling::PLAIN,
         }
     }
 
     /// Feed forward the changing observed lead while gun tracking is active.
     pub fn set_gun_aim(&mut self, aim: Option<super::gunnery::Aim>) {
         self.gun_aim = aim;
+    }
+
+    /// How this step's motion is flown: a striker's attack segments roll and
+    /// pull ([`Handling::pull`]); everything else is plain.
+    pub fn set_strike_handling(&mut self, handling: Handling) {
+        self.strike_handling = handling;
+    }
+
+    pub fn strike_handling(&self) -> Handling {
+        self.strike_handling
     }
 
     /// The attitude the previous call asked for, or `None` before the first.
@@ -115,11 +130,20 @@ impl ControlAdapter {
 
         let reference_bank_deg = steering::reference_bank_deg(maximum_bank_deg)?;
         let heading_request_deg = steering::wrap_heading(intent.heading_deg)?;
-        let turn = TurnDirection::toward(current.heading_deg, heading_request_deg);
+        let on_ground = state.research.as_ref().is_some_and(|r| r.on_ground);
+        let heading_reference = if self.strike_handling.track_heading
+            && !on_ground
+            && state.velocity[0].hypot(state.velocity[2]) > 1.
+        {
+            state.velocity[0].atan2(state.velocity[2]).to_degrees()
+        } else {
+            current.heading_deg
+        };
+        let turn = TurnDirection::toward(heading_reference, heading_request_deg);
         let bank_request_deg = match intent.bank {
             Bank::Explicit(deg) => f64::from(deg).clamp(-maximum_bank_deg, maximum_bank_deg),
             Bank::Unconstrained => {
-                let rate = heading_error_deg(current.heading_deg, heading_request_deg).to_radians()
+                let rate = heading_error_deg(heading_reference, heading_request_deg).to_radians()
                     / if self.gun_aim.is_some() {
                         0.6
                     } else {
@@ -138,7 +162,6 @@ impl ControlAdapter {
 
         // Contact is tracked by the hybrid adapter; without it the adapter
         // cannot see the ground from this signature and reports airborne.
-        let on_ground = state.research.as_ref().is_some_and(|r| r.on_ground);
         // Fitted (agent decision, 2026-09-28, overnight bug battery): an
         // airborne aircraft whose flight path is below the B44 terrain floor
         // levels its wings, so a steep turn cannot use the lift it needs to
@@ -155,10 +178,30 @@ impl ControlAdapter {
         } else {
             bank_request_deg
         };
+        // A striker's roll and pull (slice ST-T2): the lift is rolled onto
+        // the wanted direction and pulled, so a big nose-down change rolls
+        // inverted and pulls as retail's dive bomb does. Plain otherwise.
+        let pull = (self.strike_handling.pull && !on_ground)
+            .then(|| {
+                roll_and_pull(
+                    state,
+                    current.bank_deg,
+                    intent.heading_deg,
+                    intent
+                        .flight_path_pitch_deg
+                        .max(terrain_pitch_floor_deg.unwrap_or(-90.0)),
+                    g_limit,
+                )
+            })
+            .flatten();
+        let bank_request_deg = match pull {
+            Some(p) if !below_terrain_floor => p.bank_deg,
+            _ => bank_request_deg,
+        };
         let request = SteeringRequest {
             heading_deg: heading_request_deg,
             flight_path_pitch_deg: intent.flight_path_pitch_deg,
-            bank_deg: bank_request_deg,
+            bank_deg: bank_request_deg.clamp(-maximum_bank_deg, maximum_bank_deg),
             reference_bank_deg,
             // The ceiling test belongs to the maneuver layer, which owns the
             // aircraft's ceiling; it is not visible from this signature.
@@ -199,10 +242,16 @@ impl ControlAdapter {
         };
         let authority = (state.speed / stall.max(1.0)).powi(2).clamp(0.0, 1.0);
         let bank_error = heading_error_deg(current.bank_deg, bank_request_deg).to_radians();
-        let desired_roll = (bank_error / 0.7 - state.roll_rate * 0.5).clamp(
-            -effective.roll_deg_per_s.to_radians(),
-            effective.roll_deg_per_s.to_radians(),
-        );
+        // A roll and pull rolls at the aircraft's full roll rate: the B44
+        // state rates halve it for maneuvering, too slow to roll inverted
+        // and pull in a dive (slice ST-T2, fitted, agent).
+        let roll_authority = if pull.is_some() {
+            rates.roll_deg_per_s.max(effective.roll_deg_per_s)
+        } else {
+            effective.roll_deg_per_s
+        };
+        let desired_roll = (bank_error / 0.7 - state.roll_rate * 0.5)
+            .clamp(-roll_authority.to_radians(), roll_authority.to_radians());
         let roll_limit = if let Some(profile) = config.controls {
             let axis = if state.research.is_some() {
                 profile.hybrid_roll.unwrap_or(profile.roll)
@@ -311,13 +360,36 @@ impl ControlAdapter {
                 / 32.174)
             / state.bank.cos().max(0.25))
         .clamp(low, g_limit.max(low));
-        let delta = desired_g / (authority * flap_gain).max(0.01) - 1.0;
+        // The roll and pull asks for its own load, applied as the lift comes
+        // onto its bank: none while the lift is more than 45 degrees off it,
+        // so a roll-out does not pull the nose across the track.
+        let desired_g = match pull {
+            Some(p) if !below_terrain_floor => {
+                let off = heading_error_deg(current.bank_deg, p.bank_deg).to_radians();
+                let aligned = ((off.cos() - ROLL_AND_PULL_ALIGN_COS)
+                    / (1.0 - ROLL_AND_PULL_ALIGN_COS))
+                    .clamp(0.0, 1.0);
+                (p.load_g * aligned).clamp(low, g_limit.max(low))
+            }
+            _ => desired_g,
+        };
+        // The flight model also scales the lift by the airframe's damage
+        // (a damaged wing or tail, `regional_effects`; a wing fault halves
+        // it) and the elevator by the tail's damage. Inverted here as the
+        // flap lift is (agent decision, 2026-10-21): without it a damaged
+        // aircraft's pull fell short of the load it asked for, and on final
+        // an F/A-18D with a quarter of its tail damaged sank 50 ft under
+        // the glide path and touched down at the threshold.
+        let regional = crate::aircraft_systems::regional_effects(state.damage_regions);
+        let damaged_lift = regional.lift * if state.systems.has(25) { 0.5 } else { 1.0 };
+        let delta = desired_g / (authority * flap_gain * damaged_lift).max(0.01) - 1.0;
         let pitch_input = delta
             / if delta > 0.0 {
                 (high - 1.0).max(0.01)
             } else {
                 (1.0 - low).max(0.01)
-            };
+            }
+            / regional.authority[0].max(0.01);
 
         let input = PilotInput {
             pitch: if dt_s > 0.0 {
@@ -341,6 +413,7 @@ impl ControlAdapter {
                 limits,
             )?),
             commands: vec![PilotCommand::Set(Switch::Burner, intent.afterburner)],
+            ..PilotInput::default()
         }
         .bounded();
 
@@ -351,6 +424,137 @@ impl ControlAdapter {
             requested,
         })
     }
+}
+
+/// Fitted (slice ST-T2, agent): the roll and pull turns the flight path
+/// toward the wanted direction at the angle between them over this many
+/// seconds.
+pub const ROLL_AND_PULL_SECONDS: f64 = 1.0;
+/// Fitted: a nose-down change that needs more than this push, in G, rolls
+/// inverted and pulls; a smaller one unloads or pushes wings level. Once
+/// inverted it stays so while any push is needed.
+pub const ROLL_AND_PULL_INVERT_G: f64 = 1.0;
+/// Fitted: only a change of flight path of at least this many degrees rolls
+/// inverted; a smaller one is pushed (a steep dive's corrections).
+pub const ROLL_AND_PULL_INVERT_DEG: f64 = 30.0;
+/// Fitted: below this load, in G, the roll and pull holds the wings level.
+pub const ROLL_AND_PULL_SLACK_G: f64 = 0.02;
+/// Fitted: an upright bank is worked out as if at least this much lift were
+/// wanted upward, so a small lift is not banked steeply to the side.
+pub const ROLL_AND_PULL_UPRIGHT_G: f64 = 0.5;
+/// Fitted: the steepest upright bank the roll and pull flies; the load is
+/// the wanted lift along that bank.
+pub const ROLL_AND_PULL_UPRIGHT_BANK_DEG: f64 = 85.0;
+/// Fitted: the cosine of the bank error (45 degrees) beyond which the roll
+/// and pull holds its load off while it rolls; the load grows to the full
+/// request as the lift comes onto its bank.
+pub const ROLL_AND_PULL_ALIGN_COS: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+/// A roll and pull's bank and load.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RollAndPull {
+    pub bank_deg: f64,
+    /// The load along the lift, G; negative is a push.
+    pub load_g: f64,
+}
+
+/// The lift placement that turns the flight path toward `heading_deg`,
+/// `pitch_deg` (slice ST-T2, fitted, agent). The wanted acceleration across
+/// the flight path is the speed times the angle to the wanted direction over
+/// [`ROLL_AND_PULL_SECONDS`]; the lift must give it and hold off gravity's
+/// part across the path. The lift's bank and size follow: a lift that would
+/// point down by more than [`ROLL_AND_PULL_INVERT_G`] (any amount once
+/// inverted), and more down than sideways, is flown inverted with a positive
+/// pull, if the flight path must turn [`ROLL_AND_PULL_INVERT_DEG`] or more
+/// (or is inverted already); an upward lift banks at most [`ROLL_AND_PULL_UPRIGHT_BANK_DEG`], worked out as if at least
+/// [`ROLL_AND_PULL_UPRIGHT_G`] were wanted upward; a smaller downward need
+/// is a push banked at most 45 degrees the other way; a lift under
+/// [`ROLL_AND_PULL_SLACK_G`] keeps the wings level. `None` when the aircraft
+/// does not move.
+pub fn roll_and_pull(
+    state: &State,
+    bank_deg: f64,
+    heading_deg: f64,
+    pitch_deg: f64,
+    g_limit: f64,
+) -> Option<RollAndPull> {
+    const G: f64 = 32.174;
+    let v = state.velocity;
+    let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if !speed.is_finite() || speed < 1.0 {
+        return None;
+    }
+    let v = v.map(|c| c / speed);
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let norm = |a: [f64; 3]| {
+        let l = dot(a, a).sqrt();
+        (l > 1e-9).then(|| a.map(|c| c / l))
+    };
+    // Lift directions: "up" across the path in the vertical plane (bank 0)
+    // and "right" (bank +90, which turns toward a larger heading).
+    let up = norm([-v[1] * v[0], 1.0 - v[1] * v[1], -v[1] * v[2]]).unwrap_or_else(|| {
+        let h = state.yaw;
+        [-h.sin() * v[1].signum(), 0.0, -h.cos() * v[1].signum()]
+    });
+    let right = [
+        up[1] * v[2] - up[2] * v[1],
+        up[2] * v[0] - up[0] * v[2],
+        up[0] * v[1] - up[1] * v[0],
+    ];
+    let (h, p) = (
+        heading_deg.to_radians(),
+        pitch_deg.clamp(-90.0, 90.0).to_radians(),
+    );
+    let wanted = [h.sin() * p.cos(), p.sin(), h.cos() * p.cos()];
+    let along = dot(wanted, v).clamp(-1.0, 1.0);
+    let angle = along.acos();
+    let across = norm(std::array::from_fn(|i| wanted[i] - along * v[i])).unwrap_or(up);
+    let accel = speed * angle / ROLL_AND_PULL_SECONDS;
+    // Lift = wanted acceleration minus gravity's part across the path.
+    let gravity_across: [f64; 3] =
+        std::array::from_fn(|i| -v[1] * v[i] * -G - if i == 1 { G } else { 0.0 });
+    let lift: [f64; 3] = std::array::from_fn(|i| (accel * across[i] - gravity_across[i]) / G);
+    let (lift_up, lift_right) = (dot(lift, up), dot(lift, right));
+    let size = lift_up.hypot(lift_right);
+    let inverted = bank_deg.abs() > 90.0;
+    let threshold = if inverted {
+        0.0
+    } else {
+        -ROLL_AND_PULL_INVERT_G
+    };
+    let (bank, load) = if size < ROLL_AND_PULL_SLACK_G {
+        (0.0, lift_up)
+    } else if lift_up < threshold
+        && -lift_up >= lift_right.abs()
+        && (inverted || angle.to_degrees() >= ROLL_AND_PULL_INVERT_DEG)
+    {
+        // A nose-down change: roll inverted and pull.
+        (lift_right.atan2(lift_up).to_degrees(), size)
+    } else if lift_up >= 0.0 {
+        // Upright: bank toward the side wanted, the load holding the lift
+        // that is wanted upward (a turn of at most the adapter's 75 degrees).
+        let bank = lift_right
+            .atan2(lift_up.max(ROLL_AND_PULL_UPRIGHT_G))
+            .to_degrees()
+            .clamp(
+                -ROLL_AND_PULL_UPRIGHT_BANK_DEG,
+                ROLL_AND_PULL_UPRIGHT_BANK_DEG,
+            );
+        let b = bank.to_radians();
+        (bank, (lift_up * b.cos() + lift_right * b.sin()).max(0.0))
+    } else {
+        // A gentle push, nearly wings level: bank the other way, negative G.
+        let bank = (-lift_right)
+            .atan2(-lift_up)
+            .to_degrees()
+            .clamp(-45.0, 45.0);
+        let b = bank.to_radians();
+        (bank, lift_up * b.cos() - lift_right * b.sin())
+    };
+    Some(RollAndPull {
+        bank_deg: bank,
+        load_g: load.min(g_limit.max(1.0)),
+    })
 }
 
 /// The AI-only experience G adjustment ("Other experience effects").
@@ -510,6 +714,32 @@ mod tests {
     }
 
     #[test]
+    fn bomb_tracking_keeps_a_correct_ground_track_when_the_nose_is_offset() {
+        let mut s = state();
+        s.yaw = 10_f64.to_radians();
+        let command = intent(0., 0., s.speed);
+        assert!(controls(&s, &command, SECONDS_PER_TICK).input.roll < 0.);
+        let mut adapter = ControlAdapter::new();
+        adapter.set_strike_handling(Handling {
+            track_heading: true,
+            ..Handling::PLAIN
+        });
+        let output = adapter
+            .controls(
+                &s,
+                &command,
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                None,
+                SECONDS_PER_TICK,
+            )
+            .unwrap();
+        assert!(output.input.roll.abs() < 1e-9);
+    }
+
+    #[test]
     fn researched_flaps_follow_a_shallow_descent_without_ballooning() {
         let mut aircraft = profile();
         aircraft.fields.get_mut("flapsLift").unwrap().value = "256".into();
@@ -547,6 +777,52 @@ mod tests {
         );
         assert!(s.position[1] < 7_900.0);
         assert!(!s.crashed);
+    }
+
+    #[test]
+    fn a_damaged_airframe_still_holds_the_requested_descent() {
+        // 2026-10-21 (ai-long-15v15): an F/A-18D with a quarter of its tail
+        // damaged flew its final 50 ft under the glide path, because the
+        // stick it was given ignored the damaged lift and elevator.
+        let fly = |regions: [f64; 6], research: bool| {
+            let mut s = State::new(&profile(), [0.0, 8_000.0, 0.0]).unwrap();
+            if research {
+                s.enable_research(1).unwrap();
+                s.gear_down = true;
+                s.gear = 1.0;
+                s.flaps_down = true;
+                s.flaps = 1.0;
+            }
+            s.damage_regions = regions;
+            s.yaw = 0.0;
+            s.pitch = -3_f64.to_radians();
+            s.bank = 0.0;
+            s.speed = if research { 230.0 } else { 400.0 };
+            s.velocity = crate::attitude::Basis::new(s.yaw, s.pitch, s.bank)
+                .forward
+                .map(|v| v * s.speed);
+            let command = intent(0.0, -3.0, s.speed);
+            for _ in 0..30 * 120 {
+                let output = controls(&s, &command, crate::flight::DT);
+                s.step(&output.input, |_, _| 0.0);
+            }
+            assert!(!s.crashed);
+            attitude(&s).unwrap().flight_path_pitch_deg
+        };
+        for research in [false, true] {
+            let clean = fly([0.0; 6], research);
+            for regions in [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.25],
+                [0.0, 0.0, 0.0, 0.3, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.2, 0.2, 0.5],
+            ] {
+                let damaged = fly(regions, research);
+                assert!(
+                    (damaged - clean).abs() < 0.25 && (damaged + 3.0).abs() < 0.5,
+                    "research={research} {regions:?}: clean {clean}, damaged {damaged}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -964,5 +1240,92 @@ mod tests {
             error < start - 30.0,
             "heading {heading} did not close on 90 from an error of {start}"
         );
+    }
+
+    #[test]
+    fn the_roll_and_pull_rolls_inverted_for_a_dive_and_pushes_for_a_small_change() {
+        let s = state();
+        // Level, wanting 60 degrees down: inverted, pulling.
+        let dive = roll_and_pull(&s, 0.0, 0.0, -60.0, G_LIMIT).unwrap();
+        assert!(dive.bank_deg.abs() > 170.0, "{dive:?}");
+        assert!(dive.load_g > 1.0);
+        // A few degrees down: wings level, unloaded or pushed, never rolled.
+        let nudge = roll_and_pull(&s, 0.0, 0.0, -3.0, G_LIMIT).unwrap();
+        assert!(
+            nudge.bank_deg.abs() < 1.0 && nudge.load_g < 1.0,
+            "{nudge:?}"
+        );
+        // Wanting a right turn: banked right, pulling.
+        let turn = roll_and_pull(&s, 0.0, 20.0, 0.0, G_LIMIT).unwrap();
+        assert!(turn.bank_deg > 30.0 && turn.load_g > 1.0, "{turn:?}");
+        // Inverted already, a push still wanted: it stays inverted.
+        let held = roll_and_pull(&s, 175.0, 0.0, -10.0, G_LIMIT).unwrap();
+        assert!(held.bank_deg.abs() > 90.0, "{held:?}");
+        // Straight and level as wanted: one G, wings level.
+        let steady = roll_and_pull(&s, 0.0, 0.0, 0.0, G_LIMIT).unwrap();
+        assert!((steady.load_g - 1.0).abs() < 1e-6 && steady.bank_deg.abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_roll_and_pull_noses_the_aircraft_into_a_steep_dive_quickly() {
+        // Flown closed loop: the plain adapter's push and the roll and pull
+        // from level toward a 60 degree dive at 15,000 ft. The roll and pull
+        // gets there sooner, as retail's inverted pull does.
+        let fly = |pull: bool| {
+            let mut s = state();
+            let mut adapter = ControlAdapter::new();
+            adapter.set_strike_handling(if pull {
+                Handling::PULL
+            } else {
+                Handling::PLAIN
+            });
+            let command = intent(0.0, -60.0, 700.0);
+            for tick in 0..1200 {
+                let out = adapter
+                    .controls(
+                        &s,
+                        &command,
+                        &limits(),
+                        G_LIMIT,
+                        ROLL_LIMIT,
+                        MAXIMUM_BANK,
+                        None,
+                        crate::flight::DT,
+                    )
+                    .unwrap();
+                s.step(&out.input, |_, _| 0.0);
+                let v = s.velocity;
+                if v[1].atan2(v[0].hypot(v[2])).to_degrees() < -50.0 {
+                    return tick;
+                }
+            }
+            1200
+        };
+        let (pulled, pushed) = (fly(true), fly(false));
+        assert!(pulled < pushed, "pull {pulled} ticks, push {pushed} ticks");
+        assert!(pulled < 6 * 120, "{pulled}");
+    }
+
+    #[test]
+    fn plain_handling_flies_exactly_as_an_adapter_that_never_heard_of_it() {
+        let s = state();
+        let command = intent(40.0, -10.0, 650.0);
+        let fresh = controls(&s, &command, crate::flight::DT);
+        let mut adapter = ControlAdapter::new();
+        adapter.set_strike_handling(Handling::PULL);
+        adapter.set_strike_handling(Handling::PLAIN);
+        let reset = adapter
+            .controls(
+                &s,
+                &command,
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                None,
+                crate::flight::DT,
+            )
+            .unwrap();
+        assert_eq!(fresh, reset);
     }
 }

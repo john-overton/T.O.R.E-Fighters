@@ -3,52 +3,8 @@ use crate::{
     flight_ui::FlightUi,
     instruments::{Instruments, Layout},
 };
-use std::{
-    fs,
-    io::{self, Read, Write},
-    path::Path,
-};
-
-pub fn read(path: &Path) -> io::Result<String> {
-    let mut text = String::new();
-    fs::File::open(path)?
-        .take(256 * 1024 + 1)
-        .read_to_string(&mut text)?;
-    if text.len() > 256 * 1024 {
-        return Err(io::Error::other("settings file exceeds 256 KiB"));
-    }
-    Ok(text)
-}
-pub fn write(path: &Path, text: &str) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent)?;
-    let temporary = parent.join(format!(
-        ".tore-settings-{}-{}.tmp",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    // Cleanup is allowed only after successfully creating our own temporary file.
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)?;
-    let result = (|| {
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temporary);
-    }
-    result
-}
+// The two file helpers moved to `tore-import`, which the media source also uses.
+pub use tore_import::files::{read, write};
 /// Nearest recovered scope setting to a saved nautical-mile value. An equal
 /// distance keeps the lower setting; an old index is never reinterpreted.
 fn nearest_range(nmi: f64) -> usize {
@@ -81,18 +37,30 @@ pub struct Preferences {
     /// by default.
     pub debug_panels: bool,
     pub brightness: i16,
+    pub lighting: crate::cockpit_lighting::Lighting,
     /// Borderless fullscreen, the default for an interactive start. A future
     /// Pref menu row hooks into this `fullscreen` field; `menu.rs` owns that
     /// row.
     // TODO: add a Pref row that toggles `Preferences::fullscreen`.
     pub fullscreen: bool,
+    /// The powered-lift aircraft's stability level (VTOL overhaul, design
+    /// 5.2): Damper unless chosen in Pref or with Ctrl+Shift+A.
+    pub stability: tore_input::StabilityLevel,
+}
+/// The preference file's word for a stability level.
+fn stability_word(level: tore_input::StabilityLevel) -> &'static str {
+    match level {
+        tore_input::StabilityLevel::Off => "off",
+        tore_input::StabilityLevel::Damper => "damper",
+        tore_input::StabilityLevel::Attitude => "attitude",
+    }
 }
 impl Preferences {
     pub fn capture(ui: &FlightUi, i: &Instruments, fullscreen: bool) -> Self {
         let (large, small) = if i.layout == Layout::Large {
-            (&i.pages, &i.other_pages)
+            (i.chosen_pages(), i.other_pages.clone())
         } else {
-            (&i.other_pages, &i.pages)
+            (i.other_pages.clone(), i.chosen_pages())
         };
         Self {
             zoom: ui.zoom,
@@ -102,15 +70,17 @@ impl Preferences {
             radar_history: i.history,
             selected: i.selected,
             small: i.layout == Layout::Small,
-            large_pages: large.clone(),
-            small_pages: small.clone(),
+            large_pages: large,
+            small_pages: small,
             cockpit: ui.cockpit,
             hud: ui.hud,
             ladder: ui.ladder,
             weapon_diagnostics: ui.weapon_diagnostics,
             debug_panels: ui.debug_panels,
             brightness: ui.brightness,
+            lighting: ui.lighting,
             fullscreen,
+            stability: ui.stability,
         }
     }
     pub fn apply(&self, ui: &mut FlightUi, i: &mut Instruments) {
@@ -138,6 +108,8 @@ impl Preferences {
         ui.weapon_diagnostics = self.weapon_diagnostics;
         ui.debug_panels = self.debug_panels;
         ui.brightness = self.brightness;
+        ui.lighting = self.lighting;
+        ui.stability = self.stability;
     }
     pub fn text(&self) -> String {
         fn pages(p: &[u8]) -> String {
@@ -148,7 +120,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 7\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\n",
+            "tore-preferences 9\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\nstability {}\nhud-colour {}\ninstrument-light {}\nflood-light {}\n",
             self.zoom,
             self.radar_range,
             self.rcs_range,
@@ -164,7 +136,11 @@ impl Preferences {
             self.weapon_diagnostics,
             self.debug_panels,
             self.brightness,
-            self.fullscreen
+            self.fullscreen,
+            stability_word(self.stability),
+            self.lighting.colour,
+            self.lighting.instruments,
+            self.lighting.flood
         )
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -181,6 +157,8 @@ impl Preferences {
             Some("tore-preferences 5") => 5,
             Some("tore-preferences 6") => 6,
             Some("tore-preferences 7") => 7,
+            Some("tore-preferences 8") => 8,
+            Some("tore-preferences 9") => 9,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -226,7 +204,10 @@ impl Preferences {
             6 => 18,
             // Version 7 moved Music and Effects to the Sound/Music Prefs
             // settings file.
-            _ => 16,
+            7 => 16,
+            // Version 8 added the stability level.
+            8 => 17,
+            _ => 20,
         };
         if values.len() != expected {
             return Err("unknown preference".into());
@@ -313,12 +294,34 @@ impl Preferences {
             weapon_diagnostics: diagnostics_saved && boolean("weapon-diagnostics")?,
             debug_panels: version >= 6 && boolean("debug-panels")?,
             brightness,
+            lighting: if version < 9 {
+                Default::default()
+            } else {
+                let instruments = integer("instrument-light", 5)? as u8;
+                if instruments == 0 {
+                    return Err("instrument-light outside bounds".into());
+                }
+                crate::cockpit_lighting::Lighting {
+                    colour: integer("hud-colour", 3)? as u8,
+                    instruments,
+                    flood: integer("flood-light", 5)? as u8,
+                }
+            },
             // Files written before version 4 predate the window mode, and
             // borderless fullscreen is the default, so they start fullscreen.
             fullscreen: if version < 4 {
                 true
             } else {
                 boolean("fullscreen")?
+            },
+            // Older files predate the level: Damper, the default.
+            stability: if version < 8 {
+                tore_input::StabilityLevel::Damper
+            } else {
+                tore_input::StabilityLevel::ALL
+                    .into_iter()
+                    .find(|level| stability_word(*level) == get("stability").unwrap_or(""))
+                    .ok_or("invalid stability")?
             },
         })
     }
@@ -344,6 +347,11 @@ mod tests {
         ui.weapon_diagnostics = true;
         ui.debug_panels = true;
         ui.zoom = 1.7;
+        ui.lighting = crate::cockpit_lighting::Lighting {
+            colour: 2,
+            instruments: 1,
+            flood: 0,
+        };
         i.pages = vec![9, 5];
         i.other_pages = vec![7, 8, 4];
         i.radar_range = 1;
@@ -369,6 +377,7 @@ mod tests {
         assert_eq!(i.pages, vec![7, 8, 4]);
         assert!(!ui.cockpit);
         assert_eq!(ui.zoom, 1.7);
+        assert_eq!(ui.lighting, saved.lighting);
         assert_eq!(i.radar_range, 1);
         assert!(!loaded.fullscreen);
     }
@@ -390,14 +399,63 @@ mod tests {
             weapon_diagnostics: true,
             debug_panels: true,
             brightness: 3,
+            lighting: Default::default(),
             fullscreen: false,
+            stability: tore_input::StabilityLevel::Damper,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(p.text().starts_with("tore-preferences 7\n"));
+        assert!(p.text().starts_with("tore-preferences 9\n"));
         assert_eq!(legacy_sound(&p.text()), None);
+        for broken in [
+            "hud-colour 4",
+            "instrument-light 0",
+            "instrument-light 6",
+            "flood-light 6",
+        ] {
+            let key = broken.split_whitespace().next().unwrap();
+            let bad = p
+                .text()
+                .lines()
+                .map(|line| {
+                    if line.starts_with(&format!("{key} ")) {
+                        broken
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(Preferences::parse(&bad).is_err());
+        }
+        let eight = p
+            .text()
+            .replace("tore-preferences 9", "tore-preferences 8")
+            .replace("hud-colour 0\ninstrument-light 4\nflood-light 3\n", "");
+        assert_eq!(Preferences::parse(&eight).unwrap(), p);
+        // Version 7 predates the stability level: Damper.
+        let seven = p
+            .text()
+            .replace("tore-preferences 9", "tore-preferences 7")
+            .replace("hud-colour 0\ninstrument-light 4\nflood-light 3\n", "")
+            .replace("stability damper\n", "");
+        assert_eq!(Preferences::parse(&seven).unwrap(), p);
+        assert!(Preferences::parse(&(seven.clone() + "stability off\n")).is_err());
+        for level in tore_input::StabilityLevel::ALL {
+            let chosen = Preferences {
+                stability: level,
+                ..p.clone()
+            };
+            assert_eq!(Preferences::parse(&chosen.text()).unwrap(), chosen);
+        }
+        for broken in [
+            p.text().replace("stability damper\n", ""),
+            p.text().replace("stability damper", "stability full"),
+        ] {
+            assert!(Preferences::parse(&broken).is_err(), "{broken}");
+        }
         // Version 6 still carries Music and Effects, which move to the
         // sound settings.
-        let six = p.text().replace("tore-preferences 7", "tore-preferences 6")
+        let six = seven.replace("tore-preferences 7", "tore-preferences 6")
             + "music false\neffects true\n";
         assert_eq!(Preferences::parse(&six).unwrap(), p);
         assert_eq!(legacy_sound(&six), Some((false, true)));
@@ -439,7 +497,7 @@ mod tests {
         // with the panel hidden.
         let early = five.replace("weapon-diagnostics true\n", "");
         assert_eq!(Preferences::parse(&early).unwrap(), hidden);
-        // Saving writes version 7, with both switches off.
+        // Saving writes version 8, with both switches off.
         assert!(
             hidden
                 .text()

@@ -51,3 +51,42 @@ Surface-defense spawning and AI are outside this work. Keyboard transitions were
 unit-tested; interactive piloting, all sixteen theater captures, Windows and
 macOS were not exercised in this pass. The map continues normal simulation;
 only the explicit combat capture probe pauses its scene.
+
+## Mission markup, zoom and scroll, off-map pinning (2026-10-12)
+
+Implementation mode, slice CL-MAP. [Behavior specification](../spec/flight-map.md#mission-markup).
+The in-flight map gained the Mission layer (objective area, starts and route,
+read from the mission as built by the same function as the creator's map), the
+creator map's zoom rocker and scroll bars with no black border at any zoom, and
+OFF MAP pinning for anything beyond the theater. No retail comparison was run.
+
+- Unit tests: the markup's circle equals the creator's (single player,
+  networked and creator builds of one mission, and the hashed draw itself), both
+  starts are marked and an open mission starts Blue at its lead, projection and
+  pinning at an edge and a corner, the route (drawn, absent inside the area, per
+  side, with no area), an area beyond the theater pinned with its two labels,
+  segment clipping, and the follow, scroll and Home rules.
+- `menus-flight-map-preview` (windowless, no GPU): eight views of one Ukraine
+  mission, each with no more than 50 void pixels in the plot (all had none).
+  Renders are kept under `.local/surface-close/renders/cl-map/`.
+- Not run: windowed scenarios, the full battery, interactive piloting with the
+  mouse (thumb drags and rocker presses are covered by the shared view's tests,
+  which the creator's map already used), Windows and macOS.
+
+## Airfield sides (2026-10-12)
+
+Implementation mode, slice CL-MS. [Behavior specification](../spec/flight-map.md#knowledge-and-detection).
+The in-flight map draws each airfield on the tile of its airport's side
+against the viewer's own (blue friendly, red hostile, grey neutral), swapped
+for a Redfor viewer. The side is the airport allegiance the layout gives; no
+mission changes it, so it is always known. No retail comparison was run.
+
+- Unit test: a Blue viewer sees a Redfor field as hostile and a Blue field as
+  friendly, a Redfor viewer sees both swapped, and a neutral or unknown field
+  stays grey for both.
+- The preview set is unchanged (eight views of one Ukraine mission); the
+  airfields now carry their side. Before and after renders are kept under
+  `.local/surface-close/renders/cl-ms/`.
+- Start markers are viewer-relative too (own side's start friendly, the other hostile; the words stay BLUE START and RED START), with a unit test for both viewers. The creator's map already drew airfields by side from the Blue pilot's view; it is unchanged.
+- Not run: windowed scenarios, the full battery, a networked Redfor seat,
+  Windows and macOS.

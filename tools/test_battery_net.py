@@ -1,0 +1,948 @@
+"""Tests for the net lane's own helpers (tools/battery_scenarios/net.py)."""
+import re
+import socket
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import battery  # noqa: E402
+from battery_scenarios import net  # noqa: E402
+from battery_scenarios import net_a2g  # noqa: E402
+from battery_scenarios import net_accept  # noqa: E402
+from battery_scenarios import net_datalink  # noqa: E402
+from battery_scenarios import net_observe  # noqa: E402
+
+CHECK_REPORT = """Mission: UKR (clear), airborne at 20000 ft, enemy 20 nm away; friendly 4 F18.PT, 2 F14.PT; enemy 4 MIG29.PT, 2 SU27.PT; 12 aircraft
+Mission file: /tmp/mission.txt
+
+Planes (the numbers open-planes and --slot use):
+   0  F18.PT    friendly wing 1, member 1, experienced
+   1  F18.PT    friendly wing 1, member 2, experienced
+   2  F18.PT    friendly wing 1, member 3, experienced
+   3  F18.PT    friendly wing 1, member 4, experienced
+   4  F14.PT    friendly wing 2, member 1, average
+   5  F14.PT    friendly wing 2, member 2, average
+   6  MIG29.PT  enemy wing 1, member 1, experienced
+   7  MIG29.PT  enemy wing 1, member 2, experienced
+   8  MIG29.PT  enemy wing 1, member 3, experienced
+   9  MIG29.PT  enemy wing 1, member 4, experienced
+  10  SU27.PT   enemy wing 2, member 1, ace
+  11  SU27.PT   enemy wing 2, member 2, ace
+
+Runways of UKR (the numbers start ground takes):
+    0  Zaporizhzhya (5532 ft)
+
+Content manifest: 433 resources, digest 012f3911765f6c35
+
+Content: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.4 (48d62dac)
+Content items: 2 aircraft, 1 theater, 1 weapon, the shared data
+  aircraft F14.PT 0c68b3b124f7f3b8
+  aircraft F18.PT 195dfc20f45d3807
+  theater UKR 2ef6db2ac361554f
+  weapon AIM9X.JT 69d2821b6ba1980a
+  shared data 3fe3336ebde69141
+"""
+
+PLAYERS = """id   seat callsign        plane      rtt    loss    margin  repeated  address
+1    1    GoneA           0         4 ms    0.0%    4.0 tk         0  [::ffff:127.0.0.1]:57384
+2    2    GoneB           2         5 ms    0.0%    5.0 tk         0  [::ffff:127.0.0.1]:33907
+0    0    Stay            1         5 ms    0.0%   28.0 tk        28  [::ffff:127.0.0.1]:39149
+3    -    Lobbyist        -         5 ms      -       -          0  [::ffff:127.0.0.1]:40000
+"""
+
+NET_TSV = (
+    "seconds\tkind\tround_trip_ms\tloss_percent\n"
+    "0.000\tconnect\t127.0.0.1:27411\tViper\n"
+    "0.009\tjoined\t299a11382b378d60\t0\n"
+    "0.321\tmission\t0\n"
+    "0.954\tseated\t0\t0\t0\n"
+    + "".join(f"{i}.0\tstats\t5.0\t0.00\n" for i in range(2, 8))
+)
+
+
+def fake_drive(directory):
+    return SimpleNamespace(work=Path(directory), problems=[], problem=lambda text: None)
+
+
+class GuideMissionTests(unittest.TestCase):
+    def test_the_example_is_read_from_the_guide(self):
+        mission = net.guide_mission()
+        self.assertTrue(mission.startswith("tore-mission 1\n"))
+        self.assertIn("wing friendly 1 F18.PT 4 experienced", mission)
+        self.assertIn("separation-nm 20", mission)
+
+    def test_the_enemy_can_be_brought_closer(self):
+        mission = net.guide_mission(separation_nm=5)
+        self.assertIn("separation-nm 5\n", mission)
+        self.assertNotIn("separation-nm 20", mission)
+        self.assertEqual(mission.count("separation-nm"), 1)
+
+    def test_the_server_files_are_written_with_the_given_settings(self):
+        with tempfile.TemporaryDirectory() as d:
+            config = net.write_server_files(fake_drive(d), 27500, name="Battery", empty_timeout=7)
+            text = config.read_text()
+            self.assertIn("port 27500\n", text)
+            self.assertIn("mission mission.txt\n", text)
+            self.assertIn("name Battery\n", text)
+            self.assertIn("empty-timeout 7\n", text)  # one setting once: the default is replaced
+            self.assertEqual(text.count("empty-timeout"), 1)
+            self.assertIn("after-end quit\n", text)
+            self.assertTrue((Path(d) / "mission.txt").read_text().startswith("tore-mission 1"))
+
+
+class CheckReportTests(unittest.TestCase):
+    def test_the_real_report_passes(self):
+        self.assertEqual(net.check_report_problems(CHECK_REPORT), [])
+
+    def test_a_missing_plane_a_missing_manifest_and_a_wrong_summary_are_reported(self):
+        short = CHECK_REPORT.replace("   5  F14.PT    friendly wing 2, member 2, average\n", "")
+        self.assertTrue(any("planes 0 to 11" in p for p in net.check_report_problems(short)))
+        self.assertTrue(any("manifest" in p for p in net.check_report_problems(CHECK_REPORT.replace("Content manifest", "Content"))))
+        self.assertTrue(any("summary" in p for p in net.check_report_problems(CHECK_REPORT.replace("UKR (clear)", "BAL (clear)"))))
+        self.assertTrue(any("runway" in p for p in net.check_report_problems(CHECK_REPORT.replace("Runways of", "Strips of"))))
+        # Stage L (slice L3): the import's source, its counts and one line per item.
+        no_source = CHECK_REPORT.replace("Content: Fighters", "Contents: Fighters")
+        self.assertTrue(any("source" in p for p in net.check_report_problems(no_source)))
+        no_items = "".join(line for line in CHECK_REPORT.splitlines(True) if not line.startswith("  aircraft"))
+        self.assertTrue(any("aircraft" in p for p in net.check_report_problems(no_items)))
+
+
+class ParsingTests(unittest.TestCase):
+    def test_the_players_table_gives_ids_seats_and_planes(self):
+        rows = {r["callsign"]: r for r in net.players_table(PLAYERS)}
+        self.assertEqual(rows["GoneA"], {"id": 1, "seat": "1", "callsign": "GoneA", "plane": "0"})
+        self.assertEqual(rows["Stay"]["id"], 0)
+        self.assertEqual(rows["Lobbyist"]["seat"], "-")
+        self.assertEqual(len(rows), 4)
+
+    def test_a_good_net_log_passes_and_each_gap_is_named(self):
+        self.assertEqual(net.net_log_problems(NET_TSV), [])
+        self.assertEqual(net.net_log_problems(""), ["net log has no header line"])
+        no_seat = NET_TSV.replace("seated", "x")
+        self.assertIn("net log has no `seated` line", net.net_log_problems(no_seat))
+        few = "".join(NET_TSV.splitlines(True)[:7])
+        self.assertTrue(any("only 2 stats" in p for p in net.net_log_problems(few)))
+        wide = NET_TSV + "9.0\tstats\t5.0\t0.00\textra\n"
+        self.assertTrue(any("columns" in p for p in net.net_log_problems(wide)))
+
+    def test_the_figures_lines_are_found_per_player(self):
+        line = "figures seat 0 Bot1 plane 0: round trip 5 ms, loss 0.0%, arrival spread 1.0 ms"
+        self.assertEqual(net.figures_problems(line, ["Bot1"]), [])
+        self.assertEqual(net.figures_problems(line, ["Bot1", "Bot2"]), ["the server log has no figures line for Bot2"])
+
+    def test_the_scores_lines_are_checked_per_bot(self):
+        good = (
+            "Bot1: scores: players ranked by kills: 1 Bot1 (friendly) 0/0 0.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 0/0 to 0/0; 0:58 left\n"
+            "Bot2: scores: players ranked by kills: 1 Bot1 (friendly) 0/0 0.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 0/0 to 0/0; 0:58 left\n"
+            "Bot1: scores: players ranked by kills: 1 Bot1 (friendly) 1/0 1.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 1/0 to 0/0; 0:00 left\n"
+            "Bot1: Mission ended: the time limit.\n"
+            "Bot2: scores: players ranked by kills: 1 Bot1 (friendly) 1/0 1.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 1/0 to 0/0; 0:00 left\n"
+            "Bot2: Mission ended: the time limit.\n"
+        )
+        self.assertEqual(net.scores_problems(good, ["Bot1", "Bot2"]), [])
+        self.assertEqual(net.scores_problems(good, ["Bot1", "Bot3"])[-1], "Bot3 printed no scores")
+        late = good.replace("Bot2: Mission ended: the time limit.\n", "") + "Bot2: Mission ended: the time limit.\n"
+        self.assertEqual(net.scores_problems(late, ["Bot1", "Bot2"]), [])
+        no_final = good.replace("0:00 left", "0:01 left")
+        self.assertIn("Bot1's last scores are not the final ones (0:00 left)", net.scores_problems(no_final, ["Bot1"]))
+        after = good + "Bot1: scores: players ranked by kills: 1 Bot1 0/0 0.00; sides 0/0 to 0/0; 0:00 left\n"
+        self.assertIn("Bot1's final scores came after the end", net.scores_problems(after, ["Bot1"]))
+        alone = good.replace(", 2 Bot2 (friendly) 0/0 0.00", "")
+        self.assertIn("no scores line of Bot1's lists every player", net.scores_problems(alone, ["Bot1", "Bot2"]))
+
+    def test_the_results_line_is_checked_per_bot(self):
+        row = "0 Blue alive 0k, 1 AI alive 0k, 2 AI dead 1k, 6 Red alive 0k, 7 AI alive 0k"
+        good = (
+            f"Blue: results: 5 aircraft, 2 flown by players: {row}; a draw\n"
+            "Blue: Mission ended: the time limit.\n"
+            f"Red: results: 5 aircraft, 2 flown by players: {row}; a draw\n"
+            "Red: Mission ended: the time limit.\n"
+        )
+        self.assertEqual(net.results_problems(good, ["Blue", "Red"]), [])
+        winner = good.replace("a draw", "the friendly side wins")
+        self.assertEqual(net.results_problems(winner, ["Blue", "Red"]), [])
+        self.assertEqual(
+            net.results_problems(good, ["Blue", "Hawk"]),
+            ["Blue's results list no row for Hawk", "Hawk printed 0 results lines, not one"],
+        )
+        twice = good + good.splitlines()[0] + "\n"
+        self.assertEqual(net.results_problems(twice, ["Blue"]), ["Blue printed 2 results lines, not one"])
+        no_ai = good.replace("1 AI alive 0k, 2 AI dead 1k, ", "").replace("7 AI alive 0k", "8 Red2 alive 0k")
+        self.assertIn("Blue's results list no AI aircraft", net.results_problems(no_ai, ["Blue", "Red"]))
+        no_winner = good.replace("; a draw", "")
+        self.assertIn("Blue's results name no winner of the final scores", net.results_problems(no_winner, ["Blue", "Red"]))
+        late = "Blue: Mission ended: the time limit.\n" + good.splitlines()[0] + "\n"
+        self.assertIn("Blue's results came after the mission's end", net.results_problems(late, ["Blue"]))
+        few = good.replace("5 aircraft, 2 flown", "2 aircraft, 2 flown")
+        self.assertIn("Blue's results list only 2 aircraft, none of them the AI's", net.results_problems(few, ["Blue", "Red"]))
+
+    def test_the_pvp_end_follows_the_kills(self):
+        line = "{who}: scores: players ranked by kills: 1 Blue (friendly) {b}/{bl} 0.00, 2 Red (enemy) {r}/{rl} 0.00; " \
+            "sides {b}/{bl} to {r}/{rl}; {left} left; ends at 1 kill in all{end}\n"
+        flying = line.format(who="Blue", b=0, bl=0, r=0, rl=0, left="1:30", end="")
+        won = flying + line.format(who="Red", b=2, bl=0, r=0, rl=1, left="1:02", end="; the friendly side wins") + \
+            "Red: Mission ended: the kill limit.\n"
+        self.assertEqual(net.pvp_end_problems(won, ["Blue", "Red"]), [])
+        # Two bots that shot each other down on one pass finish level, a draw.
+        both = flying + line.format(who="Red", b=2, bl=1, r=2, rl=1, left="1:02", end="; a draw") + \
+            "Red: Mission ended: the kill limit.\n"
+        self.assertEqual(net.pvp_end_problems(both, ["Blue", "Red"]), [])
+        # A time limit with nobody shot down is no longer enough (the scripted pilot lands gun kills).
+        draw = flying + line.format(who="Blue", b=0, bl=0, r=0, rl=0, left="0:00", end="; a draw") + \
+            "Blue: Mission ended: the time limit.\n"
+        problems = net.pvp_end_problems(draw, ["Blue", "Red"])
+        self.assertIn("nobody shot anyone down: the time limit ended the mission, not the kill limit", problems)
+        self.assertIn("no player scored a kill", problems)
+        # A draw with one scorer, a limit that ended it without a winner line and no end at all.
+        lone = flying + line.format(who="Blue", b=1, bl=0, r=0, rl=0, left="1:00", end="; a draw") + \
+            "Blue: Mission ended: the kill limit.\n"
+        self.assertIn("fewer than two players who scored", net.pvp_end_problems(lone, ["Blue", "Red"])[0])
+        bare = flying + line.format(who="Blue", b=1, bl=0, r=0, rl=0, left="1:00", end="") + \
+            "Blue: Mission ended: the kill limit.\n"
+        self.assertIn("name no winner", net.pvp_end_problems(bare, ["Blue", "Red"])[0])
+        self.assertEqual(net.pvp_end_problems(flying, ["Blue", "Red"])[0], "the kill limit did not end the mission")
+        co_op = won.replace("(enemy)", "(friendly)").replace("ends at 1 kill in all", "")
+        self.assertEqual(
+            net.pvp_end_problems(co_op, ["Blue", "Red"]),
+            ["no scores line puts a player on the enemy side", "no scores line names the kill limit (1 kill in all)"],
+        )
+        self.assertEqual(net.pvp_end_problems("", ["Blue"]), ["no bot printed scores"])
+
+    def test_a_hunt_needs_the_bots_own_kill_and_its_sides_win(self):
+        line = "Hunter: scores: players ranked by kills: 1 Hunter (friendly) {k}/0 0.40; sides {k}/0 to 0/0; " \
+            "ends at 1 kill in all{end}\n"
+        good = line.format(k=0, end="") + line.format(k=1, end="; the friendly side wins") + \
+            "Hunter: Mission ended: the kill limit.\n"
+        self.assertEqual(net.hunt_problems(good, "Hunter"), [])
+        timed = line.format(k=0, end="; a draw") + "Hunter: Mission ended: the time limit.\n"
+        problems = net.hunt_problems(timed, "Hunter")
+        self.assertIn("the kill limit did not end the mission: the bot shot nothing down in time", problems)
+        self.assertTrue(any("has no kill" in p for p in problems), problems)
+        self.assertEqual(net.hunt_problems("", "Hunter"), ["Hunter printed no scores"])
+
+    def test_the_pvp_mission_can_be_made_peaceful_and_its_enemies_dummies(self):
+        mission = net.guide_mission(separation_nm=5)
+        peaceful = net.weapons_hold(mission)
+        self.assertIn("preset hold\n", peaceful)
+        self.assertNotIn("preset free", peaceful)
+        self.assertNotIn("objective ", peaceful)
+        self.assertIn("wing enemy 1 MIG29.PT 4 experienced", peaceful, "the wings themselves are as they were")
+        dummies = net.dummy_enemies(mission)
+        self.assertIn("wing enemy 1 MIG29.PT 4 dummy\n", dummies)
+        self.assertIn("wing enemy 2 SU27.PT 2 dummy\n", dummies)
+        self.assertIn("wing friendly 1 F18.PT 4 experienced\n", dummies, "the friendly wings keep their skill")
+
+    def test_autobalance_slots_are_read_from_the_servers_lobby_lines(self):
+        text = (
+            "12:00:01 Alpha took the slot of plane 0\n"
+            "12:00:02 mission started\n"
+            "12:00:05 Bravo took the slot of plane 6\n"
+            "12:00:09 Charlie took the slot of plane 1\n"
+            "12:00:09 Charlie was refused slot: Autobalance picks the sides.\n"
+        )
+        self.assertEqual(net.slot_takes(text), {"Alpha": [0], "Bravo": [6], "Charlie": [1]})
+        self.assertEqual(net.balance_problems(text, {"Alpha": [0], "Bravo": [6], "Charlie": [1]}), [])
+        moved = text + "12:00:20 Bravo took the slot of plane 2\n"
+        problems = net.balance_problems(moved, {"Bravo": [6], "Echo": [0]})
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("Bravo held the slots [6, 2], not [6]", problems)
+
+    def test_a_revival_is_read_from_the_bots_lines(self):
+        good = (
+            "Phoenix: seat 0, plane 0, at tick 3\n"
+            "Phoenix: ejected\n"
+            "Phoenix: revival: Press Enter to fly again\n"
+            "Phoenix: spawned plane 12 in Friendly wing 1, member 4\n"
+            "Phoenix: seat 0, plane 12, at tick 1200\n"
+        )
+        self.assertEqual(net.revive_problems(good, "Phoenix", 12), [])
+        self.assertEqual(
+            net.revive_problems(good.replace("Phoenix: ejected\n", ""), "Phoenix", 12), ["Phoenix never ejected"]
+        )
+        never = good.replace("plane 12, at tick 1200", "plane 0, at tick 1200")
+        self.assertEqual(net.revive_problems(never, "Phoenix", 12), ["Phoenix was not seated again in plane 12"])
+        lines = good.splitlines(keepends=True)
+        early = lines[0] + lines[4] + lines[1] + lines[2] + lines[3]
+        self.assertIn(
+            "Phoenix's ejection, revival, new plane and seating came out of order",
+            net.revive_problems(early, "Phoenix", 12),
+        )
+        self.assertIn("Phoenix was not told of plane 13", net.revive_problems(good, "Phoenix", 13))
+
+    def test_an_away_and_back_is_read_from_the_bots_lines(self):
+        good = (
+            "Viper: seat 0, plane 0, at tick 3\n"
+            "Viper: away: the AI flies plane 0\n"
+            "Viper: observing from tick 1210, 0 s behind\n"
+            "Viper: back at the controls\n"
+            "Viper: observing ended\n"
+            "Viper: seat 1, plane 0, at tick 1930\n"
+        )
+        self.assertEqual(net.away_problems(good, "Viper", 0), [])
+        self.assertEqual(
+            net.away_problems(good.replace("Viper: away: the AI flies plane 0\n", ""), "Viper", 0),
+            ["the AI never flew Viper's plane 0"],
+        )
+        never = good.replace("plane 0, at tick 1930", "plane 1, at tick 1930")
+        self.assertEqual(net.away_problems(never, "Viper", 0), ["Viper was not seated again in plane 0"])
+        unwatched = good.replace("Viper: observing from tick 1210, 0 s behind\n", "")
+        self.assertEqual(net.away_problems(unwatched, "Viper", 0), ["Viper never watched its plane while away"])
+        self.assertEqual(
+            net.away_problems("", "Viper", 0),
+            [
+                "Viper was never seated in plane 0",
+                "the AI never flew Viper's plane 0",
+                "Viper never watched its plane while away",
+                "Viper never asked for its plane back",
+                "Viper was not seated again in plane 0",
+            ],
+        )
+
+    def test_a_rejoin_is_read_from_the_bots_lines(self):
+        good = (
+            "Viper: rejoining with its token (session 00000000deadbeef)\n"
+            "Viper: joined\n"
+            "Viper: Welcome back, Viper: your aircraft is waiting.\n"
+            "Viper: seat 0, plane 0, at tick 812\n"
+        )
+        self.assertEqual(net.rejoin_problems(good, "Viper", 0), [])
+        self.assertEqual(
+            net.rejoin_problems(good.replace("plane 0, at", "plane 2, at"), "Viper", 0),
+            ["Viper was not seated in plane 0 again"],
+        )
+        self.assertEqual(
+            net.rejoin_problems(good.replace("Viper: Welcome back, Viper: your aircraft is waiting.\n", ""), "Viper", 0),
+            ["Viper was not welcomed back with its aircraft waiting"],
+        )
+        swapped = (
+            "Viper: seat 0, plane 0, at tick 812\n"
+            "Viper: rejoining with its token (session 00000000deadbeef)\n"
+            "Viper: Welcome back, Viper: your aircraft is waiting.\n"
+        )
+        self.assertEqual(
+            net.rejoin_problems(swapped, "Viper", 0),
+            ["Viper's token, welcome and seating came out of order"],
+        )
+        self.assertEqual(
+            net.rejoin_problems("", "Viper", 0),
+            [
+                "Viper never sent its token",
+                "Viper was not welcomed back with its aircraft waiting",
+                "Viper was not seated in plane 0 again",
+            ],
+        )
+
+    def test_bad_network_words_are_recognised(self):
+        import re
+
+        for text in ("The connection ended: a protocol error.", "no packets for 5 seconds", "Bot1: refused: full", "x fault y"):
+            self.assertTrue(re.search(net.NET_BAD, text), text)
+        self.assertFalse(re.search(net.NET_BAD, "Bot1: The connection ended: the player left."))
+
+    def test_a_port_in_use_is_noticed(self):
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as held:
+            held.bind(("::", 0))
+            self.assertTrue(net.port_in_use(held.getsockname()[1]))
+        self.assertFalse(net.port_in_use(battery.free_port()))
+
+    def test_fresh_data_clears_what_a_profile_copy_brought(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d)
+            (data / "logs").mkdir()
+            (data / "logs" / "net-old.tsv").write_text("old")
+            (data / "replays").mkdir()
+            (data / "network-v1.conf").write_text("old")
+            (data / "keep.pack").write_text("import")
+            net.fresh_data(SimpleNamespace(data=data))
+            self.assertEqual([p.name for p in data.iterdir()], ["keep.pack"])
+
+
+class AwayWatchTests(unittest.TestCase):
+    GAME = (
+        "Network: seated in plane 0\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
+        "Observer screen: watching the mission\n"
+        "Observer screen: watching the player's own aircraft\n"
+        "Network: Take Back Flight; taking the aircraft back from the AI\n"
+        "Observer screen: back to the flight\n"
+        "Network: seated in plane 0\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
+        "Observer screen: watching the mission\n"
+        "Observer screen: watching the player's own aircraft\n"
+        "Network: Leave Game (not the host)\n"
+    )
+    SERVER = (
+        "seat 0 Viper: Viper is away: the AI flies plane 0\n"
+        "Viper is back: takes plane 0 from the AI\n"
+        "Viper is away: the AI flies plane 0\n"
+        "12:00:00 Viper left: left\n"
+    )
+
+    def test_two_handoffs_one_return_and_a_leave_pass(self):
+        self.assertEqual(net_observe.away_watch_problems(self.GAME, self.SERVER), [])
+
+    def test_each_missing_step_is_named(self):
+        problems = net_observe.away_watch_problems(
+            self.GAME.replace("Network: Take Back Flight; taking the aircraft back from the AI\n", ""), self.SERVER
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Take Back Flight taking the plane back", problems[0])
+        problems = net_observe.away_watch_problems(self.GAME + "Could not show the mission: x\n", self.SERVER)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("failing to open", problems[0])
+        problems = net_observe.away_watch_problems(self.GAME + "The AI lost your aircraft while you were away.\n", self.SERVER)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("losing the aircraft", problems[0])
+        self.assertEqual(len(net_observe.away_watch_problems("", "")), 9)
+        once = self.SERVER.split("Viper is away", 2)[0] + "Viper is away: the AI flies plane 0\n"
+        self.assertGreaterEqual(len(net_observe.away_watch_problems(self.GAME, once)), 1)
+
+    def test_a_flight_input_that_takes_the_plane_back_is_a_problem(self):
+        problems = net_observe.away_watch_problems(
+            self.GAME + "Network: a flight input; taking the aircraft back from the AI\n", self.SERVER
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("no input does", problems[0])
+
+    def test_a_game_that_only_joined_never_hands_over_or_confirms(self):
+        # John, 2026-10-06: on a dedicated server the player is never the host.
+        for host_line in ("Leave Game (handing the game over)", "Leave Game (ending the game)"):
+            problems = net_observe.away_watch_problems(
+                self.GAME.replace("Leave Game (not the host)", host_line), self.SERVER
+            )
+            self.assertTrue(problems, host_line)
+
+    def test_the_scenario_is_listed_with_a_window(self):
+        scenario = next(s for s in net_observe.scenarios() if s.name == "net-window-away-watch")
+        self.assertTrue(scenario.window and callable(scenario.driver))
+        self.assertTrue(set(scenario.uses) <= {"server", "bot"})
+        # Every picture the script takes is one the driver looks for.
+        for name in net_observe.AWAY_PICTURES:
+            self.assertIn(f"SHOTS/{name}.ppm", net_observe.AWAY_SCRIPT)
+        self.assertEqual(net_observe.AWAY_SCRIPT.count("shot SHOTS/"), len(net_observe.AWAY_PICTURES))
+
+
+class ContentReportTests(unittest.TestCase):
+    """The item lines net-content-builds compares between `tore-server --check` and `tore-bot --content-report`."""
+
+    def test_item_lines_are_read_and_nothing_else(self):
+        text = (
+            "Content manifest: 1405 resources, digest 0011223344556677\n\n"
+            "Content: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.4 (48d62dac)\n"
+            "Content items: 1 aircraft, 1 theater, 1 weapon, the shared data\n"
+            "  aircraft F18.PT 0123456789abcdef\n"
+            "  theater UKR fedcba9876543210\n"
+            "  weapon AIM9X.JT 00000000000000ff\n"
+            "  shared data 1111111111111111\n"
+            "   0  F18.PT    friendly wing 1, member 1, average\n"
+        )
+        self.assertEqual(
+            net.content_item_lines(text),
+            [
+                "aircraft F18.PT 0123456789abcdef",
+                "theater UKR fedcba9876543210",
+                "weapon AIM9X.JT 00000000000000ff",
+                "shared data 1111111111111111",
+            ],
+        )
+
+
+PILOTS = """Pilot1: Lost contact with the host. Moving the game to Pilot2...
+Pilot2: Lost contact with the host. Moving the game to Pilot1...
+Pilot3: Lost contact with the host. Moving the game to Pilot1...
+Pilot1: migrate: lost the host
+Pilot1: migrate: taking the game over
+Pilot1: host: took the game over at tick 3026: replayed 0 ticks in 0 ms, 4 players expected back
+Pilot1: host: Pilot2 resumed 450 ms after the takeover, flying
+Pilot1: host: Pilot3 resumed 466 ms after the takeover, flying
+Pilot2: The game moved to Pilot1.
+Pilot3: The game moved to Pilot1.
+Pilot1: The game moved to Pilot1.
+Pilot1: host: live at tick 3547, 2838 ms after the takeover, 521 ticks fast-forwarded
+Pilot1: migrate: snapshots again 2900 ms after the loss was noticed
+Pilot2: migrate: snapshots again 2400 ms after the loss was noticed
+Pilot3: migrate: snapshots again 2500 ms after the loss was noticed
+Pilot1: host: world: tick 3026, 0 missiles in flight, 2 aircraft kills, 3 players
+Pilot1: host: world: tick 6768, 0 missiles in flight, 4 aircraft kills, 3 players
+Pilot1: results: 12 aircraft, 4 flown by players: 0 Lead dead 0k, 1 Pilot1 alive 0k, 4 AI ejected 0k, 5 AI alive 1k, 7 AI alive 1k, 10 AI alive 1k, 11 AI alive 1k
+"""
+BEFORE = {"who": "Lead", "tick": 3007, "missiles": 1, "kills": 2, "players": 4}
+PILOT_NAMES = ["Pilot1", "Pilot2", "Pilot3"]
+
+
+class MigrationTests(unittest.TestCase):
+    def test_world_lines_and_results_are_read(self):
+        text = "Lead: host: world: tick 120, 3 missiles in flight, 1 aircraft kills, 4 players\n" + PILOTS
+        self.assertEqual(net.world_lines(text, "Lead"), [{"who": "Lead", "tick": 120, "missiles": 3, "kills": 1, "players": 4}])
+        self.assertEqual([w["tick"] for w in net.world_lines(text)], [120, 3026, 6768])
+        self.assertEqual(net.results_kills(PILOTS, "Pilot1"), 4)
+        self.assertIsNone(net.results_kills(PILOTS, "Pilot2"))
+        self.assertEqual(net.snapshots_again(PILOTS, "Pilot2"), [2400])
+
+    def test_a_clean_migration_has_no_problems(self):
+        self.assertEqual(net.migrate_problems(PILOTS, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS), [])
+
+    def test_each_failure_is_named(self):
+        def problems(text, **kw):
+            return net.migrate_problems(text, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS, **kw)
+
+        self.assertTrue(any("0 games took" in p for p in problems(PILOTS.replace("migrate: taking the game over", "x"))))
+        twice = PILOTS + "Pilot2: migrate: taking the game over\n"
+        self.assertTrue(any("2 games took" in p for p in problems(twice)))
+        slow = PILOTS.replace("Pilot3: migrate: snapshots again 2500", "Pilot3: migrate: snapshots again 4900")
+        self.assertTrue(any("Pilot3's snapshots came again after 4900" in p for p in problems(slow)))
+        self.assertTrue(any("Pilot2 was never told" in p for p in problems(PILOTS.replace("Pilot2: The game moved", "x"))))
+        lost = PILOTS.replace("2 aircraft kills", "1 aircraft kills")
+        self.assertTrue(any("holds 1 kills" in p for p in problems(lost)))
+        short = PILOTS.replace("5 AI alive 1k, 7 AI alive 1k, 10 AI alive 1k, ", "")
+        self.assertTrue(any("Results hold 1 aircraft kills" in p for p in problems(short)))
+        self.assertTrue(any("never saw Pilot3 resume" in p for p in problems(PILOTS.replace("Pilot3 resumed", "x"))))
+        stuck = PILOTS.replace("tick 6768", "tick 3100")
+        self.assertTrue(any("did not carry on" in p for p in problems(stuck)))
+        self.assertEqual(problems(PILOTS.replace("Pilot3 resumed", "x"), handover=True), [])
+
+    def test_a_slow_fast_forward_is_judged_by_how_closely_the_pilots_follow_the_host(self):
+        # 831 ticks at 6.0 ms (after the window, which ended when Pilot3 resumed at 466 ms): the 5 second target is
+        # not judged, but the pilots must follow the host going live.
+        slow = PILOTS.replace("live at tick 3547, 2838 ms after the takeover, 521 ticks", "live at tick 3547, 5426 ms after the takeover, 831 ticks")
+        slow = re.sub(r"snapshots again \d+ ms", "snapshots again 6018 ms", slow)
+        self.assertEqual(net.migrate_problems(slow, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS), [])
+        late = slow.replace("Pilot3: migrate: snapshots again 6018", "Pilot3: migrate: snapshots again 9000")
+        self.assertTrue(any("Pilot3's snapshots came again after 9000" in p and "cost 6.0 ms a tick" in p
+                            for p in net.migrate_problems(late, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
+        # The same lateness at a fast tick is a failure of the target.
+        fast = PILOTS.replace("2838 ms after the takeover, 521 ticks", "1200 ms after the takeover, 521 ticks").replace(
+            "Pilot3: migrate: snapshots again 2500", "Pilot3: migrate: snapshots again 4000"
+        )
+        self.assertTrue(any("over 3500 ms" in p for p in net.migrate_problems(fast, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
+
+
+class RateTests(unittest.TestCase):
+    """Slice R1: what a bot prints of the snapshot rate."""
+
+    def test_a_flight_at_the_rate_and_a_lobby_that_shows_it_pass(self):
+        text = "Bot: settings: snapshot-rate 30 a second\nBot: seat 0, plane 0, at tick 0\nBot: snapshots: 30 a second\n"
+        self.assertEqual(net.rate_problems(text, "Bot", 30), [])
+        # A bot of a server at the default 60 shows no setting (it is co-op's default).
+        self.assertEqual(net.rate_problems("Bot: snapshots: 60 a second\n", "Bot", 60, setting_seen=False), [])
+
+    def test_a_missing_line_or_another_rate_is_a_problem(self):
+        self.assertTrue(any("no snapshot rate" in p for p in net.rate_problems("Bot: joined\n", "Bot", 30, setting_seen=False)))
+        wrong = "Bot: settings: snapshot-rate 30 a second\nBot: snapshots: 60 a second\n"
+        self.assertTrue(any("ran at ['60']" in p for p in net.rate_problems(wrong, "Bot", 30)))
+        unseen = "Bot: snapshots: 30 a second\n"
+        self.assertTrue(any("never showed" in p for p in net.rate_problems(unseen, "Bot", 30)))
+
+
+class ScenarioListTests(unittest.TestCase):
+    def test_every_scenario_is_a_driver_in_the_net_lane(self):
+        scenarios = net.scenarios()
+        self.assertGreaterEqual(len(scenarios), 7)
+        for s in scenarios:
+            self.assertEqual(s.lane, "net", s.name)
+            self.assertTrue(callable(s.driver), s.name)
+            self.assertTrue(
+                s.name.startswith(
+                    ("net-server-", "net-discovery", "net-convert-", "net-window-", "net-master-", "net-content-",
+                     "net-migrate-", "net-reach-", "net-host-")
+                ),
+                s.name,
+            )
+            self.assertTrue(set(s.uses) <= {"server", "bot"}, s.name)
+            self.assertEqual(s.window, s.name.startswith("net-window-"), f"{s.name}: only the window scenarios open one")
+
+    def test_the_battery_loads_them(self):
+        names = [s.name for s in battery.load_scenarios() if s.lane == "net"]
+        self.assertIn("net-server-fight", names)
+        self.assertIn("net-window-host", names)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class DatalinkCuesTests(unittest.TestCase):
+    """The windowed data link scenario (stage G, slice G10): the capture's events and the script's pictures."""
+
+    EVENTS = [
+        {"kind": "comms.radio", "text": "Two, attack bandit, bearing 017, 20 miles, angels 20"},
+        {"kind": "datalink.assign", "subject": 0, "object": 1, "fields": {"target": 6}},
+    ]
+
+    def test_an_assignment_and_its_call_pass(self):
+        self.assertEqual(net_datalink.capture_problems(self.EVENTS), [])
+
+    def test_each_missing_event_is_named(self):
+        self.assertEqual(len(net_datalink.capture_problems(self.EVENTS[:1])), 1)
+        self.assertEqual(len(net_datalink.capture_problems(self.EVENTS[1:])), 1)
+        self.assertEqual(len(net_datalink.capture_problems([])), 2)
+        wrong = [dict(self.EVENTS[1], object=2)]
+        self.assertIn("plane 1", net_datalink.capture_problems(wrong + self.EVENTS[:1])[0])
+
+    def test_the_scope_range_starts_at_ten_miles_whatever_the_profile_saved(self):
+        # A profile saved at 50 nm made one `comma` give 100 nm, not 25 (B3, 2026-10-06).
+        saved = "tore-preferences 7\nzoom 1\nradar-range 3\nrcs-range 4\nfullscreen true\n"
+        pinned = net_datalink.pin_scope_range(saved)
+        self.assertIn("\nradar-range 1\n", pinned)
+        self.assertEqual(pinned.replace("radar-range 1", "radar-range 3"), saved)
+        self.assertEqual(net_datalink.pin_scope_range("tore-preferences 7\nzoom 1\n"), "tore-preferences 7\nzoom 1\n")
+        self.assertEqual(net_datalink.SCRIPT.count("key comma"), 1)
+
+    def test_the_scenario_takes_the_pictures_it_looks_for(self):
+        scenario = next(s for s in net_datalink.scenarios() if s.name == "net-window-datalink-cues")
+        self.assertTrue(scenario.window and callable(scenario.driver))
+        for name in net_datalink.PICTURES:
+            self.assertIn(f"SHOTS/{name}.ppm", net_datalink.SCRIPT)
+        self.assertEqual(net_datalink.SCRIPT.count("shot SHOTS/"), len(net_datalink.PICTURES))
+
+
+class HostLeaveTests(unittest.TestCase):
+    """Slice F2-X: the hosting game's Leave Game on the observer menu, with and without a ready standby."""
+
+    COMMON = (
+        "Lobby: Settings: idle-ai 1 minute.\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
+        "Observer screen: watching the player's own aircraft\n"
+    )
+    HANDOVER_GAME = (
+        COMMON
+        + "Host: a ready standby: true\n"
+        + "Network: Leave Game (handing the game over)\n"
+        + "Host: handing the game over to player 1\n"
+        + "Host: handed the game over to player 1 after tick 11610\n"
+    )
+    HANDOVER_BOT = (
+        "Pilot: migrate: taking the game over\n"
+        "Pilot: host: took the game over at tick 11707: replayed 0 ticks in 0 ms, 1 players expected back\n"
+        "Pilot: host: live at tick 11728, 175 ms after the takeover, 21 ticks fast-forwarded\n"
+        + "".join(f"Pilot: host: world: tick {11847 + 120 * i}, 0 missiles in flight, 0 aircraft kills, 1 players\n" for i in range(6))
+    )
+    CONFIRM_GAME = (
+        COMMON
+        + "Host: a ready standby: false\n"
+        + "Network: Leave Game (ending the game)\n"
+        + "Host: tick 13289: mission ended: the host left the game\n"
+    )
+    CONFIRM_BOT = "Pilot: Mission ended: the host left the game.\nPilot: The host left the game.\n"
+
+    def test_a_hand_over_with_a_ready_standby_passes(self):
+        self.assertEqual(net_accept.host_leave_problems(self.HANDOVER_GAME, self.HANDOVER_BOT, True), [])
+
+    def test_a_leave_with_no_standby_ends_the_game_for_the_pilot(self):
+        self.assertEqual(net_accept.host_leave_problems(self.CONFIRM_GAME, self.CONFIRM_BOT, False), [])
+
+    def test_each_missing_step_of_the_hand_over_is_named(self):
+        for cut, word in (
+            ("Lobby: Settings: idle-ai 1 minute.\n", "turned to 1 minute"),
+            ("Network: away for the idle-ai time; the AI flies the plane\n", "saying it is away"),
+            ("Host: a ready standby: true\n", "ready standby"),
+            ("Host: handed the game over to player 1 after tick 11610\n", "hand-over done"),
+        ):
+            problems = net_accept.host_leave_problems(self.HANDOVER_GAME.replace(cut, ""), self.HANDOVER_BOT, True)
+            self.assertEqual(len(problems), 1, cut)
+            self.assertIn(word, problems[0])
+        problems = net_accept.host_leave_problems(
+            self.HANDOVER_GAME, self.HANDOVER_BOT.replace("Pilot: migrate: taking the game over\n", ""), True
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("taking the game over", problems[0])
+
+    def test_a_new_host_whose_world_stands_still_is_a_problem(self):
+        frozen = self.HANDOVER_BOT.replace("tick 11967", "tick 11847").replace("tick 12087", "tick 11847")
+        problems = net_accept.host_leave_problems(self.HANDOVER_GAME, frozen, True)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("did not carry on", problems[0])
+
+    def test_the_wrong_leave_for_the_state_is_a_problem(self):
+        # A hand-over with no standby, or a confirmation with one, is the menu choosing the wrong path.
+        problems = net_accept.host_leave_problems(
+            self.HANDOVER_GAME.replace("handing the game over)", "ending the game)"), self.HANDOVER_BOT, True
+        )
+        self.assertTrue(any("Leave Game lines" in p for p in problems))
+        problems = net_accept.host_leave_problems(
+            self.CONFIRM_GAME.replace("ending the game)", "handing the game over)"), self.CONFIRM_BOT, False
+        )
+        self.assertTrue(any("Leave Game lines" in p for p in problems))
+        # Two leaves (the first Enter must only ask) is a problem too.
+        twice = self.CONFIRM_GAME + "Network: Leave Game (ending the game)\n"
+        self.assertTrue(net_accept.host_leave_problems(twice, self.CONFIRM_BOT, False))
+
+    def test_a_standby_that_is_ready_when_none_stands_by_is_a_problem(self):
+        game = self.CONFIRM_GAME.replace("a ready standby: false", "a ready standby: true")
+        self.assertTrue(any("ready standby" in p for p in net_accept.host_leave_problems(game, self.CONFIRM_BOT, False)))
+
+    def test_the_pilot_must_hear_the_game_end_with_no_standby(self):
+        problems = net_accept.host_leave_problems(self.CONFIRM_GAME, "", False)
+        self.assertEqual(len(problems), 2)
+
+
+class AwayLostTests(unittest.TestCase):
+    """Slice F2-X: the observer menu's Spawn in Aircraft after the AI lost the away player's aircraft."""
+
+    GAME = (
+        "Network: seated in plane 0\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
+        "Observer screen: watching the player's own aircraft\n"
+        "Network: Spawn in Aircraft\n"
+        "Network: seated in plane 12\n"
+    )
+    SERVER = (
+        "seat 0 Viper took plane 0\n"
+        "Viper is away: the AI flies plane 0\n"
+        "Viper lost plane 0 while the AI flew it\n"
+        "seat 1 Viper took plane 12\n"
+    )
+
+    def test_a_lost_plane_and_a_spawn_pass(self):
+        self.assertEqual(net_accept.away_lost_problems(self.GAME, self.SERVER), [])
+
+    def test_a_menu_that_offered_take_back_is_named(self):
+        problems = net_accept.away_lost_problems(self.GAME + "Network: Take Back Flight; taking it\n", self.SERVER)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Take Back Flight", problems[0])
+
+    def test_a_spawn_that_seated_nobody_is_named(self):
+        problems = net_accept.away_lost_problems(self.GAME.replace("Network: seated in plane 12\n", ""), self.SERVER)
+        self.assertTrue(any("seatings" in p for p in problems))
+        problems = net_accept.away_lost_problems(self.GAME, self.SERVER.replace("seat 1 Viper took plane 12\n", ""))
+        self.assertTrue(any("new plane by Revive" in p for p in problems))
+
+    def test_a_return_to_the_old_plane_is_named(self):
+        problems = net_accept.away_lost_problems(self.GAME, self.SERVER + "Viper is back: takes plane 0 from the AI\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("taking the old plane back", problems[0])
+
+
+class AcceptScenarioTests(unittest.TestCase):
+    def test_the_scenarios_are_listed_with_a_window_and_their_pictures(self):
+        scenarios = {s.name: s for s in net_accept.scenarios()}
+        self.assertEqual(
+            sorted(scenarios),
+            [
+                "net-server-smoke-coop", "net-server-smoke-pvp", "net-window-away-lost",
+                "net-window-host-leave-confirm", "net-window-host-leave-handover",
+            ],
+        )
+        for name, scenario in scenarios.items():
+            self.assertEqual(scenario.window, name.startswith("net-window-"))
+            self.assertTrue(callable(scenario.driver))
+            self.assertTrue(set(scenario.uses) <= {"server", "bot"})
+        for name in net_accept.HOST_LEAVE_PICTURES:
+            self.assertIn(f"{name}.ppm", net_accept.HOST_LEAVE_SCRIPT)
+        for name in net_accept.AWAY_LOST_PICTURES:
+            self.assertIn(f"{name}.ppm", net_accept.AWAY_LOST_SCRIPT)
+
+    def test_the_second_enter_is_in_the_script_only_with_no_standby(self):
+        with_standby = net_accept.host_leave_script("/s", True)
+        without = net_accept.host_leave_script("/s", False)
+        self.assertEqual(with_standby.count("key Enter"), 1)
+        self.assertEqual(without.count("key Enter"), 2)
+        self.assertNotIn("CONFIRM", without)
+        self.assertNotIn("JOINWAIT", without)
+
+
+class SmokeTests(unittest.TestCase):
+    """Slice F2-X: what the smoke test's bots must have printed."""
+
+    @staticmethod
+    def texts(mode):
+        pvp = mode == "pvp"
+        settings = "mode pvp, respawn revive, observer-delay 10 seconds, idle-ai 1 minute" if pvp else "respawn revive, idle-ai 1 minute"
+        behind = "10 s behind" if pvp else "0 s behind"
+        away_plane = 7 if pvp else 0
+        phoenix = (
+            f"Phoenix: settings: {settings}\nPhoenix: seat 0, plane 1, at tick 0\nPhoenix: ejected\n"
+            "Phoenix: revival: Press Enter to fly again\nPhoenix: spawned plane 12 in Friendly wing 1, member 5\n"
+            "Phoenix: seat 0, plane 12, at tick 1036\n"
+        )
+        viper = (
+            f"Viper: settings: {settings}\nViper: seat 0, plane {away_plane}, at tick 0\n"
+            f"Viper: away: the AI flies plane {away_plane}\nViper: observing from tick 36, {behind}\n"
+            f"Viper: back at the controls\nViper: seat 1, plane {away_plane}, at tick 1953\n"
+        )
+        owl = (
+            f"Owl: settings: {settings}\nOwl: observing from tick 0, {behind}\nOwl: watching: frames 12, aircraft 12\n"
+        )
+        texts = {"Phoenix": phoenix, "Viper": viper, "Owl": owl}
+        if pvp:
+            owl += "Owl: results: 13 aircraft, 5 flown by players\n"
+            texts["Owl"] = owl
+            end = "scores: players ranked by kills: 1 Blue 2/1; ends at 2 kills in all\nMission ended: the kill limit.\n"
+            texts["Blue"] = "Blue: settings: mode pvp, respawn revive\nBlue: " + end.replace("\nMission", "\nBlue: Mission")
+            texts["Red"] = "Red: settings: mode pvp, respawn revive\n"
+        return texts
+
+    def test_both_modes_pass(self):
+        for mode in ("coop", "pvp"):
+            self.assertEqual(net_accept.smoke_problems(self.texts(mode), mode), [], mode)
+
+    def test_a_pvp_observer_that_is_not_delayed_is_named(self):
+        texts = self.texts("pvp")
+        texts["Owl"] = texts["Owl"].replace("10 s behind", "0 s behind")
+        problems = net_accept.smoke_problems(texts, "pvp")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("10 seconds behind", problems[0])
+
+    def test_a_coop_observer_that_is_delayed_is_named(self):
+        texts = self.texts("coop")
+        texts["Owl"] = texts["Owl"].replace("0 s behind", "10 s behind")
+        self.assertTrue(any("not live" in p for p in net_accept.smoke_problems(texts, "coop")))
+
+    def test_a_missing_revival_away_or_kill_limit_is_named(self):
+        texts = self.texts("pvp")
+        texts["Phoenix"] = texts["Phoenix"].replace("Phoenix: ejected\n", "")
+        self.assertTrue(any("never ejected" in p for p in net_accept.smoke_problems(texts, "pvp")))
+        texts = self.texts("pvp")
+        texts["Viper"] = texts["Viper"].replace("Viper: away: the AI flies plane 7\n", "")
+        self.assertTrue(any("never flew" in p for p in net_accept.smoke_problems(texts, "pvp")))
+        texts = self.texts("pvp")
+        texts["Blue"] = texts["Blue"].replace("Mission ended: the kill limit.", "")
+        self.assertTrue(any("neither the kill limit nor the time limit" in p for p in net_accept.smoke_problems(texts, "pvp")))
+
+    def test_the_time_limit_ends_the_pvp_smoke_as_well(self):
+        texts = self.texts("pvp")
+        texts["Blue"] = texts["Blue"].replace("the kill limit.", "the time limit.")
+        self.assertEqual(net_accept.smoke_problems(texts, "pvp"), [])
+
+    def test_a_starved_server_is_told_from_one_that_kept_up(self):
+        line = "[server] 00:00:%02d tick %d players 4/12 aircraft 12 load %d%% (%.1f ms a tick) up 90 KB/s down 8 KB/s"
+        busy = "\n".join(line % (4 * i, 600 * i, load, load / 12) for i, load in enumerate([0, 104, 323, 480, 582, 160]))
+        why = net_accept.starvation(busy)
+        self.assertIsNotNone(why)
+        self.assertIn("median load was 323%", why)
+        self.assertIn("31% of real time", why)
+        fine = "\n".join(line % (4 * i, 600 * i, load, load / 12) for i, load in enumerate([0, 20, 35, 60, 149, 18]))
+        self.assertIsNone(net_accept.starvation(fine))
+        # The server's own text has no label; a log of two lines, or none, says nothing.
+        self.assertIsNotNone(net_accept.starvation(busy.replace("[server] ", "")))
+        self.assertIsNone(net_accept.starvation(line % (4, 600, 900, 75)))
+        self.assertIsNone(net_accept.starvation(""))
+
+    def test_an_observer_with_a_plane_is_named(self):
+        texts = self.texts("coop")
+        texts["Owl"] += "Owl: seat 0, plane 3, at tick 4\n"
+        self.assertTrue(any("plane or a debrief" in p for p in net_accept.smoke_problems(texts, "coop")))
+
+
+class A2gLoopbackTests(unittest.TestCase):
+    """Protocol 23, slice NA: what the lasing bot and the buddy bomber print, from a real run."""
+
+    LASER = (
+        "Laser: seat 0, plane 0, at tick 0\n"
+        "Laser: a2g: tracking 0x58000006, laser on\n"
+        "Laser: a2g: laser Lasing spot owner 0 target 0x58000006 at 712954 13 833156 range 17920\n"
+        "Laser: a2g: saw SA9.JT 33554619 from plane 1342177294 target 0x0\n"
+        "Laser: a2g: saw GBU10.JT 0 from plane 1 target none\n"
+        "Laser: a2g: saw AGM88.JT 1 from plane 1 target 0x50000015\n"
+    )
+    BUDDY = (
+        "Buddy: seat 1, plane 1, at tick 0\n"
+        "Buddy: a2g: buddy spot owner 0 target 0x58000006 at 712954 13 833156 range 7626\n"
+        "Buddy: a2g: release GBU10.JT buddy yes reach 842-18611 range 2449 spot owner 0 target 0x58000006 at "
+        "712954 13 833156 range 3796\n"
+        "Buddy: a2g: weapon 0 Laser guiding yes tti 7.1\n"
+        "Buddy: a2g: weapon 0 Laser guiding yes tti 5.1\n"
+        "Buddy: a2g: bomb ended at tick 6453\n"
+        "Buddy: a2g: harm cue candidate 0x50000015 emitters 8 cued no readiness Ready\n"
+        "Buddy: a2g: fire AGM88.JT at 0x50000015\n"
+    )
+
+    def test_the_real_run_passes(self):
+        self.assertEqual(net_a2g.a2g_problems(self.LASER, self.BUDDY), [])
+
+    def test_a_spot_the_screens_disagree_on_is_named(self):
+        moved = self.BUDDY.replace("at 712954 13 833156 range 7626", "at 713954 13 833156 range 7626")
+        self.assertTrue(any("apart" in p for p in net_a2g.a2g_problems(self.LASER, moved)))
+        other = self.BUDDY.replace("buddy spot owner 0 target 0x58000006", "buddy spot owner 0 target 0x58000007")
+        self.assertTrue(any("not one the Laser bot lased" in p for p in net_a2g.a2g_problems(self.LASER, other)))
+
+    def test_each_missing_step_is_named(self):
+        for line, words in (
+            ("release GBU10", "released no GBU-10"),
+            ("guiding yes", "never guided"),
+            ("bomb ended", "never saw its bomb end"),
+            ("fire AGM88", "fired no HARM"),
+        ):
+            buddy = "".join(l + "\n" for l in self.BUDDY.splitlines() if line not in l)
+            self.assertTrue(any(words in p for p in net_a2g.a2g_problems(self.LASER, buddy)), line)
+        no_bomb = self.LASER.replace("saw GBU10.JT", "saw MK82.JT")
+        self.assertTrue(any("GBU-10" in p for p in net_a2g.a2g_problems(no_bomb, self.BUDDY)))
+        elsewhere = self.LASER.replace("target 0x50000015", "target 0x50000016")
+        self.assertTrue(any("AGM-88 at" in p for p in net_a2g.a2g_problems(elsewhere, self.BUDDY)))
+
+    def test_the_scenario_is_listed_in_the_net_lane(self):
+        (scenario,) = [s for s in net_a2g.scenarios() if s.name == "net-a2g-loopback"]
+        self.assertEqual((scenario.name, scenario.lane, scenario.window), ("net-a2g-loopback", "net", False))
+        self.assertIn("F16C.PT", net_a2g.MISSION)
+        self.assertIn("easy-targeting", net_a2g.MISSION)
+
+
+class StrikeHandbackTests(unittest.TestCase):
+    """`net-ai-strike-handback` (slice ST-K): the pass set up, the AI's release seen, the cockpit found."""
+
+    STRIKE = "Strike: a2g: strike set target 0x50000008 station 1 mode LVL laser auto rounds 2\n"
+    WATCH = "Stay: a2g: saw MK82.JT 16777216 from plane 0 target none\n"
+    BACK = "Strike: a2g: cockpit designated 0x50000008 station 1 mode LVL laser auto rounds 1\n"
+
+    def test_a_finished_pass_and_the_cockpit_as_left_pass(self):
+        self.assertEqual(net_a2g.handback_problems(self.STRIKE, self.WATCH, self.BACK), [])
+        dead = self.BACK.replace("designated 0x50000008", "designated none")
+        self.assertEqual(net_a2g.handback_problems(self.STRIKE, self.WATCH, dead), [])
+
+    def test_each_failure_is_named(self):
+        problems = net_a2g.handback_problems
+        self.assertTrue(any("never set up" in p for p in problems("", self.WATCH, self.BACK)))
+        self.assertTrue(any("did not continue" in p for p in problems(self.STRIKE, "", self.BACK)))
+        self.assertTrue(any("never read its cockpit" in p for p in problems(self.STRIKE, self.WATCH, "")))
+        for old, new, words in (
+            ("station 1", "station 0", "station 0"),
+            ("mode LVL", "mode CCIP", "in CCIP"),
+            ("rounds 1", "rounds 2", "as many as"),
+            ("designated 0x50000008", "designated 0x50000009", "designates 0x50000009"),
+        ):
+            back = self.BACK.replace(old, new)
+            self.assertTrue(any(words in p for p in problems(self.STRIKE, self.WATCH, back)), new)
+
+    def test_the_scenario_is_listed_in_the_net_lane(self):
+        (scenario,) = [s for s in net_a2g.scenarios() if s.name == "net-ai-strike-handback"]
+        self.assertEqual((scenario.lane, scenario.window), ("net", False))
+        self.assertNotIn("wing enemy", net_a2g.STRIKE_MISSION)
+        self.assertIn("easy-targeting", net_a2g.STRIKE_MISSION)
+
+
+class StoresTests(unittest.TestCase):
+    """`net-a2g-stores` (protocol 27, slice BP3): the other aircraft's stores drawn and seen emptying."""
+
+    LINES = (
+        "Bomber: stores: told 6, bytes 66, largest 12, drawn 3, emptied [3]\n"
+        "Watch: stores: told 9, bytes 101, largest 12, drawn 3, emptied [0 2]\n"
+    )
+
+    def test_a_good_run_passes(self):
+        self.assertEqual(net_a2g.stores_problems(self.LINES, (0, 1)), [])
+
+    def test_each_failure_is_named(self):
+        for old, new, words in (
+            ("emptied [0 2]", "emptied [2]", "plane 0"),
+            ("emptied [0 2]", "emptied [0]", "Watch never drew an AI"),
+            ("emptied [3]", "emptied []", "Bomber never drew an AI"),
+            ("told 9, bytes 101, largest 12, drawn 3", "told 9, bytes 101, largest 12, drawn 1", "other aircraft"),
+            ("told 9,", "told 0,", "no Stores event"),
+            ("largest 12, drawn 3, emptied [0 2]", "largest 90, drawn 3, emptied [0 2]", "bytes"),
+        ):
+            problems = net_a2g.stores_problems(self.LINES.replace(old, new), (0, 1))
+            self.assertTrue(any(words in p for p in problems), (words, problems))
+        self.assertTrue(any("Watch printed" in p for p in net_a2g.stores_problems(self.LINES.split("\n")[0], (0, 1))))
+
+    def test_the_scenario_is_listed_in_the_net_lane(self):
+        (scenario,) = [s for s in net_a2g.scenarios() if s.name == "net-a2g-stores"]
+        self.assertEqual((scenario.lane, scenario.window), ("net", False))
+        self.assertIn("wing enemy 1 MIG29.PT 2 average", net_a2g.STORES_MISSION)
+        self.assertIn("damage=invulnerable", net_a2g.STORES_MISSION)

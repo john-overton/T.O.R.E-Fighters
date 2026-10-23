@@ -1,12 +1,12 @@
 //! Camera-facing original smoke artwork. Simulation owns emission and lifetime.
+use crate::camera::Camera;
 use crate::countermeasure_renderer::{FlareLight, glow};
-use crate::terrain::Camera;
 use tore_formats::Pic;
 use tore_sim::combat::countermeasures::{Devices, MAX_FLARE_PUFFS};
 use tore_sim::combat::smoke::{Kind, MAX_CONTRAIL_PUFFS, MAX_PUFFS, Smoke};
 const MAX_INSTANCES: usize = MAX_PUFFS + MAX_CONTRAIL_PUFFS + MAX_FLARE_PUFFS;
-/// Center, radius, art cell, opacity and flare glow.
-const INSTANCE_BYTES: usize = 9 * 4;
+/// Center, radius, art cell, opacity, flare glow and tint.
+const INSTANCE_BYTES: usize = 12 * 4;
 /// SMOKE.PIC cells: aircraft smoke, then the white missile puff.
 const AIRCRAFT_CELL: f32 = 0.;
 const MISSILE_CELL: f32 = 94.;
@@ -18,6 +18,8 @@ struct Sprite {
     radius: f64,
     cell: f32,
     opacity: f32,
+    /// Multiplies the art's colour (a blast's tan dust).
+    tint: [f32; 3],
 }
 
 struct Frustum {
@@ -57,6 +59,10 @@ pub struct SmokeRenderer {
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
     puffs: Vec<Sprite>,
+    /// The burning city buildings' smoke this frame ([`crate::city_fires`]),
+    /// a budget of its own beside `puffs`, replaced by every
+    /// [`Self::set_city_smoke`] so a second view does not double it.
+    city: Vec<Sprite>,
     count: u32,
 }
 impl SmokeRenderer {
@@ -78,8 +84,21 @@ impl SmokeRenderer {
             bind: None,
             buffer,
             puffs: Vec::new(),
+            city: Vec::new(),
             count: 0,
         }
+    }
+    /// The burning city buildings' smoke columns for this frame: dark puffs
+    /// drawn after the simulation's, within the instance room it leaves.
+    pub fn set_city_smoke(&mut self, puffs: &[crate::gun_flash::Puff]) {
+        self.city.clear();
+        self.city.extend(puffs.iter().map(|p| Sprite {
+            position: p.position,
+            radius: p.radius,
+            cell: AIRCRAFT_CELL,
+            opacity: p.opacity,
+            tint: p.tint,
+        }));
     }
     /// Rebuild for a new anti-aliasing sample count. The bindings follow the
     /// pipeline's derived layout, so the next `prepare` recreates them.
@@ -103,7 +122,7 @@ impl SmokeRenderer {
             label: Some("Original smoke billboards"), layout: None,
             vertex: wgpu::VertexState { module: shader, entry_point: Some("smoke_vertex"), compilation_options: Default::default(), buffers: &[wgpu::VertexBufferLayout {
                 array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32,4=>Float32x3],
+                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32,4=>Float32x3,5=>Float32x3],
             }] },
             fragment: Some(wgpu::FragmentState {module:shader,entry_point:Some("smoke_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
             primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
@@ -197,6 +216,7 @@ impl SmokeRenderer {
                         Kind::Missile | Kind::Contrail => MISSILE_CELL,
                     },
                     opacity: p.opacity(),
+                    tint: crate::gun_flash::PLAIN,
                 })
                 .take(MAX_INSTANCES),
         );
@@ -212,6 +232,26 @@ impl SmokeRenderer {
                     radius: p.radius(),
                     cell: MISSILE_CELL,
                     opacity: p.opacity(),
+                    tint: crate::gun_flash::PLAIN,
+                })
+                .take(room),
+        );
+    }
+    /// Adds the guns' blast smoke, the surface defenses' launch clouds, flak
+    /// puffs and wreck smoke after `prepare`: the white missile puff, or the
+    /// dark aircraft puff for a flak puff or a wreck
+    /// (docs/spec/ac130-linked-guns.md#muzzle-flash).
+    pub fn gun_smoke(&mut self, puffs: &[crate::gun_flash::Puff]) {
+        let room = MAX_INSTANCES.saturating_sub(self.puffs.len());
+        self.puffs.extend(
+            puffs
+                .iter()
+                .map(|p| Sprite {
+                    position: p.position,
+                    radius: p.radius,
+                    cell: if p.dark { AIRCRAFT_CELL } else { MISSILE_CELL },
+                    opacity: p.opacity,
+                    tint: p.tint,
                 })
                 .take(room),
         );
@@ -227,28 +267,27 @@ impl SmokeRenderer {
         let frustum = Frustum::new(camera, aspect);
         // Retain the whole history for other views and for later camera turns.
         // Only the visible instances are sorted and uploaded for this draw.
+        let room = MAX_INSTANCES.saturating_sub(self.puffs.len());
         let mut visible: Vec<_> = self
             .puffs
             .iter()
+            .chain(self.city.iter().take(room))
             .filter_map(|p| frustum.distance(p).map(|distance| (distance, p)))
             .collect();
         visible.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let mut instances = Vec::with_capacity(visible.len() * INSTANCE_BYTES);
+        let mut instances: Vec<f32> = Vec::with_capacity(visible.len() * INSTANCE_BYTES / 4);
         for (_, p) in visible {
-            for value in p
-                .position
-                .map(|v| v as f32)
-                .into_iter()
-                .chain([p.radius as f32, p.cell, p.opacity])
-                .chain(glow(flares, p.position))
-            {
-                instances.extend(value.to_le_bytes());
-            }
+            instances.extend(
+                p.position
+                    .map(|v| v as f32)
+                    .into_iter()
+                    .chain([p.radius as f32, p.cell, p.opacity])
+                    .chain(glow(flares, p.position))
+                    .chain(p.tint),
+            );
         }
-        self.count = (instances.len() / INSTANCE_BYTES) as u32;
-        if !instances.is_empty() {
-            queue.write_buffer(&self.buffer, 0, &instances);
-        }
+        self.count = (instances.len() * 4 / INSTANCE_BYTES) as u32;
+        crate::sim_renderer::write_floats(queue, &self.buffer, 0, &instances);
     }
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.count == 0 {
@@ -281,6 +320,7 @@ mod tests {
             radius: 14.,
             cell: MISSILE_CELL,
             opacity: 0.65,
+            tint: crate::gun_flash::PLAIN,
         };
         let view = Frustum::new(&camera, 1.);
         assert!(view.distance(&puff([0., 0., 100.])).is_some());
@@ -356,8 +396,11 @@ mod tests {
             camera.yaw = 0.;
             camera.pitch = 0.;
             let mut values = camera.uniform(1., [0., 1000000., 0., 0.], [0; 3]);
-            values.resize(356, 0.);
+            values.resize((crate::sim_renderer::UNIFORM_BYTES / 4) as usize, 0.);
             values[336] = 1.;
+            // Tinted puffs (blast dust) dim after dark by the sun's height
+            // (scene.sun.y, float 33); this fixture checks the daylight colour.
+            values[33] = 1.;
             let raw: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: None,

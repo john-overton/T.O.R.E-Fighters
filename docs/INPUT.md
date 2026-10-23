@@ -15,6 +15,14 @@ through those same actions. This layer adds no external screen export, no window
 rearrangement, no sensor behaviour of its own and no fabricated readings; the
 shared [sensor component](radar.md) decides what the scopes show.
 
+## Cockpit lighting
+
+Ctrl+I then -/+ adjusts instruments and cockpit art. Ctrl+Shift+F then -/+ adjusts
+red flood lighting. These chords expire after four seconds or another key;
+Ctrl may stay held. Ctrl+H cycles HUD colour, while Shift+[ / Shift+] retain
+retail HUD brightness. Controls > View lists the selectors and separate
+bindable dim/bright actions. [Levels and defaults](spec/cockpit-lighting.md).
+
 ## Quick start
 
 Every default key, mouse input and gamepad button is in the
@@ -59,6 +67,250 @@ need a custom profile; no universal button-index layout is assumed.
 keyboard controls and any custom keyboard bindings. It also allows deterministic
 bridge tests without touching hardware.
 
+## VTOL, tiltrotor and helicopter controls
+
+The six powered-lift aircraft share the ordinary stick and rudder, and some
+stock keys change meaning with the aircraft flown. John chose the retail nozzle
+keys and the collective on the throttle controls on 2026-10-08 (VTOL overhaul
+decisions 4 and 5); the trim keys, the stability chord and the gamepad layer
+are agent decisions, made after checking the defaults for clashes. Every other
+aircraft keeps its keys. The flying guide is
+[flight controls](FLIGHT-CONTROLS.md#vtol-tiltrotors-and-helicopters).
+
+| Key | AV-8, Yak-141 | Helicopters (AH-64, Mi-24, CH-47) | V-22 | Every other aircraft |
+| --- | --- | --- | --- | --- |
+| Z / X | Nozzles up / down 10 degrees | Rudder | Rudder | Rudder |
+| Shift+Z | Nozzles to 0, or from the 100-degree braking stop to 90 | Rudder (as Z) | Rudder (as Z) | Rudder (as Z) |
+| Shift+X | Nozzles to 90, again to 100 | Rudder (as X) | Rudder (as X) | Rudder (as X) |
+| End / Page Down | Rudder | Rudder | Rudder | Rudder |
+| Ctrl+Up / Ctrl+Down | Nozzle slew | Cyclic trim forward / aft | Cyclic trim forward / aft | Nothing |
+| Ctrl+Left / Ctrl+Right | Nothing | Cyclic trim left / right | Cyclic trim left / right | Nothing |
+| 0 | Nozzles to 0 | Trim to centre | Nacelles forward | Nothing |
+| 1-8 | Engine throttle | Collective | Collective (thrust control lever) | Engine throttle |
+| Ctrl+Page Up / Ctrl+Page Down | Nothing | Nothing | Nacelles toward airplane / helicopter | Nothing |
+| Ctrl+Home / Ctrl+End | Nothing | Collective up / down | Collective up / down | Nothing |
+| Ctrl+Alt+A | Hover hold (refused) | Hover hold | Hover hold | Hover hold (refused) |
+| Ctrl+Shift+A | Stability level | Stability level | Stability level | Nothing |
+
+How the aircraft-dependent keys work:
+
+- **Contextual stock keys.** `crates/tore-app/src/input_catalog.rs` lists them
+  (`CONTEXTUAL`): each says on which aircraft its action is live, and the input
+  layer switches the stock bindings with the aircraft. A key never has two
+  meanings on the same aircraft; the catalog test checks it. A player's own
+  binding on one of these keys turns the aircraft-dependent stock meaning off,
+  so it wins. Removing such a key in the controls screen removes it from every
+  aircraft, because a removed stock key is removed by key.
+- **Throttle controls drive the collective** on the helicopters and the V-22,
+  whose engines are governed: the 1 to 8 keys, a bound throttle lever and the
+  gamepad throttle buttons become collective settings, steps and rates in the
+  input layer, so the simulation still receives an explicit collective and the
+  wire is unchanged. A throttle lever picks up against the collective. The
+  dedicated `collective` lever and Ctrl+Home / Ctrl+End stay, and a bound
+  collective lever takes priority over the throttle lever.
+- **Trim keys** (`trim-pitch-rate`, `trim-roll-rate`, `trim-pedal-rate`) move
+  the trim a 2 percent tap at once and then, held past 0.2 s, 10 percent of
+  travel a second in 20 Hz steps (fitted). Each step is a trim command, so the
+  host, recordings and tapes see it. At the Attitude stability level the
+  cyclic trim keys move the attitude the aircraft returns to instead, 5
+  degrees a second. `trim-set` (no keyboard default; bind a stick button) makes
+  the current stick plus trim the trim and ignores the stick until it is back
+  within 5 percent of centre: force trim on a spring-centred stick.
+  `trim-centre` clears it.
+- **Stability level.** `stability-level` cycles Off, Damper and Attitude and
+  `stability-level=off`, `=damper` and `=attitude` choose one; Damper is the
+  default (John, 2026-10-08). The choice is announced (`Stability: Damper`),
+  saved as a preference (Pref → Stability level, which also cycles it) and
+  applied to every powered-lift flight, restart and seat as a pilot command.
+- **Hover hold** (`hover-hold`) is the autopilot mode of the helicopters and
+  the V-22 (VTOL overhaul slice P9). Ctrl+Alt+A is the stock key; on some
+  European layouts Windows reports AltGr as Ctrl+Alt.
+
+The gamepad keeps its layer:
+
+| Control | Keyboard default | Standard Linux gamepad default |
+| --- | --- | --- |
+| Nozzle pitch, forward / vertical | Ctrl+Up / Ctrl+Down (vectoring jets) | Hold Select, right stick forward / back |
+| V-22 conversion, airplane / helicopter | Ctrl+Page Up / Ctrl+Page Down | Hold Select, right stick left / right |
+| Collective, increase / decrease | Ctrl+Home / Ctrl+End, or the throttle keys | Hold Select, right stick up / down, or the throttle buttons |
+| Nozzles/nacelles forward neutral | 0 (not on helicopters) | Hold Select, D-pad up |
+| Engine on/off | E | Hold Select, Start |
+| Engine power (vectoring jets) | 1-8 throttle presets and steps | Shoulder buttons |
+
+Pitch, roll and rudder keep their ordinary arrows and End / Page Down
+assignments. The right-stick additions use the selected
+aircraft's modifier map.
+Combat shoulder, face, countermeasure and click bindings retain their actions.
+Powered-lift engine and forward-neutral commands use the contextual Start and
+D-pad Up alternatives below. The left stick stays live during collective
+adjustments. Shared right-stick axes act according to aircraft capability.
+Added modifier mappings apply only to aircraft with the relevant controls.
+Other aircraft retain their ordinary look, rudder and modifier bindings.
+Automatic gamepad rows use an `auto-gamepad:` device alias so this distinction
+survives profile saves. Explicit user bindings use ordinary device identities or
+user aliases and always override automatic rows on the same control.
+On powered-lift aircraft Select+Start toggles the engine; on vectoring jets and
+tiltrotors Select+D-pad Up returns nozzles/nacelles forward. These contextual
+bindings replace the developer fixture alternatives on those aircraft.
+Center a stick after changing the modifier layer;
+focus loss or pause requires release before controls become active again.
+
+**Flight controls** lists separate absolute lever, rate-axis and decrease/increase
+rows for nozzle pitch, nozzle yaw, V-22 conversion and collective. Absolute
+lever positions use 0..1, except signed nozzle yaw, which uses -1..1. Axis rows
+support the editor's deadzone, sensitivity, inversion and response curves;
+min/center/max calibration remains a profile-file setting. The tokens are
+`vector-pitch`, `vector-yaw`, `conversion`, `collective` and their `-rate`
+forms. Unsupported aircraft ignore the added demands. Releasing a rate input
+holds its last requested position. Neutral resets conversion and both nozzle
+axes, and leaves collective and power unchanged. Digital position/reset commands
+release an absolute lever's ownership until it moves at least 2% of calibrated
+travel. This fitted host rule prevents a stationary HOTAS lever from immediately
+undoing the command, including after pause or focus loss. Defaults and limits reset
+with the aircraft state on restart or seat handoff.
+
+The [VTOL / Helicopters keyboard sheet](tore-keyboard-map.html#lift) shows these
+controls together with ordinary attitude, engine, gear and brake keys. Pilot
+input tapes write version 3 (`tore-pilot 3`), which adds the trim, stability,
+nozzle-key and hover-hold commands; version 1 and 2 tapes remain readable, and
+reject those words. Old tapes of the six powered-lift aircraft do not reproduce
+once their physics changes.
+
+The Apache and Chinook keep their fixed landing gear down; G reports that the
+gear is fixed. The Hind retains retractable gear. This is an explicit
+[fitted equipment rule](spec/variety-flight.md), with no new binding.
+
+## AC-130 directed gun groups
+
+Ctrl+7 selects the next gun candidate; Ctrl+8 links or unlinks it. Hold Select
+and press the gamepad D-pad up or down for the same actions (they sat on the
+right stick before the gunsight took it, John 2026-10-09).
+These gestures act on AC-130 only. The Weapons instrument shows the authoritative
+`LINK` membership and marks the current candidate with its ordinary selection
+arrow. Fire releases every enabled member together, each retaining its own
+ammunition and cadence; it needs no target or firing solution. Empty or
+blocked members do not stop the others. An empty group
+reports GROUP EMPTY. Bracket selection retains ordinary single-gun operation
+until multiple guns are linked; NAV suspends group fire.
+
+Mounts follow the gunsight's aim point (a target, a pin or the free line of
+sight) at 30 degrees/second and shots use their actual barrel directions and
+muzzle positions. NO TARGET, CANNOT BEAR, SLEWING, MAX RANGE and TERRAIN MASK
+only say the shot is not solved; the guns still fire. SAFE, EMPTY, GROUP EMPTY
+and NO LINE OF FIRE (the gun's own airframe) are what stop a gun.
+The [gunship contract](spec/ac130-linked-guns.md) records source arcs, fitted
+articulation/clearance, limits and shared host/client/replay state. These controls
+and the linked firing capability are authored choices, not recovered retail
+key assignments or original linked fire behaviour.
+
+### AC-130 gunsight controls
+
+The gunsight is the AC-130's target camera. These keys were chosen by John on
+2026-10-09; the behaviour behind them is the AC-130 gunsight project's, and the
+[controls list](CONTROLS.md) has every default. Since the air-to-ground slice T1
+the same keys drive the targeting sight of every aircraft with a laser
+designator or a FLIR ([air-to-ground](spec/air-to-ground.md#the-targeting-sight));
+on an aircraft without one, Backslash, Shift+Backslash and the zoom keys say "no
+targeting sight". The gamepad gestures stay the AC-130's.
+
+| Action | Keyboard | Gamepad | Notes |
+| --- | --- | --- | --- |
+| Designate what is under the crosshair | Backslash | Select + A, tapped | An object if one is there, else the ground. Retail's Backslash is "designate the IR/laser target": every aircraft with a sight |
+| Next visible ground object | / | None | The first press takes the one nearest the line of sight, then each press steps right, wrapping to the leftmost |
+| Laser on or off by hand | Ctrl+L | None | Aircraft with a laser designator; the laser also comes on by itself with a laser weapon selected |
+| Pin the ground under the crosshair | Shift+Backslash | Select + A, held half a second | |
+| Drop the target or pin; again, back to the default view | L or ; | Select + B | The existing clear-designation keys |
+| Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | Select + right stick | Actions `sight-left`, `sight-right`, `sight-up`, `sight-down` for keys and buttons; `sight-x` and `sight-y` for sticks and HOTAS axes (right and up positive) |
+| Zoom in / out | Shift+' / Shift+; | None | Retail's bomb camera zoom keys; six steps |
+| Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
+| Pin or release (console: orbit or search) | P | None | AC-130 only (`sight-pin-toggle`): pins the ground under the crosshair with the sight free, else lets the pin or track go, as L does. In the sensor console that is ORBIT or SEARCH. Agent's key choice, 2026-10-14 (P is free in the original, docs/spec/keyboard.md) |
+| Sensor console and orbit hold | Ctrl+9 | Select + Guide (Xbox) | AC-130 only (`sensor-console`): opens the console; the autopilot searches straight and level with the sight free, or circles the sight's pin or track; again hands the aircraft back ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). Agent choice of keys, 2026-10-13: next to the gun keys; Select + Guide was the range's incoming-missile fixture, which is off on the AC-130 |
+| Sensor picture | Ctrl+Backslash | None | The AC-130 sensor console only (Ctrl+9; [sensor console](spec/target-window.md#sensor-console)): white hot, black hot, TV and night vision in turn; does nothing elsewhere. Action `sight-polarity`; agent's key choice beside the other Backslash sight keys (2026-10-13), the two further modes John's (2026-10-14) |
+| Sensor picture, direct | Shift+F5 / F6 / F7 / F8 | None | The AC-130 sensor console only: straight to white hot / black hot / TV / night vision; nothing elsewhere. Actions `sight-whot`, `sight-bhot`, `sight-tv`, `sight-nvg`; agent's key choice (nr-replayviews, 2026-10-16, John asked for a shortcut to each picture): Shift with the function keys is free in flight. The replay's Sensor View reads the same keys |
+| Console radar range | Ctrl+0 | None | The AC-130 sensor console only: the A-G radar's range, 5, 10 and 25 nm in turn; does nothing elsewhere. Action `console-range`; agent's key choice beside Ctrl+9 (2026-10-14). In the console T and Shift+T step through the radar contacts the sensor sees |
+
+**Inside the sensor console** (slice nr-cona; John asked for slew, zoom,
+pin/release and heading, altitude and throttle keys on 2026-10-14; which keys
+is an agent decision). The stick does not fly the aircraft there, so flight
+controls take console meanings, with no new bindings to learn:
+
+| Control | In the console |
+| --- | --- |
+| Arrows, the stick (gamepad left stick), mouse look (right button held) | Slew the sight (the arrows with the hold ramp below; the mouse one field of view per 1,000 pixels at sensitivity 1, capped at the full slew rate) |
+| = and -, the mouse wheel | Zoom the sight a step |
+| Shift + Left / Right (the look keys), the look axes | Step the search heading 5 degrees |
+| Shift + Up / Down, the look axes | Step the search altitude, or the orbit's height above its point, 500 ft |
+| 1 to 6, 7 and 8 (and their bound buttons) | The autopilot's speed: 0 to 100% of the corner-to-maximum band, then 5 kt steps |
+| P | Pin or release: ORBIT or SEARCH |
+| Shift+P (`gun-lock`) | Gun lock: the guns stay on the target or point while the sensor slews free; again lets them follow the sensor. Agent's key choice, 2026-10-14, beside P (Shift+P is free in the original) |
+| Ctrl+Insert / Ctrl+Delete (`console-chaff` / `console-flare`) | Chaff / flare: the console's own actions, bound apart from Insert and Delete (John, 2026-10-14); the keys are an agent choice, the Ctrl versions of the retail chaff and flare keys. They work outside the console too |
+
+**The gamepad in the console** is John's layout (2026-10-14). While the
+console is open it owns every standard gamepad completely, whatever the
+profile (stock defaults on or off, the player's own gamepad bindings): the
+layout (`CONSOLE_PAD` in `crates/tore-app/src/input.rs`) is added for each
+connected gamepad and every other binding of that gamepad stands aside, the
+triggers' rudder, the throttle buttons and the flight switches included.
+Only menu navigation, Start (pause) and Xbox (the flight menu) keep working
+(John's bug of 2026-10-14: "make sure all sensor override controls take
+complete control of the controller"). A console action the player bound on
+their gamepad themselves wins: the layout's binding of that action, and the
+layout's binding on that control, stand aside. The triggers do nothing in
+the console (agent decision: John's layout fires on A). The layout is never
+saved into the player's controls file. Closed, the gamepad's flight bindings
+are back. A joystick or HOTAS keeps its own bindings, and the keyboard is
+unchanged.
+
+| Gamepad | In the console |
+| --- | --- |
+| View + Xbox | Open and close the console |
+| Left stick | Slew |
+| Left stick press (L3) | Pin or release |
+| Right stick | Left and right: heading; up and down: altitude or orbit height |
+| D-pad up / down | Speed up / down |
+| A (held) | Fire |
+| Y | Next target |
+| View + Y | Drop the target |
+| View + D-pad right | Previous target |
+| X | Select gun (next candidate) |
+| B | Link gun (link or unlink the candidate) |
+| LB / RB | Zoom out / in |
+| D-pad right | Sensor radar range 5 / 10 / 25 nm |
+| D-pad left | Camera mode: white hot, black hot, TV, night vision |
+| View + A / View + B | Flare / chaff |
+| View + right stick press (R3) | Gun lock |
+
+A held heading or altitude key steps at once, then every 0.15 s after 0.3 s.
+The view does not turn in the console. Each key reaches the host as the seat
+command `Console` ([the console's keys](spec/ac130-linked-guns.md#the-consoles-keys)).
+Rebinding the arrows, the look keys, the zoom or the throttle keys moves the
+console meanings with them, since the console reads the flight actions.
+
+A held slew key or button starts at a quarter of full deflection for a quarter
+second, so a short press nudges, then runs at full rate; an analog axis is
+proportional. The seat input carries the deflection (`sight`, -127 to 127 on
+each axis) and the zoom step (`sight_zoom`, 1 to 6, 3 at the start of a flight
+and of each new plane); the host turns them into degrees, so single player and
+multiplayer slew alike.
+
+A hat (such as a HOTAS point-of-view switch) binds to the four `sight-` holds,
+one direction each, using its virtual button tokens: `bind stick axis:16=-1
+sight-left hold`. Hat positions are not `position=N` bindings for these
+actions, because a slew is held, not pressed.
+
+Select + A stays the radar `designate` on every other aircraft; the AC-130
+swaps in the sight's designate and pin. The Select + D-pad uses that belong to
+the vectoring jets, the range reset and the damage test are off on the AC-130,
+where the D-pad picks and links guns, and so is Select + Guide's incoming-missile
+fixture, where Guide opens the sensor console. The live-fire range reset, which took
+Backslash, is now Ctrl+Shift+Backslash.
+
+On [the keyboard map](tore-keyboard-map.html) the sight keys are on the Fly &
+Fight sheet, with a sight legend box that also lists the AC-130's gamepad
+gestures; Tab (the gun), Ctrl+M (delivery mode) and Ctrl+R (the ground radar)
+are on that sheet too. The range reset is a developer fixture and stays off it,
+as the [map's rules](tore-keyboard-map-rules.md) require.
+
 ## In-game controls and saved preferences
 
 **Alt-Enter** switches between native borderless fullscreen and the previous
@@ -102,11 +354,11 @@ design drawn with the imported raster font. Every default is listed in the
   Weapons group: commands to bind. **Keys** (Inputs on other devices) lists
   the actions an input is already bound to. Type its name as the rows show it
   (`page` finds Page Up and Page Down; a short name such as `f` or `lb` must be
-  a whole word, so `f` finds F and Ctrl+F but not F1), or click **Press** and
+  a whole word, so `f` finds F and Ctrl+Shift+F but not F1), or click **Press** and
   press it. A pressed keyboard key matches exactly, modifiers included. A
   pressed button, D-pad direction or axis on a controller matches every
   binding that uses it, including combinations where it is the modifier.
-  Folded groups open while a search is active. Ctrl+F jumps to the field;
+  Folded groups open while a search is active. Ctrl+Shift+F jumps to the field;
   Backspace edits, Delete or **Clear** empties it, and Esc empties it before
   it backs out of the screen. Typed text stays when you change device; a
   pressed input is dropped, because it names a control on the old device.
@@ -214,6 +466,8 @@ already in use is reported in the Head tracker status line and on the console.
 ```text
 modifier DEVICE CONTROL         # up to 64 in total; CONTROL may be a D-pad direction
 disable keyboard KEY            # a stock key the player removed
+disable replay-keyboard KEY     # a stock drone key removed only in replays
+disable replay-mouse CONTROL    # a stock drone mouse input removed only in replays
 disable mouse wheel:up          # a stock mouse binding the player removed
 mouse-look on|off               # default on
 mouse-sensitivity 0.1..5        # default 1
@@ -268,10 +522,14 @@ Default keys follow Fighters Anthology wherever the original has the command
   incoming-missile range fixture), or moved to a free neighbour (next airport,
   to Shift+N).
 - An FA key whose feature T.O.R.E lacks stays unassigned. Pressing it says "not
-  implemented yet": U (IFF), Shift+R (air-to-ground radar), Shift+A and Shift+G
+  implemented yet": Shift+A and Shift+G
   (AWACS and air-to-ground radar links), Shift+F (target damage), Shift+I
-  (airbase inventory), Shift+J (drop tanks), Shift+D (message history) and
-  Alt+F (engage the laser-designated target).
+  (airbase inventory), Shift+J (drop tanks) and Shift+D (message history).
+  Alt+F (engage the IR or laser target) and Alt+W (engage every target of the
+  designated target's class) are built, as the wing orders onto the ground
+  below. U (IFF) and Ctrl+T (Show Target
+  Info) work now, and the multiplayer keys K and Alt+Shift+E, W, B and H sit on
+  keys FA leaves free ([controls](CONTROLS.md)).
 - The keypad follows FA whatever NumLock says: 0 and period release chaff and
   flares, 1 and 3 are the rudder, 8, 2, 4 and 6 are the stick, 5 centers the
   view, and plus and minus zoom. In the controls screen a keypad key is
@@ -281,9 +539,14 @@ Default keys follow Fighters Anthology wherever the original has the command
 T.O.R.E additions on keys FA leaves free: E (engine), Shift+U (HUD), F11
 (help), Ctrl+1–6, Ctrl+Shift+1–4 and Ctrl+Tab (instruments), Shift+N and
 Shift+L (next airport, request landing), Ctrl+Shift+R and Ctrl+Shift+C (tower
-repeat and cancel), Alt+L (land at selected airport), Alt+0 with
-Alt+Shift+1–4 (address the flight or one wingman), and Ctrl+B (mark a
-[mission replay](REPLAYS.md#when) moment). With Pref → Debug panels? on, a
+repeat and cancel), Alt+L (land at selected airport), Alt+A (sort: a
+different bandit for each wingman, [data link](DATALINK.md#giving-assignments)),
+Alt+N (monitor the [battle net](DATALINK.md#frequencies)), Alt+0 with
+Alt+Shift+1–4 (address the flight or one wingman), Ctrl+B (mark a
+[mission replay](REPLAYS.md#when) moment), and on the powered-lift aircraft
+Ctrl+Alt+A (hover hold), Ctrl+Shift+A (stability level) and the Ctrl+arrow
+cyclic trim of the helicopters and the V-22, where FA's Ctrl+arrows (thrust
+vectoring) do nothing. With Pref → Debug panels? on, a
 right-click that does not drag opens the debug menu, which takes no key.
 
 Deliberate differences from FA:
@@ -291,15 +554,26 @@ Deliberate differences from FA:
 | Key | T.O.R.E | FA | Why |
 | --- | --- | --- | --- |
 | Ctrl+A | Waypoint autopilot | Find-nearest cheat, when the Multi menu allows it | John requested the two autopilot modes on 2026-09-17 |
-| Z / X | Rudder, alongside End / Page Down | Wing sweep | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically |
+| Z / X | Rudder, alongside End / Page Down; on the AV-8 and Yak-141 the nozzle steps, as in FA | Wing sweep and, on the VTOL jets, nozzle steps (Shift+Z / Shift+X presets) | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically. The jets' nozzle keys are John's choice of 2026-10-08 |
 | M | Cycle sensor channels | HARM seeker | No HARM channel yet |
-| Shift+K | Jettison the selected external group, live-fire range only | Jettison all air-to-ground ordnance | Fitted jettison |
+| Shift+K | Jettison all external tanks and their remaining fuel | Retail used Shift+J for tanks | Opinionated, John 2026-10-15; [jettison](spec/jettison.md) |
+| Ctrl+Shift+K | Jettison the selected external store group | Retail Shift+K dropped all air-to-ground ordnance | Opinionated, John 2026-10-15 |
 | L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
 | Shift+/ | Center view, alongside keypad 5 | Unused | Laptops lack a keypad |
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
-| Backslash | Reset range target (test) | IR/laser designation, only with advanced targeting on | Moves when that targeting exists |
-| Tab | Nothing | Fire the gun | Not wired yet |
-| Ctrl + arrows | Nothing | Thrust vectoring | Not implemented |
+| Backslash | Designate what is under the sight's crosshair (the AC-130's gunsight, or the targeting sight of an aircraft with a laser designator or a FLIR); elsewhere "no targeting sight" | IR/laser designation, only with advanced targeting on | The AC-130 gunsight is that targeting, John 2026-10-09; every sight aircraft since A2G slice T1. The live-fire range reset moved to Ctrl+Shift+Backslash (kept its key, gained Ctrl+Shift) |
+| Shift+Backslash | Pin the sight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
+| P | AC-130 gunsight: pin or release (`sight-pin-toggle`); in the sensor console ORBIT or SEARCH. Elsewhere "no gunsight" | Unused (free in the original) | T.O.R.E addition, John 2026-10-14 (pin/release); the key is an agent choice |
+| Ctrl+9 | AC-130 sensor console and orbit hold (`sensor-console`); elsewhere "No sensor console on this aircraft" | Unused | T.O.R.E addition, John 2026-10-13 (the console); the key is an agent choice |
+| Ctrl+0 | AC-130 sensor console's radar range, 5, 10 and 25 nm (`console-range`); nothing elsewhere | Unused (the retail manual lists no Ctrl+0) | T.O.R.E addition, John 2026-10-14 (the range selector); the key is an agent choice |
+| Shift+' / Shift+; | Zoom the sight in / out; elsewhere a message | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
+| Alt + arrows | Slew the sight | Unused | T.O.R.E addition, John 2026-10-09 |
+| Tab | Fire the gun while held, whatever is selected (`fire-gun`, a hold action like the trigger; [the gun key](spec/air-to-ground.md#the-gun-key)) | Fire the gun (no default pad button) | Retail key, bound by A2G slice K1, built by FX-T |
+| Shift+R / Ctrl+R | Air-to-ground radar page on or off (`a-g-radar`): turns the air radar off, never clears the designation; R returns to the air radar | The same | Retail keys, bound by K1, built by G1. Ctrl+Shift+R is still the tower repeat |
+| / | Sight: next visible object (`sight-next`): the sight tracks the next visible ground object to the right; "no targeting sight" without one | Designate the next visible object as the IR/laser target | Retail key, bound by K1, built by T1 |
+| Ctrl+L | Laser on or off by hand (`laze`); "no laser designator" without one | Unused | T.O.R.E addition, John (A2G decision 5), built by T1 |
+| Ctrl+M | Delivery mode: CCIP / LVL for bombs, BORE / CUED for missiles (`weapon-seeker-mode`) | Unused | T.O.R.E addition, A2G design 2.7; the action existed without a key |
+| Ctrl+X | Nearest hostile ground target, under Easy targeting or on the AC-130 (`nearest-ground`); otherwise a message says it needs the cheat | Nearest ground target cheat when the Multi menu allows it | John, A2G decision 21; built by G1 |
 | V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
 
 ## Profiles and calibration
@@ -380,11 +654,12 @@ and automatic calibration wizards are not implemented.
 
 | Mode | Meaning / compatible actions |
 | --- | --- |
-| `axis` | Centered pitch, roll, yaw, throttle-rate, look-x or look-y |
+| `axis` | Centered pitch, roll, yaw, throttle-rate, look-x, look-y, sight-x or sight-y |
 | `unit` | Absolute throttle position with pickup |
 | `positive` / `negative` | Button-held signed contribution to a centered action |
 | `trigger-positive` / `trigger-negative` | Signed unipolar analog contribution; pairs add within a device/priority |
 | `press` / `release` | One command on the selected edge; repeated reports do not retrigger |
+| `tap` / `long` | A command on release if the control was held under half a second (`tap`), or once when it has been held half a second (`long`). Used together on one control, as the gunsight's designate and pin are on Select + A. 60 ticks at 120 Hz; a pause or lost focus forgets the press |
 | `hold` | Hold an equipment switch on while any assigned, armed source holds it |
 | `switch` | Explicit equipment on/off when the physical contact changes; initial state does not actuate |
 | `follow` | Continuously request the physical equipment setting, including at initialization/resume |
@@ -410,7 +685,8 @@ use the same simulation commands. `press` toggles; `switch`/`follow` request a s
 existing system behavior and never force animation fractions or bypass aircraft
 capabilities. Rafale's unavailable hook stays unavailable. `throttle=0.75`
 requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,
-`look-x`, `look-y`, and the absolute `head-yaw` and `head-pitch`. Mouse controls
+`look-x`, `look-y`, `sight-x`, `sight-y` (the AC-130 gunsight, right and up
+positive), and the absolute `head-yaw` and `head-pitch`. Mouse controls
 are `button:right`, `button:middle`, `button:back`, `button:forward`, `wheel:up`
 and `wheel:down`; each wheel notch is one press.
 
@@ -419,7 +695,9 @@ UI actions: `pause`, `menu`, `end-flight`, `restart`, `bookmark`, `view-front`, 
 `view-target`, `view-target-player`, `view-fly-by`, `view-missile`, `store-view`,
 `view-target-track`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
 `range-down`, `range-up`, `radar-mode`, `sensor-channel`, `sensor-infrared`,
-`sensor-history`, `page-0` through `page-9`, instrument
+`sensor-history`, the AC-130 gunsight's `sight-designate`, `sight-pin`, `sensor-console`,
+`sight-zoom-in`, `sight-zoom-out` and the holds `sight-left`, `sight-right`,
+`sight-up`, `sight-down`, `page-0` through `page-9`, instrument
 commands below, and `menu-up/down/left/right/accept/back`. `sensor-channel` is an
 alias of `radar-mode`; both cycle the available radar and infrared channels
 rather than the retired cosmetic display mode. `sensor-infrared` requests the
@@ -453,6 +731,9 @@ unplug. When multiple absolute throttles are assigned, priorities determine the
 eligible owner rather than averaging positions.
 
 Menus and explicit/focus pause clear pending gameplay commands and held output.
+The running-flight respawn selector uses this same input context and menu bindings,
+while the network simulation continues. Closing it restores the flight context;
+see [multiplayer revival](MULTIPLAYER.md#ai-aircraft-and-player-choice).
 Physical state remains tracked. Neutral buttons/axes rearm on resume; controls
 still held must return to neutral/release first. Custom keyboard chords retain
 the original release owner even after modifiers change. Menu buttons cannot leak
@@ -489,8 +770,11 @@ actuator audio follows actual state changes. Existing aircraft response and
 configuration remain separate. Camera look resolution cannot acquire flight-axis
 or throttle ownership.
 
-Native discovery/polling runs on a dedicated worker (4 ms service interval), with
-bounded messages to the app (8 ms wake deadline when idle). Linux delivers ordered
+Native discovery/polling runs on a dedicated worker (4 ms service interval with a
+controller connected and the game in flight, 16 ms with a controller in a menu,
+50 ms with none), with bounded messages to the app (polled every 8 ms in flight,
+the replay viewer and the controls screen, 16 ms in menus with a controller, 33 ms
+without). Linux delivers ordered
 evdev transitions at report boundaries; macOS generic devices use HID queues.
 Windows raw controllers and Apple GameController profiles sample native current
 state, so a complete pulse between samples can be missed. Once captured, short command press/release pairs survive until their
@@ -641,18 +925,19 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | --- | --- |
 | Right shoulder | Space: hold fire/release |
 | Left shoulder | ] next NAV/weapon |
-| South (A) | T: next radar target |
+| South (A) | T: next radar target; on the AC-130, tapped: Backslash (designate under the sight), held half a second: Shift-Backslash (pin the ground) |
 | East (B) | L: clear designation |
 | West (X) | [ previous NAV/weapon |
 | North (Y) | J: own jammer toggle |
 | Left-stick click | R: radar toggle |
-| Right-stick click | Shift-K: selected external group jettison |
-| D-pad up | Backslash: replace range target |
-| D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage |
+| Right-stick click | Ctrl+Shift+K: selected external group jettison |
+| Right stick (AC-130) | Slew the gunsight; other aircraft keep their uses of it (look, nozzles, collective) |
+| D-pad up | Ctrl-Shift-Backslash: replace range target; on the vectoring jets and the V-22, neutral nozzles or nacelles; on the AC-130, Ctrl-7 (next gun candidate) |
+| D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage; on the AC-130, Ctrl-8 (link or unlink the candidate gun) |
 | D-pad left | Insert: release one chaff cartridge |
 | D-pad right | Delete: release one flare |
 | Start | Shift-Y: target jammer fixture |
-| Guide | Ctrl-Shift-I: one incoming selected source weapon fixture |
+| Guide | Ctrl-Shift-I: one incoming selected source weapon fixture; on the AC-130, Ctrl-9 (the sensor console) |
 
 Chaff and flare took D-pad left and right from the damage-class and
 station-failure fixtures on 2026-09-26, an agent decision. Both fixtures remain
@@ -668,7 +953,7 @@ button or combo in **Escape → Control** when necessary. No desktop shortcuts a
 changed. Unmodified Start still pauses; unmodified flight buttons, shoulders,
 rudder triggers and instrument navigation retain their functions. External view
 uses F10 or a custom `view-external` binding; Select is no longer its default.
-No AI makes the incoming launch decision. Fixtures/jettison require `--live-fire`.
+No AI makes the incoming launch decision. Incoming and damage fixtures require `--live-fire`; jettison does not.
 
 Profile chord syntax is `MODIFIER+CONTROL` or `MODIFIER+MODIFIER+CONTROL`, for
 example:
@@ -729,8 +1014,9 @@ strength and comfort still require physical controller acceptance.
 ## Additional aircraft capabilities
 
 F-14D, A-4E and X-31 EFM use the existing input bindings. Device commands respect
-capabilities: A-4E has no burner, and X-31 has no hook. No thrust-vectoring input
-is implemented. See [aircraft behavior](spec/additional-aircraft.md) and
+capabilities: A-4E has no burner, and X-31 has no hook. The added powered-lift
+controls apply to AV-8B, Yak-141, V-22 and helicopters in the researched adapter;
+X-31 keeps its existing fitted aerodynamic model. See [aircraft behavior](spec/additional-aircraft.md) and
 [validation](baselines/aircraft-fa-expansion.md).
 
 `--flight-throttle 0..1` sets the initial throttle for engine-material captures;
@@ -742,8 +1028,8 @@ including the original imported warning samples.
 
 ## Missile seeker control
 
-Radar power OFF disables radar-missile bore and tones; IR remains independent; weapon selection permits a permanently
-unguided DUMB release. Selecting passive IR alone does not switch power off.
+Radar power OFF disables radar-missile bore and tones; IR remains independent; active missiles launch maddog, searching immediately with their own seeker.
+SARH flies unguided until illumination begins. Selecting passive IR alone does not switch power off.
 Surface weapons cannot use the A2A bore toggle; surface designation remains deferred.
 Armed independent air-to-air missiles automatically enter BORESIGHT when radar power is on and no target is
 selected. IR also supports bore with radar power off. A selected track takes
@@ -755,9 +1041,12 @@ diagnostic panel when it is shown, to clear
 both sensor and HUD display selection. A selected target outside the HUD has a
 direction chevron; the Easy targeting cheat keeps it after sensor coverage is
 lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md).
-`weapon-seeker-mode` remains rebindable but has no default key; the diagnostic
-panel's mode label is clickable only while the panel is shown (**Escape → Pref →
-Weapon diagnostics?**). Supported radar weapons still need aircraft lock.
+`weapon-seeker-mode` is on Ctrl+M (delivery mode, [key placement](#key-placement)) and
+rebindable; the diagnostic panel's mode label is clickable only while the panel
+is shown (**Escape → Pref → Weapon diagnostics?**). Supported radar weapons need aircraft illumination to guide, not to release.
+MAX RANGE and ACQUIRING are advisory. Radar missiles can also release without
+support, including surface SARH waiting for later A-G illumination. Unlocked IR shots search as BORE;
+active maddog seekers can acquire friendlies. See [release rules](spec/missiles.md#player-release-advisories-and-maddog).
 
 BORE uses a five-degree circular half-angle. Its blinking diamond marks a
 provisional contact, not a guaranteed lock; the blinking triangle on the range
@@ -803,9 +1092,12 @@ perceived attacks on their flight or protected aircraft.
 | Alt-2 / Alt-3 | Break left / right |
 | Alt-4 / Alt-5 | Break low / high |
 | Alt-6 / Alt-7 / Alt-8 / Alt-9 | Approach the designated target from left / right / low / high |
-| Alt-E | Engage the designated target |
-| Alt-R | Engage designated target from formation, medium control |
-| Alt-W | Attack on contact |
+| Alt-E | Engage the designated target: an aircraft, else a ground object (the ground designation, or the object nearest the sight's pin) |
+| Alt-R | Engage designated target from formation, medium control; takes a ground target like Alt-E |
+| Alt-F | Engage the IR/laser target: the object the targeting sight tracks, its laser spot is on, or its pin is nearest to, air or ground. With none held, attack on contact |
+| Alt-G | Lase my target: a wingman with a designator lases the ground target you designated (a T.O.R.E addition, John 2026-10-11) |
+| Alt-A | Sort: give each addressed wingman a different bandit from the flight's [data link picture](DATALINK.md#giving-assignments) (a T.O.R.E addition, John 2026-10-05) |
+| Alt-W | Engage every target of the designated target's class ("Attack SAMs", "Attack tanks"); a designated aircraft, or no designation, is "Attack bandits", attack on contact |
 | Alt-P | Protect me, maintain an escort duty |
 | Alt-D | Disengage and return to neutral formation |
 | Alt-B | Bug out: return to base and stop answering orders |
@@ -820,10 +1112,17 @@ perceived attacks on their flight or protected aircraft.
 Input profiles can use these as `key:Alt-2`, `key:Alt-t`, `key:Alt-Shift-1`
 and the corresponding keys above.
 
-Where T.O.R.E's orders differ from FA's: FA's Alt-W engages every target of the
-designated target's class; T.O.R.E's attack on contact is the nearest order it
-has. FA's Alt-F engages the IR/laser-designated target, which T.O.R.E does not
-have yet, so Alt-F reports it unavailable. Alt-T starts from the formation the
+Where T.O.R.E's orders differ from FA's: Alt-W and Alt-F are FA's. Alt-W
+engages every target of the designated target's class, as FA's does; T.O.R.E
+used to put attack on contact there (to 2026-10-11), which is now what Alt-W
+does with no ground target designated and what Alt-F does with nothing in the
+sight, so attack on contact keeps no key of its own. FA's
+IR/laser contact is the one chosen with `/` and `\` while IR/Laser advanced
+targeting is on; T.O.R.E takes the sight's track, laser spot or pin, which
+those keys set. The orders onto the ground (Alt-E, Alt-R, Alt-F, Alt-W) go to
+the wingmen the flight lead addresses and are refused, with the wingman saying
+"Winchester", by one with no surface store it can attack with. Alt-G is a
+T.O.R.E addition on a key FA leaves free. Alt-T starts from the formation the
 first addressed wingman flies. Bug out moved from Alt-U to FA's Alt-B on
 2026-09-26, when John adopted the FA layout; Alt-U no longer gives orders.
 Land at selected airport has no retail equivalent; it is an opinionated
@@ -834,7 +1133,8 @@ stays and is counted in the reply. Land at selected airport sends the addressed
 wingmen to the airport the tower has selected (Shift-N): the runway you are
 cleared for there, or else its longest usable runway. Hostile, unknown or
 unpermitted neutral airports and airports with no usable runway are refused
-with a message. A bugged-out wingman no longer answers any order; later orders
+with a message. The 22 short airstrips (a runway under 2,000 ft) are not on the
+Shift-N list, so a wing is never sent to one. A bugged-out wingman no longer answers any order; later orders
 skip it and say so. Both orders print the call ("Bug out", "Land at Field")
 without voice, because the reviewed radio catalog has no recording for them.
 Bug out is ignored on the ground, during takeoff, or from landing marshal
@@ -923,9 +1223,22 @@ legacy and restricted native modes remain available for airborne starts.
 Shift-M toggles the live map. Escape closes it, plus/minus zoom, arrows pan and
 Home resumes following the player. Map navigation takes priority over keyboard
 flight bindings for those keys while open. Other flight controls remain live.
+Enter or controller A switches between Map and Mission. The Mission brief
+scrolls with Up/Down, the controller D-pad, Page Up/Down, Home/End, the mouse
+wheel or the red scroll bar. Escape or controller B closes it. The map retains
+its view when switching tabs. A/B and the D-pad do not also operate the aircraft
+while this page is open. In the in-flight respawn Loadout and Aircraft pages,
+select Mission... or press M for the same brief; Close, Escape/B or Enter/A
+returns to the unchanged page. Pre-flight loadout menus are unchanged.
 Right-side map buttons toggle categories, with Buildings off by default.
 Selections last until flight restart; no category settings appear in Escape. See the
 [map specification](spec/flight-map.md).
+
+While waiting for multiplayer revival, Escape opens **Loadout...**, plus
+**Aircraft...** in Player Choice slots, throughout and after the delay. Done
+saves edits; Cancel or Escape discards unsaved edits. Close all menus and press
+Enter or controller A to fly again when ready. Early presses do not queue a
+respawn, and closing a menu never confirms one. See [revival choices](MULTIPLAYER.md#ai-aircraft-and-player-choice).
 
 Quick Mission inline options support right-click to cycle backward, wrapping to
 the last available value. Left-click retains forward cycling and the existing
@@ -952,7 +1265,7 @@ training targets. See [behavior](spec/dummy-aircraft.md).
 ## NAV and weapon selection
 
 `[` and `]` cycle backward/forward through NAV and weapons. Selection controls
-arming; U and semicolon have no action. Old `master-arm` profile entries are
+arming. Old `master-arm` profile entries are
 accepted but do nothing. The editor offers `weapon-next` and `weapon-previous`.
 NAV INFO minus/plus select destinations; button 3 switches mission/airport mode.
 WEAPONS minus/plus select NAV/weapons; button 3 pages the store list.
@@ -960,7 +1273,9 @@ IR boresight growl follows the actively tracked bore target and its displayed
 percentage without designation. Empty bore and lost tracks are silent. A radar
 missile in boresight sounds its lock tone on the bore return without
 designation, cued seekers sound only while tracking, and radar tones fall
-silent inside minimum range.
+silent inside minimum range. Minimum range does not block missile release.
+All-aspect IR can growl and lock head-on within its shorter acquisition range;
+see [missile aspect rules](spec/missiles.md#infrared-aspect-and-acquisition).
 [Behavior and current route limitations](spec/weapon-navigation-selection.md).
 
 ## Ownship damage report
@@ -1013,7 +1328,12 @@ The [replay viewer](REPLAYS.md#viewer) has its own built-in keys, an agent
 design from 2026-09-26. They are listed in the
 [controls master list](CONTROLS.md#built-in-controls-outside-the-tables) and on
 the Replay sheet of the [keyboard map](tore-keyboard-map.html#replay). They
-cannot be rebound yet, and profiles do not change them.
+remain built in except the drone commands. **Controls > Replay drone** configures
+mode cycling, follow/free selection, movement, boost, look hold and speed changes.
+Keyboard/mouse drone bindings are separate from flight bindings. Profiles store
+them under the replay-keyboard and replay-mouse device names. Custom controller
+bindings use their ordinary device identity, and act only in the replay.
+The drone still moves while playback is paused; the Escape menu stops input.
 
 - **Playback:** Space plays or pauses. J, K and L play backwards, pause and
   play forwards, as in video editors; J or L again doubles the speed up to
@@ -1022,13 +1342,16 @@ cannot be rebound yet, and profiles do not change them.
   while paused; with Shift, 30 seconds. Home and End go to the start and end,
   Page Up and Page Down to the previous and next timeline marker.
 - **Cameras:** Tab and Shift+Tab pick the aircraft. F1 to F10 and F12 give the
-  flight views from it; F11 is not a view. Backquote switches to the drone,
+  flight views from it; F11 is not a view. O and Shift+O look at the next or
+  previous aircraft, weapon or ground object present now. Keypad 5 or Shift+/
+  recenters the look, and plus and minus zoom. Backquote switches to the drone,
   which W, A, S, D, E and Q fly; Shift is four times faster.
 - **Panels and display:** I, F and G open or close the selected aircraft's AI
   thinking, telemetry and missile guidance panels, C the Comms panel; M opens
   its right-click menu, and X closes every panel. N, T and R switch name
   labels, the mission timer and flight path trails; Shift+R steps the trail
-  length.
+  length. B draws or hides the laser spots, designations, guided weapons and
+  bomb landings in the 3D view ([the marks](REPLAYS.md#laser-and-bomb-marks)).
 - **Screenshots:** H hides the whole interface and the pointer while playback
   and camera keys keep working. P saves the view without the interface as a
   PNG.
@@ -1041,3 +1364,21 @@ As in flight, letters are read by their physical key and the keypad works as
 the navigation keys whatever NumLock says. Alt+Enter, Alt+F4 and, on macOS,
 Command+Q still work. The viewer ignores every other Ctrl, Alt or Command
 combination, so Ctrl+B marks a moment only in flight.
+
+During flight preparation, flight controls remain paused. Escape cancels a
+multiplayer join or pending content check and returns to the connection screen.
+Window close and resize remain available. See [loading screen](spec/loading-screen.md).
+
+### Multiplayer menu navigation
+
+The [multiplayer menu specification](spec/multiplayer-menus.md) defines the
+shared ? dropdown: F1 or controller Menu opens it, arrows and Enter/A choose,
+M returns to main and X exits while open. Controller Left/Right move between
+lounge controls; Up/Down scroll the focused Games or Players list. Settings
+Close/F10 applies its draft and Escape discards it.
+
+
+The dedicated-server [feedback form](spec/replay-feedback.md) uses existing
+menu inputs, with Tab between field and buttons and Escape to cancel. Its
+on-screen keyboard accepts the controller's existing menu directions and
+accept/back buttons. No global flight binding is added.

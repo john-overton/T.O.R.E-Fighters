@@ -9,6 +9,12 @@ const MAX_WAVES: usize = 256;
 pub const FULL_LEVEL: f64 = 0.4;
 /// The original refuses any sound request farther away than this.
 pub const REFUSED_BEYOND_FT: f64 = 20000.;
+/// The distance within which a weapon launch is at full level.
+pub const LAUNCH_FULL_FT: f64 = 100.;
+/// The distance at which a launch is silent when its record names none
+/// (`maxSndDist` 0 or negative). Fitted: the value on 118 of the 135 shipped
+/// projectile records (docs/formats/sound.md#weapon-launch-and-bomb-release-sound).
+pub const LAUNCH_DEFAULT_FT: i16 = 6000;
 /// Heard from inside a cockpit, a sound from outside the aircraft plays at
 /// this share of its level with its treble above this cutoff removed
 /// (opinionated, John 2026-09-28).
@@ -57,6 +63,7 @@ impl Kind {
     /// type's pair is its full-level and silent distances.
     pub fn parameters(self) -> (f64, f64, f64) {
         match self {
+            Self::Blast(crate::combat::blast::JETTISON) => (100., 7000., FULL_LEVEL),
             Self::Blast(kind) => crate::combat::blast::explosion(kind)
                 .map_or((1000., REFUSED_BEYOND_FT, FULL_LEVEL), |e| {
                     (f64::from(e.full_ft), f64::from(e.silent_ft), FULL_LEVEL)
@@ -80,6 +87,11 @@ pub struct Listener {
     /// Main camera mode. A change is a camera cut, not listener motion.
     pub view: u8,
     pub external: bool,
+    /// The aircraft the listener flies, whose source among the ones given to
+    /// [`Passes::step`] is its own: its sonic boom is heard from an outside
+    /// view only. External fly-by cameras can be passed by it. `None` for a listener that flies
+    /// nothing.
+    pub own: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -111,6 +123,10 @@ pub fn mix(kind: Kind, position: Vector, listener: Listener) -> Mix {
         let fade = ((maximum - distance) / (0.2 * maximum)).clamp(0., 1.);
         peak * (reference / distance.max(reference)) * fade * fade * (3. - 2. * fade)
     };
+    placed(relative, distance, gain, listener)
+}
+
+fn placed(relative: Vector, distance: f64, gain: f64, listener: Listener) -> Mix {
     outside(
         Mix {
             gain: gain as f32,
@@ -119,6 +135,31 @@ pub fn mix(kind: Kind, position: Vector, listener: Listener) -> Mix {
         },
         listener,
     )
+}
+
+/// The distance in feet at which a weapon launch is silent: the record's
+/// `maxSndDist`, or [`LAUNCH_DEFAULT_FT`] when it names none, never past the
+/// 20,000 ft the original refuses.
+pub fn launch_range(max_sound_distance: i16) -> f64 {
+    let feet = if max_sound_distance > 0 {
+        max_sound_distance
+    } else {
+        LAUNCH_DEFAULT_FT
+    };
+    f64::from(feet).clamp(LAUNCH_FULL_FT + 1., REFUSED_BEYOND_FT)
+}
+
+/// A weapon launch heard from outside the firing aircraft: level 255, full
+/// within 100 ft and fading in a straight line to silence at the record's
+/// distance (docs/spec/sound.md#weapon-launch-and-bomb-release). Inside the
+/// firing aircraft's own cockpit it is not this: it plays centered at full
+/// level.
+pub fn launch_mix(position: Vector, listener: Listener, max_sound_distance: i16) -> Mix {
+    let relative = sub(position, listener.position);
+    let distance = length(relative);
+    let maximum = launch_range(max_sound_distance);
+    let gain = FULL_LEVEL * ((maximum - distance) / (maximum - LAUNCH_FULL_FT)).clamp(0., 1.);
+    placed(relative, distance, gain, listener)
 }
 
 /// A sound from outside the aircraft as the listener hears it: through
@@ -309,7 +350,7 @@ impl Passes {
         for source in sources {
             let speed = length(source.velocity);
             let mach = speed / speed_of_sound(source.position[1]);
-            if source.id == SourceId::Aircraft(0) {
+            if matches!(source.id, SourceId::Aircraft(id) if listener.own == Some(id)) {
                 if let Some(armed) = self.own_armed {
                     if armed && mach >= 1. {
                         if listener.external {
@@ -327,7 +368,11 @@ impl Passes {
                 } else {
                     self.own_armed = Some(mach < 1.);
                 }
-                continue;
+                // Outside cameras can be passed by their own aircraft too.
+                // The cockpit still excludes its own pass and trailing shock.
+                if !listener.external {
+                    continue;
+                }
             }
             let kind = match source.id {
                 SourceId::Aircraft(_) => Kind::AircraftPass,
@@ -336,7 +381,7 @@ impl Passes {
             let maximum = kind.parameters().1;
             let relative = sub(source.position, listener.position);
             let distance = length(relative);
-            let cone = if matches!(source.id, SourceId::Aircraft(_)) && mach > 1. {
+            let cone = if matches!(source.id, SourceId::Aircraft(_)) && mach >= 1. {
                 let along = dot(relative, source.velocity) / speed;
                 let lateral = (dot(relative, relative) - along * along).max(0.).sqrt();
                 Some(along - lateral * (mach * mach - 1.).sqrt())
@@ -436,6 +481,7 @@ mod tests {
             right: [1., 0., 0.],
             view: 0,
             external: false,
+            own: Some(0),
         }
     }
     #[test]
@@ -524,6 +570,39 @@ mod tests {
         let dirt = mix(Kind::Blast(15), [5050., 0., 0.], l).gain;
         assert!((dirt - FULL_LEVEL as f32 / 2.).abs() < 1e-6);
         assert_eq!(Kind::Blast(30).parameters(), (2000., 25000., FULL_LEVEL));
+    }
+    #[test]
+    fn launches_fade_in_a_straight_line_from_100_ft_to_the_records_distance() {
+        let l = Listener {
+            external: true,
+            ..listener()
+        };
+        // A Maverick record: maxSndDist 7000 (AGM-65A).
+        let at = |x: f64| launch_mix([x, 0., 0.], l, 7000).gain;
+        assert_eq!(at(10.), FULL_LEVEL as f32);
+        assert_eq!(at(100.), FULL_LEVEL as f32);
+        let half = (100. + 7000.) / 2.;
+        assert!((at(half) - FULL_LEVEL as f32 / 2.).abs() < 1e-6);
+        assert_eq!(at(7000.), 0.);
+        assert_eq!(at(7001.), 0.);
+        // Two hundred feet back, where an external camera sits, it is still
+        // nearly full; the generic impact curve it replaces gave 40 percent.
+        assert!(at(200.) > 0.98 * FULL_LEVEL as f32);
+        assert!(at(200.) > 2. * mix(Kind::Impact, [200., 0., 0.], l).gain);
+        // Pan and treble follow the position like any outside sound.
+        assert_eq!(launch_mix([300., 0., 0.], l, 7000).pan, 1.);
+        // From a cockpit view the same sound is heard through the canopy.
+        let inside = launch_mix([300., 0., 0.], listener(), 7000);
+        let out = launch_mix([300., 0., 0.], l, 7000);
+        assert!((inside.gain - out.gain * COCKPIT_GAIN).abs() < 1e-6);
+        // A record with no distance falls back to 6,000 ft; a long one is
+        // held to the 20,000 ft the original refuses past.
+        assert_eq!(launch_range(0), 6000.);
+        assert_eq!(launch_range(-5), 6000.);
+        assert_eq!(launch_range(7000), 7000.);
+        assert_eq!(launch_range(30000), REFUSED_BEYOND_FT);
+        assert!(launch_mix([5999., 0., 0.], l, 0).gain > 0.);
+        assert_eq!(launch_mix([6000., 0., 0.], l, 0).gain, 0.);
     }
     #[test]
     fn cockpit_hears_outside_sounds_at_40_percent_without_treble() {
@@ -618,6 +697,36 @@ mod tests {
         assert!(e[0].arrived);
         assert!(passes.step(l, &[s]).is_empty());
     }
+    #[test]
+    fn sonic_passes_include_mach_one_and_the_flyby_aircraft() {
+        for id in [0, 17] {
+            for mach in [1., 1.01, 2.] {
+                let mut passes = Passes::default();
+                let mut l = listener();
+                l.external = true;
+                l.view = 10;
+                let speed = speed_of_sound(0.) * mach;
+                let mut s = Source {
+                    id: SourceId::Aircraft(id),
+                    position: [-4000., 0., 300.],
+                    velocity: [speed, 0., 0.],
+                };
+                let mut events = Vec::new();
+                for _ in 0..1200 {
+                    events.extend(passes.step(l, &[s]));
+                    s.position[0] += speed * DT;
+                }
+                assert_eq!(events.len(), 1, "id={id}, mach={mach}");
+                assert_eq!(events[0].kind, Kind::SonicBoom);
+                assert!(events[0].arrived);
+                // Reselecting F9 ahead of the aircraft gives another actual pass.
+                l.view += 1;
+                s.position[0] = -4000.;
+                assert!(passes.step(l, &[s]).is_empty());
+            }
+        }
+    }
+
     #[test]
     fn own_boom_external_only_rearms_and_does_not_fire_on_view_switch() {
         let mut p = Passes::default();

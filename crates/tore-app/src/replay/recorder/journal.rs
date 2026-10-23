@@ -346,7 +346,7 @@ impl Recorder {
         };
         let trigger = match entry.sender {
             None => "the mission".to_owned(),
-            Some(0) => "your order".to_owned(),
+            Some(sender) if sender == self.player => "your order".to_owned(),
             Some(sender) => format!("an order from {}", named(sender)),
         };
         let message = self.why.message();
@@ -487,6 +487,10 @@ impl Recorder {
     /// Journal entries drained elsewhere, such as the situation music's.
     pub fn comms(&mut self, entries: Vec<talk::Entry>) {
         for entry in &entries {
+            // A line about other seats only belongs to their recordings.
+            if !entry.heard_by.is_empty() && !entry.heard_by.contains(&self.seat) {
+                continue;
+            }
             for event in self.comms_events(entry) {
                 self.note(event);
             }
@@ -613,6 +617,8 @@ impl Recorder {
                 Answered::AlreadyLanded => "already landed".into(),
                 Answered::OnAirfield => "taking off, landing or on the ground".into(),
                 Answered::NoBase => "no base to return to".into(),
+                Answered::NoSurfaceStore => "no usable surface store".into(),
+                Answered::NoDesignator => "no designator aboard".into(),
             };
             for (what, side) in &answer.side {
                 let (result, why) = receiver(*side);
@@ -645,7 +651,7 @@ fn music_event(entry: &talk::Entry) -> Event {
         .with(field::OUTCOME, entry.outcome.name())
         .with(field::REASON, entry.origin.cause.to_string());
     if let Cause::Music(music) = &entry.origin.cause {
-        let name = |rank: crate::audio::situation::Rank| format!("{rank:?}").to_lowercase();
+        let name = |rank: crate::situation::Rank| format!("{rank:?}").to_lowercase();
         event = event
             .with(field::FROM, music.from.map_or_else(|| "-".to_owned(), name))
             .with(field::TO, name(music.to));
@@ -660,8 +666,8 @@ fn music_event(entry: &talk::Entry) -> Event {
 }
 
 /// The music's inputs in the order of [`vocab::music::ALL`].
-fn music_inputs(inputs: &crate::audio::situation::Inputs) -> [bool; 8] {
-    let crate::audio::situation::Inputs {
+fn music_inputs(inputs: &crate::situation::Inputs) -> [bool; 8] {
+    let crate::situation::Inputs {
         succeeded,
         ejected,
         launching,

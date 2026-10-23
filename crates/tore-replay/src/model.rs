@@ -7,7 +7,7 @@
 //! positive right wing down. The forward vector is
 //! `[sin yaw cos pitch, sin pitch, cos yaw cos pitch]`.
 
-use crate::FORMAT_VERSION;
+use crate::BASE_FORMAT_VERSION;
 
 /// Simulation ticks per second.
 pub const TICKS_PER_SECOND: u64 = 120;
@@ -16,8 +16,9 @@ pub const TICKS_PER_SECOND: u64 = 120;
 /// never depends on environment variables or settings at playback time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
-    /// The file's format version. The writer ignores this field and always
-    /// writes [`FORMAT_VERSION`]; the reader reports what the file holds.
+    /// Request 4 for fixed-cadence cockpit display records. Older requests
+    /// select 3 when the world needs surface tracks, otherwise 2. The reader
+    /// reports the file's actual version.
     pub format_version: u16,
     /// Game version, for example `0.1.0`.
     pub game_version: String,
@@ -37,7 +38,7 @@ pub struct Header {
 impl Default for Header {
     fn default() -> Self {
         Self {
-            format_version: FORMAT_VERSION,
+            format_version: BASE_FORMAT_VERSION,
             game_version: String::new(),
             game_commit: String::new(),
             recorded_at: String::new(),
@@ -139,6 +140,91 @@ pub struct World {
     /// Map size east and north in feet, from the origin corner. Exports use it
     /// to centre Tacview's map; without it they use the known theater size.
     pub extent_ft: Option<[f64; 2]>,
+    /// The Quick Mission ground target the flight had (format 3), so a replay
+    /// rebuilds the same surface: template, defenses, seed, nationality and
+    /// separation (and so the starts). `None` for a flight with no ground
+    /// target, and for every recording before format 3.
+    pub ground_target: Option<GroundTarget>,
+    /// The enemy area defenses the flight had: a Quick Mission with no
+    /// ground target and an AAA or SAM strength above none (format 3), so a
+    /// replay rebuilds the same SAM sites and guns. `None` for every other
+    /// flight, and for every recording made before them.
+    pub area_defense: Option<AreaDefense>,
+    /// Which airfield scene the flight was flown on (format 3). 0 is the
+    /// retail airfields, and is what every recording before this field has.
+    /// A build that redraws the airports gives the redrawn scene a number
+    /// of its own, so a replay builds the airfields the flight had. Written
+    /// only when it is not 0.
+    pub airfield_scene: u32,
+    /// Which city fill scene the flight was flown over (format 3). 0 is no
+    /// city fill, and is what every recording before this field has (the
+    /// fill was opt-in until protocol 25). A build gives each fill that
+    /// changes what an aircraft can hit a number of its own, so a replay
+    /// builds the city the flight had. Written only when it is not 0.
+    pub city_fill_scene: u32,
+    /// The world holds active surface units (format 3): the recording may
+    /// carry surface poses, launcher loads, names and the rest of the
+    /// surface tracks. A recording of a world without any is a format 2 file.
+    pub surface: bool,
+}
+
+/// The Quick Mission ground target of a flight, as the world needs it to
+/// rebuild the same surface. Mirrors the game's resolution inputs; this crate
+/// knows no simulation types, so the app converts.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct GroundTarget {
+    /// Template stem, for example `QUCOL`.
+    pub stem: String,
+    /// AAA and SAM defense levels, 0 (none) to 3 (heavy).
+    pub aaa: u8,
+    pub sam: u8,
+    /// The mission's surface seed.
+    pub seed: u32,
+    /// The enemy nationality's index in the creator's list.
+    pub enemy_nationality: u8,
+    /// The night rule with a stealth aircraft in a friendly wing.
+    pub night_stealth: bool,
+    /// Whether positions jitter and templates relocate (both on in a
+    /// mission; the preview tools turn them off).
+    pub jitter: bool,
+    pub relocate: bool,
+    /// Whether the Quick Mission front line stands (off in a recording
+    /// made before it existed).
+    pub front: bool,
+    /// The creator's enemy distance in nautical miles.
+    pub separation_nm: u32,
+}
+
+/// The enemy area defenses of a flight with no ground target, as the world
+/// needs them to rebuild the same sites.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AreaDefense {
+    /// AAA and SAM strengths, 0 (none) to 3 (heavy).
+    pub aaa: u8,
+    pub sam: u8,
+    /// The mission's surface seed.
+    pub seed: u32,
+    /// The enemy nationality's index in the creator's list.
+    pub enemy_nationality: u8,
+    /// The night rule with a stealth aircraft in a friendly wing.
+    pub night_stealth: bool,
+    /// The sites are counted by rolling ten slots per kind (nr-b23b,
+    /// 2026-10-13). Absent in a recording from the first build, which kept
+    /// fixed counts and rebuilds the sites it saw.
+    pub rolled: bool,
+}
+
+impl World {
+    /// Whether the recording needs format 3 to be written: it carries the
+    /// ground target, a redrawn airfield scene, a city fill scene or
+    /// surface tracks.
+    pub fn needs_surface_format(&self) -> bool {
+        self.ground_target.is_some()
+            || self.area_defense.is_some()
+            || self.airfield_scene != 0
+            || self.city_fill_scene != 0
+            || self.surface
+    }
 }
 
 /// Cloud settings for the recording's weather.
@@ -281,15 +367,72 @@ pub struct Frame {
     pub new_puffs: Vec<PuffSpawn>,
     /// Surface objects whose hit points changed this tick: `(id, hp)`.
     pub surface_hp: Vec<(u32, i32)>,
+    /// Every surface unit that follows a route, where it is (format 3).
+    pub surface: Vec<SurfaceState>,
+    /// Launcher rails and gun reserves that changed this tick (format 3).
+    pub surface_stock: Vec<SurfaceStock>,
+    /// The piece of a surface owner's debris pieces: `(owner, index, piece)`
+    /// for each entry of `debris` whose owner is a surface object, such as a
+    /// parked aircraft (format 3). `index` is [`DebrisState::index`].
+    pub debris_pieces: Vec<(u32, u32, u8)>,
     pub events: Vec<Event>,
     pub trees: Vec<TreeSample>,
+    /// Where the city fill's buildings knocked down on this tick stand:
+    /// their base centres, east and north in whole feet (nr-fx3, the city
+    /// section; a recording from before it has none).
+    pub city_fell: Vec<[i32; 2]>,
+    /// Every city fill building stood again before `city_fell` fell (a
+    /// restarted flight).
+    pub city_stood: bool,
     /// State checksum, set by the app once per second. See
     /// [`crate::state_checksum`].
     pub checksum: Option<u64>,
 }
 
+impl Frame {
+    /// Empties the frame to what `Frame::default()` holds, keeping the
+    /// capacity of every list so the next tick can be built in it.
+    pub fn clear(&mut self) {
+        // Every field is named, so a field added later cannot be missed.
+        let Self {
+            tick,
+            aircraft,
+            projectiles,
+            debris,
+            escapees,
+            new_effects,
+            new_puffs,
+            surface_hp,
+            surface,
+            surface_stock,
+            debris_pieces,
+            events,
+            trees,
+            city_fell,
+            city_stood,
+            checksum,
+        } = self;
+        *tick = 0;
+        aircraft.clear();
+        projectiles.clear();
+        debris.clear();
+        escapees.clear();
+        new_effects.clear();
+        new_puffs.clear();
+        surface_hp.clear();
+        surface.clear();
+        surface_stock.clear();
+        debris_pieces.clear();
+        events.clear();
+        trees.clear();
+        city_fell.clear();
+        *city_stood = false;
+        *checksum = None;
+    }
+}
+
 /// Number of animated device slots.
-pub const DEVICE_COUNT: usize = 11;
+pub const DEVICE_COUNT: usize = 22;
 
 /// Device slot indices for [`AircraftState::devices`].
 pub mod device {
@@ -315,10 +458,42 @@ pub mod device {
     pub const SPEED: usize = 9;
     /// Throttle, 0 to 1.
     pub const THROTTLE: usize = 10;
+    /// Actual thrust-vectoring pitch, forward 0 to vertical 1.
+    pub const VECTOR_PITCH: usize = 11;
+    /// Actual signed thrust-vectoring yaw, -1 to 1.
+    pub const VECTOR_YAW: usize = 12;
+    /// Actual tiltrotor conversion, airplane 0 to helicopter 1.
+    pub const CONVERSION: usize = 13;
+    /// Actual rotor collective, 0 to 1.
+    pub const COLLECTIVE: usize = 14;
+    /// Signed gun mount heading/elevation, normalized by PI and PI/2.
+    pub const GUN_AIM: usize = 15;
+    /// Discrete linked gun membership, bits 0..2.
+    pub const GUN_GROUP: usize = 21;
     /// Slot names in slot order.
     pub const NAMES: [&str; super::DEVICE_COUNT] = [
-        "gear", "flaps", "brake", "hook", "bay", "exhaust", "elevator", "aileron", "rudder",
-        "speed", "throttle",
+        "gear",
+        "flaps",
+        "brake",
+        "hook",
+        "bay",
+        "exhaust",
+        "elevator",
+        "aileron",
+        "rudder",
+        "speed",
+        "throttle",
+        "vector_pitch",
+        "vector_yaw",
+        "conversion",
+        "collective",
+        "gun_25_heading",
+        "gun_25_elevation",
+        "gun_40_heading",
+        "gun_40_elevation",
+        "gun_105_heading",
+        "gun_105_elevation",
+        "gun_group",
     ];
 }
 
@@ -454,6 +629,18 @@ pub struct AircraftState {
     /// Thrust-vectoring paddles and plumes are drawn from them; zero for
     /// aircraft without them.
     pub auxiliary_rates: [f64; 3],
+    /// A rotorcraft's rotor speed, a share of its governed 100 percent (the
+    /// rotor sound follows it); zero for aircraft without a rotor. Stored in
+    /// its own chunk section, to a thousandth, so files from before it read
+    /// as zero and older readers skip it.
+    pub rotor_speed: f64,
+    /// Each main rotor's disk tilt from its shaft, `[longitudinal (forward
+    /// positive), lateral (right positive)]` in radians, for the first and
+    /// then the second rotor (the CH-47's rear rotor, the V-22's right
+    /// proprotor); zero for aircraft without a rotor. Stored in its own chunk
+    /// section, to 1/256 rad, so files from before it read as level disks and
+    /// older readers skip it.
+    pub disk_tilt: [[f64; 2]; 2],
     /// Hit points, exact.
     pub hp: i32,
     pub max_hp: i32,
@@ -529,6 +716,49 @@ pub struct DebrisState {
     pub attitude: [f64; 3],
 }
 
+/// One surface unit's pose in one tick (format 3): the units that follow a
+/// route, so a replay can draw a column that no longer sits in the static
+/// scenery.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct SurfaceState {
+    /// The unit's fixed id (`0x4000_0000` and up).
+    pub id: u32,
+    pub position: [f64; 3],
+    /// `[yaw, pitch, bank]` in radians.
+    pub attitude: [f64; 3],
+    /// No hit points left: the wreck lies where it died.
+    pub wrecked: bool,
+}
+
+/// A launcher's rails or a gun's reserve after a change (format 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SurfaceStock {
+    pub unit: u32,
+    /// The hardpoint index.
+    pub mount: u16,
+    /// Rounds or missiles in the gun or on the rail.
+    pub loaded: u32,
+    /// Spare magazines, for a gun that keeps some.
+    pub reserve: Option<u32>,
+}
+
+/// A surface unit's identity, registered once and referenced by id (format
+/// 3): names for the log and the text exports, the hit points its wreck's
+/// fire is sized by, and where a unit that does not move stands.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct SurfaceInfo {
+    pub id: u32,
+    /// Short type name, for example `SA-6`.
+    pub name: String,
+    /// Label for people, for example `SA-6 #18`.
+    pub label: String,
+    pub side: Side,
+    /// Hit points when new.
+    pub hit_points: i32,
+    /// Where it stood when registered, feet.
+    pub position: [f64; 3],
+}
+
 /// One ejected pilot in one tick.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct EscapeeState {
@@ -562,6 +792,12 @@ pub enum EffectKind {
     Crater(u8),
     /// A crash-site fire.
     Fire,
+    /// A flak shell's burst in the air and the original explosion type (15
+    /// to 38) it showed: 27 for a small flak gun, 28 for a KS-19. Format 3;
+    /// older recordings store a burst as an ordinary [`Self::Blast`] hit.
+    Flak {
+        explosion: u8,
+    },
     /// A kind this build does not know: any code [`Self::from_code`] does
     /// not name.
     Other(u8),
@@ -581,6 +817,8 @@ impl EffectKind {
     /// craters take 160 plus their size.
     const BLAST: u8 = 64;
     const CRATER: u8 = 160;
+    /// Flak bursts take 32 plus their type less 15.
+    const FLAK: u8 = 32;
 
     pub fn code(self) -> u8 {
         match self {
@@ -596,6 +834,7 @@ impl EffectKind {
                 Self::BLAST + 32 * on as u8 + explosion.clamp(15, 38) - 15
             }
             Self::Crater(size) => Self::CRATER + size.min(63),
+            Self::Flak { explosion } => Self::FLAK + explosion.clamp(15, 38) - 15,
             Self::Other(code) => code,
         }
     }
@@ -626,6 +865,9 @@ impl EffectKind {
                 }
             }
             Self::CRATER..=223 => Self::Crater(code - Self::CRATER),
+            Self::FLAK..=55 => Self::Flak {
+                explosion: code - Self::FLAK + 15,
+            },
             other => Self::Other(other),
         }
     }
@@ -651,6 +893,7 @@ impl EffectKind {
             Self::DebrisImpact => "debris_impact",
             Self::Crater(_) => "crater",
             Self::Fire => "fire",
+            Self::Flak { .. } => "flak",
             Self::Other(_) => "other",
         }
     }
@@ -658,7 +901,7 @@ impl EffectKind {
     /// The explosion type, for a kind that has one.
     pub fn explosion(self) -> Option<u8> {
         match self {
-            Self::Blast { explosion, .. } => Some(explosion),
+            Self::Blast { explosion, .. } | Self::Flak { explosion } => Some(explosion),
             _ => None,
         }
     }
@@ -671,6 +914,15 @@ pub struct EffectSpawn {
     pub kind: EffectKind,
     pub position: [f64; 3],
     pub duration_ticks: u32,
+    /// How big the explosion is drawn, percent of its type's size; 100 (the
+    /// default, and every effect of a recording made before it) is its own
+    /// size, 0 a dud's inert puff. Stored in the effect scales section.
+    pub scale: u8,
+}
+
+impl EffectSpawn {
+    /// The scale of an effect drawn at its type's own size.
+    pub const FULL_SCALE: u8 = 100;
 }
 
 /// Smoke puff kinds.

@@ -464,3 +464,361 @@ fn star_bindings_never_match_keyboard_or_mouse() {
     event(&mut r, "mouse", "wheel:up", 1., false);
     assert!(r.drain().is_empty());
 }
+
+#[test]
+fn lift_levers_retain_zero_and_release_on_disconnect() {
+    let mut r = resolver("bind stick lift collective unit\nbind stick turn vector-yaw axis");
+    event(&mut r, "stick", "lift", -1., true);
+    event(&mut r, "stick", "turn", 0., true);
+    assert_eq!(frame(&mut r).collective, Some(0.));
+    assert_eq!(frame(&mut r).vector_yaw, Some(0.));
+    event(&mut r, "stick", "lift", 1., false);
+    assert_eq!(frame(&mut r).collective, Some(1.));
+    assert!(r.disconnect("stick"));
+    assert_eq!(frame(&mut r).collective, None);
+}
+#[test]
+fn lift_profile_commands_roundtrip_and_reject_invalid_positions() {
+    let p = Profile::parse("tore-input 1\nbind stick c collective unit\nbind stick r collective-rate positive\nbind stick n neutral-vector press\nbind stick z vector-yaw=-0.5 press\nbind stick s conversion-step=-0.25 press").unwrap();
+    assert_eq!(
+        Profile::parse(&p.to_text().unwrap())
+            .unwrap()
+            .to_text()
+            .unwrap(),
+        p.to_text().unwrap()
+    );
+    for action in [
+        "collective=-0.1",
+        "conversion=1.1",
+        "vector-yaw=NaN",
+        "vector-pitch-step=2",
+    ] {
+        assert!(Action::parse(action).is_err());
+    }
+}
+
+#[test]
+fn digital_lift_override_holds_until_lever_movement_even_after_focus_loss() {
+    let mut r = resolver(
+        "bind stick lever vector-pitch unit\nbind stick yaw vector-yaw axis -1 0 1 0 1 1 10",
+    );
+    event(&mut r, "stick", "lever", -0.2, true);
+    assert_eq!(frame(&mut r).vector_pitch, Some(0.4));
+    r.override_lift_axes(&[Axis::VectorPitch]);
+    assert_eq!(frame(&mut r).vector_pitch, None);
+    event(&mut r, "stick", "lever", -0.19, false);
+    assert_eq!(frame(&mut r).vector_pitch, None);
+    r.context(false, false);
+    r.context(false, true);
+    assert_eq!(frame(&mut r).vector_pitch, None);
+    event(&mut r, "stick", "lever", -0.15, false);
+    assert!((frame(&mut r).vector_pitch.unwrap() - 0.425).abs() < 1e-12);
+    event(&mut r, "stick", "yaw", 0., true);
+    event(&mut r, "stick", "yaw", 0.4, false);
+    assert_eq!(frame(&mut r).vector_yaw, Some(0.4));
+    r.override_lift_axes(&[Axis::VectorYaw]);
+    event(&mut r, "stick", "yaw", 0.41, false);
+    assert_eq!(frame(&mut r).vector_yaw, None);
+    event(&mut r, "stick", "yaw", 0.45, false);
+    assert_eq!(frame(&mut r).vector_yaw, Some(0.45));
+}
+
+#[test]
+fn vtol_overhaul_actions_parse_name_and_roundtrip_through_profiles() {
+    let lift = |c| Action::Pilot(PilotCommand::Lift(c));
+    for (name, action) in [
+        (
+            "nozzle-step-up",
+            lift(LiftCommand::NozzleStep { down: false }),
+        ),
+        (
+            "nozzle-step-down",
+            lift(LiftCommand::NozzleStep { down: true }),
+        ),
+        (
+            "nozzle-preset-forward",
+            lift(LiftCommand::NozzlePreset(NozzlePreset::Forward)),
+        ),
+        (
+            "nozzle-preset-vertical",
+            lift(LiftCommand::NozzlePreset(NozzlePreset::Vertical)),
+        ),
+        ("stability-level", lift(LiftCommand::CycleStability)),
+        (
+            "stability-level=off",
+            lift(LiftCommand::SetStability(StabilityLevel::Off)),
+        ),
+        (
+            "stability-level=damper",
+            lift(LiftCommand::SetStability(StabilityLevel::Damper)),
+        ),
+        (
+            "stability-level=attitude",
+            lift(LiftCommand::SetStability(StabilityLevel::Attitude)),
+        ),
+        ("trim-set", lift(LiftCommand::TrimSet)),
+        ("trim-centre", lift(LiftCommand::TrimCentre)),
+        (
+            "hover-hold",
+            Action::Pilot(PilotCommand::Toggle(Switch::HoverHold)),
+        ),
+        ("trim-pitch-rate", Action::Axis(Axis::TrimPitchRate)),
+        ("trim-roll-rate", Action::Axis(Axis::TrimRollRate)),
+        ("trim-pedal-rate", Action::Axis(Axis::TrimPedalRate)),
+    ] {
+        assert_eq!(Action::parse(name), Ok(action.clone()), "{name}");
+        assert_eq!(profile_text::action_name(&action), name);
+    }
+    let p = Profile::parse(
+        "tore-input 1\nbind keyboard Ctrl-Alt-a hover-hold press\nbind keyboard Ctrl-Shift-a stability-level press\nbind keyboard Shift-z nozzle-preset-forward press\nbind stick hat trim-pitch-rate negative\nbind stick t trim-roll-rate axis\nbind stick b trim-set press\nbind stick b2 stability-level=attitude press",
+    )
+    .unwrap();
+    let text = p.to_text().unwrap();
+    assert_eq!(Profile::parse(&text).unwrap().to_text().unwrap(), text);
+    for bad in ["stability-level=full", "nozzle-step", "trim-yaw-rate"] {
+        assert!(Action::parse(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn held_trim_taps_two_percent_then_moves_ten_percent_a_second() {
+    let mut r = resolver(
+        "bind keyboard Ctrl-ArrowUp trim-pitch-rate negative\nbind keyboard Ctrl-ArrowRight trim-roll-rate positive",
+    );
+    let trims = |input: PilotInput| -> Vec<(TrimAxis, f64)> {
+        input
+            .commands
+            .into_iter()
+            .filter_map(|c| match c {
+                PilotCommand::Lift(LiftCommand::TrimAdjust(axis, v)) => Some((axis, v)),
+                _ => None,
+            })
+            .collect()
+    };
+    event(&mut r, "keyboard", "Ctrl-ArrowUp", 0., true);
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 0., true);
+    assert!(trims(frame(&mut r)).is_empty());
+    // A tap: one press for a few ticks is exactly 2 percent.
+    event(&mut r, "keyboard", "Ctrl-ArrowUp", 1., false);
+    assert_eq!(trims(frame(&mut r)), vec![(TrimAxis::Pitch, -0.02)]);
+    for _ in 0..10 {
+        assert!(trims(frame(&mut r)).is_empty());
+    }
+    event(&mut r, "keyboard", "Ctrl-ArrowUp", 0., false);
+    assert!(trims(frame(&mut r)).is_empty());
+    // Held for one second: the tap, then the rate after 0.2 s.
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 1., false);
+    let total: f64 = (0..120)
+        .flat_map(|_| trims(frame(&mut r)))
+        .map(|(axis, v)| {
+            assert_eq!(axis, TrimAxis::Roll);
+            v
+        })
+        .sum();
+    let steps = (120 - trim_keys::DELAY_TICKS).div_ceil(trim_keys::STEP_TICKS);
+    let expected = trim_keys::TAP + f64::from(steps) * trim_keys::STEP;
+    assert!((total - expected).abs() < 1e-12, "{total}");
+    assert!((total - 0.1).abs() < 1e-9, "{total}");
+    // Losing focus forgets the hold: the next press is a fresh tap.
+    r.context(false, false);
+    r.context(false, true);
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 0., true);
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 1., false);
+    assert_eq!(trims(frame(&mut r)), vec![(TrimAxis::Roll, 0.02)]);
+}
+
+#[test]
+fn gunsight_names_parse_name_and_roundtrip_through_profiles() {
+    for (name, action) in [
+        ("sight-x", Action::Axis(Axis::SightX)),
+        ("sight-y", Action::Axis(Axis::SightY)),
+        ("sight-designate", Action::Ui("sight-designate".into())),
+        ("sight-pin", Action::Ui("sight-pin".into())),
+        ("sight-pin-toggle", Action::Ui("sight-pin-toggle".into())),
+        ("gun-lock", Action::Ui("gun-lock".into())),
+        ("console-chaff", Action::Ui("console-chaff".into())),
+        ("console-flare", Action::Ui("console-flare".into())),
+        ("sensor-console", Action::Ui("sensor-console".into())),
+        ("sight-zoom-in", Action::Ui("sight-zoom-in".into())),
+        ("sight-zoom-out", Action::Ui("sight-zoom-out".into())),
+        ("sight-polarity", Action::Ui("sight-polarity".into())),
+        ("sight-whot", Action::Ui("sight-whot".into())),
+        ("sight-bhot", Action::Ui("sight-bhot".into())),
+        ("sight-tv", Action::Ui("sight-tv".into())),
+        ("sight-nvg", Action::Ui("sight-nvg".into())),
+        ("console-range", Action::Ui("console-range".into())),
+        ("sight-left", Action::Ui("sight-left".into())),
+        ("sight-right", Action::Ui("sight-right".into())),
+        ("sight-up", Action::Ui("sight-up".into())),
+        ("sight-down", Action::Ui("sight-down".into())),
+    ] {
+        assert_eq!(Action::parse(name), Ok(action.clone()), "{name}");
+        assert_eq!(profile_text::action_name(&action), name);
+    }
+    let p = Profile::parse(
+        "tore-input 1\nmodifier pad button:314\nbind keyboard Alt-ArrowLeft sight-left hold\nbind keyboard Shift-\\ sight-pin press\nbind keyboard \\ sight-designate press\nbind pad axis:16=-1 sight-left hold\nbind pad button:314+axis:3 sight-x axis -1 0 1 0.1 1 1 10\nbind pad button:314+axis:4 sight-y axis -1 0 1 0.1 1 -1 10\nbind pad button:314+button:304 sight-designate tap\nbind pad button:314+button:304 sight-pin long\nbind stick hat sight-x negative",
+    )
+    .unwrap();
+    let text = p.to_text().unwrap();
+    assert_eq!(Profile::parse(&text).unwrap().to_text().unwrap(), text);
+    assert!(text.contains("button:314+button:304 sight-designate tap"));
+    assert!(text.contains("button:314+button:304 sight-pin long"));
+    assert!(text.contains("button:314+axis:4 sight-y axis -1 0 1 0.1 1 -1 10"));
+    // The axes take analog and hold modes only, the holds hold, and the
+    // timed modes belong to commands.
+    for bad in [
+        "bind stick b sight-x press",
+        "bind stick b sight-x tap",
+        "bind stick a roll long",
+        "bind stick b sight-pin hold",
+    ] {
+        assert!(
+            Profile::parse(&format!("tore-input 1\n{bad}")).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_tap_fires_on_release_and_a_long_press_fires_at_half_a_second() {
+    let mut r = resolver(
+        "modifier pad sel\nbind pad sel+a sight-designate tap\nbind pad sel+a sight-pin long\n",
+    );
+    for control in ["sel", "a"] {
+        event(&mut r, "pad", control, 0., true);
+    }
+    event(&mut r, "pad", "sel", 1., false);
+    // A short press designates when the button comes up, not before.
+    event(&mut r, "pad", "a", 1., false);
+    for _ in 0..LONG_PRESS_TICKS - 1 {
+        frame(&mut r);
+    }
+    assert!(r.drain().is_empty());
+    event(&mut r, "pad", "a", 0., false);
+    assert_eq!(
+        r.drain(),
+        vec![("pad".into(), Action::Ui("sight-designate".into()))]
+    );
+    // Held to the long press: the pin fires on that tick, and the release
+    // afterwards designates nothing.
+    event(&mut r, "pad", "a", 1., false);
+    for _ in 0..LONG_PRESS_TICKS - 1 {
+        frame(&mut r);
+    }
+    assert!(r.drain().is_empty());
+    frame(&mut r);
+    assert_eq!(
+        r.drain(),
+        vec![("pad".into(), Action::Ui("sight-pin".into()))]
+    );
+    for _ in 0..LONG_PRESS_TICKS {
+        frame(&mut r);
+    }
+    event(&mut r, "pad", "a", 0., false);
+    assert!(r.drain().is_empty(), "the long press fires once");
+}
+
+#[test]
+fn timed_presses_forget_an_interrupted_hold_and_need_a_fresh_press() {
+    let mut r = resolver("bind pad a sight-pin long\nbind pad b sight-designate tap\n");
+    for control in ["a", "b"] {
+        event(&mut r, "pad", control, 0., true);
+    }
+    event(&mut r, "pad", "a", 1., false);
+    event(&mut r, "pad", "b", 1., false);
+    for _ in 0..10 {
+        frame(&mut r);
+    }
+    // A pause drops both: neither the long press nor the tap completes, and
+    // a control still held when play resumes needs releasing first.
+    r.context(true, true);
+    r.context(false, true);
+    for _ in 0..LONG_PRESS_TICKS {
+        frame(&mut r);
+    }
+    event(&mut r, "pad", "b", 0., false);
+    assert!(r.drain().is_empty());
+    // A press that began in a menu (a baseline) is not a press.
+    event(&mut r, "pad", "a", 1., true);
+    for _ in 0..LONG_PRESS_TICKS {
+        frame(&mut r);
+    }
+    assert!(r.drain().is_empty());
+}
+
+#[test]
+fn sight_axes_read_the_stick_and_the_holds_read_buttons_and_keys() {
+    let mut r = resolver(
+        "modifier pad sel\nbind pad sel+x sight-x axis -1 0 1 0.1 1 1 10\nbind pad sel+y sight-y axis -1 0 1 0.1 1 -1 10\nbind pad axis:16=1 sight-right hold\nbind keyboard Alt-ArrowUp sight-up hold\n",
+    );
+    for (device, control) in [
+        ("pad", "sel"),
+        ("pad", "x"),
+        ("pad", "y"),
+        ("pad", "axis:16"),
+        ("keyboard", "Alt-ArrowUp"),
+    ] {
+        event(&mut r, device, control, 0., true);
+    }
+    assert_eq!(r.sight_axes(), [0.; 2]);
+    event(&mut r, "pad", "sel", 1., false);
+    event(&mut r, "pad", "x", 0.5, false);
+    event(&mut r, "pad", "y", -1., false);
+    let [x, y] = r.sight_axes();
+    assert!(x > 0. && x < 1., "{x}");
+    assert_eq!(
+        y, 1.,
+        "the stick pushed up reads negative, sight-y inverts it"
+    );
+    // Without the Select modifier the stick is not the sight.
+    event(&mut r, "pad", "sel", 0., false);
+    assert_eq!(r.sight_axes(), [0.; 2]);
+    // Holds do not appear in the axes; they are read by name.
+    event(&mut r, "keyboard", "Alt-ArrowUp", 1., false);
+    event(&mut r, "pad", "axis:16", 1., false);
+    assert_eq!(r.sight_axes(), [0.; 2]);
+    assert!(r.held("sight-up") && r.held("sight-right"));
+    assert!(!r.held("sight-left") && !r.held("sight-down"));
+    r.context(true, true);
+    assert!(!r.held("sight-up"), "a pause releases the holds");
+    assert_eq!(r.sight_axes(), [0.; 2]);
+}
+
+#[test]
+fn the_gun_key_is_a_hold_that_follows_its_key() {
+    let mut r = resolver("bind keyboard Tab fire-gun hold");
+    assert!(!r.held("fire-gun"));
+    event(&mut r, "keyboard", "Tab", 0., true);
+    event(&mut r, "keyboard", "Tab", 1., false);
+    assert!(r.held("fire-gun"));
+    assert!(!r.held("fire"), "it is not the trigger");
+    event(&mut r, "keyboard", "Tab", 0., false);
+    assert!(!r.held("fire-gun"));
+    // Like the trigger, it is only ever a hold.
+    assert!(Profile::parse("tore-input 1\nbind keyboard Tab fire-gun press").is_err());
+}
+
+#[test]
+fn cockpit_lighting_is_local_and_adjustable_while_paused() {
+    for action in [
+        "key:Ctrl-i",
+        "key:Ctrl-Shift-f",
+        "key:Ctrl-h",
+        "key:Shift-[",
+        "key:Shift-]",
+        "instruments-dim",
+        "instruments-brighten",
+        "flood-dim",
+        "flood-brighten",
+    ] {
+        let mut r = resolver(&format!("bind keyboard x {action} press"));
+        event(&mut r, "keyboard", "x", 0., true);
+        r.context(true, true);
+        event(&mut r, "keyboard", "x", 1., false);
+        assert_eq!(
+            r.drain(),
+            vec![("keyboard".into(), Action::Ui(action.into()))]
+        );
+        assert!(frame(&mut r).commands.is_empty());
+    }
+}

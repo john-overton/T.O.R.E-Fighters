@@ -1,19 +1,26 @@
 //! Imported aircraft geometry, cockpit and data. Does not use reference runtime code.
 use crate::{
-    AppResult, flight,
-    menu::Sprite,
-    terrain::{Camera, World},
+    AppResult, aircraft_type::AircraftType, camera::Camera, flight, menu::Sprite, scenery::Scenery,
+    terrain::Terrain,
 };
-use std::collections::{BTreeMap, BTreeSet};
-use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Deref,
+    sync::Arc,
+};
+use tore_formats::{Pic, font::Font, shape::Shape};
+/// One aircraft type ready to draw: the simulation's [`AircraftType`] plus the
+/// imported art, cockpit, HUD, animation rig and damage art. It dereferences
+/// to its type, so `airframe.profile`, `airframe.sensors` and
+/// `airframe.start(..)` read as before.
 pub struct Airframe {
+    /// The simulation half, shared with combat and the world.
+    pub kind: Arc<AircraftType>,
     pub engine_material: Option<crate::engine_material::Image>,
     nozzle_bounds: [[f32; 4]; 2],
     rig: Option<crate::additional_animation::Rig>,
     /// Wing vapor attachment, from the shape's own streamer definition.
     pub streamer: Option<tore_formats::shape::StreamerDef>,
-    model: tore_sim::models::AircraftModel,
-    pub profile: Aircraft,
     pub atlas: Pic,
     damage_art: crate::damage_art::DamageArt,
     pub palette: [[u8; 3]; 256],
@@ -26,10 +33,16 @@ pub struct Airframe {
     pub hud_font: Font,
     pub hud: tore_formats::hud::Hud,
     pub flight_menu: Vec<tore_formats::ui::MenuNode>,
-    /// Imported sensor capability for this identity, resolved by record
-    /// channel. Used for capability reporting and scope labels.
-    pub sensors: tore_sim::sensors::SensorProfiles,
     pub poses: Vec<Shape>,
+    /// The clean model's surfaces where drawn pylons and wingtip rails
+    /// meet it (B3, BP2), worked out the first time a store is drawn there.
+    mounts: crate::pylons::MountCache,
+}
+impl Deref for Airframe {
+    type Target = AircraftType;
+    fn deref(&self) -> &AircraftType {
+        &self.kind
+    }
 }
 impl Airframe {
     pub fn load(
@@ -40,13 +53,11 @@ impl Airframe {
             data.get(s)
                 .ok_or_else(|| format!("aircraft cache missing {s}; re-import media"))
         };
-        let mut profile = Aircraft::parse(get(id.pt())?)?;
-        if profile.id != id.source() || profile.shape != format!("{}.SH", id.stem()) {
-            return Err(
-                "aircraft identity/shape does not match the selected retail profile".into(),
-            );
-        }
-        profile.id = id;
+        // The simulation half: the profile, its identity check, the flight
+        // model and the sensors. The engine outlets come from the drawn model
+        // below.
+        let mut kind = AircraftType::load(data, id)?;
+        let profile = &kind.profile;
         let shape = Shape::parse(get(&profile.shape)?)?;
         let streamer = tore_formats::shape::StreamerDef::parse(get(&profile.shape)?)?;
         if id == tore_formats::aircraft::AircraftId::F18
@@ -75,39 +86,19 @@ impl Airframe {
         let mut cockpit_palette = palette;
         cockpit_palette[..frame.palette.len()].copy_from_slice(&frame.palette);
         let mut sprites = BTreeMap::new();
-        let cockpit_art = [
-            id.cockpit().to_string(),
-            format!("~{}_LH.PIC", id.cockpit_stem()),
-            format!("~{}_CH.PIC", id.cockpit_stem()),
-            format!("~{}_RH.PIC", id.cockpit_stem()),
-        ];
-        for name in cockpit_art.iter().map(String::as_str) {
-            {
-                use tore_formats::aircraft::AircraftId;
-                let absent_overlay = matches!(
-                    id,
-                    AircraftId::X31
-                        | AircraftId::Mig21
-                        | AircraftId::F22
-                        | AircraftId::F22n
-                        | AircraftId::Faxx
-                ) && cockpit_art[1..].iter().any(|n| n == name)
-                    || matches!(id, AircraftId::Mig29 | AircraftId::Mig23 | AircraftId::Su25)
-                        && name == cockpit_art[2];
-                if absent_overlay {
-                    continue;
-                }
-                let p = Pic::parse(get(name)?)?;
-                sprites.insert(
-                    name.into(),
-                    Sprite {
-                        width: p.width,
-                        height: p.height,
-                        rgba: p.rgba(&cockpit_palette),
-                        glyphs: p.glyphs,
-                    },
-                );
-            }
+        for name in std::iter::once(id.cockpit().to_string())
+            .chain(id.cockpit_overlays().into_iter().flatten())
+        {
+            let p = Pic::parse(get(&name)?)?;
+            sprites.insert(
+                name,
+                Sprite {
+                    width: p.width,
+                    height: p.height,
+                    rgba: p.rgba(&cockpit_palette),
+                    glyphs: p.glyphs,
+                },
+            );
         }
         let hud = tore_formats::hud::Hud::parse(get(id.hud())?)?;
         let panel_name = hud.panel_resource();
@@ -119,9 +110,6 @@ impl Airframe {
             return Err("unreviewed instrument window frame dimensions".into());
         }
         let font = Font::parse(get("WIN11.FNT")?)?;
-        let sensors = tore_sim::sensors::SensorProfiles::from_source(&profile, |name| {
-            get(name).cloned().map_err(std::io::Error::other)
-        })?;
         let mut poses = Vec::new();
         let mut rig = None;
         if id == tore_formats::aircraft::AircraftId::F18 {
@@ -186,7 +174,15 @@ impl Airframe {
             }
             crate::rafale_animation::validate(&poses)?;
         } else {
-            let (new_rig, pose) = crate::additional_animation::Rig::load(id, get(&profile.shape)?)?;
+            let (new_rig, mut pose) =
+                crate::additional_animation::Rig::load(id, get(&profile.shape)?)?;
+            if id == tore_formats::aircraft::AircraftId::F14 {
+                let (_, donor) = crate::additional_animation::Rig::load(
+                    tore_formats::aircraft::AircraftId::F22n,
+                    get("F22N.SH")?,
+                )?;
+                crate::f14_geometry::replace_hook(&mut pose, &donor)?;
+            }
             poses.push(pose);
             rig = Some(new_rig);
         }
@@ -215,6 +211,7 @@ impl Airframe {
         // John requested all map categories with no Escape-menu filters.
         flight_menu.retain(|node| node.label != "Map");
         crate::flight_ui::add_authored_rows(&mut flight_menu);
+        crate::flight_ui::add_debug_tab(&mut flight_menu);
 
         let engine_material = if crate::engine_material::outlet_count(id) > 0 {
             crate::engine_material::Image::load()?
@@ -231,13 +228,18 @@ impl Airframe {
                 return Err("unreviewed engine face projection".into());
             }
         }
-        let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas)?;
+        let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas, &poses)?;
+        kind.contrail_offsets = contrail_offsets(
+            id,
+            &poses[0],
+            rig.as_ref(),
+            profile.fields["engines"].number()? as usize,
+        );
         Ok(Self {
+            kind: Arc::new(kind),
             engine_material,
             nozzle_bounds,
             rig,
-            model: tore_sim::models::AircraftModel::for_aircraft(&profile)?,
-            profile,
             atlas,
             damage_art,
             palette,
@@ -248,9 +250,9 @@ impl Airframe {
             hud_font: Font::parse(get("HUD11.FNT")?)?,
             hud,
             flight_menu,
-            sensors,
             poses,
             streamer,
+            mounts: Default::default(),
         })
     }
     /// The stored daytime cockpit palette, before weather, sunlight or HUD
@@ -261,22 +263,28 @@ impl Airframe {
         colors
     }
     /// One palette for cockpit art and HUD, retaining the original private prefix.
-    pub fn cockpit_palette(&self, world: &World, altitude: f64, brightness: i16) -> [[u8; 3]; 256] {
-        let mut colors = world.palette;
+    pub fn cockpit_palette(
+        &self,
+        world: &Terrain,
+        scenery: &Scenery,
+        altitude: f64,
+        brightness: i16,
+    ) -> [[u8; 3]; 256] {
+        let mut colors = scenery.palette;
         let mut source = [[0; 3]; 256];
         for (out, color) in source.iter_mut().zip(&self.cockpit_pic.palette) {
             *out = color.map(|c| ((u16::from(c) * 63 + 127) / 255) as u8);
         }
         tore_formats::weather::palette::apply_hud_brightness(&mut source, brightness)
             .expect("validated HUD brightness");
-        if world.smooth_weather
+        if scenery.smooth_weather
             && let Some(sample) = world.weather.visual_sample(altitude)
         {
             return sample.palette_with_prefix(
                 Some(source[..64].try_into().expect("fixed cockpit prefix")),
-                world.weather_presentation.visual_tint,
-                if world.glare_enabled() {
-                    world.weather_presentation.visual_sun
+                scenery.weather_presentation.visual_tint,
+                if scenery.glare_enabled() {
+                    scenery.weather_presentation.visual_sun
                 } else {
                     0.
                 },
@@ -284,8 +292,8 @@ impl Airframe {
         }
         tore_formats::weather::palette::apply_sun_whitening(
             &mut source,
-            if world.glare_enabled() {
-                world.weather_presentation.sun_whitening
+            if scenery.glare_enabled() {
+                scenery.weather_presentation.sun_whitening
             } else {
                 0
             },
@@ -295,7 +303,7 @@ impl Airframe {
             tore_formats::weather::palette::apply_tint(
                 &mut source,
                 layer.tint,
-                world.weather_presentation.tint,
+                scenery.weather_presentation.tint,
             )
             .expect("validated cockpit palette");
         }
@@ -314,18 +322,17 @@ impl Airframe {
             // fitted attachment uses its reviewed wing tips and rig pivots.
             let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
             return Some(std::array::from_fn(|side| {
-                let (tip, pivot, sign) = if side == 0 {
-                    ([-23., -4., 1.], [-4., -1., 1.], -1.)
+                let (tip, sign) = if side == 0 {
+                    ([-23., -4., 1.], -1.)
                 } else {
-                    ([24., -4., 1.], [5., -1., 1.], 1.)
+                    ([24., -4., 1.], 1.)
                 };
-                let offset = crate::aircraft_animation::rotate(
-                    std::array::from_fn(|i| tip[i] - pivot[i]),
-                    [0., 0., 1.],
-                    -sign * crate::additional_animation::sweep(s),
+                let p = crate::additional_animation::f14_wing_point(
+                    tip,
+                    sign,
+                    crate::additional_animation::sweep(s),
                 );
-                let p: [f64; 3] =
-                    std::array::from_fn(|i| f64::from(pivot[i] + offset[i]) * 4. / 3.);
+                let p = p.map(|v| f64::from(v) * 4. / 3.);
                 std::array::from_fn(|i| {
                     s.position[i]
                         + basis.right[i] * p[0]
@@ -353,18 +360,6 @@ impl Airframe {
         streamer_world_points(def, s.position, [s.yaw, s.pitch, s.bank])
     }
 
-    pub fn start(&self, world: &World) -> flight::State {
-        let c = Camera::for_world(world);
-        let mut p = c.position;
-        p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
-        let mut state = flight::State::from_model(self.model.clone(), p);
-        // State velocity is ground-relative; initialize the requested airspeed
-        // with advection already present so the first tick does not subtract it twice.
-        for (v, wind) in state.velocity.iter_mut().zip(world.wind()) {
-            *v += wind;
-        }
-        state
-    }
     /// Shared fitted instrument camera pose for fixed-tick weather and rendering.
     pub fn panel_camera(&self, state: &flight::State, page: u8) -> Camera {
         let mut camera = self.camera(state, if page == 2 { 0 } else { 3 }, Default::default());
@@ -411,66 +406,14 @@ impl Airframe {
         }
         c
     }
-    /// Fitted attachment behind reviewed nozzle bounds, with a bounds-based
-    /// fallback for aircraft whose outlet faces have not been reviewed.
-    pub fn contrail_offsets(&self) -> Vec<[f64; 3]> {
-        use tore_formats::aircraft::AircraftId;
-        let count = match self.profile.id {
-            AircraftId::A4E | AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
-            _ => 2,
-        };
-        let scale = f64::from(self.rig.as_ref().map_or(1. / 3., |r| r.scale()));
-        (0..count)
-            .map(|group| {
-                let positions: Vec<_> = self.poses[0]
-                    .faces
-                    .iter()
-                    .filter(|f| {
-                        crate::engine_material::nozzle(self.profile.id, f.address)
-                            && crate::engine_material::outlet_group(self.profile.id, &f.positions)
-                                == group
-                    })
-                    .flat_map(|f| f.positions.iter())
-                    .collect();
-                if !positions.is_empty() {
-                    let min: [f64; 3] = std::array::from_fn(|i| {
-                        positions
-                            .iter()
-                            .map(|p| f64::from(p[i]))
-                            .fold(f64::INFINITY, f64::min)
-                    });
-                    let max: [f64; 3] = std::array::from_fn(|i| {
-                        positions
-                            .iter()
-                            .map(|p| f64::from(p[i]))
-                            .fold(f64::NEG_INFINITY, f64::max)
-                    });
-                    [
-                        (min[0] + max[0]) * 0.5 * scale,
-                        (min[2] + max[2]) * 0.5 * scale,
-                        min[1] * scale - 2.,
-                    ]
-                } else {
-                    let positions = self.poses[0].faces.iter().flat_map(|f| &f.positions);
-                    let mut aft = 0_f64;
-                    let mut span = 0_f64;
-                    for p in positions {
-                        aft = aft.min(f64::from(p[1]) * scale);
-                        span = span.max(f64::from(p[0]).abs() * scale);
-                    }
-                    let lateral = if count == 1 {
-                        0.
-                    } else {
-                        span * 0.15 * if group == 0 { -1. } else { 1. }
-                    };
-                    [lateral, 0., aft - 2.]
-                }
-            })
-            .collect()
-    }
-
-    pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
-        self.visual_vertices(s, camera, world, false)
+    pub fn vertices(
+        &self,
+        s: &flight::State,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> Vec<f32> {
+        self.visual_vertices(s, camera, world, scenery, false)
     }
     /// Largest bounding-box dimension of the clean airframe in feet. The
     /// spotting aid uses it to judge how large the aircraft appears on screen.
@@ -483,14 +426,124 @@ impl Airframe {
             )
         })
     }
-    pub fn fragment_vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
-        self.visual_vertices(s, camera, world, true)
+    /// How far above source hardpoint `hardpoint`'s position the clean
+    /// model's underside is, feet: the lowest face straight above it (or up
+    /// to 3 ft inboard of it), or `None` when nothing of the model is within
+    /// 12 ft above it (a wingtip rail beside the wing).
+    pub fn pylon_top(&self, hardpoint: usize) -> Option<f64> {
+        let h = self.profile.hardpoints.get(hardpoint)?;
+        let [right, up, forward] = h.position.map(|v| f64::from(v) / 3.);
+        Some(self.underside(right, forward, up, 6)? - up)
+    }
+    /// The height (feet up of the reference point) of the clean model's
+    /// lowest face over the point `right`, `forward` that is at most 12 ft
+    /// above `from`, looking straight up and, when nothing is there, up to
+    /// `inboard_steps` half feet inboard (a pod under the gap between a body
+    /// and a nacelle). The model is mirror symmetric, so a left-hand point is
+    /// looked up on the right.
+    pub fn underside(&self, right: f64, forward: f64, from: f64, inboard_steps: u8) -> Option<f64> {
+        let right = right.abs();
+        let key =
+            [right, forward, from, f64::from(inboard_steps)].map(|v| (v * 100.).round() as i64);
+        self.mounts.underside(key, || {
+            let scale = f64::from(self.animation_scale());
+            let shape = self.poses.first()?;
+            (0..=inboard_steps).find_map(|step| {
+                let inboard = f64::from(step) * 0.5;
+                underside(shape, scale, right - inboard, forward, from).map(|h| from + h)
+            })
+        })
+    }
+    /// The clean model's outermost edge inboard of a wingtip store at
+    /// `right`, `up`, `forward` (feet), over `half_length` feet fore and aft
+    /// of it: how far out it is and its lowest and highest point there, or
+    /// `None` when nothing of the model is within 4 ft inboard.
+    pub fn tip_edge(
+        &self,
+        right: f64,
+        up: f64,
+        forward: f64,
+        half_length: f64,
+    ) -> Option<[f64; 3]> {
+        let right = right.abs();
+        let key = [right, up, forward, half_length].map(|v| (v * 100.).round() as i64);
+        self.mounts.tip_edge(key, || {
+            let scale = f64::from(self.animation_scale());
+            tip_edge(
+                self.poses.first()?,
+                scale,
+                right,
+                up,
+                [forward - half_length, forward + half_length],
+            )
+        })
+    }
+    pub fn fragment_vertices(
+        &self,
+        s: &flight::State,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> Vec<f32> {
+        self.visual_vertices(s, camera, world, scenery, true)
+    }
+    /// Clean source-space faces after the exact transforms used for drawing.
+    /// Headless surface probes use this boundary before camera culling or shading.
+    pub(crate) fn animation_faces(&self, state: &flight::State) -> Vec<tore_formats::shape::Face> {
+        self.transformed_faces(self.animation_shape(state), state, false)
+    }
+    pub(crate) fn animation_scale(&self) -> f32 {
+        self.rig.as_ref().map_or(1. / 3., |rig| rig.scale())
+    }
+    fn animation_shape(&self, state: &flight::State) -> &Shape {
+        &self.poses[if self.profile.id == tore_formats::aircraft::AircraftId::F18 {
+            15
+        } else if self.rig.is_some() {
+            0
+        } else {
+            usize::from(state.gear > 0.)
+        }]
+    }
+    fn transformed_faces(
+        &self,
+        shape: &Shape,
+        s: &flight::State,
+        damaged: bool,
+    ) -> Vec<tore_formats::shape::Face> {
+        let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
+        shape
+            .faces
+            .iter()
+            .flat_map(|f| {
+                if damaged {
+                    vec![f.clone()]
+                } else if hornet_rig {
+                    crate::aircraft_animation::rudder_faces(f, s)
+                } else if let Some(rig) = &self.rig {
+                    rig.faces(f, s)
+                } else {
+                    vec![f.clone()]
+                }
+            })
+            .filter_map(|source| {
+                if damaged {
+                    Some(source)
+                } else if hornet_rig {
+                    crate::aircraft_animation::animate(&source, s)
+                } else if let Some(rig) = &self.rig {
+                    rig.animate(&source, s)
+                } else {
+                    crate::rafale_animation::animate(&source, s)
+                }
+            })
+            .collect()
     }
     fn visual_vertices(
         &self,
         s: &flight::State,
         camera: &Camera,
-        world: &World,
+        world: &Terrain,
+        scenery: &Scenery,
         fragment: bool,
     ) -> Vec<f32> {
         if s.wreck_gone() {
@@ -513,8 +566,8 @@ impl Airframe {
             );
             direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
         });
-        let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
-        let at = world.local(s.position);
+        let model_scale = self.animation_scale();
+        let at = scenery.local(s.position);
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
         let damaged = if fragment {
             crate::damage_art::DamageArt::variant(self.profile.id, s.damage_variant)
@@ -535,40 +588,9 @@ impl Airframe {
                 &self.damage_art.bodies[index]
             }
         } else {
-            &self.poses[if hornet_rig {
-                15
-            } else if self.rig.is_some() {
-                0
-            } else {
-                usize::from(s.gear > 0.)
-            }]
+            self.animation_shape(s)
         };
-        let faces: Vec<_> = shape
-            .faces
-            .iter()
-            .flat_map(|f| {
-                if damaged.is_some() {
-                    vec![f.clone()]
-                } else if hornet_rig {
-                    crate::aircraft_animation::rudder_faces(f, s)
-                } else if let Some(rig) = &self.rig {
-                    rig.faces(f, s)
-                } else {
-                    vec![f.clone()]
-                }
-            })
-            .filter_map(|source| {
-                if damaged.is_some() {
-                    Some(source)
-                } else if hornet_rig {
-                    crate::aircraft_animation::animate(&source, s)
-                } else if let Some(rig) = &self.rig {
-                    rig.animate(&source, s)
-                } else {
-                    crate::rafale_animation::animate(&source, s)
-                }
-            })
-            .collect();
+        let faces = self.transformed_faces(shape, s, damaged.is_some());
         // Positive when the stored normal faces the camera.
         let facing = |f: &tore_formats::shape::Face| {
             f.normal.map_or(1., |n| {
@@ -581,8 +603,9 @@ impl Airframe {
             })
         };
         // Smooth mode submits complete geometry for camera-independent shadows,
-        // hiding only the rear face of each double-sided panel.
-        let hidden = if world.smooth_weather {
+        // hiding only the rear face of each double-sided panel. The MiG-21's
+        // differently divided skins are the exception handled below.
+        let hidden = if scenery.smooth_weather {
             crate::aircraft_animation::hidden_twins(&faces, facing)
         } else {
             vec![false; faces.len()]
@@ -599,7 +622,14 @@ impl Airframe {
                 self.damage_art.surfaces(&f, &s.damage_regions, model_scale)
             };
             for f in surfaces {
-                if !world.smooth_weather && facing(&f) <= 0. {
+                // The MiG-21's upper and lower wing skins are divided into
+                // different polygons, so exact twin matching cannot pair them
+                // and the underside would show through the top. Its stored
+                // facing normals do oppose, so smooth mode culls by them too.
+                if (!scenery.smooth_weather
+                    || self.profile.id == tore_formats::aircraft::AircraftId::Mig21)
+                    && facing(&f) <= 0.
+                {
                     continue;
                 }
 
@@ -607,10 +637,10 @@ impl Airframe {
                 // Smooth surfaces receive continuous GPU lighting instead.
                 // Animated world normals and light angles use the host float rig;
                 // the following Q15 dot, row selection and remap order are translated.
-                let light_row = if !world.smooth_weather && f.subtype & 0x20 != 0 {
+                let light_row = if !scenery.smooth_weather && f.subtype & 0x20 != 0 {
                     f.normal
                         .zip(lighting)
-                        .zip(world.celestial.as_ref())
+                        .zip(scenery.celestial.as_ref())
                         .map(|((normal, light), celestial)| {
                             let normal =
                                 orient(normal).map(|v| v.round().clamp(-32767., 32767.) as i16);
@@ -686,7 +716,7 @@ impl Airframe {
                             self.palette[f.colors[j] as usize]
                         };
                         let textured = !f.uv.is_empty() && !cold_nozzle;
-                        let layer = if flame && world.smooth_weather {
+                        let layer = if flame && scenery.smooth_weather {
                             if textured { -7. } else { -6. }
                         } else if engine_face {
                             -3. - crate::engine_material::heat(s)
@@ -727,6 +757,63 @@ impl Airframe {
     }
 }
 
+/// Fitted attachment behind reviewed nozzle bounds, with a bounds-based
+/// fallback for aircraft whose outlet faces have not been reviewed.
+fn contrail_offsets(
+    id: tore_formats::aircraft::AircraftId,
+    neutral: &Shape,
+    rig: Option<&crate::additional_animation::Rig>,
+    count: usize,
+) -> Vec<[f64; 3]> {
+    let scale = f64::from(rig.map_or(1. / 3., |r| r.scale()));
+    (0..count)
+        .map(|group| {
+            let positions: Vec<_> = neutral
+                .faces
+                .iter()
+                .filter(|f| {
+                    crate::engine_material::nozzle(id, f.address)
+                        && crate::engine_material::outlet_group(id, &f.positions) == group
+                })
+                .flat_map(|f| f.positions.iter())
+                .collect();
+            if !positions.is_empty() {
+                let min: [f64; 3] = std::array::from_fn(|i| {
+                    positions
+                        .iter()
+                        .map(|p| f64::from(p[i]))
+                        .fold(f64::INFINITY, f64::min)
+                });
+                let max: [f64; 3] = std::array::from_fn(|i| {
+                    positions
+                        .iter()
+                        .map(|p| f64::from(p[i]))
+                        .fold(f64::NEG_INFINITY, f64::max)
+                });
+                [
+                    (min[0] + max[0]) * 0.5 * scale,
+                    (min[2] + max[2]) * 0.5 * scale,
+                    min[1] * scale - 2.,
+                ]
+            } else {
+                let positions = neutral.faces.iter().flat_map(|f| &f.positions);
+                let mut aft = 0_f64;
+                let mut span = 0_f64;
+                for p in positions {
+                    aft = aft.min(f64::from(p[1]) * scale);
+                    span = span.max(f64::from(p[0]).abs() * scale);
+                }
+                let lateral = if count == 1 {
+                    0.
+                } else {
+                    span * 0.15 * (2. * group as f64 - (count - 1) as f64)
+                };
+                [lateral, 0., aft - 2.]
+            }
+        })
+        .collect()
+}
+
 /// Source-space X and Z bounds of each engine outlet's nozzle faces, which
 /// the engine material spans.
 fn nozzle_bounds(id: tore_formats::aircraft::AircraftId, shape: &Shape) -> [[f32; 4]; 2] {
@@ -763,11 +850,6 @@ impl Airframe {
         damage_art: crate::damage_art::DamageArt,
         engine_material: Option<crate::engine_material::Image>,
     ) -> Self {
-        let source = crate::flight::animation_tests::profile();
-        let model =
-            tore_sim::models::AircraftModel::for_aircraft(&source).expect("synthetic flight model");
-        let mut profile = source;
-        profile.id = id;
         let pic = |size: usize| Pic {
             width: size,
             height: size,
@@ -780,13 +862,21 @@ impl Airframe {
             height: 1,
             glyphs: Vec::new(),
         };
+        let engines = match id {
+            tore_formats::aircraft::AircraftId::A4E
+            | tore_formats::aircraft::AircraftId::X31
+            | tore_formats::aircraft::AircraftId::Mig21
+            | tore_formats::aircraft::AircraftId::Mig23 => 1,
+            _ => 2,
+        };
+        let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref(), engines);
         Self {
+            mounts: Default::default(),
+            kind: Arc::new(AircraftType::synthetic(id, contrail_offsets)),
             nozzle_bounds: nozzle_bounds(id, &poses[0]),
             engine_material,
             rig,
             streamer: None,
-            model,
-            profile,
             atlas: pic(16),
             damage_art,
             palette: std::array::from_fn(|i| [i as u8, 255 - i as u8, (i * 37 % 256) as u8]),
@@ -803,14 +893,6 @@ impl Airframe {
                 press_color: 0,
             },
             flight_menu: Vec::new(),
-            sensors: tore_sim::sensors::SensorProfiles {
-                aircraft: id,
-                radar: None,
-                infrared: None,
-                visual: None,
-                jammer: None,
-                signature: Default::default(),
-            },
             poses,
         }
     }
@@ -849,6 +931,23 @@ fn streamer_world_points(
         });
     }
     Some(points)
+}
+
+/// The height above `from` (feet up) of the lowest face of `shape` straight
+/// above the point `right` and `forward` feet from the reference point, up
+/// to 12 ft above it ([`tore_sim::combat::hardpoints::Underside`], the same
+/// surface the simulation hangs stores from).
+fn underside(shape: &Shape, scale: f64, right: f64, forward: f64, from: f64) -> Option<f64> {
+    tore_sim::combat::hardpoints::Underside::of(shape, scale)
+        .over(right, forward, from)
+        .map(|h| h - from)
+}
+
+/// The outermost point of `shape` (scaled to feet by `scale`) beside a
+/// store ([`tore_sim::combat::hardpoints::Underside::tip_edge`], the same
+/// edge the simulation sits wingtip stores on).
+fn tip_edge(shape: &Shape, scale: f64, right: f64, up: f64, forward: [f64; 2]) -> Option<[f64; 3]> {
+    tore_sim::combat::hardpoints::Underside::of(shape, scale).tip_edge(right, up, forward)
 }
 
 #[cfg(test)]

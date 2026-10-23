@@ -1,5 +1,5 @@
 //! The plain-English mission summary: what happened, who did what, every
-//! shot, the comms transcript with reasons, a timeline, bookmarks with the
+//! shot, the comms transcript with reasons, the data link's changes, a timeline, bookmarks with the
 //! seconds around them, and anomaly flags.
 
 use super::anomaly::{self, Thresholds};
@@ -32,6 +32,21 @@ impl Default for SummaryOptions {
     }
 }
 
+/// What a surface unit's supply and loss events add up to.
+#[derive(Default)]
+struct SurfaceCounts {
+    rearms: u32,
+    refills: u32,
+    destroyed: Option<u64>,
+}
+
+/// An id that names a surface unit: a registered one, or one in the
+/// reserved range (`0x4000_0000` and up).
+fn is_surface(recording: &Recording, id: u32) -> bool {
+    recording.surface_info(id).is_some() && recording.aircraft_info(id).is_none()
+        || (id >= super::text::SURFACE_IDS && recording.aircraft_info(id).is_none())
+}
+
 #[derive(Default)]
 struct Stats {
     airborne: u64,
@@ -54,6 +69,8 @@ struct Stats {
     devices: [u32; 2],
     activity: BTreeMap<String, u64>,
     current: Option<(String, u64)>,
+    /// AI strike decisions by reason (slice ST-G).
+    strike: BTreeMap<String, u32>,
 }
 
 fn lower(slot: &mut Option<(f64, u64)>, v: f64, tick: u64) {
@@ -120,10 +137,18 @@ fn key_event(kind_name: &str) -> bool {
         || kind_name == kind::WEAPON_OUTCOME
         || kind_name == kind::WEAPON_TRACK_LOST
         || kind_name == kind::WEAPON_DECOYED
+        || kind_name == kind::WEAPON_RELEASE
+        || kind_name == kind::WEAPON_DUD
+        || kind_name == kind::WEAPON_CLUSTER
+        || kind_name == kind::WEAPON_IMPACT
+        || kind_name == kind::WEAPON_GUIDED
         || kind_name.starts_with("combat.")
         || kind_name.starts_with("aircraft.")
         || (kind_name.starts_with("flight.") && kind_name != kind::FLIGHT_EFFECT)
         || kind_name.starts_with("system.")
+        || kind_name == kind::SURFACE_WRECK
+        || kind_name == kind::SURFACE_REARM
+        || kind_name == kind::SURFACE_REFILL
         || kind_name == kind::PLAYER_BOOKMARK
 }
 
@@ -140,6 +165,13 @@ pub fn write_summary(
     options: &SummaryOptions,
     mut out: impl Write,
 ) -> Result<()> {
+    if recording.flagged() {
+        writeln!(
+            out,
+            "Flagged: {} feedback reports",
+            recording.feedback().count()
+        )?;
+    }
     let names = Names::new(recording);
     let header = recording.header();
     let w = &header.world;
@@ -150,8 +182,16 @@ pub fn write_summary(
         .aircraft()
         .map(|a| (a.id, Stats::default()))
         .collect();
+    // What the surface units did (format 3 names them), apart from the
+    // aircraft: rearms, refills and destroyed wrecks by unit.
+    let mut surface_counts: BTreeMap<u32, SurfaceCounts> = BTreeMap::new();
     let mut shots: Vec<Shot> = Vec::new();
     let mut shot_by_projectile: HashMap<u32, usize> = HashMap::new();
+    // A hit on an aircraft is a `combat.hit`; a hit on a surface unit (a
+    // vehicle, ship, site or parked aircraft) is only the shot's
+    // `weapon.outcome` (a bomb's blast or a gun round names no victim), and
+    // its kill only the unit's `surface.wreck`.
+    let aircraft: std::collections::BTreeSet<u32> = recording.aircraft().map(|a| a.id).collect();
     for frame in recording.frames(0, u64::MAX) {
         let frame = frame?;
         let tick = frame.tick;
@@ -222,6 +262,12 @@ pub fn write_summary(
                     {
                         shots[*i].outcome = Some((tick, e.clone()));
                     }
+                    if e.string(field::RESULT) == Some("hit")
+                        && let Some(id) = subject
+                        && !e.object.is_some_and(|victim| aircraft.contains(&victim))
+                    {
+                        stats.entry(id).or_default().hits += 1;
+                    }
                 }
                 kind::COMBAT_HIT => {
                     if let Some(id) = subject {
@@ -229,6 +275,24 @@ pub fn write_summary(
                     }
                 }
                 kind::COMBAT_DESTROYED => {
+                    if let Some(killer) = e.object {
+                        stats.entry(killer).or_default().kills += 1;
+                    }
+                }
+                kind::SURFACE_REARM => {
+                    if let Some(id) = subject {
+                        surface_counts.entry(id).or_default().rearms += 1;
+                    }
+                }
+                kind::SURFACE_REFILL => {
+                    if let Some(id) = subject {
+                        surface_counts.entry(id).or_default().refills += 1;
+                    }
+                }
+                kind::SURFACE_WRECK => {
+                    if let Some(id) = subject {
+                        surface_counts.entry(id).or_default().destroyed = Some(tick);
+                    }
                     if let Some(killer) = e.object {
                         stats.entry(killer).or_default().kills += 1;
                     }
@@ -251,6 +315,17 @@ pub fn write_summary(
                 kind::FLIGHT_SPIN if e.flag(field::ON) != Some(false) => {
                     if let Some(id) = subject {
                         stats.entry(id).or_default().spins += 1;
+                    }
+                }
+                kind::AI_STRIKE => {
+                    if let Some(id) = subject {
+                        let reason = e.string(field::REASON).unwrap_or("?").to_owned();
+                        *stats
+                            .entry(id)
+                            .or_default()
+                            .strike
+                            .entry(reason)
+                            .or_default() += 1;
                     }
                 }
                 kind::AI_ACTIVITY => {
@@ -283,6 +358,16 @@ pub fn write_summary(
         }
     }
     let end = recording.last_tick().unwrap_or(0);
+    // Surface units are not aircraft: the ones that shot, were hit or died
+    // get their own section.
+    let surface_stats: BTreeMap<u32, Stats> = stats
+        .keys()
+        .copied()
+        .filter(|id| is_surface(recording, *id))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .filter_map(|id| stats.remove(&id).map(|st| (id, st)))
+        .collect();
     for st in stats.values_mut() {
         if let Some((activity, since)) = st.current.take() {
             // Activity time counts while the aircraft is alive.
@@ -502,6 +587,59 @@ pub fn write_summary(
                 .collect();
             writeln!(o, "  AI activity: {}", parts.join(", "))?;
         }
+        if !st.strike.is_empty() {
+            let parts: Vec<String> = st
+                .strike
+                .iter()
+                .map(|(reason, count)| format!("{reason} x{count}"))
+                .collect();
+            writeln!(o, "  AI strike decisions: {}", parts.join(", "))?;
+        }
+    }
+
+    if !surface_stats.is_empty() || !surface_counts.is_empty() {
+        heading(o, "Surface units")?;
+        let ids: std::collections::BTreeSet<u32> = surface_stats
+            .keys()
+            .chain(surface_counts.keys())
+            .copied()
+            .collect();
+        for id in ids {
+            let st = surface_stats.get(&id);
+            let counts = surface_counts.get(&id);
+            let mut title = names.who(id);
+            if let Some(info) = recording.surface_info(id) {
+                title = format!(
+                    "{title} ({}; {}; {} hp)",
+                    info.name,
+                    info.side.name(),
+                    thousands(f64::from(info.hit_points))
+                );
+            }
+            writeln!(o, "{title}")?;
+            writeln!(
+                o,
+                "  shots {} | hits {} | kills {}",
+                st.map_or(0, |s| s.shots),
+                st.map_or(0, |s| s.hits),
+                st.map_or(0, |s| s.kills),
+            )?;
+            if let Some(counts) = counts {
+                let mut parts = Vec::new();
+                if let Some(at) = counts.destroyed {
+                    parts.push(format!("destroyed at {}", clock(at)));
+                }
+                if counts.rearms > 0 {
+                    parts.push(format!("rearmed {} times", counts.rearms));
+                }
+                if counts.refills > 0 {
+                    parts.push(format!("magazines refilled {} times", counts.refills));
+                }
+                if !parts.is_empty() {
+                    writeln!(o, "  {}", parts.join(" | "))?;
+                }
+            }
+        }
     }
 
     heading(o, "Shots")?;
@@ -612,6 +750,52 @@ pub fn write_summary(
     }
     for e in comms {
         writeln!(o, "{}  {}", clock(e.tick), comms_line(&e.event, &names))?;
+    }
+
+    // The data link's changes, when the recording has any: a line of counts,
+    // then each assignment, its end and acknowledgement, and each sort
+    // warning. Locks are counted and left out of the list, which the
+    // events file and the viewer's Comms panel have in full.
+    let link: Vec<&TimedEvent> = recording
+        .events()
+        .iter()
+        .filter(|e| e.event.kind.starts_with("datalink."))
+        .collect();
+    if !link.is_empty() {
+        heading(o, "Data link")?;
+        let count = |wanted: &str| link.iter().filter(|e| e.event.kind == wanted).count();
+        let radars = link
+            .iter()
+            .filter(|e| e.event.kind == kind::DATALINK_MEMBER)
+            .filter(|e| e.event.flag(field::RADAR) != Some(false))
+            .count();
+        let many =
+            |n: usize, one: &str, more: &str| format!("{n} {}", if n == 1 { one } else { more });
+        writeln!(
+            o,
+            "{} ({radars} with a radar), {}, {}, {} acknowledged, {} cleared, {}",
+            many(count(kind::DATALINK_MEMBER), "member", "members"),
+            many(count(kind::DATALINK_LOCK), "lock", "locks"),
+            many(count(kind::DATALINK_ASSIGN), "assignment", "assignments"),
+            count(kind::DATALINK_ACKNOWLEDGE),
+            count(kind::DATALINK_CLEAR),
+            many(
+                count(kind::DATALINK_SORT_WARNING),
+                "sort warning",
+                "sort warnings"
+            ),
+        )?;
+        for e in link.iter().filter(|e| {
+            matches!(
+                e.event.kind.as_str(),
+                kind::DATALINK_ASSIGN
+                    | kind::DATALINK_CLEAR
+                    | kind::DATALINK_ACKNOWLEDGE
+                    | kind::DATALINK_SORT_WARNING
+            )
+        }) {
+            writeln!(o, "{}  {}", clock(e.tick), describe(&e.event, &names))?;
+        }
     }
 
     heading(o, "Timeline")?;

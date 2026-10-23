@@ -15,7 +15,7 @@ examples go from `0.1.0` to `0.1.1`; substitute your own numbers.
 
 | File | What to change |
 | --- | --- |
-| `crates/*/Cargo.toml` (every crate, eight since `tore-replay` joined) | `version = "0.1.1"` on line 3. `tore-app` is the one the release checks; the rest are kept equal. |
+| `crates/*/Cargo.toml` (every crate, nine since `tore-world` joined) | `version = "0.1.1"` on line 3. `tore-app` is the one the release checks; the rest are kept equal. |
 | `Cargo.lock` | Refreshed by the build in step 2; never edit it by hand. |
 | `README.md` | The milestone badge's alt text near the top, and "Version 0.1.0 completes..." under **What works today**, with that section's paragraphs (such as **Replays**) if the release changes what they say. |
 | `docs/DEVELOPMENT.md` | The `TORE_BUILD_VERSION=0.1.0` example under **Packaging**. |
@@ -77,6 +77,17 @@ installers. It refuses a tag that does not match `crates/tore-app/Cargo.toml`,
 so the version must be changed before tagging. The app's menu label and
 `--version` take their version from the tag, as described in
 [packaging](DEVELOPMENT.md#packaging).
+
+The release carries, for each platform: the game's installer
+(`T.O.R.E-Fighters-<version>-windows-x86_64.msi`, `-windows-x86.msi`,
+`-macos-arm64.dmg`, `-macos-x86_64.dmg`, `-x86_64.AppImage`) and the Linux
+`T.O.R.E-Fighters-<version>-linux-x86_64.tar.gz`; the dedicated server,
+`tore-server-<version>-windows-x86_64.zip`, `-macos-arm64.tar.gz`,
+`-macos-x86_64.tar.gz` and `-linux-x86_64.tar.gz`, each with a `.sha256`
+([downloading it](DEDICATED-SERVER.md#downloading-it)); and the master server,
+`tore-master-<version>-linux-x86_64.tar.gz` with its `.sha256`
+([operations](MASTER-SERVER.md#downloading-a-release)). Check the release page
+lists all eleven packages and the five checksums.
 
 The workflow only writes the notes when it creates the release. To change them
 after the tag is pushed, edit the file, commit it, and run:

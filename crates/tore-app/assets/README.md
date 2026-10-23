@@ -1,6 +1,7 @@
 # Bundled assets
 
-Everything in this directory is either openly licensed or our own work.
+Everything in this directory is openly licensed, our own work, or supplied
+by John for bundling.
 None of it contains retail game data.
 
 ## Menu font atlases
@@ -44,6 +45,69 @@ Either source may be left out; only the named atlas is rewritten. Only
 regeneration needs ImageMagick and the source fonts. Runtime uses the
 committed atlases consistently on Linux, Windows and macOS.
 
+## Sharp UI text and icon atlas
+
+`ui-text.bin` holds **Noto Sans Medium** (the same source font and SHA-256 as
+`menu-font-large.bin`, copyright 2022 The Noto Project Authors, SIL Open Font
+License 1.1 in `OFL-NotoSans.txt`) rendered at 48 px to the em, so the
+multiplayer screens can draw their text at the window's resolution instead of
+stretching the retail bitmap fonts. It also holds the screens' icons,
+rasterized at 64 by 64 from the SVGs in `icons/` as coverage only (the game
+tints them). It contains no retail game data. The file layout is documented in
+`tools/build_ui_text_atlas.py`; the app lays the glyphs out in the retail fonts'
+sizes and places (`docs/formats/menu.md`, "Sharp text"). Regeneration needs
+Python, ImageMagick 7 and `rsvg-convert` (librsvg):
+
+```sh
+python3 tools/build_ui_text_atlas.py /path/to/NotoSans-Medium.ttf
+```
+
+## Icons
+
+`icons/*.svg` are the marks a list row can carry: `lock` (a game with a
+password), `crown` (the King), `ready` (a tick), `house` (the player whose
+machine hosts), `you` (the player's own slot), `unable` (a cross) and the
+platforms `windows`, `macos` and `linux`, and `relay` (a player whose game
+reaches the host through the master's relay: two dots joined through a hub, slice J6). They are hand drawn for this project
+by an agent at John's request (2026-10-05): minimalist solid shapes on a 16 by
+16 grid, all one colour, and covered by the repository `LICENSE` like the rest
+of the source. They hold no retail art. The three platform marks are our own
+simplified drawings of a window of four panes, an apple with a leaf and a bite,
+and a penguin; they are not the vendors' logo artwork, and the Windows, Apple
+and Linux names and marks belong to their owners.
+
+## Connection screens' title lettering
+
+`direct-network-connection-title.png` is the words DIRECT NETWORK LOUNGE, and
+`internet-lobby-title.png` (slice I4, the Internet Lobby screen) the words
+INTERNET LOUNGE, each in
+**Liberation Sans Regular** (version 2.1.5, copyright 2010 Google Corporation
+and 2012 Red Hat, Inc., SIL Open Font License 1.1 in `OFL-LiberationSans.txt`,
+copied from the font's `LICENSE`) over a dark copy of the same words offset two
+pixels right and down as a shadow, 564 by 36 pixels on a transparent
+background. It is drawn at the top right of the Direct Connection and lobby
+screens' title bar, where the first letter starts at x 80 as retail's lettering
+did. It holds no retail art: every clear pixel is `0, 0, 0, 0`, and the game
+covers retail's own lettering with the bar's texture from the player's import,
+in memory. Source `LiberationSans-Regular.ttf` SHA-256:
+`baccc64becc3eb7d104b7c84d99f5314a0a1f896e2b3ea6c2f22fc08d2003bee`.
+
+John first set the words in Helvetica, a commercial typeface, and asked on
+2026-10-05 for this open-licensed redraw instead, sized to his (29 points,
+narrowed by 4.9 percent). Regeneration needs Python and ImageMagick 7:
+
+```sh
+python3 tools/build_title_lettering.py /path/to/LiberationSans-Regular.ttf
+python3 tools/build_title_lettering.py --title internet /path/to/LiberationSans-Regular.ttf
+```
+
+`direct-game-lobby-title.png` and `internet-game-lobby-title.png` carry
+DIRECT NETWORK GAME LOBBY and INTERNET GAME LOBBY. Generate these with
+`--title direct-game` and `--title internet-game`. All four are lettered the
+same way and start at x 80 on the bar; a player's own
+`DirectNetworkConnection.png` or `InternetLobby.png` in the data folder replaces
+the one for its screen.
+
 ## Application icon
 
 `icon/tore-*.png`, `icon/tore.ico` and `icon/tore-64.rgba` are downscales of
@@ -68,3 +132,38 @@ python3 tools/package/build_icons.py
 `tore-app.exe` on windows-msvc. The packaging scripts read the PNGs for the
 Linux desktop entry and the macOS `.icns`. The app embeds `tore-64.rgba` for
 the main-menu badge; no external image or runtime image decoder is needed.
+
+## Loading photographs and squadron patch
+
+John requested these bundled images on 2026-10-16. The photos are his supplied
+images, with existing ownership retained, not GPL-licensed retail data. See
+[website provenance](../../../docs/WEBSITE.md#images).
+
+On 2026-10-16 he supplied the full-size originals
+`~/Pictures/Harrier_Sunset_FullSize.jpg` (6000 by 4000) and
+`~/Pictures/F16s_CanopytoCanopy__V2_FullSize.jpg` (4843 by 3229, the
+Thunderbirds canopy-to-canopy photograph). The bundled files are those
+originals resized to 2560 pixels wide, baseline JPEG, quality 88, 4:2:0,
+metadata stripped. `loading/logo.rgba` still comes from
+`docs/images/tore-fighters-logo.png` and still begins with two little-endian
+u32 dimensions, followed by packed 8-bit RGBA. The patch fits inside 220 by
+220. The loading worker decodes the JPEGs with `zune-jpeg` 0.5.15 (scalar:
+default features off). The window thread only cover-fits and shades the
+decoded pixels. A failed decode logs one line and leaves a plain dark
+background. These are source-art conversions, not screenshots or generated
+retail derivatives.
+
+| Loading asset | Pixels | Bytes |
+| --- | --- | ---: |
+| `loading/harrier.jpg` | 2560 by 1707 | 591,274 |
+| `loading/thunderbirds.jpg` | 2560 by 1707 | 320,584 |
+| `loading/logo.rgba` | 220 by 220 | 193,608 |
+
+To regenerate a photo from John's full-size original:
+
+```sh
+magick SOURCE -resize 2560x -quality 88 -sampling-factor 4:2:0 -strip OUT.jpg
+```
+
+The patch is still `magick SOURCE -resize '220x220>' -depth 8 rgba:-`, with
+the resized width and height prefixed as little-endian u32 values.

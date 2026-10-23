@@ -1,0 +1,19 @@
+# Quick Mission, enemy 5 nm ahead holding fire: IFF with nothing designated, designate it and
+# squawk, Show Target Info on (Ctrl+T) with a frame before and after, then the score board key
+# and a wingman reply key, which both answer in single player.
+wait 1
+waittick 240
+key u
+shot before.ppm
+key t
+waittick 360
+key u
+key Ctrl+T
+waittick 480
+shot after.ppm
+key Ctrl+T
+key k
+key Alt+Shift+e
+key Alt+Shift+h
+waittick 600
+exit

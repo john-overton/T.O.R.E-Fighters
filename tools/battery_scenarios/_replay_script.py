@@ -104,6 +104,114 @@ def missile_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def orange_pixels(path: Path) -> int:
+    """How many pixels of a P6 frame are Show Target Info's orange (255, 150, 40)."""
+    data = path.read_bytes()
+    fields, at = [], 0
+    while len(fields) < 4:
+        while data[at : at + 1].isspace():
+            at += 1
+        end = at
+        while not data[end : end + 1].isspace():
+            end += 1
+        fields.append(data[at:end])
+        at = end
+    body = data[at + 1 :]
+    return sum(
+        1
+        for i in range(0, len(body) - 2, 3)
+        if body[i] >= 245 and 135 <= body[i + 1] <= 165 and body[i + 2] <= 60
+    )
+
+
+def friend_or_foe_check(work: Path, output: str) -> list[str]:
+    events, _ = load(work)
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    problems = []
+    for text in (
+        "IFF: no target",
+        "IFF: no reply",
+        "Show target info: on",
+        "Show target info: off",
+        "Score board: network games only",
+        "You lead this flight.",
+    ):
+        if text not in said:
+            problems.append(f"the flight never said {text!r}; it said {said}")
+    if any("not implemented" in text for text in said):
+        problems.append("a key still reports not implemented yet")
+    shots = work / "shots"
+    try:
+        before, after = orange_pixels(shots / "before.ppm"), orange_pixels(shots / "after.ppm")
+    except OSError as error:
+        return [*problems, f"no frame to compare: {error}"]
+    if after < before + 20:
+        problems.append(f"Show Target Info drew no orange text under the enemy ({before} orange pixels before, {after} after)")
+    return problems
+
+
+def link_cues_check(work: Path, output: str) -> list[str]:
+    """The wingmen lock the player's bandit: the flight data link's sort warning reads on the HUD."""
+    events, _ = load(work)
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    problems = []
+    clashes = [text for text in said if text.startswith("Sort: ")]
+    if not clashes:
+        problems.append(f"no wingman locked the player's bandit, so no sort warning read; the flight said {said}")
+    for text in clashes:
+        if not (text.startswith("Sort: Red ") and text.endswith(" is locked on your target.")):
+            problems.append(f"a sort warning reads {text!r}")
+    for name in ("before", "clash", "after"):
+        if not (work / "shots" / f"{name}.ppm").is_file():
+            problems.append(f"no {name}.ppm frame")
+    return problems
+
+
+def link_assign_check(work: Path, output: str) -> list[str]:
+    """The lead's Engage my target assigns the bandit to both wingmen, who then lock it: not a sort clash."""
+    events, _ = load(work)
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    problems = []
+    if "Engage my target: 2 applied, 0 rejected, 0 without motion" not in said:
+        problems.append(f"the order was not applied to both wingmen; the flight said {said}")
+    if any(text.startswith("Sort: ") for text in said):
+        problems.append(f"an assigned lock was called a sort clash: {said}")
+    for name in ("before", "assigned"):
+        if not (work / "shots" / f"{name}.ppm").is_file():
+            problems.append(f"no {name}.ppm frame")
+    return problems
+
+
+def link_sort_check(work: Path, output: str) -> list[str]:
+    """Alt+0 then Alt+A (slice G3c, acceptance G10): each of the three wingmen is dealt a bandit (a
+    `datalink.assign` with the order Sort), the HUD says how many, and the three calls are said 3.5 s apart: the
+    first with the order, the others as radio lines of the lead, each a `comms.order` that is delivered."""
+    events, _ = load(work)
+    problems = []
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    if "Sort: 3 assigned" not in said:
+        problems.append(f"the HUD never said 'Sort: 3 assigned'; the flight said {said[:6]}")
+    assigns = [e for e in events if e["kind"] == "datalink.assign" and e["fields"].get("order") == "Sort"]
+    if sorted(e["object"] for e in assigns) != [1, 2, 3]:
+        problems.append(f"the sort assigned planes {sorted(e['object'] for e in assigns)}, expected 1, 2 and 3")
+    delivered = sorted(
+        e["t"]
+        for e in events
+        if e["kind"] == "comms.order"
+        and e["fields"].get("outcome") == "delivered"
+        and e["fields"].get("speaker") == "Red one"
+        and (e.get("text") or "").endswith(("angels 5", "angels 4", "angels 6"))
+    )
+    if len(delivered) != 2:
+        problems.append(f"{len(delivered)} sort calls were delivered as radio lines after the first, expected 2: {delivered}")
+    elif abs((delivered[1] - delivered[0]) - 3.5) > 0.1:
+        problems.append(f"the later calls were {delivered[1] - delivered[0]:.2f} s apart, expected 3.5")
+    for name in ("sort-0-before", "sort-1-order", "sort-2-second-call", "sort-3-third-call", "sort-4-after"):
+        if not (work / "shots" / f"{name}.ppm").is_file():
+            problems.append(f"no {name}.ppm frame")
+    return problems
+
+
 def gun_check(work: Path, output: str) -> list[str]:
     events, _ = load(work)
     rounds = count(events, "weapon.launch", 0, **{"class": "gun"})
@@ -162,15 +270,16 @@ def takeoff_any_check(work: Path, output: str) -> list[str]:
 
 
 def belly_check(work: Path, output: str) -> list[str]:
-    """Gear up at about 45 knots with the wheels down: a belly slide, not a takeoff."""
+    """Gear up pressed at about 45 knots with weight on the wheels: the ground sensor
+    refuses it with a message and the gear stays down."""
     events, samples = load(work)
     problems = []
-    if count(events, "aircraft.took_off", 0):
-        problems.append("the player took off with the gear coming up at 45 knots")
-    if not any("belly" in (e.get("text") or "") for e in events):
-        problems.append("no belly scraping message")
-    if samples and samples[-1]["devices"]["gear"] > 0.5:
-        problems.append("the gear did not come up")
+    if not any("Ground sensor preventing gear retraction" in (e.get("text") or "") for e in events):
+        problems.append("no ground sensor message")
+    if count(events, "aircraft.crashed", 0):
+        problems.append("the player crashed")
+    if any(sample["devices"]["gear"] < 0.99 for sample in samples):
+        problems.append("the gear moved with weight on the wheels")
     return problems
 
 
@@ -249,7 +358,9 @@ def info_of(path: Path) -> str:
     import os
     import subprocess
 
-    binary = Path(__file__).resolve().parents[2] / "target" / "debug" / "tore-app"
+    # The binary under test (battery.py exports --bin); a debug build by default.
+    default = Path(__file__).resolve().parents[2] / "target" / "debug" / "tore-app"
+    binary = Path(os.environ.get("TORE_BATTERY_BIN", default))
     env = dict(os.environ, TORE_NO_ERROR_DIALOG="1")
     return subprocess.run([str(binary), "--recording-info", str(path)], capture_output=True, text=True, env=env).stdout
 
@@ -295,6 +406,32 @@ def debrief_mouse_check(work: Path, output: str) -> list[str]:
         problems.append("PREV did not return to page 4")
     if digest["creator"] in pages:
         problems.append("OK did not leave the debrief")
+    return problems
+
+
+def ordnance_flash_check(work: Path, output: str) -> list[str]:
+    """The creator opens Load Ordnance and Select Plane returns, twice, and the
+    window never presents the loading photograph between them."""
+    from battery_scenarios import _replay_tools as tools
+
+    shots = snapshots(work)
+    names = ["1-creator", "2-ordnance", "3-back-in-creator", "4-ordnance-again", "5-creator-again"]
+    problems = [f"no snapshot {n}" for n in names if n not in shots]
+    if problems:
+        return problems
+    for n in names:
+        problems += tools.ppm_problems(str(shots[n]), min_colors=8)
+    if shots["2-ordnance"].read_bytes() == shots["1-creator"].read_bytes():
+        problems.append("OK did not open Load Ordnance")
+    if shots["3-back-in-creator"].read_bytes() == shots["2-ordnance"].read_bytes():
+        problems.append("Select Plane did not return to the creator")
+    logs = sorted((work / "logs").glob("*.log"))
+    if not logs:
+        return problems + ["no diagnostics log to read the presented screens from"]
+    for log in logs:
+        for line in log.read_text(errors="replace").splitlines():
+            if "present:" in line and "now loading" in line:
+                problems.append(f"the loading photograph flashed between creator and ordnance: {line.strip()}")
     return problems
 
 
@@ -358,6 +495,17 @@ def mouse_scenarios() -> list[Scenario]:
     )
     out.append(
         Scenario(
+            name="replay-script-ordnance-no-flash",
+            lane="replay",
+            args=["--quick-mission", "--no-audio", "--input-script", str(SCRIPTS / "ordnance-no-flash.txt")],
+            window=True,
+            timeout=240,
+            env={"TORE_SCRIPT_OUT": "{work}/shots", "TORE_TRACE_PRESENT": "1", "TORE_LOG_DIR": "{work}/logs"},
+            check_work=ordnance_flash_check,
+        )
+    )
+    out.append(
+        Scenario(
             name="replay-script-replays-screen-mouse",
             lane="replay",
             args=["--ai-probe-ticks", "600", "--separation", "2", "--probe-attack", "100:5", "--record-mission", "{work}/src.tore-replay", "--no-audio"],
@@ -392,13 +540,16 @@ def scenarios() -> list[Scenario]:
         build(f"systems-{ac}", "systems.txt", ["--free-flight", "--no-audio", "--aircraft", ac, "--researched-flight"], lambda work, output, ac=ac: systems_check(work, output, ac))
         for ac in AIRCRAFT
     ]
+    # The ground starts leave Simferopol (UKR airport 2): airport 1,
+    # Zaporizhzhya, is a Redfor field since slice AL1.
     takeoffs = [
         build(
             f"takeoff-{ac}",
-            # The A-4E has no afterburner and needs 16 s of roll at its weight-scaled
-            # liftoff speed, so its script keeps climbing 3.5 s longer.
-            "takeoff-slow.txt" if ac == "a4e" else "takeoff-any.txt",
-            [*quick, "--ground-start", "1", "--aircraft", ac, "--researched-flight"],
+            # The A-4E and the Su-25 have no afterburner and need 15 to 16 s of roll
+            # at their fitted, weight-scaled liftoff speeds (the Su-25 lifts off at
+            # about 15 s and climbs slowly), so their script keeps climbing longer.
+            "takeoff-slow.txt" if ac in ("a4e", "su25") else "takeoff-any.txt",
+            [*quick, "--ground-start", "2", "--aircraft", ac, "--researched-flight"],
             takeoff_any_check,
         )
         for ac in AIRCRAFT
@@ -410,12 +561,44 @@ def scenarios() -> list[Scenario]:
         build("missile", "missile.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], missile_check, ai=3),
         build("gun", "gun.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], gun_check, ai=3),
         build("eject", "eject.txt", free, eject_check),
-        build("takeoff-and-landing-request", "takeoff.txt", [*quick, "--ground-start", "1", "--probe-wing-size", "3"], takeoff_check, tower=True),
-        build("takeoff-gear-early", "takeoff-gear-early.txt", [*quick, "--ground-start", "1", "--researched-flight"], belly_check),
+        build("takeoff-and-landing-request", "takeoff.txt", [*quick, "--ground-start", "2", "--probe-wing-size", "3"], takeoff_check, tower=True),
+        build("takeoff-gear-early", "takeoff-gear-early.txt", [*quick, "--ground-start", "2", "--researched-flight"], belly_check),
         build("navigation", "nav.txt", free, nav_check),
         build("views", "views.txt", free, views_check),
         build("maneuvers", "maneuvers.txt", free, maneuvers_check),
         build("pause-menu-bookmarks", "pause.txt", free, pause_check),
         build("cheats", "cheats.txt", free, cheats_check),
+        build(
+            "friend-or-foe",
+            "friend-or-foe.txt",
+            [*quick, "--separation", "5", "--ai-mission", "hold"],
+            friend_or_foe_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
+        build(
+            "link-cues",
+            "link-cues.txt",
+            [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "3"],
+            link_cues_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
+        build(
+            "link-assign",
+            "link-assign.txt",
+            [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "3"],
+            link_assign_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
+        build(
+            "link-sort",
+            "link-sort.txt",
+            [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "4"],
+            link_sort_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
         *mouse_scenarios(),
     ]

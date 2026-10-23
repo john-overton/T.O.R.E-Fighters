@@ -12,6 +12,12 @@
 # just runs in place.
 set -u
 
+# An agent's hosted game never asks a real router to forward its port.
+export TORE_NO_PORT_MAPPING=1
+# Agent windows sit on hidden workspaces that send no frame callbacks, so
+# V-sync would stop them after one frame; keep them uncapped unless asked.
+export TORE_FRAME_LIMIT="${TORE_FRAME_LIMIT:-off}"
+
 if [ "$#" -eq 0 ]; then
     echo "usage: tools/agent-run.sh COMMAND [ARGS...]" >&2
     exit 2

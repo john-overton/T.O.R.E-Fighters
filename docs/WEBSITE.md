@@ -66,7 +66,12 @@ names emitted by `tools/package/`:
 | Linux archive | `-linux-x86_64.tar.gz` | Additional link, or primary when AppImage is absent |
 
 Each filename must start with `T.O.R.E-Fighters-`. Empty or unfinished assets
-are ignored. The page accepts links only under this repository's HTTPS GitHub
+are ignored. The dedicated server's `tore-server-...` archives and the master
+server's `tore-master-...` archive, with their `.sha256` files, share the
+release but not that prefix, so the panel never offers them in place of the
+game; operators take them from the release page
+([dedicated server](DEDICATED-SERVER.md#downloading-it)).
+The page accepts links only under this repository's HTTPS GitHub
 release paths, and inserts release text as text, never as HTML. It never
 constructs a guessed download filename or mixes assets from different releases.
 Keep the suffix matching in the inline script aligned with the package scripts

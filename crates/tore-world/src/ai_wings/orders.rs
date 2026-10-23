@@ -1,0 +1,2266 @@
+//! Player delivery uses the same B46 receiver as AI team requests.
+//!
+//! Every order is written to the wing's journal: each addressed wingman's
+//! answer (including the ones skipped before delivery), the silent side
+//! orders, a refusal before anyone received it, and which wingman replied.
+use super::*;
+use crate::comms;
+use crate::comms::journal::{
+    Answer, Answered, Audience, Cause, Entry, Origin, Outcome, Reason, Reply, Source, WingReply,
+};
+use crate::datalink::calls;
+use tore_sim::{
+    ai::{
+        airfield::{AirfieldAnchors, LandingOrder, LandingReason, Phase, RunwayView},
+        engagement::{Assignment, Role, Stance},
+        wing::{
+            self, PlayerOrder, ReceiverOutcome, SpacingAxis, TargetId, TargetOrder, WingControl,
+            WingRequest,
+        },
+    },
+    airport::{Allegiance, Scene, Service},
+};
+
+#[derive(Default)]
+pub struct OrderReport {
+    pub message: String,
+    /// The player's own order call, played at once. The wingman's reply is
+    /// a [`Chatter`] event delivered through the radio channel.
+    pub radio: Vec<&'static str>,
+    /// The aircraft the order reached, for the data link's assignments: the
+    /// AI wingmen that took it and the human wingmen it addressed.
+    pub reached: Vec<u32>,
+    /// The aircraft an attack order named.
+    pub target: Option<u32>,
+    /// The human-flown wingmen the order addressed, which the world calls on
+    /// the radio (slice F2-R). They are in `reached` as well.
+    pub humans: Vec<u32>,
+    /// The order named a ground object or class (slice ST-O), so `target`,
+    /// which is an aircraft, is empty and the humans hear it as the order's
+    /// own words.
+    pub ground: bool,
+}
+
+/// The player's aircraft as the landing-priority rule sees it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PlayerLanding {
+    position: [f64; 3],
+    /// Height above the surface below, feet.
+    agl_ft: f64,
+    gear_down: bool,
+    speed_fps: f64,
+    /// Alive, not crashed and not ejected.
+    flying: bool,
+    /// Wheels on the ground.
+    on_ground: bool,
+    /// Horizontal velocity, ft/s: [x, z].
+    track: [f64; 2],
+}
+
+/// `spec-derived` (docs/formats/ai.md, "Airfield takeoff and landing
+/// sequences", APLanding): the player counts as landing, and AI aircraft
+/// hold at marshal, with gear down, below 4,000 ft above the ground, at no
+/// more than 953 ft/s and within 25,000 ft of the nearest friendly airport.
+pub const PRIORITY_MAX_AGL_FT: f64 = 4_000.;
+/// See [`PRIORITY_MAX_AGL_FT`].
+pub const PRIORITY_MAX_SPEED_FPS: f64 = 953.;
+/// See [`PRIORITY_MAX_AGL_FT`].
+pub const PRIORITY_RANGE_FT: f64 = 25_000.;
+/// `fitted` (agent decision, 2026-09-23): retail keeps a player who has
+/// just taken off in climb-out (0x12, which does not block the runway) until
+/// it is "aligned with the approach" (callback +0x10, not decoded). Here that
+/// means a horizontal track within this many degrees of a runway direction,
+/// with that runway's nearer end still ahead.
+pub const PRIORITY_ALIGNED_DEG: f64 = 30.;
+
+/// Where "land at selected airport" sends the wing: the airport the player
+/// selected for the tower (Shift-A) and one of its usable runways.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LandingSite {
+    pub name: String,
+    pub runway: RunwayView,
+}
+
+impl AiWings {
+    /// Resolve the tower's selected airport for a wing landing order given
+    /// by a pilot of one side (`redfor`).
+    ///
+    /// `opinionated` (agent decision, 2026-09-23): wingmen follow the tower's
+    /// own acceptance rule, so a hostile, unknown or unpermitted neutral
+    /// airport is refused, hostile as the ordering pilot's side sees it. They
+    /// use the player's cleared runway when the player holds a clearance
+    /// there, otherwise the longest usable runway (lowest object id on a tie).
+    pub fn landing_site(
+        scene: &Scene,
+        anchors: &BTreeMap<u32, AirfieldAnchors>,
+        service: &Service,
+        redfor: bool,
+    ) -> Result<LandingSite, String> {
+        let airport = service
+            .selected()
+            .and_then(|id| scene.airports.iter().find(|a| a.id == id))
+            .ok_or("Wing order unavailable: no airport selected (Shift-A selects one)")?;
+        let name = &airport.name;
+        if scene.airport_is_short_strip(airport) {
+            return Err(format!(
+                "Wing order unavailable: {name} is a short strip your wingmen cannot land on"
+            ));
+        }
+        match airport.allegiance_for(redfor) {
+            Allegiance::Hostile => {
+                return Err(format!("Wing order unavailable: {name} is hostile"));
+            }
+            Allegiance::Unknown => {
+                return Err(format!(
+                    "Wing order unavailable: {name} allegiance is unknown"
+                ));
+            }
+            Allegiance::Neutral if !airport.neutral_permission => {
+                return Err(format!(
+                    "Wing order unavailable: {name} has not granted landing permission"
+                ));
+            }
+            Allegiance::Friendly | Allegiance::Neutral => {}
+        }
+        let cleared = service
+            .clearance()
+            .filter(|(id, runway, _)| {
+                *id == airport.id && service.usable(*runway) && !scene.vertical_pad(*runway)
+            })
+            .and_then(|(_, runway, _)| scene.runway(runway));
+        let runway = cleared
+            .or_else(|| {
+                airport
+                    .runway_objects
+                    .iter()
+                    .filter(|id| {
+                        service.usable(**id)
+                            && !scene.vertical_pad(**id)
+                            && !scene.short_strip(**id)
+                    })
+                    .filter_map(|id| scene.runway(*id))
+                    .min_by(|a, b| {
+                        b.length_ft
+                            .total_cmp(&a.length_ft)
+                            .then(a.object.cmp(&b.object))
+                    })
+            })
+            .ok_or_else(|| {
+                format!("Wing order unavailable: {name} has no runway your wingmen can land on")
+            })?;
+        let mut runway_view = RunwayView::from(runway);
+        runway_view.anchors = anchors.get(&runway.object).copied();
+        Ok(LandingSite {
+            name: name.clone(),
+            runway: runway_view,
+        })
+    }
+
+    /// Re-evaluate human-flown aircraft `id`'s landing priority for this tick
+    /// and pass it to the AI ([`Self::set_priority_landing`]). Every human is
+    /// evaluated on its own, in id order, by the host. Friendly means the
+    /// tower's own rule: a friendly airport or a neutral one that grants
+    /// permission.
+    ///
+    /// Spec-derived (docs/formats/ai.md, `_ServicePlayer`): a player on the
+    /// ground is in the takeoff states, not landing; a rolling player blocks
+    /// the runway through the runway-free gate instead. After a takeoff the
+    /// player stays in climb-out, which does not block, until it is aligned
+    /// with an approach ([`PRIORITY_ALIGNED_DEG`], fitted) or leaves the
+    /// landing condition.
+    ///
+    /// `fitted` (agent decision, 2026-09-23): an airport's distance is the
+    /// horizontal distance to its nearest usable runway centre, because the
+    /// scene has no single airport position, and an airport with no usable
+    /// runway is skipped.
+    pub fn update_landing_priority(
+        &mut self,
+        id: u32,
+        scene: &Scene,
+        service: &Service,
+        flight: &flight::State,
+        surface_ft: f64,
+        redfor: bool,
+    ) {
+        let player = PlayerLanding {
+            position: flight.position,
+            agl_ft: flight.position[1] - surface_ft,
+            gear_down: flight.gear_down,
+            speed_fps: flight.speed,
+            flying: !flight.crashed && !flight.systems.pilot.dead && flight.escape.is_none(),
+            on_ground: flight.supported_at(surface_ft),
+            track: [flight.velocity[0], flight.velocity[2]],
+        };
+        let (airport, departing) =
+            Self::landing_priority(scene, service, player, self.departing.contains(&id), redfor);
+        if departing {
+            self.departing.insert(id);
+        } else {
+            self.departing.remove(&id);
+        }
+        self.set_priority_landing(id, airport);
+    }
+
+    /// The priority airport and whether the player is still climbing out
+    /// after a takeoff.
+    fn landing_priority(
+        scene: &Scene,
+        service: &Service,
+        player: PlayerLanding,
+        departing: bool,
+        redfor: bool,
+    ) -> (Option<u32>, bool) {
+        if player.flying && player.on_ground {
+            return (None, true);
+        }
+        if !player.flying
+            || !player.gear_down
+            || player.agl_ft >= PRIORITY_MAX_AGL_FT
+            || player.speed_fps > PRIORITY_MAX_SPEED_FPS
+        {
+            return (None, false);
+        }
+        let [x, _, z] = player.position;
+        let Some((_, airport)) = scene
+            .airports
+            .iter()
+            .filter(|a| a.serves(redfor))
+            .filter_map(|a| {
+                a.runway_objects
+                    .iter()
+                    .filter(|id| service.usable(**id))
+                    .filter_map(|id| scene.runway(*id))
+                    .map(|r| (r.approach_center[0] - x).hypot(r.approach_center[2] - z))
+                    .min_by(f64::total_cmp)
+                    .map(|distance| (distance, a.id))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .filter(|(distance, _)| *distance <= PRIORITY_RANGE_FT)
+        else {
+            return (None, false);
+        };
+        if departing && !Self::aligned(scene, service, airport, player) {
+            return (None, true);
+        }
+        (Some(airport), false)
+    }
+
+    /// Whether the player's track lines up with one of the airport's usable
+    /// runways, either direction, with the nearer runway end still ahead.
+    fn aligned(scene: &Scene, service: &Service, airport: u32, player: PlayerLanding) -> bool {
+        let [vx, vz] = player.track;
+        let speed = vx.hypot(vz);
+        if speed < 1. {
+            return false;
+        }
+        let [x, _, z] = player.position;
+        scene
+            .airports
+            .iter()
+            .filter(|a| a.id == airport)
+            .flat_map(|a| a.runway_objects.iter())
+            .filter(|id| service.usable(**id))
+            .filter_map(|id| scene.runway(*id))
+            .any(|r| {
+                let (sin, cos) = r.heading.sin_cos();
+                let along_track = (vx * sin + vz * cos) / speed;
+                let direction = along_track.signum();
+                let ahead = ((r.approach_center[0] - x) * sin + (r.approach_center[2] - z) * cos)
+                    * direction;
+                along_track.abs() >= PRIORITY_ALIGNED_DEG.to_radians().cos()
+                    && ahead > r.length_ft * 0.5
+            })
+    }
+
+    /// Human-flown aircraft `id` is landing at this airport: AI aircraft
+    /// landing there hold at marshal until it clears (manual p.65).
+    pub fn set_priority_landing(&mut self, id: u32, airport: Option<u32>) {
+        self.mission.set_priority_landing(id, airport);
+    }
+
+    /// Blind every AI member of the wing the human-flown aircraft `human`
+    /// flies in: no radar, infrared or eyes, so that only the flight data link
+    /// shows them an enemy. A harness for the probe's `--probe-blind-wing`.
+    pub fn blind_wingmen(&mut self, human: u32) {
+        let Some(wing) = self.wing_of(human) else {
+            return;
+        };
+        for actor in self.mission.actors_mut() {
+            if (actor.identity().side, actor.identity().wing) == wing {
+                actor.blind();
+            }
+        }
+    }
+
+    /// The wing (side and index) a human-flown aircraft belongs to.
+    fn wing_of(&self, human: u32) -> Option<(Side, u8)> {
+        self.humans
+            .iter()
+            .find(|h| h.id == human)
+            .map(|h| (side_of(h.side), h.wing))
+    }
+
+    /// Whether human-flown aircraft `sender` leads its wing now, which is what
+    /// lets it order the wing. Before the mission has stepped, the wing's
+    /// first member leads.
+    pub fn leads_wing(&self, sender: u32) -> bool {
+        let Some(human) = self.humans.iter().find(|h| h.id == sender) else {
+            return false;
+        };
+        match self.mission.wing_leader(side_of(human.side), human.wing) {
+            Some(leader) => leader == sender,
+            None => human.member == 0,
+        }
+    }
+
+    /// The refusal for an order from an aircraft that does not lead its wing.
+    fn refuse_not_leading(
+        &mut self,
+        sender: u32,
+        cause: Cause,
+        recipient: Option<u8>,
+    ) -> OrderReport {
+        let report = OrderReport {
+            message: "Wing order unavailable: you are not leading your wing".into(),
+            ..OrderReport::default()
+        };
+        self.journal_order(
+            sender,
+            cause,
+            recipient,
+            &report,
+            Outcome::Refused(Reason::NotLeading),
+        );
+        report
+    }
+
+    /// FA Alt+T: the formation after the one the first addressed wingman of
+    /// `sender`'s wing flies, cycling echelon, line abreast, line astern.
+    pub fn next_formation(&self, sender: u32, recipient: Option<u8>) -> wing::Formation {
+        let wing = self.wing_of(sender);
+        let current = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive() && Some((a.identity().side, a.identity().wing)) == wing)
+            .filter(|a| recipient.is_none_or(|wanted| a.identity().member == wanted))
+            .min_by_key(|a| a.identity().member)
+            .and_then(|a| a.controller().ordered_formation())
+            .unwrap_or(self.mission.formation());
+        let all = wing::Formation::ALL;
+        let index = all.iter().position(|f| *f == current).unwrap_or(0);
+        all[(index + 1) % all.len()]
+    }
+
+    /// [`Self::command_at`] without a landing site, as the tests use it.
+    pub fn command(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+    ) -> WorldResult<OrderReport> {
+        self.command_at(sender, order, selected, recipient, None)
+    }
+
+    /// [`Self::command`] with the resolved [`LandingSite`] that "land at
+    /// selected airport" needs. Other orders ignore `site`.
+    ///
+    /// `sender` is the human-flown aircraft giving the order. It goes to the
+    /// sender's own wing: AI members act on it, and a human member only
+    /// records that it was ordered.
+    pub fn command_at(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+    ) -> WorldResult<OrderReport> {
+        self.command_called(sender, order, selected, recipient, site, None)
+    }
+
+    /// [`Self::command_at`] with the radio flight number of the sender's
+    /// flight (0 is Red), which the attack call names when it addresses the
+    /// whole flight. `None` is the player's flight, Red.
+    pub fn command_called(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+        flight: Option<u8>,
+    ) -> WorldResult<OrderReport> {
+        self.command_linked(sender, order, selected, recipient, site, flight, &|_| false)
+    }
+
+    /// [`Self::command_called`] with what the flight data link knows (slice
+    /// G3b): `tracked` says whether a flightmate's track of an aircraft is in
+    /// the picture. An Engage order is then taken by a wingman whose own
+    /// sensors do not hold the target, which it flies toward on the track
+    /// until they do; with no track either, it still answers "cannot see the
+    /// target". Every other order that needs a target keeps that refusal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn command_linked(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+        flight: Option<u8>,
+        tracked: &dyn Fn(u32) -> bool,
+    ) -> WorldResult<OrderReport> {
+        self.command_aimed(
+            sender,
+            order,
+            selected,
+            recipient,
+            site,
+            flight,
+            tracked,
+            &GroundAim::default(),
+        )
+    }
+
+    /// [`Self::command_linked`] with what the sender's cockpit lets an order
+    /// onto the ground name (slice ST-O): the ground objects, the targeting
+    /// sight's track or pin. Alt+E and Alt+R accept a ground designation (or
+    /// the sight pin), Alt+F the sight's contact, Alt+W the designation's
+    /// class, and "Lase my target" a ground object.
+    #[allow(clippy::too_many_arguments)]
+    pub fn command_aimed(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+        flight: Option<u8>,
+        tracked: &dyn Fn(u32) -> bool,
+        ground: &GroundAim,
+    ) -> WorldResult<OrderReport> {
+        if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
+            return self.command_landing(sender, order, recipient, site);
+        }
+        // A sort gives each wingman its own target, which only the world can
+        // work out (it holds the picture): it orders each wingman to engage
+        // the bandit it was dealt (slice G3c, `World::sort_order`).
+        if order == PlayerOrder::Sort {
+            return Err("a sort is planned from the data link's picture".into());
+        }
+        let wing = self.wing_of(sender);
+        let sender_side = wing.map_or(FRIENDLY_SIDE, |(side, _)| side);
+        if wing.is_some() && !self.leads_wing(sender) {
+            let cause = Cause::Order {
+                order,
+                selected,
+                target: None,
+            };
+            return Ok(self.refuse_not_leading(sender, cause, recipient));
+        }
+        // What the order means: onto the ground, or the air order it always
+        // was (an Alt+F or Alt+W onto an aircraft or nothing is "engage" or
+        // "attack on contact"). `asked` is the order the player gave; `order`
+        // from here on is the one an air wingman receives.
+        let asked = order;
+        let plan = {
+            let hostile_air = |id: u32| {
+                self.mission
+                    .actor(id)
+                    .is_some_and(|a| a.alive() && a.identity().side != sender_side)
+            };
+            ground_orders::resolve(order, selected, ground, sender_side, &hostile_air)
+        };
+        let designated = selected;
+        let (order, selected) = match &plan {
+            ground_orders::Plan::Air { order, selected } => (*order, *selected),
+            _ => (asked, selected),
+        };
+        let humans = self.other_humans(sender, recipient);
+        let mut members: Vec<_> = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive() && Some((a.identity().side, a.identity().wing)) == wing)
+            .map(|a| (a.identity().member, a.id()))
+            .collect();
+        members.sort_unstable();
+        let first = members.first().map(|(_, id)| *id);
+        members.retain(|(member, _)| recipient.is_none_or(|wanted| *member == wanted));
+        let cause = Cause::Order {
+            order: asked,
+            selected: designated,
+            target: None,
+        };
+        if members.is_empty() && humans.is_empty() {
+            let report = unavailable_no_wingmen();
+            self.journal_order(
+                sender,
+                cause,
+                recipient,
+                &report,
+                Outcome::Refused(Reason::NoWingmen),
+            );
+            return Ok(report);
+        }
+        // A bugged-out wingman no longer answers orders (manual p.160).
+        let before = members.len();
+        let mut answers = Vec::new();
+        members.retain(|(member, id)| {
+            let gone = self.mission.actor(*id).unwrap().bugged_out();
+            if gone {
+                answers.push(Answer {
+                    recipient: *id,
+                    member: *member,
+                    result: Answered::BuggedOut,
+                    side: Vec::new(),
+                });
+            }
+            !gone
+        });
+        let bugged_out = before - members.len();
+        if members.is_empty() && humans.is_empty() {
+            let report = OrderReport {
+                message: bugged_out_notice(bugged_out, recipient),
+                ..OrderReport::default()
+            };
+            let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
+            self.journal_order(sender, cause, recipient, &report, outcome);
+            return Ok(report);
+        }
+        // Onto the ground: the wingmen's ground picture takes it.
+        match plan {
+            ground_orders::Plan::Air { .. } => {}
+            ground_orders::Plan::NoTarget => {
+                let report = self.refuse_no_ground_target(
+                    sender,
+                    asked,
+                    designated,
+                    recipient,
+                    members.first().map(|(_, id)| *id),
+                );
+                return Ok(report);
+            }
+            plan => {
+                return self.command_ground(ground_orders::Call {
+                    sender,
+                    order: asked,
+                    selected: designated,
+                    recipient,
+                    plan,
+                    members,
+                    first,
+                    humans,
+                    answers,
+                    bugged_out,
+                    flight,
+                    spots: ground.spots.clone(),
+                    facts: ground.facts.clone(),
+                });
+            }
+        }
+        let needs_target = matches!(
+            order,
+            PlayerOrder::EngageMyTarget
+                | PlayerOrder::EngageFromFormation
+                | PlayerOrder::Approach(_)
+        );
+        let target = selected.filter(|id| {
+            self.mission
+                .actor(*id)
+                .is_some_and(|a| a.alive() && a.identity().side != sender_side)
+        });
+        if needs_target && target.is_none() {
+            let report = OrderReport {
+                message: "Wing order unavailable: no valid hostile target".into(),
+                ..OrderReport::default()
+            };
+            let outcome = Outcome::Refused(Reason::NoHostileTarget);
+            self.journal_order(sender, cause, recipient, &report, outcome);
+            return Ok(report);
+        }
+        let cause = Cause::Order {
+            order: asked,
+            selected: designated,
+            target,
+        };
+        let lean_sensors = self.mission.test_settings().lean_sensors;
+        let mut applied = 0;
+        let mut rejected = 0;
+        let mut no_motion = 0;
+        let mut wing_sender = None;
+        let mut replied = None;
+        let mut reached = Vec::new();
+        for (member, id) in &members {
+            let actor = self.mission.actor(*id).unwrap();
+            let (control, horizontal, vertical) = actor.controller().wing_settings();
+            let old_control = control.unwrap_or(WingControl::Loose);
+            let control =
+                wing::apply_control_side_effect(order, old_control).map_err(|e| e.to_string())?;
+            let horizontal = if order == PlayerOrder::Spacing {
+                wing::toggle_horizontal_spacing(horizontal.unwrap_or(512))
+            } else {
+                horizontal.unwrap_or(512)
+            };
+            let vertical = if order == PlayerOrder::Stacking {
+                wing::cycle_vertical_stacking(vertical.unwrap_or(0)).map_err(|e| e.to_string())?
+            } else {
+                vertical.unwrap_or(0)
+            };
+            let request = match order {
+                PlayerOrder::BugOut | PlayerOrder::LandAtSelected => {
+                    unreachable!("landing orders take command_landing")
+                }
+                PlayerOrder::Sort => unreachable!("a sort is sent as one Engage order each"),
+                PlayerOrder::EngageIrLaser
+                | PlayerOrder::EngageClass
+                | PlayerOrder::LaseMyTarget => {
+                    unreachable!("resolved into an air order or a ground call")
+                }
+                PlayerOrder::Break(b) => b.request(),
+                PlayerOrder::Formation(f) => WingRequest::FormationSelection(f),
+                PlayerOrder::Spacing => WingRequest::Spacing {
+                    axis: SpacingAxis::Horizontal,
+                    feet: horizontal,
+                },
+                PlayerOrder::Stacking => WingRequest::Spacing {
+                    axis: SpacingAxis::Vertical,
+                    feet: vertical,
+                },
+                PlayerOrder::ControlToggle => WingRequest::WingControl(control),
+                PlayerOrder::Disengage => WingRequest::TargetAssignment(TargetOrder::HoldFire),
+                PlayerOrder::AttackOnContact | PlayerOrder::ProtectMe => {
+                    WingRequest::TargetAssignment(TargetOrder::FreeSelection)
+                }
+                PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation => {
+                    WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(
+                        target.unwrap(),
+                    )))
+                }
+                PlayerOrder::Approach(a) => {
+                    let target_actor = self.mission.actor(target.unwrap()).unwrap();
+                    let own = actor.flight().position;
+                    let point = target_actor.flight().position;
+                    let dx = point[0] - own[0];
+                    let dy = point[1] - own[1];
+                    let dz = point[2] - own[2];
+                    a.request(
+                        dx.atan2(dz).to_degrees().round() as i32,
+                        dy.atan2(dx.hypot(dz)).to_degrees().round() as i32,
+                        ScalarSpeed(0.),
+                    )
+                }
+            };
+            if wing_sender.is_none() {
+                wing_sender = Some(sender_stem(order, horizontal, vertical, control));
+            }
+            let by_link = matches!(
+                order,
+                PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation
+            ) && target.is_some_and(tracked);
+            if needs_target
+                && !by_link
+                && actor.sensors().is_some_and(|s| {
+                    !s.contacts().iter().any(|c| Some(c.id) == target)
+                        && !if lean_sensors {
+                            // Lean sensors (AI test setting) keep no visual
+                            // channel list: the aircraft's picture of the
+                            // sky, which the eyes feed, answers instead.
+                            actor
+                                .awareness()
+                                .current_observations()
+                                .any(|record| Some(record.target.id) == target)
+                        } else {
+                            s.visual().iter().any(|c| Some(c.id) == target)
+                        }
+                })
+            {
+                rejected += 1;
+                answers.push(Answer {
+                    recipient: *id,
+                    member: *member,
+                    result: Answered::CannotSeeTarget,
+                    side: Vec::new(),
+                });
+                continue;
+            }
+            // Apply the silent control side effect before installing motion.
+            // Break has no side effect, so it cannot cancel itself here.
+            let mut side = Vec::new();
+            if control != old_control {
+                let outcome = self
+                    .mission
+                    .order(*id, WingRequest::WingControl(control))
+                    .unwrap()
+                    .map_err(|e| e.to_string())?;
+                side.push(("wing control change", outcome));
+            }
+            if matches!(order, PlayerOrder::Approach(_)) {
+                let outcome = self
+                    .mission
+                    .order(
+                        *id,
+                        WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(
+                            target.unwrap(),
+                        ))),
+                    )
+                    .unwrap()
+                    .map_err(|e| e.to_string())?;
+                side.push(("approach target", outcome));
+            }
+            let outcome = self
+                .mission
+                .order(*id, request)
+                .unwrap()
+                .map_err(|e| e.to_string())?;
+            answers.push(Answer {
+                recipient: *id,
+                member: *member,
+                result: Answered::Receiver(outcome),
+                side,
+            });
+            if matches!(order, PlayerOrder::Formation(_) | PlayerOrder::Disengage)
+                && !matches!(outcome, ReceiverOutcome::Rejected(_))
+            {
+                // The sim has already debited a launched burst. Stop its
+                // remaining physical gun shots when recall is accepted.
+                // Intentional cancellation is not a failed projectile launch.
+                self.pending_guns
+                    .retain(|(queued_actor, _), _| *queued_actor != *id);
+            }
+            // An order that is not a setting replaces what the wingman was
+            // told to do on the ground (slice ST-O).
+            if order.ends_ground_orders()
+                && !matches!(outcome, ReceiverOutcome::Rejected(_))
+                && let Some(actor) = self.mission.actor_mut(*id)
+            {
+                actor.clear_ground_orders();
+            }
+            match outcome {
+                ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_) => {
+                    reached.push(*id);
+                    if let Some(assignment) = mission_assignment(sender, order, target) {
+                        self.mission
+                            .actor_mut(*id)
+                            .unwrap()
+                            .set_assignment(assignment);
+                    }
+                    applied += 1;
+                    if let PlayerOrder::Approach(a) = order {
+                        self.mission.track_ordered_approach(
+                            *id,
+                            target.unwrap(),
+                            f64::from(a.heading_offset_deg()),
+                            f64::from(a.pitch_offset_deg()),
+                        );
+                    }
+                    // The first wingman's reply goes through the radio
+                    // channel two seconds later (docs/spec/radio-chatter.md).
+                    if Some(*id) == first {
+                        match order {
+                            PlayerOrder::EngageMyTarget
+                            | PlayerOrder::EngageFromFormation
+                            | PlayerOrder::AttackOnContact => {
+                                let aircraft = self.engaged(*id, target);
+                                replied = Some(Reply::Replied {
+                                    by: *id,
+                                    reply: WingReply::Engage { aircraft },
+                                });
+                            }
+                            PlayerOrder::ProtectMe => {
+                                self.chat(Chatter::Showtime { speaker: *id });
+                                replied = Some(Reply::Replied {
+                                    by: *id,
+                                    reply: WingReply::Showtime,
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                ReceiverOutcome::Rejected(_) => rejected += 1,
+                ReceiverOutcome::AppliedNoMotion => {
+                    reached.push(*id);
+                    if let Some(assignment) = mission_assignment(sender, order, target) {
+                        self.mission
+                            .actor_mut(*id)
+                            .unwrap()
+                            .set_assignment(assignment);
+                    }
+                    no_motion += 1;
+                }
+            }
+        }
+        // A human member cannot be flown by an order: it only records that it
+        // was given one.
+        for (member, id) in &humans {
+            reached.push(*id);
+            answers.push(Answer {
+                recipient: *id,
+                member: *member,
+                result: Answered::Human,
+                side: Vec::new(),
+            });
+        }
+        // The order call. The attack orders say it with the target's place as
+        // the first addressed wingman hears it (or a blanket "Attack
+        // bandits"); every other order says its one stem.
+        // With only human wingmen addressed, the lead still says the call: a
+        // human's place for an attack call is the world's to word, so it
+        // leaves the voice empty (slice F2-R).
+        let radio = match (order, members.first()) {
+            (_, None) if humans.is_empty() => Vec::new(),
+            (PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation, Some(&(_, first))) => {
+                self.assignment_stems(first, target, recipient, flight.unwrap_or(0))
+            }
+            (PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation, None) => Vec::new(),
+            (PlayerOrder::AttackOnContact, _) => calls::blanket_stems(),
+            _ => wing_sender
+                .flatten()
+                .or_else(|| human_stem(order))
+                .into_iter()
+                .collect(),
+        };
+        let mut message = format!(
+            "{}: {applied} applied, {rejected} rejected, {no_motion} without motion",
+            order_label(asked)
+        );
+        if bugged_out > 0 {
+            message.push_str(&format!(", {bugged_out} bugged out"));
+        }
+        if !humans.is_empty() {
+            message.push_str(&format!(", {} flown by a human", humans.len()));
+        }
+        let named = matches!(
+            order,
+            PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation
+        )
+        .then_some(target)
+        .flatten();
+        let report = OrderReport {
+            message,
+            radio,
+            reached,
+            target: named,
+            humans: humans.iter().map(|(_, id)| *id).collect(),
+            ground: false,
+        };
+        let reply = replied.unwrap_or_else(|| no_reply(order, first, &answers));
+        self.journal_order(
+            sender,
+            cause,
+            recipient,
+            &report,
+            Outcome::Answered { answers, reply },
+        );
+        Ok(report)
+    }
+
+    /// The stems of the attack call to `target`, as the wingman at `first`
+    /// hears it: "Two, attack bandit, bearing 270, 15 miles, angels 20", or
+    /// the flight colour in place of "Two" when the whole flight is addressed.
+    pub(super) fn assignment_stems(
+        &self,
+        first: u32,
+        target: Option<u32>,
+        recipient: Option<u8>,
+        flight: u8,
+    ) -> Vec<&'static str> {
+        let positions = (
+            self.mission.actor(first).map(|a| a.flight().position),
+            target.and_then(|id| self.mission.actor(id).map(|a| a.flight().position)),
+        );
+        let (Some(from), Some(to)) = positions else {
+            return Vec::new();
+        };
+        let addressee = match recipient {
+            Some(member) => calls::Addressee::Wingman(member),
+            None => calls::Addressee::Flight(flight),
+        };
+        calls::assignment_stems(
+            &comms::Phrases::new(),
+            addressee,
+            calls::Geometry::between(from, to),
+        )
+    }
+
+    /// Journal one player order with its outcome. Every order that returns
+    /// a report goes out on the radio: the host plays its voice, even an
+    /// empty one, which cuts off wing speech, so the entry has the radio
+    /// route. A refusal the host makes itself has none.
+    fn journal_order(
+        &mut self,
+        sender: u32,
+        cause: Cause,
+        recipient: Option<u8>,
+        report: &OrderReport,
+        outcome: Outcome,
+    ) {
+        let mut entry = Entry::note(
+            self.journal_clock(),
+            "YOU",
+            Origin::of(Source::Order, cause)
+                .by(sender)
+                .to(Audience::Wing { member: recipient }),
+            outcome,
+        )
+        .with_text(report.message.clone())
+        .with_stems(report.radio.iter().map(|stem| stem.to_string()).collect());
+        entry.route = Some(crate::comms::Route::Radio);
+        self.watch.journal.push(entry);
+    }
+
+    /// Bug out and land at the selected airport: each addressed wingman
+    /// leaves the wing to land. The runway is its own home runway for a bug
+    /// out and the player's chosen airport for an ordered landing.
+    fn command_landing(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+    ) -> WorldResult<OrderReport> {
+        let wing = self.wing_of(sender);
+        if wing.is_some() && !self.leads_wing(sender) {
+            let cause = Cause::Order {
+                order,
+                selected: None,
+                target: None,
+            };
+            return Ok(self.refuse_not_leading(sender, cause, recipient));
+        }
+        let humans = self.other_humans(sender, recipient);
+        let mut members: Vec<_> = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive() && Some((a.identity().side, a.identity().wing)) == wing)
+            .filter(|a| recipient.is_none_or(|wanted| a.identity().member == wanted))
+            .map(|a| (a.identity().member, a.id()))
+            .collect();
+        members.sort_unstable();
+        let cause = Cause::Order {
+            order,
+            selected: None,
+            target: None,
+        };
+        if members.is_empty() && humans.is_empty() {
+            let report = unavailable_no_wingmen();
+            self.journal_order(
+                sender,
+                cause,
+                recipient,
+                &report,
+                Outcome::Refused(Reason::NoWingmen),
+            );
+            return Ok(report);
+        }
+        let (label, reason) = match (order, site) {
+            (PlayerOrder::BugOut, _) => ("Bug out".to_owned(), LandingReason::BugOut),
+            (_, Some(site)) => (format!("Land at {}", site.name), LandingReason::Ordered),
+            (_, None) => {
+                let report = OrderReport {
+                    message: "Wing order unavailable: no airport selected (Shift-A selects one)"
+                        .into(),
+                    ..OrderReport::default()
+                };
+                let outcome = Outcome::Refused(Reason::NoAirportSelected);
+                self.journal_order(sender, cause, recipient, &report, outcome);
+                return Ok(report);
+            }
+        };
+        let (mut accepted, mut rejected, mut no_base, mut bugged_out, mut human) = (0, 0, 0, 0, 0);
+        let (mut busy, mut landed, mut departing) = (0, 0, 0);
+        let mut answers = Vec::new();
+        let answer = |id, member, result| Answer {
+            recipient: id,
+            member,
+            result,
+            side: Vec::new(),
+        };
+        let mut reached = Vec::new();
+        let mut human_planes = Vec::new();
+        for (member, id) in humans {
+            human += 1;
+            reached.push(id);
+            human_planes.push(id);
+            answers.push(answer(id, member, Answered::Human));
+        }
+        for (member, id) in members {
+            let actor = self.mission.actor(id).unwrap();
+            if actor.bugged_out() {
+                bugged_out += 1;
+                answers.push(answer(id, member, Answered::BuggedOut));
+                continue;
+            }
+            // Retail ignores bug out in any airport state or on the ground
+            // (B46 subcode 0x10, docs/formats/ai.md). The private route home
+            // is free flight, so it does not count; a parked aircraft has
+            // already landed.
+            let on_ground = actor
+                .flight()
+                .research
+                .as_ref()
+                .is_some_and(|r| r.on_ground);
+            let phase = actor.airfield_phase();
+            if phase == Some(Phase::Parked) {
+                landed += 1;
+                answers.push(answer(id, member, Answered::AlreadyLanded));
+                continue;
+            }
+            if reason == LandingReason::BugOut
+                && (phase.is_some_and(|p| p != Phase::Inbound) || on_ground)
+            {
+                busy += 1;
+                answers.push(answer(id, member, Answered::OnAirfield));
+                continue;
+            }
+            // Opinionated (requested by John, 2026-09-29): a wingman still on
+            // the ground or in its takeoff cannot land; it answers unable,
+            // stays parked or completes its takeoff and rejoins its leader.
+            if reason == LandingReason::Ordered
+                && (on_ground || actor.airfield().is_some_and(|s| s.is_departure()))
+            {
+                departing += 1;
+                answers.push(answer(id, member, Answered::OnAirfield));
+                continue;
+            }
+            let runway = match site {
+                Some(site) if reason == LandingReason::Ordered => Some(site.runway),
+                _ => actor.home_runway().copied(),
+            };
+            let Some(runway) = runway else {
+                no_base += 1;
+                answers.push(answer(id, member, Answered::NoBase));
+                continue;
+            };
+            let outcome = self
+                .mission
+                .order(id, WingRequest::Land(LandingOrder { runway, reason }))
+                .unwrap()
+                .map_err(|e| e.to_string())?;
+            answers.push(answer(id, member, Answered::Receiver(outcome)));
+            if let ReceiverOutcome::Rejected(why) = outcome {
+                match why {
+                    wing::RejectReason::BuggedOut => bugged_out += 1,
+                    wing::RejectReason::Landed => landed += 1,
+                    _ => rejected += 1,
+                }
+            } else {
+                // A wingman leaving to land stops its remaining queued gun
+                // shots, as a recall does.
+                self.pending_guns
+                    .retain(|(queued_actor, _), _| *queued_actor != id);
+                // It no longer strikes on its lead's order.
+                self.mission.actor_mut(id).unwrap().clear_ground_orders();
+                reached.push(id);
+                accepted += 1;
+            }
+        }
+        if accepted == 0
+            && rejected == 0
+            && no_base == 0
+            && human == 0
+            && busy == 0
+            && landed == 0
+            && departing == 0
+        {
+            let report = OrderReport {
+                message: bugged_out_notice(bugged_out, recipient),
+                ..OrderReport::default()
+            };
+            let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
+            self.journal_order(sender, cause, recipient, &report, outcome);
+            return Ok(report);
+        }
+        let mut parts = vec![format!(
+            "{accepted} {}",
+            if reason == LandingReason::BugOut {
+                "returning to base"
+            } else {
+                "landing"
+            }
+        )];
+        if no_base > 0 {
+            parts.push(format!("{no_base} with no base"));
+        }
+        if busy > 0 {
+            parts.push(format!("{busy} already taking off or landing"));
+        }
+        if departing > 0 {
+            parts.push(format!(
+                "{departing} unable, still on the ground or taking off"
+            ));
+        }
+        if landed > 0 {
+            parts.push(format!("{landed} already landed"));
+        }
+        if bugged_out > 0 {
+            parts.push(format!("{bugged_out} bugged out"));
+        }
+        if rejected > 0 {
+            parts.push(format!("{rejected} rejected"));
+        }
+        if human > 0 {
+            parts.push(format!("{human} flown by a human"));
+        }
+        let report = OrderReport {
+            message: format!("{label}: {}", parts.join(", ")),
+            reached,
+            humans: human_planes,
+            ..OrderReport::default()
+        };
+        let outcome = Outcome::Answered {
+            answers,
+            reply: Reply::NotExpected,
+        };
+        self.journal_order(sender, cause, recipient, &report, outcome);
+        Ok(report)
+    }
+
+    /// The human-flown members of `sender`'s wing other than `sender`, as
+    /// (member, aircraft id), lowest member first, narrowed to `recipient`.
+    fn other_humans(&self, sender: u32, recipient: Option<u8>) -> Vec<(u8, u32)> {
+        let Some(wing) = self.wing_of(sender) else {
+            return Vec::new();
+        };
+        let mut humans: Vec<_> = self
+            .humans
+            .iter()
+            .filter(|h| h.id != sender && (side_of(h.side), h.wing) == wing)
+            .filter(|h| recipient.is_none_or(|wanted| h.member == wanted))
+            .map(|h| (h.member, h.id))
+            .collect();
+        humans.sort_unstable();
+        humans
+    }
+}
+
+/// Why nobody replied to an order over the radio. Only the first wingman
+/// replies, only to the attack and "protect me" orders, and only when its
+/// answer applies the order or installs motion.
+fn no_reply(order: PlayerOrder, first: Option<u32>, answers: &[Answer]) -> Reply {
+    let has_reply = matches!(
+        order,
+        PlayerOrder::EngageMyTarget
+            | PlayerOrder::EngageFromFormation
+            | PlayerOrder::AttackOnContact
+            | PlayerOrder::EngageIrLaser
+            | PlayerOrder::EngageClass
+            | PlayerOrder::LaseMyTarget
+            | PlayerOrder::ProtectMe
+    );
+    if !has_reply {
+        return Reply::NotExpected;
+    }
+    match first {
+        Some(first)
+            if answers
+                .iter()
+                .any(|a| a.recipient == first && a.result != Answered::BuggedOut) =>
+        {
+            Reply::FirstDidNotApply { first }
+        }
+        first => Reply::FirstNotAddressed { first },
+    }
+}
+
+fn unavailable_no_wingmen() -> OrderReport {
+    OrderReport {
+        message: "Wing order unavailable: no addressed wingmen".into(),
+        ..OrderReport::default()
+    }
+}
+
+/// Every addressed wingman has bugged out and no longer answers.
+fn bugged_out_notice(count: usize, recipient: Option<u8>) -> String {
+    match recipient {
+        Some(member) => {
+            format!("Wing order unavailable: wingman {member} bugged out and no longer answers")
+        }
+        None if count == 1 => {
+            "Wing order unavailable: the wingman bugged out and no longer answers".into()
+        }
+        None => "Wing order unavailable: all wingmen bugged out and no longer answer".into(),
+    }
+}
+
+fn mission_assignment(sender: u32, order: PlayerOrder, target: Option<u32>) -> Option<Assignment> {
+    match order {
+        PlayerOrder::ProtectMe => Some(Assignment {
+            role: Role::Escort,
+            stance: Stance::ProtectAssigned,
+            protected_ids: vec![sender],
+            ..Assignment::default()
+        }),
+        PlayerOrder::EngageMyTarget => Some(Assignment {
+            role: Role::Intercept,
+            stance: Stance::EngageAssigned,
+            destroy_ids: target.into_iter().collect(),
+            ..Assignment::default()
+        }),
+        PlayerOrder::AttackOnContact => Some(Assignment::default()),
+        PlayerOrder::Disengage
+        | PlayerOrder::EngageFromFormation
+        | PlayerOrder::Break(_)
+        | PlayerOrder::Approach(_)
+        | PlayerOrder::Formation(_)
+        | PlayerOrder::Spacing
+        | PlayerOrder::Stacking
+        | PlayerOrder::ControlToggle
+        | PlayerOrder::BugOut
+        | PlayerOrder::LandAtSelected
+        | PlayerOrder::EngageIrLaser
+        | PlayerOrder::EngageClass
+        | PlayerOrder::LaseMyTarget
+        | PlayerOrder::Sort => None,
+    }
+}
+
+/// The recording a human wingman hears for `order` when no AI wingman took it
+/// to take the state from: the stem as an AI wingman in its default state
+/// (loose control, 512 ft spacing, level) would have given it.
+fn human_stem(order: PlayerOrder) -> Option<&'static str> {
+    let horizontal = if order == PlayerOrder::Spacing {
+        wing::toggle_horizontal_spacing(512)
+    } else {
+        512
+    };
+    let vertical = if order == PlayerOrder::Stacking {
+        wing::cycle_vertical_stacking(0).ok()?
+    } else {
+        0
+    };
+    let control = wing::apply_control_side_effect(order, WingControl::Loose).ok()?;
+    sender_stem(order, horizontal, vertical, control)
+}
+
+fn sender_stem(
+    order: PlayerOrder,
+    horizontal: i32,
+    vertical: i32,
+    control: WingControl,
+) -> Option<&'static str> {
+    use wing::{Formation as F, PlayerApproach as A, PlayerBreak as B};
+    Some(match order {
+        PlayerOrder::Break(b) => match b {
+            B::Left => "^BREAKLF",
+            B::Right => "^BREAKRT",
+            B::High => "^BREAKHI",
+            B::Low => "^BREAKLO",
+            B::Straight => "^STEADY",
+        },
+        PlayerOrder::Approach(a) => match a {
+            A::Left => "^APPRCLF",
+            A::Right => "^APPRCRT",
+            A::High => "^APPRCHI",
+            A::Low => "^APPRCLO",
+        },
+        PlayerOrder::Formation(f) => match f {
+            F::Echelon => "^ECHFORM",
+            F::LineAbreast => "^ABRFORM",
+            F::LineAstern => "^ASTFORM",
+        },
+        PlayerOrder::Spacing => {
+            if horizontal < 1000 {
+                "^TIGHTEN"
+            } else {
+                "^CBTSPRD"
+            }
+        }
+        PlayerOrder::Stacking => {
+            if vertical > 0 {
+                "^FORMHI"
+            } else if vertical < 0 {
+                "^FORMLOW"
+            } else {
+                "^FORMLVL"
+            }
+        }
+        PlayerOrder::ControlToggle => {
+            if control == WingControl::Loose {
+                "^LOSFORM"
+            } else {
+                "^MEDFORM"
+            }
+        }
+        PlayerOrder::Disengage => "^DISENG",
+        PlayerOrder::ProtectMe => "^CLRMY6",
+        // The attack orders are called by the data link (slice G3a): the
+        // assignment call, or "Attack bandits" for the blanket order.
+        PlayerOrder::EngageMyTarget
+        | PlayerOrder::EngageFromFormation
+        | PlayerOrder::AttackOnContact => return None,
+        // No reviewed sender recording for these orders.
+        PlayerOrder::BugOut | PlayerOrder::LandAtSelected => return None,
+        // Onto the ground, the call is worded by the order itself
+        // (`command_ground`); an Alt+F or Alt+W onto an aircraft is worded as
+        // the air order it became.
+        PlayerOrder::EngageIrLaser | PlayerOrder::EngageClass | PlayerOrder::LaseMyTarget => {
+            return None;
+        }
+        // A sort's calls are the assignment calls, one for each wingman.
+        PlayerOrder::Sort => return None,
+    })
+}
+
+pub(crate) fn order_label(order: PlayerOrder) -> &'static str {
+    use wing::{Formation as F, PlayerApproach as A, PlayerBreak as B};
+    match order {
+        PlayerOrder::BugOut => "Bug out",
+        PlayerOrder::LandAtSelected => "Land at selected airport",
+        PlayerOrder::Break(b) => match b {
+            B::Left => "Break left",
+            B::Right => "Break right",
+            B::High => "Break high",
+            B::Low => "Break low",
+            B::Straight => "Steady",
+        },
+        PlayerOrder::Approach(a) => match a {
+            A::Left => "Approach left",
+            A::Right => "Approach right",
+            A::High => "Approach high",
+            A::Low => "Approach low",
+        },
+        PlayerOrder::Formation(f) => match f {
+            F::Echelon => "Echelon",
+            F::LineAbreast => "Line abreast",
+            F::LineAstern => "Line astern",
+        },
+        PlayerOrder::Spacing => "Spacing",
+        PlayerOrder::Stacking => "Stacking",
+        PlayerOrder::ControlToggle => "Wing control",
+        PlayerOrder::Disengage => "Disengage",
+        PlayerOrder::ProtectMe => "Protect me",
+        PlayerOrder::EngageMyTarget => "Engage my target",
+        PlayerOrder::AttackOnContact => "Attack on contact",
+        PlayerOrder::EngageIrLaser => "Engage IR/laser target",
+        PlayerOrder::EngageClass => "Engage target class",
+        PlayerOrder::LaseMyTarget => "Lase my target",
+        PlayerOrder::EngageFromFormation => "Engage from formation",
+        PlayerOrder::Sort => "Sort",
+    }
+}
+
+// A flight lead's orders onto the ground (slice ST-O).
+#[path = "ground_orders.rs"]
+mod ground_orders;
+pub use ground_orders::{GroundAim, GroundFact};
+
+#[cfg(test)]
+mod engagement_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_policy_orders_map_to_persistent_assignments() {
+        let protect = mission_assignment(PLAYER_ID, PlayerOrder::ProtectMe, Some(9)).unwrap();
+        assert_eq!(protect.role, Role::Escort);
+        assert_eq!(protect.stance, Stance::ProtectAssigned);
+        assert_eq!(protect.protected_ids, [PLAYER_ID]);
+        assert!(protect.destroy_ids.is_empty());
+
+        let engage = mission_assignment(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(9)).unwrap();
+        assert_eq!(engage.role, Role::Intercept);
+        assert_eq!(engage.destroy_ids, [9]);
+
+        assert_eq!(
+            mission_assignment(PLAYER_ID, PlayerOrder::AttackOnContact, None),
+            Some(Assignment::default())
+        );
+        assert_eq!(
+            mission_assignment(PLAYER_ID, PlayerOrder::Disengage, None),
+            None
+        );
+    }
+
+    #[test]
+    fn routine_motion_and_formation_orders_do_not_rewrite_mission_policy() {
+        use wing::{Formation, PlayerBreak};
+        for order in [
+            PlayerOrder::Break(PlayerBreak::Left),
+            PlayerOrder::Formation(Formation::Echelon),
+            PlayerOrder::Spacing,
+            PlayerOrder::Stacking,
+            PlayerOrder::ControlToggle,
+        ] {
+            assert_eq!(mission_assignment(PLAYER_ID, order, Some(9)), None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod landing_tests {
+    use super::*;
+    use tore_sim::{
+        ai::launch::{WingId, WingSelection, resolve_wings},
+        airport::{
+            Aircraft as Plane, Airport, Command, OrientedBox, Runway, SourceKey, StaticObject,
+        },
+        combat::missiles::{TargetRole, seeker::Heat},
+    };
+
+    fn strip(id: u32, airport: u32, x: f64, length_ft: f64) -> (StaticObject, Runway) {
+        let bounds = OrientedBox {
+            center: [x, 100., 0.],
+            half: [100., 10., length_ft / 2.],
+            heading: 0.,
+            pitch: 0.,
+            bank: 0.,
+        };
+        (
+            StaticObject {
+                id,
+                source: SourceKey {
+                    layout: "X.MM".into(),
+                    ordinal: id,
+                },
+                name: "Strip".into(),
+                object_type: "STRIP.OT".into(),
+                bounds,
+                hit_points: 100,
+                category: 0x100,
+                radar_signature: 100.,
+                infrared_signature: 100.,
+                type_flags: 0,
+                max_visible: 0,
+                runway: true,
+            },
+            Runway {
+                object: id,
+                airport,
+                name: format!("{id}"),
+                surface: bounds,
+                approach_center: bounds.center,
+                elevation_ft: 100.,
+                heading: 0.,
+                length_ft,
+            },
+        )
+    }
+
+    /// Field (7): a long runway far east and a short one at the origin.
+    /// Hostile (8), an unpermitted neutral (9) and a field without a
+    /// runway (10).
+    fn scene() -> Scene {
+        let strips = [
+            strip(1000, 7, 50_000., 10_000.),
+            strip(1001, 7, 0., 6_000.),
+            strip(1002, 8, 90_000., 8_000.),
+            strip(1003, 9, 120_000., 8_000.),
+        ];
+        let airport = |id, name: &str, runway_objects, allegiance| Airport {
+            id,
+            name: name.into(),
+            runway_objects,
+            allegiance,
+            neutral_permission: false,
+        };
+        Scene {
+            aliases: Default::default(),
+            objects: strips.iter().map(|(o, _)| o.clone()).collect(),
+            runways: strips.iter().map(|(_, r)| r.clone()).collect(),
+            airports: vec![
+                airport(7, "Field", vec![1000, 1001], Allegiance::Friendly),
+                airport(8, "Enemy Base", vec![1002], Allegiance::Hostile),
+                airport(9, "Neutral Base", vec![1003], Allegiance::Neutral),
+                airport(10, "Grass Field", vec![], Allegiance::Friendly),
+            ],
+        }
+    }
+
+    fn plane() -> Plane {
+        Plane {
+            position: [0., 3000., -20_000.],
+            forward: [0., 0., 1.],
+            nav_mode: true,
+            gear_down: true,
+            supported: false,
+            alive: true,
+            speed_fps: 300.,
+            ground_clearance_ft: 0.,
+            redfor: false,
+        }
+    }
+
+    fn select(scene: &Scene, service: &mut Service, airport: u32) {
+        service.command(scene, plane(), Command::SelectAirport(airport));
+    }
+
+    #[test]
+    fn landing_site_needs_a_selected_airport_that_accepts_the_wing() {
+        let scene = scene();
+        let mut service = Service::new(&scene).unwrap();
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
+        assert!(
+            err.contains("no airport selected") && err.contains("Shift-A"),
+            "{err}"
+        );
+
+        select(&scene, &mut service, 8);
+        assert!(
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, false)
+                .unwrap_err()
+                .contains("hostile")
+        );
+        // The ordering pilot's side decides (slice AL1): the field hostile
+        // to Blue is a Redfor pilot's own, and Blue's field is hostile to it.
+        assert!(
+            !AiWings::landing_site(&scene, &BTreeMap::new(), &service, true)
+                .is_err_and(|e| e.contains("hostile"))
+        );
+        select(&scene, &mut service, 7);
+        assert!(
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, true)
+                .unwrap_err()
+                .contains("Field is hostile")
+        );
+        select(&scene, &mut service, 9);
+        assert!(
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, false)
+                .unwrap_err()
+                .contains("permission")
+        );
+        select(&scene, &mut service, 10);
+        assert!(
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, false)
+                .unwrap_err()
+                .contains("no runway your wingmen can land on")
+        );
+
+        // The longest usable runway, unless the player is cleared elsewhere.
+        select(&scene, &mut service, 7);
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
+        assert_eq!(site.name, "Field");
+        assert_eq!(site.runway, RunwayView::from(scene.runway(1000).unwrap()));
+        service.command(&scene, plane(), Command::RequestLanding);
+        assert_eq!(service.clearance().map(|c| c.1), Some(1001));
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
+        assert_eq!(
+            site.runway.object, 1001,
+            "wingmen follow the player's runway"
+        );
+
+        // A destroyed runway is skipped.
+        service.command(&scene, plane(), Command::CancelApproach);
+        service.damage(1000, 1000);
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
+        assert_eq!(site.runway.object, 1001);
+        service.damage(1001, 1000);
+        assert!(AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).is_err());
+    }
+
+    /// John, 2026-09-30: a short strip is off the tower's list, so a wing is
+    /// never sent to land on one.
+    #[test]
+    fn wingmen_never_land_on_a_short_strip() {
+        let mut scene = scene();
+        // The tower will not even select an airport whose runways are all short.
+        let (object, runway) = strip(1005, 11, 130_000., 1_074.);
+        scene.objects.push(object);
+        scene.runways.push(runway);
+        scene.airports.push(Airport {
+            id: 11,
+            name: "Goose Green".into(),
+            runway_objects: vec![1005],
+            allegiance: Allegiance::Friendly,
+            neutral_permission: false,
+        });
+        let mut service = Service::new(&scene).unwrap();
+        select(&scene, &mut service, 11);
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
+        assert!(err.contains("no airport selected"), "{err}");
+        // An airport that shrank under a selection already made is refused too.
+        select(&scene, &mut service, 7);
+        scene.runways[0].length_ft = 1_074.;
+        scene.runways[1].length_ft = 1_074.;
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
+        assert!(err.contains("short strip"), "{err}");
+        // A long runway beside a short one is still used, the short one never.
+        scene.runways[0].length_ft = 10_000.;
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
+        assert_eq!(site.runway.object, 1000);
+        // No side takes a short strip as home.
+        let fields = Airfields::from_scene(&scene, None);
+        assert!(
+            fields
+                .runways
+                .iter()
+                .all(|r| r.view.object != 1001 && r.view.object != 1005)
+        );
+    }
+
+    /// Regression, found at Goose Green (LFA, 2026-09-23): wingmen sent to
+    /// land on a vertical pad crashed. Conventional aircraft never land on
+    /// one (DTSTRP), so the wing lands on the airport's other runway, and an
+    /// airport with only a pad refuses the order.
+    #[test]
+    fn wingmen_never_land_on_a_vertical_pad() {
+        let mut scene = scene();
+        // Long enough not to be a short strip, so the pad rule is what bites.
+        let (mut pad, pad_runway) = strip(1004, 7, 20_000., 2_400.);
+        pad.object_type = "DTSTRP.OT".into();
+        scene.objects.push(pad);
+        scene.runways.push(pad_runway);
+        scene.airports[0].runway_objects.push(1004);
+        assert!(scene.vertical_pad(1004) && !scene.vertical_pad(1000));
+        let mut service = Service::new(&scene).unwrap();
+        select(&scene, &mut service, 7);
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
+        assert_ne!(site.runway.object, 1004);
+        // An airport with nothing but a pad.
+        scene.airports[0].runway_objects = vec![1004];
+        let mut service = Service::new(&scene).unwrap();
+        select(&scene, &mut service, 7);
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
+        assert!(err.contains("no runway your wingmen can land on"), "{err}");
+        // Nor is a pad anyone's home.
+        let fields = Airfields::from_scene(&scene, None);
+        assert!(fields.runways.iter().all(|r| r.view.object != 1004));
+    }
+
+    #[test]
+    fn player_landing_priority_follows_the_retail_condition() {
+        let mut scene = scene();
+        let mut service = Service::new(&scene).unwrap();
+        let landing = PlayerLanding {
+            position: [0., 1500., -20_000.],
+            agl_ft: 1400.,
+            gear_down: true,
+            speed_fps: 300.,
+            flying: true,
+            on_ground: false,
+            track: [0., 300.],
+        };
+        let at = |scene: &Scene, service: &Service, player| {
+            AiWings::landing_priority(scene, service, player, false, false).0
+        };
+        assert_eq!(at(&scene, &service, landing), Some(7));
+        // Each retail gate on its own releases priority.
+        for player in [
+            PlayerLanding {
+                gear_down: false,
+                ..landing
+            },
+            PlayerLanding {
+                agl_ft: PRIORITY_MAX_AGL_FT,
+                ..landing
+            },
+            PlayerLanding {
+                speed_fps: PRIORITY_MAX_SPEED_FPS + 1.,
+                ..landing
+            },
+            PlayerLanding {
+                flying: false,
+                ..landing
+            },
+            PlayerLanding {
+                position: [0., 1500., -(PRIORITY_RANGE_FT + 1.)],
+                ..landing
+            },
+        ] {
+            assert_eq!(at(&scene, &service, player), None, "{player:?}");
+        }
+        // Hostile and unpermitted neutral airports never give priority.
+        let hostile = PlayerLanding {
+            position: [90_000., 1500., 0.],
+            ..landing
+        };
+        assert_eq!(at(&scene, &service, hostile), None);
+        let neutral = PlayerLanding {
+            position: [120_000., 1500., 10_000.],
+            ..landing
+        };
+        assert_eq!(at(&scene, &service, neutral), None);
+        scene.airports[2].neutral_permission = true;
+        assert_eq!(at(&scene, &service, neutral), Some(9));
+        // An airport whose runways are all destroyed is skipped.
+        service.damage(1000, 1000);
+        service.damage(1001, 1000);
+        assert_eq!(at(&scene, &service, landing), None);
+    }
+
+    /// Regression, found on a real airport (2026-09-23): a player who took
+    /// off with the gear still down claimed landing priority, and parked AI
+    /// wingmen, which need the runway free, could not follow until the gear
+    /// came up. Retail keeps the player in climb-out, which does not block,
+    /// until it lines up on an approach.
+    #[test]
+    fn a_player_climbing_out_gear_down_does_not_claim_landing_priority() {
+        let scene = scene();
+        let service = Service::new(&scene).unwrap();
+        let step = |player, departing| {
+            AiWings::landing_priority(&scene, &service, player, departing, false)
+        };
+        // Parked, gear down on runway 1001 (centre at the origin, 6,000 ft
+        // long, heading north): no priority; the runway-free gate covers a
+        // rolling player.
+        let parked = PlayerLanding {
+            position: [0., 8., -2_900.],
+            agl_ft: 0.,
+            gear_down: true,
+            speed_fps: 0.,
+            flying: true,
+            on_ground: true,
+            track: [0., 0.],
+        };
+        assert_eq!(step(parked, false), (None, true));
+        // Just airborne past mid-field, gear down, heading north: climb-out.
+        let climbing = PlayerLanding {
+            position: [0., 300., 1_000.],
+            agl_ft: 300.,
+            speed_fps: 250.,
+            on_ground: false,
+            track: [0., 250.],
+            ..parked
+        };
+        assert_eq!(step(climbing, true), (None, true));
+        // Still gear down, turned back and lined up on the south end from
+        // 12,000 ft out: priority from here on.
+        let aligned = PlayerLanding {
+            position: [0., 1_200., 12_000.],
+            agl_ft: 1_200.,
+            track: [20., -250.],
+            ..climbing
+        };
+        assert_eq!(step(aligned, true), (Some(7), false));
+        // Abeam the field, not aligned, but no longer departing: priority.
+        let abeam = PlayerLanding {
+            position: [8_000., 1_200., 0.],
+            track: [0., 250.],
+            ..aligned
+        };
+        assert_eq!(step(abeam, true), (None, true));
+        assert_eq!(step(abeam, false), (Some(7), false));
+        // Raising the gear ends the climb-out: lowering it later near the
+        // field gives priority without lining up again.
+        let clean = PlayerLanding {
+            gear_down: false,
+            ..abeam
+        };
+        assert_eq!(step(clean, true), (None, false));
+    }
+
+    fn target(id: u32, position: [f64; 3], yaw: f64) -> live::Target {
+        let basis = Basis::new(yaw, 0., 0.);
+        live::Target {
+            aircraft: Some(AircraftId::F18),
+            role: TargetRole::Aircraft,
+            heat: Heat::Engine {
+                on: true,
+                throttle: 0.7,
+                afterburner: false,
+            },
+            radar_emitting: false,
+            id,
+            position,
+            velocity: basis.forward.map(|v| v * 300.),
+            basis,
+            configuration: sensors::Configuration::CLEAN,
+            signature: sensors::SignatureProfile::default(),
+            jammer: None,
+            jammer_active: false,
+            airborne: true,
+            on_ground: false,
+            radius: 28.,
+            hp: 100,
+            initial_hp: 100,
+            fragment_offsets: [[0.; 3]; 2],
+            wreck: None,
+            wreck_power: tore_sim::wreck::Power::default(),
+            fragment_released: false,
+            localized_damage: live::LocalizedDamage::default(),
+            faults: Default::default(),
+            category: 0,
+            side: tore_sim::combat::live::NO_SIDE,
+        }
+    }
+
+    /// The player's wing with AI wingmen 1 and 2, and an enemy pair.
+    fn bridge() -> AiWings {
+        let selections =
+            [(launch::Side::Friendly, 0u8), (launch::Side::Enemy, 0)].map(|(side, index)| {
+                WingSelection {
+                    wing: WingId::new(side, index).unwrap(),
+                    aircraft: AircraftId::F18,
+                    count: 2,
+                    skill_level: 1,
+                }
+            });
+        let wings = resolve_wings(&selections, None).unwrap();
+        let targets = vec![
+            target(1, [0., 20000., 0.], 0.),
+            target(2, [1500., 20000., 0.], 0.),
+            target(3, [0., 20000., 40000.], std::f64::consts::PI),
+            target(4, [1500., 20000., 40000.], std::f64::consts::PI),
+        ];
+        AiWings::build_with(&wings, &targets, 0, |_| {
+            Ok((crate::test_support::profile(), None))
+        })
+        .unwrap()
+    }
+
+    fn view(object: u32, x: f64) -> RunwayView {
+        RunwayView {
+            airport: 7,
+            object,
+            center: [x, 100., 0.],
+            heading: 0.,
+            length_ft: 8000.,
+            elevation_ft: 100.,
+            anchors: None,
+        }
+    }
+
+    #[test]
+    fn bug_out_sends_each_wingman_to_its_own_home_runway() {
+        let mut wings = bridge();
+        let home = view(500, 10_000.);
+        wings
+            .mission
+            .actor_mut(1)
+            .unwrap()
+            .set_home_runway(Some(home));
+        wings.mission.actor_mut(2).unwrap().set_home_runway(None);
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, None)
+            .unwrap();
+        assert_eq!(
+            report.message,
+            "Bug out: 1 returning to base, 1 with no base"
+        );
+        assert!(report.radio.is_empty(), "no reviewed bug-out recording");
+        let actor = wings.mission.actor(1).unwrap();
+        assert!(actor.bugged_out());
+        assert_eq!(
+            actor.landing_order(),
+            Some(&LandingOrder {
+                runway: home,
+                reason: LandingReason::BugOut,
+            })
+        );
+        assert!(!wings.mission.actor(2).unwrap().bugged_out());
+
+        // The bugged-out wingman no longer answers: it is skipped and named.
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, Some(1))
+            .unwrap();
+        assert_eq!(
+            report.message,
+            "Wing order unavailable: wingman 1 bugged out and no longer answers"
+        );
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::Disengage, None, None)
+            .unwrap();
+        assert!(
+            report.message.ends_with(", 1 bugged out"),
+            "{}",
+            report.message
+        );
+        let report = wings
+            .command(
+                PLAYER_ID,
+                PlayerOrder::Formation(wing::Formation::Echelon),
+                None,
+                Some(1),
+            )
+            .unwrap();
+        assert!(report.message.contains("bugged out and no longer answers"));
+    }
+
+    /// Regression (review, 2026-09-23): bug out was refused on the private
+    /// route home, which the simulation and the spec treat as free flight.
+    #[test]
+    fn bug_out_is_accepted_on_the_route_home() {
+        let mut wings = bridge();
+        let site = LandingSite {
+            name: "Field".into(),
+            runway: view(1000, 500_000.),
+        };
+        wings
+            .command_at(
+                PLAYER_ID,
+                PlayerOrder::LandAtSelected,
+                None,
+                Some(2),
+                Some(&site),
+            )
+            .unwrap();
+        let leader = crate::ai_wings::tests::player_object([0., 20000., 0.]);
+        wings
+            .mission
+            .step(&[leader], &|_, _| 0., tore_sim::ai::threat::TimeOfDay(0))
+            .unwrap();
+        assert_eq!(
+            wings.mission.actor(2).unwrap().airfield_phase(),
+            Some(Phase::Inbound)
+        );
+        wings
+            .mission
+            .actor_mut(2)
+            .unwrap()
+            .set_home_runway(Some(view(500, 10_000.)));
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, Some(2))
+            .unwrap();
+        assert_eq!(report.message, "Bug out: 1 returning to base");
+        assert!(wings.mission.actor(2).unwrap().bugged_out());
+    }
+
+    #[test]
+    fn a_wingman_waiting_to_take_off_is_unable_to_land() {
+        // John, 2026-09-29: a land order to a wingman still on the ground or
+        // taking off answers unable and leaves it where it is.
+        let mut wings = bridge();
+        wings
+            .mission
+            .actor_mut(2)
+            .unwrap()
+            .start_on_ground(tore_sim::ai::airfield::GroundStart {
+                runway: view(1000, 50_000.),
+                end: tore_sim::airport::ApproachEnd::Near,
+                order: 1,
+            });
+        let site = LandingSite {
+            name: "Field".into(),
+            runway: view(1000, 50_000.),
+        };
+        let report = wings
+            .command_at(
+                PLAYER_ID,
+                PlayerOrder::LandAtSelected,
+                None,
+                Some(2),
+                Some(&site),
+            )
+            .unwrap();
+        assert_eq!(
+            report.message,
+            "Land at Field: 0 landing, 1 unable, still on the ground or taking off"
+        );
+        let actor = wings.mission.actor(2).unwrap();
+        assert!(actor.landing_order().is_none());
+        assert_eq!(actor.airfield_phase(), Some(Phase::Waiting));
+    }
+
+    #[test]
+    fn land_at_selected_uses_the_player_chosen_runway() {
+        let mut wings = bridge();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::LandAtSelected, None, Some(2))
+            .unwrap();
+        assert!(report.message.contains("Shift-A"), "{}", report.message);
+        assert!(wings.mission.actor(2).unwrap().landing_order().is_none());
+
+        let site = LandingSite {
+            name: "Field".into(),
+            runway: view(1000, 50_000.),
+        };
+        let report = wings
+            .command_at(
+                PLAYER_ID,
+                PlayerOrder::LandAtSelected,
+                None,
+                Some(2),
+                Some(&site),
+            )
+            .unwrap();
+        assert_eq!(report.message, "Land at Field: 1 landing");
+        assert_eq!(
+            wings.mission.actor(2).unwrap().landing_order(),
+            Some(&LandingOrder {
+                runway: site.runway,
+                reason: LandingReason::Ordered,
+            })
+        );
+        assert!(
+            wings.mission.actor(1).unwrap().landing_order().is_none(),
+            "only the addressed wingman lands"
+        );
+    }
+
+    /// The latest order in the wing's journal.
+    fn order_entry(wings: &mut AiWings) -> Entry {
+        wings
+            .take_journal()
+            .into_iter()
+            .rfind(|e| e.origin.source == Source::Order)
+            .unwrap()
+    }
+
+    /// Each answer as (wingman, member number, applied or rejected).
+    fn answered(entry: &Entry) -> (Vec<(u32, u8, &'static str)>, Reply) {
+        let Outcome::Answered { answers, reply } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        let answers = answers
+            .iter()
+            .map(|a| (a.recipient, a.member, a.result.name()))
+            .collect();
+        (answers, *reply)
+    }
+
+    #[test]
+    fn every_answer_and_the_wingman_who_replied_are_journaled() {
+        let mut wings = bridge();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        assert_eq!(entry.text, report.message);
+        // The call to the whole flight, from the first wingman's place.
+        let call = wings.assignment_stems(1, Some(3), None, 0);
+        assert_eq!(call[0], "^RED");
+        assert_eq!(entry.stems, call);
+        assert_eq!(entry.label, "YOU");
+        assert_eq!(entry.route, Some(crate::comms::Route::Radio));
+        assert_eq!(entry.origin.speaker, Some(PLAYER_ID));
+        assert_eq!(entry.origin.audience, Audience::Wing { member: None });
+        assert_eq!(
+            entry.origin.cause,
+            Cause::Order {
+                order: PlayerOrder::EngageMyTarget,
+                selected: Some(3),
+                target: Some(3),
+            }
+        );
+        assert_eq!(
+            answered(&entry),
+            (
+                vec![(1, 1, "applied"), (2, 2, "applied")],
+                Reply::Replied {
+                    by: 1,
+                    reply: WingReply::Engage { aircraft: true }
+                }
+            )
+        );
+        // Only the first wingman replies.
+        wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), Some(2))
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        assert_eq!(entry.origin.audience, Audience::Wing { member: Some(2) });
+        assert_eq!(
+            answered(&entry),
+            (
+                vec![(2, 2, "applied")],
+                Reply::FirstNotAddressed { first: Some(1) }
+            )
+        );
+        wings
+            .command(
+                PLAYER_ID,
+                PlayerOrder::Formation(wing::Formation::Echelon),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(answered(&order_entry(&mut wings)).1, Reply::NotExpected);
+    }
+
+    #[test]
+    fn a_wingman_whose_sensors_cannot_see_the_target_is_journaled() {
+        let mut selections = super::super::tests::payload(None);
+        selections[0].wing.index = 0;
+        let blind = sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        };
+        let mut wings =
+            AiWings::build_with(&selections, &super::super::tests::spawned(), 0, |_| {
+                Ok((super::super::tests::aircraft(), Some(blind.clone())))
+            })
+            .unwrap();
+        wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, reply } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert!(
+            answers
+                .iter()
+                .all(|a| a.result == Answered::CannotSeeTarget && a.side.is_empty()),
+            "{answers:?}"
+        );
+        assert_eq!(answers.len(), 2);
+        assert_eq!(*reply, Reply::FirstDidNotApply { first: 1 });
+        assert!(
+            entry
+                .outcome
+                .to_string()
+                .contains("rejected: its sensors cannot see the target")
+        );
+    }
+
+    /// A flight of two wingmen whose sensors perceive nothing, so no target is
+    /// ever seen by them.
+    fn blind_wings() -> AiWings {
+        let mut selections = super::super::tests::payload(None);
+        selections[0].wing.index = 0;
+        let blind = sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        };
+        AiWings::build_with(&selections, &super::super::tests::spawned(), 0, |_| {
+            Ok((super::super::tests::aircraft(), Some(blind.clone())))
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn lean_sensors_answer_a_wing_order_from_the_awareness_memory() {
+        // Lean sensors keep no visual channel list, so the check for a
+        // wingman that sees the target asks the awareness memory; blind
+        // wingmen with an empty memory still refuse it, as with full sensors.
+        let mut wings = blind_wings();
+        wings.set_ai_test(
+            tore_sim::ai::test_settings::AiTestSettings::default().with_lean_sensors(true),
+        );
+        wings.mission.set_test_settings(wings.ai_test());
+        wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, .. } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert_eq!(answers.len(), 2);
+        assert!(
+            answers
+                .iter()
+                .all(|a| a.result == Answered::CannotSeeTarget)
+        );
+    }
+
+    #[test]
+    fn a_wingman_that_cannot_see_the_target_takes_an_engage_order_a_flightmate_tracks() {
+        // Slice G3b: the picture holds a track of aircraft 3, so both blind
+        // wingmen take the order and are named as reached; the order sets
+        // their target as it does for any wingman.
+        for order in [
+            PlayerOrder::EngageMyTarget,
+            PlayerOrder::EngageFromFormation,
+        ] {
+            let mut wings = blind_wings();
+            let report = wings
+                .command_linked(PLAYER_ID, order, Some(3), None, None, None, &|id| id == 3)
+                .unwrap();
+            assert_eq!(report.reached, [1, 2], "{order:?}");
+            assert_eq!(report.target, Some(3));
+            for id in [1, 2] {
+                let controller = wings.mission().actor(id).unwrap().controller();
+                assert_eq!(controller.target(), Some(3));
+                assert_eq!(controller.ordered_target(), Some(3));
+            }
+            let entry = order_entry(&mut wings);
+            let (answers, reply) = answered(&entry);
+            assert_eq!(answers, [(1, 1, "applied"), (2, 2, "applied")]);
+            assert_eq!(
+                reply,
+                Reply::Replied {
+                    by: 1,
+                    reply: WingReply::Engage { aircraft: true }
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn a_track_of_another_aircraft_or_another_order_keeps_the_refusal() {
+        // The picture tracks aircraft 4, not the order's 3.
+        let mut wings = blind_wings();
+        let report = wings
+            .command_linked(
+                PLAYER_ID,
+                PlayerOrder::EngageMyTarget,
+                Some(3),
+                None,
+                None,
+                None,
+                &|id| id == 4,
+            )
+            .unwrap();
+        assert!(report.reached.is_empty());
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, .. } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert!(
+            answers
+                .iter()
+                .all(|a| a.result == Answered::CannotSeeTarget)
+        );
+        // An approach flies on its own target's observation: the track does
+        // not stand in for it.
+        let mut wings = blind_wings();
+        let approach = PlayerOrder::Approach(wing::PlayerApproach::Left);
+        let report = wings
+            .command_linked(PLAYER_ID, approach, Some(3), None, None, None, &|_| true)
+            .unwrap();
+        assert!(report.reached.is_empty());
+        // And `command_called`, which knows no picture, refuses as before.
+        let mut wings = blind_wings();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        assert!(report.reached.is_empty());
+    }
+
+    #[test]
+    fn bugged_out_wingmen_and_refusals_are_journaled() {
+        let mut wings = bridge();
+        let home = view(500, 10_000.);
+        wings
+            .mission
+            .actor_mut(1)
+            .unwrap()
+            .set_home_runway(Some(home));
+        wings.mission.actor_mut(2).unwrap().set_home_runway(None);
+        wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, .. } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert_eq!(answers[0].result.name(), "applied");
+        assert_eq!(answers[1].result, Answered::NoBase);
+        wings
+            .command(PLAYER_ID, PlayerOrder::Disengage, None, None)
+            .unwrap();
+        let (answers, _) = answered(&order_entry(&mut wings));
+        assert_eq!(answers[0], (1, 1, "skipped"), "bugged out before delivery");
+        assert_eq!(answers[1].0, 2);
+        let refused = |wings: &mut AiWings, order, recipient| {
+            wings.command(PLAYER_ID, order, None, recipient).unwrap();
+            order_entry(wings).outcome
+        };
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::BugOut, Some(1)),
+            Outcome::Refused(Reason::AllBuggedOut { count: 1 })
+        );
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::EngageMyTarget, Some(2)),
+            Outcome::Refused(Reason::NoHostileTarget)
+        );
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::LandAtSelected, Some(2)),
+            Outcome::Refused(Reason::NoAirportSelected)
+        );
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::Disengage, Some(3)),
+            Outcome::Refused(Reason::NoWingmen)
+        );
+    }
+}

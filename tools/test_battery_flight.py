@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from battery_scenarios import flight  # noqa: E402
+from battery_scenarios import _powered, flight  # noqa: E402
 
 EXTREMES = (
     "extremes: samples=7200 non_finite=0 max_speed_kt=450.0 max_g=7.64 min_g=1.05 min_altitude_ft=4326.6 "
@@ -101,6 +101,19 @@ class TakeoffAndLandingTests(unittest.TestCase):
         text = LANDING.replace("runway_length_ft=5532", "runway_length_ft=1074").replace("runway_left_ft=669", "runway_left_ft=-900")
         self.assertEqual(flight.check_landing(text), [])
 
+    def test_a_short_strip_has_no_ils_and_a_long_runway_must(self):
+        probe = "ils_probe: samples=12818 active=0\n"
+        active = "ils_probe: samples=11213 active=10379 max_abs_glide_deg=0.314 max_abs_localizer_deg=0.000\n"
+        short = LANDING.replace("runway_length_ft=5532", "runway_length_ft=1074")
+        self.assertEqual(flight.ils_problems(short + probe), [])
+        self.assertEqual(flight.check_landing(short.replace("runway_left_ft=669", "runway_left_ft=-900") + probe), [])
+        self.assertTrue(any("short strip" in p for p in flight.ils_problems(short + active)))
+        self.assertTrue(any("never became active" in p for p in flight.ils_problems(LANDING + probe)))
+        self.assertEqual(flight.ils_problems(LANDING + active), [])
+        # The other checks still apply on a short strip.
+        gear = short.replace("unsafe=none", "unsafe=unsafe_gear_up=true")
+        self.assertTrue(any("gear-up" in p for p in flight.check_landing(gear + probe)))
+
     def test_unsafe_variants(self):
         gear = LANDING.replace("crashed=false", "crashed=true").replace("unsafe=none", "unsafe=unsafe_gear_up=true")
         self.assertEqual(flight.check_landing_gear_up(gear), [])
@@ -136,6 +149,8 @@ class WeaponTests(unittest.TestCase):
     def test_combat_smoke(self):
         self.assertTrue(flight.check_combat_smoke("combat smoke X FAIL"))
         self.assertEqual(flight.check_combat_smoke("PASS\n" * 9), [])
+        self.assertTrue(flight.check_wreck_contacts("PASS\n" * 9))
+        self.assertEqual(flight.check_wreck_contacts("PASS\n" * 9 + "wreck collision: weapons=2 hits=2 second_kills=0 PASS"), [])
 
 
 class SpinTests(unittest.TestCase):
@@ -185,11 +200,13 @@ class LossTests(unittest.TestCase):
         self.assertTrue(flight.check_edge_lost(out(106, crashed="false"), "UKR"))
 
     def test_overspeed_loss_and_dive(self):
-        self.assertEqual(flight.check_overspeed_loss(self.LOST + "loss: cause=overspeed\n"), [])
+        self.assertEqual(flight.check_overspeed_loss(self.LOST + "loss: cause=overspeed\noverspeed_ticks=840\n"), [])
         self.assertTrue(flight.check_overspeed_loss(self.LOST + "loss: cause=none\n"))
         self.assertEqual(flight.check_dive(self.LOST + EXTREMES + "loss: cause=none\n"), [])
         fast = EXTREMES.replace("speed_over_envelope_top=0.604", "speed_over_envelope_top=1.7")
-        self.assertTrue(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"))
+        self.assertEqual(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"), [])
+        for tick in (1, 600, 719, 721, 1201):
+            self.assertTrue(flight.check_overspeed_loss(self.LOST + f"loss: cause=overspeed\noverspeed_ticks={tick}\n"))
 
     def test_invulnerable_overspeed_is_not_a_loss(self):
         kept = "ticks=600 speed_kt=900.0 altitude_ft=20000.0 fuel_lb=1.0 crashed=false\nloss: cause=none\n"
@@ -202,17 +219,31 @@ class LossTests(unittest.TestCase):
         self.assertTrue(flight.check_combat_g(line.format("5.10"), "f18"))
         self.assertEqual(set(flight.PULL_G_RETAIL), set(flight.AIRCRAFT))
 
-    def test_belly_checks(self):
-        roll = "gear_pulled=true belly_wear_percent={} gear=0.00\nticks=9000 speed_kt=4.7 altitude_ft=8.0 fuel_lb=1.0 crashed=false\n"
-        self.assertEqual(flight.check_belly_early(roll.format("27.1") + EXTREMES, "f18"), [])
-        self.assertTrue(flight.check_belly_early(roll.format("0.000") + EXTREMES, "f18"))
-        self.assertEqual(flight.check_belly_early(roll.format("0.000") + EXTREMES, "f22"), [])
-        air = "takeoff_complete=true airport_ground_ft=0\ngear_pulled=true belly_wear_percent=0.000 gear=0.55\n"
-        self.assertEqual(flight.check_belly_airborne(air + EXTREMES), [])
-        self.assertTrue(flight.check_belly_airborne(air.replace("0.000", "1.500") + EXTREMES))
+    def test_ground_sensor_checks(self):
+        roll = "gear_pulled=true ground_sensor_refusals={} gear={}\nticks=9000 speed_kt=300.0 altitude_ft=8000.0 fuel_lb=1.0 crashed={}\n"
+        self.assertEqual(flight.check_belly_early(roll.format(1, "1.00", "false") + EXTREMES, "f18"), [])
+        self.assertTrue(flight.check_belly_early(roll.format(0, "1.00", "false") + EXTREMES, "f18"))
+        self.assertTrue(flight.check_belly_early(roll.format(1, "0.00", "false") + EXTREMES, "f22"))
+        self.assertTrue(flight.check_belly_early(roll.format(1, "1.00", "true") + EXTREMES, "f22"))
+        air = "takeoff_complete=true airport_ground_ft=0\ngear_pulled=true ground_sensor_refusals={} gear={}\n"
+        self.assertEqual(flight.check_belly_airborne(air.format(0, "0.55") + EXTREMES), [])
+        self.assertTrue(flight.check_belly_airborne(air.format(1, "0.55") + EXTREMES))
+        self.assertTrue(flight.check_belly_airborne(air.format(0, "1.00") + EXTREMES))
+
+    def test_the_attacking_fight_holds_the_debrief_to_its_recorded_hits(self):
+        out = (
+            "AI probe debrief: FAILURE [] elapsed=1s player[Alive damage=0% kills=[1, 0, 0, 0, 0, 0, 0, 0, 0, 0] ff=0 "
+            "a2a=0/2 dmg=0 gun=0/0 a2g=0/0 bomb=0/0 enemy_aam=0/0 enemy_gun=0/0] wingman[-]\n"
+            "AI probe attack: clicks=1 steps=1 presses=1 missiles=2 gun_bursts=0 gun_rounds=0 player_hits=1 player_kills=0 "
+            "hits=1 destroyed=0 lost_friendly=0/1 lost_enemy=0/1 player_alive=true player_damaged=0\n"
+            "player crashed=false\nplayer_hp=100\nAI probe invariants: actors=2 samples=1 anomalies=0\n"
+        )
+        # No aircraft is exempt: the Su-27 and Su-35 used to be.
+        for ac in ("faxx", "su27", "su35"):
+            self.assertTrue(any("1 kills but only 0 recorded hits" in p for p in flight.check_attacking_fight(out, ac)), ac)
 
     def test_the_debrief_cause_suffix_still_parses(self):
-        line = "AI probe debrief: Lost Ok elapsed=10s player[Dead damage=100% kills=[] ff=0 a2a=0/0 dmg=0 gun=0/0 enemy_aam=0/0 enemy_gun=0/0 cause=overspeed] wingman[-]"
+        line = "AI probe debrief: Lost Ok elapsed=10s player[Dead damage=100% kills=[] ff=0 a2a=0/0 dmg=0 gun=0/0 a2g=0/0 bomb=0/0 enemy_aam=0/0 enemy_gun=0/0 cause=overspeed] wingman[-]"
         self.assertTrue(flight.PLAYER_LINE.search(line))
 
 
@@ -231,3 +262,139 @@ class ScenarioListTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PoweredTapeTests(unittest.TestCase):
+    """The powered-lift scenarios' tapes (tools/battery_scenarios/_powered.py)."""
+
+    def test_a_tape_has_one_numbered_line_per_tick_and_its_commands(self):
+        text = _powered.tape_text(
+            4, [(2, 3, {"pitch": -0.5, "collective": 0.85, "conversion": -1})], {1: ["toggle:hover-hold"], 3: ["a", "b"]}
+        )
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "tore-pilot 3")
+        self.assertEqual(len(lines), 5)
+        self.assertEqual(lines[1], "1 0.0 0.0 0.0 0 - toggle:hover-hold")
+        self.assertEqual(lines[2], "2 -0.5 0.0 0.0 0 - lift:collective:0:0.85 lift:conversion:-1:-")
+        self.assertEqual(lines[3], "3 -0.5 0.0 0.0 0 - lift:collective:0:0.85 lift:conversion:-1:- a b")
+        self.assertEqual(lines[4], "4 0.0 0.0 0.0 0 -")
+
+    def test_every_scenario_tape_is_defined_for_its_aircraft(self):
+        for scenario in _powered.powered_scenarios():
+            self.assertTrue(scenario.name.startswith("flight-powered-"), scenario.name)
+            self.assertEqual(scenario.lane, "flight")
+        for ac in _powered.POWERED:
+            for kind in ("quiet", "transition"):
+                ticks, _, _ = _powered.spec(kind, ac)
+                self.assertGreater(ticks, 0)
+        for ac in _powered.ROTORCRAFT:
+            self.assertEqual(_powered.spec("hold", ac)[2][420], ["toggle:hover-hold"])
+
+    def test_the_touchdown_check_reads_each_outcome(self):
+        def line(on_ground, damaged, crashed):
+            return f"touchdown: on_ground={on_ground} gear_damaged={damaged} crashed={crashed}\n"
+
+        outcomes = {"down": line("true", "false", "false"), "crash": line("false", "false", "true")}
+        good = "".join(f"\n$ then {i}: x\n" + outcomes[row[2]] for i, row in enumerate(_powered.TOUCHDOWNS, start=1))
+        self.assertEqual(_powered.check_touchdowns(good), [])
+        bad = good.replace(outcomes["crash"], outcomes["down"], 1)
+        self.assertTrue(any("should crash" in p for p in _powered.check_touchdowns(bad)))
+        self.assertTrue(any("no touchdown line" in p for p in _powered.check_touchdowns("")))
+
+    def test_the_result_line_is_read_and_the_checks_name_each_problem(self):
+        flight_line = "ticks=1800 speed_kt=0.4 altitude_ft=5000.1 fuel_lb=1900.0 crashed=false\n"
+        extremes = "extremes: samples=1800 non_finite=0 max_speed_kt=1.0\n"
+        output = "\n$ then 1: x\n\n$ then 2: y\n" + flight_line + extremes
+        self.assertEqual(_powered.check_hover(output), [])
+        drifting = output.replace("speed_kt=0.4", "speed_kt=12.0")
+        self.assertTrue(any("drifted" in p for p in _powered.check_hover(drifting)))
+        crashed = output.replace("crashed=false", "crashed=true")
+        self.assertTrue(any("crashed" in p for p in _powered.check_hover(crashed)))
+        self.assertTrue(any("no result" in p for p in _powered.check_hover("\n$ then 2: y\nnothing\n")))
+
+
+# The `--rotor-probe` output on the imported PTs (slice H1, 2026-10-12).
+ROTOR_PROBE = (
+    "ROTOR AV8.PT jet hover: off=0.0ft height=0.0ft touchdown=-4.9ft/s landing_off=0.0ft flew\n"
+    "ROTOR YAK141.PT jet hover: off=0.0ft height=0.0ft touchdown=-7.5ft/s landing_off=0.0ft flew\n"
+    "ROTOR V22.PT hold calm: off=2.2ft height=0.0ft hover=true flew\n"
+    "ROTOR V22.PT hold wind15: off=2.7ft height=0.0ft hover=true flew\n"
+    "ROTOR V22.PT move500: overshoot=-0.1ft arrived=31.4s off=0.1ft height=0.0ft flew\n"
+    "ROTOR V22.PT climb500: fastest=26.7ft/s top=500.0ft end=500.0ft drift=7.6ft flew\n"
+    "ROTOR V22.PT forward 40kt +1000fpm: climb=1032fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 40kt -1000fpm: climb=-1031fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.9kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 80kt -1000fpm: climb=-1009fpm speed_off=1.0kt heading_off=0.1deg flew\n"
+    "ROTOR V22.PT forward 120kt +1000fpm: climb=1004fpm speed_off=0.8kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 120kt -1000fpm: climb=-992fpm speed_off=3.3kt heading_off=0.4deg flew\n"
+    "ROTOR V22.PT descent_turn: least_collective=0.00 nose_off_track=33.9deg steepest_pitch=3.4deg lost=683ft flew\n"
+    "ROTOR V22.PT turn200: lost=18.6ft lowest=181.4ft heading_off=2.0deg flew\n"
+    "ROTOR V22.PT slow120: lost=5.4ft off=1.1ft ground_speed=0.0kt hover=true flew\n"
+    "ROTOR V22.PT convert: out=0.0deg 220kt converted=24.3s back=87.0deg off=0.0ft ground_speed=0.0kt hover=true height=88ft corridor_ticks=0 flew\n"
+    "ROTOR AH64.PT hold calm: off=2.6ft height=0.0ft hover=true flew\n"
+    "ROTOR AH64.PT hold wind15: off=3.1ft height=0.0ft hover=true flew\n"
+    "ROTOR AH64.PT move500: overshoot=-0.1ft arrived=31.0s off=0.1ft height=0.0ft flew\n"
+    "ROTOR AH64.PT climb500: fastest=26.0ft/s top=500.0ft end=500.0ft drift=8.9ft flew\n"
+    "ROTOR AH64.PT forward 40kt +1000fpm: climb=1032fpm speed_off=1.3kt heading_off=1.6deg flew\n"
+    "ROTOR AH64.PT forward 40kt -1000fpm: climb=-1030fpm speed_off=1.3kt heading_off=0.8deg flew\n"
+    "ROTOR AH64.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.7kt heading_off=0.7deg flew\n"
+    "ROTOR AH64.PT forward 80kt -1000fpm: climb=-1006fpm speed_off=0.6kt heading_off=0.2deg flew\n"
+    "ROTOR AH64.PT forward 120kt +1000fpm: climb=1004fpm speed_off=0.5kt heading_off=0.5deg flew\n"
+    "ROTOR AH64.PT forward 120kt -1000fpm: climb=-1002fpm speed_off=0.4kt heading_off=0.2deg flew\n"
+    "ROTOR AH64.PT descent_turn: least_collective=0.10 nose_off_track=9.9deg steepest_pitch=14.3deg lost=1079ft flew\n"
+    "ROTOR AH64.PT turn200: lost=16.0ft lowest=184.0ft heading_off=0.5deg flew\n"
+    "ROTOR AH64.PT slow120: lost=4.2ft off=0.0ft ground_speed=0.0kt hover=true flew\n"
+    "ROTOR MI24.PT hold calm: off=2.4ft height=0.0ft hover=true flew\n"
+    "ROTOR MI24.PT hold wind15: off=2.7ft height=0.0ft hover=true flew\n"
+    "ROTOR MI24.PT move500: overshoot=-0.1ft arrived=32.5s off=0.1ft height=0.0ft flew\n"
+    "ROTOR MI24.PT climb500: fastest=26.4ft/s top=500.0ft end=500.0ft drift=9.3ft flew\n"
+    "ROTOR MI24.PT forward 40kt +1000fpm: climb=1032fpm speed_off=1.3kt heading_off=1.5deg flew\n"
+    "ROTOR MI24.PT forward 40kt -1000fpm: climb=-1031fpm speed_off=1.3kt heading_off=0.6deg flew\n"
+    "ROTOR MI24.PT forward 80kt +1000fpm: climb=1007fpm speed_off=0.7kt heading_off=0.6deg flew\n"
+    "ROTOR MI24.PT forward 80kt -1000fpm: climb=-1007fpm speed_off=0.6kt heading_off=0.1deg flew\n"
+    "ROTOR MI24.PT forward 120kt +1000fpm: climb=1003fpm speed_off=0.5kt heading_off=0.4deg flew\n"
+    "ROTOR MI24.PT forward 120kt -1000fpm: climb=-1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR MI24.PT descent_turn: least_collective=0.10 nose_off_track=9.4deg steepest_pitch=3.4deg lost=833ft flew\n"
+    "ROTOR MI24.PT turn200: lost=23.9ft lowest=176.1ft heading_off=0.3deg flew\n"
+    "ROTOR MI24.PT slow120: lost=2.8ft off=0.0ft ground_speed=0.0kt hover=true flew\n"
+    "ROTOR CH47.PT hold calm: off=0.0ft height=0.0ft hover=true flew\n"
+    "ROTOR CH47.PT hold wind15: off=0.4ft height=0.0ft hover=true flew\n"
+    "ROTOR CH47.PT move500: overshoot=-0.0ft arrived=33.0s off=0.1ft height=0.0ft flew\n"
+    "ROTOR CH47.PT climb500: fastest=25.5ft/s top=500.0ft end=500.0ft drift=0.6ft flew\n"
+    "ROTOR CH47.PT forward 40kt +1000fpm: climb=1031fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 40kt -1000fpm: climb=-1031fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 80kt +1000fpm: climb=1007fpm speed_off=0.6kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 80kt -1000fpm: climb=-1007fpm speed_off=0.6kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 120kt +1000fpm: climb=1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 120kt -1000fpm: climb=-1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT descent_turn: least_collective=0.10 nose_off_track=12.9deg steepest_pitch=22.6deg lost=438ft flew\n"
+    "ROTOR CH47.PT turn200: lost=17.4ft lowest=182.6ft heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT slow120: lost=1.0ft off=0.1ft ground_speed=0.0kt hover=true flew\n"
+)
+
+
+class RotorProbeTests(unittest.TestCase):
+    """The AI rotorcraft and jet-lift probe's checker (`flight-powered-ai-probe`)."""
+
+    def test_the_recorded_probe_passes(self):
+        self.assertEqual(_powered.check_rotor_probe(ROTOR_PROBE), [])
+
+    def test_each_failure_is_named(self):
+        dropped = ROTOR_PROBE.replace("ROTOR CH47.PT slow120", "ROTOR CH47.PT slowed")
+        self.assertTrue(any("no ROTOR line for CH47.PT slow120" in p for p in _powered.check_rotor_probe(dropped)))
+        drifting = ROTOR_PROBE.replace("ROTOR AH64.PT hold calm: off=2.6ft", "ROTOR AH64.PT hold calm: off=12.6ft")
+        self.assertTrue(any("did not hold" in p for p in _powered.check_rotor_probe(drifting)))
+        crashed = ROTOR_PROBE.replace("ROTOR MI24.PT move500: overshoot=-0.1ft arrived=32.5s off=0.1ft height=0.0ft flew",
+                                      "ROTOR MI24.PT move500: overshoot=-0.1ft arrived=32.5s off=0.1ft height=0.0ft CRASHED")
+        self.assertTrue(any("CRASHED" in p for p in _powered.check_rotor_probe(crashed)))
+        held = ROTOR_PROBE.replace("corridor_ticks=0", "corridor_ticks=4")
+        self.assertTrue(any("corridor" in p for p in _powered.check_rotor_probe(held)))
+        hard = ROTOR_PROBE.replace("touchdown=-7.5ft/s", "touchdown=-12.0ft/s")
+        self.assertTrue(any("land vertically" in p for p in _powered.check_rotor_probe(hard)))
+        sank = ROTOR_PROBE.replace("ROTOR MI24.PT turn200: lost=23.9ft", "ROTOR MI24.PT turn200: lost=83.9ft")
+        self.assertTrue(any("turn round" in p for p in _powered.check_rotor_probe(sank)))
+        unloaded = ROTOR_PROBE.replace("ROTOR CH47.PT descent_turn: least_collective=0.10", "ROTOR CH47.PT descent_turn: least_collective=0.00")
+        self.assertTrue(any("unloaded its rotor" in p for p in _powered.check_rotor_probe(unloaded)))
+        slow = ROTOR_PROBE.replace("ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.9kt",
+                                   "ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=9.9kt")
+        self.assertTrue(any("missed" in p for p in _powered.check_rotor_probe(slow)))

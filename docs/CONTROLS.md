@@ -30,6 +30,54 @@ Gamepad defaults apply automatically to standard Linux gamepads. On Windows and
 macOS, and for sticks, throttles and pedals, bind controls in the controls
 screen. "View + RB" means hold View, then press RB. A dash means no default.
 
+Added gamepad mappings depend on aircraft capability. Powered-lift aircraft use
+View+Start for the engine; vectoring jets and the V-22 use View+D-pad Up for
+forward nozzle/nacelle neutral. On the AC-130 View+right stick slews the gunsight,
+View+D-pad Up and Down pick and link its guns (the range reset and damage test
+they carry elsewhere are off there), View+A designates under the crosshair and
+View+A held half a second pins the ground, and View+Xbox opens the sensor
+console (the range's incoming-missile fixture is off there). Other aircraft keep their original
+modifier look/rudder/fixture mappings. The sight rows are for every aircraft with
+a laser designator or a FLIR: their keyboard keys work on all of them, while the
+gamepad defaults above are the AC-130's. Bind your own button or stick to any
+sight row in the controls screen to use it on another aircraft. Tab holds the
+gun whatever is selected and has no gamepad default.
+The full profile remains visible in Controls. See [input contexts](INPUT.md).
+
+**Keys inside the AC-130 sensor console.** While the console (Ctrl+9) is open
+the stick does not fly, so the arrows, the stick and mouse look slew the
+sight; = and - and the mouse wheel zoom it; Shift with Left and Right steps the
+search heading and Shift with Up and Down the altitude (or the orbit's
+height); the throttle keys 1 to 8 set the autopilot's speed; P pins or
+releases the point (orbit or search); Shift+P locks the guns. The gamepad
+cells marked "(in the AC-130 console)" are John's console layout, which
+replaces those buttons' flight meanings only while the console is open. See
+[input](INPUT.md#ac-130-gunsight-controls) and the
+[console's keys](spec/ac130-linked-guns.md#the-consoles-keys).
+
+**Keys that depend on the aircraft.** On the AV-8 and Yak-141, Z and X step the
+nozzles and Shift+Z and Shift+X are the nozzle presets, as in the retail manual;
+on every other aircraft they stay a rudder pair. On the helicopters and the V-22
+Ctrl with the arrows is the cyclic trim and the throttle keys set the
+collective, and on the helicopters 0 recentres the trim. Ctrl+Shift+A cycles
+the powered-lift stability level and Ctrl+Alt+A is hover hold. A cell such as
+"Z (not on AV-8 / Yak-141)" names where a key acts; the full table is in
+[input](INPUT.md#vtol-tiltrotor-and-helicopter-controls). On some European
+layouts Windows reports AltGr as Ctrl+Alt, so AltGr+A also reaches hover hold.
+
+**macOS and laptop keyboards.** The powered-lift keyboard defaults use Ctrl with
+the arrow keys (nozzle pitch on the vectoring jets, cyclic trim on the
+helicopters and the V-22) and Ctrl with Home, End, Page Up and Page
+Down (collective and nacelle conversion). On a Mac, macOS claims Ctrl+Up for
+Mission Control, Ctrl+Down for App Exposé and Ctrl+Left and Ctrl+Right to switch
+Spaces, so those presses may never reach the game unless you turn the shortcuts
+off in System Settings, Keyboard, Keyboard Shortcuts, Mission Control. Laptop
+keyboards also have no dedicated Home, End, Page Up or Page Down keys; they are
+Fn with the arrow keys, which makes the Ctrl combinations awkward. Every one of
+these can be remapped in the controls screen (Controls, then the action's row),
+and a gamepad's View+stick defaults avoid the problem.
+
+
 <!-- controls-table:start -->
 
 ### Flight controls
@@ -43,9 +91,45 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Roll left | Left | - | - |
 | Roll right | Right | - | - |
 | Rudder (yaw) | - | - | - |
-| Rudder left | End or Z | - | LT |
-| Rudder right | Page Down or X | - | RT |
-| Throttle lever | - | - | - |
+| Rudder left | End or Z (not on AV-8 / Yak-141) | - | LT |
+| Rudder right | Page Down or X (not on AV-8 / Yak-141) | - | RT |
+| Nozzle pitch (VTOL) lever | - | - | - |
+| Nozzle pitch (VTOL) rate axis | - | - | View + Right stick Y |
+| Nozzle pitch (VTOL): decrease | Ctrl+Up (fixed-wing and AV-8 / Yak-141 only) | - | - |
+| Nozzle pitch (VTOL): increase | Ctrl+Down (fixed-wing and AV-8 / Yak-141 only) | - | - |
+| Nozzle yaw (VTOL) lever | - | - | - |
+| Nozzle yaw (VTOL) rate axis | - | - | View + Right stick X |
+| Nozzle yaw (VTOL): decrease | Ctrl+Left (fixed-wing only) | - | - |
+| Nozzle yaw (VTOL): increase | Ctrl+Right (fixed-wing only) | - | - |
+| Nacelle conversion (V-22) lever | - | - | - |
+| Nacelle conversion (V-22) rate axis | - | - | View + Right stick X |
+| Nacelle conversion (V-22): decrease | Ctrl+Page Up | - | - |
+| Nacelle conversion (V-22): increase | Ctrl+Page Down | - | - |
+| Collective (helicopters / V-22) lever | - | - | - |
+| Collective (helicopters / V-22) rate axis | - | - | View + Right stick Y |
+| Collective (helicopters / V-22): decrease | Ctrl+End | - | - |
+| Collective (helicopters / V-22): increase | Ctrl+Home | - | - |
+| Nozzles/nacelles: forward neutral | 0 (not on helicopters) | - | View + D-pad up |
+| Nozzles up (aft) 10 degrees (AV-8, Yak-141) | Z (AV-8 / Yak-141 only) | - | - |
+| Nozzles down 10 degrees (AV-8, Yak-141) | X (AV-8 / Yak-141 only) | - | - |
+| Nozzles to 0, or braking stop to vertical (AV-8, Yak-141) | Shift+Z (AV-8 / Yak-141 only) | - | - |
+| Nozzles vertical, again to the braking stop (AV-8, Yak-141) | Shift+X (AV-8 / Yak-141 only) | - | - |
+| Cyclic trim fore/aft (helicopters / V-22) rate axis | - | - | - |
+| Cyclic trim forward (helicopters / V-22) | Ctrl+Up (V-22 and helicopters only) | - | - |
+| Cyclic trim aft (helicopters / V-22) | Ctrl+Down (V-22 and helicopters only) | - | - |
+| Cyclic trim left/right (helicopters / V-22) rate axis | - | - | - |
+| Cyclic trim left (helicopters / V-22) | Ctrl+Left (V-22 and helicopters only) | - | - |
+| Cyclic trim right (helicopters / V-22) | Ctrl+Right (V-22 and helicopters only) | - | - |
+| Pedal trim (helicopters / V-22) rate axis | - | - | - |
+| Pedal trim left (helicopters / V-22) | - | - | - |
+| Pedal trim right (helicopters / V-22) | - | - | - |
+| Trim set / force trim release (helicopters / V-22) | - | - | - |
+| Trim to centre (helicopters) | 0 (helicopters only) | - | - |
+| Stability level: Off, Damper, Attitude (VTOL) | Ctrl+Shift+A (not on fixed-wing) | - | - |
+| Stability level Off (VTOL) | - | - | - |
+| Stability level Damper (VTOL) | - | - | - |
+| Stability level Attitude (VTOL) | - | - | - |
+| Throttle / engine power lever | - | - | - |
 | Throttle rate (axis) | - | - | - |
 | Throttle up | - | - | RB |
 | Throttle down | - | - | LB |
@@ -55,11 +139,12 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Throttle 75% | 4 | - | - |
 | Throttle 100% | 5 | - | - |
 | Throttle afterburner | 6 | - | - |
-| Throttle down 5% | 7 | - | - |
-| Throttle up 5% | 8 | - | - |
+| Throttle down 5% | 7 | - | D-pad down (in the AC-130 console) |
+| Throttle up 5% | 8 | - | D-pad up (in the AC-130 console) |
 | Afterburner | Shift+B | - | Y |
 | Autopilot (heading/altitude) | A | - | - |
 | Waypoint autopilot | Ctrl+A | - | - |
+| Hover hold autopilot (helicopters / V-22) | Ctrl+Alt+A | - | - |
 
 ### Systems
 
@@ -70,7 +155,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Flaps | F | - | X |
 | Airbrake / wheel brakes | B | - | B |
 | Tailhook | H | - | - |
-| Engine on/off | E | - | - |
+| Engine on/off | E | - | View + Menu |
 | Weapon bays (F-22) | O | - | - |
 | Damage report | D | - | - |
 
@@ -78,18 +163,47 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
-| Fire / release weapon | Space | - | View + RB |
+| Fire / release weapon | Space | - | View + RB or A (in the AC-130 console) |
 | Next weapon / NAV | ] | - | View + LB |
 | Previous weapon / NAV | [ | - | View + X |
-| Next radar target | T | - | View + A |
-| Previous radar target | Shift+T | - | - |
+| Next gun candidate (AC-130) | Ctrl+7 | - | View + D-pad up or X (in the AC-130 console) |
+| Link/unlink candidate gun (AC-130) | Ctrl+8 | - | View + D-pad down or B (in the AC-130 console) |
+| Sensor console and orbit hold (AC-130) | Ctrl+9 | - | View + Xbox |
+| Sight: designate under crosshair | Backslash | - | View + A (tap) |
+| Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
+| Sight: pin or release (AC-130 console: orbit or search) | P | - | Left stick press (in the AC-130 console) |
+| Gun lock: guns stay on the target, the sensor slews free (AC-130) | Shift+P | - | View + Right stick press (in the AC-130 console) |
+| Sight: zoom in | Shift+Apostrophe | - | RB (in the AC-130 console) |
+| Sight: zoom out | Shift+Semicolon | - | LB (in the AC-130 console) |
+| Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | D-pad left (in the AC-130 console) |
+| Sight: white hot (AC-130 console) | Shift+F5 | - | - |
+| Sight: black hot (AC-130 console) | Shift+F6 | - | - |
+| Sight: TV (AC-130 console) | Shift+F7 | - | - |
+| Sight: night vision (AC-130 console) | Shift+F8 | - | - |
+| Sensor console radar range 5 / 10 / 25 nm (AC-130 console) | Ctrl+0 | - | D-pad right (in the AC-130 console) |
+| Sight: slew left/right | - | - | View + Right stick X or Left stick X (in the AC-130 console) |
+| Sight: slew up/down | - | - | View + Right stick Y or Left stick Y (in the AC-130 console) |
+| Sight: slew left | Alt+Left | - | - |
+| Sight: slew right | Alt+Right | - | - |
+| Sight: slew up | Alt+Up | - | - |
+| Sight: slew down | Alt+Down | - | - |
+| Next radar target | T | - | View + A or Y (in the AC-130 console) |
+| Previous radar target | Shift+T | - | View + D-pad right (in the AC-130 console) |
 | Select visual target | Enter or Apostrophe | - | - |
-| Clear designation | Semicolon or L | - | View + B |
-| Seeker mode (bore/cued) | - | - | - |
+| Clear designation | Semicolon or L | - | View + B or View + Y (in the AC-130 console) |
+| Delivery mode (CCIP/LVL, bore/cued) | Ctrl+M | - | - |
+| Sight: next visible object | / | - | - |
+| Laser on or off | Ctrl+L | - | - |
+| Fire the gun whatever is selected | Tab | - | - |
+| Nearest ground target (Easy targeting) | Ctrl+X | - | - |
 | Release chaff | Insert | - | View + D-pad left |
 | Release flare | Delete | - | View + D-pad right |
-| Jettison selected stores | Shift+K | - | View + Right stick press |
-| Reset range target | Backslash | - | View + D-pad up |
+| Release chaff (AC-130 console) | Ctrl+Insert | - | View + B (in the AC-130 console) |
+| Release flare (AC-130 console) | Ctrl+Delete | - | View + A (in the AC-130 console) |
+| Jettison tanks | Shift+K | - | - |
+| Jettison selected store | Ctrl+Shift+K | - | View + Right stick press |
+| Reset range target | Ctrl+Shift+Backslash | - | View + D-pad up |
+| IFF squawk on the target | U | - | - |
 | Incoming missile (range) | Ctrl+Shift+I | - | View + Xbox |
 | Target jammer (range) | Shift+Y | - | View + Menu |
 | Next damage class (test) | - | - | - |
@@ -101,6 +215,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
 | Radar power / radar channel | R | - | View + Left stick press |
+| Air-to-ground radar on or off | Ctrl+R or Shift+R | - | - |
 | Jammer (ECM) | J | - | View + Y |
 | Cycle sensor channel | M | - | - |
 | Infrared channel | I | - | - |
@@ -184,9 +299,35 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Zoom out | Minus | Wheel down | - |
 | Cockpit art | Backspace | - | - |
 | HUD | Shift+U | - | - |
+| Instrument brightness: then -/+ | Ctrl+I | - | - |
+| Flood brightness: then -/+ | Ctrl+Shift+F | - | - |
+| HUD colour | Ctrl+H | - | - |
+| Dim instruments | - | - | - |
+| Brighten instruments | - | - | - |
+| Dim flood | - | - | - |
+| Brighten flood | - | - | - |
 | Dim HUD | Shift+[ | - | - |
 | Brighten HUD | Shift+] | - | - |
 | Live map | Shift+M | - | - |
+| Show target info | Ctrl+T | - | - |
+
+### Replay drone
+
+| Action | Keyboard | Mouse | Gamepad (Xbox) |
+| --- | --- | --- | --- |
+| Drone: cycle flight/follow/free | Backquote (~) | - | - |
+| Drone: follow aircraft | - | - | - |
+| Drone: free camera | - | - | - |
+| Drone: move forward | W | - | - |
+| Drone: move backward | S | - | - |
+| Drone: move left | A | - | - |
+| Drone: move right | D | - | - |
+| Drone: move up | E | - | - |
+| Drone: move down | Q | - | - |
+| Drone: four times faster | Shift | - | - |
+| Drone: hold to look with mouse | - | Right button | - |
+| Drone: increase movement speed | - | Wheel up | - |
+| Drone: decrease movement speed | - | Wheel down | - |
 
 ### Communication
 
@@ -203,7 +344,10 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Wing: approach target high | Alt+9 | - | - |
 | Wing: engage my target | Alt+E | - | - |
 | Wing: engage from formation | Alt+R | - | - |
-| Wing: attack on contact | Alt+W | - | - |
+| Wing: sort (a different bandit for each wingman) | Alt+A | - | - |
+| Wing: engage every target of my target's class (attack on contact with none) | Alt+W | - | - |
+| Wing: engage the IR/laser target (attack on contact with none) | Alt+F | - | - |
+| Wing: lase my target | Alt+G | - | - |
 | Wing: protect me | Alt+P | - | - |
 | Wing: disengage | Alt+D | - | - |
 | Wing: bug out | Alt+B | - | - |
@@ -213,11 +357,17 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Wing: stacking | Alt+V | - | - |
 | Wing: land at selected airport | Alt+L | - | - |
 | Radio silence | Alt+S | - | - |
+| Monitor the battle net (the other flights' contact reports and attack calls) | Alt+N | - | - |
 | Address whole flight | Alt+0 | - | - |
 | Address wingman 1 | Alt+Shift+1 | - | - |
 | Address wingman 2 | Alt+Shift+2 | - | - |
 | Address wingman 3 | Alt+Shift+3 | - | - |
 | Address wingman 4 | Alt+Shift+4 | - | - |
+| Reply to the flight: Engaging | Alt+Shift+E | - | - |
+| Reply to the flight: Winchester | Alt+Shift+W | - | - |
+| Reply to the flight: Bingo fuel | Alt+Shift+B | - | - |
+| Request help from the flight | Alt+Shift+H | - | - |
+| Chat line (network games only) | Backquote (~) | - | - |
 | Next airport | Shift+N | - | - |
 | Request landing | Shift+L | - | - |
 | Repeat tower reply | Ctrl+Shift+R | - | - |
@@ -233,9 +383,19 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Slow motion | Shift+C | - | - |
 | End mission | Ctrl+Q | - | - |
 | Valkyries music | Ctrl+V | - | - |
+| Score board (network games) | K | - | - |
 | Mark replay moment | Ctrl+B | - | - |
 | Restart flight | - | - | - |
 | Keyboard help | F11 | - | - |
+| Multiplayer ? menu (controller Menu also opens it) | F1 | - | - |
+| In-flight Map/Mission: switch tab (controller A) | Enter | - | - |
+| Mission brief: scroll (controller D-pad up/down) | Up or Down or Page Up or Page Down or Home or End | - | - |
+| In-flight respawn: mission brief (or select Mission...) | M | - | - |
+| Multiplayer respawn: fly again after delay, with menus closed (controller A) | Enter | - | - |
+| Mission brief: close (controller B; A also closes respawn brief) | Esc | - | - |
+| Multiplayer ? menu: return to main menu | M | - | - |
+| Multiplayer ? menu: exit | X | - | - |
+| Lobby Settings: apply and close (Escape discards) | F10 | - | - |
 | Menu up | Up | - | D-pad up |
 | Menu down | Down | - | D-pad down |
 | Menu left | Left | - | D-pad left |
@@ -257,6 +417,12 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Flight, debug menu open | Up / Down / Tab, Home / End, PageUp / PageDown, Enter / Space / Right, Esc / Left | Move, choose, close; other keys still fly |
 | Flight, debug panels shown | Left click, mouse wheel | Pin, close and filter buttons; scroll the panel under the pointer |
 | Flight | macOS Command+Q | Exit to desktop |
+| Networked flight (not single player) | Backquote (~), the key above Tab | Open the chat line. It is not rebindable and only a flight joined to a host has it; single player never opens it, and its Controls screen row says so |
+| Chat line open | Typed characters, Backspace | Type the line: printable ASCII, up to 80 characters. Every flight key you were holding is let go and the keyboard types instead of flying; the joystick and the mouse still fly |
+| Chat line open | Tab / Shift+Tab | Choose the receiver: All, Friendlies, Enemies, Wing, Target, round (Shift+Tab goes back) |
+| Chat line open | Enter | Send the line to the receiver and close the line (an empty line just closes). Closed, Enter designates the nearest visible aircraft as before |
+| Chat line open | Esc | Close the line without sending |
+| Chat line open | F1 to F12 | Send the matching line of `CHAT.TXT`, to the line's own receiver or the one chosen, and close the line. Closed, the F keys are the views |
 | Live map open | + / - | Zoom the map |
 | Live map open | Arrow keys | Pan the map |
 | Live map open | Home | Follow the player again |
@@ -282,18 +448,43 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | O / Shift+O | Object view: look at the next or previous aircraft, weapon or ground object present now |
 | Replay viewer | Keypad 5 or Shift+/ | Recenter the look, keeping the view and zoom |
 | Replay viewer | + / - (keypad too) | Zoom in or out, 0.5x to 4x |
-| Replay viewer | Backquote (`) | Drone camera following the selected aircraft, then flying free, then back to the flight view |
-| Replay viewer | W A S D, E / Q | Drone: move, climb / descend; hold Shift for four times the speed |
-| Replay viewer | Mouse wheel | Scroll a debug panel or menu under the pointer; otherwise drone speed from 20 to 5,000 feet per second, or zoom in a flight view |
-| Replay viewer | Hold right button and drag | Look around, or turn the drone |
+| Replay viewer | V / Shift+V | [HUD camera](REPLAYS.md#hud-camera) / [Sensor View](REPLAYS.md#sensor-view) on the selected aircraft; the Sensor View only for an aircraft with a targeting sight (a laser pod, a laser, a FLIR or the AC-130's console) |
+| Replay viewer, Sensor View | 1 / 2 / 3 / 4, Shift+F5 / F6 / F7 / F8, Backslash | White hot / black hot / TV / night vision; Shift+F5 to Shift+F8 also open the Sensor View in that picture from any view; Backslash steps through them |
+| Replay viewer | Mouse wheel | Scroll a debug panel or menu under the pointer; otherwise configured drone speed controls (default wheel) from 20 to 5,000 feet per second, or zoom in a flight view |
+| Replay viewer | Hold right button and drag | Look around in a flight view; the drone uses its configured look hold (default right button) |
 | Replay viewer | Left click, drag on the timeline | Transport bar buttons; jump to or scrub through a moment |
-| Replay viewer | Right-click without dragging | The debug menu on the aircraft, weapon or ground object under the pointer, with View from here and Look at this for the object view, or a list of aircraft to jump to |
+| Replay viewer | Right-click without dragging | On the camera button, choose a specific view. In the scene, the debug menu on the aircraft, weapon or ground object under the pointer, with View from here and Look at this for the object view, or a list of aircraft to jump to |
 | Replay viewer, debug menu open | Up / Down / Tab, Home / End, PageUp / PageDown, Enter / Space / Right, Esc / Left | Move, choose, close |
 | Replay viewer | N / T / C | Name labels / mission timer / Comms panel on or off |
 | Replay viewer | I / F / G | AI thinking / telemetry panel of the selected aircraft / guidance panel of its newest missile in flight, on or off |
 | Replay viewer | M / X | Debug menu on the selected aircraft / close every debug panel |
 | Replay viewer | R / Shift+R | Flight path trails on or off / next trail length (10, 30, 60, 120 or 300 seconds) |
+| Replay viewer | B | Laser spots, designations, guided weapons and bomb landings drawn in the 3D view, on or off (on at first for a recording that has them) |
 | Replay viewer | H | Hide or show the whole interface and the pointer; playback and camera keys keep working |
 | Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |
 | Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, ? > End Replay goes back to the Replays screen, and the Control tab opens the controls screen |
 | Replay viewer, pause menu open | Arrow keys, Tab, Enter / Space, Esc, left click | Move, choose and back out, as in the flight menu; every other key and click waits until it closes |
+| Watching a networked mission (slice F2-O2) | The replay viewer's keys | As in the viewer; the bar reads LIVE at the live edge, Space, J and the scrub keys leave it, End returns to it, and nothing goes past live. Esc opens the pause menu, whose first row, Stop Watching, returns to the lobby |
+| Watching your own aircraft while the AI flies it (slice F2-O3) | The stick, rudder, throttle and trigger | The controllers, the arrow keys (Shift makes them look), Z, X, End, Page Down, Space, 1 to 8 and any key your controls bind take the aircraft back and are not the viewer's keys on this screen (the arrows do not scrub, Space does not pause); every other key and the mouse are the viewer's. Stop Watching in the pause menu leaves the aircraft to the AI and goes to the lobby, or takes the aircraft back in a game with no lobby screen or one you host |
+
+## Multiplayer phase 2
+
+[Design](ARCHITECTURE.md#phase-2-the-rest-of-stage-f). John answered the key
+questions on 2026-10-05 (all as recommended). **Built** (slice F2-C, listed in
+the tables above and remappable like any other key):
+
+| Situation | Input | Action |
+| --- | --- | --- |
+| Flight | U | IFF squawk on the displayed target: "IFF: Friendly" for one of the player's side, "IFF: no reply" for any other, "IFF: no target" with none (retail's key) |
+| Flight | Ctrl+T | Show Target Info on or off, as the Pref menu's row: identities under visible aircraft and objects, a human's callsign beneath in a network game (retail's key) |
+| Flight | K | Score board in a network flight, open or closed (built, F2-S): the players ranked by the game's tally with their side, kills, losses, damage and ratio, the sides' totals, the kill limit, the time left and the winner. Single player says "Score board: network games only" |
+| Flight, as a wingman | Alt+Shift+E / W / B / H | Reply to the flight: Engaging, Winchester, Bingo fuel, or request help (built, F2-R). A wingman's call goes to every human of its flight as a radio line and recording ("Red two: Winchester"); you hear your own as YOU, other flights hear nothing, and radio silence drops it for a seat that has it on. A seat may call once in two seconds. A plane that leads its wing says "You lead this flight." (single player always does) |
+
+**Proposed, not built:**
+
+| Situation | Input | Action |
+| --- | --- | --- |
+| Networked flight, aircraft lost | Enter | Fly again, when the respawn rule, lives and delay allow (retail's key; slice F2-V) |
+| Networked flight, the AI flying for the player | Any flight control | Take the aircraft back (slice F2-A) |
+
+Stage G's keys are built: Alt+A sorts the flight's targets (slice G3c) and Alt+N monitors the battle net (slice G8; the [guide](DATALINK.md#frequencies)).

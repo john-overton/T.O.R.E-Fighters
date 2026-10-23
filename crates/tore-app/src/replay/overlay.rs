@@ -33,6 +33,7 @@ pub enum Control {
     Camera,
     Aircraft,
     HideUi,
+    Feedback,
 }
 
 /// The transport buttons, left to right.
@@ -72,6 +73,7 @@ pub fn rect(control: Control) -> Rect {
         Control::Camera => CAMERA,
         Control::Aircraft => AIRCRAFT,
         Control::HideUi => HIDE,
+        Control::Feedback => (490, 4, 142, 22),
         _ => {
             let index = TRANSPORT.iter().position(|c| *c == control).unwrap_or(0) as i32;
             (8 + index * (BUTTON_WIDTH + 2), ROW, BUTTON_WIDTH, 20)
@@ -88,6 +90,7 @@ pub fn hit(point: (f64, f64)) -> Option<Control> {
             Control::Camera,
             Control::Aircraft,
             Control::HideUi,
+            Control::Feedback,
         ])
         .find(|control| inside(point, rect(*control)))
 }
@@ -161,7 +164,11 @@ pub fn transport(control: Control, clock: &mut Clock) -> bool {
         Control::FastForward => clock.fast_forward(),
         Control::StepForward => clock.step(1),
         Control::End => clock.end(),
-        Control::Timeline | Control::Camera | Control::Aircraft | Control::HideUi => return false,
+        Control::Timeline
+        | Control::Camera
+        | Control::Aircraft
+        | Control::HideUi
+        | Control::Feedback => return false,
     }
     true
 }
@@ -223,6 +230,7 @@ pub enum MarkerKind {
     Kill,
     Order,
     Bookmark,
+    Feedback,
 }
 
 impl MarkerKind {
@@ -232,6 +240,7 @@ impl MarkerKind {
             Self::Kill => [240, 82, 70, 255],
             Self::Order => [96, 176, 255, 255],
             Self::Bookmark => [120, 214, 140, 255],
+            Self::Feedback => [255, 120, 240, 255],
         }
     }
 }
@@ -245,6 +254,10 @@ pub struct Marker {
 /// Everything the interface shows for one frame, as plain data.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Model {
+    pub feedback: Vec<tore_replay::feedback::Feedback>,
+    pub feedback_open: bool,
+    pub feedback_selected: usize,
+    pub feedback_scroll: usize,
     pub first: u64,
     pub last: u64,
     pub position: f64,
@@ -265,6 +278,7 @@ pub struct Model {
     /// How far above their usual place the subtitles sit, clear of the
     /// cockpit messages over the bar.
     pub subtitle_lift: i32,
+    pub banner: Vec<String>,
 }
 
 fn text(pixels: &mut [u8], font: &Font, color: [u8; 4], text: &str, at: (i32, i32)) {
@@ -350,6 +364,19 @@ fn labelled(pixels: &mut [u8], font: &Font, r: Rect, label: &str, lit: bool) {
     Editor::text(pixels, font, r, color, &label, (x, r.1 + 4));
 }
 
+/// Reserve exactly the banner's rows, plus padding and a separator.
+pub fn lines_height(font: &Font, count: usize) -> i32 {
+    if count == 0 {
+        0
+    } else {
+        count as i32 * (font.height as i32 + 3) + 8
+    }
+}
+
+pub fn banner_height(font: &Font, model: &Model) -> i32 {
+    lines_height(font, model.banner.len())
+}
+
 /// Draws the interface into a cleared 640x480 layer.
 pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
     let lit = |control| {
@@ -358,6 +385,21 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
             || model.hover == Some(control)
     };
     Canvas(pixels).rect(BAR, BAR_FILL);
+    let height = banner_height(font, model);
+    if height > 0 {
+        let top = BAR_TOP - height;
+        Canvas(pixels).rect((0, top, WIDTH as i32, height), BAR_FILL);
+        Canvas(pixels).rect((8, top, 624, 1), TITLE);
+        for (i, line) in model.banner.iter().enumerate() {
+            text(
+                pixels,
+                font,
+                if i == 0 { TITLE } else { PALE },
+                &fit(font, &super::panels::ascii(line), 616),
+                (12, top + 5 + i as i32 * (font.height as i32 + 3)),
+            );
+        }
+    }
     // Timeline: the played part, markers, then the playhead.
     Canvas(pixels).rect(TRACK, [70, 84, 104, 255]);
     let head = timeline_x(model.position, model.first, model.last).round() as i32;
@@ -417,6 +459,90 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
         let y = 12 + font.height as i32 + 10;
         caption(pixels, font, &fit(font, readout, 420), 320, y, PALE);
     }
+    if !model.feedback.is_empty() {
+        labelled(
+            pixels,
+            font,
+            rect(Control::Feedback),
+            &format!("Feedback ({})", model.feedback.len()),
+            model.feedback_open,
+        );
+        if model.feedback_open {
+            draw_feedback(pixels, font, model);
+        }
+    }
+}
+
+fn draw_feedback(pixels: &mut [u8], font: &Font, model: &Model) {
+    Canvas(pixels).rect((8, 32, 624, 394), [24, 34, 45, 255]);
+    let page = model.feedback_selected / 8 * 8;
+    for (i, f) in model.feedback.iter().enumerate().skip(page).take(8) {
+        let r = (12, 40 + (i - page) as i32 * 24, 236, 22);
+        labelled(
+            pixels,
+            font,
+            r,
+            &fit(
+                font,
+                &format!(
+                    "{:02}:{:02}  {}",
+                    f.tick / 7200,
+                    f.tick / 120 % 60,
+                    f.player
+                ),
+                228,
+            ),
+            i == model.feedback_selected,
+        );
+    }
+    Editor::text(
+        pixels,
+        font,
+        (12, 240, 236, 40),
+        TITLE,
+        "Up/Down: flags. Enter: seek.",
+        (12, 248),
+    );
+    Editor::text(
+        pixels,
+        font,
+        (12, 280, 236, 40),
+        TITLE,
+        "PgUp/Dn: text. Escape: close.",
+        (12, 288),
+    );
+    if let Some(f) = model.feedback.get(model.feedback_selected) {
+        for (i, line) in feedback_lines(font, f)
+            .iter()
+            .skip(model.feedback_scroll)
+            .take(27)
+            .enumerate()
+        {
+            Editor::text(
+                pixels,
+                font,
+                (264, 36, 360, 386),
+                WHITE,
+                line,
+                (264, 42 + i as i32 * 14),
+            );
+        }
+    }
+}
+
+/// Wrapped lines shared by drawing and scroll bounds.
+pub fn feedback_lines(font: &Font, f: &tore_replay::feedback::Feedback) -> Vec<String> {
+    let text = format!("{}  {}\n{}", f.player, f.aircraft, f.text);
+    let mut lines = vec![String::new()];
+    for c in text.chars() {
+        if c == '\n' || text_width(font, lines.last().unwrap()) > 346 {
+            lines.push(String::new());
+        }
+        if c != '\n' {
+            lines.last_mut().unwrap().push(c);
+        }
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -433,6 +559,53 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn banner_stays_above_transport_and_messages_at_all_window_sizes() {
+        let font = font();
+        let model = Model {
+            banner: vec![
+                "Name".into(),
+                "450 kt | 20,000 ft MSL | HDG 090 T".into(),
+                "Action: intercept".into(),
+                "Target: Bandit (5.0 nm)".into(),
+            ],
+            ..Default::default()
+        };
+        let height = banner_height(&font, &model);
+        assert_eq!(height, 48);
+        let top = BAR_TOP - height;
+        let mut layer = vec![0; WIDTH * HEIGHT * 4];
+        draw(&mut layer, &font, &model);
+        for size in [
+            [3840, 2160],
+            [1920, 1080],
+            [800, 600],
+            [640, 360],
+            [480, 800],
+        ] {
+            let placement = Placement::new(size);
+            let scale = placement.scale();
+            let mut canvas = crate::flight_canvas::FlightCanvas::default();
+            canvas.blank(size);
+            canvas.anchored_layer(&layer);
+            let bar_y = f64::from(size[1]) - (HEIGHT as i32 - BAR_TOP) as f64 * scale;
+            let top_y = f64::from(size[1]) - (HEIGHT as i32 - top) as f64 * scale;
+            assert_eq!(
+                placement
+                    .layer([f64::from(size[0]) / 2., (bar_y + top_y) / 2.])
+                    .unwrap()
+                    .1
+                    .round(),
+                (top + height / 2) as f64
+            );
+            assert!(top_y >= 0. && top_y < bar_y && bar_y < f64::from(size[1]));
+            let last_text_bottom =
+                top_y + (5 + 3 * (font.height as i32 + 3) + font.height as i32) as f64 * scale;
+            assert!(last_text_bottom < bar_y);
+        }
+        assert_eq!(banner_height(&font, &Model::default()), 0);
     }
 
     #[test]

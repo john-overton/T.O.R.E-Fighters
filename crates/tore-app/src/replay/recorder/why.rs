@@ -53,6 +53,9 @@ pub(super) struct Why {
     guides: BTreeMap<u32, Guide>,
     /// This tick's decoy rolls, by projectile.
     decoys: BTreeMap<u32, DecoyRoll>,
+    /// The roll that decoyed each missile still in flight, kept after its
+    /// own tick so a late strike can name the device that fooled it.
+    decoyed_by: BTreeMap<u32, DecoyRoll>,
     /// The player's decoy rolls made between ticks, already written; the
     /// next tick's reasons and guidance trees read them.
     pub(super) pending_rolls: Vec<DecoyRoll>,
@@ -66,12 +69,26 @@ pub(super) struct Why {
     pub(super) news: BTreeMap<u32, Vec<String>>,
     /// Communication journal entries lost to its bound, as last reported.
     pub(super) comms_lost: u64,
+    /// Data link journal entries lost to its bound, as last reported.
+    pub(super) datalink_lost: u64,
 }
 
 impl Why {
     /// This tick's decoy roll that decoyed `projectile`, if any.
     pub(super) fn decoyed(&self, projectile: u32) -> Option<&DecoyRoll> {
         self.decoys.get(&projectile).filter(|roll| roll.decoyed)
+    }
+
+    /// A new tick: the rolls of the last one are only kept for the missiles
+    /// they decoyed.
+    pub(super) fn next_tick(&mut self) {
+        self.decoys.clear();
+    }
+
+    /// The roll that decoyed `projectile` at any earlier tick, while it
+    /// flies, and the device it was against.
+    pub(super) fn decoyed_earlier(&self, projectile: u32) -> Option<&DecoyRoll> {
+        self.decoyed_by.get(&projectile)
     }
 
     /// A guided shot's closest approach to its target so far, and when.
@@ -108,6 +125,10 @@ struct Mind {
     defense: Option<(u32, &'static str)>,
     fire: Option<(tore_sim::ai::incoming_fire::Evidence, bool)>,
     ejection: Option<&'static str>,
+    /// The no-laze decision in force (slice ST-G).
+    no_laze: Option<(tore_sim::ai::strike::NoLaze, StationId)>,
+    /// A helicopter's last threat decision, by decision and tick (slice H4).
+    threat_call: Option<(tore_sim::ai::helicopter_threat::Decision, u64)>,
     /// Fitted fallbacks already reported.
     fallbacks: BTreeSet<&'static str>,
     choice: Option<Choice>,
@@ -171,11 +192,16 @@ pub(super) fn decoy_kind(class: SeekerClass) -> &'static str {
     }
 }
 
-/// `chaff` or `a flare`, for sentences.
-pub(super) fn decoy_name(class: SeekerClass) -> &'static str {
-    match class {
-        SeekerClass::Radar => "chaff",
-        SeekerClass::Infrared => "a flare",
+/// The device a roll was against, for sentences: `chaff #7` or `flare #12`.
+/// The number is the device's release number in the mission, as its
+/// `combat.countermeasure` entry carries it; a roll recorded without one
+/// (before the number was kept) names the kind alone.
+pub(super) fn decoy_label(roll: &DecoyRoll) -> String {
+    let kind = decoy_kind(roll.class);
+    if roll.device == 0 {
+        kind.to_owned()
+    } else {
+        format!("{kind} #{}", roll.device)
     }
 }
 
@@ -188,6 +214,10 @@ pub(super) fn decoyed_event(roll: &DecoyRoll, owner: Option<u32>) -> Event {
         .with(field::DECOY, decoy_kind(roll.class))
         .with(field::SUSCEPTIBILITY, i64::from(roll.susceptibility))
         .with(field::EFFECTIVENESS, i64::from(roll.effectiveness));
+    if roll.device > 0 {
+        // Which release fooled it: the number on its `combat.countermeasure`.
+        event = event.with(field::NUMBER, roll.device as i64);
+    }
     if let Some(owner) = owner {
         event = event.with_subject(owner);
     }
@@ -317,6 +347,9 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
                 choice().map_or_else(|| "evading".to_owned(), |c| format!("tactics chose {c}"))
             }
         }
+        Activity::Attacking if look.actor.strike().is_some() => {
+            "flying a ground attack pass; see Ground attack for the selection".to_owned()
+        }
         Activity::Attacking => {
             let store = trace
                 .weapons
@@ -364,6 +397,21 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             }
         }
         Activity::Searching => match (fresh, trace.motion.branch) {
+            (
+                true,
+                MotionBranch::Search {
+                    contact,
+                    opportunity: true,
+                    ..
+                },
+            ) => format!(
+                "leading a mission of opportunity after the lead was lost: searching where {} was last seen",
+                who(contact.id)
+            ),
+            (true, MotionBranch::WingRoute { .. }) => {
+                "leading a mission of opportunity: nothing found, flying the wing's waypoints"
+                    .to_owned()
+            }
             (true, MotionBranch::Search { contact, .. }) => {
                 format!("investigating {}, last seen earlier", who(contact.id))
             }
@@ -501,7 +549,7 @@ impl Recorder {
     /// followed a decoy, and the rolls kept for the outcome reasons and the
     /// guidance trees.
     pub(super) fn decoys(&mut self, tick: &Tick<'_>, frame: &Frame, events: &mut Vec<Event>) {
-        self.why.decoys.clear();
+        self.why.next_tick();
         // The player's rolls since the last tick; their entries are written.
         for roll in std::mem::take(&mut self.why.pending_rolls) {
             self.keep_roll(roll);
@@ -531,8 +579,11 @@ impl Recorder {
 
     /// A roll this tick's outcome reasons and the missile's guidance tree
     /// read.
-    fn keep_roll(&mut self, roll: DecoyRoll) {
+    pub(super) fn keep_roll(&mut self, roll: DecoyRoll) {
         self.why.decoys.insert(roll.projectile, roll);
+        if roll.decoyed {
+            self.why.decoyed_by.insert(roll.projectile, roll);
+        }
         if let Some(guide) = self.why.guides.get_mut(&roll.projectile) {
             guide.roll = Some(roll);
             guide.force = true;
@@ -626,6 +677,7 @@ impl Recorder {
     /// failure, and its telemetry tree.
     fn bodies(&mut self, tick: &Tick<'_>, frame: &mut Frame, events: &mut Vec<Event>) {
         let number = frame.tick;
+        let player = self.player;
         let infos = &self.infos;
         let why = &mut self.why;
         let Frame {
@@ -635,18 +687,15 @@ impl Recorder {
         } = frame;
         for state in aircraft.iter() {
             let id = state.id;
-            let actor = tick.wings.and_then(|w| w.mission().actor(id));
-            let f = match (id, actor) {
-                (0, _) => tick.flight,
-                (_, Some(actor)) => actor.flight(),
-                _ => continue,
+            let Some(f) = super::flight_of(player, tick, id) else {
+                continue;
             };
             let mut body = why.bodies.remove(&id).unwrap_or_default();
             let changed = effects(&mut body, id, number, f, events);
             limits(&mut body, id, number, f, events);
-            failure(&mut body, id, state, f, tick, events);
+            failure(&mut body, id, player, state, f, tick, events);
             body.seen = true;
-            let period = if id == 0 {
+            let period = if id == player {
                 PLAYER_TELEMETRY_TICKS
             } else {
                 AI_TELEMETRY_TICKS
@@ -682,7 +731,7 @@ impl Recorder {
     /// after a decoy roll; and its closest approach so far.
     fn guidance(&mut self, tick: &Tick<'_>, frame: &mut Frame) {
         let number = frame.tick;
-        let config = tick.combat.state.configuration();
+        let player = self.player;
         let infos = &self.infos;
         let named = |id: u32| who(infos, id);
         let position = |id: u32| -> Option<[f64; 3]> {
@@ -725,13 +774,16 @@ impl Recorder {
                 continue;
             }
             guide.force = false;
-            let weapon = p.weapon(config);
+            let weapon = p.weapon(super::stores_of(tick, player, p.owner));
             use tore_sim::combat::missiles::Guidance as Kind;
             let kind_name = match g.profile.guidance {
                 Kind::Supported => "semi-active radar",
                 Kind::Active => "active radar",
                 Kind::Infrared => "infrared",
                 Kind::Emitter => "anti-radiation",
+                Kind::Laser => "laser",
+                Kind::Coordinate => "coordinate",
+                Kind::Command => "command",
             };
             let decoy = guide.roll.map(|roll| {
                 format!(
@@ -741,7 +793,7 @@ impl Recorder {
                     } else {
                         "resisted"
                     },
-                    decoy_name(roll.class),
+                    decoy_label(&roll),
                     named(roll.releaser),
                     roll_reason(&roll)
                 )
@@ -779,6 +831,7 @@ impl Recorder {
         }
         frame.trees.extend(samples);
         self.why.guides.retain(|id, _| live.contains(id));
+        self.why.decoyed_by.retain(|id, _| live.contains(id));
     }
 }
 
@@ -881,6 +934,42 @@ fn decide(look: &Look, mind: &mut Mind, fallbacks: &[Fallback], events: &mut Vec
         events.push(event);
     }
     mind.phase = Some(phase);
+
+    // A strike decision: laser stores and no laser support (slice ST-G).
+    let no_laze = actor
+        .strike()
+        .and_then(|strike| strike.no_laze())
+        .map(|call| (call.kind, call.station, call.target));
+    if let Some((decision, station, target)) = no_laze
+        && mind.no_laze != Some((decision, station))
+    {
+        let event = strike_decision_event(id, decision, station, target, look.store_name(station));
+        events.push(event);
+        mind.remember(Change {
+            tick: number,
+            what: format!("strike: {}", decision.reason()),
+            why: decision.words().to_owned(),
+        });
+    }
+    mind.no_laze = no_laze.map(|(decision, station, _)| (decision, station));
+
+    // A helicopter's threat decision (slice H4): hold off, resume, switch
+    // targets, home, or leave an ambush's ring.
+    let threat_call = actor
+        .strike()
+        .and_then(|strike| strike.threat_call())
+        .copied();
+    if let Some(call) = threat_call
+        && mind.threat_call != Some((call.decision, call.tick))
+    {
+        events.push(threat_decision_event(id, &call));
+        mind.remember(Change {
+            tick: number,
+            what: format!("strike: {}", call.decision.reason()),
+            why: call.decision.words().to_owned(),
+        });
+    }
+    mind.threat_call = threat_call.map(|call| (call.decision, call.tick));
 
     // Airfield sequence.
     let airfield = actor.airfield_phase();
@@ -1015,6 +1104,50 @@ fn decide(look: &Look, mind: &mut Mind, fallbacks: &[Fallback], events: &mut Vec
     mind.ejection = ejection;
 }
 
+/// An `ai.strike` event for a no-laze decision (slice ST-G): the aircraft,
+/// the target it would attack, the decision in words, the fixed `reason` key
+/// (`no_laze_manual` or `no_laze_rtb`) and the laser store.
+fn strike_decision_event(
+    id: u32,
+    decision: tore_sim::ai::strike::NoLaze,
+    station: StationId,
+    target: Option<u32>,
+    weapon: String,
+) -> Event {
+    use tore_sim::ai::strike::NoLaze;
+    let mut event = Event::new(kind::AI_STRIKE)
+        .with_subject(id)
+        .with(
+            field::DECISION,
+            match decision {
+                NoLaze::Manual => "no laze support, dropping manual",
+                NoLaze::Rtb => "no laze support, RTB",
+            },
+        )
+        .with(field::REASON, decision.reason())
+        .with(field::STATION, i64::from(station.0))
+        .with(field::WEAPON, weapon);
+    if let Some(target) = target {
+        event = event.with_object(target);
+    }
+    event
+}
+
+/// An `ai.strike` event for a helicopter's threat decision (slice H4): the
+/// aircraft, the target it concerns, the decision in words, the fixed
+/// `reason` key (`threat_hold_off`, `threat_resume`, `threat_retarget`,
+/// `threat_home`, `threat_leave`).
+fn threat_decision_event(id: u32, call: &tore_sim::ai::helicopter_threat::Call) -> Event {
+    let mut event = Event::new(kind::AI_STRIKE)
+        .with_subject(id)
+        .with(field::DECISION, call.decision.words())
+        .with(field::REASON, call.decision.reason());
+    if let Some(target) = call.target {
+        event = event.with_object(target);
+    }
+    event
+}
+
 /// An `ai.defense` event for the missile defense in force: its maneuver
 /// and devices when `change`, otherwise the devices released now.
 fn defense_event(look: &Look, d: &tore_sim::ai::defense::DefenseDecision, change: bool) -> Event {
@@ -1147,7 +1280,11 @@ fn thought(look: &Look, mind: &Mind, fallbacks: &[Fallback]) -> Vec<tore_replay:
         who: look.who,
         store: look.store,
     };
-    trees::ai_thought(&t)
+    let mut nodes = trees::ai_thought(&t);
+    if let Some(strike) = actor.strike() {
+        nodes.extend(trees::strike_thought(strike, look.store));
+    }
+    nodes
 }
 
 /// The effects in force, with debounced on and off events. Returns whether
@@ -1266,6 +1403,7 @@ fn limits(body: &mut Body, id: u32, number: u64, f: &flight::State, events: &mut
 fn failure(
     body: &mut Body,
     id: u32,
+    player: u32,
     state: &AircraftState,
     f: &flight::State,
     tick: &Tick<'_>,
@@ -1273,11 +1411,10 @@ fn failure(
 ) {
     let failed = f.systems.structure.failed;
     if failed && !body.failed && body.seen {
-        let hit = id == 0
-            && tick
-                .events
-                .iter()
-                .any(|e| matches!(e, live::Event::SubsystemDamaged(26)));
+        let hit = id == player
+            && tick.events.iter().any(|e| {
+                matches!(e, live::Event::SubsystemDamaged { aircraft, index: 26 } if *aircraft == id)
+            });
         let reason = if hit {
             "a hit destroyed the structure"
         } else if f.systems.structure.burning() {

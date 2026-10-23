@@ -12,6 +12,19 @@ use tore_formats::ui::MenuNode;
 /// The `?` row that returns to the Replays screen, in place of retail End
 /// mission. Label chosen by John on 2026-09-28.
 pub const END_REPLAY: &str = "End Replay";
+/// The same row in the live view of a mission being flown (an observer's):
+/// it stops the watch and returns to the lobby.
+pub const STOP_WATCHING: &str = "Stop Watching";
+/// The away player's rows (slice F2-O4, John 2026-10-06), in place of Stop
+/// Watching: back into the player's own reserved aircraft, a new aircraft
+/// when none is left, and out of the game.
+pub const TAKE_BACK_FLIGHT: &str = "Take Back Flight";
+pub const SPAWN: &str = "Spawn in Aircraft";
+pub const LEAVE_GAME: &str = "Leave Game";
+/// What the Leave Game row says beside it for a host that has no ready
+/// standby, and once the first choice has asked to confirm.
+pub const ENDS_THE_GAME: &str = "Ends the game for everyone";
+pub const CONFIRM_LEAVE: &str = "Choose again to end it";
 /// The retail `?` row that quits the game, shown as Exit to Desktop.
 pub const EXIT: &str = "Exit to Windows";
 /// Authored Pref rows: the same switches as the N, T, R and C keys.
@@ -19,6 +32,10 @@ pub const NAME_LABELS: &str = "Name labels?";
 pub const MISSION_TIMER: &str = "Mission timer?";
 pub const TRAILS: &str = "Flight path trails?";
 pub const COMMS: &str = "Comms panel?";
+/// The laser spots, designations and guided weapons of an air-to-ground pass,
+/// drawn in the 3D view: the same switch as the B key (slice FX-R).
+pub const BANNER: &str = "Object banner?";
+pub const MARKS: &str = "Laser and bomb marks?";
 /// The retail tab that opens the controls screen, as it does in flight.
 pub const CONTROL: &str = "Control";
 /// The retail Pref rows a replay keeps, in retail order.
@@ -28,6 +45,19 @@ const TIME_ROWS: [&str; 6] = ["Paused", "Slow-motion", "1x", "2x", "4x", "8x"];
 
 /// The bottom buttons, left to right.
 const BUTTONS: [&str; 2] = ["Resume replay", "Keyboard shortcuts"];
+
+/// The live view's bottom buttons: a mission being flown has no replay to
+/// resume.
+const LIVE_BUTTONS: [&str; 2] = ["Back to watching", "Keyboard shortcuts"];
+
+/// How the live view of a mission being flown presents the menu (slice
+/// F2-O4): an observer's, or an away player's own aircraft's. It is no
+/// replay, so neither the title nor the button says so.
+pub const LIVE_LOOK: Look = Look {
+    title: "MENU - THE MISSION GOES ON",
+    buttons: &LIVE_BUTTONS,
+    help: help_lines,
+};
 
 /// How the replay presents the shared menu.
 pub const LOOK: Look = Look {
@@ -50,6 +80,8 @@ fn help_lines(_: &[MenuNode]) -> Vec<String> {
         "F1 to F10, F12: the flight views, on the selected aircraft",
         "Alt / Ctrl + view: from its target / its newest missile",
         "O / Shift-O: object view, look at the next / previous object",
+        "V: HUD camera | Shift-V: Sensor View (an aircraft with a sight)",
+        "Sensor View: 1-4 or Shift-F5 to F8 WHOT/BHOT/TV/NVG; \\ next",
         "Keypad 5 or Shift-/: recenter | + / -: zoom",
         "Backquote: follow drone, then free drone, then back",
         "W A S D, E / Q: move the drone, climb / descend; Shift 4x faster",
@@ -60,6 +92,7 @@ fn help_lines(_: &[MenuNode]) -> Vec<String> {
         "M: right-click menu on the selected aircraft | X: close every panel",
         "Right-click: the menu on the object under the pointer",
         "R: trails on or off | Shift-R: next trail length",
+        "B: laser spots, designations and guided bombs on or off",
         "H: hide or show the interface | P: save the view as a PNG",
         "Esc: this menu; Esc again resumes | Alt-F4: exit to the desktop",
         "The keys are built in; docs/REPLAYS.md lists them all",
@@ -111,7 +144,9 @@ pub fn tree(imported: &[MenuNode]) -> Vec<MenuNode> {
     if let Some(node) = prefs.iter_mut().find(|n| n.label == "Time") {
         node.children = kept(time, &TIME_ROWS);
     }
-    prefs.extend([NAME_LABELS, MISSION_TIMER, TRAILS, COMMS].map(|label| row(label, "")));
+    prefs.extend(
+        [NAME_LABELS, MISSION_TIMER, TRAILS, MARKS, COMMS, BANNER].map(|label| row(label, "")),
+    );
     vec![
         MenuNode {
             label: question.map_or("?", |n| &n.label).into(),
@@ -137,6 +172,8 @@ pub fn state(ui: &Ui, label: &str) -> Option<&'static str> {
         NAME_LABELS => ui.labels,
         MISSION_TIMER => ui.timer,
         TRAILS => ui.trails,
+        MARKS => ui.marks,
+        BANNER => ui.banner,
         COMMS => ui.comms,
         _ => return None,
     };
@@ -186,7 +223,56 @@ pub enum Part {
     Labels,
     Timer,
     Trails,
+    Marks,
+    Banner,
     Comms,
+}
+
+/// What the away player's observer menu offers now (slice F2-O4), from the
+/// game's state: it is rebuilt when this changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AwayRows {
+    /// The player's own reserved aircraft is alive and the AI flies it: the
+    /// first row is Take Back Flight. Else no aircraft is left (the AI lost
+    /// it, or the King released it) and the first row is Spawn in Aircraft.
+    pub own_aircraft: bool,
+    /// Why Spawn in Aircraft is dimmed, when the revival rules allow nothing
+    /// now (no revival, no lives left, the delay not over, no room).
+    pub spawn_blocked: Option<String>,
+    /// Leaving ends the game for everyone: the player hosts it and no
+    /// standby is ready to take it over. The row asks to be chosen twice.
+    pub leave_ends_game: bool,
+}
+
+impl AwayRows {
+    /// The rows, with the words beside them. A dimmed row's reason is its
+    /// readout.
+    pub fn rows(&self, confirming: bool) -> Vec<MenuNode> {
+        let mut rows = Vec::new();
+        if self.own_aircraft {
+            rows.push(row(TAKE_BACK_FLIGHT, ""));
+        } else {
+            rows.push(row(SPAWN, self.spawn_blocked.as_deref().unwrap_or("")));
+        }
+        rows.push(row(
+            LEAVE_GAME,
+            match (self.leave_ends_game, confirming) {
+                (false, _) => "",
+                (true, false) => ENDS_THE_GAME,
+                (true, true) => CONFIRM_LEAVE,
+            },
+        ));
+        rows
+    }
+
+    /// The labels drawn dim: Spawn in Aircraft when the rules allow nothing.
+    pub fn dimmed(&self) -> Vec<String> {
+        if !self.own_aircraft && self.spawn_blocked.is_some() {
+            vec![SPAWN.to_owned()]
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 /// What a key or click in the menu asks of the viewer.
@@ -195,7 +281,15 @@ pub enum Choice {
     None,
     /// The menu moved: a click sound.
     Click,
-    /// Back to the Replays screen.
+    /// The away player takes its own aircraft back (slice F2-O4).
+    TakeBack,
+    /// The away player flies again in a new aircraft, by the revival rules.
+    Spawn,
+    /// Spawn in Aircraft was chosen while dimmed: the reason is said.
+    SpawnBlocked,
+    /// The away player leaves the game.
+    LeaveGame,
+    /// Back to the Replays screen, or from a live view to the lobby.
     Leave,
     /// Quit the game.
     Exit,
@@ -213,6 +307,16 @@ pub struct Menu {
     pub tree: Vec<MenuNode>,
     /// While open: whether playback goes on when it closes.
     open: Option<bool>,
+    /// The playhead was at the live edge when the menu opened, and returns
+    /// there when it closes (a live view's paused time is not worth keeping).
+    was_live: bool,
+    /// The away player's rows, when this is the menu of its own aircraft's
+    /// observer screen (slice F2-O4).
+    away: Option<AwayRows>,
+    /// The menu of a live view ([`LIVE_LOOK`]).
+    live: bool,
+    /// Leave Game was chosen once and waits for a second choice.
+    confirming: bool,
 }
 
 impl Menu {
@@ -221,17 +325,92 @@ impl Menu {
             widget: PauseMenu::default(),
             tree: tree(imported),
             open: None,
+            was_live: false,
+            away: None,
+            live: false,
+            confirming: false,
         }
+    }
+
+    /// How this menu presents itself: a live view's words or a replay's.
+    pub fn look(&self) -> &'static Look {
+        if self.live { &LIVE_LOOK } else { &LOOK }
+    }
+
+    /// The menu of a live view: End Replay reads Stop Watching.
+    pub fn watching(imported: &[MenuNode]) -> Self {
+        let mut menu = Self::new(imported);
+        menu.live = true;
+        for node in menu.tree.iter_mut().flat_map(|tab| tab.children.iter_mut()) {
+            if node.label == END_REPLAY {
+                node.label = STOP_WATCHING.into();
+            }
+        }
+        menu
     }
 
     pub fn is_open(&self) -> bool {
         self.open.is_some()
     }
 
+    /// The menu of the observer screen of an away player's own aircraft:
+    /// the first rows are `rows`' in place of Stop Watching. Called each
+    /// frame; the tree changes only when the rows do, and the focus stays
+    /// on its row.
+    pub fn set_away(&mut self, rows: Option<AwayRows>) {
+        if self.away == rows {
+            return;
+        }
+        let on_leave = rows.as_ref().is_some_and(|r| !r.leave_ends_game);
+        if on_leave {
+            self.confirming = false;
+        }
+        self.away = rows;
+        let Some(tab) = self.tree.first_mut() else {
+            return;
+        };
+        // The first tab holds the away rows, then the retail rows after
+        // End Replay / Stop Watching, which they replace.
+        let rest: Vec<MenuNode> = tab
+            .children
+            .iter()
+            .filter(|n| {
+                !matches!(
+                    n.label.as_str(),
+                    END_REPLAY | STOP_WATCHING | TAKE_BACK_FLIGHT | SPAWN | LEAVE_GAME
+                )
+            })
+            .cloned()
+            .collect();
+        tab.children = match &self.away {
+            Some(away) => {
+                let mut rows = away.rows(self.confirming);
+                rows.extend(rest);
+                rows
+            }
+            None => {
+                let mut rows = vec![row(STOP_WATCHING, "")];
+                rows.extend(rest);
+                rows
+            }
+        };
+        self.widget.dim = self.away.as_ref().map(AwayRows::dimmed).unwrap_or_default();
+        let len = tab.children.len();
+        if self.widget.root == 0 && self.widget.path.is_empty() && self.widget.focus >= len {
+            self.widget.focus = 0;
+        }
+    }
+
+    /// The away rows now, if this menu has them.
+    pub fn away(&self) -> Option<&AwayRows> {
+        self.away.as_ref()
+    }
+
     /// Opens the menu over the view and pauses playback, noting whether it
     /// was playing.
     pub fn open(&mut self, clock: &mut Clock) {
         if self.open.is_none() {
+            self.was_live = clock.following();
             self.open = Some(!clock.paused());
             clock.pause();
         }
@@ -263,14 +442,26 @@ impl Menu {
         }
     }
 
+    /// Forgets a first choice of Leave Game that asked to confirm.
+    fn disarm(&mut self) {
+        if std::mem::take(&mut self.confirming) {
+            let rows = self.away.take();
+            self.set_away(rows);
+        }
+    }
+
     /// Closes the menu; playback goes on in the speed and direction it had,
     /// or stays paused if it was.
     pub fn close(&mut self, clock: &mut Clock) {
+        self.disarm();
         if let Some(play) = self.open.take()
             && play
             && clock.paused()
         {
             clock.toggle();
+            if std::mem::take(&mut self.was_live) {
+                clock.end();
+            }
         }
     }
 
@@ -304,7 +495,7 @@ impl Menu {
 
     /// The left button went down or up at `point` in the 640x480 layer.
     pub fn pointer(&mut self, point: Option<(f64, f64)>, down: bool, clock: &mut Clock) -> Choice {
-        match self.widget.pointer(&self.tree, &LOOK, point, down) {
+        match self.widget.pointer(&self.tree, self.look(), point, down) {
             Event::None | Event::Switched(_) => Choice::None,
             Event::Click => Choice::Click,
             Event::Tab(index) if self.is_control(index) => Choice::Controls,
@@ -313,7 +504,7 @@ impl Menu {
                 Choice::Click
             }
             Event::Select(index) => self.select(index, clock),
-            Event::Button(index) => self.activate(BUTTONS[index], clock),
+            Event::Button(index) => self.activate(self.look().buttons[index], clock),
         }
     }
 
@@ -360,7 +551,7 @@ impl Menu {
             return Choice::Click;
         }
         match label {
-            "Resume replay" => {
+            "Resume replay" | "Back to watching" => {
                 self.close(clock);
                 Choice::Click
             }
@@ -375,13 +566,40 @@ impl Menu {
                 self.close(clock);
                 Choice::Click
             }
-            END_REPLAY => Choice::Leave,
+            END_REPLAY | STOP_WATCHING => Choice::Leave,
+            TAKE_BACK_FLIGHT => {
+                self.close(clock);
+                Choice::TakeBack
+            }
+            SPAWN
+                if self
+                    .away
+                    .as_ref()
+                    .is_some_and(|a| a.spawn_blocked.is_some()) =>
+            {
+                Choice::SpawnBlocked
+            }
+            SPAWN => {
+                self.close(clock);
+                Choice::Spawn
+            }
+            LEAVE_GAME
+                if self.away.as_ref().is_some_and(|a| a.leave_ends_game) && !self.confirming =>
+            {
+                self.confirming = true;
+                let rows = self.away.take();
+                self.set_away(rows);
+                Choice::Click
+            }
+            LEAVE_GAME => Choice::LeaveGame,
             EXIT => Choice::Exit,
             "Graphics..." => Choice::Graphics,
             "Sound..." => Choice::Sound,
             NAME_LABELS => Choice::Toggle(Part::Labels),
             MISSION_TIMER => Choice::Toggle(Part::Timer),
             TRAILS => Choice::Toggle(Part::Trails),
+            MARKS => Choice::Toggle(Part::Marks),
+            BANNER => Choice::Toggle(Part::Banner),
             COMMS => Choice::Toggle(Part::Comms),
             _ => Choice::None,
         }
@@ -467,7 +685,9 @@ mod tests {
                 "Name labels?|",
                 "Mission timer?|",
                 "Flight path trails?|",
-                "Comms panel?|"
+                "Laser and bomb marks?|",
+                "Comms panel?|",
+                "Object banner?|"
             ]
             .map(String::from)
             .to_vec()
@@ -498,6 +718,201 @@ mod tests {
         assert_eq!(m.widget.root, 2);
         assert_eq!(m.key("Enter", &mut clock), Choice::Graphics);
         assert!(m.is_open());
+    }
+
+    /// The first tab's rows as the menu shows them: label and readout, with
+    /// a star on a dimmed one.
+    fn shown(menu: &Menu) -> Vec<String> {
+        let rows: Vec<String> = menu
+            .widget
+            .controls(&menu.tree, &[], &|_| None)
+            .into_iter()
+            .filter(|(id, _, _)| *id < 100)
+            .zip(&menu.tree[0].children)
+            .map(|((_, _, text), node)| {
+                let star = if menu.widget.dim.contains(&node.label) {
+                    "*"
+                } else {
+                    ""
+                };
+                format!("{}{star}", text.trim_end())
+            })
+            .collect();
+        rows
+    }
+
+    fn away_menu(rows: AwayRows) -> (Menu, Clock) {
+        let mut menu = Menu::watching(&[]);
+        menu.set_away(Some(rows));
+        (menu, Clock::new(0, 1_000))
+    }
+
+    fn choose(menu: &mut Menu, clock: &mut Clock, row: &str) -> Choice {
+        menu.open(clock);
+        menu.activate(row, clock)
+    }
+
+    /// The away player's menu in each state it has (slice F2-O4): its own
+    /// aircraft alive, lost with the rules allowing a new one, lost with
+    /// them allowing nothing, a host with a ready standby, a host with none,
+    /// and a game that only joined (a dedicated server's, a friend's).
+    #[test]
+    fn the_away_menu_snapshots_each_state() {
+        let alive = AwayRows {
+            own_aircraft: true,
+            ..AwayRows::default()
+        };
+        assert_eq!(
+            shown(&away_menu(alive.clone()).0),
+            ["Take Back Flight", "Leave Game", "Exit to Desktop  Alt-F4"]
+        );
+        let lost = AwayRows::default();
+        assert_eq!(
+            shown(&away_menu(lost.clone()).0),
+            ["Spawn in Aircraft", "Leave Game", "Exit to Desktop  Alt-F4"]
+        );
+        let blocked = AwayRows {
+            spawn_blocked: Some("No lives left".into()),
+            ..AwayRows::default()
+        };
+        assert_eq!(
+            shown(&away_menu(blocked).0),
+            [
+                "Spawn in Aircraft  No lives left*",
+                "Leave Game",
+                "Exit to Desktop  Alt-F4"
+            ]
+        );
+        // A host with a ready standby hands the game over: no confirm line.
+        // A host with none says leaving ends it for everyone.
+        let ends = AwayRows {
+            own_aircraft: true,
+            leave_ends_game: true,
+            ..AwayRows::default()
+        };
+        assert_eq!(
+            shown(&away_menu(ends).0),
+            [
+                "Take Back Flight",
+                "Leave Game  Ends the game for everyone",
+                "Exit to Desktop  Alt-F4"
+            ]
+        );
+        // The ordinary observer keeps Stop Watching.
+        assert_eq!(
+            shown(&Menu::watching(&[])),
+            ["Stop Watching", "Exit to Desktop  Alt-F4"]
+        );
+    }
+
+    #[test]
+    fn each_away_row_does_its_own_thing() {
+        let (mut menu, mut clock) = away_menu(AwayRows {
+            own_aircraft: true,
+            ..AwayRows::default()
+        });
+        assert_eq!(
+            choose(&mut menu, &mut clock, TAKE_BACK_FLIGHT),
+            Choice::TakeBack
+        );
+        assert!(!menu.is_open(), "the menu closes as the aircraft is taken");
+        // A joined game (a dedicated server's) leaves at once, no confirm.
+        assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::LeaveGame);
+        // Lost, and the rules allow a new aircraft.
+        let (mut menu, mut clock) = away_menu(AwayRows::default());
+        assert_eq!(choose(&mut menu, &mut clock, SPAWN), Choice::Spawn);
+        // Lost, and the rules allow nothing: the row answers with its reason.
+        let (mut menu, mut clock) = away_menu(AwayRows {
+            spawn_blocked: Some("No revival in this game".into()),
+            ..AwayRows::default()
+        });
+        assert_eq!(choose(&mut menu, &mut clock, SPAWN), Choice::SpawnBlocked);
+        assert!(menu.is_open(), "the menu stays up");
+        assert!(menu.widget.dim.contains(&SPAWN.to_owned()));
+    }
+
+    #[test]
+    fn a_host_with_no_standby_confirms_before_it_ends_the_game() {
+        let (mut menu, mut clock) = away_menu(AwayRows {
+            own_aircraft: true,
+            leave_ends_game: true,
+            ..AwayRows::default()
+        });
+        assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::Click);
+        assert_eq!(
+            shown(&menu)[1],
+            "Leave Game  Choose again to end it".to_owned()
+        );
+        assert_eq!(menu.activate(LEAVE_GAME, &mut clock), Choice::LeaveGame);
+        // Closing the menu forgets the first choice.
+        let (mut menu, mut clock) = away_menu(AwayRows {
+            own_aircraft: true,
+            leave_ends_game: true,
+            ..AwayRows::default()
+        });
+        choose(&mut menu, &mut clock, LEAVE_GAME);
+        menu.close(&mut clock);
+        assert_eq!(shown(&menu)[1], "Leave Game  Ends the game for everyone");
+        assert_eq!(choose(&mut menu, &mut clock, LEAVE_GAME), Choice::Click);
+        // A standby that became ready in the meantime: no confirm needed.
+        menu.set_away(Some(AwayRows {
+            own_aircraft: true,
+            ..AwayRows::default()
+        }));
+        assert_eq!(menu.activate(LEAVE_GAME, &mut clock), Choice::LeaveGame);
+    }
+
+    #[test]
+    fn the_rows_follow_the_game_as_its_state_changes() {
+        let (mut menu, _) = away_menu(AwayRows {
+            own_aircraft: true,
+            ..AwayRows::default()
+        });
+        menu.widget.focus = 1;
+        // The AI lost the aircraft: Take Back Flight gives way to Spawn.
+        menu.set_away(Some(AwayRows::default()));
+        assert_eq!(menu.tree[0].children[0].label, SPAWN);
+        assert_eq!(menu.tree[0].children[1].label, LEAVE_GAME);
+        assert_eq!(menu.widget.focus, 1, "the focus stays on its row");
+        // Unchanged rows rebuild nothing.
+        let before = format!("{:?}", menu.tree);
+        menu.set_away(Some(AwayRows::default()));
+        assert_eq!(before, format!("{:?}", menu.tree));
+        // Back to an observer's: Stop Watching returns.
+        menu.set_away(None);
+        assert_eq!(menu.tree[0].children[0].label, STOP_WATCHING);
+    }
+
+    /// The live view's menu (an observer's or an away player's) says nothing
+    /// of a replay: its title and first button are its own.
+    #[test]
+    fn the_live_menu_has_no_replay_words() {
+        let mut clock = Clock::new(0, 1_000);
+        let replay = Menu::new(&[]);
+        assert_eq!(replay.look().title, "REPLAY PAUSED");
+        assert_eq!(replay.look().buttons[0], "Resume replay");
+        let (mut live, _) = away_menu(AwayRows::default());
+        assert_eq!(live.look().title, "MENU - THE MISSION GOES ON");
+        assert_eq!(
+            live.look().buttons,
+            ["Back to watching", "Keyboard shortcuts"]
+        );
+        // The first button is still what Resume was: it closes the menu.
+        live.open(&mut clock);
+        assert_eq!(live.activate("Back to watching", &mut clock), Choice::Click);
+        assert!(!live.is_open());
+        // A click on it does the same.
+        live.open(&mut clock);
+        let point = live
+            .widget
+            .controls(&live.tree, live.look().buttons, &|_| None)
+            .into_iter()
+            .find(|(id, _, _)| *id == 200)
+            .map(|(_, (x, y, w, h), _)| (f64::from(x + w / 2), f64::from(y + h / 2)))
+            .unwrap();
+        live.pointer(Some(point), true, &mut clock);
+        live.pointer(Some(point), false, &mut clock);
+        assert!(!live.is_open());
     }
 
     #[test]

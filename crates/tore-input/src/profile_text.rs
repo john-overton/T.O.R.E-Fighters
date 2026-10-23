@@ -1,18 +1,49 @@
 //! Canonical profile output shared by the in-game editor and its persistence path.
 use crate::*;
+pub fn flight_axis_name(axis: FlightAxis) -> &'static str {
+    match axis {
+        FlightAxis::VectorPitch => "vector-pitch",
+        FlightAxis::VectorYaw => "vector-yaw",
+        FlightAxis::Conversion => "conversion",
+        FlightAxis::Collective => "collective",
+    }
+}
 pub fn action_name(action: &Action) -> String {
     match action {
+        Action::Pilot(PilotCommand::NeutralVector) => "neutral-vector".into(),
+        Action::Pilot(PilotCommand::SetAxis(axis, value)) => {
+            format!("{}={value}", flight_axis_name(*axis))
+        }
+        Action::Pilot(PilotCommand::AdjustAxis(axis, value)) => {
+            format!("{}-step={value}", flight_axis_name(*axis))
+        }
         Action::Pilot(PilotCommand::Eject) => "eject".into(),
+        Action::Pilot(PilotCommand::Lift(command)) => crate::bindings::lift_action_name(*command)
+            .unwrap_or("unsupported")
+            .into(),
         Action::Axis(a) => match a {
             Axis::Pitch => "pitch",
             Axis::Roll => "roll",
             Axis::Yaw => "yaw",
             Axis::Throttle => "throttle",
             Axis::ThrottleRate => "throttle-rate",
+            Axis::VectorPitch => "vector-pitch",
+            Axis::VectorPitchRate => "vector-pitch-rate",
+            Axis::VectorYaw => "vector-yaw",
+            Axis::VectorYawRate => "vector-yaw-rate",
+            Axis::Conversion => "conversion",
+            Axis::ConversionRate => "conversion-rate",
+            Axis::Collective => "collective",
+            Axis::CollectiveRate => "collective-rate",
             Axis::LookX => "look-x",
             Axis::LookY => "look-y",
             Axis::HeadYaw => "head-yaw",
             Axis::HeadPitch => "head-pitch",
+            Axis::TrimPitchRate => "trim-pitch-rate",
+            Axis::TrimRollRate => "trim-roll-rate",
+            Axis::TrimPedalRate => "trim-pedal-rate",
+            Axis::SightX => "sight-x",
+            Axis::SightY => "sight-y",
         }
         .into(),
         Action::Pilot(PilotCommand::Toggle(s)) => match s {
@@ -27,6 +58,7 @@ pub fn action_name(action: &Action) -> String {
             Switch::Jammer => "jammer",
             Switch::Autopilot => "autopilot",
             Switch::WaypointAutopilot => "waypoint-autopilot",
+            Switch::HoverHold => "hover-hold",
         }
         .into(),
         Action::Pilot(PilotCommand::Throttle(v)) => format!("throttle={v}"),
@@ -48,6 +80,8 @@ pub fn mode_name(mode: Mode) -> String {
         Mode::HoldState => "hold".into(),
         Mode::Press => "press".into(),
         Mode::Release => "release".into(),
+        Mode::Tap => "tap".into(),
+        Mode::Long => "long".into(),
         Mode::Switch => "switch".into(),
         Mode::Follow => "follow".into(),
         Mode::Position(n) => format!("position={n}"),

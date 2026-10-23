@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- The host: the player whose machine runs the game. -->
+  <path fill="currentColor" d="M8 1.8 L14.8 8 H12.9 V14 H9.6 V10 H6.4 V14 H3.1 V8 H1.2 Z"/>
+</svg>

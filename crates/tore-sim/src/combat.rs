@@ -2,21 +2,46 @@
 //! Diagnostic until complete dispatch/contact/guidance contracts are accepted.
 //! No renderer, resource lookup, native execution, wall clock or hidden randomness.
 use std::io::{Error, ErrorKind};
+pub mod ballistics;
 pub mod blast;
+pub mod blast_scale;
+pub mod bomb_flight;
 pub mod countermeasures;
 pub mod debris;
+pub mod delivery;
+pub mod guided;
+pub mod gun_round;
+pub mod gunship;
+pub mod gunship_impact;
 pub mod gunsight;
+pub mod hardpoints;
+pub mod laser;
 pub mod ledger;
 pub mod loading;
 pub mod loadout;
 pub mod missiles;
+pub mod sight;
 pub mod smoke;
+pub mod store_sizes;
+pub mod surface_guns;
 pub mod systems;
 pub mod threats;
 use tore_formats::{
     Result,
     weapons::{Movement, Zone},
 };
+
+/// Release recording shared by local, remote and replay presentation.
+/// Opinionated, John, 2026-10-15: bombs use the JDAM release sound.
+pub fn release_sound(w: &tore_formats::weapons::Weapon) -> Option<&str> {
+    if matches!(w.source.as_str(), "~BLDR.JT" | "~MOOSE.JT") {
+        w.fire_sound.as_deref()
+    } else if ballistics::is_bomb(w) || guided::is_glide_bomb(w) {
+        Some("&BOMB.11K")
+    } else {
+        w.fire_sound.as_deref()
+    }
+}
 
 fn invalid(message: &str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -170,6 +195,8 @@ impl PlayerTrigger {
     }
 }
 
+/// The most [`FallState`] lets a round's fall speed grow to (f8 per tick).
+pub const FALL_SPEED_CAP_F8: u16 = 0x5000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FallState {
     pub velocity_f8: u16,
@@ -193,7 +220,10 @@ impl FallState {
         }
         let ticks = i32::from(service_ticks);
         let delta = ticks.wrapping_shl(13) / 256;
-        self.velocity_f8 = self.velocity_f8.wrapping_add(delta as u16).min(0x5000);
+        self.velocity_f8 = self
+            .velocity_f8
+            .wrapping_add(delta as u16)
+            .min(FALL_SPEED_CAP_F8);
         let displacement = i32::from(self.velocity_f8 as i16).wrapping_mul(ticks) / 256;
         Ok(height_f8.wrapping_sub(displacement))
     }
@@ -418,3 +448,7 @@ mod tests {
 }
 
 pub mod live;
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "combat_checkpoint.rs"]
+mod checkpoint;

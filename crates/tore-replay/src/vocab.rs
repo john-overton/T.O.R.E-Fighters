@@ -30,12 +30,21 @@ pub mod kind {
     /// aircraft that released the decoy. Fields: `projectile`, `decoy`
     /// (Text: chaff or flare), `roll` and `threshold` (Int: the decoy roll
     /// passed when roll < threshold), `susceptibility` and `effectiveness`
-    /// (Int, percent), `reason`.
+    /// (Int, percent), `number` (Int: the chaff cartridge or flare that fooled
+    /// it, the `number` of its `combat.countermeasure`; absent in recordings
+    /// made before it was kept), `reason`.
     pub const WEAPON_DECOYED: &str = "weapon.decoyed";
     /// How a shot ended. Subject: shooter. Object: intended target. Fields:
     /// `projectile`, `result` (Text from [`super::outcome`]: hit, missed,
     /// spoofed, jammed), `damage` (Int), `hp_after` (Int), `reason` (Text),
-    /// `miss_ft` (Num: the closest the shot came to its target).
+    /// `miss_ft` (Num: the closest the shot came to its target), `replaces`
+    /// (Text from [`super::outcome`]). One per shot, except that a missile
+    /// recorded as spoofed which flies on and damages an aircraft gets a
+    /// second, `hit`, with `replaces` spoofed: the later one stands. That
+    /// hit's `reason` names the chaff or flare that fooled the missile, as in
+    /// `it was decoyed by chaff #7 from Enemy 2-1 at 0:13.5 but flew on and
+    /// struck anyway`; `#7` is the `number` of that device's
+    /// `combat.countermeasure` entry.
     pub const WEAPON_OUTCOME: &str = "weapon.outcome";
     /// Damage landed. Subject: attacker. Object: the aircraft or surface
     /// object hit. Fields: `projectile`, `weapon`, `damage` (Int), `hp_after`
@@ -47,8 +56,9 @@ pub mod kind {
     /// A warhead burst in the air near its target. Subject: shooter. Object:
     /// target. Fields: `projectile`, `miss_ft`, `damage`.
     pub const COMBAT_AIRBURST: &str = "combat.airburst";
-    /// A weapon hit the ground. Subject: shooter. Fields: `projectile`,
-    /// `weapon`.
+    /// A weapon burst on the ground, once per burst. Subject: shooter. Fields:
+    /// `x_ft`, `y_ft`, `z_ft`, and `projectile`, `weapon` when a weapon
+    /// vanished that tick.
     pub const COMBAT_GROUND_IMPACT: &str = "combat.ground_impact";
     /// A chaff cartridge or flare left an aircraft. Subject: the aircraft.
     /// Fields: `decoy` (Text: chaff or flare), `number` (Int: the device's
@@ -125,6 +135,13 @@ pub mod kind {
     /// AI fell back to a simpler behaviour. Subject: the aircraft. Fields:
     /// `from`, `to`, `reason`.
     pub const AI_FALLBACK: &str = "ai.fallback";
+    /// An AI strike decision (slice ST-G). Subject: the aircraft. Object: the
+    /// target it would attack. Fields: `decision` (Text), `reason` (Text, a
+    /// fixed key: `no_laze_manual` when an aircraft with laser bombs, no
+    /// designator and no spot drops them by hand as unguided bombs,
+    /// `no_laze_rtb` when its laser store cannot fall unguided and it goes
+    /// home), `station` (Int) and `weapon` (Text: the store).
+    pub const AI_STRIKE: &str = "ai.strike";
     /// AI airfield phase changed (taxi, takeoff, landing). Subject: the
     /// aircraft. Fields: `from`, `to`, `airport` (Id), `reason`.
     pub const AI_AIRFIELD_PHASE: &str = "ai.airfield_phase";
@@ -220,6 +237,212 @@ pub mod kind {
     pub const SYSTEM_GAP: &str = "system.gap";
     /// A free-form note, for example what a headless probe does not run.
     pub const SYSTEM_NOTE: &str = "system.note";
+    /// A gun burst a network host reported, in a replay converted from a
+    /// client's capture. Subject: the shooter. Fields: `station` (Int),
+    /// `length_ticks` (Int, absent while the burst was still firing).
+    pub const WEAPON_GUN_BURST: &str = "weapon.gun_burst";
+    /// The network's figures for the second ending at this tick, in a replay
+    /// converted from a client's capture: `client_seconds` (Num) and the
+    /// diagnostics log's `stats` fields (`round_trip_ms`, `loss_percent`,
+    /// `snapshot_loss_percent`, `snapshot_spread_ms`, `input_margin_ticks`,
+    /// `interpolation_delay_ms`, `clock_rate`, `corrections`,
+    /// `corrections_shown`, `mismatches`, `frames`, `extrapolated`,
+    /// `inputs_repeated`, `bytes_up_per_second`, `bytes_down_per_second`,
+    /// `predicted_tick`, `render_tick`, all Num; a figure the log leaves as
+    /// `-` is absent).
+    pub const NET_STATS: &str = "net.stats";
+    /// Any other line of the client's diagnostics log (a join, a seating, a
+    /// refusal, a mission, a debrief, a drop). Fields: `client_seconds` (Num),
+    /// `kind` (Text: the line's kind). Text: the rest of the line.
+    pub const NET_EVENT: &str = "net.event";
+
+    /// A plane joined its flight's data link, the first tick the link sees
+    /// it. Subject: the plane. Fields: `radar` (Bool: its aircraft has a
+    /// radar, so its scope marks the picture). Every aircraft of a side is a
+    /// member, so a recording has one at the start for each plane in play.
+    pub const DATALINK_MEMBER: &str = "datalink.member";
+    /// A member took a radar lock on an aircraft. Subject: the member.
+    /// Object: the target.
+    pub const DATALINK_LOCK: &str = "datalink.lock";
+    /// A member let go of its lock (the target, the member or the lock is
+    /// gone). Subject: the member. Object: the target it held.
+    pub const DATALINK_UNLOCK: &str = "datalink.unlock";
+    /// A flight's lead gave a wingman a target to attack. Subject: the lead.
+    /// Object: the wingman. Fields: `target` (Id), `order` (Text: the order
+    /// that gave it). The call that voiced it is the order's own
+    /// [`COMMS_ORDER`] and radio entries.
+    pub const DATALINK_ASSIGN: &str = "datalink.assign";
+    /// An assignment ended. Subject: the member that held it. Object: the
+    /// target. Fields: `reason` (Text: the order, the member or its target
+    /// lost, or the lead changed).
+    pub const DATALINK_CLEAR: &str = "datalink.clear";
+    /// A member locked the target it was assigned, the first time. Subject:
+    /// the member. Object: the target.
+    pub const DATALINK_ACKNOWLEDGE: &str = "datalink.acknowledge";
+    /// A human was told that a flightmate holds a lock on the same aircraft
+    /// the human holds, when the lead did not mean it (a HUD line and a
+    /// beep). Subject: the human's plane. Object: the aircraft both hold.
+    /// Fields: `other` (Id: the flightmate).
+    pub const DATALINK_SORT_WARNING: &str = "datalink.sort_warning";
+
+    /// A surface unit's gun fired a burst, or its launcher a salvo (format
+    /// 3; the rounds themselves are also `weapon.launch`). Subject: the
+    /// unit. Object: its target. Fields: `weapon` (Text: the record),
+    /// `mount` (Int: the hardpoint), `rounds` (Int), `refused` (Int: rounds
+    /// the world could not place), `opening` (Bool: a flak battery's opening
+    /// barrage), `flak` (Bool), `surface` (Bool, true when the target is a
+    /// ground unit or ship of the other side; absent at an aircraft, and in
+    /// recordings made before surface units fought each other).
+    pub const SURFACE_BURST: &str = "surface.burst";
+    /// A surface unit's engagement changed phase (search, track, fire,
+    /// reload and so on). Subject: the unit. Object: its target. Fields:
+    /// `station` (Int: which of its weapons), `to` (Text), `surface` (Bool,
+    /// as for [`SURFACE_BURST`]).
+    pub const SURFACE_PHASE: &str = "surface.phase";
+    /// A supply truck rearmed every empty rail of a launcher. Subject: the
+    /// unit. Fields: `loaded` (Int: missiles on its rails after).
+    pub const SURFACE_REARM: &str = "surface.rearm";
+    /// A supply truck added a spare magazine to a gun. Subject: the unit.
+    /// Fields: `mount` (Int), `reserve` (Int: spare magazines after).
+    pub const SURFACE_REFILL: &str = "surface.refill";
+    /// A surface radar came on or went off. Subject: the unit. Fields: `on`
+    /// (Bool), `reason` (Text).
+    pub const SURFACE_RADAR: &str = "surface.radar";
+    /// A surface unit was destroyed and lies as a wreck. Subject: the unit.
+    /// Object: what destroyed it. Fields: `burning` (Bool), `fire_ft` (Num:
+    /// the wreck fire's width when it burns), `hp_before` (Int).
+    pub const SURFACE_WRECK: &str = "surface.wreck";
+
+    /// A bomb, rocket or guided bomb left its station: one entry for each
+    /// trigger call, so a pack is one entry and a held rocket pod one entry
+    /// for each rocket it fires. Subject: the aircraft. Object: the ground
+    /// target it had designated, if any. Fields: `weapon` (Id), `class`
+    /// (Text: bomb or rocket), `station` (Int), `count` (Int: the rounds this
+    /// call released), `projectile` (Id: the first) and `projectiles` (Ids,
+    /// in pack order, so a round's place in the list is its pack index),
+    /// `delivery` (Text from [`super::delivery`]), `left` (Int: the rounds
+    /// the station holds after, when the aircraft is a flown one), `salvo`
+    /// (Int, rockets: this rocket's number in the run fired from the station
+    /// without a gap of a second), `range_ft` (Num: to the target at
+    /// release). Each round is also an ordinary [`WEAPON_LAUNCH`].
+    pub const WEAPON_RELEASE: &str = "weapon.release";
+    /// A bomb landed before its fuze armed and did nothing but raise a puff
+    /// of dirt (format 3 vocabulary, 2026-10-11). Subject: the shooter.
+    /// Fields: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft` (where it
+    /// landed), `arm_s` (Num: the fuze's arming time), `flown_s` (Num: how
+    /// long it fell), `reason`. The shot's [`WEAPON_OUTCOME`] says missed.
+    pub const WEAPON_DUD: &str = "weapon.dud";
+    /// A cluster bomb burst on the ground and scattered its submunitions
+    /// (the replay draws their flashes from the burst's explosion). Subject:
+    /// the shooter. Fields: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft`,
+    /// `explosion` (Int: the explosion type of the burst).
+    pub const WEAPON_CLUSTER: &str = "weapon.cluster";
+    /// A guided air-to-ground weapon (laser bomb or missile, JDAM, AT-2)
+    /// was released or changed its guidance mode. The tree channel of the
+    /// same family is [`super::channel::WEAPON_GUIDANCE`]; this is the event
+    /// log's account. Subject: the shooter. Object: the object it follows,
+    /// when it follows one. Fields: `projectile`, `weapon`, `guidance`
+    /// (Text from [`super::guidance`]), `mode` (Text from [`super::guide`]),
+    /// `from` (Text: the mode before, absent at release), `released` (Bool:
+    /// this is the release), `spot_owner` (Id: whose laser spot a laser
+    /// weapon follows) with `own` (Bool: the spot is the shooter's own, not a
+    /// buddy's), `stored` (Bool: the point is the one stored at release),
+    /// `x_ft`, `y_ft`, `z_ft` (the JDAM's stored point, or the point a laser
+    /// weapon last homed on), `reason`.
+    pub const WEAPON_GUIDED: &str = "weapon.guided";
+    /// An aircraft's laser designator changed state. Subject: the lasing
+    /// aircraft. Object: the object the spot sits on, if any. Fields:
+    /// `state` (Text from [`super::laser`]), `on` (Bool: the spot is on the
+    /// target), `how` (Text: automatic or by hand), `mask` (Text: range,
+    /// gimbal or terrain, while masked), `range_ft`, and the spot as
+    /// `x_ft`, `y_ft`, `z_ft` while it lases.
+    pub const PLAYER_LASER: &str = "player.laser";
+    /// A flown aircraft designated a ground target or pinned a ground point,
+    /// or gave one up. Subject: the aircraft. Object: the designated ground
+    /// object, absent for a pinned point or none. Fields: `channel` (Text
+    /// from [`super::designate`]: how), `from` (Id: the object before),
+    /// `x_ft`, `y_ft`, `z_ft` (the point of a pin), `reason`. Air targets
+    /// are not recorded here (the radar and the views have their own
+    /// entries).
+    pub const PLAYER_DESIGNATE: &str = "player.designate";
+    /// A lasing aircraft's spot moved (FX-R, 2026-10-11). Written while the
+    /// laser is on, at most ten times a second and only when the spot has
+    /// moved more than a few feet since the last entry, so the replay can
+    /// draw where the spot was at any moment; [`PLAYER_LASER`] has the
+    /// changes of state. Subject: the lasing aircraft. Object: the object
+    /// under the spot, if any. Fields: `x_ft`, `y_ft`, `z_ft`.
+    pub const PLAYER_LASER_SPOT: &str = "player.laser_spot";
+    /// The AC-130's sensor console and orbit hold (slice nr-orbit,
+    /// 2026-10-13): one entry when it opens or closes, and while it is open
+    /// whenever the point it circles has moved more than 50 ft, at most once
+    /// a second. Subject: the recording's player. Fields: `on` (Bool: the
+    /// console is open), and while open the point as `x_ft`, `y_ft`, `z_ft`
+    /// and the planned `radius_ft` and `height_ft` above it.
+    pub const PLAYER_ORBIT: &str = "player.orbit";
+    /// Where a guided weapon in the guiding mode was steering moved (FX-R,
+    /// 2026-10-11), sampled like [`PLAYER_LASER_SPOT`]: the spot a laser
+    /// weapon follows, the point a JDAM flies to, the target an AT-2 is
+    /// steered at. Subject: the shooter. Fields: `projectile`, `spot_owner`
+    /// (Id, a laser weapon), `x_ft`, `y_ft`, `z_ft`. The last entry before a
+    /// weapon goes blind is the point it was homing on then.
+    pub const WEAPON_AIM: &str = "weapon.aim";
+    /// A bomb or guided weapon reached the ground (FX-R, 2026-10-11).
+    /// Subject: the shooter. Object: the ground target the shooter had
+    /// designated, if any. Fields: `projectile`, `weapon`, `x_ft`, `y_ft`,
+    /// `z_ft` (where it landed), `guided` (Bool), `mode` (Text from
+    /// [`super::guide`], a guided weapon's mode at the end), `aim_x_ft`,
+    /// `aim_y_ft`, `aim_z_ft` and `miss_ft` (the point it was steering for
+    /// and how far from it the weapon landed, a guided weapon that had
+    /// one), `target_ft` (how far from the designated target), `reason`.
+    pub const WEAPON_IMPACT: &str = "weapon.impact";
+
+    /// An aircraft's drawn stations, recorded the first time it is recorded
+    /// with any and whenever the layout changes (B3, 2026-10-12): the
+    /// `stores.station` entries that follow on the same tick are its
+    /// stations in order. Subject: the aircraft. Fields: `count` (Int).
+    pub const STORES_LAYOUT: &str = "stores.layout";
+    /// One drawn station of the layout before it. Subject: the aircraft.
+    /// Fields: `slot` (Int: its place in the layout), `hardpoint` (Int: the
+    /// source record), `x_ft`, `y_ft`, `z_ft` (Num: the record's position,
+    /// right, up and forward of the reference point), `location` (Int: the
+    /// source location byte), `paired` (Bool), `look` (Text: store, pod or
+    /// tank), `items` (Int: whole stores on it), `loaded` (Int: whole stores
+    /// it started with), `shape` (Text, when the store has one),
+    /// `length_ft` and `diameter_ft` (Num, a fitted pod or tank body).
+    pub const STORES_STATION: &str = "stores.station";
+    /// The whole stores now on each station of the aircraft's layout, when
+    /// any changed (a release, a jettison, a rearm). Subject: the aircraft.
+    /// Fields: `items` (Ids: one count a station, in layout order).
+    pub const STORES_ITEMS: &str = "stores.items";
+    /// The HUD the aircraft was showing, sampled at 24 Hz for human cockpits
+    /// and on changes for aircraft without a cockpit readout.
+    /// (nr-replayhud, John 2026-10-16). Subject: the aircraft. Object: the
+    /// display target, when there is one. Fields: `nav`, `armed`, `station`,
+    /// `weapon` (Text: the source name), `rounds`, `launch` (Text: cued or
+    /// bore), `seeker` (Text: the status label), `delivery` (Text, empty or
+    /// CCIP or LVL), `readiness` (Text), `guidance`, `in_range`, `hit` (Int,
+    /// percent), `max_ft`, `band_min`, `band_max` (`band_max` 0 means no
+    /// band), `radar`, and `mount_x`, `mount_y`, `mount_z` when the station
+    /// is not at the reference point. A recording made before this event
+    /// still plays: the HUD camera keeps the derived picture. Version 4
+    /// includes target_x/y/z and velocity_x/y/z from the displayed target,
+    /// including ground objects. See docs/formats/replay-display.md.
+    pub const AIRCRAFT_HUD: &str = "aircraft.hud";
+    /// The targeting sight or AC-130 gunsight. Human cockpits use 24 Hz;
+    /// legacy and non-cockpit samples remain sparse. Subject:
+    /// the aircraft. Object: the tracked object, when the sight tracks one.
+    /// Fields: `gunship`, `az`, `el` (Num, radians), `zoom` (Int), `mode`
+    /// (Text: free, point, track or return), `x_ft`, `y_ft`, `z_ft` when a
+    /// point is held, and for a gunship `r0` `r1` `r2` (rounds), `link`,
+    /// `lead` (255 is none), `s0` `s1` `s2` (readiness labels), `radar`,
+    /// `range` (the range step), `h0` `e0` `h1` `e1` `h2` `e2` (train
+    /// radians, omitted when the trains were not known) and `lock_x`
+    /// `lock_y` `lock_z` when the guns are locked. Absent on an older
+    /// recording: the Sensor View keeps the derived line of sight. Version 4
+    /// adds display_24hz, gimbal_limit, impact0 through impact2 positions,
+    /// ranges and spent flags, mark coordinates and packed radar_dots.
+    /// See docs/formats/replay-display.md for their bounded grammar.
+    pub const AIRCRAFT_SIGHT: &str = "aircraft.sight";
 
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
@@ -253,6 +476,7 @@ pub mod kind {
         AI_WEAPON_PHASE,
         AI_DEFENSE,
         AI_FALLBACK,
+        AI_STRIKE,
         AI_AIRFIELD_PHASE,
         AI_EJECTION,
         COMMS_ORDER,
@@ -281,6 +505,37 @@ pub mod kind {
         SYSTEM_END,
         SYSTEM_GAP,
         SYSTEM_NOTE,
+        WEAPON_GUN_BURST,
+        NET_STATS,
+        NET_EVENT,
+        DATALINK_MEMBER,
+        DATALINK_LOCK,
+        DATALINK_UNLOCK,
+        DATALINK_ASSIGN,
+        DATALINK_CLEAR,
+        DATALINK_ACKNOWLEDGE,
+        DATALINK_SORT_WARNING,
+        SURFACE_BURST,
+        SURFACE_PHASE,
+        SURFACE_REARM,
+        SURFACE_REFILL,
+        SURFACE_RADAR,
+        SURFACE_WRECK,
+        WEAPON_RELEASE,
+        WEAPON_DUD,
+        WEAPON_CLUSTER,
+        WEAPON_GUIDED,
+        PLAYER_LASER,
+        PLAYER_DESIGNATE,
+        PLAYER_LASER_SPOT,
+        PLAYER_ORBIT,
+        WEAPON_AIM,
+        WEAPON_IMPACT,
+        STORES_LAYOUT,
+        STORES_STATION,
+        STORES_ITEMS,
+        AIRCRAFT_HUD,
+        AIRCRAFT_SIGHT,
     ];
 }
 
@@ -302,6 +557,8 @@ pub mod field {
     pub const DAMAGE: &str = "damage";
     pub const HP_AFTER: &str = "hp_after";
     pub const MISS_FT: &str = "miss_ft";
+    /// The result an outcome withdraws, from [`super::outcome`].
+    pub const REPLACES: &str = "replaces";
     pub const SECTION: &str = "section";
     pub const DECOY: &str = "decoy";
     pub const REASON: &str = "reason";
@@ -364,7 +621,8 @@ pub mod field {
     pub const SOURCE: &str = "source";
     /// A seeker tone's loudness, 0 to 1.
     pub const STRENGTH: &str = "strength";
-    /// A seeker tone's weapon aims at surface targets.
+    /// A seeker tone's weapon aims at surface targets; a surface unit's burst
+    /// or engagement is at a ground unit or ship.
     pub const SURFACE: &str = "surface";
     /// A released device's number among the flight's releases.
     pub const NUMBER: &str = "number";
@@ -377,8 +635,113 @@ pub mod field {
     pub const OWN: &str = "own";
     /// The views keep a target the sensors dropped, by sight.
     pub const HELD: &str = "held";
+    /// A plane's aircraft has a radar.
+    pub const RADAR: &str = "radar";
+    /// The aircraft an assignment names.
+    pub const TARGET: &str = "target";
+    /// The other member of a pair, such as the flightmate in a sort warning.
+    pub const OTHER: &str = "other";
+    /// A surface unit's hardpoint.
+    pub const MOUNT: &str = "mount";
+    /// Rounds in a surface burst.
+    pub const ROUNDS: &str = "rounds";
+    /// Rounds the world refused.
+    pub const REFUSED: &str = "refused";
+    /// A flak battery's opening barrage.
+    pub const OPENING: &str = "opening";
+    /// A flak shell.
+    pub const FLAK: &str = "flak";
+    /// Missiles on a launcher's rails.
+    pub const LOADED: &str = "loaded";
+    /// Spare magazines a gun keeps.
+    pub const RESERVE: &str = "reserve";
+    /// A wreck still burns.
+    pub const BURNING: &str = "burning";
+    /// NAV is selected: the HUD shows the navigation picture.
+    pub const NAV: &str = "nav";
+    /// A weapon is armed.
+    pub const ARMED: &str = "armed";
+    /// Seeker launch mode: `cued` or `bore`.
+    pub const LAUNCH: &str = "launch";
+    /// The mounted seeker's status label.
+    pub const SEEKER: &str = "seeker";
+    /// The shot is inside the weapon's range.
+    pub const IN_RANGE: &str = "in_range";
+    /// Maximum range of the shot, feet. Zero means none was estimated.
+    pub const MAX_FT: &str = "max_ft";
+    /// Near edge of the firing band, feet.
+    pub const BAND_MIN: &str = "band_min";
+    /// Far edge of the firing band, feet. Zero means there is no band.
+    pub const BAND_MAX: &str = "band_max";
+    /// The station's mount, feet right, up and forward.
+    pub const MOUNT_X: &str = "mount_x";
+    pub const MOUNT_Y: &str = "mount_y";
+    pub const MOUNT_Z: &str = "mount_z";
+    /// The sight belongs to an AC-130 gunsight.
+    pub const GUNSHIP: &str = "gunship";
+    /// Sight azimuth, radians, body relative.
+    pub const AZ: &str = "az";
+    /// Sight elevation, radians, body relative.
+    pub const EL: &str = "el";
+    /// Sight or sensor zoom step.
+    pub const ZOOM: &str = "zoom";
+    /// Linked-gun membership, one bit a slot.
+    pub const LINK: &str = "link";
+    /// The lead gun's slot. 255 means none.
+    pub const LEAD: &str = "lead";
+    /// A weapon or gun readiness label.
+    pub const READINESS: &str = "readiness";
+    /// The radar range step, an index on the scope ladder.
+    pub const RANGE_STEP: &str = "range";
+    /// A wreck fire's width, feet.
+    pub const FIRE_FT: &str = "fire_ft";
+    /// Hit points before a change.
+    pub const HP_BEFORE: &str = "hp_before";
+    /// A bomb or rocket's delivery: [`super::delivery`].
+    pub const DELIVERY: &str = "delivery";
+    /// Rounds one trigger call released.
+    pub const COUNT: &str = "count";
+    /// The projectiles of a release, in pack order.
+    pub const PROJECTILES: &str = "projectiles";
+    /// A rocket's number in the run fired from its station.
+    pub const SALVO: &str = "salvo";
+    /// A guided weapon's guidance: [`super::guidance`].
+    pub const GUIDANCE: &str = "guidance";
+    /// A guided weapon is at its release.
+    pub const RELEASED: &str = "released";
+    /// The aircraft whose laser spot a weapon follows.
+    pub const SPOT_OWNER: &str = "spot_owner";
+    /// The point is the one stored at release.
+    pub const STORED: &str = "stored";
+    /// The laser's state: [`super::laser`].
+    pub const STATE: &str = "state";
+    /// How a laser was turned on: automatic or by hand.
+    pub const HOW: &str = "how";
+    /// A flag: the cockpit is one a human gave back to the AI, which flies
+    /// the aircraft while its laser and designation stay as the human left
+    /// them (slice FX-K). Absent when a human flies it.
+    pub const KEPT: &str = "kept";
+    /// Why a laser is masked.
+    pub const MASK: &str = "mask";
+    /// How a ground target was designated: [`super::designate`].
+    pub const CHANNEL: &str = "channel";
+    /// A fuze's arming time, seconds.
+    pub const ARM_S: &str = "arm_s";
+    /// Seconds a weapon flew.
+    pub const FLOWN_S: &str = "flown_s";
+    /// An explosion's type.
+    pub const EXPLOSION: &str = "explosion";
+    /// The point a guided weapon was steering for, feet, world axes.
+    pub const AIM: [&str; 3] = ["aim_x_ft", "aim_y_ft", "aim_z_ft"];
+    /// How far a bomb landed from the target the shooter had designated.
+    pub const TARGET_FT: &str = "target_ft";
+    /// A flag: the weapon is a guided one.
+    pub const GUIDED: &str = "guided";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
+    /// An orbit's planned radius and height above its centre (`player.orbit`).
+    pub const RADIUS_FT: &str = "radius_ft";
+    pub const HEIGHT_FT: &str = "height_ft";
     /// A velocity in feet per second, world axes.
     pub const VELOCITY: [&str; 3] = ["vx_fps", "vy_fps", "vz_fps"];
     /// An attitude as the right, up and forward unit vectors, world axes.
@@ -393,6 +756,75 @@ pub mod field {
         "forward_y",
         "forward_z",
     ];
+}
+
+/// How a bomb or rocket was delivered, for the `delivery` field of
+/// `weapon.release`.
+pub mod delivery {
+    /// A bomb released with the dive pipper (CCIP) as the sight.
+    pub const CCIP: &str = "ccip";
+    /// A bomb released with the level "T" as the sight.
+    pub const LEVEL: &str = "level";
+    /// A rocket fired with the rocket pipper.
+    pub const ROCKET: &str = "rocket";
+    /// A guided bomb, which then flies its own guidance.
+    pub const GUIDED: &str = "guided";
+    /// Released by an aircraft with no bomb sight of its own (an AI wing or
+    /// a plane the recorder cannot see inside).
+    pub const UNGUIDED: &str = "unguided";
+}
+
+/// How a guided air-to-ground weapon is guided, for the `guidance` field of
+/// `weapon.guided`.
+pub mod guidance {
+    /// Follows a laser spot.
+    pub const LASER: &str = "laser";
+    /// Flies to a stored point (the JDAMs).
+    pub const COORDINATE: &str = "coordinate";
+    /// Steered at a designated object by its launcher (the AT-2).
+    pub const COMMAND: &str = "command";
+}
+
+/// A guided weapon's mode, for the `mode` and `from` fields of
+/// `weapon.guided`.
+pub mod guide {
+    /// A laser weapon released with no spot: it may lock one once.
+    pub const WAITING: &str = "waiting";
+    /// Homing.
+    pub const GUIDING: &str = "guiding";
+    /// Guidance lost for good, or never had: it falls or flies on.
+    pub const BLIND: &str = "blind";
+}
+
+/// A laser designator's state, for the `state` field of `player.laser`.
+pub mod laser {
+    /// No designator, or the sight holds no point.
+    pub const OFF: &str = "off";
+    /// The sight holds a point and the laser is off.
+    pub const READY: &str = "ready";
+    /// The spot is on the target.
+    pub const LASING: &str = "lasing";
+    /// Wanted, but out of range, outside the gimbal or blocked by terrain.
+    pub const MASKED: &str = "masked";
+}
+
+/// How a ground target was designated, for the `channel` field of
+/// `player.designate`.
+pub mod designate {
+    /// The air-to-ground radar page holds the object.
+    pub const RADAR: &str = "a-g radar";
+    /// The infrared (FLIR) page holds it.
+    pub const INFRARED: &str = "infrared";
+    /// The HARM page holds it.
+    pub const HARM: &str = "harm page";
+    /// The targeting sight tracks it.
+    pub const SIGHT: &str = "sight";
+    /// A designation without either: by sight, or the Easy targeting key.
+    pub const VISUAL: &str = "visual";
+    /// A ground point the sight holds with no object on it.
+    pub const PIN: &str = "pin";
+    /// The designation or pin was given up.
+    pub const CLEARED: &str = "cleared";
 }
 
 /// Seeker tone names, for the `tone` field of `audio.tone`.

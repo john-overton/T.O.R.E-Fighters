@@ -7,7 +7,7 @@
 //! builds depends only on the recording, never on how it was watched.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, mpsc};
-use tore_replay::{Frame, Recording};
+use tore_replay::{Frame, Recording, SurfaceStock};
 
 /// Ticks between trail samples: ten a second.
 pub const SAMPLE_TICKS: u64 = 12;
@@ -41,7 +41,125 @@ pub struct Batch {
     aircraft: Vec<(u32, u64, [f32; 3])>,
     missiles: Vec<(u32, u32, u64, [f32; 3])>,
     surface: Vec<(u64, u32, i32)>,
+    stock: Vec<(u64, SurfaceStock)>,
+    sights: Vec<(u64, Sight)>,
     player: Vec<(u64, View)>,
+}
+
+/// What a surface unit's weapon held, as the recording tells it (format 3):
+/// a controller's phase change, or a burst or salvo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sight {
+    /// `station` of `unit` holds `target` from now on (`None`: nothing, its
+    /// phase does not aim).
+    Phase {
+        unit: u32,
+        station: usize,
+        target: Option<u32>,
+    },
+    /// `mount` of `unit` fired at `target`.
+    Burst {
+        unit: u32,
+        mount: usize,
+        target: u32,
+    },
+}
+
+/// The surface events of `frame` that tell what a weapon holds.
+fn sights(frame: &Frame) -> impl Iterator<Item = (u64, Sight)> + '_ {
+    use tore_replay::vocab::{field, kind};
+    frame.events.iter().filter_map(move |event| {
+        let unit = event.subject?;
+        let index = |name: &str| event.num(name).map(|v| v.max(0.) as usize);
+        let sight = match event.kind.as_str() {
+            kind::SURFACE_PHASE => {
+                // Prepare chooses the target; Track, Fire and Pause hold it
+                // (`tore_world::surface::aim::aims_in`).
+                let locked = matches!(
+                    event.string(field::TO),
+                    Some("prepare" | "track" | "fire" | "pause")
+                );
+                Sight::Phase {
+                    unit,
+                    station: index(field::STATION)?,
+                    target: event.object.filter(|_| locked),
+                }
+            }
+            kind::SURFACE_BURST => Sight::Burst {
+                unit,
+                mount: index(field::MOUNT)?,
+                target: event.object?,
+            },
+            _ => return None,
+        };
+        Some((frame.tick, sight))
+    })
+}
+
+/// A controller station's phase changes in tick order: the tick, and the
+/// target it holds from then on (`None`: nothing).
+type PhaseChanges = Vec<(u64, Option<u32>)>;
+
+/// The sights, indexed so that the weapons' aim at a tick costs a lookup per
+/// controller station and a short slice of bursts, however long the recording
+/// is. Built a chunk at a time as the pass merges them (chunks arrive in tick
+/// order, so every list stays sorted by tick).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct AimIndex {
+    /// Each controller station's phase changes, by unit and station.
+    phases: BTreeMap<(u32, usize), PhaseChanges>,
+    /// Every burst, in tick order: tick, unit, mount, target.
+    bursts: Vec<(u64, u32, usize, u32)>,
+}
+
+impl AimIndex {
+    fn push(&mut self, when: u64, sight: Sight) {
+        match sight {
+            Sight::Phase {
+                unit,
+                station,
+                target,
+            } => self
+                .phases
+                .entry((unit, station))
+                .or_default()
+                .push((when, target)),
+            Sight::Burst {
+                unit,
+                mount,
+                target,
+            } => self.bursts.push((when, unit, mount, target)),
+        }
+    }
+
+    /// What the weapons hold at `tick`.
+    fn tracks(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        use tore_world::surface::{
+            UnitId,
+            aim::{BURST_HOLD_TICKS, Track, Weapon, burst_tracks},
+        };
+        // Each station's last phase change at or before `tick`.
+        let mut out: Vec<Track> = self
+            .phases
+            .iter()
+            .filter_map(|(&(unit, station), changes)| {
+                let at = changes.partition_point(|&(when, _)| when <= tick);
+                Some(Track {
+                    unit: UnitId(unit),
+                    weapon: Weapon::Station(station),
+                    target: changes.get(at.checked_sub(1)?)?.1?,
+                })
+            })
+            .collect();
+        // Only the bursts the hold still covers: began at or before `tick`,
+        // and no more than `BURST_HOLD_TICKS` before it.
+        let from = self
+            .bursts
+            .partition_point(|&(when, ..)| when < tick.saturating_sub(BURST_HOLD_TICKS));
+        let to = self.bursts.partition_point(|&(when, ..)| when <= tick);
+        out.extend(burst_tracks(tick, &self.bursts[from..to.max(from)]));
+        out
+    }
 }
 
 /// Everything the pass has found so far.
@@ -55,6 +173,13 @@ pub struct Tracks {
     pub missiles: BTreeMap<u32, Path>,
     /// Ground object hit point changes in tick order: tick, object, hit points.
     pub surface: Vec<(u64, u32, i32)>,
+    /// Launcher rail and gun reserve changes in tick order (format 3).
+    pub stock: Vec<(u64, SurfaceStock)>,
+    /// What surface weapons held, in tick order (format 3).
+    pub sights: Vec<(u64, Sight)>,
+    /// The sights again, indexed for `aim_tracks`: a frame asks about one
+    /// tick, and must not walk the recording from its start to answer.
+    aims: AimIndex,
     /// The player's view on every tick from `first`; a tick with no frame
     /// (a gap, or no player) repeats the one before it.
     player: Vec<View>,
@@ -69,7 +194,12 @@ fn sampled(tick: u64, seen: bool) -> bool {
 
 /// Everything `frames` hold for the tracks. `guns` are the weapon ids of
 /// gun rounds, which have no trail.
-fn batch(frames: &[Frame], guns: &BTreeSet<u32>, seen: &mut BTreeSet<(bool, u32)>) -> Batch {
+fn batch(
+    frames: &[Frame],
+    guns: &BTreeSet<u32>,
+    player: u32,
+    seen: &mut BTreeSet<(bool, u32)>,
+) -> Batch {
     let mut out = Batch {
         first: frames.first().map_or(0, |f| f.tick),
         last: frames.last().map_or(0, |f| f.tick),
@@ -83,7 +213,7 @@ fn batch(frames: &[Frame], guns: &BTreeSet<u32>, seen: &mut BTreeSet<(bool, u32)
                     .push((state.id, tick, state.position.map(|v| v as f32)));
             }
             seen.insert((false, state.id));
-            if state.id == 0 {
+            if state.id == player {
                 out.player.push((
                     tick,
                     View {
@@ -111,6 +241,9 @@ fn batch(frames: &[Frame], guns: &BTreeSet<u32>, seen: &mut BTreeSet<(bool, u32)
         }
         out.surface
             .extend(frame.surface_hp.iter().map(|&(id, hp)| (tick, id, hp)));
+        out.stock
+            .extend(frame.surface_stock.iter().map(|&stock| (tick, stock)));
+        out.sights.extend(sights(frame));
     }
     out
 }
@@ -137,6 +270,11 @@ impl Tracks {
             path.samples.push((tick, position));
         }
         self.surface.extend(batch.surface);
+        self.stock.extend(batch.stock);
+        for &(when, sight) in &batch.sights {
+            self.aims.push(when, sight);
+        }
+        self.sights.extend(batch.sights);
         for (tick, view) in batch.player {
             let index = tick.saturating_sub(self.first) as usize;
             // Fill a gap, or ticks before the player first appears, with the
@@ -197,22 +335,116 @@ impl Tracks {
             .collect()
     }
 
+    /// When each surface object that is destroyed at `tick` was destroyed:
+    /// the tick its hit points last ran out. A wreck's smoke starts then,
+    /// however the playhead got here.
+    pub fn deaths(&self, tick: u64) -> BTreeMap<u32, u64> {
+        let mut dead = BTreeMap::new();
+        for &(when, id, value) in &self.surface {
+            if when > tick {
+                break;
+            }
+            if value <= 0 {
+                dead.entry(id).or_insert(when);
+            } else {
+                dead.remove(&id);
+            }
+        }
+        dead
+    }
+
+    /// The launcher rails and magazines as the recording left them at
+    /// `tick` (format 3): for each unit that has ever changed, the rounds on
+    /// each hardpoint it recorded. A unit not listed is as new.
+    pub fn stock_at(&self, tick: u64) -> BTreeMap<u32, BTreeMap<u16, SurfaceStock>> {
+        let mut now: BTreeMap<u32, BTreeMap<u16, SurfaceStock>> = BTreeMap::new();
+        for &(when, stock) in &self.stock {
+            if when > tick {
+                break;
+            }
+            now.entry(stock.unit)
+                .or_default()
+                .insert(stock.mount, stock);
+        }
+        now
+    }
+
+    /// What the surface units' weapons hold at `tick`, for their pictures'
+    /// aim (docs/spec/surface-defenses.md, "Aiming"): each controller's last
+    /// phase, while it aims (Prepare to Pause), and the bursts and salvos still held
+    /// (a battery's launchers, whose controller the recording does not
+    /// tell).
+    pub fn aim_tracks(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        self.aims.tracks(tick)
+    }
+
+    /// `aim_tracks` as it was first written: every sight from the start of
+    /// the recording, walked each time. Kept to prove the index finds the
+    /// same.
+    #[cfg(test)]
+    fn aim_tracks_by_scan(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        use tore_world::surface::{
+            UnitId,
+            aim::{Track, Weapon, burst_tracks},
+        };
+        let mut held: BTreeMap<(u32, usize), Option<u32>> = BTreeMap::new();
+        let mut bursts = Vec::new();
+        for &(when, sight) in &self.sights {
+            if when > tick {
+                break;
+            }
+            match sight {
+                Sight::Phase {
+                    unit,
+                    station,
+                    target,
+                } => {
+                    held.insert((unit, station), target);
+                }
+                Sight::Burst {
+                    unit,
+                    mount,
+                    target,
+                } => bursts.push((when, unit, mount, target)),
+            }
+        }
+        let mut out: Vec<Track> = held
+            .into_iter()
+            .filter_map(|((unit, station), target)| {
+                Some(Track {
+                    unit: UnitId(unit),
+                    weapon: Weapon::Station(station),
+                    target: target?,
+                })
+            })
+            .collect();
+        out.extend(burst_tracks(tick, &bursts));
+        out
+    }
+
     /// Scans a whole recording on this thread. The background pass does the
     /// same a chunk at a time.
     #[cfg(test)]
     pub fn scan(recording: &Recording) -> Self {
         let mut tracks = Self::new(recording.first_tick().unwrap_or(0));
         let guns = guns(recording);
+        let player = player_of(recording);
         let mut seen = BTreeSet::new();
         for index in 0..recording.chunks().len() {
             match recording.decode_chunk(index) {
-                Ok(frames) => tracks.merge(batch(&frames, &guns, &mut seen)),
+                Ok(frames) => tracks.merge(batch(&frames, &guns, player, &mut seen)),
                 Err(error) => log::warn!("Replay: chunk {index} is unreadable: {error}"),
             }
         }
         tracks.done = true;
         tracks
     }
+}
+
+/// The plane a recording is for: `draw.player` in its header, otherwise
+/// plane 0. A recording with no player (an observer's) names none.
+fn player_of(recording: &Recording) -> u32 {
+    crate::replay::convert::Presentation::from_header(recording.header()).player
 }
 
 /// Weapon ids of gun rounds.
@@ -232,6 +464,8 @@ enum Message {
 /// The background pass. Dropping it stops the pass at its next chunk.
 pub struct Scanner {
     receiver: mpsc::Receiver<Message>,
+    /// A live pass is handed each newer read of the recording here.
+    feed: Option<mpsc::Sender<Arc<Recording>>>,
 }
 
 impl Scanner {
@@ -242,6 +476,7 @@ impl Scanner {
             .name("replay tracks".into())
             .spawn(move || {
                 let guns = guns(&recording);
+                let player = player_of(&recording);
                 let mut seen = BTreeSet::new();
                 for index in 0..recording.chunks().len() {
                     let frames = match recording.decode_chunk(index) {
@@ -252,7 +487,7 @@ impl Scanner {
                         }
                     };
                     if sender
-                        .send(Message::Batch(batch(&frames, &guns, &mut seen)))
+                        .send(Message::Batch(batch(&frames, &guns, player, &mut seen)))
                         .is_err()
                     {
                         return;
@@ -263,7 +498,65 @@ impl Scanner {
         if let Err(error) = spawned {
             log::warn!("Replay: could not start the track pass: {error}");
         }
-        Self { receiver }
+        Self {
+            receiver,
+            feed: None,
+        }
+    }
+
+    /// The pass over a recording that is still growing (an observer's): it
+    /// reads the chunks there are, then waits for [`Scanner::feed`] to hand
+    /// it a newer read of the same recording and reads the chunks added
+    /// since, and so on until it is dropped. It never says it is done.
+    pub fn start_live(recording: Arc<Recording>) -> Self {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        let (feed, fed) = mpsc::channel::<Arc<Recording>>();
+        let spawned = std::thread::Builder::new()
+            .name("replay tracks".into())
+            .spawn(move || {
+                let mut recording = recording;
+                let mut seen = BTreeSet::new();
+                let mut next = 0;
+                loop {
+                    let guns = guns(&recording);
+                    let player = player_of(&recording);
+                    while next < recording.chunks().len() {
+                        match recording.decode_chunk(next) {
+                            Ok(frames) => {
+                                let batch =
+                                    Message::Batch(batch(&frames, &guns, player, &mut seen));
+                                if sender.send(batch).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(error) => log::warn!("Replay: chunk {next} is unreadable: {error}"),
+                        }
+                        next += 1;
+                    }
+                    // The newest read waiting, or the next to arrive.
+                    let Ok(mut newest) = fed.recv() else {
+                        return;
+                    };
+                    while let Ok(later) = fed.try_recv() {
+                        newest = later;
+                    }
+                    recording = newest;
+                }
+            });
+        if let Err(error) = spawned {
+            log::warn!("Replay: could not start the track pass: {error}");
+        }
+        Self {
+            receiver,
+            feed: Some(feed),
+        }
+    }
+
+    /// Hands a live pass a newer read of its recording.
+    pub fn feed(&self, recording: Arc<Recording>) {
+        if let Some(feed) = &self.feed {
+            let _ = feed.send(recording);
+        }
     }
 
     /// Merges whatever has arrived. True when anything did.
@@ -285,6 +578,18 @@ impl Scanner {
             match self.receiver.recv() {
                 Ok(Message::Batch(batch)) => tracks.merge(batch),
                 Ok(Message::Done) | Err(_) => tracks.done = true,
+            }
+        }
+    }
+
+    /// Waits until the pass has read every chunk of `recording`, for tests.
+    #[cfg(test)]
+    pub fn wait_for(&mut self, tracks: &mut Tracks, recording: &Recording) {
+        let wanted = recording.last_tick().map_or(0, |last| last + 1);
+        while tracks.scanned < wanted {
+            match self.receiver.recv() {
+                Ok(Message::Batch(batch)) => tracks.merge(batch),
+                Ok(Message::Done) | Err(_) => break,
             }
         }
     }
@@ -345,6 +650,154 @@ pub(crate) mod tests {
         assert!(tracks.view(fixture::LAST + 10).is_some());
     }
 
+    /// The surface units' aim in a replay (docs/spec/surface-defenses.md,
+    /// "Aiming"): each controller's last recorded phase while it aims, and a
+    /// salvo's target for 5 s after it.
+    #[test]
+    fn recorded_phases_and_salvos_tell_what_surface_weapons_hold() {
+        use tore_replay::{
+            Event,
+            vocab::{field, kind},
+        };
+        use tore_world::surface::{
+            UnitId,
+            aim::{Track, Weapon},
+        };
+        let phase = |unit: u32, station: i64, to: &str, target: u32| {
+            Event::new(kind::SURFACE_PHASE)
+                .with_subject(unit)
+                .with_object(target)
+                .with(field::STATION, station)
+                .with(field::TO, to)
+        };
+        let burst = Event::new(kind::SURFACE_BURST)
+            .with_subject(9)
+            .with_object(4)
+            .with(field::MOUNT, 2i64);
+        let frame = |tick: u64, events: Vec<Event>| Frame {
+            tick,
+            events,
+            ..Default::default()
+        };
+        let frames = [
+            frame(10, vec![phase(7, 0, "prepare", 3)]),
+            frame(20, vec![phase(7, 0, "fire", 3), burst]),
+            frame(30, vec![phase(7, 0, "search", 3)]),
+        ];
+        let mut tracks = Tracks::new(10);
+        tracks.merge(batch(&frames, &BTreeSet::new(), 0, &mut BTreeSet::new()));
+        let held = |unit, weapon| Track {
+            unit: UnitId(unit),
+            weapon,
+            target: if unit == 9 { 4 } else { 3 },
+        };
+        assert!(tracks.aim_tracks(5).is_empty());
+        assert_eq!(tracks.aim_tracks(10), [held(7, Weapon::Station(0))]);
+        assert_eq!(
+            tracks.aim_tracks(25),
+            [held(7, Weapon::Station(0)), held(9, Weapon::Mount(2))]
+        );
+        // Searching again holds nothing; the salvo is held 600 ticks.
+        assert_eq!(tracks.aim_tracks(620), [held(9, Weapon::Mount(2))]);
+        assert!(tracks.aim_tracks(621).is_empty());
+    }
+
+    /// The indexed aim finds what the walk from the start of the recording
+    /// found, at every tick (so a seek, which asks about any tick at all,
+    /// reads the same), over a long recording merged a chunk at a time, with
+    /// several events on one tick and bursts older than their hold.
+    #[test]
+    fn the_indexed_aim_matches_a_walk_over_every_sight() {
+        use tore_replay::{
+            Event,
+            vocab::{field, kind},
+        };
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move |bound: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % bound
+        };
+        const PHASES: [&str; 5] = ["search", "prepare", "track", "fire", "pause"];
+        let mut frames = Vec::new();
+        for tick in (100..7_000_u64).step_by(7) {
+            let mut events = Vec::new();
+            for _ in 0..next(4) {
+                let unit = 0x5000_0000 + next(6) as u32;
+                if next(3) == 0 {
+                    events.push(
+                        Event::new(kind::SURFACE_BURST)
+                            .with_subject(unit)
+                            .with_object(next(9) as u32)
+                            .with(field::MOUNT, next(3) as i64),
+                    );
+                } else {
+                    events.push(
+                        Event::new(kind::SURFACE_PHASE)
+                            .with_subject(unit)
+                            .with_object(next(9) as u32)
+                            .with(field::STATION, next(2) as i64)
+                            .with(field::TO, PHASES[next(5) as usize]),
+                    );
+                }
+            }
+            frames.push(Frame {
+                tick,
+                events,
+                ..Default::default()
+            });
+        }
+        let mut tracks = Tracks::new(100);
+        for chunk in frames.chunks(40) {
+            tracks.merge(batch(chunk, &BTreeSet::new(), 0, &mut BTreeSet::new()));
+        }
+        assert!(tracks.sights.len() > 1_000, "the recording is long enough");
+        let mut held = 0;
+        for tick in 0..7_700 {
+            let indexed = tracks.aim_tracks(tick);
+            assert_eq!(indexed, tracks.aim_tracks_by_scan(tick), "tick {tick}");
+            held += indexed.len();
+        }
+        assert!(held > 10_000, "the comparison saw weapons aiming: {held}");
+    }
+
+    /// A pass over a growing recording reads each new chunk once and ends
+    /// with what a pass over the finished recording finds.
+    #[test]
+    fn the_live_pass_reads_a_growing_recording_chunk_by_chunk() {
+        let dir = crate::replay::tests::TempDir::new("tracks-live");
+        let mut growing = fixture::Growing::new(dir.path(), "live");
+        growing.push(5, 300);
+        let early = growing.open();
+        let mut scanner = Scanner::start_live(Arc::clone(&early));
+        let mut tracks = Tracks::new(early.first_tick().unwrap());
+        scanner.wait_for(&mut tracks, &early);
+        assert_eq!(tracks.scanned(), early.last_tick().unwrap() + 1);
+        assert!(!tracks.done(), "a live pass is never done");
+        // The view waits where the pass has not been.
+        assert!(tracks.view(early.last_tick().unwrap() + 1).is_none());
+        growing.push(301, 900);
+        let later = growing.open();
+        scanner.feed(Arc::clone(&later));
+        // Handing it the same read again changes nothing.
+        scanner.feed(Arc::clone(&later));
+        scanner.wait_for(&mut tracks, &later);
+        assert_eq!(tracks.scanned(), later.last_tick().unwrap() + 1);
+        let finished = growing.finish();
+        let direct = Tracks::scan(&finished);
+        let read = later.last_tick().unwrap();
+        assert_eq!(tracks.aircraft.keys().collect::<Vec<_>>(), [&0, &1, &2, &3]);
+        for (id, samples) in &tracks.aircraft {
+            let all = &direct.aircraft[id];
+            assert_eq!(samples[..], all[..samples.len()], "aircraft {id}");
+            assert!(samples.last().unwrap().0 + SAMPLE_TICKS > read);
+        }
+        assert_eq!(tracks.missiles.len(), direct.missiles.len());
+        assert_eq!(tracks.destroyed(read), direct.destroyed(read));
+        assert_eq!(tracks.view(read), direct.view(read));
+    }
+
     #[test]
     fn buildings_fall_when_their_hit_points_run_out() {
         let dir = crate::replay::tests::TempDir::new("tracks-surface");
@@ -383,5 +836,46 @@ pub(crate) mod tests {
         });
         assert_eq!(tracks.view(17), Some(view(2.)));
         assert_eq!(tracks.view(20), Some(view(3.)));
+    }
+
+    #[test]
+    fn deaths_and_rails_follow_the_recorded_changes() {
+        let frame = |tick: u64, hp: Vec<(u32, i32)>, stock: Vec<SurfaceStock>| Frame {
+            tick,
+            surface_hp: hp,
+            surface_stock: stock,
+            ..Default::default()
+        };
+        let rail = |unit, mount, loaded| SurfaceStock {
+            unit,
+            mount,
+            loaded,
+            reserve: None,
+        };
+        let frames = vec![
+            frame(10, vec![(7, 100), (8, 100)], vec![]),
+            frame(20, vec![(7, 0)], vec![rail(5, 0, 2), rail(5, 1, 3)]),
+            frame(30, vec![(8, 0)], vec![]),
+            // Unit 7 is repaired by a restart in the same recording and
+            // dies again later: its death is the last.
+            frame(40, vec![(7, 50)], vec![rail(5, 0, 3)]),
+            frame(50, vec![(7, 0)], vec![]),
+        ];
+        let mut tracks = Tracks::new(10);
+        tracks.merge(batch(&frames, &BTreeSet::new(), 0, &mut BTreeSet::new()));
+        assert!(tracks.deaths(15).is_empty());
+        assert_eq!(tracks.deaths(25), BTreeMap::from([(7, 20)]));
+        assert_eq!(tracks.deaths(35), BTreeMap::from([(7, 20), (8, 30)]));
+        assert_eq!(tracks.deaths(45), BTreeMap::from([(8, 30)]));
+        assert_eq!(tracks.deaths(60), BTreeMap::from([(7, 50), (8, 30)]));
+        assert!(tracks.stock_at(19).is_empty());
+        let at = |tick| {
+            tracks.stock_at(tick)[&5]
+                .values()
+                .map(|s| s.loaded)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(25), [2, 3]);
+        assert_eq!(at(45), [3, 3]);
     }
 }

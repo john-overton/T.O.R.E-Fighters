@@ -327,6 +327,11 @@ pub enum MotionBranch {
         heading_deg: f64,
         pitch_deg: f64,
     },
+    /// A striker's pass, ingress or exit (docs/spec/ai-strike.md).
+    Strike {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
     /// Flying back toward an escorted aircraft or a patrol region.
     MissionRejoin {
         point: [f64; 3],
@@ -349,6 +354,15 @@ pub enum MotionBranch {
         contact: SearchContact,
         distance_ft: f64,
         orbiting: bool,
+        /// The wing's mission of opportunity after its human leader was
+        /// lost, rather than this aircraft's own lost contact.
+        opportunity: bool,
+    },
+    /// Flying the wing's waypoints after its mission of opportunity search
+    /// found nothing.
+    WingRoute {
+        point: [f64; 3],
+        distance_ft: f64,
     },
     /// An Ace gave up a search after two minutes.
     SearchAbandoned {
@@ -495,6 +509,9 @@ pub struct ActorTrace {
     pub visual: Vec<super::awareness::VisualTrace>,
     pub observation_sources: Vec<(u32, super::awareness::SourceTimestamps)>,
     pub fire: super::incoming_fire::Trace,
+    /// The helicopter break flown on this step (slice ST-H), with the
+    /// threat's compass bearing it was taken from.
+    pub rotor_break: Option<(super::helicopter_defense::Break, Option<f64>)>,
     /// The mission tick this record describes; `None` before the first step.
     pub tick: Option<u64>,
     pub path: ActorPath,
@@ -641,6 +658,11 @@ pub struct FlyTrace {
     /// The adapter's whole output: the controls, its fallbacks and the
     /// rate-limited attitude it requested.
     pub adapter: Option<AdapterOutput>,
+    /// What the rotor adapter commanded, on a helicopter or the V-22
+    /// (slice H1); the fixed-wing adapter's numbers stay in `adapter`.
+    pub rotor: Option<super::rotor_adapter::RotorCommand>,
+    /// What the jet-lift law commanded in a hover (slice H1).
+    pub jet_lift: Option<super::jet_lift::JetLiftCommand>,
     /// The attitude and speed after the flight model stepped.
     pub achieved: Achieved,
 }

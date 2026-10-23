@@ -29,9 +29,8 @@ inline option selects its previous available value, wrapping to the last value.
 This also works for aircraft/theater/airport fields without opening their list;
 their existing left-click behavior is unchanged. The player's wing count wraps
 from one to its maximum, never through zero. Empty lists do nothing. Existing
-field dependencies continue to apply to editable settings. The ground-target
-section is unavailable as described below. Require a matching right
-press/release on the same field.
+field dependencies continue to apply to editable settings. Require a matching
+right press/release on the same field.
 Right-click cannot activate OK, Cancel, Exit, popup rows or controls behind a
 selector/help menu. Focus loss cancels a pending press. In the ordnance view,
 right-click retains its existing station-quantity decrement.
@@ -76,25 +75,97 @@ Exact original font choice, popup texture placement and field bevel composition 
 unknown. Further research would inspect the original dialog drawing data.
 
 The Aircraft menu label is vertically centered by visible glyph bounds within
-y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
+y=38..58, matching the [ordnance menu bar](ordnance-presentation.md). The
+**Map** entry (slice CL-R2, John 2026-10-11: "the map positioning in the menu
+bar is off quite a bit") follows the same rule as the other bars' entries:
+its label starts one label's gap, 14 pixels, after the word before it
+(103 for Aircraft, then about 175 for Map; the ordnance bar's Weapons entry is 75
+wide and Airbase starts 13 to 14 pixels after the word), and the hit boxes
+abut, each running from its label to the next. Its label sits on Aircraft's
+baseline, because the three letters of "Map" have a descender that would
+otherwise lift a label centred by its own visible bounds a pixel or two.
+Single player, the lobby's creator and the read-only view draw the one bar.
 
-## Unavailable ground-target controls
+## Ground target and defenses
 
-**Opinionated**, requested by John on 2026-09-23. The ground-target, AAA and
-SAM fields remain visible but cannot be edited. Clicking anywhere in that
-sentence block, including its three value boxes, opens a small modal notice:
-"Ground targets, AAA and SAMs are not implemented yet." Left-click,
-right-click, Shift activation and keyboard activation all leave the draft
-unchanged and never open a choice list. The other creator settings remain
-available after dismissing the notice.
+The sentence block "Friendly ground target is [target] [AAA strength] defended
+by AAA and [SAM strength] defended by SAMs." is live in all sixteen theaters
+(requested by John on 2026-10-10; before that, from 2026-09-23, it showed a
+notice and changed nothing). Its words are retail data: each theater's target
+list and the four strengths "not", "lightly", "moderately" and "heavily" come
+from the executable's creator strings, and the text form of a mission file
+writes the strengths `none`, `light`, `moderate` and `heavy`
+([mission file](../DEDICATED-SERVER.md#the-mission-file)).
 
-The popup reuses the menu font and original blue OK button. OK, Enter, Space
-or Escape dismiss it; inputs cannot change settings or launch a mission through
-it. Focus loss cancels it with the other temporary menus. Agent-selected layout
-on the 640 by 480 canvas: the sentence hit region is (334,294), 278 by 49;
-the centered popup is (166,202), 308 by 88, with its two text lines at y=214
-and y=231 and its OK button at (285,255). This disables host setup controls;
-it does not implement ground targets or defense behavior.
+- **Target list.** Each theater offers its own list, whose first entry is the
+  "nothing" template (no ground target) and whose other entries are the
+  theater's template missions, in menu order
+  ([the list per theater](../formats/quick-templates.md#recorded-facts-from-faexe-102f)).
+  Clicking the field steps through the list; Shift opens it.
+- **Strengths.** Each strength steps through its four words, with or
+  without a target. With a target they man the target's defenses. With the
+  target at "none" they set the enemy's **area defenses**: SAM sites and AAA
+  guns scattered over Red's side of the front (John, 2026-10-12, B23; see
+  [area defenses](surface-defenses.md#area-defenses)). Both "not" (the
+  default) gives a mission with no target what it always had. Retail clears
+  both strengths when the target is set to none; here they stay, and a
+  theater change keeps them too (agent decision, 2026-10-12: the strengths
+  now mean something without a target, and they are not tied to a theater).
+- **Enemy nationality.** Field 20 is part of the mission. It picks the
+  equipment group the target's units are drawn from, so the mission file
+  carries it (`enemy-nationality`), and the lobby's read-only creator shows it
+  instead of "as the King's". Changing the theater resets it to the
+  theater's own enemy.
+- **Start.** With a target chosen, the Airport list of a ground start gains a
+  first row, "Automatic (near the target)", which is the default: the mission
+  says `start ground auto` and the world picks the runway from the target.
+  Naming an airport keeps that airport. Choosing no target (or a target when
+  none was set) starts the list over. "Automatic" takes the Blue airfield
+  nearest the target at least 15 nm from it
+  ([start placement](surface-defenses.md)); when none qualifies, the first
+  Blue airport whose runway holds the wing, then the first neutral one
+  (fitted), and never an enemy field (slice AL1): with none the start is
+  refused.
+- **Seed.** Pressing OK on a mission with a target, or with area defenses,
+  draws a new number that the layout is rolled from, so each flight can differ and a restart
+  of the same flight repeats it. The lobby sends none; the host draws it when
+  the flight starts.
+- **Lobby.** The King edits the fields like any other; everyone else sees the
+  King's choice read-only, with the same dimming rule as the other fields.
+  A multiplayer start stays airborne, so `start ground auto` does not reach
+  a lobby.
+- **What the flight gets.** The target's template, its SAMs, guns, ships,
+  supply trucks and parked aircraft are built from these fields and the seed,
+  defend the target and make it the mission's objective
+  ([surface defenses](surface-defenses.md)). A template the import does not
+  hold leaves the mission without it, and the log says so.
+- **The front line** (John, 2026-10-11; slice CL-FL). A mission with a target
+  also gets a few Blue and Red ground units standing in contact 5 to 20 nm
+  from the targets (a tank and an armoured car and a gun per side, the gun only
+  with AAA on), so a surface battle is visible on the way in. They are
+  not objectives and add nothing to the creator: no field, no setting, drawn
+  from the same seed ([the front line](surface-defenses.md#the-front-line)).
+- **Area defenses** (John, 2026-10-12; B23). With no target and a strength
+  above "not", the enemy's SAM sites (with their radar vehicles) and guns
+  stand still on Red's side of the theater's front, 10 to 60 nm deep, with
+  one site in three guarding a Red airfield. Ten SAM site slots and ten gun
+  site slots are rolled the way a target's defense slots are (light 25,
+  moderate 60, heavy 100 percent manned; John, 2026-10-13), so light gives 0
+  to 10 sites of a kind (2.5 on average), moderate 0 to 10 (6) and heavy
+  all 10, two units each (the slot count is fitted). The SAM units have
+  supply trucks, as a target's do (John, 2026-10-13). They are not
+  objectives and are not on the map. Quick Mission only: free
+  flight has no creator, so it never has them. Same on every machine and in
+  replays ([area defenses](surface-defenses.md#area-defenses)).
+
+The old notice popup (sentence hit region (334,294), 278 by 49; popup (166,202),
+308 by 88) is gone, and so is the launch refusal "Ground targets and defenses
+are not available yet." The sentence keeps its layout and word-wrapping; the
+fields are ordinary inline boxes. Snapshot states: `ground-target` (the
+theater's first target, AAA moderately, SAMs heavily), `ground-target-last`
+(its last, lightly and moderately), `ground-start-auto` (the first with a
+ground start) and `lobby-creator-view-target` (the read-only creator on a
+mission with a target); `field-30` to `field-32` open the lists.
 
 ## Mission end
 
@@ -102,6 +173,119 @@ End mission opens the [mission debrief](debrief.md). Its OK returns to this
 creator with every setting of the mission just flown, including a custom load,
 and the ordnance screen closed. Requested by John on 2026-09-23. Starting the
 next mission reopens the ordnance screen for a custom load as before.
+
+## First load and the saved draft
+
+Slice BQ, B22 (John asked on 2026-10-12 that each slot's aircraft be random on
+first load and that the mission state survive the end of a game and a trip to
+the ordnance screen; the two rules below are agent decisions, recorded as such).
+Opinionated, not retail: the original opens on the same list head every time.
+
+- **First load** is the first time the creator opens in a profile that holds no
+  saved draft. Each aircraft slot then takes a random aircraft from its own list:
+  friendly wing 1 (the player's own aircraft) from every aircraft the game has,
+  and the five other wings from the aircraft the AI can fly. `--aircraft` still
+  names the player's aircraft and keeps that slot; the wings are random. The pick
+  is a menu choice from the clock: nothing in a mission reads it, and once a
+  mission is built it is a fixed mission, so it stays the same on every machine
+  online and on every replay. John confirmed on 2026-10-12 that the picks stay
+  100% random (no preference for armed combat aircraft, so a wing can be
+  transports or an AWACS) and that the player's own slot is random too.
+- **The draft is kept** in the profile as `quick-mission-v1.conf` and written
+  after every menu action, so it survives the end of a flight (the debrief's OK
+  returns to the creator as it was), a visit to the ordnance screen and a
+  restart. The random pick is made once: the next launch opens on the saved
+  draft and draws nothing. It holds the theater (by code), every aircraft (by
+  selection key, so a changed import cannot turn one aircraft into another) and
+  every other choice by its place in its list, with the group objectives and
+  survival flags. A choice the lists no longer have keeps the creator's own value.
+- **Not kept in this file:** the ground target's seed (each flight draws its own),
+  the custom load on the ordnance page (it has its own file, [below](#the-custom-loadout-across-restarts)),
+  the AI mission preset (a command-line choice), the lobby's creator and the
+  read-only lobby view. A file this build cannot read, or one
+  with a newer version, is left as it is and the creator opens on its defaults.
+- **Command-line and diagnostic runs** (`--snapshot`, probes, scripted runs,
+  `--smoke-test`, `--launch-quick-mission`, `--ground-start`, `--ground-target`,
+  `--separation`) neither read nor write the file and never randomize, so every
+  battery scenario still builds the same creator. `--theater` wins over a saved
+  theater.
+- **Preview.** `--quick-mission --snapshot-state first-load` draws the creator
+  with every slot random from a fixed seed.
+
+## The custom loadout across restarts
+
+Slice BQ2 (John asked on 2026-10-12: "persist the custom loadout only if the
+mission has not changed, or when re-flying a previously flown mission"; he also
+confirmed that the first-load picks stay 100% random, with no preference for
+armed combat aircraft, and that they cover every slot including the player's).
+Opinionated, requested by John; the choices below are agent decisions.
+
+- **The rule.** When the ordnance page opens for a Custom load, it shows the
+  load the player flew the last time this same mission was flown, if there is
+  one. Otherwise it opens on the aircraft's standard load, as before. A change to
+  the mission therefore drops the saved load for that mission: the player starts
+  from the standard load again.
+- **What "the same mission" means.** The theater, every aircraft (the player's and
+  all five wings, by selection key) and every other creator choice (all list
+  fields, the group objectives and the survival flags). The only field left out is
+  Standard or Custom load (field 18), which says whether the page opens, not what
+  the mission is. Not part of it, because the creator does not hold them: the
+  ground target's seed (a re-fly reuses it), the cheats, the AI mission preset
+  and the other command-line choices. The stamp is a 64-bit hash of the draft's
+  saved text, so it is the same on every launch.
+- **Re-flying.** The debrief's OK returns to the unchanged creator, so the next
+  mission is the same mission and its load comes back, after a restart too. Going
+  back to a mission flown earlier (changing the creator away and back) restores
+  that mission's load, because the profile keeps the loads of the last eight
+  missions flown with a Custom load, the oldest forgotten first. In the same
+  session, edits made on the page and not yet flown (Cancel, then reopen) are kept
+  as they always were. If no load was flown for the new mission but the aircraft
+  is unchanged, the page keeps the session's load, as before. Restarting the flight in progress never
+  touches the creator and is unchanged.
+- **When it is written.** On Fly, with the load that flew, so an abandoned edit
+  is not kept. Standard load never opens the page and writes nothing.
+- **The file.** `quick-loadouts-v1.conf` in the profile, beside the draft file:
+  a header line, then per mission a `mission HASH` line, `fuel`, `cheat`, the
+  `tank` lines and one `station N WEAPON COUNT QUANTITY` line per station, the
+  same words the mission text file uses. A file this build cannot read or with a
+  newer version is left exactly as it is: nothing is restored and nothing
+  written. A saved load that no longer fits the aircraft (a weapon the import no
+  longer has, a station that changed, a failed validation) falls back to the
+  standard load.
+- **Skipped runs.** Whatever skips the saved draft skips this too (snapshots,
+  probes, scripted runs, `--smoke-test`, `--launch-quick-mission`, the creator
+  setting flags), and so does `--loadout`, so battery scenarios build the same
+  loads as before.
+- **The multiplayer lobby** has a separate ordnance path (its Accept sends the
+  load to the lobby) and is unchanged.
+
+## The player's flight loadout
+
+**Opinionated, requested by John on 2026-10-15.** Every AI aircraft in the
+player's QMC wing starts with the accepted player load: identical weapon
+records, station capacities and quantities (including zero), designator pods,
+external tank choices and quantities, and internal fuel. Standard and Custom
+loads follow the same rule, including Cheat loading. Airborne and ground starts
+and a flight restart preserve it. Other wings retain their own default loads.
+QMC selects one aircraft type per wing. A different-type member, if a future
+creator permits one, keeps its own default instead of receiving incompatible
+stores. The fixture-only development path is unchanged.
+
+The loadout memory described above supplies the accepted load before sharing.
+Sharing does not add AI employment logic: a carried store that no AI weapon
+selection rule can employ stays aboard. Existing orders and weapon eligibility
+still decide what the AI can release, and an order with no usable store can
+receive Winchester. An unarmed load is not silently replaced.
+
+The creator writes `share-flight-loadout yes` in its mission text. An authored
+mission without this setting retains its existing loads. Multiplayer uses
+per-plane loads and the [human-flight rule](multiplayer.md#human-flight-loadouts).
+
+Retail QMC load sharing is **unknown**. The current recovered creator and AI
+specifications do not establish how an accepted custom load is distributed to
+wing members. Next research: trace the accepted QMC ordnance data into the
+retail wing member initializer, recording the executable build identity and
+station/count writes. This implementation is not a retail parity claim.
 
 ## Mission wings
 
@@ -120,6 +304,23 @@ full selected count, up to 29 AI aircraft plus the player. Each wing retains its
 own aircraft, experience, side and leader. Friendly Wing 1 follows the human;
 the other wings have their own AI leaders. No command-line option is required.
 `--ai-wings` remains a shortcut to open the creator.
+
+AI helicopters and VTOL aircraft (slice ST-H, John's decision of 2026-10-11;
+slice H3, John's decisions of 2026-10-12): every aircraft is offered in the five AI
+wing fields, the AH-64, Mi-24, CH-47, V-22, AV-8 and Yak-141 included, and in
+friendly wing 1 when the player flies one of them on an airborne start. The CH-47
+is an AI wing choice only (no escort objective: the creator's escort missions
+already protect a chosen wing) and carries no weapons, so it never takes the Strike
+role, whatever the wing's objective or the bomber-class default. A helicopter of
+the AI's own wings starts 1,500 ft over the ground under it rather than at the
+chosen altitude, in forward flight (**opinionated**, agent, kept by John,
+2026-10-12). A player in a helicopter, the V-22, the AV-8 or the Yak-141 who
+chooses a ground start leads friendly wing 1 alone, with a notice, because the AI
+cannot take them off the ground yet (slice H2); the other wings start airborne at
+any start. With a ground target set, a friendly wing 2 or 3 of armed helicopters
+strikes by the bomber-class default. See
+[AI strike](ai-strike.md#ai-helicopters-in-quick-mission) and, for their fuel,
+[the AI's fuel](ai.md#b48-routes-fuel-and-recovery).
 
 John requested separate delta formations on 2026-09-17. The host uses the B43
 alternating trailing slots with level stacking: slots 1 and 2 are 512 ft right
@@ -147,9 +348,9 @@ Restart restores all six groups exactly as launched.
 Separation is in nautical miles (6,076.12 ft), as the manual states (p.19:
 "between 1 and 50 nautical miles"). John chose nautical miles for every entry
 on 2026-09-23. The retail list offers 1, 2, 5, 10, 20 and 50 miles; John
-requested 100, 150, 200 and 300 miles on 2026-09-23, and the host appends them in
-ascending order in the retail label style ("100 miles", "150 miles",
-"200 miles", "300 miles"). Every label means nautical
+requested 100, 150, 200 and 300 miles on 2026-09-23 and 75 miles on 2026-10-09,
+and the host appends them in ascending order in the retail label style ("75
+miles", "100 miles", "150 miles", "200 miles", "300 miles"). Every label means nautical
 miles. An out-of-range choice falls back to the 5 mile default instead of
 failing.
 
@@ -184,14 +385,18 @@ Kurile theaters 200 miles fits only toward a corner.
 Every AI aircraft has a home runway for returning to base. The player's
 wingmen in a ground start call the departure runway home. Every other aircraft
 takes the nearest runway, measured from where it starts, that its side may
-use: a friendly field or a neutral one that grants permission, the same test
-the player's tower service applies. Allegiance is recorded from the player's
+use: a field of its own side or a neutral one that grants permission, the same
+test the player's tower service applies. Allegiance is recorded from Blue's
 side, so an enemy aircraft's own fields are the ones marked hostile, and the
 single neutral-permission flag serves both sides. Ties go to the lower runway
-number. An aircraft with no usable runway keeps its start point as home. Every
-imported airport is currently neutral with permission, so in practice each
-aircraft takes its nearest runway. This choice is **fitted** (agent decision,
-2026-09-23).
+number. An aircraft with no usable runway keeps its start point as home. A short
+strip (a runway under 2,000 ft, [see above](airports.md#short-strips)) is nobody's
+home. Since slice AL1 (John, 2026-10-10) every imported airport takes its
+runway's layout side ([allegiance](airports.md#allegiance)), so Blue aircraft
+go home to Blue fields and Redfor aircraft to Red ones; in North Vietnam and
+the Falklands, which have no Blue field, a Blue AI aircraft keeps its start
+point. Before AL1 every airport was neutral and each aircraft took its nearest
+runway. The nearest-runway choice is **fitted** (agent decision, 2026-09-23).
 
 ### Radar and aircraft on the ground
 
@@ -260,6 +465,69 @@ The accepted start is retained through ordnance setup and mission restart.
 
 Ground start parks the player's whole wing, friendly wing 1, at the selected
 airport. The other wings, friendly and enemy, keep the airborne launch.
+
+**Only the player's side's airports (John, 2026-10-10, slice AL1).** Each
+airport takes its runway's layout side ([allegiance](airports.md#allegiance)).
+The picker lists the player's side's airports and the neutral ones, in layout
+order, and its default is the first of them, so a Blue player no longer starts
+at Polotsk in the Baltics (an enemy field ringed by ZSU-23s) but at Siauliai,
+and in South Korea at Kimpo instead of Koksan. A Redfor pilot's picker would
+list the Red fields. In a theater with
+no field for the player's side (for Blue, the Falklands and North Vietnam)
+Ground is not offered: the Start field is greyed with the note "(no friendly
+airfield)", the Ground row of its list is dimmed, and choosing it, or changing
+to such a theater with Ground set, leaves the start airborne with the notice
+"No airfield of your side in this theater, so you start airborne. Ground start
+needs a friendly or neutral airfield." The `--ground-start N` option refuses an
+enemy field with "is an enemy airfield: no ground start there. Choose one of
+your side's airfields or Airborne." A dedicated server refuses a mission whose
+`start ground N` names an enemy field, before it opens its port.
+
+**Enemy ground start (John, 2026-10-11, slice CL-R).** "Add redfor ground
+starts. Match the quick mission creator styles." The creator's right column
+gains two rows under the ground target sentence, the mirror of Start and
+Airport: **Enemy start: Airborne/Ground** and, with Ground, **Enemy airport:**.
+They park Enemy Wing 1 (the flight Redfor players take online; the AI flies it
+in single player) at a Redfor or neutral field, never a Blue one (a STOL strip is
+allowed, labelled, as for Blue); Enemy Wings 2 and 3 stay airborne.
+
+| Blue (Start, Airport) | Redfor (Enemy start, Enemy airport) |
+| --- | --- |
+| Airborne (default) or Ground | The same two choices |
+| The player's side's and neutral fields, layout order | The Red and neutral fields, layout order, STOL fields last and labelled |
+| With a ground target, "Automatic (near the target)" first: the Blue-side field nearest the target at least 15 nm from it | The same first row: the Red-side field nearest the target at least 15 nm from it |
+| No field: Start greyed, "(no friendly airfield)" | No field: Enemy start greyed, "(no Redfor airfield)", and "No Redfor airfield in this theater, so the enemy starts airborne. An enemy ground start needs a Redfor or neutral airfield." |
+| A changed theater resets the airport | The same |
+| `--ground-start N` refuses an enemy field | `--enemy-ground-start N` refuses a Blue field: "is a Blue airfield: no enemy ground start there. Choose a Redfor airfield or start the enemy Airborne." |
+| Mission text `start ground N/auto` | Mission text `enemy-start ground N/auto` |
+
+Enemy start Ground with Enemy Wing 1 empty is refused at OK ("Enemy wing 1 has
+no aircraft to park. Give it aircraft or start the enemy Airborne."), and both
+sides on one airfield are refused ("You and the enemy cannot start on the same
+airfield."). The enemy ground start overrides the enemy's start distance
+([start placement](surface-defenses.md#start-placement)).
+
+**The multiplayer creator offers ground starts (agent decision, slice CL-R,
+2026-10-11).** It locked Start to Airborne from EF8 (John's 2026-09-28 rule,
+"everyone starts airborne"); John's 2026-10-11 request for Redfor ground
+starts in the creator's style supersedes that, so the King's creator offers
+both sides' rows as single player does, Accept carries them in the mission
+text, and the read-only creator shows them. The notice on opening reads
+"Multiplayer: Accept sends this mission to the lobby."
+
+**STOL strips (opinionated, John 2026-10-11; replaces his 2026-09-30 rule).**
+The 22 airstrips with a runway under 3,000 ft (about 1,074 ft, in Cuba, the
+Falklands, Pakistan, Panama and the Persian Gulf; the number is `fitted`, see
+[STOL runways](airports.md#stol-runways)) are in the airport picker, labelled
+`(STOL)` after their names and listed after the theater's longer airports, so
+the default start is a longer runway whenever the side has one. A takeoff roll
+that long does not suit a conventional aircraft or a wing (with the player
+alone the paved run is 1,020 ft, falling by 250 ft for each wingman), and the
+label says so; the choice is the player's. The Falklands' Blue field, San
+Carlos, is now a Blue ground start. `start ground auto` still never picks a
+STOL strip. The imported `~` layout variants have none. From 2026-09-30 to
+2026-10-11 these strips were left out of the picker and the `--ground-start N`
+option refused them.
 
 **Source anchors and player placement (spec-derived).** Each airport's STRIP
 shape carries a takeoff spot, taxi route and nine parking slots
@@ -336,6 +604,86 @@ restart, real runway support, takeoff probes and rendering checks.
 
 [Reverse-cycling validation](../baselines/horizon-creator.md).
 
+## Mission map
+
+John, 2026-10-11: "Add a map button that shows a screen like the in-game map
+and shows the bluefor and redfor starting locations", and "show the objective
+as an APPROXIMATE location (an area/circle around it, not the exact target
+positions)". An addition: retail's creator has no map.
+
+- **Map** sits in the creator's top bar after "? Aircraft" (see above). It
+  works in single player, in the lobby's editable creator and in the
+  read-only view. Esc, Enter, Space or Close return to the creator
+  unchanged; the in-game map's +/- zoom, arrows pan and Home resets.
+- The screen is the in-game map's ground, frame and scale bar. Airfields are
+  drawn one per airport on blue, red or grey tiles by side, as the Blue
+  pilot sees it; the in-flight map uses the same tiles, swapped for a Redfor
+  viewer ([airfield sides](flight-map.md#knowledge-and-detection)).
+- **It builds in the background** (slice CL-R2, John 2026-10-11: opening the
+  map took about 4 s on the menu's own thread). Clicking Map starts the
+  build on a thread of its own and the creator carries on, saying "Building
+  mission map..." in the notice box (the creator's retail notice style) until
+  the map is ready, when it opens by itself. Esc, Cancel and OK give the build
+  up (Esc gives up the build before it leaves the creator). If any setting
+  changes while the map builds, that result is stale: it is dropped and the
+  map is built again for the settings now in force, so the map that opens is
+  always the draft's. The result is the same as before for the same
+  settings and seed, and single player still draws the flight's seed when
+  Map is clicked and keeps it on OK.
+- **Zoom, scroll and rocker** (opinionated, John 2026-10-11: "it should start
+  zoomed in and have the scroll bars for the map, there should also be a rocker
+  switch to zoom in and out"). The map opens zoomed in on the objective area
+  and the starts: the closest view, no narrower than 50 nm across, that holds
+  both starts and the whole objective circle with a fifth of the plot to
+  spare; if no view holds them all, the first start (the player's) and the
+  objective; with neither, one step in. Home returns to that view. A
+  horizontal bar under the plot and a vertical bar beside it scroll the map:
+  each has an arrow button at either end (a click moves the view an eighth
+  of its width or height), a thumb that drags, and a track that pages by
+  seven eighths on a click; the arrow keys still pan by a quarter. A retail
+  vertical rocker (the debrief's, five frames, tilting on press) in the side
+  panel zooms: its top half in, its bottom half out, with ZOOM IN and ZOOM
+  OUT beside it; + and - do the same and tap the rocker. The bars are drawn
+  flat in the menus' greys with arrow ends (retail has no horizontal bar or
+  arrow-ended bar decoded); the rocker is retail's own art.
+- **No black border at any zoom.** The widest zoom is the one at which the
+  theater just fills the plot (as wide as the theater, or as tall, whichever
+  is the tighter), then the in-game map's 800, 400, 200, 100, 50 and 25 nm
+  steps that are narrower. The view is held inside the theater at every zoom
+  and pan, so the picture always fills the plot.
+- **BLUE START** and **RED START** mark where the player and Enemy Wing 1
+  start: the airborne point with its heading, or the airfield's name for a
+  ground start. Another wing that starts more than 3 nm from its side's start
+  is marked **BLUE WING n** or **RED WING n**. A line under the map says
+  whether each side starts in the air or on the ground.
+- The positions are the flight's: opening the map builds the mission the
+  creator would fly. In single player that draws the ground target's seed
+  then, and OK keeps it once, so the flight flies the layout the map showed.
+  In the lobby the host draws the seed when the flight starts, so the map
+  shows the target's retail spot and says the target and starts may move.
+- **The objective area** (opinionated, John 2026-10-11; numbers fitted): a
+  circle of 5 nm radius around a centre moved 0.5 to 2.5 nm off the targets'
+  centroid, in a direction and by a distance hashed from the theater, the
+  target and the seed, so the same mission shows the same circle, the targets
+  are always inside it and never at its centre. It is drawn at least 7 pixels
+  in radius. No ground target, no area.
+- The map lists no units, so the [front line](surface-defenses.md#the-front-line)
+  does not appear on it (it would give the objective's neighbourhood away);
+  it is seen in flight and in the replay. Nor do the
+  [area defenses](surface-defenses.md#area-defenses) (John, 2026-10-12:
+  hidden from the map), here or on the in-flight map's mission markup; like
+  any unit, a site the aircraft's sensors detect shows as a contact.
+- **The route** (opinionated, John 2026-10-12, with the in-flight map's mission
+  markup): a thin line from the Blue start to the edge of the objective area,
+  in the map's one line style (a one-pixel ink line over a dark edge, as the
+  in-flight map's leaders are). The map drew no lines before. A start inside
+  the area has no line. The in-flight map's Mission layer draws the same area,
+  starts and route from the same function ([in-flight map](flight-map.md#mission-markup)),
+  so the two always agree.
+- **Off the map**: a start or the area that lies beyond the theater is pinned
+  at the edge it lies past, with the words OFF MAP beside it, as in the
+  in-flight map.
+
 ## Group objectives
 
 All six groups carry objective selectors in ordinary briefing sentences, using
@@ -371,3 +719,80 @@ theater tables; restart retains the selected layout. The renderer uses the
 [static variant contract](terrain-detail.md), not a live campaign simulation.
 The creator probe checks that the list holds exactly the sixteen base theaters,
 then sweeps every layout, variants included.
+
+## Paired-airport selection compatibility
+
+The [single-field replacement](airports.md#single-fields-replacing-paired-tiles)
+shows each pair once in both sides' airport lists. Mission files may still
+name either old runway object ID. Profile draft version 2 records positions
+in the merged lists; version 1 drafts load through their old side-filtered
+lists and redirect a second-half selection to the base. New loadout fingerprints include the list revision. When no new-version
+load exists, lookup reconstructs equivalent old airport-list positions by
+source ID, including either former half and shifted STOL entries. If both
+old halves have saved loads, the most recently flown compatible load wins.
+
+The accepted creator sentences are also available in flight through the
+[Mission brief](flight-map.md#mission-brief-tab), which uses this same sentence
+builder. Pre-flight Load Ordnance and lobby Loadout remain unchanged.
+
+## Multiplayer Player Choice
+
+Opinionated requirements from John, 2026-10-16:
+
+- The host can disable AI aircraft. Starts use the configurable
+  [ready-player minimum](multiplayer-menus.md#minimum-players), updated by John
+  on 2026-10-22; unfilled slots stay empty. SAMs, AAA and ground targets remain active. An idle human keeps
+  neutral-control keepalive. Departure removes its live plane without a loss
+  or kill, and a late join uses revive placement.
+- Each wing can be Player Choice with an AI-flyable default. Human choices may
+  use any flyable aircraft shared by the session, including helicopters,
+  powered-lift aircraft and heavies. Existing content checks apply.
+- Taking a Choice slot opens the existing aircraft selector, then Load Ordnance.
+  Loadout reopens this flow. All peers build the accepted per-plane types.
+- Every player waiting to revive gets loadout controls over the running flight,
+  with timer and revive prompt visible. Choice slots also offer aircraft
+  selection. John updated the in-flight presentation on 2026-10-16: use the
+  in-game Escape menu widget, font, panel, highlight, sounds and input controls;
+  the lobby continues to use the retail dialogs. The host applies revive-weapons and loadouts own/any. Escape cancels
+  edits and input returns to flight after revival.
+- Taking a Choice slot from its AI default removes that aircraft and spawns the
+  chosen one at the existing revival distance, side bearing, altitude and speed.
+
+Agent decisions: AI defaults stay mandatory with AI off; co-op without enemy
+humans is allowed, with no enemy aircraft. Force Start requires the ready-player
+minimum and can bring unready slot holders in, including with AI off.
+Cancelling the lobby aircraft selector retains the previously displayed type
+and proceeds to its ordnance page; cancelling ordnance sends nothing.
+
+Current implementation uses a Fixed/Player choice control beside each wing's
+existing aircraft field, which serves as its AI default, and an AI aircraft
+control above the wing rows when hosting. The in-flight menu uses station display
+order from the shared loadout model, cycles legal stores and quantities, and
+provides internal fuel, Standard load and Done. Capacity and weight validation
+use the same loadout code as the lobby and host. The host applies revive-weapons
+to the accepted choice. Agent presentation decision: aircraft lists use pages of
+12; quantities cycle in single units up to a capacity of 20, otherwise in
+ten-percent steps. Internal fuel cycles from 10 to 100 percent in ten-percent
+steps. Done stages a choice for the normal revive request; Escape discards edits.
+
+John requested persistent access on 2026-10-22, an **opinionated** multiplayer
+addition. While waiting under `respawn revive` with lives remaining, the
+in-flight Escape menu offers **Loadout...**, and **Aircraft...** only for a
+Player Choice slot. These entries remain available throughout the delay and
+until the player actually respawns. The initial loadout page has no timeout.
+Done saves the aircraft and ordnance together; reopening either page restores
+that saved choice, including fuel. Cancel or Escape discards only the current
+unsaved edits. **Mission...** continues to open the same read-only brief.
+
+Agent decisions: close the menus, then press Enter or controller A to request
+revival. Enter inside a page selects its focused row; Done never respawns.
+Enter before the delay ends is ignored, with no request queued. Holding Enter
+cannot carry a menu selection into a revival confirmation. The countdown and
+ready prompt show remaining lives when finite. Waiting spends no life. There
+is no maximum wait and no automatic revival. The existing idle rules exclude
+lost aircraft, so AI never takes a dead player's slot, even after the away
+time; idle handoff still applies to live aircraft after revival. Ending the
+mission or leaving the game still ends the wait. Lives, weapon restrictions,
+loadout validation, `ai-slot`, and single-player end-of-flight rules are
+unchanged. The existing revival request carries the saved choice, with no
+protocol change.

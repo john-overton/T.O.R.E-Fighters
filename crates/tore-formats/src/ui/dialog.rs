@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 pub struct Dialog {
     pub origin: [i32; 2],
     pub size: [usize; 2],
+    /// A dialog whose size is zero draws a named picture at its origin instead
+    /// of a generic panel; the name (for example `MODEM`) is stored in the header.
+    pub picture: Option<String>,
     pub controls: Vec<Control>,
 }
 
@@ -16,10 +19,20 @@ pub struct Control {
     pub draw: String,
     /// Static local position; native setup may replace this before drawing.
     pub position: Option<[i32; 2]>,
+    /// Actions and list boxes: width in pixels. Check boxes: the side of the
+    /// square. Edit boxes: the value at record offset 8 (40 on the network
+    /// prompts, 25 on the pilot name); its unit is not established.
     pub width: Option<usize>,
     pub action_id: Option<u8>,
     /// Literal or imported label symbol, never the thunk's machine code.
+    /// Action buttons and text records carry one.
     pub label: Option<String>,
+    /// List boxes only: how many rows the box shows (record offset 16).
+    pub rows: Option<usize>,
+    /// Text records only: the 16-bit value after the position. It is 9 on every
+    /// text record except the last of a dialog, which carries 10; its meaning is
+    /// not established.
+    pub text_tail: Option<u16>,
 }
 
 struct Section<'a> {
@@ -53,6 +66,19 @@ fn string(sections: &[Section<'_>], va: usize) -> Result<String> {
 }
 fn signed_word(bytes: &[u8], offset: usize) -> Result<i32> {
     Ok(i32::from(u16_at(bytes, offset)? as i16))
+}
+
+/// The picture name a size-zero dialog stores at header offset 14: 1 to 12
+/// upper-case letters, digits or underscores ending in a zero byte.
+fn picture_name(code: &[u8]) -> Option<String> {
+    let field = code.get(14..27)?;
+    let end = field.iter().position(|b| *b == 0)?;
+    let name = &field[..end];
+    (!name.is_empty()
+        && name
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'_'))
+    .then(|| String::from_utf8_lossy(name).into_owned())
 }
 
 pub fn parse(data: &[u8]) -> Result<Dialog> {
@@ -164,7 +190,13 @@ pub fn parse(data: &[u8]) -> Result<Dialog> {
             };
             if !matches!(
                 draw.as_str(),
-                "_DrawAction" | "_DrawListBox" | "_DrawDial" | "_DrawRocker" | "_DrawText"
+                "_DrawAction"
+                    | "_DrawListBox"
+                    | "_DrawDial"
+                    | "_DrawRocker"
+                    | "_DrawText"
+                    | "_DrawEditBox"
+                    | "_DrawCheck"
             ) {
                 continue;
             }
@@ -172,45 +204,67 @@ pub fn parse(data: &[u8]) -> Result<Dialog> {
                 return Err(invalid("too many dialog controls"));
             }
             let record = slice(code, offset, 24)?;
-            let position = (draw != "_DrawText")
-                .then(|| -> Result<[i32; 2]> {
-                    Ok([signed_word(record, 4)?, signed_word(record, 6)?])
-                })
-                .transpose()?;
-            let (width, action_id, label) = if draw == "_DrawAction" {
-                let label = u32_at(record, 20)?;
-                let label = if let Ok(thunk) = at(&sections, label, 6)
+            // Actions, list boxes and rockers keep their position at +4; a text
+            // record keeps its label pointer at +4 and its position at +12.
+            let position = if draw == "_DrawText" {
+                [signed_word(record, 12)?, signed_word(record, 14)?]
+            } else {
+                [signed_word(record, 4)?, signed_word(record, 6)?]
+            };
+            let label_at = |pointer: usize, what: &'static str| -> Result<String> {
+                if let Ok(thunk) = at(&sections, pointer, 6)
                     && thunk[..2] == [0xff, 0x25]
                 {
                     imports
                         .get(&u32_at(thunk, 2)?)
                         .cloned()
-                        .ok_or_else(|| invalid("unknown action label import"))?
+                        .ok_or_else(|| invalid(what))
                 } else {
-                    string(&sections, label)?
-                };
-                (Some(u16_at(record, 18)?), Some(record[17]), Some(label))
-            } else {
-                (
-                    if draw == "_DrawListBox" {
-                        Some(u16_at(record, 8)?)
-                    } else {
-                        None
-                    },
-                    None,
-                    None,
-                )
+                    string(&sections, pointer)
+                }
             };
+            let (width, action_id, label) = match draw.as_str() {
+                "_DrawAction" => (
+                    Some(u16_at(record, 18)?),
+                    Some(record[17]),
+                    Some(label_at(
+                        u32_at(record, 20)?,
+                        "unknown action label import",
+                    )?),
+                ),
+                // A text record whose label pointer is zero gets its words from
+                // the game at run time (the nationality check boxes).
+                "_DrawText" => (
+                    None,
+                    None,
+                    match u32_at(record, 4)? {
+                        0 => None,
+                        pointer => Some(label_at(pointer, "unknown text label import")?),
+                    },
+                ),
+                "_DrawListBox" | "_DrawEditBox" => (Some(u16_at(record, 8)?), None, None),
+                "_DrawCheck" => (Some(u16_at(record, 12)?), None, None),
+                _ => (None, None, None),
+            };
+            let rows = (draw == "_DrawListBox")
+                .then(|| u16_at(record, 16))
+                .transpose()?;
+            let text_tail = (draw == "_DrawText")
+                .then(|| u16_at(record, 16))
+                .transpose()?
+                .map(|v| v as u16);
             if controls
                 .insert(
                     offset,
                     Control {
                         code_offset: offset,
                         draw: draw.clone(),
-                        position,
+                        position: Some(position),
                         width,
                         action_id,
                         label,
+                        rows,
+                        text_tail,
                     },
                 )
                 .is_some()
@@ -220,9 +274,15 @@ pub fn parse(data: &[u8]) -> Result<Dialog> {
         }
         cursor += size;
     }
+    let size = [u16_at(code, 8)?, u16_at(code, 10)?];
     Ok(Dialog {
         origin: [signed_word(code, 4)?, signed_word(code, 6)?],
-        size: [u16_at(code, 8)?, u16_at(code, 10)?],
+        size,
+        picture: if size == [0, 0] {
+            picture_name(code)
+        } else {
+            None
+        },
         controls: controls.into_values().collect(),
     })
 }
@@ -303,5 +363,369 @@ mod tests {
         let mut duplicate = b.clone();
         duplicate[970..972].copy_from_slice(&0x3015u16.to_le_bytes());
         assert!(parse(&duplicate).is_err());
+    }
+
+    /// Build a module whose CODE section holds `code` (at VA 0x1000) and whose
+    /// draw thunks import `names`; `slots` lists (record offset, import index)
+    /// pairs, each written as a relocated pointer to that import's thunk.
+    fn module(mut code: Vec<u8>, names: &[&str], slots: &[(usize, usize)]) -> Vec<u8> {
+        const THUNKS: usize = 0x300;
+        code.resize(0x400, 0);
+        let mut idata = vec![0u8; 0x300];
+        idata[0..4].copy_from_slice(&0x2040u32.to_le_bytes());
+        idata[16..20].copy_from_slice(&0x2080u32.to_le_bytes());
+        for (i, name) in names.iter().enumerate() {
+            let name_at = 0x100 + 32 * i;
+            idata[0x40 + 4 * i..0x44 + 4 * i]
+                .copy_from_slice(&(0x2000 + name_at as u32).to_le_bytes());
+            idata[name_at + 2..name_at + 2 + name.len()].copy_from_slice(name.as_bytes());
+            let thunk = THUNKS + 8 * i;
+            code[thunk..thunk + 2].copy_from_slice(&[0xff, 0x25]);
+            code[thunk + 2..thunk + 6].copy_from_slice(&(0x2080 + 4 * i as u32).to_le_bytes());
+        }
+        let mut reloc = Vec::new();
+        reloc.extend_from_slice(&0x1000u32.to_le_bytes());
+        reloc.extend_from_slice(&((8 + 2 * slots.len()) as u32).to_le_bytes());
+        for (offset, import) in slots {
+            let thunk = 0x1000 + THUNKS + 8 * import;
+            code[*offset..*offset + 4].copy_from_slice(&(thunk as u32).to_le_bytes());
+            reloc.extend_from_slice(&(0x3000 | *offset as u16).to_le_bytes());
+        }
+        reloc.extend_from_slice(&[0; 8]);
+        let mut b = vec![0; 512];
+        b[..2].copy_from_slice(b"MZ");
+        put(&mut b, 60, 64);
+        b[64..68].copy_from_slice(b"PL\0\0");
+        b[68..70].copy_from_slice(&0x14cu16.to_le_bytes());
+        b[70..72].copy_from_slice(&3u16.to_le_bytes());
+        b[84..86].copy_from_slice(&224u16.to_le_bytes());
+        put(&mut b, 192, 0x2000);
+        put(&mut b, 196, 40);
+        for (i, name, va, raw, size) in [
+            (0, b"CODE\0\0\0\0", 0x1000, 512, 0x400),
+            (1, b".idata\0\0", 0x2000, 512 + 0x400, 0x300),
+            (2, b".reloc\0\0", 0x3000, 512 + 0x700, reloc.len()),
+        ] {
+            let s = 312 + i * 40;
+            b[s..s + 8].copy_from_slice(name);
+            for (off, v) in [(8, size), (12, va), (16, size), (20, raw)] {
+                put(&mut b, s + off, v as u32);
+            }
+        }
+        b.extend_from_slice(&code);
+        b.extend_from_slice(&idata);
+        b.extend_from_slice(&reloc);
+        b
+    }
+    fn word(code: &mut [u8], at: usize, value: i32) {
+        code[at..at + 2].copy_from_slice(&(value as i16).to_le_bytes());
+    }
+    /// A header with the given origin and size, then room for records at 26.
+    fn header(origin: [i32; 2], size: [i32; 2]) -> Vec<u8> {
+        let mut code = vec![0; 0x300];
+        word(&mut code, 4, origin[0]);
+        word(&mut code, 6, origin[1]);
+        word(&mut code, 8, size[0]);
+        word(&mut code, 10, size[1]);
+        code
+    }
+    #[test]
+    fn text_records_give_position_label_and_tail() {
+        let mut code = header([86, 96], [0, 0]);
+        // Record at 40: thunk, label pointer, zero, x, y, tail. Label in code at 200.
+        code[200..213].copy_from_slice(b"Player name\0\0");
+        put(&mut code, 44, 0x1000 + 200);
+        word(&mut code, 52, 106);
+        word(&mut code, 54, -4);
+        word(&mut code, 56, 9);
+        // A second text with a null label (filled in by the game at run time).
+        word(&mut code, 78, 65);
+        word(&mut code, 80, 37);
+        word(&mut code, 82, 3);
+        let b = module(code, &["_DrawText"], &[(40, 0), (66, 0)]);
+        let d = parse(&b).unwrap();
+        assert_eq!(d.controls.len(), 2);
+        let (first, second) = (&d.controls[0], &d.controls[1]);
+        assert_eq!(first.draw, "_DrawText");
+        assert_eq!(first.position, Some([106, -4]));
+        assert_eq!(first.label.as_deref(), Some("Player name"));
+        assert_eq!(first.text_tail, Some(9));
+        assert_eq!(
+            (first.width, first.action_id, first.rows),
+            (None, None, None)
+        );
+        assert_eq!(second.position, Some([65, 37]));
+        assert_eq!(second.label, None);
+        assert_eq!(second.text_tail, Some(3));
+    }
+    #[test]
+    fn list_boxes_give_their_row_count() {
+        let mut code = header([10, 80], [619, 395]);
+        word(&mut code, 44, 38);
+        word(&mut code, 46, 105);
+        word(&mut code, 48, 200);
+        word(&mut code, 56, 4);
+        word(&mut code, 70, 35);
+        word(&mut code, 72, 46);
+        word(&mut code, 74, 549);
+        word(&mut code, 82, 8);
+        let b = module(code, &["_DrawListBox"], &[(40, 0), (66, 0)]);
+        let d = parse(&b).unwrap();
+        assert_eq!(d.picture, None);
+        let rows: Vec<_> = d
+            .controls
+            .iter()
+            .map(|c| (c.position.unwrap(), c.width.unwrap(), c.rows.unwrap()))
+            .collect();
+        assert_eq!(rows, [([38, 105], 200, 4), ([35, 46], 549, 8)]);
+        assert!(d.controls.iter().all(|c| c.text_tail.is_none()));
+    }
+    #[test]
+    fn edit_and_check_boxes_give_position_and_size() {
+        let mut code = header([10, 200], [620, 124]);
+        word(&mut code, 44, 56);
+        word(&mut code, 46, 20);
+        word(&mut code, 48, 40);
+        // A check box repeats its position at +8 and holds its side at +12.
+        word(&mut code, 70, 30);
+        word(&mut code, 72, 30);
+        word(&mut code, 74, 30);
+        word(&mut code, 76, 30);
+        word(&mut code, 78, 19);
+        word(&mut code, 80, 19);
+        let b = module(code, &["_DrawEditBox", "_DrawCheck"], &[(40, 0), (66, 1)]);
+        let d = parse(&b).unwrap();
+        assert_eq!(d.controls[0].draw, "_DrawEditBox");
+        assert_eq!(d.controls[0].position, Some([56, 20]));
+        assert_eq!(d.controls[0].width, Some(40));
+        assert_eq!(d.controls[1].draw, "_DrawCheck");
+        assert_eq!(d.controls[1].position, Some([30, 30]));
+        assert_eq!(d.controls[1].width, Some(19));
+        assert_eq!(d.controls[1].rows, None);
+    }
+    #[test]
+    fn a_size_zero_dialog_names_its_picture() {
+        let mut code = header([80, 84], [0, 0]);
+        code[14..20].copy_from_slice(b"MODEM\0");
+        let b = module(code, &[], &[]);
+        let d = parse(&b).unwrap();
+        assert_eq!((d.origin, d.size), ([80, 84], [0, 0]));
+        assert_eq!(d.picture.as_deref(), Some("MODEM"));
+        // A name with digits and an underscore, as long as the field allows.
+        let mut code = header([0, 0], [0, 0]);
+        code[14..27].copy_from_slice(b"AB_12CD34567\0");
+        assert_eq!(
+            parse(&module(code, &[], &[])).unwrap().picture.as_deref(),
+            Some("AB_12CD34567")
+        );
+    }
+    #[test]
+    fn only_size_zero_dialogs_with_a_clean_name_report_a_picture() {
+        // A sized dialog's bytes at 14 are not a name (retail has ff 00 00 00).
+        let mut code = header([10, 80], [619, 395]);
+        code[14..19].copy_from_slice(b"MODEM");
+        assert_eq!(parse(&module(code, &[], &[])).unwrap().picture, None);
+        for bad in [&b"\xff\0\0\0"[..], b"modem\0", b"MO DEM\0", b"\0MODEM\0"] {
+            let mut code = header([0, 0], [0, 0]);
+            code[14..14 + bad.len()].copy_from_slice(bad);
+            assert_eq!(parse(&module(code, &[], &[])).unwrap().picture, None);
+        }
+        // No terminator inside the field.
+        let mut code = header([0, 0], [0, 0]);
+        code[14..27].copy_from_slice(b"ABCDEFGHIJKLM");
+        assert_eq!(parse(&module(code, &[], &[])).unwrap().picture, None);
+    }
+    #[test]
+    fn a_bad_text_label_pointer_is_an_error() {
+        let mut code = header([0, 0], [0, 0]);
+        put(&mut code, 44, 0x9000);
+        assert!(parse(&module(code, &["_DrawText"], &[(40, 0)])).is_err());
+    }
+
+    /// The retail dialogs, when the install is present (the `gameassets` link
+    /// or `TORE_GAME_DIR`); the test skips quietly otherwise.
+    fn retail(name: &str) -> Option<Dialog> {
+        let root = std::env::var_os("TORE_GAME_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            });
+        let archive = crate::Archive::open(root.join("FA_2.LIB")).ok()?;
+        let data = archive.read(&format!("{name}.DLG")).ok()?;
+        Some(parse(&data).unwrap_or_else(|e| panic!("{name}: {e}")))
+    }
+    fn summary(d: &Dialog, draw: &str) -> Vec<([i32; 2], Option<usize>, Option<String>)> {
+        d.controls
+            .iter()
+            .filter(|c| c.draw == draw)
+            .map(|c| (c.position.unwrap(), c.rows.or(c.width), c.label.clone()))
+            .collect()
+    }
+    #[test]
+    fn retail_network_dialogs_decode_completely() {
+        let Some(newnet) = retail("NEWNET") else {
+            eprintln!("skipped: no retail install");
+            return;
+        };
+        // NEWNET: a generic 619 by 395 panel, four buttons, a 4 row Games list, a rocker.
+        assert_eq!(
+            (newnet.origin, newnet.size, newnet.picture.as_deref()),
+            ([10, 80], [619, 395], None)
+        );
+        let buttons: Vec<_> = newnet
+            .controls
+            .iter()
+            .filter(|c| c.draw == "_DrawAction")
+            .map(|c| {
+                (
+                    c.label.clone().unwrap(),
+                    c.position.unwrap(),
+                    c.width,
+                    c.action_id,
+                )
+            })
+            .collect();
+        assert_eq!(
+            buttons,
+            [
+                ("New".to_string(), [96, 339], Some(85), Some(1)),
+                ("Join".to_string(), [219, 339], Some(85), Some(0)),
+                ("Options".to_string(), [342, 339], Some(85), Some(0)),
+                ("_cancelString".to_string(), [465, 339], Some(85), Some(2)),
+            ]
+        );
+        assert_eq!(
+            summary(&newnet, "_DrawListBox"),
+            [([38, 105], Some(4), None)]
+        );
+        assert_eq!(newnet.controls.last().unwrap().draw, "_DrawRocker");
+        assert_eq!(newnet.controls.last().unwrap().position, Some([270, 120]));
+        // The host's and the joiner's player lists: 8 rows, 549 wide.
+        for (name, count) in [("NETNEW", 4), ("NETJOIN", 2)] {
+            let d = retail(name).unwrap();
+            assert_eq!((d.origin, d.size), ([10, 100], [619, 375]), "{name}");
+            assert_eq!(d.controls.len(), count, "{name}");
+            let list = d
+                .controls
+                .iter()
+                .find(|c| c.draw == "_DrawListBox")
+                .unwrap();
+            assert_eq!(
+                (list.position, list.width, list.rows),
+                (Some([35, 46]), Some(549), Some(8))
+            );
+        }
+        // Options panels, the message prompts, the modem status box.
+        for (name, size) in [("NETTCP", [465, 395]), ("NETIPX2", [465, 275])] {
+            let d = retail(name).unwrap();
+            assert_eq!((d.origin, d.size), ([89, 80], size), "{name}");
+            let labels: Vec<_> = d
+                .controls
+                .iter()
+                .map(|c| c.label.clone().unwrap())
+                .collect();
+            assert_eq!(labels, ["_okString", "Default", "_cancelString"], "{name}");
+        }
+        let prompt = retail("NETCEDT").unwrap();
+        assert_eq!((prompt.origin, prompt.size), ([10, 200], [620, 124]));
+        let edit = prompt
+            .controls
+            .iter()
+            .find(|c| c.draw == "_DrawEditBox")
+            .unwrap();
+        assert_eq!((edit.position, edit.width), (Some([56, 20]), Some(40)));
+        let status = retail("MODEMSTS").unwrap();
+        assert_eq!(
+            (status.origin, status.size, status.picture.as_deref()),
+            ([140, 174], [360, 190], None)
+        );
+        assert_eq!(
+            summary(&status, "_DrawText"),
+            [([135, 35], None, Some("Connection status".into()))]
+        );
+        // MODEM names its picture and carries two column headings.
+        let modem = retail("MODEM").unwrap();
+        assert_eq!((modem.origin, modem.size), ([80, 84], [0, 0]));
+        assert_eq!(modem.picture.as_deref(), Some("MODEM"));
+        assert_eq!(
+            summary(&modem, "_DrawText"),
+            [
+                ([106, 32], None, Some("Player name".into())),
+                ([286, 32], None, Some("Phone number".into())),
+            ]
+        );
+        let tails: Vec<_> = modem.controls.iter().filter_map(|c| c.text_tail).collect();
+        assert_eq!(tails, [9, 10]);
+        // The callsign picker: 14 rows and a heading.
+        let callsign = retail("CALLSIGN").unwrap();
+        assert_eq!(
+            summary(&callsign, "_DrawListBox"),
+            [([30, 35], Some(14), None)]
+        );
+        assert_eq!(
+            summary(&callsign, "_DrawText"),
+            [([43, 10], None, Some("Choose your callsign.".into()))]
+        );
+    }
+    #[test]
+    fn every_retail_multiplayer_dialog_decodes() {
+        if retail("NEWNET").is_none() {
+            eprintln!("skipped: no retail install");
+            return;
+        }
+        let names = [
+            "MODEM", "MODEMCOM", "MODEMSTS", "MODLIST", "SERIAL", "COM", "COMLIST", "NEWNET",
+            "NETNEW", "NETJOIN", "NETTCP", "NETIPX", "NETIPX2", "NETDIR", "NETEDT", "NETBEDT",
+            "NETCEDT", "CALLSIGN", "EDITSIGN", "MC_DELAY", "MC_DIST", "MC_DLG", "MC_KILLS",
+            "MC_KILLT", "MC_LIVES", "MC_NAME", "MC_NAT", "MC_NAT2", "MC_NATF", "MC_SCR", "MC_TIME",
+            "MC_WETH",
+        ];
+        for name in names {
+            let d = retail(name).unwrap();
+            assert!(!d.controls.is_empty() || d.size == [0, 0], "{name}");
+            // A size-zero dialog names the picture it draws; a sized one does not.
+            assert_eq!(d.picture.is_some(), d.size == [0, 0], "{name}");
+            for c in &d.controls {
+                assert!(c.position.is_some(), "{name} {}", c.draw);
+                // Only the three dialogs of check boxes leave text labels to the game.
+                if c.draw == "_DrawText" && c.label.is_none() {
+                    assert!(["MC_NAT", "MC_NATF"].contains(&name), "{name}");
+                }
+                assert_eq!(c.rows.is_some(), c.draw == "_DrawListBox", "{name}");
+                assert_eq!(c.text_tail.is_some(), c.draw == "_DrawText", "{name}");
+            }
+        }
+        // The pictures behind the size-zero dialogs.
+        for (name, picture) in [
+            ("MODEM", "MODEM"),
+            ("MODEMCOM", "MODEMCOM"),
+            ("SERIAL", "SERIAL"),
+            ("COM", "COM"),
+            ("NETIPX", "NETIPX"),
+            ("NETDIR", "NETDIR"),
+            ("MC_DLG", "MC"),
+        ] {
+            assert_eq!(
+                retail(name).unwrap().picture.as_deref(),
+                Some(picture),
+                "{name}"
+            );
+        }
+        // Row counts of the pick lists, in the survey's table.
+        for (name, rows) in [
+            ("MODLIST", 10),
+            ("COMLIST", 10),
+            ("MC_NAT2", 15),
+            ("MC_KILLT", 4),
+        ] {
+            let d = retail(name).unwrap();
+            let list = d
+                .controls
+                .iter()
+                .find(|c| c.draw == "_DrawListBox")
+                .unwrap();
+            assert_eq!(list.rows, Some(rows), "{name}");
+        }
     }
 }

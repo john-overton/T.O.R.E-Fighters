@@ -7,12 +7,12 @@
 //! keys and mouse the flight menu uses. Opinionated addition requested by
 //! John on 2026-09-26; items, wording and the pick radius are agent design
 //! decisions (2026-09-26).
+use crate::camera::Camera;
 use crate::controls_editor::{
     Editor, FOCUS, GOOD, HEADER, MUTED, PALE, PANEL, Rect, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::menu::Canvas;
 use crate::replay::panels::ascii;
-use crate::terrain::Camera;
 use tore_formats::font::Font;
 use tore_replay::Side;
 
@@ -49,6 +49,10 @@ pub enum Action {
     Follow(u32),
     /// The front view from the aircraft: the cockpit for the player.
     Cockpit(u32),
+    /// The replay's HUD camera on the aircraft (nr-replayviews).
+    HudCamera(u32),
+    /// The replay's Sensor View from the aircraft's targeting sight.
+    SensorView(u32),
     /// The follow drone beside the aircraft.
     Drone(u32),
     /// A free drone beside the missile.
@@ -66,6 +70,9 @@ pub enum Action {
     ViewFrom(Target),
     /// The replay's object view looks at this object.
     LookAt(Target),
+    /// A camera chosen directly from the replay transport bar.
+    Camera(u8),
+    DroneMode(super::drone::Mode),
 }
 
 /// One menu row: a heading, or an item with an optional detail on the
@@ -123,6 +130,9 @@ pub struct Aircraft {
     pub member: u16,
     /// Flown by the AI, so it has thinking to show.
     pub ai: bool,
+    /// It has a targeting sight (a laser pod, a laser, a FLIR or the
+    /// AC-130's console): the replay offers its Sensor View.
+    pub sight: bool,
 }
 
 impl Aircraft {
@@ -162,6 +172,10 @@ pub fn aircraft_items(aircraft: &Aircraft, options: Options) -> Vec<Item> {
         Item::new("Cockpit view", Action::Cockpit(id)),
     ];
     if !options.live {
+        items.push(Item::new("HUD camera", Action::HudCamera(id)));
+        if aircraft.sight {
+            items.push(Item::new("Sensor view", Action::SensorView(id)));
+        }
         items.push(Item::new("Drone here", Action::Drone(id)));
     }
     object_items(&mut items, Target::Aircraft(id), options);
@@ -257,6 +271,8 @@ pub enum Outcome {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
     pub target: Target,
+    /// Camera choices are static; an empty-space object list refreshes each frame.
+    pub camera_choices: bool,
     pub title: String,
     pub items: Vec<Item>,
     rect: Rect,
@@ -268,6 +284,29 @@ pub struct Menu {
 }
 
 impl Menu {
+    /// Refresh a live object list without moving the focus to a different
+    /// surviving object. Cancel a pending click when its rows change.
+    pub fn replace_items(&mut self, items: Vec<Item>) {
+        if self.items == items {
+            return;
+        }
+        let action = self.items.get(self.focus).and_then(|i| i.action);
+        self.items = items;
+        self.rows = self.items.len().clamp(1, MAX_ROWS);
+        self.rect.3 = self.row * (self.rows as i32 + 1) + 2;
+        self.rect.1 = self
+            .rect
+            .1
+            .min((crate::replay::panels::HEIGHT - EDGE - self.rect.3).max(EDGE));
+        self.focus = action
+            .and_then(|a| self.items.iter().position(|i| i.action == Some(a)))
+            .or_else(|| self.next(0, 1, true))
+            .unwrap_or(0);
+        self.scroll = self.scroll.min(self.items.len().saturating_sub(self.rows));
+        self.pressed = None;
+        self.reveal();
+    }
+
     /// A menu opened by a click at layer point `at`, placed beside the
     /// point and kept inside the layer; a point outside the layer (in the
     /// bands beside or above it) is brought to its edge first.
@@ -311,6 +350,7 @@ impl Menu {
         };
         let mut menu = Self {
             target,
+            camera_choices: false,
             title,
             rect: (
                 place(x, width, crate::replay::panels::WIDTH),
@@ -542,12 +582,14 @@ pub struct Pickable {
 /// (`labels` by aircraft id) when one is drawn, and every weapon but gun
 /// rounds.
 pub fn pickables(
-    picture: &crate::render_snapshot::RenderSnapshot,
+    picture: &crate::snapshot::RenderSnapshot,
     labels: &[(u32, [f64; 4])],
-    aircraft: impl Fn(&crate::render_snapshot::AircraftPose) -> bool,
+    aircraft: impl Fn(&crate::snapshot::AircraftPose) -> bool,
 ) -> Vec<Pickable> {
     std::iter::once(&picture.player)
         .chain(&picture.targets)
+        // An observer's recording has no player: its empty pose is nobody.
+        .filter(|pose| pose.id != crate::replay::convert::NO_PLAYER)
         .filter(|pose| (pose.airborne || !pose.crashed) && aircraft(pose))
         .map(|pose| Pickable {
             target: Target::Aircraft(pose.id),
@@ -651,6 +693,7 @@ mod tests {
             wing,
             member,
             ai: id != 0,
+            sight: false,
         };
         vec![
             a(4, "Enemy 2-2", Side::Enemy, 2, 2),
@@ -674,6 +717,7 @@ mod tests {
             [
                 "Follow (chase view)",
                 "Cockpit view",
+                "HUD camera",
                 "Drone here",
                 "View from here",
                 "Look at this",
@@ -700,10 +744,33 @@ mod tests {
             ]
         );
         let items = aircraft_items(&fleet[2], replay);
-        assert_eq!(items[3].action, Some(Action::ViewFrom(Target::Aircraft(3))));
-        assert_eq!(items[4].action, Some(Action::LookAt(Target::Aircraft(3))));
-        assert_eq!(items[8].detail, "On");
-        assert_eq!(items[9].detail, "Off");
+        assert_eq!(items[2].action, Some(Action::HudCamera(3)));
+        assert_eq!(items[4].action, Some(Action::ViewFrom(Target::Aircraft(3))));
+        assert_eq!(items[5].action, Some(Action::LookAt(Target::Aircraft(3))));
+        assert_eq!(items[9].detail, "On");
+        assert_eq!(items[10].detail, "Off");
+        // An aircraft with a targeting sight offers its Sensor View too.
+        let pod = Aircraft {
+            sight: true,
+            ..fleet[2].clone()
+        };
+        let items = aircraft_items(&pod, replay);
+        assert_eq!(
+            labels(&items[..5]),
+            [
+                "Follow (chase view)",
+                "Cockpit view",
+                "HUD camera",
+                "Sensor view",
+                "Drone here"
+            ]
+        );
+        assert_eq!(items[3].action, Some(Action::SensorView(3)));
+        assert!(
+            labels(&aircraft_items(&pod, live))
+                .iter()
+                .all(|l| l != "Sensor view" && l != "HUD camera")
+        );
         let missile = missile_items(7, Some(&fleet[2]), replay);
         assert_eq!(missile[0].action, Some(Action::Guidance(7)));
         assert_eq!(
@@ -870,10 +937,11 @@ mod tests {
         );
         let centre = |r: Rect| Some((f64::from(r.0 + r.2 / 2), f64::from(r.1 + r.3 / 2)));
         let row = |i: usize| centre(menu.row_rect(i));
-        // AI thinking, after the replay's two object view items.
-        let (third, fourth) = (row(5), row(6));
+        // AI thinking, after the replay's HUD camera and two object view
+        // items.
+        let (third, fourth) = (row(6), row(7));
         menu.pointer(third);
-        assert_eq!(menu.focus, 5);
+        assert_eq!(menu.focus, 6);
         assert!(menu.down(third));
         assert_eq!(menu.up(fourth), Outcome::Handled);
         assert!(menu.down(third));

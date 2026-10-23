@@ -1,13 +1,18 @@
 //! Hard limits. The writer rejects input beyond them with a clear message and
 //! writes nothing for that frame; the reader rejects files beyond them.
 //! Agent decisions (2026-09-26), sized well above what the simulation can
-//! produce: it caps live projectiles at 256, effects at 64 and smoke puffs at
-//! 8,192, and Quick Mission flies at most 30 aircraft.
+//! produce: it caps live projectiles at 5,000 (256 before 2026-10-09),
+//! effects at 64 and smoke puffs at 8,192, and Quick Mission flies at most 30
+//! aircraft.
 
 /// Aircraft in one frame.
 pub const MAX_AIRCRAFT: usize = 64;
-/// Live projectiles in one frame.
-pub const MAX_PROJECTILES: usize = 1024;
+/// Live projectiles in one frame: above the simulation's 5,000, so a
+/// recording never drops a round in flight, with room for a network
+/// player's own drawn gun rounds beside the host's (agent decision,
+/// 2026-10-09; 1,024 before). The count is a variable-length number, so the
+/// file's bytes do not change.
+pub const MAX_PROJECTILES: usize = 8192;
 /// Debris pieces in one frame.
 pub const MAX_DEBRIS: usize = 256;
 /// Ejected pilots in one frame.
@@ -18,6 +23,13 @@ pub const MAX_EFFECTS_PER_TICK: usize = 64;
 pub const MAX_PUFFS_PER_TICK: usize = 4096;
 /// Surface object hit-point changes in one frame.
 pub const MAX_SURFACE_CHANGES_PER_TICK: usize = 4096;
+/// Surface units whose poses one frame holds (format 3).
+pub const MAX_SURFACE_UNITS: usize = 4096;
+/// Launcher and magazine changes in one frame (format 3).
+pub const MAX_SURFACE_STOCK_PER_TICK: usize = 4096;
+/// City fill buildings knocked down in one frame: the fill's own building
+/// budget (nr-fx3).
+pub const MAX_CITY_PER_TICK: usize = 500_000;
 /// Events in one frame.
 pub const MAX_EVENTS_PER_TICK: usize = 1024;
 /// Fields on one event.
@@ -47,6 +59,8 @@ pub const MAX_HEADER_BYTES: usize = 64 << 10;
 pub const MAX_KEY_VALUES: usize = 256;
 /// Registered aircraft, and separately registered weapons.
 pub const MAX_REGISTERED: usize = 4096;
+/// Registered surface units (format 3).
+pub const MAX_REGISTERED_SURFACE: usize = 8192;
 /// Events a reader collects from one file.
 pub const MAX_EVENTS_TOTAL: usize = 4_000_000;
 /// Chunks in one file.

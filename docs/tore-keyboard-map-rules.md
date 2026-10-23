@@ -22,8 +22,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
 - Exclude range fixtures, developer/test commands, damage injection, diagnostic
   toggles, startup command-line flags and AI tuning. Do not include a command
   simply because it appears in the complete input catalog. In particular,
-  Ctrl+Shift+I incoming missiles, Shift+Y target jammer and backslash range
-  reset do not belong on this map.
+  Ctrl+Shift+I incoming missiles, Shift+Y target jammer and the range reset
+  (Ctrl+Shift+Backslash since the AC-130 gunsight took plain Backslash) do not
+  belong on this map.
 - Use [the input catalog](../crates/tore-app/src/input_catalog.rs) and
   [generated controls list](CONTROLS.md) for current default bindings. Check
   [input handling](../crates/tore-app/src/input.rs),
@@ -44,16 +45,60 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   and [its window routing](../crates/tore-app/src/replay/host.rs): Alt+Enter
   and Alt+F4 reach the game, Alt or Ctrl with a view key picks the view's
   reference (shown in the note beside the function keys), and every other
-  Ctrl or Alt combination is ignored.
+  Ctrl or Alt combination is ignored unless assigned to a drone command.
+  Drone keys shown are defaults; Controls > Replay drone can rebind them.
   Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
   replay moment" default, is on this sheet because its purpose is replays;
-  the sheet says it works in flight.
+  the sheet says it works in flight. The viewer's own B (laser spots,
+  designations, guided weapons and bomb landings drawn in the 3D view) shares
+  that key's cap as its first row, in the display colour.
+- The sight keys are on Fly & Fight: Backslash and Shift+Backslash
+  (designate, pin ground; Ctrl+Backslash is the AC-130 sensor console's
+  picture, white hot, black hot, TV and night vision, `IR/TV/NV`), `/` (next visible ground object), Alt with the
+  arrows (slew), Shift+' and Shift+; (zoom), L and ; (drop) and Ctrl+L (the
+  laser). They were the AC-130 gunsight's keys (John, 2026-10-09) and serve
+  every aircraft with a laser designator or a FLIR since air-to-ground slice T1,
+  so they no longer carry an AC- label. A small legend box in the keyboard
+  plate's free top-right corner lists them with the AC-130's gamepad gestures.
+  Keep those labels in step with
+  [the input guide](INPUT.md#ac-130-gunsight-controls). Ctrl+9 (the AC-130's
+  sensor console, `CONSOLE` on the 9 cap, and the legend's line with its
+  View + Xbox gesture) sits beside Ctrl+7 and Ctrl+8, and Ctrl+0 (the
+  console radar's range, `RDR RNG` on the 0 cap) beside it. P (`PIN/REL`, the
+  gunsight's pin or release: orbit or search in the console) has its own cap,
+  with Shift+P (`GUN LOCK`) under it; Ctrl+Insert and Ctrl+Delete (the
+  console's own chaff and flare, `CONSOLE`) sit under Insert and Delete;
+  the legend's last two lines give the console's own meanings of the arrows,
+  = and -, T (the next radar target), Shift with the arrows, 1 to 8, Ctrl+0
+  (the radar's range) and Ctrl+Backslash (the picture: IR, TV, NVG) (slices
+  nr-cona and nr-conb, 2026-10-14), at
+  13 px so the legend keeps its box clear of the keypad. The other
+  air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
+  on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
+- Shift+F5 to Shift+F8 (the console's picture straight to white hot, black
+  hot, TV and night vision, nr-replayviews 2026-10-16) light F5 to F8 on Fly &
+  Fight in the sight's coral with an S badge (`WHOT`, `BHOT`, `TV`, `NVG`).
+  On the Replay sheet the same keys add an S row under the views (the
+  Sensor View in that picture), V reads `HUD CAM` with S `SENSOR`, 1 to 4 the
+  four pictures and Backslash `PICTURE` (both only in the Sensor View).
+- The wing orders that reach the ground are on the Comms sheet in coral: Alt+E
+  and Alt+R (engage, an aircraft or a ground object), Alt+W (engage the
+  target's class, `ENG CLS`), Alt+F (engage the IR/laser target, `ENG IR`) and
+  Alt+G (lase my target). The callout beside them has a three-line budget, so
+  a new order goes in a key row and its tooltip, not a new callout. Attack on
+  contact has no key of its own: it is Alt+W with no ground target designated
+  and Alt+F with nothing in the sight.
 - The keypad works as the navigation keys. Highlight a keypad key on the sheet
   for its command, with the same label as the key it stands for: keypad 0 and
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on
   Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View;
   keypad 7, 8, 9, 4, 6, 1, 2 and 3 (playback), 5 (center) and plus and minus
-  (zoom) on Replay.
+  (zoom) on Replay. The VTOL / Helicopters sheet also shows the Ctrl variants on
+  keypad 7/1 (collective), 9/3 (conversion), 8/2 (nozzle pitch on the
+  vectoring jets, cyclic trim on rotorcraft) and 4/6 (cyclic trim). On that
+  sheet the 1 to 8 caps carry a second `COLL` row, because on the helicopters
+  and the V-22 the throttle keys set the collective, and the A cap shows the
+  autopilot beside hover hold and the stability level.
 - Identify context or capability limits in the key label, tooltip or callout.
   Examples include F-22 weapon bays and Home while the live map is open.
   Instrument button letters are not automatically global keyboard bindings.
@@ -64,8 +109,10 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
 
 ## Sheets and key labels
 
-Retain the four sheets: **Fly & Fight**, **Comms**, **Cockpit & View** and
-**Replay**. The Replay sheet's keys cannot be remapped, so its subtitle and
+Retain the five sheets: **Fly & Fight**, **Comms**, **Cockpit & View**,
+**Replay** and **VTOL / Helicopters**. The fifth sheet was added for John's
+2026-10-05 aircraft-variety request and shows powered-lift defaults alongside
+ordinary attitude, power and ground controls. The Replay sheet's keys cannot be remapped, so its subtitle and
 footer call them built in instead of naming the controls screen.
 Place an action on the sheet for its purpose. One physical key can appear on
 several sheets with different commands. A dim key means there is no highlighted
@@ -83,6 +130,7 @@ Retain the existing badge conventions:
 | A | Alt |
 | CS | Ctrl and Shift together |
 | AS | Alt and Shift together |
+| CA | Ctrl and Alt together |
 | S/C | Either Shift or Ctrl, not both required |
 
 Keep modifiers on the command row they modify. Do not make Shift+E look like
@@ -119,8 +167,15 @@ controls are document controls, not new game bindings.
 
 - Compare relevant normal defaults with the input catalog; check both new and
   existing entries for omissions or stale descriptions. Explicitly exclude test
-  and range bindings during this comparison.
-- Check all four sheets in a browser at 1920×1080 and at a smaller viewport.
+  and range bindings during this comparison. Groups land on sheets as follows:
+  Flight, Systems, Weapons and the sensor keys on Fly & Fight; instrument and
+  window selection, views, HUD, map and the game keys on Cockpit & View;
+  Communication on Comms; the replay drone and viewer on Replay; the
+  powered-lift keys on VTOL / Helicopters. The `input_catalog` test
+  `every_key_the_flight_acts_on_is_a_catalog_key` fails when the flight starts
+  acting on a key the catalog does not list, so a new key cannot skip the
+  catalog, CONTROLS.md and this comparison.
+- Check all five sheets in a browser at 1920×1080 and at a smaller viewport.
   Verify every modified key, modifier badge, callout and leader. Text must not
   overflow, overlap unrelated controls or rely on a tooltip to explain
   ejection confirmation.

@@ -16,6 +16,56 @@ bind keyboard flight-roll roll axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-yaw yaw axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-x look-x axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-y look-y axis -1 0 1 0 1 1 100\n\
+bind keyboard Ctrl-ArrowUp vector-pitch-rate negative\n\
+bind keyboard Ctrl-ArrowDown vector-pitch-rate positive\n\
+bind keyboard Ctrl-ArrowLeft vector-yaw-rate negative\n\
+bind keyboard Ctrl-ArrowRight vector-yaw-rate positive\n\
+bind keyboard Ctrl-PageUp conversion-rate negative\n\
+bind keyboard Ctrl-PageDown conversion-rate positive\n\
+bind keyboard Ctrl-End collective-rate negative\n\
+bind keyboard Ctrl-Home collective-rate positive\n\
+bind keyboard 0 neutral-vector press\n\
+bind keyboard z nozzle-step-up press\n\
+bind keyboard x nozzle-step-down press\n\
+bind keyboard Shift-z nozzle-preset-forward press\n\
+bind keyboard Shift-x nozzle-preset-vertical press\n\
+bind keyboard Ctrl-ArrowUp trim-pitch-rate negative\n\
+bind keyboard Ctrl-ArrowDown trim-pitch-rate positive\n\
+bind keyboard Ctrl-ArrowLeft trim-roll-rate negative\n\
+bind keyboard Ctrl-ArrowRight trim-roll-rate positive\n\
+bind keyboard 0 trim-centre press\n\
+bind keyboard Ctrl-Alt-a hover-hold press\n\
+bind keyboard Ctrl-Shift-a stability-level press\n\
+bind keyboard Ctrl-7 weapon-group-next press\n\
+bind keyboard Ctrl-8 weapon-group-toggle press\n\
+bind keyboard Ctrl-9 sensor-console press\n\
+bind keyboard Shift-k jettison-tanks press\n\
+bind keyboard Ctrl-Shift-k jettison press\n\
+bind keyboard \\ sight-designate press\n\
+bind keyboard Shift-\\ sight-pin press\n\
+bind keyboard p sight-pin-toggle press\n\
+bind keyboard Shift-p gun-lock press\n\
+bind keyboard Ctrl-Insert console-chaff press\n\
+bind keyboard Ctrl-Delete console-flare press\n\
+bind keyboard Shift-' sight-zoom-in press\n\
+bind keyboard Shift-; sight-zoom-out press\n\
+bind keyboard Ctrl-\\ sight-polarity press\n\
+bind keyboard Shift-F5 sight-whot press\n\
+bind keyboard Shift-F6 sight-bhot press\n\
+bind keyboard Shift-F7 sight-tv press\n\
+bind keyboard Shift-F8 sight-nvg press\n\
+bind keyboard Ctrl-0 console-range press\n\
+bind keyboard Alt-ArrowLeft sight-left hold\n\
+bind keyboard Alt-ArrowRight sight-right hold\n\
+bind keyboard Alt-ArrowUp sight-up hold\n\
+bind keyboard Alt-ArrowDown sight-down hold\n\
+bind keyboard Ctrl-r a-g-radar press\n\
+bind keyboard Shift-r a-g-radar press\n\
+bind keyboard Ctrl-l laze press\n\
+bind keyboard / sight-next press\n\
+bind keyboard Ctrl-m weapon-seeker-mode press\n\
+bind keyboard Tab fire-gun hold\n\
+bind keyboard Ctrl-x nearest-ground press\n\
 bind keyboard Shift-e eject press\n\
 bind keyboard n airport-nav press\n\
 bind keyboard Shift-n airport-next press\n\
@@ -45,7 +95,9 @@ pub fn fa_throttle_step(throttle: f64, burner: bool, delta: f64) -> (f64, bool) 
 fn complete(custom: &Profile) -> Result<Profile, String> {
     let mut profile = Profile::parse(DEFAULTS)?;
     profile.bindings.retain(|b| {
-        !custom
+        let overridden_jettison = matches!(&b.action, Action::Ui(name) if name == "jettison" || name == "jettison-tanks")
+            && custom.bindings.iter().any(|c| c.device == b.device && c.control == b.control);
+        !overridden_jettison && !custom
             .disabled
             .contains(&(b.device.clone(), b.control.clone()))
     });
@@ -58,20 +110,261 @@ fn complete(custom: &Profile) -> Result<Profile, String> {
     Ok(profile)
 }
 fn is_stock(binding: &tore_input::Binding) -> bool {
-    Profile::parse(DEFAULTS)
-        .expect("static defaults")
-        .bindings
-        .iter()
-        .any(|d| {
-            d.device == binding.device
-                && d.control == binding.control
-                && d.action == binding.action
-                && d.mode == binding.mode
-        })
+    in_stock(
+        &Profile::parse(DEFAULTS).expect("static defaults").bindings,
+        binding,
+    )
 }
+fn in_stock(stock: &[tore_input::Binding], binding: &tore_input::Binding) -> bool {
+    stock.iter().any(|d| {
+        d.device == binding.device
+            && d.control == binding.control
+            && d.action == binding.action
+            && d.mode == binding.mode
+    })
+}
+/// Whether a stock keyboard binding acts on `airframe` (VTOL overhaul,
+/// design 5.6: [`crate::input_catalog::CONTEXTUAL`]). A player's own binding
+/// on the same key turns the aircraft-dependent stock meaning off, so it
+/// wins.
+fn keyboard_binding_enabled(
+    binding: &tore_input::Binding,
+    airframe: crate::input_catalog::Airframe,
+    stock: &[tore_input::Binding],
+    custom_keys: &BTreeSet<String>,
+) -> bool {
+    if binding.device != "keyboard" || !in_stock(stock, binding) {
+        return true;
+    }
+    let action = tore_input::profile_text::action_name(&binding.action);
+    let airframes = crate::input_catalog::stock_airframes(&binding.control, &action);
+    if airframes == crate::input_catalog::Airframes::ALL {
+        return true;
+    }
+    airframes.contains(airframe) && !custom_keys.contains(&binding.control)
+}
+/// A hash of everything the aircraft filter reads from a profile: its
+/// bindings and device aliases. Any change to the binding set (a new
+/// resolver, a saved profile, gamepad defaults added) changes it, unlike the
+/// binding count it replaced, which two different profiles can share. It
+/// hashes the bindings' debug text straight into the hasher, with no
+/// allocation, as the filter check runs every frame.
+fn binding_set_hash(profile: &Profile) -> u64 {
+    use std::fmt::Write as _;
+    use std::hash::Hasher as _;
+    struct Feed(std::collections::hash_map::DefaultHasher);
+    impl std::fmt::Write for Feed {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0.write(text.as_bytes());
+            Ok(())
+        }
+    }
+    let mut feed = Feed(std::collections::hash_map::DefaultHasher::new());
+    let _ = write!(feed, "{:?}{:?}", profile.bindings, profile.aliases);
+    feed.0.finish()
+}
+pub const AUTO_GAMEPAD_PREFIX: &str = "auto-gamepad:";
+
+/// The AC-130 sensor console's gamepad layout (John, 2026-10-14). While the
+/// console is open it owns every standard gamepad, whatever the player's
+/// profile (stock defaults on or off): these bindings are added for each
+/// connected gamepad under [`AUTO_CONSOLE_PREFIX`] and act only in the
+/// console, and every other binding of that gamepad stands aside except menu
+/// navigation, pause and the flight menu ([`console_takeover`]). A console
+/// action the player bound on their gamepad themselves wins over the
+/// layout's. The left stick slews and the right stick steps the heading and
+/// altitude (the look axes, `crate::console_keys`); the triggers do nothing
+/// in the console (agent decision: John's layout fires on A).
+/// (control, action, mode, scale).
+pub const CONSOLE_PAD: [(&str, &str, &str, f64); 21] = [
+    ("axis:0", "sight-x", "axis", 1.),
+    ("axis:1", "sight-y", "axis", -1.),
+    ("axis:3", "look-x", "axis", 1.),
+    ("axis:4", "look-y", "axis", -1.),
+    ("button:304", "fire", "hold", 1.),
+    ("button:305", "weapon-group-toggle", "press", 1.),
+    ("button:307", "weapon-group-next", "press", 1.),
+    ("button:308", "designate", "press", 1.),
+    ("button:314+button:308", "clear-designation", "press", 1.),
+    ("button:310", "sight-zoom-out", "press", 1.),
+    ("button:311", "sight-zoom-in", "press", 1.),
+    ("axis:17", "throttle-step=0.05", "position=-1", 1.),
+    ("axis:17", "throttle-step=-0.05", "position=1", 1.),
+    ("axis:16", "sight-polarity", "position=-1", 1.),
+    ("axis:16", "console-range", "position=1", 1.),
+    ("button:317", "sight-pin-toggle", "press", 1.),
+    ("button:314+button:318", "gun-lock", "press", 1.),
+    ("button:314+button:304", "console-flare", "press", 1.),
+    ("button:314+button:305", "console-chaff", "press", 1.),
+    ("button:314+axis:16", "designate-previous", "position=1", 1.),
+    ("button:314+button:316", "sensor-console", "press", 1.),
+];
+/// The device reference of the console layout's bindings: an alias of the
+/// gamepad they belong to. Never saved with the player's controls.
+pub const AUTO_CONSOLE_PREFIX: &str = "auto-console:";
+/// Gamepad actions that keep working in the console besides its layout:
+/// the menus over it, pause and the flight menu.
+fn console_keeps(action: &Action) -> bool {
+    matches!(action, Action::Ui(name)
+        if name.starts_with("menu-") || name == "menu" || name == "pause")
+}
+/// Whether `action` is one the console layout gives a gamepad (so a player's
+/// own gamepad binding of it wins in the console).
+fn console_action(action: &Action) -> bool {
+    let name = tore_input::profile_text::action_name(action);
+    CONSOLE_PAD.iter().any(|(_, a, _, _)| *a == name)
+}
+
+/// Whether `binding` is one of the console layout's gamepad bindings.
+pub fn console_pad_binding(binding: &tore_input::Binding) -> bool {
+    binding.device.starts_with(AUTO_CONSOLE_PREFIX)
+}
+
+/// A standard Linux gamepad: the controls the stock layouts are made for.
+fn standard_gamepad(device: &Device) -> bool {
+    device.id.starts_with("linux-")
+        && [
+            "axis:0",
+            "axis:1",
+            "axis:2",
+            "axis:3",
+            "axis:4",
+            "axis:5",
+            "button:304",
+            "button:305",
+        ]
+        .iter()
+        .all(|id| device.controls.iter().any(|c| &c.id == id))
+}
+
+/// The console layout's bindings for `device`, under its own alias.
+pub fn console_pad_text(device: &Device) -> String {
+    if !standard_gamepad(device) {
+        return "tore-input 1\n".into();
+    }
+    let reference = format!("{AUTO_CONSOLE_PREFIX}{}", device.id);
+    let mut text = format!("tore-input 1\nalias {reference} {}\n", device.id);
+    for (control, action, mode, scale) in CONSOLE_PAD {
+        let present = control.split('+').all(|part| {
+            device
+                .controls
+                .iter()
+                .any(|c| c.id == tore_input::token_base(part))
+        });
+        if present {
+            text.push_str(&format!(
+                "bind {reference} {control} {action} {mode} -1 0 1 0.1 1 {scale} 10\n"
+            ));
+        }
+    }
+    text
+}
+
+/// What the console does to a gamepad binding, or None for a binding it
+/// leaves alone (keyboard, mouse, joysticks and other devices). `gamepad`
+/// is the binding's device when it is a standard gamepad; `owned` the
+/// console actions the player bound on a gamepad themselves and the controls
+/// they bound them to: the layout's binding of the same action, or on the
+/// same control, yields to theirs.
+fn console_takeover(
+    binding: &tore_input::Binding,
+    console: bool,
+    gamepad: bool,
+    owned: &(BTreeSet<String>, BTreeSet<String>),
+) -> Option<bool> {
+    if console_pad_binding(binding) {
+        let name = tore_input::profile_text::action_name(&binding.action);
+        return Some(console && !owned.0.contains(&name) && !owned.1.contains(&binding.control));
+    }
+    if !console || !gamepad {
+        return None;
+    }
+    let own = !binding.device.starts_with(AUTO_GAMEPAD_PREFIX);
+    Some(console_keeps(&binding.action) || (own && console_action(&binding.action)))
+}
+
+fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> bool {
+    let [vectoring, conversion, collective, gunship] = roles;
+    let powered = vectoring || conversion || collective;
+    if !binding.device.starts_with(AUTO_GAMEPAD_PREFIX)
+        || !binding.control.starts_with("button:314+")
+    {
+        return true;
+    }
+    match &binding.action {
+        Action::Axis(tore_input::Axis::VectorPitchRate) => vectoring,
+        Action::Axis(tore_input::Axis::VectorYawRate) => vectoring,
+        // The AC-130's right stick slews the gunsight with Select held. The
+        // chord also keeps that stick from panning the camera.
+        Action::Axis(tore_input::Axis::SightX | tore_input::Axis::SightY) => gunship,
+        Action::Axis(tore_input::Axis::ConversionRate) => conversion,
+        Action::Axis(tore_input::Axis::CollectiveRate) => collective,
+        Action::Pilot(PilotCommand::NeutralVector) => vectoring || conversion,
+        Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Engine))
+            if binding.control == "button:314+button:315" =>
+        {
+            powered
+        }
+        // The gun-group gestures sit on Select with the D-pad up and down,
+        // where the vectoring and test uses of those directions are
+        // meaningless or development-only on the AC-130 (John, 2026-10-09).
+        Action::Ui(name)
+            if matches!(
+                name.as_str(),
+                "weapon-group-next" | "weapon-group-toggle" | "sight-designate" | "sight-pin"
+            ) =>
+        {
+            gunship
+        }
+        // On the AC-130, A designates under the sight's crosshair instead of
+        // the next radar contact.
+        Action::Ui(name) if name == "designate" && binding.control == "button:314+button:304" => {
+            !gunship
+        }
+        Action::Ui(name)
+            if name == "target-jammer" && binding.control == "button:314+button:315" =>
+        {
+            !powered
+        }
+        // On the AC-130, View + Xbox opens the sensor console instead of the
+        // range's incoming-missile fixture (agent decision, 2026-10-13).
+        Action::Ui(name) if name == "sensor-console" => gunship,
+        Action::Ui(name) if name == "incoming" && binding.control == "button:314+button:316" => {
+            !gunship
+        }
+        Action::Ui(name)
+            if name == "range-target"
+                && binding.control == "button:314+axis:17"
+                && binding.mode == tore_input::Mode::Position(-1) =>
+        {
+            !(vectoring || conversion || gunship)
+        }
+        Action::Ui(name) if name == "damage-player" && binding.control == "button:314+axis:17" => {
+            !gunship
+        }
+        _ => true,
+    }
+}
+
+/// The gap between polls of the controllers and of the keys' actions: 8 ms
+/// where the game is flown or a control is being captured, 16 ms in the
+/// menus with a controller connected, 33 ms with none.
+pub(crate) fn poll_interval(fast: bool, controller: bool) -> Duration {
+    Duration::from_millis(match (fast, controller) {
+        (true, _) => 8,
+        (false, true) => 16,
+        (false, false) => 33,
+    })
+}
+
 pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
+    gamepad_roles: [bool; 4],
+    pub map_navigation: bool,
+    /// The roles and the binding set ([`binding_set_hash`]) the aircraft
+    /// filter last ran for: it runs again when either changes.
+    filter_signature: Option<([bool; 4], bool, bool, u64)>,
     pub observed: Vec<Event>,
     profile_path: Option<std::path::PathBuf>,
     pub devices: BTreeMap<String, Device>,
@@ -84,10 +377,25 @@ pub struct Input {
     key_values: BTreeMap<String, f64>,
     context: (bool, bool),
     pub next_poll: Instant,
+    /// Flight, the replay viewer and the controls screen poll every 8 ms;
+    /// the menus do not need it ([`poll_interval`]).
+    fast: bool,
     native: bool,
     head: HeadTracker,
     head_raw: Option<[f64; 2]>,
     head_center: [f64; 2],
+    /// The AC-130 gunsight's slew ramp, stepped once per [`Self::frame`].
+    sight_slew: tore_input::SightSlew,
+    /// The slew deflection the last [`Self::frame`] resolved, right and up
+    /// positive.
+    sight_deflection: [i8; 2],
+    /// The gunsight's zoom step, 1 to 6: client state that rides in the seat
+    /// input (docs/INPUT.md, AC-130 gunsight).
+    sight_zoom: u8,
+    /// The AC-130 sensor console's keys: while it is open the stick and
+    /// arrows slew the sight and the look keys step the heading and
+    /// altitude ([`crate::console_keys`]).
+    pub console: crate::console_keys::ConsoleKeys,
 }
 impl Input {
     /// The saved controls file, loaded without being asked for. A file that
@@ -142,6 +450,9 @@ impl Input {
         Ok(Self {
             resolver,
             automatic,
+            gamepad_roles: [false; 4],
+            map_navigation: false,
+            filter_signature: None,
             observed: vec![],
             profile_path: path.map(Path::to_path_buf),
             devices: BTreeMap::new(),
@@ -158,15 +469,31 @@ impl Input {
             key_values: BTreeMap::new(),
             context: (false, true),
             next_poll: Instant::now(),
+            fast: true,
             native,
             head,
             head_raw: None,
             head_center: [0.; 2],
+            sight_slew: tore_input::SightSlew::default(),
+            sight_deflection: [0; 2],
+            sight_zoom: tore_input::sight::ZOOM_DEFAULT,
+            console: crate::console_keys::ConsoleKeys::default(),
+        })
+        .map(|mut input| {
+            // The stock keys of a fixed-wing aircraft until a flight says
+            // otherwise.
+            input.aircraft_controls(false, false, false, false);
+            input
         })
     }
     pub fn settings_profile(&self) -> Profile {
         let mut profile = self.resolver.profile.clone();
-        profile.bindings.retain(|b| !is_stock(b));
+        profile
+            .bindings
+            .retain(|b| !is_stock(b) && !console_pad_binding(b));
+        profile
+            .aliases
+            .retain(|alias, _| !alias.starts_with(AUTO_CONSOLE_PREFIX));
         profile
     }
     pub fn save_settings(&mut self, profile: &Profile) -> Result<(), String> {
@@ -190,6 +517,7 @@ impl Input {
         self.stop();
         let port = self.resolver.profile.head_port;
         self.resolver = Resolver::new(complete(profile).expect("validated profile"));
+        self.filter_signature = None;
         self.resolver.context(self.context.0, self.context.1);
         if port != profile.head_port {
             self.head = HeadTracker::disabled();
@@ -225,6 +553,8 @@ impl Input {
         if path.is_some() {
             self.profile_path = path;
         }
+        let [vectoring, conversion, collective, gunship] = self.gamepad_roles;
+        self.aircraft_controls(vectoring, conversion, collective, gunship);
     }
     pub fn context(&mut self, paused: bool, focused: bool) {
         if self.context != (paused, focused) {
@@ -244,6 +574,36 @@ impl Input {
         self.backend.stop();
         self.commands.clear();
     }
+    /// Whether the throttle controls drive the collective: the helicopters
+    /// and the V-22, whose engines are governed (VTOL overhaul, John's
+    /// decision 4 of 2026-10-08).
+    pub fn collective_role(&self) -> bool {
+        self.gamepad_roles[2]
+    }
+    /// The lever the throttle controls move, for the throttle lever's
+    /// pickup: the collective on the helicopters and the V-22, else the
+    /// throttle.
+    pub fn throttle_reference(&self, throttle: f64, collective: f64) -> f64 {
+        if self.collective_role() {
+            collective
+        } else {
+            throttle
+        }
+    }
+    /// A throttle command as the aircraft takes it: on the helicopters and
+    /// the V-22 a throttle setting or step moves the collective instead.
+    fn role(&self, command: PilotCommand) -> PilotCommand {
+        use tore_input::FlightAxis::Collective;
+        match command {
+            PilotCommand::Throttle(v) if self.collective_role() => {
+                PilotCommand::SetAxis(Collective, v)
+            }
+            PilotCommand::AdjustThrottle(v) if self.collective_role() => {
+                PilotCommand::AdjustAxis(Collective, v)
+            }
+            other => other,
+        }
+    }
     pub fn queue(&mut self, command: PilotCommand) {
         if self.context.0 || !self.context.1 {
             return;
@@ -253,6 +613,23 @@ impl Input {
             PilotCommand::Throttle(_) | PilotCommand::AdjustThrottle(_)
         ) {
             self.resolver.override_throttle();
+        }
+        let command = self.role(command);
+        match command {
+            PilotCommand::NeutralVector => self.resolver.override_lift_axes(&[
+                tore_input::Axis::VectorPitch,
+                tore_input::Axis::VectorYaw,
+                tore_input::Axis::Conversion,
+            ]),
+            PilotCommand::SetAxis(axis, _) | PilotCommand::AdjustAxis(axis, _) => {
+                self.resolver.override_lift_axes(&[match axis {
+                    tore_input::FlightAxis::VectorPitch => tore_input::Axis::VectorPitch,
+                    tore_input::FlightAxis::VectorYaw => tore_input::Axis::VectorYaw,
+                    tore_input::FlightAxis::Conversion => tore_input::Axis::Conversion,
+                    tore_input::FlightAxis::Collective => tore_input::Axis::Collective,
+                }])
+            }
+            _ => {}
         }
         if self.commands.len() < 256 {
             self.commands.push(command);
@@ -271,8 +648,33 @@ impl Input {
             },
         )
     }
+    /// The stability level once the commands queued for the next tick
+    /// apply, starting from `current`: what a stability key announces.
+    pub fn pending_stability(
+        &self,
+        current: tore_input::StabilityLevel,
+    ) -> tore_input::StabilityLevel {
+        self.commands
+            .iter()
+            .fold(current, |level, command| match command {
+                PilotCommand::Lift(tore_input::LiftCommand::SetStability(l)) => *l,
+                PilotCommand::Lift(tore_input::LiftCommand::CycleStability) => level.next(),
+                _ => level,
+            })
+    }
     pub fn claimed(&self, key: &str) -> bool {
         self.key_claims.contains_key(key)
+    }
+    /// Lets go of every key the profile holds down, as if each had been
+    /// released, so what they drive stops: the chat line takes the
+    /// keyboard (slice EF6). The joystick and the mouse go on. The keys'
+    /// own releases, when they come, find nothing held.
+    pub fn release_keys(&mut self) {
+        for control in std::mem::take(&mut self.key_claims).into_values() {
+            if !control.is_empty() {
+                self.key_value(&control, 0.);
+            }
+        }
     }
     pub fn key(
         &mut self,
@@ -346,6 +748,7 @@ impl Input {
             });
         }
         if self.key_values.insert(key, value) != Some(value) {
+            self.poll_soon();
             self.resolver.event(Event {
                 device: "mouse".into(),
                 control: control.into(),
@@ -401,6 +804,7 @@ impl Input {
             });
         }
         if self.key_values.insert(control.into(), value) != Some(value) {
+            self.poll_soon();
             self.resolver.event(Event {
                 device: "keyboard".into(),
                 control: control.into(),
@@ -409,9 +813,196 @@ impl Input {
             });
         }
     }
+    /// Added standard gamepad commands apply only to aircraft that use them.
+    /// Other aircraft retain their original modifier look/rudder/fixture map.
+    /// Add the console layout ([`CONSOLE_PAD`]) for every connected standard
+    /// gamepad that lacks it: on connecting, and again after a new profile
+    /// replaced the bindings.
+    fn add_console_pads(&mut self) {
+        let missing: Vec<Device> = self
+            .devices
+            .values()
+            .filter(|d| {
+                standard_gamepad(d)
+                    && !self
+                        .resolver
+                        .profile
+                        .aliases
+                        .contains_key(&format!("{AUTO_CONSOLE_PREFIX}{}", d.id))
+            })
+            .cloned()
+            .collect();
+        for device in missing {
+            let Ok(pad) = Profile::parse(&console_pad_text(&device)) else {
+                continue;
+            };
+            if self.resolver.profile.bindings.len() + pad.bindings.len() > 1024 {
+                continue;
+            }
+            self.resolver.profile.aliases.extend(pad.aliases);
+            self.resolver.profile.bindings.extend(pad.bindings);
+        }
+    }
+    pub fn aircraft_controls(
+        &mut self,
+        vectoring: bool,
+        conversion: bool,
+        collective: bool,
+        gunship: bool,
+    ) {
+        self.gamepad_roles = [vectoring, conversion, collective, gunship];
+        let roles = self.gamepad_roles;
+        // The AC-130's sensor console swaps the gamepad's plain buttons for
+        // its own layout ([`CONSOLE_PAD`]).
+        let console = gunship && self.console.open;
+        self.add_console_pads();
+        let signature = (
+            roles,
+            console,
+            self.map_navigation,
+            binding_set_hash(&self.resolver.profile),
+        );
+        if self.filter_signature == Some(signature) {
+            return;
+        }
+        self.filter_signature = Some(signature);
+        let aliases = self.resolver.profile.aliases.clone();
+        let explicit: Vec<_> = self
+            .resolver
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| !b.device.starts_with(AUTO_GAMEPAD_PREFIX) && !console_pad_binding(b))
+            .map(|b| {
+                (
+                    aliases.get(&b.device).unwrap_or(&b.device).clone(),
+                    b.control.clone(),
+                    b.mode,
+                )
+            })
+            .collect();
+        let airframe = crate::input_catalog::Airframe::of(vectoring, conversion, collective);
+        let stock = Profile::parse(DEFAULTS).expect("static defaults").bindings;
+        let custom_keys: BTreeSet<String> = self
+            .resolver
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| b.device == "keyboard" && !in_stock(&stock, b))
+            .map(|b| b.control.clone())
+            .collect();
+        // The console's takeover of the gamepads: which bound devices are
+        // standard gamepads, and the console actions the player bound on
+        // them (theirs win over the layout's).
+        let gamepads: BTreeSet<String> = self
+            .devices
+            .values()
+            .filter(|d| standard_gamepad(d))
+            .map(|d| d.id.clone())
+            .collect();
+        let device_of = |binding: &tore_input::Binding| {
+            aliases
+                .get(&binding.device)
+                .unwrap_or(&binding.device)
+                .clone()
+        };
+        let mine: Vec<&tore_input::Binding> = self
+            .resolver
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| {
+                !b.device.starts_with(AUTO_GAMEPAD_PREFIX)
+                    && !console_pad_binding(b)
+                    && gamepads.contains(&device_of(b))
+                    && console_action(&b.action)
+            })
+            .collect();
+        let owned = (
+            mine.iter()
+                .map(|b| tore_input::profile_text::action_name(&b.action))
+                .collect::<BTreeSet<_>>(),
+            mine.iter()
+                .map(|b| b.control.clone())
+                .collect::<BTreeSet<_>>(),
+        );
+        let navigation = self.map_navigation;
+        let changed = self.resolver.filter_bindings(|binding| {
+            // The map owns A/B and the D-pad, including in the gunship console.
+            // Axes and the other flight controls remain available.
+            if navigation && gamepads.contains(&device_of(binding))
+                && matches!(binding.control.as_str(), "button:304" | "button:305" | "axis:16" | "axis:17") {
+                return matches!(&binding.action, Action::Ui(name) if name.starts_with("menu-"));
+            }
+            if let Some(enabled) =
+                console_takeover(binding, console, gamepads.contains(&device_of(binding)), &owned)
+            {
+                return enabled;
+            }
+            if !keyboard_binding_enabled(binding, airframe, &stock, &custom_keys) {
+                return false;
+            }
+            if binding.device.starts_with(AUTO_GAMEPAD_PREFIX) {
+                let device = aliases.get(&binding.device).unwrap_or(&binding.device);
+                let (mods, base) = tore_input::chord_parts(&binding.control);
+                if explicit.iter().any(|(reference, control, mode)| {
+                    if reference != "*" && reference != device { return false; }
+                    let (other_mods, other_base) = tore_input::chord_parts(control);
+                    if mods != other_mods || tore_input::token_base(base) != tore_input::token_base(other_base) { return false; }
+                    !matches!((*mode, binding.mode), (tore_input::Mode::Position(a), tore_input::Mode::Position(b)) if a != b)
+                }) { return false; }
+            }
+            gamepad_binding_enabled(binding, roles)
+        });
+        if changed {
+            self.key_claims.clear();
+            self.key_values.clear();
+            for control in FLIGHT_KEYS {
+                self.resolver.event(Event {
+                    device: "keyboard".into(),
+                    control: control.into(),
+                    value: 0.,
+                    baseline: true,
+                });
+            }
+            for device in self.devices.values() {
+                for control in &device.controls {
+                    self.resolver.event(normalize(
+                        device,
+                        Event {
+                            device: device.id.clone(),
+                            control: control.id.clone(),
+                            value: control.value,
+                            baseline: true,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    /// Sets the poll cadence for where the game is: `fast` in flight, in the
+    /// replay viewer and on the controls screen, where a controller is
+    /// captured or flown; slower in the menus.
+    pub fn set_pace(&mut self, fast: bool) {
+        if self.fast != fast {
+            self.fast = fast;
+            self.backend.set_flight(fast);
+            if fast {
+                let soon = Instant::now() + poll_interval(true, true);
+                self.next_poll = self.next_poll.min(soon);
+            }
+        }
+    }
+    /// A key or mouse change that the next poll turns into an action: in the
+    /// menus the poll waits longer, so it is called for at once.
+    fn poll_soon(&mut self) {
+        if !self.fast {
+            self.next_poll = Instant::now();
+        }
+    }
     pub fn poll(&mut self) -> (Vec<Action>, bool, Vec<String>) {
         self.observed.clear();
-        self.next_poll = Instant::now() + Duration::from_millis(8);
+        self.next_poll = Instant::now() + poll_interval(self.fast, !self.devices.is_empty());
         let mut lost = false;
         let mut warnings = vec![];
         for notification in self.backend.drain() {
@@ -423,7 +1014,7 @@ impl Input {
                             .profile
                             .bindings
                             .iter()
-                            .any(|b| b.device == d.id)
+                            .any(|b| self.resolver.matches_device(&b.device, &d.id))
                     {
                         let defaults = gamepad_defaults(&d);
                         if self.resolver.profile.bindings.len() + defaults.bindings.len() <= 1024 {
@@ -432,6 +1023,7 @@ impl Input {
                                     "Input: standard Linux gamepad bindings enabled; see docs/INPUT.md"
                                 );
                             }
+                            self.resolver.profile.aliases.extend(defaults.aliases);
                             self.resolver.profile.bindings.extend(defaults.bindings);
                             for modifier in defaults.modifiers {
                                 if !self.resolver.profile.modifiers.contains(&modifier) {
@@ -443,6 +1035,8 @@ impl Input {
                     if self.devices.contains_key(&d.id) {
                         lost |= self.resolver.disconnect(&d.id);
                     }
+                    let [vectoring, conversion, collective, gunship] = self.gamepad_roles;
+                    self.aircraft_controls(vectoring, conversion, collective, gunship);
                     for c in &d.controls {
                         self.resolver.event(normalize(
                             &d,
@@ -510,15 +1104,28 @@ impl Input {
             .collect();
         (actions, lost, warnings)
     }
+    /// One tick's pilot input from the held `keys` and the bindings.
+    /// `throttle` is the lever the throttle controls move
+    /// ([`Self::throttle_reference`]).
     pub fn frame(&mut self, keys: &BTreeSet<String>, throttle: f64) -> (PilotInput, [f32; 2]) {
+        let [vectoring, conversion, collective, _] = self.gamepad_roles;
+        let airframe = crate::input_catalog::Airframe::of(vectoring, conversion, collective);
         let held = |key: &str| f64::from(keys.contains(key));
+        // FA rudder is End and PageDown; Z and X are a second pair, except
+        // where they are the nozzle keys (the vectoring jets).
+        let rudder = |key: &str| {
+            if crate::input_catalog::stock_airframes(key, "yaw").contains(airframe) {
+                held(key)
+            } else {
+                0.
+            }
+        };
         for (control, value) in [
             ("flight-pitch", held("ArrowDown") - held("ArrowUp")),
             ("flight-roll", held("ArrowRight") - held("ArrowLeft")),
-            // FA rudder is End and PageDown; Z and X stay as a second pair.
             (
                 "flight-yaw",
-                held("x").max(held("PageDown")) - held("z").max(held("End")),
+                rudder("x").max(held("PageDown")) - rudder("z").max(held("End")),
             ),
             (
                 "flight-look-x",
@@ -529,19 +1136,98 @@ impl Input {
             self.key_value(control, value);
         }
         // Resolve pickup against the setting that ordered presets will establish this tick.
-        let target = self
-            .commands
-            .iter()
-            .fold(throttle, |value, command| match command {
-                PilotCommand::Throttle(v) => *v,
-                PilotCommand::AdjustThrottle(v) => (value + v).clamp(0., 1.),
+        let target = self.commands.iter().fold(throttle, |value, command| {
+            match (command, self.collective_role()) {
+                (PilotCommand::Throttle(v), false)
+                | (PilotCommand::SetAxis(tore_input::FlightAxis::Collective, v), true) => *v,
+                (PilotCommand::AdjustThrottle(v), false)
+                | (PilotCommand::AdjustAxis(tore_input::FlightAxis::Collective, v), true) => {
+                    (value + v).clamp(0., 1.)
+                }
                 _ => value,
-            });
+            }
+        });
         let (mut frame, look) = self.resolver.frame(target);
+        if self.collective_role() {
+            // The throttle lever and rate drive the collective; a bound
+            // collective lever keeps priority.
+            if frame.collective.is_none() {
+                frame.collective = frame.throttle;
+            }
+            frame.throttle = None;
+            frame.collective_rate = (frame.collective_rate + frame.throttle_rate).clamp(-1., 1.);
+            frame.throttle_rate = 0.;
+            for command in &mut frame.commands {
+                *command = self.role(*command);
+            }
+        }
         let mut commands = std::mem::take(&mut self.commands);
         commands.append(&mut frame.commands);
         frame.commands = commands;
+        let mut holds = ["sight-left", "sight-right", "sight-up", "sight-down"]
+            .map(|name| self.resolver.held(name));
+        let mut analog = self.resolver.sight_axes();
+        if self.console.open {
+            // The sensor console: the stick does not fly the aircraft, so
+            // the arrows (as holds, with the fine-then-full ramp), the stick
+            // and the mouse slew the sight; the look keys and axes step the
+            // heading and altitude (crate::console_keys).
+            for (hold, key) in
+                holds
+                    .iter_mut()
+                    .zip(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"])
+            {
+                *hold |= keys.contains(key);
+            }
+            let keyboard = |resolver: &Resolver, axis| {
+                resolver
+                    .owned_binding(axis)
+                    .is_some_and(|b| b.device == "keyboard")
+            };
+            let mouse = self.console.mouse_deflection();
+            // Stick right and forward slew right and up, as the arrows do.
+            if !keyboard(&self.resolver, tore_input::Axis::Roll) {
+                analog[0] += frame.roll;
+            }
+            if !keyboard(&self.resolver, tore_input::Axis::Pitch) {
+                analog[1] -= frame.pitch;
+            }
+            analog = [analog[0] + mouse[0], analog[1] + mouse[1]];
+            frame.pitch = 0.;
+            frame.roll = 0.;
+            frame.yaw = 0.;
+            let look = self.resolver.look();
+            self.console
+                .step_look([f64::from(look[0]), f64::from(look[1])]);
+        } else {
+            self.console.release();
+        }
+        self.sight_deflection = tore_input::sight::deflection(self.sight_slew.step(holds, analog));
         (frame, look)
+    }
+    /// The gunsight's slew (right and up positive, -127 to 127) as the last
+    /// [`Self::frame`] resolved it, and the zoom step: the seat input's
+    /// `sight` and `sight_zoom`. The sim ignores both on every aircraft but
+    /// the AC-130.
+    pub fn sight(&self) -> ([i8; 2], u8) {
+        (self.sight_deflection, self.sight_zoom)
+    }
+    /// Zoom the gunsight in (positive) or out (negative) by steps; the new
+    /// step, 1 (widest) to 6.
+    pub fn zoom_sight(&mut self, steps: i8) -> u8 {
+        self.sight_zoom = tore_input::sight::zoom_step(self.sight_zoom, steps);
+        self.sight_zoom
+    }
+    /// A flight starts or restarts: the default zoom, no slew in progress.
+    pub fn reset_sight(&mut self) {
+        self.sight_zoom = tore_input::sight::ZOOM_DEFAULT;
+        self.sight_slew.release();
+        self.sight_deflection = [0; 2];
+    }
+    /// Whether the aircraft in flight is the gunship, the one aircraft with
+    /// a gunsight.
+    pub fn gunsight(&self) -> bool {
+        self.gamepad_roles[3]
     }
     pub fn feedback(&mut self, event: FeedbackEvent) {
         if !self.resolver.profile.rumble || self.context.0 || !self.context.1 {
@@ -614,7 +1300,7 @@ impl Input {
         }
     }
 }
-fn normalize(device: &Device, mut event: Event) -> Event {
+pub(crate) fn normalize(device: &Device, mut event: Event) -> Event {
     if let Some(control) = device.controls.iter().find(|c| c.id == event.control)
         && matches!(control.kind, Kind::Axis)
         && control.max > control.min
@@ -850,22 +1536,35 @@ pub fn gamepad_text(device: &Device) -> String {
         ("button:304", "menu-accept", "press", 1.),
         ("button:305", "menu-back", "press", 1.),
     ];
-    let mut text = String::from("tore-input 1\n");
+    let default_ref = format!("{AUTO_GAMEPAD_PREFIX}{}", device.id);
+    let mut text = format!("tore-input 1\nalias {default_ref} {}\n", device.id);
     for (control, action, mode, scale) in defaults {
         if device.controls.iter().any(|c| c.id == control) {
             text.push_str(&format!(
                 "bind {} {control} {action} {mode} -1 0 1 0.1 1 {scale} 10\n",
-                device.id
+                default_ref
             ));
         }
     }
     if device.controls.iter().any(|c| c.id == "button:314") {
-        text.push_str(&format!("modifier {} button:314\n", device.id));
+        text.push_str(&format!("modifier {default_ref} button:314\n"));
     }
     for (control, action, mode) in [
+        ("axis:3", "vector-yaw-rate", "axis"),
+        ("axis:4", "vector-pitch-rate", "axis"),
+        ("axis:3", "conversion-rate", "axis"),
+        ("axis:4", "collective-rate", "axis"),
+        ("axis:3", "sight-x", "axis"),
+        ("axis:4", "sight-y", "axis"),
+        ("axis:17", "neutral-vector", "position=-1"),
+        ("axis:17", "weapon-group-next", "position=-1"),
+        ("axis:17", "weapon-group-toggle", "position=1"),
+        ("button:315", "engine", "press"),
         ("button:311", "fire", "hold"),
         ("button:310", "weapon-next", "press"),
         ("button:304", "designate", "press"),
+        ("button:304", "sight-designate", "tap"),
+        ("button:304", "sight-pin", "long"),
         ("button:305", "clear-designation", "press"),
         ("button:307", "weapon-previous", "press"),
         ("button:308", "jammer", "press"),
@@ -877,13 +1576,24 @@ pub fn gamepad_text(device: &Device) -> String {
         ("axis:17", "damage-player", "position=1"),
         ("button:315", "target-jammer", "press"),
         ("button:316", "incoming", "press"),
+        ("button:316", "sensor-console", "press"),
     ] {
         if device.controls.iter().any(|c| c.id == "button:314")
-            && device.controls.iter().any(|c| c.id == control)
+            && device
+                .controls
+                .iter()
+                .any(|c| c.id == tore_input::token_base(control))
         {
             text.push_str(&format!(
-                "bind {} button:314+{control} {action} {mode}\n",
-                device.id
+                "bind {} button:314+{control} {action} {mode} -1 0 1 0.1 1 {} 10\n",
+                default_ref,
+                // Pushing the stick up reads negative; collective up and
+                // the sight up are positive.
+                if matches!(action, "collective-rate" | "sight-y") {
+                    -1.
+                } else {
+                    1.
+                }
             ));
         }
     }
@@ -900,6 +1610,109 @@ mod tests {
         input.resolver.profile.aliases.extend(profile.aliases);
         input.resolver.profile.bindings.extend(profile.bindings);
         input
+    }
+    #[test]
+    fn the_poll_cadence_is_8_ms_in_flight_16_in_menus_with_a_controller_33_without() {
+        let ms = |fast, controller| poll_interval(fast, controller).as_millis();
+        assert_eq!(ms(true, true), 8);
+        assert_eq!(ms(true, false), 8, "flight keeps its cadence without a pad");
+        assert_eq!(ms(false, true), 16);
+        assert_eq!(ms(false, false), 33);
+    }
+    #[test]
+    fn the_menu_pace_slows_the_poll_and_a_key_or_flight_brings_it_back() {
+        let mut input = input("");
+        // Flight cadence until the game says it is in a menu.
+        input.poll();
+        assert!(input.next_poll <= Instant::now() + Duration::from_millis(8));
+        input.set_pace(false);
+        input.poll();
+        let now = Instant::now();
+        assert!(input.next_poll > now + Duration::from_millis(25), "33 ms");
+        assert!(input.next_poll <= now + Duration::from_millis(33));
+        // A key that changes what the resolver holds is polled at once.
+        input.key_value("Enter", 1.);
+        assert!(input.next_poll <= Instant::now());
+        // Going to flight pulls a far poll in to the flight cadence.
+        input.poll();
+        input.set_pace(true);
+        assert!(input.next_poll <= Instant::now() + Duration::from_millis(8));
+        // And in flight a key does not change when the poll is.
+        input.poll();
+        let due = input.next_poll;
+        input.key_value("Enter", 0.);
+        assert_eq!(input.next_poll, due);
+    }
+    /// The AC-130's command keys the controls catalog lists (and so
+    /// CONTROLS.md and the keyboard map show) are bound in the stock profile:
+    /// Ctrl+9, the sensor console, was listed and drawn on the keyboard map
+    /// but never bound (2026-10-14), so pressing it did nothing.
+    #[test]
+    fn the_ac130_command_keys_are_stock_bound() {
+        use crate::input_catalog::ENTRIES;
+        let stock = Profile::parse(DEFAULTS).expect("static defaults").bindings;
+        for action in [
+            "weapon-group-next",
+            "weapon-group-toggle",
+            "sensor-console",
+            "sight-designate",
+            "sight-pin",
+            "sight-pin-toggle",
+            "gun-lock",
+            "console-chaff",
+            "console-flare",
+            "sight-zoom-in",
+            "sight-zoom-out",
+            "sight-polarity",
+            "sight-whot",
+            "sight-bhot",
+            "sight-tv",
+            "sight-nvg",
+            "console-range",
+        ] {
+            let entry = ENTRIES
+                .iter()
+                .find(|e| e.action == action)
+                .unwrap_or_else(|| panic!("{action} is not in the catalog"));
+            assert!(!entry.keys.is_empty(), "{action} lists no stock key");
+            for &key in entry.keys {
+                assert!(
+                    stock
+                        .iter()
+                        .any(|b| b.device == "keyboard" && b.control == key && entry.matches(b)),
+                    "{key} ({action}) is listed but not bound in the stock profile"
+                );
+            }
+        }
+    }
+    #[test]
+    fn custom_jettison_binding_overrides_the_new_stock_tank_key() {
+        let custom =
+            Profile::parse("tore-input 1\nbind keyboard Shift-k jettison press\n").unwrap();
+        let profile = complete(&custom).unwrap();
+        let keys: Vec<_> = profile
+            .bindings
+            .iter()
+            .filter(|b| b.device == "keyboard" && b.control == "Shift-k")
+            .collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].action, Action::Ui("jettison".into()));
+    }
+    #[test]
+    fn jettison_stock_keys_follow_the_real_key_path() {
+        let mut i = Input::new(None, false).unwrap();
+        for (modifiers, action) in [
+            (M::SHIFT, "jettison-tanks"),
+            (M::CONTROL | M::SHIFT, "jettison"),
+        ] {
+            assert!(i.key("k", true, modifiers));
+            assert_eq!(
+                i.resolver.drain(),
+                vec![("keyboard".into(), Action::Ui(action.into()))]
+            );
+            i.key("k", false, M::empty());
+            i.resolver.drain();
+        }
     }
     #[test]
     fn fa_throttle_steps_cross_into_and_out_of_afterburner() {
@@ -1193,6 +2006,188 @@ mod tests {
             p.to_text().unwrap()
         );
     }
+    /// The AC-130 sensor console's keys on the real key path (slice nr-cona):
+    /// P is stock-bound to the pin toggle; with the console open the plain
+    /// arrows (as the flight's key handler records them) slew the sight
+    /// with the fine-then-full ramp and fly nothing, Shift with the arrows
+    /// steps the heading and altitude once a press, and the zoom and
+    /// throttle keys reach the console's meanings; closed, the arrows fly
+    /// again.
+    #[test]
+    fn the_console_keys_slew_step_and_zoom_on_the_real_key_path() {
+        use tore_sim::autopilot::orbit::ConsoleCommand;
+        let mut i = Input::new(None, false).unwrap();
+        assert!(i.key("p", true, M::empty()));
+        assert_eq!(
+            i.resolver.drain(),
+            vec![("keyboard".into(), Action::Ui("sight-pin-toggle".into()))]
+        );
+        assert!(i.key("p", false, M::empty()));
+        i.console.open = true;
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowLeft", M::empty());
+        crate::look::press(&mut keys, "ArrowUp", M::empty());
+        let (pilot, _) = i.frame(&keys, 0.5);
+        assert_eq!((pilot.pitch, pilot.roll, pilot.yaw), (0., 0., 0.));
+        assert_eq!(i.sight().0, [-32, 32], "a quarter rate first");
+        for _ in 0..tore_input::sight::FINE_TICKS {
+            i.frame(&keys, 0.5);
+        }
+        assert_eq!(i.sight().0, [-127, 127], "then full rate");
+        assert!(i.console.take().is_empty());
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowRight", M::SHIFT);
+        i.frame(&keys, 0.5);
+        assert_eq!(i.sight().0, [0, 0], "Shift+arrows do not slew");
+        i.frame(&keys, 0.5);
+        assert_eq!(i.console.take(), vec![ConsoleCommand::Heading(1)]);
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowDown", M::SHIFT);
+        i.frame(&keys, 0.5);
+        assert_eq!(i.console.take(), vec![ConsoleCommand::Altitude(-1)]);
+        // The view zoom keys, the wheel and the throttle keys, then their
+        // meaning in the console: the wheel through the bindings, the others
+        // through the flight's key handler.
+        i.mouse_wheel(1);
+        i.mouse_wheel(-1);
+        let wheel: Vec<_> = i.resolver.drain().into_iter().map(|(_, a)| a).collect();
+        assert_eq!(
+            wheel,
+            [Action::Ui("zoom-in".into()), Action::Ui("zoom-out".into())]
+        );
+        assert_eq!(crate::console_keys::zoom_action("zoom-in"), Some(1));
+        assert_eq!(crate::console_keys::zoom_action("zoom-out"), Some(-1));
+        let mut ui = crate::flight_ui::FlightUi::default();
+        for (key, zoom) in [("=", Some(1)), ("-", Some(-1)), ("1", None)] {
+            assert!(!i.key(key, true, M::empty()), "{key} is the flight's key");
+            assert_eq!(crate::console_keys::zoom_key(key), zoom);
+        }
+        for (key, meaning) in [
+            ("1", ConsoleCommand::Speed(0)),
+            ("3", ConsoleCommand::Speed(50)),
+            ("6", ConsoleCommand::Speed(100)),
+            ("7", ConsoleCommand::SpeedStep(-1)),
+            ("8", ConsoleCommand::SpeedStep(1)),
+        ] {
+            let command = ui.key(key, false, false, false, &[]);
+            assert_eq!(
+                crate::console_keys::throttle(&command),
+                Some(meaning),
+                "{key}"
+            );
+        }
+        // Closed, the arrows fly the aircraft and slew nothing.
+        i.console.open = false;
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowLeft", M::empty());
+        let (pilot, _) = i.frame(&keys, 0.5);
+        assert!(pilot.roll < 0.);
+        assert_eq!(i.sight().0, [0, 0]);
+    }
+    /// The gunsight's stock keys (John, 2026-10-09): Backslash designates,
+    /// Shift+Backslash pins, Shift+' and Shift+; zoom, Alt with the arrows
+    /// (or the keypad's 4, 6, 8 and 2) slew. Ctrl+Shift+Backslash is not one
+    /// of them: it reaches the flight keys as the range reset.
+    #[test]
+    fn the_gunsight_keys_act_and_the_range_reset_key_passes_through() {
+        let mut i = Input::new(None, false).unwrap();
+        for (key, modifiers, action) in [
+            ("\\", M::empty(), "sight-designate"),
+            ("\\", M::SHIFT, "sight-pin"),
+            ("'", M::SHIFT, "sight-zoom-in"),
+            (";", M::SHIFT, "sight-zoom-out"),
+            ("\\", M::CONTROL, "sight-polarity"),
+            ("0", M::CONTROL, "console-range"),
+            ("F5", M::SHIFT, "sight-whot"),
+            ("F6", M::SHIFT, "sight-bhot"),
+            ("F7", M::SHIFT, "sight-tv"),
+            ("F8", M::SHIFT, "sight-nvg"),
+        ] {
+            assert!(i.key(key, true, modifiers), "{key}");
+            assert_eq!(
+                i.resolver.drain(),
+                vec![("keyboard".into(), Action::Ui(action.into()))],
+                "{key}"
+            );
+            assert!(i.key(key, false, modifiers));
+        }
+        assert!(!i.key("\\", true, M::CONTROL | M::SHIFT));
+        assert!(i.resolver.drain().is_empty());
+        // The plain keys beside them are not claimed.
+        assert!(!i.key("'", true, M::empty()));
+        assert!(!i.key(";", true, M::empty()));
+        assert!(!i.key("l", true, M::empty()));
+        // A held Alt arrow nudges at a quarter rate for a quarter second,
+        // then slews at full rate; letting go stops it.
+        let none = BTreeSet::new();
+        assert!(i.key("ArrowLeft", true, M::ALT));
+        let (pilot, look) = i.frame(&none, 0.5);
+        assert_eq!((pilot.roll, look), (0., [0.; 2]), "Alt+arrows fly nothing");
+        assert_eq!(i.sight().0, [-32, 0]);
+        for _ in 1..tore_input::sight::FINE_TICKS {
+            i.frame(&none, 0.5);
+        }
+        assert_eq!(i.sight().0, [-32, 0]);
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [-127, 0]);
+        assert!(i.key("ArrowUp", true, M::ALT));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [-127, 32]);
+        assert!(i.key("ArrowLeft", false, M::ALT));
+        assert!(i.key("ArrowUp", false, M::ALT));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+        // Plain arrows still roll and pitch, and Shift+arrows still look.
+        assert!(!i.key("ArrowLeft", true, M::empty()));
+        assert!(!i.key("ArrowLeft", true, M::SHIFT));
+        // A pause lets go of whatever was held.
+        assert!(i.key("ArrowRight", true, M::ALT));
+        i.frame(&none, 0.5);
+        assert_ne!(i.sight().0, [0, 0]);
+        i.context(true, true);
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+    }
+    #[test]
+    fn the_gunsight_zoom_steps_within_its_ladder_and_restarts_at_the_default() {
+        let mut i = input("");
+        assert_eq!(i.sight().1, tore_input::sight::ZOOM_DEFAULT);
+        assert_eq!(i.zoom_sight(1), 4);
+        assert_eq!(i.zoom_sight(5), 6);
+        assert_eq!(i.zoom_sight(-1), 5);
+        assert_eq!(i.zoom_sight(-9), 1);
+        assert_eq!(i.sight().1, 1);
+        i.reset_sight();
+        assert_eq!(i.sight().1, tore_input::sight::ZOOM_DEFAULT);
+        assert!(!i.gunsight());
+        i.aircraft_controls(false, false, false, true);
+        assert!(i.gunsight());
+    }
+    #[test]
+    fn a_players_own_sight_bindings_replace_the_stock_keys() {
+        let mut i = Input::new(None, false).unwrap();
+        let p = Profile::parse(
+            "tore-input 1\ndisable keyboard Alt-ArrowLeft\ndisable keyboard \\\nbind keyboard Ctrl-j sight-left hold\nbind keyboard Ctrl-k sight-designate press",
+        )
+        .unwrap();
+        i.save_settings_to(&p, None);
+        let none = BTreeSet::new();
+        // The stock keys are gone and swallowed; the moved ones act.
+        assert!(i.key("ArrowLeft", true, M::ALT));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+        assert!(i.key("ArrowLeft", false, M::ALT));
+        assert!(i.key("\\", true, M::empty()));
+        assert!(i.resolver.drain().is_empty());
+        assert!(i.key("j", true, M::CONTROL));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0[0], -32);
+        assert!(i.key("k", true, M::CONTROL));
+        assert_eq!(
+            i.resolver.drain(),
+            vec![("keyboard".into(), Action::Ui("sight-designate".into()))]
+        );
+    }
     #[test]
     fn wheel_notches_zoom_unless_removed() {
         let mut i = input("");
@@ -1205,6 +2200,24 @@ mod tests {
         i.mouse_wheel(1);
         i.mouse_wheel(-1);
         assert_eq!(i.resolver.drain()[0].1, Action::Ui("zoom-out".into()));
+    }
+    #[test]
+    fn releasing_the_keys_lets_go_of_what_they_hold_and_the_stick_goes_on() {
+        // The chat line takes the keyboard (EF6): a key held when it opens
+        // stops driving the plane at once; its own release then finds
+        // nothing held.
+        let mut i = input("bind keyboard w pitch negative -1 0 1 0 1 1 100");
+        let keys = BTreeSet::new();
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, -1.);
+        i.release_keys();
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, 0.);
+        assert!(!i.claimed("w"));
+        assert!(!i.key("w", false, M::empty()), "nothing left to release");
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, 0.);
+        // A key pressed after it flies as before.
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, -1.);
     }
     #[test]
     fn pending_commands_are_consumed_once_and_dropped_on_pause() {
@@ -1231,6 +2244,646 @@ mod tests {
         i.queue(PilotCommand::Throttle(0.1));
         assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.throttle, None);
         assert_eq!(i.frame(&BTreeSet::new(), 0.1).0.throttle, None);
+    }
+    /// A console action the player bound on their gamepad wins in the
+    /// console: the layout's binding of that action and the layout's binding
+    /// on that control stand aside.
+    #[test]
+    fn a_players_own_console_binding_wins_over_the_layout() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input(&format!(
+            "bind {} button:307 sight-zoom-in press -1 0 1 0.1 1 1 10",
+            device.id
+        ));
+        i.devices.insert(device.id.clone(), device.clone());
+        i.console.open = true;
+        i.aircraft_controls(false, false, false, true);
+        let event = |i: &mut Input, control: &str, value: f64| {
+            i.resolver.event(Event {
+                device: device.id.clone(),
+                control: control.into(),
+                value,
+                baseline: false,
+            })
+        };
+        event(&mut i, "button:307", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("sight-zoom-in".into()))]
+        );
+        event(&mut i, "button:307", 0.);
+        event(&mut i, "button:311", 1.);
+        assert!(i.resolver.drain().is_empty(), "RB's zoom in yields to X");
+    }
+    /// A copy of John's own controls file (2026-10-14): gamepad defaults off,
+    /// his own gamepad bindings, View bound to the external view and no
+    /// modifier declared.
+    const JOHN_PROFILE: &str = r#"tore-input 1
+rumble on
+gamepad-defaults off
+mouse-look on
+mouse-sensitivity 1
+mouse-invert off
+head-tracker udp:4242
+head-scale 1 1
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:0 roll axis -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:1 pitch axis -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:3 look-x axis -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:4 look-y axis -1 0 1 0.1 1 -1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:2 yaw trigger-negative -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:5 yaw trigger-positive -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:310 throttle-rate negative -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:311 throttle-rate positive -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:304 gear press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:305 airbrake press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:307 flaps press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:308 burner press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:314 view-external press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:315 pause press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:316 menu press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:317 view-front press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:318 center-look press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:16 instrument-previous position=-1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:16 instrument-next position=1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:17 control-1 position=-1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:17 control-2 position=1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:16 menu-left position=-1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:16 menu-right position=1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:17 menu-up position=-1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 axis:17 menu-down position=1 -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:304 menu-accept press -1 0 1 0.1 1 1 10
+bind linux-2dc8-310b-303845373944323542392f696e70757430 button:305 menu-back press -1 0 1 0.1 1 1 10
+bind keyboard q chaff press -1 0 1 0 1 1 10
+bind keyboard Shift-q flare press -1 0 1 0 1 1 10
+"#;
+    /// The console owns the whole gamepad on John's own profile (his bug of
+    /// 2026-10-14: "the controls for the aircraft do not properly relinquish
+    /// when going into sensor mode"): on the real button path, in the console
+    /// every button, the D-pad, both sticks and both triggers give only their
+    /// console meanings (none of gear, airbrake, flaps, burner, throttle,
+    /// rudder, the instrument pages or the external view); Start still
+    /// pauses and Xbox still opens the menu; out of the console his flight
+    /// bindings work again.
+    #[test]
+    fn the_console_takes_the_whole_gamepad_on_johns_own_profile() {
+        let path =
+            std::env::temp_dir().join(format!("tore-john-input-{}.conf", std::process::id()));
+        std::fs::write(&path, JOHN_PROFILE).unwrap();
+        let mut i = Input::new(Some(&path), false).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(!i.resolver.profile.gamepad_defaults);
+        let mut device = crate::controls_editor::preview_device();
+        device.id = "linux-2dc8-310b-303845373944323542392f696e70757430".into();
+        i.devices.insert(device.id.clone(), device.clone());
+        let event = |i: &mut Input, control: &str, value: f64| {
+            i.resolver.event(Event {
+                device: device.id.clone(),
+                control: control.into(),
+                value,
+                baseline: false,
+            })
+        };
+        let press = |i: &mut Input, control: &str, value: f64| -> Vec<Action> {
+            event(i, control, value);
+            let fired = i
+                .resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .filter(|a| !matches!(a, Action::Ui(name) if name.starts_with("menu-")))
+                .collect();
+            event(i, control, 0.);
+            i.resolver.drain();
+            fired
+        };
+        let ui = |name: &str| vec![Action::Ui(name.into())];
+        let pilot = |switch| vec![Action::Pilot(PilotCommand::Toggle(switch))];
+        use tore_input::Switch;
+        // Flying, his bindings.
+        i.aircraft_controls(false, false, false, true);
+        assert_eq!(press(&mut i, "button:304", 1.), pilot(Switch::Gear));
+        assert_eq!(press(&mut i, "button:314", 1.), ui("view-external"));
+        // The console open: the layout, and nothing else.
+        i.console.open = true;
+        i.aircraft_controls(false, false, false, true);
+        for (control, value, wanted) in [
+            ("button:305", 1., ui("weapon-group-toggle")),
+            ("button:307", 1., ui("weapon-group-next")),
+            ("button:308", 1., ui("designate")),
+            ("button:310", 1., ui("sight-zoom-out")),
+            ("button:311", 1., ui("sight-zoom-in")),
+            ("axis:17", -1., ui("throttle-step=0.05")),
+            ("axis:17", 1., ui("throttle-step=-0.05")),
+            ("axis:16", -1., ui("sight-polarity")),
+            ("axis:16", 1., ui("console-range")),
+            ("button:317", 1., ui("sight-pin-toggle")),
+            ("button:318", 1., vec![]),
+            ("button:314", 1., vec![]),
+            ("button:315", 1., ui("pause")),
+            ("button:316", 1., ui("menu")),
+        ] {
+            assert_eq!(press(&mut i, control, value), wanted, "{control} {value}");
+        }
+        // A fires (held) and nothing else.
+        event(&mut i, "button:304", 1.);
+        assert!(i.resolver.held("fire"));
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("menu-accept".into()))],
+            "no gear, only the menus' accept"
+        );
+        event(&mut i, "button:304", 0.);
+        i.resolver.drain();
+        // The View chords.
+        event(&mut i, "button:314", 1.);
+        assert!(i.resolver.drain().is_empty(), "no external view");
+        for (control, value, wanted) in [
+            ("button:308", 1., ui("clear-designation")),
+            ("button:318", 1., ui("gun-lock")),
+            ("button:304", 1., ui("console-flare")),
+            ("button:305", 1., ui("console-chaff")),
+            ("axis:16", 1., ui("designate-previous")),
+            ("button:316", 1., ui("sensor-console")),
+        ] {
+            assert_eq!(press(&mut i, control, value), wanted, "View + {control}");
+        }
+        event(&mut i, "button:314", 0.);
+        i.resolver.drain();
+        // The sticks and the triggers: the left stick slews, the right stick
+        // steps the heading, the triggers and LB/RB fly nothing.
+        event(&mut i, "axis:0", 1.);
+        event(&mut i, "axis:2", 1.);
+        event(&mut i, "axis:5", 1.);
+        event(&mut i, "button:311", 1.);
+        let (frame, _) = i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(
+            (frame.roll, frame.pitch, frame.yaw, frame.throttle_rate),
+            (0., 0., 0., 0.)
+        );
+        assert!(i.sight().0[0] > 0, "the left stick slews");
+        for control in ["axis:0", "axis:2", "axis:5", "button:311"] {
+            event(&mut i, control, 0.);
+        }
+        i.resolver.drain();
+        i.console.take();
+        event(&mut i, "axis:3", 1.);
+        i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(
+            i.console.take(),
+            vec![tore_sim::autopilot::orbit::ConsoleCommand::Heading(1)]
+        );
+        event(&mut i, "axis:3", 0.);
+        // Closed: his flight bindings are back.
+        i.console.open = false;
+        i.aircraft_controls(false, false, false, true);
+        assert_eq!(press(&mut i, "button:305", 1.), pilot(Switch::Airbrake));
+        assert_eq!(press(&mut i, "button:308", 1.), pilot(Switch::Burner));
+        assert_eq!(press(&mut i, "axis:16", 1.), ui("instrument-next"));
+        event(&mut i, "axis:5", 1.);
+        let (frame, _) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(frame.yaw > 0., "the trigger is the rudder again");
+        // His saved controls never gain the console layout.
+        assert!(
+            i.settings_profile()
+                .bindings
+                .iter()
+                .all(|b| !console_pad_binding(b))
+        );
+    }
+    /// The AC-130 sensor console's gamepad layout (John, 2026-10-14) on the
+    /// real button path: with the console open each button gives its console
+    /// action instead of its flight one; closed, the flight meanings return.
+    #[test]
+    fn mission_brief_controller_navigation_does_not_operate_aircraft() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input("");
+        i.resolver = Resolver::new(gamepad_defaults(&device));
+        i.devices.insert(device.id.clone(), device.clone());
+        i.context(false, true);
+        for console in [false, true] {
+            i.console.open = console;
+            i.map_navigation = true;
+            i.aircraft_controls(false, false, false, true);
+            for (control, value, wanted) in [
+                ("button:304", 1., "menu-accept"),
+                ("button:305", 1., "menu-back"),
+                ("axis:16", 1., "menu-right"),
+                ("axis:17", -1., "menu-up"),
+            ] {
+                for value in [0., value] {
+                    i.resolver.event(Event {
+                        device: device.id.clone(),
+                        control: control.into(),
+                        value,
+                        baseline: false,
+                    });
+                }
+                let actions: Vec<_> = i.resolver.drain().into_iter().map(|(_, a)| a).collect();
+                assert_eq!(actions, vec![Action::Ui(wanted.into())]);
+                assert!(!i.resolver.held("fire"));
+                i.resolver.event(Event {
+                    device: device.id.clone(),
+                    control: control.into(),
+                    value: 0.,
+                    baseline: false,
+                });
+                i.resolver.drain();
+            }
+        }
+        i.console.open = false;
+        i.map_navigation = false;
+        i.aircraft_controls(false, false, false, false);
+        i.resolver.event(Event {
+            device: device.id,
+            control: "button:304".into(),
+            value: 1.,
+            baseline: false,
+        });
+        assert!(
+            i.resolver
+                .drain()
+                .iter()
+                .any(|(_, a)| *a == Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Gear)))
+        );
+    }
+    #[test]
+    fn the_console_gamepad_layout_replaces_the_flight_buttons_only_in_the_console() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input("");
+        i.resolver = Resolver::new(gamepad_defaults(&device));
+        i.devices.insert(device.id.clone(), device.clone());
+        let event = |i: &mut Input, control: &str, value: f64| {
+            i.resolver.event(Event {
+                device: device.id.clone(),
+                control: control.into(),
+                value,
+                baseline: false,
+            })
+        };
+        let press = |i: &mut Input, control: &str, value: f64| -> Vec<Action> {
+            event(i, control, value);
+            // Menu navigation stays on A, B and the D-pad for the menus.
+            let fired = i
+                .resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .filter(|a| !matches!(a, Action::Ui(name) if name.starts_with("menu-")))
+                .collect();
+            event(i, control, 0.);
+            i.resolver.drain();
+            fired
+        };
+        let ui = |name: &str| vec![Action::Ui(name.into())];
+        i.console.open = true;
+        i.aircraft_controls(false, false, false, true);
+        assert_eq!(press(&mut i, "button:317", 1.), ui("sight-pin-toggle"));
+        assert_eq!(press(&mut i, "button:305", 1.), ui("weapon-group-toggle"));
+        assert_eq!(press(&mut i, "button:307", 1.), ui("weapon-group-next"));
+        assert_eq!(press(&mut i, "button:308", 1.), ui("designate"));
+        assert_eq!(press(&mut i, "button:310", 1.), ui("sight-zoom-out"));
+        assert_eq!(press(&mut i, "button:311", 1.), ui("sight-zoom-in"));
+        assert_eq!(press(&mut i, "axis:17", -1.), ui("throttle-step=0.05"));
+        assert_eq!(press(&mut i, "axis:17", 1.), ui("throttle-step=-0.05"));
+        assert_eq!(press(&mut i, "axis:16", -1.), ui("sight-polarity"));
+        assert_eq!(press(&mut i, "axis:16", 1.), ui("console-range"));
+        // A is the trigger, held.
+        event(&mut i, "button:304", 1.);
+        assert!(i.resolver.held("fire"));
+        let (pilot, _) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(pilot.commands.is_empty(), "no gear: {:?}", pilot.commands);
+        event(&mut i, "button:304", 0.);
+        assert!(!i.resolver.held("fire"));
+        i.resolver.drain();
+        // The View chords.
+        event(&mut i, "button:314", 1.);
+        assert_eq!(press(&mut i, "button:308", 1.), ui("clear-designation"));
+        assert_eq!(press(&mut i, "button:318", 1.), ui("gun-lock"));
+        assert_eq!(press(&mut i, "button:304", 1.), ui("console-flare"));
+        assert_eq!(press(&mut i, "button:305", 1.), ui("console-chaff"));
+        assert_eq!(press(&mut i, "axis:16", 1.), ui("designate-previous"));
+        assert_eq!(press(&mut i, "button:316", 1.), ui("sensor-console"));
+        event(&mut i, "button:314", 0.);
+        i.resolver.drain();
+        // The console's speed and zoom reach their meanings in the app.
+        assert_eq!(
+            crate::console_keys::throttle(&crate::flight_ui::Command::ThrottleStep(0.05)),
+            Some(tore_sim::autopilot::orbit::ConsoleCommand::SpeedStep(1))
+        );
+        // Closed: the flight meanings are back.
+        i.console.open = false;
+        i.aircraft_controls(false, false, false, true);
+        assert_eq!(
+            press(&mut i, "button:305", 1.),
+            vec![Action::Pilot(PilotCommand::Toggle(
+                tore_input::Switch::Airbrake
+            ))]
+        );
+        assert_eq!(
+            press(&mut i, "button:317", 1.),
+            vec![Action::Ui("view-front".into())]
+        );
+        event(&mut i, "button:304", 1.);
+        assert!(!i.resolver.held("fire"));
+        // And another aircraft never gets the console layout.
+        i.console.open = true;
+        i.aircraft_controls(false, false, false, false);
+        assert_eq!(
+            press(&mut i, "button:317", 1.),
+            vec![Action::Ui("view-front".into())]
+        );
+    }
+    /// The aircraft filter runs again for a different binding set of the
+    /// same size: its cache once keyed on the binding count, so a new
+    /// resolver whose profile had as many bindings as the old one (the
+    /// gamepad defaults against the stock keys, once P was bound) kept every
+    /// binding unfiltered.
+    #[test]
+    fn the_aircraft_filter_reruns_for_a_new_binding_set_of_the_same_size() {
+        let a = "tore-input 1\nbind keyboard Ctrl-ArrowUp vector-pitch-rate negative\nbind keyboard Ctrl-ArrowUp trim-pitch-rate negative";
+        let b = "tore-input 1\nbind keyboard Ctrl-ArrowUp trim-pitch-rate negative\nbind keyboard Ctrl-ArrowUp vector-pitch-rate negative";
+        let (a, b) = (Profile::parse(a).unwrap(), Profile::parse(b).unwrap());
+        assert_eq!(a.bindings.len(), b.bindings.len());
+        assert_ne!(binding_set_hash(&a), binding_set_hash(&b));
+        assert_eq!(binding_set_hash(&a), binding_set_hash(&a.clone()));
+        let mut i = input("");
+        i.aircraft_controls(false, false, false, false);
+        let before = i.filter_signature;
+        let count = i.resolver.profile.bindings.len();
+        // Another profile with exactly as many bindings, swapped in.
+        let mut other = i.resolver.profile.clone();
+        other.bindings.reverse();
+        assert_eq!(other.bindings.len(), count);
+        i.resolver = Resolver::new(other);
+        i.aircraft_controls(false, false, false, false);
+        assert_ne!(i.filter_signature, before, "the filter ran again");
+    }
+    #[test]
+    fn aircraft_context_keeps_old_look_rudder_and_scopes_added_engine_neutral_commands() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input("");
+        i.resolver = Resolver::new(gamepad_defaults(&device));
+        i.devices.insert(device.id.clone(), device.clone());
+        let event = |i: &mut Input, control: &str, value: f64| {
+            i.resolver.event(Event {
+                device: device.id.clone(),
+                control: control.into(),
+                value,
+                baseline: false,
+            })
+        };
+        i.aircraft_controls(false, false, false, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:4", -0.5);
+        event(&mut i, "axis:5", 1.);
+        let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(look[1] > 0.);
+        assert!(pilot.yaw > 0.);
+        assert_eq!(pilot.collective_rate, 0.);
+        assert!(i.resolver.drain().is_empty());
+        event(&mut i, "button:315", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("target-jammer".into()))]
+        );
+        i.aircraft_controls(false, false, true, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:4", -0.5);
+        event(&mut i, "axis:5", 1.);
+        let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(pilot.collective_rate > 0.);
+        assert!(pilot.yaw > 0.);
+        assert_eq!(look[1], 0.);
+        assert!(i.resolver.drain().is_empty());
+        event(&mut i, "button:315", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(
+                device.id.clone(),
+                Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Engine))
+            )]
+        );
+        i.aircraft_controls(true, false, false, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:17", -1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(
+                device.id.clone(),
+                Action::Pilot(PilotCommand::NeutralVector)
+            )]
+        );
+        // The AC-130: Select with the right stick slews the gunsight (and
+        // pans nothing), and the gun-group gestures are Select with the
+        // D-pad up and down (John, 2026-10-09).
+        i.aircraft_controls(false, false, false, true);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:3", 0.75);
+        assert!(
+            i.resolver.drain().is_empty(),
+            "the stick is no longer a gesture"
+        );
+        let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(pilot.vector_yaw_rate, 0.);
+        assert_eq!(look[0], 0.);
+        assert!(i.sight().0[0] > 0, "stick right slews right");
+        event(&mut i, "axis:3", 0.);
+        event(&mut i, "axis:4", -1.);
+        i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(i.sight().0, [0, 127], "stick up slews up");
+        event(&mut i, "axis:4", 0.);
+        event(&mut i, "axis:17", -1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("weapon-group-next".into()))]
+        );
+        event(&mut i, "axis:17", 0.);
+        event(&mut i, "axis:17", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("weapon-group-toggle".into()))]
+        );
+        event(&mut i, "axis:17", 0.);
+        // A on the AC-130 designates under the crosshair, on release; the
+        // radar target it designates elsewhere stays out of the way.
+        event(&mut i, "button:304", 1.);
+        assert!(i.resolver.drain().is_empty());
+        event(&mut i, "button:304", 0.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("sight-designate".into()))]
+        );
+        // Held half a second it pins the ground instead.
+        event(&mut i, "button:304", 1.);
+        for _ in 0..tore_input::LONG_PRESS_TICKS {
+            i.frame(&BTreeSet::new(), 0.5);
+        }
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("sight-pin".into()))]
+        );
+        event(&mut i, "button:304", 0.);
+        assert!(i.resolver.drain().is_empty());
+        // The same stick on the other aircraft does not slew anything.
+        i.aircraft_controls(false, false, false, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:3", 0.75);
+        i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+        event(&mut i, "axis:3", 0.);
+        event(&mut i, "button:304", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("designate".into()))]
+        );
+    }
+    #[test]
+    fn explicit_engine_and_target_jammer_bindings_override_contextual_gamepad_defaults() {
+        let device = crate::controls_editor::preview_device();
+        for (roles, action, expected) in [
+            (
+                [false; 4],
+                "engine",
+                Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Engine)),
+            ),
+            (
+                [false, false, true, false],
+                "target-jammer",
+                Action::Ui("target-jammer".into()),
+            ),
+        ] {
+            let mut profile = gamepad_defaults(&device);
+            let custom = Profile::parse(&format!(
+                "tore-input 1\nbind {} button:314+button:315 {action} press",
+                device.id
+            ))
+            .unwrap();
+            profile.bindings.extend(custom.bindings);
+            // Canonical persistence must keep automatic origins distinct from custom rows.
+            let text = profile.to_text().unwrap();
+            let mut i = input("");
+            i.resolver = Resolver::new(Profile::parse(&text).unwrap());
+            i.devices.insert(device.id.clone(), device.clone());
+            i.aircraft_controls(roles[0], roles[1], roles[2], roles[3]);
+            for control in ["button:314", "button:315"] {
+                i.resolver.event(Event {
+                    device: device.id.clone(),
+                    control: control.into(),
+                    value: 1.,
+                    baseline: false,
+                });
+            }
+            assert_eq!(i.resolver.drain(), vec![(device.id.clone(), expected)]);
+        }
+    }
+    #[test]
+    fn queued_neutral_command_temporarily_releases_bound_absolute_lift_levers() {
+        let mut i =
+            input("bind stick nozzle vector-pitch unit\nbind stick nacelle conversion unit");
+        for control in ["nozzle", "nacelle"] {
+            i.resolver.event(Event {
+                device: "stick".into(),
+                control: control.into(),
+                value: -0.2,
+                baseline: true,
+            });
+        }
+        let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+        assert_eq!(pilot.vector_pitch, Some(0.4));
+        assert_eq!(pilot.conversion, Some(0.4));
+        i.queue(PilotCommand::NeutralVector);
+        let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+        assert_eq!(pilot.commands, vec![PilotCommand::NeutralVector]);
+        assert_eq!(pilot.vector_pitch, None);
+        assert_eq!(pilot.conversion, None);
+        assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.vector_pitch, None);
+        i.resolver.event(Event {
+            device: "stick".into(),
+            control: "nacelle".into(),
+            value: -0.1,
+            baseline: false,
+        });
+        assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.conversion, Some(0.45));
+    }
+    #[test]
+    fn powered_lift_stock_keys_release_remap_and_obey_modifiers() {
+        let mut i = input("");
+        i.context(false, true);
+        assert!(i.key("ArrowDown", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.vector_pitch_rate, 1.);
+        assert!(i.key("ArrowDown", false, M::empty()));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.vector_pitch_rate, 0.);
+        assert!(i.key("Home", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 1.);
+        i.context(false, false);
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+        i.context(false, true);
+        i.key("Home", false, M::empty());
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+        assert!(!i.key("Home", true, M::SHIFT));
+        let mut i = input("");
+        let p = Profile::parse(
+            "tore-input 1\ndisable keyboard Ctrl-Home\nbind keyboard w collective-rate positive",
+        )
+        .unwrap();
+        i.save_settings_to(&p, None);
+        i.context(false, true);
+        assert!(i.key("Home", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 1.);
+        i.release_keys();
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+    }
+    #[test]
+    fn powered_lift_gamepad_layer_preserves_combat_buttons() {
+        let p = gamepad_defaults(&crate::controls_editor::preview_device());
+        for (control, action) in [
+            ("button:314+axis:3", "vector-yaw-rate"),
+            ("button:314+axis:4", "vector-pitch-rate"),
+            ("button:314+axis:3", "conversion-rate"),
+            ("button:314+axis:4", "collective-rate"),
+            ("button:314+button:311", "fire"),
+            ("button:314+button:310", "weapon-next"),
+        ] {
+            assert!(
+                p.bindings
+                    .iter()
+                    .any(|b| b.control == control && b.action == Action::parse(action).unwrap())
+            );
+        }
+        // The vectoring and conversion (or collective) uses of the right
+        // stick, and the gunship's gunsight slew.
+        for control in ["button:314+axis:3", "button:314+axis:4"] {
+            assert_eq!(
+                p.bindings.iter().filter(|b| b.control == control).count(),
+                3
+            );
+        }
+        assert!(!p.bindings.iter().any(|b| matches!(
+            b.control.as_str(),
+            "button:314+axis:0" | "button:314+axis:1"
+        )));
+        let mut r = Resolver::new(p);
+        for control in ["axis:0", "axis:1", "axis:3", "axis:4", "button:314"] {
+            r.event(Event {
+                device: crate::controls_editor::preview_device().id,
+                control: control.into(),
+                value: 0.,
+                baseline: true,
+            });
+        }
+        for (control, value) in [("button:314", 1.), ("axis:1", 0.5), ("axis:4", -0.5)] {
+            r.event(Event {
+                device: crate::controls_editor::preview_device().id,
+                control: control.into(),
+                value,
+                baseline: false,
+            });
+        }
+        let pilot = r.frame(0.7).0;
+        assert!(pilot.pitch > 0.);
+        assert!(pilot.collective_rate > 0.);
     }
     #[test]
     fn keyboard_pitch_and_look_keep_original_signs() {
@@ -1287,53 +2940,312 @@ mod tests {
                 .collect(),
         };
         let profile = Profile::parse(&gamepad_text(&d)).unwrap();
-        let chords: Vec<_> = profile
-            .bindings
-            .iter()
-            .filter(|b| b.control.contains('+'))
-            .cloned()
-            .collect();
-        assert_eq!(chords.len(), 14);
-        for binding in chords {
-            let mut r = Resolver::new(profile.clone());
-            for id in ids {
+        for roles in [
+            [false; 4],
+            [true, false, false, false],
+            [false, true, true, false],
+            [false, false, true, false],
+            [false, false, false, true],
+        ] {
+            let chords: Vec<_> = profile
+                .bindings
+                .iter()
+                .filter(|b| {
+                    b.control.contains('+')
+                        && !matches!(b.action, Action::Axis(_))
+                        && gamepad_binding_enabled(b, roles)
+                })
+                .cloned()
+                .collect();
+            // The gunship swaps the radar designation, range reset and damage
+            // test for the gun-group gestures and the sight's tap and long
+            // press.
+            assert_eq!(chords.len(), if roles[3] { 15 } else { 14 });
+            for binding in chords {
+                let mut r = Resolver::new(profile.clone());
+                r.filter_bindings(|binding| gamepad_binding_enabled(binding, roles));
+                for id in ids {
+                    r.event(Event {
+                        device: d.id.clone(),
+                        control: id.into(),
+                        value: 0.,
+                        baseline: true,
+                    });
+                }
                 r.event(Event {
                     device: d.id.clone(),
-                    control: id.into(),
-                    value: 0.,
-                    baseline: true,
+                    control: "button:314".into(),
+                    value: 1.,
+                    baseline: false,
                 });
-            }
-            r.event(Event {
-                device: d.id.clone(),
-                control: "button:314".into(),
-                value: 1.,
-                baseline: false,
-            });
-            let (_, control) = binding.control.split_once('+').unwrap();
-            r.event(Event {
-                device: d.id.clone(),
-                control: control.into(),
-                value: if let tore_input::Mode::Position(n) = binding.mode {
-                    f64::from(n)
+                let (_, control) = binding.control.split_once('+').unwrap();
+                r.event(Event {
+                    device: d.id.clone(),
+                    control: control.into(),
+                    value: if let tore_input::Mode::Position(n) = binding.mode {
+                        f64::from(n)
+                    } else {
+                        1.
+                    },
+                    baseline: false,
+                });
+                // A tap comes on release and a long press after its hold.
+                match binding.mode {
+                    tore_input::Mode::Tap => r.event(Event {
+                        device: d.id.clone(),
+                        control: control.into(),
+                        value: 0.,
+                        baseline: false,
+                    }),
+                    tore_input::Mode::Long => {
+                        for _ in 0..tore_input::LONG_PRESS_TICKS {
+                            r.frame(0.5);
+                        }
+                    }
+                    _ => {}
+                }
+                let actions = r.drain();
+                if binding.action == Action::Ui("fire".into()) {
+                    assert!(r.held("fire"));
+                    assert!(actions.is_empty());
                 } else {
-                    1.
-                },
-                baseline: false,
-            });
-            let actions = r.drain();
-            if binding.action == Action::Ui("fire".into()) {
-                assert!(r.held("fire"));
-                assert!(actions.is_empty());
-            } else {
-                assert_eq!(
-                    actions,
-                    vec![(d.id.clone(), binding.action.clone())],
-                    "{}",
-                    binding.control
-                );
+                    assert_eq!(
+                        actions,
+                        vec![(d.id.clone(), binding.action.clone())],
+                        "{}",
+                        binding.control
+                    );
+                }
+                assert_eq!(r.frame(0.5).0.throttle_rate, 0.);
             }
-            assert_eq!(r.frame(0.5).0.throttle_rate, 0.);
         }
+    }
+    /// K1 (VTOL overhaul, design section 10): the stock keys whose meaning
+    /// depends on the aircraft. Roles are [vectoring, conversion,
+    /// collective, gunship] as the flight sets them.
+    #[test]
+    fn k1_key_roles_follow_the_aircraft() {
+        use tore_input::{FlightAxis, LiftCommand, NozzlePreset, Switch, TrimAxis};
+        const F16: [bool; 4] = [false; 4];
+        const AV8: [bool; 4] = [true, false, false, false];
+        const V22: [bool; 4] = [false, true, true, false];
+        const AH64: [bool; 4] = [false, false, true, false];
+        let on = |roles: [bool; 4]| {
+            let mut i = input("");
+            i.context(false, true);
+            i.aircraft_controls(roles[0], roles[1], roles[2], roles[3]);
+            i
+        };
+        let press = |i: &mut Input, key: &str, m: M| -> Vec<Action> {
+            let claimed = i.key(key, true, m);
+            i.key(key, false, M::empty());
+            assert!(claimed || i.resolver.drain().is_empty());
+            i.resolver.drain().into_iter().map(|(_, a)| a).collect()
+        };
+        let lift = |c| Action::Pilot(PilotCommand::Lift(c));
+        // The jets: Z / X step, Shift+Z / Shift+X preset, never the rudder.
+        let mut jet = on(AV8);
+        for (key, m, expected) in [
+            (
+                "z",
+                M::empty(),
+                lift(LiftCommand::NozzleStep { down: false }),
+            ),
+            (
+                "x",
+                M::empty(),
+                lift(LiftCommand::NozzleStep { down: true }),
+            ),
+            (
+                "z",
+                M::SHIFT,
+                lift(LiftCommand::NozzlePreset(NozzlePreset::Forward)),
+            ),
+            (
+                "x",
+                M::SHIFT,
+                lift(LiftCommand::NozzlePreset(NozzlePreset::Vertical)),
+            ),
+        ] {
+            assert_eq!(press(&mut jet, key, m), vec![expected], "{key} {m:?}");
+        }
+        let held: BTreeSet<String> = ["z".into()].into();
+        assert_eq!(jet.frame(&held, 0.5).0.yaw, 0.);
+        let held: BTreeSet<String> = ["x".into(), "End".into()].into();
+        assert_eq!(jet.frame(&held, 0.5).0.yaw, -1., "End stays the rudder");
+        // The F-16, AH-64 and V-22: Z / X stay rudder.
+        for roles in [F16, AH64, V22] {
+            let mut i = on(roles);
+            assert!(!i.key("z", true, M::empty()), "{roles:?}");
+            assert!(!i.key("x", true, M::SHIFT), "{roles:?}");
+            let held: BTreeSet<String> = ["z".into()].into();
+            assert_eq!(i.frame(&held, 0.5).0.yaw, -1., "{roles:?}");
+            let held: BTreeSet<String> = ["x".into()].into();
+            assert_eq!(i.frame(&held, 0.5).0.yaw, 1., "{roles:?}");
+        }
+        // Ctrl+arrows trim only on the rotorcraft; elsewhere they are the
+        // nozzle slew as before.
+        let trims = |pilot: &PilotInput| -> Vec<(TrimAxis, f64)> {
+            pilot
+                .commands
+                .iter()
+                .filter_map(|c| match c {
+                    PilotCommand::Lift(LiftCommand::TrimAdjust(axis, v)) => Some((*axis, *v)),
+                    _ => None,
+                })
+                .collect()
+        };
+        for roles in [AH64, V22] {
+            let mut i = on(roles);
+            assert!(i.key("ArrowUp", true, M::CONTROL));
+            let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+            assert_eq!(trims(&pilot), vec![(TrimAxis::Pitch, -0.02)], "{roles:?}");
+            assert_eq!(pilot.vector_pitch_rate, 0.);
+            i.key("ArrowUp", false, M::empty());
+            assert!(i.key("ArrowRight", true, M::CONTROL));
+            let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+            assert_eq!(trims(&pilot), vec![(TrimAxis::Roll, 0.02)], "{roles:?}");
+            assert_eq!(pilot.vector_yaw_rate, 0.);
+        }
+        for roles in [F16, AV8] {
+            let mut i = on(roles);
+            assert!(i.key("ArrowDown", true, M::CONTROL));
+            let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+            assert!(trims(&pilot).is_empty(), "{roles:?}");
+            assert_eq!(pilot.vector_pitch_rate, 1., "{roles:?}");
+        }
+        // Nozzle yaw is gone from the jets' Ctrl+Left / Right.
+        let mut i = on(AV8);
+        assert!(!i.key("ArrowLeft", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.vector_yaw_rate, 0.);
+        // 0: trim centre on the helicopters, forward neutral elsewhere.
+        assert_eq!(
+            press(&mut on(AH64), "0", M::empty()),
+            vec![lift(LiftCommand::TrimCentre)]
+        );
+        for roles in [F16, AV8, V22] {
+            assert_eq!(
+                press(&mut on(roles), "0", M::empty()),
+                vec![Action::Pilot(PilotCommand::NeutralVector)],
+                "{roles:?}"
+            );
+        }
+        // Ctrl+Alt+A is hover hold everywhere (the flight refuses it where
+        // it does not apply); Ctrl+Shift+A the stability level on the six.
+        for roles in [F16, AV8, V22, AH64] {
+            assert_eq!(
+                press(&mut on(roles), "a", M::CONTROL | M::ALT),
+                vec![Action::Pilot(PilotCommand::Toggle(Switch::HoverHold))],
+                "{roles:?}"
+            );
+        }
+        for roles in [AV8, V22, AH64] {
+            assert_eq!(
+                press(&mut on(roles), "a", M::CONTROL | M::SHIFT),
+                vec![lift(LiftCommand::CycleStability)],
+                "{roles:?}"
+            );
+        }
+        assert!(!on(F16).key("a", true, M::CONTROL | M::SHIFT));
+        // Throttle keys drive the collective only on the rotorcraft.
+        for (roles, rotorcraft) in [(F16, false), (AV8, false), (AH64, true), (V22, true)] {
+            let mut i = on(roles);
+            i.queue(PilotCommand::Throttle(0.75));
+            i.queue(PilotCommand::AdjustThrottle(0.05));
+            let expected = if rotorcraft {
+                vec![
+                    PilotCommand::SetAxis(FlightAxis::Collective, 0.75),
+                    PilotCommand::AdjustAxis(FlightAxis::Collective, 0.05),
+                ]
+            } else {
+                vec![
+                    PilotCommand::Throttle(0.75),
+                    PilotCommand::AdjustThrottle(0.05),
+                ]
+            };
+            assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.commands, expected);
+            assert_eq!(i.collective_role(), rotorcraft);
+            assert_eq!(
+                i.throttle_reference(0.9, 0.4),
+                if rotorcraft { 0.4 } else { 0.9 }
+            );
+        }
+    }
+
+    #[test]
+    fn the_throttle_lever_and_rate_drive_the_collective_on_rotorcraft() {
+        let mut i = input("bind hotas t throttle unit\nbind hotas up throttle-rate positive");
+        i.context(false, true);
+        let hotas = |i: &mut Input, control: &str, value: f64, baseline: bool| {
+            i.resolver.event(Event {
+                device: "hotas".into(),
+                control: control.into(),
+                value,
+                baseline,
+            })
+        };
+        // The lever picks up against the collective, not the engine
+        // throttle, which the governed engines leave at 100 percent.
+        i.aircraft_controls(false, false, true, false);
+        hotas(&mut i, "t", 0.2, true);
+        hotas(&mut i, "up", 0., true);
+        let pilot = i.frame(&BTreeSet::new(), 0.6).0;
+        assert_eq!((pilot.throttle, pilot.collective), (None, Some(0.6)));
+        hotas(&mut i, "t", 0.3, false);
+        let pilot = i.frame(&BTreeSet::new(), 0.6).0;
+        assert_eq!((pilot.throttle, pilot.collective), (None, Some(0.65)));
+        hotas(&mut i, "up", 1., false);
+        let pilot = i.frame(&BTreeSet::new(), 0.65).0;
+        assert_eq!((pilot.throttle_rate, pilot.collective_rate), (0., 1.));
+        // A throttle key overrides the lever until it moves again.
+        i.queue(PilotCommand::Throttle(0.25));
+        let pilot = i.frame(&BTreeSet::new(), 0.65).0;
+        assert_eq!(pilot.collective, None);
+        assert_eq!(
+            pilot.commands,
+            vec![PilotCommand::SetAxis(
+                tore_input::FlightAxis::Collective,
+                0.25
+            )]
+        );
+        // On a fighter the same lever is the throttle.
+        i.aircraft_controls(false, false, false, false);
+        hotas(&mut i, "t", 0.3, true);
+        hotas(&mut i, "up", 0., true);
+        let pilot = i.frame(&BTreeSet::new(), 0.65).0;
+        assert_eq!((pilot.throttle, pilot.collective), (Some(0.65), None));
+    }
+
+    #[test]
+    fn a_players_own_binding_on_a_contextual_key_wins() {
+        let mut i = input("");
+        let p = Profile::parse("tore-input 1\nbind keyboard z gear press").unwrap();
+        i.save_settings_to(&p, None);
+        i.context(false, true);
+        i.aircraft_controls(true, false, false, false);
+        assert!(i.key("z", true, M::empty()));
+        assert_eq!(
+            i.resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .collect::<Vec<_>>(),
+            vec![Action::Pilot(PilotCommand::Toggle(
+                tore_input::Switch::Gear
+            ))]
+        );
+        // X keeps its stock nozzle meaning.
+        i.key("z", false, M::empty());
+        assert!(i.key("x", true, M::empty()));
+        assert_eq!(
+            i.resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .collect::<Vec<_>>(),
+            vec![Action::Pilot(PilotCommand::Lift(
+                tore_input::LiftCommand::NozzleStep { down: true }
+            ))]
+        );
     }
 }

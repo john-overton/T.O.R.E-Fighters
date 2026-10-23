@@ -4,7 +4,7 @@
 //! `--verify-render`. These read recordings of what happened; they are not
 //! the `--replay-input` and `--replay-combat` tapes, which re-simulate.
 use super::convert::{self, Identities, Presentation};
-use crate::{AppResult, render_snapshot::RenderSnapshot};
+use crate::{AppResult, snapshot::RenderSnapshot};
 use std::collections::BTreeMap;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -51,6 +51,13 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
     let recording = open(path)?;
     let header = recording.header();
     let world = &header.world;
+    if recording.flagged() {
+        writeln!(
+            out,
+            "Feedback    {} reports (flagged)",
+            recording.feedback().count()
+        )?;
+    }
     writeln!(out, "Recording   {}", path.display())?;
     writeln!(
         out,
@@ -95,6 +102,59 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
                 "a scattered deck at {feet} ft"
             ))
     )?;
+    if let Some(target) = &world.ground_target {
+        writeln!(
+            out,
+            "Ground      target {} with AAA {} and SAM {}, surface seed {}, enemy nationality {}, {} nm apart{}{}",
+            target.stem,
+            target.aaa,
+            target.sam,
+            target.seed,
+            target.enemy_nationality,
+            target.separation_nm,
+            if target.jitter {
+                ""
+            } else {
+                ", positions fixed"
+            },
+            if target.relocate {
+                ""
+            } else {
+                ", template not relocated"
+            },
+        )?;
+    }
+    if let Some(area) = &world.area_defense {
+        writeln!(
+            out,
+            "Area        defenses with AAA {} and SAM {}, surface seed {}, enemy nationality {}, {}",
+            area.aaa,
+            area.sam,
+            area.seed,
+            area.enemy_nationality,
+            if area.rolled {
+                "sites rolled per slot"
+            } else {
+                "fixed site counts (first build)"
+            },
+        )?;
+    }
+    if world.airfield_scene != 0 {
+        writeln!(out, "Airfields   scene {}", world.airfield_scene)?;
+    }
+    if world.city_fill_scene != 0 {
+        writeln!(out, "City fill   scene {}", world.city_fill_scene)?;
+    }
+    let city = recording.city();
+    if !city.is_empty() {
+        writeln!(
+            out,
+            "City        {} buildings knocked down in {} changes, first at tick {}",
+            city.all().len(),
+            city.changes.len(),
+            city.changes[0].0
+        )?;
+    }
     let frames = recording.frame_count();
     let aircraft = recording.aircraft().count().max(1) as u64;
     match recording.first_tick().zip(recording.last_tick()) {
@@ -131,6 +191,18 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
         }
         None => writeln!(out, "Result      unknown: the recording did not finish")?,
     }
+    if recording.surface_units().next().is_some() {
+        let units: Vec<_> = recording.surface_units().collect();
+        let hostile = units
+            .iter()
+            .filter(|unit| unit.side == tore_replay::Side::Enemy)
+            .count();
+        writeln!(
+            out,
+            "Surface     {} units named, {hostile} of them enemy",
+            units.len()
+        )?;
+    }
     for info in recording.aircraft() {
         writeln!(
             out,
@@ -163,6 +235,21 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
                 .as_ref()
                 .map_or(String::new(), |s| format!(", shape {s}"))
         )?;
+    }
+    // Effects by kind, for a recording that can hold flak and craters from
+    // surface units (format 3).
+    if header.format_version >= 3
+        && let Ok(spawns) = recording.spawns(0, u64::MAX)
+    {
+        let mut effects: BTreeMap<&str, usize> = BTreeMap::new();
+        for (_, effect) in &spawns.effects {
+            *effects.entry(effect.kind.name()).or_default() += 1;
+        }
+        let list: Vec<String> = effects
+            .iter()
+            .map(|(name, count)| format!("{name} {count}"))
+            .collect();
+        writeln!(out, "Effects     {}", list.join(", "))?;
     }
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     for event in recording.events() {
@@ -213,6 +300,9 @@ pub fn log(path: &Path, options: &LogOptions) -> AppResult<PathBuf> {
     file.flush()?;
     let mut file = BufWriter::new(create(&folder.join("summary.txt"))?);
     export::write_summary(&recording, &export::SummaryOptions::default(), &mut file)?;
+    file.flush()?;
+    let mut file = BufWriter::new(create(&folder.join("feedback.jsonl"))?);
+    export::feedback::write(&recording, &path.display().to_string(), &mut file)?;
     file.flush()?;
     Ok(folder)
 }
@@ -302,12 +392,13 @@ pub fn verify(
     path: &Path,
     live: &[RenderSnapshot],
     devices: &[(u64, u64)],
-    world: &crate::terrain::World,
+    world: &crate::terrain::Terrain,
 ) -> AppResult<Verification> {
     let recording = open(path)?;
     let presentation = Presentation::from_header(recording.header());
     let identities = Identities::of(&recording);
     let marks = convert::recorded_marks(&recording);
+    let stores = tore_replay::stores::StoreTrack::from_events(recording.events());
     let flown: std::collections::BTreeMap<u64, u64> = devices.iter().copied().collect();
     let mut track = super::devices::DeviceTrack::new(recording.events());
     let none = super::devices::digest(&Default::default());
@@ -323,9 +414,14 @@ pub fn verify(
             result.missing += 1;
             continue;
         };
-        let effects = recording.live_effects(snapshot.tick, convert::EFFECT_LOOKBACK_TICKS)?;
+        let effects = convert::playing_effects(&recording, snapshot.tick)?;
         let mut rebuilt = convert::snapshot(&frame, &effects, &presentation, &identities);
         rebuilt.marks = convert::marks_at(&marks, snapshot.tick);
+        tore_session::client::convert::stores::put_recorded(
+            &stores,
+            snapshot.tick,
+            std::iter::once(&mut rebuilt.player).chain(&mut rebuilt.targets),
+        );
         result.compared += 1;
         let difference = convert::difference(snapshot, &rebuilt).or_else(|| {
             let expected = *flown.get(&snapshot.tick)?;

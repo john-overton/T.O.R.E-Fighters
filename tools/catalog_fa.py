@@ -225,6 +225,7 @@ def aircraft_row(source, archive, data, layout, guns):
         'internal_gun': ';'.join(name for name in counted if name in guns),
         'default_stores': ';'.join(f'{name}:{count}' for name, count in counted.items()),
         'hud_resource': ';'.join(strings(blocks, obj['hudName'])),
+        'ai_script': ';'.join(strings(blocks, npc['ctName'])),
         'shape': ';'.join(strings(blocks, obj['shape'])),
         'archive': archive,
     }
@@ -266,6 +267,8 @@ def weapon_row(source, archive, data, layout):
         'surface_type_references': 0,
         'shape': ';'.join(strings(blocks, obj['shape'])),
         'fire_sound': ';'.join(strings(blocks, projectile['fireSound'])),
+        'max_sound_distance_ft': projectile['maxSndDist'].number(),
+        'frequency_adjust': projectile['freqAdj'].number(),
         'archive': archive,
     }
 

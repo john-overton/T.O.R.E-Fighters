@@ -11,6 +11,18 @@
 One page. What is specified, what is built, what is next. Milestones live in
 [ROADMAP.md](ROADMAP.md); how agents work is in [AGENTS.md](../AGENTS.md).
 
+**Air-to-ground weapons, 2026-10-11.** A player can now designate ground
+targets (the A-G radar page, the FLIR, the targeting sight, the HARM page), use
+CCIP and level-release bomb sights with John's "T" guide, fire rocket pods, guided
+bombs, laser missiles, JDAMs and the ground missiles, and see the laser and the
+release-range indicator. Every weapon class was flown headless on two carriers
+([acceptance](baselines/air-to-ground.md), [spec](spec/air-to-ground.md)). Online
+under protocol 23 (slice NA) networked clients see the new displays, the lobby
+carries the Pave pods and `net-a2g-loopback` flies a lasing and a buddy bomber.
+Open: an AGM-65A
+range question, and the not-built items in the spec. The AI strike round (AI
+wings attacking ground targets) is next and needs John's go-ahead.
+
 **Retail map detail, 2026-09-23.** John selected source textures, artwork,
 scenery and variants. All sixteen base maps and 59 variants now load, with
 Kurile's named artwork, full-resolution scenery pages and visible main-shape
@@ -87,12 +99,14 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
-| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Implemented for A2A stores and controlled surface-seeker fixtures. Surface designation remains deferred; [missile validation](baselines/missiles.md), [HUD cleanup and tone limits](baselines/hud-cleanup.md) |
-| [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
+| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Implemented for A2A stores and, since the air-to-ground round, for the surface seekers (Mavericks, SLAM, HARM, Harpoon, Exocet, Kickback, AS-7, AS-15) flown from ground designations; surface units fire 13 radar and 6 infrared SAM and ship missile profiles (2026-10-10); [missile validation](baselines/missiles.md), [air-to-ground acceptance](baselines/air-to-ground.md), [HUD cleanup and tone limits](baselines/hud-cleanup.md) |
+| [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component, with the retail air-to-ground, IR-ground and HARM pages added by the air-to-ground round; [component guide](radar.md), [validation](baselines/radar.md) |
+| [Air-to-ground](spec/air-to-ground.md) | Ground designation, the A-G radar and HARM page, the targeting sight and laser, bomb sights and warnings, guided bombs, rocket pods, cluster bombs and the ground missiles: 40 records in twelve classes plus the Pave pods | Implemented and flown headless on two carriers per record (2026-10-11); not built: a JDAM release-at-the-bar mode, the HUD time-to-impact row, Tab gun fire and a viewer laser overlay; clients see the new displays under protocol 23 ([online](MULTIPLAYER.md#air-to-ground-online)); [acceptance](baselines/air-to-ground.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
 | [AI experience](spec/ai-experience.md) | Experience channels, Quick Mission and mission skill rules, enemy-skill override, tactical thresholds, G exemption, family scope | Specified; implemented as isolated `tore-sim::ai::experience`, Quick Mission hookup is partial |
 | [AI behavior](spec/ai.md) | Fighter decisions, timing, pursuit, targeting, steering and terrain, seeker gates, ammunition, wing orders and formations, threat warnings and countermeasures, routes and fuel | Established rules implemented as isolated components with synthetic tests; open items in the [M1e backlog](ROADMAP.md#ai-backlog-2026-09-17); Quick Mission hookup is partial |
+| [Surface defenses](spec/surface-defenses.md) | Quick Mission ground targets in 16 theaters: templates, rolls, jitter and relocation, starts, SAM batteries, AAA tuning, flak, resupply, parked aircraft, objectives, multiplayer and replays | Implemented (John's request, 2026-10-10); [acceptance](baselines/surface-defenses.md) |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
 | [Ground textures and map detail](spec/terrain-detail.md) | Source terrain scale, named artwork, scenery scope and shader boundaries | Source detail expansion implemented for 75 static layouts; fitted land tiling and variant composition, dynamic states remain open |
@@ -114,18 +128,34 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Load Ordnance screen | Original art, supported weapon and fuel edits; normal catalog requires aircraft compatibility, Cheat shows all supported imports | mixed | [creator/ordnance](baselines/creator-ordnance.md), [catalog checks](baselines/ordnance-catalog.md) |
 | Theaters | 16 base maps selectable (59 variants load through `--theater ~CODE`, developer only); named/numbered artwork, fitted generic land and full-size scenery textures render. Dynamic scenery and campaign progression remain open | native data, fitted rendering | [terrain review](baselines/retail-terrain-review.md) |
 | Weather | Day/night palettes, horizon, sun/moon/stars, cloud sheets, fog maps | mixed | [weather](baselines/weather.md), [review](baselines/weather-review.md) |
-| Twelve aircraft in free flight | Source cockpits, HUD, instrument windows, external views, initial device rigs; new control-surface schedules remain open | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [additional FA aircraft](baselines/aircraft-fa-expansion.md), [roster](baselines/aircraft-roster-expansion.md) |
+| 36 retail aircraft plus F/A-XX | Source cockpits, reviewed equipment, initial exterior rigs and hybrid flight, including six powered-lift types on the VTOL overhaul's rotor, nozzle and nacelle physics; remaining moving surfaces and special-system acceptance are tracked separately | source-derived configuration and documented fitted flight/animation laws | [Variety matrix](spec/aircraft-variety.md), [flight evidence](baselines/variety-flight.md), [powered-lift flight](spec/powered-lift-flight.md) |
 | Ground contact and landing | Runway contact, taxi, brakes, touchdown; taxiway-queued ground starts, airport/wing speech and AI takeoff, landing and return to base ([airfield spec](spec/ai-airfield.md)) | **opinionated** contact; spec-derived airfield sequence with fitted flight control | [land foundation](baselines/native-land-foundation.md) |
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding; default keys follow the original's in-flight key table, including chaff and flares | spec-derived keyboard layout ([keyboard](spec/keyboard.md)), opinionated authored layer and T.O.R.E-only keys | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
-| Sensors | One shared radar, infrared and visual component for all twelve aircraft: imported capability profiles, contacts, one fire-control track, click selection, history, jammer noise, the RCS exposure page and radar weapon support | **opinionated** detection/notch/jamming/RCS tuning over spec-derived equipment data | [radar](baselines/radar.md) |
-| Combat AI | Spec-derived components in `tore-sim::ai` plus a per-actor controller, steering adapter and actor-owned mission runtime. Quick Mission launches independent AI wings by default; `--fixture-wings` keeps the straight-flight setup. Idle aircraft follow their own wing leader in delta formation. Surface actors and the other aircraft families are not implemented | spec-derived, with named fitted rules where the spec leaves a branch open; each is recorded per actor | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai), [provenance](behavior-provenance.md) |
+| Sensors | One shared radar, infrared and visual component across the expanded roster, with explicit absent equipment: imported capability profiles, contacts, one fire-control track, click selection, history, jammer noise, the RCS exposure page and radar weapon support | **opinionated** detection/notch/jamming/RCS tuning over spec-derived equipment data | [radar](baselines/radar.md) |
+| Surface defenses | The Quick Mission ground target in every theater and the base layouts' air defenses fight: batteries, guns, flak, ships, columns, supply trucks, parked aircraft, wrecks, objectives and the debrief; online under protocol 22 and in replay format 3 | retail records and tables, spec-derived phases, fitted and opinionated (John, 2026-10-10) rules recorded per component | [spec](spec/surface-defenses.md), [acceptance](baselines/surface-defenses.md) |
+| Combat AI | Spec-derived components in `tore-sim::ai` plus a per-actor controller, steering adapter and actor-owned mission runtime. Quick Mission launches independent AI wings by default; `--fixture-wings` keeps the straight-flight setup. Idle aircraft follow their own wing leader in delta formation. Surface units (SAM, AAA, flak, ships, armed vehicles) run their own controller since the 2026-10-10 surface round; the other aircraft families are not implemented, and AI wings do not attack ground targets | spec-derived, with named fitted rules where the spec leaves a branch open; each is recorded per actor | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai), [provenance](behavior-provenance.md) |
 
 Flight has three selectable paths and they stay distinct: the compatibility `--legacy-flight`, the
 default hybrid `--researched-flight`, and the restricted `--native-flight-tables`
 research path. Do not change the default without being asked.
 
 ## Next
+
+**Surface objectives and air defenses, 2026-10-10 (built, awaiting the full
+battery and John's in-game check).** John authorized surface AI on 2026-10-10.
+The Quick Mission's ground target is live in all sixteen theaters with its
+retail template, defended at the chosen AAA and SAM strength, nudged and
+relocated per flight; SAM batteries, guns, flak, ships, columns, supply trucks
+and simulated parked aircraft fight or burn as specified, the base layouts'
+defenses wake on both sides, and the objective and debrief count it, single
+player and online ([spec](spec/surface-defenses.md),
+[acceptance](baselines/surface-defenses.md)). Next, each its own round: the
+air-to-ground player weapons, then AI strike with the ground weapons pass, the
+real-scale airfields and the city fill
+([roadmap](ROADMAP.md#next-rounds-after-the-surface-round)). Runway width is
+deferred by John, with the remaining work listed there.
+
 
 Existing implementation track: **M1 air-to-air awareness and engagement**.
 The retail terrain expansion above adds no autonomous behavior. The
@@ -155,8 +185,9 @@ authored tuning; the [implementation baseline](baselines/incoming-fire-implement
 records aircraft/skill/adapter coverage and remaining limits. Headless probes now
 select opponents, geometry, skill and flight adapter, inject controlled threats,
 and record actual AI attitude. Radar stealth and normal adapter defaults are
-unchanged. Surface firing AI, full weather visibility, cockpit blind sectors and
-retail timing remain separate work.
+unchanged. Full weather visibility, cockpit blind sectors and retail timing
+remain separate work; surface firing AI was built in its own round
+(2026-10-10, below).
 
 **AI gun employment implemented.** Expired attempts retry, and live guns use
 physical bursts, observed-motion lead and barrel alignment with per-round debit.
@@ -177,14 +208,17 @@ requests from live faults. Dummies and health thresholds are unchanged.
    active flight, same-target reacquisition through guidance expiry, inherited
    velocity, BORESIGHT, HUD and fitted tone are implemented. The
    [baseline](baselines/missiles.md) records 3,920 reach cases and the remaining
-   fitted tuning, unavailable human review and original evidence gaps. No new
-   catalog stores or combat AI were added.
+   fitted tuning, unavailable human review and original evidence gaps. The
+   air-to-ground round (2026-10-10 and 11) later added the ground weapons and
+   their catalog entries; no combat AI was added, and the AI wings still do not
+   attack the ground.
 2. **Finish the shared aircraft radar tuning pass.** The component John
    requested on 2026-09-16 shipped on the same day: shared profiles and contact
    state using PT signatures with authored look-down, notch and jamming, the
    RCS/aspect display, persistent click selection, Y history and infrared A2A,
    one fire-control track only, and detectable destroyed aircraft. Target-view
-   IFF is unchanged and A2G is still deferred. Stages 1 to 4 of the
+   IFF is unchanged; the A-G, IR-ground and HARM pages came with the
+   air-to-ground round. Stages 1 to 4 of the
    [component guide](radar.md#delivery-and-acceptance) are done. Stage 5 is
    partly done: all twelve aircraft produce the capability summary and pass their
    combat smokes, but no side-by-side tuning review of the twelve has happened,

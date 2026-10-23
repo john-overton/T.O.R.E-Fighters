@@ -104,6 +104,7 @@ fn identity(id: u32, member: u8) -> ActorIdentity {
         side: Side(1),
         wing: 0,
         member,
+        leads: member == 0,
         aircraft: AircraftId::F18,
         human_controlled: false,
     }
@@ -153,6 +154,7 @@ fn own_state() -> OwnState {
         alive: true,
         fuel_endurance_s: 3_600.,
         time_home_s: Some(600.),
+        rotorcraft: false,
         internal_fuel_lbs: 8_000.,
         radar_emitting: true,
     }
@@ -160,6 +162,7 @@ fn own_state() -> OwnState {
 
 fn hostile(id: u32, position: [f64; 3]) -> TargetView {
     TargetView {
+        infrared_strength: 1.,
         id,
         side: Side(2),
         position,
@@ -176,6 +179,7 @@ fn hostile(id: u32, position: [f64; 3]) -> TargetView {
         wing_attackers: 0,
         terrain_blocked: false,
         sensor_supported: true,
+        link_track: false,
     }
 }
 
@@ -191,6 +195,7 @@ fn missile_station(maximum_range_ft: f64) -> StationView {
         employment_fit: None,
         minimum_range_ft: 1_000.,
         maximum_range_ft: Some(maximum_range_ft),
+        infrared_envelope: None,
         requires_radar: false,
         requires_sensor: false,
         employment_zone: None,
@@ -1047,4 +1052,31 @@ fn the_ignore_reason_agrees_with_the_response_permission() {
             );
         }
     }
+}
+
+#[test]
+fn ai_ir_head_on_uses_shared_seeker_but_keeps_minimum_range_discipline() {
+    let mut station = missile_station(50_000.);
+    station.infrared_envelope = Some((true, 50_000.));
+    let own = frame(0, &[], &[], wing_view(None)).own;
+    for (distance, usable) in [
+        (500., false),
+        (1000., true),
+        (18_228., true),
+        (21_000., false),
+    ] {
+        let t = hostile(2, [0., 20_000., distance]);
+        assert_eq!(
+            station.employment_error(&own, &t).is_some(),
+            usable,
+            "{distance}"
+        );
+    }
+    let mut t = hostile(2, [0., 20_000., 21_000.]);
+    t.infrared_strength = 1.5;
+    assert!(station.employment_error(&own, &t).is_some());
+    station.infrared_envelope = Some((false, 50_000.));
+    assert!(station.employment_error(&own, &t).is_none());
+    t.heading_deg = 0.;
+    assert!(station.employment_error(&own, &t).is_some());
 }

@@ -542,3 +542,7 @@ mod tests {
         ));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "motion_checkpoint.rs"]
+mod checkpoint;

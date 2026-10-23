@@ -1,4 +1,7 @@
-use crate::{PilotCommand, PilotInput, Switch};
+use crate::{
+    FlightAxis, LiftCommand, NozzlePreset, PilotCommand, PilotInput, StabilityLevel, Switch,
+    TrimAxis, trim_keys,
+};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -8,12 +11,74 @@ pub enum Axis {
     Yaw,
     Throttle,
     ThrottleRate,
+    VectorPitch,
+    VectorPitchRate,
+    VectorYaw,
+    VectorYawRate,
+    Conversion,
+    ConversionRate,
+    Collective,
+    CollectiveRate,
     LookX,
     LookY,
     /// Absolute head-tracker yaw: -1..1 maps to -180..180 degrees before scaling.
     HeadYaw,
     /// Absolute head-tracker pitch: -1..1 maps to -90..90 degrees before scaling.
     HeadPitch,
+    /// Cyclic and pedal trim of the helicopters and the V-22, held at a rate
+    /// (design 5.3): each tick becomes a [`LiftCommand::TrimAdjust`].
+    TrimPitchRate,
+    TrimRollRate,
+    TrimPedalRate,
+    /// The AC-130 gunsight's slew, right positive. Presentation-side like
+    /// look: [`Resolver::sight`] reads it, it never reaches [`PilotInput`].
+    SightX,
+    /// The AC-130 gunsight's slew, up positive.
+    SightY,
+}
+impl Axis {
+    /// The trim rate axes in [`TrimAxis`] order.
+    pub const TRIM: [(Axis, TrimAxis); 3] = [
+        (Axis::TrimPitchRate, TrimAxis::Pitch),
+        (Axis::TrimRollRate, TrimAxis::Roll),
+        (Axis::TrimPedalRate, TrimAxis::Pedal),
+    ];
+}
+/// Profile names of the powered-lift commands (VTOL overhaul, design 5.7).
+pub const LIFT_ACTIONS: [(&str, LiftCommand); 10] = [
+    ("nozzle-step-up", LiftCommand::NozzleStep { down: false }),
+    ("nozzle-step-down", LiftCommand::NozzleStep { down: true }),
+    (
+        "nozzle-preset-forward",
+        LiftCommand::NozzlePreset(NozzlePreset::Forward),
+    ),
+    (
+        "nozzle-preset-vertical",
+        LiftCommand::NozzlePreset(NozzlePreset::Vertical),
+    ),
+    ("stability-level", LiftCommand::CycleStability),
+    (
+        "stability-level=off",
+        LiftCommand::SetStability(StabilityLevel::Off),
+    ),
+    (
+        "stability-level=damper",
+        LiftCommand::SetStability(StabilityLevel::Damper),
+    ),
+    (
+        "stability-level=attitude",
+        LiftCommand::SetStability(StabilityLevel::Attitude),
+    ),
+    ("trim-set", LiftCommand::TrimSet),
+    ("trim-centre", LiftCommand::TrimCentre),
+];
+/// The profile name of a powered-lift command, when it has one. Trim
+/// adjustments are named by their rate axes instead.
+pub fn lift_action_name(command: LiftCommand) -> Option<&'static str> {
+    LIFT_ACTIONS
+        .iter()
+        .find(|(_, c)| *c == command)
+        .map(|(name, _)| *name)
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -59,14 +124,58 @@ impl Action {
             "yaw" => Some(Axis::Yaw),
             "throttle" => Some(Axis::Throttle),
             "throttle-rate" => Some(Axis::ThrottleRate),
+            "vector-pitch" => Some(Axis::VectorPitch),
+            "vector-pitch-rate" => Some(Axis::VectorPitchRate),
+            "vector-yaw" => Some(Axis::VectorYaw),
+            "vector-yaw-rate" => Some(Axis::VectorYawRate),
+            "conversion" => Some(Axis::Conversion),
+            "conversion-rate" => Some(Axis::ConversionRate),
+            "collective" => Some(Axis::Collective),
+            "collective-rate" => Some(Axis::CollectiveRate),
             "look-x" => Some(Axis::LookX),
             "look-y" => Some(Axis::LookY),
             "head-yaw" => Some(Axis::HeadYaw),
             "head-pitch" => Some(Axis::HeadPitch),
+            "trim-pitch-rate" => Some(Axis::TrimPitchRate),
+            "trim-roll-rate" => Some(Axis::TrimRollRate),
+            "trim-pedal-rate" => Some(Axis::TrimPedalRate),
+            "sight-x" => Some(Axis::SightX),
+            "sight-y" => Some(Axis::SightY),
             _ => None,
         };
         if let Some(axis) = axis {
             return Ok(Self::Axis(axis));
+        }
+        if s == "neutral-vector" {
+            return Ok(Self::Pilot(PilotCommand::NeutralVector));
+        }
+        if let Some((_, command)) = LIFT_ACTIONS.iter().find(|(name, _)| *name == s) {
+            return Ok(Self::Pilot(PilotCommand::Lift(*command)));
+        }
+        for (name, axis) in [
+            ("vector-pitch", FlightAxis::VectorPitch),
+            ("vector-yaw", FlightAxis::VectorYaw),
+            ("conversion", FlightAxis::Conversion),
+            ("collective", FlightAxis::Collective),
+        ] {
+            for (prefix, adjust) in [(format!("{name}="), false), (format!("{name}-step="), true)] {
+                if let Some(value) = s.strip_prefix(&prefix) {
+                    let value: f64 = value.parse().map_err(|_| "invalid lift control")?;
+                    let low = if adjust || axis == FlightAxis::VectorYaw {
+                        -1.
+                    } else {
+                        0.
+                    };
+                    if !value.is_finite() || !(low..=1.).contains(&value) {
+                        return Err("invalid lift control".into());
+                    }
+                    return Ok(Self::Pilot(if adjust {
+                        PilotCommand::AdjustAxis(axis, value)
+                    } else {
+                        PilotCommand::SetAxis(axis, value)
+                    }));
+                }
+            }
         }
         if s == "eject" {
             return Ok(Self::Pilot(PilotCommand::Eject));
@@ -83,6 +192,7 @@ impl Action {
             ("jammer", Switch::Jammer),
             ("autopilot", Switch::Autopilot),
             ("waypoint-autopilot", Switch::WaypointAutopilot),
+            ("hover-hold", Switch::HoverHold),
         ] {
             if s == name {
                 return Ok(Self::Pilot(PilotCommand::Toggle(switch)));
@@ -98,8 +208,28 @@ impl Action {
         if matches!(
             s,
             "fire"
+                | "drone-cycle"
+                | "drone-follow"
+                | "drone-free"
+                | "drone-forward"
+                | "drone-backward"
+                | "drone-left"
+                | "drone-right"
+                | "drone-up"
+                | "drone-down"
+                | "drone-boost"
+                | "drone-look"
+                | "drone-faster"
+                | "drone-slower"
                 | "weapon-seeker-mode"
+                | "a-g-radar"
+                | "laze"
+                | "sight-next"
+                | "fire-gun"
+                | "nearest-ground"
                 | "weapon-next"
+                | "weapon-group-next"
+                | "weapon-group-toggle"
                 | "weapon-previous"
                 | "designate"
                 | "designate-previous"
@@ -107,11 +237,31 @@ impl Action {
                 | "clear-designation"
                 | "master-arm"
                 | "jettison"
+                | "jettison-tanks"
                 | "range-target"
                 | "damage-class"
                 | "fail-station"
                 | "damage-report"
                 | "damage-player"
+                | "sight-designate"
+                | "sight-pin"
+                | "sight-pin-toggle"
+                | "gun-lock"
+                | "console-chaff"
+                | "console-flare"
+                | "sensor-console"
+                | "sight-zoom-in"
+                | "sight-zoom-out"
+                | "sight-polarity"
+                | "sight-whot"
+                | "sight-bhot"
+                | "sight-tv"
+                | "sight-nvg"
+                | "console-range"
+                | "sight-left"
+                | "sight-right"
+                | "sight-up"
+                | "sight-down"
                 | "target-jammer"
                 | "chaff"
                 | "flare"
@@ -152,6 +302,10 @@ impl Action {
                 | "airport-cancel"
                 | "cockpit"
                 | "hud"
+                | "instruments-dim"
+                | "instruments-brighten"
+                | "flood-dim"
+                | "flood-brighten"
                 | "zoom-in"
                 | "zoom-out"
                 | "menu-up"
@@ -199,7 +353,10 @@ impl Action {
         Err(format!("unknown action {s}"))
     }
     fn allowed_paused(&self) -> bool {
-        matches!(self, Self::Ui(s) if s == "pause" || s == "menu" || s.starts_with("menu-"))
+        matches!(self, Self::Ui(s) if s == "pause" || s == "menu" || s.starts_with("menu-")
+            || matches!(s.as_str(), "key:Ctrl-i" | "key:Ctrl-Shift-f" | "key:Ctrl-h"
+                | "key:Shift-[" | "key:Shift-]" | "instruments-dim" | "instruments-brighten"
+                | "flood-dim" | "flood-brighten"))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -261,6 +418,10 @@ impl Calibration {
             * self.scale
     }
 }
+/// Ticks a [`Mode::Tap`] or [`Mode::Long`] control must be held to count as
+/// a long press: half a second at the fixed 120 Hz (John, 2026-10-09, for
+/// the gunsight's pin gesture).
+pub const LONG_PRESS_TICKS: u32 = 60;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Axis,
@@ -270,6 +431,12 @@ pub enum Mode {
     HoldState,
     Press,
     Release,
+    /// Fires on release when the control was held less than
+    /// [`LONG_PRESS_TICKS`]; the short half of a press that also has a
+    /// [`Mode::Long`] action.
+    Tap,
+    /// Fires once when the control has been held [`LONG_PRESS_TICKS`] ticks.
+    Long,
     Switch,
     Follow,
     Position(i32),
@@ -355,7 +522,10 @@ pub fn chord_parts(control: &str) -> (Vec<&str>, &str) {
 }
 fn valid_chord(device: &str, control: &str) -> bool {
     let parts: Vec<_> = control.split('+').collect();
-    if device == "keyboard" || device == "mouse" {
+    if matches!(
+        device,
+        "keyboard" | "mouse" | "replay-keyboard" | "replay-mouse"
+    ) {
         return parts.len() == 1 && !control.is_empty();
     }
     parts.len() <= 3
@@ -416,9 +586,11 @@ impl Profile {
                             p.modifiers.push(entry);
                         }
                     }
-                    ["disable", device @ ("keyboard" | "mouse"), control]
-                        if p.disabled.len() < 512 =>
-                    {
+                    [
+                        "disable",
+                        device @ ("keyboard" | "mouse" | "replay-keyboard" | "replay-mouse"),
+                        control,
+                    ] if p.disabled.len() < 512 => {
                         p.disabled.insert(((*device).into(), (*control).into()));
                     }
                     ["mouse-look", value] => p.mouse_look = on_off(value)?,
@@ -463,6 +635,8 @@ impl Profile {
                             "hold" => Mode::HoldState,
                             "press" => Mode::Press,
                             "release" => Mode::Release,
+                            "tap" => Mode::Tap,
+                            "long" => Mode::Long,
                             "switch" => Mode::Switch,
                             "follow" => Mode::Follow,
                             "delta" => Mode::Delta,
@@ -499,8 +673,18 @@ impl Profile {
                             Mode::Axis | Mode::Hold(_) | Mode::Trigger(_) => {
                                 matches!(action, Action::Axis(a) if a != Axis::Throttle)
                             }
-                            Mode::Unit => action == Action::Axis(Axis::Throttle),
-                            Mode::HoldState if action == Action::Ui("fire".into()) => true,
+                            Mode::Unit => matches!(
+                                action,
+                                Action::Axis(
+                                    Axis::Throttle
+                                        | Axis::VectorPitch
+                                        | Axis::Conversion
+                                        | Axis::Collective
+                                )
+                            ),
+                            Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || name == "fire-gun" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look" | "sight-left" | "sight-right" | "sight-up" | "sight-down")) => {
+                                true
+                            }
                             Mode::Switch | Mode::Follow | Mode::HoldState => {
                                 matches!(action, Action::Pilot(PilotCommand::Toggle(_)))
                             }
@@ -510,8 +694,11 @@ impl Profile {
                             }
                             _ => !matches!(action, Action::Axis(_)),
                         };
-                        if action == Action::Ui("fire".into()) && mode != Mode::HoldState {
-                            return Err("fire requires hold behavior".into());
+                        if (action == Action::Ui("fire".into())
+                            || action == Action::Ui("fire-gun".into()))
+                            && mode != Mode::HoldState
+                        {
+                            return Err("fire and fire-gun require hold behavior".into());
                         }
                         if !valid_chord(device, control) {
                             return Err("invalid control or modifier chord".into());
@@ -548,6 +735,9 @@ struct Contribution {
     seen: bool,
     pickup: bool,
     previous: f64,
+    override_at: Option<f64>,
+    /// Ticks a tap or long-press control has been held.
+    held: u32,
 }
 /// Physical baseline events initialize state without producing synthetic presses.
 #[derive(Clone, Debug)]
@@ -560,6 +750,7 @@ pub struct Event {
 #[derive(Default)]
 pub struct Resolver {
     pub profile: Profile,
+    blocked_bindings: BTreeSet<usize>,
     states: BTreeMap<(usize, String), Contribution>,
     owners: BTreeMap<Axis, (usize, String)>,
     events: VecDeque<(String, Action)>,
@@ -570,6 +761,8 @@ pub struct Resolver {
     physical: BTreeMap<(String, String), f64>,
     /// The chord (or plain control) each base control currently feeds.
     layers: BTreeMap<(String, String), String>,
+    /// Ticks each trim rate axis has been held, in [`Axis::TRIM`] order.
+    trim_held: [u32; 3],
 }
 /// A chord binding split into its modifiers, base control and full token.
 type Chord = (Vec<String>, String, String);
@@ -581,11 +774,32 @@ impl Resolver {
             ..Self::default()
         }
     }
-    pub fn bound(&self, device: &str, control: &str) -> bool {
-        self.profile
+    /// Enable a runtime subset without changing the saved/edited profile.
+    /// Context changes release old contributions and require fresh baselines.
+    pub fn filter_bindings(&mut self, enabled: impl Fn(&Binding) -> bool) -> bool {
+        let blocked: BTreeSet<_> = self
+            .profile
             .bindings
             .iter()
-            .any(|b| self.matches(b, device) && b.control == control)
+            .enumerate()
+            .filter_map(|(i, b)| (!enabled(b)).then_some(i))
+            .collect();
+        if blocked == self.blocked_bindings {
+            return false;
+        }
+        self.blocked_bindings = blocked;
+        self.states.clear();
+        self.owners.clear();
+        self.events.clear();
+        self.physical.clear();
+        self.layers.clear();
+        self.held_switches.clear();
+        true
+    }
+    pub fn bound(&self, device: &str, control: &str) -> bool {
+        self.profile.bindings.iter().enumerate().any(|(i, b)| {
+            !self.blocked_bindings.contains(&i) && self.matches(b, device) && b.control == control
+        })
     }
     fn matches(&self, binding: &Binding, device: &str) -> bool {
         self.matches_device(&binding.device, device)
@@ -616,8 +830,9 @@ impl Resolver {
     }
     /// Feedback eligibility includes assigned controls at rest, excluding UI-only boxes.
     pub fn flight_bound(&self, device: &str, control: &str) -> bool {
-        self.profile.bindings.iter().any(|b| {
-            self.matches(b, device)
+        self.profile.bindings.iter().enumerate().any(|(i, b)| {
+            !self.blocked_bindings.contains(&i)
+                && self.matches(b, device)
                 && b.control.rsplit('+').next().map(token_base) == Some(control)
                 && (matches!(
                     b.action,
@@ -628,8 +843,20 @@ impl Resolver {
                                 | Axis::Yaw
                                 | Axis::Throttle
                                 | Axis::ThrottleRate
+                                | Axis::VectorPitch
+                                | Axis::VectorPitchRate
+                                | Axis::VectorYaw
+                                | Axis::VectorYawRate
+                                | Axis::Conversion
+                                | Axis::ConversionRate
+                                | Axis::Collective
+                                | Axis::CollectiveRate
+                                | Axis::TrimPitchRate
+                                | Axis::TrimRollRate
+                                | Axis::TrimPedalRate
                         )
-                ) || b.action == Action::Ui("fire".into()))
+                ) || b.action == Action::Ui("fire".into())
+                    || b.action == Action::Ui("fire-gun".into()))
         })
     }
     pub fn context(&mut self, paused: bool, focused: bool) {
@@ -640,6 +867,7 @@ impl Resolver {
         self.focused = focused;
         self.events.clear();
         self.owners.clear();
+        self.trim_held = [0; 3];
         for ((index, _), s) in &mut self.states {
             let binding = &self.profile.bindings[*index];
             let neutral = match binding.mode {
@@ -657,8 +885,13 @@ impl Resolver {
             } else {
                 0.
             };
+            if s.override_at.is_some() {
+                s.armed = false;
+                s.value = 0.;
+            }
             s.previous = s.value;
             s.pickup = false;
+            s.held = 0;
         }
     }
     /// Modifier-first chords use `MODIFIER+CONTROL`, with up to two modifiers.
@@ -675,8 +908,9 @@ impl Resolver {
             .profile
             .bindings
             .iter()
-            .filter(|b| self.matches(b, &event.device))
-            .flat_map(|b| b.control.split('+'))
+            .enumerate()
+            .filter(|(i, b)| !self.blocked_bindings.contains(i) && self.matches(b, &event.device))
+            .flat_map(|(_, b)| b.control.split('+'))
             .chain(
                 self.profile
                     .modifiers
@@ -707,8 +941,13 @@ impl Resolver {
             .profile
             .bindings
             .iter()
-            .filter(|b| b.control.contains('+') && self.matches(b, device))
-            .map(|b| {
+            .enumerate()
+            .filter(|(i, b)| {
+                !self.blocked_bindings.contains(i)
+                    && b.control.contains('+')
+                    && self.matches(b, device)
+            })
+            .map(|(_, b)| {
                 let (mods, base) = chord_parts(&b.control);
                 (
                     mods.into_iter().map(str::to_owned).collect(),
@@ -802,6 +1041,9 @@ impl Resolver {
             return;
         }
         for index in 0..self.profile.bindings.len() {
+            if self.blocked_bindings.contains(&index) {
+                continue;
+            }
             let b = &self.profile.bindings[index];
             if !self.matches(b, &event.device)
                 || b.control != event.control
@@ -841,6 +1083,23 @@ impl Resolver {
                 }
                 Mode::Axis | Mode::Unit => {
                     let v = b.calibration.apply(event.value, b.mode == Mode::Unit);
+                    if let Some(previous) = s.override_at {
+                        let span = if b.action == Action::Axis(Axis::VectorYaw) {
+                            2.
+                        } else {
+                            1.
+                        };
+                        if !allowed
+                            || initial
+                            || (v - previous).abs() < 0.02 * span * b.calibration.scale.abs() - 1e-9
+                        {
+                            s.value = 0.;
+                            s.armed = false;
+                            continue;
+                        }
+                        s.override_at = None;
+                        s.armed = true;
+                    }
                     s.previous = if initial { v } else { s.value };
                     if initial {
                         s.armed = b.mode == Mode::Unit || v.abs() <= 0.02;
@@ -904,6 +1163,31 @@ impl Resolver {
                         }
                     }
                 }
+                Mode::Tap | Mode::Long => {
+                    // `value` is 1 while the press is being timed; the
+                    // resolver's frames count it (see `Resolver::frame`).
+                    let active = event.value != 0.;
+                    if initial || !allowed {
+                        s.armed = !active;
+                        s.value = 0.;
+                        s.held = 0;
+                    } else if active {
+                        if s.armed && s.value == 0. {
+                            s.value = 1.;
+                            s.held = 0;
+                            s.armed = false;
+                        }
+                    } else {
+                        if b.mode == Mode::Tap && s.value != 0. && s.held < LONG_PRESS_TICKS {
+                            output = Some(b.action.clone());
+                        }
+                        s.value = 0.;
+                        s.held = 0;
+                    }
+                    if !active {
+                        s.armed = true;
+                    }
+                }
                 Mode::Press | Mode::Release | Mode::Position(_) => {
                     let active = match b.mode {
                         Mode::Position(n) => event.value == n as f64,
@@ -947,7 +1231,22 @@ impl Resolver {
     }
     pub fn disconnect(&mut self, device: &str) -> bool {
         let primary = self.owners.iter().any(|(axis, (_, d))| {
-            d == device && matches!(axis, Axis::Pitch | Axis::Roll | Axis::Yaw | Axis::Throttle)
+            d == device
+                && matches!(
+                    axis,
+                    Axis::Pitch
+                        | Axis::Roll
+                        | Axis::Yaw
+                        | Axis::Throttle
+                        | Axis::VectorPitch
+                        | Axis::VectorYaw
+                        | Axis::Conversion
+                        | Axis::Collective
+                        | Axis::VectorPitchRate
+                        | Axis::VectorYawRate
+                        | Axis::ConversionRate
+                        | Axis::CollectiveRate
+                )
         });
         self.physical.retain(|(d, _), _| d != device);
         self.layers.retain(|(d, _), _| d != device);
@@ -955,6 +1254,28 @@ impl Resolver {
         self.owners.retain(|_, (_, d)| d != device);
         self.events.retain(|(d, _)| d != device);
         primary
+    }
+    /// A digital lift command holds priority until the absolute lever moves
+    /// two percent of its calibrated range. Keep this latch across focus loss.
+    pub fn override_lift_axes(&mut self, axes: &[Axis]) {
+        for axis in axes {
+            self.owners.remove(axis);
+        }
+        for ((index, _), state) in &mut self.states {
+            let binding = &self.profile.bindings[*index];
+            if let Action::Axis(axis) = binding.action
+                && axes.contains(&axis)
+                && matches!(binding.mode, Mode::Axis | Mode::Unit)
+            {
+                state.override_at = Some(
+                    binding
+                        .calibration
+                        .apply(state.raw, binding.mode == Mode::Unit),
+                );
+                state.value = 0.;
+                state.armed = false;
+            }
+        }
     }
     pub fn override_throttle(&mut self) {
         self.owners.remove(&Axis::Throttle);
@@ -991,7 +1312,11 @@ impl Resolver {
                 if !s.pickup {
                     continue;
                 }
-            } else if s.value.abs() <= 0.001 {
+            } else if !matches!(
+                axis,
+                Axis::VectorPitch | Axis::VectorYaw | Axis::Conversion | Axis::Collective
+            ) && s.value.abs() <= 0.001
+            {
                 continue;
             }
             candidates.push((b.priority, key.clone(), s.value));
@@ -1016,10 +1341,17 @@ impl Resolver {
             if axis == Axis::Throttle { throttle } else { 0. }
         }
     }
+    /// The profile row currently supplying an axis, when it has an owner.
+    pub fn owned_binding(&self, axis: Axis) -> Option<&Binding> {
+        self.owners
+            .get(&axis)
+            .and_then(|(index, _)| self.profile.bindings.get(*index))
+    }
     pub fn frame(&mut self, throttle: f64) -> (PilotInput, [f32; 2]) {
         if self.paused || !self.focused {
             return (PilotInput::default(), [0.; 2]);
         }
+        self.time_presses();
         let throttle_rate = self.axis(Axis::ThrottleRate, throttle);
         if throttle_rate != 0. {
             self.override_throttle();
@@ -1057,16 +1389,84 @@ impl Resolver {
             }
         }
         commands.extend(follows.values().map(|(_, c)| *c));
+        // Held trim: a tap at once, then steps at the rate after the delay.
+        for (index, (axis, trim)) in Axis::TRIM.into_iter().enumerate() {
+            let rate = self.axis(axis, 0.);
+            if rate == 0. {
+                self.trim_held[index] = 0;
+                continue;
+            }
+            let held = self.trim_held[index];
+            self.trim_held[index] = held.saturating_add(1);
+            let amount = if held == 0 {
+                trim_keys::TAP * rate
+            } else if held >= trim_keys::DELAY_TICKS
+                && (held - trim_keys::DELAY_TICKS).is_multiple_of(trim_keys::STEP_TICKS)
+            {
+                trim_keys::STEP * rate
+            } else {
+                continue;
+            };
+            commands.push(PilotCommand::Lift(LiftCommand::TrimAdjust(trim, amount)));
+        }
         let input = PilotInput {
             pitch: self.axis(Axis::Pitch, throttle),
             roll: self.axis(Axis::Roll, throttle),
             yaw: self.axis(Axis::Yaw, throttle),
             throttle_rate,
             throttle: self.owners.contains_key(&Axis::Throttle).then_some(t),
+            vector_pitch_rate: self.axis(Axis::VectorPitchRate, 0.),
+            vector_pitch: {
+                let value = self.axis(Axis::VectorPitch, 0.);
+                self.owners
+                    .contains_key(&Axis::VectorPitch)
+                    .then_some(value)
+            },
+            vector_yaw_rate: self.axis(Axis::VectorYawRate, 0.),
+            vector_yaw: {
+                let value = self.axis(Axis::VectorYaw, 0.);
+                self.owners.contains_key(&Axis::VectorYaw).then_some(value)
+            },
+            conversion_rate: self.axis(Axis::ConversionRate, 0.),
+            conversion: {
+                let value = self.axis(Axis::Conversion, 0.);
+                self.owners.contains_key(&Axis::Conversion).then_some(value)
+            },
+            collective_rate: self.axis(Axis::CollectiveRate, 0.),
+            collective: {
+                let value = self.axis(Axis::Collective, 0.);
+                self.owners.contains_key(&Axis::Collective).then_some(value)
+            },
             commands,
         };
         let look = self.look();
         (input, look)
+    }
+    /// One tick of every timed press: a [`Mode::Long`] control fires the
+    /// tick it has been held [`LONG_PRESS_TICKS`]. A tap's timing ends at
+    /// its release, in [`Self::resolve_event`].
+    fn time_presses(&mut self) {
+        let mut fired = Vec::new();
+        for ((index, device), s) in &mut self.states {
+            let b = &self.profile.bindings[*index];
+            if !matches!(b.mode, Mode::Tap | Mode::Long) || s.value == 0. {
+                continue;
+            }
+            s.held = s.held.saturating_add(1);
+            if b.mode == Mode::Long && s.held == LONG_PRESS_TICKS {
+                fired.push((device.clone(), b.action.clone()));
+            }
+        }
+        self.events.extend(fired);
+    }
+    /// The gunsight slew axes, each -1..1 with right and up positive: the
+    /// analog `sight-x` and `sight-y` sources only. The keyboard and button
+    /// holds (`sight-left` and the rest) join them in [`SightSlew::step`].
+    pub fn sight_axes(&mut self) -> [f64; 2] {
+        if self.paused || !self.focused {
+            return [0.; 2];
+        }
+        [self.axis(Axis::SightX, 0.), self.axis(Axis::SightY, 0.)]
     }
     /// Presentation-only look resolution cannot acquire throttle/flight-axis ownership.
     pub fn look(&mut self) -> [f32; 2] {

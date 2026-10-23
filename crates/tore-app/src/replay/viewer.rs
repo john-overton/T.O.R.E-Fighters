@@ -6,27 +6,36 @@
 //!
 //! The viewer owns its own world and aircraft models. Entering it points
 //! the renderer at them; leaving hands the renderer back to the game's.
+pub(crate) mod banner_check;
 mod director;
+mod views;
 use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;
-use crate::flight_views::{self, Body, Reference, Rig, Scene, Shot};
-use crate::render_snapshot::{self, AircraftPose, CombatArt, RenderSnapshot};
+use crate::flight_views::{self, Body, Reference, Rig, Scene};
+use crate::pylons;
+use crate::render_snapshot::{self, CombatArt};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
-use crate::replay::context_menu::{self, Action, Menu, Outcome, Pickable, RightClick, Target};
+use crate::replay::context_menu::{
+    self, Action, Item, Menu, Outcome, Pickable, RightClick, Target,
+};
+use crate::replay::convert;
 use crate::replay::devices::DeviceTrack;
 use crate::replay::drone::{Drone, Mode};
+use crate::replay::ground_marks;
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
 use crate::replay::panels::{self, Data, Kind, Panels, RecordedTrees};
 use crate::replay::pause;
 use crate::replay::playback::Playback;
 use crate::replay::sound::{self, ReplaySound};
+use crate::replay::tape_views;
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
-use crate::terrain::{Camera, World};
+use crate::snapshot::{self, RenderSnapshot};
 use crate::{AppResult, attitude::Basis};
+use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +44,13 @@ use tore_formats::aircraft::AircraftId;
 use tore_replay::{
     AircraftInfo, Event, Recording, Side, TimedEvent, TreeSample, WeaponClass, vocab,
 };
+
+#[derive(Clone, Copy, Default)]
+struct WeaponApproach {
+    scanned: u64,
+    target: Option<u32>,
+    stopped: Option<(u64, flight_views::WeaponStop)>,
+}
 
 /// Weather snapshots built ahead of the playhead each frame, in ticks:
 /// a ten-minute recording is ready in about a second.
@@ -69,16 +85,22 @@ pub struct Ui {
     pub trails: bool,
     /// Index into [`trails::LENGTHS`].
     pub trail_length: usize,
+    /// Laser spots, designations and guided weapons drawn in the 3D view
+    /// (B, FX-R); on at first, and only for a recording that has any.
+    pub marks: bool,
+    pub banner: bool,
 }
 
 impl Ui {
     /// The interface parts named in a comma-separated list (labels, timer,
-    /// trails, comms, subtitles), all others off; `none` for none.
+    /// trails, marks, banner, comms, subtitles), all others off; `none` for none.
     pub fn parse(list: &str) -> Result<Self, String> {
         let mut ui = Self {
             labels: false,
             timer: false,
             subtitles: false,
+            marks: false,
+            banner: false,
             ..Self::default()
         };
         for part in list.split(',').map(str::trim) {
@@ -86,12 +108,14 @@ impl Ui {
                 "labels" => ui.labels = true,
                 "timer" => ui.timer = true,
                 "trails" => ui.trails = true,
+                "marks" => ui.marks = true,
+                "banner" => ui.banner = true,
                 "comms" => ui.comms = true,
                 "subtitles" => ui.subtitles = true,
                 "none" | "" => {}
                 other => {
                     return Err(format!(
-                        "unknown replay interface part {other:?}: use labels, timer, trails, comms or subtitles"
+                        "unknown replay interface part {other:?}: use labels, timer, trails, marks, banner, comms or subtitles"
                     ));
                 }
             }
@@ -110,6 +134,8 @@ impl Default for Ui {
             subtitles: true,
             trails: false,
             trail_length: trails::DEFAULT_LENGTH,
+            marks: true,
+            banner: true,
         }
     }
 }
@@ -218,6 +244,12 @@ pub enum Command {
     Controls,
     /// Save the frame as a PNG.
     Screenshot,
+    /// The away player takes its own aircraft back (slice F2-O4).
+    TakeBack,
+    /// The away player flies again in a new aircraft, by the revival rules.
+    Spawn,
+    /// The away player leaves the game.
+    LeaveGame,
 }
 
 /// Names of the flight views by `--flight-view` number, with their keys.
@@ -236,6 +268,8 @@ fn view_name(view: u8) -> &'static str {
         flight_views::FLY_BY => "F9 Fly-by",
         flight_views::MISSILE => "F12 Missile",
         OBJECT => "O Object view",
+        tape_views::HUD_CAMERA => "V HUD camera",
+        tape_views::SENSOR => "Shift+V Sensor view",
         _ => "View",
     }
 }
@@ -256,7 +290,7 @@ const VIEW_ORDER: [u8; 11] = [
 ];
 
 /// The terrain height under an east and north position, feet.
-fn ground(world: &World) -> impl Fn(f64, f64) -> f64 + '_ {
+fn ground(world: &Terrain) -> impl Fn(f64, f64) -> f64 + '_ {
     move |x, z| f64::from(world.height(x as f32, z as f32))
 }
 
@@ -274,6 +308,8 @@ fn copy(camera: &Camera) -> Camera {
     out.zoom = camera.zoom;
     out.near_clip = camera.near_clip;
     out.keys = camera.keys.clone();
+    out.thermal = camera.thermal;
+    out.sensor = camera.sensor;
     out
 }
 
@@ -316,12 +352,22 @@ impl Label {
     }
 }
 
+/// Keep a live identity, advance past a missing one, and wrap in stable id order.
+fn active_successor(current: Option<u32>, ids: &[u32], advance: bool) -> Option<u32> {
+    if !advance && current.is_some_and(|id| ids.contains(&id)) {
+        return current;
+    }
+    current
+        .and_then(|id| ids.iter().copied().find(|next| *next > id))
+        .or_else(|| ids.first().copied())
+}
+
 /// Name labels over `poses` for a view of `size` through `camera`: each
 /// aircraft's label in its side's colour, `selected` in brackets. Aircraft
 /// over 100 nautical miles away, wrecks on the ground and the aircraft the
 /// camera sits in have none. `who` gives an aircraft's label and side.
 pub fn name_labels<'a>(
-    poses: impl Iterator<Item = &'a crate::render_snapshot::AircraftPose>,
+    poses: impl Iterator<Item = &'a crate::snapshot::AircraftPose>,
     camera: &Camera,
     size: [u32; 2],
     font: &tore_formats::font::Font,
@@ -444,7 +490,10 @@ fn compose(
             messages.font,
             messages.color,
             messages.lines.iter().map(String::as_str),
-            f64::from(overlay::HEIGHT as i32 - overlay::BAR_TOP),
+            f64::from(
+                overlay::HEIGHT as i32 - overlay::BAR_TOP
+                    + overlay::banner_height(font, interface.model),
+            ),
         );
     }
     if interface.bar {
@@ -457,29 +506,19 @@ fn compose(
     }
 }
 
+/// Every aircraft in `picture`: the plane the recording is for first, then
+/// the others. A recording with no player (an observer's) has only the
+/// others, so its empty player pose is never taken for an aircraft.
+fn everyone(picture: &RenderSnapshot) -> impl Iterator<Item = &crate::snapshot::AircraftPose> {
+    (picture.player.id != convert::NO_PLAYER)
+        .then_some(&picture.player)
+        .into_iter()
+        .chain(&picture.targets)
+}
+
 /// Straight-line feet between two points.
 fn feet(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
-}
-
-/// The flight views' body for an aircraft as drawn, its velocity times
-/// `sign`: playing backwards, it moves the other way.
-fn aircraft_body(pose: &AircraftPose, sign: f64) -> Body {
-    let [yaw, pitch, bank] = pose.attitude;
-    Body::new(
-        pose.id,
-        pose.position,
-        pose.velocity.map(|v| v * sign),
-        Basis::new(yaw, pitch, bank),
-    )
-}
-
-/// The flight views' body for a weapon in flight, its velocity times `sign`.
-fn weapon_body(p: &crate::render_snapshot::ProjectilePose, sign: f64) -> Body {
-    let d = p.direction;
-    let speed = f64::from(p.speed_f8) / 256. * sign;
-    let basis = Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.);
-    Body::missile(p.id, p.position, d.map(|v| v * speed), basis)
 }
 
 /// An aircraft's label for people: its label, else its type, else its id.
@@ -512,7 +551,13 @@ fn missiles(recording: &Recording) -> BTreeMap<u32, (u32, String)> {
                 .id(vocab::field::WEAPON)
                 .and_then(|w| recording.weapon_info(w))
                 .filter(|w| !w.name.is_empty())
-                .map_or_else(|| "Missile".to_owned(), |w| w.name.clone());
+                .map_or_else(
+                    || "Missile".to_owned(),
+                    |w| {
+                        tore_formats::weapons::corrections::identity(&w.source)
+                            .map_or_else(|| w.name.clone(), |(_, long)| long.into())
+                    },
+                );
             Some((projectile, (shooter, weapon)))
         })
         .collect()
@@ -526,6 +571,8 @@ struct ReplayData<'a> {
     missiles: &'a BTreeMap<u32, (u32, String)>,
     comms: &'a [TimedEvent],
     now: u64,
+    /// The plane the recording is for.
+    player: u32,
 }
 
 impl Data for ReplayData<'_> {
@@ -559,7 +606,9 @@ impl Data for ReplayData<'_> {
     fn missing(&self, kind: Kind, subject: u32) -> String {
         let who = self.name(subject);
         match kind {
-            Kind::Thought if subject == 0 || self.info.get(&subject).is_some_and(|a| a.human) => {
+            Kind::Thought
+                if subject == self.player || self.info.get(&subject).is_some_and(|a| a.human) =>
+            {
                 format!("{who} is flown by a person, so there is no AI thinking to show.")
             }
             Kind::Thought => format!("No AI thinking recorded for {who} up to this moment."),
@@ -635,7 +684,8 @@ fn message_lines(entries: &[TimedEvent]) -> Vec<String> {
     lines.into()
 }
 
-/// The events the timeline marks: launches, kills, orders and bookmarks.
+/// The events the timeline marks: launches, kills, orders (an AI strike
+/// decision among them, slice ST-G) and bookmarks.
 fn markers(events: &[TimedEvent]) -> Vec<Marker> {
     events
         .iter()
@@ -643,11 +693,16 @@ fn markers(events: &[TimedEvent]) -> Vec<Marker> {
             let kind = match e.event.kind.as_str() {
                 vocab::kind::WEAPON_LAUNCH => MarkerKind::Launch,
                 vocab::kind::COMBAT_DESTROYED => MarkerKind::Kill,
-                vocab::kind::COMMS_ORDER => MarkerKind::Order,
+                vocab::kind::COMMS_ORDER | vocab::kind::AI_STRIKE => MarkerKind::Order,
                 vocab::kind::PLAYER_BOOKMARK => MarkerKind::Bookmark,
+                tore_replay::feedback::KIND => MarkerKind::Feedback,
                 _ => return None,
             };
-            Some(Marker { tick: e.tick, kind })
+            Some(Marker {
+                tick: tore_replay::feedback::Feedback::from_event(&e.event)
+                    .map_or(e.tick, |f| f.tick),
+                kind,
+            })
         })
         .collect()
 }
@@ -657,7 +712,10 @@ fn markers(events: &[TimedEvent]) -> Vec<Marker> {
 /// player's is the view target live flight's target views followed, sight
 /// hold included; a recording from before those were recorded has the
 /// player's designation, noted with every command the player gives.
-pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u32>)>> {
+pub(super) fn targets(
+    events: &[TimedEvent],
+    player: u32,
+) -> BTreeMap<u32, Vec<(u64, Option<u32>)>> {
     let viewed = events
         .iter()
         .any(|e| e.event.kind == vocab::kind::PLAYER_VIEW_TARGET);
@@ -669,7 +727,7 @@ pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u
         let target = match e.event.kind.as_str() {
             vocab::kind::PLAYER_VIEW_TARGET => e.event.object,
             // With view targets recorded, they alone give the player's.
-            _ if viewed && subject == 0 => continue,
+            _ if viewed && subject == player => continue,
             vocab::kind::AI_TARGET => e.event.object.or_else(|| e.event.id(vocab::field::TO)),
             vocab::kind::PLAYER_COMMAND => e.event.object,
             _ => continue,
@@ -679,10 +737,35 @@ pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u
     out
 }
 
+/// The building of `fill` standing at each of `places` (east, north, whole
+/// feet), for a recording's knocked-down city buildings (nr-fx3). A place
+/// with no building in this fill is left out.
+pub(crate) fn city_index(
+    fill: &tore_world::city::CityFill,
+    places: &[[i32; 2]],
+) -> std::collections::HashMap<[i32; 2], u32> {
+    let wanted: std::collections::HashSet<[i32; 2]> = places.iter().copied().collect();
+    let mut out = std::collections::HashMap::with_capacity(wanted.len());
+    if wanted.is_empty() {
+        return out;
+    }
+    for (n, i) in fill.layout.instances.iter().enumerate() {
+        let at = [i.x, i.z];
+        if wanted.contains(&at) {
+            out.entry(at).or_insert(n as u32);
+        }
+    }
+    out
+}
+
 pub struct Viewer {
+    pub mission_timer: Option<crate::mission_timer::Timer>,
+    local_lighting: (crate::cockpit_lighting::Lighting, i16),
     pub path: PathBuf,
     recording: Arc<Recording>,
-    pub world: World,
+    pub world: Terrain,
+    /// The art and camera weather of `world`.
+    pub scenery: Scenery,
     /// The recorded player's aircraft, drawn in the renderer's ownship slot.
     pub ownship: Airframe,
     /// Models of the other aircraft, in the recording's draw order.
@@ -692,12 +775,28 @@ pub struct Viewer {
     /// is rebuilt over it.
     template: flight::State,
     scratch: flight::State,
+    /// AC-130 muzzle flashes: the gunship rounds each picture showed.
+    gun_flash: crate::gun_flash::Tracker,
     playback: Playback,
+    /// The city fill (by address) and the count of recorded city changes
+    /// it was last set to (nr-fx3), so the fill is set only when a seek or
+    /// the clock crosses a change.
+    city_shown: Option<(usize, usize)>,
+    /// The fill's building at each place the recording knocks one down.
+    city_index: std::collections::HashMap<[i32; 2], u32>,
+    /// The tick each flat building fell on, for the burning city's smoke
+    /// columns (nr-fx4); `None` while the city is not followed.
+    city_falls: Option<Arc<crate::city_fires::Falls>>,
+    /// The plane the recording is for (`draw.player`, plane 0 in single
+    /// player's), or [`convert::NO_PLAYER`] for an observer's.
+    player: u32,
     tracks: Tracks,
     scanner: Scanner,
     weather: WeatherTrack,
     /// Released chaff and flares, flown again from their releases.
     devices: DeviceTrack,
+    /// The recording's laser spots, designations and guided weapons.
+    marks: ground_marks::Marks,
     /// Where each airframe's engine outlets sit, for the afterburner
     /// lights: the player's airframe's, then each model's.
     outlets: (Vec<[f64; 3]>, Vec<Vec<[f64; 3]>>),
@@ -705,6 +804,10 @@ pub struct Viewer {
     sound: ReplaySound,
     pub clock: Clock,
     info: BTreeMap<u32, AircraftInfo>,
+    feedback_flags: Vec<tore_replay::feedback::Feedback>,
+    feedback_open: bool,
+    feedback_selected: usize,
+    feedback_scroll: usize,
     markers: Vec<Marker>,
     /// Unique marker ticks, for PageUp and PageDown.
     marker_ticks: Vec<u64>,
@@ -715,6 +818,8 @@ pub struct Viewer {
     missiles: BTreeMap<u32, (u32, String)>,
     panels: Panels,
     trees: RecordedTrees,
+    banner: super::banner::Inspector,
+    drone_subject: Option<Target>,
     menu: Option<Menu>,
     /// A right-button press being watched for a click, and where it went
     /// down in view pixels.
@@ -740,6 +845,10 @@ pub struct Viewer {
     anchor: Option<[f64; 3]>,
     rig: Rig,
     selected: u32,
+    /// Stable projectile identity, never an index into a changing list.
+    selected_missile: Option<u32>,
+    /// First 100 m crossing by weapon, indexed lazily from recorded history.
+    weapon_stops: BTreeMap<u32, WeaponApproach>,
     /// Where the object view starts from when it is not the selected
     /// aircraft: a ground object or a weapon chosen with View from here.
     from: Option<Target>,
@@ -762,18 +871,84 @@ pub struct Viewer {
     pause: pause::Menu,
     /// Held drone movement keys.
     held: BTreeSet<String>,
+    drone_input: crate::replay::drone::Controls,
     bar: overlay::Pointer,
     /// Where a right-drag last was, in window pixels.
     dragging: Option<[f64; 2]>,
     toast: Option<(String, Instant)>,
     layer: Vec<u8>,
-    airports: Option<(BTreeSet<u32>, Vec<f32>, Vec<f32>)>,
     /// The renderer holds this viewer's world and models.
     entered: bool,
     last_frame: Option<Instant>,
+    /// Set while the recording grows as it plays (an observer's).
+    growth: Option<Growth>,
+    /// Each aircraft's type, by its recorded id.
+    kinds: BTreeMap<u32, AircraftId>,
+    /// The targeting sight of each aircraft type's own sensor records, read
+    /// from the import (the Sensor View, nr-replayviews).
+    sights: Vec<(
+        AircraftId,
+        Option<(String, tore_sim::combat::sight::SightSensor)>,
+    )>,
+    /// Each aircraft type's gun, for the HUD camera's pipper.
+    guns: Vec<(AircraftId, tore_formats::weapons::Weapon, [f64; 3])>,
+    /// The Sensor View's picture: white hot, black hot, TV or night vision.
+    sensor_mode: crate::sensor_console::SensorMode,
+    /// Each aircraft's weapon bursts on the ground (`combat.ground_impact`)
+    /// in tick order: where an AC-130's or a strafer's rounds went.
+    ground_impacts: BTreeMap<u32, Vec<(u64, [f64; 3])>>,
+    /// Recorded HUD and sight samples (nr-replayhud). Empty on an older file.
+    display: tore_replay::display::Track,
+    /// Weapons named by `aircraft.hud`, plus the AC-130's three guns.
+    hud_weapons: BTreeMap<String, tore_formats::weapons::Weapon>,
+    /// The HUD camera's tape: which frames make a picture, and the last one.
+    tape: views::TapeState,
+    /// One combat configuration per drawn aircraft type, for the HUD.
+    hud_configs: Vec<(
+        tore_formats::aircraft::AircraftId,
+        tore_sim::combat::live::Configuration,
+    )>,
+}
+
+/// How much of a growing recording can be scrubbed: the last ten minutes
+/// (the design's rule for the observer view). Older frames stay in the file
+/// and are never shown.
+pub const LIVE_WINDOW_TICKS: u64 = 10 * 60 * 120;
+
+/// What a viewer on a growing recording keeps beyond a finished one's.
+struct Growth {
+    /// The import, for the art of weapons that appear later.
+    resources: Arc<BTreeMap<String, Vec<u8>>>,
+    /// The weapon shapes already loaded.
+    shapes: BTreeSet<String>,
+    /// How many events the viewer has read, to read them again when more
+    /// come.
+    events: usize,
 }
 
 impl Viewer {
+    pub(crate) fn loading_eye(&mut self) -> [f64; 3] {
+        self.playback
+            .frame(self.clock.tick())
+            .and_then(|(frames, at)| {
+                frames[at]
+                    .aircraft
+                    .iter()
+                    .find(|a| a.id == self.selected)
+                    .map(|a| a.position)
+            })
+            .unwrap_or(self.template.position)
+    }
+    pub(crate) fn loading_art(&self) -> &CombatArt {
+        &self.art
+    }
+    pub(crate) fn loading_models(&self) -> &[Airframe] {
+        &self.models
+    }
+    pub(crate) fn loading_entered(&mut self) {
+        self.entered = true;
+    }
+
     /// Opens a recording and loads what drawing it needs: its world, the
     /// player's airframe, the other aircraft models and the weapon art.
     pub fn open(
@@ -786,16 +961,51 @@ impl Viewer {
         for problem in recording.problems() {
             log::warn!("Replay {}: {problem}", path.display());
         }
+        Self::load(path, recording, resources, options, None)
+    }
+
+    /// Opens the live view of a mission being flown: `recording` is the
+    /// first read of the observer's growing recording, and [`Viewer::grow`]
+    /// is given each newer read of it. The playhead follows the newest frame.
+    pub fn open_live(
+        recording: Arc<Recording>,
+        resources: Arc<BTreeMap<String, Vec<u8>>>,
+        options: &Options,
+    ) -> AppResult<Self> {
+        let growth = Growth {
+            resources: Arc::clone(&resources),
+            shapes: BTreeSet::new(),
+            events: 0,
+        };
+        Self::load(
+            Path::new("observer"),
+            recording,
+            &resources,
+            options,
+            Some(growth),
+        )
+    }
+
+    fn load(
+        path: &Path,
+        recording: Arc<Recording>,
+        resources: &BTreeMap<String, Vec<u8>>,
+        options: &Options,
+        growth: Option<Growth>,
+    ) -> AppResult<Self> {
         if recording.first_tick().is_none() {
             return Err(format!("{}: the recording holds no frames", path.display()).into());
         }
-        let world = World::for_identity(resources, &recording.header().world)?;
+        let world = crate::replay::identity::terrain(resources, &recording.header().world)?;
+        let scenery = Scenery::build(resources, &world)?;
         let identities = crate::replay::convert::Identities::of(&recording);
         let presentation = crate::replay::convert::Presentation::from_header(recording.header());
-        let player = match identities.aircraft.get(&0) {
+        let player = match identities.aircraft.get(&presentation.player) {
             Some(id) => *id,
             None => {
-                log::warn!("Replay: the recording has no player aircraft; drawing an F/A-18D");
+                if presentation.player != convert::NO_PLAYER {
+                    log::warn!("Replay: the recording has no player aircraft; drawing an F/A-18D");
+                }
                 AircraftId::F18
             }
         };
@@ -807,38 +1017,51 @@ impl Viewer {
             }
         }
         let mut art = CombatArt::load(resources)?;
-        art.add_shapes(
-            recording.weapons().filter_map(|w| w.shape.as_deref()),
-            resources,
-        );
-        Self::assemble(path, recording, world, ownship, models, art, options)
+        art.add_shapes(super::store_art::shapes(&recording), resources);
+        let mut viewer = Self::assemble(
+            path,
+            recording,
+            (world, scenery),
+            (ownship, models, art),
+            options,
+            growth,
+        )?;
+        viewer.local_lighting = crate::assets::data_directory()
+            .ok()
+            .and_then(|path| crate::preferences::read(&path.join("preferences-v1.conf")).ok())
+            .and_then(|text| crate::preferences::Preferences::parse(&text).ok())
+            .map_or((Default::default(), 0), |prefs| {
+                (prefs.lighting, prefs.brightness)
+            });
+        viewer.playback.add_motors(resources);
+        viewer.load_sights(resources);
+        // Other aircraft's launches name their weapon record.
+        viewer
+            .sound
+            .set_launches(crate::audio::LaunchSounds::of(resources));
+        Ok(viewer)
     }
 
     /// A viewer from loaded parts.
     fn assemble(
         path: &Path,
         recording: Arc<Recording>,
-        world: World,
-        ownship: Airframe,
-        models: Vec<Airframe>,
-        art: CombatArt,
+        (world, scenery): (Terrain, Scenery),
+        (ownship, models, art): (Airframe, Vec<Airframe>, CombatArt),
         options: &Options,
+        growth: Option<Growth>,
     ) -> AppResult<Self> {
         let (Some(first), Some(last)) = (recording.first_tick(), recording.last_tick()) else {
             return Err(format!("{}: the recording holds no frames", path.display()).into());
         };
         let playback = Playback::new(Arc::clone(&recording));
+        let player = playback.presentation.player;
         let template = ownship.start(&world);
-        let events = recording.events();
-        let markers = markers(events);
-        let mut marker_ticks: Vec<u64> = markers.iter().map(|m| m.tick).collect();
-        marker_ticks.dedup();
-        let comms = events
-            .iter()
-            .filter(|e| panels::Channel::of(&e.event.kind).is_some())
-            .cloned()
-            .collect();
-        let mut clock = Clock::new(first, last);
+        let mut clock = if growth.is_some() {
+            Clock::new_live(first.max(last.saturating_sub(LIVE_WINDOW_TICKS)), last)
+        } else {
+            Clock::new(first, last)
+        };
         if let Some(speed) = options.speed {
             if speed < 0. {
                 clock.end();
@@ -858,21 +1081,38 @@ impl Viewer {
         }
         let info: BTreeMap<u32, AircraftInfo> =
             recording.aircraft().map(|a| (a.id, a.clone())).collect();
-        let selected = options.aircraft.unwrap_or(0);
+        // The recorded player is watched first; an observer's recording has
+        // none, and starts on its first aircraft.
+        let selected = options
+            .aircraft
+            .or_else(|| (player != convert::NO_PLAYER).then_some(player))
+            .or_else(|| info.keys().next().copied())
+            .unwrap_or(0);
         if options.aircraft.is_some() && !info.contains_key(&selected) {
             return Err(format!("the recording has no aircraft {selected}").into());
         }
-        let mut rig = Rig::default();
+        let mut rig = Rig::for_plane(player);
         rig.select(Reference::Aircraft(selected));
-        let pause = pause::Menu::new(&ownship.flight_menu);
+        let pause = if growth.is_some() {
+            pause::Menu::watching(&ownship.flight_menu)
+        } else {
+            pause::Menu::new(&ownship.flight_menu)
+        };
         let mut viewer = Self {
+            mission_timer: None,
+            local_lighting: (Default::default(), 0),
             path: path.to_path_buf(),
-            scanner: Scanner::start(Arc::clone(&recording)),
+            scanner: if growth.is_some() {
+                Scanner::start_live(Arc::clone(&recording))
+            } else {
+                Scanner::start(Arc::clone(&recording))
+            },
             tracks: Tracks::new(first),
             // A headless probe never steps the weather, so its recording
             // keeps the launch sky throughout.
             weather: WeatherTrack::new(
                 &world,
+                &scenery,
                 if recording.header().mission == tore_replay::MissionKind::Probe {
                     0
                 } else {
@@ -883,28 +1123,45 @@ impl Viewer {
                 Arc::clone(&recording),
                 std::iter::once(&ownship.profile).chain(models.iter().map(|m| &m.profile)),
             ),
-            targets: targets(events),
-            missiles: missiles(&recording),
-            devices: DeviceTrack::new(events),
+            // Read from the events by `read_events` below.
+            targets: BTreeMap::new(),
+            missiles: BTreeMap::new(),
+            devices: DeviceTrack::new(&[]),
+            marks: ground_marks::Marks::default(),
             outlets: (
-                ownship.contrail_offsets(),
-                models.iter().map(Airframe::contrail_offsets).collect(),
+                ownship.contrail_offsets.clone(),
+                models
+                    .iter()
+                    .map(|model| model.contrail_offsets.clone())
+                    .collect(),
             ),
             recording,
             world,
+            scenery,
             scratch: template.clone(),
+            gun_flash: Default::default(),
             template,
             ownship,
             models,
             art,
             playback,
+            city_shown: None,
+            city_index: std::collections::HashMap::new(),
+            city_falls: None,
+            player,
             clock,
             info,
-            markers,
-            marker_ticks,
-            comms,
+            feedback_flags: Vec::new(),
+            feedback_open: false,
+            feedback_selected: 0,
+            feedback_scroll: 0,
+            markers: Vec::new(),
+            marker_ticks: Vec::new(),
+            comms: Vec::new(),
             panels: Panels::default(),
             trees: RecordedTrees::default(),
+            banner: super::banner::Inspector::default(),
+            drone_subject: None,
             menu: None,
             right_click: None,
             point: None,
@@ -923,6 +1180,8 @@ impl Viewer {
             anchor: None,
             rig,
             selected,
+            selected_missile: None,
+            weapon_stops: BTreeMap::new(),
             from: None,
             look_at: options.look_at,
             announce_wingman: false,
@@ -936,14 +1195,25 @@ impl Viewer {
             ui: options.ui,
             pause,
             held: BTreeSet::new(),
+            drone_input: crate::replay::drone::Controls::new(&tore_input::Profile::default()),
             bar: overlay::Pointer::default(),
             dragging: None,
             toast: None,
             layer: vec![0; overlay::WIDTH * overlay::HEIGHT * 4],
-            airports: None,
             entered: false,
             last_frame: None,
+            growth,
+            kinds: BTreeMap::new(),
+            sights: Vec::new(),
+            guns: Vec::new(),
+            sensor_mode: Default::default(),
+            ground_impacts: BTreeMap::new(),
+            display: tore_replay::display::Track::default(),
+            hud_weapons: BTreeMap::new(),
+            tape: Default::default(),
+            hud_configs: Vec::new(),
         };
+        viewer.read_events();
         if options.drone {
             viewer.drone_mode(Some(Mode::Follow));
         }
@@ -957,8 +1227,121 @@ impl Viewer {
         Ok(viewer)
     }
 
+    /// What the events say, read from the recording: the timeline's markers,
+    /// the Comms panel's entries, each aircraft's target, the weapons and
+    /// the chaff and flares. Read again when a growing recording has more.
+    fn read_events(&mut self) {
+        let events = self.recording.events();
+        self.feedback_flags = self.recording.feedback().collect();
+        self.markers = markers(events);
+        self.markers.sort_by_key(|m| m.tick);
+        self.marker_ticks = self.markers.iter().map(|m| m.tick).collect();
+        self.marker_ticks.dedup();
+        self.comms = events
+            .iter()
+            .filter(|e| panels::Channel::of(&e.event.kind).is_some())
+            .cloned()
+            .collect();
+        self.targets = targets(events, self.player);
+        self.missiles = missiles(&self.recording);
+        self.devices = DeviceTrack::new(events);
+        self.marks = ground_marks::Marks::from_events(events);
+        self.kinds = convert::Identities::of(&self.recording).aircraft;
+        self.ground_impacts = BTreeMap::new();
+        for e in events
+            .iter()
+            .filter(|e| e.event.kind == vocab::kind::COMBAT_GROUND_IMPACT)
+        {
+            if let (Some(id), Some(x), Some(y), Some(z)) = (
+                e.event.subject,
+                e.event.num("x_ft"),
+                e.event.num("y_ft"),
+                e.event.num("z_ft"),
+            ) {
+                self.ground_impacts
+                    .entry(id)
+                    .or_default()
+                    .push((e.tick, [x, y, z]));
+            }
+        }
+        self.display = tore_replay::display::Track::from_events(events);
+        if let Some(growth) = &mut self.growth {
+            growth.events = events.len();
+        }
+    }
+
+    /// What a live view's camera is on, for the host to send what is near
+    /// it at the full rate: the selected aircraft, or the point the camera
+    /// is at when it is free of every aircraft (the free drone, or the
+    /// selected aircraft is not in the mission).
+    pub fn camera_subject(&self) -> tore_session::wire::messages::Subject {
+        use tore_session::wire::messages::Subject;
+        let free = self.drone.as_ref().is_some_and(|d| d.mode == Mode::Free);
+        if !free && self.info.contains_key(&self.selected) {
+            return Subject::Aircraft(self.selected);
+        }
+        if self.shown {
+            Subject::Point(self.camera.position.map(|feet| feet as i32))
+        } else {
+            Subject::None
+        }
+    }
+
+    /// The menu of the observer screen of an away player's own aircraft
+    /// (slice F2-O4): what its first rows offer now, or `None` for an
+    /// observer's Stop Watching.
+    pub fn set_away_menu(&mut self, rows: Option<pause::AwayRows>) {
+        self.pause.set_away(rows);
+    }
+
+    /// Whether the view is of a mission being flown, a recording that grows
+    /// as it plays.
+    pub fn live(&self) -> bool {
+        self.growth.is_some() && self.clock.is_live()
+    }
+
+    /// The recording this view reads has grown: `recording` is a newer read
+    /// of it (the same frames, then more). The playhead keeps its place; a
+    /// live one stays a second behind the newest frame. Frames older than
+    /// ten minutes are no longer scrubbable.
+    pub fn grow(&mut self, recording: Arc<Recording>) {
+        let (Some(first), Some(last)) = (recording.first_tick(), recording.last_tick()) else {
+            return;
+        };
+        if self.growth.is_none() || last <= self.recording.last_tick().unwrap_or(0) {
+            return;
+        }
+        self.playback.extend(Arc::clone(&recording));
+        if let Some(growth) = &self.growth {
+            self.playback.add_motors(&growth.resources);
+        }
+        self.sound.extend(Arc::clone(&recording));
+        self.scanner.feed(Arc::clone(&recording));
+        self.weather.set_end(last);
+        self.clock
+            .grow(first.max(last.saturating_sub(LIVE_WINDOW_TICKS)), last);
+        self.info = recording.aircraft().map(|a| (a.id, a.clone())).collect();
+        if let Some(growth) = &mut self.growth {
+            let new: Vec<&str> = super::store_art::shapes(&recording)
+                .filter(|shape| growth.shapes.insert((*shape).to_owned()))
+                .collect();
+            self.art.add_shapes(new, &growth.resources);
+        }
+        let more = self
+            .growth
+            .as_ref()
+            .is_some_and(|g| g.events != recording.events().len());
+        self.recording = recording;
+        if more {
+            self.read_events();
+        }
+    }
+
     /// The window title.
     pub fn title(&self) -> String {
+        if self.growth.is_some() {
+            return "T.O.R.E-Fighters - Observing".into();
+        }
         let name = self
             .path
             .file_name()
@@ -971,10 +1354,9 @@ impl Viewer {
     /// slot is prepared after it.
     pub fn enter(&mut self, renderer: &mut Renderer) {
         if !self.entered {
-            renderer.set_world(&self.world);
+            renderer.set_scenery(&self.scenery);
             renderer.prepare_aircraft(&self.ownship);
             self.entered = true;
-            self.airports = None;
         }
     }
 
@@ -1003,8 +1385,8 @@ impl Viewer {
     }
 
     fn side(&self, id: u32) -> Side {
-        if id == 0 {
-            return self.info.get(&0).map_or(Side::Friendly, |a| match a.side {
+        if id == self.player {
+            return self.info.get(&id).map_or(Side::Friendly, |a| match a.side {
                 Side::Unknown => Side::Friendly,
                 side => side,
             });
@@ -1047,6 +1429,7 @@ impl Viewer {
     /// missiles.
     fn select(&mut self, id: u32) {
         self.from = None;
+        self.drone_subject = None;
         if id != self.selected {
             self.selected = id;
             self.anchor = None;
@@ -1062,11 +1445,25 @@ impl Viewer {
             self.camera_error = None;
             self.look = [0.; 2];
             self.panels.follow(id);
+            if self.view == flight_views::MISSILE && reference != Reference::Aircraft(id) {
+                self.show_view(self.view, reference);
+            }
         }
     }
 
     /// F1 to F12: a flight view on the selected aircraft, leaving the drone.
     pub fn set_view(&mut self, view: u8) {
+        if view == flight_views::MISSILE {
+            let ids = self.active_missiles(self.clock.tick());
+            let advance = self.view == view
+                && self.drone.is_none()
+                && self.rig.reference == Reference::Aircraft(self.selected);
+            if advance && ids.is_empty() {
+                self.show_view(0, Reference::Aircraft(self.selected));
+                return;
+            }
+            self.selected_missile = active_successor(self.selected_missile, &ids, advance);
+        }
         self.show_view(view, Reference::Aircraft(self.selected));
     }
 
@@ -1091,6 +1488,23 @@ impl Viewer {
         } else {
             // The fly-by point is chosen afresh each time the view is picked.
             self.rig.select(reference);
+        }
+        if view == flight_views::MISSILE && reference != Reference::Aircraft(self.selected) {
+            let tick = self.clock.tick();
+            let owner = match reference {
+                Reference::Target => self.view_target(tick),
+                Reference::Aircraft(id) => Some(id),
+                _ => Some(self.selected),
+            };
+            let picture = self.playback.picture(tick, 1.);
+            let active = picture
+                .projectiles
+                .iter()
+                .filter(|p| Some(p.owner) == owner && !p.gun)
+                .map(|p| p.id)
+                .max();
+            self.selected_missile =
+                active.or_else(|| owner.and_then(|owner| self.newest_weapon(tick, owner)));
         }
         self.announce_wingman = view == flight_views::WING;
     }
@@ -1134,16 +1548,152 @@ impl Viewer {
         self.from.unwrap_or(Target::Aircraft(self.selected))
     }
 
+    /// The launcher rails as the recording had them at `tick`, in the shape
+    /// the scenery draws them from (format 3).
+    /// Shows the city fill as the recording left it at `tick` (nr-fx3): its
+    /// knocked-down buildings flat, and so burning, whether the clock got
+    /// there playing, seeking or playing backwards. A recording names each
+    /// building by where it stands; the rebuilt fill's building there falls,
+    /// and a place where it has none is skipped. A recording from before
+    /// the city section keeps the city whole.
+    pub(super) fn follow_city(&mut self, tick: u64) {
+        let Some(fill) = &self.world.city_fill else {
+            return;
+        };
+        // A developer aid: replay as a build from before the city section.
+        if std::env::var("TORE_REPLAY_CITY").as_deref() == Ok("0") {
+            return;
+        }
+        let address = std::sync::Arc::as_ptr(fill) as usize;
+        let key = (address, self.playback.city_changes_at(tick));
+        if self.city_shown == Some(key) {
+            return;
+        }
+        if self.city_shown.is_none_or(|(at, _)| at != address) {
+            self.city_index = city_index(fill, &self.playback.city_all());
+        }
+        self.city_shown = Some(key);
+        let mut ids: Vec<u32> = self
+            .playback
+            .city_at(tick)
+            .iter()
+            .filter_map(|at| self.city_index.get(at).copied())
+            .collect();
+        ids.sort_unstable();
+        fill.set_flattened(&ids);
+        // Each flat building burns from the tick it fell on, so a seek
+        // shows its smoke column as tall as playing through would have.
+        let fell = self
+            .playback
+            .city_falls_at(tick)
+            .into_iter()
+            .filter_map(|(at, when)| Some((*self.city_index.get(&at)?, when as f64)))
+            .collect();
+        self.city_falls = Some(Arc::new(crate::city_fires::Falls::new(fell)));
+    }
+
+    /// The burning city's clock at the playhead `now` (ticks): see
+    /// [`crate::city_fires::Clock`]. `None` while the city is not followed.
+    pub(super) fn city_clock(&self, now: f64) -> Option<crate::city_fires::Clock> {
+        // A developer aid: the columns age on the wall clock from the moment
+        // each is first seen, as they did before nr-fx4.
+        if std::env::var("TORE_REPLAY_CITY_CLOCK").as_deref() == Ok("0") {
+            return None;
+        }
+        self.city_falls
+            .as_ref()
+            .map(|falls| crate::city_fires::Clock {
+                tick: now,
+                falls: Arc::clone(falls),
+            })
+    }
+
+    pub(super) fn rails(&self, tick: u64) -> tore_world::surface::SurfaceState {
+        use tore_world::surface::{MountStock, SurfaceState, SurfaceUnitState, UnitId};
+        let units = self
+            .tracks
+            .stock_at(tick)
+            .into_iter()
+            .map(|(unit, mounts)| {
+                let mut state = SurfaceUnitState::new(UnitId(unit));
+                state.armed = true;
+                let size = mounts.keys().max().map_or(0, |m| usize::from(*m) + 1);
+                state.mounts = vec![MountStock::default(); size];
+                for (index, stock) in mounts {
+                    state.mounts[usize::from(index)] = MountStock {
+                        loaded: stock.loaded,
+                        reserve: stock.reserve,
+                        ordinal: 0,
+                    };
+                }
+                state
+            })
+            .collect();
+        SurfaceState::new(0, units)
+    }
+
+    /// Shows the gun-flash tracker `picture`: the rounds, launches and flak
+    /// the recording holds, and the wrecks of the surface units it lost (as
+    /// the ground rows flight would have), with the tick each one died on so
+    /// a seek does not start a wreck's smoke afresh (format 3).
+    pub(super) fn observe_surface(
+        (tracks, recording): (&Tracks, &Recording),
+        tracker: &mut crate::gun_flash::Tracker,
+        picture: &RenderSnapshot,
+        (tick, now): (u64, f64),
+        mounts: &impl Fn(u32) -> Option<crate::gun_flash::Mount>,
+    ) {
+        let deaths = tracks.deaths(tick);
+        let rows: Vec<crate::snapshot::AircraftPose> = deaths
+            .keys()
+            .filter_map(|id| {
+                let unit = recording.surface_info(*id)?;
+                let position = picture
+                    .surface
+                    .iter()
+                    .find(|pose| pose.id.0 == *id)
+                    .map_or(unit.position, |pose| pose.position);
+                Some(crate::snapshot::AircraftPose {
+                    id: *id,
+                    position,
+                    crashed: true,
+                    damage: crate::snapshot::Damage {
+                        hp: 0,
+                        initial_hp: unit.hit_points,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+            })
+            .collect();
+        tracker.set_deaths(deaths);
+        if rows.is_empty() {
+            tracker.observe(picture, now, mounts);
+        } else {
+            let mut seen = picture.clone();
+            seen.targets.extend(rows);
+            tracker.observe(&seen, now, mounts);
+        }
+    }
+
     /// Ground objects of the recorded world still standing at `tick`, in id
-    /// order, with where each is.
-    fn ground_objects(&self, tick: u64) -> Vec<(u32, [f64; 3])> {
+    /// order, with where each is: a unit that follows a route is where the
+    /// recording had it, not at its starting place.
+    fn ground_objects(&self, tick: u64, picture: &RenderSnapshot) -> Vec<(u32, [f64; 3])> {
         let destroyed = self.tracks.destroyed(tick);
         self.world
             .airport_scene
             .objects
             .iter()
             .filter(|o| !destroyed.contains(&o.id))
-            .map(|o| (o.id, o.bounds.center))
+            .map(|o| {
+                let at = picture
+                    .surface
+                    .iter()
+                    .find(|pose| pose.id.0 == o.id)
+                    .map_or(o.bounds.center, |pose| pose.position);
+                (o.id, at)
+            })
             .collect()
     }
 
@@ -1152,11 +1702,11 @@ impl Viewer {
     /// weapon in flight.
     fn body_of(&self, picture: &RenderSnapshot, tick: u64, object: Target) -> Option<Body> {
         match object {
-            Target::Aircraft(0) => Some(aircraft_body(&picture.player, 1.)),
+            Target::Aircraft(id) if id == self.player => Some(Body::posed(&picture.player, 1.)),
             Target::Aircraft(id) => picture
                 .target(id)
                 .filter(|pose| pose.airborne || pose.damage.hp > 0)
-                .map(|pose| aircraft_body(pose, 1.)),
+                .map(|pose| Body::posed(pose, 1.)),
             Target::Ground(id) => {
                 let object = self
                     .world
@@ -1166,6 +1716,17 @@ impl Viewer {
                     .find(|o| o.id == id)?;
                 if self.tracks.destroyed(tick).contains(&id) {
                     return None;
+                }
+                // A unit on a route is where it drove to, facing the way it
+                // faces now.
+                if let Some(pose) = picture.surface.iter().find(|pose| pose.id.0 == id) {
+                    let [yaw, pitch, bank] = pose.attitude;
+                    return Some(Body::new(
+                        id,
+                        pose.position,
+                        [0.; 3],
+                        Basis::new(yaw, pitch, bank),
+                    ));
                 }
                 let b = object.bounds;
                 Some(Body::new(
@@ -1179,7 +1740,7 @@ impl Viewer {
                 .projectiles
                 .iter()
                 .find(|p| p.id == id && !p.gun)
-                .map(|p| weapon_body(p, 1.)),
+                .map(|p| Body::weapon(p, 1.)),
             Target::Nothing => None,
         }
     }
@@ -1190,16 +1751,22 @@ impl Viewer {
         match object {
             Target::Aircraft(id) => self.label(id),
             Target::Ground(id) => self
-                .world
-                .airport_scene
-                .objects
-                .iter()
-                .find(|o| o.id == id)
-                .and_then(|o| {
-                    [&o.name, &o.object_type]
-                        .into_iter()
-                        .find(|n| !n.trim().is_empty())
-                        .cloned()
+                .recording
+                .surface_info(id)
+                .map(|unit| unit.label.clone())
+                .filter(|label| !label.is_empty())
+                .or_else(|| {
+                    self.world
+                        .airport_scene
+                        .objects
+                        .iter()
+                        .find(|o| o.id == id)
+                        .and_then(|o| {
+                            [&o.name, &o.object_type]
+                                .into_iter()
+                                .find(|n| !n.trim().is_empty())
+                                .cloned()
+                        })
                 })
                 .unwrap_or_else(|| format!("Ground object {id}")),
             Target::Missile(id) => match self.missiles.get(&id) {
@@ -1217,12 +1784,12 @@ impl Viewer {
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
         let from = self.from();
-        let mut out: Vec<Target> = std::iter::once(&picture.player)
-            .chain(&picture.targets)
-            .filter(|pose| pose.id == 0 || pose.airborne || pose.damage.hp > 0)
+        let player = self.player;
+        let mut out: Vec<Target> = everyone(&picture)
+            .filter(|pose| pose.id == player || pose.airborne || pose.damage.hp > 0)
             .map(|pose| Target::Aircraft(pose.id))
             .chain(
-                self.ground_objects(tick)
+                self.ground_objects(tick, &picture)
                     .into_iter()
                     .map(|(id, _)| Target::Ground(id)),
             )
@@ -1276,8 +1843,7 @@ impl Viewer {
         {
             return Some(target);
         }
-        std::iter::once(&picture.player)
-            .chain(&picture.targets)
+        everyone(&picture)
             .map(|pose| Target::Aircraft(pose.id))
             .filter(|t| *t != from)
             .filter_map(|t| Some((t, self.body_of(&picture, tick, t)?.position())))
@@ -1287,7 +1853,7 @@ impl Viewer {
 
     /// Where the selected aircraft is drawn in `picture`.
     fn anchor(&self, picture: &RenderSnapshot) -> Option<[f64; 3]> {
-        if self.selected == 0 {
+        if self.selected == self.player {
             return Some(picture.player.position);
         }
         picture.target(self.selected).map(|t| t.position)
@@ -1296,6 +1862,7 @@ impl Viewer {
     /// Backquote: from a flight view to the follow drone, then the free
     /// drone, then back. `Some(mode)` switches straight to that drone.
     pub fn drone_mode(&mut self, mode: Option<Mode>) {
+        self.drone_subject = None;
         let tick = self.clock.tick();
         let recorded = self.playback.aircraft(tick, self.selected);
         let anchor = recorded.as_ref().map(|a| a.position);
@@ -1369,11 +1936,22 @@ impl Viewer {
             Choice::Graphics => Command::Graphics,
             Choice::Sound => Command::Sound,
             Choice::Controls => Command::Controls,
+            Choice::TakeBack => Command::TakeBack,
+            Choice::Spawn => Command::Spawn,
+            Choice::LeaveGame => Command::LeaveGame,
+            Choice::SpawnBlocked => {
+                if let Some(why) = self.pause.away().and_then(|a| a.spawn_blocked.clone()) {
+                    self.message(why);
+                }
+                Command::Click
+            }
             Choice::Toggle(part) => {
                 match part {
                     Part::Labels => self.ui.labels = !self.ui.labels,
                     Part::Timer => self.ui.timer = !self.ui.timer,
                     Part::Trails => self.ui.trails = !self.ui.trails,
+                    Part::Marks => self.ui.marks = !self.ui.marks,
+                    Part::Banner => self.ui.banner = !self.ui.banner,
                     Part::Comms => {
                         self.panels.toggle_comms();
                         self.ui.comms = self.panels.comms_open();
@@ -1388,6 +1966,27 @@ impl Viewer {
     /// (letters lower case, `` ` `` for the backquote key). While the
     /// Escape menu is open it takes every key.
     pub fn key(&mut self, name: &str, pressed: bool, repeat: bool, shift: bool) -> Command {
+        if self.feedback_open {
+            if pressed {
+                let count = self.feedback_flags.len();
+                match name {
+                    "Escape" => self.feedback_open = false,
+                    "ArrowDown" if count > 0 => {
+                        self.feedback_scroll = 0;
+                        self.feedback_selected = (self.feedback_selected + 1) % count
+                    }
+                    "ArrowUp" if count > 0 => {
+                        self.feedback_scroll = 0;
+                        self.feedback_selected = (self.feedback_selected + count - 1) % count
+                    }
+                    "PageDown" => self.scroll_feedback(20),
+                    "PageUp" => self.scroll_feedback(-20),
+                    "Enter" => self.seek_feedback(),
+                    _ => {}
+                }
+            }
+            return Command::None;
+        }
         if self.pause.is_open() {
             if !pressed {
                 return Command::None;
@@ -1395,12 +1994,9 @@ impl Viewer {
             let choice = self.pause.key(name, &mut self.clock);
             return self.pause_choice(choice);
         }
-        if matches!(name, "w" | "a" | "s" | "d" | "e" | "q") {
-            if pressed {
-                self.held.insert(name.to_owned());
-            } else {
-                self.held.remove(name);
-            }
+        let mut modifiers = winit::keyboard::ModifiersState::empty();
+        modifiers.set(winit::keyboard::ModifiersState::SHIFT, shift);
+        if self.bound_key(name, pressed, repeat, modifiers) {
             return Command::None;
         }
         if !pressed {
@@ -1457,7 +2053,6 @@ impl Viewer {
             }
             "Tab" => self.cycle_aircraft(!shift),
             "o" => self.cycle_look_at(!shift),
-            "`" => self.drone_mode(None),
             "h" => {
                 self.ui.hidden = !self.ui.hidden;
                 self.menu = None;
@@ -1496,8 +2091,22 @@ impl Viewer {
                     "Trails off"
                 });
             }
+            "b" => {
+                self.ui.marks = !self.ui.marks;
+                let words = match (self.ui.marks, self.marks.any()) {
+                    (false, _) => "Laser and bomb marks off",
+                    (true, true) => "Laser and bomb marks on",
+                    (true, false) => "Laser and bomb marks on (this recording has none)",
+                };
+                self.toast(words);
+            }
             "p" => return Command::Screenshot,
             "Escape" => self.open_pause(),
+            // The HUD camera and the Sensor View (nr-replayviews): the
+            // aircraft's video recorder, the HUD's tape and the pod's.
+            "v" if shift => self.taped_view_key(tape_views::SENSOR),
+            "v" => self.taped_view_key(tape_views::HUD_CAMERA),
+            key if self.sensor_mode_key(key, shift) => {}
             key => {
                 if let Some(view) = flight_views::key(key) {
                     self.set_view(view);
@@ -1505,6 +2114,83 @@ impl Viewer {
             }
         }
         Command::None
+    }
+
+    pub fn set_input_profile(&mut self, profile: &tore_input::Profile) {
+        self.release();
+        self.drone_input = crate::replay::drone::Controls::new(profile);
+    }
+
+    /// Configured drone keys run before the fixed replay shortcuts. A release
+    /// uses the binding claimed on press, even if a modifier was released first.
+    pub fn bound_key(
+        &mut self,
+        name: &str,
+        pressed: bool,
+        repeat: bool,
+        modifiers: winit::keyboard::ModifiersState,
+    ) -> bool {
+        if self.feedback_open {
+            return false;
+        }
+        if pressed && repeat && !self.drone_input.claimed(name) {
+            return false;
+        }
+        if pressed && (self.pause.is_open() || self.menu.is_some() || name == "Escape") {
+            return false;
+        }
+        let taken = self.drone_input.key(name, pressed, modifiers);
+        self.apply_drone_controls();
+        taken
+    }
+
+    pub fn drone_event(&mut self, event: tore_input::Event) {
+        if self.pause.is_open() || self.menu.is_some() {
+            return;
+        }
+        self.drone_input.event(event);
+        self.apply_drone_controls();
+    }
+
+    pub fn drone_devices(&mut self, present: impl Fn(&str) -> bool) {
+        self.drone_input.retain_devices(present);
+        self.apply_drone_controls();
+    }
+
+    pub fn drone_mouse(&mut self, control: &str, pressed: bool) {
+        if pressed && (self.pause.is_open() || self.menu.is_some()) {
+            return;
+        }
+        self.drone_input.mouse(control, pressed);
+        self.apply_drone_controls();
+    }
+
+    fn apply_drone_controls(&mut self) {
+        self.held = [
+            ("drone-forward", "w"),
+            ("drone-backward", "s"),
+            ("drone-left", "a"),
+            ("drone-right", "d"),
+            ("drone-up", "e"),
+            ("drone-down", "q"),
+        ]
+        .into_iter()
+        .filter(|(action, _)| self.drone_input.held(action))
+        .map(|(_, key)| key.to_owned())
+        .collect();
+        for command in self.drone_input.commands() {
+            match command.as_str() {
+                "drone-cycle" => self.drone_mode(None),
+                "drone-follow" => self.drone_mode(Some(Mode::Follow)),
+                "drone-free" => self.drone_mode(Some(Mode::Free)),
+                "drone-faster" | "drone-slower" => {
+                    if let Some(drone) = &mut self.drone {
+                        drone.wheel(if command == "drone-faster" { 1 } else { -1 });
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// The pointer left the window.
@@ -1518,6 +2204,7 @@ impl Viewer {
 
     /// Lets go of every held key and drag, when the window loses focus.
     pub fn release(&mut self) {
+        self.drone_input.release();
         self.held.clear();
         self.dragging = None;
         self.right_click = None;
@@ -1572,6 +2259,13 @@ impl Viewer {
             layer.filter(|_| !over_menu || self.bar.scrubbing),
             &mut self.clock,
         );
+        if self.drone.is_some() {
+            if !self.drone_input.held("drone-look") {
+                self.dragging = None;
+            } else if self.dragging.is_none() {
+                self.dragging = Some(window);
+            }
+        }
         if let Some(last) = self.dragging {
             let delta = [
                 (window[0] - last[0]) * radians[0],
@@ -1598,6 +2292,20 @@ impl Viewer {
             return self.pause_choice(choice);
         }
         let layer = self.layer_point(point, size);
+        if self.feedback_open
+            && let Some((x, y)) = layer
+            && (8. ..632.).contains(&x)
+            && (32. ..426.).contains(&y)
+        {
+            if !pressed && x < 248. && (40. ..232.).contains(&y) {
+                let index = self.feedback_selected / 8 * 8 + ((y - 40.) / 24.) as usize;
+                if index < self.feedback_flags.len() {
+                    self.feedback_selected = index;
+                    self.seek_feedback();
+                }
+            }
+            return Command::None;
+        }
         let at = self.panel_point(point, size);
         if pressed {
             let owner = if let Some(menu) = &mut self.menu {
@@ -1631,6 +2339,7 @@ impl Viewer {
                     missiles: &self.missiles,
                     comms: &self.comms,
                     now: self.clock.tick(),
+                    player: self.player,
                 };
                 self.panels.up(self.layout, at, &data);
                 self.ui.comms = self.panels.comms_open();
@@ -1646,6 +2355,10 @@ impl Viewer {
                 Control::Camera => self.next_camera(),
                 Control::Aircraft => self.cycle_aircraft(true),
                 Control::HideUi => self.ui.hidden = true,
+                Control::Feedback if self.recording.flagged() => {
+                    self.feedback_open = !self.feedback_open;
+                    self.clock.pause();
+                }
                 _ => {}
             }
         }
@@ -1669,6 +2382,7 @@ impl Viewer {
             self.right_click = None;
             return;
         }
+        self.drone_mouse("button:right", pressed);
         if pressed {
             self.dragging = Some(window);
             self.right_click = point.map(|p| (RightClick::press(window, slop), p));
@@ -1685,6 +2399,10 @@ impl Viewer {
     /// Mouse wheel notches: a menu or panel under the pointer scrolls,
     /// otherwise the drone's speed, or zoom in a flight view.
     pub fn wheel(&mut self, notches: i32) {
+        if self.feedback_open {
+            self.scroll_feedback(-notches * 3);
+            return;
+        }
         if self.pause.is_open() {
             return;
         }
@@ -1701,17 +2419,25 @@ impl Viewer {
             missiles: &self.missiles,
             comms: &self.comms,
             now: self.clock.tick(),
+            player: self.player,
         };
         if self.panels.wheel(self.layout, self.point, notches, &data) {
             return;
         }
-        match &mut self.drone {
-            Some(drone) => {
-                drone.wheel(notches);
-                let speed = drone.speed();
-                self.toast(format!("Drone speed {speed:.0} ft/s"));
+        if self.drone.is_some() {
+            let control = if notches > 0 {
+                "wheel:up"
+            } else {
+                "wheel:down"
+            };
+            for _ in 0..notches.unsigned_abs().min(8) {
+                self.drone_mouse(control, true);
+                self.drone_mouse(control, false);
             }
-            None => self.zoom = (self.zoom * 1.1f32.powi(notches)).clamp(0.5, 4.),
+            let speed = self.drone.as_ref().unwrap().speed();
+            self.toast(format!("Drone speed {speed:.0} ft/s"));
+        } else {
+            self.zoom = (self.zoom * 1.1f32.powi(notches)).clamp(0.5, 4.);
         }
     }
 
@@ -1744,6 +2470,58 @@ impl Viewer {
             .map(|p| p.id)
     }
 
+    /// F12 uses every active non-gun weapon in the same recording tick as the object list.
+    fn active_missiles(&mut self, tick: u64) -> Vec<u32> {
+        let Some((frames, at)) = self.playback.frame(tick) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<_> = frames[at]
+            .projectiles
+            .iter()
+            .filter(|p| {
+                self.recording
+                    .weapon_info(p.weapon)
+                    .is_some_and(|w| w.class != WeaponClass::Gun)
+            })
+            .map(|p| p.id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    fn object_list_items(&mut self) -> Vec<context_menu::Item> {
+        let entries: Vec<_> = self
+            .present()
+            .into_iter()
+            .map(|id| self.menu_entry(id))
+            .collect();
+        let mut items = context_menu::jump_items(
+            &entries,
+            context_menu::Options {
+                live: false,
+                labels: self.ui.labels,
+                trails: self.ui.trails,
+            },
+        );
+        let picture = self.playback.picture(self.clock.tick(), self.clock.alpha());
+        let mut weapons: Vec<_> = picture.projectiles.iter().filter(|p| !p.gun).collect();
+        weapons.sort_by_key(|p| p.id);
+        if !weapons.is_empty() {
+            items.push(context_menu::Item {
+                label: "ACTIVE WEAPONS".into(),
+                detail: String::new(),
+                action: None,
+            });
+            items.extend(weapons.into_iter().map(|p| context_menu::Item {
+                label: format!("{} #{}", p.weapon.trim_end_matches(".JT"), p.id),
+                detail: self.label(p.owner),
+                action: Some(Action::ViewFrom(Target::Missile(p.id))),
+            }));
+        }
+        items
+    }
+
     /// An aircraft as the menus list it.
     fn menu_entry(&self, id: u32) -> context_menu::Aircraft {
         let info = self.info.get(&id);
@@ -1754,7 +2532,8 @@ impl Viewer {
             side: self.side(id),
             wing: info.map_or(0, |a| a.wing),
             member: info.map_or(0, |a| a.member),
-            ai: id != 0 && info.is_some_and(|a| !a.human),
+            ai: id != self.player && info.is_some_and(|a| !a.human),
+            sight: self.sight_of(id).is_some(),
         }
     }
 
@@ -1788,17 +2567,7 @@ impl Viewer {
                 self.object_name(target),
                 context_menu::ground_items(id, options),
             ),
-            Target::Nothing => {
-                let entries: Vec<_> = self
-                    .present()
-                    .into_iter()
-                    .map(|id| self.menu_entry(id))
-                    .collect();
-                (
-                    "Jump to an aircraft".to_owned(),
-                    context_menu::jump_items(&entries, options),
-                )
-            }
+            Target::Nothing => ("Jump to an object".to_owned(), self.object_list_items()),
         };
         Menu::new(target, title, items, at, &self.ownship.font)
     }
@@ -1813,6 +2582,10 @@ impl Viewer {
         }
         let placement = Placement::new(size);
         let layer = placement.centered(at);
+        if placement.layer(at).and_then(overlay::hit) == Some(Control::Camera) {
+            self.open_camera_menu(layer);
+            return;
+        }
         let on_panel = match self.panels.hit(self.layout, layer) {
             Some(panels::Hit::Body(side) | panels::Hit::Pin(side) | panels::Hit::Close(side)) => {
                 self.panels.slot(side).map(|p| match p.kind {
@@ -1832,6 +2605,60 @@ impl Viewer {
             )
         });
         self.menu = Some(self.build_menu(target, layer));
+    }
+
+    fn refresh_object_menu(&mut self) {
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.target == Target::Nothing && !m.camera_choices)
+        {
+            let items = self.object_list_items();
+            self.menu.as_mut().unwrap().replace_items(items);
+        }
+    }
+
+    fn open_camera_menu(&mut self, at: (f64, f64)) {
+        let mut items: Vec<_> = VIEW_ORDER
+            .into_iter()
+            .chain([2, OBJECT, tape_views::HUD_CAMERA, tape_views::SENSOR])
+            .map(|view| Item {
+                label: view_name(view).into(),
+                detail: if self.drone.is_none() && self.view == view {
+                    "Current"
+                } else {
+                    ""
+                }
+                .into(),
+                action: match view {
+                    OBJECT => self.look_at.is_some(),
+                    tape_views::SENSOR => self.sight_of(self.selected).is_some(),
+                    _ => true,
+                }
+                .then_some(Action::Camera(view)),
+            })
+            .collect();
+        for (mode, label) in [(Mode::Follow, "Drone follow"), (Mode::Free, "Drone free")] {
+            items.push(Item {
+                label: label.into(),
+                detail: if self.drone.as_ref().is_some_and(|d| d.mode == mode) {
+                    "Current"
+                } else {
+                    ""
+                }
+                .into(),
+                action: Some(Action::DroneMode(mode)),
+            });
+        }
+        let mut menu = Menu::new(
+            Target::Nothing,
+            "Choose view".into(),
+            items,
+            at,
+            &self.ownship.font,
+        );
+        menu.camera_choices = true;
+        self.menu = Some(menu);
     }
 
     /// M: the right-click menu on the selected aircraft, where the last
@@ -1861,6 +2688,20 @@ impl Viewer {
     /// Does what a menu item says.
     fn perform(&mut self, action: Action) {
         match action {
+            Action::Camera(OBJECT) => self.object_view(),
+            Action::Camera(view @ (tape_views::HUD_CAMERA | tape_views::SENSOR)) => {
+                self.taped_view_key(view)
+            }
+            Action::Camera(view) => self.set_view(view),
+            Action::HudCamera(id) => {
+                self.select(id);
+                self.taped_view_key(tape_views::HUD_CAMERA);
+            }
+            Action::SensorView(id) => {
+                self.select(id);
+                self.taped_view_key(tape_views::SENSOR);
+            }
+            Action::DroneMode(mode) => self.drone_mode(Some(mode)),
             Action::Follow(id) => {
                 self.select(id);
                 self.set_view(EXTERNAL);
@@ -1893,6 +2734,7 @@ impl Viewer {
                 match found {
                     Some((position, heading)) => {
                         self.drone = Some(Drone::beside(Mode::Free, position, heading));
+                        self.drone_subject = Some(Target::Missile(id));
                         self.camera_error = None;
                     }
                     None => self.toast("That missile is not in the recording now"),
@@ -1984,7 +2826,7 @@ impl Viewer {
     /// when the recording knows it, otherwise the player's.
     fn view_target(&self, tick: u64) -> Option<u32> {
         self.target_of(self.selected, tick)
-            .or_else(|| self.target_of(0, tick))
+            .or_else(|| self.target_of(self.player, tick))
             .flatten()
     }
 
@@ -2000,43 +2842,191 @@ impl Viewer {
         } else {
             1.
         };
-        let body = |pose: &AircraftPose| aircraft_body(pose, sign);
         let target = self.view_target(tick);
-        let flying = |pose: &&AircraftPose| pose.airborne && pose.damage.hp > 0;
-        let wings = picture
-            .targets
-            .iter()
-            .filter(flying)
-            .filter_map(|pose| {
-                let info = self.info.get(&pose.id)?;
-                (info.wing > 0).then(|| {
-                    (
-                        pose.id,
-                        info.side == Side::Friendly,
-                        u8::try_from(info.wing).unwrap_or(u8::MAX),
-                        u8::try_from(info.member).unwrap_or(u8::MAX),
-                    )
-                })
+        let wing_of = |id: u32| {
+            let info = self.info.get(&id)?;
+            (info.wing > 0).then(|| {
+                (
+                    info.side == Side::Friendly,
+                    u8::try_from(info.wing).unwrap_or(u8::MAX),
+                    u8::try_from(info.member).unwrap_or(u8::MAX),
+                )
             })
-            .collect();
-        let missiles = picture
-            .projectiles
-            .iter()
-            .filter(|p| !p.gun)
-            .map(|p| Shot::new(weapon_body(p, sign), p.owner, p.target, p.incoming))
-            .collect();
-        Scene::from_parts(
-            body(&picture.player),
+        };
+        Scene::of_picture(
+            Body::posed(&picture.player, sign),
             target,
-            picture
-                .targets
-                .iter()
-                .filter(|t| t.airborne || t.damage.hp > 0)
-                .map(body)
-                .collect(),
-            wings,
-            missiles,
+            picture,
+            wing_of,
+            sign,
         )
+    }
+
+    /// Find the first approach in recorded time, once per weapon. Keeping the
+    /// eye after a miss makes direct seeks and reverse playback independent of
+    /// viewing history, including a seek which skips the entire approach.
+    fn weapon_stop_at(&mut self, id: u32, tick: u64) -> Option<flight_views::WeaponStop> {
+        let approach = self.weapon_stops.get(&id).copied().unwrap_or_default();
+        if let Some((when, stop)) = approach.stopped {
+            return (when <= tick).then_some(stop);
+        }
+        let mut target = approach.target.or_else(|| {
+            self.recording
+                .events_between(0, tick)
+                .iter()
+                .find_map(|entry| {
+                    let event = &entry.event;
+                    (event.kind == "weapon.launch"
+                        && event.get("projectile").and_then(|v| v.as_i64()) == Some(i64::from(id)))
+                    .then_some(event.object)
+                    .flatten()
+                })
+        });
+        let launched = self
+            .playback
+            .frame(tick)
+            .and_then(|(frames, at)| {
+                frames[at]
+                    .projectiles
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| tick.saturating_sub(u64::from(p.age)))
+            })
+            .unwrap_or(0);
+        for before in approach.scanned.max(launched)..=tick {
+            let Some((frames, at)) = self.playback.frame(before) else {
+                continue;
+            };
+            let frame = &frames[at];
+            if frame.tick != before {
+                continue;
+            }
+            let Some(p) = frame.projectiles.iter().find(|p| p.id == id) else {
+                continue;
+            };
+            target = p.target.or(target);
+            let aim = self
+                .marks
+                .scene(before)
+                .weapons
+                .iter()
+                .find(|w| w.projectile == id)
+                .and_then(|w| w.aim)
+                .or_else(|| {
+                    target.and_then(|id| {
+                        frame
+                            .aircraft
+                            .iter()
+                            .find(|a| a.id == id)
+                            .map(|a| a.position)
+                            .or_else(|| {
+                                frame
+                                    .surface
+                                    .iter()
+                                    .find(|u| u.id == id)
+                                    .map(|u| u.position)
+                            })
+                            .or_else(|| {
+                                self.world
+                                    .airport_scene
+                                    .objects
+                                    .iter()
+                                    .find(|o| o.id == id)
+                                    .map(|o| o.bounds.center)
+                            })
+                    })
+                });
+            let d = p.direction;
+            let body = Body::missile(
+                p.id,
+                p.position,
+                d.map(|v| v * p.speed),
+                Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.),
+            );
+            if let Some(stop) =
+                flight_views::weapon_stop(body, aim, |x, z| self.world.surface(x, z).height)
+            {
+                self.weapon_stops.insert(
+                    id,
+                    WeaponApproach {
+                        scanned: before + 1,
+                        target,
+                        stopped: Some((before, stop)),
+                    },
+                );
+                return Some(stop);
+            }
+        }
+        self.weapon_stops.insert(
+            id,
+            WeaponApproach {
+                scanned: approach.scanned.max(tick + 1),
+                target,
+                stopped: None,
+            },
+        );
+        None
+    }
+
+    /// Chase placement from one recorded picture, also used for its final pose.
+    fn weapon_pose(&mut self, picture: &RenderSnapshot, tick: u64, id: u32) -> Option<Camera> {
+        let p = picture.projectiles.iter().find(|p| p.id == id && !p.gun)?;
+        let target = p
+            .target
+            .and_then(|id| {
+                self.body_of(picture, tick, Target::Aircraft(id))
+                    .or_else(|| self.body_of(picture, tick, Target::Ground(id)))
+            })
+            .map_or_else(
+                || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
+                |b| b.position(),
+            );
+        Some(self.weapon_stop_at(id, tick).map_or_else(
+            || flight_views::relation(Body::weapon(p, 1.), target),
+            |stop| flight_views::stopped_weapon_camera(stop, p.position),
+        ))
+    }
+
+    /// Reconstruct the hold from history, never from the direction of playback
+    /// or the previous rendered frame. The bounded search includes miss expiry
+    /// and self-destruct, which need not have an impact event.
+    fn weapon_chase(
+        &mut self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        id: Option<u32>,
+    ) -> Option<(u32, Camera)> {
+        if let Some(id) = id
+            && let Some(camera) = self.weapon_pose(picture, tick, id)
+        {
+            return Some((id, camera));
+        }
+        for before in (tick.saturating_sub(flight_views::weapon_hold_ticks())..tick).rev() {
+            let (frames, at) = self.playback.frame(before)?;
+            // Do not extend a pose across a missing recording interval.
+            if frames[at].tick != before {
+                continue;
+            }
+            let found = frames[at]
+                .projectiles
+                .iter()
+                .filter(|p| {
+                    id.is_none_or(|id| p.id == id)
+                        && self
+                            .recording
+                            .weapon_info(p.weapon)
+                            .is_some_and(|w| w.class != WeaponClass::Gun)
+                })
+                .map(|p| p.id)
+                .min();
+            if let Some(id) = found {
+                let last = self.playback.picture(before, 1.);
+                return self
+                    .weapon_pose(&last, before, id)
+                    .map(|camera| (id, camera));
+            }
+        }
+        None
     }
 
     /// The camera for this frame: the drone, or the selected flight view.
@@ -2055,17 +3045,52 @@ impl Viewer {
         self.compass = None;
         self.readout = None;
         if let Some(drone) = &mut self.drone {
-            drone.step(seconds, &self.held, shift, anchor, ground(&self.world));
+            self.drone_input.shift(shift);
+            drone.step(
+                seconds,
+                &self.held,
+                self.drone_input.held("drone-boost"),
+                anchor,
+                ground(&self.world),
+            );
             return drone.camera(anchor, ground(&self.world));
         }
         if self.view == OBJECT {
             return self.object_camera(picture, tick);
         }
         let scene = self.scene(picture, tick);
-        match self
-            .rig
-            .camera(self.view, &scene, Camera::new(), self.look, self.zoom)
-        {
+        self.rig.observe(&scene);
+        if matches!(self.view, tape_views::HUD_CAMERA | tape_views::SENSOR) {
+            // The HUD camera and the Sensor View make their own camera
+            // (viewer/views.rs); this is the view from outside they fall
+            // back to when they cannot be shown.
+            return self
+                .rig
+                .camera(EXTERNAL, &scene, Camera::new(), [0.; 2], 1.)
+                .unwrap_or_else(|_| copy(&self.camera));
+        }
+        let result = if self.view == flight_views::MISSILE {
+            let unmodified = self.rig.reference == Reference::Aircraft(self.selected);
+            if self.selected_missile.is_none() && unmodified {
+                self.selected_missile = active_successor(None, &self.active_missiles(tick), false);
+            }
+            let id = self.selected_missile;
+            (id.is_some() || unmodified)
+                .then(|| self.weapon_chase(picture, tick, id))
+                .flatten()
+                .map(|(id, mut camera)| {
+                    if self.rig.reference == Reference::Aircraft(self.selected) {
+                        self.selected_missile = Some(id);
+                    }
+                    camera.zoom = self.zoom;
+                    camera
+                })
+                .ok_or("No active weapon for this view")
+        } else {
+            self.rig
+                .camera(self.view, &scene, Camera::new(), self.look, self.zoom)
+        };
+        match result {
             Ok(camera) => {
                 self.camera_error = None;
                 if std::mem::take(&mut self.announce_wingman)
@@ -2092,11 +3117,18 @@ impl Viewer {
                     self.camera_error = Some(reason);
                     self.toast(reason);
                 }
+                if self.view == flight_views::MISSILE {
+                    let mut forward = Rig::default();
+                    forward.select(Reference::Aircraft(self.selected));
+                    return forward
+                        .camera(0, &scene, Camera::new(), [0.; 2], self.zoom)
+                        .unwrap_or_else(|_| copy(&self.camera));
+                }
                 // The aircraft from outside; if it has left the scene, the
                 // last camera shown, or at first the player from outside.
                 let mut outside = self.rig.clone();
                 let mut player = Rig::default();
-                player.select(Reference::Aircraft(0));
+                player.select(Reference::Aircraft(self.player));
                 outside
                     .camera(EXTERNAL, &scene, Camera::new(), self.look, self.zoom)
                     .or_else(|error| {
@@ -2141,7 +3173,8 @@ impl Viewer {
             self.camera_error = Some(reason);
             self.toast(reason);
         }
-        let player = (!self.shown).then(|| aircraft_body(&picture.player, 1.));
+        let player = (!self.shown && self.player != convert::NO_PLAYER)
+            .then(|| Body::posed(&picture.player, 1.));
         match from.or(player) {
             Some(from) => {
                 let mut camera = flight_views::outside(from);
@@ -2155,12 +3188,13 @@ impl Viewer {
     /// The player as drawn: its pose over the airframe's start state, with
     /// the recorded load factor and the roll rate its attitudes imply.
     fn player_state(&mut self, picture: &RenderSnapshot, tick: u64) -> flight::State {
-        let mut state = render_snapshot::pose_state(&self.template, &picture.player);
-        if let Some(now) = self.playback.aircraft(tick, 0) {
+        let mut state = snapshot::pose_state(&self.template, &picture.player);
+        state.ticks = tick;
+        if let Some(now) = self.playback.aircraft(tick, self.player) {
             state.g = now.g;
             state.roll_rate = tick
                 .checked_sub(1)
-                .and_then(|t| self.playback.aircraft(t, 0))
+                .and_then(|t| self.playback.aircraft(t, self.player))
                 .map_or(0., |before| roll_rate(before.attitude, now.attitude));
         }
         state
@@ -2175,17 +3209,19 @@ impl Viewer {
         height: f64,
         out: &mut Vec<f32>,
     ) {
+        let origin = self.scenery.origin;
         let seconds = trails::LENGTHS[self.ui.trail_length];
-        for pose in std::iter::once(&picture.player).chain(&picture.targets) {
+        for pose in everyone(picture) {
             let Some(samples) = self.tracks.aircraft.get(&pose.id) else {
                 continue;
             };
             let points = trails::path(samples, tick, seconds, pose.position);
-            trails::ribbon(
+            trails::ribbon_world(
                 out,
                 &points,
                 trails::side_color(self.side(pose.id)),
                 camera,
+                origin,
                 height,
             );
         }
@@ -2195,7 +3231,7 @@ impl Viewer {
             };
             let points = trails::path(&path.samples, tick, seconds, projectile.position);
             let color = trails::weapon_color(self.side(path.owner));
-            trails::ribbon(out, &points, color, camera, height);
+            trails::ribbon_world(out, &points, color, camera, origin, height);
         }
     }
 
@@ -2204,13 +3240,106 @@ impl Viewer {
     /// bracketed; an aircraft the camera sits inside has none.
     fn labels(&self, picture: &RenderSnapshot, camera: &Camera, size: [u32; 2]) -> Vec<Label> {
         name_labels(
-            std::iter::once(&picture.player).chain(&picture.targets),
+            everyone(picture),
             camera,
             size,
             &self.ownship.font,
             Some(self.selected),
             &|id| (self.label(id), self.side(id)),
         )
+    }
+
+    /// Whether the laser and bomb marks are drawn: switched on, and the
+    /// recording has any.
+    fn marks_shown(&self) -> bool {
+        self.ui.marks && self.marks.any()
+    }
+
+    /// Whether the marks' shapes are drawn: H hides them (the designation
+    /// square, laser spots, weapon lines) with the rest of the interface
+    /// (John, 2026-10-15).
+    fn marks_drawn(&self) -> bool {
+        self.marks_shown() && !self.ui.hidden
+    }
+
+    /// What the marks draw at `tick` in `picture`: laser spots, designations,
+    /// guided weapons and landings, placed where the picture has their
+    /// aircraft, weapons and ground objects.
+    fn mark_prims(&self, picture: &RenderSnapshot, tick: u64) -> Vec<ground_marks::Prim> {
+        let scene = self.marks.scene(tick);
+        if scene == ground_marks::Scene::default() {
+            return Vec::new();
+        }
+        let wants_objects =
+            !scene.designations.is_empty() || scene.weapons.iter().any(|w| w.target.is_some());
+        let objects: BTreeMap<u32, [f64; 3]> = if wants_objects {
+            self.ground_objects(tick, picture).into_iter().collect()
+        } else {
+            BTreeMap::new()
+        };
+        let aircraft = |id: u32| everyone(picture).find(|p| p.id == id).map(|p| p.position);
+        let projectile = |id: u32| {
+            picture
+                .projectiles
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.position)
+        };
+        let object = |id: u32| objects.get(&id).copied();
+        let side = |id: u32| self.side(id);
+        let name = |id: u32| crate::replay::panels::ascii(&self.label(id));
+        ground_marks::draw(
+            &scene,
+            &ground_marks::Positions {
+                aircraft: &aircraft,
+                projectile: &projectile,
+                object: &object,
+            },
+            &ground_marks::Who {
+                player: self.player,
+                side: &side,
+                name: &name,
+            },
+        )
+    }
+
+    /// The words beside the marks, placed for a view of `size` and kept
+    /// clear of `others`, the name labels already there. They have no
+    /// aircraft behind them, so a right-click does not pick them.
+    fn mark_labels(
+        &self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        camera: &Camera,
+        size: [u32; 2],
+        others: &[Label],
+    ) -> Vec<Label> {
+        if !self.marks_shown() {
+            return Vec::new();
+        }
+        let scale = Placement::new(size).scale();
+        let font = &self.ownship.font;
+        let mut all = others.to_vec();
+        for prim in self.mark_prims(picture, tick) {
+            let ground_marks::Prim::Text { at, text, color } = prim else {
+                continue;
+            };
+            let Some([x, y]) = camera.project(size, at) else {
+                continue;
+            };
+            let text = crate::replay::panels::ascii(&text);
+            let width = FlightCanvas::text_width(font, &text, scale);
+            all.push(Label {
+                id: u32::MAX,
+                // Clear of the shape drawn at the point.
+                at: [x - width / 2., y - (font.height as f64 + 26.) * scale],
+                size: [width, (font.height as f64 + 1.) * scale],
+                text,
+                color,
+            });
+        }
+        separate_labels(&mut all, scale);
+        all.split_off(others.len())
     }
 
     /// The cockpit messages on screen at `tick`, oldest first.
@@ -2264,6 +3393,83 @@ impl Viewer {
             .collect()
     }
 
+    /// The object explicitly viewed, with aircraft selection as the drone fallback.
+    fn banner_subject(&mut self, tick: u64) -> Target {
+        if self.drone.is_some() {
+            return self
+                .drone_subject
+                .unwrap_or(Target::Aircraft(self.selected));
+        }
+        if self.view == OBJECT {
+            // View from a weapon or ground object keeps that explicit subject.
+            return self
+                .from
+                .filter(|t| !matches!(t, Target::Aircraft(_)))
+                .or(self.look_at)
+                .unwrap_or_else(|| self.from());
+        }
+        if self.camera_error.is_some() {
+            return Target::Aircraft(self.selected);
+        }
+        if self.view == flight_views::MISSILE {
+            return self
+                .selected_missile
+                .map_or(Target::Aircraft(self.selected), Target::Missile);
+        }
+        if self.view == flight_views::WING {
+            return Target::Aircraft(self.rig.wingman().unwrap_or(self.selected));
+        }
+        match self.rig.reference {
+            Reference::Target => self
+                .view_target(tick)
+                .map_or(Target::Aircraft(self.selected), Target::Aircraft),
+            Reference::Missile => self
+                .rig
+                .missile_subject()
+                .map_or(Target::Aircraft(self.selected), Target::Missile),
+            Reference::Aircraft(id) => Target::Aircraft(id),
+            Reference::Player => Target::Aircraft(self.player),
+        }
+    }
+
+    fn object_banner(&mut self, tick: u64) -> Option<super::banner::Banner> {
+        let subject = self.banner_subject(tick);
+        if let Target::Ground(id) = subject
+            && self.tracks.destroyed(tick).contains(&id)
+        {
+            return None;
+        }
+        let ground = if let Target::Ground(id) = subject {
+            self.world
+                .airport_scene
+                .objects
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| super::banner::Ground {
+                    active: self
+                        .world
+                        .surface
+                        .unit(tore_world::surface::UnitId(id))
+                        .is_some_and(|u| {
+                            u.kind == tore_world::surface::UnitKind::Active || u.route.is_some()
+                        }),
+                    name: self.object_name(subject),
+                    position: o.bounds.center,
+                })
+        } else {
+            None
+        };
+        let previous = tick.checked_sub(1).and_then(|t| self.playback.frame(t));
+        let (frames, at) = self.playback.frame(tick)?;
+        self.banner.inspect(
+            &self.recording,
+            &frames[at],
+            previous.as_ref().map(|(frames, at)| &frames[*at]),
+            subject,
+            ground,
+        )
+    }
+
     /// The interface model for this frame.
     fn model(&self, tick: u64) -> Model {
         let active = if self.clock.paused() {
@@ -2282,6 +3488,10 @@ impl Viewer {
             _ => self.label(self.selected),
         };
         Model {
+            feedback: self.feedback_flags.clone(),
+            feedback_open: self.feedback_open,
+            feedback_selected: self.feedback_selected,
+            feedback_scroll: self.feedback_scroll,
             first: self.clock.first(),
             last: self.clock.last(),
             position: self.clock.position(),
@@ -2317,6 +3527,7 @@ impl Viewer {
             } else {
                 Vec::new()
             },
+            banner: Vec::new(),
             subtitle_lift: crate::flight_ui::message_band(&self.ownship.hud_font).ceil() as i32,
         }
     }
@@ -2341,30 +3552,59 @@ impl Viewer {
             .map_or(0., |last| (now - last).as_secs_f64().min(0.25));
         self.last_frame = Some(now);
         self.scanner.poll(&mut self.tracks);
-        self.weather
-            .build(&mut self.world, &self.tracks, WEATHER_BUDGET);
+        self.weather.build(
+            &mut self.world,
+            &mut self.scenery,
+            &self.tracks,
+            WEATHER_BUDGET,
+        );
         let from = self.clock.position();
         if !self.bar.scrubbing {
             self.clock.advance(seconds);
         }
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
-        self.weather.seek(&mut self.world, &self.tracks, tick);
+        self.refresh_object_menu();
+        self.weather
+            .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
+        self.follow_city(tick);
         let player = self.player_state(&picture, tick);
         let camera = self.frame_camera(&picture, tick, seconds, shift);
+        // The HUD camera and the Sensor View: their own camera, and a
+        // picture shown through the CRT pass with their overlay.
+        // The HUD camera shows the tape's last picture again between the 24
+        // a second it makes (replay::tape_pacing), and while nothing moves.
+        let held = self.tape_held(
+            renderer,
+            now,
+            (tick, self.clock.alpha()),
+            screen.is_none() && !self.pause.is_open(),
+        );
+        let taped = if held.is_some() {
+            None
+        } else {
+            self.taped_view(&picture, tick, self.clock.alpha(), renderer.flight_size())
+        };
+        let camera = match (&taped, &held) {
+            (Some(t), _) => copy(&t.camera),
+            (None, Some(held)) => copy(held),
+            (None, None) => camera,
+        };
+        let held = held.is_some();
         // The back view from the player's seat draws its airframe but is
         // heard from the cockpit, as flight hears it.
         let seat = crate::mirrors::pilot_eye(
             picture.player.position,
-            aircraft_body(&picture.player, 1.).basis(),
+            Body::posed(&picture.player, 1.).basis(),
         );
         let listening = (self.drone.is_none()
+            && self.player != convert::NO_PLAYER
             && self.view == 3
             && camera.hidden_target.is_none()
             && feet(camera.position, seat) < 1.)
             .then(|| {
                 let mut inside = copy(&camera);
-                inside.hidden_target = Some(0);
+                inside.hidden_target = Some(self.player);
                 inside
             });
         let moment = sound::Moment {
@@ -2376,18 +3616,72 @@ impl Viewer {
             selected: self.selected,
         };
         self.sound.frame(audio, &moment);
-        self.world.resolve_palette(camera.position[1]);
-        self.world.set_origin(camera.position);
+        let size = renderer.flight_size();
+        if !held {
+            self.feed_renderer(renderer, &picture, tick, &camera, &player, size);
+        }
+        let composed = Instant::now();
+        self.overlay(&picture, tick, &camera, size, canvas);
+        if let Some(screen) = screen {
+            canvas.legacy_layer(screen, 1.);
+        }
+        let drawn = Instant::now();
+        if let Some(t) = taped {
+            self.tape_made(&t.camera, size, (tick, self.clock.alpha()));
+            renderer.set_console(t.frame, t.overlay, t.overlay_size);
+        } else if held {
+            renderer.repeat_console();
+        } else {
+            self.tape.forget();
+        }
+        let presented = renderer.draw(
+            &canvas.pixels,
+            Some((&camera, &self.world, &self.scenery)),
+            Some(canvas.size),
+            None,
+            crate::frame_rate::Surface::Replay {
+                right_panel: self.panels.right_open(),
+                hud_camera: self.view == tape_views::HUD_CAMERA,
+            },
+        )?;
+        self.camera = camera;
+        self.shown = true;
+        let ms = |d: Duration| d.as_secs_f64() * 1000.;
+        Ok(Timing {
+            presented,
+            scene: ms(composed - now),
+            interface: ms(drawn - composed),
+            present: ms(drawn.elapsed()),
+        })
+    }
+
+    /// Hands the moment to the renderer: the sky, the weather, the smoke, the
+    /// effects, every aircraft and ground unit, the combat geometry and the
+    /// player's own aircraft, as seen from `camera`. A frame that shows the
+    /// HUD camera's last picture again does not do this.
+    fn feed_renderer(
+        &mut self,
+        renderer: &mut Renderer,
+        picture: &RenderSnapshot,
+        tick: u64,
+        camera: &Camera,
+        player: &flight::State,
+        size: [u32; 2],
+    ) {
+        self.scenery
+            .resolve_palette(&self.world, camera.position[1]);
+        self.scenery.set_origin(camera.position);
         let vapor = match self.playback.vapor(tick, &self.ownship, &mut self.scratch) {
             Some(vapor) => crate::vapor_vertices(
                 &vapor,
                 &self.world,
-                &player,
-                self.ownship.streamer_points(&player),
+                player,
+                self.ownship.streamer_points(player),
             ),
             None => Vec::new(),
         };
         renderer.vapor(&vapor);
+        renderer.set_city_clock(self.city_clock(tick as f64 + self.clock.alpha()));
         let [smoke, contrails] = self.playback.smoke(tick);
         // Chaff and flares flown again from their releases, lit and lighting
         // the scene with every lit afterburner, as live flight draws them.
@@ -2403,7 +3697,7 @@ impl Viewer {
                 player_outlets,
             ));
         }
-        glows.extend(render_snapshot::target_glows(&picture, |pose| {
+        glows.extend(render_snapshot::target_glows(picture, |pose| {
             render_snapshot::engine_outlets(
                 pose.aircraft,
                 self.ownship.profile.id,
@@ -2412,20 +3706,37 @@ impl Viewer {
                 player_outlets,
             )
         }));
-        renderer.emitters(devices, &glows);
+        // AC-130 muzzle flashes from the recorded rounds, on the recorded
+        // barrels, as live flight draws them.
+        let flash_now = tick as f64 + self.clock.alpha();
+        let mounts = crate::gun_flash::mounts(picture, None);
+        self.gun_flash
+            .set_fire_widths(std::sync::Arc::clone(&self.scenery.fire_widths));
+        Self::observe_surface(
+            (&self.tracks, &self.recording),
+            &mut self.gun_flash,
+            picture,
+            (tick, flash_now),
+            &mounts,
+        );
+        let guns = self.gun_flash.draw(flash_now, &mounts);
+        renderer.emitters(devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
-        if self
-            .airports
-            .as_ref()
-            .is_none_or(|(set, ..)| *set != destroyed)
-        {
-            let vertices = self.world.visible_static_vertices_where(&destroyed);
-            let lines = self.world.visible_static_lines_where(&destroyed);
-            self.airports = Some((destroyed, vertices, lines));
-        }
-        if let Some((_, vertices, lines)) = &self.airports {
-            renderer.airports(vertices, lines);
-        }
+        let rails = self.rails(tick);
+        self.scenery.surface.step_aim(
+            picture,
+            &self.world.surface,
+            &self.tracks.aim_tracks(tick),
+            Some(&rails),
+        );
+        renderer.airports(self.scenery.static_geometry_replay(&destroyed, &rails));
+        // Routed units on the move, the men, deck crew and parked aircraft
+        // pieces.
+        renderer.surface_units(&self.scenery.surface_vertices(
+            picture,
+            &|id| !destroyed.contains(&id),
+            camera,
+        ));
         if let Some(art) = &self.art.escape {
             renderer.escapees(
                 art,
@@ -2436,30 +3747,42 @@ impl Viewer {
                         .map(|p| (p.position, p.heading, p.phase)),
                     &self.ownship.palette,
                     camera.position,
-                    self.world.origin,
+                    self.scenery.origin,
                 ),
             );
         }
         renderer.dummies(render_snapshot::aircraft_batches(
-            &picture,
+            picture,
             &self.models,
-            &camera,
+            &self.art,
+            camera,
             &self.world,
+            &self.scenery,
         ));
         let mut combat = render_snapshot::combat_geometry(
-            &picture,
+            picture,
             &self.art,
             &self.ownship,
-            &player,
-            &camera,
+            player,
+            camera,
             &self.world,
+            &self.scenery,
         );
-        let size = renderer.flight_size();
         if self.ui.trails {
             self.trails(
-                &picture,
+                picture,
                 tick,
-                &camera,
+                camera,
+                f64::from(size[1]),
+                &mut combat.vertices,
+            );
+        }
+        if self.marks_drawn() {
+            let prims = self.mark_prims(picture, tick);
+            ground_marks::geometry(
+                &prims,
+                camera,
+                self.scenery.origin,
                 f64::from(size[1]),
                 &mut combat.vertices,
             );
@@ -2467,34 +3790,22 @@ impl Viewer {
         renderer.combat(&combat);
         renderer.aircraft(
             &self.ownship,
-            &player,
-            camera.hidden_target != Some(0),
-            &camera,
+            player,
+            &pylons::for_flown(
+                &picture.player.stores,
+                player,
+                &self.ownship,
+                &self.art,
+                &self.scenery,
+            ),
+            self.player != convert::NO_PLAYER && camera.hidden_target != Some(self.player),
+            camera,
             &self.world,
+            &self.scenery,
         );
         // No cockpit, HUD or mirrors in a replay; the cockpit pass keeps its
         // switches between frames, so they are turned off every frame.
-        renderer.cockpit(&player, &camera, false, false, &[], &self.world.palette);
-        let composed = Instant::now();
-        self.overlay(&picture, tick, &camera, size, canvas);
-        if let Some(screen) = screen {
-            canvas.legacy_layer(screen, 1.);
-        }
-        let drawn = Instant::now();
-        let presented = renderer.draw(
-            &canvas.pixels,
-            Some((&camera, &self.world)),
-            Some(canvas.size),
-        )?;
-        self.camera = camera;
-        self.shown = true;
-        let ms = |d: Duration| d.as_secs_f64() * 1000.;
-        Ok(Timing {
-            presented,
-            scene: ms(composed - now),
-            interface: ms(drawn - composed),
-            present: ms(drawn.elapsed()),
-        })
+        renderer.cockpit(player, camera, false, false, &[], &self.scenery.palette);
     }
 
     /// Draws the interface over the view: labels, the debug panels, the
@@ -2514,7 +3825,15 @@ impl Viewer {
             Vec::new()
         };
         self.size = size;
-        self.pickables = Self::pickables_for(picture, &labels, &self.ground_objects(tick));
+        self.pickables = Self::pickables_for(picture, &labels, &self.ground_objects(tick, picture));
+        // The words beside laser spots and guided weapons are drawn with the
+        // name labels, with the labels switch, but are not picked.
+        let drawn: Vec<Label> = if self.ui.hidden {
+            Vec::new()
+        } else {
+            let marks = self.mark_labels(picture, tick, camera, size, &labels);
+            labels.iter().cloned().chain(marks).collect()
+        };
         if !self.requests.is_empty() {
             self.open_requests(camera);
         }
@@ -2522,16 +3841,37 @@ impl Viewer {
         // prints them above the window's edge; the debug panels and the
         // subtitles stay clear of the seven lines they can fill.
         let band = crate::flight_ui::message_band(&self.ownship.hud_font);
-        self.layout = panels::REPLAY.clear_of(overlay::BAR_TOP, band);
+        let banner = if self.ui.banner && !self.ui.hidden && !self.pause.is_open() {
+            self.object_banner(tick)
+                .map_or_else(Vec::new, |b| b.lines())
+        } else {
+            Vec::new()
+        };
+        let banner_height = overlay::lines_height(&self.ownship.font, banner.len());
+        let subtitle_rows = if self.ui.subtitles && !self.panels.comms_open() {
+            self.subtitles(tick).len()
+        } else {
+            0
+        };
+        let subtitle_band = if subtitle_rows > 0 {
+            29 + (subtitle_rows as i32 - 1) * (self.ownship.font.height as i32 + 10)
+        } else {
+            0
+        };
+        self.layout =
+            panels::REPLAY.clear_of(overlay::BAR_TOP - banner_height - subtitle_band, band);
         let messages = if self.ui.subtitles && !self.ui.hidden {
             self.messages(tick)
         } else {
             Vec::new()
         };
-        let hud_color = self
-            .ownship
-            .cockpit_palette(&self.world, camera.position[1], 0)
-            [usize::from(self.ownship.hud.primary_color)];
+        let hud_color = self.ownship.cockpit_palette(
+            &self.world,
+            &self.scenery,
+            camera.position[1],
+            self.local_lighting.1,
+        )[usize::from(self.ownship.hud.primary_color)];
+        let hud_color = self.local_lighting.0.hud(hud_color, self.local_lighting.1);
         let mut panel_rects = Vec::new();
         let mut menu_rect = None;
         let model = if self.ui.hidden {
@@ -2546,6 +3886,7 @@ impl Viewer {
                 missiles: &self.missiles,
                 comms: &self.comms,
                 now: tick,
+                player: self.player,
             };
             panel_rects = self
                 .panels
@@ -2555,7 +3896,10 @@ impl Viewer {
                 menu_rect = Some(menu.rect());
             }
             self.ui.comms = self.panels.comms_open();
-            self.model(tick)
+            let mut model = self.model(tick);
+            model.banner = banner;
+            model.subtitle_lift += banner_height;
+            model
         };
         compose(
             canvas,
@@ -2565,7 +3909,7 @@ impl Viewer {
             &Interface {
                 hidden: self.ui.hidden,
                 bar: !self.pause.is_open(),
-                labels: &labels,
+                labels: &drawn,
                 model: &model,
                 panels: PanelLayer {
                     pixels: &self.panel_layer,
@@ -2582,6 +3926,35 @@ impl Viewer {
                     .map(|bearing| (&self.ownship.hud_font, hud_color, bearing)),
             },
         );
+        if self.live()
+            && !self.pause.is_open()
+            && !self.ui.hidden
+            && let Some(timer) = self.mission_timer
+        {
+            let mut blocks: Vec<[f64; 4]> = drawn.iter().map(Label::rect).collect();
+            let [w, h] = size.map(f64::from);
+            let scale = (w / 640.).min(h / 480.);
+            blocks.extend(panel_rects.iter().map(|&(x, y, pw, ph)| {
+                [
+                    (w - 640. * scale) / 2. + f64::from(x) * scale,
+                    (h - 480. * scale) / 2. + f64::from(y) * scale,
+                    f64::from(pw) * scale,
+                    f64::from(ph) * scale,
+                ]
+            }));
+            if self.view == tape_views::HUD_CAMERA {
+                blocks.push([w * 0.70, h * 0.07, w * 0.26, 24.]);
+            }
+
+            blocks.push(crate::mission_timer::counter_rect(
+                size,
+                crate::frame_rate::Surface::Replay {
+                    right_panel: self.panels.right_open(),
+                    hud_camera: self.view == tape_views::HUD_CAMERA,
+                },
+            ));
+            timer.draw_corner(canvas, &self.ownship.hud_font, &blocks);
+        }
         // The Escape menu goes over everything, the hidden interface too,
         // where flight draws its own.
         if self.pause.is_open() {
@@ -2591,9 +3964,14 @@ impl Viewer {
                 &mut self.layer,
                 &self.ownship.font,
                 &self.pause.tree,
-                &pause::LOOK,
+                self.pause.look(),
                 &|label| pause::state(&ui, label),
             );
+            if self.live()
+                && let Some(timer) = self.mission_timer
+            {
+                timer.draw_menu(&mut self.layer, &self.ownship.font);
+            }
             canvas.legacy_layer(&self.layer, 1.);
         }
     }
@@ -2616,7 +3994,15 @@ impl Viewer {
     /// a PNG at the view's size (at most 1920x1080).
     pub fn save_png(&self, renderer: &mut Renderer, path: &Path) -> AppResult<()> {
         let [width, height] = renderer.flight_size();
-        let pixels = renderer.scene_pixels(&self.camera, &self.world, width, height, false)?;
+        let pixels = renderer.scene_pixels(
+            crate::sim_renderer::ViewKind::Main,
+            &self.camera,
+            &self.world,
+            &self.scenery,
+            width,
+            height,
+            false,
+        )?;
         std::fs::write(
             path,
             crate::replay::png::encode_rgba(width, height, &pixels)?,
@@ -2630,9 +4016,356 @@ impl Viewer {
     }
 }
 
+impl Viewer {
+    fn scroll_feedback(&mut self, delta: i32) {
+        if let Some(f) = self.feedback_flags.get(self.feedback_selected) {
+            let max = overlay::feedback_lines(&self.ownship.font, f)
+                .len()
+                .saturating_sub(27);
+            self.feedback_scroll = self
+                .feedback_scroll
+                .saturating_add_signed(delta as isize)
+                .min(max);
+        }
+    }
+    fn seek_feedback(&mut self) {
+        self.feedback_scroll = 0;
+        if let Some(f) = self.feedback_flags.get(self.feedback_selected) {
+            self.clock.seek(f.tick as f64);
+            self.clock.pause();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banner_follows_selected_aircraft_weapons_and_explicit_objects() {
+        let dir = TempDir::new("viewer-banner-selection");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek(180.);
+        assert_eq!(v.banner_subject(180), Target::Aircraft(v.player));
+        v.select(1);
+        assert_eq!(v.banner_subject(180), Target::Aircraft(1));
+        v.select(0);
+        v.set_view(flight_views::MISSILE);
+        assert_eq!(v.banner_subject(180), Target::Missile(f::MISSILE));
+        v.from = Some(Target::Ground(9001));
+        v.look_at = Some(Target::Aircraft(1));
+        v.object_view();
+        assert_eq!(v.banner_subject(180), Target::Ground(9001));
+        v.from = None;
+        v.look_at = Some(Target::Missile(f::MISSILE));
+        assert_eq!(v.banner_subject(180), Target::Missile(f::MISSILE));
+        v.drone_mode(Some(Mode::Free));
+        v.drone_subject = Some(Target::Missile(f::MISSILE));
+        assert_eq!(v.banner_subject(180), Target::Missile(f::MISSILE));
+        v.select(0);
+        assert_eq!(v.banner_subject(180), Target::Aircraft(0));
+        assert!(Ui::default().banner);
+        assert!(!Ui::parse("none").unwrap().banner);
+        assert!(Ui::parse("banner").unwrap().banner);
+    }
+
+    #[test]
+    fn f12_and_object_menu_follow_overlapping_recorded_weapon_lifetimes() {
+        let dir = TempDir::new("viewer-overlapping-weapons");
+        let recording = Arc::new(f::recording_with_weapons(dir.path(), "weapons", true));
+        let mut v = viewer_recording(recording, &Options::default());
+        v.clock.seek(140.);
+        let listed: Vec<_> = v
+            .object_list_items()
+            .iter()
+            .filter_map(|i| i.action)
+            .collect();
+        for id in [7, 9, 13] {
+            assert!(listed.contains(&Action::ViewFrom(Target::Missile(id))));
+        }
+        assert!(
+            !listed.contains(&Action::ViewFrom(Target::Missile(14))),
+            "gun in object menu"
+        );
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(7));
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(9));
+        frame_at(&mut v, 150); // New missile does not steal the view.
+        assert_eq!(v.selected_missile, Some(9));
+        let expired = frame_at(&mut v, 200);
+        assert_eq!(v.selected_missile, Some(9));
+        assert_eq!(expired.hidden_target, None); // The ended shot holds its chase pose.
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(11));
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(13)); // Bombs participate too.
+        assert_eq!(frame_at(&mut v, 200).hidden_projectile, None);
+        v.select(1);
+        assert!(v.view_key("F12", false, true));
+        assert_eq!(frame_at(&mut v, 200).hidden_projectile, None);
+        assert_eq!(v.rig.missile_subject(), Some(13));
+        assert!(v.view_key("F1", false, true));
+        assert_eq!(frame_at(&mut v, 200).hidden_projectile, Some(13));
+        v.set_view(flight_views::MISSILE);
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(7));
+        frame_at(&mut v, 240);
+        assert!(
+            !v.object_list_items()
+                .iter()
+                .any(|i| i.action == Some(Action::ViewFrom(Target::Missile(13))))
+        );
+        frame_at(&mut v, 300);
+        assert_eq!(v.selected_missile, Some(7));
+        frame_at(&mut v, 700);
+        assert_eq!(v.selected_missile, Some(7));
+        assert_eq!(v.camera_error, Some("No active weapon for this view"));
+        frame_at(&mut v, 140); // Reverse seek rebuilds the active set.
+        assert_eq!(v.selected_missile, Some(7));
+        assert!(v.camera_error.is_none());
+    }
+
+    #[test]
+    fn missile_cycle_preserves_identity_when_shots_spawn_and_expire() {
+        let mut selected = active_successor(None, &[10, 20, 30], false);
+        assert_eq!(selected, Some(10));
+        selected = active_successor(selected, &[10, 20, 30], true);
+        assert_eq!(selected, Some(20));
+        assert_eq!(
+            active_successor(selected, &[10, 20, 30, 40], false),
+            Some(20)
+        );
+        assert_eq!(active_successor(selected, &[10, 30, 40], false), Some(30));
+        assert_eq!(active_successor(selected, &[10, 30, 40], true), Some(30));
+        assert_eq!(active_successor(Some(40), &[10, 30], false), Some(10));
+        assert_eq!(active_successor(Some(40), &[], false), None);
+        assert_eq!(active_successor(None, &[50], true), Some(50));
+    }
+
+    #[test]
+    fn replay_object_list_adds_and_retires_weapons_and_f12_tracks_a_live_id() {
+        let dir = TempDir::new("viewer-live-weapons");
+        let mut v = viewer(&dir, &Options::default());
+        let weapons = |items: Vec<context_menu::Item>| {
+            items
+                .into_iter()
+                .filter_map(|i| {
+                    if let Some(Action::ViewFrom(Target::Missile(id))) = i.action {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(weapons(v.object_list_items()).is_empty());
+        v.clock.seek((f::LAUNCH + 1) as f64);
+        assert_eq!(weapons(v.object_list_items()), vec![f::MISSILE]);
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
+        v.clock.seek(f::LAST as f64);
+        assert!(weapons(v.object_list_items()).is_empty());
+        let picture = v.playback.picture(v.clock.tick(), 1.);
+        v.frame_camera(&picture, v.clock.tick(), 0., false);
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
+        // Seeking backward restores the same followed weapon.
+        v.clock.seek((f::LAUNCH + 1) as f64);
+        let picture = v.playback.picture(v.clock.tick(), 1.);
+        v.frame_camera(&picture, v.clock.tick(), 0., false);
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
+    }
+
+    #[test]
+    fn weapon_chase_matches_live_f12_and_director_through_expiry_and_reverse() {
+        let dir = TempDir::new("weapon-chase");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek(180.);
+        v.select(1);
+        v.set_view(flight_views::MISSILE);
+        let picture = v.playback.picture(180, 1.);
+        let replay = v.frame_camera(&picture, 180, 0., false);
+        let scene = v.scene(&picture, 180);
+        let mut live = Rig::default();
+        live.follow_missiles_of(1);
+        live.select(Reference::Aircraft(1));
+        let expected = live
+            .camera(flight_views::MISSILE, &scene, Camera::new(), [0.; 2], 1.)
+            .unwrap();
+        let director = v.director_weapon_camera(&picture, 180, 1, [0.; 3]);
+        for camera in [&replay, &director] {
+            assert_eq!(camera.position, expected.position);
+            assert_eq!(camera.yaw, expected.yaw);
+            assert_eq!(camera.pitch, expected.pitch);
+            assert_eq!(camera.hidden_projectile, None);
+            assert!(
+                camera
+                    .project([1920, 1080], picture.projectiles[0].position)
+                    .is_some()
+            );
+        }
+        let offset = v.director_weapon_camera(&picture, 180, 1, [6., 12., -40.]);
+        assert_ne!(offset.position, director.position);
+        assert!(
+            offset
+                .project([1920, 1080], picture.projectiles[0].position)
+                .is_some()
+        );
+        let mut ended = v.playback.picture(f::IMPACT, 1.);
+        let mut older = picture.projectiles[0].clone();
+        older.id = f::MISSILE - 1;
+        ended.projectiles.push(older); // Still flying, but must not take over.
+        let post = v.director_weapon_camera(&ended, f::IMPACT, 1, [0.; 3]);
+        assert_eq!(post.hidden_target, Some(1));
+        let backward = v.director_weapon_camera(&picture, 180, 1, [0.; 3]);
+        assert_eq!(backward.position, director.position);
+    }
+
+    #[test]
+    fn f12_hold_reconstructs_exact_boundaries_reverse_and_view_interruptions() {
+        let dir = TempDir::new("f12-hold");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek((f::IMPACT - 1) as f64);
+        v.set_view(flight_views::MISSILE);
+        let last = frame_at(&mut v, f::IMPACT - 1);
+        let end = f::IMPACT + flight_views::weapon_hold_ticks();
+        for tick in [f::IMPACT, end - 1, f::IMPACT + 60, f::IMPACT + 60] {
+            let held = frame_at(&mut v, tick);
+            assert_eq!(held.position, last.position);
+            assert_eq!((held.yaw, held.pitch), (last.yaw, last.pitch));
+            assert!(v.camera_error.is_none());
+        }
+        assert_eq!(frame_at(&mut v, end).hidden_target, Some(v.selected));
+        assert_eq!(frame_at(&mut v, end - 1).position, last.position);
+        assert_ne!(frame_at(&mut v, f::IMPACT - 2).position, last.position);
+        frame_at(&mut v, f::IMPACT + 30);
+        press(&mut v, "F10");
+        assert_ne!(frame_at(&mut v, f::IMPACT + 30).position, last.position);
+        // Directly opening F12 inside the hold needs no previously drawn pose.
+        v.selected_missile = None;
+        v.clock.seek((f::IMPACT + 30) as f64);
+        v.set_view(flight_views::MISSILE);
+        assert_eq!(frame_at(&mut v, f::IMPACT + 30).position, last.position);
+        press(&mut v, "F12"); // No live successor: leave the hold immediately.
+        assert_eq!(v.view, 0);
+        assert_eq!(
+            frame_at(&mut v, f::IMPACT + 30).hidden_target,
+            Some(v.selected)
+        );
+    }
+
+    #[test]
+    fn f12_approach_is_identical_on_direct_seek_forward_and_reverse() {
+        let dir = TempDir::new("f12-approach");
+        let template = f::recording(dir.path(), "template");
+        let path = dir.path().join("approach.tore-replay");
+        let mut writer =
+            tore_replay::Writer::create(&path, &tore_replay::Header::default()).unwrap();
+        for aircraft in template.aircraft() {
+            writer.register_aircraft(aircraft).unwrap();
+        }
+        for weapon in template.weapons() {
+            writer.register_weapon(weapon).unwrap();
+        }
+        for tick in f::FIRST..=f::LAST {
+            let mut frame = f::frame(tick);
+            for p in &mut frame.projectiles {
+                if p.id == f::MISSILE {
+                    let target = frame.aircraft.iter().find(|a| a.id == 0).unwrap().position;
+                    p.position = [
+                        target[0],
+                        target[1],
+                        target[2] - (f::IMPACT - tick) as f64 * 4.,
+                    ];
+                    p.direction = [0., 0., 1.];
+                    p.speed = 480.;
+                    if tick > 200 {
+                        p.target = None;
+                    } // Lost guidance must not lose the camera's aim.
+                }
+            }
+            writer.push(&frame).unwrap();
+        }
+        writer.finish(&tore_replay::Footer::default()).unwrap();
+        let recording = Arc::new(Recording::open(path).unwrap());
+        let mut v = viewer_recording(recording.clone(), &Options::default());
+        v.clock.seek(247.);
+        v.set_view(flight_views::MISSILE);
+        let before = frame_at(&mut v, 247);
+        let stopped = frame_at(&mut v, 248); // 82 ticks * 4 feet = 328 feet.
+        assert_ne!(before.position, stopped.position);
+        let mut live = Rig::default();
+        live.follow_missiles_of(1);
+        live.select(Reference::Aircraft(1));
+        let launched = v.playback.picture(f::LAUNCH, 1.);
+        live.observe(&v.scene(&launched, f::LAUNCH));
+        let lost = v.playback.picture(248, 1.);
+        assert_eq!(lost.projectiles[0].target, None);
+        let scene = live.prepare(v.scene(&lost, 248), flight_views::MISSILE, &v.world);
+        let live_camera = live
+            .camera(flight_views::MISSILE, &scene, Camera::new(), [0.; 2], 1.)
+            .unwrap();
+        assert_eq!(live_camera.position, stopped.position);
+        for tick in [249, 329, 330, 509, 300, 248] {
+            assert_eq!(frame_at(&mut v, tick).position, stopped.position);
+        }
+        assert_eq!(frame_at(&mut v, 247).position, before.position);
+        assert_eq!(frame_at(&mut v, 510).hidden_target, Some(v.selected));
+        let mut seek = viewer_recording(
+            recording,
+            &Options {
+                tick: Some(350),
+                view: Some(flight_views::MISSILE),
+                ..Options::default()
+            },
+        );
+        assert_eq!(frame_at(&mut seek, 350).position, stopped.position);
+        assert_eq!(frame_at(&mut seek, 247).position, before.position);
+    }
+
+    #[test]
+    fn f12_hold_pause_and_playback_rate_use_recorded_time() {
+        let dir = TempDir::new("f12-clock-hold");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek((f::IMPACT - 1) as f64);
+        v.set_view(flight_views::MISSILE);
+        let last = frame_at(&mut v, f::IMPACT - 1);
+        v.clock.seek(f::IMPACT as f64);
+        v.clock.pause();
+        assert!(!v.clock.advance(10.));
+        let tick = v.clock.tick();
+        assert_eq!(frame_at(&mut v, tick).position, last.position);
+        assert!(v.clock.set_speed(2.));
+        v.clock.advance(0.5); // One game second.
+        let tick = v.clock.tick();
+        assert_eq!(tick, f::IMPACT + 120);
+        assert_eq!(frame_at(&mut v, tick).position, last.position);
+        v.clock.advance(0.25); // Exactly 1.5 game seconds.
+        let tick = v.clock.tick();
+        assert_eq!(frame_at(&mut v, tick).hidden_target, Some(v.selected));
+        assert!(v.clock.set_speed(-2.));
+        v.clock.advance(0.25);
+        let tick = v.clock.tick();
+        assert_eq!(frame_at(&mut v, tick).position, last.position);
+    }
+
+    #[test]
+    fn modified_f12_holds_its_owner_and_reselects_when_aircraft_changes() {
+        let dir = TempDir::new("f12-owner-hold");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek((f::IMPACT - 1) as f64);
+        v.select(1);
+        assert!(v.view_key("F12", false, true));
+        let last = frame_at(&mut v, f::IMPACT - 1);
+        assert_eq!(frame_at(&mut v, f::IMPACT + 60).position, last.position);
+        assert_eq!(
+            v.banner_subject(f::IMPACT + 60),
+            Target::Missile(f::MISSILE)
+        );
+        v.select(0); // This aircraft never fired a missile in the fixture.
+        assert_eq!(v.selected_missile, None);
+        assert_eq!(frame_at(&mut v, f::IMPACT + 60).hidden_target, Some(0));
+    }
 
     #[test]
     fn labels_over_close_aircraft_are_lifted_apart() {
@@ -2740,30 +4473,110 @@ mod tests {
 
     use crate::replay::fixture as f;
     use crate::replay::tests::TempDir;
+    use tore_session::wire::messages::Subject;
 
     /// A viewer over the synthetic recording, with synthetic art and world.
     fn viewer(dir: &TempDir, options: &Options) -> Viewer {
         static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let recording = Arc::new(f::recording(dir.path(), &format!("viewer-{n}")));
+        viewer_recording(recording, options)
+    }
+    fn viewer_recording(recording: Arc<Recording>, options: &Options) -> Viewer {
+        viewer_growing(recording, options, None)
+    }
+    fn viewer_growing(
+        recording: Arc<Recording>,
+        options: &Options,
+        growth: Option<Growth>,
+    ) -> Viewer {
         let art = CombatArt::synthetic(BTreeMap::new());
-        let mut ownship = crate::combat::render_hash_tests::hornet_airframe(true);
+        let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
         // Menus measure their text, so the font needs its glyphs.
         ownship.font = crate::replay::panels::tests::font();
         Viewer::assemble(
             Path::new("/x/test.tore-replay"),
             recording,
-            crate::terrain::tests::world(),
-            ownship,
-            Vec::new(),
-            art,
+            (
+                tore_world::test_support::terrain(),
+                crate::scenery::tests::scenery(),
+            ),
+            (ownship, Vec::new(), art),
             options,
+            growth,
         )
         .unwrap()
     }
 
     fn press(viewer: &mut Viewer, key: &str) -> Command {
+        // A fresh press, with any previous press of this key released first.
+        viewer.key(key, false, false, false);
         viewer.key(key, true, false, false)
+    }
+
+    #[test]
+    fn feedback_marker_and_list_seek_to_opening_tick_not_submit() {
+        let dir = TempDir::new("viewer-feedback");
+        let path = dir.path().join("feedback.tore-replay");
+        let mut writer =
+            tore_replay::Writer::create(&path, &tore_replay::Header::default()).unwrap();
+        for tick in 0..=120 {
+            let mut frame = tore_replay::Frame {
+                tick,
+                ..Default::default()
+            };
+            if tick == 120 {
+                frame.events.push(
+                    tore_replay::feedback::Feedback {
+                        tick: 12,
+                        submit_tick: 120,
+                        text: "bump".into(),
+                        ..Default::default()
+                    }
+                    .event(),
+                );
+            }
+            writer.push(&frame).unwrap();
+        }
+        writer.finish(&tore_replay::Footer::default()).unwrap();
+        let mut v = viewer_recording(
+            Arc::new(Recording::open(path).unwrap()),
+            &Options::default(),
+        );
+        assert_eq!(
+            v.markers,
+            vec![Marker {
+                tick: 12,
+                kind: MarkerKind::Feedback
+            }]
+        );
+        v.feedback_open = true;
+        v.clock.end();
+        press(&mut v, "Enter");
+        assert_eq!(v.clock.tick(), 12);
+        assert!(v.clock.paused());
+        assert_eq!(v.model(12).feedback[0].text, "bump");
+        press(&mut v, "Escape");
+        assert!(!v.feedback_open);
+    }
+
+    #[test]
+    fn hide_ui_hides_the_designation_square_with_the_labels() {
+        let dir = TempDir::new("viewer-marks-hidden");
+        let mut v = viewer(&dir, &Options::default());
+        v.marks = ground_marks::Marks::from_events(&[TimedEvent {
+            tick: 0,
+            event: tore_replay::Event::new(vocab::kind::PLAYER_DESIGNATE)
+                .with_subject(0)
+                .with_object(0x5000_0001)
+                .with(vocab::field::CHANNEL, vocab::designate::RADAR),
+        }]);
+        v.ui.marks = true;
+        assert!(v.marks_drawn(), "the square shows with the interface");
+        press(&mut v, "h");
+        assert!(v.ui.hidden && !v.marks_drawn(), "H hides the square too");
+        press(&mut v, "h");
+        assert!(!v.ui.hidden && v.marks_drawn(), "and H brings it back");
     }
 
     #[test]
@@ -2820,6 +4633,31 @@ mod tests {
     }
 
     #[test]
+    fn rebound_drone_keys_move_while_paused_and_release_after_modifier_or_focus_loss() {
+        use winit::keyboard::ModifiersState as M;
+        let dir = TempDir::new("viewer-drone-bindings");
+        let mut v = viewer(&dir, &Options::default());
+        let profile = tore_input::Profile::parse("tore-input 1\ndisable replay-keyboard w\nbind replay-keyboard Ctrl-u drone-forward hold\n").unwrap();
+        v.set_input_profile(&profile);
+        v.clock.pause();
+        v.drone_mode(Some(Mode::Free));
+        let tick = v.clock.tick();
+        let picture = v.playback.picture(tick, 0.);
+        let before = v.frame_camera(&picture, tick, 0., false).position;
+        assert!(!v.bound_key("w", true, false, M::empty()));
+        assert!(v.bound_key("u", true, false, M::CONTROL));
+        let moved = v.frame_camera(&picture, tick, 0.1, false).position;
+        assert!((0..3).map(|i| (moved[i] - before[i]).powi(2)).sum::<f64>() > 100.);
+        assert!(v.clock.paused());
+        assert!(v.bound_key("u", false, false, M::empty()));
+        assert_eq!(v.frame_camera(&picture, tick, 0.1, false).position, moved);
+        v.bound_key("u", true, false, M::CONTROL);
+        v.release();
+        assert!(!v.bound_key("u", true, true, M::CONTROL));
+        assert!(v.held.is_empty());
+    }
+
+    #[test]
     fn keys_switch_views_aircraft_and_the_interface() {
         let dir = TempDir::new("viewer-views");
         let mut v = viewer(&dir, &Options::default());
@@ -2869,6 +4707,12 @@ mod tests {
         v.key("r", true, false, true);
         assert!(v.ui.trails);
         assert_eq!(trails::LENGTHS[v.ui.trail_length], 60);
+        // B switches the laser and bomb marks, on at first.
+        assert!(before.marks);
+        press(&mut v, "b");
+        assert!(!v.ui.marks);
+        press(&mut v, "b");
+        assert!(v.ui.marks);
         assert_eq!(press(&mut v, "p"), Command::Screenshot);
         // H hides everything. Esc opens the menu over the hidden
         // interface, with the pointer; closing it leaves the interface
@@ -2984,7 +4828,7 @@ mod tests {
         // Back up to the Pref rows, then the ? tab.
         press(&mut v, "Escape");
         press(&mut v, "Escape");
-        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 7);
+        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 9);
         click(&mut v, QUESTION_TAB);
         assert_eq!(
             v.pause.widget.rows(&v.pause.tree)[0].label,
@@ -3001,15 +4845,26 @@ mod tests {
         let before = v.ui;
         let state = |v: &Viewer, label| pause::state(&v.ui, label);
         assert_eq!(state(&v, pause::COMMS), Some("Off"));
-        for row in 3..7 {
+        for row in 3..8 {
             assert_eq!(click(&mut v, menu_row(row)), Command::Click);
         }
         assert_eq!(
-            (v.ui.labels, v.ui.timer, v.ui.trails, v.ui.comms),
-            (!before.labels, !before.timer, !before.trails, !before.comms)
+            (v.ui.labels, v.ui.timer, v.ui.trails, v.ui.marks, v.ui.comms),
+            (
+                !before.labels,
+                !before.timer,
+                !before.trails,
+                !before.marks,
+                !before.comms
+            )
         );
+        assert_eq!(state(&v, pause::MARKS), Some("Off"));
         assert!(v.panels.comms_open());
         assert_eq!(state(&v, pause::COMMS), Some("On"));
+        assert_eq!(state(&v, pause::BANNER), Some("On"));
+        assert_eq!(click(&mut v, menu_row(8)), Command::Click);
+        assert_eq!(state(&v, pause::BANNER), Some("Off"));
+        assert!(!v.ui.banner);
         assert_eq!(state(&v, "Graphics..."), None);
     }
 
@@ -3132,7 +4987,9 @@ mod tests {
         camera(&mut v, f::LAUNCH + 20);
         assert_eq!(v.camera_error, None);
         camera(&mut v, f::IMPACT + 20);
-        assert_eq!(v.camera_error, Some("That aircraft has no live missile"));
+        assert_eq!(v.camera_error, None);
+        camera(&mut v, f::IMPACT + flight_views::weapon_hold_ticks());
+        assert_eq!(v.camera_error, Some("No active weapon for this view"));
         // The front view sits in the aircraft and hides it.
         press(&mut v, "F1");
         let inside = camera(&mut v, 300);
@@ -3158,6 +5015,7 @@ mod tests {
             missiles: &v.missiles,
             comms: &v.comms,
             now,
+            player: v.player,
         }
     }
 
@@ -3288,7 +5146,7 @@ mod tests {
     fn shown(v: &mut Viewer, tick: u64, camera: Camera, size: [u32; 2]) {
         v.clock.seek(tick as f64);
         let picture = v.playback.picture(tick, 1.);
-        let ground = v.ground_objects(tick);
+        let ground = v.ground_objects(tick, &picture);
         v.pickables = Viewer::pickables_for(&picture, &[], &ground);
         v.camera = camera;
         v.size = size;
@@ -3297,6 +5155,52 @@ mod tests {
     fn right_click(v: &mut Viewer, at: [f64; 2], size: [u32; 2]) {
         v.right(true, at, Some(at), size, 4.);
         v.right(false, [at[0] + 2., at[1] - 1.], Some(at), size, 4.);
+    }
+
+    #[test]
+    fn right_clicking_the_camera_button_chooses_views_directly() {
+        let dir = TempDir::new("viewer-camera-menu");
+        for size in [[1280, 960], [1920, 1080], [800, 1200]] {
+            let mut v = viewer(&dir, &Options::default());
+            let (x, y, w, h) = overlay::rect(Control::Camera);
+            let scale = Placement::new(size).scale();
+            let at = [
+                (f64::from(size[0]) - 640. * scale) / 2.
+                    + (f64::from(x) + f64::from(w) / 2.) * scale,
+                f64::from(size[1]) + (f64::from(y) + f64::from(h) / 2. - 480.) * scale,
+            ];
+            right_click(&mut v, at, size);
+            v.refresh_object_menu();
+            let menu = v.menu.as_mut().unwrap();
+            assert!(menu.camera_choices);
+            assert_eq!(menu.title, "Choose view");
+            assert_eq!(menu.items.len(), VIEW_ORDER.len() + 6);
+            menu.focus = menu
+                .items
+                .iter()
+                .position(|item| item.action == Some(Action::Camera(flight_views::FLY_BY)))
+                .unwrap();
+            press(&mut v, "Enter");
+            assert!(v.menu.is_none() && v.drone.is_none());
+            assert_eq!(v.view, flight_views::FLY_BY);
+            right_click(&mut v, at, size);
+            v.refresh_object_menu();
+            let menu = v.menu.as_mut().unwrap();
+            menu.focus = menu
+                .items
+                .iter()
+                .position(|item| item.action == Some(Action::DroneMode(Mode::Free)))
+                .unwrap();
+            press(&mut v, "Enter");
+            assert_eq!(v.drone.as_ref().unwrap().mode, Mode::Free);
+            // Scene clicks still open the object menu.
+            right_click(&mut v, [10., 10.], size);
+            assert!(!v.menu.as_ref().unwrap().camera_choices);
+            v.ui.hidden = true;
+            v.menu = None;
+            right_click(&mut v, at, size);
+            assert!(v.menu.is_none());
+        }
     }
 
     #[test]
@@ -3323,9 +5227,10 @@ mod tests {
         v.pointer(Some([700., 480.]), [700., 480.], size, [0.; 2]);
         v.right(false, [700., 480.], Some([640., 480.]), size, 4.);
         assert!(v.menu.is_none());
-        // Keys move through the menu and choose: AI thinking.
+        // Keys move through the menu and choose: AI thinking, after the
+        // HUD camera.
         right_click(&mut v, [640., 480.], size);
-        for _ in 0..5 {
+        for _ in 0..6 {
             assert_eq!(press(&mut v, "ArrowDown"), Command::None);
         }
         assert_eq!(press(&mut v, "Enter"), Command::None);
@@ -3397,6 +5302,88 @@ mod tests {
         v.toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default()
     }
 
+    #[test]
+    fn replay_hud_camera_uses_local_ink_but_not_instrument_or_flood_levels() {
+        let dir = TempDir::new("viewer-local-lighting");
+        let mut v = viewer(&dir, &Options::default());
+        // The general viewer fixture carries no HUD font. Supply synthetic ink.
+        for model in std::iter::once(&mut v.ownship).chain(v.models.iter_mut()) {
+            model.hud_font = tore_formats::font::Font {
+                height: 7,
+                glyphs: (0..256)
+                    .map(|_| tore_formats::font::Glyph {
+                        advance: 6,
+                        pixels: vec![(0, 0)],
+                    })
+                    .collect(),
+            };
+        }
+        press(&mut v, "v");
+        let tick = v.recording.first_tick().unwrap();
+        let picture = v.playback.picture(tick, 1.);
+        let draw = |v: &mut Viewer| {
+            v.taped_view(&picture, tick, 0., [640, 480])
+                .unwrap()
+                .overlay
+        };
+        let green = draw(&mut v);
+        v.local_lighting.0.colour = 3;
+        let cyan = draw(&mut v);
+        assert!(green != cyan, "HUD camera must use the local colour");
+        v.local_lighting.0.instruments = 1;
+        v.local_lighting.0.flood = 0;
+        assert!(
+            cyan == draw(&mut v),
+            "instrument/flood levels must leave HUD ink unchanged"
+        );
+        v.local_lighting.1 = -256;
+        let dim = draw(&mut v);
+        v.local_lighting.1 = 256;
+        assert!(
+            dim != draw(&mut v),
+            "HUD camera must use the local brightness"
+        );
+    }
+
+    #[test]
+    fn v_opens_the_hud_camera_and_shift_v_needs_a_sight() {
+        let dir = TempDir::new("viewer-taped");
+        let mut v = viewer(&dir, &Options::default());
+        let shifted = |v: &mut Viewer, key: &str| {
+            v.key(key, false, false, true);
+            v.key(key, true, false, true)
+        };
+        // The fixture's aircraft have no sight: the Sensor View says so and
+        // the view stays.
+        let before = v.view;
+        shifted(&mut v, "v");
+        assert_eq!(v.view, before);
+        assert!(toast(&v).contains("no targeting sight"), "{}", toast(&v));
+        press(&mut v, "v");
+        assert_eq!(v.view, tape_views::HUD_CAMERA);
+        // Digits are the Sensor View's pictures only inside it.
+        press(&mut v, "2");
+        assert_eq!(v.sensor_mode, crate::sensor_console::SensorMode::WhiteHot);
+        // Give the selected aircraft's type a sight: Shift+F7 opens the
+        // Sensor View in TV, and 4, 1 and Backslash change the picture.
+        let kind = v.kinds[&v.selected];
+        v.sights
+            .push((kind, Some(("TEST POD".into(), tape_views::pave_spike()))));
+        shifted(&mut v, "F7");
+        assert_eq!(v.view, tape_views::SENSOR);
+        assert_eq!(v.sensor_mode, crate::sensor_console::SensorMode::Tv);
+        press(&mut v, "4");
+        assert_eq!(
+            v.sensor_mode,
+            crate::sensor_console::SensorMode::NightVision
+        );
+        press(&mut v, "\\");
+        assert_eq!(v.sensor_mode, crate::sensor_console::SensorMode::WhiteHot);
+        // An F-key leaves to the flight view.
+        press(&mut v, "F1");
+        assert_eq!(v.view, 0);
+    }
+
     fn forward(c: &Camera) -> [f64; 3] {
         Basis::new(f64::from(c.yaw), f64::from(c.pitch), -f64::from(c.roll)).forward
     }
@@ -3429,7 +5416,7 @@ mod tests {
         let back = frame_at(&mut v, 300);
         let picture = v.playback.picture(300, 1.);
         let pose = picture.target(1).unwrap();
-        let body = aircraft_body(pose, 1.);
+        let body = Body::posed(pose, 1.);
         let eye = crate::mirrors::pilot_eye(pose.position, body.basis());
         assert!(feet(back.position, eye) < 1e-6);
         assert_eq!((back.hidden_target, back.hidden_projectile), (None, None));
@@ -3517,7 +5504,7 @@ mod tests {
         let tick = 300;
         let picture = v.playback.picture(tick, 1.);
         let pose = picture.player.clone();
-        let right = aircraft_body(&pose, 1.).basis().right;
+        let right = Body::posed(&pose, 1.).basis().right;
         let point = |sign: f64| -> [f64; 3] {
             std::array::from_fn(|i| {
                 pose.position[i]
@@ -3558,6 +5545,8 @@ mod tests {
             category: 0,
             radar_signature: 1.,
             infrared_signature: 1.,
+            type_flags: 0,
+            max_visible: 0,
             runway: false,
         }
     }
@@ -3581,6 +5570,28 @@ mod tests {
     fn far_site() -> [f64; 3] {
         let at = f::position(0, FAR_AT);
         [at[0] + 50. * NMI, at[1], at[2]]
+    }
+
+    #[test]
+    fn cycling_missile_view_keeps_a_ground_target_centered() {
+        let (_dir, mut v) = with_ground("viewer-missile-ground-target");
+        v.clock.seek(FAR_AT as f64);
+        press(&mut v, "F12");
+        let mut picture = v.playback.picture(FAR_AT, 1.);
+        let missile = picture
+            .projectiles
+            .iter_mut()
+            .find(|p| p.id == f::MISSILE)
+            .unwrap();
+        missile.target = Some(9_050);
+        // The target exists in the recorded world, not in aircraft snapshots.
+        assert!(picture.target(9_050).is_none());
+        let camera = v.frame_camera(&picture, FAR_AT, 0., false);
+        let [x, y] = camera
+            .project([960, 720], far_site())
+            .expect("ground target in view");
+        assert!((x - 480.).abs() < 0.01 && (y - 360.).abs() < 0.01);
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
     }
 
     #[test]
@@ -3619,6 +5630,70 @@ mod tests {
         assert_eq!(v.object_name(g(9_050)), "Bunker");
         v.world.airport_scene.objects[1].object_type.clear();
         assert_eq!(v.object_name(g(9_050)), "Ground object 9050");
+    }
+
+    #[test]
+    fn the_object_view_follows_a_surface_unit_that_drives_and_names_it() {
+        use tore_world::surface::{SurfacePose, UnitId};
+        let (_dir, mut v) = with_ground("viewer-object-column");
+        v.clock.seek(FAR_AT as f64);
+        // The column's unit started at the far site and has driven 3 nmi on.
+        let drove = [
+            far_site()[0] + 3. * NMI,
+            far_site()[1],
+            far_site()[2] + 500.,
+        ];
+        let mut picture = v.playback.picture(FAR_AT, 1.);
+        picture.surface = vec![SurfacePose {
+            id: UnitId(9_050),
+            position: drove,
+            attitude: [1.0, 0.0, 0.0],
+            shape: None,
+            wrecked: false,
+        }];
+        // Listed, looked at and picked where it is, not where it began.
+        let at = |objects: Vec<(u32, [f64; 3])>| objects.iter().find(|o| o.0 == 9_050).unwrap().1;
+        assert_eq!(at(v.ground_objects(FAR_AT, &picture)), drove);
+        let plain = v.playback.picture(FAR_AT, 1.);
+        assert_eq!(
+            at(v.ground_objects(FAR_AT, &plain)),
+            far_site(),
+            "a unit with no recorded pose stands where the scene put it"
+        );
+        let body = v.body_of(&picture, FAR_AT, Target::Ground(9_050)).unwrap();
+        assert_eq!(body.position(), drove);
+        // The recording's registry names it; failing that, the scene does.
+        assert_eq!(v.object_name(Target::Ground(9_050)), "Bunker");
+        v.world.airport_scene.objects[1].name = "T-72".into();
+        assert_eq!(v.object_name(Target::Ground(9_050)), "T-72");
+    }
+
+    #[test]
+    fn launcher_rails_come_from_the_recorded_changes() {
+        use tore_replay::SurfaceStock;
+        let (_dir, mut v) = with_ground("viewer-rails");
+        let rail = |mount, loaded| SurfaceStock {
+            unit: 9_050,
+            mount,
+            loaded,
+            reserve: None,
+        };
+        v.tracks.stock = vec![(150, rail(0, 1)), (150, rail(1, 3)), (190, rail(0, 3))];
+        let loads = |tick| -> Vec<u32> {
+            v.rails(tick)
+                .unit(tore_world::surface::UnitId(9_050))
+                .map(|unit| unit.mounts.iter().map(|m| m.loaded).collect())
+                .unwrap_or_default()
+        };
+        assert!(loads(149).is_empty(), "as new until a rail changes");
+        assert_eq!(loads(150), [1, 3]);
+        assert_eq!(loads(200), [3, 3]);
+        assert!(
+            v.rails(200)
+                .unit(tore_world::surface::UnitId(9_050))
+                .unwrap()
+                .armed
+        );
     }
 
     #[test]
@@ -3853,6 +5928,10 @@ mod tests {
         assert_eq!(v.panels.find(Kind::Telemetry, 2), Some(panels::Side::Right));
         assert_eq!(v.menu.as_ref().unwrap().target, Target::Aircraft(2));
         assert!(Request::parse("thought,sparkles").is_err());
+        // The marks are on unless the list leaves them out.
+        assert!(!v.ui.marks);
+        assert!(Ui::parse("marks").unwrap().marks);
+        assert!(Ui::default().marks);
         assert_eq!(Request::parse("").unwrap(), []);
         assert_eq!(v.clock.position(), 300.);
         assert_eq!(
@@ -3897,11 +5976,17 @@ mod tests {
             Viewer::assemble(
                 Path::new("x"),
                 recording,
-                crate::terrain::tests::world(),
-                crate::combat::render_hash_tests::hornet_airframe(true),
-                Vec::new(),
-                art,
+                (
+                    tore_world::test_support::terrain(),
+                    crate::scenery::tests::scenery(),
+                ),
+                (
+                    crate::combat_view::render_hash_tests::hornet_airframe(true),
+                    Vec::new(),
+                    art,
+                ),
                 &bad,
+                None,
             )
             .is_err()
         );
@@ -3972,7 +6057,7 @@ mod tests {
                 },
             ]
         );
-        let found = targets(recording.events());
+        let found = targets(recording.events(), 0);
         assert_eq!(found[&1], [(20, Some(0))]);
         assert_eq!(found[&0], [(100, Some(2))]);
         // The player's designation rides on its commands.
@@ -3986,7 +6071,7 @@ mod tests {
                 }
             },
         };
-        let player = targets(&[command(5, Some(3)), command(9, None)]);
+        let player = targets(&[command(5, Some(3)), command(9, None)], 0);
         assert_eq!(player[&0], [(5, Some(3)), (9, None)]);
         // A recording with view targets follows them alone for the player,
         // sight hold and drop included; AI aircraft keep their own.
@@ -4008,19 +6093,232 @@ mod tests {
                 .with_subject(1)
                 .with_object(0),
         };
-        let viewed = targets(&[
-            view(0, None, false),
-            command(5, Some(3)),
-            view(5, Some(3), false),
-            ai,
-            command(8, None),
-            view(8, Some(3), true),
-            view(12, None, false),
-        ]);
+        let viewed = targets(
+            &[
+                view(0, None, false),
+                command(5, Some(3)),
+                view(5, Some(3), false),
+                ai,
+                command(8, None),
+                view(8, Some(3), true),
+                view(12, None, false),
+            ],
+            0,
+        );
         assert_eq!(
             viewed[&0],
             [(0, None), (5, Some(3)), (8, Some(3)), (12, None)]
         );
         assert_eq!(viewed[&1], [(6, Some(0))]);
+    }
+
+    /// A viewer on a recording made for the seat that flew plane 2: the
+    /// plane's own pose is the picture's player, and everything that was
+    /// plane 0's in single player's recordings (the first selection, the
+    /// weather's player, the target the views follow, the telemetry) is
+    /// plane 2's.
+    #[test]
+    fn a_recording_for_another_seat_follows_that_plane() {
+        let dir = TempDir::new("viewer-seat");
+        let recording = Arc::new(f::recording_seat(dir.path(), "seat", 2));
+        let mut v = viewer_recording(Arc::clone(&recording), &Options::default());
+        assert_eq!((v.player, v.selected), (2, 2));
+        assert_eq!(v.label(2), "You");
+        assert_ne!(v.label(0), "You");
+        // Plane 2 is an enemy in the fixture, and the player is shown as
+        // what its roster entry says; plane 0 is no longer the exception.
+        assert_eq!(v.side(2), Side::Enemy);
+        assert_eq!(v.side(0), Side::Friendly);
+        let picture = v.playback.picture(300, 1.);
+        assert_eq!(picture.player.id, 2);
+        assert!(picture.targets.iter().all(|t| t.id != 2));
+        assert!(picture.targets.iter().any(|t| t.id == 0));
+        // The camera starts on the player: its anchor, and its flight state
+        // (the load factor the fixture gives plane 0 only is not borrowed).
+        assert_eq!(v.anchor(&picture), Some(picture.player.position));
+        let state = v.player_state(&picture, 300);
+        assert_eq!(state.position, picture.player.position);
+        assert_eq!(state.g, 2.);
+        // The object view's list and the labels count the player once.
+        v.look_at = None;
+        let objects = v.objects_now();
+        assert!(objects.contains(&Target::Aircraft(0)));
+        assert!(
+            !objects.contains(&Target::Aircraft(2)),
+            "it is where the view starts from"
+        );
+        assert_eq!(
+            v.body_of(&picture, 300, Target::Aircraft(2))
+                .map(|b| b.position()),
+            Some(picture.player.position)
+        );
+        let outside = camera_on(2, 300);
+        let labels = v.labels(&picture, &outside, [1280, 960]);
+        assert_eq!(labels.iter().filter(|l| l.id == 2).count(), 1);
+        // The weather follows the player's path, which the tracks read from
+        // plane 2's frames.
+        v.finish_tracks();
+        let at = v.playback.aircraft(300, 2).unwrap().position;
+        let view = v.tracks.view(300).unwrap().position;
+        assert!((0..3).all(|i| (at[i] - view[i]).abs() < 1e-9));
+        // The menus list plane 2 as a person flying, not as an AI.
+        assert!(!v.menu_entry(2).ai);
+        assert!(v.menu_entry(0).ai || v.info[&0].human);
+    }
+
+    /// An observer's recording has no player: no pose is the player's, no
+    /// aircraft is drawn as the ownship, and the first aircraft is watched.
+    #[test]
+    fn an_observers_recording_has_no_player_pose_to_mistake_for_an_aircraft() {
+        let dir = TempDir::new("viewer-observer");
+        let mut growing = f::Growing::watching(dir.path(), "observer", convert::NO_PLAYER);
+        growing.push(5, 300);
+        let mut v = viewer_growing(
+            growing.open(),
+            &Options::default(),
+            Some(Growth {
+                resources: Arc::new(BTreeMap::new()),
+                shapes: BTreeSet::new(),
+                events: 0,
+            }),
+        );
+        assert_eq!(v.player, convert::NO_PLAYER);
+        assert_eq!(v.selected, 0, "the first aircraft");
+        let tick = v.clock.tick();
+        let picture = v.playback.picture(tick, 1.);
+        assert_eq!(picture.player.id, convert::NO_PLAYER);
+        let everyone: Vec<u32> = everyone(&picture).map(|pose| pose.id).collect();
+        assert_eq!(everyone, [0, 1, 2]);
+        // Labels, the object list and what a click picks name real planes.
+        let outside = camera_on(1, tick);
+        let labels = v.labels(&picture, &outside, [1280, 960]);
+        assert!(labels.iter().all(|l| l.id != convert::NO_PLAYER));
+        let objects = v.objects_now();
+        assert!(
+            objects
+                .iter()
+                .all(|t| *t != Target::Aircraft(convert::NO_PLAYER))
+        );
+        let picks = Viewer::pickables_for(&picture, &[], &[]);
+        assert!(
+            picks
+                .iter()
+                .all(|p| p.target != Target::Aircraft(convert::NO_PLAYER))
+        );
+        // The camera's subject is the aircraft watched, or where the free
+        // drone is.
+        assert_eq!(v.camera_subject(), Subject::Aircraft(0));
+        v.drone_mode(Some(Mode::Free));
+        v.shown = true;
+        v.camera.position = [1_000.7, 2_000., -3_000.2];
+        assert_eq!(v.camera_subject(), Subject::Point([1_000, 2_000, -3_000]));
+        v.drone_mode(None);
+        v.select(9);
+        assert!(
+            matches!(v.camera_subject(), Subject::Point(_)),
+            "9 is not in the mission"
+        );
+    }
+
+    /// The live view: it opens a second behind the newest frame, grows with
+    /// the recording, keeps ten minutes, leaves live when scrubbed and
+    /// returns to it with End; its menu stops the watch.
+    #[test]
+    fn the_live_view_follows_a_growing_recording() {
+        let dir = TempDir::new("viewer-live");
+        let mut growing = f::Growing::watching(dir.path(), "live", convert::NO_PLAYER);
+        growing.push(5, 300);
+        let first = growing.open();
+        let mut v = viewer_growing(
+            Arc::clone(&first),
+            &Options::default(),
+            Some(Growth {
+                resources: Arc::new(BTreeMap::new()),
+                shapes: BTreeSet::new(),
+                events: 0,
+            }),
+        );
+        assert!(v.live() && v.clock.following());
+        let last = first.last_tick().unwrap();
+        assert_eq!(v.clock.position(), last as f64 - clock::LIVE_LAG);
+        assert_eq!(v.model(v.clock.tick()).speed, "LIVE");
+        assert_eq!(v.title(), "T.O.R.E-Fighters - Observing");
+        // The recording grows by a read of it with more frames, a new
+        // aircraft and a new marker.
+        growing.push(301, 700);
+        growing.register(&tore_replay::AircraftInfo {
+            id: 9,
+            pt: "MIG29.PT".into(),
+            label: "Newcomer".into(),
+            ..Default::default()
+        });
+        growing.push(701, 760);
+        let later = growing.open();
+        let newest = later.last_tick().unwrap();
+        v.grow(Arc::clone(&later));
+        assert_eq!(v.clock.last(), newest);
+        // Frames that came late and all at once: a following playhead is
+        // brought back to the edge.
+        assert_eq!(v.clock.position(), newest as f64 - clock::LIVE_LAG);
+        assert!(v.info.contains_key(&9));
+        assert_eq!(v.label(9), "Newcomer");
+        assert!(v.clock.following());
+        // Time passing moves the playhead on, and never past the newest.
+        for _ in 0..200 {
+            v.clock.advance(0.1);
+        }
+        assert_eq!(v.clock.position(), newest as f64);
+        assert!(!v.clock.paused() && v.clock.following());
+        // The same read again, or an older one, changes nothing.
+        v.grow(Arc::clone(&later));
+        v.grow(Arc::clone(&first));
+        assert_eq!(v.clock.last(), newest);
+        // Scrubbing leaves live; End comes back.
+        press(&mut v, "Home");
+        assert!(!v.clock.following());
+        assert_eq!(v.model(v.clock.tick()).speed, "1x");
+        press(&mut v, "End");
+        assert!(v.clock.following());
+        assert_eq!(v.clock.position(), newest as f64 - clock::LIVE_LAG);
+        // Space pauses, and plays on from where it was, not from the start.
+        press(&mut v, "Space");
+        assert!(v.clock.paused());
+        press(&mut v, "Space");
+        assert!(!v.clock.paused() && v.clock.position() > 100.);
+        // The Escape menu stops the watch where a replay's ends the replay.
+        press(&mut v, "Escape");
+        assert!(v.pause.is_open());
+        let rows = &v.pause.tree[0].children;
+        assert_eq!(rows[0].label, pause::STOP_WATCHING);
+        assert_eq!(click(&mut v, menu_row(0)), Command::Leave);
+        // A recording that is not live has no such row.
+        let still = viewer(&dir, &Options::default());
+        assert!(!still.live());
+        assert_eq!(still.pause.tree[0].children[0].label, pause::END_REPLAY);
+    }
+
+    /// Ten minutes can be scrubbed: the oldest frames are not reachable.
+    #[test]
+    fn only_the_last_ten_minutes_of_a_live_recording_can_be_scrubbed() {
+        let dir = TempDir::new("viewer-window");
+        let mut growing = f::Growing::watching(dir.path(), "window", convert::NO_PLAYER);
+        growing.push(5, 300);
+        let mut v = viewer_growing(
+            growing.open(),
+            &Options::default(),
+            Some(Growth {
+                resources: Arc::new(BTreeMap::new()),
+                shapes: BTreeSet::new(),
+                events: 0,
+            }),
+        );
+        assert_eq!(v.clock.first(), 5);
+        // Frames far later (the fixture has none past tick 900, so the
+        // window is tested on the clock the view drives).
+        let far = LIVE_WINDOW_TICKS + 5_000;
+        v.clock.grow(far.saturating_sub(LIVE_WINDOW_TICKS), far);
+        assert_eq!(v.clock.first(), 5_000);
+        v.clock.start();
+        assert_eq!(v.clock.position(), 5_000.);
     }
 }

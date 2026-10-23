@@ -1,5 +1,5 @@
 //! Original CLOUD1 geometry with source repeat layout and mission altitude.
-use crate::{AppResult, terrain::Camera};
+use crate::{AppResult, camera::Camera};
 use std::collections::BTreeMap;
 use tore_formats::{Pic, shape::Shape, weather::clouds::Layout};
 pub struct Clouds {

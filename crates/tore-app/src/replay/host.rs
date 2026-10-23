@@ -58,21 +58,48 @@ impl App {
     /// `Action::WatchReplay`: opens the viewer, or explains on the menu why
     /// it could not.
     pub(crate) fn watch_replay(&mut self, path: &Path) {
-        match Viewer::open(path, &self.theater_resources, &Options::default()) {
-            Ok(viewer) => self.start_replay(viewer, None),
-            Err(error) => {
-                log::warn!("Replay {}: {error}", path.display());
-                self.menu.state.toast = Some((
-                    format!("Could not open the replay: {error}"),
-                    Instant::now(),
-                ));
+        let path = path.to_owned();
+        let resources = std::sync::Arc::clone(&self.theater_resources);
+        let graphics = self
+            .renderer
+            .as_ref()
+            .map(crate::renderer::Renderer::loading_factory);
+        match crate::loading::Job::spawn(move |progress| {
+            progress.stage(crate::loading::Stage::Replay);
+            let mut viewer = Viewer::open(&path, &resources, &Options::default())
+                .map_err(|error| error.to_string())?;
+            progress.stage(crate::loading::Stage::Graphics);
+            let eye = viewer.loading_eye();
+            let graphics = graphics.map(|build| {
+                build(
+                    crate::renderer::LoadingScene {
+                        scenery: &viewer.scenery,
+                        world: &viewer.world,
+                        eye,
+                    },
+                    &viewer.ownship,
+                    viewer.loading_models(),
+                    viewer.loading_art(),
+                    None,
+                )
+            });
+            if graphics.is_some() {
+                viewer.loading_entered();
             }
+            Ok(crate::loading::Prepared::Replay(
+                Box::new(viewer),
+                graphics.map(Box::new),
+            ))
+        }) {
+            Ok(job) => self.loading = Some(job),
+            Err(error) => self.menu.state.toast = Some((error, Instant::now())),
         }
     }
 
     /// Shows `viewer`. The renderer switches to its world on the first
     /// frame drawn.
-    pub(crate) fn start_replay(&mut self, viewer: Viewer, capture: Option<Capture>) {
+    pub(crate) fn start_replay(&mut self, mut viewer: Viewer, capture: Option<Capture>) {
+        viewer.set_input_profile(&self.input.resolver.profile);
         self.replay = Some(Box::new(Replay { viewer, capture }));
         self.screen = Screen::Replay;
         self.mouse_look = None;
@@ -90,21 +117,77 @@ impl App {
     /// Closes the viewer and gives the renderer back the game's own world
     /// and aircraft.
     pub(crate) fn leave_replay(&mut self) {
+        self.close_viewer();
+        // Back to the recordings list, re-read, even when the viewer was
+        // started from the command line.
+        self.return_to_replays();
+    }
+
+    /// Closes the live view of a mission being flown (the observer screen)
+    /// and shows the lobby it was opened from.
+    pub(crate) fn leave_live_replay(&mut self) {
+        self.close_viewer();
+        // An away player's own plane (slice F2-O3): the flight screen is
+        // where the player was, and its last picture waits there for the
+        // plane's return (or for the end the idle rule finds).
+        let flying = self.net_flight.is_some();
+        if flying {
+            self.screen = Screen::Flight;
+            self.frame_time = Instant::now();
+        }
+        if let Some(renderer) = &self.renderer {
+            renderer.window.set_title(&if flying {
+                format!(
+                    "T.O.R.E-Fighters - {} Multiplayer",
+                    self.hornet.profile.id.label()
+                )
+            } else {
+                "T.O.R.E-Fighters - Choose Activity".to_owned()
+            });
+            renderer.window.request_redraw();
+        }
+    }
+
+    /// Puts the viewer away and gives the renderer back the game's own world
+    /// and aircraft.
+    pub(crate) fn close_viewer(&mut self) {
         let entered = self.replay.take().is_some_and(|r| r.viewer.entered());
         if let Some(audio) = &self.audio {
             crate::replay::sound::stop(audio);
         }
         if let Some(renderer) = &mut self.renderer {
             if entered {
-                renderer.set_world(&self.world);
+                renderer.set_scenery(&self.scenery);
                 renderer.prepare_aircraft(&self.hornet);
             }
             renderer.window.set_cursor_visible(true);
         }
         self.screen = Screen::Main;
-        // Back to the recordings list, re-read, even when the viewer was
-        // started from the command line.
-        self.return_to_replays();
+    }
+
+    /// A key of `--input-script` while the viewer shows: the viewer's own
+    /// keys, as `replay_event` gives them for the window's. `physical` makes a
+    /// letter's name its physical key's, as the window's do.
+    pub(crate) fn replay_script_key(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        physical: &PhysicalKey,
+        name: &str,
+        pressed: bool,
+        repeat: bool,
+    ) {
+        let name = crate::flight_key(*physical, name);
+        let modifiers = self.modifiers;
+        let Some(replay) = self.replay.as_mut() else {
+            return;
+        };
+        if replay.viewer.bound_key(&name, pressed, repeat, modifiers) {
+            return;
+        }
+        let command = replay
+            .viewer
+            .key(&name, pressed, repeat, modifiers.shift_key());
+        self.replay_command(event_loop, command);
     }
 
     fn replay_command(&mut self, event_loop: &ActiveEventLoop, command: Command) {
@@ -112,9 +195,24 @@ impl App {
             Command::None => {}
             Command::Click => self.action(event_loop, Action::Click),
             Command::Leave => {
-                self.leave_replay();
+                // Stop Watching, in the live view of a mission being flown.
+                if self.replay.as_ref().is_some_and(|r| r.viewer.live()) {
+                    self.stop_observing();
+                } else {
+                    self.leave_replay();
+                }
                 self.action(event_loop, Action::Click);
             }
+            // The away player's menu (slice F2-O4).
+            Command::TakeBack => {
+                self.away_take_back();
+                self.action(event_loop, Action::Click);
+            }
+            Command::Spawn => {
+                self.away_spawn();
+                self.action(event_loop, Action::Click);
+            }
+            Command::LeaveGame => self.away_leave_game(event_loop),
             // Escape > ? > Exit to Desktop quits as flight's does.
             Command::Exit => self.action(event_loop, Action::Exit),
             // Escape > Pref: the screens open over the paused replay and
@@ -195,6 +293,13 @@ impl App {
                 {
                     return Some(event);
                 }
+                if self.replay.as_mut().is_some_and(|replay| {
+                    replay
+                        .viewer
+                        .bound_key(&name, pressed, key.repeat, self.modifiers)
+                }) {
+                    return None;
+                }
                 // Alt or Ctrl with a view key picks the view's reference, as
                 // in flight; the viewer's other keys take no Control, Alt
                 // or Command.
@@ -260,7 +365,15 @@ impl App {
                                     .right(pressed, window, Some(point), size, slop);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            let control = match button {
+                                MouseButton::Middle => "button:middle",
+                                MouseButton::Back => "button:back",
+                                MouseButton::Forward => "button:forward",
+                                _ => return None,
+                            };
+                            replay.viewer.drone_mouse(control, pressed);
+                        }
                     }
                 }
                 None
@@ -294,6 +407,11 @@ impl App {
     /// Draws one replay frame and, for `--capture-replay`, saves it and
     /// exits once it has been presented.
     fn replay_redraw(&mut self, event_loop: &ActiveEventLoop) {
+        // The live view of a mission being flown is fed by the session: its
+        // turn comes first, as the other screens' does in `window_event`.
+        if self.replay.as_ref().is_some_and(|r| r.viewer.live()) {
+            self.net_tick(event_loop);
+        }
         let (Some(replay), Some(renderer)) = (self.replay.as_mut(), self.renderer.as_mut()) else {
             return;
         };
@@ -325,6 +443,10 @@ impl App {
         } else {
             None
         };
+        viewer.mission_timer = self
+            .net
+            .as_ref()
+            .and_then(|net| crate::mission_timer::Timer::from_client(&net.client));
         let result = viewer.frame(
             renderer,
             &mut self.flight_canvas,
@@ -360,8 +482,18 @@ impl App {
                         viewer.save_png(renderer, &request.path).map(|()| {
                             println!("Replay screenshot: {}", request.path.display());
                         })
+                    } else if viewer.taped()
+                        && renderer.capture_console(&request.path).unwrap_or(false)
+                    {
+                        Ok(())
                     } else {
-                        renderer.capture_sim(&request.path, viewer.camera(), &viewer.world, true)
+                        renderer.capture_sim(
+                            &request.path,
+                            viewer.camera(),
+                            &viewer.world,
+                            &viewer.scenery,
+                            true,
+                        )
                     };
                     if let Err(error) = written {
                         self.error = Some(error);
@@ -373,7 +505,7 @@ impl App {
             }
             Ok(_) => {}
         }
-        // Playback is paced by presentation, like flight.
-        self.next_frame = Some(Instant::now());
+        // Playback is paced like flight, by the frame rate choice.
+        self.next_frame = self.pace(crate::frame_pacing::Want::Live);
     }
 }

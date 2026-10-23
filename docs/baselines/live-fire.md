@@ -56,7 +56,8 @@ cargo run --locked -p tore-app -- --combat-smoke --aircraft rafale
   cannot fire. Pause, menu, focus loss, resize and aircraft/restart transitions
   cancel held fire. A held key must physically release after interruption.
 - Semicolon cycles the aircraft's five PT weapon slots. Empty slots remain empty.
-- Backslash resets the explicit range target at a range suited to the selected
+- Ctrl+Shift+Backslash (plain Backslash until the AC-130 gunsight took it on
+  2026-10-09) resets the explicit range target at a range suited to the selected
   weapon's source minimum range. It does not replenish ammunition.
 - T or Enter designates the actual scripted target. Radar-guided stores require R
   to be on and source radar/weapon range/FOV checks to pass. Guns are visual/unguided.
@@ -83,8 +84,10 @@ them independently of the launcher, guides applicable stores, finds swept target
 or sampled terrain hits, applies source class-0 damage and destroys targets once.
 Destroyed targets stop rendering and cannot be locked or damaged again. Store
 release reduces payload through the aircraft's existing model API. Damage,
-projectile and effect pools are bounded (256 projectiles, 64 effects); pool
-saturation rejects a spawn before ammunition is consumed.
+projectile and effect pools are bounded (5,000 projectiles since 2026-10-09,
+256 before; 64 effects); pool saturation rejects a spawn before ammunition is
+consumed. The [projectile cap baseline](projectile-cap-2026-10-09.md) measures
+the raise.
 
 The target uses the selected aircraft's original mesh and atlas. Missile shapes
 use bounded SH static geometry with palette colors; their textures and native

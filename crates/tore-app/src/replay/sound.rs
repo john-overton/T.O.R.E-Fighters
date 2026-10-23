@@ -14,10 +14,10 @@
 //! after a jump. Scheduling is plain data ([`Cue`]), tested without a sound
 //! device and written to the session log with `TORE_REPLAY_SOUND_LOG=1`.
 use crate::audio::{self, Audio, EngineLoops, EngineSounds};
+use crate::camera::Camera;
 use crate::replay::clock::{self, Clock, Direction};
 use crate::replay::convert;
 use crate::replay::playback::Playback;
-use crate::terrain::Camera;
 use std::sync::Arc;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_formats::flight_model::departure::DepartureMode;
@@ -108,6 +108,8 @@ pub struct SpatialTick {
     pub emissions: Vec<Emission>,
     /// The player's weapon release sounds this tick.
     pub releases: Vec<String>,
+    /// Other aircraft's launches this tick, each heard from where it fired.
+    pub others: Vec<OtherLaunch>,
     /// Where the player's aircraft is, where its releases sound from.
     pub player: [f64; 3],
     /// Where the watched aircraft is and how fast it moves: its engine is
@@ -116,6 +118,10 @@ pub struct SpatialTick {
     /// Fires and other aircraft's engines.
     pub loops: Vec<audio::LoopSource>,
 }
+
+/// An aircraft other than the recorded player's firing a weapon: the
+/// recording of its record's `fireSound` and that record's reach.
+pub type OtherLaunch = audio::Heard;
 
 impl Cue {
     /// Hands the cue to the sound device.
@@ -139,7 +145,20 @@ impl Cue {
                 tick.listener,
                 &tick.sources,
                 &tick.emissions,
-                &tick.releases.iter().map(String::as_str).collect::<Vec<_>>(),
+                &tick
+                    .releases
+                    .iter()
+                    .map(|name| audio::Launch::named(name))
+                    .chain(tick.others.iter().map(|launch| {
+                        audio::Launch::by(
+                            launch.shooter,
+                            launch.position,
+                            &launch.sound,
+                            launch.max_distance_ft,
+                        )
+                        .with_gun(launch.gun)
+                    }))
+                    .collect::<Vec<_>>(),
                 tick.player,
                 tick.engine,
                 &tick.loops,
@@ -179,9 +198,14 @@ impl Cue {
                     .map(|e| format!("{:?}", e.kind).to_lowercase())
                     .collect();
                 format!(
-                    "traveling sound: effects [{}], releases [{}], {} sources",
+                    "traveling sound: effects [{}], releases [{}], others' launches [{}], {} sources",
                     effects.join(" "),
                     tick.releases.join(" "),
+                    tick.others
+                        .iter()
+                        .map(|l| format!("{} {}", l.shooter, l.sound))
+                        .collect::<Vec<_>>()
+                        .join(" "),
                     tick.sources.len()
                 )
             }
@@ -204,6 +228,125 @@ impl Cue {
     }
 }
 
+/// Device-free audit of the same source selection and burst policy the viewer
+/// and live mixer use. This does not alter the recording or require a window.
+/// Enable alongside --recording-log with TORE_WEAPON_SOUND_LOG=1.
+pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResult<()> {
+    use std::io::Write;
+    let assets = crate::assets::Assets::load(&crate::assets::data_directory()?)?;
+    let recording = Arc::new(Recording::open(path)?);
+    let mut sound = ReplaySound::new(Arc::clone(&recording), std::iter::empty());
+    let catalog = audio::LaunchSounds::of(&assets.theater_resources);
+    let mut stores =
+        std::io::BufWriter::new(std::fs::File::create(folder.join("store-sound.tsv"))?);
+    writeln!(stores, "record\tsound\tclip_present")?;
+    for record in tore_formats::weapons::corrections::R27_DERIVED
+        .into_iter()
+        .chain(tore_formats::weapons::corrections::SMALL_BOMBS.map(|b| b.0))
+    {
+        let name = catalog.get(record).map_or("", |(name, _)| name);
+        writeln!(
+            stores,
+            "{record}\t{name}\t{}",
+            assets.sounds.contains_key(name)
+        )?;
+    }
+    stores.flush()?;
+    sound.set_launches(catalog);
+    let player = sound.playback.presentation.player;
+    let selected = std::env::var("TORE_WEAPON_SOUND_SUBJECT")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(player);
+    let mut fire = audio::other::Fire::default();
+    let mut output =
+        std::io::BufWriter::new(std::fs::File::create(folder.join("weapon-sound.tsv"))?);
+    writeln!(
+        output,
+        "tick\tevent\tshooter\tsound\tgun\tdistance_ft\tgain\tselected\tclip_present\temitted_tick"
+    )?;
+    let mut candidates = 0;
+    let mut audible = 0;
+    for tick in recording.first_tick().unwrap_or(0)..=recording.last_tick().unwrap_or(0) {
+        let position = sound
+            .playback
+            .frame(tick)
+            .and_then(|(frames, at)| {
+                frames[at]
+                    .aircraft
+                    .iter()
+                    .find(|a| a.id == selected)
+                    .map(|a| a.position)
+            })
+            .unwrap_or([0.; 3]);
+        let listener = Listener {
+            position,
+            right: [1., 0., 0.],
+            view: 0,
+            external: selected != player,
+            own: Some(player),
+        };
+        let mut cues = Vec::new();
+        sound.tick(
+            tick,
+            recording.events_between(tick, tick),
+            listener,
+            selected,
+            &mut cues,
+        );
+        for (_, cue) in cues {
+            let Cue::Tick(t) = cue else { continue };
+            for name in &t.releases {
+                let canonical = name.to_ascii_uppercase();
+                writeln!(
+                    output,
+                    "{tick}\taudio.own.release\t{player}\t{canonical}\tfalse\t0\t1\ttrue\t{}\t{tick}",
+                    assets.sounds.contains_key(&canonical)
+                )?;
+            }
+            let shots: Vec<_> = t
+                .others
+                .iter()
+                .map(|l| {
+                    audio::Launch::by(l.shooter, l.position, &l.sound, l.max_distance_ft)
+                        .with_gun(l.gun)
+                })
+                .collect();
+            let heard = fire.step(&shots, listener);
+            candidates += shots.len();
+            for report in heard {
+                let launch = report.launch();
+                let mix = audio::other::mix(launch, listener);
+                let shooter = launch.shooter.unwrap();
+                let distance = shooter
+                    .position
+                    .iter()
+                    .zip(position)
+                    .map(|(a, b)| (a - b).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                audible += 1;
+                writeln!(
+                    output,
+                    "{}\taudio.other.{}\t{}\t{}\t{}\t{:.1}\t{:.6}\ttrue\t{}\t{}",
+                    tick,
+                    if launch.gun { "burst" } else { "release" },
+                    shooter.id,
+                    launch.name,
+                    launch.gun,
+                    distance,
+                    mix.gain,
+                    assets.sounds.contains_key(launch.name),
+                    recording.first_tick().unwrap_or(0) + report.emitted_tick - 1
+                )?;
+            }
+        }
+    }
+    output.flush()?;
+    println!("Weapon sound audit: {candidates} source ticks, {audible} audible bursts/releases");
+    Ok(())
+}
+
 /// Silences everything a replay started: queued speech, tones, loops and
 /// effects. For entering and leaving the viewer.
 pub fn stop(audio: &Audio) {
@@ -213,9 +356,10 @@ pub fn stop(audio: &Audio) {
 
 /// The listener for a frame drawn from `camera`: its position and right
 /// hand, built as live flight builds it from the main view, and outside
-/// unless it sits in the player's cockpit. `cut` changes whenever the
-/// camera cuts, so a cut is never heard as something flying past.
-pub fn listener(camera: &Camera, cut: u8) -> Listener {
+/// unless it sits in the cockpit of `player`, the plane the recording is
+/// for. `cut` changes whenever the camera cuts, so a cut is never heard as
+/// something flying past.
+pub fn listener(camera: &Camera, cut: u8, player: u32) -> Listener {
     let basis = Basis::new(
         f64::from(camera.yaw),
         f64::from(camera.pitch),
@@ -225,7 +369,8 @@ pub fn listener(camera: &Camera, cut: u8) -> Listener {
         position: camera.position,
         right: basis.right,
         view: cut,
-        external: camera.hidden_target != Some(0),
+        external: camera.hidden_target != Some(player),
+        own: None,
     }
 }
 
@@ -247,6 +392,9 @@ pub struct ReplaySound {
     playback: Playback,
     /// Engine recordings of each loaded aircraft type.
     engines: Vec<(AircraftId, EngineSounds)>,
+    /// Each weapon record's launch sound and reach.
+    launches: audio::LaunchSounds,
+    known_guns: std::collections::BTreeSet<u32>,
     /// The seeker tone and the stall warning from each recorded change on.
     tones: Vec<(u64, Option<SeekerTone>)>,
     stalls: Vec<(u64, Option<&'static str>)>,
@@ -279,15 +427,21 @@ impl ReplaySound {
             .into_iter()
             .map(|profile| (profile.id, EngineSounds::of(profile)))
             .collect();
-        Self::with_engines(recording, engines)
+        Self::with_engines(recording, engines, Default::default())
     }
 
-    fn with_engines(recording: Arc<Recording>, engines: Vec<(AircraftId, EngineSounds)>) -> Self {
+    fn with_engines(
+        recording: Arc<Recording>,
+        engines: Vec<(AircraftId, EngineSounds)>,
+        launches: audio::LaunchSounds,
+    ) -> Self {
         let (tones, stalls) = timelines(recording.events());
         Self {
             playback: Playback::new(Arc::clone(&recording)),
             recording,
             engines,
+            launches,
+            known_guns: Default::default(),
             tones,
             stalls,
             state: State::Silent,
@@ -300,6 +454,22 @@ impl ReplaySound {
             log: std::env::var("TORE_REPLAY_SOUND_LOG").is_ok_and(|v| v == "1"),
             logged: None,
         }
+    }
+
+    /// The weapon records' launch sounds, for the launches of aircraft
+    /// other than the recorded player's.
+    pub fn set_launches(&mut self, launches: audio::LaunchSounds) {
+        self.launches = launches;
+    }
+
+    /// The recording has grown (an observer's live recording): the sound
+    /// reads the newer read of it from here on.
+    pub fn extend(&mut self, recording: Arc<Recording>) {
+        if recording.events().len() != self.recording.events().len() {
+            (self.tones, self.stalls) = timelines(recording.events());
+        }
+        self.playback.extend(Arc::clone(&recording));
+        self.recording = recording;
     }
 
     /// Schedules one frame's sound and plays it on `audio`, if there is a
@@ -348,7 +518,8 @@ impl ReplaySound {
                 State::Playing => from.floor() + 1.,
             };
             self.state = State::Playing;
-            let listener = listener(moment.camera, self.cuts);
+            let player = self.playback.presentation.player;
+            let listener = listener(moment.camera, self.cuts, player);
             self.play(first, to.floor(), listener, moment.selected, &mut cues);
             // Playback stops by itself at the end.
             if clock.paused() {
@@ -374,6 +545,7 @@ impl ReplaySound {
         self.tone = None;
         self.engine = None;
         self.player_down = false;
+        self.known_guns.clear();
     }
 
     /// Plays the recorded ticks `first` to `last`, then sets the steady
@@ -421,8 +593,9 @@ impl ReplaySound {
         // Inside a gap the last frame before it holds.
         let frame = self.playback.frame(tick);
         let frame = frame.as_ref().map(|(frames, at)| &frames[*at]);
+        let player = self.playback.presentation.player;
         let down = frame
-            .and_then(|frame| frame.aircraft.iter().find(|a| a.id == 0))
+            .and_then(|frame| frame.aircraft.iter().find(|a| a.id == player))
             .is_some_and(|p| p.flags.crashed || p.flags.ejected || !p.flags.alive);
         if down && !self.player_down {
             cues.push((tick, Cue::TowerCancelled));
@@ -430,14 +603,25 @@ impl ReplaySound {
         self.player_down = down;
         let mut emissions = Vec::new();
         let mut releases = Vec::new();
+        // Other shooters' launches: who, the weapon's record, the round.
+        let mut launched: Vec<(u32, u32, Option<u32>)> = Vec::new();
         for TimedEvent { event, .. } in events {
             if let Some(cue) = cue(event) {
                 cues.push((tick, cue));
             }
             match event.kind.as_str() {
                 vocab::kind::AUDIO_EFFECT => emissions.extend(emission(event)),
-                vocab::kind::AUDIO_RELEASE if event.subject == Some(0) => {
+                vocab::kind::AUDIO_RELEASE if event.subject == Some(player) => {
                     releases.extend(event.string(vocab::field::SOUND).map(str::to_owned));
+                }
+                // The player's own launch is its release sound above.
+                vocab::kind::WEAPON_LAUNCH => {
+                    if let (Some(shooter), Some(weapon)) =
+                        (event.subject, event.id(vocab::field::WEAPON))
+                        && shooter != player
+                    {
+                        launched.push((shooter, weapon, event.id(vocab::field::PROJECTILE)));
+                    }
                 }
                 _ => {}
             }
@@ -445,6 +629,25 @@ impl ReplaySound {
         let Some(frame) = frame else {
             return;
         };
+        // Converted network captures reconstruct gun rounds from burst
+        // messages, without individual weapon.launch entries. Only new,
+        // newly born rounds count, so seeking past bullets does not fire guns.
+        for round in &frame.projectiles {
+            if round.owner != player
+                && round.age <= 1
+                && !self.known_guns.contains(&round.id)
+                && self
+                    .playback
+                    .identities
+                    .weapons
+                    .get(&round.weapon)
+                    .is_some_and(|w| w.class == tore_replay::WeaponClass::Gun)
+                && !launched.iter().any(|(_, _, id)| *id == Some(round.id))
+            {
+                launched.push((round.owner, round.weapon, Some(round.id)));
+            }
+        }
+        self.known_guns = frame.projectiles.iter().map(|p| p.id).collect();
         let mut snapshot = convert::snapshot(
             frame,
             &[],
@@ -452,6 +655,50 @@ impl ReplaySound {
             &self.playback.identities,
         );
         snapshot.marks = self.playback.marks_at(tick);
+        // Where each fired: its aircraft at this tick, else the round (a
+        // surface unit's launch sounds from its round, the mount).
+        let others: Vec<OtherLaunch> = launched
+            .into_iter()
+            .filter_map(|(shooter, weapon, round)| {
+                let record = &self.playback.identities.weapons.get(&weapon)?.source;
+                let aircraft = || {
+                    frame
+                        .aircraft
+                        .iter()
+                        .find(|a| a.id == shooter)
+                        .map(|a| a.position)
+                };
+                let projectile = || {
+                    let round = round?;
+                    frame
+                        .projectiles
+                        .iter()
+                        .find(|p| p.id == round)
+                        .map(|p| p.position)
+                };
+                let position = if crate::surface_fx::is_unit(shooter) {
+                    projectile()
+                        .or_else(|| {
+                            frame
+                                .surface
+                                .iter()
+                                .find(|u| u.id == shooter)
+                                .map(|u| u.position)
+                        })
+                        .or_else(|| {
+                            self.playback
+                                .identities
+                                .surface
+                                .get(&shooter)
+                                .map(|u| u.position)
+                        })
+                        .or_else(aircraft)?
+                } else {
+                    aircraft().or_else(projectile)?
+                };
+                self.launches.heard(record, shooter, position)
+            })
+            .collect();
         let engine = frame
             .aircraft
             .iter()
@@ -462,10 +709,15 @@ impl ReplaySound {
         cues.push((
             tick,
             Cue::Tick(Box::new(SpatialTick {
-                listener,
+                // The recorded player's aircraft is the listener's own.
+                listener: Listener {
+                    own: Some(snapshot.player.id),
+                    ..listener
+                },
                 sources: audio::snapshot_sources(&snapshot),
                 emissions,
                 releases,
+                others,
                 player: snapshot.player.position,
                 engine,
                 loops: audio::loop_sources(&snapshot, &self.engines),
@@ -507,6 +759,9 @@ impl ReplaySound {
                 running: flags.engine_on && aboard,
                 throttle: state.controls[control::THROTTLE].clamp(0., 1.),
                 afterburner: flags.afterburner,
+                // Only a recorded rotor has a speed; the rest keep the
+                // recording's pitch.
+                rotor_speed: (state.rotor_speed > 0.).then_some(state.rotor_speed),
             });
         }
         self.engine = watched.map(|state| (state.id, state.flags.engine_on));
@@ -519,7 +774,11 @@ impl ReplaySound {
         for (tick, cue) in cues {
             let text = cue.describe();
             match cue {
-                Cue::Tick(t) if t.emissions.is_empty() && t.releases.is_empty() => continue,
+                Cue::Tick(t)
+                    if t.emissions.is_empty() && t.releases.is_empty() && t.others.is_empty() =>
+                {
+                    continue;
+                }
                 Cue::Loops { .. } if self.logged.as_ref() == Some(&text) => continue,
                 Cue::Loops { .. } => self.logged = Some(text.clone()),
                 _ => {}
@@ -787,7 +1046,7 @@ mod tests {
         };
         match tick {
             5 => vec![
-                heard(line(kind::COMMS_RADIO, "^FOX2 ^RED2", route::RADIO).with_subject(2)),
+                heard(line(kind::COMMS_RADIO, "^FOXTHR ^RED2", route::RADIO).with_subject(2)),
                 line(kind::COMMS_RADIO, "^CONTACT", route::RADIO)
                     .with(field::HEARD, false)
                     .with(field::OUTCOME, outcome::UNHEARD),
@@ -796,7 +1055,7 @@ mod tests {
                 line(kind::COMMS_RADIO, "^SPLASH", route::RADIO)
                     .with(field::OUTCOME, outcome::QUEUED),
                 // Cut off after it was delivered: said once, at delivery.
-                line(kind::COMMS_RADIO, "^FOX2 ^RED2", route::RADIO)
+                line(kind::COMMS_RADIO, "^FOXTHR ^RED2", route::RADIO)
                     .with(field::HEARD, true)
                     .with(field::OUTCOME, outcome::INTERRUPTED),
             ],
@@ -850,6 +1109,26 @@ mod tests {
                     .with(field::SOUND, "&MSLFIRE.5K")
                     .with(field::WEAPON, Value::Id(1)),
             ],
+            // The enemy MiG fires a missile; the player's own launch is its
+            // release above, and a surface unit's is heard from its round.
+            250 => vec![
+                Event::new(kind::WEAPON_LAUNCH)
+                    .with_subject(1)
+                    .with(field::PROJECTILE, Value::Id(8))
+                    .with(field::WEAPON, Value::Id(1)),
+                Event::new(kind::WEAPON_LAUNCH)
+                    .with_subject(1)
+                    .with(field::PROJECTILE, Value::Id(9))
+                    .with(field::WEAPON, Value::Id(1)),
+                Event::new(kind::WEAPON_LAUNCH)
+                    .with_subject(0)
+                    .with(field::PROJECTILE, Value::Id(7))
+                    .with(field::WEAPON, Value::Id(1)),
+                Event::new(kind::WEAPON_LAUNCH)
+                    .with_subject(0x4000_0001)
+                    .with(field::PROJECTILE, Value::Id(10))
+                    .with(field::WEAPON, Value::Id(1)),
+            ],
             300 => vec![
                 Event::new(kind::AUDIO_EFFECT)
                     .with(field::SOUND, "explosion")
@@ -897,7 +1176,17 @@ mod tests {
         Frame {
             tick,
             aircraft: (0..3).map(|id| aircraft(id, tick)).collect(),
-            projectiles: missile.into_iter().collect(),
+            projectiles: missile
+                .into_iter()
+                .chain((tick == 250).then(|| ProjectileState {
+                    // The surface unit's missile, at its mount.
+                    id: 10,
+                    owner: 0x4000_0001,
+                    weapon: 1,
+                    position: [4_000., 20., 5_000.],
+                    ..Default::default()
+                }))
+                .collect(),
             events: events(tick),
             ..Default::default()
         }
@@ -973,7 +1262,11 @@ mod tests {
         fn new(recording: &Arc<Recording>) -> Self {
             Self {
                 clock: Clock::new(0, LAST),
-                sound: ReplaySound::with_engines(Arc::clone(recording), engines()),
+                sound: ReplaySound::with_engines(
+                    Arc::clone(recording),
+                    engines(),
+                    Default::default(),
+                ),
                 camera: Camera::new(),
                 view: Some(1),
                 selected: 0,
@@ -1080,7 +1373,7 @@ mod tests {
         assert!(host.clock.paused(), "playback stops at the end");
         let expected: Vec<(u64, String)> = vec![
             (0, "seeker tone off".to_owned()),
-            (5, "radio ^FOX2 ^RED2".into()),
+            (5, "radio ^FOXTHR ^RED2".into()),
             (20, "radio ^CHECK6".into()),
             (30, "tower ^RWYFREE".into()),
             (40, "tower reply ^CLRLAND".into()),
@@ -1290,7 +1583,7 @@ mod tests {
         let mut camera = Camera::new();
         camera.position = [100., 2_000., -300.];
         [camera.yaw, camera.pitch, camera.roll] = [0.7, -0.2, 0.3];
-        let heard = listener(&camera, 4);
+        let heard = listener(&camera, 4, 0);
         assert_eq!(heard.position, [100., 2_000., -300.]);
         let basis = Basis::new(f64::from(0.7f32), f64::from(-0.2f32), -f64::from(0.3f32));
         assert_eq!(heard.right, basis.right);
@@ -1298,15 +1591,20 @@ mod tests {
         assert!(heard.external);
         // Only a camera in the player's own cockpit is inside.
         camera.hidden_target = Some(0);
-        assert!(!listener(&camera, 0).external);
+        assert!(!listener(&camera, 0, 0).external);
         camera.hidden_target = Some(3);
-        assert!(listener(&camera, 0).external);
+        assert!(listener(&camera, 0, 0).external);
+        // The player is the plane the recording is for, not plane 0.
+        assert!(!listener(&camera, 0, 3).external);
+        camera.hidden_target = Some(0);
+        assert!(listener(&camera, 0, 3).external);
+        camera.hidden_target = Some(3);
         // Looking north, an explosion to the east is on the right.
         let mut north = Camera::new();
         [north.yaw, north.pitch, north.roll] = [0.; 3];
         north.position = [0., 1_000., 0.];
         let mix =
-            tore_sim::acoustics::mix(Kind::Explosion, [800., 1_000., 0.], listener(&north, 0));
+            tore_sim::acoustics::mix(Kind::Explosion, [800., 1_000., 0.], listener(&north, 0, 0));
         assert!(mix.pan > 0.9, "{}", mix.pan);
         // Every tick is heard from the frame's camera, and a cut to another
         // view, aircraft or the drone is a new view for the pass detector.
@@ -1375,6 +1673,202 @@ mod tests {
         assert_eq!(
             ticks.values().filter(|t| !t.emissions.is_empty()).count(),
             1
+        );
+    }
+
+    #[test]
+    fn another_aircrafts_launch_is_heard_from_where_it_fired() {
+        let dir = TempDir::new("sound-others");
+        let recording = recording(&dir, "others");
+        let mut host = Host::new(&recording);
+        let cues = host.play_to(LAST, FINE);
+        // Without the weapon records nobody else's launch has a sound.
+        assert!(spatial(&cues).iter().all(|(_, t)| t.others.is_empty()));
+        let mut host = Host::new(&recording);
+        host.sound.set_launches(audio::LaunchSounds::from_rows(&[(
+            "AIM9M.JT",
+            "&MSLFIRE.5K",
+            6000,
+        )]));
+        let cues = host.play_to(LAST, FINE);
+        let ticks: BTreeMap<u64, &SpatialTick> = spatial(&cues).into_iter().collect();
+        let launch = |tick: u64| ticks[&tick].others.clone();
+        // The MiG's two rounds are two events and the surface unit's missile
+        // a third, from its round's position; the player's own makes none.
+        let at = position(1, 250);
+        let all = launch(250);
+        assert_eq!(all.len(), 3);
+        let unit = all.iter().find(|l| l.shooter == 0x4000_0001).unwrap();
+        assert_eq!(unit.sound, "&MSLFIRE.5K");
+        assert_eq!(unit.position, [4_000., 20., 5_000.]);
+        let rounds: Vec<OtherLaunch> = all.iter().filter(|l| l.shooter == 1).cloned().collect();
+        assert_eq!(rounds.len(), 2);
+        for round in &rounds {
+            assert_eq!(round.shooter, 1);
+            assert_eq!(round.sound, "&MSLFIRE.5K");
+            assert_eq!(round.max_distance_ft, 6000);
+            assert!((0..3).all(|i| (round.position[i] - at[i]).abs() <= 1. / 32.));
+        }
+        // The player's own launch is still its release alone.
+        assert_eq!(ticks[&MISSILE.0].releases, ["&MSLFIRE.5K"]);
+        assert!(ticks[&MISSILE.0].others.is_empty());
+        assert_eq!(ticks.values().filter(|t| !t.others.is_empty()).count(), 1);
+        // The device gets the MiG's two rounds as one sound, and the unit's
+        // as another.
+        let played: Vec<audio::Launch> = all
+            .iter()
+            .map(|l| audio::Launch::by(l.shooter, l.position, &l.sound, l.max_distance_ft))
+            .collect();
+        assert_eq!(audio::one_sound_per_release(&played).len(), 2);
+    }
+
+    #[test]
+    fn converted_network_gun_rounds_sound_without_launch_events_once_and_not_after_a_seek() {
+        let dir = TempDir::new("network-gun-sound");
+        let path = dir.path().join("guns.tore-replay");
+        let mut writer =
+            tore_replay::Writer::create(&path, &tore_replay::Header::default()).unwrap();
+        for id in [0, 1] {
+            writer
+                .register_aircraft(&AircraftInfo {
+                    id,
+                    pt: "F18.PT".into(),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        writer
+            .register_weapon(&WeaponInfo {
+                id: 1,
+                source: "M61.JT".into(),
+                name: "gun".into(),
+                shape: None,
+                class: WeaponClass::Gun,
+            })
+            .unwrap();
+        for tick in 0..=40 {
+            writer
+                .push(&Frame {
+                    tick,
+                    aircraft: vec![aircraft(0, tick), aircraft(1, tick)],
+                    projectiles: if tick >= 10 {
+                        vec![ProjectileState {
+                            id: 10,
+                            owner: 1,
+                            weapon: 1,
+                            position: position(1, tick),
+                            age: (tick - 10) as u32,
+                            ..Default::default()
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let path = writer.finish(&tore_replay::Footer::default()).unwrap();
+        let recording = Arc::new(Recording::open(path).unwrap());
+        let mut host = Host::new(&recording);
+        host.sound
+            .set_launches(audio::LaunchSounds::from_gun_rows(&[(
+                "M61.JT", "gun", 6000,
+            )]));
+        let cues = host.play_to(35, FINE);
+        let shots: Vec<_> = spatial(&cues)
+            .into_iter()
+            .filter(|(_, t)| !t.others.is_empty())
+            .collect();
+        assert_eq!(shots.len(), 1);
+        assert_eq!(shots[0].0, 10);
+        assert!(shots[0].1.others[0].gun);
+        host.clock.seek(20.);
+        assert!(
+            spatial(&host.frame(FINE))
+                .iter()
+                .all(|(_, t)| t.others.is_empty())
+        );
+    }
+
+    #[test]
+    fn gun_catalog_reaches_the_same_burst_policy_from_replay_and_network_launches() {
+        // Reuse the synthetic launch timeline, classify its test record as
+        // a gun to exercise the lookup rather than the recorded class label.
+        let dir = TempDir::new("sound-gun-policy");
+        let recording = recording(&dir, "guns");
+        let mut host = Host::new(&recording);
+        host.sound
+            .set_launches(audio::LaunchSounds::from_gun_rows(&[(
+                "AIM9M.JT", "gun", 6000,
+            )]));
+        let cues = host.play_to(260, FINE);
+        let (_, tick) = spatial(&cues)
+            .into_iter()
+            .find(|(tick, _)| *tick == 250)
+            .unwrap();
+        assert_eq!(tick.others.len(), 3);
+        assert!(tick.others.iter().all(|l| l.gun));
+        let replay: Vec<_> = tick
+            .others
+            .iter()
+            .map(|l| {
+                audio::Launch::by(l.shooter, l.position, &l.sound, l.max_distance_ft)
+                    .with_gun(l.gun)
+            })
+            .collect();
+        let network: Vec<_> = tick
+            .others
+            .iter()
+            .map(|l| audio::Launch::by(l.shooter, l.position, "gun", 6000).with_gun(true))
+            .collect();
+        let listener = Listener {
+            position: {
+                let mut p = position(1, 250);
+                p[0] += 3000.;
+                p
+            },
+            right: [1., 0., 0.],
+            view: 0,
+            external: true,
+            own: Some(0),
+        };
+        let mut a = audio::other::Fire::default();
+        let mut b = audio::other::Fire::default();
+        let mut live = audio::other::Fire::default();
+        let live_launch = network
+            .iter()
+            .copied()
+            .filter(|l| l.shooter.unwrap().id == 1)
+            .collect::<Vec<_>>();
+        let mut arrivals = Vec::new();
+        for tick in 1..=400 {
+            let heard = a.step(if tick == 1 { &replay } else { &[] }, listener);
+            assert_eq!(
+                heard,
+                b.step(if tick == 1 { &network } else { &[] }, listener)
+            );
+            let live_heard = live.step(if tick == 1 { &live_launch } else { &[] }, listener);
+            assert_eq!(
+                heard
+                    .iter()
+                    .filter(|r| r.heard.shooter == 1)
+                    .collect::<Vec<_>>(),
+                live_heard.iter().collect::<Vec<_>>()
+            );
+            if !live_heard.is_empty() {
+                arrivals.push(tick);
+            }
+        }
+        let expected = (3000. / tore_sim::acoustics::speed_of_sound(listener.position[1]) * 120.)
+            .ceil() as u64;
+        assert_eq!(arrivals, [expected]);
+        // Following the shooter still hears it; selection is not a filter.
+        host.selected = 1;
+        host.clock.seek(250.);
+        assert!(
+            spatial(&host.frame(FINE))
+                .iter()
+                .any(|(_, t)| !t.others.is_empty())
         );
     }
 
@@ -1527,7 +2021,9 @@ mod tests {
             for (tick, cue) in host.frame(1. / 60.) {
                 total += 1;
                 let quiet = match &cue {
-                    Cue::Tick(t) => t.emissions.is_empty() && t.releases.is_empty(),
+                    Cue::Tick(t) => {
+                        t.emissions.is_empty() && t.releases.is_empty() && t.others.is_empty()
+                    }
                     Cue::Loops { .. } => true,
                     _ => false,
                 };

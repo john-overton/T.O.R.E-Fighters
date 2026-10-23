@@ -8,23 +8,32 @@
 
 mod checksum;
 mod chunk;
+mod city;
 mod codec;
+pub mod display;
+mod display_detail;
 mod error;
 mod events;
 pub mod export;
+pub mod feedback;
 mod format;
 mod frames;
 pub mod limits;
 pub mod model;
 mod predict;
 mod reader;
+mod rotors;
 mod spawns;
+pub mod stores;
 mod strings;
+mod tilts;
 mod trees;
 pub mod vocab;
 mod writer;
 
 pub use checksum::state_checksum;
+pub use city::CityTrack;
+pub use display::{HudSample, SightSample, Track as DisplayTrack};
 pub use error::{Error, Result};
 pub use model::*;
 pub use predict::precision;
@@ -34,8 +43,12 @@ pub use reader::{
 };
 pub use writer::{Writer, WriterOptions, partial_path};
 
-/// The format version this build writes, and the newest it reads.
-pub const FORMAT_VERSION: u16 = 1;
+/// The newest readable format. Live recorders request version 4 for 24 Hz
+/// display samples. Synthetic and legacy writers can still request 2 or 3.
+pub const FORMAT_VERSION: u16 = 4;
+/// The format version a recording is written in unless its world needs more:
+/// the one from before the surface tracks.
+pub const BASE_FORMAT_VERSION: u16 = 2;
 
 #[cfg(test)]
 mod tests {

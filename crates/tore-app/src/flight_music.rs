@@ -2,7 +2,9 @@
 //!
 //! Read-only: nothing here feeds back into the simulation, and it runs only
 //! when audio exists, so headless and `--no-audio` runs are unchanged. One
-//! call per fixed 120 Hz step; time is game time counted in those steps.
+//! call per fixed 120 Hz step; time is game time counted in those steps. The
+//! mission result and home checks, and the two radio calls they send, are the
+//! mission core's (`ai_wings::outcome`); the music reads their status.
 //! Rules and numbers are from `docs/spec/flight-music.md`; how each maps onto
 //! TORE state is recorded there under "Current TORE state".
 //!
@@ -10,53 +12,20 @@
 //! entry ([`Step::journal`]). The score the mixer then plays is decided in
 //! the audio device and is not visible here.
 use crate::{
-    ai_wings::{AiWings, PLAYER_ID, outcome},
-    audio::situation::{self, AIM_MEMORY_S, AIM120_IGNORE_FT, AIR_RANGE_FT, HIT_HOLD_S},
     comms::journal::{Audience, Cause, Entry, Music, Origin, Outcome, Source},
-    comms::{Call, Kind, Phrase, Phrases},
     flight,
-    terrain::World,
+    frame::FlightFrame,
+    situation::{self, AIM_MEMORY_S, AIM120_IGNORE_FT, AIR_RANGE_FT, HIT_HOLD_S},
+    terrain::Terrain,
 };
-use tore_sim::ai::weapon_service::{self, Rounds, TargetClass};
-use tore_sim::combat::{live, missiles::TargetRole};
+use tore_sim::combat::live;
 
 pub struct Step {
     pub now: f64,
     pub inputs: situation::Inputs,
-    /// Radio stems to queue now.
-    pub radio: Vec<&'static str>,
     /// Journal entries of this step: the inputs changed, and why each is
     /// on. The host hands them to the mission recording.
     pub journal: Vec<Entry>,
-    /// The trigger of each `radio` stem, in the same order.
-    causes: Vec<Cause>,
-}
-
-impl Step {
-    /// The calls for [`Self::radio`], exactly as the host sends them (the
-    /// mission result 2 s after it is decided, "almost home" at once, both
-    /// important), each with its trigger. `label` is the crew label or
-    /// `YOU`.
-    pub fn radio_calls(&self, label: &str, phrases: &Phrases) -> Vec<Call> {
-        self.radio
-            .iter()
-            .zip(&self.causes)
-            .map(|(stem, cause)| {
-                let delay = if *stem == outcome::MISSION_ACCOMPLISHED {
-                    2.
-                } else {
-                    0.
-                };
-                Call::new(label, Phrase::stem(phrases, stem), Kind::Important)
-                    .after(delay)
-                    .because(
-                        Origin::of(Source::Radio, cause.clone())
-                            .by(PLAYER_ID)
-                            .to(Audience::Flight),
-                    )
-            })
-            .collect()
-    }
 }
 
 /// What the inputs were last journaled as: the asked rank, the inputs, and
@@ -77,28 +46,10 @@ pub struct Observer {
     hit: situation::Hold,
     aim: situation::Hold,
     airport: situation::Airport,
-    outcome: outcome::Tracker,
-    /// Journal only: the home base, the last hit and the inputs last
-    /// journaled. No rule reads them.
-    home_base: Option<[f64; 3]>,
+    /// Journal only: the last hit and the inputs last journaled. No rule
+    /// reads them.
     hit_at: Option<f64>,
     seen: Option<Seen>,
-}
-
-/// `fitted`: the Quick Mission home base is the ground-start airport, placed
-/// at the mean centre of its runways. An airborne start has no home base.
-pub fn home_base(world: &World, airport: Option<u32>) -> Option<[f64; 3]> {
-    let runways: Vec<_> = world
-        .airport_scene
-        .runways
-        .iter()
-        .filter(|runway| Some(runway.airport) == airport)
-        .collect();
-    (!runways.is_empty()).then(|| {
-        std::array::from_fn(|i| {
-            runways.iter().map(|r| r.surface.center[i]).sum::<f64>() / runways.len() as f64
-        })
-    })
 }
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -110,50 +61,33 @@ fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 impl Observer {
-    pub fn new(home_base: Option<[f64; 3]>) -> Self {
-        Self {
-            outcome: outcome::Tracker::new(home_base),
-            home_base,
-            ..Self::default()
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn step(
-        &mut self,
-        flight: &flight::State,
-        combat: &live::State,
-        events: &[live::Event],
-        wings: Option<&AiWings>,
-        world: &World,
-        // Whether the mission has succeeded, from the debrief evaluator;
-        // `None` without a mission. Called only on the 4 second cadence.
-        mission: Option<&dyn Fn() -> bool>,
-    ) -> Step {
+    /// One step for the screen of the human the frame is for: its plane's
+    /// damage, designated target, inbound missiles and the AI aircraft aimed
+    /// at it, and the mission result and home latch, all from the frame's
+    /// readout.
+    pub fn step(&mut self, frame: &FlightFrame, events: &[live::Event], world: &Terrain) -> Step {
+        let (plane, flight) = (frame.plane.0, frame.flight);
         let now = self.steps as f64 * flight::DT;
         self.steps += 1;
         let position = flight.position;
 
-        if events
-            .iter()
-            .any(|e| matches!(e, live::Event::PlayerDamaged(_)))
-        {
+        if events.iter().any(
+            |e| matches!(e, live::Event::OwnshipDamaged { aircraft, .. } if *aircraft == plane),
+        ) {
             self.hit.refresh(now, HIT_HOLD_S);
             self.hit_at = Some(now);
         }
 
-        // Designated target: live, the other side, and an aircraft. Without AI
-        // wings every non-friendly target (range and fixture aircraft) counts
-        // as the other side.
-        let designated_target = combat
-            .designated()
-            .and_then(|id| combat.targets.iter().find(|t| t.id == id && t.hp > 0))
-            .filter(|t| t.role == TargetRole::Aircraft)
-            .filter(|t| {
-                wings.map_or(!combat.friendlies.contains(&t.id), |w| {
-                    w.slot(t.id).is_some_and(|slot| slot.side.is_enemy())
-                })
-            })
-            .map(|t| (t.id, distance(t.position, position)));
+        // Designated target: live, the other side, and an aircraft, as the
+        // readout decided.
+        let music = &frame.readout.music;
+        let designated_target = music
+            .designated_enemy
+            .map(|(id, target)| (id, distance(target, position)));
         let designated = designated_target.map(|(_, range)| range);
         let air_target = designated.is_some_and(|range| range < AIR_RANGE_FT);
         let far_target = designated.is_some_and(|range| range >= AIR_RANGE_FT);
@@ -163,42 +97,22 @@ impl Observer {
         // which still carries a usable guided air-to-air store. The 1 s
         // final-attack memory has no TORE equivalent; 4 s is always used.
         // Every such aircraft is listed for the journal.
-        let aiming: Vec<u32> = wings.map_or_else(Vec::new, |w| {
-            w.mission()
-                .actors()
-                .iter()
-                .filter(|actor| {
-                    actor.alive()
-                        && actor.controller().target() == Some(PLAYER_ID)
-                        && actor.stations().iter().any(|s| {
-                            s.guided
-                                && !s.store.inhibited
-                                && weapon_service::store_eligible(s.capability, TargetClass::Air)
-                                && !matches!(s.store.rounds, Rounds::Finite(0))
-                        })
-                })
-                .map(|actor| actor.id())
-                .collect()
-        });
+        let aiming: Vec<u32> = music.aiming.clone();
         if !aiming.is_empty() {
             self.aim.refresh(now, AIM_MEMORY_S);
         }
 
         // Missiles guided at the player, counted every step; an AIM-120
         // farther than 30,380 ft is not counted.
-        let inbound_ids: Vec<u32> = combat
-            .projectiles
+        let inbound_ids: Vec<u32> = frame
+            .readout
+            .rwr
+            .inbound
             .iter()
-            .filter(|p| {
-                p.incoming
-                    && p.target == Some(live::PLAYER_OWNER)
-                    && !(p
-                        .weapon(combat.configuration())
-                        .source
-                        .eq_ignore_ascii_case("AIM120.JT")
-                        && distance(p.position, position) > AIM120_IGNORE_FT)
+            .filter(|missile| {
+                !(missile.aim120 && distance(missile.position, position) > AIM120_IGNORE_FT)
             })
-            .map(|p| p.id)
+            .map(|missile| missile.id)
             .collect();
         let inbound = !inbound_ids.is_empty();
 
@@ -215,43 +129,21 @@ impl Observer {
             gear_down: flight.gear_down,
         });
 
-        let airborne = !on_runway && !flight.research.as_ref().is_some_and(|r| r.on_ground);
-        let status = self.outcome.step(now, mission, position, airborne);
-
         let inputs = situation::Inputs {
-            succeeded: status.succeeded,
+            succeeded: music.succeeded,
             ejected: flight.escape.is_some(),
             launching,
             air_target,
             hit_recently: self.hit.active(now),
             danger: far_target || self.aim.active(now) || inbound,
-            home: status.home,
+            home: music.home,
             deck,
         };
-        let causes = status
-            .radio
-            .iter()
-            .map(|stem| match *stem {
-                outcome::ALMOST_HOME => {
-                    let (range_ft, altitude_ft) = self.home_base.map_or((0., 0.), |base| {
-                        let across = (base[0] - position[0]).hypot(base[2] - position[2]);
-                        (across.hypot(base[1] - position[1]), position[1])
-                    });
-                    Cause::AlmostHome {
-                        range_ft,
-                        altitude_ft,
-                    }
-                }
-                _ => Cause::MissionAccomplished,
-            })
-            .collect();
         let journal = self.journal(now, inputs, designated_target, aiming, inbound_ids);
         Step {
             now,
             inputs,
-            radio: status.radio,
             journal,
-            causes,
         }
     }
 
@@ -304,20 +196,55 @@ impl Observer {
 mod tests {
     use super::*;
 
+    /// The frame parts a test's flight frame borrows.
+    #[derive(Default)]
+    struct Parts {
+        picture: crate::snapshot::RenderSnapshot,
+        smoke: tore_sim::combat::smoke::Smoke,
+        devices: tore_sim::combat::countermeasures::Devices,
+    }
+    fn test_frame<'a>(
+        parts: &'a Parts,
+        flight: &'a flight::State,
+        combat: &'a live::State,
+    ) -> FlightFrame<'a> {
+        FlightFrame {
+            seat: crate::seats::SeatId(0),
+            plane: crate::seats::PlaneId(0),
+            flight,
+            previous: flight,
+            presented: std::borrow::Cow::Borrowed(flight),
+            picture: &parts.picture,
+            smoke: [&parts.smoke, &parts.smoke],
+            devices: &parts.devices,
+            config: combat.own().configuration(),
+            readout: tore_world::frame::ReadoutSlot::ready(
+                tore_world::readout::build(combat, 0, crate::combat::launcher(flight), None, None)
+                    .unwrap(),
+            ),
+            tick_cues: &[],
+        }
+    }
+
     #[test]
     fn hits_and_guided_missiles_feed_air_and_danger() {
-        let world = crate::terrain::tests::world();
-        let mut combat = crate::ai_wings::tests::combat_fixture(true);
-        let flight = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 20_000., 0.],
-        )
-        .unwrap();
-        let mut observer = Observer::new(None);
+        let world = tore_world::test_support::terrain();
+        let mut combat = tore_world::test_support::combat_fixture(true);
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 20_000., 0.]).unwrap();
+        let mut observer = Observer::new();
+        let parts = Parts::default();
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
-            observer.step(&flight, combat, events, None, &world, None)
+            observer.step(&test_frame(&parts, &flight, combat), events, &world)
         };
-        let first = step(&mut observer, &combat, &[live::Event::PlayerDamaged(3)]);
+        let first = step(
+            &mut observer,
+            &combat,
+            &[live::Event::OwnshipDamaged {
+                aircraft: 0,
+                amount: 3,
+            }],
+        );
         assert_eq!(first.now, 0.);
         assert!(first.inputs.hit_recently && !first.inputs.danger);
         for _ in 1..(30 * 120) {
@@ -330,14 +257,13 @@ mod tests {
             "the hold ends 30 game seconds after the hit"
         );
         assert!(!later.inputs.succeeded && !later.inputs.home, "no mission");
-        assert!(later.radio.is_empty());
 
         // A guided round aimed at the player selects DANGER.
-        combat.command(live::Command::Incoming, crate::combat::launcher(&flight));
-        assert_eq!(combat.projectiles[0].target, Some(live::PLAYER_OWNER));
+        combat.command(0, live::Command::Incoming, crate::combat::launcher(&flight));
+        assert_eq!(combat.projectiles[0].target, Some(0));
         assert!(step(&mut observer, &combat, &[]).inputs.danger);
         // An AIM-120 beyond 30,380 ft is not counted; inside, it is.
-        let mut aim120 = combat.configuration().stations[0].weapon.clone();
+        let mut aim120 = combat.own().configuration().stations[0].weapon.clone();
         aim120.source = "AIM120.JT".into();
         combat.projectiles[0].weapon = Some(aim120);
         combat.projectiles[0].position = [30_381., 20_000., 0.];
@@ -348,16 +274,14 @@ mod tests {
 
     #[test]
     fn input_changes_are_journaled_with_the_reasons_behind_them() {
-        let world = crate::terrain::tests::world();
-        let mut combat = crate::ai_wings::tests::combat_fixture(true);
-        let flight = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 20_000., 0.],
-        )
-        .unwrap();
-        let mut observer = Observer::new(None);
+        let world = tore_world::test_support::terrain();
+        let mut combat = tore_world::test_support::combat_fixture(true);
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 20_000., 0.]).unwrap();
+        let mut observer = Observer::new();
+        let parts = Parts::default();
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
-            observer.step(&flight, combat, events, None, &world, None)
+            observer.step(&test_frame(&parts, &flight, combat), events, &world)
         };
         let music = |step: &Step| match &step.journal[..] {
             [entry] => match &entry.origin.cause {
@@ -375,14 +299,17 @@ mod tests {
         let hit = music(&step(
             &mut observer,
             &combat,
-            &[live::Event::PlayerDamaged(3)],
+            &[live::Event::OwnshipDamaged {
+                aircraft: 0,
+                amount: 3,
+            }],
         ));
         assert_eq!(
             (hit.from, hit.to),
             (Some(situation::Rank::Normal), situation::Rank::Air)
         );
         assert_eq!(hit.hit_at, Some(2. * flight::DT));
-        combat.command(live::Command::Incoming, crate::combat::launcher(&flight));
+        combat.command(0, live::Command::Incoming, crate::combat::launcher(&flight));
         let inbound = music(&step(&mut observer, &combat, &[]));
         assert_eq!(inbound.inbound, [combat.projectiles[0].id]);
         assert!(inbound.inputs.danger);
@@ -391,58 +318,6 @@ mod tests {
             Cause::Music(Box::new(inbound))
                 .to_string()
                 .contains("guided at you")
-        );
-    }
-
-    #[test]
-    fn result_calls_match_what_the_host_sends_and_carry_their_trigger() {
-        let world = crate::terrain::tests::world();
-        let combat = crate::ai_wings::tests::combat_fixture(true);
-        let flight = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 5_000., 10_000.],
-        )
-        .unwrap();
-        let mut observer = Observer::new(Some([0.; 3]));
-        // Not yet at the first check, then a success on the 4 s cadence.
-        let step = (0..600)
-            .map(|i| {
-                let succeeded = move || i > 0;
-                let mission = Some(&succeeded as &dyn Fn() -> bool);
-                observer.step(&flight, &combat, &[], None, &world, mission)
-            })
-            .find(|step| !step.radio.is_empty())
-            .unwrap();
-        assert_eq!(
-            step.radio,
-            [outcome::MISSION_ACCOMPLISHED, outcome::ALMOST_HOME]
-        );
-        let phrases: Phrases = [("^MISSACC", "Mission accomplished")]
-            .into_iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect();
-        let calls = step.radio_calls("RIO", &phrases);
-        for (call, stem) in calls.iter().zip(&step.radio) {
-            // What the host builds for each stem today.
-            let delay = if *stem == outcome::MISSION_ACCOMPLISHED {
-                2.
-            } else {
-                0.
-            };
-            let host = Call::new("RIO", Phrase::stem(&phrases, stem), Kind::Important).after(delay);
-            assert_eq!(
-                (&call.label, &call.text, &call.stems, call.kind),
-                (&host.label, &host.text, &host.stems, host.kind)
-            );
-            assert_eq!((call.route, call.delay), (host.route, host.delay));
-        }
-        assert_eq!(calls[0].origin.cause, Cause::MissionAccomplished);
-        assert_eq!(
-            calls[1].origin.cause,
-            Cause::AlmostHome {
-                range_ft: 10_000f64.hypot(5_000.),
-                altitude_ft: 5_000.
-            }
         );
     }
 }

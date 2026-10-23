@@ -2,10 +2,9 @@
 //! change detection against synthetic effect lists.
 use super::super::{Message, Recorder, Tick};
 use super::*;
-use crate::ai_wings::tests::{aircraft, combat_fixture, payload, spawned};
-use crate::combat::render_hash_tests as fixture;
-use crate::terrain;
+use crate::combat_view::render_hash_tests as fixture;
 use tore_sim::flight::trace::Effect;
+use tore_world::test_support::{aircraft, combat_fixture, payload, spawned};
 
 #[test]
 fn an_effect_turns_on_and_off_once_through_flicker_and_a_moment_has_no_off() {
@@ -92,8 +91,8 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
     combat.state = combat_fixture(true);
     combat.state.targets = targets;
     let player = flight::State::new(&aircraft(), [0., 20_000., -5_000.]).unwrap();
-    let world = terrain::tests::world();
-    combat.restart_render(&player, Some(&wings));
+    let world = tore_world::test_support::terrain();
+    combat.restart_render(combat.own_id(), &player, Some(&wings));
     let (mut recorder, receiver) = Recorder::detached(1 << 20, &[]);
     for tick in 0..ticks {
         if record {
@@ -102,6 +101,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
         if tick == 120 {
             wings
                 .command_at(
+                    crate::ai_wings::PLAYER_ID,
                     tore_sim::ai::wing::PlayerOrder::AttackOnContact,
                     None,
                     None,
@@ -109,11 +109,22 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
                 )
                 .unwrap();
         }
-        let events = combat
-            .state
-            .step(false, crate::combat::launcher(&player), |_, _| 0.);
-        wings.step(&mut combat.state, &player, &world).unwrap();
-        combat.advance_render(&player, Some(&wings));
+        let events = combat.state.step(
+            &[tore_sim::combat::live::OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: crate::combat::launcher(&player),
+            }],
+            |_, _| 0.,
+        );
+        let own = combat.state.own();
+        let human = crate::ai_wings::HumanAircraft::new(
+            crate::ai_wings::HumanSlot::SINGLE_PLAYER,
+            &player,
+            own,
+        );
+        wings.step(&mut combat.state, &[human], &world).unwrap();
+        combat.advance_render(combat.own_id(), &player, Some(&wings));
         if record {
             let journal = wings.take_ai_journal();
             let outcomes = combat.state.ledger.take_outcomes();
@@ -123,6 +134,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
                 flight: &player,
                 previous: &player,
                 pilot: &flight::PilotInput::default(),
+                others: &[],
                 wings: Some(&wings),
                 world: &world,
                 events: &events,
@@ -150,7 +162,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
         actors,
         combat.state.projectiles.clone(),
         combat.state.targets.iter().map(|t| t.position).collect(),
-        combat.state.player_hp,
+        combat.state.own().hp,
     );
     (fingerprint, frames)
 }
@@ -255,4 +267,23 @@ fn recording_the_reasons_changes_nothing_the_mission_does() {
             }
         }
     }
+}
+
+#[test]
+fn a_no_laze_decision_is_an_ai_strike_event_with_a_fixed_reason() {
+    use tore_sim::ai::strike::NoLaze;
+    let manual = strike_decision_event(7, NoLaze::Manual, StationId(2), Some(42), "GBU-10E".into());
+    assert_eq!(manual.kind, kind::AI_STRIKE);
+    assert_eq!((manual.subject, manual.object), (Some(7), Some(42)));
+    assert_eq!(manual.string(field::REASON), Some("no_laze_manual"));
+    assert_eq!(
+        manual.string(field::DECISION),
+        Some("no laze support, dropping manual")
+    );
+    assert_eq!(manual.string(field::WEAPON), Some("GBU-10E"));
+    assert_eq!(manual.num(field::STATION), Some(2.));
+    let rtb = strike_decision_event(8, NoLaze::Rtb, StationId(3), None, "AS-14".into());
+    assert_eq!(rtb.string(field::REASON), Some("no_laze_rtb"));
+    assert_eq!(rtb.string(field::DECISION), Some("no laze support, RTB"));
+    assert_eq!(rtb.object, None);
 }

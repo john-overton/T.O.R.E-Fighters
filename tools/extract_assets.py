@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--source', type=Path, default=repo / 'gameassets/fighters-anthology',
                         help='An archive or directory; default: local Fighters Anthology media')
     parser.add_argument('--out', type=Path, default=repo / '.local/extracted', help='Output directory outside source media')
-    parser.add_argument('--aircraft', action='append', choices=['f18', 'rafale', 'f14', 'a4e', 'x31', 'mig29', 'su27', 'mig21', 'su25', 'mig23', 'su35', 'f22', 'f22n'], help='Reviewed FA aircraft and its transitive aircraft, cockpit, sensor, store and audio dependencies')
+    parser.add_argument('--aircraft', action='append', choices=['f18', 'rafale', 'f14', 'a4e', 'x31', 'mig29', 'su27', 'mig21', 'su25', 'mig23', 'su35', 'f22', 'f22n', 'c130', 'ac130', 'e3', 'il76', 'e2', 'av8', 'yak141', 'v22', 'ah64', 'mi24', 'ch47', 'mig17', 'f4b', 'f4j', 'f4e', 'f4g', 'a7', 'f15', 'f16c', 'f104', 'a10', 'b747', 'a310'], help='Reviewed FA aircraft and its transitive aircraft, cockpit, sensor, store and audio dependencies')
     parser.add_argument('--validate-flight', action='store_true', help='After aircraft extraction, run the shared headless hybrid-flight acceptance suite')
     parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
     parser.add_argument('--native-weapons', action='store_true', help='Static FA weapon, sensor, loading and effect code research; no retail execution')
@@ -108,7 +108,7 @@ def main():
         print(f'SHA-256 provenance added: {report_path}')
     if result.returncode == 0 and args.validate_flight:
         report = json.loads(report_path.read_text())
-        identities = {{'f18': 'F18.PT', 'rafale': 'RAFALE.PT', 'f14': 'F14.PT', 'a4e': 'A4E.PT', 'x31': 'F31.PT', 'mig29': 'MIG29.PT', 'su27': 'SU27.PT', 'mig21': 'MIG21.PT', 'su25': 'SU25.PT', 'mig23': 'MIG23.PT', 'su35': 'SU35.PT', 'f22': 'F22.PT', 'f22n': 'F22N.PT'}[aircraft] for aircraft in args.aircraft}
+        identities = {{'f18': 'F18.PT', 'rafale': 'RAFALE.PT', 'f14': 'F14.PT', 'a4e': 'A4E.PT', 'x31': 'F31.PT', 'mig29': 'MIG29.PT', 'su27': 'SU27.PT', 'mig21': 'MIG21.PT', 'su25': 'SU25.PT', 'mig23': 'MIG23.PT', 'su35': 'SU35.PT', 'f22': 'F22.PT', 'f22n': 'F22N.PT', 'c130': 'C130.PT', 'ac130': 'AC130.PT', 'e3': 'E3.PT', 'il76': 'IL76.PT', 'e2': 'E2.PT', 'av8': 'AV8.PT', 'yak141': 'YAK141.PT', 'v22': 'V22.PT', 'ah64': 'AH64.PT', 'mi24': 'MI24.PT', 'ch47': 'CH47.PT', 'mig17': 'MIG17F.PT', 'f4b': 'F4B.PT', 'f4j': 'F4J.PT', 'f4e': 'F4E.PT', 'f4g': 'F4.PT', 'a7': 'A7.PT', 'f15': 'F15.PT', 'f16c': 'F16C.PT', 'f104': 'F104.PT', 'a10': 'A10.PT', 'b747': 'B747.PT', 'a310': 'A310.PT'}[aircraft] for aircraft in args.aircraft}
         profiles = []
         hashes = set()
         for entry in report['entries']:

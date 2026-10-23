@@ -35,6 +35,165 @@ Each chaff cartridge or flare released plays `&CHAFF.5K` or `&FLARE.5K`, for
 the player and AI alike. Its level, distances and cockpit rule are in the
 [countermeasures spec](countermeasures.md#release-sound).
 
+Rotorcraft: the engine loop plays at the rotor's speed, a share of its
+governed 100 percent, so a rotor that bleeds drops in pitch and an
+overspeeding one rises (the V-22 sits at 84 percent in airplane mode); the
+vortex ring state and retreating blade stall add a warble of up to 4 percent.
+LOW ROTOR plays the stall horn and ROTOR OVERSPEED and the V-22's GEAR SPEED
+play the stall warning, each after the condition has held a quarter second,
+with their cockpit messages repeating every four seconds. The same pitch is
+heard from another rotorcraft's engine and in a replay, which records the rotor
+speed ([replays](../REPLAYS.md)). Opinionated (VTOL overhaul slice P7, agent
+decisions): the sizes and the choice of recordings are not retail.
+
+## Weapon launch and bomb release
+
+Bombs use `&bomb.11k` on release, including slick, retarded, cluster, packed,
+laser and coordinate stores (opinionated, John, 2026-10-15). The novelty
+~BLDR and ~MOOSE keep their own `&mothbf.11k`. One shared `release_sound`
+helper supplies cockpit, other-aircraft, multiplayer and replay playback.
+The resource key is canonical uppercase `&BOMB.11K`, including virtual GBU-12,
+GBU-16 and GBU-38 records. R-27 variants inherit their donor firing recording.
+Impact sounds are unchanged. Other weapons keep their record's firing sound:
+a Maverick, for example, plays `&ASHVMIS.11K`.
+
+- **One sound per release.** The sound is asked for once per trigger call,
+  after the call has made all its projectiles. A 3-, 6- or 7-bomb pack is one
+  thump, not three, six or seven laid on top of each other; a rocket pod's held
+  fire sounds once per rocket, four a second; a gun sounds per its own round
+  cadence as before. The simulation reports each bomb of a pack, so the same
+  recording asked for twice in one tick plays once.
+- **From the cockpit.** The firing aircraft's own cockpit hears it at once,
+  centered, at full level, wherever the weapon goes.
+- **From outside.** In an external view it starts at once and is full within
+  100 ft of the aircraft, then fades in a straight line to silence at the
+  record's `maxSndDist`: 6,000 ft on most records, 7,000 on the AGM-65A,
+  AGM-45, GBU-10 and a few more. A view 200 ft back hears it at nearly full
+  level, where the earlier generic curve gave it about 40 percent. It is
+  silent past 20,000 ft whatever the record says.
+- **Pitch.** The record's `freqAdj` offsets the pitch (1/256 of the 11 kHz rate
+  per unit). It is zero on every missile, bomb, rocket and gun a player's
+  aircraft can carry and nonzero only on surface guns, so there is no pitch
+  change to hear; it is not applied.
+
+Agent decisions: a replay and a multiplayer client carry the recording name
+only, so their launches fade over 6,000 ft (fitted: the value on 118 of the
+135 records); the player's own launch no longer waits for sound to travel in an
+external view, where the earlier build delayed it by distance. Evidence and the
+disassembly addresses are in
+[the sound format notes](../formats/sound.md#weapon-launch-and-bomb-release-sound).
+Not heard by ear yet; whether `&ASHVMIS.11K` is what the Maverick should sound
+like is John's call to make by listening.
+
+## Other aircraft's launches
+
+Retail plays an aircraft's launch sound for any aircraft, not only the one
+flown: the sound request carries the record's recording and `maxSndDist`, and
+it sounds when the listener is within that distance of the firing aircraft
+(John asked for this on 2026-10-12). So an AI wingman's Sidewinder, an enemy's
+bomb release and another player's Maverick online are heard.
+
+- **Same distance rule as the external view.** Full within 100 ft of the firing
+  aircraft, a straight-line fade to silence at the record's `maxSndDist`,
+  nothing beyond. The report travels at the speed of sound. In a cockpit it is heard through the
+  canopy (40 percent, no treble), as every outside sound is. Other shooters'
+  weapons use 65 percent of the own external weapon level (fitted agent
+  choice, 2026-10-15), before canopy and preference volumes.
+- **One sound per aircraft per release.** A seven-bomb pack from one AI
+  aircraft is one thump. Two aircraft releasing in the same tick are two
+  sounds, even for the same recording.
+- **Surface units.** A surface unit's missile launch (a SAM site, a ship's
+  SAM or SSM, any surface launcher) plays its weapon record's recording the
+  same way, from where the missile leaves the launcher: full within 100 ft,
+  fading to the record's `maxSndDist` (6,000 ft on the SA-3, SA-6 and most
+  others, 12,000 ft on the SA-2A), silent beyond. One sound per launcher per
+  release: a battery firing two missiles at once from one unit is one sound,
+  two units are two. Switched on by John on 2026-10-12 (item 4); BA2 had left
+  them silent. Every surface missile record names a recording (`&SALTMIS.11K`,
+  `&SAHVMIS.11K`, `&LTMISS.11K`, `&HVYMISS.11K`), so none needs a fitted
+  default.
+- **Guns.** Aircraft, helicopters, AC-130 guns, AAA and ship guns use their
+  own weapon record's `fireSound`. The previous gun exclusions made these
+  shooters silent. New rounds start a burst of at most 0.25 seconds; rounds
+  from the same shooter and recording cannot start another until 30 simulation
+  ticks have passed. Sustained fire repeats those bursts, not one sound per
+  round. At most four bursts are selected per 30-tick emission window, with
+  nearer new sources chosen first. At arrival the mixer also holds at most four
+  gun voices, replacing its quietest gun if arrivals bunch together. Gun reach is
+  the record's positive distance capped at 6,000 ft, or 4,500 ft when absent.
+  The first 5 ms fade in and last 30 ms fade out to avoid clicks. These burst,
+  cap and range rules are fitted agent choices (2026-10-15), not recovered
+  retail behavior. Slow cannon reports can be shortened by the burst limit.
+- **Voices.** At most the four nearest non-gun launches are selected per
+  emission tick (agent decision); the placed-sound pool still drops the quietest when it is full.
+- **Online and replays.** The wire and a recording name the weapon (and the
+  shooter), not the recording or the reach, so the game looks the weapon up in
+  its own weapon catalog by name: the same `fireSound` and `maxSndDist` the
+  host used. Where a weapon is not in the catalog it is silent. Position is the
+  firing aircraft's at that tick. Surface replays fall back to the recorded
+  unit position if the new projectile is absent. Clients also sound the gun
+  rounds reconstructed from existing gun/surface burst messages; converted
+  network replays use newly born recorded gun rounds if no launch event exists.
+  Flak has no reconstructed rounds, so the host now sends its report as an
+  existing Launch event. Wire layout and protocol number are unchanged; old
+  clients ignore these gun sounds. The lead decides the release protocol.
+
+Retail evidence for surface launches: `PROJFire` (`0x4c2170`) and
+`PROJFireSound` (`0x4c26f0`) test no object class before the sound request,
+and every surface missile record carries the same `fireSound` and
+`maxSndDist` fields
+([evidence](../formats/sound.md#surface-launches)). Whether the original's
+ground units reach `PROJFire` through the same NPC weapon service as aircraft
+was not traced, so that a SAM site sounds in retail is expected, not seen.
+
+Other shooters' gun bursts, missiles, rockets, bombs and surface reports use
+travel time in live play, multiplayer clients and replays (opinionated, John,
+2026-10-15). The existing model expands a spherical wave from the emission
+position at the sound speed for the mean source/listener altitude at emission.
+Each 120 Hz tick compares its radius with the listener's current distance.
+At sea level, 3,000 ft takes about 2.7 seconds. Movement toward or away from
+the source changes arrival time. The firing cockpit stays immediate.
+
+Agent decision: apply release grouping, nearest-source selection and the
+30-tick shooter/recording cooldown at emission, not arrival. Hearing range
+and canopy mix are evaluated at arrival, so a listener can enter hearing
+range while a wave travels. Pending reports share the existing 256-wave bound in a separate weapon field; overflow drops the oldest.
+Mute and replay reset discard pending reports. No sound device is needed for
+the recording-log arrival audit. These are fitted presentation limits,
+not recovered retail behavior. Not heard by ear yet.
+
+## Flak bursts
+
+John asked on 2026-10-13 for a check that the flak explosion sound is the
+retail one. Checked against FA.EXE 1.02F (SHA-256 `e31560c2...e99244c`, the
+build in [the explosion notes](../formats/explosions.md)) and the user's
+FA_2.LIB, static reads only; nothing was played.
+
+- **Retail.** `KS12.JT` and `KS19.JT` both carry `expType` 27 (hit an
+  aircraft or object), 15 (land) and 17 (water), `maxSndDist` 15,000 ft and
+  `fireSound` `&expl3.5k`. A flak burst is explosion type 27, whose row of the
+  explosion table at `0x4f46c8` (read again from the executable on 2026-10-13)
+  names four recordings, `&AIREXP1.11K`, `&AIREXP2.11K`, `&EXPL3.5K` and
+  `&EXPL9.5K` (one drawn at random), full level within 1,000 ft and silent at
+  25,000 ft. Types 28 and 29 name `&AIREXP1`, `&AIREXP2`, `&AIREXP4` and
+  `&AIREXP5` instead; in retail they are only the variants that a gun hit on
+  an aircraft (18) or an aircraft kill (30) sometimes shows.
+- **Before 2026-10-13.** The KS-12's burst was type 27 and sounded exactly as
+  above. The KS-19's burst was type 28, an agent choice to draw a larger sheet
+  (`FLAKB`), and so played the type 28 recordings (`&AIREXP4` and `&AIREXP5`
+  in place of `&EXPL3` and `&EXPL9`): not what retail plays for that record.
+- **Now.** Both flak guns' bursts are heard as type 27, the retail row, with
+  its distances; the KS-19 still draws the larger `FLAKB` sheet. Same
+  recordings, distances and level for the player, AI aircraft, online and
+  replays (the sound is made by the simulation when the shell bursts and
+  carried as a sound event).
+- **Limits and unverified aspects:** the volume is the
+  generic explosion curve (straight line from full to silent), not measured;
+  the gun's own report (`fireSound` `&expl3.5k`, retail reach 15,000 ft) is
+  subject to the fitted gun burst and range limits above.
+  Whether the burst you heard as wrong was the KS-19's or the missing report
+  needs John's ear.
+
 ## Numbers and boundaries
 
 | Component | Established value |
@@ -42,6 +201,7 @@ the player and AI alike. Its level, distances and cockpit rule are in the
 | IR growl | Unsigned 8-bit mono, 11,025 samples/second |
 | Aircraft pass and sonic boom | Unsigned 8-bit mono, 11,025 samples/second |
 | Missile pass | Unsigned 8-bit mono, 5,512 samples/second |
+| Weapon launch and bomb release | Level 255 (full), centered in the firing cockpit; outside, full within 100 ft, silent at the record's `maxSndDist` (6,000 or 7,000 ft on the player's weapons), none past 20,000 ft; one request per fire call |
 | IR tracking amplitude relative to lock | One half before the original smoothing |
 | IR quality input limit | 100 percent |
 

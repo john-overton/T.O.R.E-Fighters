@@ -633,8 +633,16 @@ delta slots 1, 4 and 7 by wing index. Outside the 10 NM leash, rejoin the charge
 resume engagement at or inside 8 NM. Rejoin guidance uses corner speed with
 pitch limited to plus or minus 20 degrees in three-second bounded requests.
 Immediate missile defense and fuel recovery take precedence. CAP returns toward
-its assigned center outside the patrol radius. Full route navigation and
-mission success/failure scoring remain outside this slice.
+its assigned center outside the patrol radius when it has no permitted target.
+An observed intruder inside the station can be engaged while the patroller is
+outside it; returning to station must not override that pursuit. Before first
+contact an AI leader also navigates its station, with its unreleased wingmen
+in formation. An explicit recall still suppresses this autonomous navigation.
+After a target leaves the permitted region or is lost, the wing resumes patrol.
+Clearing the sky does not complete a CAP assignment; fuel, damage and explicit
+return orders still send it home. This is spec-derived implementation of John's
+CAP correction (2026-10-15), with the station selection below fitted by the agent.
+Full route navigation remains outside this slice.
 
 <a id="quick-mission-objective-stamps"></a>
 
@@ -652,7 +660,7 @@ six objective fields and the six survival fields.
 | --- | --- |
 | Use mission setting | Inherit the selected mission preset; normal default is free engagement |
 | Free fire (any opposing group) | Engage observed eligible hostiles without a designated primary group |
-| Combat air patrol | Patrol a 10 NM horizontal circle centered on the player launch position |
+| Combat air patrol | Patrol a 10 NM horizontal circle centered on that wing leader's launch position (fitted, agent decision, 2026-10-15); a human-led wing uses its human launch position |
 | Primary target: opposing group 1, 2 or 3 | Assign every aircraft in that group as a destroy objective; unrelated groups are not primary objectives |
 | Escort another same-side group | Protect every aircraft in the chosen group |
 | Self-defense | Engage only independently identified immediate attackers |

@@ -63,7 +63,7 @@ The app defaults to the researched hybrid adapter, requested by John on
 2026-09-16. `--researched-flight` remains an explicit alias; `--legacy-flight`
 selects the previous compatibility model. Selection persists across new free
 flights in that process. It also works
-with `--headless-flight 7200 --maneuver loop`. Twelve aircraft have rendered initial ports; the
+with `--headless-flight 7200 --maneuver loop`. Thirty-seven aircraft identities have flight configurations; the
 [roster guide](aircraft-import.md) lists their identities. Select Rafale with
 `--aircraft rafale` or Quick Mission. Each uses its source-referenced cockpit family and
 its own reviewed exterior device mapping. No F18.SH animation addresses are applied to another shape. The additional
@@ -88,19 +88,60 @@ checks cover full loops, bank symmetry/AoA, wind advection, departure/recovery,
 contact outcomes and fuel consumption. Synthetic unit tests cover pause/render
 rate independence, wind, mass validation and ground behavior without retail data.
 
+## Variety aircraft and powered lift
+
+The [variety flight contract](spec/variety-flight.md) covers seventeen additional
+conventional aircraft and six powered-lift aircraft. Every exact identity owns
+its source mass, fuel, thrust, controls and envelopes. The four F-4 variants
+share algorithms while preserving their own source configuration. Conventional
+variety aircraft use the established hybrid solver. The fitted top speeds, the
+level-speed fraction (drag reaches full thrust at 96 percent of the top speed,
+which keeps the transports and airliners out of the overspeed shake) and the
+ground-contact rules (the complete deployed gear, including the AV8's central
+pieces) have one home in that contract.
+
+The six powered-lift aircraft (AV8, YAK141, V22, AH64, MI24, CH47) fly their own
+physics since the VTOL and helicopter overhaul, specified in
+[powered-lift flight](spec/powered-lift-flight.md): a six-degree-of-freedom rigid
+body whose angular rates are state, with rotors (momentum theory, a rotor-speed
+state, translational lift, ground effect, autorotation, the vortex ring state,
+torque, retreating blade stall), vectored nozzles with puffer jets, nacelles
+with an always-on conversion corridor and an angle-of-attack wing. They share
+the conventional solver's envelope, drag, systems and contact pieces, so a
+fixed-wing aircraft is untouched (every golden fingerprint is unchanged). The
+module map is in [architecture](ARCHITECTURE.md#powered-lift-flight-modules).
+
+Powered controls operate only in the hybrid adapter; the legacy adapter and the
+restricted native research path stay separate. All of the powered-lift state
+(body rates, rotor speed, induced velocity, disk tilt, engine output, trim,
+stability level, warnings and the corridor's held demand) is tick-owned and in the
+exact flight state, so snapshots, checkpoints, prediction and seat handoff
+continue the same flight. The unit tests are synthetic; the source-backed
+probes read user-owned PT files at runtime. `variety_flight` checks conventional
+flight or hover, vertical landing, departure, stick and yaw response and forward
+conversion; `powered_probe` (helicopters and the V-22) and `jet_probe` (the
+jets, against the conventional model on the same PT) print the tables recorded in
+the [overhaul baseline](baselines/vtol-overhaul.md):
+
+```sh
+cargo run --locked -p tore-sim --example variety_flight -- PATH/FA_2.LIB/AV8.PT PATH/FA_2.LIB/AH64.PT
+cargo run --release --locked -p tore-sim --example powered_probe -- PATH/FA_2.LIB/AH64.PT PATH/FA_2.LIB/V22.PT
+cargo run --release --locked -p tore-sim --example jet_probe -- PATH/FA_2.LIB/AV8.PT --compare PATH/FA_2.LIB/F16C.PT
+```
+
 ## Data and implementation boundaries
 
 | Component | Runtime behavior and provenance |
 | --- | --- |
-| Aircraft selection | Reviewed F18.PT (F/A-18D) and RAFALE.PT (Rafale C), both FA type 5 / size 660. Other identities remain rejected, including RAFALEE/RAFALEF and F18C. |
+| Aircraft selection | Exact reviewed PT identities for the existing roster and the [23-aircraft variety batch](spec/aircraft-variety.md). F18.PT remains the F/A-18D; RAFALE.PT remains the Rafale C. F18C, RAFALEE and RAFALEF are not aliases. |
 | Envelopes and mass | Original G polygons, empty weight, internal fuel, military/AB thrust, consumption and drag/loading fields. Scalars resolve once when creating state; envelope intersection no longer allocates per update. |
 | Attitude and momentum | Shared orthonormal basis, independent velocity and nose direction, full vertical/inverted flight. Float integration, aerodynamic alignment, trim AoA, atmosphere lapse, response and drag normalization are fitted. |
 | Controls | Original roll-rate maximum in the hybrid path; G authority from aircraft envelopes/loading. Response filtering, pitch/yaw coupling and actuator travel are fitted. |
 | Departure | Source warning/stall transitions and spin entry, with connected severity/control/lift attenuation. Initial stall classification uses a fitted below-clean-envelope gate. Hybrid spin torque, damping, surface response and threshold recovery are fitted; PT maximum yaw rate bounds angular velocity. The original two reviewed aircraft use spinExit −2; X-31 additionally disables spin entry. |
 | Propulsion/fuel/devices | Per-aircraft military/AB thrust and fuel consumption; engine/fuel/throttle gates; gear, flaps, brake, hook and burner state. Lapse, exhaust ramp and three-second actuator travel remain fitted. |
-| Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash. Aircraft-owned CG clearance, load-scaled tire scrub/friction, smooth wheel unloading and crash severity policy are fitted ([takeoff rules](spec/takeoff-ground-contact.md)). |
+| Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash, except that on a landable surface a touchdown over the landing limits but inside a hard-landing band (2 times sink and side speed, 1.5 times forward speed, roll and pitch) damages the gear and survives. One shared touchdown rule (`touchdown::assess`) also lets helicopters, the V-22 in helicopter mode and hovering AV-8/Yak-141 land on open ground or flat roofs within sink, ground speed and slope limits, used by contact, the AI ejection check and the AI go-around check ([rule](spec/touchdown.md)). Aircraft-owned CG clearance, load-scaled tire scrub/friction, smooth wheel unloading and crash severity policy are fitted ([takeoff rules](spec/takeoff-ground-contact.md)). |
 | Wind | Explicit world wind in ft/s via `research::Surface`; airborne aerodynamic forces use air-relative velocity and position uses ground velocity. Hybrid aerodynamics also use full wind during rollout; the [MTOW crosswind/tailwind rule](spec/runway-wind.md) affects tire grip and difficulty cues, with static parked hold. Synthetic advection test holds airspeed unchanged and checks 400-foot drift over ten seconds at 40 ft/s. |
-| Payload | `State::set_payload` validates finite, nonnegative mass against current fuel + empty weight and MTOW. Added mass affects loading/forces. The flight model reads it through `State::carried_lbs`, which the Ignore weapon weights cheat reduces to external fuel only ([cheats](spec/cheats.md)); Pull extra G raises the positive G limit to 9. This is mass-only: UI loadout, station release, external fuel transfer and store-specific drag are not implemented. |
+| Payload | `State::set_payload` validates finite, nonnegative mass against current fuel + empty weight and MTOW. Added mass affects loading/forces. The flight model reads it through `State::carried_lbs`, which the Ignore weapon weights cheat reduces to external fuel only ([cheats](spec/cheats.md)); Pull extra G raises the positive G limit to 9. Loadout, station release, external fuel burn and [player/AI jettison](spec/jettison.md) update the carried load used by the shared loading and drag model. Individual store-specific drag coefficients are not imported. |
 | Time/replay | Fixed 120 Hz simulation; authored fractional bridge to native 256-unit time; seeded native RNG helper. Same-host deterministic replay is tested. Original scheduler/global RNG draw ordering and cross-architecture bit identity are not established. |
 
 The legacy path remains available for comparison. Native integer matrix, force,
@@ -268,6 +309,9 @@ Rudder yaw now consumes the fitted filtered deflection, preserving a smooth
 release. Each aircraft's own tuning includes `sideslip_drag=0.5`: drag/weight is
 that coefficient times squared lateral airspeed fraction times low-speed authority.
 This symmetric continuous loss is authored, not the native display-slip drag law.
+[Lateral flight](spec/lateral-flight.md) adds fitted slip side force and roll coupling,
+and the requested 0 to 50 mph nosewheel schedule. The sim exposes its available
+steering fraction for the NSW HUD readout, independently of pedal position.
 Roll retains its single response filter and existing source/hybrid versus fitted/
 legacy cap. No new native rudder-to-roll law is asserted.
 
@@ -358,10 +402,72 @@ actuators and engine progression remain in the shared systems model. Damaged
 pilots can request recovery but cannot repair a component or override physics.
 Ground-started AI aircraft use the researched model for runway contact.
 An airborne AI actor switches to that model when its landing sequence begins.
+AI helicopters (AH-64, Mi-24, CH-47) and the AI V-22 fly the researched model, and
+so their powered-lift physics, from the mission start under every AI flight model,
+single player's `standard` included: an intended default change of 2026-10-12
+(opinionated: John's request for AI helicopter and VTOL hover, takeoff and landing;
+the mechanism the lead's decision, slice H1), because on the legacy model a
+rotorcraft flies as an aeroplane and cannot hover. They are flown by their own
+[rotorcraft control](spec/ai.md#rotorcraft-and-jet-lift-control), which commands the
+collective, cyclic, pedals and V-22 nacelles. The vectoring jets keep the AI flight
+model's choice. The player's adapter flags (`--legacy-flight` and the others) do
+not apply to AI aircraft and are unchanged.
 The control mapping accounts for current flap lift and low-speed G authority.
 [Takeoff, landing and return to base](spec/ai-airfield.md) define the sequence.
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
+
+## Rotorcraft fuel
+
+Fitted (agent decision, John's requests of 2026-10-13). A helicopter or the V-22 does
+not burn the PT record's fuel flow times the throttle, as every other aircraft does.
+The records' flows (1 lb/s for the AH-64, V-22 and CH-47, 3 lb/s for the Mi-24) are
+whole-pound placeholders that would empty the Mi-24 in 18 minutes
+([evidence](formats/aircraft.md#rotorcraft-fuel-records)). The burn follows the shaft
+power the drive delivers, the turboshaft line:
+
+```text
+flow = full_flow x (0.22 + 0.78 x power / rated_power)        lb/s
+full_flow = rated shaft hp x 0.6 lb/(hp h) / 3600
+```
+
+- `power` is the drive's own lagged engine output, so a hover burns what the rotor
+  draws to hover, level flight at 60 to 100 knots burns less (translational lift), a
+  climb or a fast dash more, and an engine on the ground with the collective down only
+  the idle share. Engines off burn nothing. The rated power is the one each aircraft's
+  rotor model already carries (`models/variety/lift.rs`), so the burn scales with the
+  aircraft.
+- **0.6 lb/(hp h)** is 0.55 for turboshafts of this class (T700, TV3-117, T55 run 0.45
+  to 0.60) over the 8 percent of the engines' power that transmission and installation
+  take before the rotors. **0.22** is the idle share (a turboshaft burns about a fifth to
+  a quarter of its full flow at flight idle). Both fitted.
+- **Results** (`powered_probe`, hover and level trims at 1,000 ft at the record weights; the
+  full table is in the [baseline](baselines/rotorcraft-fuel.md)): hover 0.47 lb/s for the
+  AH-64 (71 minutes), 0.43 for the Mi-24 (128 minutes, about 200 at 100 knots). The
+  CH-47, with the CH-47F's weights and 7,340 lb of fuel since slice HF3, burns 0.67 lb/s
+  at a hover (182 minutes) and 0.83 at its 156 knot cruise home (148 minutes; the real
+  CH-47F's 400 nautical miles at 157 knots is about 2.5 hours). The real aircraft burn about 0.3 lb/s (AH-64D cruise, 1,000 to 1,200 lb/h)
+  and 0.5 to 0.6 (Mi-24). The V-22, with the MV-22B's weights and 11,700 lb of fuel since
+  slice HF3 ([record correction](formats/aircraft.md#rotorcraft-fuel-records)), burns
+  1.37 lb/s at a hover (142 minutes), 1.16 at 220 knots in airplane mode at 1,000 ft
+  (168 minutes) and 1.04 at 240 knots at 15,000 ft (187 minutes); the real MV-22B's
+  879 nautical mile range at about 240 knots is about three and a half hours.
+- **The player's gauge** falls at these rates in a helicopter or the V-22: the internal
+  fuel row of the systems page and the weight (a lighter aircraft hovers on less power).
+  Jets, transports and the vectoring jets keep the record's flow and the afterburner
+  rule.
+- **Planning** (the AI's bingo line and the crew voice's low-fuel call) uses one steady
+  figure, so the line does not swing with every climb and descent. Since slice HF3
+  (opinionated, John 2026-10-13: "helicopter bingo planned at cruise flow") it is the
+  flow of level flight at the AI's cruise home, 80 percent of the envelope's top speed
+  (the V-22 on its downstops), at sea level and empty plus full internal fuel, trimmed
+  once when the model is built and scaled in proportion to the weight now (fitted:
+  profile and parasite power, which the weight barely moves, dominate at cruise). Slice
+  HF2 used the hover flow. At those speeds the cruise is fast, so the cruise flow is
+  about the hover flow or a little more (AH-64 0.52 against 0.47 lb/s, Mi-24 0.44 against
+  0.43, CH-47 0.83 against 0.65, V-22 1.44 against 1.36): the plan matches the flight
+  home the AI actually flies. A model with no level trim there plans at the hover flow.
+- The Unlimited fuel cheat and the fuel starvation rules are unchanged.
 
 ## Envelope limits and loading
 
@@ -383,44 +489,81 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   G limit (`ai/steering_adapter.rs`) applies the same floor and the same ceiling rule, so
   it never asks for G the aircraft cannot give. Both rules are hybrid adapter rules; the
   legacy compatibility model keeps the old limits.
+- **Fast-side hold (fitted, agent decision 2026-10-08).** On the fast side of
+  the envelope the higher rows end one after another before the 1 G row's top
+  speed, so the available G steps down with speed. Past the fast edge of the
+  last row above 1 G (in practice the 2 G row) only the 1 G row used to hold,
+  and a full pull gave 1 G: no pull at all. Transports and airliners have few
+  rows and reach that band in level flight at full power, so John reported
+  (2026-10-08) heavies going from pulling 2 G to nothing well below overspeed,
+  and an AI E-3 flying into the ground. The 1 G row's fast edge is the
+  aircraft's structural speed limit, which the overspeed rule below governs,
+  not a manoeuvring limit. So from that last fast edge to the top speed, and on
+  past it, the aircraft keeps the G of the row whose fast edge reaches furthest
+  (the higher G on a tie), before the loading divisor, and the 1 G floor
+  applies there too. Near the ceiling, where no row above 1 G reaches the
+  altitude, the hold past the 1 G edge is 1 G. Inside any row above 1 G nothing changes: a fighter's
+  staircase is untouched, and only its last few percent below top speed (and
+  overspeed) keep 2 G instead of 1 G. The powered-lift solver and the
+  autopilot's stick scaling apply the same hold. The AI adapter
+  (`ai/steering_adapter.rs`) still computes 1 G there; with the flight model
+  delivering the hold it asks for full stick and gets the held G, which is
+  enough to recover (see the regression tests below). Regression:
+  `flight::tests::a_heavy_keeps_its_pull_*`, `the_fast_side_hold_leaves_a_fighter_staircase_alone`,
+  `an_ai_heavy_recovers_from_a_fast_descent_*` and the `flight-variety-gcurve-*`
+  battery scenarios.
 - **Above the ceiling (fitted, 2026-09-29).** Above the top of the 1 G polygon the
   air is too thin to lift the weight (manual p. 90), so the upper limit is
   multiplied by the ratio of the air density there to the density at the ceiling
   (standard atmosphere, held at its 100,000 ft value above that, so the thinning stays finite). A zoom climb can carry an aircraft a little past its
   ceiling but it cannot stay there.
-- Outside every row at that speed (faster than the polygon's right edge) the limit
-  stays at 1 G divided by the loading divisor: the aircraft cannot hold level
-  flight. Overspeed is `opinionated` (requested by John,
-  2026-09-29; the numbers are agent decisions, [overspeed](spec/overspeed.md)). The manual says that below about
+- Outside every row at that speed the limit is 1 G divided by the loading
+  divisor, except past the right edge, where the fast-side hold above keeps the
+  last higher row's pull so a pilot can still pull out of an overspeed dive. Overspeed is `opinionated` (requested by John,
+  2026-10-01; timing and odds are requested values, [overspeed](spec/overspeed.md)). The manual says that below about
   36,000 ft, beyond the structural limit, "air resistance begins to weaken the airframe and the
   wings will eventually tear off" and gives no numbers. Here the view shakes from 95% of the top speed
-  at the aircraft's altitude, rising to a clear maximum at 100%, and at 1.5 times the top speed
-  the aircraft (player or AI) is lost through the ordinary destroyed path with the cause `overspeed`.
+  at the aircraft's altitude, rising to a clear maximum at 100%. Continuous time
+  above the limit is safe through 5 seconds, followed by 25 percent loss rolls
+  at 6, 7, 8 and 9 seconds and guaranteed destruction at 10 seconds. Returning
+  to the limit resets the timer. Loss uses the ordinary destroyed path with cause `overspeed`.
   Above the ceiling the envelope has no speed range and the rule does not apply.
+  The AH-64 and Mi-24 on the hybrid adapter are judged against their never-exceed
+  speeds (197 and 190 kt) instead, because their envelope row is a performance
+  figure ([overspeed](spec/overspeed.md)).
 - The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
 
 ### Weight-scaled stall speed
 
-`opinionated`, requested by John on 2026-09-29; the reference weight and the
+`opinionated`, requested by John on 2026-09-29; the reference weights and the
 numbers are agent decisions ([rules](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)).
-The polygon's slow edges for the 0 G to 2 G rows are the aircraft's speeds at its empty
-weight and grow with the square root of its weight (fuel, stores, ordnance), fading out at
+The polygon's slow edges for the 0 G to 2 G rows are the aircraft's speeds at its
+reference weight (its empty weight times a fitted fraction, one per aircraft) and grow
+with the square root of its weight over that (fuel, stores, ordnance), fading out at
 the 4 G row so that the G limit above about twice the stall speed is the imported one (the
 loaded-elevator divisor already carries the weight there), in the hybrid adapter only.
 The fast edge, the overspeed rule and the ceiling rules do not change; full flaps
 still take 25 percent off the 1 G stall speed; the loaded-elevator divisor stays.
 `--retail-stall-speeds` (developer switch) restores the imported speeds at every
-weight. It is the same rule for all fourteen aircraft: nothing is tuned per aircraft.
+weight. The rule is the same for all fourteen aircraft, but the reference fraction is
+`fitted` per aircraft (2026-09-30, to John's unsourced liftoff and approach ranges; a lower
+fraction means faster liftoff and approach): F/A-18D 1.33, Rafale C 1.38, F-14D 0.85,
+A-4E 1.20, X-31 1.00, MiG-29 1.20, Su-27 0.86, MiG-21 0.73, Su-25 0.55, MiG-23 0.78,
+Su-35 0.95 and the F-22 family 0.42
+(`STALL_REFERENCE_FRACTIONS` in `tore-sim/src/models/mod.rs`, read through
+`AircraftModel::stall_reference_fraction` for the player and the AI alike).
 
 ### Limits of the world and the ground
 
-Two more `opinionated` rules, both requested by John on 2026-09-29 with agent-decided
-numbers: an aircraft is lost 105 nautical miles beyond the nearest point of the map,
-with a turn-back warning from 100 ([world edge](spec/world-edge.md)); and retracting
-the gear on the ground below stall speed settles the aircraft on its belly, a strong
-brake with airframe wear, while retraction at rotation speed or airborne is unchanged
-([gear on the ground](spec/gear-on-the-ground.md)). Both, like overspeed, end in the
-ordinary structural-failure or hit-point path, and a loss records its cause.
+An `opinionated` rule requested by John on 2026-09-29 with agent-decided numbers: an
+aircraft is lost 105 nautical miles beyond the nearest point of the map, with a
+turn-back warning from 100 ([world edge](spec/world-edge.md)). Like overspeed it ends
+in the ordinary structural-failure or hit-point path, and a loss records its cause.
+
+On the ground the gear cannot be raised while the main wheels carry weight, as in
+retail: the gear key does nothing and T.O.R.E shows `Ground sensor preventing gear
+retraction` on each refused press. Once the wheels leave the ground the key works as
+before ([gear on the ground](spec/gear-on-the-ground.md)).
 
 ## Telemetry record
 

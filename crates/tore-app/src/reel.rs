@@ -2,8 +2,10 @@
 use crate::{
     AppResult,
     assets::Assets,
+    camera::Camera,
     replay::viewer::{Options, Viewer},
-    terrain::{Camera, World},
+    scenery::Scenery,
+    terrain::Terrain,
 };
 use std::{
     fs::File,
@@ -13,6 +15,8 @@ use std::{
 };
 
 pub struct Gpu {
+    /// Seeker nose eye held after impact, matching the trailer capture view.
+    pub seeker_camera: Option<Camera>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub sim: crate::sim_renderer::SimRenderer,
@@ -31,10 +35,13 @@ pub struct Gpu {
     texture: wgpu::Texture,
     symbol_texture: wgpu::Texture,
     buffer: wgpu::Buffer,
+    /// The sensor console's world picture, CRT pass and overlay, made on
+    /// first use ([`Gpu::console_pixels`]).
+    console: Option<(wgpu::Texture, crate::crt::Crt, wgpu::Texture, [u32; 2])>,
 }
 static WEATHER: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<u8>>> =
     std::sync::OnceLock::new();
-pub fn visual_weather_module(world: &World) -> AppResult<tore_formats::weather::Module> {
+pub fn visual_weather_module(world: &Terrain) -> AppResult<tore_formats::weather::Module> {
     let bytes = WEATHER
         .get()
         .and_then(|m| m.get(&world.environment.layer))
@@ -60,7 +67,7 @@ fn target(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat) -> wg
     })
 }
 impl Gpu {
-    async fn new(world: &World) -> AppResult<Self> {
+    pub(crate) async fn new(scenery: &Scenery) -> AppResult<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -78,7 +85,7 @@ impl Gpu {
             &device,
             &queue,
             format,
-            world,
+            scenery,
             crate::graphics::Options::default(),
             4,
         );
@@ -92,6 +99,7 @@ impl Gpu {
         });
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, format);
         Ok(Self {
+            seeker_camera: None,
             cockpit,
             cockpit_aircraft: None,
             gun_sounds: Default::default(),
@@ -104,23 +112,31 @@ impl Gpu {
             texture,
             symbol_texture,
             buffer,
+            console: None,
         })
     }
-    pub fn mirror(&mut self, camera: &Camera, world: &World) {
+    pub fn mirror(&mut self, camera: &Camera, world: &Terrain, scenery: &Scenery) {
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.sim.draw(
+        self.sim.draw_view(
             &self.device,
             &self.queue,
             &mut encoder,
+            crate::sim_renderer::ViewKind::Mirror,
             &view,
             crate::mirrors::SIZE,
             camera,
             world,
+            scenery,
         );
         self.queue.submit([encoder.finish()]);
     }
-    pub fn pixels(&mut self, camera: &Camera, world: &World) -> AppResult<Vec<u8>> {
+    pub fn pixels(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> AppResult<Vec<u8>> {
         let view = self.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.sim.draw(
@@ -131,8 +147,94 @@ impl Gpu {
             [WIDTH, HEIGHT],
             camera,
             world,
+            scenery,
         );
-        self.cockpit.draw(&mut encoder, &view);
+        self.cockpit.draw(&mut encoder, &view, [WIDTH, HEIGHT]);
+        self.read(encoder, false)
+    }
+    /// The world drawn thermally and shown through the sensor console's CRT
+    /// pass with `overlay` (straight-alpha sRGB RGBA, 1080p) on it: the
+    /// offscreen form of the AC-130 sensor console. `camera` should be
+    /// thermal.
+    pub fn console_pixels(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+        frame: &crate::crt::Frame,
+        overlay: &[u8],
+    ) -> AppResult<Vec<u8>> {
+        self.console_pixels_sized(camera, world, scenery, frame, overlay, [WIDTH, HEIGHT])
+    }
+    /// [`Self::console_pixels`] with an overlay of `overlay_size` (the
+    /// CRT pass stretches it over the picture): the replay's HUD camera and
+    /// Sensor View (nr-replayviews).
+    pub fn console_pixels_sized(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+        frame: &crate::crt::Frame,
+        overlay: &[u8],
+        overlay_size: [u32; 2],
+    ) -> AppResult<Vec<u8>> {
+        if self
+            .console
+            .as_ref()
+            .is_some_and(|(.., size)| *size != overlay_size)
+        {
+            self.console = None;
+        }
+        if self.console.is_none() {
+            let picture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Reel sensor console world"),
+                size: wgpu::Extent3d {
+                    width: WIDTH,
+                    height: HEIGHT,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let crt = crate::crt::Crt::new(
+                &self.device,
+                &self.queue,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            );
+            let layer = crate::crt::overlay_texture(&self.device, overlay_size);
+            self.console = Some((picture, crt, layer, overlay_size));
+        }
+        let (picture, crt, layer, _) = self.console.as_ref().expect("made above");
+        crate::crt::write_overlay(&self.queue, layer, overlay_size, overlay);
+        let picture = picture.create_view(&Default::default());
+        let layer = layer.create_view(&Default::default());
+        let view = self.texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.sim.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &picture,
+            [WIDTH, HEIGHT],
+            camera,
+            world,
+            scenery,
+        );
+        crt.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &picture,
+            Some(&layer),
+            &view,
+            [WIDTH, HEIGHT],
+            frame,
+        );
         self.read(encoder, false)
     }
     /// The cockpit pass again, emitting only the HUD symbols the glass shows.
@@ -154,7 +256,7 @@ impl Gpu {
             })],
             ..Default::default()
         });
-        self.cockpit.draw(&mut encoder, &view);
+        self.cockpit.draw(&mut encoder, &view, [WIDTH, HEIGHT]);
         self.read(encoder, true)
     }
     fn read(&mut self, mut encoder: wgpu::CommandEncoder, symbols: bool) -> AppResult<Vec<u8>> {
@@ -212,7 +314,8 @@ pub struct Frame {
     pub eye: [f64; 3],
     pub target: [f64; 3],
     pub fov: f64,
-    pub time_minutes: Option<i32>,
+    /// Minutes of the day, a fraction for seconds in between.
+    pub time_minutes: Option<f64>,
     pub view: u8,
     pub rate: f64,
     /// When set, the eye is placed in the anchor's recorded heading frame at
@@ -243,7 +346,7 @@ impl Frame {
             eye: [n[2], n[3], n[4]],
             target: [n[5], n[6], n[7]],
             fov: n[8],
-            time_minutes: (n[9] >= 0.).then_some(n[9] as i32),
+            time_minutes: (n[9] >= 0.).then_some(n[9]),
             view: n.get(10).copied().unwrap_or(0.) as u8,
             rate: n.get(11).copied().unwrap_or(1.),
             eye_tick: n.get(12).filter(|t| **t >= 0.).map(|t| *t as u64),
@@ -286,7 +389,7 @@ fn capture_encoder(output: &Path, alpha: bool) -> AppResult<Child> {
         .spawn()?)
 }
 
-fn load_assets() -> AppResult<Assets> {
+pub(crate) fn load_assets() -> AppResult<Assets> {
     let assets = Assets::load(&crate::assets::data_directory()?)?;
     let _ = WEATHER.set(
         assets
@@ -359,6 +462,74 @@ pub fn music() -> AppResult<()> {
     Ok(())
 }
 
+/// A director frame's anchor that is the world itself: its eye and target
+/// are world feet (nr-fx3, for stills of a fixed place).
+pub const WORLD_ANCHOR: u32 = u32::MAX - 1;
+
+/// `--replay-stills REPLAY FRAME_PLAN OUT_DIR`: the director's frames of a
+/// recording as PNG files, offscreen, no audio written and no ffmpeg (nr-fx3:
+/// stills of a recorded city strike). Each plan row is a director frame
+/// (`--reel-render`'s format); anchor 4294967294 places the eye and target
+/// in world feet. Writes `OUT_DIR/still-NN-tTICK.png`.
+pub fn stills() -> AppResult<()> {
+    let args: Vec<_> = std::env::args().skip(2).collect();
+    let (replay, plan, out, look_at) = match args.as_slice() {
+        [replay, plan, out] => (replay, plan, out, None),
+        [replay, plan, out, flag, object] if flag == "--look-at" => (
+            replay,
+            plan,
+            out,
+            Some(crate::replay::viewer::parse_object(object)?),
+        ),
+        _ => return Err(
+            "--replay-stills REPLAY FRAME_PLAN OUT_DIR [--look-at aircraft:ID|weapon:ID|ground:ID]"
+                .into(),
+        ),
+    };
+    let assets = load_assets()?;
+    let plan = std::fs::read_to_string(plan)?
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(Frame::parse)
+        .collect::<AppResult<Vec<_>>>()?;
+    let mut viewer = Viewer::open(
+        Path::new(replay),
+        &assets.theater_resources,
+        &Options {
+            look_at,
+            ..Options::default()
+        },
+    )?;
+    viewer.finish_tracks();
+    let mut gpu = pollster::block_on(Gpu::new(&viewer.scenery))?;
+    viewer.director_guns(&mut gpu, &assets.theater_resources)?;
+    let audio = crate::audio::Audio::offline(
+        assets.sounds,
+        &assets.music_scores,
+        &assets.theater_resources,
+    )?;
+    let out = Path::new(out);
+    std::fs::create_dir_all(out)?;
+    for (index, frame) in plan.iter().enumerate() {
+        let previous = index.checked_sub(1).map(|i| &plan[i]);
+        let pixels = viewer.director_frame(&mut gpu, frame, previous, &audio)?;
+        let city = gpu.sim.city_report();
+        if city.burning > 0 {
+            println!(
+                "Replay city smoke: tick {} burning {} fires {} puffs {} tallest {:.1} ft digest {:016x}",
+                frame.tick, city.burning, city.fires, city.puffs, city.tallest_ft, city.digest
+            );
+        }
+        let path = out.join(format!("still-{index:02}-t{}.png", frame.tick));
+        std::fs::write(
+            &path,
+            crate::replay::png::encode_rgba(WIDTH, HEIGHT, &pixels)?,
+        )?;
+        println!("Replay still: {}", path.display());
+    }
+    Ok(())
+}
+
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
     let hud_layer = args.iter().any(|a| a == "--hud-layer");
@@ -394,7 +565,7 @@ pub fn run() -> AppResult<()> {
     if plan.iter().any(|f| f.tick > viewer.clock.last() as f64) {
         return Err("director frame past replay end".into());
     }
-    let mut gpu = pollster::block_on(Gpu::new(&viewer.world))?;
+    let mut gpu = pollster::block_on(Gpu::new(&viewer.scenery))?;
     viewer.director_guns(&mut gpu, &assets.theater_resources)?;
     // AI launch events retain weapon identity but not a cockpit release cue.
     // Resolve its own retail fire sample for the director's watched gun burst.

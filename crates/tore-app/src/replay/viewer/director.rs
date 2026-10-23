@@ -15,10 +15,15 @@ impl Viewer {
             {
                 continue;
             }
-            let combat = crate::combat::Combat::new(model, resources, false)?;
-            if let Some(station) = combat
-                .state
-                .configuration()
+            // The weapon load the aircraft's own profile names, as combat
+            // would build it; the director needs only the stations.
+            let configuration =
+                tore_sim::combat::live::Configuration::from_source(&model.profile, |name| {
+                    resources.get(name).cloned().ok_or_else(|| {
+                        std::io::Error::other(format!("missing live-fire resource {name}"))
+                    })
+                })?;
+            if let Some(station) = configuration
                 .stations
                 .iter()
                 .find(|s| tore_sim::combat::live::is_gun(&s.weapon))
@@ -37,13 +42,28 @@ impl Viewer {
         audio: &crate::audio::Audio,
     ) -> AppResult<Vec<u8>> {
         let cockpit_view = matches!(frame.view, 1 | 2);
+        // The promo reel never shows the air-to-ground marks, which are for
+        // troubleshooting; `TORE_REPLAY_MARKS=1` draws them for a check.
+        self.ui.marks = std::env::var_os("TORE_REPLAY_MARKS").is_some_and(|v| v == "1");
+        // The same for the flight path trails (R), for checking where they
+        // are drawn.
+        self.ui.trails = std::env::var_os("TORE_REPLAY_TRAILS").is_some_and(|v| v == "1");
         self.clock.seek(frame.tick);
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
+        self.weather.build(
+            &mut self.world,
+            &mut self.scenery,
+            &self.tracks,
+            self.clock.last(),
+        );
         self.weather
-            .build(&mut self.world, &self.tracks, self.clock.last());
-        self.weather.seek(&mut self.world, &self.tracks, tick);
-        if let Some(minutes) = frame.time_minutes {
+            .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
+        self.follow_city(tick);
+        if let Some(time) = frame.time_minutes {
+            // Whole minutes start the clock; a fraction runs it on that many
+            // ticks, for frame-by-frame sky sweeps.
+            let minutes = (time.floor() as i32).rem_euclid(24 * 60);
             let config = self.world.weather.configuration();
             let resources = crate::reel::visual_weather_module(&self.world)?;
             self.world.weather =
@@ -52,12 +72,18 @@ impl Viewer {
                     minutes / 60,
                     minutes % 60,
                     config.parameter(),
-                    crate::terrain::Recorded::from_identity(&self.recording.header().world)?.wind,
+                    crate::replay::identity::recorded(&self.recording.header().world)?.wind,
                 )?);
+            for _ in 0..((time - time.floor()) * 60. * 120.).round() as u32 {
+                self.world.weather.step();
+            }
         }
         let player = self.player_state(&picture, tick);
         // u32::MAX is the recipe's static first-runway camera anchor.
-        let (position, heading) = if frame.anchor == u32::MAX {
+        let (position, heading) = if frame.anchor == crate::reel::WORLD_ANCHOR {
+            // The world itself: eye and target are world feet.
+            ([0.; 3], 0.)
+        } else if frame.anchor == u32::MAX {
             let runway = self
                 .world
                 .airport_scene
@@ -66,7 +92,7 @@ impl Viewer {
                 .ok_or("theater has no runway camera anchor")?;
             (runway.surface.center, runway.heading)
         } else {
-            let pose = if frame.anchor == 0 {
+            let pose = if frame.anchor == self.player {
                 &picture.player
             } else {
                 picture
@@ -89,7 +115,7 @@ impl Viewer {
         // A fixed eye stays where the anchor's recorded frame put it at
         // eye_tick; the look target still follows the anchor.
         let place_eye = match frame.eye_tick {
-            Some(at) if frame.anchor != u32::MAX => {
+            Some(at) if frame.anchor < crate::reel::WORLD_ANCHOR => {
                 let state = self
                     .playback
                     .aircraft(at, frame.anchor)
@@ -98,13 +124,48 @@ impl Viewer {
             }
             _ => place,
         };
-        let watched_pose = if frame.anchor == 0 {
+        let watched_pose = if frame.anchor == self.player {
             Some(&picture.player)
         } else {
             picture.target(frame.anchor)
         };
         let watched_now = if cockpit_view {
             self.playback.aircraft(tick, frame.anchor)
+        } else {
+            None
+        };
+        // Views 4 to 8 (nr-replayviews): the replay's HUD camera on the
+        // anchor, then its Sensor View in white hot, black hot, TV and night
+        // vision, exactly as the viewer draws them.
+        let taped = if (4..=8).contains(&frame.view) && frame.anchor < crate::reel::WORLD_ANCHOR {
+            self.select(frame.anchor);
+            self.drone = None;
+            self.zoom = 1.;
+            self.view = if frame.view == 4 {
+                crate::replay::tape_views::HUD_CAMERA
+            } else {
+                self.sensor_mode =
+                    crate::sensor_console::SensorMode::ALL[usize::from(frame.view - 5)];
+                crate::replay::tape_views::SENSOR
+            };
+            let taped = self
+                .taped_view(&picture, tick, 0., [crate::reel::WIDTH, crate::reel::HEIGHT])
+                .ok_or_else(|| {
+                    format!(
+                        "the HUD camera or Sensor View cannot be shown on aircraft {} at tick {tick}: {}",
+                        frame.anchor,
+                        self.camera_error.unwrap_or("unknown")
+                    )
+                })?;
+            Some(taped)
+        } else {
+            None
+        };
+        // Resolve mutable camera state before borrowing an aircraft model.
+        let object_camera = if frame.view == 3 && self.look_at.is_some() {
+            self.select(frame.anchor);
+            self.view = OBJECT;
+            Some(self.frame_camera(&picture, tick, 0., false))
         } else {
             None
         };
@@ -119,7 +180,7 @@ impl Viewer {
             })
             .unwrap_or(&self.ownship);
         let mut watched =
-            watched_pose.map(|p| render_snapshot::pose_state(&watched_model.start(&self.world), p));
+            watched_pose.map(|p| snapshot::pose_state(&watched_model.start(&self.world), p));
         if let (Some(state), Some(now)) = (&mut watched, &watched_now) {
             state.speed = now.airspeed;
             state.g = now.g;
@@ -135,6 +196,9 @@ impl Viewer {
         camera.yaw = d[0].atan2(d[2]) as f32;
         camera.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
         camera.zoom = ((30f64).to_radians().tan() / (frame.fov / 2.).to_radians().tan()) as f32;
+        if let Some(object_camera) = object_camera {
+            camera = object_camera;
+        }
         if cockpit_view {
             let state = watched
                 .as_ref()
@@ -148,10 +212,58 @@ impl Viewer {
             camera.roll = -state.bank as f32;
             camera.hidden_target = Some(frame.anchor);
         }
+        if let Some(t) = &taped {
+            camera = copy(&t.camera);
+        }
+        // A clean full-frame view through the existing seeker nose camera.
+        // This uses the weapon's recorded pose and guided aim, not a new
+        // trajectory. The final eye is held as the impact appears.
+        if frame.view == 9 {
+            let weapon = picture
+                .projectiles
+                .iter()
+                .filter(|p| {
+                    p.owner == frame.anchor
+                        && !p.gun
+                        && !p.incoming
+                        && tore_sim::combat::missiles::has_seeker_view(&p.weapon)
+                })
+                .max_by_key(|p| p.id);
+            if let Some(weapon) = weapon {
+                let target = weapon
+                    .target
+                    .and_then(|id| {
+                        self.body_of(&picture, tick, Target::Aircraft(id))
+                            .or_else(|| self.body_of(&picture, tick, Target::Ground(id)))
+                    })
+                    .map(|body| body.position())
+                    .or_else(|| {
+                        self.marks
+                            .scene(tick)
+                            .weapons
+                            .iter()
+                            .find(|w| w.projectile == weapon.id)
+                            .and_then(|w| w.aim)
+                    });
+                camera = crate::gunsight_view::camera(&crate::seeker_view::view(weapon, target));
+                camera.hidden_projectile = Some(weapon.id);
+                gpu.seeker_camera = Some(copy(&camera));
+            } else {
+                camera = gpu
+                    .seeker_camera
+                    .as_ref()
+                    .map(copy)
+                    .ok_or("director seeker view requires a seeker weapon in flight")?;
+            }
+        }
+        if frame.view == 10 {
+            camera = self.director_weapon_camera(&picture, tick, frame.anchor, frame.eye);
+            camera.zoom = ((30f64).to_radians().tan() / (frame.fov / 2.).to_radians().tan()) as f32;
+        }
         // HUD/cockpit sound is heard inside the watched aircraft.
         let mut listener = copy(&camera);
         if cockpit_view {
-            listener.hidden_target = Some(0);
+            listener.hidden_target = Some(self.player);
         }
         let forward = previous.is_some_and(|p| (frame.tick - p.tick - 2.).abs() < 0.001);
         if frame.view == 3 {
@@ -173,7 +285,7 @@ impl Viewer {
                 scrubbing: !forward,
                 camera: &listener,
                 view: (cockpit_view).then_some(0),
-                selected: if frame.anchor == u32::MAX {
+                selected: if frame.anchor >= crate::reel::WORLD_ANCHOR {
                     0
                 } else {
                     frame.anchor
@@ -197,8 +309,9 @@ impl Viewer {
                 }
             }
         }
-        self.world.resolve_palette(camera.position[1]);
-        self.world.set_origin(camera.position);
+        self.scenery
+            .resolve_palette(&self.world, camera.position[1]);
+        self.scenery.set_origin(camera.position);
         let device = &gpu.device;
         let queue = &gpu.queue;
         let sim = &mut gpu.sim;
@@ -212,6 +325,7 @@ impl Viewer {
             None => Vec::new(),
         };
         sim.vapor(device, queue, &vapor);
+        sim.set_city_clock(self.city_clock(tick as f64 + self.clock.alpha()));
         let [smoke, contrails] = self.playback.smoke(tick);
         let devices = self.devices.at(tick, &self.world);
         sim.smoke(device, queue, &self.art.smoke, [smoke, contrails], devices);
@@ -240,23 +354,38 @@ impl Viewer {
                 player_outlets,
             )
         }));
-        sim.emitters(queue, devices, &glows);
+        let flash_now = tick as f64 + self.clock.alpha();
+        let mounts = crate::gun_flash::mounts(&picture, None);
+        Self::observe_surface(
+            (&self.tracks, &self.recording),
+            &mut self.gun_flash,
+            &picture,
+            (tick, flash_now),
+            &mounts,
+        );
+        let guns = self.gun_flash.draw(flash_now, &mounts);
+        sim.emitters(queue, devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
-        if self
-            .airports
-            .as_ref()
-            .is_none_or(|(set, ..)| *set != destroyed)
-        {
-            self.airports = Some((
-                destroyed.clone(),
-                self.world.visible_static_vertices_where(&destroyed),
-                self.world.visible_static_lines_where(&destroyed),
-            ));
-        }
-        if let Some((_, vertices, lines)) = &self.airports {
-            sim.airports(device, queue, vertices);
-            sim.airport_lines(device, queue, lines);
-        }
+        let rails = self.rails(tick);
+        self.scenery.surface.step_aim(
+            &picture,
+            &self.world.surface,
+            &self.tracks.aim_tracks(tick),
+            Some(&rails),
+        );
+        sim.airports(
+            device,
+            queue,
+            self.scenery.static_geometry_replay(&destroyed, &rails),
+        );
+        // The routed units, the men, deck crew and parked aircraft pieces.
+        sim.surface_units(
+            device,
+            queue,
+            &self
+                .scenery
+                .surface_vertices(&picture, &|id| !destroyed.contains(&id), &camera),
+        );
         if let Some(art) = &self.art.escape {
             sim.escapees(
                 device,
@@ -269,32 +398,58 @@ impl Viewer {
                         .map(|p| (p.position, p.heading, p.phase)),
                     &self.ownship.palette,
                     camera.position,
-                    self.world.origin,
+                    self.scenery.origin,
                 ),
             );
         }
         sim.dummies(
             device,
             queue,
-            render_snapshot::aircraft_batches(&picture, &self.models, &camera, &self.world),
-        );
-        sim.combat(
-            device,
-            queue,
-            &render_snapshot::combat_geometry(
+            render_snapshot::aircraft_batches(
                 &picture,
+                &self.models,
                 &self.art,
-                &self.ownship,
-                &player,
                 &camera,
                 &self.world,
+                &self.scenery,
             ),
         );
+        let mut combat = render_snapshot::combat_geometry(
+            &picture,
+            &self.art,
+            &self.ownship,
+            &player,
+            &camera,
+            &self.world,
+            &self.scenery,
+        );
+        if self.ui.trails {
+            self.trails(
+                &picture,
+                tick,
+                &camera,
+                f64::from(crate::reel::HEIGHT),
+                &mut combat.vertices,
+            );
+        }
+        if self.marks_shown() {
+            let prims = self.mark_prims(&picture, tick);
+            ground_marks::geometry(
+                &prims,
+                &camera,
+                self.scenery.origin,
+                f64::from(crate::reel::HEIGHT),
+                &mut combat.vertices,
+            );
+        }
+        sim.combat(device, queue, &combat);
         sim.aircraft(
             device,
             queue,
             &self.ownship,
-            &self.ownship.vertices(&player, &camera, &self.world),
+            &self
+                .ownship
+                .vertices(&player, &camera, &self.world, &self.scenery),
         );
         if cockpit_view {
             let state = watched.as_ref().ok_or("missing cockpit state")?;
@@ -308,8 +463,15 @@ impl Viewer {
                 );
                 gpu.cockpit_aircraft = Some(watched_model.profile.id);
             }
-            let palette = watched_model.cockpit_palette(&self.world, camera.position[1], 0);
-            let color = palette[usize::from(watched_model.hud.primary_color)];
+            let palette =
+                watched_model.cockpit_palette(&self.world, &self.scenery, camera.position[1], 0);
+            let green = watched_model.cockpit_palette(
+                &self.world,
+                &self.scenery,
+                camera.position[1],
+                self.local_lighting.1,
+            )[usize::from(watched_model.hud.primary_color)];
+            let color = self.local_lighting.0.hud(green, self.local_lighting.1);
             let mut pixels = vec![0; 640 * 480 * 4];
             let zoom = (1. / crate::flight_canvas::HUD_SCALE) as f32;
             crate::hud::draw(
@@ -384,18 +546,17 @@ impl Viewer {
                     device,
                     queue,
                     watched_model,
-                    &watched_model.vertices(state, &mirror, &self.world),
+                    &watched_model.vertices(state, &mirror, &self.world, &self.scenery),
                 );
-                gpu.mirror(&mirror, &self.world);
+                gpu.mirror(&mirror, &self.world, &self.scenery);
                 gpu.sim.aircraft(
                     &gpu.device,
                     &gpu.queue,
                     &self.ownship,
-                    &self.ownship.vertices(&player, &camera, &self.world),
+                    &self
+                        .ownship
+                        .vertices(&player, &camera, &self.world, &self.scenery),
                 );
-            }
-            if frame.anchor == 0 {
-                gpu.sim.hide_aircraft();
             }
         } else {
             gpu.cockpit.update(
@@ -408,7 +569,22 @@ impl Viewer {
                 &[],
             );
         }
-        let mut pixels = gpu.pixels(&camera, &self.world)?;
+        // A cockpit view, the HUD camera and the Sensor View put the eye
+        // inside the watched aircraft, so the player's airframe is not drawn.
+        if camera.hidden_target == Some(self.player) {
+            gpu.sim.hide_aircraft();
+        }
+        let mut pixels = match &taped {
+            Some(t) => gpu.console_pixels_sized(
+                &camera,
+                &self.world,
+                &self.scenery,
+                &t.frame,
+                &t.overlay,
+                t.overlay_size,
+            )?,
+            None => gpu.pixels(&camera, &self.world, &self.scenery)?,
+        };
         if gpu.symbols.is_some() {
             gpu.symbols = Some(if cockpit_view {
                 gpu.hud_symbols()?
@@ -417,9 +593,14 @@ impl Viewer {
             });
         }
         if frame.view == 3 {
-            self.selected = frame.anchor;
-            self.view = 1;
-            self.ui = Ui::default();
+            self.select(frame.anchor);
+            if self.look_at.is_none() {
+                self.view = 1;
+            }
+            self.ui = Ui {
+                marks: self.ui.marks,
+                ..Ui::default()
+            };
             let mut canvas = FlightCanvas::default();
             self.overlay(
                 &picture,
@@ -461,5 +642,73 @@ impl Viewer {
             }
         }
         Ok(pixels)
+    }
+}
+
+impl Viewer {
+    pub(super) fn newest_weapon(&self, tick: u64, owner: u32) -> Option<u32> {
+        self.recording
+            .events_between(0, tick)
+            .iter()
+            .rev()
+            .find_map(|entry| {
+                let e = &entry.event;
+                if e.kind != "weapon.launch"
+                    || e.subject != Some(owner)
+                    || e.string("class") == Some("gun")
+                {
+                    return None;
+                }
+                let weapon = e
+                    .get("weapon")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|id| self.recording.weapon_info(id as u32));
+                if weapon.is_some_and(|w| w.class == WeaponClass::Gun) {
+                    return None;
+                }
+                e.get("projectile")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|id| u32::try_from(id).ok())
+            })
+    }
+
+    /// F12's weapon relation camera, selected by the anchor's newest launch.
+    /// Read launch history so expiry cannot jump back to an older weapon and
+    /// direct seeks, reverse play and repeated captures choose the same shot.
+    pub(super) fn director_weapon_camera(
+        &self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        owner: u32,
+        offset: [f64; 3],
+    ) -> Camera {
+        let newest = self.newest_weapon(tick, owner);
+        let weapon = picture
+            .projectiles
+            .iter()
+            .filter(|p| p.owner == owner && !p.gun && (owner != self.player || !p.incoming))
+            .filter(|p| newest.is_none_or(|id| id == p.id))
+            .max_by_key(|p| p.id);
+        if let Some(p) = weapon {
+            let body = Body::weapon(p, 1.);
+            let target = p
+                .target
+                .and_then(|id| {
+                    self.body_of(picture, tick, Target::Aircraft(id))
+                        .or_else(|| self.body_of(picture, tick, Target::Ground(id)))
+                })
+                .map_or_else(
+                    || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
+                    |b| b.position(),
+                );
+            return flight_views::weapon_camera(body, target, offset);
+        }
+        // The director retains its immediate return at expiry. A replay has no
+        // cockpit overlay; its Forward camera hides the reference aircraft.
+        let scene = self.scene(picture, tick);
+        let mut rig = Rig::default();
+        rig.select(Reference::Aircraft(owner));
+        rig.camera(0, &scene, Camera::new(), [0.; 2], 1.)
+            .unwrap_or_else(|_| copy(&self.camera))
     }
 }

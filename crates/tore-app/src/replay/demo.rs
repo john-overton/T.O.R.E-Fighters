@@ -70,7 +70,10 @@ fn aircraft(id: u32, path: &Path, tick: u64, alive: bool) -> AircraftState {
         velocity,
         airspeed: path.speed,
         g: if id == 0 { g + 3. } else { g },
-        devices: [0., 0., 0., 0., 0., 0.4, -0.3, 0.2, 0., path.speed, 0.95],
+        devices: [
+            0., 0., 0., 0., 0., 0.4, -0.3, 0.2, 0., path.speed, 0.95, 0., 0., 0., 0., 0., 0., 0.,
+            0., 0., 0., 0.,
+        ],
         heat: 0.95,
         flags: AircraftFlags {
             engine_on: alive,
@@ -294,8 +297,10 @@ fn demo() {
     let data = crate::assets::data_directory().unwrap();
     let assets = crate::assets::Assets::load(&data).unwrap();
     let resources = &assets.theater_resources;
-    let world = crate::terrain::World::for_mission(resources, "UKR", Some(0)).unwrap();
-    let centre = crate::terrain::Camera::for_world(&world)
+    let world =
+        crate::terrain::Terrain::for_mission(resources, "UKR", Some(0), &Default::default())
+            .unwrap();
+    let centre = crate::camera::Camera::for_world(&world)
         .position
         .map(f64::from);
     let ground = f64::from(world.height(centre[0] as f32, centre[2] as f32));
@@ -311,12 +316,13 @@ fn demo() {
     let presentation = Presentation {
         models: vec![AircraftId::Mig29],
         slots: count - 1,
+        player: 0,
     };
     let header = replay::Header {
         game_version: crate::version::version().into(),
         recorded_at: "2026-09-26T12:00:00Z".into(),
         mission: replay::MissionKind::QuickMission,
-        world: world.identity(),
+        world: crate::replay::identity::of(&world),
         extra: presentation.extras(),
         ..Default::default()
     };
@@ -483,6 +489,7 @@ fn demo() {
             kind,
             position,
             duration_ticks,
+            scale: tore_replay::EffectSpawn::FULL_SCALE,
         };
         match tick {
             240 => frame.events.push(

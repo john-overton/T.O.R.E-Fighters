@@ -11,9 +11,13 @@ import re
 import time
 
 from battery import Scenario
+from battery_scenarios._debrief import kill_hit_problems
+from battery_scenarios._powered import powered_scenarios
+from battery_scenarios._strips import ground_airport
 
-# The fourteen flyable identities, `AircraftId::SELECTABLE`.
+# Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -33,23 +37,29 @@ BASE_THEATERS = [t for t in AIRPORTS if not t.startswith("~")]
 VARIANT_THEATERS = [t for t in AIRPORTS if t.startswith("~")]
 
 # Gun capacity and the other station capacities of each aircraft's default load,
-# in the order `--weapon-slot 1..N` selects them (from the combat smoke).
+# in the order `--weapon-slot 1..N` selects them (from the combat smoke). A trailing 0 is a
+# retained selection station the variety import added: configured but never loaded, so the
+# weapon cycle skips it (docs/formats/aircraft-ordnance.md). A rocket pod station counts its
+# rockets, not its pods (ffc8fff2: two LAU-61 or B-8M1 pods hold 38, two B-13L pods 10).
+# The A-4E's default load carries three tanks in place of retail's centreline Mk 82s, which
+# stay selectable at 0 (35023ad1). F22.PT row 8 is the optional inboard wing pair, empty by
+# default (30f69393); F22N.PT now shares that carrier and the bay classification.
 STATIONS = {
     "f18": [570, 2, 4, 4, 2],
     "rafale": [250, 4, 2, 2, 2],
     "f14": [675, 4, 2, 2],
-    "a4e": [400, 4, 2],
-    "x31": [740, 2, 2, 2],
+    "a4e": [400, 0, 38, 0],
+    "x31": [740, 2, 2, 2, 0],
     "mig29": [150, 2, 2, 2],
     "su27": [150, 2, 2, 4, 2],
-    "mig21": [200, 2, 2],
-    "su25": [250, 2, 4, 4],
-    "mig23": [200, 2, 2, 2],
+    "mig21": [200, 2, 2, 0],
+    "su25": [250, 10, 4, 4, 0],
+    "mig23": [200, 38, 2, 2, 0],
     "su35": [150, 1, 2, 4, 2],
-    "f22": [750, 2, 2, 4],
+    "f22": [750, 2, 2, 4, 0],
 }
-STATIONS["f22n"] = STATIONS["f22"]
-STATIONS["faxx"] = STATIONS["f22"]
+STATIONS["f22n"] = [750, 2, 2, 4, 0]
+STATIONS["faxx"] = STATIONS["f22n"]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -182,8 +192,8 @@ def check_takeoff(output: str) -> list[str]:
 def liftoff_problems(output: str) -> list[str]:
     """The wheels leave the ground at the speed the weight-scaled model gives.
     Two checks. The imported 1 G edge bounds it (0.75 to 1.9 times, since the
-    stall speed grows with the square root of the weight above the edge's
-    empty-weight reference, docs/spec/takeoff-ground-contact.md). And it lands
+    stall speed grows with the square root of the weight over the aircraft's
+    fitted reference weight, docs/spec/takeoff-ground-contact.md). And it lands
     within 5 percent below to 12 percent above the loaded minimum speed for 1 G
     with full flaps that the probe prints as `min_level_flaps_kt`, which is
     the rule the model follows."""
@@ -209,18 +219,17 @@ APPROACH_TARGET = {
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145),
 }
-# Where one rule (the polygon's edge is the stall speed at the empty weight) is
-# more than 10 percent off the target, the figure the model gives, kept as a
-# regression window of plus or minus 6 percent (docs/testing/lane-flight.md).
-KNOWN_LIFTOFF = {"su27": 119.5, "su25": 92.9, "f22": 102.5, "f22n": 102.5, "faxx": 102.5}
-KNOWN_APPROACH = {
-    "f18": 155.8, "rafale": 158.3, "mig21": 136.9, "su25": 97.0, "mig23": 134.4, "f22": 102.0,
-    "f22n": 102.0, "faxx": 102.0,
-}
+# The figures the model gives with the fitted per-aircraft stall references
+# (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
+# exactly inside John's range, kept as a regression window of plus or minus 6
+# percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
+# range, so the range's own window already holds them; these record the values.
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
-    "mig21": 4534, "su25": 22664, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
+    "mig21": 4534, "su25": 6614, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
 }
 
 
@@ -261,9 +270,11 @@ def check_approach_speed(output: str, ac: str) -> list[str]:
 # The G a held pull reaches at 450 knots and 5,000 ft with the imported speeds
 # (`--retail-stall-speeds`, 2026-09-29). The weight-scaled stall speed keeps the
 # combat-speed G: the scaling fades out by the 4 G row (docs/spec/takeoff-ground-contact.md).
+# The Su-25 was re-recorded on 2026-10-13 (4.99 to 5.41) when its record lost
+# the Su-24's mass and thrust (docs/spec/aircraft-records.md).
 PULL_G_RETAIL = {
     "f18": 7.64, "rafale": 7.39, "f14": 6.18, "a4e": 6.13, "x31": 7.25, "mig29": 7.15, "su27": 7.54,
-    "mig21": 6.47, "su25": 4.99, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
+    "mig21": 6.47, "su25": 5.41, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
 }
 
 
@@ -381,12 +392,23 @@ def _landing(output: str) -> tuple[dict, float]:
     return landing, float(start.group(1)) if start else 0.0
 
 
+SHORT_STRIP_FT = 2000.0  # the game's line: no tower, clearance or ILS below it
+
+
 def ils_problems(output: str) -> list[str]:
     """The player's ILS read along a scripted approach that flew its glide path:
     it must be active and stay near the bars (the pilot script is not perfect,
     and a crosswind lets it drift a little)."""
     m = re.search(r"ils_probe: samples=(\d+) active=(\d+)(?: max_abs_glide_deg=([\d.]+) max_abs_localizer_deg=([\d.]+))?", output)
     if not m:
+        return []
+    # Since f7d16d85 the tower gives no ILS to a runway under 2,000 ft (the 22
+    # airstrips of 1,074 ft): none must be offered there, and the rest of the
+    # landing's checks still apply.
+    start = re.search(r"runway_length_ft=(\d+)", output)
+    if start and float(start.group(1)) < SHORT_STRIP_FT:
+        if int(m.group(2)) != 0:
+            return ["the tower offered an ILS on a short strip"]
         return []
     if int(m.group(2)) == 0:
         return ["the ILS never became active on the approach"]
@@ -675,6 +697,13 @@ def check_combat_smoke(output: str) -> list[str]:
     return problems
 
 
+def check_wreck_contacts(output: str) -> list[str]:
+    problems = check_combat_smoke(output)
+    if "wreck collision: weapons=2 hits=2 second_kills=0 PASS" not in output:
+        problems.append("gun and AIM-120 wreck-contact checks did not both pass")
+    return problems
+
+
 # Aircraft with no reviewed guided air-to-air missile in the default load.
 NO_MISSILES = {"a4e", "mig23"}
 # Aircraft whose missile acceptance run is too slow for the battery.
@@ -725,8 +754,39 @@ def check_combat_evidence(output: str) -> list[str]:
     return problems
 
 
+def check_missile_sag(output: str) -> list[str]:
+    rows = [line.split(",") for line in output.splitlines() if line.startswith("sag,") and ".JT," in line]
+    problems = []
+    if len(rows) != 128:
+        problems.append(f"expected 128 sag measurements, got {len(rows)}")
+    ranges = {"AIM7.JT": 40, "AIM9M.JT": 12, "AIM120.JT": 50, "SEA_SPAR.JT": 12}
+    checked = set()
+    for row in rows:
+        if len(row) != 8:
+            problems.append(f"short sag row: {row}")
+            continue
+        try:
+            _, weapon, height, distance, miss, end, predicted, ticks = row
+            if float(distance) != ranges.get(weapon):
+                continue
+            checked.add((weapon, float(height)))
+            if float(miss) >= 1 or end != "passed" or predicted != "true" or int(ticks) <= 0:
+                problems.append(f"coasting intercept failed: {','.join(row)}")
+        except ValueError:
+            problems.append(f"unreadable sag row: {row}")
+    expected = {(weapon, height) for weapon in ranges for height in (300, 10000)}
+    if checked != expected:
+        problems.append(f"missing sag cases: {sorted(expected - checked)}")
+    return problems
+
+
 def combat_scenarios() -> list[Scenario]:
-    out = []
+    out = [Scenario(name="flight-wreckcontact-f18", lane="flight",
+                    args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
+                    check=check_wreck_contacts, timeout=300)]
+    out.append(Scenario(name="flight-missile-sag", lane="flight",
+                        args=["--missile-sag", "--no-audio"],
+                        check=check_missile_sag, timeout=120))
     for ac in AIRCRAFT:
         out.append(Scenario(name=f"flight-combatsmoke-{ac}", lane="flight", args=["--combat-smoke", "--aircraft", ac, "--no-audio"], check=check_combat_smoke, timeout=300))
         # The F-14 and Su-35 carry very long range missiles: their acceptance
@@ -799,6 +859,18 @@ def check_slot(ac: str, slot: int):
         for index, (left, cap) in enumerate(zip(ammo, capacity)):
             if left < 0 or left > cap:
                 problems.append(f"station {index + 1} ammo {left} outside 0..{cap}")
+        if capacity[slot - 1] == 0:
+            # A never-loaded station cannot be selected: the run starts on NAV
+            # and the probe fires whatever the cycle reaches, so this slot only
+            # proves the harness does not hang and the station stays empty.
+            if ammo[slot - 1] != 0:
+                problems.append(f"the never-loaded station {slot} holds {ammo[slot - 1]}")
+            used = sum(cap - left for left, cap in zip(ammo, capacity))
+            if used != shots:
+                problems.append(f"{shots} shots but the stations used {used}")
+            if hits > shots or kills > hits:
+                problems.append(f"impossible tally shots={shots} hits={hits} kills={kills}")
+            return problems
         if refused and shots != 0:
             problems.append(f"a surface weapon fired at the practice aircraft ({shots} shots)")
         if not refused and shots == 0:
@@ -819,7 +891,7 @@ def check_slot(ac: str, slot: int):
 def slot_scenarios() -> list[Scenario]:
     out = []
     for ac, capacity in STATIONS.items():
-        if ac in {"f22n", "faxx"}:
+        if ac == "faxx":
             continue
         for slot in range(1, len(capacity) + 1):
             out.append(
@@ -832,6 +904,19 @@ def slot_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+    for ac in ("f22", "f22n"):
+        for row in (5, 7, 8):
+            out.append(Scenario(
+                name=f"flight-bay-fire-{ac}-row{row}", lane="flight",
+                args=["--stores-preview", "{work}/frames"], window=True,
+                env={"TORE_STORES_PREVIEW_AIRCRAFT": ac,
+                     "TORE_STORES_PREVIEW_FULL": "1",
+                     "TORE_STORES_PREVIEW_FIRE": str(row)},
+                expect=[f"Stores firing: {ac} row={row} PASS"],
+                outputs=[f"frames/{ac}-fire-row{row}-t000.png", f"frames/{ac}-fire-row{row}-t400.png"],
+                timeout=300,
+                notes="Actual one-press release, bay-only gate, hold and closing; main bay, side bay and wing, with rendered projectile frames.",
+            ))
     return out
 
 
@@ -883,9 +968,11 @@ def check_jettison(ac: str, slot: int):
 def jettison_scenarios() -> list[Scenario]:
     out = []
     for ac, capacity in STATIONS.items():
-        if ac in {"f22n", "faxx"}:
+        if ac == "faxx":
             continue
         for slot in range(2, len(capacity) + 1):
+            if capacity[slot - 1] == 0:
+                continue  # nothing is loaded there to jettison
             out.append(
                 Scenario(
                     name=f"flight-jettison-{ac}-slot{slot}",
@@ -941,8 +1028,11 @@ def check_climbout(output: str) -> list[str]:
     problems = []
     if "player crashed=false" not in output:
         problems.append("the player crashed or the probe did not finish")
-    if "player: airborne, gear and flaps up" not in output:
+    # An aircraft short of speed for its clean wing keeps its flaps down until it has it.
+    if not re.search(r"player: airborne, gear (and flaps )?up", output):
         problems.append("never got airborne")
+    if "flaps held for speed" in output and "player: flaps up" not in output:
+        problems.append("the flaps were held for speed and never came up")
     if "levelling off at" not in output:
         problems.append("never reached cruise height")
     if not re.search(r"AI probe liftoff gaps: \[\] hazards_open=0", output):
@@ -959,18 +1049,23 @@ def climbout_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-climbout-{ac}",
                 lane="flight",
-                args=["--theater", "UKR", "--ground-start", "3", "--ai-probe-ticks", "16000", "--maneuver", "takeoff", "--probe-wing-size", "1", "--probe-wing-only", "--aircraft", ac, "--no-audio"],
+                # Kherson: Krasnodar (airport 3) is a Redfor field (slice AL1).
+                args=["--theater", "UKR", "--ground-start", "11", "--ai-probe-ticks", "16000", "--maneuver", "takeoff", "--probe-wing-size", "1", "--probe-wing-only", "--aircraft", ac, "--no-audio"],
                 check=check_climbout,
                 timeout=240,
             )
         )
-    # A whole wing of five leaving the first airport of every base theater.
+    # A whole wing of five leaving the first Blue airport of every base
+    # theater (slice AL1); the Falklands and North Vietnam have none.
     for theater in BASE_THEATERS:
+        airport = ground_airport(theater, 1)
+        if airport is None:
+            continue
         out.append(
             Scenario(
                 name=f"flight-climbout-wing5-{_theater_tag(theater)}",
                 lane="flight",
-                args=["--theater", theater, "--ground-start", "1", "--ai-probe-ticks", "9000", "--maneuver", "takeoff", "--probe-wing-size", "5", "--probe-wing-only", "--no-audio"],
+                args=["--theater", theater, "--ground-start", str(airport), "--ai-probe-ticks", "9000", "--maneuver", "takeoff", "--probe-wing-size", "5", "--probe-wing-only", "--no-audio"],
                 check=check_climbout,
                 timeout=240,
             )
@@ -1028,6 +1123,21 @@ def make_check_eject(maneuver: str):
             problems.append("the pilot died ejecting at 5,000 ft in level flight")
         if abs(position[1]) > 60:
             problems.append(f"the pilot came to rest at {position[1]:.0f} ft above the ground")
+        # A two-seater ejects its second crew member too (John, 2026-10-06):
+        # a second chute, down by the end like the pilot's. A single seat
+        # prints neither line.
+        crew = re.search(r"^crew_ejection=(\w+) crew_position=\[([^\]]+)\]", output, re.M)
+        two_seater = re.search(r"^two_seater=true", output, re.M) is not None
+        if two_seater and not crew:
+            problems.append("a two-seater ejected only its pilot")
+        if crew and not two_seater:
+            problems.append("a single seat ejected a second crew member")
+        if crew:
+            if crew.group(1) != "Landed":
+                problems.append(f"the second crew member was still {crew.group(1)} after the run")
+            height = float(crew.group(2).split(",")[1])
+            if abs(height) > 60:
+                problems.append(f"the second crew member came to rest at {height:.0f} ft above the ground")
         return problems
 
     return check
@@ -1255,13 +1365,12 @@ def waypoint_scenarios() -> list[Scenario]:
 
 def check_climb(output: str) -> list[str]:
     """A full-power climb and the dive after it. Overspeed loses an aircraft at
-    1.5 times its own top speed (docs/spec/overspeed.md); the ceiling is
+    sustained time above its own top speed (docs/spec/overspeed.md); the ceiling is
     enforced by the density rule in docs/FLIGHT-MODEL.md, so a zoom climb carries them at most a fifth past it. These limits are today's
     behaviour with a margin, so a change for the worse is caught; the speed limit
     is not a specification."""
     problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
     c = _numbers(output, "climb:")
-    e = _numbers(output, "extremes:")
     if not c:
         return problems + ["no climb: line"]
     try:
@@ -1271,10 +1380,6 @@ def check_climb(output: str) -> list[str]:
             problems.append(f"climbed to {c['max_altitude_ft']} ft, {c['over_ceiling']} of its {c['ceiling_ft']} ft ceiling")
         if float(c["max_altitude_ft"]) < 0.6 * float(c["ceiling_ft"]):
             problems.append(f"could only climb to {c['max_altitude_ft']} ft of a {c['ceiling_ft']} ft ceiling")
-        # Overspeed loses the aircraft at 1.5 times its top speed
-        # (docs/spec/overspeed.md), so nothing is seen past it.
-        if float(e["speed_over_envelope_top"]) > 1.52:
-            problems.append(f"reached {e['speed_over_envelope_top']} times the envelope's top speed")
     except (KeyError, ValueError):
         problems.append("no result line")
     return problems
@@ -1416,6 +1521,10 @@ def capture_scenarios() -> list[Scenario]:
             )
         )
 
+    for label, distance in (("close", 500), ("long", 60000)):
+        for view in (0, 8, 9):
+            add(f"target-camera-{label}-view{view}", ["--free-flight", "--flight-view", str(view),
+                "--hud-target-preview", f"0,0,{distance}"])
     for ac in AIRCRAFT:
         for fraction in ("0.5", "1"):
             add(f"damage-{ac}-{fraction}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", "core"])
@@ -1424,10 +1533,13 @@ def capture_scenarios() -> list[Scenario]:
     for section in ("nose", "cockpit", "core", "left-wing", "right-wing", "tail"):
         for fraction in ("0.3", "0.7", "1"):
             add(f"damage-f18-{section}-{fraction}", ["--free-flight", "--aircraft", "f18", "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", section])
+    # Odesa (UKR 9), a Blue field: Zaporizhzhya (UKR 1) is Redfor since slice
+    # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
-        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "1", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for bay in ("0", "0.5", "1"):
-        add(f"bay-f22-{bay}", ["--free-flight", "--aircraft", "f22", "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
+        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
+    for ac in ("f22", "f22n"):
+        for bay in ("0", "0.5", "1"):
+            add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
 
 
@@ -1530,18 +1642,21 @@ def edge_scenarios() -> list[Scenario]:
 
 
 def check_overspeed_loss(output: str) -> list[str]:
-    """1.6 times the top speed at 20,000 ft: lost on the first step, with the
+    """A continuous 1.1 times the top speed fixture: lost at 6 to 10 seconds, with the
     cause overspeed (docs/spec/overspeed.md)."""
     problems = []
     if _plain_numbers(output).get("crashed") != "true":
-        problems.append("the aircraft was not lost at 1.6 times its top speed")
+        problems.append("the aircraft survived ten continuous seconds above its top speed")
     if "loss: cause=overspeed" not in output:
         problems.append("the loss did not name overspeed as the cause")
+    timer = re.search(r"^overspeed_ticks=(\d+)$", output, re.M)
+    if timer is None or int(timer.group(1)) not in (720, 840, 960, 1080, 1200):
+        problems.append("loss was not on a 6 to 10 second overspeed boundary")
     return problems
 
 
 def check_overspeed_invulnerable(output: str) -> list[str]:
-    """The same 1.6 times the top speed with the Invulnerable cheat: not lost."""
+    """The same continuous overspeed fixture with the Invulnerable cheat: not lost."""
     problems = []
     if _plain_numbers(output).get("crashed") != "false":
         problems.append("an invulnerable player was lost to overspeed")
@@ -1552,20 +1667,48 @@ def check_overspeed_invulnerable(output: str) -> list[str]:
 
 def check_dive(output: str) -> list[str]:
     """A full afterburner dive from 40,000 ft with nobody pulling out ends on
-    the ground, or in the overspeed loss for the aircraft that reach 1.5 times
-    their top speed on the way. Never a faster one."""
+    the ground, or in the time-based overspeed loss. Peak speed alone is no
+    longer the failure trigger."""
     problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
-    e = _numbers(output, "extremes:")
-    try:
-        if float(e["speed_over_envelope_top"]) > 1.52:
-            problems.append(f"dived to {e['speed_over_envelope_top']} times the top speed, past the 1.5 loss line")
-    except (KeyError, ValueError):
-        problems.append("no result line")
     if _plain_numbers(output).get("crashed") != "true":
         problems.append("an unattended 60 degree dive from 40,000 ft did not end in a loss")
     if "loss: cause=" not in output:
         problems.append("no loss line")
     return problems
+
+
+def check_rudder_path(output: str) -> list[str]:
+    values = _numbers(output, "lateral:")
+    problems = extremes_problems(output, engine_off_ok=True)
+    try:
+        if float(values["velocity_x_fps"]) <= 10 or float(values["bank_deg"]) <= 0.5:
+            problems.append("rudder did not turn the unpowered aircraft's path and bank it")
+    except (KeyError, ValueError):
+        problems.append("no lateral response report")
+    return problems
+
+
+def check_nosewheel(output: str) -> list[str]:
+    values = _numbers(output, "lateral:")
+    problems = extremes_problems(output, engine_off_ok=True)
+    try:
+        if abs(float(values["wheel_deg"]) - 90) > 0.01:
+            problems.append("low-speed nosewheel did not reach 90 degrees")
+        if _plain_numbers(output).get("crashed") != "false":
+            problems.append("taxi steering crashed the aircraft")
+    except (KeyError, ValueError):
+        problems.append("no nosewheel report")
+    return problems
+
+
+def lateral_scenarios() -> list[Scenario]:
+    return [Scenario(name=f"flight-lateral-{maneuver}-{ac}", lane="flight",
+                     args=["--headless-flight", "360", "--maneuver", maneuver,
+                           "--aircraft", ac, "--no-audio", *extra], check=check)
+            for ac in ("f18", "rafale")
+            for maneuver, extra, check in (
+                ("rudder", [], check_rudder_path),
+                ("nosewheel", ["--theater", "UKR", "--ground-start", "1"], check_nosewheel))]
 
 
 def overspeed_scenarios() -> list[Scenario]:
@@ -1575,7 +1718,7 @@ def overspeed_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-overspeed-loss-{ac}",
                 lane="flight",
-                args=["--headless-flight", "600", "--maneuver", "overspeed", "--aircraft", ac, "--no-audio"],
+                args=["--headless-flight", "1200", "--maneuver", "overspeed", "--aircraft", ac, "--no-audio"],
                 check=check_overspeed_loss,
             )
         )
@@ -1583,7 +1726,7 @@ def overspeed_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-overspeed-invulnerable-{ac}",
                 lane="flight",
-                args=["--headless-flight", "600", "--maneuver", "overspeed", "--flight-cheat", "invulnerable", "--aircraft", ac, "--no-audio"],
+                args=["--headless-flight", "1200", "--maneuver", "overspeed", "--flight-cheat", "invulnerable", "--aircraft", ac, "--no-audio"],
                 check=check_overspeed_invulnerable,
             )
         )
@@ -1598,40 +1741,35 @@ def overspeed_scenarios() -> list[Scenario]:
     return out
 
 
-# Aircraft whose thrust carries them through the belly slide from 80 knots to their
-# weight-scaled liftoff speed (the F-22 family: about 99 kt, with about 1 percent wear).
-# Every other aircraft is below its stall speed at 80 knots, slides, slows and wears.
-BELLY_FLIES = {"f22", "f22n", "faxx"}
-
-
 def check_belly_early(output: str, ac: str) -> list[str]:
-    """Gear up at 80 knots with the wheels down (docs/spec/gear-on-the-ground.md):
-    the aircraft settles on its belly, slows and wears the airframe; one whose
-    lift already carries it at that speed retracts as usual."""
+    """Gear up pressed at 80 knots with weight on the wheels (docs/spec/gear-on-the-ground.md):
+    the ground sensor refuses it, the gear stays down and the aircraft is not lost.
+    Every aircraft, however fast it is at 80 knots, is refused while it rolls."""
     problems = extremes_problems(output, engine_off_ok=True)
     n = _plain_numbers(output)
-    wear = float(n.get("belly_wear_percent", "nan"))
     if n.get("gear_pulled") != "true":
         return problems + ["the script never pulled the gear up"]
     if n.get("crashed") == "true":
-        problems.append("a belly slide on a runway crashed the aircraft")
-    if ac in BELLY_FLIES:
-        return problems
-    if not wear > 2.0:
-        problems.append(f"gear up at 80 knots wore the airframe by only {wear} percent")
+        problems.append("the aircraft crashed on the runway")
+    if n.get("ground_sensor_refusals") != "1":
+        problems.append(f"expected one ground sensor message, saw {n.get('ground_sensor_refusals')}")
+    if n.get("gear") != "1.00":
+        problems.append(f"the gear did not stay down (gear={n.get('gear')})")
     return problems
 
 
 def check_belly_airborne(output: str) -> list[str]:
-    """Gear up once airborne is a normal retraction, with no scrape."""
+    """Gear up once airborne is a normal retraction, with no ground sensor message."""
     problems = extremes_problems(output, engine_off_ok=True)
     n = _plain_numbers(output)
     if "takeoff_complete=true" not in output:
         problems.append("did not take off")
-    if float(n.get("belly_wear_percent", "nan")) != 0.0:
-        problems.append("an airborne gear retraction scraped the belly")
+    if n.get("ground_sensor_refusals") != "0":
+        problems.append("an airborne gear retraction was refused by the ground sensor")
     if n.get("gear_pulled") != "true":
         problems.append("the script never pulled the gear up")
+    if n.get("gear") == "1.00":
+        problems.append("the gear did not come up")
     return problems
 
 
@@ -1788,6 +1926,7 @@ def check_passive_fight(output: str) -> list[str]:
     anomalies = [a for a in re.findall(r"^AI probe anomaly: (.*)$", output, re.M) if "mid-air collision" not in a]
     if anomalies:
         problems.append(f"{len(anomalies)} probe anomalies: {anomalies[0][:120]}")
+    problems.extend(kill_hit_problems(output))
     if aam_hits > aam_shots or gun_hits > gun_shots:
         problems.append(f"the debrief counts more hits than shots (missiles {aam_hits}/{aam_shots}, guns {gun_hits}/{gun_shots})")
     if status == "Dead":
@@ -1836,10 +1975,6 @@ ATTACK_LINE = re.compile(
 )
 
 
-# Aircraft whose seeded fight shows the debrief crediting more kills than hits.
-DEBRIEF_KILL_MISMATCH = {"su27", "su35"}
-
-
 def check_attacking_fight(output: str, ac: str = "") -> list[str]:
     """The scripted leader designates, selects a weapon and fires through the
     player's own controls in a 5 v 5. What it did, what the debrief says it did
@@ -1851,15 +1986,11 @@ def check_attacking_fight(output: str, ac: str = "") -> list[str]:
         return problems + ["missing attack or debrief line"]
     clicks, steps, presses, missiles, bursts, rounds, hits, kills = (int(a.group(i)) for i in range(1, 9))
     alive = a.group(9) == "true"
-    kill_list = sum(int(v) for v in d.group(2).split(","))
     a2a_hits, a2a_shots, damage_dealt, gun_hits, gun_shots = (int(d.group(i)) for i in (3, 4, 5, 6, 7))
     if clicks < 1:
         problems.append("the leader never designated a target")
-    # A kill needs a recorded hit by the player. Known not to hold today with the
-    # Su-27 and Su-35: the debrief credits two kills against one recorded hit
-    # (see "Bugs found" in the lane page), so those two skip this one check.
-    if kill_list > a2a_hits + gun_hits and ac not in DEBRIEF_KILL_MISMATCH:
-        problems.append(f"the debrief lists {kill_list} kills but only {a2a_hits + gun_hits} recorded hits")
+    # A kill needs a recorded hit by the player: check_passive_fight holds both
+    # columns to it (docs/spec/debrief.md, "Kills"), with no aircraft exempt.
     if kills > hits:
         problems.append(f"the probe counts {kills} kills from {hits} hits")
     if a2a_hits > a2a_shots or gun_hits > gun_shots:
@@ -1923,6 +2054,38 @@ def panel_scenarios() -> list[Scenario]:
                 timeout=120,
             )
         )
+    # The seeker window: a launch opens the target camera when every slot is
+    # taken (small: top right; large: left of the top-right window), takes a
+    # free slot otherwise, and the landing closes what the launch opened.
+    # --window-layout-preview draws the whole layout without a GPU and prints
+    # where the camera went (a 640x480 canvas).
+    popups = {
+        "small": r"x=536 y=8 w=96 h=95",
+        "large": r"x=300 y=8 w=162 h=160",
+    }
+    for layout, popup in popups.items():
+        words = layout.capitalize()
+        modes = {
+            "before": r"popup false, opened by launch false, target camera closed",
+            "launch": r"popup true, opened by launch true, target camera " + popup,
+            "free": r"popup false, opened by launch true, target camera x=\d+ y=\d+",
+            "landed": r"popup false, opened by launch false, target camera closed",
+        }
+        for mode, expected in modes.items():
+            out.append(
+                Scenario(
+                    name=f"flight-window-seeker-{layout}-{mode}",
+                    lane="flight",
+                    args=[
+                        "--panel-snapshot", "{work}/w.ppm", "--window-layout-preview", mode,
+                        "--instrument-layout", layout, "--window-size", "640x480",
+                        "--aircraft", "f16c", "--no-audio",
+                    ],
+                    outputs=["w.ppm"],
+                    expect=[rf"window layout {words} {mode}: pages \[[\d, ]+\], {expected}"],
+                    timeout=120,
+                )
+            )
     return out
 
 
@@ -1945,15 +2108,193 @@ def daytime_scenarios() -> list[Scenario]:
     return out
 
 
+def check_variety_flight(output: str) -> list[str]:
+    problems = extremes_problems(output)
+    if "flight_model=hybrid" not in output or "crashed=false" not in output:
+        problems.append("variety aircraft did not complete a live hybrid flight")
+    if _plain_numbers(output).get("ticks") != "1200":
+        problems.append("variety flight did not complete 1,200 ticks")
+    return problems
+
+
+def variety_scenarios() -> list[Scenario]:
+    """Every new identity loads its own app assets and flies without a display.
+
+    Hover/conversion numerical checks live in the shared powered-flight tests
+    and the source-backed variety_flight example, not the jet-only maneuvers.
+    """
+    return [Scenario(
+        name=f"flight-variety-{aircraft}", lane="flight",
+        args=["--headless-flight", "1200", "--aircraft", aircraft,
+              "--researched-flight", "--no-audio", "--no-controllers"],
+        check=check_variety_flight, timeout=120,
+    ) for aircraft in VARIETY_AIRCRAFT]
+
+
+# Transports and airliners: their higher G rows end well short of the 1 G row's
+# top speed, the band where they once could not pull at all (John, 2026-10-08).
+HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310"]
+
+
+def check_heavy_gcurve(output: str) -> list[str]:
+    """Once the full-stick limit has passed 1.4 G it never falls back near 1 G.
+
+    The probe's `gcurve:` lines sweep 100 to 750 kt at 5,000 ft, so the sweep
+    runs from the slow-side ramp through the top speed into overspeed. Before
+    the fast-side hold the limit fell from about 1.5 to 2 G to 1.00 well below
+    the top speed (docs/FLIGHT-MODEL.md, "Envelope limits and loading")."""
+    limits = [(int(kt), float(g)) for kt, g in re.findall(r"^gcurve: kt=(\d+) limit_g=(\S+)", output, re.M)]
+    if len(limits) < 20:
+        return ["gcurve sweep missing"]
+    problems = []
+    pulled = False
+    for kt, g in limits:
+        pulled = pulled or g > 1.4
+        if pulled and g < 1.3:
+            problems.append(f"full-stick limit fell to {g:.2f} G at {kt} kt")
+    if not pulled:
+        problems.append("never reached 1.4 G")
+    return problems
+
+
+def heavy_gcurve_scenarios() -> list[Scenario]:
+    return [Scenario(
+        name=f"flight-variety-gcurve-{aircraft}", lane="flight",
+        args=["--headless-flight", "10", "--maneuver", "gcurve", "--aircraft", aircraft,
+              "--researched-flight", "--no-audio", "--no-controllers"],
+        check=check_heavy_gcurve, timeout=120,
+    ) for aircraft in HEAVY_AIRCRAFT]
+
+
+# The AC-130 gunsight probes (`--gunsight-probe`, crates/tore-app/src/gunsight_probe.rs):
+# scripted runs on flat ground through the live combat state with the imported guns.
+# name -> the PASS lines a healthy run prints at least.
+GUNSIGHT_PROBES = {"pin-orbit": 9, "fire-no-target": 9, "track-out-of-arc": 11, "splash-105": 7}
+
+
+def check_gunsight(name: str, minimum: int):
+    def check(output: str) -> list[str]:
+        problems = [line.strip()[:200] for line in output.splitlines() if line.startswith("FAIL ")]
+        passes = sum(1 for line in output.splitlines() if line.startswith("PASS "))
+        if f"gunsight probe {name}: PASS" not in output:
+            problems.append(f"the {name} probe did not finish with PASS")
+        if passes < minimum:
+            problems.append(f"only {passes} PASS lines, expected at least {minimum}")
+        return problems
+
+    return check
+
+
+def gunsight_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-ac130-{name}",
+            lane="flight",
+            args=["--gunsight-probe", name, "--aircraft", "ac130", "--no-audio"],
+            check=check_gunsight(name, minimum),
+            timeout=300,
+        )
+        for name, minimum in GUNSIGHT_PROBES.items()
+    ]
+
+
+# The AC-130's sensor console and orbit hold (slice nr-orbit,
+# crates/tore-app/src/a2g_run/orbit.rs): the console opens over the Ukraine
+# armoured column and the autopilot flies the attack orbit with no stick or
+# throttle. name -> (extra arguments, notes).
+ORBIT_RUNS = {
+    "orbit-pin": (
+        ["--orbit-sight", "pin", "--seconds", "300"],
+        "The console opens on a pin at the column: enters the orbit, never inside the minimum radius or "
+        "below the minimum height after entry, every gun and the camera bear 90% of the time, smooth bank "
+        "and pitch, no stall.",
+    ),
+    "orbit-slew": (
+        ["--orbit-sight", "pin", "--orbit-slew", "150", "--seconds", "330"],
+        "The console opens on a pin; at 150 s the pin is slewed right for 4 s and the orbit re-centres on "
+        "it without exceeding the bank and pitch rates.",
+    ),
+    "orbit-track": (
+        ["--orbit-sight", "track", "--seconds", "300"],
+        "The console opens on the tracked lead tank of the moving column and follows it.",
+    ),
+    "orbit-console-radar": (
+        ["--orbit-sight", "pin", "--console-range", "2", "--console-cycle", "70,90", "--seconds", "120"],
+        "The console turns the A-G radar on as it opens; at 70 s and 90 s the console's T (slice nr-conb) "
+        "picks the next radar contact the sensor sees within 25 nm, designates it, and the gunsight tracks "
+        "it one zoom step wider than the step that fills the picture.",
+    ),
+    "orbit-console-search-t": (
+        ["--orbit-sight", "free", "--console-range", "2", "--console-cycle", "20", "--seconds", "90"],
+        "The console opens searching with nothing pinned and the A-G radar on; the console's T at 20 s "
+        "designates the nearest radar contact the sensor sees, the gunsight tracks it and the autopilot "
+        "leaves the search for the orbit about it (slices nr-conb and nr-cona).",
+    ),
+    # Slice nr-cona (John, 2026-10-14): the console opens with a free sight and
+    # searches straight and level; its keys step the heading, altitude and
+    # speed; P pins the ground under the crosshair (orbit) and lets it go
+    # (search again).
+    "console-search": (
+        ["--orbit-sight", "free", "--seconds", "220", "--console-keys",
+         "10:heading+6,10:altitude+4,10:speed+2,90:heading-18,90:altitude-2,90:speed=25"],
+        "Opens searching with nothing pinned; a 30 degree right turn with a 2,000 ft climb, then a 90 degree "
+        "left turn, each settling on its heading without turning back, holding altitude, speed and wings "
+        "level, with smooth bank and pitch rates and no stall.",
+    ),
+    "console-pin-release": (
+        ["--orbit-sight", "free", "--seconds", "330", "--console-keys", "20:pin,240:pin"],
+        "Opens searching; P at 20 s pins the ground under the crosshair and the autopilot joins and enters "
+        "the orbit (guns and camera bear 90% after entry); P at 240 s lets it go and the search rolls out "
+        "wings level on the roll-out heading without turning back.",
+    ),
+    "console-gun-lock": (
+        ["--orbit-sight", "free", "--seconds", "240", "--console-keys",
+         "20:pin,90:gunlock,100:slew,180:gunlock"],
+        "Gun lock (John, 2026-10-14): P at 20 s pins and the orbit is joined; the guns lock on the pin at "
+        "90 s and the sensor slews right for 4 s at 100 s; while locked every pipper stays within 300 ft of "
+        "the locked point, the sight looks over 1,000 ft away and the orbit keeps circling the locked point; "
+        "unlocked at 180 s the pippers go back to the sight within 20 s.",
+    ),
+    "orbit-close": (
+        ["--orbit-sight", "pin", "--orbit-close", "120", "--seconds", "130"],
+        "Ctrl+9 again at 120 s closes the console and hands the aircraft back, flying, with no snap.",
+    ),
+}
+
+
+def check_orbit(output: str) -> list[str]:
+    problems = [line.strip()[:200] for line in output.splitlines() if line.startswith("FAIL ")]
+    if "orbit probe: PASS" not in output:
+        problems.append("the orbit probe did not finish with PASS")
+    return problems
+
+
+def orbit_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-ac130-{name}",
+            lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--aircraft", "ac130", "--load", "C_25.JT", "--attack", "orbit",
+                  "--altitude", "4000", "--speed", "200", "--from", "3", *extra],
+            check=check_orbit,
+            timeout=600,
+            notes=notes,
+        )
+        for name, (extra, notes) in ORBIT_RUNS.items()
+    ]
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
+        + orbit_scenarios()
         + landing_scenarios()
         + maneuver_scenarios()
         + spin_scenarios()
         + stall_scenarios()
         + fault_scenarios()
         + combat_scenarios()
+        + gunsight_scenarios()
         + slot_scenarios()
         + jettison_scenarios()
         + countermeasure_scenarios()
@@ -1967,6 +2308,7 @@ def scenarios() -> list[Scenario]:
         + device_scenarios()
         + edge_scenarios()
         + overspeed_scenarios()
+        + lateral_scenarios()
         + liftoff_scenarios()
         + combat_g_scenarios()
         + belly_scenarios()
@@ -1981,4 +2323,7 @@ def scenarios() -> list[Scenario]:
         + waypoint_scenarios()
         + climb_scenarios()
         + sprint_scenarios()
+        + variety_scenarios()
+        + heavy_gcurve_scenarios()
+        + powered_scenarios()
     )

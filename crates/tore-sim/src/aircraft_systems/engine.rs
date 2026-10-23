@@ -129,3 +129,16 @@ impl Engine {
         messages
     }
 }
+
+crate::flight::exact::exact_struct!(Engine {
+    temperature,
+    power,
+    flameout,
+    count,
+    shutdown,
+    serious,
+    compressor_hits,
+    compressor_exposure,
+    restart_armed,
+    heat_warning,
+});

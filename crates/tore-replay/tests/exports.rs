@@ -64,6 +64,7 @@ fn header() -> Header {
                 deck_ft: None,
             },
             extent_ft: Some([1_695_744., 1_630_208.]),
+            ..World::default()
         },
         extra: vec![("flight_model".into(), "researched".into())],
         ..Header::default()
@@ -142,7 +143,10 @@ fn player(tick: u64) -> AircraftState {
         velocity: [speed * s, 0., speed * c],
         airspeed: speed,
         g: 2.,
-        devices: [0., 0., 0., 0., 0., 0.5, 0.25, 0.4, 0., speed, 0.9],
+        devices: [
+            0., 0., 0., 0., 0., 0.5, 0.25, 0.4, 0., speed, 0.9, 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+            0., 0.,
+        ],
         heat: 0.8,
         flags: AircraftFlags {
             engine_on: true,
@@ -154,6 +158,8 @@ fn player(tick: u64) -> AircraftState {
         fuel_lb: 9_000. - t * 2.5,
         controls: [0.25, 0.4, 0., 0.9],
         auxiliary_rates: [0.; 3],
+        rotor_speed: 0.,
+        disk_tilt: [[0.; 2]; 2],
         hp: 1_000,
         max_hp: 1_000,
         sections: [0; 6],
@@ -177,7 +183,10 @@ fn enemy(tick: u64) -> AircraftState {
         velocity: [-600., if dead { -400. } else { 0. }, 0.],
         airspeed: 600.,
         g: 1.,
-        devices: [0., 0., 0., 0., 0., 0.4, 0., 0., 0., 600., 0.7],
+        devices: [
+            0., 0., 0., 0., 0., 0.4, 0., 0., 0., 600., 0.7, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+            0.,
+        ],
         heat: 0.6,
         flags: AircraftFlags {
             engine_on: !dead,
@@ -190,6 +199,8 @@ fn enemy(tick: u64) -> AircraftState {
         fuel_lb: 5_000. - t * 2.,
         controls: [0., 0., 0., 0.7],
         auxiliary_rates: [0.; 3],
+        rotor_speed: 0.,
+        disk_tilt: [[0.; 2]; 2],
         hp: if dead { 0 } else { 800 },
         max_hp: 800,
         sections: if dead { [0, 400, 0, 0, 0, 0] } else { [0; 6] },
@@ -427,6 +438,7 @@ fn golden_frames() -> Vec<Frame> {
                 kind: EffectKind::Flare,
                 position: enemy(250).position,
                 duration_ticks: 120,
+                scale: EffectSpawn::FULL_SCALE,
             }),
             255 | 256 => {
                 let (owner, state, decoy, left) = if tick == 255 {
@@ -490,6 +502,66 @@ fn golden_frames() -> Vec<Frame> {
             360 => frame
                 .events
                 .push(Event::new(kind::PLAYER_BOOKMARK).with_text("odd dip")),
+            _ => {}
+        }
+        // The data link (slice G9): both friendlies join with a radar, the
+        // wingman locks the enemy, the lead assigns it, the wingman
+        // acknowledges, a sort warning, and the assignment ends when the
+        // enemy is destroyed.
+        match tick {
+            0 => {
+                for plane in [0u32, 1] {
+                    frame.events.push(
+                        Event::new(kind::DATALINK_MEMBER)
+                            .with_subject(plane)
+                            .with(field::RADAR, true)
+                            .with_text("joined the data link, with a radar"),
+                    );
+                }
+            }
+            118 => frame.events.push(
+                Event::new(kind::DATALINK_LOCK)
+                    .with_subject(1)
+                    .with_object(2)
+                    .with_text("locked"),
+            ),
+            131 => frame.events.push(
+                Event::new(kind::DATALINK_ASSIGN)
+                    .with_subject(0)
+                    .with_object(1)
+                    .with(field::TARGET, Value::Id(2))
+                    .with(field::ORDER, "EngageMyTarget"),
+            ),
+            140 => {
+                frame.events.push(
+                    Event::new(kind::DATALINK_ACKNOWLEDGE)
+                        .with_subject(1)
+                        .with_object(2)
+                        .with_text("locked its assigned target"),
+                );
+                frame.events.push(
+                    Event::new(kind::DATALINK_SORT_WARNING)
+                        .with_subject(0)
+                        .with_object(2)
+                        .with(field::OTHER, Value::Id(1))
+                        .with_text("told a flightmate holds the same lock"),
+                );
+            }
+            301 => {
+                frame.events.push(
+                    Event::new(kind::DATALINK_UNLOCK)
+                        .with_subject(1)
+                        .with_object(2)
+                        .with_text("let go of its lock"),
+                );
+                frame.events.push(
+                    Event::new(kind::DATALINK_CLEAR)
+                        .with_subject(1)
+                        .with_object(2)
+                        .with(field::REASON, "target lost")
+                        .with_text("assignment ended"),
+                );
+            }
             _ => {}
         }
         if tick.is_multiple_of(30) {
@@ -687,6 +759,125 @@ fn the_summary_and_units_say_when_external_tanks_are_counted() {
     assert!(
         text.contains("(used 10 lb)") && !text.contains("external"),
         "{text}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_summary_counts_the_data_link_and_leaves_the_section_out_without_it() {
+    let dir = temp_dir("summary-link");
+    let recording = golden_recording(&dir);
+    let mut out = Vec::new();
+    write_summary(&recording, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "2 members (2 with a radar), 1 lock, 1 assignment, 1 acknowledged, 1 cleared, 1 sort warning"
+        ),
+        "{text}"
+    );
+    let section = text
+        .split("Data link\n")
+        .nth(1)
+        .and_then(|rest| rest.split("Timeline").next())
+        .unwrap();
+    assert!(
+        !section.contains("let go") && !section.contains("Friendly 1-2 locked Enemy"),
+        "locks are counted, not listed: {section}"
+    );
+    assert!(
+        text.contains("You assigned Friendly 1-2 to attack Enemy 2-1 (EngageMyTarget)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Friendly 1-2's assignment on Enemy 2-1 ended because target lost"),
+        "{text}"
+    );
+    // A recording from before the events has no such section.
+    let frames: Vec<Frame> = golden_frames()
+        .into_iter()
+        .map(|mut frame| {
+            frame
+                .events
+                .retain(|event| !event.kind.starts_with("datalink."));
+            frame
+        })
+        .collect();
+    let older =
+        Recording::open(write(&dir, "older.tore-replay", &frames, &golden_footer())).unwrap();
+    let mut out = Vec::new();
+    write_summary(&older, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(!text.contains("Data link"), "{text}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The golden frames with two `ai.strike` decisions added (slice ST-G): one
+/// aircraft drops its laser bomb by hand, another sends a laser missile home.
+fn strike_decision_recording(dir: &Path) -> Recording {
+    let mut frames = golden_frames();
+    let decide = |aircraft: u32, reason: &str, decision: &str, weapon: &str| {
+        Event::new(kind::AI_STRIKE)
+            .with_subject(aircraft)
+            .with_object(0)
+            .with(field::DECISION, decision)
+            .with(field::REASON, reason)
+            .with(field::STATION, 2_i64)
+            .with(field::WEAPON, weapon)
+    };
+    for frame in &mut frames {
+        match frame.tick {
+            250 => frame.events.push(decide(
+                2,
+                "no_laze_manual",
+                "no laze support, dropping manual",
+                "GBU-10E",
+            )),
+            300 => frame
+                .events
+                .push(decide(1, "no_laze_rtb", "no laze support, RTB", "AS-14")),
+            _ => {}
+        }
+    }
+    Recording::open(write(dir, "strike.tore-replay", &frames, &golden_footer())).unwrap()
+}
+
+#[test]
+fn a_no_laze_strike_decision_reaches_the_summary_the_text_and_tacview() {
+    let dir = temp_dir("strike-decision");
+    let recording = strike_decision_recording(&dir);
+    let mut out = Vec::new();
+    write_summary(&recording, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("AI strike decisions: no_laze_manual x1"),
+        "{text}"
+    );
+    assert!(
+        text.contains("strike decision: no laze support, dropping manual with GBU-10E on")
+            && text.contains("[no_laze_manual]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("strike decision: no laze support, RTB with AS-14"),
+        "{text}"
+    );
+    // Tacview carries every `ai.` event as a debug event.
+    let mut out = Vec::new();
+    write_acmi(&recording, &AcmiOptions::default(), &mut out).unwrap();
+    let acmi = String::from_utf8(out).unwrap();
+    assert!(
+        acmi.contains("Event=Message") || acmi.contains("Event="),
+        "{acmi}"
+    );
+    assert!(acmi.contains("no_laze_manual"), "{acmi}");
+    // The JSON lines keep the fields.
+    let mut out = Vec::new();
+    write_jsonl(&recording, &JsonlOptions::default(), &mut out).unwrap();
+    let json = String::from_utf8(out).unwrap();
+    assert!(
+        json.contains("\"ai.strike\"") && json.contains("no_laze_rtb"),
+        "{json}"
     );
     let _ = std::fs::remove_dir_all(dir);
 }

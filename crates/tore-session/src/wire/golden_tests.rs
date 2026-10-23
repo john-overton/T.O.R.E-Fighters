@@ -1,0 +1,187 @@
+//! The wire golden test: a fixed set of sample sections and messages,
+//! encoded and compared with the committed copy in `wire-golden.txt`.
+//!
+//! When the bytes change the test fails: raise [`PROTOCOL_VERSION`], then
+//! refresh the copy with
+//! `TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session wire_golden`.
+//! Refreshing without raising the version is refused, so the bytes cannot
+//! change under an old version number.
+
+use super::own_state::OwnStateHeader;
+use super::{PROTOCOL_VERSION, samples};
+use std::fmt::Write as _;
+use tore_codec::BitWriter;
+
+const GOLDEN: &str = "wire-golden.txt";
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+/// Every sample, one line each: its name and its bytes in hex. The
+/// transport's Keepalive packet is whole, checksum included, so its line is
+/// the one that depends on `version`.
+fn lines(version: u16) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    out.push(("inputs".into(), hex(&samples::inputs().encode().unwrap())));
+    let (full, delta) = samples::snapshots();
+    out.push(("snapshot-full".into(), hex(&full)));
+    out.push(("snapshot-delta".into(), hex(&delta)));
+    let (with_readout, against) = samples::readout_snapshots();
+    out.push(("snapshot-readout-full".into(), hex(&with_readout)));
+    out.push(("snapshot-readout-delta".into(), hex(&against)));
+    out.push(("events".into(), hex(&samples::events().encode().unwrap())));
+    // The own state's header; its body is the exact state's own coding,
+    // which `tore-world` tests.
+    let mut w = BitWriter::new();
+    OwnStateHeader {
+        flight: 3,
+        tick: 7_204,
+        number: 65_535,
+        back: 31,
+    }
+    .write(&mut w);
+    out.push(("own-state-header".into(), hex(&w.finish())));
+    for message in samples::messages(vec![1, 2, 3, 255]) {
+        out.push((
+            format!("message-{}", message.kind()),
+            hex(&message.encode().unwrap()),
+        ));
+    }
+    // Added under protocol 1 before anything shipped (the lead, 2026-09-30).
+    let ended = super::messages::Message::MissionEnded(super::messages::MissionEnded {
+        reason: super::messages::EndReason::EndedByServer,
+        next_in_seconds: Some(30),
+    });
+    out.push((
+        "message-11-ended-by-server".into(),
+        hex(&ended.encode().unwrap()),
+    ));
+    // The transport's own packet added under protocol 5 (EF-K), sealed for
+    // the version.
+    let keepalive = tore_net::packet::Packet::Keepalive(tore_net::packet::Keepalive {
+        connection: 0xDEAD_BEEF,
+        loading: false,
+    });
+    out.push((
+        "transport-keepalive".into(),
+        hex(&keepalive.encode(version).unwrap()),
+    ));
+    // The host's loading keepalive (protocol 28, slice NET2).
+    let loading = tore_net::packet::Packet::Keepalive(tore_net::packet::Keepalive {
+        connection: 0xDEAD_BEEF,
+        loading: true,
+    });
+    out.push((
+        "transport-keepalive-loading".into(),
+        hex(&loading.encode(version).unwrap()),
+    ));
+    // The transport's Challenge answer, which carries the player's platform
+    // since protocol 7 and the path since protocol 9, sealed for the version. It is padded with zeros to
+    // 1,000 bytes; the line keeps the bytes before the padding (the checksum
+    // covers it all).
+    let challenge_answer =
+        tore_net::packet::Packet::ChallengeAnswer(tore_net::packet::ChallengeAnswer {
+            nonce: 0x0123_4567_89AB_CDEF,
+            cookie: 0xFEDC_BA98_7654_3210,
+            callsign: "Viper".into(),
+            password: "secret".into(),
+            game_version: "0.1.3".into(),
+            game_commit: "fb9c2ec".into(),
+            platform: super::Platform::Linux,
+            path: tore_net::master::Path::Punched,
+            // The rejoin token since protocol 13 (stage K).
+            token: Some(tore_net::Token(0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210)),
+        })
+        .encode(version)
+        .unwrap();
+    assert_eq!(challenge_answer.len(), tore_net::packet::PADDED_LEN);
+    let head = challenge_answer.len()
+        - challenge_answer
+            .iter()
+            .rev()
+            .take_while(|&&b| b == 0)
+            .count();
+    out.push((
+        "transport-challenge-answer-head".into(),
+        hex(&challenge_answer[..head]),
+    ));
+    // The host's Punch to a player the master introduced (protocol 9, J2).
+    let punch = tore_net::packet::Packet::Punch(tore_net::packet::Punch {
+        introduction: 0x0123_4567_89AB_CDEF,
+    });
+    out.push((
+        "transport-punch".into(),
+        hex(&punch.encode(version).unwrap()),
+    ));
+    // Stage K's Reach and Reach answer (protocol 13, K0).
+    let reach = tore_net::packet::Packet::Reach(tore_net::packet::Reach {
+        session_id: 0x1122_3344_5566_7788,
+        nonce: 0x99AA_BBCC_DDEE_FF00,
+        from: 7,
+    });
+    out.push((
+        "transport-reach".into(),
+        hex(&reach.encode(version).unwrap()),
+    ));
+    let answer = tore_net::packet::Packet::ReachAnswer(tore_net::packet::ReachAnswer {
+        nonce: 0x99AA_BBCC_DDEE_FF00,
+        session_id: 0x1122_3344_5566_7788,
+        role: tore_net::ReachRole::Hosting,
+    });
+    out.push((
+        "transport-reach-answer".into(),
+        hex(&answer.encode(version).unwrap()),
+    ));
+    out
+}
+
+fn render(version: u16) -> String {
+    let mut text = format!(
+        "# T.O.R.E wire golden: tore-session's sample sections and messages.\n\
+         # Raise PROTOCOL_VERSION, then refresh with TORE_UPDATE_WIRE_GOLDEN=1.\n\
+         version {version}\n"
+    );
+    for (name, bytes) in lines(version) {
+        let _ = writeln!(text, "{name} {bytes}");
+    }
+    text
+}
+
+fn committed_version(text: &str) -> Option<u16> {
+    text.lines()
+        .find_map(|line| line.strip_prefix("version "))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+#[test]
+fn wire_golden() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
+    // A Windows checkout may turn the file's line ends into CR LF.
+    let committed = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    let now = render(PROTOCOL_VERSION);
+    if now == committed {
+        return;
+    }
+    let old_version = committed_version(&committed);
+    let bytes_changed = render(old_version.unwrap_or(PROTOCOL_VERSION)) != committed;
+    if std::env::var_os("TORE_UPDATE_WIRE_GOLDEN").is_some() {
+        assert!(
+            !(bytes_changed && old_version == Some(PROTOCOL_VERSION)),
+            "the wire bytes changed: raise PROTOCOL_VERSION in crates/tore-session/src/wire/mod.rs \
+             before refreshing {GOLDEN}"
+        );
+        std::fs::write(&path, now).unwrap();
+        return;
+    }
+    panic!(
+        "the wire bytes differ from {GOLDEN} (protocol version {PROTOCOL_VERSION}, committed {old_version:?}): \
+         raise PROTOCOL_VERSION in crates/tore-session/src/wire/mod.rs, then run \
+         TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session wire_golden"
+    );
+}

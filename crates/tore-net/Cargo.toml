@@ -1,0 +1,12 @@
+[package]
+name = "tore-net"
+version = "0.2.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+tore-codec = { path = "../tore-codec" }
+
+[lints]
+workspace = true

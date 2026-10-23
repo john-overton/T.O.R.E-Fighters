@@ -30,8 +30,6 @@ pub enum Action {
     FreeFlight,
     Mission,
     MissionFly,
-    Theater(usize),
-    Aircraft(usize),
     Back,
     Exit,
     /// A lever on a settings screen reached its sounding frame.
@@ -42,6 +40,18 @@ pub enum Action {
     Controls,
     Graphics,
     Sound,
+    /// The Multi menu's Direct Connection row: opens that screen (EF7).
+    Direct,
+    /// Leaves the Direct Connection screen.
+    DirectClose,
+    /// Leaves the game session the Direct Connection screen started.
+    DirectLeave,
+    /// Disconnect and return to the root menu.
+    MultiplayerMain,
+    /// The Multi menu's Internet Lobby row: opens that screen (I4).
+    Internet,
+    /// Leaves the Internet Lobby screen.
+    InternetClose,
     /// Opens the mission replay viewer on a recording.
     #[allow(dead_code)] // Sent by the Replays screen's Watch button.
     WatchReplay(std::path::PathBuf),
@@ -112,14 +122,18 @@ impl State {
                 "Controls...".into(),
                 "Re-import media...".into(),
             ],
-            2 => vec![
-                "Host Game...".into(),
-                "Join Game...".into(),
-                "Player Setup...".into(),
-            ],
+            // Authored rows (EF7, I4, agent decisions): the direct lobby for
+            // friends and the public Internet Lobby. Retail's six rows (Serial,
+            // Modem, IPX/SPX, TCP/IP, Disconnect, Airbase Assault) are not built.
+            2 => vec!["Direct Connection...".into(), "Internet...".into()],
             // Replays opens its screen directly.
             _ => vec![],
         }
+    }
+    pub fn hint(&self) -> Option<&'static str> {
+        (self.open == Some(2)
+            && (self.hover == Some(Target::Item(1)) || self.focus == Some(Target::Item(1))))
+        .then_some("Open the Internet Lounge to find or host a game.")
     }
     fn popup_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
         (
@@ -230,6 +244,14 @@ impl State {
                     if bar == 1 && row == 3 {
                         self.cancel();
                         return Action::ReimportMedia;
+                    }
+                    if bar == 2 && row == 0 {
+                        self.cancel();
+                        return Action::Direct;
+                    }
+                    if bar == 2 && row == 1 {
+                        self.cancel();
+                        return Action::Internet;
                     }
                     if let Some(item) = self.items(bar).get(row) {
                         self.toast = Some((
@@ -347,6 +369,9 @@ pub(crate) struct Sprite {
 }
 pub struct Menu {
     pub state: State,
+    /// What the multiplayer screens' kit is built from when one opens (the
+    /// assets are consumed by `Menu::new`).
+    pub kit_source: std::sync::Arc<crate::widgets::KitSource>,
     pub(crate) sprites: BTreeMap<String, Sprite>,
     pub quick_sprites: BTreeMap<String, Sprite>,
     pub pixels: Vec<u8>,
@@ -366,6 +391,25 @@ impl Menu {
                     self.state.down();
                 }
             }
+            "bar-multi-hover"
+            | "bar-replays-hover"
+            | "bar-replays-pressed"
+            | "bar-replays-focus" => {
+                let bar = if name == "bar-multi-hover" {
+                    2
+                } else {
+                    REPLAYS_BAR
+                };
+                if name == "bar-replays-focus" {
+                    self.state.keyboard = true;
+                    self.state.focus = Some(Target::Bar(bar));
+                } else {
+                    self.state.hover = Some(Target::Bar(bar));
+                    if name == "bar-replays-pressed" {
+                        self.state.down();
+                    }
+                }
+            }
             "help" | "pref" | "multi" => {
                 let bar = match name {
                     "help" => 0,
@@ -377,7 +421,7 @@ impl Menu {
             }
             _ => {
                 return Err(
-                    "snapshot state must be normal, hover, pressed, help, pref, multi, or notice"
+                    "snapshot state must be normal, hover, pressed, help, pref, multi, notice, bar-multi-hover, bar-replays-hover, bar-replays-pressed, or bar-replays-focus"
                         .into(),
                 );
             }
@@ -410,6 +454,10 @@ impl Menu {
             let seed = std::collections::hash_map::RandomState::new().hash_one(());
             choices[seed as usize % choices.len()].to_string()
         };
+        let kit_source = std::sync::Arc::new(crate::widgets::KitSource::of(
+            &assets.pics,
+            &assets.multiplayer_resources,
+        ));
         assets.palette = assets.pics[&background]
             .palette
             .clone()
@@ -506,6 +554,7 @@ impl Menu {
         );
         Ok(Self {
             state,
+            kit_source,
             sprites,
             quick_sprites,
             pixels: vec![0; WIDTH * HEIGHT * 4],
@@ -526,10 +575,12 @@ impl Menu {
             } else {
                 1.0 + self.state.glow[i] * 0.15
             };
-            let stem = if enabled(i) { "ACTION0" } else { "ACTIOD0" };
-            let l = &self.sprites[&format!("{stem}L.PIC")];
-            let m = &self.sprites[&format!("{stem}M.PIC")];
-            let r = &self.sprites[&format!("{stem}R.PIC")];
+            let (l, m, r) = if enabled(i) {
+                ("ACTION0L.PIC", "ACTION0M.PIC", "ACTION0R.PIC")
+            } else {
+                ("ACTIOD0L.PIC", "ACTIOD0M.PIC", "ACTIOD0R.PIC")
+            };
+            let (l, m, r) = (&self.sprites[l], &self.sprites[m], &self.sprites[r]);
             let (x, y) = (b.x + shift, b.y + shift);
             canvas.blit(l, (x, y), 0, l.width, gain);
             let end = b.width - r.width as i32;
@@ -558,7 +609,9 @@ impl Menu {
             if self.state.open == Some(i) || self.state.highlighted(Target::Bar(i)) {
                 canvas.rect(rect, [190, 200, 215, 255]);
             }
-            canvas.centered_text(menu_font, label, rect);
+            // Keep the imported font's shared baseline: Replays' descenders
+            // must not lift the whole word above Multi (presentation spec).
+            canvas.centered_text_by(menu_font, label, "Multi", rect);
         }
         let body = &self.sprites["ARMFONT.PIC"];
         // Opinionated (John, 2026-09-23): badge plus version, drawn before
@@ -599,6 +652,15 @@ impl Menu {
                 }
                 canvas.text(menu_font, label, x + 9, y + 6 + row as i32 * 20, None);
             }
+        }
+        if self.state.toast.is_none()
+            && let Some(hint) = self.state.hint()
+        {
+            canvas.rect(
+                (14, 449, text_width(body, hint) + 20, 23),
+                [22, 31, 43, 255],
+            );
+            canvas.text(body, hint, 24, 453, Some([235, 239, 243]));
         }
         if let Some((message, _)) = &self.state.toast {
             let width = (text_width(body, message) + 20).min(610);
@@ -662,11 +724,39 @@ pub(crate) fn text_width(font: &Sprite, text: &str) -> i32 {
         .sum()
 }
 pub(crate) struct Canvas<'a>(pub &'a mut [u8]);
+/// The piece `{prefix}{edge}.PIC` of a button, found without building its
+/// name on the heap (a button is drawn every frame).
+fn button_piece<'a>(sprites: &'a BTreeMap<String, Sprite>, prefix: &str, edge: char) -> &'a Sprite {
+    let tail = [edge as u8, b'.', b'P', b'I', b'C'];
+    let mut name = [0u8; 48];
+    if !edge.is_ascii() || prefix.len() + tail.len() > name.len() {
+        return &sprites[&format!("{prefix}{edge}.PIC")];
+    }
+    name[..prefix.len()].copy_from_slice(prefix.as_bytes());
+    name[prefix.len()..prefix.len() + tail.len()].copy_from_slice(&tail);
+    let key = std::str::from_utf8(&name[..prefix.len() + tail.len()])
+        .expect("a prefix and ASCII are UTF-8");
+    &sprites[key]
+}
+
 impl Canvas<'_> {
     pub(crate) fn centered_text(&mut self, font: &Sprite, text: &str, rect: (i32, i32, i32, i32)) {
+        self.centered_text_by(font, text, text, rect);
+    }
+    /// `text` centred in `rect` across, and down by the visible glyph bounds
+    /// of `bounds_of`: a top-bar label sits on its neighbours' baseline
+    /// when it is centred by their text, not by its own (a label with a
+    /// descender, "Map", would otherwise ride a pixel or two high).
+    pub(crate) fn centered_text_by(
+        &mut self,
+        font: &Sprite,
+        text: &str,
+        bounds_of: &str,
+        rect: (i32, i32, i32, i32),
+    ) {
         let mut top = font.height;
         let mut bottom = 0;
-        for ch in text.glyph_codes() {
+        for ch in bounds_of.glyph_codes() {
             let [sx, w, h] = font.glyphs[ch as usize];
             for y in 0..h {
                 if (sx..sx + w).any(|x| font.rgba[(y * font.width + x) * 4 + 3] > 0) {
@@ -728,9 +818,9 @@ impl Canvas<'_> {
         gain: f32,
         prefix: &str,
     ) {
-        let l = &sprites[&format!("{prefix}L.PIC")];
-        let m = &sprites[&format!("{prefix}M.PIC")];
-        let r = &sprites[&format!("{prefix}R.PIC")];
+        let l = button_piece(sprites, prefix, 'L');
+        let m = button_piece(sprites, prefix, 'M');
+        let r = button_piece(sprites, prefix, 'R');
         self.blit(l, (x, y), 0, l.width, gain);
         let end = w - r.width as i32;
         let mut at = l.width as i32;
@@ -844,6 +934,27 @@ impl Canvas<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn button_pieces_are_found_by_prefix_and_edge() {
+        let piece = |width| Sprite {
+            width,
+            height: 1,
+            rgba: vec![0; width * 4],
+            glyphs: vec![],
+        };
+        let mut sprites = BTreeMap::new();
+        let long = "P".repeat(60);
+        for (n, prefix) in ["ACTION0", "BUTTON", long.as_str()].into_iter().enumerate() {
+            for (m, edge) in ['L', 'M', 'R'].into_iter().enumerate() {
+                sprites.insert(format!("{prefix}{edge}.PIC"), piece(1 + n * 3 + m));
+            }
+        }
+        for (n, prefix) in ["ACTION0", "BUTTON", long.as_str()].into_iter().enumerate() {
+            for (m, edge) in ['L', 'M', 'R'].into_iter().enumerate() {
+                assert_eq!(button_piece(&sprites, prefix, edge).width, 1 + n * 3 + m);
+            }
+        }
+    }
     #[test]
     fn centered_labels_ignore_transparent_top_padding() {
         let mut glyphs = vec![[0, 0, 0]; 256];

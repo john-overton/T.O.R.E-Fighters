@@ -236,6 +236,22 @@ pub enum FuelState {
 /// B48: fuel state from endurance and time-to-home, both in seconds. The
 /// host computes both at the cruise speed and lowest throttle that holds it.
 pub fn fuel_state(endurance_s: f64, time_home_s: Option<f64>) -> Result<FuelState> {
+    fuel_state_with(
+        endurance_s,
+        time_home_s,
+        CRITICAL_ENDURANCE_S,
+        BINGO_MARGIN_S,
+        CAUTION_MARGIN_S,
+    )
+}
+
+fn fuel_state_with(
+    endurance_s: f64,
+    time_home_s: Option<f64>,
+    critical_s: f64,
+    bingo_margin_s: f64,
+    caution_margin_s: f64,
+) -> Result<FuelState> {
     if !endurance_s.is_finite() || time_home_s.is_some_and(|t| !t.is_finite() || t < 0.0) {
         return Err(AiError::InvalidInput("fuel times must be finite"));
     }
@@ -244,15 +260,57 @@ pub fn fuel_state(endurance_s: f64, time_home_s: Option<f64>) -> Result<FuelStat
     };
     Ok(if endurance_s <= 0.0 {
         FuelState::OutOfFuel
-    } else if endurance_s < CRITICAL_ENDURANCE_S {
+    } else if endurance_s < critical_s {
         FuelState::Critical
-    } else if endurance_s < time_home_s + BINGO_MARGIN_S {
+    } else if endurance_s < time_home_s + bingo_margin_s {
         FuelState::Bingo
-    } else if endurance_s <= time_home_s + CAUTION_MARGIN_S {
+    } else if endurance_s <= time_home_s + caution_margin_s {
         FuelState::Caution
     } else {
         FuelState::Ok
     })
+}
+
+/// Slice H3, fitted (agent decision 2026-10-12): the fraction of its maximum
+/// speed at which a helicopter or the V-22 flies home, and plans the flight
+/// home. B48's cruise (the minimum plus a fifth of the envelope) is a
+/// fighter's economical speed; for a helicopter it is 55 knots (AH-64), well
+/// under what its rotor sheds drag at, and the time home is what counts
+/// against its reserve. 80 percent of the envelope's top is where a
+/// helicopter's cruise sits in practice, and leaves the margin the break
+/// needs.
+pub const ROTORCRAFT_CRUISE_FRACTION: f64 = 0.8;
+
+/// Slice H3, fitted: the speed a helicopter or the V-22 plans and flies its
+/// way home at, [`ROTORCRAFT_CRUISE_FRACTION`] of the envelope's maximum,
+/// never under its minimum.
+pub fn rotorcraft_cruise_speed(limits: &SpeedLimits) -> ScalarSpeed {
+    ScalarSpeed((limits.maximum.0 * ROTORCRAFT_CRUISE_FRACTION).max(limits.minimum.0))
+}
+
+/// The fuel states of a helicopter or the V-22: B48's critical level and
+/// margins, the fighters' (slice HF2, John 2026-10-13: the helicopter bingo
+/// reserve is five minutes like a fighter's; slice H3 had used 3 minutes
+/// because the record's flow gave a tank of 18 to 55 minutes, and the fuel now
+/// burns by the power drawn, hours of it). The host gives the time home at
+/// [`rotorcraft_cruise_speed`], and none ([`rotorcraft_home_in_range`]) when a
+/// full tank could not fly there and back with the reserve.
+pub fn rotorcraft_fuel_state(endurance_s: f64, time_home_s: Option<f64>) -> Result<FuelState> {
+    fuel_state(endurance_s, time_home_s)
+}
+
+/// Slice H3, fitted (agent decision 2026-10-12): whether a rotorcraft's fuel
+/// schedule has a home to manage. It has one when a full tank
+/// (`full_endurance_s`) carries it to the field and leaves the bingo reserve;
+/// otherwise the field is beyond the aircraft's reach and the rotorcraft has
+/// none (no bingo, no caution, as B48 has for an aircraft with no home).
+/// The data gives a helicopter 18 to 55 minutes, and a Quick Mission puts a
+/// wing wherever the geometry falls: an enemy AH-64 starts 54 nautical miles
+/// from its field with 33 minutes of fuel. Sent home at the start, it would
+/// leave the fight it was placed in; with no home to manage it flies its
+/// mission, and its schedule starts the moment its field comes within reach.
+pub fn rotorcraft_home_in_range(time_home_s: f64, full_endurance_s: f64) -> bool {
+    time_home_s + BINGO_MARGIN_S <= full_endurance_s
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -560,6 +618,58 @@ mod tests {
     }
 
     #[test]
+    fn a_rotorcraft_flies_home_at_four_fifths_of_its_top_speed() {
+        // The Mi-24: 53 to 178 kt at sea level. B48's cruise is 80 kt, a
+        // little over half the 142 kt of the rotorcraft's.
+        let kt = 1.687_81;
+        let mi24 = limits(53.0 * kt, 178.0 * kt);
+        assert!((rotorcraft_cruise_speed(&mi24).0 / kt - 142.4).abs() < 0.01);
+        assert!(cruise_speed(&mi24).0 / kt < 80.0);
+        // Never under the minimum.
+        assert_eq!(
+            rotorcraft_cruise_speed(&limits(200.0, 220.0)),
+            ScalarSpeed(200.0)
+        );
+    }
+
+    #[test]
+    fn a_rotorcrafts_fuel_states_use_the_fighters_margins() {
+        // Slice HF2: the helicopter reserve is five minutes, B48's.
+        let home = Some(600.0);
+        let state = |endurance: f64| rotorcraft_fuel_state(endurance, home).unwrap();
+        assert_eq!(state(0.0), FuelState::OutOfFuel);
+        assert_eq!(state(239.9), FuelState::Critical);
+        assert_eq!(state(240.0), FuelState::Bingo);
+        // Short of the five-minute reserve over the time home: bingo.
+        assert_eq!(state(899.9), FuelState::Bingo);
+        assert_eq!(state(900.0), FuelState::Caution);
+        assert_eq!(state(1200.0), FuelState::Caution);
+        assert_eq!(state(1200.1), FuelState::Ok);
+        for endurance in [0.0, 100.0, 239.0, 500.0, 899.0, 900.0, 1100.0, 1300.0] {
+            assert_eq!(
+                rotorcraft_fuel_state(endurance, home),
+                fuel_state(endurance, home)
+            );
+        }
+        assert_eq!(
+            rotorcraft_fuel_state(100.0, None),
+            Ok(FuelState::NoManagement)
+        );
+        assert!(rotorcraft_fuel_state(f64::NAN, home).is_err());
+    }
+
+    #[test]
+    fn a_home_beyond_a_full_tanks_round_trip_is_not_managed() {
+        // A tank of 8,000 s: a field 7,700 s away leaves exactly the 300 s
+        // reserve; a tenth of a second more is out of reach.
+        assert!(rotorcraft_home_in_range(7700.0, 8000.0));
+        assert!(!rotorcraft_home_in_range(7700.1, 8000.0));
+        // A tank of 1,102 s (the Mi-24 before slice HF2) reaches 802 s.
+        assert!(rotorcraft_home_in_range(216.0, 1102.0));
+        assert!(!rotorcraft_home_in_range(803.0, 1102.0));
+    }
+
+    #[test]
     fn fuel_thresholds_at_each_edge() {
         let home = Some(1000.0);
         assert_eq!(fuel_state(0.0, home), Ok(FuelState::OutOfFuel));
@@ -615,3 +725,7 @@ mod tests {
         assert!(low < 5100 && high > 9900, "{low}..{high}");
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "route_checkpoint.rs"]
+mod checkpoint;

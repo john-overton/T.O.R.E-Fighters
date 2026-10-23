@@ -61,3 +61,11 @@ Player clearance takes precedence over routine wing status. Radio silence
 suppresses routine wing reports; player clearances remain important calls.
 Pause freezes all timing. Restart resets report history. Speech never changes
 flight or clearance decisions. These queue limits are fitted agent choices.
+
+### Several seats (multiplayer, agent decisions, 2026-09-29)
+
+Each human-flown plane has its own tower conversation (departure, approach,
+its own clearance and landing calls and the paced queue above), spoken to its
+own seat and held back by its own seat's channel. A wingman's report is decided
+once, with one variant roll, and every seat in the wingman's wing queues the
+same report in its own queue. A wing with no human hears no reports.

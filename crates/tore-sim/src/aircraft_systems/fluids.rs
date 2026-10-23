@@ -50,3 +50,13 @@ impl Fluids {
         messages
     }
 }
+
+crate::flight::exact::exact_struct!(Fluids {
+    oil,
+    hydraulic,
+    pump_hits,
+    oil_leaks,
+    hydraulic_leaks,
+    oil_warning,
+    hydraulic_warning,
+});

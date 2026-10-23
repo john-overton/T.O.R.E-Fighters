@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- A game with a password. -->
+  <path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" d="M5 7 V5.2 A3 3 0 0 1 11 5.2 V7"/>
+  <path fill="currentColor" fill-rule="evenodd" d="M4.1 7 H11.9 A1.1 1.1 0 0 1 13 8.1 V13.4 A1.1 1.1 0 0 1 11.9 14.5 H4.1 A1.1 1.1 0 0 1 3 13.4 V8.1 A1.1 1.1 0 0 1 4.1 7 Z M8 9.1 A1.25 1.25 0 1 0 8.01 9.1 Z M7.4 10.2 H8.6 V12.6 H7.4 Z"/>
+</svg>

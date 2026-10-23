@@ -4,7 +4,7 @@ use crate::AppResult;
 use tore_sim::{
     attitude::Basis,
     combat::{
-        live::{self, Command, Configuration, Launcher},
+        live::{self, Command, Configuration, Launcher, OwnshipInput},
         missiles::{self, LaunchMode},
     },
     sensors,
@@ -16,6 +16,11 @@ pub fn run(config: Configuration) -> AppResult<()> {
     );
     let mut seen = std::collections::BTreeSet::new();
     for (station, store) in config.stations.iter().enumerate() {
+        // A pylon the default load leaves empty cannot launch, so it has no
+        // table (the combat smoke skips these retained selection stations too).
+        if store.count == 0 {
+            continue;
+        }
         let Some(profile) = missiles::Profile::for_weapon(&store.weapon) else {
             continue;
         };
@@ -48,7 +53,7 @@ pub fn run(config: Configuration) -> AppResult<()> {
                                 * fraction)
                                 .max(f64::from(store.weapon.seeker.zones[1].minimum_range));
                             let mut state = live::State::new(config.clone(), true)?;
-                            state.selected = station;
+                            state.own_mut().selected = station;
                             let l = Launcher {
                                 position: [0., 10000., 0.],
                                 basis: Basis::new(0., 0., 0.),
@@ -63,40 +68,71 @@ pub fn run(config: Configuration) -> AppResult<()> {
                                 radar: true,
                                 jammer: false,
                                 alive: true,
+                                body_present: true,
                                 controls: sensors::Controls::default(),
                             };
-                            state.range_target(l);
+                            state.range_target(0, l);
                             state.targets[0].position = [0., 10000., distance];
                             state.targets[0].velocity = [0.; 3];
                             state.targets[0].basis =
                                 Basis::new(velocity[0].atan2(velocity[2]), 0., 0.);
-                            state.step(false, l, |_, _| 0.);
-                            state.command(Command::Designate, l);
+                            state.step(
+                                &[OwnshipInput {
+                                    aircraft: 0,
+                                    held: false,
+                                    launcher: l,
+                                }],
+                                |_, _| 0.,
+                            );
+                            state.command(0, Command::Designate, l);
                             // Establish the cued track before applying the scripted velocity.
                             for _ in 0..90 {
-                                state.step(false, l, |_, _| 0.);
+                                state.step(
+                                    &[OwnshipInput {
+                                        aircraft: 0,
+                                        held: false,
+                                        launcher: l,
+                                    }],
+                                    |_, _| 0.,
+                                );
                             }
-                            state.launch_mode = mode;
+                            state.own_mut().launch_mode = mode;
                             if mode == LaunchMode::Boresight {
-                                state.command(Command::ClearDesignation, l);
+                                state.command(0, Command::ClearDesignation, l);
                             }
                             state.targets[0].velocity = velocity;
                             state.targets[0].basis =
                                 Basis::new(velocity[0].atan2(velocity[2]), 0., 0.);
-                            let events = state.step(true, l, |_, _| 0.);
-                            state.release();
-                            let mut outcome =
-                                if events.iter().any(|e| matches!(e, live::Event::Fired(_))) {
-                                    "expiry".to_owned()
-                                } else {
-                                    format!("inhibit:{}", state.release_readiness.label())
-                                };
+                            let events = state.step(
+                                &[OwnshipInput {
+                                    aircraft: 0,
+                                    held: true,
+                                    launcher: l,
+                                }],
+                                |_, _| 0.,
+                            );
+                            state.release(0);
+                            let mut outcome = if events
+                                .iter()
+                                .any(|e| matches!(e, live::Event::Fired { .. }))
+                            {
+                                "expiry".to_owned()
+                            } else {
+                                format!("inhibit:{}", state.own().release_readiness.label())
+                            };
                             let mut travel = 0.;
                             let mut seconds = 0.;
                             let mut previous = l.position;
                             if !state.projectiles.is_empty() {
                                 for tick in 0..u64::from(store.weapon.movement.remove_t) * 30 + 1 {
-                                    let events = state.step(false, l, |_, _| 0.);
+                                    let events = state.step(
+                                        &[OwnshipInput {
+                                            aircraft: 0,
+                                            held: false,
+                                            launcher: l,
+                                        }],
+                                        |_, _| 0.,
+                                    );
                                     if let Some(p) = state.projectiles.first() {
                                         travel +=
                                             missiles::length(missiles::sub(p.position, previous));

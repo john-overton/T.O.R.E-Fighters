@@ -317,6 +317,7 @@ mod tests {
             flight_paused: false,
             ejection_warning: false,
             engine_gain: 0.,
+            engine_pitch: 1.,
             burner_gain: 0.,
             engine_place: super::super::spatial::Placed::inside(),
             last_listener: None,

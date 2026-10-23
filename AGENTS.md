@@ -110,6 +110,9 @@ not have to be replaced by a `native` one before acceptance. See
   renderer.
 - Preserve Linux, Windows and macOS support, deterministic headless execution,
   and fixed 120 Hz simulation independent of rendering.
+- **Grounding:** every ground object, unit, man and sprite stands on the
+  bottom of its shape through `tore_world::grounding`; never ground an object
+  any other way ([grounding](docs/formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)).
 - Never commit retail media, extracted art/audio/fonts or generated retail
   derivatives. `gameassets/`, `USNF-ATF/`, `.local/` and `target/` are local
   only. Use synthetic fixtures in committed tests.
@@ -183,6 +186,11 @@ controlled, so a clone without that step has no hook at all.
 
 Run these before finishing, from the repository root. Full details and
 platform-specific setup are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+While you iterate, run `python3 tools/quick_check.py` (about five minutes: format,
+clippy and tests for the crates you touched, and the battery scenarios the change can
+affect; see [testing tiers](docs/testing/README.md#testing-tiers)). It is an aid only:
+the check list below stays the merge requirement.
 
 ```sh
 cargo fmt --all -- --check

@@ -103,3 +103,16 @@ impl Structure {
         messages
     }
 }
+
+crate::flight::exact::exact_enum!(LossCause {
+    Overspeed = 0,
+    OutOfBounds = 1,
+});
+crate::flight::exact::exact_struct!(Structure {
+    failed,
+    cause,
+    wing_damage,
+    fire_remaining,
+    weak,
+    exposure,
+});

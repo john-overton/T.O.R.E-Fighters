@@ -1,0 +1,981 @@
+//! Tests of the lobby screen: who may press which button in each state, the
+//! slot clicks, the words that say why Fly cannot be pressed, the Leave
+//! confirmation, Kick, chat, and the lines a change of state puts in Messages.
+//! Built on the kit of synthetic pieces; no window, no session.
+use super::facts::{self, FlyAs, LoadoutAs, Show, SlotClick};
+use super::preview::{player, sample, slots};
+use super::*;
+use crate::widgets::test_kit;
+use std::time::{Duration, Instant};
+use tore_session::wire::messages::{LobbyPhase, StartRule};
+
+fn screen_of(lobby: &LobbyState, hosting: bool) -> LobbyScreen {
+    LobbyScreen::sample(Arc::new(test_kit::kit()), lobby.clone(), hosting)
+}
+
+/// The King's lobby with Goose's slot ready and the King holding a slot.
+fn king() -> LobbyState {
+    sample(1)
+}
+
+fn click(screen: &mut LobbyScreen, at: Point) -> Option<Request> {
+    screen.moved(Some((f64::from(at.0), f64::from(at.1))));
+    let down = screen.button(true);
+    let up = screen.button(false);
+    down.or(up)
+}
+
+fn button_centre(place: usize) -> Point {
+    (SLOT_X[place] + 37, BUTTON_Y + 12)
+}
+
+fn slot_row(index: i32) -> Point {
+    (100, 168 + 18 * index + 8)
+}
+
+#[test]
+fn the_king_in_a_lobby_has_every_button_and_the_joiner_only_his_own() {
+    let state = king();
+    let king = facts::buttons(&Facts::of(Some(&state), None), false);
+    assert!(king.mission.is_enabled(), "Mission... in the lobby");
+    assert!(king.settings.is_enabled(), "Settings... for everyone");
+    assert_eq!(king.players, Show::Disabled, "nobody is selected");
+    assert!(king.loadout.is_enabled(), "the King holds a slot");
+    assert_eq!(king.loadout_as, LoadoutAs::Loadout);
+    assert!(king.ready.is_enabled());
+    // Goose is ready and Maverick is not: Fly reads Force Start.
+    assert_eq!(king.fly, Show::Enabled);
+    assert_eq!(king.fly_as, FlyAs::ForceStart);
+    assert!(king.leave.is_enabled());
+    assert!(
+        facts::buttons(&Facts::of(Some(&state), None), true)
+            .players
+            .is_enabled()
+    );
+
+    let joiner = facts::buttons(&Facts::of(Some(&sample(2)), None), true);
+    for hidden in [joiner.players, joiner.fly] {
+        assert_eq!(hidden, Show::Hidden, "the King's buttons are not offered");
+    }
+    assert!(
+        joiner.mission.is_enabled(),
+        "Mission... is everyone's: the joiner reads the mission"
+    );
+    assert!(
+        joiner.settings.is_enabled()
+            && joiner.loadout.is_enabled()
+            && joiner.ready.is_enabled()
+            && joiner.leave.is_enabled()
+    );
+}
+
+#[test]
+fn a_player_with_no_slot_cannot_arm_or_ready() {
+    let mut state = sample(2);
+    state.players[1].slot = None;
+    state.players[1].ready = false;
+    state.slots = slots(&[(0, 1)]);
+    let b = facts::buttons(&Facts::of(Some(&state), None), false);
+    assert_eq!(b.loadout, Show::Disabled);
+    assert_eq!(b.ready, Show::Disabled);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(
+        facts::disabled_reason(&facts, Id::Ready, false).as_deref(),
+        Some("Take a slot first.")
+    );
+}
+
+#[test]
+fn fly_waits_for_everyone_holding_a_slot_and_says_who() {
+    let mut state = king();
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(
+        facts::fly_block(&facts).as_deref(),
+        Some("Not ready: Maverick.")
+    );
+    // The host's own words for the same refusal.
+    state.players[0].ready = true;
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(facts::fly_block(&facts), None);
+    assert!(facts::buttons(&facts, false).fly.is_enabled());
+    // Two waiting: both named, in the order they connected.
+    state.players[0].ready = false;
+    state.players[1].ready = false;
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(
+        facts::fly_block(&facts).as_deref(),
+        Some("Not ready: Maverick, Goose.")
+    );
+    // Nobody holds a slot.
+    for p in &mut state.players {
+        p.slot = None;
+    }
+    state.slots = slots(&[]);
+    assert_eq!(
+        facts::fly_block(&Facts::of(Some(&state), None)).as_deref(),
+        Some("Nobody holds a slot.")
+    );
+}
+
+#[test]
+fn while_the_mission_flies_fly_ends_it_and_ready_joins_it() {
+    let mut state = king();
+    state.phase = LobbyPhase::Flying;
+    let facts = Facts::of(Some(&state), None);
+    let b = facts::buttons(&facts, false);
+    assert_eq!(b.fly_as, FlyAs::EndMission);
+    assert!(b.fly.is_enabled());
+    assert_eq!(
+        b.mission,
+        Show::Enabled,
+        "the mission page opens while it flies, to read (it changes only in the lobby)"
+    );
+    assert_eq!(
+        (b.loadout, b.loadout_as),
+        (Show::Enabled, LoadoutAs::Watch),
+        "the Loadout button's place watches the flying mission"
+    );
+    assert_eq!(facts::ready_label(&facts), "Join");
+    assert!(b.ready.is_enabled());
+    let mut screen = screen_of(&state, true);
+    assert_eq!(
+        click(&mut screen, button_centre(5)),
+        Some(Request::EndMission)
+    );
+}
+
+#[test]
+fn the_blue_button_is_fly_when_it_can_be_pressed_else_ready() {
+    let mut state = king();
+    let screen = screen_of(&state, true);
+    // Goose is ready and the King is not, so the blue button is Force Start.
+    assert_eq!(screen.default_button(), Some(facts::DefaultButton::Fly));
+    assert_eq!(screen.buttons().fly_as, FlyAs::ForceStart);
+    state.players[1].ready = false;
+    let screen = screen_of(&state, true);
+    assert_eq!(screen.default_button(), Some(facts::DefaultButton::Ready));
+    state.players[0].ready = true;
+    state.players[1].ready = true;
+    let screen = screen_of(&state, true);
+    assert_eq!(screen.default_button(), Some(facts::DefaultButton::Fly));
+    // A joiner who is ready has nothing to press.
+    let screen = screen_of(&sample(2), false);
+    assert_eq!(screen.default_button(), None);
+}
+
+#[test]
+fn clicking_a_free_slot_takes_it_and_clicking_ones_own_frees_it() {
+    let mut state = sample(2);
+    // Goose holds plane 1; Maverick plane 0.
+    let mut screen = screen_of(&state, false);
+    assert_eq!(click(&mut screen, slot_row(2)), Some(Request::Take(2)));
+    // Own slot (row 1): freed.
+    assert_eq!(click(&mut screen, slot_row(1)), Some(Request::LeaveSlot));
+    // Another player's slot (row 0) is not clickable, and says why.
+    assert_eq!(click(&mut screen, slot_row(0)), None);
+    assert!(
+        screen
+            .message_lines()
+            .last()
+            .is_some_and(|l| l.contains("Another player holds"))
+    );
+    // A double-click is one click, not a take and a leave.
+    state.players[1].slot = None;
+    state.slots = slots(&[(0, 1)]);
+    screen.update(Some(&state), None);
+    screen.moved(Some((100., 168. + 18. * 3. + 8.)));
+    assert_eq!(screen.button(true), Some(Request::Take(3)));
+    screen.button(false);
+    assert_eq!(
+        screen.button(true),
+        None,
+        "the second press of a double-click"
+    );
+    screen.button(false);
+}
+
+#[test]
+fn slot_clicks_are_refused_while_flying_or_unable() {
+    let state = sample(2);
+    let mut facts = Facts::of(Some(&state), None);
+    facts.flying = true;
+    assert!(matches!(
+        facts::slot_click(&state, &facts, 3),
+        SlotClick::Refused(_)
+    ));
+    let facts = Facts::of(Some(&state), Some("data differs"));
+    assert!(matches!(
+        facts::slot_click(&state, &facts, 3),
+        SlotClick::Refused(_)
+    ));
+    assert_eq!(
+        facts::slot_click(&state, &Facts::of(Some(&state), None), 3),
+        SlotClick::Take(3)
+    );
+    assert_eq!(
+        facts::slot_click(&state, &Facts::of(Some(&state), None), 1),
+        SlotClick::Leave
+    );
+}
+
+#[test]
+fn enter_on_a_selected_slot_clicks_it() {
+    let state = sample(2);
+    let mut screen = screen_of(&state, false);
+    screen.focus.set(Id::Slots);
+    screen.key("ArrowDown", false);
+    assert_eq!(screen.selected_slot(), Some(0));
+    screen.key("ArrowDown", false);
+    screen.key("ArrowDown", false);
+    assert_eq!(screen.selected_slot(), Some(2));
+    assert_eq!(screen.key("Enter", false), Some(Request::Take(2)));
+}
+
+#[test]
+fn ready_toggles_and_says_when_the_standard_stores_are_flown() {
+    let mut state = sample(2);
+    state.players[1].ready = false;
+    state.players[1].loadout = false;
+    let mut screen = screen_of(&state, false);
+    assert_eq!(
+        click(&mut screen, button_centre(5)),
+        Some(Request::SetReady(true))
+    );
+    assert!(
+        screen
+            .message_lines()
+            .iter()
+            .any(|l| l.contains("standard stores")),
+        "{:?}",
+        screen.message_lines()
+    );
+    // Armed: no such line, and Ready again takes it back.
+    state.players[1].loadout = true;
+    let mut screen = screen_of(&state, false);
+    assert_eq!(
+        click(&mut screen, button_centre(5)),
+        Some(Request::SetReady(true))
+    );
+    assert!(
+        !screen
+            .message_lines()
+            .iter()
+            .any(|l| l.contains("standard"))
+    );
+    state.players[1].ready = true;
+    screen.update(Some(&state), None);
+    assert_eq!(
+        click(&mut screen, button_centre(5)),
+        Some(Request::SetReady(false))
+    );
+}
+
+#[test]
+fn the_kings_leave_asks_first_and_a_joiners_does_not() {
+    let state = king();
+    let mut screen = screen_of(&state, true);
+    assert_eq!(click(&mut screen, button_centre(6)), None);
+    assert!(screen.modal_open());
+    assert!(screen.modal.as_ref().is_some_and(|m| {
+        m.lines()
+            .iter()
+            .any(|l| l == "Leaving ends the game for everyone.")
+    }));
+    // Enter on the panel is Cancel (it has the focus); the game goes on.
+    assert_eq!(screen.key("Enter", false), None);
+    assert!(!screen.modal_open());
+    // Esc is Leave: asks again; Esc closes the panel; the second Esc asks.
+    assert_eq!(screen.key("Escape", false), None);
+    assert!(screen.modal_open());
+    assert_eq!(screen.key("Escape", false), None);
+    assert!(!screen.modal_open());
+    // Leave on the panel.
+    screen.key("Escape", false);
+    assert_eq!(screen.key("Tab", true), None);
+    assert_eq!(screen.key("Enter", false), Some(Request::Leave));
+    assert!(!screen.modal_open());
+
+    let mut joiner = screen_of(&sample(2), false);
+    assert_eq!(click(&mut joiner, button_centre(6)), Some(Request::Leave));
+    assert_eq!(joiner.key("Escape", false), Some(Request::Leave));
+}
+
+#[test]
+fn a_host_that_has_not_answered_yet_is_still_asked_before_leaving() {
+    let mut screen = LobbyScreen::new(Arc::new(test_kit::kit()), "Maverick's game", true);
+    assert_eq!(screen.key("Escape", false), None);
+    assert!(screen.modal_open());
+    let mut joining = LobbyScreen::new(Arc::new(test_kit::kit()), "Friday night", false);
+    assert_eq!(joining.key("Escape", false), Some(Request::Leave));
+}
+
+#[test]
+fn players_opens_for_the_selected_player_and_kick_asks_for_a_reason() {
+    let state = king();
+    let mut screen = screen_of(&state, true);
+    // Nobody selected: Players... says what to do.
+    assert_eq!(click(&mut screen, button_centre(2)), None);
+    assert!(
+        screen
+            .message_lines()
+            .last()
+            .is_some_and(|l| l.contains("Select another player"))
+    );
+    // The King's own row is not a target.
+    screen.players.select(0);
+    screen.refresh();
+    assert_eq!(screen.buttons().players, Show::Disabled);
+    screen.players.select(1);
+    screen.refresh();
+    assert_eq!(screen.buttons().players, Show::Enabled);
+    assert_eq!(click(&mut screen, button_centre(2)), None);
+    let panel = screen.players_open().expect("the Players panel is open");
+    assert_eq!((panel.player(), panel.callsign()), (2, "Goose"));
+    assert!(!screen.typing(), "the panel has no text line");
+    // Kick... in the panel opens EF8's reason panel.
+    assert_eq!(screen.key("Tab", true), None);
+    assert_eq!(screen.key("Enter", false), None);
+    assert!(screen.players_open().is_none() && screen.modal_open() && screen.typing());
+    screen.text_input("AFK too long");
+    assert_eq!(
+        screen.key("Enter", false),
+        Some(Request::Kick {
+            player: 2,
+            reason: "AFK too long".into()
+        })
+    );
+    assert!(!screen.modal_open());
+    // Cancel keeps everyone.
+    click(&mut screen, button_centre(2));
+    screen.key("Tab", true);
+    screen.key("Enter", false);
+    assert!(screen.modal_open());
+    assert_eq!(screen.key("Escape", false), None);
+    assert!(!screen.modal_open());
+}
+
+#[test]
+fn a_button_that_cannot_be_pressed_says_why_when_clicked() {
+    let mut state = king();
+    // Nobody ready: Force Start is not offered, and Fly says who waits.
+    state.players[1].ready = false;
+    let mut screen = screen_of(&state, true);
+    assert_eq!(click(&mut screen, button_centre(5)), None);
+    assert_eq!(
+        screen.message_lines().last().map(String::as_str),
+        Some("Not ready: Maverick, Goose.")
+    );
+}
+
+#[test]
+fn enter_in_the_chat_line_sends_it_and_an_empty_line_presses_the_blue_button() {
+    let state = king();
+    let mut screen = screen_of(&state, true);
+    assert!(screen.typing(), "typing starts in the line");
+    screen.text_input("  hello all ");
+    assert_eq!(screen.typed(), "  hello all ");
+    assert_eq!(
+        screen.key("Enter", false),
+        Some(Request::Chat("hello all".into()))
+    );
+    assert_eq!(screen.typed(), "");
+    // Nothing typed: Enter is the blue button (Force Start here).
+    assert_eq!(screen.key("Enter", false), Some(Request::ForceStart));
+}
+
+#[test]
+fn a_dedicated_servers_lobby_has_no_kings_controls_and_states_its_rule() {
+    let mut state = sample(2);
+    state.king = None;
+    state.host = None;
+    state.start = StartRule::FirstReady;
+    let facts = Facts::of(Some(&state), None);
+    assert!(facts.server && !facts.king);
+    let b = facts::buttons(&facts, true);
+    assert_eq!(
+        [b.mission, b.players, b.fly],
+        [Show::Enabled, Show::Hidden, Show::Hidden],
+        "a server's players read its mission"
+    );
+    assert!(
+        b.settings.is_enabled(),
+        "a server's players see its settings too"
+    );
+    assert!(
+        facts::ready_hint(&Facts::of(Some(&state), None))
+            .is_some_and(|hint| hint.contains("first player holding a slot"))
+    );
+    state.start = StartRule::Flying;
+    assert!(
+        facts::ready_hint(&Facts::of(Some(&state), None))
+            .is_some_and(|hint| hint.contains("always flying"))
+    );
+    // Leave never asks on a server.
+    let mut screen = screen_of(&state, false);
+    assert_eq!(click(&mut screen, button_centre(6)), Some(Request::Leave));
+    // The rows have no crown: the King's column is empty for everyone.
+    let rows = facts::player_rows(&state);
+    assert!(
+        rows.iter()
+            .all(|r| r.cells[0] == crate::widgets::Cell::Empty)
+    );
+}
+
+fn set_setting(state: &mut LobbyState, number: u8, value: u32) {
+    state.settings.retain(|s| s.0 != number);
+    state.settings.push((number, value));
+}
+
+#[test]
+fn the_lobby_says_it_waits_for_the_minimum_players_as_the_host_does() {
+    use tore_session::settings::number;
+    // The sample has two slots held: Maverick's, not ready, and Goose's.
+    let mut state = sample(2);
+    state.king = None;
+    state.host = None;
+    state.start = StartRule::FirstReady;
+    set_setting(&mut state, number::MIN_PLAYERS, 4);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!((facts.min_players, facts.min_waiting), (4, 3));
+    assert!(!facts.all_ready());
+    assert_eq!(
+        facts::hint(&facts),
+        "Waiting for 3 more ready players (minimum 4)."
+    );
+    assert!(
+        facts::ready_hint(&facts).is_some_and(|hint| hint.contains("minimum number of players"))
+    );
+    // Met: the wait line goes.
+    set_setting(&mut state, number::MIN_PLAYERS, 1);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(facts.min_waiting, 0);
+    assert!(!facts::hint(&facts).starts_with("Waiting for"));
+    // Never more than the six slots, or the player limit.
+    set_setting(&mut state, number::MIN_PLAYERS, 30);
+    assert_eq!(Facts::of(Some(&state), None).min_players, 6);
+    set_setting(&mut state, number::MAX_PLAYERS, 3);
+    assert_eq!(Facts::of(Some(&state), None).min_players, 3);
+    // AI off uses the same minimum, independent of the unfilled slots.
+    set_setting(&mut state, number::MAX_PLAYERS, 30);
+    set_setting(&mut state, number::MIN_PLAYERS, 2);
+    set_setting(&mut state, number::AI, 0);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(
+        facts::hint(&facts),
+        "Waiting for 1 more ready player (minimum 2)."
+    );
+}
+
+#[test]
+fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
+    let mut state = king();
+    state.players.push(player(3, "Viper", None));
+    state.players[2].unable = Some("data differs".into());
+    let rows = facts::player_rows(&state);
+    use crate::widgets::{Cell, Icon};
+    assert_eq!(rows[0].cells[0], Cell::Icon(Icon::Crown));
+    assert_eq!(rows[0].cells[1], Cell::Icon(Icon::House));
+    assert_eq!(rows[1].cells[2], Cell::Icon(Icon::Ready));
+    assert_eq!(rows[2].cells[2], Cell::Icon(Icon::Unable));
+    // No state word follows the name: the ticks and the cross say it.
+    assert_eq!(rows[2].cells.len(), 6);
+    // The platform sits beside the name: the sample players are on Linux
+    // (id 1), Windows (2) and macOS (3), and an unnamed platform has no mark.
+    assert_eq!(rows[0].cells[3], Cell::Icon(Icon::Linux));
+    assert_eq!(rows[1].cells[3], Cell::Icon(Icon::Windows));
+    assert_eq!(rows[2].cells[3], Cell::Icon(Icon::MacOs));
+    assert_eq!(rows[0].cells[5], Cell::Text("Maverick".into()));
+    state.players[0].platform = tore_session::wire::Platform::Unknown;
+    assert_eq!(facts::player_rows(&state)[0].cells[3], Cell::Empty);
+    assert!(rows[2].tint.is_some());
+    assert_eq!(
+        facts::player_detail(&state, 3).as_deref(),
+        Some("data differs")
+    );
+}
+
+#[test]
+fn the_slots_list_shows_who_holds_what_with_the_players_own_marked() {
+    let state = sample(2);
+    let rows = facts::slot_rows(&state);
+    use crate::widgets::{Cell, Icon};
+    assert_eq!(rows.len(), 6);
+    assert_eq!(rows[0].cells[3], Cell::Text("Maverick".into()));
+    assert!(rows[0].dim, "another player's slot is dimmed");
+    assert_eq!(rows[1].cells[0], Cell::Icon(Icon::You));
+    // The Players list carries the ready ticks, so the row ends at the holder.
+    assert_eq!(rows[1].cells.len(), 4);
+    assert_eq!(rows[2].cells[3], Cell::Text("AI".into()));
+    assert_eq!(rows[2].cells[1], Cell::Text("Wing 1 #3".into()));
+    assert_eq!(rows[4].cells[2], Cell::Text("F/A-18D Hornet".into()));
+    assert_eq!(rows[4].cells[1], Cell::Text("Wing 2 #1".into()));
+}
+
+#[test]
+fn a_relayed_player_has_the_relay_mark_beside_its_platform_and_every_path_is_said() {
+    use crate::widgets::{Cell, Icon};
+    use tore_session::wire::Path;
+    let mut state = king();
+    state.players.push(player(3, "Viper", None));
+    for (path, mark, line) in [
+        (
+            Path::LocalNetwork,
+            None,
+            "Viper: on macOS. Connected over the local network.",
+        ),
+        (
+            Path::ByAddress,
+            None,
+            "Viper: on macOS. Connected directly.",
+        ),
+        (
+            Path::MappedPort,
+            None,
+            "Viper: on macOS. Connected directly (forwarded port).",
+        ),
+        (
+            Path::Ipv6,
+            None,
+            "Viper: on macOS. Connected directly (IPv6).",
+        ),
+        (
+            Path::Punched,
+            None,
+            "Viper: on macOS. Connected directly (punched through).",
+        ),
+        (
+            Path::Relay,
+            Some(Icon::Relay),
+            "Viper: on macOS. Connected through the relay.",
+        ),
+    ] {
+        state.players[2].path = path;
+        let rows = facts::player_rows(&state);
+        assert_eq!(
+            rows[2].cells[4],
+            mark.map_or(Cell::Empty, Cell::Icon),
+            "{path:?}"
+        );
+        // The platform's mark and the name keep their cells.
+        assert_eq!(rows[2].cells[3], Cell::Icon(Icon::MacOs));
+        assert_eq!(rows[2].cells[5], Cell::Text("Viper".into()));
+        assert_eq!(facts::player_detail(&state, 3).as_deref(), Some(line));
+    }
+    // The house's own game has no path to say, and an unable player's
+    // reason comes before the path.
+    assert_eq!(
+        facts::player_detail(&state, 1).as_deref(),
+        Some("Maverick: on Linux. Runs this game.")
+    );
+    state.players[2].unable = Some("data differs".into());
+    assert_eq!(
+        facts::player_detail(&state, 3).as_deref(),
+        Some("data differs")
+    );
+    assert_eq!(facts::player_detail(&state, 99), None);
+}
+
+#[test]
+fn the_screen_draws_the_relay_mark_in_the_players_list_and_the_path_in_the_selected_line() {
+    let kit = Arc::new(test_kit::kit());
+    let mut state = king();
+    state.players.push(player(3, "Viper", None));
+    let draw = |state: &LobbyState, select: Option<usize>| {
+        let mut screen = LobbyScreen::sample(Arc::clone(&kit), state.clone(), true);
+        if let Some(row) = select {
+            screen.players.select(row);
+            screen.refresh();
+        }
+        let mut pixels = test_kit::blank();
+        screen.draw(&mut Canvas(&mut pixels));
+        pixels
+    };
+    let before = draw(&state, None);
+    state.players[2].path = tore_session::wire::Path::Relay;
+    let after = draw(&state, None);
+    let changed: Vec<usize> = (0..before.len() / 4)
+        .filter(|i| before[i * 4..i * 4 + 4] != after[i * 4..i * 4 + 4])
+        .collect();
+    assert!(
+        changed.len() > 20,
+        "the relay mark drew {} pixels",
+        changed.len()
+    );
+    // Only the Players list changed: its third row, at the relay column.
+    for i in changed {
+        let (x, y) = ((i % 640) as i32, (i / 640) as i32);
+        assert!(
+            (404..590).contains(&x) && (168..268).contains(&y),
+            "a pixel changed outside the Players list at ({x}, {y})"
+        );
+    }
+    // Selecting the relayed player puts its path in the hint line.
+    let selected = draw(&state, Some(2));
+    assert_ne!(selected, after);
+}
+
+#[test]
+fn a_slot_whose_player_is_away_reads_ai_and_the_players_name() {
+    let mut state = sample(1);
+    let rows = facts::slot_rows(&state);
+    use crate::widgets::Cell;
+    assert_eq!(rows[1].cells[3], Cell::Text("Goose".into()));
+    state.players[1].away = true;
+    let rows = facts::slot_rows(&state);
+    assert_eq!(rows[1].cells[3], Cell::Text("AI (Goose away)".into()));
+    // Another slot, and a player who is back, read as before.
+    assert_eq!(rows[0].cells[3], Cell::Text("Maverick".into()));
+    state.players[1].away = false;
+    assert_eq!(
+        facts::slot_rows(&state)[1].cells[3],
+        Cell::Text("Goose".into())
+    );
+}
+
+#[test]
+fn a_change_of_state_is_said_in_messages() {
+    let old = king();
+    let mut new = old.clone();
+    new.players.push(player(3, "Viper", None));
+    new.mission = 4;
+    new.summary = "UKR, clear".into();
+    let lines = facts::change_lines(Some(&old), &new);
+    assert!(lines.contains(&"Viper joined the game.".to_string()));
+    assert!(lines.contains(&"The mission is now: UKR, clear".to_string()));
+    let lines = facts::change_lines(Some(&new), &old);
+    assert!(lines.contains(&"Viper left the game.".to_string()));
+    let mut flying = old.clone();
+    flying.phase = LobbyPhase::Flying;
+    assert!(
+        facts::change_lines(Some(&old), &flying)
+            .iter()
+            .any(|l| l.contains("is flying"))
+    );
+    assert!(
+        facts::change_lines(Some(&flying), &old)
+            .iter()
+            .any(|l| l == "Back in the lobby.")
+    );
+    assert!(facts::change_lines(Some(&old), &old).is_empty());
+    // An unable player is named with the reason, once.
+    // The host's words start with the callsign, so they are said as they are.
+    let mut unable = old.clone();
+    unable.players[1].unable = Some("Goose's game has no Su-27, which this mission flies.".into());
+    assert!(
+        facts::change_lines(Some(&old), &unable)
+            .iter()
+            .any(|l| l == "Goose's game has no Su-27, which this mission flies.")
+    );
+    assert!(facts::change_lines(Some(&unable), &unable).is_empty());
+}
+
+#[test]
+fn the_screen_tells_a_player_whose_own_game_cannot_play_the_mission() {
+    let state = sample(2);
+    let mut screen = screen_of(&state, false);
+    // Short enough for one line of the Messages box, whose text stops short
+    // of its scroll bar (a longer line is wrapped, and then no one line is the
+    // words).
+    let words = "Your game has no Su-27, which this mission flies. Re-import to add it.";
+    screen.update(Some(&state), Some(words));
+    // The player's own words are said and shown as they are, once.
+    assert_eq!(
+        screen
+            .message_lines()
+            .iter()
+            .filter(|l| *l == words)
+            .count(),
+        1
+    );
+    let b = screen.buttons();
+    assert_eq!([b.loadout, b.ready], [Show::Disabled, Show::Disabled]);
+    assert_eq!(facts::hint(screen.facts()), words);
+}
+
+#[test]
+fn hints_walk_the_player_through_the_lobby() {
+    let mut state = sample(2);
+    state.players[1].slot = None;
+    state.players[1].ready = false;
+    state.slots = slots(&[(0, 1)]);
+    let hint = |s: &LobbyState| facts::hint(&Facts::of(Some(s), None));
+    assert!(hint(&state).starts_with("Click a free slot"));
+    state.players[1].slot = Some(1);
+    state.slots = slots(&[(0, 1), (1, 2)]);
+    assert!(hint(&state).starts_with("Choose a loadout"));
+    state.players[1].loadout = true;
+    assert!(hint(&state).starts_with("Press Ready"));
+    state.players[1].ready = true;
+    assert!(
+        hint(&state).contains("Waiting for the King")
+            || hint(&state).contains("Waiting for Maverick")
+    );
+    assert_eq!(
+        facts::hint(&Facts::of(None, None)),
+        "Connecting to the game..."
+    );
+}
+
+#[test]
+fn the_screen_draws_with_and_without_a_lobby_and_panels() {
+    let kit = Arc::new(test_kit::kit());
+    let mut pixels = test_kit::blank();
+    let mut screen = LobbyScreen::new(Arc::clone(&kit), "Friday night", false);
+    screen.draw(&mut Canvas(&mut pixels));
+    let state = king();
+    screen.update(Some(&state), None);
+    screen.draw(&mut Canvas(&mut pixels));
+    screen.focus.set(Id::Slots);
+    screen.press(Id::Leave);
+    screen.draw(&mut Canvas(&mut pixels));
+    assert!(screen.modal_open());
+}
+
+/// Times the screen's update and draw on the imported pieces, a full lobby
+/// (six players, eight slots, a chat line, a few lines of Messages). Run it
+/// with a release build:
+///
+/// ```text
+/// TORE_DATA_DIR=... cargo test --release -p tore-app --locked \
+///     lobby_screen::tests::time_lobby_frame -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "needs an imported data profile (TORE_DATA_DIR)"]
+fn time_lobby_frame() {
+    use crate::widgets::KitSource;
+    let data = crate::assets::data_directory().expect("data directory");
+    let assets = crate::assets::Assets::load(&data).expect("an imported pack");
+    let source = KitSource::of(&assets.pics, &assets.multiplayer_resources);
+    let kit = Arc::new(source.build("MODEM3").expect("kit"));
+    let mut state = sample(1);
+    for (i, name) in ["Slider", "Viper", "Hollywood", "Wolfman"]
+        .iter()
+        .enumerate()
+    {
+        let mut p = player(3 + i as u8, name, Some(2 + i as u32));
+        p.ready = i % 2 == 0;
+        state.players.push(p);
+    }
+    state.slots = slots(&[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
+    let mut screen = LobbyScreen::sample(kit, state.clone(), true);
+    for text in [
+        "Slider joined the game.",
+        "Viper joined the game.",
+        "A third line.",
+    ] {
+        screen.say(text);
+    }
+    screen.text_input("typing a chat line");
+    let mut pixels = test_kit::blank();
+    let runs = 500;
+    let (mut turn, mut draw, mut both) = (Vec::new(), Vec::new(), Vec::new());
+    for i in 0..runs + 20 {
+        let t = Instant::now();
+        screen.update(Some(&state), None);
+        let a = t.elapsed();
+        let t = Instant::now();
+        screen.draw(&mut Canvas(&mut pixels));
+        let b = t.elapsed();
+        if i >= 20 {
+            turn.push(a);
+            draw.push(b);
+            both.push(a + b);
+        }
+    }
+    for (name, mut times) in [("update", turn), ("draw", draw), ("update and draw", both)] {
+        times.sort();
+        let total: Duration = times.iter().sum();
+        println!(
+            "{name}, {runs} runs: mean {:?}, median {:?}, p95 {:?}, max {:?}",
+            total / runs as u32,
+            times[runs / 2],
+            times[runs * 95 / 100],
+            times[runs - 1]
+        );
+    }
+}
+
+// ---- Stage L, slice L4: gaps (L5 dropped the builds) ----
+
+use tore_session::wire::messages::{Build, ContentGaps, Gap, GapPlayer, ItemKind};
+
+/// The gaps of a host on 1.02F with nobody lacking anything.
+fn no_gaps() -> ContentGaps {
+    ContentGaps {
+        host_build: Build::V102F,
+        host_importer: None,
+        gaps: Vec::new(),
+    }
+}
+
+/// A gap in the Su-27 for the players `ids`.
+fn su27_gap(ids: &[u8], differs: bool) -> Gap {
+    Gap {
+        kind: ItemKind::Aircraft,
+        key: "SU27.PT".into(),
+        label: "Su-27".into(),
+        host_lacks: false,
+        players: ids
+            .iter()
+            .map(|id| GapPlayer { id: *id, differs })
+            .collect(),
+    }
+}
+
+#[test]
+fn the_selected_players_line_says_its_system_then_how_it_connected_and_never_its_build() {
+    let mut state = king();
+    assert_eq!(
+        facts::player_detail(&state, 2).as_deref(),
+        Some("Goose: on Windows. Connected directly (punched through).")
+    );
+    assert_eq!(
+        facts::player_detail(&state, 1).as_deref(),
+        Some("Maverick: on Linux. Runs this game.")
+    );
+    // An unable player's line is the host's reason, as it is: it starts with
+    // the callsign already.
+    state.players[1].unable = Some("Goose's game has no Su-27, which this mission flies.".into());
+    assert_eq!(
+        facts::player_detail(&state, 2).as_deref(),
+        Some("Goose's game has no Su-27, which this mission flies.")
+    );
+}
+
+#[test]
+fn messages_say_nothing_about_a_players_build_whatever_it_is() {
+    let mut state = king();
+    let mut notes = facts::GapNotes::default();
+    // Nothing before the gaps arrive.
+    assert!(notes.lines(&state, None).is_empty());
+    // Goose imported 1.0 and the host 1.02F: no gap, so no line, now or
+    // later, and a build the host does not know is no line either.
+    assert!(notes.lines(&state, Some(&no_gaps())).is_empty());
+    state.players[1].build = Build::Unknown;
+    assert!(notes.lines(&state, Some(&no_gaps())).is_empty());
+    let joiner = sample(2);
+    assert!(
+        facts::GapNotes::default()
+            .lines(&joiner, Some(&no_gaps()))
+            .is_empty()
+    );
+}
+
+#[test]
+fn messages_say_what_a_player_lacks_or_has_differently_once_and_again_when_it_returns() {
+    let state = king();
+    let mut notes = facts::GapNotes::default();
+    // A gap that names Goose is said at once.
+    let gaps = ContentGaps {
+        gaps: vec![su27_gap(&[2], false)],
+        ..no_gaps()
+    };
+    assert_eq!(
+        notes.lines(&state, Some(&gaps)),
+        vec!["Goose's game differs from the host's: no Su-27."]
+    );
+    // Once for each player.
+    assert!(notes.lines(&state, Some(&gaps)).is_empty());
+    // A different one, said the same way.
+    let mut notes = facts::GapNotes::default();
+    let gaps = ContentGaps {
+        gaps: vec![su27_gap(&[2], true)],
+        ..no_gaps()
+    };
+    assert_eq!(
+        notes.lines(&state, Some(&gaps)),
+        vec!["Goose's game differs from the host's: a different Su-27."]
+    );
+    // The joiner is told in the second person.
+    let mut notes = facts::GapNotes::default();
+    let joiner = sample(2);
+    let own = ContentGaps {
+        gaps: vec![su27_gap(&[2], false)],
+        ..no_gaps()
+    };
+    assert_eq!(
+        notes.lines(&joiner, Some(&own)),
+        vec!["Your game differs from the host's: no Su-27."]
+    );
+    // A player who left, and comes back, is told about again.
+    let mut notes = facts::GapNotes::default();
+    notes.lines(&state, Some(&gaps));
+    let mut gone = state.clone();
+    gone.players.truncate(1);
+    assert!(notes.lines(&gone, Some(&gaps)).is_empty());
+    assert_eq!(notes.lines(&state, Some(&gaps)).len(), 1);
+}
+
+#[test]
+fn the_screen_puts_a_players_gap_in_messages_once_never_its_build_and_shows_the_hosts_reason_as_it_is()
+ {
+    let state = sample(1);
+    let mut screen = screen_of(&state, true);
+    // Goose is on 1.0 and the host on 1.02F: nothing is said about it.
+    screen.set_gaps(Some(&no_gaps()));
+    assert!(
+        !screen
+            .message_lines()
+            .iter()
+            .any(|l| l.contains("Fighters Anthology")),
+        "no build line"
+    );
+    let gaps = ContentGaps {
+        gaps: vec![su27_gap(&[2], false)],
+        ..no_gaps()
+    };
+    screen.set_gaps(Some(&gaps));
+    screen.set_gaps(Some(&gaps));
+    let said = screen
+        .message_lines()
+        .iter()
+        .filter(|l| *l == "Goose's game differs from the host's: no Su-27.")
+        .count();
+    assert_eq!(said, 1);
+    // The host's reason about another player is a line of its own, as it is,
+    // and its own player's reason (the second person) is the hint.
+    let mut unable = state.clone();
+    unable.players[1].unable = Some("Goose's game has no Su-27, which this mission flies.".into());
+    screen.update(Some(&unable), None);
+    assert_eq!(
+        screen
+            .message_lines()
+            .iter()
+            .filter(|l| *l == "Goose's game has no Su-27, which this mission flies.")
+            .count(),
+        1
+    );
+    let mut own = unable.clone();
+    own.you = 2;
+    own.players[1].unable = unable.players[1].unable.clone();
+    let mut goose = screen_of(&sample(2), false);
+    goose.update(Some(&own), None);
+    // Only the host has said so: its words are said once, as they are.
+    assert_eq!(
+        goose
+            .message_lines()
+            .iter()
+            .filter(|l| *l == "Goose's game has no Su-27, which this mission flies.")
+            .count(),
+        1
+    );
+    assert_eq!(
+        facts::hint(goose.facts()),
+        "Goose's game has no Su-27, which this mission flies."
+    );
+}
+
+#[test]
+fn ai_off_fly_and_force_start_ignore_empty_slots_but_require_the_minimum() {
+    use tore_session::settings::number;
+    let mut state = king();
+    set_setting(&mut state, number::AI, 0);
+    set_setting(&mut state, number::MIN_PLAYERS, 1);
+    let facts = Facts::of(Some(&state), None);
+    assert!(facts.force_start());
+    assert!(!facts.all_ready());
+    set_setting(&mut state, number::MIN_PLAYERS, 2);
+    assert!(!Facts::of(Some(&state), None).force_start());
+    state.players[0].ready = true;
+    assert!(Facts::of(Some(&state), None).all_ready());
+}

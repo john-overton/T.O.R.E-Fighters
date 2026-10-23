@@ -49,7 +49,7 @@ placement or timing. Retail comparison is unavailable.
 | F8 | External view of the current target, facing the player |
 | F9 | Watch the player fly past a fixed world position; a new one once the player is 3 nmi from it |
 | F10 | External player view, with orbit controls |
-| F12 | External view of the last player missile, facing that missile's target |
+| F12 | External view of the last player weapon, facing that weapon's target |
 
 Alt plus a view key references the selected target instead of the player. Ctrl
 references the last player-launched missile. An unmodified view key restores the
@@ -117,16 +117,20 @@ scene camera without a second cockpit overlay.
 - F5 chooses the nearest live non-gun projectile aimed at the reference subject,
   measured in three-dimensional feet. The player's explicit incoming fixture
   also qualifies. This view does not grant sensor locks or weapon support.
-- The last player missile is the highest launched projectile identity observed
+- The last player weapon is the highest launched projectile identity observed
   during the flight, excluding guns and incoming fixtures. Its expiration does
-  not switch the view back to an older missile. The mission replay follows the
-  selected aircraft's missiles by the same rule; another aircraft's shots at
-  the player count. F12 uses its retained target,
+  not switch the view back to an older missile. Alt/Ctrl references in mission replay follow the
+  selected aircraft's weapons by the same rule; unmodified replay F12 cycles
+  all active non-gun weapons by stable id when pressed. Missiles, guided and dumb
+  bombs, and rockets qualify in both live flight and replay. Another aircraft's
+  shots at the player count in replay. Expiry keeps the chosen identity and
+  holds its last chase pose as described below, then shows Forward on the
+  selected aircraft; rewinding before expiry restores that weapon. It never automatically jumps to another shot. F12 uses its retained target,
   independent of the player's later designation. Without a retained target,
   it looks along the missile's flight direction.
 - Missing subjects at selection leave the current view untouched and explain
   what is missing. If an active subject disappears, return to F1 once with a
-  message. Missing subjects in Other View clear its image. Coincident positions
+  message, after the hold below for F12. Missing subjects in Other View clear its image. Coincident positions
   use the subject's forward direction. Paused simulation keeps camera subjects
   and fly-by positions still. Restart clears references and saved views.
 
@@ -136,6 +140,19 @@ relations. Here modifiers replace the player endpoint; target-relative F12 follo
 the target's last live missile and missile-relative F12 follows the player missile.
 Next research: bounded review of the original camera selection and placement
 handlers, only if closer tuning is wanted. These gaps do not block fitted views.
+
+## Rear-view mirrors
+
+The cockpit's mirrors (the aircraft with them are listed in the
+[mirror review](../baselines/mirrors.md)) all show crops of one rear picture,
+768 by 384 pixels, taken from the pilot's eye looking straight back with the
+aircraft's up. Its field of view is 66 degrees vertically and about 105 degrees
+across, 10% wider than a 1x view's 60 degrees (98 across before 2026-10-19).
+The picture is redrawn on every other flight frame and the mirrors show the last
+one in between, so at 60 frames a second the mirrors update 30 times a second;
+the first frame they appear on always draws a fresh picture. Both are
+opinionated, requested by John on 2026-10-19 to halve the mirrors' cost. The
+crops' placement and the eye stay fitted.
 
 ## Target views and visual range
 
@@ -167,6 +184,73 @@ middle half of the screen, about 80 degrees either side, and narrows to stop
 short of the top instrument windows. The compass shows only in F7 with the
 player as the reference, only while the view has a target, and never over the
 Shift-M map. It leaves with the target. Layout and scale are agent choices.
+
+## Weapon chase captures
+
+Implementation mode, opinionated addition requested by John on 2026-10-22.
+Live and replay F12 follow missiles, bombs and rockets and draw their bodies.
+On the approach, the camera stops moving when the weapon first comes within
+**328 feet (about 100 metres)** of its retained target or guided aim point.
+Air-to-air uses the target aircraft's current position. The local camera keeps
+the last observed target identity when guidance loses it; replay can also read
+the original target from the launch event. This never restores a guidance or
+sensor lock. A client joining after that information is lost uses the available
+picture, without inventing a target. Without a retained aim,
+bombs and unguided weapons use the first ground or surface intersection along
+their current flight direction. This short tangent prediction is a fitted agent
+choice, sampled every 10.25 feet and refined to within 0.003 feet, not a second
+weapon simulation. It can differ from a curved or retarded bomb's eventual
+landing point. If the flight direction has no surface crossing within 328 feet,
+the chase continues until one appears. Neither prediction grants a target lock.
+
+At that threshold the existing chase eye freezes, raised if necessary to at
+least 10 feet above terrain (an agent choice), and turns to watch the weapon fly
+on. Selecting F12 after the weapon is already inside the threshold stops at that
+selection's pose; live flight does not invent an earlier view. If the weapon
+misses, the eye stays fixed and continues turning toward it until it ends, an
+agent choice. A new view selection cancels both the approach stop and the hold.
+
+When the followed weapon disappears, whether from a hit, ground impact,
+airburst, self-destruct or miss expiry, the camera looks at its last position
+for **1.5 seconds of game time**, then live flight returns to F1 and replay
+shows Forward on the selected aircraft. If no approach stop occurred, the last
+chase pose is held as before. The explosion, fire, debris, smoke and other
+aircraft continue normally. The distance and duration are John's numbers, each
+held in one named camera constant. No simulation, network or recording format
+changes. The final weapon position approximates the impact within one tick.
+
+Agent decisions: pausing pauses the hold and time compression scales it. A
+view selection cancels the hold immediately, falling back to Forward if that
+view has no subject. F12 during the hold selects the next eligible live weapon
+in identity order, wrapping if necessary; with none left it returns to Forward.
+Live eligibility remains the reference owner's non-gun weapons; unmodified
+replay F12 includes all recorded owners. Death, escape and mission ending keep
+their existing view transitions. Multiplayer holds only the local camera.
+Replay retains the selected identity after the hold and finds the first
+approach crossing from recorded ticks. Direct seeks and reverse playback show
+the same fixed eye and hold interval, then restore the moving chase before the
+approach. Recorded guided aim points are used when present; older recordings
+without them use their retained target or the surface prediction.
+
+The camera uses the existing fitted relation placement: 30 feet behind the
+weapon along its retained target line and 10 feet above in world coordinates.
+Without a present target it uses the weapon's flight direction. Its near plane
+is 1 foot. The approach stops this eye; the post-impact hold freezes the final
+look as well.
+The ordinary imported weapon shape remains visible while flying, with the same
+palette and weather lighting as live flight. Texture-only weapon faces remain
+omitted by the existing renderer, a known approximation unrelated to this camera.
+
+The director's `weapon` capture follows the anchor aircraft's newest non-gun
+launch, including through its last in-flight tick, without the interactive
+328-foot approach stop or 1.5-second hold. Expiry immediately shows that
+aircraft's Forward view. This selection reads recorded history, so direct seeks and reverse
+play are repeatable. Optional side, height and distance offsets are editorial
+choices, documented in [the reel guide](../../tools/reel/README.md).
+The separate `seeker` capture remains a nose camera that hides the weapon and
+holds its last eye at impact. It was used by the reported trailer shots and is
+not F12. Object view retains its explicit endpoints, ground clearance and
+last-eye hold; Ctrl+Forward/Back/Up/Track retain their interior camera rules.
 
 The existing View transitions preference and Other View numeric instrument
 overlays are outside this camera-selection pass.

@@ -206,8 +206,18 @@ that maneuver. Actual firing eligibility belongs to weapon services.
 Egress uses a jinking phase while within 10000 horizontal feet, then a climbing
 departure until at least `max(30000 feet, twice turn radius)` away, before
 turning back. This is horizontal separation, not a 30000-foot altitude goal.
-B15 establishes the shared target-offset frame. Dive-bomb rollout, jink path
-and complete attack trajectories remain open.
+B15 establishes the shared target-offset frame. The dive-bomb rollout, the
+jink path and the pop-up and orbit maneuvers are recorded in [Strike
+maneuvers, steering frame and orbit](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)
+(static read, ST-R); only the interruption rules and the hit test remain open.
+
+**T.O.R.E strike AI (opinionated, John, 2026-10-11).** Retail chooses these
+passes by dice and moves each released AI bomb to within 100 ft of its target.
+T.O.R.E does neither: the pass is a fixed function of perceived threat and
+available speed, limited by the aircraft's bombing class and weapon, and the AI
+flies the pass and releases from the player's own solutions with skill-scaled
+precision. The B14 pass shapes above still apply to each pass. The full
+behaviour, with labels, is in [AI strike](ai-strike.md#pass-choice).
 
 ## B15: Pursuit reference frame and speed regulation
 
@@ -258,12 +268,26 @@ Family binding and catalog counts remain in the experience spec.
 
 | Family | Behavior present | Inputs and missing contract |
 | --- | --- | --- |
-| F-117 | Shares fighter air combat; ground pass requests a 5000 vertical offset and speed operand 300 while target remains ahead/valid | Target pose, maximum/minimum speed and attack path; offset axes and release timing remain open |
-| Helicopter | Shares IR/radar response entry, distinct pursuit and pop-up attack; missile response turns toward a target with off-beam below 90 degrees, otherwise chooses a +/-90-degree break | Helicopter motion limits and target geometry; do not reuse fighter aerobatic trajectories |
+| F-117 | Shares fighter air combat; ground pass requests a 5000 vertical offset and speed operand 300 while target remains ahead/valid | Target pose, maximum/minimum speed and attack path; offset axes are the [steering frame](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); release timing is the weapon service's gates ([weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
+| Helicopter | Shares IR/radar response entry, distinct pursuit and pop-up attack; missile response turns toward a target with off-beam below 90 degrees, otherwise chooses a +/-90-degree break | Helicopter motion limits and target geometry; do not reuse fighter aerobatic trajectories. T.O.R.E builds the break (beamed to the threat, at speed and height, with terrain masking) as [helicopter defence](ai-strike.md#helicopter-defence) |
 | Bomber | Aircraft attack handler exits; ground attack uses a high pass; IR/radar reactions choose a +/-90-degree break | Target type, altitude, available stores, wing state and evasion limits; exit does not prove that defensive weapons cannot fire |
-| AC-130 | Ground attack repeatedly requests a circle with speed halfway between corner and maximum | Target pose and orbit parameters; six circle-argument meanings and weapon firing sector remain unresolved |
+| AC-130 | Ground attack repeatedly requests a circle with speed halfway between corner and maximum | Target pose and orbit parameters; the six circle arguments (left, 4,000 ft radius, 2,000 ft up, 35 degrees of bank capped by `maxBank`, speed, 5 s) and the gun arcs are in [Strike maneuvers, steering frame and orbit](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); the hit test is open |
 | Large/airliner | Handles hit and evade; hit requests a downward pitch from 0 through -24 degrees and speed operand 2000 | Damage event and aircraft limits; positive speed clamp prevents assuming literal 2000-unit achieved flight |
 | MOTH | Fighter-derived air behavior with distinct ground attack and shorter egress operands | Exact special-aircraft configuration and maneuver consumers; no ordinary aircraft alias |
+
+A helicopter does not fly the fighter reactions of B47 below: its break, its
+speed and height and its use of terrain are in
+[AI strike](ai-strike.md#helicopter-defence), a helicopter has a fuel schedule of
+its own ([rotorcraft fuel](#rotorcraft-fuel-slices-h3-and-hf2)) and since slice H2 takes off
+and lands vertically through the airfield sequences
+([vertical takeoff and landing](ai-airfield.md#vertical-takeoff-and-landing)).
+
+For the T.O.R.E strike behaviour of these families (heavies level-bomb from a
+minimum of 5,000 ft AGL raised by threat, helicopters pop up, the AC-130
+orbits with its radius and height taken from its guns' reach, and the bombing
+class taken from the imported record rather than a list), see
+[AI strike](ai-strike.md#bombing-class), [heavy bombers](ai-strike.md#heavy-bombers)
+and [AC-130](ai-strike.md#ac-130).
 
 ## B30: Surface behavior
 
@@ -450,15 +474,160 @@ through a lead-projection branch whose entry condition is open.
 
 ### Leader succession
 
-**Opinionated, requested by John on 2026-09-29:** when an AI-led wing's leader
-is lost (destroyed, ejected, crashed or removed), the surviving member next in
-the wing's order becomes its leader and the others close up behind it: the
-survivors are renumbered from 0 in their old order, so their formation slots
-follow, and a wingman that was following the lost leader in to land stops as
-the wing abort does. A wing led by a human is left alone (multiplayer handles
-the general case separately). No radio call is made: the retail "You're the
-wingleader now" call is voiced only by a living previous leader
-([radio chatter](radio-chatter.md)).
+**Opinionated: the rule is John's of 2026-09-28, and at his decision of
+2026-09-29 it replaces the bug bash's renumbering.** Each wing has a current
+leader, its member 0 at the start of the mission. When the leader's aircraft is
+destroyed or its pilot ejects, the lead passes on that tick to the
+lowest-numbered living human in the wing, or, if there is none, to the
+lowest-numbered living AI member. Every aircraft keeps its member number and
+callsign; the followers re-form behind the new leader in member order, taking
+formation slots 1, 2 and so on. A member that was following the lost leader in
+to land stops, as the wing abort does. When the AI takes the lead nothing is
+said; the radio call a human who takes the lead hears is in the
+[architecture guide](../ARCHITECTURE.md#lead-succession). In a networked game
+with revival the [lead hold](#lead-hold-in-games-with-revival) changes this
+for a human lead.
+
+### Lead hold in games with revival
+
+**Opinionated: the rules are John's of 2026-10-09 (the lobby pass); the
+ordering, the owner of a lead an AI lost while its humans wait, and the HUD
+lines are agent decisions.** In a networked game, co-op or PvP, whose respawn
+rule is not `none`, a human who leads a flight keeps its lead while dead,
+waiting to revive, in the lobby with its seat held, away (the AI flying its
+plane for it), or flying back after a revival. Single player, and a game with
+`respawn none`, keep the rule above unchanged.
+
+- **The owner.** A flight's lead belongs to the human who flies its leading
+  plane: from the start, by taking it, or by succeeding a lost AI lead. When
+  an AI lead is lost while every human in the flight waits to revive, the
+  lowest of them owns the lead. "Lowest" is the member number of the human's
+  current plane, then the seat, the order the rule above uses; a revived
+  human's new plane has a higher member number than its old one.
+- **The stand-in.** While the owner does not fly, the flight is led by a
+  stand-in chosen by the rule above (the lowest flying human, else the lowest
+  flying AI member). Everything that follows a leader follows the stand-in.
+  Under an AI stand-in the flight flies the
+  [mission of opportunity](#mission-of-opportunity-after-a-lost-human-leader);
+  a human stand-in may give wing orders. A stand-in that is lost passes the
+  stand-in's place on the same way. A human stand-in reads "You lead the
+  flight until Viper flies again." (the owner's player by callsign, the
+  lobby pass's follow-up F1; the owner's plane by its radio name, "Red one",
+  when the mission has no callsign for it), with no voice, instead of
+  "You're the Wingleader now". A stand-in never
+  becomes the owner while the owner is in the game.
+- **The lead given back.** As soon as the owner's new plane flies in the
+  flight, it leads: the mission of opportunity ends, the flight re-forms on
+  it in member order, and each AI wingman flies back into formation, except
+  one engaged in combat (holding a target), which finishes its fight first
+  and then re-forms (John, 2026-10-09). The owner reads "You lead your flight
+  again." with no voice. John accepts that the owner may be out of the fight
+  while it revives or flies back.
+- **The owner leaves the game** (it leaves, is kicked, or drops and is no
+  longer kept by the host): the lead goes to the next human in the flight,
+  who leads at once if flying (and hears "You're the Wingleader now"), or
+  owns the held lead if waiting to revive. With no human left the current
+  leader leads as an ordinary lead, and the AI's own succession goes on. A
+  human who leaves the flight for the lobby with a living plane, or whose
+  revival puts it in another flight, has left the flight the same way; one
+  who leaves with a lost plane keeps its held seat and the lead.
+- **AI-only flights** keep the rule above: the lead passes down the flight
+  as aircraft are lost, and an AI aircraft that respawns joins as the last
+  wingman of the current lead, so the loop goes on for as long as the
+  mission does.
+
+### AI respawn in networked games
+
+**Opinionated: the rules are John's of 2026-10-09 (the lobby pass); the
+2,000 ft step back, the room rule and the retiring of AI wrecks are fitted
+or agent decisions, recorded in the
+[architecture guide](../ARCHITECTURE.md#death-revival-and-lives).** In a
+networked game, co-op or PvP, whose respawn rule is not `none` and whose King
+has AI respawn on (the default), a lost AI aircraft that no player holds comes
+back. Single player never respawns.
+
+- **When.** After the same delay as a human's revival, and while the original
+  aircraft's lineage has lives left (lives count per original aircraft, since
+  an AI aircraft has no player; unlimited by default). A delay of 0 respawns on
+  the next tick. An aircraft the AI flies for an away or dropped player is that
+  player's own revival, not an AI respawn.
+- **Where.** At the flight's original spawn point (the aircraft's own start
+  position and heading), not near the lead and not at the revival distance. If
+  a living aircraft is within 2,000 ft of the point, the point steps back 1 nm
+  along the reverse of the heading, up to five times, and never off the map.
+- **What.** The same aircraft with full fuel, the loadout the lobby gave that
+  slot (else the standard load) cut by the revival weapons setting, the
+  flight's own skill and the flight's orders. It gets a fresh decision stream
+  of its own.
+- **Joining the flight.** It is the flight's last wingman: it takes the lowest
+  formation slot no living wingman holds (never above slot 9) and flies to its
+  lead; a flight in a mission of opportunity gives it free engagement like the
+  rest. Its member number is one past the flight's highest, so it is last in
+  line for the lead.
+- **Silent.** No radio call and no HUD line for an AI respawn.
+
+### Mission of opportunity after a lost human leader
+
+**Opinionated: the rule is John's of 2026-09-30; every number and edge below
+is an agent decision (fitted).** When a wing's human leader is lost and the
+lead passes to an AI aircraft (no living human is left in the wing), the wing
+"continues on with the mission of opportunity and visual based on last known
+enemy locations, if they can't find anything then RTB's", and, asked what a
+wing that knows no enemy does: "Ideally it's go after enemy first, if no enemy
+or threat found, then waypoints, if no waypoints, then direct RTB." Before, the
+new lead had no order or route and flew straight on until the world edge
+removed it.
+
+- **Taking it up.** On the tick the AI takes the lead, every AI member of the
+  wing is given free engagement, and any recall the lost leader gave ends with
+  it. The lost leader's task (a patrol around its start point, an escort of the
+  human, an intercept of one aircraft) ends too. A wing under weapons hold or
+  self-defense keeps those rules: it is not cleared to hunt, so it returns to
+  base at once.
+- **Engaging.** A hostile aircraft the new lead detects releases the wing to
+  engage, as for any AI leader.
+- **Searching.** With no hostile in contact, the lead searches by eye where
+  the enemy was last seen. The wing pools what its members know: every hostile
+  aircraft each member sees now or remembers in its awareness memory (its own
+  sightings and sensor tracks), one point per enemy aircraft at its latest
+  known position. The pooled points outlast each pilot's own memory. A
+  destroyed aircraft is dropped, as from each pilot's memory. The lead flies to
+  the nearest point, circles over it (the lost-contact search: straight to the
+  point, then a level clockwise circle of 0.75 nm radius once within 1 nm) and
+  counts it searched after **60 s** within **2 nm** of it; then the next
+  nearest. A hostile a member sees now is searched first, and a newer sighting
+  of an aircraft makes its point worth searching again. The wingmen stay in
+  formation on the lead. The lead's own lost contact, if it has one, comes
+  first, as before.
+- **The search ends** when no point is left to search (or the wing knew of
+  none), or after **10 minutes** without a hostile in contact (counted from
+  the lead passing, or from the wing's last contact: any member seeing a
+  hostile aircraft, or the lead having a target).
+- **Waypoints.** The lead then flies the wing's remaining waypoints in order:
+  the lost human's route from the waypoint it was flying to, or the wing's own
+  route. It heads for each at the waypoint's altitude and cruise speed (the
+  B48 route command, climbing or diving at most 20 degrees), and a waypoint is
+  done once it is behind the aircraft (B48: the direction to it has turned to
+  within 45 degrees of the opposite of where it lay when it became current).
+  The wing still engages anything it detects, and a new contact reopens the
+  search; the route resumes when that search is over. *Today no wing has
+  waypoints:* Quick Mission has no mission route (the NAV page shows
+  `NO WAYPOINTS`, [navigation selection](weapon-navigation-selection.md)) and
+  AI wings fly none, so the wing goes straight home. The rule takes effect
+  once mission routes are imported; the AI probe can hand the player's wing a
+  route to test it.
+- **Returning to base.** With no waypoint left, or none at all, the wing
+  returns to base through the [ordinary return to base](#return-to-base-when-the-mission-is-over):
+  each airborne AI member with a home runway lands there, and a lead with none
+  flies home and holds. A member still waiting to take off stays parked, since
+  it would only take off to land again (it does not hold up its side's own
+  return to base either); one already taxiing goes on, takes off and lands.
+  The wing does not take up the search again. Bingo fuel and damage send an
+  aircraft home earlier, as always.
+- **Unchanged.** A wing led by AI from the start keeps its own succession: when
+  an AI leader is lost, the next member leads and nothing else changes. A wing
+  that took up a mission of opportunity keeps it when its AI lead is lost in
+  turn. Nothing is said on the radio.
 
 ### Traffic avoidance
 
@@ -473,7 +642,12 @@ closes on that aircraft on purpose. On the first conflict it takes up a heading
 when the other is within 20 degrees of its nose (head-on, as the rules of the
 air have both aircraft turn right). It keeps its pitch and speed, holds that
 heading until 3 s after the last predicted conflict, and never changes side
-while it holds, so it does not flap. Avoidance never overrides missile or gun
+while it holds, so it does not flap. The held heading belongs to the aircraft
+whose conflict set it: once that aircraft is no longer a conflict, a conflict
+with another aircraft sets a new heading, 30 degrees off the current one and
+away from the new aircraft (B4, 2026-10-06: two flightmates that turned right
+together for one head-on aircraft otherwise held that heading against each
+other for half a minute and collided). Avoidance never overrides missile or gun
 defense, an airfield sequence, or a formation procedure (station keeping, a
 join or a rejoin): wingmen in formation are kept apart by their slots.
 
@@ -487,13 +661,18 @@ through the ordinary landing sequence ([AI airfield sequences](ai-airfield.md));
 its wingmen join the leader's landing as for any ordered landing. A wing with
 no home runway has its leader fly the B48 return-to-base path to its home
 position (the launch point) and hold there by flying back over it, the
-wingmen staying in formation. Nothing changes while any hostile aircraft is
+wingmen staying in formation. Helicopters, the V-22 and the hovering jets land
+too since slice H2, by the [vertical landing](ai-airfield.md#vertical-takeoff-and-landing). Nothing changes while any hostile aircraft is
 alive or any aircraft on the side is still waiting or taking off (its landing
 traffic would hold the runway), and a mission that never had a hostile
 aircraft does not end this way.
 A wing led by the player stays with the player, whose own mission may still be
-open. The AI's objectives are air objectives (patrol, intercept, escort), so
-no hostile aircraft left means they are complete.
+open. A wing with unfinished ground work stays on its strike assignment until
+its strike controller finishes; see [AI strike](ai-strike.md). A CAP assignment
+continues patrolling after the last bandit dies; see
+[CAP navigation](ai-awareness.md#assignment-delivery-and-observed-attack-reports).
+These exceptions implement John's correction of 2026-10-15. Intercept and escort
+wings without remaining ground work keep the return rule.
 
 ### Normal formation variation and transitions
 
@@ -719,6 +898,17 @@ envelope, raising the flight path 14 degrees for the steepest hillsides takes
 about 3 s more. At 440 kt the look-ahead is 4,500 ft; below 100 kt the retail
 1,000 ft applies. Before this, supersonic AI aircraft saw rising ground 0.6 s
 before hitting it.
+
+**Fitted (agent decision, 2026-10-20, fuzz seed 43):** above corner speed the
+envelope, not the pilot, limits the pull, so the look-ahead also covers the
+time the G left there takes to raise the flight path those 14 degrees: 3 s to
+roll level and settle, plus the angle times the speed over 32.174 ft/s² times
+the excess G above 1 (taken as at least 0.25), never less than six seconds and
+never more than 20. The six-second estimate above undercounts that term: at
+1,800 ft/s with 1.2 G of excess it is about 11 s, not 3. A loaded F-22N at
+1,030 kt and 3,000 ft keeps only about 1.5 G; with six seconds (10,300 ft) it
+saw a 17 degree escarpment too late and flew into it at full back stick. With
+20 s it climbs over. Helicopters and the V-22 keep six seconds.
 
 Other overrides: above its ceiling altitude the aircraft does not accept a
 climbing pitch request. On the ground it holds its entry pitch, and may pitch
@@ -1047,7 +1237,12 @@ leader's airport, joins the landing.
 
 Fuel: with a home airport the aircraft computes time to reach it at a cruise
 speed (minimum plus one fifth of the envelope, or half if that is under
-75 ft/s) and its endurance at the lowest throttle that holds that speed. It is
+75 ft/s) and its endurance at the lowest throttle that holds that speed. The
+endurance counts all remaining fuel, external tanks included: every AI
+aircraft starts with its tanks full, a default load's as well as a given
+one's, and burns them first, as the player does (fixed 2026-10-20; before, a
+default load's tank, such as the F/A-18's or F-16C's centreline tank, was
+carried at full weight with no fuel in it). It is
 out of fuel at zero, critical below four minutes of endurance, on bingo when
 endurance is under time-to-home plus five minutes, and on caution at or
 under time-to-home plus ten minutes. An AI wingman whose leader is AI-controlled
@@ -1057,9 +1252,81 @@ fuel reaches zero is lost. The route ends in a Land goal, so the aircraft lands
 and stays parked; the takeoff and landing sequences are specified in
 [AI airfield sequences](ai-airfield.md). With a home runway, leaders,
 singletons and wingmen of a human leader land the same way (fitted).
-Damage-triggered disengagement is open. When no hostile aircraft remains, the
+When no hostile aircraft remains and no ground strike or CAP duty remains, the
 same landing and return path end the mission
 ([return to base](#return-to-base-when-the-mission-is-over), opinionated).
+
+### Rotorcraft fuel (slices H3 and HF2)
+
+Fitted (agent decisions, 2026-10-12 and 2026-10-13, John's requests that the AI
+helicopters get a real fuel schedule and bingo, that rotorcraft burn fuel by the power
+their rotor draws, and that the helicopter bingo reserve be five minutes, like a
+fighter's). B48 is written for fighters; a helicopter or the V-22 (the aircraft the
+[rotor adapter](#rotorcraft-and-jet-lift-control) flies) gets the same machinery with
+two differences, the cruise speed and the planning flow. The AV-8 and the Yak-141 keep
+B48's fighter rules.
+
+**The AI burns fuel, by the power its rotor draws.** The flight model debits the fuel
+every second the engine runs. For a rotorcraft that is not the PT record's flow (1 lb/s
+for the AH-64, V-22 and CH-47, 3 lb/s for the Mi-24: placeholders, see [aircraft
+records](../formats/aircraft.md#rotorcraft-fuel-records)) but the turboshaft line of the
+[flight model](../FLIGHT-MODEL.md#rotorcraft-fuel): about a fifth of the full flow at
+idle, rising to full flow at rated power, so a hover burns what hovering draws and a
+cruise less. The AI plans with one steady figure (`State::endurance_flow_lbs_per_second`):
+since slice HF3 (opinionated, John 2026-10-13: "helicopter bingo planned at cruise flow")
+the flow of level flight at its cruise home (below) at sea level, worked out once at
+empty plus full fuel and scaled with the weight now (fitted); slice HF2 planned at the
+hover flow. At the cruise home speed the cruise flow is about the hover flow or a little
+more, so the plan matches the flight home rather than lengthening it. Fuel at zero is
+out of fuel and the aircraft goes down.
+
+| | AH-64 | V-22 | CH-47 | Mi-24 |
+| --- | --- | --- | --- | --- |
+| Internal fuel, lb | 2,000 (record) | 11,700 (MV-22B, slice HF3; the record's 2,000 was the AH-64's) | 7,340 (CH-47F, slice HF3; the record's 3,307 was the Mi-24's) | 3,307 (record) |
+| Flow of the record, lb/s (no longer read) | 1 | 1 | 1 | 3 |
+| Top speed of the envelope at sea level, kt | 173 | 301 | 196 | 196 |
+| Cruise home (80 percent), kt | 138 | 241 (airplane mode) | 156 | 156 |
+| Planning flow at full fuel, lb/s (cruise home, sea level) | 0.52 | 1.44 | 0.83 | 0.44 |
+| Full tank at the planning flow, minutes | 64 | 135 | 148 | 126 |
+| Hover flow, lb/s (HF2's planning figure) | 0.47 | 1.36 | 0.65 | 0.43 |
+| Full tank at 100 kt level, minutes | 93 | 244 | 232 | 199 |
+
+(The probe that prints these is `powered_probe`; the table is in the [rotorcraft fuel
+baseline](../baselines/rotorcraft-fuel.md).)
+
+- **Cruise.** The time home is the straight distance to the home field at 80 percent of
+  the envelope's top speed (`route::rotorcraft_cruise_speed`), and bingo flies the way
+  home at that speed. B48's cruise (the envelope's minimum plus a fifth) is 55 knots
+  for the AH-64 and 80 for the Mi-24, the figure that, with ST-H's 15 minute home, made
+  every Mi-24 bingo at the start. 80 percent is where a helicopter cruises in practice.
+  **Fitted.**
+- **Margins are B48's** since slice HF2 (**opinionated**, John 2026-10-13): critical
+  under 4 minutes of fuel, bingo under the time home plus **5 minutes**, caution plus 10.
+  Slice H3 had used 2, 3 and 7 minutes because the record's flow gave tanks of 18 to 55
+  minutes.
+- **A home out of reach is no home.** The schedule has a home only when a full tank
+  (at the planning flow) could fly to it and leave the 5 minute reserve
+  (`route::rotorcraft_home_in_range`). A wing the Quick Mission puts farther from its
+  field than that would be bingo at the start and fly home instead of the fight it was
+  placed in. With no home it has no bingo, caution or critical, as B48 has for an
+  aircraft with no home airport, and flies its mission until its field comes within
+  reach. It is lost when the tanks run dry. **Fitted;** the alternative (send it home
+  at once) was weighed and left out because it would neuter enemy helicopter wings. The
+  reach grew with the endurance: a field up to 114 nautical miles from an AH-64 is in
+  reach (it was 53), 99 for the V-22 (53), 357 for the CH-47 (123) and 292 for the
+  Mi-24 (36). Slice HF3's cruise planning and the V-22's real tank move these: at the
+  cruise home speed a full tank less the reserve reaches about 135 nautical miles for the
+  AH-64, about 300 for the Mi-24, about 370 for the CH-47 (its real tank since slice
+  HF3) and about 520 for the V-22.
+- **Not bingo at the start.** A friendly wing's field is normally a few minutes away
+  (3.5 minutes at the AH-64's cruise in the probes) against 64 to 148 minutes of fuel.
+- **What bingo does.** The same as for a fighter: the actor heads for its home runway
+  at the cruise speed, and since slice H2 lands there (a helicopter vertically).
+
+Tests: `route::tests` (the cruise, the margins, the range), `flight::powered::fuel_tests` (flow by power, endurance per type), `ai_wings::tests::a_helicopter_has_a_fuel_schedule_at_its_own_cruise_and_goes_home_on_bingo`
+and the battery's `ai-fight-*-friendly-wings` (no helicopter bingo at the start, fuel
+lines from `--probe-fuel-trace`), `ai-fight-heli-fuel-bingo-ah64` and `ai-fight-v22-fuel-bingo`
+(`--probe-fuel`).
 
 ## Implementation status
 
@@ -1087,15 +1354,19 @@ through `Controller::fallbacks`.
 | `weapon_service` | B42 phases and retries, timing profiles for all twelve aircraft, B45 ammunition debit, seeker envelopes by role, detection range and stated signature modifiers, class eligibility, store score, in-flight track check and AI support extension, device schedule | Missile burst pacing after a shot, hit-chance rule, signature producers that need sensor state |
 | `gunnery` | [Live gun employment](ai-gun-employment.md): shared-physics lead, fixed-barrel release, individual-round burst/recovery and tracking | Original skill accuracy, timing and maneuvering-target tracking |
 | `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
+| `helicopter_defense` | B20 helicopter break: plus or minus 90 degrees to the threat's bearing, the side by the smaller turn, terrain-masking search, speed and height kept ([AI strike](ai-strike.md#helicopter-defence)) | Retail's turn toward a target that is ahead; the threat's site when no site is known |
 | `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route (also flown by leaders and singletons, fitted) | Original damage-triggered disengagement policy; authored response is in `damage` |
-| `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Vertical, STOVL and carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes |
+| `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes; the [vertical and STOVL variants](ai-airfield.md#vertical-takeoff-and-landing) (slice H2) fit the descent rate, the helicopter marshal height and the air taxi |
 | `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |
 | `fitted` | One named, documented fitted rule per unresolved branch a fighter/strike actor can reach, with its constants | Nothing; this file exists because the branches are unresolved |
 | `controller` | `Controller::new` and `Controller::step`, persistent state, seeded draws at documented decision points only, reason ranking, target selection, tactical choice, motion resolution, weapon cadence, wing requests, fuel | Families other than fighter/strike are rejected, not served fighter behavior |
 | `steering_adapter` | Motion intent to flight controls through the B44 rate limits, and the AI-only experience G adjustment | Ceiling test and ground contact are caller concerns; the control gains are fitted |
+| `rotor_adapter` | [Rotorcraft control](#rotorcraft-and-jet-lift-control): steer and hover requests flown on the helicopters and the V-22 through the autopilot's rotor laws, the V-22 nacelle schedule | Nothing retail; every gain and number is fitted |
+| `jet_lift` | [Jet-lift control](#rotorcraft-and-jet-lift-control): the AV-8's and Yak-141's hover, vertical climb and descent | Transition to wingborne flight and short takeoff (slice H2) |
 | `mission` | Actor-owned sensors, stores, flight model and decision state; ammunition debited before a launch event | Missile physics deliberately not duplicated; the host realises each launch |
 | `damage` | [Authored fault responses](systems-damage.md#ai-pilot-response-to-faults): recovery commitment, power protection/restart, maneuver limits and fire danger | Original AI procedures; unreachable or missing recovery runway and irrecoverable failures can still be fatal |
 | `launch` | Quick Mission launch payload: side, wing, member, aircraft, resolved experience and the enemy-skill override | Nothing; loadout carriage stays with the host |
+| `opportunity` | [Mission of opportunity after a lost human leader](#mission-of-opportunity-after-a-lost-human-leader): the wing's pooled last known enemy positions, the search order, dwell and time limit, the waypoint leg, and when it returns to base (opinionated, fitted numbers) | Nothing; the rule is an opinionated addition |
 
 Fitted and opinionated choices are listed in each file's module comment and in
 the [provenance summary](../behavior-provenance.md).
@@ -1244,6 +1515,17 @@ floor is active (fitted, agent decision 2026-09-28, after the bug battery saw
 undamaged AI aircraft fly into hills at full G while still turning toward a
 target, or ease into a rising hillside at 2 G; the airfield terrain correction
 already levels the wings the same way).
+A striker's attack steers alone may ask for two more handlings (AI strike
+round, slice ST-T2; fitted, agent; [how the AI flies a
+pass](ai-strike.md#how-the-ai-flies-a-pass)). **Roll and pull**: the lift is
+rolled onto the wanted direction and pulled, so a nose-down change of 30
+degrees or more that needs more than a 1 G push rolls inverted and pulls
+(retail's dive bomb roll-in), at the aircraft's full roll rate, with the load
+held off while the lift is more than 45 degrees from its bank. **Planned dive**:
+the terrain floor is the dive's planned pull-out (the physical pull-out arc at
+the AI's G limit plus 1 s of sink, bottoming out 1,000 ft over the highest
+ground ahead) instead of the floor above. Every other motion, air combat
+included, is flown exactly as described here.
 Invert the model's loaded stick-to-G mapping, with low-speed authority floored
 at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
 For the researched model, this includes its flap-adjusted minimum speed,
@@ -1265,6 +1547,73 @@ also act through the shared flight model. [Fault responses](systems-damage.md#ai
 end offensive engagement when recovery is needed and add protective power,
 speed and maneuver requests. These never overwrite achieved flight motion.
 
+### Rotorcraft and jet-lift control
+
+*Built in slice H1 of the helicopter and VTOL AI pass (2026-10-12; AI work
+requested by John). Fitted, agent decisions, unless a row says otherwise.*
+The controller above flies a load factor on the stick and a speed on the
+throttle. On a helicopter the stick tilts the rotor disk, the throttle is a
+governed engine's power lever and the lift comes from the collective, which
+that controller never moved: a helicopter could hardly climb or descend, slowed
+until it sank when asked for less speed, and could not hover. The helicopters
+(AH-64, Mi-24, CH-47) and the V-22 on the researched model are therefore flown
+by their own adapter (`ai::rotor_adapter`), which takes the same steer requests
+(heading, flight path, speed with Maximum resolved, explicit or free bank) and
+hover requests the airfield sequences use. It flies through the player
+autopilot's own laws (`autopilot::rotor_law`, the [hover hold and coupled
+heading modes](autopilot.md)) with targets it commands, so the player's and the
+AI's rotorcraft obey one set of gains. Every other aircraft keeps the
+controller above unchanged.
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Engines | The throttle is held at 1: governed engines, power never cut for speed | fitted (agent) |
+| Forward flight | Climb on the collective, speed on the cyclic (the ground speed along the heading, the wind along it added so the airspeed is the one asked), pedals coordinating the turn. Climb = speed x sin(flight path), at most 3,000 ft/min either way (the helicopter defence's 10 degree path at 150 kt); pitch at most 15 degrees | fitted (agent); the law and its gains are the player A modes' |
+| Bank | An explicit bank, or the heading error over 1 s as a turn rate, banked as atan(speed x rate / g) with speed floored at 40 kt; at most 60 degrees or the aircraft's maximum bank (45 left a Mi-24 at 158 kt circling a lead-in point it could not turn inside) | fitted (agent) |
+| Height before speed | Below 1,000 ft over the ground, outside pointing: the cyclic is asked for at most 10 ft/s of speed change at a time; sinking more than 2 ft/s below the descent asked (or below level when a climb is asked; any sink once the collective is at full travel or the rotor droops under 95 percent) it stops accelerating, slows by up to 10 ft/s and eases the bank by up to half. A 180 degree turn at 200 ft asking 160 kt loses 15 to 20 ft (without it the AH-64 flew into the ground) | fitted (agent) |
+| Terrain floor | The B44 floor on the flight path, as for every aircraft, but with a minimum height of 100 ft for a helicopter instead of the fighters' 300, so the 200 ft masking height of the helicopter defence and the stand-off attack can be flown. The V-22 keeps the fighters' 300 ft (slice HF1): it never masks, and at 250 kt in aeroplane mode it needs their margin over rising ground | B44 spec-derived; the 100 ft and the V-22's 300 ft fitted (agent) |
+| Strike speed | The helicopter's strike legs, exit, hold-off and break ask for 80% of its envelope's maximum speed, never under its minimum: about 120 kt on the Mi-24 (maximum about 150 kt). See [helicopters](ai-strike.md#helicopters) | about 120 kt opinionated (John, 2026-10-13); the 80% share fitted (agent, slice HF1) |
+| Collective floor | A helicopter in forward flight never flies the collective under 0.1 of its travel (the climb loop and its integrator are held there; the V-22 and pointing, which has its own 0.2, are not touched). Wound to the stop by a long descent at 120 kt (a wingman chasing its slot 400 ft lower asked 42 ft/s down for 10 s), a CH-47's rotor lost its control power: the nose swung up to 85 degrees away from the track while the aircraft kept flying straight, the speed along the nose read near zero, the speed loop pitched the nose down to 68 degrees chasing it and the CH-47 flew into the ground (battery `ai-fight-ch47-enemy-wing`, slice CH47, 2026-10-13). 0.1 still flies the CH-47 down at 1,000 ft/min at 120 kt | fitted (agent, slice CH47) |
+| Formation descent limit | A helicopter or V-22 wingman chasing its formation slot is asked for at most 1,000 ft/min (16.7 ft/s) down, or its leader's own sink when that is more: the formation's flight path is raised to that at the wingman's speed (40 kt floor), climbs untouched (`formation::rotorcraft_formation_path_deg`, applied in the controller's formation motion). The fighters' slot geometry had asked a CH-47 wingman for 28 degrees down at 59 kt, up to 80 ft/s with the pointing regime engaged (battery `ai-fight-ch47-formation-descent` without the limit). 1,000 ft/min is an ordinary helicopter descent and what the CH-47 flies at 120 kt above its collective floor | opinionated (John, 2026-10-13, "helicopter limit on formation descents"); the figure fitted (agent, slice HF3) |
+| Defence's speed rule | The helicopter defence comes down no faster than it can hold its maximum speed; the adapter holds the speed on the cyclic whatever the path, so the defence allows it 10 kt over the maximum before it levels off | fitted (agent) |
+| Pointing | A requested path steeper than 12 degrees that also asks for more than 3,000 ft/min (a pop-up's pull, a rocket run's dive at speed) is flown with the nose on the path (pitch up to 30 degrees) and the speed on the collective (never under 0.2 of it); back to forward flight below 8 degrees | fitted (agent): rockets leave along the nose |
+| Hover | Hover hold's cascade toward a commanded point, wheel height and heading: position to ground velocity (0.15 per second, at most the commanded closing speed) to tilt (at most 20 degrees) to attitude; height to climb (0.25 per second, within the commanded climb and sink) to collective; heading to pedals. An optional slow-flight velocity rides on top (air taxi) | fitted (agent); the gains are hover hold's |
+| Hover entry | The cascade takes over at a hover request below 40 kt of ground speed (hover hold's band). Faster, it slows first on the forward law toward the point, the speed wanted being sqrt(2 x 4 ft/s² x distance ahead) | fitted (agent) |
+| V-22 nacelles | A schedule against indicated airspeed: 87 degrees (the published helicopter preset) to 40 kt, 80 at 80, 75 at 110 (the wing's published stall), 60 at 125, 45 at 135, 30 at 145, 15 at 155, 0 from 165. Asked to slow, the nacelles come up as if 2 kt slower for each knot too fast. The demand stays inside the angles the corridor allows, never aft within 10 kt of the 200 kt aft lock, and the speed asked is paced to 10 kt inside the corridor at the present angle, so the protection never has to override it. 87 degrees in a hover | fitted (agent); the preset, the corridor and the stall speed published |
+| V-22 law | From 75 degrees of nacelle up (down to 72 once in it) the forward law flies the collective as on a helicopter; below (wingborne), the climb on the pitch and the speed on the collective, its power lever, as the player A modes do, the climb error handed to that law four times over (a few feet a second of sink is a fraction of a degree of path at 280 ft/s). Wingborne the climb is speed x sin(flight path) with no 3,000 ft/min cap, and the pitch may reach 25 degrees: until slice HF1 the helicopter's cap held a V-22 at 240 kt to a 7 degree path, flatter than the terrain floor's 10 to 14 degrees over rising ground, and AI V-22s flew into hills 22 s after an airborne start and about 100 s after a ground start | fitted (agent) |
+| Memory | The laws' integrators and the regime are the actor's own and are checkpointed | spec-derived (checkpoint rule) |
+
+Measured on the PT records over flat ground (the [rotor
+probe](../testing/lane-flight.md#rotor-probe) and its unit tests): every
+rotorcraft holds a point within 3.1 ft in calm air and a 15 kt wind, moves its
+point 500 ft in 31 to 33 s without overshoot, climbs from 20 to 500 ft at 25 to
+27 ft/s and settles on 500 ft, flies 40, 80 and 120 kt climbing or descending
+1,000 ft/min within 35 ft/min and 3.2 kt, and slows from 120 kt to a hover over a
+point 3,000 ft ahead losing at most 5.4 ft, and turns 180 degrees at 200 ft asking
+160 kt losing 15 to 20 ft. The V-22 converts from a hover to airplane mode in 25 s
+on its way to 220 kt and back to a hover, within 88 ft of its height, with no
+corridor override; converted at 240 kt and asked by the terrain floor for a 12
+degree path, it climbs at more than 65 ft/s within 10 s (57 ft/s at most before
+slice HF1). In Quick Missions AI V-22s in every wing fly 300 s from an airborne
+start and 400 s from a ground start without a loss
+(`ai-v22-quick-mission`).
+
+**Jet lift** (`ai::jet_lift`, the AV-8 and Yak-141). Used only for the hovers,
+vertical takeoffs and landings the airfield sequences ask for (slice H2);
+wingborne flight stays on the controller above. Throttle for height (0.03 per
+ft/s of climb error plus an integrator), the nozzle for the speed along the
+heading (the wanted acceleration as an angle off vertical, from 60 degrees to
+the braking stop), the bank (at most 10 degrees) for the speed across, the nose
+held level, the heading on the pedals through the puffers. Fitted, agent. On the
+PT records, clean, both hold a point exactly in calm air and set down at a
+commanded 5 ft/s sink: the AV-8 touches at 4.9 ft/s, the Yak-141 at 7.5 ft/s
+(the jets lose lift to suck-down near the ground). A loaded AV-8 cannot hover
+(the manual's "never be able to fully hover"); the law then sinks at full
+throttle and the caller must choose a runway: the airfield sequence takes the
+retail short takeoff and the runway landing for a jet that needs more than 90%
+throttle to hover (slice H2, [vertical takeoff and
+landing](ai-airfield.md#vertical-takeoff-and-landing)).
+
 ## Live integration and authored boundaries
 
 Implementation repairs on 2026-09-17 connect pursuit, delayed warnings, weapon
@@ -1283,7 +1632,10 @@ are behavior fixes, not evidence of retail combat parity. Validation lives in
   choice. Equal and lower-priority reasons preserve an active maneuver.
 - Imported AI actors carry their own PT default weapons and ECM counts. Using
   the PT default loadout when Quick Mission provides no AI loadout is an
-  opinionated agent choice. A projectile owns its selected weapon record; guns
+  opinionated agent choice. The player's wing instead shares its accepted
+  [QMC load](quick-mission-menu.md#the-players-flight-loadout), including empty
+  stations and fuel; human multiplayer flights follow the
+  [same-wing rule](multiplayer.md#human-flight-loadouts). A projectile owns its selected weapon record; guns
   remain unguided. Live guns authorize individual rounds, then debit at physical
   emission after capacity and barrel checks. Their fitted tracking and authored
   burst policy are specified in [gun employment](ai-gun-employment.md). Synthetic
@@ -1363,3 +1715,12 @@ The mission evaluates escape before weapon releases; a successful ejection
 stops aircraft control while the detached pilot continues descending. Combat
 retains ownership of the abandoned wreck. These additions are fitted and
 opinionated where labelled, not recovered retail AI decision predicates.
+
+## Defensive store jettison
+
+John requested AI defensive jettison on 2026-10-15. The shared
+[jettison contract](jettison.md#replay-network-and-ai) defines tank shedding,
+merge range, skill-dependent strike-load retention and inert recording behavior.
+Since John's 2026-10-20 revision a fight drops only the tanks; the
+air-to-ground load goes only when the pilot must save the aircraft (damaged or
+short of fuel going home, or losing a close defensive fight).

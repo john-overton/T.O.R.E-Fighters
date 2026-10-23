@@ -278,6 +278,59 @@ pub(super) fn draw(
     }
 }
 
+/// What [`draw`] draws from, for the page key ([`super::page_key`]).
+pub(super) fn key(
+    k: &mut super::page_key::Key,
+    rows: &[Envelope],
+    state: &State,
+    mode: Mode,
+    combat: Option<&CombatReadout>,
+) {
+    let locked = combat.is_some_and(|c| {
+        c.scope
+            .contacts
+            .iter()
+            .any(|p| p.selected && p.acquired && !p.stale)
+    });
+    let target = combat.and_then(|c| c.envelope_target.as_deref());
+    let comparing = mode == Mode::Compare && locked;
+    let compared = if comparing {
+        target.unwrap_or(&[])
+    } else {
+        &[]
+    };
+    k.debug(&mode);
+    for rows in [rows, compared] {
+        k.u64(rows.len() as u64);
+        for row in rows {
+            k.i32(row.g).u64(row.points.len() as u64);
+            for &[speed, altitude] in &row.points {
+                k.f64(speed).f64(altitude);
+            }
+        }
+    }
+    // The chart takes the G only through the row it selects.
+    let selected =
+        current(rows, state.g).and_then(|e| rows.iter().position(|r| std::ptr::eq(r, e)));
+    k.debug(&selected).f64(state.stall_scale());
+    let scale = Scale::new(rows, compared);
+    k.point(scale.marker(state.speed, state.position[1]))
+        .colour(marker_color(state.ticks))
+        .text(&format!("{:.0} FT", state.position[1]))
+        .text(&g_label(state.g))
+        .text(&format!("{:.0} KTS", state.speed / 1.68781));
+    if mode == Mode::Compare {
+        let status = if !locked {
+            Some("NO LOCK")
+        } else if target.is_none_or(|t| t.is_empty()) {
+            Some("NO TARGET DATA")
+        } else {
+            None
+        };
+        k.debug(&status);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

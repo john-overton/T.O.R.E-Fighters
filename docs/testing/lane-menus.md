@@ -32,12 +32,20 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | Scenarios | What they do |
 | --- | --- |
 | `menus-validate-creator` | `--validate-creator`: loadouts for all 14 aircraft including every removed-store case, then the creator matrix, the render sweep and the input fuzz (below) |
+| `airport-allegiance` | `--airport-allegiance` (slice AL1): for every base theater, for Blue and for Redfor, the ground-start fields the creator offers and its default, each checked against the built world (the side's own or neutral, never the other side's; the creator's owner matches the imported allegiance; `start ground auto` and the AI's home runway from the map's middle and corners pick no enemy field). The summary must read `16 theaters, blue none: TVIET, red none: -, 0 problems` ([allegiance](../spec/airports.md#allegiance)); the Falklands' San Carlos, a STOL strip, is a Blue ground start since 2026-10-11 ([STOL runways](../spec/airports.md#stol-runways)) |
+| `merged-airport-audit` | `--airfield-audit --merged`: all 84 base-theater pairs, source and merged positions, terrain picture IDs, flat and dry pavement, bounds, centerline clearance, four ground-start slots, 19 AI pavement routes and old-ID redirects. Requires `fields=84 problems=0`. |
+| `airfield-taxi-audit` | `--airfield-audit` (slice CL-AP): every AI ground route of all 1,028 redrawn runway objects of the 75 layouts on the drawn pavement, every runway end reachable from parking, every runway line (the ILS) on a drawn runway. The summary must read `75 theaters, N airfields, 1028 runway objects, N routes, 0 problems` ([audit](../formats/redrawn-airports.md#audit)) |
+| `airfield-parked-audit` | `--airfield-audit --parked`: every Quick Mission template aircraft parked on a redrawn airfield (the 108 templates, seed 1) stands on its pavement; `0 problems` |
 | `menus-validate-text` | `--validate-text`: every imported string decodes without U+FFFD and is drawable in the original fonts |
-| `menus-window-terrain-*` | Real-window captures on every base theater (clear, night), four theaters in each other weather, and ground starts in all six weathers, checked for blank, black, one-colour, dark-day and bright-night frames |
+| `menus-window-terrain-*` | Real-window captures on every base theater (clear, night), four theaters in each other weather, and ground starts (UKR and Cuba, the first Blue field of each) in all six weathers, checked for blank, black, one-colour, dark-day and bright-night frames |
 | `menus-validate-maps`, `menus-validate-weather` | Every imported map layout and every weather module and choice |
-| `menus-snap-*` | A CPU snapshot of every `--snapshot-state` value (main menu, Pref, controls tabs, graphics, sound, replays, locate), each checked for the right size and not being blank |
+| `menus-snap-*` | A CPU snapshot of every `--snapshot-state` value (main menu, Pref, controls tabs, graphics, sound, replays, locate, the Direct Connection screen), each checked for the right size and not being blank |
+| `menus-snap-lobby-*` | The lobby screen's states, CPU text so the words are in the picture. The lobby pass (2026-10-09) added 18: the scroll bars and the ready hint (`lobby-scroll`, `lobby-scroll-top`, `lobby-king-hint`, `lobby-joiner-noslot-hint`, `lobby-joiner-hint`, `lobby-joiner-ready-hint`, `lobby-pvp-hint`, `lobby-coop-hint`) and PvP sides (`lobby-pvp-colours`, `lobby-pvp-colours-red`, `lobby-pvp-bluefor`, `lobby-pvp-redfor`, `lobby-pvp-open`, `lobby-pvp-full`, `lobby-pvp-locked`, `lobby-balanced`, `lobby-pvp-balanced-wait`, `lobby-pvp-unable`: every slot colour, each side box state, the filter, Autobalance) |
+| `menus-snap-quick-lobby-creator-view*` | The read-only mission page (`--quick-mission --snapshot-state`, lobby pass L4 and K1): `lobby-creator-view`, `-gaps` (items the reader's game lacks), `-click` (a click's words), `-changed` ("The King changed the mission."), `-flying` (the King while the mission flies) and `-locked` (a server whose mission is fixed) |
+| `menus-snap-quick-map*` | The creator's Map (slice CL-R; slice CL-R2 adds `map-building`, the note while the map is still built on its thread, and `map-wide` and `map-close`, the widest and narrowest zoom, all three checked for no void pixels in the plot): `map` and `map-lobby` on the default setup, and `menus-snap-quick-map-ukr-target-ground` and `-map-lobby-ukr-target-ground` on the Ukraine with a ground target, a Blue ground start at L'viv and Enemy Wing 1 parked at Donets'k. The log must name both starts by their airfields and give the 5 nm objective area (radius 30380 ft); the lobby's map shows the target's retail spot |
+| `menus-flight-map-preview` | The in-flight map's mission markup, windowless and with no GPU (slice CL-MAP, `--flight-map-preview OUT_DIR`): it builds one Ukraine mission with a ground target and an enemy wing, reads the markup from the world as built (the function the creator's map and a networked game use), and draws the map as a flight does: following the player, zoomed to the whole theater, onto the objective area, scrolled by hand, with the Mission layer clicked off, as the Redfor pilot sees it, and with the player beyond the theater's edge (pinned, OFF MAP). The log must give both starts and the objective area, and no picture may show more than 50 void pixels in its plot |
 | `menus-snap-quick-*` | The same for the creator, the aircraft and theater popups, the Load Ordnance page (normal, empty, drag, messages), the five debrief pages and both outcomes, for every aircraft and for every one of the 75 theater layouts |
-| `menus-start-*` | The headless AI probe starts a mission through the creator's launch layout code: every aircraft on three theaters, every weather choice, every separation, every wing size. No aircraft may start off the map |
+| `menus-start-*` | The headless AI probe starts a mission through the creator's launch layout code: every aircraft on three theaters, every weather choice, every separation (1 to 300 nm, 75 added by the lobby pass: `menus-start-separation75-ukr` and `-cub`), every wing size. No aircraft may start off the map |
 | `menus-loadout-*` | `--loadout none` and `--loadout guns` (stores taken off) for every aircraft, flown headless |
 | `menus-window-launch-*` | The real launch path (`--launch-quick-mission --loadout none|guns`) for every aircraft: the launch line must show exactly the ammunition the page left, and the weapons window must list nothing (none) or only the gun (guns) |
 | `menus-panel-*` | Instrument windows drawn on the CPU: every page (0 to 9) for every aircraft, and every panel-only systems fault (1 to 35) on the systems window |
@@ -49,11 +57,11 @@ for size and blankness, and were also looked at by the agent that wrote them.
 
 `--validate-creator` (`TORE_CREATOR_STAGE=loadouts|matrix|render` runs one part):
 
-- **Matrix** (`quick_mission/matrix.rs`): about 11,600 setups started through the same
+- **Matrix** (`quick_mission/matrix.rs`): about 11,500 setups started through the same
   steps a flown mission takes (the creator's own refusal check, the wing launch,
   ground layout, layout plan, altitude check, combat build, flight restart, AI wing
   build, group orders). It sweeps every theater layout with every separation and
-  altitude, every runway with wings of one to five, every weather choice on every
+  altitude, every runway with wings of one to five (the 22 short strips were not on the list from 2026-09-30, 110 fewer setups; since 2026-10-11 they are listed, labelled STOL), every weather choice on every
   source theater, every player aircraft against every enemy aircraft, every wing's
   count, skill and aircraft, a sample of the whole wing-count product, every group
   order with survival on and off, every mission preset, and every other dropdown
@@ -172,7 +180,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Replay Last Mission, Continue Old Campaign greyed; Play Single Mission and the campaign entries say "coming soon" | 11 | NOT IMPLEMENTED | `menus-snap-notice`, features row |
 | ? menu with Exit to Desktop | 12 | OK | `menus-snap-help` |
 | Pref menu: Graphics, Sound (Screen Resolution absent, Controls and Re-import media added) | 12, 326 | DIFFERS | `menus-snap-pref`; the game has one window size setting via `--window-size` and Alt-Enter |
-| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Host, Join, Player Setup for the new multiplayer, not the retail transports |
+| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Direct Connection and Internet Lobby for the new multiplayer, not the retail transports; the Direct Connection screen's five states are `menus-snap-direct*` and the Internet Lobby's are `menus-snap-internet*` (`internet`, `internet-games`, `internet-joining`, `internet-options`, `internet-unreachable`) |
 | OK is Enter and Cancel is Escape on every screen | 12 | DIFFERS | Load Ordnance and debrief: Enter is OK, Escape backs out. Creator: Escape is Cancel, but Enter activates the focused field and OK is reached by Tab ([keyboard traversal spec](../spec/quick-mission-menu.md)) |
 | Text buttons: left click cycles forward, right backward, Shift-click opens the list | 13 | OK | `quick_mission` right-click tests, creator fuzz |
 | Aircraft menu: Fly All, Era | 14, 18, 326 | NOT IMPLEMENTED | the menu says "Aircraft era filters are not available yet" |
@@ -204,7 +212,8 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Control menu: Keyboard | 332 | OK | opens the controls screen |
 | Control menu: joystick types, rudder pedals, throttle stick, HAT | 332 | NOT IMPLEMENTED | probe; the controls screen binds any device instead |
 | Pref: Graphics, Sound, Time (Paused, Slow-motion, 1x to 8x), HUD pitch ladder, Dim and Brighten HUD, Show cockpit, Large windows | 332 | OK | probe: each opens its screen or toggles |
-| Pref: Accelerated time, Rear-view mirrors, Authentic radar CRT, Show target info, IR/Laser targeting, Radio silence | 332, 333 | NOT IMPLEMENTED | probe prints "not implemented yet" (the mirrors are always on) |
+| Pref: Accelerated time, Rear-view mirrors, Authentic radar CRT, IR/Laser targeting, Radio silence | 332, 333 | NOT IMPLEMENTED | probe prints "not implemented yet" (the mirrors are always on) |
+| Pref: Show target info (Ctrl+T) | 12, 333 | OK | probe: the row toggles and says "Show target info: on"; `show_target_info_is_off_by_default_and_toggles_from_ctrl_t_and_the_pref_row`, `target_info` render test, `replay-script-friend-or-foe` (F2-C, 2026-10-05) |
 | View menu: 11 views with F1 to F12 shortcuts | 333, 103 | OK | probe, `menus-window-view-*` |
 | View menu: Ctrl and Alt use missile or target, View transitions | 333 | NOT IMPLEMENTED | probe (the Ctrl and Alt keys themselves work, see CONTROLS) |
 | Window menu: envelope (Current), the nine windows, RCS | 333 | OK | probe, `menus-panel-*` |
@@ -237,7 +246,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Wingman Alt-W (engage every target of the target's class) and Alt-F (attack on contact, IR targeting) | 159 | DIFFERS | Alt-W is attack on contact here and Alt-F reports "unavailable" ([INPUT.md](../INPUT.md), documented) |
 | ? menu labelled Exit to Windows | 12 | DIFFERS | every menu shows Exit to Desktop (John, 2026-09-29): the main menu, creator, debrief, the flight and replay Esc menus and the shortcut help; only the imported row label behind them stays retail (`pause_menu::display_label`) |
 | In-flight map: Shift-M toggles, +/- zoom, scroll | 102, 202 | OK | the manual's "A S W Z" and "W Z A S" are its typeface's arrow-key symbols (the same symbols name pitch, roll and Shift-panning, which the catalog binds to the arrows), so the arrows scroll |
-| In-flight map: Show menu classes (planes, SAM, AAA, ships, airports, vehicles, other), SAM ranges, 5 nmi grid | 201, 328 | DIFFERS | category toggles are Aircraft, Airfields, Buildings, Surface, Emitters; no SAM ranges or grid yet ([map spec](../spec/flight-map.md)) |
+| In-flight map: Show menu classes (planes, SAM, AAA, ships, airports, vehicles, other), SAM ranges, 5 nmi grid | 201, 328 | DIFFERS | category toggles are Aircraft, Airfields, Buildings, Surface, Emitters and Mission; no SAM ranges or grid yet ([map spec](../spec/flight-map.md)) |
 | In-flight map pauses the flight | 334 | DIFFERS | the flight keeps running under the map (`map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors`) |
 | Keys: 1 to 8 throttle, A autopilot, B brakes, F flaps, G gear, H hook, O bay, [ ] weapons, R radar, I IR, T targets, Enter visual target, W and Shift-W waypoints, Insert and Delete countermeasures, Shift-1 to 0 windows, Ctrl-P pause, Shift-E twice | 60 to 104 | OK | `docs/CONTROLS.md` row by row, `flight_ui` key test |
 

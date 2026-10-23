@@ -92,6 +92,10 @@ pub struct AutopilotTrace {
     /// Stick the flight model received, [pitch, roll, yaw]. Equal to `pilot`
     /// when the autopilot let go before steering.
     pub commanded: [f64; 3],
+    /// Collective lever position the flight model received while the
+    /// autopilot was engaged; hover hold and the rotorcraft heading and
+    /// waypoint modes write it.
+    pub collective: Option<f64>,
     /// Why the autopilot switched itself off during the step, if it did.
     pub released: Option<Release>,
 }
@@ -110,6 +114,15 @@ pub enum Release {
     PilotOverride,
     /// On the ground, or crashed.
     Ground,
+    /// Hover hold: the pilot moved the collective or the throttle.
+    PilotCollective,
+    /// Hover hold: the engine failed, stopped or ran out of fuel.
+    EngineFailure,
+    /// Hover hold: the hydraulics were lost.
+    HydraulicsLost,
+    /// The heading or waypoint mode of a helicopter, the V-22 or a vectoring
+    /// jet lost the speed it flies at.
+    TooSlow,
 }
 
 /// What the control system did to the stick (`Systems::controls`).
@@ -307,6 +320,8 @@ pub enum BurnerBlock {
     NoFuel,
     /// Throttle at or below `PowerTrace::afterburner_throttle`.
     ThrottleLow,
+    /// Fitted powered-lift gate: nozzle pitch at or above 20 percent travel.
+    Vectoring,
 }
 
 /// Stall and top speed, control authority and the G limits.
@@ -333,8 +348,12 @@ pub struct EnvelopeTrace {
     pub authority: f64,
     /// Number of envelope rows containing this speed at this altitude.
     pub rows: u32,
-    /// Lowest and highest G of those rows, [-1, 1] when none do.
+    /// Lowest and highest G of those rows, [-1, 1] when none do. The highest
+    /// includes the fast-side hold.
     pub envelope_g: [f64; 2],
+    /// Hybrid fast-side hold, when the speed is past the fast edge of every
+    /// row above 1 G.
+    pub fast_hold: Option<FastSideHold>,
     /// Fuel plus carried stores over empty weight.
     pub loading: f64,
     /// 1 + loading x the aircraft's loaded-elevator percent / 100. Both G
@@ -353,6 +372,14 @@ pub struct EnvelopeTrace {
     /// G asked by the stick within the limits, times authority, before the
     /// lift factors in [`LiftTrace`].
     pub stick_g: f64,
+}
+
+/// The hybrid fast-side hold: past `edge_fps`, the fast edge of every row
+/// above 1 G, the positive limit keeps `g` before loading.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FastSideHold {
+    pub g: f64,
+    pub edge_fps: f64,
 }
 
 /// The hybrid ramp that caps positive G near the stall speed: 1 G at
@@ -688,8 +715,6 @@ pub struct Rolling {
     pub ground_speed_fps: f64,
     /// Elevator at or below neutral, so the nose settled toward the runway.
     pub nose_settling: bool,
-    /// The gear is not fully down on the ground: the belly is scraping.
-    pub belly: bool,
 }
 
 /// A graded landing.
@@ -787,6 +812,12 @@ pub enum Effect {
     /// No envelope row contains this speed at this altitude: G limits of
     /// ±1 before loading.
     OutsideEnvelope { airspeed_fps: f64, altitude_ft: f64 },
+    /// Past the fast edge of every row above 1 G: the positive limit keeps
+    /// the G of the row reaching furthest, before loading.
+    FastSideHold {
+        hold: FastSideHold,
+        airspeed_fps: f64,
+    },
     /// Fuel and stores divided both G limits by `divisor`.
     LoadedLimits { divisor: f64, loading: f64 },
     /// Pull extra G raised the positive limit.
@@ -1015,6 +1046,12 @@ fn adapter_effects(t: &AdapterTrace, hybrid: bool, out: &mut Vec<Effect>) {
         out.push(Effect::OutsideEnvelope {
             airspeed_fps: t.air.airspeed_fps,
             altitude_ft: t.air.altitude_ft,
+        });
+    }
+    if let Some(hold) = e.fast_hold {
+        out.push(Effect::FastSideHold {
+            hold,
+            airspeed_fps: t.air.airspeed_fps,
         });
     }
     if e.load_divisor != 1. {
@@ -1270,8 +1307,9 @@ mod tests {
 
     #[test]
     fn a_stall_scales_controls_and_lift_and_records_the_spin_check() {
-        // The fixture's clean stall speed at 5,000 ft is 205 ft/s.
-        let mut s = airborne(true, 5000., 150.);
+        // The fixture's clean stall speed at 5,000 ft is about 186 ft/s (its
+        // fitted stall reference, the F/A-18D's, scales the imported edge).
+        let mut s = airborne(true, 5000., 130.);
         s.research.as_mut().unwrap().departure.mode = DepartureMode::Stalled;
         step(
             &mut s,

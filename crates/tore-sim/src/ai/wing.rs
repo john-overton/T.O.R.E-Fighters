@@ -257,6 +257,40 @@ pub enum PlayerOrder {
     BugOut,
     /// Land at the airport the player has selected for the tower.
     LandAtSelected,
+    /// Give each addressed wingman a different bandit from the flight data
+    /// link's picture (slice G3c, Alt+A; the rule is `datalink::sort`).
+    Sort,
+    /// Alt+F, retail's "engage the IR/laser target": the object the lead's
+    /// targeting sight holds (a track, a pin, or its laser spot), air or
+    /// ground. With none held the wingmen are freed to attack on contact,
+    /// which is what the retail manual says of the key. A T.O.R.E order key
+    /// in the strike round (docs/spec/ai-strike.md, "Orders from the flight
+    /// lead").
+    EngageIrLaser,
+    /// Alt+W, retail's "engage every target of my target's class" ("Attack
+    /// SAMs"): every hostile object of the designated target's class. A
+    /// designated air target, or none, is "Attack bandits" (attack on
+    /// contact), as Alt+W has always done.
+    EngageClass,
+    /// "Lase my target" (Alt+G, a T.O.R.E order): a wingman with a
+    /// designator lases the lead's designated ground target.
+    LaseMyTarget,
+}
+
+impl PlayerOrder {
+    /// Whether the order replaces what a wingman was told to do on the
+    /// ground (a strike, a class order or lasing, slice ST-O). The formation
+    /// settings (formation, spacing, stacking, wing control) leave it; the
+    /// ground orders replace it themselves.
+    pub fn ends_ground_orders(self) -> bool {
+        !matches!(
+            self,
+            PlayerOrder::Formation(_)
+                | PlayerOrder::Spacing
+                | PlayerOrder::Stacking
+                | PlayerOrder::ControlToggle
+        )
+    }
 }
 
 /// B43: the player's horizontal spacing order toggles 512 and 2048 ft. Any
@@ -311,6 +345,9 @@ pub fn apply_control_side_effect(order: PlayerOrder, control: WingControl) -> Re
         PlayerOrder::EngageMyTarget
         | PlayerOrder::ProtectMe
         | PlayerOrder::AttackOnContact
+        | PlayerOrder::Sort
+        | PlayerOrder::EngageIrLaser
+        | PlayerOrder::EngageClass
         | PlayerOrder::Approach(_) => control.min(WingControl::Loose),
         PlayerOrder::EngageFromFormation
         | PlayerOrder::Disengage
@@ -326,7 +363,10 @@ pub fn apply_control_side_effect(order: PlayerOrder, control: WingControl) -> Re
                 ));
             }
         },
-        PlayerOrder::Break(_) | PlayerOrder::BugOut | PlayerOrder::LandAtSelected => control,
+        PlayerOrder::Break(_)
+        | PlayerOrder::BugOut
+        | PlayerOrder::LandAtSelected
+        | PlayerOrder::LaseMyTarget => control,
     })
 }
 
@@ -519,7 +559,11 @@ pub fn sender_phrase(
         | PlayerOrder::Approach(_)
         | PlayerOrder::Stacking
         | PlayerOrder::BugOut
-        | PlayerOrder::LandAtSelected => Err(AiError::UnspecifiedRule(
+        | PlayerOrder::LandAtSelected
+        | PlayerOrder::EngageIrLaser
+        | PlayerOrder::EngageClass
+        | PlayerOrder::LaseMyTarget
+        | PlayerOrder::Sort => Err(AiError::UnspecifiedRule(
             "B46 sender phrase text for this order is not recorded",
         )),
     }
@@ -537,7 +581,11 @@ pub fn wingman_reply(
         return None;
     }
     match order {
-        PlayerOrder::EngageMyTarget if radio_traffic_enabled => Some("Engaging"),
+        PlayerOrder::EngageMyTarget | PlayerOrder::EngageIrLaser | PlayerOrder::EngageClass
+            if radio_traffic_enabled =>
+        {
+            Some("Engaging")
+        }
         PlayerOrder::ProtectMe => Some("Showtime!"),
         _ => None,
     }
@@ -1209,6 +1257,8 @@ mod tests {
             PlayerOrder::EngageMyTarget,
             PlayerOrder::ProtectMe,
             PlayerOrder::AttackOnContact,
+            PlayerOrder::EngageIrLaser,
+            PlayerOrder::EngageClass,
             PlayerOrder::Approach(PlayerApproach::Left),
             PlayerOrder::Approach(PlayerApproach::High),
         ];
@@ -1756,3 +1806,7 @@ mod tests {
         assert_eq!(ai.target_deadline, None);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "wing_checkpoint.rs"]
+mod checkpoint;

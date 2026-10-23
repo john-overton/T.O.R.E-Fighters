@@ -6,6 +6,72 @@ use crate::{
     invalid,
 };
 use std::collections::BTreeMap;
+#[path = "weapon_corrections.rs"]
+pub mod corrections;
+
+/// Shared gameplay classification of a guided store's seeker. The raw record
+/// remains intact. See docs/spec/missiles.md, "Shared classification".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekerKind {
+    SemiActiveRadar,
+    ActiveRadar,
+    Infrared,
+    PassiveRadar,
+    Other,
+}
+
+impl SeekerKind {
+    pub fn from_fields(flags: u32, signature: u8) -> Self {
+        if flags & 1 == 0 {
+            return Self::Other;
+        }
+        match signature {
+            2 => Self::Infrared,
+            3 if flags & 0x200 != 0 => Self::SemiActiveRadar,
+            3 => Self::ActiveRadar,
+            4 => Self::PassiveRadar,
+            _ => Self::Other,
+        }
+    }
+
+    pub fn fox_stem(self) -> Option<&'static str> {
+        match self {
+            Self::SemiActiveRadar => Some("^FOXONE"),
+            Self::Infrared => Some("^FOXTWO"),
+            Self::ActiveRadar => Some("^FOXTHR"),
+            _ => None,
+        }
+    }
+}
+
+/// Existing fitted surface guidance policy, not a real-world identification.
+/// These lack the support bit. Preserve docs/spec/surface-defenses.md's
+/// supported-radar rule; no A2A override is currently justified.
+const SEEKER_OVERRIDES: &[(&str, SeekerKind)] = &[
+    ("SA19.JT", SeekerKind::SemiActiveRadar),
+    ("SAN11.JT", SeekerKind::SemiActiveRadar),
+];
+
+impl Weapon {
+    /// Fitted interpretation of the reviewed aspect field: 100 is rear-only,
+    /// 20..40 identifies the all-aspect A2A records. Zero is unspecified.
+    pub fn infrared_all_aspect(&self) -> bool {
+        corrections::infrared_aspect(&self.source)
+            .unwrap_or(self.seeker.all_aspect > 0 && self.seeker.all_aspect < 100)
+    }
+
+    /// Shared classification, with the existing surface-defense exceptions.
+    /// Ambiguous A2A variants stay data-defined, never guessed from HUD text.
+    pub fn seeker_kind(&self) -> SeekerKind {
+        SEEKER_OVERRIDES
+            .iter()
+            .find(|(source, _)| self.source.eq_ignore_ascii_case(source))
+            .map_or_else(
+                || SeekerKind::from_fields(self.flags, self.seeker.signature),
+                |(_, kind)| *kind,
+            )
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Zone {
@@ -137,6 +203,21 @@ pub struct Countermeasures {
     pub infrared_lose_lock_time: u8,
 }
 impl Countermeasures {
+    /// Explicit absence of countermeasure equipment, with no carried devices.
+    pub const NONE: Self = Self {
+        weight: 0,
+        flags: 0,
+        mode_flags: 0,
+        chaff: [0; 4],
+        flare: [0; 4],
+        radar_deception_chance: 0,
+        radar_signature_add: 0,
+        radar_noise_range: [0; 2],
+        infrared_deception_chance: 0,
+        infrared_signature_add: 0,
+        infrared_lose_lock_time: 0,
+    };
+
     pub fn parse(name: &str, bytes: &[u8]) -> Result<Self> {
         let name = name.to_ascii_uppercase();
         if !name.ends_with(".ECM") {
@@ -424,7 +505,7 @@ impl Weapon {
         if native_callback != "_PROJProc" {
             return Err(invalid("unreviewed projectile callback"));
         }
-        Ok(Self {
+        let mut weapon = Self {
             source,
             name: e.name.clone(),
             hud_name: e.name.clone(),
@@ -440,13 +521,240 @@ impl Weapon {
             guidance,
             damage,
             effects,
-        })
+        };
+        corrections::apply(&mut weapon);
+        Ok(weapon)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_inventoried_air_to_air_missile_has_the_right_seeker_and_fox_call() {
+        use SeekerKind::*;
+        // Synthetic records carrying only the audited classification fields.
+        // No retail bytes: complete 22-record A2A inventory, 2026-10-15.
+        let rows = [
+            ("AA10.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("R27ER.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("R27T.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("R27ET.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA11.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA11B.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA12.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("AA2.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA6.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AA8.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA9.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AAML.JT", 3, 0x1206f, ActiveRadar, "^FOXTHR"),
+            ("AEMP1.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("AIM120.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("AIM54C.JT", 3, 0x1206f, ActiveRadar, "^FOXTHR"),
+            ("AIM7.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AIM7E.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AIM9B.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AIM9M.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AIM9X.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("MICA.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("PL10.JT", 3, 0x1236f, SemiActiveRadar, "^FOXONE"),
+            ("PL7.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("R530.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("R550.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+        ];
+        for (name, signature, flags, expected, stem) in rows {
+            let actual = SeekerKind::from_fields(flags, signature);
+            assert_eq!(actual, expected, "{name}");
+            assert_eq!(actual.fox_stem(), Some(stem), "{name}");
+        }
+        assert_eq!(SeekerKind::from_fields(0, 3), Other);
+        assert_eq!(SeekerKind::from_fields(1, 0).fox_stem(), None);
+        assert_eq!(SeekerKind::from_fields(1, 4), PassiveRadar);
+    }
+
+    #[test]
+    fn virtual_bomb_shapes_alias_only_the_donor_model() {
+        // Construct by field name instead of assuming an object offset.
+        let mut fields = String::from("[brent's_relocatable_format]\n");
+        for (layout, schema) in [
+            ("object", crate::aircraft::schema::OBJECT),
+            ("projectile", crate::aircraft::schema::PROJECTILE),
+        ] {
+            for &(kind, field) in schema {
+                let value = match (layout, field) {
+                    ("object", "structType") => "7",
+                    ("object", "typeSize") => "315",
+                    ("projectile", "structType") => "10",
+                    (_, "utilProc") => "_PROJProc",
+                    (_, "si_names" | "ot_names") => "si_names",
+                    (_, "shape") => "model",
+                    _ => "0",
+                };
+                let kind = if kind == "ptr" && value == "0" {
+                    "dword"
+                } else {
+                    kind
+                };
+                fields.push_str(&format!("{kind} {value}\n"));
+            }
+        }
+        fields.push_str(
+            r#":si_names
+string "Test"
+string "Test bomb"
+string "TEST.JT"
+:model
+string "TEST.SH"
+end
+"#,
+        );
+        let mut data = BTreeMap::from([
+            ("PAVEWAY.JT".into(), fields.clone().into_bytes()),
+            ("GBU29.JT".into(), fields.into_bytes()),
+            ("TEST.SH".into(), vec![1, 2, 3]),
+        ]);
+        corrections::extend_resources(&mut data);
+        assert_eq!(data.len(), 9);
+        for (name, donor, _, _, shape) in corrections::SMALL_BOMBS {
+            assert_eq!(
+                corrections::resource_donor(name, &data).as_deref(),
+                Some(donor)
+            );
+            assert_eq!(
+                corrections::resource_donor(shape, &data).as_deref(),
+                Some("TEST.SH")
+            );
+            assert_eq!(data[shape], data["TEST.SH"]);
+        }
+        data.insert("GB12.SH".into(), vec![9]);
+        corrections::extend_resources(&mut data);
+        assert_eq!(data["GB12.SH"], vec![9], "explicit shapes win");
+    }
+
+    #[test]
+    fn smaller_bombs_preserve_donor_contract_and_scale_damage() {
+        let bytes = fixture();
+        let mut donor = Weapon::parse("PAVEWAY.JT", bytes.as_bytes()).unwrap();
+        donor.weight = 2000;
+        donor.damage.by_class = [401, 800, 1200, 1600, 2000];
+        donor.damage.collateral_radius = 100;
+        for (name, _, weight, divisor, shape) in corrections::SMALL_BOMBS {
+            let mut variant = donor.clone();
+            variant.source = name.into();
+            corrections::apply(&mut variant);
+            assert_eq!(variant.weight, weight);
+            assert_eq!(
+                variant.damage.by_class,
+                donor.damage.by_class.map(|v| v / divisor)
+            );
+            assert_eq!(
+                variant.damage.collateral_radius,
+                if divisor == 4 { 63 } else { 79 }
+            );
+            assert_eq!(
+                variant.damage.collateral_percent,
+                donor.damage.collateral_percent
+            );
+            assert_eq!(variant.damage.fuze_radius, donor.damage.fuze_radius);
+            assert_eq!(variant.damage.fuze_arm_t, donor.damage.fuze_arm_t);
+            assert_eq!(variant.movement, donor.movement);
+            assert_eq!(variant.seeker, donor.seeker);
+            assert_eq!(variant.flags, donor.flags);
+            assert_eq!(variant.effects, donor.effects);
+            assert_eq!(variant.shape.as_deref(), Some(shape));
+            assert_eq!(
+                Weapon::parse(name, bytes.as_bytes()).unwrap().weight,
+                weight
+            );
+        }
+        let mut resources = BTreeMap::from([
+            ("PAVEWAY.JT".into(), bytes.clone().into_bytes()),
+            ("GBU29.JT".into(), bytes.into_bytes()),
+        ]);
+        corrections::extend_resources(&mut resources);
+        let once = resources.clone();
+        corrections::extend_resources(&mut resources);
+        assert_eq!(resources, once);
+        assert_eq!(resources.len(), 5);
+    }
+
+    #[test]
+    fn gunship_damage_correction_preserves_direct_damage_and_effects() {
+        let bytes = fixture_damage("150");
+        let original = Weapon::parse("C_25.JT", bytes.as_bytes()).unwrap();
+        assert_eq!(original.damage.by_class, [150; 5]);
+        for source in ["C_40.JT", "C_105.JT"] {
+            let mut corrected = Weapon::parse(source, bytes.as_bytes()).unwrap();
+            assert_eq!(
+                corrected.damage.by_class,
+                original.damage.by_class.map(|v| v.saturating_mul(2))
+            );
+            if source == "C_105.JT" {
+                assert_eq!(corrected.damage.collateral_radius, 100);
+                assert_eq!(corrected.damage.collateral_percent, 35);
+                assert_eq!(
+                    corrections::collateral_damage(&corrected),
+                    [300, 0, 300, 0, 300]
+                );
+            } else {
+                assert_eq!(corrected.damage.collateral_radius, 0);
+                assert_eq!(corrected.damage.collateral_percent, 0);
+                assert_eq!(corrections::collateral_damage(&corrected), [300; 5]);
+            }
+            corrected.damage.collateral_radius = original.damage.collateral_radius;
+            corrected.damage.collateral_percent = original.damage.collateral_percent;
+            corrected.damage.by_class = original.damage.by_class;
+            corrected.source = original.source.clone();
+            assert_eq!(corrected, original);
+        }
+        assert_eq!(
+            Weapon::parse("C_25.JT", bytes.as_bytes()).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn derived_r27_records_change_guidance_motor_and_names_at_parse() {
+        let bytes = fixture();
+        let mut donor = Weapon::parse("AA10.JT", bytes.as_bytes()).unwrap();
+        donor.flags = 0x1234f;
+        donor.seeker.signature = 3;
+        donor.movement.fuel_t = 212;
+        donor.movement.remove_t = 424;
+        donor.movement.acceleration = 100;
+        donor.seeker.zones[0].maximum_range = 120_000;
+        donor.seeker.zones[1].maximum_range = 120_000;
+        for (name, kind, maximum, weight) in [
+            ("R27ER.JT", SeekerKind::SemiActiveRadar, 180_000, 772),
+            ("R27T.JT", SeekerKind::Infrared, 100_000, 541),
+            ("R27ET.JT", SeekerKind::Infrared, 150_000, 756),
+        ] {
+            let mut variant = donor.clone();
+            variant.source = name.into();
+            corrections::apply(&mut variant);
+            assert_eq!(variant.seeker_kind(), kind);
+            assert_eq!(variant.seeker.zones[1].maximum_range, maximum);
+            assert_eq!(variant.weight, weight);
+            let extended = name != "R27T.JT";
+            assert_eq!(variant.movement.fuel_t, if extended { 318 } else { 212 });
+            assert_eq!(
+                variant.movement.acceleration,
+                if extended { 125 } else { 100 }
+            );
+            let parsed = Weapon::parse(name, bytes.as_bytes()).unwrap();
+            assert_eq!(parsed.hud_name, variant.hud_name);
+            assert!(parsed.name.starts_with("R-27"));
+            assert!(parsed.hud_name.len() <= 7);
+        }
+        assert_eq!(donor.hud_name, "AA-10A", "old replay resource stays valid");
+        let mut map = BTreeMap::from([("AA10.JT".into(), bytes.into_bytes())]);
+        corrections::extend_resources(&mut map);
+        let once = map.clone();
+        corrections::extend_resources(&mut map);
+        assert_eq!(map, once);
+        assert_eq!(map.len(), 4);
+    }
+
     #[test]
     fn rear_sensor_and_countermeasure_words_preserve_source_bits() {
         let make = |schema: &[(&str, &str)], sensor: bool| {
@@ -495,6 +803,9 @@ mod tests {
         assert!(Tank::parse(&s[..s.len() - 5]).is_err());
     }
     fn fixture() -> String {
+        fixture_damage("0")
+    }
+    fn fixture_damage(damage: &str) -> String {
         let mut s = "[brent's_relocatable_format]\n".to_string();
         for (layout, fields) in [
             ("object", crate::aircraft::schema::OBJECT),
@@ -508,6 +819,7 @@ mod tests {
                     (_, "utilProc") => "_PROJProc",
                     (_, "si_names") | (_, "ot_names") => "names",
                     (_, "_maxSpeed") => "500",
+                    ("object", name) if name.starts_with("damage[") => damage,
                     _ => "0",
                 };
                 let kind = if kind == "ptr" && v == "0" {

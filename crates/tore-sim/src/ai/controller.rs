@@ -117,8 +117,12 @@ pub struct ActorIdentity {
     pub side: targeting::Side,
     /// Wing index on the setup screen, 0..=2 per side.
     pub wing: u8,
-    /// Member index inside the wing; 0 is the leader.
+    /// Member index inside the wing, from 0. It is the aircraft's place in the
+    /// roster and never changes; who leads is [`Self::leads`].
     pub member: u8,
+    /// This aircraft currently leads its wing. At the start it is the wing's
+    /// first member (member 0); lead succession moves it.
+    pub leads: bool,
     /// The exact aircraft record. `F18` is the F/A-18D, `RafaleC` the Rafale C.
     pub aircraft: AircraftId,
     /// Human control. No AI path may set this true; it gates the experience G
@@ -128,7 +132,7 @@ pub struct ActorIdentity {
 
 impl ActorIdentity {
     pub fn is_leader(&self) -> bool {
-        self.member == 0
+        self.leads
     }
 }
 
@@ -175,6 +179,11 @@ pub struct OwnState {
     pub time_home_s: Option<f64>,
     pub internal_fuel_lbs: f64,
     pub radar_emitting: bool,
+    /// The aircraft is a helicopter or the V-22 flown through the rotor
+    /// adapter (slice H3): its flight home is planned and flown at
+    /// [`route::rotorcraft_cruise_speed`], and its fuel states use
+    /// [`route::rotorcraft_fuel_state`], not B48's fighter rules.
+    pub rotorcraft: bool,
 }
 
 impl OwnState {
@@ -187,6 +196,8 @@ impl OwnState {
 /// sensors; `Observable` is service input, never automatic AI knowledge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TargetView {
+    /// Observed IR signature relative to 100, multiplied by engine heat.
+    pub infrared_strength: f64,
     pub id: u32,
     pub side: targeting::Side,
     pub position: [f64; 3],
@@ -205,6 +216,11 @@ pub struct TargetView {
     /// Terrain blocks the firing path.
     pub terrain_blocked: bool,
     pub sensor_supported: bool,
+    /// The view is built from a flightmate's track in the flight data link,
+    /// not from this actor's own sensors (slice G3b). The actor may fly toward
+    /// it and keep it as its target, but never fires on it: a launch needs a
+    /// target the actor holds itself.
+    pub link_track: bool,
 }
 
 /// A frozen aircraft observation that may be investigated but never attacked.
@@ -228,6 +244,10 @@ pub struct DefenseMotion {
     pub source: DefenseSource,
     pub heading_deg: f64,
     pub pitch_deg: f64,
+    /// A helicopter's defence (slice ST-H, docs/spec/ai-strike.md,
+    /// "Helicopter defence"): flown at maximum speed, not corner speed, which
+    /// sinks a helicopter.
+    pub rotorcraft: bool,
 }
 
 /// A launch warning delivered to this actor and nobody else (B47).
@@ -302,6 +322,8 @@ pub struct StationView {
     pub employment_fit: Option<f64>,
     pub minimum_range_ft: f64,
     pub maximum_range_ft: Option<f64>,
+    /// All-aspect flag and nominal IR seeker reach, absent for other stores.
+    pub infrared_envelope: Option<(bool, f64)>,
     pub requires_radar: bool,
     pub requires_sensor: bool,
     pub employment_zone: Option<tore_formats::weapons::Zone>,
@@ -353,6 +375,32 @@ impl StationView {
         }
     }
 
+    fn infrared_fit(&self, origin: [f64; 3], target: &TargetView) -> bool {
+        self.infrared_envelope.is_none_or(|(all_aspect, nominal)| {
+            let direction =
+                crate::attitude::unit(crate::combat::missiles::sub(origin, target.position));
+            let facing = crate::attitude::dot(
+                crate::attitude::Basis::new(
+                    target.heading_deg.to_radians(),
+                    target.pitch_deg.to_radians(),
+                    0.,
+                )
+                .forward,
+                direction,
+            );
+            crate::combat::missiles::seeker::infrared_quality(
+                all_aspect,
+                nominal,
+                target.infrared_strength,
+                facing,
+                crate::combat::missiles::length(crate::combat::missiles::sub(
+                    origin,
+                    target.position,
+                )),
+            ) >= 0.25
+        })
+    }
+
     /// Current mount-relative pointing error after a successful employment
     /// check. This is shared by diagnostics and release, avoiding stale target
     /// geometry when selection changes during the decision. It stops at the
@@ -364,7 +412,8 @@ impl StationView {
             range,
             error,
         } = self.mount_geometry(own, target);
-        let permitted = range >= self.minimum_range_ft
+        let permitted = self.infrared_fit(origin, target)
+            && range >= self.minimum_range_ft
             && self.maximum_range_ft.is_none_or(|max| range <= max)
             && self.employment_limit_deg.is_none_or(|limit| error <= limit)
             && self.employment_zone.is_none_or(|zone| {
@@ -393,9 +442,10 @@ impl StationView {
             below_minimum_range: !(range >= self.minimum_range_ft),
             beyond_maximum_range: !self.maximum_range_ft.is_none_or(|max| range <= max),
             beyond_angle_limit: !self.employment_limit_deg.is_none_or(|limit| error <= limit),
-            outside_zone: !self.employment_zone.is_none_or(|zone| {
-                crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
-            }),
+            outside_zone: !self.infrared_fit(origin, target)
+                || !self.employment_zone.is_none_or(|zone| {
+                    crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
+                }),
         }
     }
 
@@ -753,17 +803,31 @@ pub struct Controller {
     pending_warnings: Vec<(u64, ThreatReport)>,
     pursuit: Option<(u32, PursuitOffset)>,
     formation_guidance: super::formation::Guidance,
-    formation_traffic: Vec<super::formation::Traffic>,
+    formation_traffic: std::sync::Arc<[super::formation::Traffic]>,
     ordered_approach: Option<(u32, f64, f64, bool)>,
     search_contact: Option<SearchContact>,
     search_started_tick: Option<u64>,
     search_orbit_altitude_ft: Option<f64>,
     completed_search: Option<SearchContact>,
+    /// Opinionated (John, 2026-09-30): the wing's mission of opportunity
+    /// search point, a hostile's last known position, flown like a lost
+    /// contact when this aircraft has none of its own
+    /// ([`super::opportunity`]).
+    wing_search: Option<SearchContact>,
+    /// Opinionated (John, 2026-09-30): the wing's next waypoint once its
+    /// mission of opportunity search is over ([`super::opportunity`]).
+    wing_route: Option<[f64; 3]>,
     defense_motion: Option<DefenseMotion>,
     defense_motion_id: Option<u64>,
     mission_target: Option<Option<u32>>,
     mission_rejoin: Option<[f64; 3]>,
     mission_search_bearing: Option<f64>,
+    /// A striker's order for this step (slice ST-T), set by the mission just
+    /// before `step` and taken by it.
+    strike: Option<super::strike::Order>,
+    /// How the adapter is to fly the strike steer this step flew (slice
+    /// ST-T2); the mission takes it right after the step.
+    strike_handling: super::strike::Handling,
     /// Write-only record of the latest advancing tick. No decision reads it.
     trace: thought::Record<ControllerTrace>,
 }
@@ -796,6 +860,11 @@ impl Controller {
         } else if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
             self.recipient.target_order = None;
         }
+    }
+
+    /// Weapons are held (the hold preset or a hold fire order).
+    pub fn weapons_held(&self) -> bool {
+        self.recipient.target_order == Some(wing::TargetOrder::HoldFire)
     }
 
     /// A shared bearing can orient a search but never supplies a target ID,
@@ -859,9 +928,48 @@ impl Controller {
         self.search_contact = contact;
     }
 
+    /// Supply the wing's mission of opportunity search point, or `None`. It is
+    /// searched as a lost contact is, without the Ace's two-minute limit, and
+    /// only while this aircraft has no lost contact of its own to
+    /// investigate. Like that contact it never becomes a target.
+    pub fn set_wing_search(&mut self, contact: Option<SearchContact>) {
+        if self.wing_search.map(|c| c.id) != contact.map(|c| c.id)
+            && self
+                .search_contact
+                .is_none_or(|own| self.completed_search == Some(own))
+        {
+            if self.active.is_some_and(|active| active.search) {
+                self.active = None;
+            }
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+        }
+        self.wing_search = contact;
+    }
+
+    /// The wing's mission of opportunity search point, if any.
+    pub fn wing_search(&self) -> Option<SearchContact> {
+        self.wing_search
+    }
+
+    /// Supply the waypoint the wing flies once its mission of opportunity
+    /// search is over, or `None`. It is flown only while this aircraft has
+    /// no target, no lost contact and no search point.
+    pub fn set_wing_route(&mut self, waypoint: Option<[f64; 3]>) {
+        self.wing_route = waypoint;
+    }
+
+    /// The waypoint of the wing's mission of opportunity, if any.
+    pub fn wing_route(&self) -> Option<[f64; 3]> {
+        self.wing_route
+    }
+
     /// Supply one immutable mission snapshot before advancing this controller.
-    pub fn set_formation_observation(&mut self, traffic: Vec<super::formation::Traffic>) {
-        self.formation_traffic = traffic;
+    pub fn set_formation_observation(
+        &mut self,
+        traffic: impl Into<std::sync::Arc<[super::formation::Traffic]>>,
+    ) {
+        self.formation_traffic = traffic.into();
     }
 
     /// Diagnostics/extension hook, with no normal-flight display or side effects.
@@ -945,17 +1053,21 @@ impl Controller {
             pending_warnings: Vec::new(),
             pursuit: None,
             formation_guidance: super::formation::Guidance::default(),
-            formation_traffic: Vec::new(),
+            formation_traffic: std::sync::Arc::default(),
             ordered_approach: None,
             search_contact: None,
             search_started_tick: None,
             search_orbit_altitude_ft: None,
             completed_search: None,
+            wing_search: None,
+            wing_route: None,
             defense_motion: None,
             defense_motion_id: None,
             mission_target: None,
             mission_rejoin: None,
             mission_search_bearing: None,
+            strike: None,
+            strike_handling: super::strike::Handling::PLAIN,
             trace: thought::Record::default(),
         })
     }
@@ -965,6 +1077,25 @@ impl Controller {
     }
 
     /// Mission return to base without a runway (see `AiMission`).
+    /// A striker's order for the next step (docs/spec/ai-strike.md): its
+    /// steering flies below a B47 defence and above every other motion, and
+    /// its release becomes a weapon request. The step takes it.
+    pub fn set_strike(&mut self, order: Option<super::strike::Order>) {
+        self.strike = order;
+    }
+
+    /// How the adapter is to fly this step's motion: a striker's attack
+    /// handling when the step flew its steer, else plain. Taken, so it never
+    /// outlives the step (slice ST-T2).
+    pub fn take_strike_handling(&mut self) -> super::strike::Handling {
+        std::mem::take(&mut self.strike_handling)
+    }
+
+    /// The controller flies a B47 defence (a missile or gunfire) now.
+    pub fn defending(&self) -> bool {
+        self.defense_motion.is_some()
+    }
+
     pub fn set_mission_complete(&mut self, complete: bool) {
         self.mission_complete = complete;
     }
@@ -973,9 +1104,9 @@ impl Controller {
         self.mission_complete
     }
 
-    /// Leader succession renumbers a wing (see `AiMission`).
-    pub fn set_member(&mut self, member: u8) {
-        self.identity.member = member;
+    /// Lead succession: this aircraft now leads its wing, or no longer does.
+    pub fn set_leads(&mut self, leads: bool) {
+        self.identity.leads = leads;
     }
 
     pub fn profile(&self) -> &BehaviorProfile {
@@ -993,6 +1124,16 @@ impl Controller {
 
     pub fn target(&self) -> Option<u32> {
         self.target
+    }
+
+    /// The aircraft a lead's order told this actor to attack, while that order
+    /// stands (the concrete target of its latest target order). The flight
+    /// data link's pursuit applies only to this target (slice G3b).
+    pub fn ordered_target(&self) -> Option<u32> {
+        match self.recipient.target_order {
+            Some(wing::TargetOrder::ConcreteTarget(id)) => Some(id.0),
+            _ => None,
+        }
     }
 
     pub fn reason(&self) -> Option<ScriptReason> {
@@ -1069,6 +1210,8 @@ impl Controller {
     /// anything, so a paused host, a re-render or a duplicated call cannot
     /// reroll a tactic. A tick that goes backwards is invalid input.
     pub fn step(&mut self, frame: &DecisionFrame<'_>) -> Result<IntentBatch> {
+        let strike = self.strike.take();
+        self.strike_handling = super::strike::Handling::PLAIN;
         match self.last_tick {
             Some(last) if frame.tick < last => {
                 return Err(AiError::InvalidInput("controller tick went backwards"));
@@ -1153,7 +1296,32 @@ impl Controller {
         self.trace.0.geometry = geometry;
 
         // 4. Weapons, on the service's own clock (B42, B45).
-        let has_firing_solution = self.weapons(frame, view, geometry.as_ref(), &mut batch)?;
+        // A target known only from the flight data link is flown toward and
+        // never fired on: the weapons see no target until this actor's own
+        // sensors hold it (slice G3b).
+        let own_view = view.filter(|t| !t.link_track);
+        let has_firing_solution = self.weapons(
+            frame,
+            own_view,
+            geometry.as_ref().filter(|_| own_view.is_some()),
+            &mut batch,
+        )?;
+
+        // A striker's release (slice ST-T), unless weapons are held.
+        if let Some(release) = strike.and_then(|o| o.release)
+            && self.recipient.target_order != Some(wing::TargetOrder::HoldFire)
+            && !self.damage_recovery
+        {
+            batch.weapons.push(WeaponIntent {
+                request: weapon_service::FireRequest {
+                    actor: self.identity.actor,
+                    station: release.station,
+                    target: weapon_service::TargetId(release.target),
+                    request_id: weapon_service::RequestId(self.next_request_id),
+                },
+            });
+            self.next_request_id += 1;
+        }
 
         // 5. Wing requests (B43).
         self.wing_requests(frame, &mut batch);
@@ -1167,11 +1335,18 @@ impl Controller {
                 self.next_motion_id += 1;
                 id
             });
+            let (speed_request, speed) = if defense.rotorcraft {
+                // A helicopter's break keeps its strike speed (slice HF1).
+                let speed = super::helicopter_defense::strike_speed(&frame.own.limits);
+                (SpeedRequest::Explicit(speed), speed)
+            } else {
+                (SpeedRequest::Corner, frame.own.limits.corner)
+            };
             let request = MotionRequest::new(
                 defense.heading_deg.round() as i32,
                 PitchRequest::Explicit(defense.pitch_deg.round() as i32),
                 Bank::Unconstrained,
-                SpeedRequest::Corner,
+                speed_request,
                 Duration::Timed(1),
             );
             batch.motion = Some(MotionIntent {
@@ -1179,7 +1354,7 @@ impl Controller {
                 request,
                 heading_deg: defense.heading_deg,
                 flight_path_pitch_deg: defense.pitch_deg,
-                speed: frame.own.limits.corner,
+                speed,
                 bank: Bank::Unconstrained,
                 completion: Completion::Deadline(
                     motion::deadline_for(Duration::Timed(1), clock).expect("timed defense"),
@@ -1214,6 +1389,48 @@ impl Controller {
             batch.motion = Some(self.resolve(frame, clock, request, None, None, &mut batch)?);
             batch.activity = Some(Activity::ReturningToBase);
             self.trace.0.motion.branch = MotionBranch::DamageRecovery;
+        } else if let Some(steer) = strike.and_then(|o| o.steer).filter(|_| !recovering) {
+            // A striker's pass (slice ST-T): the strike owns the motion, so
+            // whatever maneuver was running is dropped.
+            self.active = None;
+            self.pursuit = None;
+            // The gunship's orbit flies its own bank (slice ST-F); every
+            // other pass leaves the bank to the adapter.
+            let bank =
+                steer.bank_deg.map_or(
+                    Bank::Unconstrained,
+                    |deg| Bank::Explicit(deg.round() as i32),
+                );
+            self.strike_handling = steer.handling;
+            let request = MotionRequest::new(
+                steer.heading_deg.round() as i32,
+                PitchRequest::Explicit(steer.pitch_deg.round() as i32),
+                bank,
+                steer.speed,
+                Duration::Timed(1),
+            );
+            let id = self.next_motion_id;
+            self.next_motion_id += 1;
+            batch.motion = Some(MotionIntent {
+                id,
+                request,
+                heading_deg: steer.heading_deg,
+                flight_path_pitch_deg: steer.pitch_deg.clamp(-90., 90.),
+                speed: steer.speed.resolve(frame.own.limits)?,
+                bank,
+                completion: Completion::Deadline(
+                    motion::deadline_for(Duration::Timed(1), clock).expect("timed strike"),
+                ),
+                steering_point: None,
+                mode: CommandMode::OtherState,
+                formation_flight: false,
+                afterburner: steer.afterburner,
+            });
+            batch.activity = strike.and_then(|o| o.activity);
+            self.trace.0.motion.branch = MotionBranch::Strike {
+                heading_deg: steer.heading_deg,
+                pitch_deg: steer.pitch_deg,
+            };
         } else if let Some(point) = self.mission_rejoin.filter(|_| !recovering) {
             let delta = std::array::from_fn::<_, 3, _>(|i| point[i] - frame.own.position[i]);
             let heading = delta[0].atan2(delta[2]).to_degrees();
@@ -1676,7 +1893,12 @@ impl Controller {
             self.trace.0.fuel = Some(trace);
             return Some(FuelState::OutOfFuel);
         }
-        let state = route::fuel_state(frame.own.fuel_endurance_s, frame.own.time_home_s).ok();
+        let state = if frame.own.rotorcraft {
+            route::rotorcraft_fuel_state(frame.own.fuel_endurance_s, frame.own.time_home_s)
+        } else {
+            route::fuel_state(frame.own.fuel_endurance_s, frame.own.time_home_s)
+        }
+        .ok();
         trace.state = state;
         self.trace.0.fuel = Some(trace);
         let state = state?;
@@ -2215,6 +2437,14 @@ impl Controller {
         {
             return Ok(());
         }
+        if reason.is_none()
+            && !recovering
+            && target.is_none()
+            && self.recipient.target_order != Some(wing::TargetOrder::HoldFire)
+            && self.route_motion(frame, clock, batch)?
+        {
+            return Ok(());
+        }
         // An active maneuver keeps flying until its completion rule fires.
         if let Some(active) = self.active {
             let finished = match active.intent.completion {
@@ -2278,21 +2508,26 @@ impl Controller {
 
     /// Investigate one frozen observation without turning it into a live
     /// target. Outside one nautical mile the actor flies to the observation;
-    /// inside it flies a fitted, bounded clockwise level orbit.
+    /// inside it flies a fitted, bounded clockwise level orbit. Without a
+    /// lost contact of its own, the wing's mission of opportunity point is
+    /// searched the same way.
     fn search_motion(
         &mut self,
         frame: &DecisionFrame<'_>,
         clock: CommandClock,
         batch: &mut IntentBatch,
     ) -> Result<bool> {
-        let Some(contact) = self.search_contact else {
-            return Ok(false);
+        let own = self
+            .search_contact
+            .filter(|contact| self.completed_search != Some(*contact));
+        let (contact, opportunity) = match (own, self.wing_search) {
+            (Some(contact), _) => (contact, false),
+            (None, Some(contact)) => (contact, true),
+            (None, None) => return Ok(false),
         };
-        if self.completed_search == Some(contact) {
-            return Ok(false);
-        }
         let started = *self.search_started_tick.get_or_insert(frame.tick);
-        if self.experience.level == super::Experience::Ace
+        if !opportunity
+            && self.experience.level == super::Experience::Ace
             && frame.tick.saturating_sub(started) >= ACE_SEARCH_LIMIT_TICKS
         {
             if self.active.is_some_and(|active| active.search) {
@@ -2402,7 +2637,74 @@ impl Controller {
             distance_ft: spatial,
             // Only the fly-to branch steers at the contact itself.
             orbiting: steering_point.is_none(),
+            opportunity,
         };
+        Ok(true)
+    }
+
+    /// Fly toward the wing's mission of opportunity waypoint with the B48
+    /// route command: its altitude (no leader jitter, so no draw) at cruise
+    /// speed. The climb or dive toward that altitude is bounded to 20 degrees
+    /// (fitted, as the mission rejoin).
+    fn route_motion(
+        &mut self,
+        frame: &DecisionFrame<'_>,
+        clock: CommandClock,
+        batch: &mut IntentBatch,
+    ) -> Result<bool> {
+        let Some(point) = self.wing_route else {
+            return Ok(false);
+        };
+        let dx = point[0] - frame.own.position[0];
+        let dz = point[2] - frame.own.position[2];
+        let distance_ft = dx.hypot(dz);
+        let command = route::route_command(
+            &route::RouteInputs {
+                waypoint: Some(route::Waypoint {
+                    altitude_ft: point[1],
+                    speed: route::cruise_speed(&frame.own.limits),
+                    landing: false,
+                    distance_ft,
+                }),
+                has_airport: false,
+                wing_leader: false,
+                limits: frame.own.limits,
+            },
+            &mut self.random,
+        )?;
+        let route::RouteCommand::Fly {
+            altitude_ft, speed, ..
+        } = command
+        else {
+            return Ok(false);
+        };
+        let heading = if distance_ft > f64::EPSILON {
+            dx.atan2(dz).to_degrees()
+        } else {
+            frame.own.heading_deg
+        };
+        let pitch = (altitude_ft - frame.own.position[1])
+            .atan2(distance_ft.max(1.0))
+            .to_degrees()
+            .clamp(-20., 20.);
+        let request = MotionRequest::new(
+            heading.round() as i32,
+            PitchRequest::Explicit(pitch.round() as i32),
+            Bank::Unconstrained,
+            SpeedRequest::Explicit(speed),
+            Duration::Timed(3),
+        );
+        self.pursuit = None;
+        batch.motion = Some(self.resolve(
+            frame,
+            clock,
+            request,
+            None,
+            None,
+            &mut IntentBatch::default(),
+        )?);
+        batch.activity = Some(Activity::Searching);
+        self.trace.0.motion.branch = MotionBranch::WingRoute { point, distance_ft };
         Ok(true)
     }
 
@@ -2456,7 +2758,16 @@ impl Controller {
         let dy = aim[1] - frame.own.position[1];
         let dz = aim[2] - frame.own.position[2];
         let heading_deg = dx.atan2(dz).to_degrees();
-        let pitch_deg = dy.atan2(dx.hypot(dz)).to_degrees();
+        let mut pitch_deg = dy.atan2(dx.hypot(dz)).to_degrees();
+        if frame.own.rotorcraft {
+            // A transport helicopter is not asked for a fighter's descent
+            // to its slot (slice HF3).
+            pitch_deg = super::formation::rotorcraft_formation_path_deg(
+                pitch_deg,
+                frame.own.speed.0,
+                leader.velocity[1],
+            );
+        }
         let speed = ScalarSpeed(guidance.speed);
         let duration = Duration::Timed(wing::FORMATION_REQUEST_SECONDS as u8);
         let request = MotionRequest::new(
@@ -2567,7 +2878,11 @@ impl Controller {
                 self.note(Fallback::LeaderReturnToBase, batch);
             }
             batch.activity = Some(Activity::ReturningToBase);
-            let speed = route::cruise_speed(&frame.own.limits);
+            let speed = if frame.own.rotorcraft {
+                route::rotorcraft_cruise_speed(&frame.own.limits)
+            } else {
+                route::cruise_speed(&frame.own.limits)
+            };
             let home_heading_deg = self.home_heading(frame, heading);
             let request = MotionRequest::new(
                 home_heading_deg,
@@ -3398,6 +3713,7 @@ mod tests {
             side: targeting::Side(1),
             wing: 0,
             member: 0,
+            leads: true,
             aircraft: AircraftId::F18,
             human_controlled: false,
         }
@@ -3447,6 +3763,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 3600.0,
             time_home_s: Some(600.0),
+            rotorcraft: false,
             internal_fuel_lbs: 8000.0,
             radar_emitting: true,
         }
@@ -3454,6 +3771,7 @@ mod tests {
 
     fn enemy(id: u32, position: [f64; 3]) -> TargetView {
         TargetView {
+            infrared_strength: 1.,
             id,
             side: targeting::Side(2),
             position,
@@ -3470,6 +3788,7 @@ mod tests {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: true,
+            link_track: false,
         }
     }
 
@@ -3511,6 +3830,7 @@ mod tests {
                     employment_fit: Some(1.0),
                     minimum_range_ft: 0.0,
                     maximum_range_ft: Some(40000.0),
+                    infrared_envelope: None,
                     requires_radar: false,
                     requires_sensor: false,
                     employment_zone: None,
@@ -3589,6 +3909,7 @@ mod tests {
     fn formation_motion_tracks_its_leader_and_preserves_repeated_tick_determinism() {
         let mut identity = identity();
         identity.member = 1;
+        identity.leads = false;
         let mut c = Controller::new(identity, profile(), resolved(Experience::Ace), 1234).unwrap();
         let mut scene = Scene::new();
         scene.targets.clear();
@@ -3924,6 +4245,7 @@ mod tests {
 
         let mut wingman_identity = identity();
         wingman_identity.member = 1;
+        wingman_identity.leads = false;
         let mut wingman =
             Controller::new(wingman_identity, profile(), resolved(Experience::Ace), 5).unwrap();
         let mut view = wing_view();
@@ -3982,6 +4304,27 @@ mod tests {
                     assert!(batch.motion.is_some(), "{aircraft:?} {level:?} at {tick}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_defence_flies_corner_speed_but_a_helicopters_flies_its_strike_speed() {
+        let scene = Scene::new();
+        let strike = super::super::helicopter_defense::strike_speed(&own().limits);
+        assert!(strike.0 < own().limits.maximum.0 && strike.0 >= own().limits.minimum.0);
+        for (rotorcraft, speed) in [(false, own().limits.corner), (true, strike)] {
+            let mut c = controller(Experience::Average);
+            c.set_defense_motion(Some(DefenseMotion {
+                source: DefenseSource::Missile,
+                heading_deg: 90.,
+                pitch_deg: -4.,
+                rotorcraft,
+            }));
+            let motion = c.step(&scene.frame(0, own())).unwrap().motion.unwrap();
+            assert_eq!(motion.speed, speed, "rotorcraft {rotorcraft}");
+            assert_eq!(motion.heading_deg, 90.);
+            assert_eq!(motion.flight_path_pitch_deg, -4.);
+            assert!(c.defending());
         }
     }
 
@@ -4531,6 +4874,7 @@ mod tests {
     fn live_formation_variation_is_smooth_and_vertical_target_stays_within_five_feet() {
         let mut id = identity();
         id.member = 1;
+        id.leads = false;
         let mut c = Controller::new(id, profile(), resolved(Experience::Average), 5).unwrap();
         let scene = Scene::new();
         let mut frame = scene.frame(0, own());
@@ -4561,3 +4905,7 @@ mod tests {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "controller_checkpoint.rs"]
+mod checkpoint;

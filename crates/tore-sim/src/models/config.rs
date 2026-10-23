@@ -30,6 +30,11 @@ pub struct Aerodynamics {
     pub roll_limit_rad_per_second: f64,
     /// Imported fixed8 flap-lift coefficient.
     pub flaps_lift_f8: f64,
+    /// Hybrid adapter: the share of the 1 G top speed at which drag equals
+    /// full thrust, so unloaded level flight at full power settles there.
+    /// 1 for every decoded aircraft; a fitted value below 1 for the variety
+    /// transports and airliners (docs/spec/variety-flight.md, "Top speeds").
+    pub level_speed_fraction: f64,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Equipment {
@@ -60,6 +65,9 @@ pub struct Configuration {
     /// Reviewed carrier hook or explicitly authored concept equipment.
     pub hook_available: bool,
     pub ejection_seat: bool,
+    /// A second crew member (PLANE flags bit 0x4, the multi-crew mark the
+    /// crew voice reads): the RIO or co-pilot, who ejects with the pilot.
+    pub multi_crew: bool,
     pub tuning: Tuning,
     /// Required PT turbulence coefficient; mutable event state lives outside configuration.
     pub turbulence_percent: i16,
@@ -85,6 +93,13 @@ impl Configuration {
                 .ok_or_else(|| std::io::Error::other("missing PLANE flags"))?
                 .number()?
                 & 0x10
+                != 0,
+            multi_crew: a
+                .fields
+                .get("flags")
+                .ok_or_else(|| std::io::Error::other("missing PLANE flags"))?
+                .number()?
+                & 0x4
                 != 0,
             hook_available: matches!(
                 a.id,
@@ -134,6 +149,7 @@ impl Configuration {
                 g_pull_drag_f8: number("_gpullDrag")?,
                 roll_limit_rad_per_second: number("_brv.x.max")?.to_radians(),
                 flaps_lift_f8: number("flapsLift")?,
+                level_speed_fraction: 1.,
             },
             turbulence_percent: i16::try_from(
                 a.fields
@@ -181,6 +197,7 @@ impl Configuration {
             m.max_takeoff_lbs,
             p.military_thrust_lbf,
             a.roll_limit_rad_per_second,
+            a.level_speed_fraction,
         ];
         let nonnegative = [
             m.internal_fuel_lbs,

@@ -314,9 +314,9 @@ Stems are the recording names without the `.5K` extension.
 
 ## Implementation in TORE
 
-Implementation, 2026-09-23: `crates/tore-app/src/crew_voice.rs`, evaluated on
+Implementation, 2026-09-23: `crates/tore-world/src/crew_voice.rs`, evaluated on
 every fixed 120 Hz tick just before due radio lines are delivered. Lines go
-through the shared channel (`crates/tore-app/src/comms.rs`), which applies the
+through the shared channel (`crates/tore-world/src/comms.rs`), which applies the
 3 second hold, the radio silence filter and delivery. Components are
 spec-derived unless listed below.
 
@@ -332,6 +332,7 @@ Implemented:
 - The single-seat wingman: the player's wing member 1, alive, on the same
   target (or both without one) and within 15,000 ft, speaking the "you" lines
   under his radio label. TORE's player always leads Quick Mission wing 1.
+  For a plane that is not the leader, the wingman is the wing's leader.
 - G strain, "Ease up on the stick" and being sick, counted on the fixed tick.
 - Fuel calls, once each, never silenced.
 - Missile warnings one second after launch (the human-flown warning delay of
@@ -373,8 +374,37 @@ Fitted components:
 - **Extra wait after a G sound** is added to the later of the pending coaching
   time and now.
 
+Several seats (multiplayer, agent decisions, 2026-09-29): every human-flown
+plane has its own crew voice, built from that plane's aircraft type and spoken
+to that plane's seat, with its own pacing, fuel, G, feet wet and missile
+memory, its own channel hold and radio silence, and its own 6 second
+missile-warning limits. Its wingman is the first other member of the plane's
+own wing (the second member for a wing leader, else the leader), alive or not
+as for the single player, and only an AI-flown one coaches. Until combat has an
+ownship for every human-flown plane, a plane after the first sees no
+designation, weapon selection or incoming missile.
+
+A lost aircraft's cockpit is silent (John, 2026-10-06; found by the full
+suite, where the AI wingmen finish a mission after the player was shot down and
+the RIO said "Mission accomplished!" 14 seconds in): once the player's aircraft
+is destroyed, the pilot ejects or the pilot dies, no line of that cockpit's
+voice plays after that tick. That is the crew's lines (the RIO, the co-pilot,
+or the wingman who coaches a single-seat player), the plane's own mission
+result calls ("mission accomplished", "almost home") and anything of these
+already waiting for the seat, which is dropped and journaled as cancelled
+("your aircraft is lost"). The death scream, queued on the tick of the loss,
+is the last sound. The debrief is untouched: it still reads SUCCESS when the
+wingmen finish the job. Radio from other aircraft is not the cockpit's voice
+and stays as it was: a player who is down hears no radio from the flight (the
+radio treats the plane as not listening), the wingmen refuse the player's
+orders and replies ("No reply: your aircraft is down"), and the tower's queue
+is cancelled when the aircraft is lost. A reply a wingman had already put on
+the air before the loss still plays out, as on a real radio (agent decision).
+
 Not implemented here: the radar link report (no supplemental radar key), the
-mission result and "almost home" lines (music and debrief work), airport and
+mission failure line (its trigger is unknown; "mission accomplished" and
+"almost home" are the mission core's, from `ai_wings/outcome.rs`, sent to every
+human-flown plane's seat with or without audio since 2026-09-29), airport and
 carrier calls, the `#` second voice set (no Vietnamese speakers fly with the
 player) and the takeoff and landing states of AI targets (TORE's AI targets
 are always airborne; only "going down" silences the coaching).

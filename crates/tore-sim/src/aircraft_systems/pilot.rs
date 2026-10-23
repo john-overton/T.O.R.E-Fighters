@@ -46,3 +46,10 @@ impl Pilot {
         messages
     }
 }
+
+crate::flight::exact::exact_struct!(Pilot {
+    remaining,
+    warning,
+    dead,
+    ejected,
+});

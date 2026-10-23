@@ -5,6 +5,7 @@
 //! by John on 2026-09-26; see docs/REPLAYS.md. The format, reader and exports
 //! live in the dependency-free `tore-replay` crate; this module is the only
 //! place the app's own types meet it.
+pub mod banner;
 pub mod cli;
 pub mod clock;
 pub mod context_menu;
@@ -15,9 +16,14 @@ pub mod devices;
 pub mod drone;
 #[cfg(test)]
 pub(crate) mod fixture;
+pub mod ground_marks;
 pub mod host;
+pub(crate) mod hud_play;
+pub mod identity;
 pub mod library;
 pub mod live;
+pub mod net_convert;
+pub mod net_effects;
 pub mod overlay;
 pub mod panels;
 pub mod pause;
@@ -26,6 +32,10 @@ pub mod png;
 pub mod recorder;
 pub mod screen;
 pub mod sound;
+pub(crate) mod store_art;
+pub(crate) mod stores_check;
+pub mod tape_pacing;
+pub mod tape_views;
 pub mod tracks;
 pub mod trails;
 pub mod trees;

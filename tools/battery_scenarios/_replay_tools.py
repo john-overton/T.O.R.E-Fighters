@@ -49,13 +49,47 @@ def mangle(kind: str, src: str, dest: str) -> None:
     print(f"mangled {kind}: {size} -> {len(data)} bytes")
 
 
+def retail_source() -> str:
+    """Finds the local retail Fighters Anthology folder.
+
+    A git worktree has no gameassets/ of its own (it is local-only and untracked), so the checkout's own
+    folder is only the last guess. Tried in order: TORE_GAME_DIR, the battery profile's remembered media
+    source (the folder the profile was imported from), this checkout's gameassets/, and the main checkout's
+    gameassets/ (the parent of the shared .git directory).
+    """
+    import subprocess
+
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    candidates = [os.environ.get("TORE_GAME_DIR", "")]
+    profile = os.environ.get("TORE_BATTERY_PROFILE", "")
+    if profile:
+        try:
+            for line in open(os.path.join(profile, "media-source.txt"), encoding="utf-8"):
+                if line.startswith("path="):
+                    candidates.append(line[5:].strip())
+        except OSError:
+            pass
+    candidates.append(os.path.join(root, "gameassets", "fighters-anthology"))
+    try:
+        common = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        candidates.append(os.path.join(os.path.dirname(common), "gameassets", "fighters-anthology"))
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    for c in candidates:
+        if c and os.path.isfile(os.path.join(c, "FA_1.LIB")):
+            return c
+    raise SystemExit("no retail Fighters Anthology folder found; set TORE_GAME_DIR (tried: %s)" % ", ".join(c for c in candidates if c))
+
+
 def media(kind: str, dest: str) -> None:
     """Builds damaged Fighters Anthology media at `dest` from the local retail copy (copy-on-write)."""
     import shutil
     import subprocess
 
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    source = os.path.join(root, "gameassets", "fighters-anthology")
+    source = retail_source()
 
     def clone(name):
         os.makedirs(dest, exist_ok=True)

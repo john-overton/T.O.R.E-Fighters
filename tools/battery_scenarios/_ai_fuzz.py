@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import random
 
+from ._strips import ground_airport
+
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
 BASE_THEATERS = ["APA", "BAL", "CUB", "EGY", "FRA", "GRE", "IRA", "KURILE", "LFA", "NSK", "PGU", "SPA", "TVIET", "UKR", "VLA", "WTA"]
 VARIANTS = ["~APAF", "~BAL0", "~BAL3", "~BALF", "~CUBF", "~EGY1", "~EGY5", "~EGYF", "~FRA0", "~FRA4", "~FRA9", "~FRAF",
@@ -50,8 +52,13 @@ def config(seed: int) -> tuple[list[str], int, dict]:
             "--probe-friendly-aircraft", wing, "--probe-enemy-aircraft", foe,
             "--probe-enemy-skill", r.choice(SKILLS), "--ai-mission", r.choice(MISSIONS),
             "--probe-geometry", r.choice(["head", "side", "rear"])]
+    # The draw is unchanged; a short strip (no ground start there, John
+    # 2026-09-30) or a Redfor field (slice AL1) moves to the next airport that
+    # is one, and a theater with none for Blue flies an airborne start.
+    airport = ground_airport(theater, r.randint(1, 3)) if ground else None
+    ground = airport is not None
     if ground:
-        args += ["--ground-start", str(r.randint(1, 3)), "--maneuver", "takeoff", "--separation", r.choice(["20", "50", "100"])]
+        args += ["--ground-start", str(airport), "--maneuver", "takeoff", "--separation", r.choice(["20", "50", "100"])]
     else:
         args += ["--separation", r.choice(["1", "2", "5", "10", "20", "50"]),
                  "--probe-flight-model", r.choice(["legacy", "researched"])]

@@ -83,6 +83,7 @@ converted from the source feet per second.
 | `internal_gun` | Default store on a station whose store is classified `gun round` below |
 | `default_stores` | Each default store as `RESOURCE:stations`, in station order. Includes sensors (`.SEE`), countermeasures (`.ECM`) and tanks (`.GAS`) |
 | `hud_resource` | HUD resource the record names, empty when it names none. Many types share one cockpit |
+| `ai_script` | The AI program the record binds through `ctName` (`f.BI`, `b.BI`, `h.BI`, `liner.BI`, `large.BI`, `ac130.BI`, `f117.BI`, `moth.BI`), empty when it names none. The bombing-class census reads it ([bombing class](../spec/ai-strike.md#bombing-class)) |
 | `shape` | Main exterior shape resource |
 | `archive` | Source archive |
 
@@ -112,6 +113,7 @@ host's quarter second timer unit, speeds are feet per second.
 | `aircraft_default_stations` | Aircraft stations across all 145 PTs naming this store as their default. 70 records have a nonzero count, matching the earlier audit in [importer coverage](coverage.md) |
 | `surface_type_references` | Ground and ship type records (NT, OT) naming this store |
 | `shape`, `fire_sound` | Resources the record names |
+| `max_sound_distance_ft`, `frequency_adjust` | Source `maxSndDist` (feet at which the fire sound reaches zero) and `freqAdj` (pitch offset in 1/256 of the 11 kHz rate). See [weapon launch and bomb release sound](sound.md#weapon-launch-and-bomb-release-sound) |
 | `archive` | Source archive |
 
 ### Derived kind rule

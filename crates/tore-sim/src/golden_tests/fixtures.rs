@@ -122,6 +122,7 @@ pub(super) fn aircraft(id: AircraftId) -> Aircraft {
         AircraftId::Mig23 => "MiG-23",
         AircraftId::Su35 => "Su-35",
         AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx => "F-22",
+        _ => id.reviewed_names().expect("reviewed variety identity").0,
     }
     .into();
     a.shape = format!("{}.SH", id.stem());
@@ -146,10 +147,29 @@ pub(super) fn aircraft(id: AircraftId) -> Aircraft {
 
 /// Every synthetic configuration the flight goldens fly: the shared synthetic
 /// record, then each selectable aircraft identity.
+/// The recorded fingerprints cover the original fighter roster. New human-only
+/// flight families have separate variety acceptance, rather than silently
+/// entering fighter scripts or changing the scope of these frozen recordings.
+const RECORDED_AIRCRAFT: [AircraftId; 14] = [
+    AircraftId::F18,
+    AircraftId::Rafale,
+    AircraftId::F14,
+    AircraftId::A4E,
+    AircraftId::X31,
+    AircraftId::Mig29,
+    AircraftId::Su27,
+    AircraftId::Mig21,
+    AircraftId::Su25,
+    AircraftId::Mig23,
+    AircraftId::Su35,
+    AircraftId::F22,
+    AircraftId::F22n,
+    AircraftId::Faxx,
+];
 pub(super) fn configurations() -> Vec<(String, Aircraft)> {
     std::iter::once(("Synthetic".to_string(), synthetic_aircraft()))
         .chain(
-            AircraftId::SELECTABLE
+            RECORDED_AIRCRAFT
                 .into_iter()
                 .map(|id| (id.label().to_string(), aircraft(id))),
         )

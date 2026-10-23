@@ -28,7 +28,7 @@ unit choice and detailed rules below are agent proposals. Sequencing is in
 | S: supported radar | Aircraft holds radar lock on this missile's target throughout guided flight. For future ground/ship weapons, the equivalent support comes from their launcher. | No steering from hidden target state after support loss. Retain the last observed intercept and seek renewed support until guidance lifetime expires. No pitbull. |
 | A: active radar | Cued launch: snapshot the aircraft firing solution and intercept, then activate at the matrix distance. Boresight launch: own seeker searches immediately, without aircraft designation or radar lock. | Aircraft updates are optional. Losing aircraft support freezes the last supported intercept; it does not destroy the missile or expose live target coordinates. After seeker acquisition, guide independently. |
 | I: infrared | Use the weapon's own heat seeker, with either a designated target or narrow forward boresight search. Aircraft radar and installed FLIR are not required for boresight search. | Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No radar or emitter fallback. |
-| E: passive emitter | Use the surface weapon's receiver with designation for compatible emissions. An enabled passive receiver does not transmit radar. | Emission shutdown stops measurement immediately. Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No heat fallback. |
+| E: passive emitter | Use the surface weapon's receiver with designation for compatible emissions, or the HARM boresight cue ([air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)). An enabled passive receiver does not transmit radar. | Once the seeker has acquired its radar, an emission shutdown does not stop it: it keeps homing on the object, angles only, while the object stays inside its zone-1 cone (retail data, slice W2). Before acquisition a silent object is not seen. No heat fallback. |
 
 John revised loss behavior on 2026-09-17: retain the known intercept and attempt
 same-target reacquisition within the applicable seeker cone until guidance life
@@ -37,9 +37,173 @@ LOST searching; it never permanently disables reacquisition. Search can steer
 toward the frozen intercept, but cannot follow hidden movement. S still requires
 launcher support; IR and emitter weapons retain their own sensor types. This
 supersedes the draft permanent-loss rule and does not interpret `trackT`.
+John's 2026-10-02 loop report adds a fitted guard: once a missile passes the
+remembered intercept along its current velocity, stop steering toward that stale
+point. Continue searching for the same target until guidance expires. A fresh
+seeker observation or renewed launcher support permits steering again. This
+prevents orbiting a missed memory point without shortening the weapon's lifetime.
 Use current shared sensor support for S. A missile retains its own target ID;
 changing cockpit selection never redirects an existing shot. At most one target
-receives aircraft support at once. No aircraft combat AI is included.
+receives aircraft support at once. The same profiles now guide AI-owned shots;
+[AI warning and defense policy](ai-awareness.md) specifies their observations
+and defensive behavior.
+
+## Shared classification
+
+Implementation mode, 2026-10-15. `Weapon::seeker_kind` is the authority for
+missile guidance, launch speech and ordnance labels. For guided records (flag
+`0x1`), signature 2 means infrared, 3 with support flag `0x200` means
+semi-active radar, 3 without it means active radar, and 4 means passive emitter.
+Other signatures remain other guidance, not an invented Fox class. Retail bytes
+are unchanged; the load-time variant rules below adjust owned weapon fields. Reviewed flight eligibility and the fitted activation distances
+below remain separate from classification.
+
+The only store-name overrides preserve the existing fitted surface policy:
+`SA19.JT` and `SAN11.JT` are supported radar despite lacking `0x200`, as specified
+in [surface defenses](surface-defenses.md#sam-missiles). There are no A2A
+classification overrides. New exceptions belong in that one table in
+`tore-formats`, with their evidence here, never in HUD-name comparisons.
+
+John requested correct Fox terminology on 2026-10-15. Active A2A releases now
+say Fox three (`^FOXTHR`), including AIM-120, MICA, AA-12 and AAM-L. This is an
+**opinionated correction**, deliberately differing from the original's
+Phoenix-only rule. Semi-active and IR releases retain Fox one and Fox two and
+the original 50 percent generic-call alternative. Active releases use the
+Phoenix's existing always-Fox-three rule, an agent decision. Surface-target
+shots keep generic calls. See [radio](radio-chatter.md#weapon-launch-calls).
+
+The 22 retail A2A records now have three derived R-27 stores. Five retail
+records remain catalog-only: AA6, AA9, AEMP1, PL7 and PL10. MICA's radar
+record represents the EM role; no MICA-IR or AIM-9L record is added.
+
+## Corrected identities and R-27 stores
+
+**Opinionated, requested by John on 2026-10-15.** AA10.JT remains the stable
+R-27R resource identity, including in old replays, but its HUD reads AA-10A.
+The three new resource keys are R27ER.JT, R27T.JT and R27ET.JT. Loading a
+user's pack supplies these virtual records from AA10.JT in memory. The checked
+weapon reader applies the variant rules, so the UI, host, clients, AI and
+replay effects resolve one definition. No retail bytes are distributed.
+
+Agent naming choice: compact NATO-style AA-10A/B/C/D on the HUD, full names
+R-27R (AA-10A Alamo-A), R-27T (AA-10B Alamo-B), R-27ER (AA-10C Alamo-C),
+and R-27ET (AA-10D Alamo-D) on selection in Load Ordnance. Cards use the
+R-27 variant name. Other corrections: AA-2A / R-3S, AA-6A / R-40R family,
+S530D / Super 530D, MICA-EM and AIM-54C. AA8's all-aspect record represents
+R-60M. AA-11B keeps its distinct game IR variant, without the misleading
+Backfire name; PL10-R explicitly means the 1997 radar concept, not today's
+IR PL-10. AAM-L and AEMP-1 remain fictional game stores. Exact AA-11B and
+historical PL-10 hardware identities remain unknown.
+
+The **fitted** envelopes below are agent choices, not measured retail behavior
+or real missile performance claims. R/ER are SARH, T/ET are IR. The ER/ET
+larger motor multiplies donor acceleration by 1.25 and fuel/removal timers
+by 1.5, with integer truncation. ER multiplies both donor range maxima by
+1.5. T/ET clear launcher/support flags 0x300, use signature 2 and all-aspect
+IR. All other donor physics, turn limits, damage and fuze arming remain.
+Extended variants reuse the donor artwork, so their larger motor is modeled
+in propulsion and mass, not a new mesh.
+
+| Resource | HUD | Guidance / Fox | Nominal launch min/max ft | Seeker max ft | Burn / removal s | Mass lb |
+| --- | --- | --- | --- | ---: | --- | ---: |
+| AA10.JT | AA-10A | SARH / one | 12000 / 120000 | 120000 | 53 / 106 | donor |
+| R27ER.JT | AA-10C | SARH / one | 12000 / 180000 | 180000 | 79.5 / 159 | 772 |
+| R27T.JT | AA-10B | IR / two | 12000 / 100000 | 60000 | 53 / 106 | 541 |
+| R27ET.JT | AA-10D | IR / two | 12000 / 150000 | 60000 | 79.5 / 159 | 756 |
+
+Normal loadouts allow all four on Su-27 and Su-35 medium-missile rails,
+and on the MiG-29's inner pair (source hardpoint row 5). MIG29.PT is the
+Fulcrum-C, not an early export Fulcrum-A; the [US Army MiG-29S entry](https://odin.t2com.army.mil/WEG/Asset/8e5ee70c6f22f4df21b8514ebc3a68e9)
+lists T1/ER1/ET1 capability. Yak-141 takes R/T; extended variants are withheld
+there as an agent choice. No Su-30 aircraft exists in the current 36-aircraft
+roster. Existing defaults remain: Flankers use AA-12, MiG-29 uses AA-8,
+Yak-141's AA10 is R-27R. Wingtip and short IR-only rails do not gain R-27
+capacity; T/ET require underwing positions for their seeker view. Cheat
+loading retains its explicit override.
+
+Real-world family grounding: [Rosoboronexport R-27ER1](https://roe.ru/pdfs/pdf_4712.pdf)
+and [R-27ET1](https://roe.ru/pdfs/pdf_4714.pdf) identify the extended radar
+and IR family. These references do not calibrate this game's motor timers.
+
+## Smaller guided bomb stores
+
+**Opinionated, requested by John on 2026-10-15.** GBU-12, GBU-16 and GBU-38
+are derived game stores. Their guidance, seeker, steering class, release and
+impact sounds, fuze rules, lifetime and loadout art stay those of the donor.
+They are not recovered retail variants. The numerical scaling and model
+sizes below are fitted agent decisions for the requested weight classes.
+
+| Resource / HUD | Donor | Weight lb | Damage multiplier | Shape alias | Length / diameter / fin span ft |
+| --- | --- | ---: | ---: | --- | --- |
+| GBU12.JT / GBU-12 | PAVEWAY.JT, Paveway II | 500 | 0.25 | GB12.SH | 10.8 / 0.90 / 4.4 |
+| GBU16.JT / GBU-16 | PAVEWAY.JT, Paveway II | 1000 | 0.50 | GB16.SH | 12.1 / 1.17 / 5.0 |
+| GBU38.JT / GBU-38 | GBU29.JT, JDAM | 500 | 0.25 | GB38.SH | 7.7 / 0.90 / 1.67 |
+
+All five `damage.by_class` values divide by four or two, with integer
+truncation toward zero. `damage.collateral_radius` divides by the cube root
+of that divisor and rounds to the nearest integer. `collateral_percent`,
+fuze radius, arm time and side-hit failure remain the donor's. Thus splash
+strength inherits the smaller class damage and splash reach shrinks by
+volume scaling. Explosion types and the record's crater-presence field stay
+unchanged. Existing [explosion sizing](explosions.md#size-by-weapon) uses
+`round(100 * (weight / 500)^(1/3))`: 100 percent for GBU-12/38 and 126 percent
+for GBU-16, versus 159 percent for a 2000 lb donor. Craters use that same
+scale on the existing 500 lb crater template when the donor leaves a crater.
+
+The [shared bomb body](air-to-ground.md#bomb-motion) derives mass and drag
+area from the smaller record weight. GBU-12/16 retain Paveway II bang-bang
+steering; GBU-38 retains JDAM proportional steering. Existing AI store
+classification and strike logic consume those same definitions.
+
+Loading a pack supplies donor-identical virtual record bytes and private
+shape aliases in memory. Parsing applies these rules. Each shape is refitted
+to the table's length, body diameter and fin span for both carriage and flight;
+the donor shape remains unchanged. No retail model or image is distributed.
+The import fingerprint excludes only aliases whose bytes still match their
+donor, including shape aliases, preserving old tapes' import identity.
+Explicit different resources continue to participate in the fingerprint.
+
+Every station that accepts a donor accepts its smaller variants. An exact
+donor-default station recognizes the variant as belonging to that default
+family. Other station compatibility masks remain in force. Existing count
+limits and total weight-class limits determine carriage: a four-place,
+2000 lb rack takes four 500 lb bombs or two 1000 lb bombs. Aircraft defaults
+are unchanged. Cheat loading includes all three through its existing rules.
+Validation is in the [bomb-flight baseline](../baselines/bomb-flight.md).
+
+## Infrared aspect and acquisition
+
+**Opinionated, requested by John on 2026-10-15; numeric model fitted by the
+agent.** The reviewed retail `allAspect` field is 100 for AIM-9B and AA2,
+30 for AIM-9M, AA11/B, AA8 and R550, 20 for AIM-9X, and 40 for PL7.
+The correction table explicitly records rear-only B/AA2 and all-aspect
+M/X, AA11/B, AA8 (R-60M role), R550, PL7 and the new R27T/ET. PL7 stays
+catalog-only. The field's exact original numeric formula is unknown.
+
+For the reviewed A2A stores against an airborne target, strength is `max(IR signature, 0) / 100 * engine heat`.
+Engine heat retains 0.1 stopped, 0.5 + 0.5 * throttle running, 1.5 in
+burner, or 1 for an unspecified source. Facing is the dot product of the
+target's nose and its direction toward the seeker, +1 head-on, -1 rear.
+All-aspect acquisition reach is `nominal seeker range * (0.7 - 0.3 * facing)
+* sqrt(strength)`: a head-on fighter has 40% of its rear reach; burner extends
+both by sqrt(1.5), capped by the imported seeker maximum. Rear-only weapons require a 45-degree rear quarter and
+use the full nominal reach within it. Outside reach there is no return.
+Inside, quality is `strength / (1 + (distance / reach)^2)`. Existing acquisition
+and retention thresholds remain 0.25 and 0.20, with 30 ticks dwell at 120 Hz.
+This fixes the previous head-on quality ceiling of 0.25, which distance made
+strictly lower than the acquisition threshold.
+
+SAM profiles retain their previous heat response and minimum-range rules.
+AI jet observations refresh engine heat; rotorcraft retain their supplied heat
+observation, including a handoff snapshot. Collective is not jet throttle.
+
+The mounted seeker produces growl while acquiring and locked tone after dwell.
+CUED IR can fire with or without its own lock, including head-on. A release
+without lock starts BORE search. AI employment reads the same IR response and observed target
+strength, retaining its minimum range, pointing, cadence and tactical discipline.
+The player readout drives both local and client tone; recordings retain tone
+changes for replay audio. [USAF Sidewinder](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104557/aim-9-sidewinder/)
+confirms the L/M all-aspect distinction; no L store is present here.
 
 ## Manual-supported behavior
 
@@ -54,7 +218,8 @@ rules. Manual text was reviewed, not pixel geometry or a matching retail run.
 
 ## First-pass inventory matrix
 
-All 135 imported JT definitions were reviewed for inventory inclusion. The table
+All 135 retail JT definitions in the import were reviewed for inventory inclusion.
+The three virtual R-27 variants above are separate from this raw census. The table
 contains **63 missile or missile-like candidates**, including ground/ship and
 unresolved special roles, not 63 accepted playable missiles. [Inventory method,
 source identity and validation](../baselines/missiles.md).
@@ -71,6 +236,11 @@ not that all guidance behavior has passed acceptance. **Catalog** means inventor
 only, hidden from Load Ordnance until flight support is connected under the
 [catalog availability rule](ordnance-presentation.md#catalog-availability).
 Missile presence does not authorize SAM, ship, ground-target or AI work.
+John authorized surface air defenses on 2026-10-10: the SAM and ship records
+that surface units fire have reviewed profiles, supported radar or infrared, as
+listed in [surface defenses](surface-defenses.md#sam-missiles) (the S and I
+rows above; ASROC and the anti-ship SS-N-9 stay without one). They stay
+Catalog: no aircraft carries them.
 
 Ranges are the source launch envelope converted using **6,076 feet per nmi**,
 rounded to two decimals. They are not a guaranteed intercept range. Times use
@@ -83,63 +253,63 @@ should use launch-relative 120 Hz timers. Removal can precede burnout, as noted
 below. Tracking/battery life remains a
 separate proposed profile setting, never inferred from these motor numbers.
 
-| Record (source label) | Type | Availability | Launch envelope nmi | Ignition s | Burn s | Removal s | Seeker max nmi | Seeker H/V half-angle deg | Active-on distance nmi (fitted) | Uncued search H/V deg (fitted) |
+| Record (current HUD label) | Type | Availability | Launch envelope nmi | Ignition s | Burn s | Removal s | Seeker max nmi | Seeker H/V half-angle deg | Active-on distance nmi (fitted) | Uncued search H/V deg (fitted) |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
-| AA10.JT (AA-10T) | S* | Catalog | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
+| AA10.JT (AA-10A) | S* | Live | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
 | AA11.JT (AA-11) | I* | Live | 0.33 to 9.87 | 0 | 26 | 52 | 9.87 | 80/80 | N/A | 5/5 |
 | AA11B.JT (AA-11B) | I* | Live | 0.25 to 9.87 | 0 | 26 | 52 | 9.87 | wide*/90 | N/A | 5/5 |
 | AA12.JT (AA-12) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 60/60 | 5 | 5/5 |
-| AA2.JT (AA-2) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
-| AA6.JT (AA-6) | S* | Catalog | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
+| AA2.JT (AA-2A) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
+| AA6.JT (AA-6A) | S* | Catalog | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
 | AA8.JT (AA-8) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
 | AA9.JT (AA-9) | S* | Catalog | 1.97 to 41.15 | 2 | 130 | 264 | 41.15 | 45/45 | N/A | N/A |
 | AAML.JT (AAM-L) | A* | Live | 4.94 to 74.06 | 0 | 130 | 270 | 74.06 | 45/45 | 8 | 5/5 |
 | AEMP1.JT (AEMP-1) | A* | Catalog | 0.33 to 14.81 | 0 | 35 | 70 | 19.75 | 45/45 | 3 | 5/5 |
-| AGM45.JT (AGM-45) | E* | Catalog | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AGM65A.JT (AGM-65A) | I* | Catalog | 0.00 to 8.23 | 1 | 9 | 40 | 8.23 | 45/45 | N/A | 5/5 |
-| AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AGM84A.JT (AGM-84A) | A* | Catalog | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | N/A |
-| AGM84E.JT (AGM-84E) | I* | Catalog | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 5/5 |
-| AGM88.JT (AGM-88) | E* | Catalog | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | N/A |
+| AGM45.JT (AGM-45) | E* | Live | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | 45/45 (HARM cue) |
+| AGM65A.JT (AGM-65A) | I* | Live | 0.00 to 8.23 | 1 | 9 | 40 | 8.23 | 45/45 | N/A | 5/5 |
+| AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | 5/5 |
+| AGM84A.JT (AGM-84A) | A* | Live | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | N/A |
+| AGM84E.JT (AGM-84E) | I* | Live | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 5/5 |
+| AGM88.JT (AGM-88) | E* | Live | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | 45/45 (HARM cue) |
 | AIM120.JT (AIM-120) | A* | Live | 1.97 to 23.70 | 0 | 66 | 132 | 23.70 | 45/45 | 5 | 5/5 |
-| AIM54C.JT (AIM-54) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 5/5 |
-| AIM7.JT (AIM-7) | S* | Catalog | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
-| AIM7E.JT (AIM-7E) | S* | Catalog | 0.49 to 16.46 | 1 | 11 | 60 | 16.46 | 45/45 | N/A | N/A |
-| AIM9B.JT (AIM-9B) | I* | Catalog | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 5/5 |
+| AIM54C.JT (AIM-54C) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 5/5 |
+| AIM7.JT (AIM-7) | S* | Live | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
+| AIM7E.JT (AIM-7E) | S* | Live | 0.49 to 16.46 | 1 | 11 | 60 | 16.46 | 45/45 | N/A | N/A |
+| AIM9B.JT (AIM-9B) | I* | Live | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | AIM9M.JT (AIM-9M) | I* | Live | 0.66 to 3.95 | 0 | 11 | 22 | 8.23 | 45/45 | N/A | 5/5 |
 | AIM9X.JT (AIM-9X) | I* | Live | 0.49 to 3.95 | 0 | 15 | 24 | 8.23 | 75/75 | N/A | 5/5 |
-| AM39.JT (AM-39) | A* | Catalog | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | N/A |
+| AM39.JT (AM-39) | A* | Live | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | N/A |
 | AS14.JT (AS-14) | Hold: designator | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | TBD | TBD |
-| AS15.JT (AS 15) | S* | Catalog | 0.08 to 9.87 | 1 | 19 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AS16.JT (AS-16) | A* | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | N/A |
+| AS15.JT (AS 15) | S* | Live | 0.08 to 9.87 | 1 | 19 | 40 | 9.87 | 45/45 | N/A | N/A |
+| AS16.JT (AS-16) | A* | Live | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | N/A |
 | AS30.JT (AS 30L) | Hold: designator | Catalog | 0.08 to 9.87 | 1 | 12 | 26 | 9.87 | 45/45 | TBD | TBD |
 | AS7.JT (AS-7) | S* | Live | 0.08 to 4.94 | 1 | 9 | 30 | 8.23 | 45/45 | N/A | N/A |
 | ASROC.JT (ASROC) | Hold: radar role | Catalog | 0.08 to 12.34 | 2 | 20 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | AT12.JT (AT-12) | Hold: designator | Catalog | 0.16 to 4.28 | 3 | 97 | 180 | 4.28 | 45/45 | TBD | TBD |
-| AT2.JT (AT-2) | Hold: no seeker | Catalog | 0.08 to 2.96 | 1 | 9 | 30 | 3.29 | 45/45 | TBD | TBD |
+| AT2.JT (AT-2) | Unguided fitted host adapter | Live | 0.08 to 2.96 | 1 | 9 | 30 | 3.29 | 45/45 | TBD | TBD |
 | FIM92.JT (FIM-92) | I* | Catalog | 1.23 to 8.89 | 0 | 4 | 20 | 16.46 | wide*/90 | N/A | 5/5 |
 | HQ2J.JT (HQ-2J) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | HQ61.JT (HQ-61) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| MICA.JT (MICA) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 5/5 |
+| MICA.JT (MICA-EM) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 5/5 |
 | MIM23.JT (MIM-23) | S* | Catalog | 0.16 to 7.41 | 1 | 9 | 20 | 15.43 | wide*/90 | N/A | N/A |
 | MIS.JT (MIS) | S* | Catalog | 1.23 to 7.90 | 2 | 21 | 40 | 10.53 | wide*/90 | N/A | N/A |
-| PL10.JT (PL-10) | S* | Catalog | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
+| PL10.JT (PL10-R) | S* | Catalog | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
 | PL7.JT (PL-7) | I* | Catalog | 0.66 to 3.95 | 0 | 4 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | R440.JT (R-440) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| R530.JT (R-530D) | S* | Live | 1.32 to 16.46 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
+| R530.JT (S530D) | S* | Live | 1.32 to 16.46 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
 | R550.JT (R-550) | I* | Live | 0.66 to 3.95 | 0 | 7 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | ROLAND.JT (Roland) | S* | Catalog | 0.16 to 4.44 | 1 | 9 | 20 | 7.41 | wide*/90 | N/A | N/A |
 | SA13.JT (SA-13) | I* | Catalog | 0.25 to 2.47 | 1 | 9 | 20 | 4.11 | wide*/90 | N/A | 5/5 |
 | SA14.JT (SA-14) | I* | Catalog | 0.08 to 2.47 | 0 | 22 | 20 | 3.29 | wide*/90 | N/A | 5/5 |
 | SA15.JT (SA-15) | S* | Catalog | 0.16 to 5.92 | 1 | 9 | 20 | 13.17 | wide*/90 | N/A | N/A |
 | SA16.JT (SA-16) | I* | Catalog | 0.08 to 1.32 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
-| SA19.JT (SA-19) | Hold: radar role | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
+| SA19.JT (SA-19) | S (surface, default pending John) | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
 | SA2A.JT (SA-2A) | S* | Catalog | 1.23 to 15.64 | 2 | 21 | 40 | 24.69 | wide*/90 | N/A | N/A |
 | SA3.JT (SA-3) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SA6.JT (SA-6) | S* | Catalog | 1.48 to 12.34 | 2 | 21 | 20 | 13.17 | wide*/90 | N/A | N/A |
 | SA7.JT (SA-7) | I* | Catalog | 0.08 to 1.48 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
 | SA9.JT (SA-9) | I* | Catalog | 0.41 to 2.96 | 0 | 10 | 20 | 3.29 | wide*/90 | N/A | 5/5 |
-| SAN11.JT (SA-N-11) | Hold: radar role | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
+| SAN11.JT (SA-N-11) | S (surface, default pending John) | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | SAN3.JT (SA-N-3) | S* | Catalog | 0.82 to 16.46 | 2 | 8 | 180 | 16.46 | wide*/90 | N/A | N/A |
 | SAN4.JT (SA-N-4) | S* | Catalog | 0.66 to 5.76 | 2 | 8 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SAN5.JT (SA-N-5) | I* | Catalog | 0.08 to 1.48 | 2 | 3 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
@@ -149,13 +319,42 @@ separate proposed profile setting, never inferred from these motor numbers.
 | SEA_SPAR.JT (AIM-7) | S* | Catalog | 0.49 to 19.75 | 0 | 10 | 40 | 19.75 | wide*/90 | N/A | N/A |
 | SSN9.JT (SS-N-9) | S* | Catalog | 0.49 to 19.75 | 0 | 100 | 360 | 41.15 | wide*/90 | N/A | N/A |
 
-Seeker maximum uses source `zone0`; its minimum and relative-altitude limits
-also remain binding. Half-angles use 182 source units per degree. `wide*` denotes
+Seeker maximum uses source `zone0`; relative-altitude limits remain binding.
+Minimum range does not suppress an aircraft-launched missile seeker. Half-angles use 182 source units per degree. `wide*` denotes
 the 0x7fff source value, whose wide-angle handling needs review, not a normal
 180-degree cone. These columns describe imported geometry, not proven detection
 range or completed seeker behavior. The uncued-search column contains agent-fitted
-half-angle caps, separately from the imported seeker envelope. Each axis uses
-the smaller of its fitted cap and its usable source limit.
+half-angle caps, separately from the imported seeker envelope. IR search uses the smaller of the fitted cap and source limit. Active airborne
+maddog search now uses the source limits without the fitted cap; the table
+caps for active stores describe the cockpit cue only.
+
+## Variety-default weapon extension
+
+Implementation choice, 2026-10-05. The source-reviewed AA10, AIM7 and AIM7E
+records use the existing supported-radar family: source signature 3 and support
+flag 0x200. AIM9B uses the existing infrared family: source signature 2. Their
+own source ranges, cones, motor timers and steering limits remain binding.
+Guidance lifetime uses each source `removeT * 30` at 120 Hz and the existing
+240-tick fitted memory interval. These classifications follow the inventory
+candidates above; exact retail homing behavior is still unvalidated.
+
+AGM88 uses the existing passive emitter profile on a designated surface radar
+emitter, or in BORE on the HARM cue's candidate. It accepts actual enabled radar
+emissions and no jammer homing. After acquisition an emission shutdown no longer
+stops it: it homes on the object on angles only (retail data; slice W2, see
+[air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)). Source ground-object systems
+and target categories determine whether a compatible surface emitter is present;
+an airborne fighter's radar is not a compatible substitute.
+
+AT2 has source signature 0. Its original command-guidance behavior is unknown.
+The host now allows the Mi24 default AT2 store as an explicitly **fitted unguided
+forward weapon**, using its own source launch/motor/coast/removal and damage
+records through the shared unguided path. It receives no invented IR, radar or
+emitter seeker, no designation lock, and no automatic steering. Source ignition
+is 1 second, powered duration 9 seconds, removal 30 seconds under the shared
+4-source-units-per-second conversion. This is a known difference from a possible
+original guided mode. The next research step is to recover the original AT2
+player command-guidance control contract before adding that mode.
 
 ## Activation and independent acquisition
 
@@ -305,21 +504,22 @@ kept alongside. Snapshot
 the mode at launch; changing modes later cannot retask missiles in flight.
 
 In BORESIGHT, an armed, operational, loaded weapon can fire without designation,
-installed FLIR or seeker lock, provided radar power is on. IR searches forward on the rail
+installed FLIR, radar power or seeker lock. IR searches forward on the rail
 and after release. Active radar guidance searches only after release, enabling
 its seeker immediately and requiring acquisition before reporting PITBULL.
 A separate prelaunch estimate can identify a provisional bore contact. With a lock, retain that target; without one, fly on
 and search until acquisition or guidance expiry. Keep normal station, bay, trigger
 and ammunition gates. Missing target data cannot produce a fake range inhibit:
-omit `IN RNG` for an uncued release. A known bore candidate inside imported `zone1.minimum_range` inhibits release
-with MIN RANGE. Other envelope cues still warn without blocking uncued release.
+omit `IN RNG` for an uncued release. Minimum range is advisory and never blocks release.
+Other envelope cues still warn without blocking uncued release.
 The trigger opens an internal bay, with or without a cockpit designation ([F-22 bays](aircraft-animation.md#f-22-main-weapon-bays)).
 
 The fitted bore is a **5-degree circular half-angle** for independent seekers,
 limited by the imported seeker volume. John requested a smaller bore on 2026-09-17; the latest "5%" wording is
 interpreted as five degrees. The half-angle interpretation preserves the existing
-meaning of the setting. It follows the rail axis
-before launch and missile nose afterward, independent of camera look and zoom.
+meaning of the setting. It follows the rail axis before launch and the IR missile nose afterward,
+independent of camera look and zoom. Active airborne search uses the imported
+seeker volume without that five-degree cap.
 Mounted bore IR stays inside the circle even after acquisition. Released seekers
 use imported tracking limits after acquisition.
 No source cone value is overwritten. Keep normal terrain, range, target-class
@@ -344,28 +544,12 @@ existing IFF, but unknown contacts must not gain hidden identity information.
 
 ### Fitted heat quality and tone
 
-These initial constants are agent choices for the game, not retail measurements.
-Reuse the imported IR signature, independently of radar RCS. Multiply its ratio
-to reference signature 100 by an aspect factor and engine factor. Use aspect
-factor 1.0 when viewing the tail, 0.5 from the side and 0.25 head-on, interpolating
-between them. Engine factor is 0.1 when off, 0.5 at idle, 1.0 at full dry power
-and 1.5 with afterburner; interpolate idle-to-dry with normalized throttle.
-Call the result `heat`. Unknown engine state uses factor 1.0, labelled fitted;
-do not substitute radar emission state. Add these observables to fixtures and
-combat tapes so playback and live search agree.
+The current numeric rule is defined once under [infrared aspect and
+acquisition](#infrared-aspect-and-acquisition). It separates shorter head-on
+reach from signal quality, so an eligible all-aspect return can complete dwell.
+Terrain masking and the seeker's gimbal still reject observations. These are
+fitted game numbers, not retail measurements.
 
-Use effective IR range `nominal_range * min(1, sqrt(max(0, heat)))`.
-Inside that range and the cone, quality is
-`max(heat / (1 + (distance / nominal_range)^2), 0)`; otherwise it is zero.
-Require quality at least 0.25 for the 0.25-second acquisition dwell, and at least
-0.20 for retention. These are game thresholds, not probabilities of hitting.
-Preserve independently specified rear-aspect eligibility and target classes;
-a high heat score cannot bypass them. Do not infer such eligibility by filename.
-
-Example: a full-power, reference-signature tail target at half nominal range
-scores 0.8, while its head-on score is 0.2 and cannot acquire at that distance.
-Afterburner raises the same head-on score to 0.3, allowing acquisition after dwell
-if the weapon's aspect eligibility permits it. A masked target scores zero.
 
 Selected armed missiles produce local seeker audio. IR growl now follows the
 same fitted percentage displayed on the HUD, with quieter tracking and louder
@@ -481,29 +665,33 @@ in advance. No new artwork or sound assets are required for this planning pass.
 
 ## Minimum engagement and target role
 
-John requested minimum-range enforcement and separate surface-weapon behavior on
-2026-09-17. The following boundary rules are **agent-fitted**, not measured retail
-behavior. Use imported `zone1.minimum_range` in feet, inclusive at equality.
-A known designated or inferred bore target below that distance inhibits release.
-An uncued shot with no observed candidate remains possible. Its seeker cannot
-acquire, and its proximity/direct-hit test cannot damage, a target inside that
-radius measured from the launch origin. A target accepted outside the boundary
-keeps its eligibility while closing, including terminal flight below minR.
-This is an engagement qualification, not a mandatory straight-flight distance or
-an added fuze timer. Imported fuze arming time remains a separate gate.
+**Opinionated revision requested by John, 2026-10-15.** Imported minimum
+range is information for the player and shot discipline for AI. It does not
+inhibit a player missile release, suppress seeker acquisition, or disqualify a
+close hit. This supersedes the earlier fitted launch-origin qualification.
+Normal seeker geometry, signal, turn limits, propulsion and fuze arming decide
+whether a released missile hits. No additional straight-flight or arming time
+is invented. The HUD range scale and IN RNG still use the imported minimum;
+radar tone keeps its existing below-minimum silence. AI still checks its own
+minimum-range envelope before firing.
 
 Weapon role is explicit, separate from seeker type and target damage category.
-AGM65G, AGM45, AGM88, AGM84A, AM39 and AS16 require surface targets; AS7 does too.
-Other reviewed implemented profiles require airborne aircraft. Surface weapons
-have no air-combat BORESIGHT mode and require designation. Aircraft that land or
+AGM65G, AGM65A, AGM84E, AGM45, AGM88, AGM84A, AM39, AS16, AS7 and AS15 require
+surface targets (the list `missiles::SURFACE_ROLE`). Other reviewed implemented
+profiles require airborne aircraft. Of the surface weapons the infrared ones and
+the anti-radiation ones fire in BORE as well as on a designation (slice W2,
+[air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)); the
+radar ones use the A-G track for supported cueing. Player active surface
+missiles can instead launch maddog; unsupported player surface SARH shots
+wait for later illumination under the player release rules below. Aircraft that land or
 are assigned another damage-test category do not become surface targets.
 The manual's air-to-ground and IR sections support Maverick's surface role and
 its separate lock tone. Surface IR uses imported thermal signature without
 fighter exhaust aspect/throttle multipliers, an **agent-fitted** contrast model.
-No surface target scene or surface designation channel is supplied by this fix;
 AGM-65 remains unavailable against the practice aircraft rather than borrowing
-its A2A targeting workflow. Surface seeker behavior is tested with synthetic
-fixtures. Active surface support/mission integration remains deferred.
+its A2A targeting workflow. The surface designation channels
+([air-to-ground](air-to-ground.md#ground-contacts-and-channels)) are built (G1)
+and the surface missiles fly from them (W2).
 
 The imported AGM65G minimum is 500 feet, whereas the manual table states 0.8 nmi.
 This unresolved source discrepancy needs record/unit research. Keep the reviewed
@@ -511,10 +699,23 @@ imported value; do not replace it with an invented real-world value.
 
 ## Range, motor and tracking lifetime
 
+### Hits on destroyed aircraft
+
+Requested by John on 2026-10-02: guns and missiles can hit a destroyed aircraft
+while its falling body is still present. Radar/visual selection and mounted
+seekers can retain that body. Impact consumes the projectile and produces its
+normal hit effect, including with friendly fire disabled, but applies no further
+damage, pilot injury, system fault or kill credit to the wreck. Its
+[splash](#splash-damage) still reaches anything else nearby. Once impact or airburst removes
+the wreck, its old position is not a collision body. The simulation owns both
+presence and collision; the renderer does not decide what is hittable.
+
+### Independent lifetime rules
+
 Keep four independent concepts:
 
-1. **Launch envelope:** imported minimum slant range and altitude/angle limits,
-   plus a predicted intercept, control cued firing permission. The imported
+1. **Launch envelope:** imported altitude/angle limits,
+   with predicted intercept for advisory cues, not a maximum-range trigger gate. The imported
    nominal launch maximum does not cap the engagement estimate. BORESIGHT explicitly permits uncued
    release as specified above. Being in range does not promise a hit.
 2. **Seeker envelope:** onboard acquisition/retention limits govern observations
@@ -549,6 +750,176 @@ For SA14 and SA6, imported removal precedes motor cutoff. Preserve that
 compatibility behavior and report it; do not silently fix the source data.
 The long burn values in the table are likewise the current game's timing choice.
 
+## Splash damage
+
+Decided by John on 2026-10-10: every weapon whose record carries a collateral
+radius and percent does splash damage, whatever fired it. That is every
+air-to-air and air-to-ground missile, every bomb and rocket, the SAMs and the
+flak. The authored [AC-130 105 mm correction](ac130-linked-guns.md#105-mm-fragmentation-splash)
+also enables splash, with armor resistance. Other AC-130 guns retain zero splash.
+
+What a player sees:
+
+- A missile that bursts on or beside an aircraft also hurts every other
+  aircraft within its radius, so a wingman in close formation with the target
+  can be damaged or killed by the shot meant for his leader, and a missile
+  bursting near the player's own aircraft hurts it.
+- A bomb or missile that hits the ground hurts every ground object, ship,
+  vehicle and parked aircraft within its radius, and any aircraft low enough
+  to be inside it. A near miss on a target is no longer harmless.
+- The damage falls off in a straight line with distance, from the record's
+  percent of its damage at the burst to nothing at the radius edge. Distance
+  is measured to the target's surface: its box for a ground object, its body
+  sphere for an aircraft, so a large building is reached as soon as its near
+  wall is.
+- A burst in the air or on an aircraft passes the share on whole. A burst on
+  the ground (the terrain, the sea, a ground object or a ship) passes on 70
+  percent of it for a weapon whose percent is 100 (every bomb) and half for
+  any other.
+- The aircraft or object a round struck directly takes only that direct hit.
+- The shooter can be caught in its own blast, as the manual warns (p. 126:
+  "Firing a missile within its minimum range, or launching a bomb at too low
+  an altitude, can put you within this radius"). That damage credits no one,
+  like a crash: no kill, no strike, no friendly-fire count.
+  Not while the burst is still inside the shooter's own hit box: see
+  [launch grace](#launch-grace).
+- With friendly fire off, splash spares everything of the shooter's side,
+  the shooter included: aircraft, ground objects and parked aircraft. With
+  it on (single player), it spares no one.
+- A splash kill is credited to the shooter in the debrief, the replay and the
+  multiplayer score, exactly as a direct kill is, and an ownship's splash
+  kills count on its kill tally. Strikes, radio hit calls and jolts follow.
+- Splash that only damages a bystander aircraft does not make the shooter its
+  last attacker, because the tally holds one hit for the shot and that hit is
+  the aircraft it struck; if the bystander is lost later, by colliding with its
+  wingman for instance, nobody is credited
+  ([one record](debrief.md#kills)). Agent decision, 2026-10-16.
+- A surface unit's splash reaches aircraft and the other side's ground
+  objects and ships, never its own side's or neutral scenery, whatever the
+  friendly fire setting ([surface against
+  surface](surface-defenses.md#surface-against-surface)).
+
+Retail radii and percents (FA 1.02F records):
+
+| Weapons | Radius | Percent |
+| --- | ---: | ---: |
+| Most air-to-air missiles (AIM-7, AIM-9, AIM-120, AA-2 to AA-12, MICA, R-530, R-550, PL-7, PL-10), the anti-radar missiles, most air-to-ground missiles, AM-39, most SAMs | 750 ft | 35 |
+| AIM-54, AAM-L, AS-14, AS-16 | 1,000 ft | 35 |
+| AGM-65A | 650 ft | 30 |
+| AT-12 | 200 ft | 35 |
+| Harpoon (AGM-84A, AGM-84E) | 1,000 ft | 100 |
+| SA-2 | 1,200 ft | 35 |
+| Rockets: LAU-10, LAU-61, B-8; B-13 | 250 ft; 350 ft | 35 |
+| Mk 82 and Mk 82 HD; Mk 82 P3; Mk 82 HDP6; Mk 82 AIR | 500; 800; 1,000; 1,100 ft | 100 |
+| FAB-250, FAB-500, FAB-1000 | 600, 900, 1,200 ft | 100 |
+| Mk 84, GBU-10, GBU-27, GBU-30 | 1,000 ft | 100 |
+| GBU-29 | 300 ft | 100 |
+| GBU-28, GBU-29/P | 100 ft | 35 |
+| Cluster bombs: Mk 20, RBK-250, CBU-87, CBU-97 (CBU89), RBK-500 | 1,600, 1,500, 2,200, 2,500, 2,500 ft | 100 |
+| KS-12, KS-19 flak | 750 ft | 35 |
+
+Worked examples: an AIM-7M (170 damage to aircraft) bursting at its 100 ft
+fuze beside its target does 35 percent, 59 points, to an aircraft whose skin
+is at the burst, 21 percent (35 points) to one 300 ft beside the target, and
+nothing past 750 ft. A Mk 84 (400 damage) landing 200 ft from a vehicle
+(near side 185 ft away) does (100 - 18) x 70 / 100 = 57 percent, 228 points.
+
+Edge cases:
+
+- A record with a radius of 0 or a percent of 0 (guns, the AEMP-1, which has
+  a radius but no damage, and the cheat weapons) does no splash.
+- A round defeated by a jammer, a round that runs out of life in the air and a
+  surface gun round that passes its target do no splash. A flak shell bursts
+  at its fuze, its time fuze or the end of its life, with splash.
+- Collateral damage never harms a weapon or decoy in flight.
+
+Spec-derived from the original's collateral routine
+([format notes](../formats/weapons.md#collateral-damage)): who is reached,
+the straight-line falloff to the target's surface, the struck target
+excluded, and the ground share. Spec-derived from the manual (p. 126): the
+shooter can be caught in its own blast. Fitted by the agent: which
+direct hits count as ground bursts (TORE: a hit on a ground object or ship;
+the original's split between its two direct-hit calls was not traced); the
+splash applied at once (the original delays each target's share by about
+2 ticks plus one per 500 feet, which no player can see at these ranges); an
+ownship's splash damage taking the usual damage roll, as a direct hit does.
+Opinionated (John, 2026-10-10): splash for every weapon and friendly fire
+deciding whom it spares. Agent decision: self-inflicted splash credits no
+one. The original's routine spares the shooter, and the shooter's side
+except one unidentified object type, unless the shooter carries an
+unidentified flag; see [unknowns](#splash-unknowns).
+
+### Launch grace
+
+Requested by John on 2026-10-13 (opinionated), because stores now hang close to
+the aircraft and in places inside its hit volume: a store cannot hurt the
+aircraft that launched it while the store is still inside that aircraft's hit
+box. The box is the aircraft contact sphere the missile and bomb hit tests
+already use (28 ft for an ownship), and the grace holds for the player, the AI
+and online peers alike, because it is a plain rule of the combat step: it uses
+positions only, so it does not depend on frame rate, the view or what a
+replay shows.
+
+What a player sees:
+
+- A rocket, missile or bomb leaves its pylon without ever exploding on its own
+  aircraft, however close or deep its mount sits.
+- A proximity fuze does not fire on the launcher while the store is inside
+  the box widened by the fuze radius (an AIM-7's 100 ft makes that 128 ft).
+- A store that goes off in the air while still inside the box (it struck
+  another aircraft there) hurts everything its splash reaches except its own
+  launcher. A burst even one foot outside the box is the normal own blast
+  described above.
+- A burst on the ground is not covered (John, 2026-10-13: ground bursts damage
+  aircraft with splash regardless of initial proximity). A store that goes off
+  on the terrain, the sea, a ground object, a ship or a parked aircraft gives
+  its launcher the normal ground share even when the burst point is inside the
+  box, so a bomb dropped too low, or a rocket fired into the runway under a
+  parked aircraft, still hurts it. Ground objects and ships count as ground
+  bursts (agent decision, matching the rule that already gives them the ground
+  share).
+- Once the store has left the box the grace is over: a missile that turns back
+  and re-enters hits the launcher as any other target (its fuze fires at the
+  widened box edge, before it is inside), and its blast outside the box still
+  reaches the launcher.
+- A drop-launched store (one whose motor lights after release: the AIM-54,
+  AIM-7, AA-9 and PL-10 at 2 s, the AA-6, AIM-7E, AGM-65 and AS-7 at 1 s)
+  spares its launcher, wherever it is, until 1 s after its motor lights.
+  It falls about 124 ft under the aircraft, which leaves it at the very edge
+  of a 128 ft box, and a lofting AIM-54 then climbs ahead through the
+  launcher's height and is clear of the box about 0.6 s after it lights. Without
+  this a level F-14 fuzed every Phoenix it fired on itself (fitted, agent
+  decision 2026-10-20; the 1 s is the record's quarter-second steps, 4 of them).
+  A store whose motor lights on the rail, a rocket and a bomb have no such
+  window.
+- Another aircraft overlapping the launcher's box is hit as always, and a
+  store of any other aircraft bursting inside the box still hurts it.
+- Guns are unchanged: a gun round never hits its shooter at all.
+
+How it is built (agent decision, no new state): the direct-hit and fuze test
+ignores the launcher for a store whose position at the start of the tick was
+inside the box widened by its fuze radius, or that is a drop-launched store
+within 1 s of its motor lighting (its age against the record's ignition time), and the splash step skips the
+launcher when an airburst's point is inside the box. Both read positions only, so
+there is nothing to store in a checkpoint or a replay and nothing on the wire.
+The arming time of a bomb or missile (`fuze_arm_t`) is unchanged and still
+keeps an unarmed store from exploding on anything. A store that leaves the box
+and returns to burst in the air on a different target inside it counts as
+inside the box (the grace follows the burst point, not the store's history;
+John, 2026-10-13: leave it that way).
+
+### Splash unknowns
+
+- The original's collateral routine skips the shooter, and objects of the
+  shooter's side unless the target is of object type 4, except when the
+  shooter carries a flag (object byte 0x10, bit 0x80); neither is
+  identified. The manual says a player can be caught in his own blast, so
+  the flag may mark the player's aircraft. TORE follows the friendly fire
+  setting instead, per John's decision, and lets the shooter be hurt, per the
+  manual. Next step: name object type 4 and the flag from the object creator.
+- Which of the original's two direct-hit collateral calls (full share, or
+  the ground share) serves which kind of target.
+
 ## Drop launch, sag and cruise profile
 
 **Spec-derived, 2026-09-28.** John asked for missiles that drop before their
@@ -572,6 +943,20 @@ addresses are in [the missile format notes](../formats/missiles.md#release-sag-a
   `cruise2Dist` to `cruise1Dist`, `cruise2Alt`; inside `cruise2Dist` it homes
   directly. Distances and altitudes are 256-foot steps. The height is above the
   target (or its predicted intercept), not above the ground or the launch point.
+
+**Fitted, requested by John (2026-10-11):** every missile with the sag
+flag holds its actual path, including the downward sink, onto the intercept
+point. This includes air-to-air missiles and SAMs. Surface-target profiles and
+laser, coordinate and command air-to-ground guidance keep the same correction
+introduced in FX-M (fitted, agent decision). Steering subtracts the current sink
+from vertical velocity in both live flight and fly-out prediction. The motor,
+32 ft/s² sag, 80 ft/s cap, locked fins before ignition and cruise heights are
+unchanged. This correction is not a recovered original steering rule. The
+[air-to-ground baseline](../baselines/air-to-ground.md#class-8-infrared-air-to-ground-missiles)
+records the Maverick reach; the [air missile sag baseline](../baselines/missile-sag.md)
+records air-to-air and SAM validation. The range envelope remains
+terrain-independent; the terrain-aware fly-out time follows the clearance rule
+below. Neither is a promise of a hit.
 
 What a player sees, from the retail records:
 
@@ -598,6 +983,58 @@ estimates, so they include the drop, sag and climb. The sag's time base follows
 the documented 120 Hz service; the original's tick unit is inferred. Whether an
 unlit missile loses speed is unknown; it keeps its speed here. The lob gains no
 thinner-air benefit, since the fitted motion has no altitude drag law.
+
+### Cruise terrain clearance
+
+**Opinionated, John, 2026-10-11 (surface close-out Q7):** cruise-profile
+missiles climb over terrain along their route, then resume their record's
+profile. This applies to every record with a cruise profile, including
+Maverick, Harpoon, Exocet, SLAM, AS-7, AS-15, laser missiles, AT-2 and airborne
+lob profiles. A weapon without a cruise profile keeps its existing motion.
+
+**Fitted, agent decision, 2026-10-11:** each guided 120 Hz step samples the
+horizontal line to the remembered intercept for the next 2 nmi (12,152 ft),
+or to the target if nearer. Evenly spaced samples are at most 256 ft apart,
+including the current position and the far endpoint. Only terrain more than
+1 ft above the lower ground elevation at the missile and target endpoints
+counts as an intervening obstacle. Flat ground and sea retain the record's
+profile, including low sea cruise and the terminal descent. The clearance goal
+is 256 ft, with an extra 64 ft allowance for sampling and turning. The combined
+320 ft command tapers linearly to zero over the last 5,120 ft to the target.
+The steepest line needed to clear those samples overrides the record's aim
+only when it requires a steeper climb or a shallower descent. For terrain
+above the missile, shorten the climb distance by two seconds of current
+horizontal speed, with a 256 ft minimum, to allow time to turn. This is a
+steering command, never an altitude snap. Motor, turn limits, ignition and
+sag still apply. Once the samples permit it, the record's aim resumes.
+
+Flight and the HUD's terrain-aware time-to-impact fly-out use this same
+rule, including record-based laser and command missiles. The launch-zone
+scale, maximum range, favorable band and IN RNG remain range and energy
+estimates with no terrain penalty, as requested by John. Lock visibility is
+separate, described in [air-to-ground](air-to-ground.md#terrain-at-lock-and-launch).
+The energy envelope can therefore show an otherwise reachable shot while
+MASK or a missing track prevents a lock or launch.
+
+The terrain-aware fly-out samples the terrain on every step to impact, so it
+is not run every tick (agent design, review fix 2026-10-12). A guiding cruise
+missile works out its time to impact on its first guiding tick and then every
+15 ticks (8 a second, staggered by projectile id), counting down in between.
+Other guided weapons still work it out every tick. The HUD's launch fly-out
+time for a selected cruise weapon is kept for 15 ticks while the station,
+target and launch mode stay the same. Both are time cues only; nothing in
+flight reads them. In a probe over rolling hills the guiding missile's cost
+fell from about 550 to 37 microseconds a tick, with the same time to impact to
+a tenth of a millisecond, and the HUD fly-out from about 2.5 to 5.7 ms on every
+frame to the same cost eight times a second.
+
+Measured checks are in the [terrain validation](../baselines/surface-terrain.md).
+
+These clearance numbers are not recovered original behaviour or real missile
+performance. Sampled look-ahead cannot guarantee avoidance of very narrow
+obstacles, a ridge reached before ignition, or terrain exceeding the missile's
+turn or energy limits. No new seeker visibility or loss rule is applied to a
+missile already guiding. Retail comparison is unavailable.
 
 ## What exists today and what changes
 
@@ -691,18 +1128,49 @@ gap. The bezel and bottom buttons keep the normal pointer. This applies when
 the radar is off or sensor data is unavailable too. Contact projection and
 selection tolerance do not change. Scaling uses the displayed instrument bounds.
 
-## Radar-off unguided release
+## Player release advisories and maddog
 
-**Opinionated, requested by John on 2026-09-17.** In the spec weapon rules,
-radar power OFF disables radar-missile acquisition, boresight, seeker tones
-and target-derived weapon cues. IR guidance remains independent of radar power. Arming follows weapon/NAV selection.
-An armed radar missile may release without designation while radar power is off, with
-normal safe, bay, ammunition and station gates. The HUD omits DUMB and IN RNG for that unguided release. Such a shot never acquires or steers, even if radar power returns later.
-It retains normal propulsion, inherited velocity, fuze timing, minimum-engagement
-and target-role damage gates. Radar power returning enables acquisition for the
-next shot. Already airborne guided shots retain their own guidance rules; power
-off does not retroactively turn an independent shot dumb. Compatibility rules
-remain unchanged. This is a requested game rule, not a claimed retail behavior.
+**Opinionated, requested by John on 2026-10-15.** MAX RANGE and a failed
+intercept solution are advice, not player missile trigger inhibits, including
+the compatibility weapon adapter. The HUD keeps the range scale, out-of-range
+marker and MAX RANGE. SAFE, ammunition, station failure, launcher death,
+projectile capacity, cadence and bay delay still apply. Surface target-role,
+terrain and emitter restrictions remain separate; lack of A-G support is
+also advisory for player radar missiles.
+
+A player may release an A2A missile with no target or usable lock. An unlocked
+IR release starts the existing BORE search with no inherited target, within
+its five-degree circular search cap and imported seeker envelope. It can
+acquire a different aircraft, or fly out without acquisition. Existing flare
+seduction remains available after acquisition. SARH launches without support
+fly without steering until the launcher illuminates a target; a designated identity
+is retained, and an initially targetless shot can take the launcher's later
+illuminated designation. It never steers from hidden target coordinates.
+This also applies when the radar was off at release. An unsupported player
+surface SARH release is recorded as BORESIGHT, retains that recoverable
+state, and uses later A-G illumination. It keeps its first acquired identity.
+Supported-at-launch CUED surface shots and AI shots retain their separately
+specified A-G retarget/loss policy.
+
+An active-radar player missile without supported cueing, including radar off,
+no designation, no lock or a target outside the launch acquisition cone,
+starts active BORE search immediately (maddog). Its airborne search uses the
+imported zone-0 seeker field of view and range, without the cockpit's fitted
+five-degree cue cap. This applies by guidance classification, including
+AIM-120, AIM-54C, AA-12, MICA-EM and AAM-L. Motor, turning, acquisition dwell
+(30 ticks, 0.25 seconds), signature, terrain, notch and lifetime rules remain.
+The seeker selects an available return deterministically by signal quality,
+then angular centering, range and ID. It has no side/IFF filter: a friendly
+can be acquired. Collision and damage still follow the friendly-fire setting. After acquisition, the existing same-target memory
+and reacquisition rules apply. No return means continued search until expiry.
+These selection details reuse the fitted seeker, not measured real hardware.
+
+The recorded guidance tree already stores BORESIGHT/CUED and ACTIVE SEARCH,
+ACQUIRING, PITBULL, MEMORY, LOST and EXPIRED. The replay banner uses that
+current recorded seeker state before older guidance-event labels. Active radar
+BORESIGHT is labeled MADDOG using the existing tree guidance description. No new
+record format or state is needed. Targetless active launches retain Fox three.
+AI employment keeps its minimum, maximum, lock and support discipline.
 
 ## IR independence and retail-reference readouts
 
@@ -722,7 +1190,7 @@ intercept prediction before displaying the blinking inferred diamond. Radar bore
 candidates are additionally limited by the selected scope range and the aircraft
 radar's imported tracking maximum. These are prelaunch limits, not restrictions
 on an already released independent seeker. Missing aircraft radar gives no radar
-bore candidates. Radar-off radar missiles still release unguided, but no DUMB
+bore candidates. Radar-off active missiles launch maddog; SARH waits for illumination. No DUMB
 label appears in the lower HUD. IR guidance and tones are independent of power.
 
 Use the supplied retail screenshots as presentation references, not proof of
@@ -740,8 +1208,7 @@ timing remain fitted.
 Implementation revision requested by John on 2026-09-17. The displayed maximum
 is an **agent-fitted kinematic estimate**. The imported nominal launch maximum
 is not a cap. Active radar shots can be cued outside onboard seeker range and
-acquire later; other guidance types remain limited by their prelaunch seeker
-range. Use launcher world velocity, rail
+acquire later; other guidance types retain their seeker range for acquisition, not release.  Use launcher world velocity, rail
 attitude and altitude, observed target velocity, and the target's bearing and
 relative altitude. Target heading affects heat/signature; target velocity supplies
 its approach, crossing and recession geometry. Future maneuvers are unknown.
@@ -771,15 +1238,17 @@ from imported minimum to the search ceiling, then refine the outermost
 successful interval with 10 bisections. Show zero if none succeeds. Refresh the
 range estimate every 60 simulation ticks or immediately when contact/station
 changes. Hit estimate uses that maximum and the predicted time; IN RNG requires
-an actual predicted intercept. Imported minimum range, altitude and angle limits remain release constraints.
-CUED MAX RANGE comes from failure to predict an intercept, not the old nominal
+an actual predicted intercept. Imported minimum is advisory; altitude and angle limits remain release constraints.
+CUED MAX RANGE is advisory and comes from failure to predict an intercept, not the old nominal
 maximum. Actual seeker acquisition/retention volumes remain unchanged. A radar
 bore search still needs a prelaunch observation inside the selected scope and
 radar tracking limits.
 
-Prediction assumes immediate usable guidance and constant target motion, and
-omits terrain along the future path, future seeker loss, lofting and wind/gravity
-not present in the current missile model. It does not promise a kill. Compatibility
+Prediction assumes immediate usable guidance and constant target motion. It
+includes the documented drop, sag and cruise profile, but omits future seeker
+loss and forces absent from the current missile model. The energy envelope
+omits terrain; the HUD time-to-impact fly-out uses the shared
+[cruise clearance](#cruise-terrain-clearance). It does not promise a kill. Compatibility
 motion stays unchanged. The 25-foot prediction tolerance and turning-loss rule
 must be validated against live synthetic trajectories; do not label them retail.
 
@@ -788,8 +1257,11 @@ must be validated against live synthetic trajectories; do not label them retail.
 Implementation mode, requested by John on 2026-09-17. One simulation-owned
 range cue supplies imported minimum, estimated maximum, observed target range
 and in-range status to the HUD scale, target marker, radar-ready diamond and
-IN RNG label. In-range requires release readiness, a predicted intercept and a
-target between the range endpoints. A rounded hit percentage does not determine
+IN RNG label. Air-to-air in-range requires release readiness, a predicted
+intercept and a target between the range endpoints. Surface in-range uses the
+predicted intercept and range endpoints separately from lock and launch
+warnings, as specified in [terrain at lock and launch](air-to-ground.md#terrain-at-lock-and-launch).
+TERRAIN MASK remains on the readiness row while IN RNG blinks on its own row. A rounded hit percentage does not determine
 physical range validity. A cued target outside range retains its range marker at
 the corresponding end of the scale. No target or safe state supplies no range
 cue; an impossible maximum displays `--`, not a misleading zero-mile envelope.
@@ -830,3 +1302,21 @@ missile only while its own enabled seeker has an acquired observation of the
 releasing aircraft. An inactive active-radar seeker is not decoyed by a chaff
 burst. Successful decoy preserves the physical coasting body and retires its
 lock; the body can remain visible.
+
+## Air-to-ground weapons
+
+Specified in [air-to-ground](air-to-ground.md); the infrared, anti-radiation,
+active radar and supported radar classes are built (slice W2), the bombs fall
+(B1), and the rest is not built yet. The surface
+roles above gain player-side designation (A-G radar, FLIR, HARM page, sight,
+visual). The inventory of 40 real air-to-ground records in twelve
+[weapon classes](air-to-ground.md#weapon-classes) lists each record's seeker,
+ranges and carriers. New guidance kinds join the four above: **laser** (rides a
+laser spot, falls blindly without it, never reacquires as in retail),
+**coordinate** (the JDAMs: retail JDAMs are "optical", home on the target object
+and are fire and forget; GPS flight to the point designated at release is John's
+opinionated treatment) and **command** (the AT-2 rides the designation).
+A HARM gets a boresight cue like air-to-air BORE, and a Maverick may fire in
+BORE at the hottest ground object near the bore. The rules for the HUD range
+scale of a guided bomb, the HARM cue and the laser box are in
+[the HUD section](air-to-ground.md#the-hud-in-air-to-ground-modes).

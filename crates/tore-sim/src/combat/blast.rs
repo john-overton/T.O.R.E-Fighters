@@ -96,6 +96,9 @@ const TABLE: [Explosion; 24] = [
     row(250, 1, false, &["&EMPEXP.11K", "&EMPEXP.11K"], 1000, 25000),
 ];
 
+/// Host sound-only type: retail jettison recording, never a drawn explosion.
+pub const JETTISON: u8 = 39;
+pub const JETTISON_SOUND: &str = "&BOMB.11K";
 pub fn explosion(kind: u8) -> Option<&'static Explosion> {
     TABLE.get(usize::from(kind.checked_sub(FIRST)?))
 }
@@ -105,11 +108,22 @@ pub fn recordings() -> impl Iterator<Item = &'static str> {
     TABLE.iter().flat_map(|e| e.sounds.iter().copied())
 }
 
+/// The explosion type whose recordings and distances a flak burst sounds
+/// with: 27, the original's air flak row, which both flak records name.
+pub const FLAK_SOUND: u8 = 27;
 /// Every FA aircraft explodes as type 30 when destroyed.
 pub const AIRCRAFT: u8 = 30;
-/// A destroyed ground object or ship: its own type is not read yet, so a
-/// large ground blast stands in (fitted).
+/// A destroyed ground object or ship without a unit record (buildings and
+/// other scenery): a large ground blast (fitted).
 pub const GROUND_OBJECT: u8 = 35;
+/// The explosion a destroyed ground object or ship shows: its unit record's
+/// own type (`expType`: 21 for ground vehicles, 35 for ships, 15 for men,
+/// docs/spec/surface-defenses.md, "Destroyed looks") when it has one the
+/// table defines, otherwise [`GROUND_OBJECT`].
+pub fn ground_object(unit: Option<u8>) -> u8 {
+    unit.filter(|kind| explosion(*kind).is_some())
+        .unwrap_or(GROUND_OBJECT)
+}
 /// An aircraft hitting land or water (opinionated, John 2026-09-28).
 pub const CRASH_LAND: u8 = 35;
 pub const CRASH_WATER: u8 = 34;
@@ -123,10 +137,25 @@ pub const FIRE_FADE_TICKS: u32 = 60 * 120;
 pub const FIRE_SIZE: u8 = 100;
 pub const FIRE_SOUND: &str = "&FIRE.5K";
 pub const FIRE_SOUND_FT: f64 = 2000.;
-/// A weapon crater stays for the whole mission, as in the original; the
-/// oldest is dropped past this many.
-pub const MAX_CRATERS: usize = 256;
+/// Fires of limited life (crash sites, burning vehicles, a parked aircraft's
+/// hulk) burning at once; the oldest goes out past this many. Weapon craters
+/// and gun pock marks have no cap: every one stays for the whole mission
+/// (opinionated, John, 2026-10-12; the 256 crater cap is gone). A
+/// destroyed building's or fixed object's fire burns for the whole mission
+/// ([`FOREVER`]) and is outside the cap (John, 2026-10-13; agent decision:
+/// the cap guards the crash sites, which can come without limit).
 pub const MAX_FIRES: usize = 64;
+/// The scorch a parked aircraft's hulk lies on: crater size 2, 32 ft of half
+/// width, a fighter's wing reach (agent decision, 2026-10-13).
+pub const HULK_SCORCH: u8 = 2;
+/// The crater size a gun round's pock mark is kept as: a crater of size 0
+/// is the small scorched dent a shell up to 57 mm leaves, sized by its
+/// scale ([`mark_half_width`]). An older build draws it as nothing.
+pub const POCK: u8 = 0;
+/// A pock mark's half width at a scale of 100, feet (fitted, agent
+/// decision, 2026-10-12): a 20 to 40 mm shell's at 50 is 2.5 ft, 5 ft
+/// across, so a strafing run leaves a line seen from a low pass.
+pub const POCK_HALF_FT: f64 = 5.;
 /// Marker for a mark that never runs out.
 pub const FOREVER: u32 = u32::MAX;
 
@@ -134,6 +163,17 @@ pub const FOREVER: u32 = u32::MAX;
 /// original crater size, at most 333.
 pub fn crater_half_width(size: u8) -> f64 {
     f64::from((u16::from(size) * 16).min(333))
+}
+
+/// A crater or pock mark's drawn half width in feet: the crater's at its
+/// scale ([`super::blast_scale::factor`]), at most 333, or a pock mark's.
+pub fn mark_half_width(size: u8, scale: u8) -> f64 {
+    let factor = super::blast_scale::factor(scale);
+    if size == POCK {
+        POCK_HALF_FT * factor
+    } else {
+        (crater_half_width(size) * factor).min(333.)
+    }
 }
 
 /// The original's variety: some explosion types are sometimes drawn and
@@ -223,6 +263,9 @@ pub fn rolled_size(kind: u8, position: Vector) -> u8 {
 
 /// The recording one explosion plays.
 pub fn recording(kind: u8, position: Vector) -> Option<&'static str> {
+    if kind == JETTISON {
+        return Some(JETTISON_SOUND);
+    }
     let e = explosion(kind)?;
     Some(e.sounds[usize::from(pick(position, 2, e.sounds.len() as u16))])
 }
@@ -250,8 +293,17 @@ pub struct Mark {
     /// Serial number, rising by one for each mark, so a recording can tell
     /// new marks from old.
     pub serial: u64,
+    /// A crater's drawn scale, percent ([`super::blast_scale`]): its
+    /// weapon's, so a 2,000 lb bomb's crater is bigger than a 500 lb's
+    /// (John, 2026-10-12); 100 for a crash's crater and a fire.
+    pub scale: u8,
 }
 impl Mark {
+    /// A fire that goes out and counts against [`MAX_FIRES`]: not a
+    /// building's, which burns for good.
+    pub fn is_limited_fire(&self) -> bool {
+        self.kind == MarkKind::Fire && self.ticks != FOREVER
+    }
     /// A fire's strength: full, then fading to nothing over its last minute.
     pub fn strength(&self) -> f32 {
         if self.ticks == FOREVER {
@@ -345,16 +397,32 @@ mod tests {
     }
 
     #[test]
+    fn a_ground_object_explodes_as_its_unit_record_says() {
+        assert_eq!(ground_object(Some(21)), 21);
+        assert_eq!(ground_object(Some(15)), 15);
+        assert_eq!(ground_object(Some(35)), 35);
+        // No record, or a type the table does not define: the fitted blast.
+        assert_eq!(ground_object(None), GROUND_OBJECT);
+        assert_eq!(ground_object(Some(0)), GROUND_OBJECT);
+        assert_eq!(ground_object(Some(39)), GROUND_OBJECT);
+    }
+
+    #[test]
     fn craters_scale_16_feet_per_unit_up_to_333_and_fires_fade_in_their_last_minute() {
         assert_eq!(crater_half_width(3), 48.);
         assert_eq!(crater_half_width(18), 288.);
         assert_eq!(crater_half_width(30), 333.);
+        // Scaled, still at most 333; a pock mark is a few feet.
+        assert_eq!(mark_half_width(9, 100), 144.);
+        assert_eq!(mark_half_width(18, 200), 333.);
+        assert_eq!(mark_half_width(POCK, 50), 2.5);
         let mut fire = Mark {
             position: [0.; 3],
             kind: MarkKind::Fire,
             ticks: CRASH_TICKS,
             born: 0,
             serial: 0,
+            scale: 100,
         };
         assert_eq!(fire.strength(), 1.);
         fire.ticks = FIRE_FADE_TICKS / 2;
@@ -363,3 +431,7 @@ mod tests {
         assert_eq!(fire.strength(), 1.);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "blast_checkpoint.rs"]
+mod checkpoint;

@@ -79,7 +79,13 @@ def semantic_log_problems(text: str) -> list[str]:
                 text_ = d.get("text", "")
                 if not text_.strip() or (k != "comms.hud" and not f.get("speaker")):
                     problems.append(f"empty delivered line at {d['t']}s: {f}")
-                key = (f.get("speaker"), text_)
+                # The same line twice in 0.2 s is a stutter only when one
+                # trigger made it. Two different triggers are two real events:
+                # an "I'm hit" call is made for every guided hit (docs/spec/
+                # radio-chatter.md), so two missiles striking one aircraft a
+                # few ticks apart, or a splash and a direct hit, call twice and
+                # the variant roll can pick the same line (1 in 5).
+                key = (f.get("speaker"), text_, f.get("trigger"))
                 last = delivered.get(key)
                 if last is not None and d["t"] - last < 0.2 and k != "comms.hud":
                     problems.append(f"{f.get('speaker')} said '{text_}' twice within 0.2 s at {d['t']}s")
@@ -90,6 +96,54 @@ def semantic_log_problems(text: str) -> list[str]:
         if len(problems) > 20:
             problems.append("... more problems suppressed")
             break
+    return problems
+
+
+def outcome_problems(shot: int, results: list[dict]) -> list[str]:
+    """A shot has one outcome. The one exception: a missile recorded as spoofed
+    that flies on and damages an aircraft is recorded again as a hit that
+    names the spoof it replaces (the debrief ledger withdraws the spoof and
+    counts the hit, docs/spec/debrief.md)."""
+    kinds = [(r.get("result"), r.get("replaces")) for r in results]
+    if len(kinds) == 1:
+        if kinds[0][1] is not None:
+            return [f"shot {shot} outcome replaces {kinds[0][1]} but none came before it"]
+        return []
+    if kinds == [("spoofed", None), ("hit", "spoofed")]:
+        return []
+    return [f"shot {shot} has {len(kinds)} outcomes: " + ", ".join(
+        k if r is None else f"{k} replacing {r}" for k, r in kinds)]
+
+
+def decoy_problems(events: list[dict]) -> list[str]:
+    """A decoyed missile names the chaff or flare that fooled it by the release
+    number its `combat.countermeasure` entry carries. Recordings without numbers
+    stay valid: only a number that is there is checked, and it must belong to a
+    device of that kind released by then (by the aircraft the entry names, for
+    `weapon.decoyed`). A tick lists its weapon events before the devices
+    released on it, so a device counts from the tick it left."""
+    problems: list[str] = []
+    released: dict[tuple, int] = {}
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "combat.countermeasure" and f.get("number") is not None:
+            released.setdefault((f["number"], e.get("subject"), f.get("decoy")), e["tick"])
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "weapon.decoyed" and f.get("number") is not None:
+            left = released.get((f["number"], e.get("object"), f.get("decoy")))
+            if left is None or left > e["tick"]:
+                problems.append(
+                    f"shot {f.get('projectile')} was decoyed by {f.get('decoy')} #{f['number']} "
+                    f"of aircraft {e.get('object')}, which was never released")
+        elif e["kind"] == "weapon.outcome" and f.get("replaces") is not None:
+            m = re.search(r"decoyed by (chaff|flare) #(\d+) from ", f.get("reason", ""))
+            if m and not any(
+                n == int(m.group(2)) and d == m.group(1) and tick <= e["tick"]
+                for (n, _, d), tick in released.items()
+            ):
+                problems.append(
+                    f"shot {f.get('projectile')} late hit names {m.group(1)} #{m.group(2)}, which was never released")
     return problems
 
 
@@ -118,7 +172,7 @@ def invariant_problems(text: str) -> list[str]:
         if e["kind"] in ("combat.destroyed", "aircraft.crashed") and e.get("subject") is not None:
             dead.setdefault(e["subject"], e["t"])
     launched = set()
-    outcomes: dict[int, int] = {}
+    outcomes: dict[int, list[dict]] = {}
     left: dict[tuple, int] = {}
     for e in events:
         f = e.get("fields", {})
@@ -127,15 +181,15 @@ def invariant_problems(text: str) -> list[str]:
             if e["subject"] in dead and e["t"] > dead[e["subject"]] + 0.01:
                 problems.append(f"aircraft {e['subject']} fired at {e['t']}s after it was lost at {dead[e['subject']]}s")
         elif e["kind"] == "weapon.outcome":
-            outcomes[f["projectile"]] = outcomes.get(f["projectile"], 0) + 1
+            outcomes.setdefault(f["projectile"], []).append(f)
         elif e["kind"] == "combat.countermeasure" and f.get("left") is not None:
             key = (e.get("subject"), f.get("decoy"))
             if f["left"] < 0 or f["left"] > left.get(key, 10**9):
                 problems.append(f"aircraft {key[0]} {key[1]} count went to {f['left']} at {e['t']}s")
             left[key] = f["left"]
-    for shot, count in outcomes.items():
-        if count > 1:
-            problems.append(f"shot {shot} has {count} outcomes")
+    problems += decoy_problems(events)
+    for shot, results in outcomes.items():
+        problems += outcome_problems(shot, results)
         if shot not in launched:
             problems.append(f"shot {shot} has an outcome but no launch")
     revived: set[int] = set()
@@ -250,8 +304,176 @@ def record_scenario(
     )
 
 
+def fox_three_problems(work: Path, output: str) -> list[str]:
+    """Match a real AIM-120 release to its delivered, recorded launch call."""
+    log = work / "log" / "log.jsonl"
+    if not log.exists():
+        return ["missing Fox regression event log"]
+    rows = [json.loads(line) for line in log.read_text().splitlines()]
+    weapons = {row["id"] for row in rows if row["type"] == "weapon"
+               and row["source"] == "AIM120.JT"}
+    launches = [r for r in rows if r["type"] == "event" and r["kind"] == "weapon.launch"
+                and r.get("fields", {}).get("weapon") in weapons]
+    if not launches:
+        return ["no AIM-120 launch recorded"]
+    calls = [r for r in rows if r["type"] == "event" and r["kind"] == "comms.radio"
+             and r.get("fields", {}).get("outcome") == "delivered"]
+    for shot in launches:
+        for call in calls:
+            if (call.get("subject") == shot.get("subject")
+                    and 0 <= call["t"] - shot["t"] <= 2
+                    and "^FOXTHR" in call.get("fields", {}).get("stems", "").split()):
+                return []
+    return ["AIM-120 release has no matching delivered ^FOXTHR recording"]
+
+
+def missile_release_problems(work: Path, output: str, *, close: bool) -> list[str]:
+    problems = fox_three_problems(work, output)
+    rows = [json.loads(line) for line in (work / "log" / "log.jsonl").read_text().splitlines()]
+    launches = [r for r in rows if r.get("kind") == "weapon.launch" and r.get("subject") == 0]
+    if not launches:
+        return problems + ["manual player shot did not leave the rail"]
+    if "readiness=Ready" not in output:
+        problems.append("manual release was not ready")
+    if close:
+        if "initial_range_ft=1215.2" not in output:
+            problems.append("close target was not placed at 0.2 nm")
+        if not any(r.get("kind") == "weapon.pitbull" and r.get("subject") == 0
+                   and r.get("fields", {}).get("range_ft", 12000) < 2000 for r in rows):
+            problems.append("close shot did not acquire with its own seeker inside minimum range")
+        if not any(r.get("kind") == "weapon.outcome" and r.get("subject") == 0
+                   and r.get("fields", {}).get("result") in ("hit", "miss", "ground", "expired") for r in rows):
+            problems.append("close shot has no recorded physical outcome")
+    else:
+        calls = [r for r in rows if r.get("kind") == "comms.radio"
+                 and r.get("subject") == 0 and "^FOXTHR" in r.get("fields", {}).get("stems", "")]
+        if not calls:
+            problems.append("targetless launch has no recorded Fox three")
+    return problems
+
+
+def head_ir_problems(work: Path, output: str) -> list[str]:
+    rows = [json.loads(line) for line in (work / "log" / "log.jsonl").read_text().splitlines()]
+    weapons = {r["id"] for r in rows if r.get("type") == "weapon" and r.get("source") == "AIM9M.JT"}
+    launches = [r for r in rows if r.get("kind") == "weapon.launch" and r.get("subject") == 0
+                and r.get("fields", {}).get("weapon") in weapons]
+    problems = []
+    if not launches:
+        problems.append("head-on AIM-9M did not leave the rail")
+    elif not any(r.get("fields", {}).get("aspect_deg", 0) > 170
+                 and 2.5 * 6076 < r.get("fields", {}).get("range_ft", 0) < 3.1 * 6076 for r in launches):
+        problems.append("AIM-9M release was not head-on near 3 nm")
+    if not any(r.get("kind") == "combat.hit" and r.get("subject") == 0
+               and r.get("fields", {}).get("weapon") in weapons for r in rows):
+        problems.append("head-on guided missile did not reach the fixture target")
+    if not any(r.get("kind") == "audio.tone" and r.get("fields", {}).get("tone") == "infrared lock" for r in rows):
+        problems.append("head-on IR lock tone was not recorded")
+    return problems
+
+
+def unlocked_release_problems(work: Path, output: str, *, mode: str) -> list[str]:
+    rows = [json.loads(line) for line in (work / "log" / "log.jsonl").read_text().splitlines()]
+    launches = [r for r in rows if r.get("kind") == "weapon.launch" and r.get("subject") == 0]
+    if not launches:
+        return ["manual player missile did not launch"]
+    problems = []
+    shots = {r.get("fields", {}).get("projectile") for r in launches}
+    guidance = [{n["label"]: n.get("value") for n in r.get("nodes", [])}
+                for r in rows if r.get("type") == "tree"
+                and r.get("channel") == "weapon.guidance" and r.get("subject") in shots]
+    if mode in ("maddog", "unlocked-ir"):
+        if not guidance or guidance[0].get("Mode") != "boresight" or guidance[0].get("Target") is not None:
+            problems.append("unlocked shot did not record independent targetless search")
+    if mode == "maddog":
+        problems += fox_three_problems(work, output)
+        if not any(g.get("Seeker") == "PITBULL" for g in guidance):
+            problems.append("recorded guidance tree never shows PITBULL")
+        if not any(r.get("kind") == "weapon.pitbull" and r.get("subject") == 0 for r in rows):
+            problems.append("maddog failed to acquire the off-bore target")
+    elif mode == "unlocked-ir":
+        if "mode=Cued" not in output or "locked: true" in output:
+            problems.append("IR shot was not cued without seeker lock")
+    elif mode == "max-range":
+        if "readiness=MaximumRange" not in output:
+            problems.append("shot did not retain MAX RANGE advisory")
+        if any(r.get("kind") == "combat.hit" and r.get("subject") == 0 for r in rows):
+            problems.append("beyond-energy shot unexpectedly hit")
+    if mode != "maddog" and not any(r.get("kind") == "weapon.outcome"
+            and r.get("subject") == 0 for r in rows):
+        problems.append("shot has no recorded physical outcome")
+    return problems
+
+
+def other_weapon_sound_check(work: Path, output: str) -> list[str]:
+    import csv
+    path = work / "sound-log" / "weapon-sound.tsv"
+    if not path.exists():
+        return ["missing weapon sound audit"]
+    rows = list(csv.DictReader(path.open(), delimiter="\t"))
+    heard = [r for r in rows if r["selected"] == "true" and r["event"].startswith("audio.other.")]
+    problems = []
+    if not heard:
+        problems.append("no other shooter audible")
+    previous = {}
+    for row in sorted(heard, key=lambda r: int(r.get("emitted_tick", r["tick"]))):
+        if row["clip_present"] != "true" or not 0 < float(row["gain"]) <= 0.104001:
+            problems.append("missing recording or invalid cockpit gain")
+        if row["gun"] == "true":
+            key = (row["shooter"], row["sound"])
+            tick = int(row.get("emitted_tick", row["tick"]))
+            if tick - previous.get(key, -30) < 30:
+                problems.append("gun sound repeated per round")
+            previous[key] = tick
+        if float(row["distance_ft"]) > 100 and int(row["tick"]) <= int(row.get("emitted_tick", row["tick"])):
+            problems.append("remote weapon sound did not travel")
+    if "guns" in work.name and not previous:
+        problems.append("no audible gun burst")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
+    for mode in ["maddog", "unlocked-ir", "max-range"]:
+        out.append(record_scenario(
+            f"replay-rec-missile-{mode}",
+            ["--aircraft", "f14" if mode == "max-range" else "f18", "--ai-probe-ticks", "18000", "--probe-fight", "1:1",
+             "--probe-enemy-aircraft", "mig29", "--probe-geometry", "rear",
+             "--probe-missile-release", mode, "--scope-range", "150", "--ai-mission", "hold"],
+            timeout=300, same_run=True,
+            extra_check=lambda work, output, mode=mode: unlocked_release_problems(work, output, mode=mode),
+            notes="Player release advisories and independent seeker flight, recorded and replayed without rendering",
+        ))
+    out.append(record_scenario(
+        "replay-rec-fox-three",
+        ["--aircraft", "f18", "--ai-probe-ticks", "7200", "--separation", "5",
+         "--probe-attack", "600:10"],
+        same_run=False, timeout=400, extra_check=fox_three_problems,
+        notes="AIM-120 launch is recorded as ^FOXTHR and survives replay export",
+    ))
+
+    for close in [False, True]:
+        mode = "close" if close else "empty"
+        out.append(record_scenario(
+            f"replay-rec-missile-release-{mode}",
+            ["--aircraft", "f18", "--ai-probe-ticks", "1200",
+             "--probe-missile-release", mode, "--ai-mission", "hold",
+             *(["--probe-fight", "1:1", "--probe-geometry", "rear"] if close
+               else ["--probe-wing-only", "--probe-wing-size", "1"])],
+            timeout=180, same_run=True,
+            extra_check=lambda work, output, close=close: missile_release_problems(work, output, close=close),
+            notes="Manual missile release, recorded Fox call and deterministic playback; minimum range is advisory",
+        ))
+
+    out.append(record_scenario(
+        "replay-rec-missile-head-ir",
+        ["--aircraft", "f18", "--ai-probe-ticks", "1800", "--probe-fight", "1:1",
+         "--probe-enemy-aircraft", "mig29", "--probe-geometry", "head",
+         "--probe-missile-release", "head-ir", "--ai-mission", "hold"],
+        timeout=180, same_run=True,
+        expect=[r"missile release tone: Some.*locked: true", r"readiness=Ready"],
+        extra_check=head_ir_problems,
+        notes="AIM-9M head-on at a MiG-29 from 3 nm: tone, release, guidance and replay",
+    ))
 
     # AI fights of every size.
     for f, e in [(1, 1), (2, 2), (3, 3), (5, 5), (8, 8), (15, 15), (1, 15), (15, 1), (4, 9)]:
@@ -300,6 +522,18 @@ def scenarios() -> list[Scenario]:
             )
         )
 
+    for mode, extra in [("guns", ["--probe-ai-guns-only", "--probe-guns"]), ("missiles", [])]:
+        out.append(Scenario(
+            name=f"replay-rec-other-weapon-sound-{mode}", lane="replay",
+            args=["--ai-probe-ticks", "7200", "--probe-fight", "2:2", "--separation", "1" if mode == "guns" else "5",
+                  "--probe-wing-order", "1:attack-on-contact", *extra,
+                  "--record-mission", "{work}/sound.tore-replay", "--no-audio"],
+            timeout=300, env={"TORE_WEAPON_SOUND_LOG": "1"},
+            then=[Step(["--recording-log", "{work}/sound.tore-replay", "--out", "{work}/sound-log", "--rate", "1"], timeout=300)],
+            check_work=other_weapon_sound_check,
+            expect=[r"Weapon sound audit:"],
+        ))
+
     # Guns, missiles, chaff and flares, threats, faults.
     out.append(record_scenario("replay-rec-guns", ["--ai-probe-ticks", "3600", "--separation", "2", "--probe-guns", "--probe-ai-guns-only", "--probe-attack", "300:5"]))
     out.append(record_scenario("replay-rec-missiles", ["--ai-probe-ticks", "7200", "--separation", "5", "--probe-attack", "600:10"], timeout=400))
@@ -314,8 +548,9 @@ def scenarios() -> list[Scenario]:
     for fault in (0, 4, 7, 11, 12, 29, 30, 34, 44):
         out.append(record_scenario(f"replay-rec-fault-{fault}", ["--ai-probe-ticks", "1800", "--separation", "1", "--probe-fault", f"100:{fault}"], same_run=False))
 
-    # Ground starts, takeoffs, wings, orders.
-    for airport in (1, 2, 5):
+    # Ground starts, takeoffs, wings, orders, at Blue fields (slice AL1):
+    # Simferopol, Odesa and Kherson.
+    for airport in (2, 9, 11):
         for wing in (1, 3, 5):
             out.append(
                 record_scenario(
@@ -329,14 +564,62 @@ def scenarios() -> list[Scenario]:
         out.append(
             record_scenario(
                 f"replay-rec-order-{order}",
-                ["--ai-probe-ticks", "9000", "--ground-start", "1", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-order", f"3000:{order}"],
+                ["--ai-probe-ticks", "9000", "--ground-start", "2", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-order", f"3000:{order}"],
                 same_run=False,
                 timeout=400,
             )
         )
 
+    # The flight data link's events (slice G9): the probe's own `data link:` lines
+    # and the recording's `datalink.*` events say the same things.
+    out.append(
+        record_scenario(
+            "replay-rec-datalink",
+            [
+                "--ai-probe-ticks", "2400", "--probe-wing-size", "2", "--separation", "5", "--probe-player-lock", "600:4",
+                "--probe-wing-order", "700:engage-my-target@1", "--probe-wing-order", "900:attack-on-contact",
+            ],
+            expect=[r"data link: assign plane=1 target=4 by=0 order=EngageMyTarget"],
+            extra_check=datalink_event_problems,
+            notes="datalink.* events: every plane a member, the player's lock, the assignment and its clearing by order",
+        )
+    )
+
     out += failure_scenarios()
     return out
+
+
+def datalink_event_problems(work: Path, output: str) -> list[str]:
+    """The recorded `datalink.*` events of the data link probe: every plane joined
+    once, the player's lock, the lead's assignment to the first wingman and its
+    clearing by the later Attack on contact, and nothing out of order."""
+    log = work / "log" / "log.jsonl"
+    if not log.exists():
+        return []
+    events = [e for e in (json.loads(line) for line in log.read_text().splitlines()) if e["type"] == "event"]
+    link = [e for e in events if e["kind"].startswith("datalink.")]
+    problems: list[str] = []
+    members = [e["subject"] for e in link if e["kind"] == "datalink.member"]
+    if sorted(members) != sorted(set(members)) or sorted(members) != list(range(6)):
+        problems.append(f"datalink.member events for planes {sorted(members)}, expected each of 0..5 once")
+    if any(e["fields"].get("radar") is not True for e in link if e["kind"] == "datalink.member"):
+        problems.append("a datalink.member event says no radar")
+    if not any(e["kind"] == "datalink.lock" and e["subject"] == 0 and e["object"] == 4 for e in link):
+        problems.append("no datalink.lock for the player on aircraft 4")
+    assigns = [e for e in link if e["kind"] == "datalink.assign"]
+    if not any(
+        (e["subject"], e["object"], e["fields"].get("target"), e["fields"].get("order")) == (0, 1, 4, "EngageMyTarget")
+        for e in assigns
+    ):
+        problems.append(f"no datalink.assign from plane 0 to plane 1 for target 4: {assigns}")
+    clears = [e for e in link if e["kind"] == "datalink.clear" and e["subject"] == 1 and e["object"] == 4]
+    if not any(e["fields"].get("reason") == "order" for e in clears):
+        problems.append(f"plane 1's assignment was not cleared by an order: {clears}")
+    # The probe's own lines say the same: one assign line for each assign event.
+    lines = len(re.findall(r"^t=\d+ data link: assign ", sections(output)[0], re.M))
+    if lines != len(assigns):
+        problems.append(f"the probe printed {lines} assignments, the recording has {len(assigns)}")
+    return problems
 
 
 def check_rejected(output: str, message: str) -> list[str]:
@@ -368,7 +651,7 @@ def check_soft_damage(work: Path, output: str) -> list[str]:
 
 def killed_probe_scenario() -> Scenario:
     """A recording whose writer is killed mid-flight must still read back as incomplete."""
-    binary = str(ROOT / "target" / "debug" / "tore-app")
+    binary = "{bin}"  # the tore-app under test, filled in by battery.run_steps
     return Scenario(
         name="replay-rec-killed-probe",
         lane="replay",
@@ -387,6 +670,13 @@ def killed_probe_scenario() -> Scenario:
     )
 
 
+def has_length(info: str) -> bool:
+    """recording-info prints `Length      m:ss.s`. How much was written before the
+    kill depends on how fast the machine runs the probe (0:xx on a slow one,
+    minutes on a fast one), so only a printed length counts."""
+    return re.search(r"^Length +\d+:\d\d", info, re.M) is not None
+
+
 def check_killed(work: Path, output: str) -> list[str]:
     s = sections(output)
     problems = []
@@ -396,7 +686,7 @@ def check_killed(work: Path, output: str) -> list[str]:
         problems.append("a killed run left a finished-looking recording")
     if "INCOMPLETE" not in s.get(2, ""):
         problems.append("recording-info does not call it incomplete")
-    if "Length      0:" not in s.get(2, ""):
+    if not has_length(s.get(2, "")):
         problems.append("the partial recording has no length")
     problems += rc.file_problems(work, "log/log.jsonl", rc.check_jsonl)
     problems += rc.file_problems(work, "k.acmi", rc.check_acmi)

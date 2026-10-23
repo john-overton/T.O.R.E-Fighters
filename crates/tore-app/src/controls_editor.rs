@@ -498,7 +498,11 @@ impl Editor {
         let mut ids: Vec<String> = self.devices.iter().map(|d| d.id.clone()).collect();
         for b in &self.profile.bindings {
             let id = self.profile.aliases.get(&b.device).unwrap_or(&b.device);
-            if !matches!(id.as_str(), "keyboard" | "mouse" | "*") && !ids.contains(id) {
+            if !matches!(
+                id.as_str(),
+                "keyboard" | "mouse" | "replay-keyboard" | "replay-mouse" | "*"
+            ) && !ids.contains(id)
+            {
                 ids.push(id.clone());
             }
         }
@@ -519,7 +523,11 @@ impl Editor {
     /// The device reference new bindings use: an existing alias, `*` for
     /// session-only Apple gamepads, otherwise the identity.
     fn reference(&self, id: &str) -> String {
-        if let Some((alias, _)) = self.profile.aliases.iter().find(|(_, v)| *v == id) {
+        if let Some((alias, _)) =
+            self.profile.aliases.iter().find(|(alias, v)| {
+                !alias.starts_with(crate::input::AUTO_GAMEPAD_PREFIX) && *v == id
+            })
+        {
             return alias.clone();
         }
         if id.starts_with("macos-gc-session-") {
@@ -535,8 +543,8 @@ impl Editor {
     }
     fn on_tab(&self, binding: &Binding, tab: &Tab) -> bool {
         match tab {
-            Tab::Keyboard => binding.device == "keyboard",
-            Tab::Mouse => binding.device == "mouse",
+            Tab::Keyboard => matches!(binding.device.as_str(), "keyboard" | "replay-keyboard"),
+            Tab::Mouse => matches!(binding.device.as_str(), "mouse" | "replay-mouse"),
             Tab::Head => false,
             Tab::Device(id) => self.names_device(&binding.device, id),
         }
@@ -559,7 +567,7 @@ impl Editor {
                 !self
                     .profile
                     .disabled
-                    .contains(&(device.to_owned(), (*k).to_owned()))
+                    .contains(&(entry.device(device).to_owned(), (*k).to_owned()))
             })
             .collect()
     }
@@ -1026,7 +1034,7 @@ impl Editor {
         };
         self.capture = Some(Capture { target, rest });
     }
-    fn remove_source(&mut self, source: &Source, tab: &Tab) {
+    fn remove_source(&mut self, source: &Source, tab: &Tab, entry: &Entry) {
         match source {
             Source::Stock(key) => {
                 let device = if *tab == Tab::Mouse {
@@ -1034,7 +1042,9 @@ impl Editor {
                 } else {
                     "keyboard"
                 };
-                self.profile.disabled.insert((device.into(), (*key).into()));
+                self.profile
+                    .disabled
+                    .insert((entry.device(device).into(), (*key).into()));
             }
             Source::Binding(i) => {
                 self.profile.bindings.remove(*i);
@@ -1057,7 +1067,7 @@ impl Editor {
         }
         highest_first(&mut slots);
         for source in slots {
-            self.remove_source(&source, &tab);
+            self.remove_source(&source, &tab, entry);
         }
         self.message = format!("{} cleared on this device", entry.label);
         self.keep_visible();
@@ -1101,8 +1111,13 @@ impl Editor {
                 } else {
                     "keyboard"
                 };
-                self.profile.disabled.retain(|(d, _)| d != device);
-                self.profile.bindings.retain(|b| b.device != device);
+                let replay = format!("replay-{device}");
+                self.profile
+                    .disabled
+                    .retain(|(d, _)| d != device && *d != replay);
+                self.profile
+                    .bindings
+                    .retain(|b| b.device != device && b.device != replay);
                 if tab == Tab::Mouse {
                     let d = Profile::default();
                     self.profile.mouse_look = d.mouse_look;
@@ -1130,6 +1145,7 @@ impl Editor {
                 if let Some(d) = self.device(id) {
                     let defaults = crate::input::gamepad_defaults(d);
                     self.profile.bindings.extend(defaults.bindings);
+                    self.profile.aliases.extend(defaults.aliases);
                     self.profile.modifiers.extend(defaults.modifiers);
                 }
             }
@@ -1149,7 +1165,11 @@ impl Editor {
         // in flight and select in menus); those are only reported.
         let mut remove: Vec<Source> = vec![];
         for (other, e) in ENTRIES.iter().enumerate() {
-            if other == index || catalog::menu_only(e) || e.fixed {
+            if other == index
+                || catalog::menu_only(e)
+                || e.fixed
+                || e.replay_only() != entry.replay_only()
+            {
                 continue;
             }
             for source in self.slots(other, &tab) {
@@ -1192,7 +1212,7 @@ impl Editor {
             _ => None,
         };
         for source in &remove {
-            self.remove_source(source, &tab);
+            self.remove_source(source, &tab, entry);
         }
         let shown = match tab {
             Tab::Keyboard => catalog::key_label(&binding.control),
@@ -1212,7 +1232,7 @@ impl Editor {
             };
             self.profile
                 .disabled
-                .remove(&(device.into(), binding.control.clone()));
+                .remove(&(entry.device(device).into(), binding.control.clone()));
         } else {
             if let Some(action) = entry.parsed() {
                 binding.action = action;
@@ -1249,7 +1269,7 @@ impl Editor {
             _ => (Mode::Press, 10),
         };
         Binding {
-            device: device.into(),
+            device: entry.device(device).into(),
             control,
             action: entry.parsed().unwrap_or(Action::Ui("pause".into())),
             mode,
@@ -1483,9 +1503,11 @@ impl Editor {
             if matches!(target, Target::Modifier) {
                 return ResultAction::None;
             }
+            let capture_shift = key == "Shift"
+                && matches!(target, Target::Slot(i, _) if ENTRIES[i].action == "drone-boost");
             if self.current() != Tab::Keyboard
                 || key.is_empty()
-                || matches!(key, "Shift" | "Control" | "Alt" | "Super")
+                || (!capture_shift && matches!(key, "Shift" | "Control" | "Alt" | "Super"))
             {
                 return ResultAction::None;
             }
@@ -1493,7 +1515,11 @@ impl Editor {
                 "{}{}{}{}",
                 if ctrl { "Ctrl-" } else { "" },
                 if alt { "Alt-" } else { "" },
-                if shift { "Shift-" } else { "" },
+                if shift && !capture_shift {
+                    "Shift-"
+                } else {
+                    ""
+                },
                 key
             );
             let Target::Slot(index, slot) = target else {
@@ -1620,7 +1646,7 @@ impl Editor {
             }
             _ => return ResultAction::None,
         };
-        if control == "button:right" && self.profile.mouse_look {
+        if control == "button:right" && self.profile.mouse_look && !ENTRIES[index].replay_only() {
             self.message = "The right button is mouse look; turn mouse look off to bind it".into();
             return ResultAction::Changed;
         }
@@ -1786,8 +1812,12 @@ impl Editor {
                     if entry.kind == Row::Head {
                         calibration.deadzone = 0.;
                     } else if entry.kind == Row::Axis {
-                        // Pushing a stick forward to look up reads negative.
-                        let sign = if entry.action == "look-y" { -1. } else { 1. };
+                        // Pushing a stick forward to look or slew up reads negative.
+                        let sign = if matches!(entry.action, "look-y" | "sight-y") {
+                            -1.
+                        } else {
+                            1.
+                        };
                         calibration.scale = sensitivity * sign;
                     }
                     binding.calibration = calibration;
@@ -2557,6 +2587,38 @@ mod tests {
         assert!(e.settings().contains(&Setting::Modifiers));
         assert_eq!(e.tabs().last(), Some(&Tab::Head));
     }
+    #[test]
+    fn drone_bindings_keep_flight_assignments_and_save_in_their_own_context() {
+        let mut e = Editor::new(Profile::default(), vec![], "Replay paused");
+        e.activate(Hit::Cell(line(&e, "Drone: move forward"), 0));
+        e.key("g", false, false, false);
+        assert!(
+            e.profile
+                .disabled
+                .contains(&("replay-keyboard".into(), "w".into()))
+        );
+        assert!(!e.slots(entry("Landing gear"), &Tab::Keyboard).is_empty());
+        assert_eq!(e.profile.bindings[0].device, "replay-keyboard");
+        let saved = Profile::parse(&e.profile.to_text().unwrap()).unwrap();
+        let mut controls = crate::replay::drone::Controls::new(&saved);
+        assert!(!controls.key("w", true, Default::default()));
+        assert!(controls.key("g", true, Default::default()));
+        assert!(controls.held("drone-forward"));
+        controls.key("g", false, Default::default());
+        assert!(!controls.held("drone-forward"));
+        // Reset restores both desktop contexts on this tab.
+        e.reset_device();
+        assert!(e.profile.bindings.is_empty() && e.profile.disabled.is_empty());
+        e.activate(Hit::Cell(line(&e, "Drone: four times faster"), 0));
+        e.key("Shift", true, false, false);
+        assert!(!e.capturing());
+        assert_eq!(
+            e.slots(entry("Drone: four times faster"), &Tab::Keyboard)
+                .len(),
+            1
+        );
+    }
+
     #[test]
     fn keyboard_stock_key_moves_and_reports_the_previous_owner() {
         let mut e = Editor::new(Profile::default(), vec![], "Main menu");

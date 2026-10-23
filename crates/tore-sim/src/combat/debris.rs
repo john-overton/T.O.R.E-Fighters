@@ -29,7 +29,14 @@ pub fn damage_variant(id: AircraftId, section: usize) -> Option<usize> {
 pub fn scale(id: AircraftId) -> f64 {
     match id {
         AircraftId::F14 => 4. / 3.,
-        AircraftId::Mig23 => 2. / 3.,
+        AircraftId::Mig23
+        | AircraftId::C130
+        | AircraftId::Ac130
+        | AircraftId::E3
+        | AircraftId::Il76
+        | AircraftId::E2
+        | AircraftId::B747
+        | AircraftId::A310 => 2. / 3.,
         _ => 1. / 3.,
     }
 }
@@ -156,3 +163,7 @@ mod tests {
         assert!(at[2] > 20.);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "debris_checkpoint.rs"]
+mod checkpoint;

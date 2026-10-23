@@ -61,8 +61,7 @@ pub const CONDITIONS: [Condition; 6] = [
     },
 ];
 
-/// 0x42a80c: a theater whose map name begins with one of these letters uses the
-/// matching per-theater module variant; every other theater uses the plain one.
+/// Legacy fallback for names outside the reviewed retail theater catalog.
 const VARIANTS: [char; 5] = ['B', 'E', 'F', 'T', 'V'];
 
 /// The `.LAY` resource one condition selects for one theater map name.
@@ -76,10 +75,19 @@ pub fn layer_resource(condition: usize, map: &str) -> Result<String> {
         .find(|c| *c != '~' && *c != '$')
         .ok_or_else(|| std::io::Error::other("theater map name is empty"))?
         .to_ascii_uppercase();
-    let suffix = if VARIANTS.contains(&letter) {
-        letter.to_string()
-    } else {
-        String::new()
+    // The retail MM layer references, not geography or the map's first
+    // letter, identify these palette families. The old first-letter rule
+    // made IRA, PGU and SPA green and gave TVIET the Taiwan palette.
+    // See docs/formats/weather.md, "Theater palette families".
+    let normalized = map.to_ascii_uppercase();
+    let suffix = match tore_formats::theater::base_theater(&normalized) {
+        Some("EGY" | "IRA" | "PGU" | "SPA") => "E".to_owned(),
+        Some("BAL") => "B".to_owned(),
+        Some("FRA") => "F".to_owned(),
+        Some("VLA") => "V".to_owned(),
+        Some(_) => String::new(),
+        None if VARIANTS.contains(&letter) => letter.to_string(),
+        None => String::new(),
     };
     Ok(format!("{}{suffix}.LAY", choice.layer))
 }
@@ -434,6 +442,26 @@ impl Environment {
         Ok(strength)
     }
 
+    /// The active layers' sensor effects (selectors 0 to 4) with their
+    /// altitude spans, for the sensors' own span queries
+    /// ([`crate::sensors::Weather::percent`] answers as [`Self::effect`]).
+    pub fn sensor_weather(&self) -> crate::sensors::Weather {
+        crate::sensors::Weather {
+            bands: self.sensor_weather_bands().collect(),
+        }
+    }
+    /// The bands of [`Self::sensor_weather`], without collecting them: a
+    /// caller that holds the last ones can compare before it builds.
+    pub fn sensor_weather_bands(
+        &self,
+    ) -> impl ExactSizeIterator<Item = crate::sensors::WeatherBand> + Clone + '_ {
+        self.active.iter().map(|layer| crate::sensors::WeatherBand {
+            low_ft: f64::from(layer.low_feet),
+            high_ft: f64::from(layer.high_feet),
+            effects: std::array::from_fn(|selector| layer.effect(selector).unwrap_or(100)),
+        })
+    }
+
     /// FA 0x4b34af reschedules after one second when a callback ran, ten otherwise;
     /// leaving the first active time range also forces selection. Adjacent
     /// records sharing a floor collapse into one blended record, exactly as
@@ -598,6 +626,52 @@ mod tests {
     fn configuration(records: usize) -> Configuration {
         let module = Module::parse(&tore_formats::weather::synthetic_module(records)).unwrap();
         Configuration::new(module, 0, 0, 0, None).unwrap()
+    }
+
+    #[test]
+    fn every_retail_theater_keeps_its_ground_palette_in_every_condition() {
+        let families = [
+            ("APA", ""),
+            ("BAL", "B"),
+            ("CUB", ""),
+            ("EGY", "E"),
+            ("FRA", "F"),
+            ("GRE", ""),
+            ("IRA", "E"),
+            ("KURILE", ""),
+            ("LFA", ""),
+            ("NSK", ""),
+            ("PGU", "E"),
+            ("SPA", "E"),
+            ("TVIET", ""),
+            ("UKR", ""),
+            ("VLA", "V"),
+            ("WTA", ""),
+        ];
+        assert_eq!(families.len(), tore_formats::theater::THEATERS.len());
+        for (theater, suffix) in families {
+            for (index, condition) in CONDITIONS.iter().enumerate() {
+                let expected = format!("{}{suffix}.LAY", condition.layer);
+                assert_eq!(
+                    layer_resource(index, &format!("{theater}.T2")).unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    layer_resource(index, &format!("{theater}.t2").to_lowercase()).unwrap(),
+                    expected
+                );
+                let variant = if matches!(theater, "KURILE" | "TVIET") {
+                    format!("~{theater}.T2")
+                } else {
+                    format!("~{theater}F.T2")
+                };
+                assert_eq!(layer_resource(index, &variant).unwrap(), expected);
+                assert_eq!(
+                    layer_resource(index, &variant.replace('~', "$")).unwrap(),
+                    expected
+                );
+            }
+        }
     }
 
     #[test]
@@ -865,3 +939,7 @@ pub fn sun_whitening_target(layer: &Layer, seconds: i32, alignment: f64) -> u8 {
     (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.)).floor() as i32 - 15564) / 3)
         .clamp(0, 255) as u8
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "environment_checkpoint.rs"]
+mod checkpoint;

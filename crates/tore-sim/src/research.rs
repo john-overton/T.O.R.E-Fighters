@@ -15,14 +15,18 @@ use tore_formats::{
     flight_model::{
         clock_rng::{FixedClock, NativeRng},
         departure::{self, DepartureMode, StallState},
-        ground::{LandingLimits, LandingSeverity, landing_severity},
+        ground::LandingLimits,
     },
 };
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surface {
     pub height: f64,
     pub water: bool,
     pub landable: bool,
+    /// How far the ground is tilted from level, degrees. Zero for a runway and
+    /// for synthetic surfaces. Read only by the off-airfield touchdown rule
+    /// ([`crate::touchdown`]).
+    pub slope_deg: f64,
     /// World wind in feet/second; uniform during each fixed step.
     pub wind: [f64; 3],
 }
@@ -33,6 +37,7 @@ impl Surface {
             wind: [0.; 3],
             water: false,
             landable: false,
+            slope_deg: 0.,
         }
     }
     pub fn runway(height: f64) -> Self {
@@ -41,6 +46,7 @@ impl Surface {
             wind: [0.; 3],
             water: false,
             landable: true,
+            slope_deg: 0.,
         }
     }
 }
@@ -128,19 +134,6 @@ impl Landings {
         graded
     }
 }
-/// Deceleration of a sliding belly, ft/s^2 (about 1.4 G), at full scrape. Chosen
-/// so that no fighter's thrust carries it through the slide.
-pub const BELLY_DECELERATION_FPS2: f64 = 45.;
-/// Least share of its weight that a belly below stall speed rests on the ground.
-pub const BELLY_MINIMUM_LOAD: f64 = 0.8;
-/// Share of gear retraction at which the belly counts as fully on the ground.
-pub const BELLY_FULL_RETRACTION: f64 = 0.5;
-/// Airframe wear of a belly slide, as a share of the aircraft's hit points per
-/// second: this much when barely moving, plus [`BELLY_WEAR_PER_S`] at
-/// [`BELLY_WEAR_REFERENCE_FPS`] (about 148 knots) and in proportion to speed.
-pub const BELLY_WEAR_BASE_PER_S: f64 = 0.01;
-pub const BELLY_WEAR_PER_S: f64 = 0.06;
-pub const BELLY_WEAR_REFERENCE_FPS: f64 = 250.;
 impl Research {
     pub fn new(seed: i32) -> Result<Self> {
         Ok(Self {
@@ -344,14 +337,7 @@ impl Research {
         let basis = Basis::new(s.yaw, s.pitch, s.bank);
         let forward = dot(s.velocity, basis.forward);
         let side = dot(s.velocity, basis.right);
-        let severity = landing_severity(
-            c.native.landing,
-            (s.bank.to_degrees() * 256.) as i32,
-            (s.pitch.to_degrees() * 256.) as i32,
-            (forward * 256.) as i32,
-            (side * 256.) as i32,
-            s.velocity[1] as i16,
-        );
+        let severity = crate::touchdown::severity(c.native.landing, s, &surface);
         let touchdown = Touchdown {
             bank_deg: s.bank.to_degrees(),
             pitch_deg: s.pitch.to_degrees(),
@@ -361,6 +347,11 @@ impl Research {
             limits: c.native.landing,
         };
         let gear = s.gear;
+        // The shared touchdown rule: on an airfield the landing limits, with
+        // a hard-landing band that only damages the gear; off it only a
+        // helicopter or hovering aircraft within the limits
+        // (docs/spec/touchdown.md).
+        let rule = crate::touchdown::judge(c.native.landing, s, &surface);
         let unsafe_touchdown = |bounced: bool| {
             Contact::Unsafe(UnsafeTouchdown {
                 bounced,
@@ -372,22 +363,12 @@ impl Research {
                 touchdown,
             })
         };
-        if !self.on_ground
-            && (surface.water
-                || !surface.landable
-                || s.gear < 0.99
-                || severity != LandingSeverity::WithinLimits)
-            && s.cheats.no_crashes
-        {
+        let refused = rule.is_refused() || s.gear < 0.99;
+        if !self.on_ground && refused && s.cheats.no_crashes {
             s.trace.0.contact = Some(unsafe_touchdown(true));
             s.ricochet(floor);
             return;
-        } else if !self.on_ground
-            && (surface.water
-                || !surface.landable
-                || s.gear < 0.99
-                || severity != LandingSeverity::WithinLimits)
-        {
+        } else if !self.on_ground && refused {
             s.trace.0.contact = Some(unsafe_touchdown(false));
             s.crashed = true;
             s.engine = false;
@@ -395,6 +376,15 @@ impl Research {
             s.velocity = [0.; 3];
             s.speed = 0.;
         } else {
+            if !self.on_ground && rule.damages_gear() {
+                // A touchdown over the landing limits but inside the
+                // hard-landing band: the gear is damaged (opinionated, John
+                // 2026-10-12; docs/spec/touchdown.md).
+                if !s.systems.has(16) {
+                    s.systems.hit(16, s.throttle);
+                }
+                s.systems.notify("Hard landing: gear damaged");
+            }
             let landing = if !self.on_ground {
                 let score =
                     self.landings
@@ -414,34 +404,11 @@ impl Research {
             for i in [0, 2] {
                 s.velocity[i] -= basis.right[i] * side * scrub;
             }
-            // Gear not fully down on the ground: the aircraft settles on its
-            // belly. The scrape is a strong brake and it wears the airframe more
-            // the faster and longer it slides. `opinionated` (requested by John,
-            // 2026-09-29; docs/spec/gear-on-the-ground.md); the numbers are agent
-            // decisions.
-            let scrape = ((1. - s.gear) / BELLY_FULL_RETRACTION).clamp(0., 1.);
-            let belly = scrape > 0.01;
-            let mut decel = if s.brake_out {
+            let decel = if s.brake_out {
                 tuning.brake_deceleration
             } else {
                 tuning.rolling_deceleration
             } * wheel_load;
-            if belly {
-                decel = decel.max(BELLY_DECELERATION_FPS2 * scrape * wheel_load);
-                if v > 1. {
-                    s.belly_scrape += (BELLY_WEAR_BASE_PER_S
-                        + BELLY_WEAR_PER_S * v / BELLY_WEAR_REFERENCE_FPS)
-                        * scrape
-                        * wheel_load
-                        * DT;
-                }
-                if !s.belly_reported {
-                    s.belly_reported = true;
-                    s.systems.notify("Gear up on the ground: belly scraping");
-                }
-            } else {
-                s.belly_reported = false;
-            }
             let factor = (1. - decel * DT / v.max(0.01)).max(0.);
             for i in [0, 2] {
                 s.velocity[i] *= factor;
@@ -475,7 +442,6 @@ impl Research {
                 brake_hold,
                 ground_speed_fps: v,
                 nose_settling,
-                belly,
             }));
         }
         s.position[1] = s.position[1].max(floor);
@@ -483,9 +449,28 @@ impl Research {
     }
 }
 
+crate::flight::exact::exact_struct!(Research {
+    departure,
+    spinning,
+    spin_rate,
+    on_ground,
+    severity_f8,
+    stall_active,
+    clock,
+    rng,
+    elapsed,
+    landings,
+});
+crate::flight::exact::exact_struct!(Landings {
+    count,
+    score,
+    airborne_ticks,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tore_formats::flight_model::ground::LandingSeverity;
     #[test]
     fn landings_after_real_flight_are_graded_and_bounces_are_not() {
         let limits = LandingLimits {
@@ -953,6 +938,29 @@ mod tests {
         };
         assert!(s.crashed && !u.bounced && u.gear_up && u.not_landable && !u.water);
         assert_eq!(u.severity, LandingSeverity::WithinLimits);
+        // Gear down, slow and gentle on open ground is still a crash for a
+        // fixed-wing aircraft: only helicopters and hovering aircraft land
+        // there (docs/spec/touchdown.md).
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -2., 1., Surface::terrain(0.));
+        let Some(Contact::Unsafe(u)) = s.trace().contact else {
+            panic!("unsafe touchdown");
+        };
+        assert!(s.crashed && u.not_landable && !u.gear_up && !u.water);
+        let mut water = Surface::terrain(0.);
+        water.water = true;
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -2., 1., water);
+        assert!(s.crashed);
+        // Over the 30 ft/s limit but inside the hard-landing band (twice it):
+        // the gear is damaged and the aircraft survives, on a runway.
+        let (s, r) = touch(Landings::FLIGHT_TICKS, -50., 1., Surface::runway(0.));
+        assert!(!s.crashed && r.on_ground && s.systems.has(16));
+        assert!(matches!(s.trace().contact, Some(Contact::Rolling(_))));
+        // Inside the limits nothing is damaged.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -25., 1., Surface::runway(0.));
+        assert!(!s.crashed && !s.systems.has(16));
+        // Beyond the band (over twice the limit) it is a crash.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -61., 1., Surface::runway(0.));
+        assert!(s.crashed);
         // Descending three times the limit is over it by more than the margin.
         let (s, _) = touch(Landings::FLIGHT_TICKS, -90., 1., Surface::runway(0.));
         let Some(Contact::Unsafe(u)) = s.trace().contact else {

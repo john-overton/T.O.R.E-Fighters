@@ -1,0 +1,576 @@
+//! The host's events as a replay's events, effects and surface changes
+//! (docs/ARCHITECTURE.md, "Converting a capture into a replay"). Each is put
+//! on the tick the host gave; one outside the replay's ticks is left out.
+
+use super::{angles, basis, feet};
+use crate::client::seen::FlightSeen;
+use crate::wire::entity::VELOCITY_STEP;
+use crate::wire::events::WireEvent;
+use crate::wire::names::NameIndex;
+use std::collections::BTreeMap;
+use tore_replay as replay;
+use tore_replay::vocab::{self, field, kind, outcome, route, source, trigger};
+use tore_sim::combat::blast::{self, MarkKind};
+use tore_sim::combat::live::EffectKind;
+use tore_world::comms::Route;
+use tore_world::datalink::Entry;
+
+/// The tick each projectile was launched at, from the host's launch events.
+pub(crate) fn launches(seen: &FlightSeen) -> BTreeMap<u32, u32> {
+    let mut out = BTreeMap::new();
+    for seen in &seen.events {
+        if let WireEvent::Launch { projectile, .. } = &seen.event.event {
+            out.entry(*projectile).or_insert(seen.event.tick);
+        }
+    }
+    out
+}
+
+/// What one event does to a frame.
+enum Put {
+    Event(replay::Event),
+    Effect(replay::EffectSpawn),
+    Surface(u32),
+    /// A surface unit's hit points changed, alive (protocol 22).
+    Hp(u32, i32),
+    /// A launcher's rails or a gun's spares changed (protocol 22).
+    Stock(replay::SurfaceStock),
+    /// Where the city fill buildings the host knocked down stand (protocol
+    /// 25), recorded since nr-fx3 so the replay shows them flat and burning.
+    City(Vec<[i32; 2]>),
+}
+
+/// A flight's events, by tick.
+pub(crate) struct Events {
+    put: std::vec::IntoIter<(u64, Put)>,
+    next: Option<(u64, Put)>,
+}
+
+impl Events {
+    /// The events of `seen`; `player` is the plane the seat flew, whom the
+    /// HUD lines, the order calls and the release sounds belong to.
+    pub fn new(
+        seen: &FlightSeen,
+        player: u32,
+        weapons: &BTreeMap<String, u32>,
+        first: u64,
+        last: u64,
+        city: Option<&tore_world::city::CityFill>,
+    ) -> Self {
+        let name = |index: NameIndex| seen.names.name(index).unwrap_or_default().to_owned();
+        let stems = |names: &[NameIndex]| -> String {
+            names.iter().map(|n| name(*n)).collect::<Vec<_>>().join(" ")
+        };
+        let mut out: Vec<(u64, Put)> = Vec::new();
+        // Each surface unit's state as last told, for its changes.
+        let mut told: BTreeMap<u32, crate::wire::events::SurfaceUnitView> = BTreeMap::new();
+        let burst_ends: BTreeMap<_, _> = seen
+            .events
+            .iter()
+            .filter_map(|received| {
+                if let WireEvent::SurfaceBurstEnd { unit, mount, fired } = received.event.event {
+                    Some(((received.event.tick, unit, mount), fired))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for received in &seen.events {
+            let mut tick = u64::from(received.event.tick);
+            // Buildings already flat when the seat joined are told with the
+            // backlog: they stand flat from the replay's first tick.
+            if tick < first && matches!(received.event.event, WireEvent::CityFlattened { .. }) {
+                tick = first;
+            }
+            if tick < first || tick > last {
+                continue;
+            }
+            let events = match &received.event.event {
+                WireEvent::Message { text } => vec![Put::Event(
+                    replay::Event::new(kind::COMMS_HUD)
+                        .with_subject(player)
+                        .with(field::SOURCE, source::HUD)
+                        .with(field::OUTCOME, outcome::DELIVERED)
+                        .with_text(text.as_str()),
+                )],
+                WireEvent::Radio {
+                    route: how,
+                    important,
+                    label,
+                    text,
+                    stems: names,
+                    // The battle net's label already says `Net `.
+                    ..
+                } => {
+                    let (event_kind, producer, played) = match how {
+                        Route::Radio => (kind::COMMS_RADIO, source::RADIO, route::RADIO),
+                        Route::Airport => (kind::COMMS_TOWER, source::TOWER, route::TOWER),
+                        Route::Direct => (kind::COMMS_CREW, source::CREW, route::DIRECT),
+                    };
+                    let mut event = replay::Event::new(event_kind)
+                        .with(field::SPEAKER, label.as_str())
+                        .with(field::SOURCE, producer)
+                        .with(field::ROUTE, played)
+                        .with(
+                            field::KIND,
+                            if *important { "important" } else { "chatter" },
+                        )
+                        .with(field::OUTCOME, outcome::DELIVERED)
+                        .with(field::HEARD, true)
+                        .with_text(text.as_str());
+                    if !names.is_empty() {
+                        event = event.with(field::STEMS, stems(names));
+                    }
+                    vec![Put::Event(event)]
+                }
+                WireEvent::Tower { stem: Some(stem) } => vec![Put::Event(
+                    replay::Event::new(kind::COMMS_TOWER)
+                        .with(field::SOURCE, source::TOWER)
+                        .with(field::ROUTE, route::TOWER)
+                        .with(field::OUTCOME, outcome::DELIVERED)
+                        .with(field::HEARD, true)
+                        .with(field::STEMS, name(*stem)),
+                )],
+                WireEvent::Tower { stem: None } => vec![Put::Event(
+                    replay::Event::new(kind::COMMS_TOWER)
+                        .with(field::SOURCE, source::TOWER)
+                        .with(field::TRIGGER, trigger::CLEARANCE_CANCELLED)
+                        .with(field::OUTCOME, outcome::CANCELLED)
+                        .with(field::HEARD, false),
+                )],
+                WireEvent::OrderVoice { stems: names } => vec![Put::Event(
+                    replay::Event::new(kind::COMMS_ORDER)
+                        .with_subject(player)
+                        .with(field::SOURCE, source::ORDER)
+                        .with(field::ROUTE, route::RADIO)
+                        .with(field::OUTCOME, outcome::APPLIED)
+                        .with(field::STEMS, stems(names)),
+                )],
+                WireEvent::Release { sound, .. } => vec![Put::Event(
+                    replay::Event::new(kind::AUDIO_RELEASE)
+                        .with_subject(player)
+                        .with(field::SOUND, name(*sound)),
+                )],
+                WireEvent::Launch {
+                    shooter,
+                    projectile,
+                    weapon,
+                } => {
+                    let mut event = replay::Event::new(kind::WEAPON_LAUNCH)
+                        .with_subject(*shooter)
+                        .with(field::PROJECTILE, replay::Value::Id(*projectile));
+                    if let Some(id) = weapons.get(&name(*weapon)) {
+                        event = event.with(field::WEAPON, replay::Value::Id(*id));
+                    }
+                    vec![Put::Event(event)]
+                }
+                WireEvent::WingEjection {
+                    aircraft,
+                    message,
+                    friendly,
+                } => {
+                    let aircraft = *aircraft;
+                    let mut out = vec![Put::Event(
+                        replay::Event::new(kind::AIRCRAFT_EJECTED)
+                            .with_subject(aircraft)
+                            .with_text(message.as_str()),
+                    )];
+                    if *friendly {
+                        out.push(Put::Event(
+                            replay::Event::new(kind::AUDIO_EJECTION).with_subject(aircraft),
+                        ));
+                    }
+                    out
+                }
+                WireEvent::Effect {
+                    kind: effect,
+                    position,
+                    ticks,
+                    blast,
+                    scale,
+                } => vec![Put::Effect(replay::EffectSpawn {
+                    kind: effect_kind(*effect, *blast),
+                    position: feet(position),
+                    duration_ticks: u32::from(*ticks),
+                    scale: *scale,
+                })],
+                WireEvent::Mark {
+                    kind: mark,
+                    position,
+                    scale,
+                } => vec![Put::Effect(replay::EffectSpawn {
+                    kind: match mark {
+                        MarkKind::Crater(size) => replay::EffectKind::Crater(*size),
+                        MarkKind::Fire => replay::EffectKind::Fire,
+                    },
+                    position: feet(position),
+                    duration_ticks: blast::FOREVER,
+                    scale: *scale,
+                })],
+                WireEvent::GroundDestroyed { object } => vec![
+                    Put::Surface(*object),
+                    Put::Event(
+                        replay::Event::new(kind::COMBAT_DESTROYED)
+                            .with_subject(*object)
+                            .with(field::REASON, "destroyed"),
+                    ),
+                ],
+                WireEvent::Countermeasure {
+                    aircraft,
+                    flare,
+                    position,
+                    velocity,
+                    attitude,
+                    number,
+                    left,
+                } => {
+                    let decoy = if *flare { "flare" } else { "chaff" };
+                    let mut event = replay::Event::new(kind::COMBAT_COUNTERMEASURE)
+                        .with_subject(*aircraft)
+                        .with(field::DECOY, decoy)
+                        .with(field::NUMBER, *number as i64)
+                        .with(field::AFTER_TICK, i64::from(received.event.tick));
+                    if let Some(left) = left {
+                        event = event.with(field::LEFT, i64::from(*left));
+                    }
+                    let b = basis(angles(*attitude));
+                    let numbers = feet(position)
+                        .into_iter()
+                        .chain(velocity.map(|v| v as f64 * VELOCITY_STEP))
+                        .chain(b.right)
+                        .chain(b.up)
+                        .chain(b.forward);
+                    let names = field::POSITION
+                        .into_iter()
+                        .chain(field::VELOCITY)
+                        .chain(field::BASIS);
+                    for (name, value) in names.zip(numbers) {
+                        event = event.with(name, value);
+                    }
+                    vec![Put::Event(event.with_text(format!("released {decoy}")))]
+                }
+                WireEvent::GunBurst {
+                    shooter,
+                    station,
+                    length,
+                } => {
+                    let mut event = replay::Event::new(kind::WEAPON_GUN_BURST)
+                        .with_subject(*shooter)
+                        .with(field::STATION, i64::from(*station));
+                    if let Some(length) = length {
+                        event = event.with("length_ticks", i64::from(*length));
+                    }
+                    vec![Put::Event(event)]
+                }
+                // The data link's changes about the seat's flight, as the
+                // single-player recorder writes them (slice G7).
+                WireEvent::Link(link) => vec![Put::Event(datalink_event(
+                    &link.entry(u64::from(received.event.tick)),
+                ))],
+                // Kept by the replay in other ways, or not at all: the rumble
+                // and the weapon page are the player's hands, the order's
+                // answer is its HUD line, the aircraft's end is in its state,
+                // and sounds are made again from the recorded effects.
+                // A surface unit's gun burst, as a gun burst of the unit and
+                // its hardpoint with the schedule's length (protocol 22; the
+                // recording's surface tracks are the replay slice's).
+                WireEvent::SurfaceBurst {
+                    unit,
+                    mount,
+                    target,
+                    rounds,
+                    span,
+                    ..
+                } => {
+                    let mut event = replay::Event::new(kind::WEAPON_GUN_BURST)
+                        .with_subject(*unit)
+                        .with(field::STATION, i64::from(*mount))
+                        .with("length_ticks", i64::from(*span));
+                    event.object = *target;
+                    let fired = burst_ends
+                        .get(&(received.event.tick, *unit, *mount))
+                        .copied()
+                        .unwrap_or(*rounds)
+                        .min(*rounds);
+                    if fired > 0 {
+                        // The wire defines round k at ceil(k * span / rounds).
+                        // Keep only the interval through the last known shot;
+                        // the exact controller stop time is not transmitted.
+                        let last_shot = tick
+                            + (u64::from(fired - 1) * u64::from(*span))
+                                .div_ceil(u64::from(*rounds));
+                        event = event
+                            .with(field::SOURCE, "net.surface")
+                            .with("last_tick", last_shot as i64);
+                    }
+                    vec![Put::Event(event)]
+                }
+                // A surface unit's state (protocol 22): its hit points while
+                // alive (its death is the Ground destroyed event's), and its
+                // stock as the single-player recorder writes it: every rail
+                // when one changed, a gun's spares when they changed. A unit's
+                // first state is all of its stock.
+                WireEvent::SurfaceUnit(view) => {
+                    let before = told.insert(view.unit, view.clone());
+                    surface_puts(before.as_ref(), view)
+                }
+                WireEvent::OrderReply { .. }
+                | WireEvent::WeaponCycled
+                | WireEvent::Feedback { .. }
+                | WireEvent::YourAircraftExploded { .. }
+                | WireEvent::Sound { .. }
+                | WireEvent::SurfaceBurstEnd { .. } => Vec::new(),
+                // Named by where each stands, as the recorder does.
+                WireEvent::CityFlattened { buildings } => city
+                    .map(|fill| {
+                        vec![Put::City(
+                            buildings
+                                .iter()
+                                .filter_map(|&n| fill.layout.instances.get(n as usize))
+                                .map(|i| [i.x, i.z])
+                                .collect(),
+                        )]
+                    })
+                    .unwrap_or_default(),
+                // Stores (protocol 27) are kept by the conversion's frames.
+                WireEvent::Stores { .. } => Vec::new(),
+            };
+            out.extend(events.into_iter().map(|put| (tick, put)));
+        }
+        // By tick, each tick's events in the order they arrived.
+        out.sort_by_key(|(tick, _)| *tick);
+        let mut put = out.into_iter();
+        let next = put.next();
+        Self { put, next }
+    }
+
+    /// Puts the events of `tick` into `frame`.
+    pub fn fill(&mut self, tick: u64, frame: &mut replay::Frame) {
+        while let Some((at, _)) = &self.next {
+            if *at > tick {
+                break;
+            }
+            let (_, put) = self.next.take().expect("an event");
+            match put {
+                Put::Event(event) => frame.events.push(event),
+                Put::Effect(effect) => frame.new_effects.push(effect),
+                Put::Surface(object) => frame.surface_hp.push((object, 0)),
+                Put::Hp(object, hp) => {
+                    if !frame.surface_hp.iter().any(|(id, _)| *id == object) {
+                        frame.surface_hp.push((object, hp));
+                    }
+                }
+                Put::Stock(stock) => frame.surface_stock.push(stock),
+                Put::City(buildings) => {
+                    frame.city_fell.extend(buildings);
+                    frame.city_fell.sort_unstable();
+                    frame.city_fell.dedup();
+                }
+            }
+            self.next = self.put.next();
+        }
+        frame
+            .new_effects
+            .truncate(replay::limits::MAX_EFFECTS_PER_TICK);
+        frame.events.truncate(replay::limits::MAX_EVENTS_PER_TICK);
+        let _ = vocab::heard;
+    }
+}
+
+/// What a surface unit's told state `now` adds to the recording, after
+/// `before` (none: its first).
+fn surface_puts(
+    before: Option<&crate::wire::events::SurfaceUnitView>,
+    now: &crate::wire::events::SurfaceUnitView,
+) -> Vec<Put> {
+    let mut out = Vec::new();
+    if now.hp > 0 && before.is_none_or(|b| b.hp != now.hp) {
+        out.push(Put::Hp(now.unit, now.hp));
+    }
+    let mount = |index: usize| before.and_then(|b| b.mounts.get(index).copied());
+    let rails_changed = now
+        .mounts
+        .iter()
+        .enumerate()
+        .any(|(i, m)| m.rails.is_some() && mount(i).is_none_or(|b| b.rails != m.rails));
+    for (index, m) in now.mounts.iter().enumerate() {
+        let stock = |loaded: u32, reserve: Option<u32>| {
+            Put::Stock(replay::SurfaceStock {
+                unit: now.unit,
+                mount: index as u16,
+                loaded,
+                reserve,
+            })
+        };
+        if let Some(rails) = m.rails
+            && rails_changed
+        {
+            out.push(stock(u32::from(rails), None));
+        } else if m.spares.is_some() && mount(index).is_none_or(|b| b.spares != m.spares) {
+            // A gun's loaded rounds are not on the wire: spares only.
+            out.push(stock(0, m.spares.map(u32::from)));
+        }
+    }
+    out
+}
+
+/// One data link journal entry as a replay's `datalink.*` event
+/// (docs/REPLAYS.md, "Data link events"; the layout is slice G9's): the
+/// subject is the member (the lead for an assignment), the object the target
+/// aircraft (the wingman for an assignment). The single-player recorder
+/// (`tore-app`'s `replay/recorder/datalink.rs`) and the capture conversion
+/// both call it, so a recorded and a converted flight write the same events.
+pub fn datalink_event(entry: &Entry) -> replay::Event {
+    match *entry {
+        Entry::Member { plane, radar, .. } => replay::Event::new(kind::DATALINK_MEMBER)
+            .with_subject(plane)
+            .with(field::RADAR, radar)
+            .with_text(if radar {
+                "joined the data link, with a radar"
+            } else {
+                "joined the data link, with no radar"
+            }),
+        Entry::Lock { plane, target, .. } => replay::Event::new(kind::DATALINK_LOCK)
+            .with_subject(plane)
+            .with_object(target)
+            .with_text("locked"),
+        Entry::Unlock { plane, target, .. } => replay::Event::new(kind::DATALINK_UNLOCK)
+            .with_subject(plane)
+            .with_object(target)
+            .with_text("let go of its lock"),
+        Entry::Assign {
+            plane,
+            target,
+            by,
+            order,
+            ..
+        } => replay::Event::new(kind::DATALINK_ASSIGN)
+            .with_subject(by)
+            .with_object(plane)
+            .with(field::TARGET, replay::Value::Id(target))
+            .with(field::ORDER, format!("{order:?}")),
+        Entry::Clear {
+            plane, target, why, ..
+        } => replay::Event::new(kind::DATALINK_CLEAR)
+            .with_subject(plane)
+            .with_object(target)
+            .with(field::REASON, why.name())
+            .with_text("assignment ended"),
+        Entry::Acknowledge { plane, target, .. } => replay::Event::new(kind::DATALINK_ACKNOWLEDGE)
+            .with_subject(plane)
+            .with_object(target)
+            .with_text("locked its assigned target"),
+        Entry::SortWarning {
+            plane,
+            other,
+            target,
+            ..
+        } => replay::Event::new(kind::DATALINK_SORT_WARNING)
+            .with_subject(plane)
+            .with_object(target)
+            .with(field::OTHER, replay::Value::Id(other))
+            .with_text("told a flightmate holds the same lock"),
+    }
+}
+
+/// A live effect as a recording keeps it: a hit, kill or ground strike with
+/// a reviewed explosion type keeps that type (as `replay/convert.rs` in the
+/// app does for the single-player recorder).
+fn effect_kind(effect: EffectKind, explosion: Option<u8>) -> replay::EffectKind {
+    // A flak burst has its own code (format 3) with the explosion type the
+    // wire's effect carried, 27 or 28, as the single-player recorder writes.
+    if effect == EffectKind::Flak
+        && let Some(explosion) = explosion.filter(|b| blast::explosion(*b).is_some())
+    {
+        return replay::EffectKind::Flak { explosion };
+    }
+    let on = match effect {
+        EffectKind::Hit | EffectKind::Flak => Some(replay::Strike::Hit),
+        EffectKind::Destroyed => Some(replay::Strike::Destroyed),
+        EffectKind::Ground => Some(replay::Strike::Ground),
+        _ => None,
+    };
+    if let (Some(on), Some(explosion)) = (on, explosion.filter(|b| blast::explosion(*b).is_some()))
+    {
+        return replay::EffectKind::Blast { on, explosion };
+    }
+    match effect {
+        EffectKind::Flare => replay::EffectKind::Flare,
+        EffectKind::Chaff => replay::EffectKind::Chaff,
+        EffectKind::Launch => replay::EffectKind::Launch,
+        EffectKind::Hit | EffectKind::Flak => replay::EffectKind::Hit,
+        EffectKind::Destroyed => replay::EffectKind::Destroyed,
+        EffectKind::Ground => replay::EffectKind::Ground,
+        EffectKind::DebrisImpact => replay::EffectKind::DebrisImpact,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::events::{MountView, SurfaceUnitView};
+
+    /// Flak keeps its own code with the explosion the wire carried, 27 or
+    /// 28 (replay format 3), as the single-player recorder writes it.
+    #[test]
+    fn a_flak_burst_records_as_flak_with_its_explosion() {
+        for explosion in [27, 28] {
+            assert_eq!(
+                effect_kind(EffectKind::Flak, Some(explosion)),
+                replay::EffectKind::Flak { explosion }
+            );
+        }
+        assert_eq!(effect_kind(EffectKind::Flak, None), replay::EffectKind::Hit);
+    }
+
+    /// A unit's first state records its hit points and stock; later ones
+    /// what changed: every rail when one changed, a gun's spares, hit points
+    /// while alive.
+    #[test]
+    fn surface_unit_states_record_their_changes() {
+        let view = |hp: i32, rails: [u16; 2], spares: u16| SurfaceUnitView {
+            unit: 9,
+            hp,
+            radar: false,
+            mounts: vec![
+                MountView {
+                    rails: Some(rails[0]),
+                    spares: None,
+                },
+                MountView {
+                    rails: Some(rails[1]),
+                    spares: None,
+                },
+                MountView {
+                    rails: None,
+                    spares: Some(spares),
+                },
+            ],
+        };
+        let stock = |puts: &[Put]| -> Vec<(u16, u32, Option<u32>)> {
+            puts.iter()
+                .filter_map(|p| match p {
+                    Put::Stock(s) => Some((s.mount, s.loaded, s.reserve)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let hp = |puts: &[Put]| puts.iter().any(|p| matches!(p, Put::Hp(9, _)));
+        let first = view(80, [1, 1], 2);
+        let puts = surface_puts(None, &first);
+        assert!(hp(&puts));
+        assert_eq!(stock(&puts), [(0, 1, None), (1, 1, None), (2, 0, Some(2))]);
+        // One rail fires: both rails recorded, nothing else.
+        let fired = view(80, [0, 1], 2);
+        let puts = surface_puts(Some(&first), &fired);
+        assert!(!hp(&puts));
+        assert_eq!(stock(&puts), [(0, 0, None), (1, 1, None)]);
+        // A spare magazine used and a hit: the spares and the hit points.
+        let hit = view(40, [0, 1], 1);
+        let puts = surface_puts(Some(&fired), &hit);
+        assert!(hp(&puts));
+        assert_eq!(stock(&puts), [(2, 0, Some(1))]);
+        // Destroyed: its death is the Ground destroyed event's.
+        assert!(!hp(&surface_puts(Some(&hit), &view(0, [0, 1], 1))));
+    }
+}

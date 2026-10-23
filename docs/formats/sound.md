@@ -97,6 +97,129 @@ bit (flags 0x63, 0x41, 0x6b), and case 0 places the eye with a per-resolution
 value (`0x52160b`, chosen at `0x4068d5..0x4068f9`). That is the evidence for
 reading the bit as a cockpit view; which key selects each case was not traced.
 
+## Weapon launch and bomb release sound
+
+Research on 2026-10-12 for bugs B4 (Maverick launch) and B5 (bomb release),
+same FA.EXE 1.02F (SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`) and
+FA_2.LIB (`fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`).
+Static disassembly and bounded resource decoding only; nothing was executed.
+[Player-visible result](../spec/sound.md#weapon-launch-and-bomb-release).
+
+### One request per fire call
+
+`PROJFireSound` (`0x4c26f0`, one argument: the projectile record) is called from
+two places. The launch routine `0x4c2170` calls it at `0x4c2296` for records
+with flag `0x200000` (a branch with no projectile loop) and, for every other
+record, at `0x4c227c` after its projectile loop. The loop makes one projectile, or
+`gameRoundsInBurst` of them for a pack (`0x4c22a7` to `0x4c22c9`, see
+[packs and pods](weapons.md#packs-and-pods)), and its exit jumps to `0x4c227c`
+(`0x4c2486`). The sound is therefore requested once per fire call, after all of
+that call's projectiles exist: a MK-82 3-, 6- or 7-pack is one sound, and a
+rocket pod's held-repeat calls (one rocket each, every `gameBurstT` quarter
+seconds) are one sound each. The other caller, `0x46d126`, is the network
+receiver and makes one request per received launch message.
+
+### The request
+
+`PROJFireSound` passes these to sound request `0x433680` (argument layout in
+[the countermeasure section](#countermeasure-release-sound)). Record offsets
+are the `fireSound`, `maxSndDist` and `freqAdj` fields in the JT schema order
+(`crates/tore-formats/src/aircraft_schema.rs`) and the flags at `+0xa6`.
+
+| Argument | Value | Use |
+| --- | --- | --- |
+| 1 | record `+0x12f`, `fireSound` | The recording; the record names it, nothing else chooses it |
+| 2 | 43 (`0x2b`) | Priority when all 16 voices are busy |
+| 3 | 255 | Level on a 0 to 255 scale: full |
+| 4 | 1 for the player's own gun fire (flag `0x800` with the player-fire state set), else 0 | Keep a voice that starts out of range |
+| 5 | current object `0x4f6fbc` | Source object, the firing aircraft |
+| 6 | record `+0x133`, `maxSndDist` | Distance in feet at which the level reaches zero |
+| 7 | 100 | Distance in feet within which the level is full |
+| 8 | 0 | Zero means argument 9 applies |
+| 9 | record `+0x135`, `freqAdj` | Pitch offset |
+| 14 | 3 for the same gun branch, else 0 | Not traced |
+
+Distance, refusal past 20,000 ft, the linear level fall, the cockpit rule and
+pan are as in the countermeasure section. Pitch (`0x433711` to `0x4337a8`): the
+request takes the recording's rate class from its suffix, a base of `0x80` for
+`.5K`, `0xba` for `.8K` and `0x100` for `.11K`, and when argument 8 is zero it
+adds the sign-extended argument 9, so `freqAdj` is a pitch offset in 1/256 of
+the 11 kHz rate. For the player's gun fire (flag `0x800`) the returned voice handle is kept in
+`0x50d0f8`; missiles and bombs do not have that flag. Flag `0x40000` also calls
+`0x412a60` (arguments 2 and `0x40`) when the camera is on the firing aircraft in
+a cockpit view; a view effect, not traced.
+
+### What the records carry
+
+Read with `tools/catalog_fa.py` from the 135 shipped JT records
+([`fa-weapons.csv`](fa-weapons.csv), columns `max_sound_distance_ft` and
+`frequency_adjust`).
+
+- `maxSndDist`: 6,000 ft on 118 records, 7,000 on 9 (20MM_4, AGM-45, AGM-65A,
+  AIM-7E, GBU-10, GBU-10A, Mk 12, SUU-16, T20_1), 12,000 on 3 (the 37 mm
+  AAA records and SA-2A), 15,000 on 2 (KS-12, KS-19) and 30,000 on 3 (the
+  joke records `~BLDR`, `~MOOSE`, `~MOTHB`).
+- `freqAdj`: zero on every record a player's aircraft can carry. It is nonzero
+  only on 13 surface-gun records (AAA20, AAA30, AAA30BAD, A_M1939, BMP2, BTR80,
+  M1, M113, M163, M2, SMLARMS, ZSU-23, ZSU-57; 10 to 50), so it cannot be what
+  makes a missile or bomb sound different.
+- `fireSound`: AGM-65A and AGM-65G both name `&ashvmis.11k`, shared with
+  AGM-45, AGM-84A/E, AGM-88, AM-39, AS-14, AS-16, AS 30L and AS-7. The MK-82
+  family and MK-84 name `&bomb2.11k`; CBU-87/97, GBU-10/28/29/30, Paveway,
+  FAB, Mk 20 and RBK name `&bomb.11k`. No other table, key or branch in the
+  executable maps a weapon to a different launch recording.
+- FA_2.LIB also holds `&ASHMIS.11K`, `&ASLMIS.11K`, `&SAHMIS.11K`,
+  `&SALMIS.11K`, `&MISSILE.11K`, `&HRCK.11K` and `&LRCK.11K`. No JT, PT, NT or
+  OT record names them and the executable's only mention is the name `&missile.11K`
+  in a resource preload list (`0x4f8540`) that plays nothing. They are not
+  launch sounds in the retail data.
+- The three `&BOMB.11K` requests at `0x414ec4`, `0x414f8a` and `0x451ffc` (store
+  jettison, priority 43, level 255, silent at 7,000 ft, full within 100 ft)
+  are a separate path and not a weapon release.
+
+### Surface launches
+
+Checked 2026-10-12 for the surface-unit launch sound (John, item 4), same
+FA.EXE 1.02F and FA_2.LIB. Static only.
+
+- `PROJFire` (`0x4c2170`) tests the hardpoint kind, the station and the
+  ammunition debit, and nothing about the launching object's class, before it
+  calls `PROJFireSound` (`0x4c2296`, `0x4c227c`). Its two callers are the
+  player service (`0x417027`) and the weapon service `PROJServiceWeapon`
+  (`0x4c4e34`), which `_NPCWeaponsProc` calls (`0x4737d5`, `0x473983`).
+- Of the 135 shipped records, 21 guided missiles are named by a surface
+  unit type (ASROC, FIM92, MIS, R440, SA13, SA14, SA15, SA16, SA19, SA2A, SA3,
+  SA6, SA7, SA9, SAN11, SAN3, SAN4, SAN7, SAN9, SEA_SPAR, SSN9; the count is
+  from [`fa-weapons.csv`](fa-weapons.csv) `surface_type_references`). Each
+  names a `fireSound` (`&SALTMIS.11K` on 12, `&SAHVMIS.11K` on 4, `&LTMISS.11K`
+  on 3, `&HVYMISS.11K` on 2) and a `maxSndDist` of 6,000 ft, except SA2A at
+  12,000 ft. `freqAdj` is 0 on all of them. All four recordings are in FA_2.LIB.
+- Unknown: whether the original's ground units run `_NPCWeaponsProc`. The
+  records say a surface missile has a sound and a reach; nothing found says it
+  is skipped.
+
+### Recordings
+
+| Resource | Decoded bytes | Length | SHA-256 |
+| --- | ---: | ---: | --- |
+| `&ASHVMIS.11K` | 25,222 | 2.29 s | `96f5445e7f9eb02f71b40c527562f1d386840feaf98fac073ec9417252b9b717` |
+| `&BOMB.11K` | 17,346 | 1.57 s | `0bec8ce1dd8ecc9d53843ea92b306d3498813375fc45ece945357f08eacca0cb` |
+| `&BOMB2.11K` | 24,461 | 2.22 s | `92f82c48e666d88cf90cb77ca2f856322170c3917062989d2117153a86696d74` |
+
+Unsigned 8-bit mono at 11,025 samples a second. `&ASHVMIS.11K` is the loudest
+missile launch recording: its energy peaks between 0.5 and 0.75 s and 1,483 of
+its samples sit at the rail, against 209 for `&HVYMISS.11K` and 37 for
+`&LTMISS.11K`. `&BOMB.11K` is a single thump that dies away; `&BOMB2.11K` is a
+longer rumble. Not heard by ear; the numbers come from decoding.
+
+### Unresolved
+
+- Whether a build other than 1.02F maps a weapon to another recording. Next
+  step: none, the retail library offers no alternative.
+- The meaning of argument 14 and of the held-fire gun branch's sustained voice.
+  Not needed for missiles and bombs.
+
 ## Decoded recording identities
 
 | Resource | Decoded bytes | SHA-256 |

@@ -4,8 +4,9 @@ import struct
 import tarfile
 import tempfile
 import unittest
+import zipfile
 
-from check_assets import is_tarball, tarball_violations, violation
+from check_assets import is_tarball, is_zip, tarball_violations, violation, zip_violations
 
 
 def synthetic_pic():
@@ -90,6 +91,56 @@ class TarballScanTests(unittest.TestCase):
             self.assertEqual(
                 tarball_violations(path), [("tore/Applications", "expected a regular file")]
             )
+
+
+def write_zip(path, entries):
+    """Build a .zip from {member name: bytes}."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, payload in entries.items():
+            archive.writestr(name, payload)
+
+
+class ZipScanTests(unittest.TestCase):
+    """The Windows dedicated server's .zip is scanned member by member too."""
+
+    def test_recognized_archive_names(self):
+        for name in ("tore-server-0.2.0-windows-x86_64.zip", "PACKAGE.ZIP"):
+            self.assertTrue(is_zip(Path(name)), name)
+        for name in ("release.tar.gz", "package.msi", "tore-server.exe"):
+            self.assertFalse(is_zip(Path(name)), name)
+
+    def test_clean_package_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clean.zip"
+            write_zip(path, {
+                "tore/tore-server.exe": b"MZ" + bytes(64),
+                "tore/DEDICATED-SERVER.md": b"EALIB and PIC are format names\n",
+            })
+            self.assertEqual(zip_violations(path), [])
+
+    def test_retail_extension_inside_package_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dirty.zip"
+            write_zip(path, {"tore/MENU.PIC": b"placeholder"})
+            reported = zip_violations(path)
+            self.assertEqual([name for name, _ in reported], ["tore/MENU.PIC"])
+
+    def test_embedded_signature_inside_package_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dirty.zip"
+            write_zip(path, {"tore/tore-server.exe": b"prefix" + synthetic_pic()})
+            reported = zip_violations(path)
+            self.assertEqual(len(reported), 1)
+            self.assertIn("PIC", reported[0][1])
+
+    def test_symlink_member_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "linked.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                info = zipfile.ZipInfo("tore/link")
+                info.external_attr = (0o120777 << 16)
+                archive.writestr(info, "/etc/passwd")
+            self.assertEqual(zip_violations(path), [("tore/link", "expected a regular file")])
 
 
 if __name__ == "__main__":

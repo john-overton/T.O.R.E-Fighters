@@ -1,0 +1,425 @@
+//! Slice EF-K's acceptance: a game joined over loopback UDP whose loop
+//! stalls is kept connected by its keepalive thread, for as long as the
+//! bound allows, and only for that long; the hosting game's King, over the
+//! in-process link, has no keepalive and is unaffected. In real time, on the
+//! synthetic import (no retail data), with the host thread a hosted game
+//! runs.
+//!
+//! Both games are pumped once a 16 ms frame, as the game pumps its session,
+//! through [`KeptAlive`] exactly as [`NetSession::pump`] does.
+//!
+//! ```sh
+//! cargo test --locked -p tore-app keepalive -- --nocapture
+//! ```
+
+use super::*;
+use crate::net::hosting::{HostSetup, HostThread, Report, config};
+use crate::net::options::HostOptions;
+use std::thread;
+use std::time::Instant;
+use tore_formats::aircraft::AircraftId;
+use tore_net::{CloseReason, DisconnectReason, LINK_ADDRESS, Listen, bind_udp};
+use tore_session::bot::Bot;
+use tore_session::{ClientPhase, HostLog, LeaveReason, OpenPlanes};
+use tore_world::mission::{Skill, Start};
+use tore_world::test_support::resources::{THEATER, resources};
+
+/// How often each game pumps its session: a 60 Hz frame.
+const FRAME: Duration = Duration::from_millis(16);
+
+/// A late input explains a correction within this many ticks after it (one
+/// second, as in the network matrix and the hosting tests).
+const LATE_INPUT_TICKS: u64 = 120;
+
+/// The hosting player, the joined player and two AI wingmen against two
+/// enemy AI, 5 nautical miles apart, as the hosting tests fly.
+fn spec() -> MissionSpec {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.wings[0].count = 4;
+    spec.wings[3].count = 2;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = 5;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    spec
+}
+
+fn import() -> Arc<BTreeMap<String, Vec<u8>>> {
+    Arc::new(resources())
+}
+
+/// One game: a client with the scripted pilot, its transport and its
+/// keepalive, pumped once a frame.
+struct Side {
+    bot: Bot,
+    transport: Transport,
+    clock: RealClock,
+    kept: KeptAlive,
+    events: Vec<ClientEvent>,
+    seated: bool,
+    closed: Option<CloseReason>,
+    /// The predicted ticks at which the host reported repeating this
+    /// player's input (a late input), and the count reported so far.
+    repeats: Vec<u64>,
+    repeated: u64,
+}
+
+impl Side {
+    fn join(
+        server: SocketAddr,
+        transport: Transport,
+        callsign: &str,
+        kept: KeepaliveConfig,
+    ) -> Self {
+        let clock = RealClock::new();
+        let config = ClientConfig {
+            entropy: Entropy::System,
+            ..ClientConfig::new(server, callsign, build_id())
+        };
+        let client = Client::connect(config, import(), clock.now()).expect("a client");
+        Self {
+            bot: Bot::new(client),
+            transport,
+            clock,
+            kept: KeptAlive::new(kept),
+            events: Vec::new(),
+            seated: false,
+            closed: None,
+            repeats: Vec::new(),
+            repeated: 0,
+        }
+    }
+
+    /// One frame's turn, as `NetSession::pump` takes it.
+    fn pump(&mut self) {
+        let now = self.clock.now();
+        let _ = self.bot.client.receive_from(now, &mut self.transport);
+        self.bot.update(now);
+        let _ = self.bot.client.transmit(&mut self.transport);
+        self.kept.turned(&self.bot.client, &self.transport);
+        let repeated = self.bot.client.clone_stats().inputs_repeated;
+        if repeated > self.repeated {
+            let tick = self.bot.client.prediction().map_or(0, |p| p.tick());
+            self.repeats.push(tick);
+            self.repeated = repeated;
+        }
+        while let Some(event) = self.bot.client.poll_event() {
+            match &event {
+                ClientEvent::Seated { .. } => self.seated = true,
+                ClientEvent::Closed(reason) => self.closed = Some(reason.clone()),
+                _ => {}
+            }
+            self.events.push(event);
+        }
+    }
+
+    fn corrections(&self) -> usize {
+        self.bot.client.corrections().len()
+    }
+
+    /// Whether the host repeated this player's input in the second before
+    /// the predicted tick `at`, which explains a correction then.
+    fn late_input_before(&self, at: u64) -> bool {
+        self.repeats
+            .iter()
+            .any(|&r| r <= at + 2 && at.saturating_sub(r) < LATE_INPUT_TICKS)
+    }
+}
+
+/// A hosted game: the host thread, its King over the link and a guest over
+/// loopback UDP.
+struct Game {
+    host: HostThread,
+    king: Side,
+    guest: Side,
+    reports: Vec<(Instant, Report)>,
+    /// The guest's game is stalled: it neither receives, steps nor sends.
+    guest_stalled: bool,
+}
+
+impl Game {
+    fn start(guest_keepalive: KeepaliveConfig) -> Self {
+        let options = HostOptions {
+            mission: "duel.txt".into(),
+            spec: spec(),
+            port: 0,
+            name: "Host's game".into(),
+            open_planes: OpenPlanes::Friendly,
+            password: None,
+            callsign: "Host".into(),
+            slot: None,
+            listing: None,
+        };
+        // The keepalives are under test, not the AI's idle rule (slice
+        // F2-A), which would take a plane stalled for ten seconds.
+        let mut config = config(&options);
+        config
+            .settings
+            .push((tore_session::settings::number::IDLE_AI, 0));
+        let (host, link) = HostThread::start(HostSetup {
+            spec: spec(),
+            resources: import(),
+            config,
+            listen: Listen::Address("127.0.0.1".parse().unwrap()),
+            port: 0,
+        })
+        .expect("the host starts");
+        let server = host.addresses()[0];
+        let mut king = Side::join(
+            LINK_ADDRESS,
+            Transport::Link(link),
+            "Host",
+            KeepaliveConfig::default(),
+        );
+        // The King starts each mission once everyone holding a slot is
+        // ready, as `tore-app --host` does.
+        king.bot.start_when_ready = true;
+        let socket = bind_udp("127.0.0.1:0".parse().unwrap()).expect("a socket");
+        let guest = Side::join(server, Transport::Udp(socket), "Guest", guest_keepalive);
+        Self {
+            host,
+            king,
+            guest,
+            reports: Vec::new(),
+            guest_stalled: false,
+        }
+    }
+
+    fn frame(&mut self) {
+        let now = Instant::now();
+        self.reports
+            .extend(self.host.poll().into_iter().map(|report| (now, report)));
+        self.king.pump();
+        if !self.guest_stalled {
+            self.guest.pump();
+        }
+        thread::sleep(FRAME);
+    }
+
+    fn run(&mut self, time: Duration) {
+        let until = Instant::now() + time;
+        while Instant::now() < until {
+            self.frame();
+        }
+    }
+
+    fn run_until(&mut self, limit: Duration, mut done: impl FnMut(&Self) -> bool) -> bool {
+        let until = Instant::now() + limit;
+        while Instant::now() < until {
+            self.frame();
+            if done(self) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Both seated and flying a few seconds.
+    fn fly_both(&mut self) {
+        assert!(
+            self.run_until(Duration::from_secs(20), |g| g.king.seated && g.guest.seated),
+            "both seated: king {:?}, guest {:?}",
+            self.king.events,
+            self.guest.events
+        );
+        self.run(Duration::from_secs(3));
+    }
+
+    /// When the host logged the guest's departure, and why.
+    fn guest_left(&self) -> Option<(Instant, LeaveReason)> {
+        self.reports.iter().find_map(|(at, report)| match report {
+            Report::Log(HostLog::Left {
+                callsign, reason, ..
+            }) if callsign == "Guest" => Some((*at, *reason)),
+            _ => None,
+        })
+    }
+}
+
+/// Acceptance: the joined game stalls for 15 seconds. Its keepalive speaks
+/// about once a second, the host keeps it, its plane flies on with the held
+/// controls, and when it resumes it catches up and settles with no lasting
+/// corrections. The hosting game's King, which has no keepalive, flies on
+/// unaffected and still reigns.
+///
+/// Settling is judged leniently here: two seconds with no correction that a
+/// late input does not explain. On macos-15-intel the guest's own thread,
+/// starved beside the rest of the suite, kept sending late inputs for eight
+/// seconds after it resumed, and each cost a small correction. The strict
+/// form is [`a_joined_game_stalled_for_fifteen_seconds_is_kept_and_recovers_strictly`].
+#[test]
+fn a_joined_game_stalled_for_fifteen_seconds_is_kept_and_recovers() {
+    fifteen_second_stall(false);
+}
+
+/// The 15-second stall in its strict form, for a machine whose sleeps are
+/// accurate: two seconds with no correction at all. Run by `network.yml` on
+/// Linux, or with `--ignored`.
+#[test]
+#[ignore = "strict: needs a machine whose sleeps are accurate"]
+fn a_joined_game_stalled_for_fifteen_seconds_is_kept_and_recovers_strictly() {
+    fifteen_second_stall(true);
+}
+
+fn fifteen_second_stall(strict: bool) {
+    let mut game = Game::start(KeepaliveConfig::default());
+    game.fly_both();
+    assert!(game.guest.kept.running(), "the guest's keepalive runs");
+    assert!(!game.king.kept.running(), "the King over the link has none");
+    let king_before = game.king.corrections();
+    let before_stall = game.guest.bot.client.clone_stats();
+
+    let stall = Instant::now();
+    game.guest_stalled = true;
+    game.run(Duration::from_secs(15));
+    game.guest_stalled = false;
+    // The game's first frame back reads the snapshots the socket kept. The
+    // guest has sent no input since, so the host is still repeating its
+    // last controls in every one of them.
+    let backlog = game.guest.bot.client.clone_stats();
+    game.frame();
+    let read = game.guest.bot.client.clone_stats();
+    let sent = game.guest.kept.sent();
+    let king_during = game.king.corrections() - king_before;
+    assert!(
+        game.guest_left().is_none(),
+        "dropped: {:?}",
+        game.guest_left()
+    );
+    // One a second from the first quiet second on; a loaded machine may
+    // delay a few, never by seconds.
+    assert!((10..=16).contains(&sent), "{sent} keepalives in 15 s");
+
+    game.run(Duration::from_secs(4));
+    let after = game.guest.corrections();
+    let stats = game.guest.bot.client.clone_stats();
+    eprintln!(
+        "guest after a 15 s stall, {:?} after it began: {sent} keepalives, {} corrections \
+         since: {:?}\nstats: {stats:#?}\nKing: {king_during} corrections during the stall",
+        stall.elapsed(),
+        after,
+        game.guest.bot.client.corrections()
+    );
+    assert!(game.guest.closed.is_none(), "{:?}", game.guest.closed);
+    assert_eq!(game.guest.bot.client.phase(), ClientPhase::Flying);
+    // The host flew the plane on with the held controls through the stall.
+    // The client only learns that from the snapshots it read, and a socket
+    // buffer holds a few seconds of them at most (the system drops the
+    // rest). How many it holds depends on the snapshots' size and the
+    // system, and what arrives while the game catches up depends on the
+    // machine's speed, so no fixed count is the property. It is this: each
+    // snapshot read on the first frame back says the host repeated the last
+    // input for every tick since the one before, all but the first few
+    // ticks, which the host's input buffer still held (a margin of a few
+    // ticks; a quarter second here allows for it).
+    let snapshots = read.snapshots - backlog.snapshots;
+    let repeated = read.inputs_repeated - backlog.inputs_repeated;
+    let per = u64::from(game.guest.bot.client.ticks_per_snapshot());
+    eprintln!(
+        "first frame back: {snapshots} snapshots, {repeated} ticks repeated ({per} a snapshot)"
+    );
+    // The socket's receive buffer is the system's default (the game does not
+    // set it), so how many snapshots survive differs by platform: Linux
+    // keeps about 52; ask only for enough to judge the repeats by.
+    assert!(
+        snapshots >= 10,
+        "only {snapshots} snapshots kept through the stall: {stats:#?}"
+    );
+    // The host held real inputs for as many ticks as the guest's inputs ran
+    // ahead of it when the stall began: the input margin the host reported
+    // and the half of the round trip still in flight. On a quiet machine
+    // that is a few ticks; on a loaded runner far more (macOS Intel, run
+    // 38308953880: a 94 ms round trip, a margin of 28 ticks, and 565 ticks
+    // repeated in 306 snapshots of 2, 47 short of all of them).
+    let lead = u64::try_from(before_stall.input_margin.unwrap_or(0).max(0)).unwrap_or(0)
+        + (before_stall.round_trip.as_secs_f64() * 60.).ceil() as u64;
+    assert!(
+        repeated > 0 && repeated + 30 + lead >= snapshots * per,
+        "{repeated} ticks repeated in {snapshots} snapshots of {per} ticks, \
+         the guest {lead} ticks ahead at the stall: {before_stall:#?}"
+    );
+    // It takes the host's newest state rather than step 15 seconds of
+    // backlog (a catch-up, not a correction) ...
+    assert!(stats.catch_ups >= 1, "{stats:#?}");
+    // ... and then settles: two seconds with the prediction the host's at
+    // every snapshot.
+    let mut quiet_since = (Instant::now(), after);
+    let settled = game.run_until(Duration::from_secs(12), |g| {
+        let corrections = g.guest.bot.client.corrections();
+        let unexplained = corrections[quiet_since.1..]
+            .iter()
+            .any(|c| strict || !g.guest.late_input_before(c.now));
+        if unexplained {
+            quiet_since.0 = Instant::now();
+        }
+        quiet_since.1 = corrections.len();
+        quiet_since.0.elapsed() >= Duration::from_secs(2)
+    });
+    assert!(
+        settled,
+        "still corrected: {:?}\nlate inputs at predicted ticks {:?}",
+        &game.guest.bot.client.corrections()[after..],
+        game.guest.repeats
+    );
+    assert!(game.guest_left().is_none(), "{:?}", game.guest_left());
+
+    // The King flew on and still reigns; nobody was dropped.
+    assert!(game.king.closed.is_none(), "{:?}", game.king.closed);
+    assert!(!game.king.kept.running());
+    let lobby = game.king.bot.client.lobby().expect("the lobby").clone();
+    assert!(lobby.is_king());
+    assert_eq!(lobby.players.len(), 2, "{lobby:?}");
+    assert!(lobby.players.iter().all(|p| p.flying), "{lobby:?}");
+    assert!(game.host.stop(crate::net::hosting::JOIN_LIMIT));
+}
+
+/// Acceptance: a joined game stalled for longer than the bound is dropped
+/// as before, 5 seconds after its last keepalive, and learns it on resuming.
+/// The bound is 3 seconds here (60 in the game) so the test is short.
+#[test]
+fn a_joined_game_stalled_past_the_bound_is_dropped() {
+    let bound = Duration::from_secs(3);
+    let mut game = Game::start(KeepaliveConfig {
+        bound,
+        ..KeepaliveConfig::default()
+    });
+    game.fly_both();
+    let stall = Instant::now();
+    game.guest_stalled = true;
+    assert!(
+        game.run_until(Duration::from_secs(14), |g| g.guest_left().is_some()),
+        "never dropped"
+    );
+    let (at, reason) = game.guest_left().unwrap();
+    let after = at - stall;
+    let sent = game.guest.kept.sent();
+    eprintln!("dropped {after:?} after the stall began, after {sent} keepalives");
+    assert_eq!(reason, LeaveReason::Silent);
+    // Kept past the plain 5 seconds by the keepalives within the bound,
+    // dropped 5 seconds after the last.
+    assert!((1..=3).contains(&sent), "{sent} keepalives");
+    assert!(
+        after >= Duration::from_millis(6500) && after <= bound + Duration::from_secs(7),
+        "dropped {after:?} after the stall began"
+    );
+    game.run(Duration::from_secs(2));
+    game.guest_stalled = false;
+    assert!(game.run_until(Duration::from_secs(8), |g| g.guest.closed.is_some()));
+    assert!(
+        matches!(
+            game.guest.closed,
+            Some(CloseReason::Disconnected {
+                reason: DisconnectReason::Timeout,
+                ..
+            })
+        ),
+        "{:?}",
+        game.guest.closed
+    );
+    // The closed connection stops the thread.
+    game.frame();
+    assert!(!game.guest.kept.running());
+    assert!(game.king.closed.is_none(), "{:?}", game.king.closed);
+    assert!(game.host.stop(crate::net::hosting::JOIN_LIMIT));
+}

@@ -1,6 +1,7 @@
 //! Post-mission debrief over the retail clipboard art. The BRIEFSCR.DLG
 //! controls, page text fonts and mission text are imported; page layout is
-//! fitted to John's retail screenshots. Spec: docs/spec/debrief.md.
+//! fitted to John's retail screenshots. Spec: docs/spec/debrief.md. The
+//! evaluator that builds the report is `tore_world::debrief`.
 use crate::rocker::Rocker;
 use crate::{
     AppResult,
@@ -9,23 +10,15 @@ use crate::{
 use std::{collections::BTreeMap, time::Instant};
 use tore_formats::text::GlyphCodes;
 use tore_formats::{Pic, mission_text::MissionText};
-use tore_sim::combat::ledger::{Kill, Ledger, ShotKind, Tally};
+use tore_sim::combat::ledger::Tally;
+// The evaluator lives in the mission core; the rest of the app reads it here.
+pub use tore_world::debrief::{KILL_ROWS, Objective, Outcome, Pilot, Report, Status, capture};
 
 type Rect = (i32, i32, i32, i32);
 
-/// Debrief resources beyond the shared menu art, by archive.
-pub const ART: &[&str] = &[
-    "DEBSCR.PIC",
-    "DEBSC3.PIC",
-    "DEBSCU.PIC",
-    "DEBSCV.PIC",
-    "PANLFNT2.PIC",
-    "PANELFNT.PIC",
-    "BODYFONT.PIC",
-    "BOLDFONT.PIC",
-    "HEADFONT.PIC",
-];
-pub const DATA: &[&str] = &["BRIEFSCR.DLG", "QUICK.MT", "&ROCKUP.11K", "&ROCKDN.11K"];
+/// Debrief art beyond the shared menu art. The import keeps it, so the lists
+/// live in `tore-import`.
+pub use tore_import::selection::DEBRIEF_ART as ART;
 
 const OK: usize = 1;
 const PREVIOUS: usize = 3;
@@ -42,396 +35,6 @@ const TABS: [i32; 2] = [403, 478];
 const TOP: i32 = 162;
 const LINE: i32 = 12;
 const HEADER_LINE: i32 = 15;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Outcome {
-    Success,
-    #[default]
-    Failure,
-}
-impl Outcome {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Success => "SUCCESS",
-            Self::Failure => "FAILURE",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Status {
-    #[default]
-    Alive,
-    Ejected,
-    Dead,
-}
-
-/// Kill table rows, in retail order.
-pub const KILL_ROWS: [&str; 10] = [
-    "Fighter",
-    "Bomber",
-    "Helicopter",
-    "Ship",
-    "SAM",
-    "AAA",
-    "Tank",
-    "Vehicle",
-    "Structure",
-    "Other",
-];
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Pilot {
-    pub status: Status,
-    /// Airframe damage, 0 to 1; a dead or ejected pilot shows 100%.
-    pub damage: f64,
-    /// Average landing score as a percentage.
-    pub landing_grade: Option<u32>,
-    /// `overspeed` or `out of bounds` when the airframe was lost that way.
-    pub cause: Option<&'static str>,
-    pub kills: [u32; 10],
-    pub friendly_fire: u32,
-    pub air_to_air: Tally,
-    pub air_to_ground: Tally,
-    pub gun: Tally,
-    pub bombs: Tally,
-    /// Enemy fire aimed at this pilot. SAM and AAA sites do not exist yet.
-    pub enemy_aam: Tally,
-    pub enemy_sam: Tally,
-    pub enemy_gun: Tally,
-    pub enemy_aaa: Tally,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Objective {
-    Destroy { destroyed: u32, total: u32 },
-    Protect { protected: u32, total: u32 },
-}
-impl Objective {
-    fn sentence(self) -> String {
-        match self {
-            Self::Destroy { destroyed, total } => match (destroyed, total) {
-                (1, 1) => "Destroyed the target.".into(),
-                (0, 1) => "Failed to destroy the target.".into(),
-                (d, t) if d == t => format!("Destroyed the {t} targets."),
-                (d, t) => format!("Destroyed {d} of {t} targets."),
-            },
-            Self::Protect { protected, total } => match (protected, total) {
-                (1, 1) => "Protected the friendly objective.".into(),
-                (0, 1) => "Failed to protect the friendly objective.".into(),
-                (p, t) if p == t => format!("Protected the {t} friendly objectives."),
-                (p, t) => format!("Protected {p} of {t} friendly objectives."),
-            },
-        }
-    }
-}
-
-/// Everything the five pages show, captured when the mission ends.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Report {
-    pub outcome: Outcome,
-    pub objectives: Vec<Objective>,
-    pub elapsed_seconds: u64,
-    pub player: Pilot,
-    /// The player's one tracked wingman; `None` when the player flew alone.
-    pub wingman: Option<Pilot>,
-}
-
-/// One aircraft as the mission ends. The player is id 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Airframe {
-    pub id: u32,
-    pub friendly: bool,
-    /// Still flying with its pilot aboard.
-    pub alive: bool,
-    /// The pilot escaped; a dead pilot is never ejected.
-    pub ejected: bool,
-    /// Airframe damage, 0 to 1.
-    pub damage: f64,
-    pub landing_grade: Option<u32>,
-    /// Lost to overspeed or to leaving the map rather than to combat, a crash
-    /// or the pilot (requested by John, 2026-09-29).
-    pub cause: Option<tore_sim::aircraft_systems::LossCause>,
-}
-
-/// Host facts at mission end, gathered before the flight is torn down.
-pub struct Ending<'a> {
-    pub ledger: &'a Ledger,
-    pub ticks: u64,
-    pub player: Airframe,
-    /// AI aircraft, both sides.
-    pub aircraft: Vec<Airframe>,
-    /// The aircraft shown in the WINGMAN column, if the player had one.
-    pub wingman: Option<u32>,
-    /// Player-relative mission requirements.
-    pub destroy: Vec<u32>,
-    pub protect: Vec<u32>,
-}
-
-impl Ending<'_> {
-    fn airframe(&self, id: u32) -> Option<&Airframe> {
-        if id == self.player.id {
-            Some(&self.player)
-        } else {
-            self.aircraft.iter().find(|a| a.id == id)
-        }
-    }
-    fn friendly(&self, id: u32) -> bool {
-        self.airframe(id).is_some_and(|a| a.friendly)
-    }
-    fn hostile(&self, id: u32) -> bool {
-        self.airframe(id).is_some_and(|a| !a.friendly)
-    }
-    /// Recorded kills, plus lost aircraft credited to their last attacker.
-    fn kills(&self) -> Vec<Kill> {
-        let mut kills = self.ledger.kills().to_vec();
-        for lost in self.aircraft.iter().filter(|a| !a.alive) {
-            if !kills.iter().any(|k| k.victim == lost.id)
-                && let Some(kill) = self.ledger.credit(lost.id)
-            {
-                kills.push(kill);
-            }
-        }
-        kills
-    }
-    fn pilot(&self, airframe: &Airframe) -> Pilot {
-        let id = airframe.id;
-        let own = |kind: ShotKind| self.ledger.total(|k| k.owner == id && k.kind == kind);
-        // Enemy aircraft fire splits only into guns and everything else.
-        let at = |gun: bool| {
-            self.ledger.total(|k| {
-                k.aim == Some(id) && (k.kind == ShotKind::Gun) == gun && self.hostile(k.owner)
-            })
-        };
-        let status = if airframe.ejected {
-            Status::Ejected
-        } else if airframe.alive {
-            Status::Alive
-        } else {
-            Status::Dead
-        };
-        let mut pilot = Pilot {
-            status,
-            damage: if status == Status::Alive {
-                airframe.damage
-            } else {
-                1.
-            },
-            landing_grade: airframe.landing_grade,
-            cause: airframe.cause.map(|c| c.label()),
-            air_to_air: own(ShotKind::AirToAir),
-            air_to_ground: own(ShotKind::AirToGround),
-            gun: own(ShotKind::Gun),
-            bombs: own(ShotKind::Bomb),
-            enemy_aam: at(false),
-            enemy_gun: at(true),
-            ..Pilot::default()
-        };
-        for kill in self.kills().iter().filter(|k| k.owner == id) {
-            if self.friendly(kill.victim) {
-                pilot.friendly_fire += 1;
-            } else if let Some(row) = kill_row(kill.category) {
-                pilot.kills[row] += 1;
-            }
-        }
-        pilot
-    }
-}
-
-/// The kill row for a victim's object class word: the first matching bit of
-/// 0x8000 fighter, 0x4000 bomber, 0x2000 ship, 0x1000 SAM, 0x800 AAA,
-/// 0x400 tank, 0x200 vehicle, 0x100 structure and 0x40 other. Retail puts
-/// helicopters first by a PT flag; no supported aircraft is a helicopter yet.
-pub fn kill_row(category: u16) -> Option<usize> {
-    const BITS: [(u16, usize); 9] = [
-        (0x8000, 0),
-        (0x4000, 1),
-        (0x2000, 3),
-        (0x1000, 4),
-        (0x800, 5),
-        (0x400, 6),
-        (0x200, 7),
-        (0x100, 8),
-        (0x40, 9),
-    ];
-    BITS.iter()
-        .find(|(bit, _)| category & bit != 0)
-        .map(|(_, row)| *row)
-}
-
-/// Reads the mission's results from the live flight, combat and AI bridge.
-/// Call before `Action::Back` drops the bridge.
-pub fn capture(
-    combat: &crate::combat::Combat,
-    flight: &crate::flight::State,
-    wings: Option<&crate::ai_wings::AiWings>,
-) -> Report {
-    use tore_sim::ai::launch::Side;
-    let state = &combat.state;
-    let pilot = &flight.systems.pilot;
-    let player = Airframe {
-        id: 0,
-        friendly: true,
-        alive: !flight.crashed && state.player_hp > 0 && !pilot.dead && !pilot.ejected,
-        ejected: pilot.ejected && !pilot.dead,
-        damage: flight.damage_fraction,
-        landing_grade: flight.research.as_ref().and_then(|r| r.landings.grade()),
-        cause: flight.systems.structure.cause,
-    };
-    let mut aircraft = Vec::new();
-    let (mut wingman, mut destroy, mut protect) = (None, Vec::new(), Vec::new());
-    if let Some(wings) = wings {
-        let mission = wings.mission();
-        for slot in wings.slots() {
-            let actor = mission.actor(slot.id);
-            aircraft.push(Airframe {
-                id: slot.id,
-                friendly: slot.side == Side::Friendly,
-                alive: actor.is_some_and(|a| a.alive() && a.flight().escape.is_none()),
-                ejected: actor.is_some_and(|a| a.flight().escape.is_some()),
-                damage: actor.map_or(1., |a| a.flight().damage_fraction),
-                // AI aircraft do not land yet.
-                landing_grade: None,
-                cause: actor.and_then(|a| a.flight().systems.structure.cause),
-            });
-        }
-        wingman = wings
-            .slots()
-            .iter()
-            .filter(|s| s.side == Side::Friendly && s.wing_number == 1)
-            .min_by_key(|s| s.member_number)
-            .map(|s| s.id);
-        let assignment = mission.player_assignment();
-        destroy = assignment.destroy_ids.clone();
-        // Retail Quick Missions make every enemy aircraft a target. That still
-        // applies when the player's flight has no assigned target group.
-        if destroy.is_empty() {
-            destroy = aircraft
-                .iter()
-                .filter(|a| !a.friendly)
-                .map(|a| a.id)
-                .collect();
-        }
-        protect = friendly_objectives(&assignment.protected_ids, mission.must_survive(), &aircraft);
-    }
-    report(&Ending {
-        ledger: &state.ledger,
-        ticks: state.tick(),
-        player,
-        aircraft,
-        wingman,
-        destroy,
-        protect,
-    })
-}
-
-/// The player's friendly objectives: the aircraft the player's flight
-/// protects, then every aircraft of the player's side whose group must
-/// survive (the player is id 0). An enemy group whose survival its own side
-/// requires is not the player's objective (docs/spec/debrief.md, "Friendly
-/// objectives"; battery finding 2026-09-29: destroying such a group failed
-/// the player's mission).
-fn friendly_objectives(protected: &[u32], must_survive: &[u32], aircraft: &[Airframe]) -> Vec<u32> {
-    let mut protect = protected.to_vec();
-    for id in must_survive {
-        let friendly = *id == 0 || aircraft.iter().any(|a| a.id == *id && a.friendly);
-        if friendly && !protect.contains(id) {
-            protect.push(*id);
-        }
-    }
-    protect
-}
-
-pub fn report(end: &Ending) -> Report {
-    let destroyed = end
-        .destroy
-        .iter()
-        .filter(|id| end.airframe(**id).is_none_or(|a| !a.alive))
-        .count() as u32;
-    let protected = end
-        .protect
-        .iter()
-        .filter(|id| end.airframe(**id).is_some_and(|a| a.alive))
-        .count() as u32;
-    let mut objectives = Vec::new();
-    if !end.destroy.is_empty() {
-        objectives.push(Objective::Destroy {
-            destroyed,
-            total: end.destroy.len() as u32,
-        });
-    }
-    if !end.protect.is_empty() {
-        objectives.push(Objective::Protect {
-            protected,
-            total: end.protect.len() as u32,
-        });
-    }
-    let player = end.pilot(&end.player);
-    let success = player.friendly_fire == 0
-        && destroyed as usize == end.destroy.len()
-        && protected as usize == end.protect.len();
-    Report {
-        outcome: if success {
-            Outcome::Success
-        } else {
-            Outcome::Failure
-        },
-        objectives,
-        elapsed_seconds: end.ticks / 120,
-        player,
-        wingman: end
-            .wingman
-            .and_then(|id| end.airframe(id))
-            .map(|a| end.pilot(a)),
-    }
-}
-
-impl Report {
-    /// One line for headless probes: outcome, objectives and both columns.
-    pub fn summary(&self) -> String {
-        let pilot = |p: &Pilot| {
-            format!(
-                "{:?} damage={:.0}% kills={:?} ff={} a2a={}/{} dmg={} gun={}/{} enemy_aam={}/{} enemy_gun={}/{}{}",
-                p.status,
-                p.damage * 100.,
-                p.kills,
-                p.friendly_fire,
-                p.air_to_air.hit,
-                p.air_to_air.launched,
-                p.air_to_air.damage,
-                p.gun.hit,
-                p.gun.launched,
-                p.enemy_aam.hit,
-                p.enemy_aam.launched,
-                p.enemy_gun.hit,
-                p.enemy_gun.launched,
-                p.cause.map_or_else(String::new, |c| format!(" cause={c}")),
-            )
-        };
-        format!(
-            "{} {:?} elapsed={}s player[{}] wingman[{}]",
-            self.outcome.label(),
-            self.objectives,
-            self.elapsed_seconds,
-            pilot(&self.player),
-            self.wingman.as_ref().map_or_else(|| "-".into(), pilot),
-        )
-    }
-    /// The retail reference case: a failed Quick Mission flown alone for one
-    /// second with nothing fired. Used by `--snapshot-state debrief-N`.
-    pub fn sample() -> Self {
-        Self {
-            outcome: Outcome::Failure,
-            objectives: vec![Objective::Destroy {
-                destroyed: 0,
-                total: 3,
-            }],
-            elapsed_seconds: 1,
-            player: Pilot::default(),
-            wingman: None,
-        }
-    }
-}
 
 fn count(value: u32) -> String {
     if value == 0 {
@@ -461,14 +64,69 @@ fn cell(pilot: Option<&Pilot>, value: impl Fn(&Pilot) -> String) -> String {
     pilot.map(value).unwrap_or_else(|| "-".into())
 }
 
+/// How a networked flight's debrief says it ended when its objectives did
+/// not decide the result: the first page's heading and sentence, and the
+/// outcome line's word. Single player never has one (its debrief is
+/// unchanged); see `net::debrief::ending`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ended {
+    pub title: String,
+    pub sentence: String,
+}
+
+/// The first page of an ended mission: the retail page's own layout with its
+/// heading and result sentence replaced.
+fn ended_page(retail: &[String], ended: &Ended) -> Vec<String> {
+    let mut page = Vec::new();
+    let mut seen = 0;
+    for line in retail {
+        let trimmed = line.trim();
+        if trimmed.starts_with('.') || trimmed.is_empty() {
+            page.push(line.clone());
+            continue;
+        }
+        seen += 1;
+        match seen {
+            1 => page.push(ended.title.clone()),
+            2 => page.push(ended.sentence.clone()),
+            _ => {}
+        }
+    }
+    if seen == 0 {
+        page = vec![".center".into(), ".header".into(), ended.title.clone()];
+    }
+    if seen < 2 {
+        page.extend([".body".into(), String::new(), ended.sentence.clone()]);
+    }
+    page
+}
+
+/// The pages with none of a networked flight's extra ones.
+#[cfg(test)]
+pub fn pages_ended(report: &Report, text: &MissionText, ended: Option<&Ended>) -> Vec<Vec<String>> {
+    pages_with(report, text, ended, &[])
+}
+
 /// Page markup in the mission-text grammar: `.center`, `.left`, `.header`,
 /// `.body`, `.bold`/`..bold`, `.underline`/`..underline` and tab columns.
-pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
+/// `ended` is a networked flight's, which its objectives did not decide.
+/// `extra` pages (a networked flight's SCORES and RESULTS, see
+/// `net::debrief::extra_pages`) are turned in after the first.
+pub fn pages_with(
+    report: &Report,
+    text: &MissionText,
+    ended: Option<&Ended>,
+    extra: &[Vec<String>],
+) -> Vec<Vec<String>> {
     let success = report.outcome == Outcome::Success;
-    let first = text
+    let retail = text
         .debrief(success)
         .map(<[String]>::to_vec)
         .unwrap_or_default();
+    let first = match ended {
+        Some(ended) => ended_page(&retail, ended),
+        None => retail,
+    };
     let player = Some(&report.player);
     let wing = report.wingman.as_ref();
     let row = |label: &str, value: &dyn Fn(&Pilot) -> String| {
@@ -494,7 +152,14 @@ pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
     };
     let group = |title: &str| vec![".bold".to_string(), title.to_string(), "..bold".into()];
 
-    let mut outcome = heading(&format!("MISSION OUTCOME : {}", report.outcome.label()));
+    let mut outcome = heading(&format!(
+        "MISSION OUTCOME : {}",
+        if ended.is_some() {
+            "INCOMPLETE"
+        } else {
+            report.outcome.label()
+        }
+    ));
     for objective in &report.objectives {
         outcome.extend([String::new(), objective.sentence()]);
     }
@@ -523,6 +188,14 @@ pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
     if player.is_some_and(|p| p.cause.is_some()) || wing.is_some_and(|p| p.cause.is_some()) {
         outcome.push(row("Cause", &|p| {
             p.cause.map_or_else(|| "-".into(), |c| c.to_string())
+        }));
+    }
+    // Only when a surface unit (a SAM site, a gun, a ship) scored the loss.
+    if player.is_some_and(|p| p.shot_down_by.is_some())
+        || wing.is_some_and(|p| p.shot_down_by.is_some())
+    {
+        outcome.push(row("Shot down by", &|p| {
+            p.shot_down_by.clone().unwrap_or_else(|| "-".into())
         }));
     }
     outcome.push(row("Damage", &|p| {
@@ -591,7 +264,10 @@ pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
     enemy.push(String::new());
     shots(&mut enemy, "AAA", &|p| p.enemy_aaa);
 
-    vec![first, outcome, kills, hits, enemy]
+    let mut pages = vec![first];
+    pages.extend(extra.iter().cloned());
+    pages.extend([outcome, kills, hits, enemy]);
+    pages
 }
 
 pub struct Debrief {
@@ -614,6 +290,20 @@ impl Debrief {
         report: Report,
         data: &BTreeMap<String, Vec<u8>>,
         background: Option<&str>,
+    ) -> AppResult<Self> {
+        Self::networked(report, data, background, None, &[])
+    }
+
+    /// A networked flight's debrief: `ended` is set when the flight ended
+    /// without its objectives deciding the result (the King, the server or
+    /// the player ended it), so it shows no success or failure it did not
+    /// earn.
+    pub fn networked(
+        report: Report,
+        data: &BTreeMap<String, Vec<u8>>,
+        background: Option<&str>,
+        ended: Option<&Ended>,
+        extra: &[Vec<String>],
     ) -> AppResult<Self> {
         let background = background.map_or_else(
             || {
@@ -690,7 +380,7 @@ impl Debrief {
                 .ok_or("missing debrief resource QUICK.MT; re-import media")?,
         )?;
         Ok(Self {
-            pages: pages(&report, &text),
+            pages: pages_with(&report, &text, ended, extra),
             page: 0,
             sprites,
             background,
@@ -844,7 +534,7 @@ impl Debrief {
         let panel = &s["PANELFNT.PIC"];
         c.text(panel, "PREV", ox + 20, oy + 41, None);
         c.text(panel, "NEXT", ox + 20, oy + 63, None);
-        let rocker = &s[&self.rocker.sprite()];
+        let rocker = &s[self.rocker.sprite()];
         c.blit(rocker, (ox + 48, oy + 39), 0, rocker.width, 1.);
         self.controls.extend([
             (PREVIOUS, (ox + 48, oy + 39, 18, 16)),
@@ -891,12 +581,26 @@ fn label(c: &mut Canvas, font: &Sprite, text: &str, (x, y, w): (i32, i32, i32)) 
 /// Lays out one page of mission-text markup on the clipboard.
 fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], first_page: bool) {
     let (mut center, mut header, mut bold, mut underline) = (false, false, false, false);
+    // `.columns X1 X2 ...` (the networked pages' own directive, not retail's)
+    // starts cell n of every following line at the n-th x, whatever the
+    // cells before it hold.
+    let mut columns: Vec<i32> = Vec::new();
     let mut y = TOP;
     for line in lines {
         let trimmed = line.trim();
         if trimmed.starts_with('.') {
-            for directive in trimmed.split_whitespace() {
+            let mut words = trimmed.split_whitespace();
+            while let Some(directive) = words.next() {
                 match directive {
+                    ".columns" => {
+                        columns.clear();
+                        let mut rest = words.clone().peekable();
+                        while let Some(x) = rest.peek().and_then(|w| w.parse::<i32>().ok()) {
+                            columns.push(x);
+                            rest.next();
+                            words.next();
+                        }
+                    }
                     ".center" => center = true,
                     ".left" => center = false,
                     ".header" => header = true,
@@ -927,7 +631,9 @@ fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], fir
             LEFT
         };
         for (index, text) in cells.iter().enumerate() {
-            if index > 0 {
+            if let Some(column) = columns.get(index).filter(|_| cells.len() > 1) {
+                x = *column;
+            } else if index > 0 {
                 x = TABS.iter().copied().find(|stop| *stop > x).unwrap_or(x);
             }
             c.text(font, text, x, y, None);
@@ -955,35 +661,15 @@ fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], fir
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
+        pages_ended(report, text, None)
+    }
     fn text() -> MissionText {
         MissionText::parse(
             b".section 3\n.center\n.header\nWON\n.section 4\n.center\n.header\nLOST\n",
         )
         .unwrap()
     }
-    #[test]
-    fn enemy_survival_groups_are_not_the_players_objectives() {
-        let craft = |id, friendly| Airframe {
-            id,
-            friendly,
-            alive: false,
-            ejected: false,
-            damage: 1.,
-            landing_grade: None,
-            cause: None,
-        };
-        let aircraft = [
-            craft(1, true),
-            craft(2, true),
-            craft(7, false),
-            craft(8, false),
-        ];
-        assert_eq!(
-            friendly_objectives(&[2], &[0, 1, 2, 7, 8], &aircraft),
-            vec![2, 0, 1]
-        );
-    }
-
     #[test]
     fn five_pages_with_mission_text_first() {
         let lost = pages(&Report::default(), &text());
@@ -998,6 +684,20 @@ mod tests {
         );
         assert_eq!(won[0][2], "WON");
         assert!(won[1].contains(&"MISSION OUTCOME : SUCCESS".to_string()));
+    }
+    #[test]
+    fn a_networked_flights_extra_pages_follow_the_first_and_single_player_has_none() {
+        let extra = vec![vec!["SCORES".to_owned()], vec!["RESULTS".to_owned()]];
+        let report = Report::default();
+        let with = pages_with(&report, &text(), None, &extra);
+        assert_eq!(with.len(), 7);
+        assert_eq!(with[0], [".center", ".header", "LOST"]);
+        assert_eq!(with[1], ["SCORES"]);
+        assert_eq!(with[2], ["RESULTS"]);
+        assert!(with[3].contains(&"MISSION OUTCOME : FAILURE".to_string()));
+        // The retail pages after them are the five-page debrief's, unchanged.
+        let plain = pages(&report, &text());
+        assert_eq!([&with[..1], &with[3..]].concat(), plain);
     }
     #[test]
     fn empty_cells_show_a_dash_and_missing_wingman_is_all_dashes() {
@@ -1028,63 +728,23 @@ mod tests {
         assert!(pages[3].contains(&"    Spoofed\t33%\t-".to_string()));
         assert!(pages[3].contains(&"    Hit\t1%\t-".to_string()));
     }
-    fn airframe(id: u32, friendly: bool, alive: bool) -> Airframe {
-        Airframe {
-            id,
-            friendly,
-            alive,
-            ejected: false,
-            damage: 0.25,
-            landing_grade: None,
-            cause: None,
-        }
-    }
-    fn ending(ledger: &Ledger) -> Ending<'_> {
-        Ending {
-            ledger,
-            ticks: 125 * 120 + 60,
-            player: airframe(0, true, true),
-            aircraft: vec![
-                airframe(1, true, true),
-                airframe(2, true, true),
-                airframe(10, false, false),
-                airframe(11, false, true),
-            ],
-            wingman: Some(1),
-            destroy: vec![10, 11],
-            protect: vec![],
-        }
-    }
     #[test]
-    fn an_out_of_bounds_enemy_is_a_lost_aircraft_credited_to_nobody() {
-        use tore_sim::aircraft_systems::LossCause;
-        use tore_sim::combat::ledger::Kill;
-        let mut ledger = Ledger::default();
-        // The player had hit enemy 10 earlier, then it flew off the map.
-        ledger.damaged(Kill {
-            owner: 0,
-            victim: 10,
-            category: 0x8000,
-            aircraft: true,
-        });
-        ledger.lose_without_credit(10);
-        let mut end = ending(&ledger);
-        end.aircraft[2].cause = Some(LossCause::OutOfBounds);
-        let plain = report(&end);
-        assert_eq!(plain.player.kills, [0; 10]);
-        // The debrief keeps its retail rows when nobody's cause is set.
+    fn a_lost_airframes_cause_shows_only_when_one_is_set() {
+        let plain = Report::default();
         assert!(
             !pages(&plain, &text())
                 .concat()
                 .iter()
                 .any(|l| l.starts_with("Cause"))
         );
-        end.player.alive = false;
-        end.player.cause = Some(LossCause::Overspeed);
-        let lost = report(&end);
-        assert_eq!(lost.player.status, Status::Dead);
-        assert_eq!(lost.player.cause, Some("overspeed"));
-        assert!(lost.summary().contains("cause=overspeed"));
+        let lost = Report {
+            player: Pilot {
+                status: Status::Dead,
+                cause: Some("overspeed"),
+                ..Pilot::default()
+            },
+            ..Report::default()
+        };
         assert!(
             pages(&lost, &text())
                 .concat()
@@ -1093,141 +753,283 @@ mod tests {
         );
     }
     #[test]
-    fn overspeed_belly_and_edge_losses_credit_no_kill_for_the_player_or_an_enemy() {
-        use tore_sim::aircraft_systems::LossCause;
-        use tore_sim::combat::ledger::Kill;
-        let mut ledger = Ledger::default();
-        // The player hit enemy 10 earlier, and enemy 10 had hit the player.
-        for (owner, victim) in [(0, 10), (10, 0)] {
-            ledger.damaged(Kill {
-                owner,
-                victim,
-                category: 0x8000,
-                aircraft: true,
-            });
-        }
-        // Enemy 10 is then lost to overspeed, belly wear or the map edge alike:
-        // the ledger holds no credit for it.
-        ledger.lose_without_credit(10);
-        let mut end = ending(&ledger);
-        end.aircraft[2].cause = Some(LossCause::Overspeed);
-        // The player is lost to overspeed too; a lost player is never credited
-        // to the last aircraft that hit it.
-        end.player.alive = false;
-        end.player.cause = Some(LossCause::Overspeed);
-        let report = report(&end);
-        assert_eq!(report.player.kills, [0; 10]);
-        assert_eq!(report.player.status, Status::Dead);
-        assert!(end.kills().iter().all(|k| k.victim != 10 && k.victim != 0));
-    }
-    #[test]
-    fn a_surviving_target_or_friendly_kill_fails_the_mission() {
-        use tore_sim::combat::ledger::{Kill, Resolution};
-        let mut ledger = Ledger::default();
-        let first = report(&ending(&ledger));
-        assert_eq!(first.outcome, Outcome::Failure);
-        assert_eq!(
-            first.objectives,
-            [Objective::Destroy {
-                destroyed: 1,
-                total: 2
-            }]
+    fn a_surface_units_kill_names_it_and_its_fire_fills_the_sam_and_aaa_rows() {
+        let plain = Report::default();
+        assert!(
+            !pages(&plain, &text())
+                .concat()
+                .iter()
+                .any(|l| l.starts_with("Shot down by"))
         );
-        assert_eq!(first.elapsed_seconds, 125);
-        let mut all_down = ending(&ledger);
-        all_down.aircraft[3].alive = false;
-        assert_eq!(report_outcome(&all_down), Outcome::Success);
-        // Shooting down a friendly turns the same result into a failure.
-        ledger.launch(5, 0, Some(2), ShotKind::AirToAir);
-        ledger.resolve(5, Resolution::Hit(90));
-        ledger.kill(Kill {
-            owner: 0,
-            victim: 2,
-            category: 0x8000,
-            aircraft: true,
-        });
-        let mut all_down = ending(&ledger);
-        all_down.aircraft[3].alive = false;
-        let result = report(&all_down);
-        assert_eq!(result.outcome, Outcome::Failure);
-        assert_eq!(result.player.friendly_fire, 1);
-        assert_eq!(result.player.kills, [0; 10]);
-    }
-    fn report_outcome(end: &Ending) -> Outcome {
-        report(end).outcome
-    }
-    #[test]
-    fn wingman_column_and_enemy_fire_follow_owner_and_aim() {
-        use tore_sim::combat::ledger::{Kill, Resolution};
-        let mut ledger = Ledger::default();
-        // The wingman downs a bomber; an enemy guns the wingman and fires a
-        // missile at the player.
-        ledger.kill(Kill {
-            owner: 1,
-            victim: 10,
-            category: 0x4000,
-            aircraft: true,
-        });
-        ledger.aim(20, 1);
-        ledger.launch(20, 11, None, ShotKind::Gun);
-        ledger.resolve(20, Resolution::Hit(15));
-        ledger.launch(21, 11, Some(0), ShotKind::AirToAir);
-        let mut end = ending(&ledger);
-        end.player.alive = false;
-        let result = report(&end);
-        let wingman = result.wingman.as_ref().unwrap();
-        assert_eq!(wingman.kills[1], 1);
-        assert_eq!(wingman.enemy_gun.hit, 1);
-        assert_eq!(wingman.enemy_gun.damage, 15);
-        assert_eq!(result.player.enemy_aam.launched, 1);
-        assert_eq!(result.player.enemy_gun.launched, 0);
-        assert_eq!(result.player.status, Status::Dead);
-        assert_eq!(result.player.damage, 1.);
-        assert_eq!(wingman.damage, 0.25);
-        // An enemy whose pilot ejects after the player's hit is the player's
-        // kill; an ejected wingman shows as ejected, with full damage.
-        let mut ledger = Ledger::default();
-        ledger.damaged(Kill {
-            owner: 0,
-            victim: 11,
-            category: 0x8000,
-            aircraft: true,
-        });
-        let mut end = ending(&ledger);
-        end.aircraft[3].alive = false;
-        end.aircraft[3].ejected = true;
-        end.aircraft[0].alive = false;
-        end.aircraft[0].ejected = true;
-        let result = report(&end);
-        assert_eq!(result.player.kills[0], 1);
-        assert_eq!(result.outcome, Outcome::Success);
-        let wingman = result.wingman.unwrap();
-        assert_eq!(wingman.status, Status::Ejected);
-        assert_eq!(wingman.damage, 1.);
-        let alone = report(&Ending {
-            wingman: None,
-            ..ending(&ledger)
-        });
-        assert!(alone.wingman.is_none());
+        let tally = |launched, hit| Tally {
+            launched,
+            hit,
+            damage: hit * 40,
+            ..Tally::default()
+        };
+        let shot = Report {
+            player: Pilot {
+                status: Status::Dead,
+                shot_down_by: Some("SA-6".into()),
+                enemy_sam: tally(4, 1),
+                enemy_aaa: tally(30, 3),
+                ..Pilot::default()
+            },
+            wingman: Some(Pilot {
+                status: Status::Dead,
+                shot_down_by: Some("ZSU-23-4".into()),
+                ..Pilot::default()
+            }),
+            ..Report::default()
+        };
+        let pages = pages(&shot, &text());
+        assert!(pages[1].contains(&"Shot down by\tSA-6\tZSU-23-4".to_string()));
+        // The enemy page: SAM launches and the AAA hit percentage.
+        assert!(pages[4].contains(&"    Launches\t4\t-".to_string()));
+        assert!(pages[4].contains(&"    Hit\t25% (40)\t-".to_string()));
+        assert!(pages[4].contains(&"    Hit\t10% (120)\t-".to_string()));
     }
     #[test]
-    fn kill_rows_take_the_first_matching_class_bit() {
-        assert_eq!(kill_row(0x8000), Some(0));
-        assert_eq!(kill_row(0x4000), Some(1));
-        assert_eq!(kill_row(0x2100), Some(3));
-        assert_eq!(kill_row(0x100), Some(8));
-        assert_eq!(kill_row(0x40), Some(9));
-        assert_eq!(kill_row(0x1), None);
+    fn an_ended_mission_keeps_the_retail_layout_and_says_it_was_not_decided() {
+        let ended = Ended {
+            title: "MISSION ENDED".into(),
+            sentence: "The King ended the mission.".into(),
+        };
+        let retail = b".section 4\n.center\n.header\nMISSION FAILURE\n.left\n.body\n\nYou failed this Quick Mission.\n";
+        let text = MissionText::parse(retail).unwrap();
+        let ended_pages = pages_ended(&Report::default(), &text, Some(&ended));
+        assert_eq!(
+            ended_pages[0],
+            [
+                ".center",
+                ".header",
+                "MISSION ENDED",
+                ".left",
+                ".body",
+                "",
+                "The King ended the mission."
+            ]
+        );
+        assert!(ended_pages[1].contains(&"MISSION OUTCOME : INCOMPLETE".to_string()));
+        // Without it the page is the retail one, word for word.
+        let plain = pages_ended(&Report::default(), &text, None);
+        assert!(plain[0].contains(&"You failed this Quick Mission.".to_string()));
+        assert!(plain[1].contains(&"MISSION OUTCOME : FAILURE".to_string()));
+        // A mission text with no section still gets a page.
+        let empty = MissionText::parse(b".section 1\nX\n").unwrap();
+        let bare = pages_ended(&Report::default(), &empty, Some(&ended));
+        assert!(bare[0].contains(&"MISSION ENDED".to_string()));
+        assert!(bare[0].contains(&"The King ended the mission.".to_string()));
     }
+}
+
+/// The multiplayer pages as they draw (stage F phase 2, slice F2-D): thirty
+/// aircraft and a dozen players, headless. The committed tests lay the pages
+/// out in a bundled font (the retail ones need the user's media), checking
+/// that every page stays on the clipboard's height; the ignored one draws
+/// them with the retail art of an imported profile and checks every cell
+/// against its column in the retail fonts.
+#[cfg(test)]
+mod net_pages {
+    use super::*;
+    use crate::net::debrief::{PER_PAGE, extra_pages, sample_results};
+
+    const WHITE: [u8; 3] = [255, 255, 255];
+    /// The clipboard paper's right edge, and the lowest line that fits.
+    const RIGHT: i32 = 581;
+    const BOTTOM: i32 = 466;
+
+    /// The retail fonts' places taken by the bundled font.
+    fn bundled_fonts() -> BTreeMap<String, Sprite> {
+        ["BODYFONT.PIC", "BOLDFONT.PIC", "HEADFONT.PIC"]
+            .into_iter()
+            .map(|name| (name.to_owned(), crate::menu::flat_font(WHITE)))
+            .collect()
+    }
+
+    /// Draws the page and returns the box of pixels it touched.
+    fn bounds(fonts: &BTreeMap<String, Sprite>, lines: &[String]) -> (i32, i32, i32, i32) {
+        let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
+        clipboard(&mut Canvas(&mut pixels), fonts, lines, false);
+        let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, 0, 0);
+        for (n, px) in pixels.chunks_exact(4).enumerate() {
+            if px[3] > 0 {
+                let (x, y) = ((n % WIDTH) as i32, (n / WIDTH) as i32);
+                (left, top, right, bottom) = (left.min(x), top.min(y), right.max(x), bottom.max(y));
+            }
+        }
+        (left, top, right, bottom)
+    }
+
+    /// Every cell of a `.columns` page against its column: where the cell
+    /// ends must be left of the next column (a pixel to spare), and the last
+    /// one inside the paper. Returns what does not fit.
+    fn overflows(fonts: &BTreeMap<String, Sprite>, lines: &[String]) -> Vec<String> {
+        let (mut columns, mut bold) = (Vec::<i32>::new(), false);
+        let mut problems = Vec::new();
+        for line in lines {
+            if line.trim().starts_with('.') {
+                let mut words = line.split_whitespace();
+                while let Some(word) = words.next() {
+                    match word {
+                        ".columns" => {
+                            columns = words.clone().map_while(|w| w.parse().ok()).collect();
+                        }
+                        ".bold" => bold = true,
+                        "..bold" => bold = false,
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+            let cells: Vec<&str> = line.split('\t').collect();
+            if cells.len() < 2 {
+                continue;
+            }
+            let font = &fonts[if bold { "BOLDFONT.PIC" } else { "BODYFONT.PIC" }];
+            for (n, cell) in cells.iter().enumerate() {
+                let end = columns[n] + text_width(font, cell.trim_end());
+                // A cell may run on over the empty ones after it.
+                let limit = (n + 1..cells.len())
+                    .find(|m| !cells[*m].is_empty())
+                    .map_or(RIGHT, |m| columns[m] - 1);
+                if end > limit {
+                    problems.push(format!("{cell:?} ends at {end}, past {limit}"));
+                }
+            }
+        }
+        problems
+    }
+
     #[test]
-    fn objective_sentences_follow_counts() {
-        let destroy = |destroyed, total| Objective::Destroy { destroyed, total }.sentence();
-        assert_eq!(destroy(0, 3), "Destroyed 0 of 3 targets.");
-        assert_eq!(destroy(3, 3), "Destroyed the 3 targets.");
-        assert_eq!(destroy(1, 1), "Destroyed the target.");
-        assert_eq!(destroy(0, 1), "Failed to destroy the target.");
-        let protect = |protected, total| Objective::Protect { protected, total }.sentence();
-        assert_eq!(protect(1, 2), "Protected 1 of 2 friendly objectives.");
-        assert_eq!(protect(0, 1), "Failed to protect the friendly objective.");
+    fn thirty_aircraft_and_a_dozen_players_fit_the_clipboard_and_page_as_designed() {
+        let fonts = bundled_fonts();
+        let results = sample_results(15, 6);
+        let pages = extra_pages(&results);
+        // One page of scores (12 players) and two of results (15 and 15).
+        assert_eq!(pages.len(), 3);
+        let text = |page: &[String]| page.iter().filter(|l| !l.starts_with('.')).count();
+        assert!(pages[0].contains(&"SCORES".to_string()));
+        assert!(pages[1].contains(&"RESULTS : FRIENDLY SIDE".to_string()));
+        assert!(pages[2].contains(&"RESULTS : ENEMY SIDE".to_string()));
+        // A heading, a blank, the column heads and the fifteen rows.
+        assert_eq!(text(&pages[1]), 1 + 1 + 1 + PER_PAGE);
+        assert_eq!(text(&pages[2]), 1 + 1 + 1 + PER_PAGE);
+        for (n, page) in pages.iter().enumerate() {
+            let (left, top, _, bottom) = bounds(&fonts, page);
+            assert!(left >= LEFT, "page {n} starts at {left}");
+            assert!(top >= TOP - 4, "page {n} starts at {top}");
+            assert!(bottom <= BOTTOM, "page {n} runs to {bottom}");
+        }
+    }
+
+    #[test]
+    fn thirty_players_take_two_score_pages_and_the_sides_totals_come_last() {
+        let fonts = bundled_fonts();
+        let results = sample_results(15, 15);
+        let pages = extra_pages(&results);
+        // Two of scores (15 and 15), two of results.
+        assert_eq!(pages.len(), 4);
+        let totals = |page: &[String]| page.iter().filter(|l| l.contains(" SIDE\t")).count();
+        assert_eq!((totals(&pages[0]), totals(&pages[1])), (0, 2));
+        // Ranks run on over the pages.
+        assert!(pages[1].iter().any(|l| l.starts_with("16\t")));
+        for page in &pages {
+            assert!(bounds(&fonts, page).3 <= BOTTOM);
+        }
+    }
+
+    #[test]
+    fn a_lopsided_mission_pages_each_side_apart() {
+        // 20 against 10: two pages for the first side, one for the second.
+        let mut results = sample_results(20, 0);
+        results
+            .rows
+            .retain(|r| r.wing.side == tore_sim::ai::launch::Side::Friendly || r.plane < 30);
+        results.scores = None;
+        let pages = extra_pages(&results);
+        let titles: Vec<&str> = pages
+            .iter()
+            .map(|p| {
+                p.iter()
+                    .find(|l| l.starts_with("RESULTS"))
+                    .unwrap()
+                    .as_str()
+            })
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                "RESULTS : FRIENDLY SIDE",
+                "RESULTS : FRIENDLY SIDE",
+                "RESULTS : ENEMY SIDE"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_column_starts_where_the_columns_directive_says_whatever_comes_before() {
+        let fonts = bundled_fonts();
+        let wide = ".columns 300 420".to_owned();
+        let alone = bounds(&fonts, &[wide.clone(), "A\tB".into()]);
+        let far = bounds(&fonts, &[wide, "AAAAAAAAAA\tB".into()]);
+        // The second cell sits at 420 either way: the right edge is the same.
+        assert_eq!(alone.2, far.2);
+    }
+
+    /// Draws the pages with the retail fonts and clipboard of an imported
+    /// profile, one picture each into `TORE_CREATOR_DUMP` when it is set, and
+    /// checks every cell against its column in the retail fonts:
+    ///
+    /// ```text
+    /// TORE_DATA_DIR=... TORE_CREATOR_DUMP=/some/folder cargo test --locked \
+    ///     -p tore-app debrief::net_pages::retail_art -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "needs an imported data profile (TORE_DATA_DIR)"]
+    fn retail_art_draws_the_multiplayer_pages() {
+        let data = crate::assets::data_directory().expect("data directory");
+        let assets = crate::assets::Assets::load(&data).expect("an imported pack");
+        for (name, per_side, humans) in [("even", 15, 6), ("lopsided", 20, 3), ("full", 15, 15)] {
+            let results = sample_results(per_side, humans);
+            let extra = extra_pages(&results);
+            let report = Report::sample();
+            let pages = 5 + extra.len();
+            for page in 0..pages {
+                let mut debrief = Debrief::networked(
+                    report.clone(),
+                    &assets.theater_resources,
+                    Some("DEBSCV.PIC"),
+                    None,
+                    &extra,
+                )
+                .unwrap();
+                debrief.page = page;
+                let mut shot = vec![0u8; WIDTH * HEIGHT * 4];
+                debrief.render(&mut shot);
+                if let Some(folder) = std::env::var_os("TORE_CREATOR_DUMP") {
+                    let folder = std::path::PathBuf::from(folder);
+                    std::fs::create_dir_all(&folder).unwrap();
+                    let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                    for p in shot.chunks_exact(4) {
+                        out.extend_from_slice(&p[..3]);
+                    }
+                    std::fs::write(
+                        folder.join(format!("debrief-net-{name}-{}.ppm", page + 1)),
+                        out,
+                    )
+                    .unwrap();
+                }
+                // The pages after the first and before the retail ones.
+                if (1..=extra.len()).contains(&page) {
+                    let problems = overflows(&debrief.sprites, &extra[page - 1]);
+                    assert!(
+                        problems.is_empty(),
+                        "{name} page {}: {problems:?}",
+                        page + 1
+                    );
+                }
+            }
+        }
     }
 }

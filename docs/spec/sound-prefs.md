@@ -314,3 +314,10 @@ rather than settings a player chooses.
   RADIO MSG slider.
 - `&TOGGLE1.5K`, extracted beside this dialog, is not used by it. The lever uses
   `&SWITCH.11K`.
+
+## Jettison sound
+
+Tank and selected-store release play the retail `&BOMB.11K` through the
+shared positional emission path, including replays and multiplayer. Inert land
+impacts use the small retail ground-impact samples, and water uses
+`&SPLASH3.11K`. Selection and provenance are in [jettison](jettison.md).

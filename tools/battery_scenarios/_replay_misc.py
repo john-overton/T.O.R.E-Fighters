@@ -69,7 +69,7 @@ def diagnostics_scenarios() -> list[Scenario]:
             name="replay-diag-startup-script",
             lane="replay",
             args=["--version"],
-            then=[Step([PY, "tools/check_startup_diagnostics.py", str(ROOT / "target" / "debug" / "tore-app")], app=False, timeout=240)],
+            then=[Step([PY, "tools/check_startup_diagnostics.py", "{bin}"], app=False, timeout=240)],
             expect=[r"tore-app|T\.O\.R\.E"],
             check_work=lambda work, output: [] if "Startup diagnostics passed" in output else ["startup diagnostics script did not pass"],
         )
@@ -168,7 +168,7 @@ def input_scenarios() -> list[Scenario]:
         "wrong-header": (b"not a profile\n", "expected tore-input 1"),
         "future-version": (b"tore-input 2\n", "expected tore-input 1"),
         "bad-action": (b"tore-input 1\nbind key:F1 nonsense-action press\n", "invalid profile directive"),
-        "fire-press": (b"tore-input 1\nbind bogus button:1 fire press\n", "fire requires hold"),
+        "fire-press": (b"tore-input 1\nbind bogus button:1 fire press\n", "fire and fire-gun require hold"),
         "dup-alias": (b"tore-input 1\nalias a linux-xx\nalias a linux-yy\n", "duplicate alias"),
         "bad-utf8": (b"\xff\xfe\x00 bad", "valid UTF-8"),
         "too-big": (b"#" * 300_000, "exceeds 256 KiB"),
@@ -444,7 +444,9 @@ BAD_OPTIONS = {
     "monitor-word": (["--monitor-inputs", "abc"], "--monitor-inputs needs a number"),
     "monitor-range": (["--monitor-inputs", "100000"], "must be 1..300 seconds"),
     "rumble-none": (["--test-rumble", "nosuchdevice"], "rumble device was not found"),
-    "probe-ticks-zero": (["--ai-probe-ticks", "0"], "needs 1 to 216000 ticks"),
+    # 288000 since ca59477f: 40 minutes, so a four-ship landing on a merged
+    # 12,000 ft field can finish its taxi. 216000 was the old 30 minute cap.
+    "probe-ticks-zero": (["--ai-probe-ticks", "0"], "needs 1 to 288000 ticks"),
     "probe-ticks-word": (["--ai-probe-ticks", "many"], "--ai-probe-ticks needs a number"),
     "ground-start-word": (["--ai-probe-ticks", "60", "--ground-start", "x"], "--ground-start needs a number"),
     "ground-start-none": (["--ai-probe-ticks", "60", "--ground-start", "99"], "airport is unavailable"),

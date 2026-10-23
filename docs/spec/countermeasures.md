@@ -129,7 +129,10 @@ messages, decoy odds or seekers.
   chaff and smoke with warm white light, linear RGB (1, 0.75, 0.45).
 - It falls with the square of distance. At full strength it lights a surface
   facing it as brightly as full sun at about 63 feet, a quarter as brightly at
-  126 feet, and not at all beyond 1,500 feet.
+  126 feet, and not at all beyond 1,500 feet. A light of the same law
+  stronger than a flare (a bomb's flash, a big fire) reaches farther, by the
+  square root of its strength in flares (nr-fx3, [night
+  glow](explosions.md#night-glow)); a flare's own reach is unchanged.
 - At night eyes adapt to the dark, so the same flare counts up to four times
   as much. The boost blends in as the sun goes down.
 - Night weather darkens the art itself. Under flare light, surfaces show the

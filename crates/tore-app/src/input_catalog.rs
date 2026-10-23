@@ -12,16 +12,18 @@ pub enum Group {
     Weapons,
     Sensors,
     View,
+    Replay,
     Communication,
     Game,
 }
 impl Group {
-    pub const ALL: [Group; 7] = [
+    pub const ALL: [Group; 8] = [
         Group::Flight,
         Group::Systems,
         Group::Weapons,
         Group::Sensors,
         Group::View,
+        Group::Replay,
         Group::Communication,
         Group::Game,
     ];
@@ -32,6 +34,7 @@ impl Group {
             Group::Weapons => "Weapons",
             Group::Sensors => "Sensors and instruments",
             Group::View => "View",
+            Group::Replay => "Replay drone",
             Group::Communication => "Communication",
             Group::Game => "Game and menus",
         }
@@ -43,7 +46,7 @@ impl Group {
 pub enum Kind {
     /// A centered analog action: stick, rudder, look.
     Axis,
-    /// The absolute throttle lever.
+    /// An absolute throttle, nozzle, nacelle or collective lever.
     Lever,
     /// An absolute head-tracker angle.
     Head,
@@ -67,8 +70,22 @@ pub struct Entry {
     pub mouse: &'static [&'static str],
     /// Stock keys that the player cannot remove (menu, window, exit).
     pub fixed: bool,
+    /// Built-in shortcut active only on a menu screen.
+    pub menu_context: bool,
 }
 impl Entry {
+    pub fn replay_only(&self) -> bool {
+        self.group == Group::Replay
+    }
+    /// Replay assignments have their own desktop context. Removing W here
+    /// must not remove a flight action on W, or vice versa.
+    pub fn device<'a>(&self, device: &'a str) -> &'a str {
+        match (self.replay_only(), device) {
+            (true, "keyboard") => "replay-keyboard",
+            (true, "mouse") => "replay-mouse",
+            _ => device,
+        }
+    }
     pub fn parsed(&self) -> Option<Action> {
         Action::parse(self.action).ok()
     }
@@ -113,6 +130,7 @@ const fn e(
         keys,
         mouse: &[],
         fixed: false,
+        menu_context: false,
     }
 }
 const fn cmd(
@@ -137,6 +155,7 @@ const fn fixed(
         keys,
         mouse: &[],
         fixed: true,
+        menu_context: false,
     }
 }
 const fn mouse(
@@ -154,12 +173,69 @@ const fn mouse(
         keys,
         mouse,
         fixed: false,
+        menu_context: false,
     }
+}
+const fn menu_shortcut(label: &'static str, keys: &'static [&'static str]) -> Entry {
+    let mut entry = fixed("", label, Group::Game, keys);
+    entry.menu_context = true;
+    entry
 }
 use Group::*;
 use Kind::{Axis, Direction, Head, Hold, Lever};
 
 pub const ENTRIES: &[Entry] = &[
+    cmd(
+        "drone-cycle",
+        "Drone: cycle flight/follow/free",
+        Replay,
+        &["`"],
+    ),
+    cmd("drone-follow", "Drone: follow aircraft", Replay, &[]),
+    cmd("drone-free", "Drone: free camera", Replay, &[]),
+    e("drone-forward", "Drone: move forward", Replay, Hold, &["w"]),
+    e(
+        "drone-backward",
+        "Drone: move backward",
+        Replay,
+        Hold,
+        &["s"],
+    ),
+    e("drone-left", "Drone: move left", Replay, Hold, &["a"]),
+    e("drone-right", "Drone: move right", Replay, Hold, &["d"]),
+    e("drone-up", "Drone: move up", Replay, Hold, &["e"]),
+    e("drone-down", "Drone: move down", Replay, Hold, &["q"]),
+    e(
+        "drone-boost",
+        "Drone: four times faster",
+        Replay,
+        Hold,
+        &["Shift"],
+    ),
+    Entry {
+        mouse: &["button:right"],
+        ..e(
+            "drone-look",
+            "Drone: hold to look with mouse",
+            Replay,
+            Hold,
+            &[],
+        )
+    },
+    mouse(
+        "drone-faster",
+        "Drone: increase movement speed",
+        Replay,
+        &[],
+        &["wheel:up"],
+    ),
+    mouse(
+        "drone-slower",
+        "Drone: decrease movement speed",
+        Replay,
+        &[],
+        &["wheel:down"],
+    ),
     e("pitch", "Pitch (nose up/down)", Flight, Axis, &[]),
     e(
         "pitch",
@@ -187,7 +263,248 @@ pub const ENTRIES: &[Entry] = &[
         Direction(1.),
         &["PageDown", "x"],
     ),
-    e("throttle", "Throttle lever", Flight, Lever, &[]),
+    e(
+        "vector-pitch",
+        "Nozzle pitch (VTOL) lever",
+        Flight,
+        Lever,
+        &[],
+    ),
+    e(
+        "vector-pitch-rate",
+        "Nozzle pitch (VTOL) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "vector-pitch-rate",
+        "Nozzle pitch (VTOL): decrease",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-ArrowUp"],
+    ),
+    e(
+        "vector-pitch-rate",
+        "Nozzle pitch (VTOL): increase",
+        Flight,
+        Direction(1.),
+        &["Ctrl-ArrowDown"],
+    ),
+    e("vector-yaw", "Nozzle yaw (VTOL) lever", Flight, Axis, &[]),
+    e(
+        "vector-yaw-rate",
+        "Nozzle yaw (VTOL) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "vector-yaw-rate",
+        "Nozzle yaw (VTOL): decrease",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-ArrowLeft"],
+    ),
+    e(
+        "vector-yaw-rate",
+        "Nozzle yaw (VTOL): increase",
+        Flight,
+        Direction(1.),
+        &["Ctrl-ArrowRight"],
+    ),
+    e(
+        "conversion",
+        "Nacelle conversion (V-22) lever",
+        Flight,
+        Lever,
+        &[],
+    ),
+    e(
+        "conversion-rate",
+        "Nacelle conversion (V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "conversion-rate",
+        "Nacelle conversion (V-22): decrease",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-PageUp"],
+    ),
+    e(
+        "conversion-rate",
+        "Nacelle conversion (V-22): increase",
+        Flight,
+        Direction(1.),
+        &["Ctrl-PageDown"],
+    ),
+    e(
+        "collective",
+        "Collective (helicopters / V-22) lever",
+        Flight,
+        Lever,
+        &[],
+    ),
+    e(
+        "collective-rate",
+        "Collective (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "collective-rate",
+        "Collective (helicopters / V-22): decrease",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-End"],
+    ),
+    e(
+        "collective-rate",
+        "Collective (helicopters / V-22): increase",
+        Flight,
+        Direction(1.),
+        &["Ctrl-Home"],
+    ),
+    cmd(
+        "neutral-vector",
+        "Nozzles/nacelles: forward neutral",
+        Flight,
+        &["0"],
+    ),
+    cmd(
+        "nozzle-step-up",
+        "Nozzles up (aft) 10 degrees (AV-8, Yak-141)",
+        Flight,
+        &["z"],
+    ),
+    cmd(
+        "nozzle-step-down",
+        "Nozzles down 10 degrees (AV-8, Yak-141)",
+        Flight,
+        &["x"],
+    ),
+    cmd(
+        "nozzle-preset-forward",
+        "Nozzles to 0, or braking stop to vertical (AV-8, Yak-141)",
+        Flight,
+        &["Shift-z"],
+    ),
+    cmd(
+        "nozzle-preset-vertical",
+        "Nozzles vertical, again to the braking stop (AV-8, Yak-141)",
+        Flight,
+        &["Shift-x"],
+    ),
+    e(
+        "trim-pitch-rate",
+        "Cyclic trim fore/aft (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "trim-pitch-rate",
+        "Cyclic trim forward (helicopters / V-22)",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-ArrowUp"],
+    ),
+    e(
+        "trim-pitch-rate",
+        "Cyclic trim aft (helicopters / V-22)",
+        Flight,
+        Direction(1.),
+        &["Ctrl-ArrowDown"],
+    ),
+    e(
+        "trim-roll-rate",
+        "Cyclic trim left/right (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "trim-roll-rate",
+        "Cyclic trim left (helicopters / V-22)",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-ArrowLeft"],
+    ),
+    e(
+        "trim-roll-rate",
+        "Cyclic trim right (helicopters / V-22)",
+        Flight,
+        Direction(1.),
+        &["Ctrl-ArrowRight"],
+    ),
+    e(
+        "trim-pedal-rate",
+        "Pedal trim (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "trim-pedal-rate",
+        "Pedal trim left (helicopters / V-22)",
+        Flight,
+        Direction(-1.),
+        &[],
+    ),
+    e(
+        "trim-pedal-rate",
+        "Pedal trim right (helicopters / V-22)",
+        Flight,
+        Direction(1.),
+        &[],
+    ),
+    cmd(
+        "trim-set",
+        "Trim set / force trim release (helicopters / V-22)",
+        Flight,
+        &[],
+    ),
+    cmd(
+        "trim-centre",
+        "Trim to centre (helicopters)",
+        Flight,
+        &["0"],
+    ),
+    cmd(
+        "stability-level",
+        "Stability level: Off, Damper, Attitude (VTOL)",
+        Flight,
+        &["Ctrl-Shift-a"],
+    ),
+    cmd(
+        "stability-level=off",
+        "Stability level Off (VTOL)",
+        Flight,
+        &[],
+    ),
+    cmd(
+        "stability-level=damper",
+        "Stability level Damper (VTOL)",
+        Flight,
+        &[],
+    ),
+    cmd(
+        "stability-level=attitude",
+        "Stability level Attitude (VTOL)",
+        Flight,
+        &[],
+    ),
+    e(
+        "throttle",
+        "Throttle / engine power lever",
+        Flight,
+        Lever,
+        &[],
+    ),
     e("throttle-rate", "Throttle rate (axis)", Flight, Axis, &[]),
     e("throttle-rate", "Throttle up", Flight, Direction(1.), &[]),
     e(
@@ -218,6 +535,12 @@ pub const ENTRIES: &[Entry] = &[
         Flight,
         &["Ctrl-a"],
     ),
+    cmd(
+        "hover-hold",
+        "Hover hold autopilot (helicopters / V-22)",
+        Flight,
+        &["Ctrl-Alt-a"],
+    ),
     cmd("eject", "Eject (press twice)", Systems, &["Shift-e"]),
     cmd("gear", "Landing gear", Systems, &["g"]),
     cmd("flaps", "Flaps", Systems, &["f"]),
@@ -229,6 +552,116 @@ pub const ENTRIES: &[Entry] = &[
     e("fire", "Fire / release weapon", Weapons, Hold, &["Space"]),
     cmd("weapon-next", "Next weapon / NAV", Weapons, &["]"]),
     cmd("weapon-previous", "Previous weapon / NAV", Weapons, &["["]),
+    cmd(
+        "weapon-group-next",
+        "Next gun candidate (AC-130)",
+        Weapons,
+        &["Ctrl-7"],
+    ),
+    cmd(
+        "weapon-group-toggle",
+        "Link/unlink candidate gun (AC-130)",
+        Weapons,
+        &["Ctrl-8"],
+    ),
+    cmd(
+        "sensor-console",
+        "Sensor console and orbit hold (AC-130)",
+        Weapons,
+        &["Ctrl-9"],
+    ),
+    cmd(
+        "sight-designate",
+        "Sight: designate under crosshair",
+        Weapons,
+        &["\\"],
+    ),
+    cmd(
+        "sight-pin",
+        "Sight: pin ground point",
+        Weapons,
+        &["Shift-\\"],
+    ),
+    cmd(
+        "sight-pin-toggle",
+        "Sight: pin or release (AC-130 console: orbit or search)",
+        Weapons,
+        &["p"],
+    ),
+    cmd(
+        "gun-lock",
+        "Gun lock: guns stay on the target, the sensor slews free (AC-130)",
+        Weapons,
+        &["Shift-p"],
+    ),
+    cmd("sight-zoom-in", "Sight: zoom in", Weapons, &["Shift-'"]),
+    cmd("sight-zoom-out", "Sight: zoom out", Weapons, &["Shift-;"]),
+    cmd(
+        "sight-polarity",
+        "Sight: white hot / black hot / TV / night vision (AC-130 console)",
+        Weapons,
+        &["Ctrl-\\"],
+    ),
+    cmd(
+        "sight-whot",
+        "Sight: white hot (AC-130 console)",
+        Weapons,
+        &["Shift-F5"],
+    ),
+    cmd(
+        "sight-bhot",
+        "Sight: black hot (AC-130 console)",
+        Weapons,
+        &["Shift-F6"],
+    ),
+    cmd(
+        "sight-tv",
+        "Sight: TV (AC-130 console)",
+        Weapons,
+        &["Shift-F7"],
+    ),
+    cmd(
+        "sight-nvg",
+        "Sight: night vision (AC-130 console)",
+        Weapons,
+        &["Shift-F8"],
+    ),
+    cmd(
+        "console-range",
+        "Sensor console radar range 5 / 10 / 25 nm (AC-130 console)",
+        Weapons,
+        &["Ctrl-0"],
+    ),
+    e("sight-x", "Sight: slew left/right", Weapons, Axis, &[]),
+    e("sight-y", "Sight: slew up/down", Weapons, Axis, &[]),
+    e(
+        "sight-left",
+        "Sight: slew left",
+        Weapons,
+        Hold,
+        &["Alt-ArrowLeft"],
+    ),
+    e(
+        "sight-right",
+        "Sight: slew right",
+        Weapons,
+        Hold,
+        &["Alt-ArrowRight"],
+    ),
+    e(
+        "sight-up",
+        "Sight: slew up",
+        Weapons,
+        Hold,
+        &["Alt-ArrowUp"],
+    ),
+    e(
+        "sight-down",
+        "Sight: slew down",
+        Weapons,
+        Hold,
+        &["Alt-ArrowDown"],
+    ),
     cmd("designate", "Next radar target", Weapons, &["t"]),
     cmd(
         "designate-previous",
@@ -250,19 +683,53 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd(
         "weapon-seeker-mode",
-        "Seeker mode (bore/cued)",
+        "Delivery mode (CCIP/LVL, bore/cued)",
         Weapons,
-        &[],
+        &["Ctrl-m"],
+    ),
+    cmd("sight-next", "Sight: next visible object", Weapons, &["/"]),
+    cmd("laze", "Laser on or off", Weapons, &["Ctrl-l"]),
+    e(
+        "fire-gun",
+        "Fire the gun whatever is selected",
+        Weapons,
+        Hold,
+        &["Tab"],
+    ),
+    cmd(
+        "nearest-ground",
+        "Nearest ground target (Easy targeting)",
+        Weapons,
+        &["Ctrl-x"],
     ),
     cmd("chaff", "Release chaff", Weapons, &["Insert"]),
     cmd("flare", "Release flare", Weapons, &["Delete"]),
     cmd(
-        "jettison",
-        "Jettison selected stores",
+        "console-chaff",
+        "Release chaff (AC-130 console)",
         Weapons,
-        &["Shift-k"],
+        &["Ctrl-Insert"],
     ),
-    cmd("range-target", "Reset range target", Weapons, &["\\"]),
+    cmd(
+        "console-flare",
+        "Release flare (AC-130 console)",
+        Weapons,
+        &["Ctrl-Delete"],
+    ),
+    cmd("jettison-tanks", "Jettison tanks", Weapons, &["Shift-k"]),
+    cmd(
+        "jettison",
+        "Jettison selected store",
+        Weapons,
+        &["Ctrl-Shift-k"],
+    ),
+    cmd(
+        "range-target",
+        "Reset range target",
+        Weapons,
+        &["Ctrl-Shift-\\"],
+    ),
+    cmd("key:u", "IFF squawk on the target", Weapons, &["u"]),
     cmd(
         "incoming",
         "Incoming missile (range)",
@@ -279,6 +746,12 @@ pub const ENTRIES: &[Entry] = &[
     cmd("fail-station", "Fail station (test)", Weapons, &[]),
     cmd("damage-player", "Damage player (test)", Weapons, &[]),
     cmd("radar", "Radar power / radar channel", Sensors, &["r"]),
+    cmd(
+        "a-g-radar",
+        "Air-to-ground radar on or off",
+        Sensors,
+        &["Ctrl-r", "Shift-r"],
+    ),
     cmd("jammer", "Jammer (ECM)", Sensors, &["j"]),
     cmd("sensor-channel", "Cycle sensor channel", Sensors, &["m"]),
     cmd("sensor-infrared", "Infrared channel", Sensors, &["i"]),
@@ -470,9 +943,27 @@ pub const ENTRIES: &[Entry] = &[
     mouse("zoom-out", "Zoom out", View, &["-"], &["wheel:down"]),
     cmd("cockpit", "Cockpit art", View, &["Backspace"]),
     cmd("hud", "HUD", View, &["Shift-u"]),
+    cmd(
+        "key:Ctrl-i",
+        "Instrument brightness: then -/+",
+        View,
+        &["Ctrl-i"],
+    ),
+    cmd(
+        "key:Ctrl-Shift-f",
+        "Flood brightness: then -/+",
+        View,
+        &["Ctrl-Shift-f"],
+    ),
+    cmd("key:Ctrl-h", "HUD colour", View, &["Ctrl-h"]),
+    cmd("instruments-dim", "Dim instruments", View, &[]),
+    cmd("instruments-brighten", "Brighten instruments", View, &[]),
+    cmd("flood-dim", "Dim flood", View, &[]),
+    cmd("flood-brighten", "Brighten flood", View, &[]),
     cmd("key:Shift-[", "Dim HUD", View, &["Shift-["]),
     cmd("key:Shift-]", "Brighten HUD", View, &["Shift-]"]),
     cmd("key:Shift-m", "Live map", View, &["Shift-m"]),
+    cmd("key:Ctrl-t", "Show target info", View, &["Ctrl-t"]),
     cmd("key:Alt-1", "Wing: fly straight", Communication, &["Alt-1"]),
     cmd("key:Alt-2", "Wing: break left", Communication, &["Alt-2"]),
     cmd("key:Alt-3", "Wing: break right", Communication, &["Alt-3"]),
@@ -515,10 +1006,28 @@ pub const ENTRIES: &[Entry] = &[
         &["Alt-r"],
     ),
     cmd(
+        "key:Alt-a",
+        "Wing: sort (a different bandit for each wingman)",
+        Communication,
+        &["Alt-a"],
+    ),
+    cmd(
         "key:Alt-w",
-        "Wing: attack on contact",
+        "Wing: engage every target of my target's class (attack on contact with none)",
         Communication,
         &["Alt-w"],
+    ),
+    cmd(
+        "key:Alt-f",
+        "Wing: engage the IR/laser target (attack on contact with none)",
+        Communication,
+        &["Alt-f"],
+    ),
+    cmd(
+        "key:Alt-g",
+        "Wing: lase my target",
+        Communication,
+        &["Alt-g"],
     ),
     cmd("key:Alt-p", "Wing: protect me", Communication, &["Alt-p"]),
     cmd("key:Alt-d", "Wing: disengage", Communication, &["Alt-d"]),
@@ -544,6 +1053,12 @@ pub const ENTRIES: &[Entry] = &[
         &["Alt-l"],
     ),
     cmd("key:Alt-s", "Radio silence", Communication, &["Alt-s"]),
+    cmd(
+        "key:Alt-n",
+        "Monitor the battle net (the other flights' contact reports and attack calls)",
+        Communication,
+        &["Alt-n"],
+    ),
     cmd(
         "key:Alt-0",
         "Address whole flight",
@@ -574,6 +1089,31 @@ pub const ENTRIES: &[Entry] = &[
         Communication,
         &["Alt-Shift-4"],
     ),
+    cmd(
+        "key:Alt-Shift-e",
+        "Reply to the flight: Engaging",
+        Communication,
+        &["Alt-Shift-e"],
+    ),
+    cmd(
+        "key:Alt-Shift-w",
+        "Reply to the flight: Winchester",
+        Communication,
+        &["Alt-Shift-w"],
+    ),
+    cmd(
+        "key:Alt-Shift-b",
+        "Reply to the flight: Bingo fuel",
+        Communication,
+        &["Alt-Shift-b"],
+    ),
+    cmd(
+        "key:Alt-Shift-h",
+        "Request help from the flight",
+        Communication,
+        &["Alt-Shift-h"],
+    ),
+    fixed("", "Chat line (network games only)", Communication, &["`"]),
     cmd("airport-next", "Next airport", Communication, &["Shift-n"]),
     cmd(
         "airport-request-landing",
@@ -599,9 +1139,40 @@ pub const ENTRIES: &[Entry] = &[
     cmd("key:Shift-c", "Slow motion", Game, &["Shift-c"]),
     cmd("end-flight", "End mission", Game, &["Ctrl-q"]),
     cmd("key:Ctrl-v", "Valkyries music", Game, &["Ctrl-v"]),
+    cmd("key:k", "Score board (network games)", Game, &["k"]),
     cmd("bookmark", "Mark replay moment", Game, &["Ctrl-b"]),
     cmd("restart", "Restart flight", Game, &[]),
     cmd("key:F11", "Keyboard help", Game, &["F11"]),
+    menu_shortcut(
+        "Multiplayer ? menu (controller Menu also opens it)",
+        &["F1"],
+    ),
+    menu_shortcut(
+        "In-flight Map/Mission: switch tab (controller A)",
+        &["Enter"],
+    ),
+    menu_shortcut(
+        "Mission brief: scroll (controller D-pad up/down)",
+        &["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: mission brief (or select Mission...)",
+        &["m"],
+    ),
+    menu_shortcut(
+        "Multiplayer respawn: fly again after delay, with menus closed (controller A)",
+        &["Enter"],
+    ),
+    menu_shortcut(
+        "Mission brief: close (controller B; A also closes respawn brief)",
+        &["Escape"],
+    ),
+    menu_shortcut("Multiplayer ? menu: return to main menu", &["M"]),
+    menu_shortcut("Multiplayer ? menu: exit", &["X"]),
+    menu_shortcut(
+        "Lobby Settings: apply and close (Escape discards)",
+        &["F10"],
+    ),
     fixed("menu-up", "Menu up", Game, &["ArrowUp"]),
     fixed("menu-down", "Menu down", Game, &["ArrowDown"]),
     fixed("menu-left", "Menu left", Game, &["ArrowLeft"]),
@@ -616,10 +1187,141 @@ pub const ENTRIES: &[Entry] = &[
 /// always reach the menu, change window mode and quit.
 pub const PROTECTED_KEYS: [&str; 3] = ["Escape", "Alt-Enter", "Alt-F4"];
 
+/// The kinds of aircraft whose stock keys differ (VTOL overhaul, design
+/// 5.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Airframe {
+    /// Every aircraft without powered lift.
+    Fixed,
+    /// The AV-8 and Yak-141.
+    VectorJet,
+    /// The V-22.
+    Tiltrotor,
+    /// The AH-64, Mi-24 and CH-47.
+    Helicopter,
+}
+impl Airframe {
+    #[cfg(test)]
+    pub const ALL: [Airframe; 4] = [
+        Airframe::Fixed,
+        Airframe::VectorJet,
+        Airframe::Tiltrotor,
+        Airframe::Helicopter,
+    ];
+    /// The kind of aircraft whose powered-lift levers are `vectoring`
+    /// (nozzles), `conversion` (nacelles) and `collective`.
+    pub fn of(vectoring: bool, conversion: bool, collective: bool) -> Self {
+        match (vectoring, conversion, collective) {
+            (true, ..) => Self::VectorJet,
+            (_, true, _) => Self::Tiltrotor,
+            (_, _, true) => Self::Helicopter,
+            _ => Self::Fixed,
+        }
+    }
+    #[cfg(test)]
+    fn name(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed-wing",
+            Self::VectorJet => "AV-8 / Yak-141",
+            Self::Tiltrotor => "V-22",
+            Self::Helicopter => "helicopters",
+        }
+    }
+}
+/// A set of [`Airframe`]s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Airframes(u8);
+impl Airframes {
+    pub const FIXED: Self = Self(1);
+    pub const VECTOR_JET: Self = Self(2);
+    pub const HELICOPTER: Self = Self(8);
+    pub const ALL: Self = Self(15);
+    pub const ROTORCRAFT: Self = Self(4 | 8);
+    pub const POWERED_LIFT: Self = Self(2 | 4 | 8);
+    pub const fn but(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+    pub fn contains(self, airframe: Airframe) -> bool {
+        self.0 & (1 << airframe as u8) != 0
+    }
+    #[cfg(test)]
+    fn disjoint(self, other: Self) -> bool {
+        self.0 & other.0 == 0
+    }
+    /// Where the key acts, for the controls document: empty for every
+    /// aircraft.
+    #[cfg(test)]
+    pub fn describe(self) -> String {
+        let named = |set: Self| -> Vec<&str> {
+            Airframe::ALL
+                .into_iter()
+                .filter(|a| set.contains(*a))
+                .map(Airframe::name)
+                .collect()
+        };
+        match Self::ALL.but(self) {
+            Self(0) => String::new(),
+            missing if named(missing).len() == 1 => format!("not on {}", named(missing)[0]),
+            _ => format!("{} only", named(self).join(" and ")),
+        }
+    }
+}
+
+/// Stock keys whose action depends on the aircraft flown (VTOL overhaul,
+/// design 5.6): the same key may name one action on some aircraft and
+/// another on the rest, never two on the same aircraft. Every stock key not
+/// listed here acts on every aircraft. A player's own bindings always act.
+/// The aircraft-dependent meanings are opinionated, decided by John on
+/// 2026-10-08 (design decisions 4 and 5).
+pub const CONTEXTUAL: &[(&str, &str, Airframes)] = &[
+    // Z and X: rudder, except on the vectoring jets, where they are the
+    // retail nozzle keys.
+    ("z", "yaw", Airframes::ALL.but(Airframes::VECTOR_JET)),
+    ("x", "yaw", Airframes::ALL.but(Airframes::VECTOR_JET)),
+    ("z", "nozzle-step-up", Airframes::VECTOR_JET),
+    ("x", "nozzle-step-down", Airframes::VECTOR_JET),
+    ("Shift-z", "nozzle-preset-forward", Airframes::VECTOR_JET),
+    ("Shift-x", "nozzle-preset-vertical", Airframes::VECTOR_JET),
+    // Ctrl+arrows: nozzle slew on the jets (and, doing nothing, on every
+    // other aircraft as before), cyclic trim on the rotorcraft.
+    (
+        "Ctrl-ArrowUp",
+        "vector-pitch-rate",
+        Airframes::ALL.but(Airframes::ROTORCRAFT),
+    ),
+    (
+        "Ctrl-ArrowDown",
+        "vector-pitch-rate",
+        Airframes::ALL.but(Airframes::ROTORCRAFT),
+    ),
+    ("Ctrl-ArrowLeft", "vector-yaw-rate", Airframes::FIXED),
+    ("Ctrl-ArrowRight", "vector-yaw-rate", Airframes::FIXED),
+    ("Ctrl-ArrowUp", "trim-pitch-rate", Airframes::ROTORCRAFT),
+    ("Ctrl-ArrowDown", "trim-pitch-rate", Airframes::ROTORCRAFT),
+    ("Ctrl-ArrowLeft", "trim-roll-rate", Airframes::ROTORCRAFT),
+    ("Ctrl-ArrowRight", "trim-roll-rate", Airframes::ROTORCRAFT),
+    // 0: nozzles and nacelles forward, except on the helicopters.
+    (
+        "0",
+        "neutral-vector",
+        Airframes::ALL.but(Airframes::HELICOPTER),
+    ),
+    ("0", "trim-centre", Airframes::HELICOPTER),
+    ("Ctrl-Shift-a", "stability-level", Airframes::POWERED_LIFT),
+];
+
+/// The aircraft on which stock `key` performs `action`.
+pub fn stock_airframes(key: &str, action: &str) -> Airframes {
+    CONTEXTUAL
+        .iter()
+        .find(|(k, a, _)| *k == key && *a == action)
+        .map_or(Airframes::ALL, |(.., set)| *set)
+}
+
 /// Menu-only rows use the keyboard's built-in navigation; their stock keys are
 /// not flight shortcuts and are never disabled by remapping.
 pub fn menu_only(entry: &Entry) -> bool {
-    entry.action.starts_with("menu-")
+    entry.menu_context || entry.action.starts_with("menu-")
 }
 
 /// Human name of a keyboard shortcut in `Input::key` naming.
@@ -649,6 +1351,7 @@ pub fn key_label(key: &str) -> String {
         "Backspace" => "Backspace".into(),
         "Escape" => "Esc".into(),
         "'" => "Apostrophe".into(),
+        "`" => "Backquote (~)".into(),
         "\\" => "Backslash".into(),
         "," => "Comma".into(),
         ";" => "Semicolon".into(),
@@ -790,8 +1493,8 @@ fn token_label(token: &str, gamepad: bool) -> String {
 /// the hat position a `position=N` binding reads.
 pub fn control_label(device: &str, control: &str, mode: Mode, gamepad: bool) -> String {
     match device {
-        "keyboard" => return key_label(control),
-        "mouse" => return mouse_label(control),
+        "keyboard" | "replay-keyboard" => return key_label(control),
+        "mouse" | "replay-mouse" => return mouse_label(control),
         _ => {}
     }
     let (mods, base) = tore_input::chord_parts(control);
@@ -808,6 +1511,29 @@ pub fn control_label(device: &str, control: &str, mode: Mode, gamepad: bool) -> 
 mod tests {
     use super::*;
     #[test]
+    fn lighting_actions_and_rebound_keys_roundtrip() {
+        let profile = tore_input::Profile::parse("tore-input 1\nbind keyboard Ctrl-i key:Ctrl-i press\nbind keyboard Ctrl-Shift-f key:Ctrl-Shift-f press\nbind keyboard Ctrl-f key:Ctrl-Shift-f press\nbind keyboard Ctrl-h key:Ctrl-h press\nbind keyboard F9 instruments-dim press\nbind keyboard F10 instruments-brighten press\nbind keyboard F11 flood-dim press\nbind keyboard F12 flood-brighten press\n").unwrap();
+        let text = profile.to_text().unwrap();
+        assert_eq!(
+            tore_input::Profile::parse(&text)
+                .unwrap()
+                .to_text()
+                .unwrap(),
+            text
+        );
+        assert_eq!(profile.bindings.len(), 8);
+        for chord in [
+            "Ctrl+I",
+            "Ctrl+Shift+F",
+            "Ctrl+H",
+            "Ctrl+-",
+            "Ctrl+=",
+            "Shift+[",
+        ] {
+            assert!(crate::input_script::key_spec(chord).is_ok(), "{chord}");
+        }
+    }
+    #[test]
     fn every_bindable_entry_parses_and_labels_are_unique() {
         let mut labels = std::collections::BTreeSet::new();
         for entry in ENTRIES {
@@ -817,16 +1543,110 @@ mod tests {
             }
         }
     }
+    /// The clash check (design 5.6): a stock key names one action on any
+    /// one aircraft. Two entries share a key only through
+    /// [`CONTEXTUAL`], on aircraft that do not overlap.
     #[test]
     fn stock_keys_are_not_shared_between_flight_entries() {
-        let mut seen = std::collections::BTreeMap::new();
-        for entry in ENTRIES.iter().filter(|e| !menu_only(e)) {
-            for key in entry.keys {
-                if let Some(other) = seen.insert(*key, entry.label) {
-                    // The menu key opens and backs out of the same menu.
-                    assert_eq!(*key, "Escape", "{key}: {other} and {}", entry.label);
+        for airframe in Airframe::ALL {
+            let mut seen = std::collections::BTreeMap::new();
+            for entry in ENTRIES.iter().filter(|e| !menu_only(e)) {
+                for key in entry.keys {
+                    if !stock_airframes(key, entry.action).contains(airframe) {
+                        continue;
+                    }
+                    if let Some(other) = seen.insert((entry.replay_only(), *key), entry.label) {
+                        // The menu key opens and backs out of the same menu.
+                        assert_eq!(
+                            *key, "Escape",
+                            "{key} on {airframe:?}: {other} and {}",
+                            entry.label
+                        );
+                    }
                 }
             }
+        }
+        // Every contextual key is a stock key of its entry, and each key's
+        // meanings cover disjoint aircraft.
+        for (index, (key, action, set)) in CONTEXTUAL.iter().enumerate() {
+            assert!(
+                ENTRIES
+                    .iter()
+                    .any(|e| e.action == *action && e.keys.contains(key)),
+                "{key} {action}"
+            );
+            for (other_key, other_action, other) in &CONTEXTUAL[index + 1..] {
+                if other_key == key {
+                    assert!(set.disjoint(*other), "{key}: {action} and {other_action}");
+                }
+            }
+        }
+    }
+    /// The design's clash check of the new chords: Shift+Z, Shift+X,
+    /// Ctrl+Alt+A and Ctrl+Shift+A were free; Ctrl+A and Alt+A stay
+    /// distinct, Shift+A (AWACS radar link) stays free.
+    #[test]
+    fn the_vtol_chords_are_their_own() {
+        let owners = |key: &str| -> Vec<&str> {
+            ENTRIES
+                .iter()
+                .filter(|e| e.keys.contains(&key))
+                .map(|e| e.action)
+                .collect()
+        };
+        assert_eq!(owners("Ctrl-Alt-a"), ["hover-hold"]);
+        assert_eq!(owners("Ctrl-Shift-a"), ["stability-level"]);
+        assert_eq!(owners("Shift-z"), ["nozzle-preset-forward"]);
+        assert_eq!(owners("Shift-x"), ["nozzle-preset-vertical"]);
+        assert_eq!(owners("Ctrl-a"), ["waypoint-autopilot"]);
+        assert_eq!(owners("Alt-a"), ["key:Alt-a"]);
+        assert!(owners("Shift-a").is_empty());
+        assert!(owners("Ctrl-z").is_empty());
+        assert_eq!(owners("Ctrl-x"), ["nearest-ground"]);
+        assert_eq!(
+            Airframes::ALL.but(Airframes::VECTOR_JET).describe(),
+            "not on AV-8 / Yak-141"
+        );
+        assert_eq!(
+            Airframes::ROTORCRAFT.describe(),
+            "V-22 and helicopters only"
+        );
+        assert_eq!(Airframes::ALL.describe(), "");
+    }
+    #[test]
+    fn the_phase_two_keys_are_listed_with_their_stock_keys() {
+        for (action, key) in [
+            ("key:u", "u"),
+            ("key:Ctrl-t", "Ctrl-t"),
+            ("key:k", "k"),
+            ("key:Alt-Shift-e", "Alt-Shift-e"),
+            ("key:Alt-Shift-w", "Alt-Shift-w"),
+            ("key:Alt-Shift-b", "Alt-Shift-b"),
+            ("key:Alt-Shift-h", "Alt-Shift-h"),
+        ] {
+            let entry = ENTRIES
+                .iter()
+                .find(|entry| entry.action == action)
+                .unwrap_or_else(|| panic!("{action} is not in the catalog"));
+            assert_eq!(entry.keys, [key], "{action}");
+            assert!(entry.bindable() && entry.parsed().is_some(), "{action}");
+        }
+        // Alt+A is the data link's sort (slice G3c) and Alt+N monitors the
+        // battle net (slice G8); the rest of stage G's keys stay free.
+        for (action, key) in [("key:Alt-a", "Alt-a"), ("key:Alt-n", "Alt-n")] {
+            assert_eq!(
+                ENTRIES
+                    .iter()
+                    .find(|entry| entry.action == action)
+                    .map(|entry| entry.keys),
+                Some(&[key][..])
+            );
+        }
+        for key in ["Alt-Shift-a", "Alt-Shift-n"] {
+            assert!(
+                ENTRIES.iter().all(|entry| !entry.keys.contains(&key)),
+                "{key} is taken"
+            );
         }
     }
     fn cell(values: Vec<String>) -> String {
@@ -838,7 +1658,12 @@ mod tests {
     }
     /// The generated part of `docs/CONTROLS.md`.
     fn controls_markdown() -> String {
-        let pad = crate::input::gamepad_defaults(&crate::controls_editor::preview_device());
+        let preview = crate::controls_editor::preview_device();
+        let mut pad = crate::input::gamepad_defaults(&preview);
+        // The AC-130 console's layout, which owns the gamepad in the console.
+        let console =
+            tore_input::Profile::parse(&crate::input::console_pad_text(&preview)).unwrap();
+        pad.bindings.extend(console.bindings);
         let mut out = String::new();
         for group in Group::ALL {
             out.push_str(&format!(
@@ -846,16 +1671,44 @@ mod tests {
                 group.title()
             ));
             for entry in ENTRIES.iter().filter(|e| e.group == group) {
-                let keys = entry.keys.iter().map(|k| key_label(k)).collect();
+                let keys = entry
+                    .keys
+                    .iter()
+                    .map(|k| match stock_airframes(k, entry.action).describe() {
+                        place if place.is_empty() => key_label(k),
+                        place => format!("{} ({place})", key_label(k)),
+                    })
+                    .collect();
                 let mut mouse: Vec<String> = entry.mouse.iter().map(|m| mouse_label(m)).collect();
                 if matches!(entry.kind, Kind::Axis) && entry.action.starts_with("look-") {
                     mouse.push("Hold right button and drag".into());
                 }
-                let buttons = pad
+                let matching: Vec<_> = pad
                     .bindings
                     .iter()
                     .filter(|b| entry.bindable() && entry.matches(b))
-                    .map(|b| control_label(&b.device, &b.control, b.mode, true))
+                    .collect();
+                // The console layout's binding of a control the flight layout
+                // already gives this action says nothing new.
+                let buttons = matching
+                    .iter()
+                    .filter(|b| {
+                        !crate::input::console_pad_binding(b)
+                            || !matching.iter().any(|o| {
+                                !crate::input::console_pad_binding(o) && o.control == b.control
+                            })
+                    })
+                    .map(|b| {
+                        let mut label = control_label(&b.device, &b.control, b.mode, true);
+                        if crate::input::console_pad_binding(b) {
+                            label.push_str(" (in the AC-130 console)");
+                        }
+                        match b.mode {
+                            Mode::Tap => format!("{label} (tap)"),
+                            Mode::Long => format!("{label} (hold half a second)"),
+                            _ => label,
+                        }
+                    })
                     .collect();
                 out.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
@@ -890,6 +1743,147 @@ mod tests {
         assert!(
             current == generated,
             "docs/CONTROLS.md is out of date; run TORE_UPDATE_CONTROLS_DOC=1 cargo test -p tore-app controls_doc"
+        );
+    }
+    /// The gunsight's keys (John, 2026-10-09): each is its entry's only
+    /// stock owner, none is a retail key (retail's Backslash is the IR/laser
+    /// designate this key now does on the AC-130), and the live-fire range
+    /// reset moved to Ctrl+Shift+Backslash to make room.
+    #[test]
+    fn the_gunsight_keys_are_their_own() {
+        let owners = |key: &str| -> Vec<&str> {
+            ENTRIES
+                .iter()
+                .filter(|e| e.keys.contains(&key))
+                .map(|e| e.action)
+                .collect()
+        };
+        assert_eq!(owners("\\"), ["sight-designate"]);
+        assert_eq!(owners("Shift-\\"), ["sight-pin"]);
+        assert_eq!(owners("p"), ["sight-pin-toggle"]);
+        assert_eq!(owners("Shift-p"), ["gun-lock"]);
+        assert_eq!(owners("Ctrl-Insert"), ["console-chaff"]);
+        assert_eq!(owners("Ctrl-Delete"), ["console-flare"]);
+        assert_eq!(owners("Ctrl-Shift-\\"), ["range-target"]);
+        assert_eq!(owners("Ctrl-\\"), ["sight-polarity"]);
+        assert_eq!(owners("Shift-'"), ["sight-zoom-in"]);
+        assert_eq!(owners("Shift-;"), ["sight-zoom-out"]);
+        for (key, action) in [
+            ("Alt-ArrowLeft", "sight-left"),
+            ("Alt-ArrowRight", "sight-right"),
+            ("Alt-ArrowUp", "sight-up"),
+            ("Alt-ArrowDown", "sight-down"),
+        ] {
+            assert_eq!(owners(key), [action], "{key}");
+        }
+        // The keys they sit beside keep their own meaning: the plain
+        // apostrophe and semicolon still pick and clear a target, Shift+L is
+        // still the landing request, and no other Alt+arrow is stock.
+        assert_eq!(owners("'"), ["designate-visual"]);
+        assert_eq!(owners(";"), ["clear-designation"]);
+        assert_eq!(owners("l"), ["clear-designation"]);
+        assert!(
+            ENTRIES
+                .iter()
+                .flat_map(|e| e.keys)
+                .filter(|k| k.starts_with("Alt-Arrow"))
+                .all(|k| owners(k).len() == 1)
+        );
+        // None of them is a protected desktop-style key, and every gunsight
+        // action is bindable and parses, so the controls screen can rebind it.
+        for entry in ENTRIES.iter().filter(|e| e.action.starts_with("sight-")) {
+            assert!(
+                entry.bindable() && entry.parsed().is_some(),
+                "{}",
+                entry.label
+            );
+            assert!(!entry.keys.iter().any(|k| PROTECTED_KEYS.contains(k)));
+            assert_eq!(entry.group, Weapons);
+        }
+        // The slew has an axis row for sticks and four hold rows for keys and
+        // buttons; the captured control of each decides how it is bound.
+        let kinds = |action: &str| -> Vec<Kind> {
+            ENTRIES
+                .iter()
+                .filter(|e| e.action == action)
+                .map(|e| e.kind)
+                .collect()
+        };
+        assert_eq!(kinds("sight-x"), [Kind::Axis]);
+        assert_eq!(kinds("sight-y"), [Kind::Axis]);
+        assert_eq!(kinds("sight-left"), [Kind::Hold]);
+    }
+    /// Every key the flight's own key handler acts on is a catalog stock
+    /// key, so the controls screen lists it, can move it, and CONTROLS.md
+    /// and the keyboard map can be checked against it. The only keys that
+    /// do anything without being listed are the original's keys whose
+    /// feature is not built: they say "not implemented yet".
+    #[test]
+    fn every_key_the_flight_acts_on_is_a_catalog_key() {
+        use crate::flight_ui::{Command, FlightUi};
+        // Original keys that only answer "not implemented yet".
+        const NOT_BUILT: [&str; 6] = [
+            "Shift-a", "Shift-d", "Shift-f", "Shift-g", "Shift-i", "Shift-j",
+        ];
+        let mut names: Vec<String> = ('a'..='z').map(String::from).collect();
+        names.extend(('0'..='9').map(String::from));
+        names.extend((1..=12).map(|n| format!("F{n}")));
+        names.extend(
+            [
+                "-",
+                "=",
+                "[",
+                "]",
+                "\\",
+                ";",
+                "'",
+                ",",
+                ".",
+                "/",
+                "`",
+                "Space",
+                "Enter",
+                "Tab",
+                "Backspace",
+                "Insert",
+                "Delete",
+                "Home",
+                "End",
+                "PageUp",
+                "PageDown",
+                "ArrowUp",
+                "ArrowDown",
+                "ArrowLeft",
+                "ArrowRight",
+                "Numpad5",
+            ]
+            .map(String::from),
+        );
+        let listed: std::collections::BTreeSet<&str> = ENTRIES
+            .iter()
+            .flat_map(|e| e.keys.iter().copied())
+            .collect();
+        let mut unlisted = Vec::new();
+        for name in &names {
+            for mask in 0..8u8 {
+                let (ctrl, alt, shift) = (mask & 1 != 0, mask & 2 != 0, mask & 4 != 0);
+                let chord = format!(
+                    "{}{}{}{name}",
+                    if ctrl { "Ctrl-" } else { "" },
+                    if alt { "Alt-" } else { "" },
+                    if shift { "Shift-" } else { "" },
+                );
+                if listed.contains(chord.as_str()) || NOT_BUILT.contains(&chord.as_str()) {
+                    continue;
+                }
+                if FlightUi::default().key(name, shift, ctrl, alt, &[]) != Command::None {
+                    unlisted.push(chord);
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "keys the flight acts on that the catalog does not list: {unlisted:?}"
         );
     }
     #[test]

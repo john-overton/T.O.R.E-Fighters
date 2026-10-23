@@ -14,6 +14,9 @@ All constants and rendering choices below are agent decisions, not recovered
 original behavior. Original shadow and surface-light calibration remain unknown;
 retail comparison is unavailable.
 
+The [cockpit ambient consumer](cockpit-lighting.md) shares the sun/moon directions,
+night/day blend and dense-band transmission, with a fitted flat-art exposure.
+
 ## Surface response
 
 Smooth weather uses continuous diffuse lighting on all opaque world triangles:
@@ -46,6 +49,18 @@ is added. The existing night/day blend phases out this change at night. These
 constants are agent decisions. Aircraft fill, water lighting and fog remain
 unchanged.
 
+John asked on 2026-10-20 for the ground to brighten in direct morning sun as
+the trees and objects on it do: under a low sun the weather palette already
+darkens the land, and the plain cosine gave a level field little light, so it
+read as shaded beside sunlit trees. In smooth weather, land (terrain, and rock
+lit as the ground) takes `cosine * (1 + 0.9 * low) + 0.12 * low *
+smoothstep(-0.05, 0.25, cosine)` in place of the cosine, where `low` is 1 at
+solar elevation 6 degrees and below and eases to 0 by 35 degrees (sine
+smoothstep). Slopes turned to the sun gain most, slopes turned away keep their
+shade, cast shadows remove the whole term, and the midday picture is
+unchanged. Stepped weather (original graphics) keeps the cosine. The constants
+are agent decisions, fitted by eye.
+
 
 Daylight strength is the visible area fraction of the original solid sun disc,
 including when its center is below the horizon. While partly visible, the light
@@ -71,12 +86,23 @@ tracers, explosions, burning flares, chaff, smoke and vapor retain their own
 presentation rather than receiving solid diffuse shading or casting solid shadows.
 Glass receives lighting but does not cast an opaque silhouette.
 
-Burning flares, and lit afterburner flames at an eighth of a flare's strength
-([afterburner glow](engine-material.md#afterburner-glow)), add their own warm
-point light to every surface this pass lights, and to water, clouds and
+Burning fires and explosion fireballs ([night effect light](explosions.md#night-glow)),
+burning flares, lit afterburner flames at an eighth of a flare's strength
+([afterburner glow](engine-material.md#afterburner-glow)) and the AC-130's
+gunfire ([muzzle flash](ac130-linked-guns.md#muzzle-flash)) add their own warm
+light to every surface this pass lights, and to water, clouds and
 smoke, with no shadows. Its strength, reach,
 night boost and the daylight colors it shows at night are in
 [countermeasure presentation](countermeasures.md#flare-light).
+Fire, fireball and impact sources use the same flare point law. The rejected
+nr-nightfx finite footprint and additional warm surface term are removed
+(John, 2026-10-15). On terrain and objects, a source with a radius reflects
+mostly as its brightness, with 30 percent of the surface hue, so green grass
+lit by a fire stays warm orange, and snow or sand stays warm too (John,
+2026-10-16). A point source still shows the art colour. Water keeps its fitted
+dark-sea tint times the same orange, and clouds and smoke keep their own art
+times that orange. Whole flame sprites remain emissive; persistent fires have
+reserved night slots as described in [night effect light](explosions.md#night-glow).
 
 ## Geometry shadows
 
@@ -84,12 +110,33 @@ All opaque geometry submitted to the world renderer participates in the same
 directional depth-map pass. Terrain casts and receives shadows; objects shadow
 themselves, one another, terrain and visible water. Texture cutouts keep their
 holes. The player's aircraft still casts a shadow when hidden by cockpit view.
+Every ground object casts (John, 2026-10-20: "Airports should cast shadows
+(all ground objects should)"): the static placements (airport buildings,
+hangars and towers, theater buildings, bridges, SAM and AAA sites, parked
+aircraft, wrecks) as well as the moving units, men and ships. Agent decisions
+for the static placements: a triangle that lies on the ground does not cast,
+so pavement, aprons, markings and flat wrecks leave no rim where the rendered
+ground dips below them at a low sun. On the ground means lower than 2 ft above
+its placement's lowest point and within 15 degrees of level, or lower than
+0.5 ft whatever its slope. Glass, flame and emissive faces and the retail
+ground shadow decal (layer -9) do not cast either. City fill buildings cast
+their box, and at High and Ultra the near trees cast a sun-facing card of
+their sprite, thinning by a per-tree hash over the outer 30 percent of their
+reach so the tree shadows end gradually; a tree then takes its own sunlight
+from just sunward of its card (1.25 times its half-width), so it is not
+darkened by its own shadow. The
+[shadow quality](graphics-options.md#shadows) chooses the map size, how many
+maps, the soft-edge sample count and which of the city buildings and trees
+cast. The separate [shadow distance](graphics-options.md#shadows) chooses
+map reach and caster distances; the default follows vegetation distance.
 Light direction follows the visible sun segment. Fully shadowed water retains
 30 percent of its unshadowed resolved color at full sun, blended by visible-disc
 strength, cloud transmission and fog. Moon shadows are not added.
 
-Three camera-centered maps use half-widths of 256, 8,192 and 131,072 feet,
-each 2,048 pixels square, with light-depth coverage of plus/minus 262,144 feet.
+Three camera-centered maps use the
+[distance-dependent half-widths](graphics-options.md#shadows), each 2,048
+pixels square (1,024 with two maps at Low, 4,096 at Ultra), with light-depth
+coverage of plus/minus 262,144 feet.
 The innermost map containing a receiver supplies detail; its outer 15 percent
 blends to the next map, and the outermost fades to unshadowed ambient/daylight.
 John requested visibility-proportional shadow strength and contact-dependent
@@ -105,7 +152,8 @@ caster-to-receiver distance along the light. Penumbra radius is that distance
 times the tangent of the apparent sun radius: aircraft close to a surface cast
 sharp shadows; distant casters cast broader shadows. The agent-selected bounded
 filter searches the center plus four directions at 1, 4, 16 and 64 texels, then
-uses 32 fixed, evenly distributed disc samples with bilinear comparisons.
+uses 32 fixed, evenly distributed disc samples (16 at Low) with bilinear
+comparisons.
 John requested less tile flicker and more diffuse near-view transitions on
 2026-09-18. Agent-selected stabilization uses four manually weighted depth
 neighbors per tap, each corrected to the receiving triangle's plane. A 0.125-foot

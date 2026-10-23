@@ -16,7 +16,7 @@ use crate::FORMAT_VERSION;
 use crate::codec::{FNV_OFFSET, In, fnv1a, put_text, put_u16, put_u32, put_u64, put_uv};
 use crate::error::{Error, Result, corrupt, invalid};
 use crate::limits::{MAX_HEADER_BYTES, MAX_KEY_VALUES, MAX_STRING_BYTES};
-use crate::model::{Clouds, Footer, Header, MissionKind, World};
+use crate::model::{AreaDefense, Clouds, Footer, GroundTarget, Header, MissionKind, World};
 
 pub(crate) const MAGIC: &[u8; 8] = b"TOREREPL";
 pub(crate) const PRELUDE_BYTES: usize = 12;
@@ -37,10 +37,30 @@ pub(crate) const SECTION_SPAWNS: u64 = 4;
 pub(crate) const SECTION_EVENTS: u64 = 5;
 pub(crate) const SECTION_TREES: u64 = 6;
 pub(crate) const SECTION_CHECKSUMS: u64 = 7;
+pub(crate) const SECTION_ROTORS: u64 = 8;
+pub(crate) const SECTION_DISK_TILT: u64 = 9;
+/// The scale of each spawned effect not drawn at its type's own size (slice
+/// BF, 2026-10-12). Older readers skip it and draw every effect full size.
+pub(crate) const SECTION_EFFECT_SCALES: u64 = 10;
+/// The city fill's knocked-down buildings (nr-fx3, 2026-10-13). Older
+/// readers skip it and show the city whole.
+pub(crate) const SECTION_CITY: u64 = 11;
 
-pub(crate) fn prelude() -> Vec<u8> {
+/// Display recorders request version 4 explicitly. Legacy writers retain
+/// version 3 for surface tracks and version 2 otherwise.
+pub(crate) fn version_for(header: &Header) -> u16 {
+    if header.format_version >= 4 {
+        FORMAT_VERSION
+    } else if header.world.needs_surface_format() {
+        3
+    } else {
+        2
+    }
+}
+
+pub(crate) fn prelude(version: u16) -> Vec<u8> {
     let mut buf = MAGIC.to_vec();
-    put_u16(&mut buf, FORMAT_VERSION);
+    put_u16(&mut buf, version);
     put_u16(&mut buf, 0);
     buf
 }
@@ -130,8 +150,7 @@ pub(crate) fn read_sections(body: &[u8]) -> Result<Vec<(u64, &[u8])>> {
         let id = input.uv()?;
         let n = input.count(body.len(), "section bytes")?;
         let payload = input.bytes(n)?;
-        if (SECTION_STRINGS..=SECTION_CHECKSUMS).contains(&id) && out.iter().any(|(i, _)| *i == id)
-        {
+        if (SECTION_STRINGS..=SECTION_CITY).contains(&id) && out.iter().any(|(i, _)| *i == id) {
             return Err(corrupt(format!("section {id} appears twice in one chunk")));
         }
         out.push((id, payload));
@@ -237,6 +256,29 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
     if let Some(extent) = w.extent_ft {
         lines.push(("world.extent_ft".into(), numbers(&extent)));
     }
+    if let Some(target) = &w.ground_target {
+        lines.push(("world.ground_target".into(), ground_target_text(target)?));
+    }
+    if let Some(area) = &w.area_defense {
+        lines.push(("world.area_defense".into(), area_defense_text(area)));
+        // Its own key, so a build that predates the rolled counts keeps it
+        // as an unknown extra and reads the rest as before.
+        if area.rolled {
+            lines.push(("world.area_rolled".into(), "1".into()));
+        }
+    }
+    if w.airfield_scene != 0 {
+        lines.push(("world.airfield_scene".into(), w.airfield_scene.to_string()));
+    }
+    if w.city_fill_scene != 0 {
+        lines.push((
+            "world.city_fill_scene".into(),
+            w.city_fill_scene.to_string(),
+        ));
+    }
+    if w.surface {
+        lines.push(("world.surface".into(), "1".into()));
+    }
     for (key, value) in &header.extra {
         if key.is_empty() {
             return Err(invalid("an extra header entry has an empty key"));
@@ -259,6 +301,121 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
         )));
     }
     Ok(text.into_bytes())
+}
+
+/// The ground target as one header value:
+/// `stem,aaa,sam,seed,nationality,night_stealth,jitter,relocate,separation_nm`
+/// with the three flags as 0 or 1, and a tenth value `1` for the Quick
+/// Mission front line when it stands (left out when it does not, which is
+/// what a recording made before the front line reads as).
+fn ground_target_text(target: &GroundTarget) -> Result<String> {
+    if target.stem.is_empty()
+        || !target
+            .stem
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(invalid(format!(
+            "the ground target stem {:?} is not a template name",
+            target.stem
+        )));
+    }
+    let mut text = format!(
+        "{},{},{},{},{},{},{},{},{}",
+        target.stem,
+        target.aaa,
+        target.sam,
+        target.seed,
+        target.enemy_nationality,
+        u8::from(target.night_stealth),
+        u8::from(target.jitter),
+        u8::from(target.relocate),
+        target.separation_nm
+    );
+    if target.front {
+        text.push_str(",1");
+    }
+    Ok(text)
+}
+
+fn parse_ground_target(text: &str) -> Result<GroundTarget> {
+    let bad = || corrupt("header entry world.ground_target is not a ground target");
+    let parts: Vec<&str> = text.split(',').collect();
+    let (parts, front) = match parts.len() {
+        9 => (&parts[..], false),
+        10 if parts[9] == "1" => (&parts[..9], true),
+        _ => return Err(bad()),
+    };
+    let [
+        stem,
+        aaa,
+        sam,
+        seed,
+        nationality,
+        night,
+        jitter,
+        relocate,
+        separation,
+    ] = parts[..]
+    else {
+        return Err(bad());
+    };
+    let number = |text: &str| text.parse::<u32>().map_err(|_| bad());
+    let flag = |text: &str| match text {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(bad()),
+    };
+    if stem.is_empty() {
+        return Err(bad());
+    }
+    Ok(GroundTarget {
+        stem: stem.to_owned(),
+        aaa: u8::try_from(number(aaa)?).map_err(|_| bad())?,
+        sam: u8::try_from(number(sam)?).map_err(|_| bad())?,
+        seed: number(seed)?,
+        enemy_nationality: u8::try_from(number(nationality)?).map_err(|_| bad())?,
+        night_stealth: flag(night)?,
+        jitter: flag(jitter)?,
+        relocate: flag(relocate)?,
+        front,
+        separation_nm: number(separation)?,
+    })
+}
+
+/// The area defenses as one header value:
+/// `aaa,sam,seed,nationality,night_stealth`, the flag as 0 or 1.
+fn area_defense_text(area: &AreaDefense) -> String {
+    format!(
+        "{},{},{},{},{}",
+        area.aaa,
+        area.sam,
+        area.seed,
+        area.enemy_nationality,
+        u8::from(area.night_stealth)
+    )
+}
+
+fn parse_area_defense(text: &str) -> Result<AreaDefense> {
+    let bad = || corrupt("header entry world.area_defense is not an area defense");
+    let parts: Vec<&str> = text.split(',').collect();
+    let [aaa, sam, seed, nationality, night] = parts[..] else {
+        return Err(bad());
+    };
+    let small = |text: &str| text.parse::<u8>().map_err(|_| bad());
+    Ok(AreaDefense {
+        aaa: small(aaa)?,
+        sam: small(sam)?,
+        seed: seed.parse().map_err(|_| bad())?,
+        enemy_nationality: small(nationality)?,
+        night_stealth: match night {
+            "0" => false,
+            "1" => true,
+            _ => return Err(bad()),
+        },
+        // Set from its own key once the whole header is read.
+        rolled: false,
+    })
 }
 
 fn parse_number(key: &str, text: &str) -> Result<f64> {
@@ -292,6 +449,7 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
         },
         ..Header::default()
     };
+    let mut area_rolled = false;
     for line in text.lines() {
         if line.is_empty() {
             continue;
@@ -330,6 +488,20 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
             "world.clouds.module" => w.clouds.module = value,
             "world.clouds.deck_ft" => w.clouds.deck_ft = Some(parse_number(&key, &value)?),
             "world.extent_ft" => w.extent_ft = Some(parse_numbers(&key, &value)?),
+            "world.ground_target" => w.ground_target = Some(parse_ground_target(&value)?),
+            "world.area_defense" => w.area_defense = Some(parse_area_defense(&value)?),
+            "world.area_rolled" => area_rolled = value == "1",
+            "world.airfield_scene" => {
+                w.airfield_scene = value
+                    .parse()
+                    .map_err(|_| corrupt("header entry world.airfield_scene is not a number"))?
+            }
+            "world.city_fill_scene" => {
+                w.city_fill_scene = value
+                    .parse()
+                    .map_err(|_| corrupt("header entry world.city_fill_scene is not a number"))?
+            }
+            "world.surface" => w.surface = value == "1",
             other => {
                 if header.extra.len() >= MAX_KEY_VALUES {
                     return Err(corrupt("the header has too many entries"));
@@ -340,6 +512,9 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
                 header.extra.push((key, value));
             }
         }
+    }
+    if let Some(area) = &mut header.world.area_defense {
+        area.rolled = area_rolled;
     }
     Ok(header)
 }
@@ -482,6 +657,29 @@ mod tests {
                     deck_ft: Some(7000.),
                 },
                 extent_ft: Some([1_703_936., 1_630_208.]),
+                ground_target: Some(GroundTarget {
+                    stem: "QUCOL".into(),
+                    aaa: 3,
+                    sam: 2,
+                    seed: 4_000_000_007,
+                    enemy_nationality: 5,
+                    night_stealth: true,
+                    jitter: true,
+                    relocate: false,
+                    front: true,
+                    separation_nm: 60,
+                }),
+                area_defense: Some(AreaDefense {
+                    aaa: 2,
+                    sam: 3,
+                    seed: 4_000_000_009,
+                    enemy_nationality: 33,
+                    night_stealth: false,
+                    rolled: true,
+                }),
+                airfield_scene: 2,
+                city_fill_scene: 3,
+                surface: true,
             },
             extra: vec![
                 ("flight=model".into(), "researched\\hybrid".into()),
@@ -491,6 +689,37 @@ mod tests {
             ..Header::default()
         };
         let bytes = encode_header(&header).unwrap();
-        assert_eq!(decode_header(&bytes, FORMAT_VERSION).unwrap(), header);
+        assert_eq!(
+            decode_header(&bytes, header.format_version).unwrap(),
+            header
+        );
+    }
+
+    #[test]
+    fn a_recording_from_the_first_area_build_keeps_its_fixed_counts() {
+        // nr-b23b: rolled counts are marked by their own key; the first
+        // build's five-field value carries no mark and decodes as fixed.
+        let old = b"mission=quick\nworld.area_defense=3,3,17,10,0\n";
+        let header = decode_header(old, 3).unwrap();
+        let area = header.world.area_defense.unwrap();
+        assert!(!area.rolled);
+        assert_eq!((area.aaa, area.sam, area.seed), (3, 3, 17));
+        // And a rolled one writes the mark and reads it back, whatever the
+        // order of the keys.
+        let rolled = Header {
+            world: World {
+                area_defense: Some(AreaDefense {
+                    rolled: true,
+                    ..area
+                }),
+                ..World::default()
+            },
+            ..Header::default()
+        };
+        let text = String::from_utf8(encode_header(&rolled).unwrap()).unwrap();
+        assert!(text.contains("world.area_rolled=1"));
+        let reversed: Vec<&str> = text.lines().rev().collect();
+        let back = decode_header(reversed.join("\n").as_bytes(), 3).unwrap();
+        assert!(back.world.area_defense.unwrap().rolled);
     }
 }

@@ -1346,3 +1346,7 @@ mod tests {
         assert_eq!(TurnDirection::toward(0.0, 180.0), Some(TurnDirection::Left));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "steering_checkpoint.rs"]
+mod checkpoint;

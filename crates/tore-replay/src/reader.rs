@@ -12,9 +12,10 @@ use crate::error::{Error, Result, corrupt};
 use crate::events::{get_checksums, get_events};
 use crate::format::{
     CHUNK_HEADER_BYTES, ChunkHeader, IndexEntry, KIND_DATA, KIND_FOOTER, KIND_HEADER, KIND_INDEX,
-    PRELUDE_BYTES, SECTION_CHECKSUMS, SECTION_ENTITIES, SECTION_EVENTS, SECTION_SPAWNS,
-    SECTION_STRINGS, SECTION_TREES, TRAILER_BYTES, chunk_checksum, decode_footer, decode_header,
-    decode_index, read_chunk_header, read_prelude, read_sections, read_trailer, section,
+    PRELUDE_BYTES, SECTION_CHECKSUMS, SECTION_CITY, SECTION_EFFECT_SCALES, SECTION_ENTITIES,
+    SECTION_EVENTS, SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES, TRAILER_BYTES, chunk_checksum,
+    decode_footer, decode_header, decode_index, read_chunk_header, read_prelude, read_sections,
+    read_trailer, section,
 };
 use crate::limits::{
     MAX_CHUNK_BYTES, MAX_CHUNK_FRAMES, MAX_CHUNKS, MAX_EVENTS_TOTAL, MAX_FILE_BYTES,
@@ -22,9 +23,9 @@ use crate::limits::{
 };
 use crate::model::{
     AircraftInfo, EffectKind, EffectSpawn, Event, Footer, Frame, Header, LAYER_CONTRAILS, PuffKind,
-    PuffSpawn, TreeSample, WeaponInfo,
+    PuffSpawn, SurfaceInfo, TreeSample, WeaponInfo,
 };
-use crate::spawns::{FrameSpawns, get_spawns};
+use crate::spawns::{FrameSpawns, apply_scales, get_spawns};
 use crate::strings::StringTable;
 use crate::trees::{get_tree_directory, get_trees};
 use std::collections::{BTreeMap, HashMap};
@@ -91,6 +92,27 @@ pub struct LivePuff {
     pub position: [f64; 3],
 }
 
+impl LivePuff {
+    /// The puff released at `spawn_tick` as it looks at `tick`, or `None`
+    /// once it has lived its lifetime (or if its kind has none known).
+    pub fn at(spawn_tick: u64, puff: &PuffSpawn, tick: u64) -> Option<Self> {
+        let age = tick - spawn_tick;
+        let lifetime = puff.kind.lifetime_ticks()?;
+        if age >= lifetime {
+            return None;
+        }
+        let mut position = puff.position;
+        position[1] += puff.kind.rise_fps() * age as f64 / 120.;
+        Some(Self {
+            spawn_tick,
+            age_ticks: age,
+            layer: puff.layer,
+            kind: puff.kind,
+            position,
+        })
+    }
+}
+
 /// What [`Recording::peek`] reads without scanning the frames.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Peek {
@@ -114,6 +136,8 @@ pub struct LiveEffect {
     pub kind: EffectKind,
     pub position: [f64; 3],
     pub duration_ticks: u32,
+    /// Percent of its type's size it is drawn at ([`EffectSpawn::scale`]).
+    pub scale: u8,
 }
 
 enum Source {
@@ -158,8 +182,11 @@ pub struct Recording {
     strings: StringTable,
     aircraft: BTreeMap<u32, AircraftInfo>,
     weapons: BTreeMap<u32, WeaponInfo>,
+    surface_units: BTreeMap<u32, SurfaceInfo>,
     events: Vec<TimedEvent>,
     checksums: Vec<(u64, u64)>,
+    /// The city fill's knocked-down buildings, tick by tick (nr-fx3).
+    city: crate::city::CityTrack,
     trees: HashMap<(u32, String), Vec<(usize, u64)>>,
     frame_cache: Mutex<Option<(usize, Arc<Vec<Frame>>)>>,
     spawn_cache: Mutex<HashMap<usize, Arc<Vec<FrameSpawns>>>>,
@@ -286,8 +313,10 @@ impl Recording {
             strings: StringTable::default(),
             aircraft: BTreeMap::new(),
             weapons: BTreeMap::new(),
+            surface_units: BTreeMap::new(),
             events: Vec::new(),
             checksums: Vec::new(),
+            city: crate::city::CityTrack::default(),
             trees: HashMap::new(),
             frame_cache: Mutex::new(None),
             spawn_cache: Mutex::new(HashMap::new()),
@@ -489,18 +518,25 @@ impl Recording {
             .map(|p| get_checksums(p, header.frames))
             .transpose()?
             .unwrap_or_default();
+        let city = section(&sections, SECTION_CITY)
+            .map(|p| crate::city::get_city(p, header.frames))
+            .transpose()?
+            .unwrap_or_default();
         let event_count: usize = events.iter().map(|(_, e)| e.len()).sum();
         if self.events.len() + event_count > MAX_EVENTS_TOTAL {
             return Err(corrupt(format!(
                 "the file holds more than {MAX_EVENTS_TOTAL} events"
             )));
         }
-        if let Some((aircraft, weapons)) = entities {
+        if let Some((aircraft, weapons, surface)) = entities {
             for info in aircraft {
                 self.aircraft.entry(info.id).or_insert(info);
             }
             for info in weapons {
                 self.weapons.entry(info.id).or_insert(info);
+            }
+            for info in surface {
+                self.surface_units.entry(info.id).or_insert(info);
             }
         }
         if header.frames == 0 {
@@ -522,6 +558,10 @@ impl Recording {
             checksums
                 .into_iter()
                 .map(|(frame, checksum)| (first + u64::from(frame), checksum)),
+        );
+        self.city.changes.extend(
+            city.into_iter()
+                .map(|(frame, stood, fell)| (first + u64::from(frame), stood, fell)),
         );
         self.chunks.push(ChunkInfo {
             offset,
@@ -602,6 +642,15 @@ impl Recording {
         self.weapons.get(&id)
     }
 
+    /// Every surface unit the recording names (format 3), by id.
+    pub fn surface_units(&self) -> impl Iterator<Item = &SurfaceInfo> {
+        self.surface_units.values()
+    }
+
+    pub fn surface_info(&self, id: u32) -> Option<&SurfaceInfo> {
+        self.surface_units.get(&id)
+    }
+
     /// Every event in the recording, in tick order.
     pub fn events(&self) -> &[TimedEvent] {
         &self.events
@@ -612,6 +661,13 @@ impl Recording {
         let start = self.events.partition_point(|e| e.tick < from);
         let end = self.events.partition_point(|e| e.tick <= to);
         &self.events[start..end.max(start)]
+    }
+
+    /// The city fill's buildings knocked down over the recording, tick by
+    /// tick: empty in a recording from before the city section (nr-fx3) or
+    /// of a flight that flattened nothing.
+    pub fn city(&self) -> &crate::city::CityTrack {
+        &self.city
     }
 
     /// Every stored state checksum: `(tick, checksum)`.
@@ -644,7 +700,13 @@ impl Recording {
     pub fn decode_chunk(&self, index: usize) -> Result<Vec<Frame>> {
         let (info, body) = self.chunk_body(index)?;
         let sections = read_sections(&body)?;
-        decode_frames(&sections, info.first_tick, info.frames, &self.strings)
+        decode_frames(
+            &sections,
+            info.first_tick,
+            info.frames,
+            &self.strings,
+            self.header.format_version,
+        )
     }
 
     /// The frame at `tick`, if one was recorded.
@@ -730,7 +792,13 @@ impl Recording {
         let (info, body) = self.chunk_body(index)?;
         let sections = read_sections(&body)?;
         let spawns = Arc::new(match section(&sections, SECTION_SPAWNS) {
-            Some(payload) => get_spawns(payload, info.frames)?,
+            Some(payload) => {
+                let mut spawns = get_spawns(payload, info.frames)?;
+                if let Some(scales) = section(&sections, SECTION_EFFECT_SCALES) {
+                    apply_scales(scales, info.frames, &mut spawns)?;
+                }
+                spawns
+            }
             None => Vec::new(),
         });
         let mut cache = lock(&self.spawn_cache);
@@ -750,10 +818,13 @@ impl Recording {
             if first > to {
                 break;
             }
-            for (frame, effects, puffs) in self.chunk_spawns(index)?.iter() {
+            let spawns = self.chunk_spawns(index)?;
+            // Entries ascend by frame, so the range starts by bisection.
+            let begin = spawns.partition_point(|(frame, ..)| first + u64::from(*frame) < from);
+            for (frame, effects, puffs) in &spawns[begin..] {
                 let tick = first + u64::from(*frame);
-                if tick < from || tick > to {
-                    continue;
+                if tick > to {
+                    break;
                 }
                 out.effects
                     .extend(effects.iter().map(|e| (tick, e.clone())));
@@ -774,21 +845,8 @@ impl Recording {
         let mut smoke = Vec::new();
         let mut contrails = Vec::new();
         for (spawn_tick, puff) in spawns.puffs {
-            let age = tick - spawn_tick;
-            let Some(lifetime) = puff.kind.lifetime_ticks() else {
+            let Some(live) = LivePuff::at(spawn_tick, &puff, tick) else {
                 continue;
-            };
-            if age >= lifetime {
-                continue;
-            }
-            let mut position = puff.position;
-            position[1] += puff.kind.rise_fps() * age as f64 / 120.;
-            let live = LivePuff {
-                spawn_tick,
-                age_ticks: age,
-                layer: puff.layer,
-                kind: puff.kind,
-                position,
             };
             if puff.layer == LAYER_CONTRAILS {
                 contrails.push(live);
@@ -821,6 +879,7 @@ impl Recording {
                 kind: e.kind,
                 position: e.position,
                 duration_ticks: e.duration_ticks,
+                scale: e.scale,
             })
             .collect())
     }

@@ -25,6 +25,7 @@ T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
   - [1f. Sensors and weapons](#1f-sensors-and-weapons)
   - [1g. Installer and first-run import](#1g-installer-and-first-run-import)
   - [1h. Cheats](#1h-cheats)
+  - [1i. Aircraft pass](#1i-aircraft-pass)
 - [Milestone 2: Multiplayer](#milestone-2-multiplayer)
 - [Milestone 3: Missions and campaigns](#milestone-3-missions-and-campaigns)
 - [Milestone 4: Tools](#milestone-4-tools)
@@ -56,6 +57,12 @@ authored behaviour ([opinionated](behavior-provenance.md)); combat AI has
 spec-derived components and a partial Quick Mission hookup. John requested aircraft and surface AI research
 and planning on 2026-09-17; the 2026-09-22 M1 air-to-air plan now prioritizes
 awareness, search and mission engagement. Current stages are in M1e below.
+On 2026-10-10 John authorized surface AI and autonomous surface firing: the
+Quick Mission's ground targets, their AAA, flak and SAM defenses and the base
+layouts' air defenses, built that day in the
+[surface objectives round](#surface-objectives-and-air-defenses-2026-10-10).
+AI wings attacking ground targets stay unauthorized until the
+[next rounds](#next-rounds-after-the-surface-round).
 
 John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
 See [ocean behavior and visual scope](spec/ocean.md). This bounded visual
@@ -169,7 +176,8 @@ or reference-checkout terrain engine is part of this milestone.
 **Implementation mode. John selected retail detail for all maps on
 2026-09-23:** textures, artwork, scenery and map variants. Surface shaders and
 expanded landscapes are future work under [M5](#future-terrain-enhancements).
-No surface AI is authorized by this visual scope.
+No surface AI is authorized by this visual scope; John authorized it
+separately on 2026-10-10 ([surface round](#surface-objectives-and-air-defenses-2026-10-10)).
 
 [Measured findings](baselines/retail-terrain-review.md),
 [behavior specification](spec/terrain-detail.md), and
@@ -253,8 +261,8 @@ All proposed type/file names below are agent design choices, not existing APIs.
 | `tore-formats::theater::Environment` | Bounded top-level M/MM environment parsing | Separate object-block reader; side tables and both nationality forms |
 | `tore-formats::aircraft::Brf` and OBJECT schema | Inert OT token/field parsing | General static object definition, explicit resources and reviewed scalar fields |
 | `tore-formats::strip`, SH contact boxes | Reviewed STRIP identity and runway anchors | Review all thirteen airport definitions and their actual shape contracts |
-| `tore-app/src/assets.rs`, `tore-extract` | Archive provenance, runtime imports and caches | One shared transitive object dependency resolver; import report/cache version |
-| `terrain::World` and `World::surface` | Source terrain, weather, grounding queries | Scene construction and runway surface query integration |
+| `tore-import` (was `tore-app/src/assets.rs`), `tore-extract` | Archive provenance, runtime imports and caches | One shared transitive object dependency resolver; import report/cache version |
+| `terrain::Terrain` and `Terrain::surface` | Source terrain, weather, grounding queries | Scene construction and runway surface query integration |
 | `tore-sim::combat::live::Target` | Stable IDs, ground roles, hit points, sensors and damage classes | Per-object configuration and building/runway contact geometry |
 | `combat.rs`, `sim_renderer.rs`, HUD/instruments | Current target display, geometry submission, palette and shadows | Static meshes, ground-object identity, ILS readout and airport selection |
 | `audio.rs`, `tore-formats::radio` | Serial recorded speech playback and reviewed phrase mappings | Airport response events; only independently reviewed tower phrases |
@@ -359,7 +367,7 @@ resources/ambiguous overlay operations are actionable errors.
 **Depends on A; finish Ukraine first, extend through B's shared definitions.**
 
 Add an airport surface query using reviewed extents/anchors and the fitted support
-policy in the spec. Wire it through all applicable World surface consumers so
+policy in the spec. Wire it through all applicable Terrain surface consumers so
 flight, target grounding and presentation agree. Building contact uses a separate
 solid-object query, not roof height returned as terrain. Verify both runway ends,
 edge transitions, taxi exits, gear contact and off-runway terrain. Preserve legacy,
@@ -532,7 +540,8 @@ skill-scaled memory, search, missile defense, shared AI/RWR threat information
 and mission rules. Observation/memory and search/Target-view activity are
 implemented. Missile defense and shared RWR information are implemented;
 mission rules and six per-group objective/survival selectors are implemented. Surface AI
-and additional behavior families remain in the broader backlog, outside this scope.
+was built in its own round on 2026-10-10 (AI-4 below); additional behavior
+families remain in the broader backlog, outside this scope.
 
 The [main AI behavior specification](spec/ai.md) now covers established fighter
 choices, other family differences, surface boundaries and proposed API inputs.
@@ -555,7 +564,8 @@ experience. Quick Mission enables the live hookup by default, with separate
 wing groups and idle delta-formation following. `--fixture-wings` keeps the
 straight-flight setup. Reviewed runtime defects are covered by the
 [repair baseline](baselines/ai-research.md); AI seeker lifecycle and broader
-mission integration remain partial. AI-4, surface behavior, remains pending.
+mission integration remain partial. AI-4, surface behavior, is built for the
+air defenses (2026-10-10, [surface round](#surface-objectives-and-air-defenses-2026-10-10)).
 The delivery sequence below prioritizes this scope; the older backlog retains
 remaining research and integration work.
 
@@ -644,8 +654,12 @@ Missing evidence (research, in priority order):
 2. Remaining tactics: last-ditch candidate suitability, the random-tactic menu
    contents, engagement-pitch rule, jink and circle shapes, what a script
    restart does to a maneuver in flight (B11, B12, B13, B47).
-3. Surface classes: event mask meanings and command operands in the surface
-   event handler, then SAM, AAA, vehicle, ship and carrier contracts (B30).
+3. Surface classes (B30): SAM, AAA, flak, ship and armed vehicle engagement
+   and route movement are specified and built from the retail records
+   ([surface defenses](spec/surface-defenses.md)); still open are the event
+   mask meanings, the surface target ranking terms, the hit-chance rule, the
+   unready flag's producer and the hydrofoil and carrier programs
+   ([unknowns](spec/surface-defenses.md#unknowns)).
 4. Wing remainder: approach steering point, mode 9 negative-band entry,
    loose-versus-medium self-engagement, 20 second target deadline expiry,
    reply voicing (B43, B46).
@@ -662,8 +676,9 @@ Missing evidence (research, in priority order):
 Implementation work (spec established, not yet coded): family variants for
 F-117, helicopter, bomber, AC-130, large and MOTH behaviors (B20), which
 `Controller::new` currently rejects rather than serving fighter behavior; the
-hydrofoil program (B30); surface actors, which `ai::targeting` still reports as
-an unresolved selector.
+hydrofoil program (B30). Surface actors run their own controller
+(`tore_sim::ai::surface`) since 2026-10-10; `ai::targeting` still does not
+rank them for aircraft.
 
 Fitted rules now standing in for unresolved branches, each named in
 `ai::fitted` and listed in [behavior provenance](behavior-provenance.md):
@@ -678,8 +693,7 @@ combinations) that run the components together headless with a fixed seed;
 determinism and restart tests for the live controller; a review of the
 fitted steering curves against any flight-model turn data already measured.
 
-Integration work remaining after the 2026-09-17 hookup: surface actors in the
-same runtime; mission routes and orders beyond the fuel and waypoint rules
+Integration work remaining after the 2026-09-17 hookup: mission routes and orders beyond the fuel and waypoint rules
 already wired; full AI seeker acquisition, activation and pitbull beyond imported launch
 envelopes; and the wing-approach value producer, without
 which the B12 wing-split branch stays untried rather than being fed ordinary
@@ -699,8 +713,8 @@ aircraft imports.
 | AI-1: Experience | Trace the six wing selections, four side/domain assignment channels, per-object mission values and all type-appropriate skill consumers | Specify Quick Mission distributions, saved-skill precedence, tactical percentages, G exemption and device reactions; synthetic boundary cases for 0..3 and invalid input |
 | AI-2: Aircraft behavior specifications | Complete fighter/strike and defensive behavior first, then F-117, helicopters, bombers/AC-130, transports/airliners and special families; include formation, orders, navigation, fuel and damage responses | For each maneuver and decision, prose gives trigger, target geometry, units, limits, duration/completion and interruption rules; source/BI disagreements and unsupported aircraft motion are explicit |
 | AI-3: Isolated Rust components (runtime gaps remain) | Implement specified behavior slices in renderer-independent `tore-sim::ai`; add only needed bounded data readers to dependency-free `tore-formats` | Deterministic headless scenarios exercise each family's decisions and maneuvers at all applicable experience levels; known approximations have named rules/constants and provenance |
-| AI-4: Surface behavior | Trace and specify static defenses, SAM, AAA, mobile ground units, ordinary ships, hydrofoil and carrier behavior separately, then implement isolated components | At least one representative fixture per supported class validates detection/eligibility, movement where applicable, fire control and experience; scenery never acquires an invented combat brain |
-| AI-5: Simulation service adapters (partial for aircraft) | Generalize actor ownership for sensors, weapons, missile support, damage, fuel and movement; feed isolated controllers through those services | Multiple actors own independent contacts, stores and targets; no free ammunition, omniscient targeting by accident, duplicated missile physics or player-state contamination |
+| AI-4: Surface behavior (built for air defenses, 2026-10-10) | Trace and specify static defenses, SAM, AAA, mobile ground units, ordinary ships, hydrofoil and carrier behavior separately, then implement isolated components | Built: SAM, battery, AAA, flak, barrage, ship and armed vehicle controllers with detection, fire control, experience and route movement, each with fixture tests and battery scenarios ([surface defenses](spec/surface-defenses.md), [acceptance](baselines/surface-defenses.md)); scenery never fights. Open: hydrofoil and carrier programs, surface against surface |
+| AI-5: Simulation service adapters (partial for aircraft; surface units since 2026-10-10) | Generalize actor ownership for sensors, weapons, missile support, damage, fuel and movement; feed isolated controllers through those services | Multiple actors own independent contacts, stores and targets; no free ammunition, omniscient targeting by accident, duplicated missile physics or player-state contamination |
 | AI-6: Later game hookup (partial for Quick Mission) | Replace the lossy dummy-wing launch payload with side, wing, member, type, loadout, experience source and resolved level; connect mission routes/orders and activity display | Six mixed-skill wings retain identity end to end; replay and headless/live results agree; player and straight-flight fixture paths remain available |
 
 Research can advance by family and spec section; completing all executable
@@ -779,8 +793,12 @@ against each other. See the
 [delivery table](radar.md#delivery-and-acceptance) for what each stage delivered.
 
 Mode scope is TWS/RWS and installed infrared air-to-air, with single-target
-tracking only. Gamified IFF stays in the target view. A2G/HARM awaits ground weapons
-and object systems; no realistic IFF, multi-track or AI work is authorized.
+tracking only. Gamified IFF stays in the target view. The air-to-ground (A-G)
+page, the IR page's ground objects and the HARM page arrived with the
+air-to-ground round (2026-10-10, [spec](spec/air-to-ground.md#the-air-to-ground-radar),
+[evidence](baselines/air-to-ground.md)): the retail ground lists and symbols,
+no ground map and no moving-target picture. No realistic IFF, multi-track or AI
+work is authorized.
 Unresolved retail details use documented fitted rules; complete source-code
 closure is not a prerequisite.
 
@@ -789,14 +807,86 @@ implementation: four guidance types, pitbull activation, launch velocity and ran
 motor burn, guidance lifetime, uncued seeker search and HUD/tone feedback, with
 delivery stages, [measured acceptance and remaining limits](baselines/missiles.md).
 
+#### Missile flight overhaul (later)
+
+Deferred at John's request on 2026-10-20. The time-to-impact cost work preserves
+existing answers; it does not change propulsion or launch policy. A later pass
+needs decisions on the current [fitted launch model](spec/missiles.md#launch-velocity-and-intercept-estimates).
+
+Current findings, checked after the cost commit `8d883e95`:
+
+- **Acceleration can end before the motor burns out.** `Motion::step` adds
+  `acceleration * DT` only until `gain` exhausts the budget
+  ([missiles.rs:609](../crates/tore-sim/src/combat/missiles.rs#L609)). `phase()`
+  remains Powered until launch age `fuel_t * 30` ticks
+  ([missiles.rs:355](../crates/tore-sim/src/combat/missiles.rs#L355)). Smoke,
+  flame, powered turn rate and the HUD's BURN label follow that phase, not
+  remaining thrust: [smoke, live.rs:5405](../crates/tore-sim/src/combat/live.rs#L5405),
+  [flame flag, combat.rs:1177](../crates/tore-world/src/combat.rs#L1177),
+  [flame drawing, render_snapshot.rs:434](../crates/tore-app/src/render_snapshot.rs#L434),
+  [turn rate, missiles.rs:715](../crates/tore-sim/src/combat/missiles.rs#L715),
+  [BURN, weapon_hud.rs:767](../crates/tore-app/src/weapon_hud.rs#L767).
+  The [AIM-120 record](formats/fa-weapons.csv#L25) burns for 66 seconds. Once
+  the budget is spent, [turn losses](../crates/tore-sim/src/combat/missiles.rs#L590)
+  are never recovered while lit. Existing [FA evidence](formats/missiles.md#compatibility-and-current-launch-adapters)
+  describes acceleration toward an absolute maximum, holding it and recovering
+  toward it after turns ([combat.rs:104](../crates/tore-sim/src/combat.rs#L104),
+  [combat.rs:119](../crates/tore-sim/src/combat.rs#L119)).
+- **There is no absolute speed cap.** The budget is
+  `max(0, altitude-adjusted maximum_speed - initial_speed)`, fixed at launch
+  altitude. Straight,
+  aligned flight can reach inherited launcher speed plus that budget, exceeding
+  `maximum_speed`; later altitude changes do not recalculate it
+  ([missiles.rs:533](../crates/tore-sim/src/combat/missiles.rs#L533)).
+- **There is no aerodynamic drag law.** After burnout, speed falls by fixed
+  deceleration toward the record's final speed. The separate fitted turn loss
+  remains ([coast, missiles.rs:619](../crates/tore-sim/src/combat/missiles.rs#L619)).
+
+Some range limits stay fixed even when launch speed changes:
+
+| Path | Current rule |
+| --- | --- |
+| IR, semi-active radar and emitter maximum-range estimate | The speed-aware search is capped at zone 0 seeker range. Active radar has no such cap. [missiles.rs:1085](../crates/tore-sim/src/combat/missiles.rs#L1085). |
+| Compatibility weapon rules | Readiness uses the fixed zone 1 range. [live.rs:2689](../crates/tore-sim/src/combat/live.rs#L2689), [live.rs:2798](../crates/tore-sim/src/combat/live.rs#L2798). |
+| Powered air-to-ground release bars | `reach_uncached` returns the geometric zone when `!glide`; it does not solve speed-dependent reach. [guided.rs:322](../crates/tore-sim/src/combat/guided.rs#L322). |
+| AI launch gate | Store setup copies zone 1 maximum into `spec.maximum_range_ft`; the controller checks that range and the fixed employment zone. [ai_wings.rs:607](../crates/tore-world/src/ai_wings.rs#L607), [controller.rs:417](../crates/tore-sim/src/ai/controller.rs#L417). Released AI missiles still inherit launch velocity and use the shared motion. [ai_wings.rs:3230](../crates/tore-world/src/ai_wings.rs#L3230), [ai_wings.rs:3314](../crates/tore-world/src/ai_wings.rs#L3314). |
+
+The release code also computes the compatibility `launch_speed` scalar, but a
+Spec missile's `Motion::launch` receives `launcher.velocity`. Live flight then
+sets the displayed projectile speed from `motion.velocity`. Changing the scalar
+helper alone will not change that flight model. See
+[cockpit.rs:845](../crates/tore-sim/src/combat/live/cockpit.rs#L845),
+[cockpit.rs:914](../crates/tore-sim/src/combat/live/cockpit.rs#L914),
+[cockpit.rs:917](../crates/tore-sim/src/combat/live/cockpit.rs#L917) and
+[live.rs:5578](../crates/tore-sim/src/combat/live.rs#L5578).
+
+Decisions for John before implementation: keep the FA accelerate-and-hold shape,
+or choose boost then coast with drag; clamp at `maximum_speed`, or retain the
+additive launch speed requested on 2026-09-17; retain or change the seeker-range
+cap; and decide whether AI launch gates should use the speed-aware estimate.
+These are deferred decisions, not changes authorized by the cost optimization.
+
+A new model changes simulation results. Update the behaviour spec first, then
+review guard references and golden fingerprints, including [CI on `macos-14`](../.github/workflows/ci.yml#L23).
+Plan a protocol bump from the current **54**
+([wire/mod.rs:255](../crates/tore-session/src/wire/mod.rs#L255)), and review the
+[missile checkpoint layout, missiles_checkpoint.rs:43](../crates/tore-sim/src/combat/missiles_checkpoint.rs#L43)
+and combat tape **VERSION 8** ([tape_file.rs:28](../crates/tore-app/src/tape_file.rs#L28)). Re-run the [missile reach cases](baselines/missiles.md)
+and `--missile-acceptance`. The TTI shortcut
+[`straight_seconds`, guided.rs:102](../crates/tore-sim/src/combat/guided.rs#L102)
+and the [conservative fly-out bounds](ARCHITECTURE.md#the-firing-estimate-and-its-exact-shortcuts)
+must follow the chosen model as well as live flight. No protocol, checkpoint
+or tape change is part of this backlog note.
+
 #### Weapon catalog update passes
 
 Requested by John on 2026-09-23: Load Ordnance hides weapons without connected
 flight behaviour. Normal loading shows supported weapons that fit the selected
 aircraft; Cheat shows all imported supported weapons. The
 [catalog specification](spec/ordnance-presentation.md#catalog-availability)
-defines visibility. The current flight support list contains 25 weapons;
-importing the wider [JT inventory](formats/fa-weapons.csv) does not enable them.
+defines visibility. The current flight support list contains 72 weapons (2026-10-11,
+after the air-to-ground round) and the Cheat-only Boulder and Moose;
+importing the wider [JT inventory](formats/fa-weapons.csv) does not enable the rest.
 
 The agent-selected passes below plan the remaining weapons. Each starts with a
 player-facing behaviour spec and records unknowns with a next research step.
@@ -807,12 +897,12 @@ enabled by the catalog fix.
 
 | Pass | Remaining scope and examples | Acceptance before catalog exposure |
 | --- | --- | --- |
-| W1: Conventional guns, rockets and bombs | Remaining aircraft cannon and pods such as ADEN, BK27 and GAU8; LAU10 rockets; MK84 and FAB-series bombs | Specify ammunition/pod counts, release cadence, trajectories, impact/fuze behaviour and damage. Exercise manual release, depletion, mass, compatible stations and accepted-load restart. |
+| W1: Conventional guns, rockets and bombs | **Bombs and rockets delivered 2026-10-11 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** MK84, FAB-250, FAB-500, FAB-1000, the Mk 82 pack and retarded variants and the LAU-10 are loadable; bombs fall on the retail equation, packs release together and pods hold their real rockets. **Remaining:** the aircraft cannon pods ADEN, BK27, GAU-13 and GSh-6-23 (GAU8 is supported already), which nothing loads. Original scope: remaining aircraft cannon and pods such as ADEN, BK27 and GAU8; LAU10 rockets; MK84 and FAB-series bombs | Specify ammunition/pod counts, release cadence, trajectories, impact/fuze behaviour and damage. Exercise manual release, depletion, mass, compatible stations and accepted-load restart. |
 | W2: Remaining air-to-air missiles | AIM7/AIM7E, AIM9B, AA10/AA6/AA9, PL7/PL10 | Resolve each guidance profile, launch limits, support loss, seeker acquisition, motor/lifetime and HUD/audio feedback. Validate against spec numbers and deterministic manual target fixtures. |
-| W3: Surface and anti-ship missiles | AGM65A, AGM84A/AGM84E, AM39, AS15/AS16; AGM45/AGM88 passive-emitter weapons | Connect the required ground/ship targets, designation and emission state first. Validate valid and invalid targets, lost emissions/support, flight, impact and damage without granting hidden target knowledge. |
-| W4: Designator and unresolved guidance | GBU10/GBU10A, GBU28, PAVEWAY/PAVEWA3; AS14, AS30, AT12 and AT2 | Specify the actual guidance and designation requirements before selecting a model. Connect acquisition, release, loss of designation and terminal impact; do not substitute a radar or heat seeker for an unresolved contract. |
-| W5: Special payloads and delivery variants | CBU87/CBU89, MK20, RBK250/RBK500, MK82 variants, GBU29/GBU29P/GBU30 and AEMP1 | Resolve each record's payload and release behaviour. Implement the applicable submunition, retarding, penetration or special damage effect with numerical tests; keep unresolved and internal novelty records hidden. |
-| W6: Ground and naval weapons | Remaining surface gun rounds, SAM/ship missiles, ASROC and other held surface roles in the inventory | Depends on separately scoped ground/ship systems. Specify launcher, sensor, target and damage contracts; validate through manual fixtures before exposing a working weapon. Autonomous firing or AI requires John's separate authorization. |
+| W3: Surface and anti-ship missiles | **Delivered 2026-10-11 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** AGM65A, AGM84A/AGM84E, AM39, AS15/AS16 and AGM45/AGM88 fly from the ground designations, the A-G track, the HARM boresight cue and the HARM page; online since protocol 23 (slice NA), the HARM cue and the ground pages included. Original scope: AGM65A, AGM84A/AGM84E, AM39, AS15/AS16; AGM45/AGM88 passive-emitter weapons | Connect the required ground/ship targets, designation and emission state first. Validate valid and invalid targets, lost emissions/support, flight, impact and damage without granting hidden target knowledge. |
+| W4: Designator and unresolved guidance | **Delivered 2026-10-11 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** the laser bombs and laser missiles home on the aircraft's own laser spot or a same-side buddy's (John's addition) and go blind when the spot ends; the AT-2 is command guided. Remaining: a JDAM "release at the bar" mode on the level T and a viewer overlay for laser spots. Original scope: GBU10/GBU10A, GBU28, PAVEWAY/PAVEWA3; AS14, AS30, AT12 and AT2 | Specify the actual guidance and designation requirements before selecting a model. Connect acquisition, release, loss of designation and terminal impact; do not substitute a radar or heat seeker for an unresolved contract. |
+| W5: Special payloads and delivery variants | **Delivered 2026-10-11 except AEMP1 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** the cluster bombs (retail wide splash and presentation-only flashes), the Mk 82 variants and the JDAMs (John's choice: fly to the point designated at release, where retail homes on the object). **Remaining:** AEMP1, an air-to-air EM pulse that nothing loads. Original scope: CBU87/CBU89, MK20, RBK250/RBK500, MK82 variants, GBU29/GBU29P/GBU30 and AEMP1 | Resolve each record's payload and release behaviour. Implement the applicable submunition, retarding, penetration or special damage effect with numerical tests; keep unresolved and internal novelty records hidden. |
+| W6: Ground and naval weapons | Remaining surface gun rounds, SAM/ship missiles, ASROC and other held surface roles in the inventory | Built for air defense on 2026-10-10 with John's authorization: the surface gun rounds with the AAA tuning table, flak, the 13 radar and 6 infrared SAM and ship missile profiles, fired by surface units only ([surface defenses](spec/surface-defenses.md)). Held: ASROC and the SS-N-9 anti-ship missile (surface against surface is out of scope). |
 
 Every pass updates the shared flight support list only for weapons that have
 working behaviour, plus the feature matrix and one feature baseline. Check both
@@ -825,7 +915,10 @@ Work:
 - Radar modes, RWR, IFF, and the retail sensor model.
 - Missiles, bombs, and gun stats from retail data.  Stores affect weight and flight.
 - Per-system damage.
-- SAM sites and ships as targets and threats.
+- SAM sites and ships as targets and threats. Built 2026-10-10 (surface round,
+  [Milestone 2](#surface-objectives-and-air-defenses-2026-10-10)): Quick
+  Mission ground targets in all 16 theaters and the base layouts' defenses.
+  Player ground designation and A2G weapons are the next workstream.
 - Extend the decoded station compatibility to auxiliary stores and remaining
   stock/year/airbase rules; supported weapon catalogs already apply it.
 
@@ -1000,6 +1093,115 @@ specification await John's review.
 Deliverable: each cheat toggles mid-flight from the menu, shows On or Off, and
 survives Restart.
 
+### 1i. Aircraft pass
+
+Planned 2026-09-30 at John's request, from what the
+[overnight battery](baselines/battery-2026-09-28.md) left open. It is built on
+the multiplayer branch after its stage C and before stage D. The measured
+options it chose from are in the battery report's section 4 and the pass notes.
+
+Decisions (John, 2026-09-29 and 2026-09-30):
+
+1. **A fitted stall-speed reference for each aircraft.** The weight-scaled
+   stall speed keeps its rule, and each aircraft gets its own reference weight,
+   fitted to John's liftoff and approach figures (unsourced, used as a
+   plausibility range). Measured on a scratch build: every approach within 10
+   percent of his figures (8 of 11 inside the range), liftoff for the Su-27,
+   Su-25 and F-22 family within 6 percent, and combat-speed G at the retail value
+   for all 14 aircraft. The cost: the F-22 family needs about 200 kt to hold level
+   flight clean, against 150 kt. The X-31, with no figure, keeps today's
+   reference. `fitted`.
+2. **The Su-27 in the middle.** John's liftoff (135 to 150 kt) and approach (120
+   to 135 kt) figures cannot both be met in this model, which puts its approach
+   at about 1.1 times its liftoff. The fitted value gives about 128 kt and 142 kt.
+3. **No short strips for a ground start.** The 22 airstrips of about 1,074 ft (in
+   Cuba, the Falklands, Pakistan, Panama and the Persian Gulf) are no longer
+   offered in the Quick Mission takeoff choice, so neither the player nor an AI
+   wingman starts on one. This settles the strip questions for the player, the
+   wingmen and wings of two or more. Changed 2026-10-11 (John): they are
+   offered again, labelled STOL ([STOL runways](spec/airports.md#stol-runways)).
+4. **No short strips in flight.** They also leave the in-flight airport list:
+   navigation, landing guidance and the wing's land order.
+5. **The gear stays down on the ground.** As in retail, the gear cannot be
+   raised while the aircraft has weight on its wheels, and the gear key does
+   nothing. T.O.R.E adds a message, "Ground sensor preventing gear retraction"
+   (`opinionated`). This replaces the belly slide that the gear key started on
+   the runway (battery report, section 3.9, item 3).
+6. **The wingman who takes over carries on.** When an AI wingman takes the lead
+   from a lost human, it continues with a mission of opportunity: it searches by
+   eye around the enemy's last known positions, and if it finds nothing it
+   returns to base (John, 2026-09-30). Before, it flew straight on until the
+   world edge removed it.
+
+Also in the pass: the AI probe's scripted pilot survives its takeoff and
+climb-out from every ground start the battery uses (slice P5: it holds the
+runway line, respects the aircraft's minimum speed and clears the terrain
+ahead), so the landing scenarios test a living player. See
+[the scripted pilot](testing/lane-ai.md).
+
+Current (2026-09-30): built on the multiplayer branch in five slices, each
+checked against the single-player baseline. The stall table
+(`STALL_REFERENCE_FRACTIONS`) gives the numbers above. A short strip is an
+airport whose longest runway is under 2,000 ft (`fitted`: the 22 strips are
+1,074 ft and every other airport is 4,060 ft or longer); every theater keeps at
+least three ground-start airports. The ground sensor replaced the belly slide,
+whose code went with it. The new lead's waypoint step works, but no mission has
+waypoints yet (Quick Mission imports no route), so in play it searches and then
+goes home. The probe pilot now holds the runway against the wind, climbs over
+the terrain ahead and survives every start, and a probe option
+(`--probe-lose-player`) loses the player on purpose where a scenario tests the
+new lead.
+
+Acceptance: liftoff and approach speeds for every aircraft recorded against
+John's figures, with the flight lane's liftoff and approach checks re-recorded;
+combat-speed G unchanged for all 14 aircraft; no short strip offered for a ground
+start or in flight, with every theater keeping at least one airport; the gear key
+on the ground shows the message and the gear stays down; an AI that takes the
+lead from a lost human searches and then returns to base; the whole battery
+passing, its checks updated for these decisions; the single-player baseline
+differences explained as planned changes; the specs and lane pages updated.
+
+### Aircraft variety import
+
+Requested by John on 2026-10-05. The `import-variety` branch started from
+multiplayer at `7d25975b`. The [23-aircraft matrix](spec/aircraft-variety.md)
+covers transports, a gunship, airborne radar aircraft, VTOL jets, a tiltrotor,
+helicopters, fighters including all four retail F-4s, and two airliners. Exact
+variant choices are recorded as agent choices; 20 was not a hard limit.
+
+Initial ports are implemented: reviewed source imports, aircraft-owned hybrid
+configurations, powered-lift flight, playable controls, cockpits and
+initial device rigs. AC-130 selected-target tracking and linked gun groups are
+connected to simulation, rendering and recordings. The
+[flight baseline](baselines/variety-flight.md) distinguishes tested behavior
+from the remaining animation and wider systems acceptance. No new AI pilot
+behavior or new-family AI acceptance is claimed.
+
+[Selectable external tanks](spec/external-fuel-tanks.md) now separate installed
+quantities, shell mass and fuel. The F-14 source probe validates zero, one and
+two tanks through accepted-load restoration. The F-4J gun pod likewise keeps
+installed hardware separate from its ammunition. Source-specific capacity and
+ammunition fits are documented rather than presented as recovered retail laws.
+
+The [import guide](aircraft-import.md#worked-variety-import-examples) now has
+worked transport, F-4 family and powered-lift/system examples. Next: human
+handling review, remaining moving surfaces and cockpit mirrors, fuller AWACS
+sharing/operator behavior, tank visuals/jettison and wider platform/controller
+acceptance. Keep per-aircraft status and evidence in the matrix.
+
+**VTOL and helicopter overhaul.** Designed with John's twelve decisions of
+2026-10-08, after the fitted attitude-hold law proved unflyable (an AH-64 topped
+out at 34 kt). Player
+flight is built: the six powered-lift aircraft fly a rigid body on rotors, nozzles
+with puffer jets, nacelles and an angle-of-attack wing; the stability levels,
+trim, the nozzle and collective keys, the HUD cluster, hover hold, the Easy flight
+physics cheat, trimmed airborne starts and the moving parts follow. It is
+specified in [powered-lift flight](spec/powered-lift-flight.md) and measured in
+the [overhaul baseline](baselines/vtol-overhaul.md). It awaits John's flight test
+and the windowed battery. The second project, AI wingmen flying these aircraft
+through the same inputs (decision 7), has not started; the AI still does not fly
+them.
+
 ## Milestone 2: Multiplayer
 
 **Goal:** players create and fly Quick Missions together through the existing
@@ -1030,14 +1232,18 @@ Retail Fighters Anthology's own multiplayer is recorded in the
 Work, in the plan's stage order:
 - A, B: one mission core outside the app, and seats so several humans fly in one
   mission and aircraft pass between AI and humans.
-- C, D: network foundation, dedicated server and player-hosted games. Then
-  E-lite, the first playable checkpoint: two players flying co-op on a LAN.
-- E: lobby through the Quick Mission creator.
-- F: flight data link and radio backing, also in single player.
-- G: exact checkpoints of the whole mission, which John chose on 2026-09-28 so
+- C: the bug bash merged in (built 2026-09-29): the multiplayer commits rebuilt
+  on main, with the bug bash's player rules applying to every human-flown plane.
+- D, E: network foundation, dedicated server and player-hosted games. Then
+  F-lite, the first playable checkpoint: two players flying co-op on a LAN.
+  Stage D's design (reviewed by John on 2026-09-30) is in the
+  [architecture guide](ARCHITECTURE.md#network-sessions).
+- F: lobby through the Quick Mission creator.
+- G: flight data link and radio backing, also in single player.
+- H: exact checkpoints of the whole mission, which John chose on 2026-09-28 so
   host migration is seamless.
-- H, I: master server, server browser and connectivity.
-- J, K: host selection, migration, rejoin and compatibility hardening.
+- I, J: master server, server browser and connectivity.
+- K, L: host selection, migration, rejoin and compatibility hardening.
 - Keep single player deterministic in headless simulation at 120 Hz. Networked
   play is host-authoritative, because results are not bit-identical across
   platforms.
@@ -1047,6 +1253,92 @@ together.
 
 Exit: a multiplayer Quick Mission completed across separate clients, with
 validation evidence recorded. Later mode extensions do not block M2 acceptance.
+
+### Surface objectives and air defenses (2026-10-10)
+
+John asked on 2026-10-10 for the next multiplayer round to cover the Quick
+Mission Creator's surface objectives by theater, the import of the surface
+objects and surface AI for AAA, flak and SAMs. That request is the explicit
+authorization AGENTS.md requires for surface AI and autonomous surface firing;
+his answers set the rules (manned slots, jittered and relocated sites, real
+shells, batteries around a search radar, supply trucks, simulated parked
+aircraft, one combined objective, friendly fire, Redfor defends in PvP). Built
+on the `surface-ai` branch in slices R1 to A1:
+
+- The ground target, AAA and SAM fields are live in all 16 theaters; the
+  retail templates resolve with the retail rolls and equipment lists, nudged
+  and (when not tied to a theater feature) relocated, with both sides' starts
+  following the target ([quick mission menu](spec/quick-mission-menu.md),
+  [surface defenses](spec/surface-defenses.md)).
+- SAM sites, SAM batteries, AAA, flak, barrage zones, armed ships and armed
+  vehicles fight with their retail records; the base layouts' 321 air-defense
+  units fight on both sides; supply trucks rearm; columns and ships move;
+  parked aircraft are simulated targets; destroyed units keep their wreck.
+- The import carries the templates and every unit they name (`TORE_SURFACE_V1`).
+- Splash damage for every weapon and a shockwave on large ground explosions.
+- Objectives and the debrief count the ground target and SAM and AAA fire.
+- Online under protocol 22 (host-authoritative, digest-checked, migration
+  carries it); recordings under replay format 3.
+- Real-size buildings and units (a third of the retail shape scale);
+  runways, bridges and roads keep the map scale.
+- Airports take their runway's side; only own-side fields are offered.
+
+Evidence: the per-theater acceptance in
+[surface defenses baseline](baselines/surface-defenses.md). The full battery
+and John's in-game check close the round.
+
+### Next rounds after the surface round
+
+In John's order where he gave one; each is its own planned round.
+
+1. **Air-to-ground player weapons.** Ground designation (A-G radar, FLIR,
+   visual), CCIP and level-release bomb sights, laser designation and guided
+   bombs, HARM boresight, Mavericks and anti-ship missiles, the bomb motion
+   from the original, for every A2G store the imported aircraft carry. Planned
+   (2026-10-10), not started; AI strike is excluded from it.
+2. **AI strike and the ground weapons pass.** AI wings attacking ground
+   targets on purpose (target assignment from the ground objective, release
+   solutions, buddy lasing, SEAD with HARMs, the Alt+F wingman order) combined
+   with the remaining ground weapon systems. John placed it after this round
+   (2026-10-10); it needs his go-ahead to start (AGENTS.md).
+3. **Real-scale airfields.** Built and the default (mp-fixes slice FX-A,
+   2026-10-11, protocol 24): every airport redrawn at real size from its
+   runway type's plan with the theater's own textures, markings, runway,
+   approach and PAPI lights and about 12 extra targets per airport, in single
+   player, the Quick Mission, missions, online and on the server; recordings
+   keep the airfield scene so old ones replay on the retail airfields.
+   `TORE_REDRAWN_AIRPORTS=0` keeps the retail airfields in single player for
+   developers. What remains: [redrawn airports, limits](formats/redrawn-airports.md#limits).
+4. **City fill.** Real-size scenery buildings filling the light areas of the
+   city textures, on by default everywhere since the surface close-out
+   (protocol 25; `TORE_CITY_FILL=0` turns it off in single player):
+   up to 500,000 buildings drawn to 30 nm with separate graphics settings for
+   building distance and detail; scenery, not targets.
+
+#### Real-scale airfields and runway width
+
+Runway pavement keeps the retail width, about twice a real runway's: John
+deferred narrowing it on 2026-10-10. What a narrower runway would still need:
+the strip mesh width, the runway's landable contact surface, the taxi paths,
+ground-start slot spacing, the AI landing's lateral tolerance and the ILS
+localizer width ([placed object scale](formats/objects-and-shapes.md#placed-object-scale-2026-10-10)).
+The redrawn airports of item 3 (the default since protocol 24) replace the
+pavement with real-width runways, so this applies only to the retail
+airfields kept behind `TORE_REDRAWN_AIRPORTS=0`.
+
+Deferred, with no round yet:
+
+- **Redfor ground start online.** A Redfor human in a networked game starts
+  airborne by the target; a ground start on Red's own airfield needs a
+  mission flag the host sets in PvP, an enemy departure in the airfields, the
+  parking of Enemy Wing 1 and Red's AI takeoff. The single-player creator's
+  side-aware picker exists.
+- **Dirt strip lengthening.** A future option John chose not to take
+  (2026-10-10): the 22 dirt strips stay 1,074 ft short strips. Lengthening
+  them to 3,500 or 4,000 ft needs no terrain work but three would cross water
+  and one would cover a Roland site, and it needs a plan length for the runway
+  and its ILS, the Quick Mission's strip list, the vertical-pad rule and a pad
+  plan (findings in [redrawn airports](formats/redrawn-airports.md#short-strips-under-the-redraw)).
 
 ---
 

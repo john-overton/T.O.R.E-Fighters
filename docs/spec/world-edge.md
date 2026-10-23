@@ -30,7 +30,7 @@ it is the straight distance to that corner. This is an agent decision.
 An AI aircraft lost this way is a lost aircraft (a crash) for the debrief and the
 objectives, and it is **not a kill for anyone**: the kill ledger removes it from
 credit (`Ledger::lose_without_credit`) so an earlier shooter's damage does not
-turn into a kill. It does not crash the ledger, which stays consistent. Overspeed and belly wear
+turn into a kill. It does not crash the ledger, which stays consistent. Overspeed
 losses use the same no-credit call (`AiWings::lose_uncredited`), and a lost player is never
 credited to the last aircraft that hit it.
 The AI probe's activity line names the cause.

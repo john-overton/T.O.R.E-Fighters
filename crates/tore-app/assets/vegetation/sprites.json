@@ -1,0 +1,542 @@
+[
+  {
+    "name": "broadleaf-1",
+    "kind": "broadleaf",
+    "variant": 1,
+    "side": 0,
+    "top": 1,
+    "radius": 0.6014492753623188,
+    "top_aspect": 1.303656597774245,
+    "source_sha256": "db01c4f49df51c12fd1a3fd2414402dd66013d19011b201656751ee0b1aa8526"
+  },
+  {
+    "name": "broadleaf-2",
+    "kind": "broadleaf",
+    "variant": 2,
+    "side": 2,
+    "top": 3,
+    "radius": 0.5763195435092725,
+    "top_aspect": 1.06993006993007,
+    "source_sha256": "39b44524d962ad67fed47f2af5a0e04dd97fbbbb4915b2068b7f826619f60aac"
+  },
+  {
+    "name": "broadleaf-3",
+    "kind": "broadleaf",
+    "variant": 3,
+    "side": 4,
+    "top": 5,
+    "radius": 0.6611570247933884,
+    "top_aspect": 1.087667161961367,
+    "source_sha256": "7708d3cf1c18f217c5565b0b2a88db4dbacef15bc9e49138c2421362335fef9a"
+  },
+  {
+    "name": "dead-1",
+    "kind": "dead",
+    "variant": 1,
+    "side": 6,
+    "top": 7,
+    "radius": 0.5824817518248175,
+    "top_aspect": 1.2576489533011272,
+    "source_sha256": "6379450339d516f9473f73cca0f98d57daac7391acd88c8318235500b21a8fbf"
+  },
+  {
+    "name": "dead-2",
+    "kind": "dead",
+    "variant": 2,
+    "side": 8,
+    "top": 9,
+    "radius": 0.37639060568603216,
+    "top_aspect": 1.1139646869983948,
+    "source_sha256": "31a921360985a8b9ce3e75abd99a5ba431c22014220cf224732bbfc688a9c319"
+  },
+  {
+    "name": "dead-3",
+    "kind": "dead",
+    "variant": 3,
+    "side": 10,
+    "top": 11,
+    "radius": 0.43588082901554404,
+    "top_aspect": 1.236220472440945,
+    "source_sha256": "3fbf3deeb8e21af444931a8a66080c59061705cbb63287b92f8088ff417114e9"
+  },
+  {
+    "name": "conifer-1",
+    "kind": "conifer",
+    "variant": 1,
+    "side": 12,
+    "top": 13,
+    "radius": 0.2795765877957659,
+    "top_aspect": 1.2183098591549295,
+    "source_sha256": "c192bdb30c5c8bc5843f00b7769937ef48adaf7aa1d3488984bedc092125c3a1"
+  },
+  {
+    "name": "conifer-2",
+    "kind": "conifer",
+    "variant": 2,
+    "side": 14,
+    "top": 15,
+    "radius": 0.2013715710723192,
+    "top_aspect": 0.9935483870967742,
+    "source_sha256": "909385894231970d998a5a4367e975f0a6d8eb91b69c7e7fea8b1a7301550ced"
+  },
+  {
+    "name": "conifer-3",
+    "kind": "conifer",
+    "variant": 3,
+    "side": 16,
+    "top": 17,
+    "radius": 0.27378048780487807,
+    "top_aspect": 1.0560420315236427,
+    "source_sha256": "d3f2a4d33a75e4596c30d08ca4714e71b45b5231e173e963ea270ffdda25d384"
+  },
+  {
+    "name": "palm-1",
+    "kind": "palm",
+    "variant": 1,
+    "side": 18,
+    "top": 19,
+    "radius": 0.49712643678160917,
+    "top_aspect": 1.062691131498471,
+    "source_sha256": "a763a84c39307787eda4b7ffef75cf84c7842a76b2f1932b3ffdf0e4a6928cf0"
+  },
+  {
+    "name": "palm-2",
+    "kind": "palm",
+    "variant": 2,
+    "side": 20,
+    "top": 21,
+    "radius": 0.3758043758043758,
+    "top_aspect": 1.1335453100158983,
+    "source_sha256": "eda614add1a23b7be2d6496df86eb9748c80e438649d76ba79eda5dccf07fb82"
+  },
+  {
+    "name": "palm-3",
+    "kind": "palm",
+    "variant": 3,
+    "side": 22,
+    "top": 23,
+    "radius": 0.4862119013062409,
+    "top_aspect": 0.992412746585736,
+    "source_sha256": "3a33f814714fe89f442ca8e1a5272dfb1d66620d4bde16a3049d86bd20b66156"
+  },
+  {
+    "name": "acacia-1",
+    "kind": "acacia",
+    "variant": 1,
+    "side": 24,
+    "top": 25,
+    "radius": 0.9341252699784017,
+    "top_aspect": 1.8482905982905984,
+    "source_sha256": "e2b9d317a4945c9dbef56dd433f045e0d0733b67b5fd98b1ce1a1b93800f303b"
+  },
+  {
+    "name": "acacia-2",
+    "kind": "acacia",
+    "variant": 2,
+    "side": 26,
+    "top": 27,
+    "radius": 0.7571174377224199,
+    "top_aspect": 1.4254606365159128,
+    "source_sha256": "a7fc4bf76538c466b8844846d35ef8bf4425b2afe2b39cca3395eb4b47ae6f50"
+  },
+  {
+    "name": "acacia-3",
+    "kind": "acacia",
+    "variant": 3,
+    "side": 28,
+    "top": 29,
+    "radius": 1.0381861575178997,
+    "top_aspect": 1.3282442748091603,
+    "source_sha256": "d048026a3d301812dbb6f6fc4c5fb087606b8ca4b66820098a6697f835fe21e3"
+  },
+  {
+    "name": "birch-1",
+    "kind": "birch",
+    "variant": 1,
+    "side": 30,
+    "top": 31,
+    "radius": 0.4263959390862944,
+    "top_aspect": 1.1655052264808363,
+    "source_sha256": "422a2684464e05ef8deec9e3ff4a18c606a7324121a54becae19cb30ff2bf883"
+  },
+  {
+    "name": "birch-2",
+    "kind": "birch",
+    "variant": 2,
+    "side": 32,
+    "top": 33,
+    "radius": 0.30335731414868106,
+    "top_aspect": 1.0525252525252524,
+    "source_sha256": "78676edca1f82ebe4a8a0d198dde2fed913443e5b5635f4c220fdfff25f68261"
+  },
+  {
+    "name": "birch-3",
+    "kind": "birch",
+    "variant": 3,
+    "side": 34,
+    "top": 35,
+    "radius": 0.3287037037037037,
+    "top_aspect": 1.0277264325323474,
+    "source_sha256": "f0f5abeab19a4bb84cbdf224e3447bf181b44ec4fe5cd257316fb8ad1a960ca4"
+  },
+  {
+    "name": "jungle_tree-1",
+    "kind": "jungle_tree",
+    "variant": 1,
+    "side": 36,
+    "top": 37,
+    "radius": 0.5425392670157068,
+    "top_aspect": 1.1794871794871795,
+    "source_sha256": "f0a554d1315fa8ac31dda5cfb97388f08b11dc1d72dd745a0f2e3216aed73f02"
+  },
+  {
+    "name": "jungle_tree-2",
+    "kind": "jungle_tree",
+    "variant": 2,
+    "side": 38,
+    "top": 39,
+    "radius": 0.43599493029150826,
+    "top_aspect": 1.0059970014992503,
+    "source_sha256": "491c69444b0198d807807cb978516763e8659469593269ae16e29abe487755df"
+  },
+  {
+    "name": "jungle_tree-3",
+    "kind": "jungle_tree",
+    "variant": 3,
+    "side": 40,
+    "top": 41,
+    "radius": 0.5351213282247765,
+    "top_aspect": 1.2085714285714286,
+    "source_sha256": "758ef14d8bf2f1414d1af727f0d8a8fab82d8d5db801737996dea0f7646017ff"
+  },
+  {
+    "name": "green_bush-1",
+    "kind": "green_bush",
+    "variant": 1,
+    "side": 42,
+    "top": 43,
+    "radius": 0.8397435897435898,
+    "top_aspect": 1.4342857142857144,
+    "source_sha256": "f3a85911928a8d024c8188933d3173619dd59ad7329e21274ebd9d2bd607fe39"
+  },
+  {
+    "name": "green_bush-2",
+    "kind": "green_bush",
+    "variant": 2,
+    "side": 44,
+    "top": 45,
+    "radius": 0.878132118451025,
+    "top_aspect": 1.3176470588235294,
+    "source_sha256": "bf7151cf0581541ce4649f9e25357c81e3bdf3eddb9f844276f3a373f1dc21b4"
+  },
+  {
+    "name": "green_bush-3",
+    "kind": "green_bush",
+    "variant": 3,
+    "side": 46,
+    "top": 47,
+    "radius": 0.8735763097949886,
+    "top_aspect": 1.3032490974729243,
+    "source_sha256": "5959719156b12092a0d41c8d0ac641a1fdc8d1dbd131af2e73f675f7a749215c"
+  },
+  {
+    "name": "dry_bush-1",
+    "kind": "dry_bush",
+    "variant": 1,
+    "side": 48,
+    "top": 49,
+    "radius": 0.8404710920770878,
+    "top_aspect": 1.4658385093167703,
+    "source_sha256": "98c5b4aecdb0e5366f91c1646cf3f475e2ffd3c7c9aa05df46f10e28ea4cfc94"
+  },
+  {
+    "name": "dry_bush-2",
+    "kind": "dry_bush",
+    "variant": 2,
+    "side": 50,
+    "top": 51,
+    "radius": 0.7368932038834951,
+    "top_aspect": 1.3313953488372092,
+    "source_sha256": "a774d3e2b2c19d84ed605f9f79de00da4cdf34169124e2056d5d6fe5eb479de5"
+  },
+  {
+    "name": "dry_bush-3",
+    "kind": "dry_bush",
+    "variant": 3,
+    "side": 52,
+    "top": 53,
+    "radius": 1.0075566750629723,
+    "top_aspect": 1.223127035830619,
+    "source_sha256": "429ee738f327e6f54ed3a5239d8679adf0e67598c01a299003fea9dcc92c3c43"
+  },
+  {
+    "name": "fern-1",
+    "kind": "fern",
+    "variant": 1,
+    "side": 54,
+    "top": 55,
+    "radius": 0.9801401869158879,
+    "top_aspect": 1.35426731078905,
+    "source_sha256": "a9cb175e759300c74cb9747bd93fdd0cf72893275e15525d5e9f38474f6eec68"
+  },
+  {
+    "name": "fern-2",
+    "kind": "fern",
+    "variant": 2,
+    "side": 56,
+    "top": 57,
+    "radius": 1.0374064837905237,
+    "top_aspect": 1.290909090909091,
+    "source_sha256": "4512dd9c641f3546ed7995c49f178eae95325d88ddd07b4088e5b7e5f76b7668"
+  },
+  {
+    "name": "fern-3",
+    "kind": "fern",
+    "variant": 3,
+    "side": 58,
+    "top": 59,
+    "radius": 1.0387596899224807,
+    "top_aspect": 1.1161387631975868,
+    "source_sha256": "8430f142d8bd65e7dcfa9910818e5c88c3be11fae7c76459cc984e2b0eb57262"
+  },
+  {
+    "name": "banana-1",
+    "kind": "banana",
+    "variant": 1,
+    "side": 60,
+    "top": 61,
+    "radius": 0.49680715197956576,
+    "top_aspect": 1.016566265060241,
+    "source_sha256": "70d3b1d41c6669f45c58920fd761dab6584744774a48682a6d24faad8502b9cd"
+  },
+  {
+    "name": "banana-2",
+    "kind": "banana",
+    "variant": 2,
+    "side": 62,
+    "top": 63,
+    "radius": 0.4793438639125152,
+    "top_aspect": 0.9702127659574468,
+    "source_sha256": "a403ba2b7c855e741dd47372ee18f635d6a7e66e92b6304dac1c7f1bd3aa0f0d"
+  },
+  {
+    "name": "banana-3",
+    "kind": "banana",
+    "variant": 3,
+    "side": 64,
+    "top": 65,
+    "radius": 0.625,
+    "top_aspect": 1.3078231292517006,
+    "source_sha256": "bdbbc57fe91a08875cfe7fc70c8a057b8ace400fddf6a90ea8248dfde400980d"
+  },
+  {
+    "name": "yucca-1",
+    "kind": "yucca",
+    "variant": 1,
+    "side": 66,
+    "top": 67,
+    "radius": 0.7039473684210527,
+    "top_aspect": 1.1603498542274053,
+    "source_sha256": "901f0853571449776d8466a935c58a8ac5fb61ba22db5e80082ca3cfdf5186b3"
+  },
+  {
+    "name": "yucca-2",
+    "kind": "yucca",
+    "variant": 2,
+    "side": 68,
+    "top": 69,
+    "radius": 0.695575221238938,
+    "top_aspect": 1.0370879120879122,
+    "source_sha256": "656c947cb8a3778033f6911da89643e0acb9fc023b9c82d466ed2445fc844bf0"
+  },
+  {
+    "name": "yucca-3",
+    "kind": "yucca",
+    "variant": 3,
+    "side": 70,
+    "top": 71,
+    "radius": 0.8004032258064516,
+    "top_aspect": 1.0620490620490621,
+    "source_sha256": "a413b882f252d03419120f817c4f3f14f8fb2dff9d43eb50099d03de43f744e3"
+  },
+  {
+    "name": "dry_scrub-1",
+    "kind": "dry_scrub",
+    "variant": 1,
+    "side": 72,
+    "top": 73,
+    "radius": 0.6959798994974874,
+    "top_aspect": 1.3107255520504733,
+    "source_sha256": "7ffa2b19c51a3f78121b03432233c7e7db40fcdf54c41e163db568d1c4d2ab55"
+  },
+  {
+    "name": "dry_scrub-2",
+    "kind": "dry_scrub",
+    "variant": 2,
+    "side": 74,
+    "top": 75,
+    "radius": 0.9341176470588235,
+    "top_aspect": 1.174055829228243,
+    "source_sha256": "b58cdb0cc11207672e2d86def02b957c7a951fbff83adb0a6ec5764696030992"
+  },
+  {
+    "name": "dry_scrub-3",
+    "kind": "dry_scrub",
+    "variant": 3,
+    "side": 76,
+    "top": 77,
+    "radius": 0.9451901565995525,
+    "top_aspect": 1.0703592814371257,
+    "source_sha256": "897607542eb9c0b418fb0a3df32229472fe0d88120fb70af28986b74403baf4c"
+  },
+  {
+    "name": "stone-1",
+    "kind": "stone",
+    "variant": 1,
+    "side": 78,
+    "top": 79,
+    "radius": 1.1623188405797102,
+    "top_aspect": 1.762979683972912,
+    "source_sha256": "3fb6ef372c851f25b17107bc1f2a6fef36f82aac3ad7be3bac140b76284a7c6b"
+  },
+  {
+    "name": "stone-2",
+    "kind": "stone",
+    "variant": 2,
+    "side": 80,
+    "top": 81,
+    "radius": 1.1816901408450704,
+    "top_aspect": 1.8493449781659388,
+    "source_sha256": "af80f86ac9356a8623fcc016c43353d8d7158430f447894b49eda1e0f5bd5a32"
+  },
+  {
+    "name": "stone-3",
+    "kind": "stone",
+    "variant": 3,
+    "side": 82,
+    "top": 83,
+    "radius": 1.4028776978417266,
+    "top_aspect": 1.6318082788671024,
+    "source_sha256": "15e27f1f15fb281256d5246d6c162d5d94219c1b6c5683621f9867189bbf4a0d"
+  },
+  {
+    "name": "boulder-1",
+    "kind": "boulder",
+    "variant": 1,
+    "side": 84,
+    "top": 85,
+    "radius": 0.765686274509804,
+    "top_aspect": 1.4378698224852071,
+    "source_sha256": "f87a2541dc29cbad6d4669efa00fceedbe42e343f2caaf7466e00bce1bb12544"
+  },
+  {
+    "name": "boulder-2",
+    "kind": "boulder",
+    "variant": 2,
+    "side": 86,
+    "top": 87,
+    "radius": 0.7299412915851272,
+    "top_aspect": 1.1304347826086956,
+    "source_sha256": "e30ce249efd8e17937400c25514dfd7b67073a9e6c03d435277ab63a7ee71353"
+  },
+  {
+    "name": "boulder-3",
+    "kind": "boulder",
+    "variant": 3,
+    "side": 88,
+    "top": 89,
+    "radius": 0.8143776824034334,
+    "top_aspect": 1.2135416666666667,
+    "source_sha256": "bc2de9748cba66a8aae02b9c70bb53f2a6bc52ef4309193508e7498e726250d0"
+  },
+  {
+    "name": "outcrop-1",
+    "kind": "outcrop",
+    "variant": 1,
+    "side": 90,
+    "top": 91,
+    "radius": 1.0477941176470589,
+    "top_aspect": 1.8102345415778252,
+    "source_sha256": "fa1b196e2ed838921616e6c5203acd87e1bcbcc0afec79c074380094011e2925"
+  },
+  {
+    "name": "outcrop-2",
+    "kind": "outcrop",
+    "variant": 2,
+    "side": 92,
+    "top": 93,
+    "radius": 1.259090909090909,
+    "top_aspect": 1.6162280701754386,
+    "source_sha256": "6783646aa62b01216ac1e7b1cef66a8e4d5a408b5130f2dbb634ffac9a7a4fe3"
+  },
+  {
+    "name": "outcrop-3",
+    "kind": "outcrop",
+    "variant": 3,
+    "side": 94,
+    "top": 95,
+    "radius": 1.0811855670103092,
+    "top_aspect": 1.822125813449024,
+    "source_sha256": "744d08d8958c217223f180d513d47260206e134d5e68e59ca82b3c4732e382c9"
+  },
+  {
+    "name": "desert_rock-1",
+    "kind": "desert_rock",
+    "variant": 1,
+    "side": 96,
+    "top": 97,
+    "radius": 0.8449304174950298,
+    "top_aspect": 1.868421052631579,
+    "source_sha256": "bc44cbd79752286222025a4a3f1971472567932bc523d7c104937f3ac4b828b5"
+  },
+  {
+    "name": "desert_rock-2",
+    "kind": "desert_rock",
+    "variant": 2,
+    "side": 98,
+    "top": 99,
+    "radius": 0.843010752688172,
+    "top_aspect": 1.639080459770115,
+    "source_sha256": "1b03aa76693a1a82ed6e12515c841c5882d5e4309a7947b60f985935bd28bb0e"
+  },
+  {
+    "name": "desert_rock-3",
+    "kind": "desert_rock",
+    "variant": 3,
+    "side": 100,
+    "top": 101,
+    "radius": 0.8436853002070394,
+    "top_aspect": 1.6042105263157895,
+    "source_sha256": "05e62a3f176e4cc5ea23ce19ca07f52c72edd9e61eade7dd60811f09cdd4c7ab"
+  },
+  {
+    "name": "tropical_shrub-1",
+    "kind": "tropical_shrub",
+    "variant": 1,
+    "side": 102,
+    "top": 103,
+    "radius": 0.6677367576243981,
+    "top_aspect": 1.420265780730897,
+    "source_sha256": "6618cf4d8ae6827fa419d3dc713746a40627f310be9cc6f0dfc5e034d69658b2"
+  },
+  {
+    "name": "tropical_shrub-2",
+    "kind": "tropical_shrub",
+    "variant": 2,
+    "side": 104,
+    "top": 105,
+    "radius": 0.5845481049562682,
+    "top_aspect": 1.3717532467532467,
+    "source_sha256": "dfac1852f5acb2efcd9c255b023c6ea6b484203562de323d3be5e04fb5070ca5"
+  },
+  {
+    "name": "tropical_shrub-3",
+    "kind": "tropical_shrub",
+    "variant": 3,
+    "side": 106,
+    "top": 107,
+    "radius": 0.8659574468085106,
+    "top_aspect": 1.194267515923567,
+    "source_sha256": "824543adfd6713ad4ad57b24b353345dec137fba69bee83e2a57f69818851e2c"
+  }
+]

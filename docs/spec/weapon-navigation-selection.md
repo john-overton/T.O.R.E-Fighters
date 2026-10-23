@@ -19,7 +19,11 @@ selection does not hide their status. A station that carries nothing is not on
 the aircraft: the ring steps over it and the WEAPONS list leaves it out (John,
 2026-09-28, after a bug report that Mavericks taken off the loadout page were
 still listed). A station that runs dry in flight stays selected until the next
-`[` or `]`, and unlimited ammunition keeps every station reachable. Startup
+`[` or `]`, and unlimited ammunition keeps every station that was loaded
+reachable. The retained selection stations some aircraft carry at zero rounds
+(see [aircraft ordnance](../formats/aircraft-ordnance.md)) were never loaded, so
+the ring steps over them even with unlimited ammunition, and `[` and `]` agree
+with the minus and plus buttons. Startup
 selects the gun, else the first station that carries something, else NAV, so an
 aircraft loaded with nothing starts on NAV. Ground starts use NAV; airborne starts
 retain the canonical gun, now armed. Existing headless range commands and old
@@ -49,7 +53,7 @@ Agent choices: list airports nearest first by horizontal distance to their
 nearest usable runway center, breaking ties by airport ID. Keep selection by ID
 as distances change. Eligible airports are friendly, or neutral with landing
 permission, and must have a usable runway. Hostile, unknown, unpermitted neutral
-and disabled airports are excluded. This denotes landing eligibility, not a
+and disabled airports are excluded, and so are the short airstrips (a runway under 2,000 ft, John 2026-09-30; [short strips](airports.md#short-strips)). A listed airport whose runways are all STOL runways shows `(STOL)` after its name ([STOL runways](airports.md#stol-runways)); the short strips are the only STOL fields today, so no listed entry carries it. This denotes landing eligibility, not a
 promise of freedom from nearby threats. The existing base-layout host explicitly
 assigns neutral landing permission; mission allegiance is not inferred.
 

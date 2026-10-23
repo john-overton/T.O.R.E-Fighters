@@ -1,121 +1,26 @@
-use crate::{
-    AppResult,
-    media_source::{self, MediaSource},
-};
-use std::{
-    collections::BTreeMap,
-    fs,
-    io::{Read, Write},
-    path::{Path, PathBuf},
-};
+use crate::AppResult;
+use std::{collections::BTreeMap, path::Path};
 use tore_formats::{Button, Pic};
+use tore_import::media_source::MediaSource;
 
-const ART: &[&str] = &[
-    "QUIKMIS3.PIC",
-    "ORD_AIR3.PIC",
-    "ROCKER00.PIC",
-    "ROCKER01.PIC",
-    "ROCKER02.PIC",
-    "ROCKER03.PIC",
-    "ROCKER04.PIC",
-    "DIAL00.PIC",
-    "DIAL04.PIC",
-    "DIAL11.PIC",
-    "DIAL13.PIC",
-    "LIGHTON.PIC",
-    "LIGHTOFF.PIC",
-    "PANELFNT.PIC",
-    "CHOOSEV.PIC",
-    "CHOOSEAC.PIC",
-    "CHOOSE3.PIC",
-    "CHOOSEU.PIC",
-    "CHOOSEM.PIC",
-    "ACTDFLT.PIC",
-    "ACTDFT0L.PIC",
-    "ACTDFT0M.PIC",
-    "ACTDFT0R.PIC",
-    "ACTION0L.PIC",
-    "ACTION0M.PIC",
-    "ACTION0R.PIC",
-    "ACTIOD0L.PIC",
-    "ACTIOD0M.PIC",
-    "ACTIOD0R.PIC",
-    "FONTACT.PIC",
-    "FONTACD.PIC",
-    "MENUFONT.PIC",
-    "BODYFONT.PIC",
-    "ARMFONT.PIC",
-    "SMLFONT.PIC",
-    // The Sound/Music Prefs dialog (sound_screen.rs).
-    "SNDPREF.PIC",
-    "SLIDERV.PIC",
-    "TOGGLE00.PIC",
-    "TOGGLE01.PIC",
-    "TOGGLE02.PIC",
-    "TOGGLE03.PIC",
-    "TOGGLE04.PIC",
-];
-const DATA: &[&str] = &[
-    "CHOOSEAC.DLG",
-    "MAINMENU.MNU",
-    "FMENUD.MNU",
-    "&CLICK.11K",
-    "&BUTTON.11K",
-    "&TOGGLE1.5K",
-    "&SWITCH.11K",
-    // RWR warning tones (rwr_tone.rs); &RWRMISS.5K is never played.
-    "&RWRLOCK.5K",
-    "&RWRDTCT.5K",
-    "&RWRIR.5K",
-];
-/// Sanity bounds on the import pack, far above a full Fighters Anthology
-/// import (about 4,100 resources and 180 MB in 2026-09), so a corrupt file is
-/// refused without capping what an import may hold. The pack is read as a
-/// stream, so memory follows the resources kept, not the bound.
-const MAX_PACK_BYTES: u64 = 1024 * 1024 * 1024;
-const MAX_PACK_RESOURCES: usize = 32_768;
-const MAX_RESOURCE_BYTES: usize = 2 * 1024 * 1024;
+pub use tore_import::{Progress, data_directory};
+
 pub struct Assets {
     pub creator_options: tore_formats::ui::creator::Options,
     pub theater_resources: BTreeMap<String, Vec<u8>>,
+    /// The multiplayer screens' pictures, dialogs, menus and the quick-message
+    /// file, as imported (the screens decode them with their own palettes).
+    /// Kept apart from `theater_resources` on purpose: that map is what the
+    /// combat tapes fingerprint, so the same flights keep the same tapes when
+    /// the import grows by menu art.
+    #[allow(dead_code)] // Read by the multiplayer screens (EF2 onwards).
+    pub multiplayer_resources: BTreeMap<String, Vec<u8>>,
     pub pics: BTreeMap<String, Pic>,
     pub buttons: Vec<Button>,
     pub sounds: BTreeMap<String, Vec<u8>>,
     pub music_scores: BTreeMap<String, Vec<u8>>,
     pub palette: [[u8; 3]; 256],
 }
-pub fn data_directory() -> AppResult<PathBuf> {
-    if let Some(path) = std::env::var_os("TORE_DATA_DIR") {
-        return Ok(PathBuf::from(path));
-    }
-    #[cfg(target_os = "macos")]
-    let root = PathBuf::from(std::env::var_os("HOME").ok_or("HOME is unset")?)
-        .join("Library/Application Support");
-    #[cfg(target_os = "windows")]
-    let root = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA is unset")?);
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let root = match std::env::var_os("XDG_DATA_HOME") {
-        Some(path) => PathBuf::from(path),
-        None => {
-            PathBuf::from(std::env::var_os("HOME").ok_or("HOME is unset")?).join(".local/share")
-        }
-    };
-    Ok(root.join("T.O.R.E-Fighters"))
-}
-/// How far an import has got, for the first-run screen.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Progress {
-    /// Work before any archive is read, named in plain words for the player.
-    Preparing(&'static str),
-    /// Reading one archive. `total` is the number of resources selected from
-    /// it, when it is known.
-    Reading {
-        archive: String,
-        done: usize,
-        total: Option<usize>,
-    },
-}
-
 /// A finished import: the decoded assets and the plain-words summary the
 /// locate screen shows. The same facts are in `import-report.txt` in full.
 pub(crate) struct ImportOutcome {
@@ -124,58 +29,57 @@ pub(crate) struct ImportOutcome {
     pub summary: Vec<String>,
 }
 
-fn pack_generation(path: &Path) -> Option<u128> {
-    let name = path.file_name()?.to_str()?;
-    let generation = name.strip_prefix("menu-")?.strip_suffix(".pack")?;
-    if generation.is_empty() || !generation.bytes().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    generation.parse().ok()
-}
-
-/// Only called after the retained pack has been decoded successfully.
-fn remove_older_packs(directory: &Path, retained: &Path) -> std::io::Result<usize> {
-    let Some(generation) = pack_generation(retained) else {
-        return Ok(0);
-    };
-    let mut removed = 0;
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        if entry.file_type()?.is_file()
-            && pack_generation(&entry.path()).is_some_and(|old| old < generation)
-        {
-            fs::remove_file(entry.path())?;
-            removed += 1;
+/// Confirms the multiplayer screens' pieces (slice EF1) are in the pack and
+/// that each picture, dialog and menu reads with the existing readers. The
+/// screens decode the pictures themselves with their own palettes, so nothing
+/// is kept here. A missing `CHAT.TXT` is not a failure: chat then has no quick
+/// messages.
+fn check_multiplayer_art(resources: &tore_import::Resources) -> AppResult<()> {
+    use tore_import::selection::{MULTIPLAYER_ART, MULTIPLAYER_DATA};
+    for name in MULTIPLAYER_ART.iter().chain(MULTIPLAYER_DATA) {
+        let bytes = resources
+            .get(*name)
+            .ok_or_else(|| format!("cache missing multiplayer {name}; re-import media"))?;
+        if name.ends_with(".PIC") {
+            Pic::parse(bytes).map_err(|error| format!("multiplayer {name}: {error}"))?;
+        } else if name.ends_with(".DLG") {
+            tore_formats::ui::dialog::parse(bytes)
+                .map_err(|error| format!("multiplayer {name}: {error}"))?;
+        } else if name.ends_with(".MNU") {
+            tore_formats::ui::menu_tree(bytes)
+                .map_err(|error| format!("multiplayer {name}: {error}"))?;
         }
     }
-    Ok(removed)
+    Ok(())
 }
 
-fn cleanup_previous_imports(directory: &Path, retained: &Path) {
-    match remove_older_packs(directory, retained) {
-        Ok(0) => {}
-        Ok(count) => log::info!("Removed previous import packs: {count}"),
-        Err(error) => log::warn!(
-            "Could not finish cleaning older import packs in {}: {error}",
-            directory.display()
-        ),
-    }
+/// True for what the multiplayer slice (EF1) added to the pack: the pieces in
+/// `MULTIPLAYER_ART` and `MULTIPLAYER_DATA`, the scroll bar's track
+/// (`SLIDER_ART`, optional), the quick-message file and the
+/// marker, and the import's source entry (slice L1: the build and importer,
+/// which no flight depends on).
+fn is_multiplayer_resource(name: &str) -> bool {
+    use tore_import::selection::{CHAT_RESOURCE, MULTIPLAYER_ART, MULTIPLAYER_DATA, SLIDER_ART};
+    MULTIPLAYER_ART.contains(&name)
+        || SLIDER_ART.contains(&name)
+        || MULTIPLAYER_DATA.contains(&name)
+        || name == CHAT_RESOURCE
+        || name == tore_import::pack::MULTIPLAYER_MARKER
+        || name == tore_import::source::RESOURCE
+}
+
+/// Legacy vegetation names are ignored when reading old imports. Keeping them
+/// out of theater_resources preserves existing combat-tape fingerprints.
+fn is_vegetation_resource(name: &str) -> bool {
+    tore_import::selection::LEGACY_VEGETATION_ART.contains(&name)
 }
 
 impl Assets {
-    fn decode(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
-        if resources.get("TORE_MUSIC_V1").map(Vec::as_slice) != Some(b"PCM1") {
-            return Err("cache predates recorded music profile; re-import media".into());
-        }
-        if resources.get("TORE_COMBAT_V1").map(Vec::as_slice) != Some(b"RAW1") {
-            return Err("cache predates combat dependencies; re-import media".into());
-        }
-        if resources.get("TORE_AIRPORTS_V1").map(Vec::as_slice) != Some(b"SCENE1") {
-            return Err("cache predates airport scene dependencies; re-import media".into());
-        }
-        if resources.get("TORE_SPEECH_V1").map(Vec::as_slice) != Some(b"ALL1") {
-            return Err("cache predates the full radio speech set; re-import media".into());
-        }
+    fn decode(resources: &tore_import::Resources) -> AppResult<Self> {
+        tore_import::check_markers(resources)?;
+        // The dedicated server does not ask for this; the game does, because
+        // the multiplayer screens draw art an older import did not keep.
+        tore_import::check_multiplayer_marker(resources)?;
         for &name in tore_formats::ui::creator::ORDNANCE_SOUNDS {
             let bytes = resources
                 .get(name)
@@ -232,7 +136,10 @@ impl Assets {
                 return Err(format!("cache missing {code}.MM; re-import all theaters").into());
             }
         }
-        for name in crate::debrief::ART.iter().chain(crate::debrief::DATA) {
+        for name in tore_import::selection::DEBRIEF_ART
+            .iter()
+            .chain(tore_import::selection::DEBRIEF_DATA)
+        {
             if !resources.contains_key(*name) {
                 return Err(format!("cache missing debrief {name}; re-import media").into());
             }
@@ -260,12 +167,13 @@ impl Assets {
         }
         tore_formats::font::Font::parse(&resources["WIN11.FNT"])?;
         let mut pics = BTreeMap::new();
-        for name in ART {
+        for name in tore_import::selection::MENU_ART {
             let bytes = resources
                 .get(*name)
                 .ok_or_else(|| format!("menu cache missing {name}; re-import media"))?;
             pics.insert(name.to_string(), Pic::parse(bytes)?);
         }
+        check_multiplayer_art(resources)?;
         for (name, bytes) in resources.iter().filter(|(n, _)| {
             n.starts_with('$') && n.ends_with(".PIC")
                 || ["MCICONS.PIC", "FNTWPNB.PIC", "FNTWPNY.PIC"].contains(&n.as_str())
@@ -345,7 +253,16 @@ impl Assets {
             creator_options,
             theater_resources: resources
                 .iter()
-                .filter(|(name, _)| !tore_formats::music::resource(name))
+                .filter(|(name, _)| {
+                    !tore_formats::music::resource(name)
+                        && !is_multiplayer_resource(name)
+                        && !is_vegetation_resource(name)
+                })
+                .map(|(n, b)| (n.clone(), b.clone()))
+                .collect(),
+            multiplayer_resources: resources
+                .iter()
+                .filter(|(name, _)| is_multiplayer_resource(name))
                 .map(|(n, b)| (n.clone(), b.clone()))
                 .collect(),
             pics,
@@ -365,481 +282,136 @@ impl Assets {
         Ok(Self::import_with_progress(source, destination, &mut |_| {})?.assets)
     }
     /// Import with progress reports, at least once per archive and every 64
-    /// resources. The callback runs on the importing thread.
+    /// resources. The callback runs on the importing thread. The library
+    /// writes and verifies the pack; this only decodes what the menus draw.
     pub(crate) fn import_with_progress(
         source: &MediaSource,
         destination: &Path,
         progress: &mut dyn FnMut(Progress),
     ) -> AppResult<ImportOutcome> {
-        let mut resources = BTreeMap::new();
-        let mut summary = Vec::new();
-        let mut report = String::from(
-            "T.O.R.E-Fighters menu import v1\nOnly selected resources decompressed. No executable resources executed.\n",
-        );
-        report.push_str(&format!(
-            "Source: {} {}\n",
-            source.kind.label(),
-            source.path.display()
-        ));
-        // The build is identified before any archive is opened, so an unreviewed
-        // executable never leaves a half-known data set in the cache.
-        progress(Progress::Preparing("Identifying the game build"));
-        let executable = source.executable()?;
-        let layout = tore_formats::executable::identify(&executable)?;
-        let tables = tore_formats::ui::creator::Options::parse(&executable)?;
-        let clouds = tore_formats::weather::clouds::Layout::parse(&executable)?;
-        resources.insert("TORE_CLOUDS_V1".into(), clouds.encode());
-        resources.insert(
-            "TORE_FLARE_V1".into(),
-            tore_formats::weather::flare::Layout::parse(&executable)?.encode(),
-        );
-        resources.insert("TORE_CREATOR_V1".into(), tables.encode());
-        report.push_str(&format!(
-            "FA.EXE: {} SHA-256 {}; inert creator lists and cloud layout\n",
-            layout.name,
-            tore_formats::executable::sha256(&executable)
-        ));
-        summary.push(format!("Build read: FA.EXE {}", layout.name));
-        progress(Progress::Preparing("Finding aircraft and theaters"));
-        let aircraft_libs = [source.archive("FA_1.LIB")?, source.archive("FA_2.LIB")?];
-        let aircraft_names = tore_formats::aircraft::dependencies(
-            &aircraft_libs.iter().collect::<Vec<_>>(),
-            &tore_formats::aircraft::AircraftId::ALL,
-            true,
-        )?;
-        let scene_layouts: Vec<String> = aircraft_libs
-            .iter()
-            .flat_map(|archive| archive.entries.keys())
-            .filter(|name| {
-                name.ends_with(".MM") && tore_formats::theater::base_theater(name).is_some()
-            })
-            .cloned()
-            .collect();
-        resources.insert("TORE_TERRAIN_V2".into(), vec![2]);
-        let scene_names = tore_formats::mission::scene_dependencies(
-            &aircraft_libs.iter().collect::<Vec<_>>(),
-            &scene_layouts,
-        )?;
-        for (filename, names, debrief) in [
-            ("FA_1.LIB", ART, crate::debrief::ART),
-            ("FA_2.LIB", DATA, crate::debrief::DATA),
-        ] {
-            let lib = source.archive(filename)?;
-            report.push_str(&format!(
-                "{filename}: {} unique entries\n",
-                lib.entries.len()
-            ));
-            summary.push(format!("{filename}: {} entries read", lib.entries.len()));
-            let selected: Vec<_> = lib
-                .entries
-                .keys()
-                .filter(|n| {
-                    names.contains(&n.as_str())
-                        || debrief.contains(&n.as_str())
-                        || n.as_str() == "MCICONS.PIC"
-                        || aircraft_names.contains(*n)
-                        || scene_names.contains(*n)
-                        || tore_formats::ui::creator::resource(n)
-                        || tore_formats::music::resource(n)
-                        || tore_formats::radio::resource(n)
-                        || tore_formats::ejection::RESOURCES.contains(&n.as_str())
-                        || tore_formats::theater::theater_resource(n, "ALL")
-                })
-                .cloned()
-                .collect();
-            progress(Progress::Reading {
-                archive: filename.to_string(),
-                done: 0,
-                total: Some(selected.len()),
-            });
-            for (index, name) in selected.iter().enumerate() {
-                if index > 0 && index.is_multiple_of(64) {
-                    progress(Progress::Reading {
-                        archive: filename.to_string(),
-                        done: index,
-                        total: Some(selected.len()),
-                    });
-                }
-                let bytes = lib.read(name)?;
-                let entry = &lib.entries[name];
-                report.push_str(&format!(
-                    "{filename}/{name}: offset={}, stored={}, decoded={}\n",
-                    entry.offset,
-                    entry.size,
-                    bytes.len()
-                ));
-                if resources.get(name).is_some_and(|old| *old != bytes) {
-                    return Err(format!("conflicting resource {filename}/{name}").into());
-                }
-                resources.insert(name.to_string(), bytes);
-            }
-            progress(Progress::Reading {
-                archive: filename.to_string(),
-                done: selected.len(),
-                total: Some(selected.len()),
-            });
-        }
-        match tore_formats::radio::phrases(&executable) {
-            Ok(phrases) => {
-                report.push_str(&format!(
-                    "Radio: {} verified phrase mappings\n",
-                    phrases.len()
-                ));
-                summary.push(format!("Radio: {} phrase mappings read", phrases.len()));
-                resources.extend(phrases);
-            }
-            Err(error) => {
-                report.push_str(&format!("Optional radio metadata unavailable: {error}\n"));
-                summary.push(format!("Radio phrases unavailable: {error}"));
-            }
-        }
-        for filename in ["FA_4B.LIB", "FA_4D.LIB"] {
-            let lib = match source.optional_archive(filename) {
-                Ok(Some(lib)) => lib,
-                Ok(None) => {
-                    report.push_str(&format!(
-                        "Optional recorded music unavailable: {filename} is not in this source\n"
-                    ));
-                    summary.push(format!("Recorded music {filename} missing"));
-                    continue;
-                }
-                Err(error) => {
-                    log::warn!("Optional recorded music unavailable: {error}");
-                    report.push_str(&format!("Optional recorded music unavailable: {error}\n"));
-                    summary.push(format!("Recorded music {filename} unreadable: {error}"));
-                    continue;
-                }
-            };
-            let scores: Vec<String> = lib
-                .entries
-                .keys()
-                .filter(|n| tore_formats::music::resource(n))
-                .cloned()
-                .collect();
-            progress(Progress::Reading {
-                archive: filename.to_string(),
-                done: 0,
-                total: Some(scores.len()),
-            });
-            summary.push(format!("{filename}: {} music resources read", scores.len()));
-            for (index, name) in scores.iter().enumerate() {
-                if index > 0 && index.is_multiple_of(64) {
-                    progress(Progress::Reading {
-                        archive: filename.to_string(),
-                        done: index,
-                        total: Some(scores.len()),
-                    });
-                }
-                let bytes = lib.read(name)?;
-                if resources.get(name).is_some_and(|old| *old != bytes) {
-                    return Err(format!("conflicting music resource {filename}/{name}").into());
-                }
-                let entry = &lib.entries[name];
-                report.push_str(&format!(
-                    "{filename}/{name}: offset={}, stored={}, decoded={}\n",
-                    entry.offset,
-                    entry.size,
-                    bytes.len()
-                ));
-                resources.insert(name.clone(), bytes);
-            }
-            progress(Progress::Reading {
-                archive: filename.to_string(),
-                done: scores.len(),
-                total: Some(scores.len()),
-            });
-        }
-        let mut missing_scores = 0;
-        for name in tore_formats::music::SCORES {
-            if let Some(bytes) = resources.get(*name) {
-                let score = tore_formats::music::Score::parse(bytes)?;
-                for track in &score.tracks {
-                    let file = score.filename(*track);
-                    if !resources.contains_key(&file) {
-                        report.push_str(&format!("{name}: unavailable {file}; no substitution\n"));
-                    }
-                }
-            } else {
-                missing_scores += 1;
-                report.push_str(&format!("Unavailable score {name}\n"));
-            }
-        }
-        if missing_scores > 0 {
-            summary.push(format!(
-                "Recorded music: {missing_scores} of {} scores unavailable",
-                tore_formats::music::SCORES.len()
-            ));
-        }
-        resources.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
-        resources.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
-        resources.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
-        resources.insert("TORE_SPEECH_V1".into(), b"ALL1".to_vec());
-        let assets = Self::decode(&resources)?;
-        fs::create_dir_all(destination)?;
-        // Generation files keep the previous import usable until the new pack is complete.
-        let generation = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_nanos();
-        let path = destination.join(format!("menu-{generation}.pack"));
-        write_pack(&path, &resources)?;
-        fs::write(destination.join("import-report.txt"), report)?;
-        // Verify the on-disk pack before removing any previously usable import.
-        drop(assets);
-        let assets = Self::load_pack(&path)?;
-        cleanup_previous_imports(destination, &path);
-        // The remembered source only saves the player a second choice; failing to
-        // write it does not spoil a finished import.
-        if let Err(error) = media_source::remember(destination, source) {
-            log::warn!("Could not remember the media source: {error}");
-            summary.push(format!("Media source not remembered: {error}"));
-        }
-        log::info!(
-            "Imported menu and all theater resources to {}",
-            path.display()
-        );
-        Ok(ImportOutcome { assets, summary })
+        let imported =
+            tore_import::import_with_progress(source, destination, progress, &Self::decode)?;
+        crate::vegetation::cache::configure(destination);
+        tore_world::city::cache::configure(destination);
+        Ok(ImportOutcome {
+            assets: imported.value,
+            summary: imported.summary,
+        })
     }
     pub fn load(directory: &Path) -> AppResult<Self> {
-        let mut paths = fs::read_dir(directory)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with("menu-"))
-                    && p.extension().is_some_and(|e| e == "pack")
-            })
-            .collect::<Vec<_>>();
-        paths.sort();
-        let mut last_error =
-            "No imported menu. Run with --import gameassets/fighters-anthology".to_string();
-        for path in paths.into_iter().rev() {
-            match Self::load_pack(&path) {
-                Ok(assets) => {
-                    cleanup_previous_imports(directory, &path);
-                    return Ok(assets);
-                }
-                Err(error) => {
-                    last_error = format!("{}: {error}", path.display());
-                    log::warn!("Ignoring invalid menu cache: {last_error}");
-                }
-            }
-        }
-        Err(last_error.into())
+        let loaded = tore_import::load_with(directory, &Self::decode)?;
+        crate::vegetation::cache::configure(directory);
+        tore_world::city::cache::configure(directory);
+        Ok(loaded.value)
     }
-    fn load_pack(path: &Path) -> AppResult<Self> {
-        Self::decode(&read_pack(path)?)
-    }
-}
-
-/// Writes a new pack. `path` must not exist yet; the file is synced before
-/// returning.
-fn write_pack(path: &Path, resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
-    let encoded_size = 16u64
-        + resources
-            .iter()
-            .map(|(name, bytes)| 6 + name.len() as u64 + bytes.len() as u64)
-            .sum::<u64>();
-    if encoded_size > MAX_PACK_BYTES
-        || resources.len() > MAX_PACK_RESOURCES
-        || resources.iter().any(|(name, bytes)| {
-            !(1..=32).contains(&name.len()) || bytes.len() > MAX_RESOURCE_BYTES
-        })
-    {
-        return Err(format!(
-            "import exceeds cache bounds: {} resources, {} bytes",
-            resources.len(),
-            encoded_size
-        )
-        .into());
-    }
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    let mut out = std::io::BufWriter::new(file);
-    out.write_all(b"TOREMENU\x01\0\0\0")?;
-    out.write_all(&(resources.len() as u32).to_le_bytes())?;
-    for (name, bytes) in resources {
-        out.write_all(&(name.len() as u16).to_le_bytes())?;
-        out.write_all(name.as_bytes())?;
-        out.write_all(&(bytes.len() as u32).to_le_bytes())?;
-        out.write_all(bytes)?;
-    }
-    out.into_inner()
-        .map_err(|error| error.into_error())?
-        .sync_all()?;
-    Ok(())
-}
-
-fn read_pack(path: &Path) -> AppResult<BTreeMap<String, Vec<u8>>> {
-    let file = fs::File::open(path)?;
-    let size = file.metadata()?.len();
-    if size > MAX_PACK_BYTES {
-        return Err("asset pack exceeds 1 GiB".into());
-    }
-    let mut cursor = std::io::BufReader::new(file.take(size));
-    let mut header = [0; 12];
-    cursor.read_exact(&mut header)?;
-    if &header != b"TOREMENU\x01\0\0\0" {
-        return Err("unsupported menu pack".into());
-    }
-    fn word(c: &mut impl Read) -> AppResult<usize> {
-        let mut b = [0; 4];
-        c.read_exact(&mut b)?;
-        Ok(u32::from_le_bytes(b) as usize)
-    }
-    let count = word(&mut cursor)?;
-    if count > MAX_PACK_RESOURCES {
-        return Err("too many menu resources".into());
-    }
-    let mut resources = BTreeMap::new();
-    for _ in 0..count {
-        let mut len = [0; 2];
-        cursor.read_exact(&mut len)?;
-        let len = u16::from_le_bytes(len) as usize;
-        if len == 0 || len > 32 {
-            return Err("invalid resource name length".into());
-        }
-        let mut name = vec![0; len];
-        cursor.read_exact(&mut name)?;
-        let name = String::from_utf8(name)?;
-        let length = word(&mut cursor)?;
-        if length > MAX_RESOURCE_BYTES {
-            return Err("menu resource exceeds limit".into());
-        }
-        let mut bytes = vec![0; length];
-        cursor.read_exact(&mut bytes)?;
-        if resources.insert(name, bytes).is_some() {
-            return Err("duplicate menu resource".into());
-        }
-    }
-    if cursor.read(&mut [0])? != 0 {
-        return Err("trailing menu pack bytes".into());
-    }
-    Ok(resources)
 }
 
 #[cfg(test)]
-mod cache_tests {
+mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use tore_import::{Resources, selection};
 
-    struct CacheDirectory(PathBuf);
-    impl CacheDirectory {
-        fn new() -> Self {
-            static NEXT: AtomicU64 = AtomicU64::new(0);
-            let path = std::env::temp_dir().join(format!(
-                "tore-cache-{}-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for CacheDirectory {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.0).unwrap();
-        }
+    const OLD_MARKERS: [(&str, &[u8]); 5] = [
+        ("TORE_MUSIC_V1", b"PCM1"),
+        ("TORE_COMBAT_V1", b"RAW1"),
+        ("TORE_AIRPORTS_V1", b"SCENE1"),
+        ("TORE_SPEECH_V1", b"ALL1"),
+        ("TORE_SURFACE_V1", b"SURF1"),
+    ];
+
+    fn older_pack() -> Resources {
+        OLD_MARKERS
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_vec()))
+            .collect()
     }
 
     #[test]
-    fn cleanup_removes_only_older_numbered_regular_packs() {
-        let directory = CacheDirectory::new();
+    fn the_game_asks_for_a_re_import_of_a_pack_without_the_multiplayer_art() {
+        let resources = older_pack();
+        // The dedicated server's check takes this pack; the game's refuses it.
+        tore_import::check_markers(&resources).unwrap();
+        let error = Assets::decode(&resources).err().unwrap().to_string();
+        assert!(error.contains("multiplayer"), "{error}");
+        assert!(error.contains("re-import media"), "{error}");
+    }
+
+    #[test]
+    fn the_multiplayer_pieces_stay_out_of_the_tape_fingerprinted_resources() {
+        for name in selection::MULTIPLAYER_ART
+            .iter()
+            .chain(selection::MULTIPLAYER_DATA)
+        {
+            assert!(is_multiplayer_resource(name), "{name}");
+        }
+        // The scroll bar's track is one, and no pack is refused for lacking it.
+        for name in selection::SLIDER_ART {
+            assert!(is_multiplayer_resource(name), "{name}");
+            assert!(!selection::MULTIPLAYER_ART.contains(name), "{name}");
+        }
+        assert!(is_multiplayer_resource(selection::CHAT_RESOURCE));
+        assert!(is_multiplayer_resource("TORE_MULTIPLAYER_V1"));
+        assert!(is_multiplayer_resource(tore_import::source::RESOURCE));
+        // What flights already depended on is not touched.
         for name in [
-            "menu-9.pack",
-            "menu-10.pack",
-            "menu-20.pack",
-            "menu-30.pack",
-            "menu-backup.pack",
-            "menu-+1.pack",
-            "preferences.conf",
-            "other.pack",
+            "PANELFNT.PIC",
+            "TORE_SPEECH_V1",
+            "F18.PT",
+            "CHOOSEM.PIC",
+            "FMENUD.MNU",
         ] {
-            fs::write(directory.0.join(name), b"synthetic").unwrap();
+            assert!(!is_multiplayer_resource(name), "{name}");
         }
-        fs::create_dir(directory.0.join("menu-1.pack")).unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("preferences.conf", directory.0.join("menu-2.pack")).unwrap();
-        assert_eq!(
-            remove_older_packs(&directory.0, &directory.0.join("menu-20.pack")).unwrap(),
-            2
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_piece_is_named() {
+        let mut resources = Resources::new();
+        let error = check_multiplayer_art(&resources).unwrap_err().to_string();
+        assert!(
+            error.contains(selection::MULTIPLAYER_ART[0]) && error.contains("re-import media"),
+            "{error}"
         );
-        assert!(!directory.0.join("menu-9.pack").exists());
-        assert!(!directory.0.join("menu-10.pack").exists());
-        for name in [
-            "menu-20.pack",
-            "menu-30.pack",
-            "menu-backup.pack",
-            "menu-+1.pack",
-            "preferences.conf",
-            "other.pack",
-            "menu-1.pack",
+        for name in selection::MULTIPLAYER_ART
+            .iter()
+            .chain(selection::MULTIPLAYER_DATA)
+        {
+            resources.insert(name.to_string(), vec![0; 16]);
+        }
+        let error = check_multiplayer_art(&resources).unwrap_err().to_string();
+        assert!(error.contains(selection::MULTIPLAYER_ART[0]), "{error}");
+    }
+
+    /// Every piece the lists name, straight from the retail archives, when the
+    /// install is present (the `gameassets` link or `TORE_GAME_DIR`); the test
+    /// skips quietly otherwise. Also reads `CHAT.TXT` as the import does.
+    #[test]
+    fn the_retail_pieces_all_pass_the_pack_check() {
+        let root = std::env::var_os("TORE_GAME_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gameassets/fighters-anthology")
+            });
+        let (Ok(art), Ok(data)) = (
+            tore_formats::Archive::open(root.join("FA_1.LIB")),
+            tore_formats::Archive::open(root.join("FA_2.LIB")),
+        ) else {
+            eprintln!("skipped: no retail install");
+            return;
+        };
+        let mut resources = Resources::new();
+        for (archive, names) in [
+            (&art, selection::MULTIPLAYER_ART),
+            (&data, selection::MULTIPLAYER_DATA),
         ] {
-            assert!(directory.0.join(name).exists(), "removed {name}");
+            for name in names {
+                resources.insert(name.to_string(), archive.read(name).unwrap());
+            }
         }
-        #[cfg(unix)]
-        assert!(directory.0.join("menu-2.pack").is_symlink());
-    }
-
-    #[test]
-    fn packs_hold_more_than_the_old_four_thousand_resources() {
-        let directory = CacheDirectory::new();
-        let path = directory.0.join("menu-1.pack");
-        let resources: BTreeMap<String, Vec<u8>> = (0..9000u32)
-            .map(|n| (format!("R{n:05}.RAW"), n.to_le_bytes().to_vec()))
-            .collect();
-        write_pack(&path, &resources).unwrap();
-        assert_eq!(read_pack(&path).unwrap(), resources);
-        // A pack is never overwritten in place.
-        assert!(write_pack(&path, &resources).is_err());
-        let mut bytes = fs::read(&path).unwrap();
-        bytes.push(0);
-        fs::write(&path, &bytes).unwrap();
-        assert!(read_pack(&path).is_err());
-        bytes.truncate(bytes.len() - 2);
-        fs::write(&path, &bytes).unwrap();
-        assert!(read_pack(&path).is_err());
-    }
-
-    #[test]
-    fn packs_refuse_resources_the_reader_would_reject() {
-        let directory = CacheDirectory::new();
-        for (name, size) in [
-            ("", 1),
-            ("A_NAME_LONGER_THAN_THIRTY_TWO_BYTES", 1),
-            ("BIG.RAW", MAX_RESOURCE_BYTES + 1),
-        ] {
-            let path = directory.0.join("menu-2.pack");
-            let resources = BTreeMap::from([(name.to_string(), vec![0; size])]);
-            assert!(write_pack(&path, &resources).is_err(), "{name}");
-            assert!(!path.exists());
+        check_multiplayer_art(&resources).unwrap();
+        // The scroll bar's track is in the archive too (optional in a pack).
+        for name in selection::SLIDER_ART {
+            Pic::parse(&art.read(name).unwrap()).unwrap();
         }
-    }
-
-    #[test]
-    fn failed_load_preserves_all_existing_packs() {
-        let directory = CacheDirectory::new();
-        for name in ["menu-10.pack", "menu-20.pack"] {
-            fs::write(directory.0.join(name), b"invalid synthetic pack").unwrap();
-        }
-        assert!(Assets::load(&directory.0).is_err());
-        assert!(directory.0.join("menu-10.pack").exists());
-        assert!(directory.0.join("menu-20.pack").exists());
-    }
-
-    #[test]
-    fn non_generation_selection_does_not_authorize_cleanup() {
-        let directory = CacheDirectory::new();
-        fs::write(directory.0.join("menu-10.pack"), b"synthetic").unwrap();
-        assert_eq!(
-            remove_older_packs(&directory.0, &directory.0.join("menu-custom.pack")).unwrap(),
-            0
-        );
-        assert!(directory.0.join("menu-10.pack").exists());
     }
 }

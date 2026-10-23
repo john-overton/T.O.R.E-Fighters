@@ -26,7 +26,11 @@ mkdir -p .local/theater-research
 objdump -d gameassets/fighters-anthology/FA.EXE > .local/theater-research/fa-disassembly.txt
 ```
 
-Addresses below are virtual addresses in this exact `FA.EXE`, SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`. They are not portable to another edition. The extraction report records archive/output SHA-256, offsets and decoded sizes, plus structured terrain/mission metadata. Full inputs and derived captures remain ignored. Readers live in `crates/tore-formats/src/theater.rs`; runtime construction in `crates/tore-app/src/terrain.rs`.
+Addresses below are virtual addresses in this exact `FA.EXE`, SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`. They are not portable to another edition. The extraction report records archive/output SHA-256, offsets and decoded sizes, plus structured terrain/mission metadata. Full inputs and derived captures remain ignored. Readers live in `crates/tore-formats/src/theater.rs`; runtime construction in `crates/tore-world/src/terrain.rs` (queries) and `crates/tore-app/src/scenery.rs` (art and mesh).
+
+Runtime terrain adds [shared static foundations](objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)
+after resolving the layout and objective. These fitted triangles serve both
+contact and drawing; the imported BIT2 grid and its classification are unchanged.
 
 ## BIT2 / T2: confirmed packed layout
 
@@ -66,6 +70,58 @@ records unsupported shape and campaign boundaries.
 The ocean now uses user-requested short ripples and distance/altitude filtering,
 retaining the original textures and weather colors. Whitecaps are removed. [Source contract and limits](ocean.md),
 [behavior](../spec/ocean.md), [acceptance](../baselines/ocean.md).
+
+## City texture light areas (CF0 prototype)
+
+Measured 2026-10-10 over all sixteen theaters (`tore-app --city-fill-survey`);
+the reader is `tore_world::city::mask` and the fill that uses it is
+`tore_world::city` (on by default since 2026-10-11; `TORE_CITY_FILL=0`
+turns it off in single player). The terrain class and colour bytes do
+not mark cities ([terrain materials](terrain-materials.md)); the city tile
+pictures do.
+
+- Fifteen theaters reuse one set of city pictures, the same indices under
+  each theater's prefix: 1 (downtown), 2 (edge), 3 (corner), 4, 5, 6 and 26
+  (coastal), 55 and 56 (towns sitting in fields) and 60 and 62 (Baltic). A
+  full city is a 3 by 3 block of placements, about 16 nm across, with 1 in
+  the middle; corner pictures alone make the smaller cities. North Vietnam
+  has none: its retail city clusters sit on jungle pictures.
+- The art paints built-up land in one ramp of palette indices, 198 to 207;
+  192 to 197 and 208 to 215 are parks and fields (sand in Egypt), 224 a
+  grey-green dot, 217 to 223 blue dots, 254 white, 255 the water cutout.
+  Each theater's reference palette (the clear-day layer, condition 0, at
+  noon) paints the ramp light to dark (Ukraine: 198 luma about 225, 207
+  about 30; Egypt 219 to 28) in every theater but North Vietnam, where it is
+  jungle green.
+- Classes from that palette: light roofs are ramp indices with luma at
+  least 115 (and 254); residential streets ramp indices with luma 100 to
+  180 and the 224 dots; downtown streets ramp indices darker than 90 and
+  224. A texel is a street when its run of either street class along a row,
+  column or diagonal is at least 8 texels (1,024 ft) and at most 2 (256 ft)
+  across.
+- A picture is city art when at least one land texel in twenty is a light
+  roof, at least one in fifty steps three or more ramp shades from its right
+  neighbour (Kurile's snow and rock, smooth ramp art, stay under one in a
+  hundred), and either at least half its land is ramp (city pictures) or it
+  has no water, at least a quarter ramp and at least half of its non-green
+  land ramp (the town pictures; shoreline pictures also carry ramp sand but
+  have water).
+- Result: city or town pictures in every theater but Kurile; North Vietnam
+  fills each retail cluster's footprint at the retail shape scale (three
+  times its drawn size) as a round village thinning from 60 to 10 percent
+  of texels toward its edge.
+- At 128 ft per texel the downtown blocks are about 2,000 ft and the painted
+  roofs 500 to 1,300 ft: the art is drawn at about the retail 3x object
+  scale.
+- World to picture: texel `(tu, tv)` east and north inside the placement
+  maps to picture column and row `(tu, 255-tv)`, `(255-tv, 255-tu)`,
+  `(255-tu, tv)` or `(tv, tu)` for rotations 0 to 3, as the terrain mesh
+  draws it (picture row 0 is the north edge at rotation 0). A quarter turn
+  swaps the two diagonals.
+
+The development aid `tore-app --city-fill-dump OUT [THEATER]` writes each
+city's mask and fill images and prints the counts; its render, sequence,
+sweep and bench options are in [development](../DEVELOPMENT.md).
 
 ## Mission environment and weather modules
 
@@ -140,9 +196,18 @@ All 75 MM layouts parse. PGU.MM contains border placements (-4,244), (-4,248), (
 
 ## Runtime expansion to the 16 base theaters
 
-The viewer uses the selected base or variant MM, its referenced terrain and DAY2 palette, and paged indexed artwork. The numbered texture naming convention uses the first three code characters: TVIET therefore needs TVI0–41.PIC. The shared profile now includes TVI. Kurile has no numbered tmap placements; its 236 named placements now render with their original artwork. [Named-tile contract](terrain-materials.md#named-texture-placements). Other theaters have 29–68 numbered texture layers in this preview.
+The viewer uses the selected base or variant MM, its referenced terrain and theater-specific weather palette, and paged indexed artwork. The numbered texture naming convention uses the first three code characters: TVIET therefore needs TVI0–41.PIC. The shared profile now includes TVI. Kurile has no numbered tmap placements; its 236 named placements now render with their original artwork. [Named-tile contract](terrain-materials.md#named-texture-placements). Other theaters have 29–68 numbered texture layers in this preview.
 
 Signed out-of-grid border placements remain preserved; the mesh only queries patches intersecting actual fine-grid quads. Camera starts and fixed triangles are authored investigation behavior. All 16 passed Metal startup/render checks; native landmark/shoreline/atmosphere parity remains open. See [runtime validation](../baselines/all-theaters.md#runtime-and-typography-follow-up).
+
+## Climate (not in the retail data)
+
+The retail theater files carry no humidity or climate. TORE gives each of the
+16 base theaters a fixed, fitted humidity for the look of a large blast
+(condensation cloud when humid, lingering tan dust when arid), pushed toward
+humid by a fog or overcast weather choice; the table and rules live in the
+explosions spec's [climate](../spec/explosions.md#climate) section and in
+`tore_world::climate`. It is presentation only.
 
 ## Diagnostic native contact geometry, 2026-09-15
 
@@ -169,3 +234,62 @@ samples. The renderer splits triangles along each oriented airport footprint,
 retains the original texture coordinates, and lowers only the inside surface
 beneath the fixed runway plane. See [airport integration](../spec/airports.md#integration-choices)
 and [the visibility regression](../baselines/airfield-radio.md#ground-visibility).
+
+## Merged-airfield ground pictures
+
+The scene-3 paired-airport replacement marks `tmap` cells intersecting the
+source strip footprints as neutral airfield ground. Scenery retains the tile's
+own ground texels, using the existing terrain green ramps (192 to 197 and
+208 to 215). Other opaque texels inherit the nearest original ground texel
+by Manhattan distance on the wrapping 256-square tile. A multi-source queue
+starts in row order, expands left, right, up, down, and resolves ties by first
+arrival. Original ground texels and index-255 or masked water stay unchanged.
+A tile without a ground donor is an explicit error. Rotation stays unchanged.
+
+This is an agent-selected **fitted** cleanup rule, not a recovered airfield-art
+classifier. It also removes non-ground road or built-up markings within the
+selected source tiles. It avoids importing the unrelated LAND plane's palette
+ramp and large-scale blotches into otherwise continuous ground. The merged
+headless audit prints means, population variances and dominant palette indices
+for each repaired tile and adjacent untouched tiles, and checks exact ground
+and water preservation. Those statistics describe indexed source pixels, not
+lit GPU colors. No protocol, checkpoint or contact surface changes accompany
+this presentation repair.
+The imported T2 and MM bytes remain unchanged. Ground-picture water queries
+retain that same source mask, so neutralization does not fill coastal sea.
+See [merged airports](redrawn-airports.md#merged-pairs-airfield-scene-3).
+
+## Exploratory vegetation classification
+
+The `exp/vegetation` renderer samples this theater data and its reference
+palette to place presentation-only sprites and classify GPU grass habitat. It does not add terrain records
+or establish original vegetation placement. Cached patch, field, road, village
+edge, desert, broad-water beach exclusion and canopy sampling rules are specified in
+[terrain detail](../spec/terrain-detail.md#where-things-grow); retail card
+records and unresolved original distance rules are in
+[objects and shapes](objects-and-shapes.md#vegetation-card-assets).
+
+GPU blade grass additionally caches a two-bit habitat per 128 ft source-art
+texel and a terrain-vertex lookup grid. This is disposable presentation data,
+not a new retail format. See [grass habitat](../spec/terrain-detail.md#grass) and
+[renderer storage](../ARCHITECTURE.md#exploratory-vegetation-rendering).
+
+The exploratory vegetation habitat uses a device-sized atlas of 256-square
+logical pages, independent of theater rows. The shared canopy/card atlas and
+all vegetation buffers are checked by the CPU-only
+[theater limits audit](../testing/README.md#vegetation-theater-limits).
+
+## Temperate tile colour audit
+
+The 2026-10-18 UKR/FRA/BAL audit compares imported layout, T2, picture and weather
+payloads with the source archives, recomputes `tdic` coverage, and checks the
+render mesh's texture pages and quarter-turn UVs. No new per-tile palette or
+shade mapping is established. The source pictures differ in colour, including
+the fitted LAND fallback. The reviewed UKR seam has mottled LAND.PIC south of
+the edge and flat UKR23.PIC north of it. The renderer retains both source pages
+and applies a cached texture response inside accepted 500 ft bands. Separately,
+statistically flat natural pictures receive fitted world-space modulation,
+approved by John on 2026-10-18. Mottled interiors and protected features retain
+their source colour. Imported resources and T2 cells stay unchanged. Retail runtime appearance and exact fallback-land
+projection remain unverified. [Measured evidence](../baselines/terrain-seams.md)
+and [exploratory seam presentation](../spec/terrain-detail.md#tile-seams).

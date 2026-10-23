@@ -117,6 +117,8 @@ impl TimingProfile {
             | AircraftId::F22
             | AircraftId::F22n
             | AircraftId::Faxx => 5,
+            // The player-only variety import does not add AI timing calibration.
+            _ => 5,
         };
         Self {
             search_delay_s,
@@ -2355,3 +2357,7 @@ mod tests {
         assert!(!passive_emitter_keeps_track(false, ScalarSpeed(500.0), t));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "weapon_service_checkpoint.rs"]
+mod checkpoint;

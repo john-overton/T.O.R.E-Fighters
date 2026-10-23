@@ -93,7 +93,11 @@ Compared entry by entry after extracting both archive versions:
 - `FA_4B.LIB` and `FA_4D.LIB`: identical SHA-256 in both builds.
 - `FA_2.LIB`: same 5,405 resources. 168 of them differ by exactly four bytes at
   resource offset 136, the PE link timestamp of the DLG/MNU/HUD/MC module
-  resources. Their content is otherwise identical.
+  resources. Their content is otherwise identical. (Recounted on 2026-10-06:
+  170 modules differ only in that timestamp and one, the retail Armory menu
+  `AR_MENU.MNU`, has a real change that the import does not keep; the pack now
+  holds 4,157 names, 50 of them timestamp-only. See the
+  [build audit](../baselines/fa-builds-2026-10-06.md).)
 - `FA_1.LIB`: 1.02F adds five resources, `H3D_OFF.PIC`, `H3D_ON.PIC`,
   `HUI11.FNT`, `HUISYM11.FNT`, `WII11.FNT`. Nothing in the app or its profiles
   references them. The other 1,996 resources are identical.
@@ -105,6 +109,36 @@ Compared entry by entry after extracting both archive versions:
 
 So a disc import yields the same gameplay data as an installed 1.02F import.
 The only reader that must know the build is the executable-table reader.
+
+## The import pack under both builds
+
+Slice D3a of the multiplayer work imported both builds into separate profiles
+(2026-09-30, the `tore-import` library): the installed 1.02F folder and the disc
+folder holding the 1.0 `SETUP.ESA`. Each import holds 4,093 resources with the
+same names. Comparing the two packs resource by resource:
+
+| Class | Resources | Result |
+| --- | --- | --- |
+| Simulation: aircraft `.PT` (145) and `.PTS` (9), weapons `.JT` (135), sensors `.SEE` (51), `.ECM` (30), `.GAS` (4), theater `.MM` (75), `.T2` (16), `.LAY` (24), objects `.OT` (118), `.NT` (35), shapes `.SH` (325), missions `.M` (65) and `.MT` (66), and the 307 `TORE_*` entries (the radio phrases and the creator, cloud and lens-flare tables the import derives from `FA.EXE`, plus the format markers) | 1,405 | Byte-identical |
+| Presentation: art `.PIC` (1,730), sounds `.5K`, `.8K`, `.11K` (901), fonts `.FNT`, music scores `.MUS`, campaign text and cameras `.TXT`, `.CAM`, and the palette and sequence files | 2,664 | Byte-identical |
+| Presentation: dialogs `.DLG` (5), menus `.MNU` (4), HUD layouts `.HUD` (12) | 21 | Differ |
+| Mission modules `.MC` (`UKR01`, `UKR02`, `VIET03`; nothing reads them) | 3 | Differ |
+
+All 24 that differ are the executable-module resources described above: each
+differs by exactly four bytes at offset 136, the link timestamp, and is
+otherwise identical. They are `ARMPLANE.MNU`, `FMENUD.MNU`, `MAINMENU.MNU`,
+`QM_MENU.MNU`, `BRIEFSCR.DLG`, `CHOOSEAC.DLG`, `LOADORD.DLG`, `QUICK14.DLG`,
+`QUIKMISS.DLG`, the twelve `.HUD` files (`AV8`, `F14`, `F14CC`, `F18`, `F22`,
+`F22N`, `F31`, `F4`, `MIG21`, `RAFALE`, `SU33CC`, `SU35`) and the three `.MC`.
+Nothing in `tore-sim` or `tore-world` reads any of them. The other 144 of the
+168 differing `FA_2.LIB` modules are not selected by the import. The two
+import reports differ in their source and build lines and in the archive
+offsets, and `FA_1.LIB` lists five more entries in 1.02F (the five unused
+resources above); the pack has the same 4,093 names.
+
+So the two builds can share a multiplayer session: every resource the
+simulation reads is identical. The entries derived from `FA.EXE` are identical
+too, which is what the inert-table check below predicted.
 
 ## Inert tables in the 1.0 executable
 

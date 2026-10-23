@@ -217,7 +217,7 @@ fn comms_entries_become_radio_order_hud_and_music_events() {
             store: Store {
                 flags: 1,
                 seeker: 2,
-                phoenix: false,
+                active_radar: false,
             },
         },
     )
@@ -305,9 +305,9 @@ fn comms_entries_become_radio_order_hud_and_music_events() {
             Origin::of(
                 Source::Music,
                 Cause::Music(Box::new(Music {
-                    from: Some(crate::audio::situation::Rank::Normal),
-                    to: crate::audio::situation::Rank::Air,
-                    inputs: crate::audio::situation::Inputs {
+                    from: Some(crate::situation::Rank::Normal),
+                    to: crate::situation::Rank::Air,
+                    inputs: crate::situation::Inputs {
                         air_target: true,
                         home: true,
                         ..Default::default()
@@ -429,10 +429,10 @@ fn a_line_through_the_channel_is_heard_once_at_its_delivery() {
     let (mut recorder, _receiver) = Recorder::detached(64, &roster());
     let mut comms = crate::comms::Comms::new(1);
     let origin = Origin::of(Source::Radio, Cause::Unspecified).by(5);
-    comms.send(1., call("Blue two", "Fox two", origin));
+    comms.send_all(1., call("Blue two", "Fox two", origin));
     assert_eq!(comms.due(1.).len(), 1);
     // The player's order voice then cut it off in the mixer.
-    comms.cut_off(1.5, Reason::OrderVoice);
+    comms.cut_off(crate::seats::SeatId::default(), 1.5, Reason::OrderVoice);
     recorder.drain_comms(&mut comms);
     let outcomes: Vec<Option<&str>> = recorder
         .early
@@ -457,4 +457,25 @@ fn a_line_through_the_channel_is_heard_once_at_its_delivery() {
             .all(|e| e.num(field::MESSAGE) == heard[0].num(field::MESSAGE)),
         "every entry names the same line"
     );
+}
+
+#[test]
+fn a_recording_keeps_only_the_lines_about_its_own_seat() {
+    use crate::seats::SeatId;
+    let (recorder, _receiver) = Recorder::detached(64, &roster());
+    let mut recorder = recorder.for_seat(SeatId(1), 5);
+    let origin = Origin::of(Source::Radio, Cause::Unspecified).by(5);
+    let fox = call("Blue two", "Fox two", origin);
+    let entry = |seats: &[u8]| {
+        talk::Entry::call(1., Some(7), &fox, Said::Delivered { waited: 0. })
+            .heard_by(seats.iter().map(|seat| SeatId(*seat)))
+    };
+    // Delivered to seat 0 only, to seat 1 only, queued for both, and a line
+    // that is not addressed to a seat.
+    recorder.comms(vec![entry(&[0]), entry(&[1]), entry(&[0, 1]), entry(&[])]);
+    assert_eq!(recorder.early.len(), 3);
+    // Single player's recording has no line about another seat to leave out.
+    let (mut single, _receiver) = Recorder::detached(64, &roster());
+    single.comms(vec![entry(&[0]), entry(&[])]);
+    assert_eq!(single.early.len(), 2);
 }

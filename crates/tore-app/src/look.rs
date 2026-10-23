@@ -1,5 +1,5 @@
 //! Authored keyboard head-look and exterior orbit, independent of flight dynamics.
-use crate::terrain::Camera;
+use crate::camera::Camera;
 use std::{
     collections::BTreeSet,
     f32::consts::{PI, TAU},

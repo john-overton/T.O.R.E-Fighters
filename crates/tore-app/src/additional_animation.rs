@@ -17,9 +17,21 @@ enum Part {
 pub struct Rig {
     id: AircraftId,
     parts: BTreeMap<usize, Part>,
+    variety: Option<crate::variety_animation::Rig>,
 }
 impl Rig {
     pub fn load(id: AircraftId, bytes: &[u8]) -> Result<(Self, Shape), Box<dyn std::error::Error>> {
+        if crate::variety_animation::supported(id) {
+            let (variety, shape) = crate::variety_animation::Rig::load(id, bytes)?;
+            return Ok((
+                Self {
+                    id,
+                    parts: BTreeMap::new(),
+                    variety: Some(variety),
+                },
+                shape,
+            ));
+        }
         let (size, neutral_count, words, branches): (_, _, &[usize], &[(usize, Part, usize)]) =
             match id {
                 AircraftId::F14 => (
@@ -172,10 +184,20 @@ impl Rig {
         {
             return Err("unreviewed FA aircraft texture".into());
         }
+        if id == AircraftId::F14 {
+            crate::f14_geometry::repair(&mut shape)?;
+        }
         if id == AircraftId::Faxx {
             concept_colors(&mut shape.faces);
         }
-        Ok((Self { id, parts }, shape))
+        Ok((
+            Self {
+                id,
+                parts,
+                variety: None,
+            },
+            shape,
+        ))
     }
     /// A rig over synthetic face addresses, for drawing tests without retail shapes.
     #[cfg(test)]
@@ -195,15 +217,25 @@ impl Rig {
         .into_iter()
         .flat_map(|(addresses, part)| addresses.iter().map(move |address| (*address, part)))
         .collect();
-        Self { id, parts }
+        Self {
+            id,
+            parts,
+            variety: None,
+        }
     }
     pub fn scale(&self) -> f32 {
+        if let Some(rig) = &self.variety {
+            return rig.scale();
+        }
         // FA F14 has header exponent 10; A4/F31 have 8. Retain the host's
         // fitted one-third-foot scale, applying the source exponent difference.
         tore_sim::combat::debris::scale(self.id) as f32
     }
     pub fn flame(&self, address: usize) -> bool {
-        self.parts.get(&address) == Some(&Part::Flame)
+        self.variety.as_ref().map_or_else(
+            || self.parts.get(&address) == Some(&Part::Flame),
+            |rig| rig.flame(address),
+        )
     }
     pub fn cold_nozzle(&self, address: usize) -> bool {
         match self.id {
@@ -213,6 +245,9 @@ impl Rig {
         }
     }
     pub fn faces(&self, f: &Face, s: &State) -> Vec<Face> {
+        if let Some(rig) = &self.variety {
+            return rig.faces(f, s);
+        }
         if self.parts.get(&f.address) == Some(&Part::Bay) {
             return crate::roster_animation::bay_lining(self.id.source(), f);
         }
@@ -245,6 +280,9 @@ impl Rig {
         )
     }
     pub fn animate(&self, source: &Face, s: &State) -> Option<Face> {
+        if let Some(rig) = &self.variety {
+            return rig.animate(source, s);
+        }
         let mut f = source.clone();
         let part = self.parts.get(&f.address).copied();
         if let Some(flame_root) = roster_flame_root(self.id) {
@@ -308,6 +346,9 @@ impl Rig {
                     [1., 0., 0.],
                     -std::f64::consts::FRAC_PI_2 * (1. - s.gear),
                 );
+                if pivot[0] == 0. && steerable_nose(self.id, f.address) {
+                    turn(&mut f, pivot, [0., 0., 1.], -s.nosewheel_angle());
+                }
             }
             Some(Part::Brake) => {
                 if s.brake <= 0. {
@@ -342,16 +383,8 @@ impl Rig {
                     if s.hook <= 0. {
                         return None;
                     }
-                    // Quantization collapses the two source root vertices.
-                    // A fitted 1/4-source-unit root width restores a visible
-                    // triangle while preserving its center and tip.
-                    let mut root = 0;
-                    for p in &mut f.positions {
-                        if p[1] == -5. && p[2] == -2. {
-                            p[0] += if root == 0 { -0.125 } else { 0.125 };
-                            root += 1;
-                        }
-                    }
+                    // The loaded F-22N blade has already been fitted to this
+                    // F-14 hinge and deployed endpoint, preserving its UVs.
                     turn(&mut f, [0., -5., -2.], [1., 0., 0.], -0.6 * (1. - s.hook));
                 }
             }
@@ -360,6 +393,11 @@ impl Rig {
         let a = f.address;
         match self.id {
             AircraftId::F14 => {
+                if (0x4dba..=0x5434).contains(&a) {
+                    for point in &mut f.positions {
+                        *point = f14_wing_alignment(*point, side);
+                    }
+                }
                 if matches!(a, 0x540d | 0x5434 | 0x4fe9 | 0x5010) {
                     turn(
                         &mut f,
@@ -371,12 +409,24 @@ impl Rig {
                 if (0x4dba..=0x5434).contains(&a) {
                     turn(
                         &mut f,
-                        [if side < 0. { -4. } else { 5. }, -1., 1.],
+                        f14_wing_pivot(side),
                         [0., 0., 1.],
                         -side as f64 * sweep(s),
                     );
+                    for point in &mut f.positions {
+                        point[2] += F14_WING_LIFT;
+                    }
                 }
                 if matches!(a, 0x4828 | 0x4888 | 0x49c5 | 0x4a22) {
+                    // The right forward root alone is one unit outboard of
+                    // its mirrored left partner and the nacelle attachment.
+                    if matches!(a, 0x49c5 | 0x4a22) {
+                        for point in &mut f.positions {
+                            if point[0] == 6. && point[1] == -6. {
+                                point[0] = 5.;
+                            }
+                        }
+                    }
                     turn(
                         &mut f,
                         [side * 6., -10., 0.],
@@ -485,6 +535,54 @@ fn vector_angles(s: &State) -> [f64; 2] {
 pub fn sweep(s: &State) -> f64 {
     ((s.speed / 1.68781 - 400.) / 300.).clamp(0., 1.) * 48f64.to_radians() * (1. - s.flaps)
 }
+// A fitted two-inch clearance above the outer root surface. The inner panel
+// tucks under the fixed fuselage glove instead of floating above its deck.
+const F14_WING_LIFT: f32 = 0.125;
+fn f14_wing_pivot(side: f32) -> [f32; 3] {
+    [side * 8., 4., 1.]
+}
+fn f14_wing_alignment(mut point: [f32; 3], side: f32) -> [f32; 3] {
+    if side < 0. {
+        point[0] -= 1.;
+    }
+    point
+}
+/// The same front-root sweep and height used by the wing mesh and vapor tips.
+pub(crate) fn f14_wing_point(point: [f32; 3], side: f32, angle: f64) -> [f32; 3] {
+    let point = f14_wing_alignment(point, side);
+    let pivot = f14_wing_pivot(side);
+    let offset = rotate(
+        std::array::from_fn(|i| point[i] - pivot[i]),
+        [0., 0., 1.],
+        -f64::from(side) * angle,
+    );
+    let mut point = std::array::from_fn(|i| pivot[i] + offset[i]);
+    point[2] += F14_WING_LIFT;
+    point
+}
+
+/// Reviewed wheel/steerable-strut skins. Retraction still moves the full gear
+/// group, but steering leaves its support braces and doors attached to the body.
+pub(crate) fn steerable_nose(id: AircraftId, address: usize) -> bool {
+    use AircraftId::*;
+    match id.source() {
+        F18 => matches!(address, 0x4f64 | 0x4f83 | 0x4fa2 | 0x4fc1),
+        Rafale => matches!(address, 0x3cbb | 0x3cda),
+        F14 => matches!(address, 0x57a1 | 0x57c0 | 0x57df | 0x57fe),
+        A4E => matches!(address, 0x564f | 0x566f),
+        X31 => matches!(address, 0x41ed | 0x420c),
+        Mig29 => matches!(address, 0x50e2 | 0x5101 | 0x5120 | 0x513f),
+        Su27 => matches!(address, 0x2c8f | 0x2caa),
+        Mig21 => matches!(address, 0x3275 | 0x3290),
+        Su25 => matches!(address, 0x5d60 | 0x5d7f | 0x5d9e | 0x5dbd),
+        Mig23 => matches!(address, 0x47c2 | 0x47e9 | 0x4810 | 0x4837),
+        Su35 => matches!(address, 0x56f3 | 0x5712 | 0x5731 | 0x5750),
+        F22 => matches!(address, 0x41fd | 0x421c),
+        F22n => matches!(address, 0x42f5 | 0x4314),
+        Faxx => unreachable!("source resolves the concept donor"),
+        _ => false,
+    }
+}
 pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
     let length = axis.iter().map(|v| v * v).sum::<f32>().sqrt();
     let axis = axis.map(|v| f64::from(v / length));
@@ -536,7 +634,7 @@ fn roster_device(
     let scaling = match part {
         Some(Part::Flame) if s.exhaust > 0. => Some((1, flame_root, s.exhaust as f32)),
         Some(Part::Gear) if s.gear > 0. => {
-            crate::roster_animation::gear(id, &mut f, s.gear);
+            crate::roster_animation::gear(id, &mut f, s.gear, s.nosewheel_angle());
             None
         }
         Some(Part::Brake) if s.brake > 0. => {
@@ -624,11 +722,12 @@ mod tests {
     }
     #[test]
     fn native_hook_deploys_to_source_geometry_and_stows_out_of_sight() {
-        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut s = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for id in [AircraftId::F22n, AircraftId::Faxx] {
             for address in [0x40a1, 0x40c0] {
                 let source = native_hook(address);
                 let rig = Rig {
+                    variety: None,
                     id,
                     parts: [(address, Part::Hook)].into(),
                 };
@@ -702,12 +801,13 @@ mod tests {
     }
     #[test]
     fn roster_devices_keep_roots_and_preserve_each_source_endpoint() {
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for id in AircraftId::ALL {
             let Some(flame_root) = roster_flame_root(id) else {
                 continue;
             };
             let rig = Rig {
+                variety: None,
                 id,
                 parts: [(7, Part::Gear), (8, Part::Flame), (9, Part::Brake)].into(),
             };
@@ -767,10 +867,11 @@ mod tests {
     #[test]
     fn device_endpoints_keep_source_geometry_and_hide_retracted_parts() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::F14,
             parts: [(7, Part::Gear), (8, Part::Flame)].into(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.gear = 1.;
         state.exhaust = 1.;
         let source = face(7);
@@ -786,10 +887,11 @@ mod tests {
     #[test]
     fn a4_elevator_crosses_mesh_diagonals_without_moving_forward_stabilizer() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::A4E,
             parts: BTreeMap::new(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.elevator = 1.;
         for address in [
             0x4345, 0x4361, 0x44b5, 0x44d5, 0x4967, 0x4982, 0x49dd, 0x49f8,
@@ -815,10 +917,11 @@ mod tests {
     #[test]
     fn paddles_share_plume_demand_preserve_hinges_and_move_without_burner() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::X31,
             parts: BTreeMap::new(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for (addresses, axis) in [
             ([0x44b2, 0x44da], [1., 0., 0.]),
             ([0x4406, 0x442e], [-1., 0., 2.]),
@@ -857,10 +960,11 @@ mod tests {
     #[test]
     fn x31_vector_plume_follows_live_rates_and_keeps_its_root() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::X31,
             parts: [(8, Part::Flame)].into(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.exhaust = 1.;
         let mut source = face(8);
         source.positions = vec![[0., -41., 0.], [0., -51., 0.], [1., -51., 0.]];
@@ -880,8 +984,123 @@ mod tests {
         assert!(rig.animate(&source, &state).is_none());
     }
     #[test]
+    fn nosewheel_steering_leaves_braces_and_doors_at_their_deployed_pose() {
+        use AircraftId::*;
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.enable_research(1).unwrap();
+        state.start_on_runway([0.; 3], 0.).unwrap();
+        for (id, wheel, fixed) in [
+            (F18, 0x4f64, 0x4ee1),
+            (F14, 0x57a1, 0x571e),
+            (A4E, 0x564f, 0x55cc),
+            (X31, 0x41ed, 0x4182),
+            (Su27, 0x2c8f, 0x2c2c),
+            (Su25, 0x5d60, 0x5ced),
+            (Mig23, 0x47c2, 0x474f),
+            (Su35, 0x56f3, 0x5680),
+            (F22, 0x41fd, 0x4192),
+            (F22n, 0x42f5, 0x428a),
+            (Faxx, 0x42f5, 0x428a),
+        ] {
+            let rig = Rig::synthetic(id, &[], &[], &[wheel, fixed], &[]);
+            for address in [wheel, fixed] {
+                let mut source = face(address);
+                source.positions = vec![[0., 60., -8.], [0., 60., -20.], [0., 55., -20.]];
+                let render = |s: &State| {
+                    if id == F18 {
+                        crate::aircraft_animation::animate(&source, s).unwrap()
+                    } else {
+                        rig.animate(&source, s).unwrap()
+                    }
+                };
+                state.rudder = 0.;
+                let straight = render(&state);
+                state.rudder = 1.;
+                let steered = render(&state);
+                assert_eq!(
+                    straight.positions != steered.positions,
+                    address == wheel,
+                    "{id:?} {address:x}"
+                );
+                assert_eq!(steered.uv, source.uv);
+                assert_eq!(steered.texture, source.texture);
+            }
+        }
+    }
+
+    #[test]
+    fn f14_sweep_keeps_the_front_root_fixed_and_vapor_on_the_lifted_wing() {
+        let rig = Rig::synthetic(AircraftId::F14, &[], &[], &[], &[]);
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.flaps = 0.;
+        for side in [-1., 1.] {
+            let root = f14_wing_pivot(side);
+            let source_root = [if side < 0. { -7. } else { 8. }, 4., 1.];
+            let tip = [if side < 0. { -23. } else { 24. }, -4., 1.];
+            let mut source = face(0x4dba);
+            source.positions = vec![source_root, tip, [source_root[0], -1., 1.]];
+            for knots in [400., 550., 700.] {
+                state.speed = knots * 1.68781;
+                let moved = rig.animate(&source, &state).unwrap();
+                assert_eq!(moved.positions[0], [root[0], root[1], 1.125]);
+                assert_eq!(moved.positions[1], f14_wing_point(tip, side, sweep(&state)));
+                let distance =
+                    |a: [f32; 3], b: [f32; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f32>();
+                assert!(
+                    (distance(moved.positions[0], moved.positions[1]) - distance(source_root, tip))
+                        .abs()
+                        < 1e-4
+                );
+                assert_eq!(moved.uv, source.uv);
+                assert_eq!(moved.normal, source.normal);
+            }
+        }
+    }
+
+    #[test]
+    fn f14_wings_and_horizontal_tails_align_across_the_body_centerline() {
+        let rig = Rig::synthetic(AircraftId::F14, &[], &[], &[], &[]);
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.flaps = 0.;
+        let mirror = |p: [f32; 3]| [-p[0], p[1], p[2]];
+        // Synthetic panels using the measured root offsets, not retail meshes.
+        let mut left = face(0x51d8);
+        left.positions = vec![[-7., 4., 1.], [-15., 0., 1.], [-4., -1., 1.]];
+        let mut right = face(0x4dba);
+        right.positions = left
+            .positions
+            .iter()
+            .map(|p| [1. - p[0], p[1], p[2]])
+            .collect();
+        for knots in [400., 550., 700.] {
+            state.speed = knots * 1.68781;
+            let a = rig.animate(&left, &state).unwrap();
+            let b = rig.animate(&right, &state).unwrap();
+            assert_eq!(
+                a.positions.iter().copied().map(mirror).collect::<Vec<_>>(),
+                b.positions
+            );
+        }
+        left.address = 0x4828;
+        right.address = 0x49c5;
+        left.positions = vec![[-5., -6., 0.], [-9., -10., 0.], [-5., -12., 0.]];
+        right.positions = left.positions.iter().copied().map(mirror).collect();
+        right.positions[0][0] = 6.;
+        for elevator in [0., 0.5, -0.5] {
+            state.elevator = elevator;
+            let a = rig.animate(&left, &state).unwrap();
+            let b = rig.animate(&right, &state).unwrap();
+            assert_eq!(
+                a.positions.iter().copied().map(mirror).collect::<Vec<_>>(),
+                b.positions
+            );
+            assert_eq!(b.uv, right.uv);
+        }
+    }
+
+    #[test]
     fn sweep_respects_speed_and_flaps_and_rotations_preserve_shape() {
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.flaps = 0.;
         for (knots, degrees) in [
             (300., 0.),

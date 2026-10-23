@@ -1,0 +1,852 @@
+//! In-flight mission result cadence: the mission result and home checks that
+//! the situation music (SUCC and HOME) and the two radio calls ("Mission
+//! accomplished!" and "We're almost home!") share.
+//!
+//! The mission core runs one [`Tracker`] for each human-flown plane and sends
+//! the calls to its seat, whether or not the host has an audio device
+//! (docs/ARCHITECTURE.md, "Radio, orders and debrief for each seat"). The
+//! music reads the tracker's [`Status`]. The result comes from [`succeeded`],
+//! which is the one rule the debrief reads too ([`Standing`]), so the music,
+//! the calls and the debrief agree. This file keeps the 4 second check,
+//! the rule that a result already decided at flight start disables SUCC and
+//! HOME, and the home check.
+use crate::ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE};
+use crate::comms::journal::{Audience, Cause, Origin, Source};
+use crate::comms::{Call, Kind, Phrase, Phrases};
+use crate::surface::{LAYOUT_OBJECT_BASE, SURFACE_UNIT_END, Surface};
+use crate::terrain::Terrain;
+use tore_sim::ai::launch::Side;
+use tore_sim::combat::ledger::{Kill, Ledger};
+use tore_sim::combat::live;
+/// The mission result and home check run this often, game seconds.
+pub const CHECK_S: f64 = 4.;
+/// Home: this close to the home base...
+pub const HOME_RANGE_FT: f64 = 42_240.;
+/// ...and below this altitude (above sea level; retail datum unknown).
+pub const HOME_CEILING_FT: f64 = 20_000.;
+pub const MISSION_ACCOMPLISHED: &str = "^MISSACC";
+pub const ALMOST_HOME: &str = "^ALMSTHM";
+
+/// What the music needs from the mission this step.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Status {
+    pub succeeded: bool,
+    /// Latched once reached; HOME itself still plays once.
+    pub home: bool,
+    /// Radio calls to queue now.
+    pub radio: Vec<&'static str>,
+}
+
+/// Mission result cadence, success-disabled rule and home check for one flight.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Tracker {
+    /// None before the first check; false when the result was already
+    /// decided at flight start or there is no mission.
+    enabled: Option<bool>,
+    next_check: f64,
+    succeeded: bool,
+    announced: bool,
+    home: bool,
+    home_base: Option<[f64; 3]>,
+}
+impl Tracker {
+    pub fn new(home_base: Option<[f64; 3]>) -> Self {
+        Self {
+            home_base,
+            ..Self::default()
+        }
+    }
+    /// What the music reads: the result and the home latch, with no calls.
+    pub fn status(&self) -> Status {
+        Status {
+            succeeded: self.succeeded,
+            home: self.home,
+            radio: Vec::new(),
+        }
+    }
+    /// The Quick Mission home base this tracker checks, if any.
+    pub fn home_base(&self) -> Option<[f64; 3]> {
+        self.home_base
+    }
+    /// `evaluate` is None when the flight has no mission.
+    pub fn step(
+        &mut self,
+        now: f64,
+        succeeded: Option<impl FnOnce() -> bool>,
+        position: [f64; 3],
+        airborne: bool,
+    ) -> Status {
+        let mut radio = Vec::new();
+        if now >= self.next_check {
+            self.next_check = now + CHECK_S;
+            match (self.enabled, succeeded) {
+                // Success already reached at flight start disables SUCC and
+                // HOME. The debrief evaluator cannot report an in-flight
+                // failure, so an already failed start is not detected.
+                (None, Some(succeeded)) => self.enabled = Some(!succeeded()),
+                (None, None) => self.enabled = Some(false),
+                (Some(true), Some(succeeded)) => {
+                    self.succeeded = succeeded();
+                    if self.succeeded {
+                        if !self.announced {
+                            self.announced = true;
+                            radio.push(MISSION_ACCOMPLISHED);
+                        }
+                        if !self.home
+                            && self.home_base.is_some_and(|base| {
+                                let range = (base[0] - position[0]).hypot(base[2] - position[2]);
+                                range.hypot(base[1] - position[1]) < HOME_RANGE_FT
+                                    && position[1] < HOME_CEILING_FT
+                            })
+                        {
+                            self.home = true;
+                            if airborne {
+                                radio.push(ALMOST_HOME);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Status {
+            succeeded: self.succeeded,
+            home: self.home,
+            radio,
+        }
+    }
+}
+
+/// `fitted`: the Quick Mission home base is the ground-start airport, placed
+/// at the mean centre of its runways. An airborne start has no home base.
+pub fn home_base(world: &Terrain, airport: Option<u32>) -> Option<[f64; 3]> {
+    let runways: Vec<_> = world
+        .airport_scene
+        .runways
+        .iter()
+        .filter(|runway| Some(runway.airport) == airport)
+        .collect();
+    (!runways.is_empty()).then(|| {
+        std::array::from_fn(|i| {
+            runways.iter().map(|r| r.surface.center[i]).sum::<f64>() / runways.len() as f64
+        })
+    })
+}
+
+/// One aircraft as the mission result sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Aircraft {
+    pub id: u32,
+    /// On the same side as the plane whose result this is.
+    pub friendly: bool,
+    /// Still flying with its pilot aboard.
+    pub alive: bool,
+}
+
+/// How a surface object stands to the plane whose result this is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stance {
+    /// On the plane's own side.
+    Friendly,
+    /// On the other side.
+    Hostile,
+    /// Scenery with no owner.
+    Neutral,
+}
+impl Stance {
+    /// The stance of an object on combat side `object` to a plane that flies
+    /// for `side`.
+    pub fn of(object: live::Side, side: Side) -> Self {
+        let own = if side.is_enemy() {
+            ENEMY_SIDE
+        } else {
+            FRIENDLY_SIDE
+        };
+        if object == own {
+            Self::Friendly
+        } else if object == FRIENDLY_SIDE || object == ENEMY_SIDE {
+            Self::Hostile
+        } else {
+            Self::Neutral
+        }
+    }
+}
+
+/// One surface object as the mission result sees it: a unit of the theater
+/// layout or of the ground target, a battery's added radar, a supply truck or
+/// a parked aircraft (docs/spec/surface-defenses.md, "Objectives, scoring and
+/// debrief"). Ids are in the surface ranges ([`crate::surface::UnitId`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ground<'a> {
+    pub id: u32,
+    pub stance: Stance,
+    /// Its combat row still has hit points.
+    pub alive: bool,
+    /// Its type's short display name, for "shot down by" lines.
+    pub name: &'a str,
+}
+
+/// Whether `id` is a surface object's id (any of the reserved ranges).
+pub fn is_surface(id: u32) -> bool {
+    (LAYOUT_OBJECT_BASE..SURFACE_UNIT_END).contains(&id)
+}
+
+/// Every surface object of `surface` that has a combat row, as the plane
+/// that flies for `side` sees it. An object with no row (its shape was one
+/// the reader cannot draw) is left out: it can be neither hit nor destroyed.
+pub fn ground<'a>(surface: &'a Surface, state: &live::State, side: Side) -> Vec<Ground<'a>> {
+    let rows: std::collections::BTreeMap<u32, i32> = state
+        .targets
+        .iter()
+        .filter(|t| is_surface(t.id))
+        .map(|t| (t.id, t.hp))
+        .collect();
+    let object = |id: u32, name: &'a str| {
+        rows.get(&id).map(|hp| Ground {
+            id,
+            stance: Stance::of(surface.side_of(id), side),
+            alive: *hp > 0,
+            name,
+        })
+    };
+    surface
+        .units
+        .iter()
+        .filter_map(|unit| object(unit.id.0, &unit.name))
+        .chain(
+            surface
+                .parked_scene
+                .iter()
+                .filter_map(|pose| object(pose.id.0, &pose.name)),
+        )
+        .collect()
+}
+
+/// The short name of the surface unit the ledger credits with the loss of
+/// aircraft `plane` ("SA-6", "ZSU-23-4"): its recorded kill, else the last
+/// shooter to hit it. `None` when an aircraft, or nobody, is credited.
+pub fn shot_down_by<'a>(surface: &'a Surface, ledger: &Ledger, plane: u32) -> Option<&'a str> {
+    let owner = ledger.credit(plane)?.owner;
+    is_surface(owner)
+        .then(|| surface.unit(crate::surface::UnitId(owner)))
+        .flatten()
+        .map(|unit| unit.name.as_str())
+}
+
+/// The destroy targets the mission's ground target has in the world: the
+/// template objects and parked aircraft flagged 0x80 that have a combat row,
+/// ascending id. Empty without a ground target.
+pub fn ground_targets(surface: &Surface, state: &live::State) -> Vec<u32> {
+    let mut targets: Vec<u32> = surface
+        .targets()
+        .map(|id| id.0)
+        .filter(|id| state.targets.iter().any(|t| t.id == *id))
+        .collect();
+    targets.sort_unstable();
+    targets
+}
+
+/// What the mission result knows of lineages (the lobby pass's follow-up
+/// F1): the root of every plane a respawn or a revival added (the plane the
+/// mission started with that it continues), and the side of every plane the
+/// mission started with. An objective is a lineage, counted once by its
+/// root: destroyed the first time any plane of it is lost, protected while
+/// none of it has been. Single player's is empty, every plane its own root.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Lineages {
+    pub roots: std::collections::BTreeMap<u32, u32>,
+    pub sides: std::collections::BTreeMap<u32, Side>,
+}
+
+impl Lineages {
+    /// The root of `plane`'s lineage: `plane` itself for one the mission
+    /// started with.
+    pub fn root_of(&self, plane: u32) -> u32 {
+        self.roots.get(&plane).copied().unwrap_or(plane)
+    }
+
+    /// `ids` as lineages: each plane's root, once, in the order first named.
+    fn fold(&self, ids: &[u32]) -> Vec<u32> {
+        let mut roots: Vec<u32> = Vec::with_capacity(ids.len());
+        for id in ids {
+            let root = self.root_of(*id);
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        roots
+    }
+}
+
+/// What the mission asks of one plane: the aircraft it must destroy and the
+/// ones it must protect, each a lineage named by its root (the lobby pass's
+/// follow-up F1). The debrief's objectives and the result check read the same
+/// lists (docs/spec/debrief.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Requirements {
+    pub destroy: Vec<u32>,
+    pub protect: Vec<u32>,
+}
+
+impl Requirements {
+    /// The requirements of `plane`, which flies for `side`, from its own
+    /// assignment. Retail Quick Missions make every aircraft of the other side
+    /// a target when the plane has no assigned target group, and the aircraft
+    /// the mission says must survive are protected. A respawn or a revival
+    /// continues its lineage's objective rather than adding one
+    /// ([`Lineages`]); every aircraft of the other side the mission started
+    /// with is a target, whoever flies it now.
+    pub fn of(wings: &AiWings, plane: u32, side: Side, lineages: &Lineages) -> Self {
+        let mission = wings.mission();
+        let assignment = mission.human_assignment(plane);
+        let mut destroy = lineages.fold(&assignment.destroy_ids);
+        if destroy.is_empty() {
+            destroy = wings
+                .slots()
+                .iter()
+                .filter(|slot| slot.side != side)
+                .map(|slot| lineages.root_of(slot.id))
+                .chain(
+                    lineages
+                        .sides
+                        .iter()
+                        .filter(|(_, root_side)| **root_side != side)
+                        .map(|(root, _)| *root),
+                )
+                .collect();
+            destroy.sort_unstable();
+            destroy.dedup();
+        }
+        let mut protect = assignment.protected_ids.clone();
+        // Only the plane's own side is its objective: an enemy group whose
+        // survival its own side requires is not (docs/spec/debrief.md,
+        // "Friendly objectives"; bug bash finding 2026-09-29).
+        for id in mission.must_survive(plane) {
+            let own_side = *id == plane
+                || lineages.sides.get(&lineages.root_of(*id)) == Some(&side)
+                || wings
+                    .slots()
+                    .iter()
+                    .any(|slot| slot.id == *id && slot.side == side);
+            if own_side && !protect.contains(id) {
+                protect.push(*id);
+            }
+        }
+        Self {
+            destroy,
+            protect: lineages.fold(&protect),
+        }
+    }
+
+    /// The same requirements with the mission's ground `targets` added
+    /// (docs/spec/surface-defenses.md, "Objectives, scoring and debrief"): a
+    /// plane of the friendly side must destroy them, joining the air
+    /// requirement in one combined Destroy objective, and a plane of the
+    /// enemy side (a Redfor player in a multiplayer game) must keep them
+    /// alive. Surface ids have no lineage. Agent decision, 2026-10-10;
+    /// requested by John.
+    pub fn with_ground(mut self, side: Side, targets: &[u32]) -> Self {
+        let list = if side.is_enemy() {
+            &mut self.protect
+        } else {
+            &mut self.destroy
+        };
+        for id in targets {
+            if !list.contains(id) {
+                list.push(*id);
+            }
+        }
+        self
+    }
+}
+
+/// The AI's aircraft as they stand, each friendly when it is on `side`, for
+/// [`Standing`]. The plane itself and any other human-flown plane are not in
+/// the AI's rows: the caller adds them.
+pub fn ai_aircraft(wings: &AiWings, side: Side) -> Vec<Aircraft> {
+    let mission = wings.mission();
+    wings
+        .slots()
+        .iter()
+        .map(|slot| Aircraft {
+            id: slot.id,
+            friendly: slot.side == side,
+            alive: mission
+                .actor(slot.id)
+                .is_some_and(|a| a.alive() && a.flight().escape.is_none()),
+        })
+        .collect()
+}
+
+/// How the mission stands for one plane, from the combat ledger, every
+/// aircraft's fate and the plane's requirements. The one place the mission
+/// result rule lives: the plane shot down no friendly aircraft and destroyed
+/// no friendly ground object that was not a target, every object it must
+/// destroy is gone and every one it must protect still stands.
+pub struct Standing<'a> {
+    pub ledger: &'a Ledger,
+    /// The plane whose result this is; it must be in `aircraft`.
+    pub plane: u32,
+    /// Every aircraft the plane knows of, the plane included. An aircraft
+    /// that is not listed counts as gone.
+    pub aircraft: &'a [Aircraft],
+    /// Every surface object the plane knows of ([`ground`]); empty without a
+    /// ground target. A surface id that is not listed is undecided: it is
+    /// neither destroyed nor lost.
+    pub ground: &'a [Ground<'a>],
+    pub requirements: &'a Requirements,
+}
+
+impl Standing<'_> {
+    fn aircraft(&self, id: u32) -> Option<&Aircraft> {
+        self.aircraft.iter().find(|a| a.id == id)
+    }
+    /// The surface object `id`, when the standing lists it.
+    pub fn ground(&self, id: u32) -> Option<&Ground<'_>> {
+        self.ground.iter().find(|g| g.id == id)
+    }
+    /// An aircraft on the plane's side, or a surface object on its side that
+    /// the mission does not name as an objective (retail: a same-side object
+    /// "not flagged as a target"; the plane's own protected objectives are
+    /// not friendly fire, they fail the mission another way).
+    pub fn friendly(&self, id: u32) -> bool {
+        match self.ground(id) {
+            Some(ground) => {
+                ground.stance == Stance::Friendly
+                    && !self.requirements.destroy.contains(&id)
+                    && !self.requirements.protect.contains(&id)
+            }
+            None => self.aircraft(id).is_some_and(|a| a.friendly),
+        }
+    }
+    /// Recorded kills, plus lost aircraft credited to their last attacker. The
+    /// plane's own loss credits nobody.
+    pub fn kills(&self) -> Vec<Kill> {
+        let mut kills = self.ledger.kills().to_vec();
+        for lost in self
+            .aircraft
+            .iter()
+            .filter(|a| a.id != self.plane && !a.alive)
+        {
+            if !kills.iter().any(|k| k.victim == lost.id)
+                && let Some(kill) = self.ledger.credit(lost.id)
+            {
+                kills.push(kill);
+            }
+        }
+        kills
+    }
+    /// The plane shot down an aircraft of its own side, or destroyed a
+    /// surface object of its own side that was not an objective.
+    pub fn friendly_fire(&self) -> bool {
+        self.kills()
+            .iter()
+            .any(|k| k.owner == self.plane && self.friendly(k.victim))
+    }
+    /// How many of the objects to destroy are gone. A surface object counts
+    /// once its combat row has no hit points; one the standing does not list
+    /// is undecided, not destroyed (before the ground fates existed an
+    /// unknown id counted as destroyed at once). An aircraft the standing
+    /// does not list is gone.
+    pub fn destroyed(&self) -> u32 {
+        self.requirements
+            .destroy
+            .iter()
+            .filter(|id| match self.ground(**id) {
+                Some(ground) => !ground.alive,
+                None if is_surface(**id) => false,
+                None => self.aircraft(**id).is_none_or(|a| !a.alive),
+            })
+            .count() as u32
+    }
+    /// How many of the objects to protect still stand. A surface object the
+    /// standing does not list is undecided and still protected.
+    pub fn protected(&self) -> u32 {
+        self.requirements
+            .protect
+            .iter()
+            .filter(|id| match self.ground(**id) {
+                Some(ground) => ground.alive,
+                None if is_surface(**id) => true,
+                None => self.aircraft(**id).is_some_and(|a| a.alive),
+            })
+            .count() as u32
+    }
+    pub fn succeeded(&self) -> bool {
+        !self.friendly_fire()
+            && self.destroyed() as usize == self.requirements.destroy.len()
+            && self.protected() as usize == self.requirements.protect.len()
+    }
+}
+
+/// Whether the mission has succeeded for the plane `plane`, as the debrief
+/// decides it ([`Standing`]). `plane_alive` is whether the plane and its pilot
+/// are alive, `side` the side it flies for. `humans` are the other human-flown
+/// planes as they stand (a multiplayer game's; the lobby pass's follow-up F1),
+/// each friendly when on `side`: without them they count as neither friendly
+/// nor alive here (B3). `lineages` folds respawns and revivals into the
+/// objectives they continue. `surface` is the mission's resolved surface:
+/// its ground targets join the requirements and its objects' fates decide
+/// them.
+#[allow(clippy::too_many_arguments)]
+pub fn succeeded(
+    state: &live::State,
+    wings: Option<&AiWings>,
+    plane: u32,
+    plane_alive: bool,
+    side: Side,
+    humans: &[Aircraft],
+    lineages: &Lineages,
+    surface: Option<&Surface>,
+) -> bool {
+    let mut aircraft = vec![Aircraft {
+        id: plane,
+        friendly: true,
+        alive: plane_alive,
+    }];
+    aircraft.extend(humans.iter().filter(|human| human.id != plane).copied());
+    let mut requirements = Requirements::default();
+    if let Some(wings) = wings {
+        aircraft.extend(ai_aircraft(wings, side));
+        requirements = Requirements::of(wings, plane, side, lineages);
+    }
+    let fates = surface.map_or_else(Vec::new, |surface| ground(surface, state, side));
+    if let Some(surface) = surface {
+        requirements = requirements.with_ground(side, &ground_targets(surface, state));
+    }
+    Standing {
+        ledger: &state.ledger,
+        plane,
+        aircraft: &aircraft,
+        ground: &fates,
+        requirements: &requirements,
+    }
+    .succeeded()
+}
+
+/// One mission-result call: the stem, why it is sent and who says it.
+pub struct ResultCall {
+    stem: &'static str,
+    cause: Cause,
+}
+impl ResultCall {
+    /// The call for `plane`'s seat, the mission result two seconds after it is
+    /// decided and "almost home" at once, both important and addressed to the
+    /// flight. `label` is the crew label or `YOU`.
+    pub fn call(&self, plane: u32, label: &str, phrases: &Phrases) -> Call {
+        let delay = if self.stem == MISSION_ACCOMPLISHED {
+            2.
+        } else {
+            0.
+        };
+        Call::new(label, Phrase::stem(phrases, self.stem), Kind::Important)
+            .after(delay)
+            .because(
+                Origin::of(Source::Radio, self.cause.clone())
+                    .by(plane)
+                    .to(Audience::Flight),
+            )
+    }
+}
+
+impl Tracker {
+    /// One tick of `plane`'s mission result. `evaluate` is `None` without a
+    /// mission. Returns the calls to send now, each with its trigger.
+    pub fn results(
+        &mut self,
+        now: f64,
+        evaluate: Option<impl FnOnce() -> bool>,
+        position: [f64; 3],
+        airborne: bool,
+    ) -> Vec<ResultCall> {
+        let base = self.home_base;
+        self.step(now, evaluate, position, airborne)
+            .radio
+            .into_iter()
+            .map(|stem| ResultCall {
+                stem,
+                cause: match stem {
+                    ALMOST_HOME => {
+                        let (range_ft, altitude_ft) = base.map_or((0., 0.), |base| {
+                            let across = (base[0] - position[0]).hypot(base[2] - position[2]);
+                            (across.hypot(base[1] - position[1]), position[1])
+                        });
+                        Cause::AlmostHome {
+                            range_ft,
+                            altitude_ft,
+                        }
+                    }
+                    _ => Cause::MissionAccomplished,
+                },
+            })
+            .collect()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn success_is_disabled_when_decided_at_flight_start() {
+        let mut t = Tracker::new(Some([0.; 3]));
+        let decided = t.step(0., Some(|| true), [0.; 3], true);
+        assert_eq!(decided, Status::default());
+        let later = t.step(8., Some(|| true), [0.; 3], true);
+        assert!(!later.succeeded && !later.home && later.radio.is_empty());
+        let mut none = Tracker::new(None);
+        none.step(0., None::<fn() -> bool>, [0.; 3], true);
+        assert!(!none.step(4., Some(|| true), [0.; 3], true).succeeded);
+    }
+
+    #[test]
+    fn four_second_cadence_radio_and_home() {
+        let mut t = Tracker::new(Some([0., 0., 0.]));
+        let far = [50_000., 5_000., 0.];
+        assert!(t.step(0., Some(|| false), far, true).radio.is_empty());
+        // Targets die at 1 s; nothing is re-evaluated before 4 s.
+        assert!(!t.step(3.99, Some(|| true), far, true).succeeded);
+        let s = t.step(4., Some(|| true), far, true);
+        assert!(s.succeeded && !s.home);
+        assert_eq!(s.radio, [MISSION_ACCOMPLISHED]);
+        // Within 42,240 ft but too high, then low enough.
+        let high = [30_000., 20_000., 0.];
+        assert!(!t.step(8., Some(|| true), high, true).home);
+        let near = [30_000., 19_999., 0.];
+        let s = t.step(12., Some(|| true), near, true);
+        assert!(s.home);
+        assert_eq!(s.radio, [ALMOST_HOME]);
+        let s = t.step(16., Some(|| true), far, true);
+        assert!(
+            s.home && s.radio.is_empty(),
+            "home is latched and called once"
+        );
+        // A later failure clears success but not the home latch.
+        assert!(!t.step(20., Some(|| false), far, true).succeeded);
+        // No home base: HOME never.
+        let mut t = Tracker::new(None);
+        t.step(0., Some(|| false), [0.; 3], true);
+        assert!(!t.step(4., Some(|| true), [0.; 3], true).home);
+        // On the ground the home condition is reached without the radio call.
+        let mut t = Tracker::new(Some([0.; 3]));
+        t.step(0., Some(|| false), [0.; 3], false);
+        let s = t.step(4., Some(|| true), [0.; 3], false);
+        assert!(s.home);
+        assert_eq!(s.radio, [MISSION_ACCOMPLISHED]);
+    }
+
+    #[test]
+    fn result_calls_carry_their_delay_label_and_trigger() {
+        let mut t = Tracker::new(Some([0.; 3]));
+        let far = [50_000., 5_000., 0.];
+        assert!(t.results(0., Some(|| false), far, true).is_empty());
+        let near = [0., 5_000., 10_000.];
+        let results = t.results(4., Some(|| true), near, true);
+        assert_eq!(results.len(), 2);
+        let phrases: Phrases = [("^MISSACC", "Mission accomplished")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        let calls: Vec<Call> = results
+            .iter()
+            .map(|result| result.call(0, "RIO", &phrases))
+            .collect();
+        assert_eq!(calls[0].stems, [MISSION_ACCOMPLISHED]);
+        assert_eq!(calls[0].text, "Mission accomplished");
+        assert_eq!((calls[0].delay, calls[1].delay), (2., 0.));
+        assert!(
+            calls
+                .iter()
+                .all(|c| c.label == "RIO" && c.kind == Kind::Important)
+        );
+        assert_eq!(calls[0].origin.cause, Cause::MissionAccomplished);
+        assert_eq!(
+            calls[1].origin.cause,
+            Cause::AlmostHome {
+                range_ft: 10_000f64.hypot(5_000.),
+                altitude_ft: 5_000.
+            }
+        );
+        assert_eq!(t.status().radio, Vec::<&str>::new());
+        assert!(t.status().succeeded && t.status().home);
+    }
+
+    #[test]
+    fn a_mission_without_wings_succeeds_unless_the_plane_shot_a_friend() {
+        let state = crate::test_support::combat_fixture(true);
+        assert!(succeeded(
+            &state,
+            None,
+            0,
+            true,
+            Side::Friendly,
+            &[],
+            &Lineages::default(),
+            None
+        ));
+        assert!(
+            succeeded(
+                &state,
+                None,
+                0,
+                false,
+                Side::Friendly,
+                &[],
+                &Lineages::default(),
+                None
+            ),
+            "the plane's own death is not a failure"
+        );
+    }
+
+    fn aircraft(id: u32, friendly: bool, alive: bool) -> Aircraft {
+        Aircraft {
+            id,
+            friendly,
+            alive,
+        }
+    }
+
+    #[test]
+    fn the_standing_of_a_plane_follows_its_own_kills_and_requirements() {
+        use tore_sim::combat::ledger::Kill;
+        let mut ledger = Ledger::default();
+        // Plane 2 shoots down a friendly, plane 0 an enemy; a lost enemy with
+        // only a last hit is credited to the plane that hit it.
+        ledger.kill(Kill {
+            owner: 2,
+            victim: 1,
+            category: 0x8000,
+            aircraft: true,
+        });
+        ledger.kill(Kill {
+            owner: 0,
+            victim: 10,
+            category: 0x8000,
+            aircraft: true,
+        });
+        ledger.damaged(Kill {
+            owner: 2,
+            victim: 11,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let fates = [
+            aircraft(0, true, true),
+            aircraft(1, true, false),
+            aircraft(2, true, true),
+            aircraft(10, false, false),
+            aircraft(11, false, false),
+        ];
+        let requirements = Requirements {
+            destroy: vec![10, 11],
+            protect: vec![0],
+        };
+        let standing = |plane| Standing {
+            ledger: &ledger,
+            plane,
+            aircraft: &fates,
+            ground: &[],
+            requirements: &requirements,
+        };
+        assert_eq!(standing(0).kills().len(), 3);
+        assert!(!standing(0).friendly_fire());
+        assert!(standing(0).succeeded());
+        assert_eq!((standing(0).destroyed(), standing(0).protected()), (2, 1));
+        // The same ledger fails the plane that shot a friend down.
+        assert!(standing(2).friendly_fire());
+        assert!(!standing(2).succeeded());
+        // An aircraft the standing does not list counts as gone: destroyed if
+        // it is a target, lost if it must be protected.
+        let unlisted = Requirements {
+            destroy: vec![99],
+            protect: vec![98],
+        };
+        let lists = Standing {
+            requirements: &unlisted,
+            ..standing(0)
+        };
+        assert_eq!((lists.destroyed(), lists.protected()), (1, 0));
+    }
+
+    /// The bug bash's objective-side rule (battery finding 2026-09-29): an
+    /// enemy group whose own side must keep it alive is not the plane's
+    /// objective, so shooting it down does not fail the mission.
+    #[test]
+    fn an_enemy_group_that_must_survive_is_not_the_planes_objective() {
+        use tore_formats::aircraft::AircraftId;
+        use tore_sim::ai::launch::{self, WingSelection, resolve_wings};
+        let selections =
+            [(launch::Side::Friendly, 0u8), (launch::Side::Enemy, 0)].map(|(side, index)| {
+                WingSelection {
+                    wing: launch::WingId::new(side, index).unwrap(),
+                    aircraft: AircraftId::F18,
+                    count: 2,
+                    skill_level: 1,
+                }
+            });
+        let launches = resolve_wings(&selections, None).unwrap();
+        let targets = crate::test_support::spawned();
+        let mut wings = AiWings::build_with(&launches, &targets, 0, |_| {
+            Ok((crate::test_support::profile(), None))
+        })
+        .unwrap();
+        let state = crate::test_support::combat_fixture(true);
+        let enemies: Vec<u32> = wings
+            .slots()
+            .iter()
+            .filter(|slot| slot.side != Side::Friendly)
+            .map(|slot| slot.id)
+            .collect();
+        assert!(!enemies.is_empty());
+        for id in &enemies {
+            wings.mission.actor_mut(*id).unwrap().flight_mut().crashed = true;
+        }
+        // The enemy group (group 4) must survive for its own side.
+        wings.apply_group_survival(&[false, false, false, true, false, false]);
+        assert!(
+            wings
+                .mission()
+                .must_survive(0)
+                .iter()
+                .any(|id| enemies.contains(id))
+        );
+        assert!(succeeded(
+            &state,
+            Some(&wings),
+            0,
+            true,
+            Side::Friendly,
+            &[],
+            &Lineages::default(),
+            None
+        ));
+        // A friendly group that must survive still is the plane's objective.
+        wings.apply_group_survival(&[true, false, false, false, false, false]);
+        let friends: Vec<u32> = wings
+            .slots()
+            .iter()
+            .filter(|slot| slot.side == Side::Friendly)
+            .map(|slot| slot.id)
+            .collect();
+        wings
+            .mission
+            .actor_mut(friends[0])
+            .unwrap()
+            .flight_mut()
+            .crashed = true;
+        assert!(!succeeded(
+            &state,
+            Some(&wings),
+            0,
+            true,
+            Side::Friendly,
+            &[],
+            &Lineages::default(),
+            None
+        ));
+    }
+}
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "outcome_checkpoint.rs"]
+mod checkpoint;

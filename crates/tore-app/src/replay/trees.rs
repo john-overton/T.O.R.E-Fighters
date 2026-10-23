@@ -237,6 +237,13 @@ pub fn airfield_label(phase: AirfieldPhase) -> &'static str {
         AirfieldPhase::Rollout => "rollout",
         AirfieldPhase::TaxiClear => "taxiing to parking",
         AirfieldPhase::Parked => "parked",
+        AirfieldPhase::VerticalHold => "holding before a vertical takeoff",
+        AirfieldPhase::VerticalClimb => "vertical climb",
+        AirfieldPhase::Transition => "transition to forward flight",
+        AirfieldPhase::HoverApproach => "hover approach",
+        AirfieldPhase::VerticalDescent => "vertical descent",
+        AirfieldPhase::Settle => "landed, settling",
+        AirfieldPhase::AirTaxi => "air taxiing to parking",
     }
 }
 
@@ -498,6 +505,13 @@ pub fn motion_branch(
     match branch {
         MotionBranch::None => ("none", String::new()),
         MotionBranch::DamageRecovery => ("damage recovery", "returning with weapons held".into()),
+        MotionBranch::Strike {
+            heading_deg,
+            pitch_deg,
+        } => (
+            "strike",
+            format!("heading {heading_deg:.0}, pitch {pitch_deg:.0}"),
+        ),
         MotionBranch::GunTracking {
             heading_deg,
             pitch_deg,
@@ -538,9 +552,16 @@ pub fn motion_branch(
         }
         MotionBranch::OrderedMotion => ("ordered maneuver", String::new()),
         MotionBranch::Search {
-            contact, orbiting, ..
+            contact,
+            orbiting,
+            opportunity,
+            ..
         } => (
-            "investigating a contact",
+            if *opportunity {
+                "searching for the enemy"
+            } else {
+                "investigating a contact"
+            },
             format!(
                 "{} last seen at {}, {}",
                 who(contact.id),
@@ -550,6 +571,13 @@ pub fn motion_branch(
                 } else {
                     "flying to it"
                 }
+            ),
+        ),
+        MotionBranch::WingRoute { distance_ft, .. } => (
+            "flying the wing's waypoints",
+            format!(
+                "nothing found on the search; next waypoint {:.1} nm",
+                distance_ft / 6_076.12
             ),
         ),
         MotionBranch::SearchAbandoned { contact } => (
@@ -587,6 +615,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     match controller.motion.branch {
         MotionBranch::None => 1,
         MotionBranch::DamageRecovery => 13,
+        MotionBranch::Strike { .. } => 14,
         MotionBranch::MissileDefense { .. } => 2,
         MotionBranch::IncomingFire { .. } => 11,
         MotionBranch::GunTracking { .. } => 12,
@@ -594,7 +623,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
         MotionBranch::SearchBearing { .. } => 4,
         MotionBranch::OrderedApproach { .. } => 5,
         MotionBranch::OrderedMotion => 6,
-        MotionBranch::Search { .. } => 7,
+        MotionBranch::Search { .. } | MotionBranch::WingRoute { .. } => 7,
         MotionBranch::SearchAbandoned { .. } => 8,
         MotionBranch::Formation(_) => 9,
         MotionBranch::ActiveContinues | MotionBranch::NotYetDue | MotionBranch::NewManeuver => 10,
@@ -859,6 +888,49 @@ fn thought_perception(tree: &mut Tree, t: &Thought) {
             tree.text(1, &(t.who)(*id), names.join(", "), "");
         }
     }
+}
+
+/// Ground attack decisions, independent of the air-to-air weapon service.
+pub fn strike_thought(
+    strike: &tore_sim::ai::strike::Strike,
+    store: &dyn Fn(StationId) -> Option<String>,
+) -> Vec<Node> {
+    let mut tree = Tree::default();
+    tree.text(
+        0,
+        "Ground attack",
+        format!("{:?}", strike.phase()),
+        "a pass phase is not a weapon release",
+    );
+    tree.text(1, "Segment", format!("{:?}", strike.segment()), "");
+    if let Some(pass) = strike.pass() {
+        tree.text(1, "Pass", pass.label(), "");
+    }
+    if let Some(selection) = strike.selection() {
+        tree.text(
+            1,
+            "Ground target",
+            format!("object {:#010x}", selection.target),
+            "",
+        );
+        tree.int(2, "Object id", i64::from(selection.target), "");
+        tree.text(
+            1,
+            "Surface weapon",
+            store(selection.station).unwrap_or_else(|| format!("station {}", selection.station.0)),
+            "",
+        );
+        tree.text(2, "Kind", format!("{:?}", selection.kind), "");
+        tree.num(
+            1,
+            "Release gate",
+            selection.gate_ft,
+            0,
+            "ft",
+            "around the drawn aim point",
+        );
+    }
+    tree.nodes
 }
 
 /// Builds an AI aircraft's thought tree. See docs/REPLAYS.md for the layout.
@@ -1997,6 +2069,10 @@ pub fn effect_line(effect: &Effect) -> EffectLine {
                 Release::NavigationFailed => "navigation failed",
                 Release::PilotOverride => "the pilot moved the stick",
                 Release::Ground => "on the ground or crashed",
+                Release::PilotCollective => "the pilot moved the collective",
+                Release::EngineFailure => "engine failure",
+                Release::HydraulicsLost => "hydraulics lost",
+                Release::TooSlow => "too slow for the mode",
             }
             .into(),
         ),
@@ -2108,6 +2184,7 @@ pub fn effect_line(effect: &Effect) -> EffectLine {
                 BurnerBlock::NoPower => "no engine power".into(),
                 BurnerBlock::NotFitted => "this aircraft has no afterburner".into(),
                 BurnerBlock::NoFuel => "no fuel".into(),
+                BurnerBlock::Vectoring => "nozzles in powered-lift position".into(),
                 BurnerBlock::ThrottleLow => {
                     format!("throttle at or below {}", percent(*afterburner_throttle))
                 }
@@ -2169,6 +2246,15 @@ pub fn effect_line(effect: &Effect) -> EffectLine {
             "Outside the envelope",
             "G limits +/-1 before loading",
             "no envelope row holds this speed at this height".into(),
+        ),
+        Effect::FastSideHold { hold, .. } => limit(
+            "Fast-side G hold",
+            hold.g,
+            format!(
+                "past the {} G row's fast edge at {}, the pull stays",
+                fixed(hold.g, 0),
+                kt_text(hold.edge_fps)
+            ),
         ),
         Effect::LoadedLimits { divisor, loading } => EffectLine {
             label: "Loaded G limits".into(),
@@ -2438,7 +2524,9 @@ pub fn g_limit_reason(trace: &FlightTrace) -> String {
             fixed(e.load_divisor, 2)
         ));
     }
-    if e.rows == 0 {
+    if let Some(hold) = e.fast_hold {
+        why.push(format!("fast-side hold at {} G", fixed(hold.g, 0)));
+    } else if e.rows == 0 {
         why.push("outside every envelope row".to_owned());
     } else {
         why.push(format!(

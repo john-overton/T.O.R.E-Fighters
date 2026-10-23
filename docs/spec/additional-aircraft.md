@@ -94,8 +94,8 @@ Full weapon catalog parity is not implied by import success.
 
 ## Fitted exterior behavior
 
-Agent choices for the initial port, 2026-09-16: preserve FA neutral geometry,
-texture mapping and source device endpoints. Keep the existing host scale of
+The fitted rigs use FA texture mapping and source device endpoints. The F-14
+wing-height correction below also applies at zero sweep. Keep the host scale of
 one-third foot per unit, multiplied by four for F14's exponent-10 shape.
 A4 and F31 have exponent 8. Absolute scale remains a host fit.
 
@@ -106,27 +106,68 @@ wingtip vapor origins. No extra aerodynamic effect is asserted. FA's F14 CE
 points do not coincide with its quantized base mesh; use the reviewed visible
 wing tips as fitted attachments. Do not describe these as decoded CE placement.
 
-Flaps droop up to 0.4 rad. F-14 tailplanes mix -0.3 rad pitch and ±0.2 rad roll;
-A-4 elevators use -0.3 rad pitch and outboard ailerons ±0.2 rad roll.
-The A-4 elevator is the complete strip aft of fitted source y=-54, z=7 across
-both tail halves. Split all eight horizontal-tail faces at this straight hinge,
-interpolating texture coordinates; keep the forward stabilizer fixed. Source
-polygon diagonals are not hinges. X-31
-canards use +0.35 rad pitch; aft panels mix 0.4 rad flap, -0.3 rad pitch and
-±0.2 rad roll. Rudders deflect up to 0.35 rad. F-14 fin clipping preserves the
-fixed forward area. These hinges and mixing are fitted, not original schedules.
+John's 2026-10-02 alignment review requires symmetric body attachments and wings
+close to the outer root surface. Translate the left wing one source unit left:
+its source root at `(-7,4,1)` then matches the body's `(-8,4,1)` attachment and
+mirrors the right root `(8,4,1)`. Sweep about those front inner roots. Correct only
+the right horizontal tail's forward root from `(6,-6,0)` to `(5,-6,0)`, matching
+the left tail; the other tail vertices already match. Vertical fins are already
+symmetric. Coordinates are source right/forward/up.
 
-Gear rotates through a fitted quarter turn and disappears at full retraction.
-A-4/X-31 side brakes interpolate through 1.05 rad from their open meshes;
-F-14 brakes hinge continuously through a fitted 45 degrees to the source raised
-pose, around their forward edge; see the [animation contract](aircraft-animation.md). A-4's stowed hook rotates
-0.9 rad; F-14's projected hook uses a 0.6 rad travel, but its source triangles
-collapse through quantization. Give the coincident root vertices a fitted
-±0.125 source-unit width, preserving the center and tip, to make the hook visible.
+The fitted wing lift is 0.125 source units, or two inches at this model's scale.
+This clears the outer root surface without raising the wing above the inner
+fuselage deck; swept panels tuck beneath the fixed glove. Wing faces, flaps and
+vapor tips share the alignment and sweep transform. The sweep schedule and flight dynamics stay unchanged.
+
+The F-14 exterior also receives **opinionated** source-art repairs following
+John's 2026-10-02 review. He reports these defects in retail as well. The agent
+chooses the better formed right exhaust outlet and collar as the symmetry
+reference, mirroring it onto the left. Both horizontal afterburner sheets span
+their respective outlet widths and stay centered on the engines. Existing
+afterburner length and device animation remain unchanged.
+
+Close six small triangular seams using positions and texture coordinates from
+the adjacent source panels: one aft belly seam, two under-cockpit seams, one
+left nose-side seam and two tail fairing side seams. Preserve the intended
+intakes, cockpit and device openings. These are corrections to the loaded base
+model, not claims of retail parity or a replacement model. Source files stay
+intact. No aircraft dimensions or flight dynamics are changed.
+
+F-14 now uses its source flap endpoint morph and corrected differential-tail
+sign in the [attachment contract](aircraft-animation.md#f-14d-attachment-corrections).
+A-4 now uses its own diagonal pitch seams, attached roll/rudder skins and
+reconciled source trailing flaps in its
+[attachment contract](aircraft-animation.md#a-4e-attachment-corrections).
+Its source forward flap-branch strips remain an explicit mapping gap.
+X-31 now uses exact source inner flap and
+signed rudder endpoints, corrected thick surface attachments and independently
+reviewed gear/brace/door paths in its
+[attachment contract](aircraft-animation.md#x-31-attachment-corrections).
+Canards and prototype vector controls retain their existing laws above.
+F-14 fin clipping preserves the fixed forward area. These hinges and mixing
+are fitted, not original schedules.
+
+All three use their individual reviewed gear, brace and panel paths. A-4
+brakes use separate leaves, fixed cavities and fitted actuators; its hook uses
+both source endpoint poses and remains visible when stowed. X-31 side brakes
+retain 1.05-radian travel and close toward its body instead of outward.
+F-14 brake closure uses its corrected 75-degree fit around original forward
+edges; see the [animation contract](aircraft-animation.md#f-14d-attachment-corrections). The F-14 source hook has two untextured, collapsed triangles. John
+suggested the F-22N hook as a shape/texture reference on 2026-10-02. The agent
+chooses to replace the triangles with the loaded F-22N's textured,
+two-sided hook blade, retaining its original UVs and transparent outline. This
+is an **opinionated** visual substitution. The agent's **fitted** placement
+uniformly scales and rotates that blade so its root midpoint meets the F-14
+hinge `(0,-5,-2)` and its tip midpoint meets `(0,-12,-6)`, in F-14 source units.
+Keep the F-14's 0.6 rad retraction about that hinge and hide it at zero extension.
+No source art is bundled, no F-22N geometry is changed, and no carrier arrestment
+physics is added. The previous triangular widening is removed.
 F-14/X-31 flames follow the existing exhaust fraction. A-4 has no flame branch.
 
 Cockpit mirrors use three reviewed flat-fill regions for F-14D and A-4E;
-X-31 has no mirror regions. Their optics share the existing fitted rear camera.
+X-31 has no mirror regions. Slice BC (2026-10-12) added the side mirrors the
+SU-33 and AV-8 pictures draw and the mirrors of the A-7, F-104 (and A-10),
+Su-35 sides and Yak-141: see the [mirror review](../baselines/mirrors.md#2026-10-12-review-of-every-cockpit-picture). Their optics share the existing fitted rear camera.
 X-31 side-mirror art is absent and is not borrowed from another aircraft.
 
 ## Unknown behavior

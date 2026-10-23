@@ -17,6 +17,85 @@ The F/A-18D cockpit now covers the full flight canvas. The world renders behind 
 
 Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Right and Fn-Down supply End and Page Down, and Fn-Delete supplies Delete; there is no Insert key, so bind chaff yourself in **Pref → Controls...**. The physical US key positions are used in flight, including shifted numbers and Option combinations.
 
+Rudder now turns the air-relative flight path through sideslip force and roll
+coupling. The HUD shows available NSW percent below BRAKE while on the wheels and hides the readout when displayed authority reaches zero.
+Steering turns the nosewheel and steerable strut, leaving separate braces fixed.
+Nosewheel steering has 90-degree authority through 10 mph, fading
+linearly to zero at 50 mph ground speed (John widened the fade from 25 mph on 2026-10-12; opinionated). [Rules and fitted constants](spec/lateral-flight.md).
+
+## AC-130 directed guns
+
+On the AC-130 the TARGET CAM page (instrument 4) is a gunsight. The camera
+looks 90 degrees abeam to the left and 25 degrees down until you do something
+else. Slew it with Alt + the arrows and zoom with Shift+' / Shift+;. Backslash
+designates whatever is under the crosshair, an object if there is one and the
+ground if not; Shift+Backslash pins the ground there; L or ; drops the target
+or pin, and pressed again sends the view back to the default. The guns follow
+that point inside their arcs, a ring and dot (the pipper, with a bold range arc
+like the fighter's LCOS pipper) shows where rounds will land, and a box on every
+view marks the point. The AC-130 tracks ground
+and air objects at any range, as if Easy targeting were always on. On a
+gamepad hold View: the right stick slews, A designates (tap) or pins (hold),
+D-pad up and down pick and link a gun. [Keys](INPUT.md#ac-130-gunsight-controls),
+[behaviour](spec/ac130-linked-guns.md#the-gunsight).
+
+Use Ctrl+7 to choose a gun candidate and Ctrl+8 to include or remove it from
+the firing group. Hold Fire to release every enabled linked gun: it fires with
+or without a target or solution, along wherever the barrels point, and only
+SAFE, EMPTY, a lost gun or the aircraft's own wing in the way holds it. The
+Weapons instrument's LINK row shows membership and its ordinary arrow
+identifies the current candidate. Each gun has its own ammo, cadence,
+source-informed arc and fitted tracking slew. These are player-directed
+controls; [limits and gamepad defaults](INPUT.md#ac-130-directed-gun-groups).
+
+## VTOL, tiltrotors and helicopters
+
+Use the ordinary arrow stick, End / Page Down rudder and E engine switch. Some
+keys change with the aircraft ([the full table](INPUT.md#vtol-tiltrotor-and-helicopter-controls)):
+
+- **AV-8 and Yak-141**, the retail keys: **X** turns the nozzles down 10
+  degrees and **Z** up 10. **Shift+X** puts them vertical (90 degrees), and a
+  second press to the 100-degree braking stop; **Shift+Z** puts them aft (0),
+  or from the braking stop back to vertical. Ctrl+Up / Ctrl+Down slew them,
+  **0** sends them aft. Z and X are not rudder keys on these two; use End and
+  Page Down. 1-8 set engine power as on any jet. Per the manual: Shift+X and
+  full power to lift off, Z three times at 500 ft, Shift+Z past 80 to 90 kt;
+  for a short takeoff, X four times (40 degrees) at 80 to 90 kt.
+- **Helicopters (AH-64, Mi-24, CH-47) and the V-22**: the throttle keys 1-8
+  (and a throttle lever or the gamepad throttle buttons) set the
+  **collective**; the engines are governed. Ctrl+Home / Ctrl+End still move
+  the collective. **Ctrl+arrows trim the cyclic**: a tap moves the trim 2
+  percent of travel, a held key 10 percent a second, so a few taps of
+  Ctrl+Up and the aircraft flies forward hands off. **0** recentres the trim on
+  the helicopters; on the V-22 it still sends the nacelles forward. V-22
+  conversion uses Ctrl+Page Up toward airplane mode and Ctrl+Page Down toward
+  helicopter mode. Z and X stay rudder keys.
+- **All six**: **Ctrl+Shift+A** cycles the stability level, announced as
+  `Stability: Off`, `Damper` or `Attitude`; Pref → Stability level does the
+  same and the choice is kept for later flights. **Damper** (the default)
+  stops the aircraft rotating when you let go of the stick and leaves it at
+  the attitude you left it; **Attitude** also returns it to the trimmed
+  attitude, and at the Attitude level Ctrl+arrows move that attitude
+  instead of the trim; **Off** adds nothing. No level limits the attitude:
+  full stick always wins. **Ctrl+Alt+A** is hover hold on the helicopters
+  and the V-22 below 40 kt: it stops the drift, then holds the spot, the
+  heading and the height above the ground, through the controls. Any stick,
+  pedal or collective input cancels it; Ctrl+arrows move the held spot 10 ft
+  a tap. At 40 kt and above, **A** and **Ctrl+A** fly the helicopters and the
+  V-22 (height on the collective, speed on the cyclic, Ctrl+Up / Ctrl+Down
+  2 kt faster or slower). See [hover hold](spec/autopilot.md#hover-hold-helicopters-and-the-v-22).
+
+A stick button bound to **Trim set** makes the current stick plus trim the new
+trim and ignores the stick until it is back near centre, which turns a
+spring-centred stick into a force-trim cyclic. The controls editor exposes the
+lift demands, the trim axes and every new command as bindable rows. What each
+aircraft does, the stability levels, the Easy flight physics cheat, the numbers
+and their sources are in [powered-lift flight](spec/powered-lift-flight.md).
+
+The Apache and Chinook keep their fixed landing gear down; G reports that the
+gear is fixed. The Hind retains retractable gear. This is an explicit
+[fitted equipment rule](spec/variety-flight.md), with no new binding.
+
 ## Working flight commands
 
 | Key | Action | Evidence/status |
@@ -56,12 +135,16 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | + / - | Zoom view | USNF manual; authored 0.5–4× projection |
 | Backspace | Toggle cockpit art, retain HUD/windows | FA menu (`BS`) |
 | Shift-U | Toggle HUD | Development shortcut |
-| Shift-[ / Shift-] | Dim / brighten HUD | FA menu |
+| Shift-[ / Shift-] | Dim / brighten HUD, 33 settings | FA menu |
+| Ctrl-H | Cycle HUD green / amber / white / cyan | Authored |
+| Ctrl-I then -/+ | Instrument and cockpit brightness, five levels, default 4 | Requested, authored chord |
+| Ctrl-Shift-F then -/+ | Red cockpit flood, Off and five levels, default 3 | Requested, authored chord |
 | D | Report ownship and systems damage in the sim log | Manual p. 161; requested summary |
 | Shift-0…9 | Toggle instrument windows (four large or six small) | FA menu; oldest open window is replaced |
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
 | C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× slow motion | FA keys; fixed 120 Hz ticks, authored adapter time scaling |
 | A / Ctrl-A | Toggle heading/altitude hold / waypoint autopilot | [Autopilot behavior](spec/autopilot.md), requested USNF-ATF modes |
+| Ctrl-Alt-A | Toggle hover hold (helicopters and V-22, below 40 kt) | [Hover hold](spec/autopilot.md#hover-hold-helicopters-and-the-v-22), requested 2026-10-08 |
 | Ctrl-P | Pause/resume | FA menu |
 | Escape | Open/close in-flight menu; return one level from submenus/help | FA menu/manual |
 | Ctrl-Q | End mission and return to creator | FA menu; does not quit the application |
@@ -80,9 +163,16 @@ Heading hold shows `AUTO` above `HDG ALT`, beside the heading tape.
 
 **Escape → Pref → Large windows?** toggles the layout. Large is the default: four corner windows, with size and margins based on the 162×160 window and eight pixels at the 640×480 reference size. They anchor to the actual screen edges, including on wider displays. The initial arrangement is Systems top-left, RWR bottom-left, Radar bottom-right and Radar/Visual top-right, following the supplied large-style reference.
 
-Small places six windows across the bottom in two groups of three. Their reference size is 96×95, with six-pixel gaps and eight-pixel outer margins. Each group anchors to its screen edge; the center gutter grows on wider displays. Its initial pages are Systems/RWR/Nav on the left and Radar/Visual/Radar/Weapons on the right. Each layout remembers its own selected pages for the session. Shift-0…9 toggles pages; opening beyond a layout's capacity replaces its oldest page. Switching layouts cancels any pending instrument click. Button hit testing uses the same scaling and rectangles as rendering.
+Small places six windows across the bottom in two groups of three. Their reference size is 96×95, with six-pixel gaps and eight-pixel outer margins. Each group anchors to its screen edge; the center gutter grows on wider displays. Its initial pages are Systems/RWR/Nav on the left and Radar/Visual/Radar/Weapons on the right. Each layout remembers its own selected pages for the session. Shift-0…9 toggles pages; opening beyond a layout's capacity replaces its oldest page. Launching a seeker weapon also opens the target camera (Shift-4) if it is closed: at the top right in the small layout, to the left of the top-right window in the large one, without closing any window ([seeker window](spec/target-window.md#seeker-window)). Switching layouts cancels any pending instrument click. Button hit testing uses the same scaling and rectangles as rendering.
 
 The Envelope window (Shift-1) uses U for the current G curve, A for all positive-G curves, and C for locked-target comparison. Red marks the target's advantage. It shows clean-aircraft capability, with live altitude, G and speed readouts and a color-cycling square. Each aircraft sets its own chart scale. Missing comparison data is labeled explicitly. See the [envelope spec](spec/envelope.md) for fitted colors, scale and marker timing.
+
+Lighting choices are saved between flights. Adjustment chords expire after four seconds
+or another key; Ctrl may remain held. All commands are bindable in Controls > View,
+and PREF > Cockpit lighting provides individual adjustment rows. Cockpit paint and
+bezels fade with the world sunlight and moonlight; screens stay self-lit. The red
+flood lights the darkened paint at night. Generated bezel legends have a subtle
+backlight controlled by instrument brightness. See [cockpit lighting](spec/cockpit-lighting.md).
 
 Each window is a 162×160 raster: the flying aircraft's own original frame at double size, with its title, number and button letters in the aircraft's HUD colours ([bezel spec](spec/instrument-bezel.md)). It is resampled directly to the flight overlay resolution. There is no intermediate 96×95 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not the original placement, which uses 10- and 14-pixel margins and an 81×80 small window ([window placement](spec/instrument-bezel.md#window-placement)). Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 
@@ -91,6 +181,28 @@ Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual
 
 The scope, the exposure page and the weapons all read one shared sensor
 component. [What it models, what is authored tuning and what is deferred](radar.md).
+
+## Friend or foe
+
+Slice F2-C of [multiplayer phase 2](ARCHITECTURE.md#friend-or-foe). All three
+work in single player and in a network flight, from the flight's own copy of the
+mission.
+
+- **The lock box's X** is drawn when the displayed target is on the side of the
+  plane the screen presents: a player flying for the enemy side sees it on the
+  enemy's aircraft. Single player always flies the friendly side.
+- **U** squawks IFF on the displayed target: "IFF: Friendly" for an aircraft on
+  the player's side, "IFF: no reply" for any other (agent decision: the retail
+  manual names only the Friendly answer), "IFF: no target" with nothing
+  designated.
+- **Show Target Info** (Pref menu row, or Ctrl+T; off by default) prints each
+  visible aircraft's and object's identity below it, in the HUD's font and
+  size. The displayed target also shows its manoeuvre (the target window's
+  activity). The text is orange, and red for a target that aims at the player.
+  In a network game a human's callsign is the line beneath. Agent decisions: a
+  label reaches 10 nautical miles, at most 24 show at once (aircraft first, then
+  the nearest objects), and the manoeuvre and the red are known only for the
+  displayed target, the only one a client's copy of the mission knows.
 
 ## In-flight messages
 
@@ -112,14 +224,12 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized, and the
 
 | Key | Original action / remaining work |
 | --- | --- |
-| U | IFF interrogation |
 | Shift-R | Air-to-ground radar |
 | Shift-A / Shift-G | AWACS / air-to-ground radar link |
 | Shift-F / Shift-D | Target damage / message history |
 | Shift-I | Airbase aircraft inventory |
 | Shift-J | Jettison external fuel |
 | Alt-F | Wingmen engage the IR/laser-designated target |
-| Ctrl-T | Target information (menu row) |
 
 Tab (gun), M's HARM seeker, Z/X wing sweep, Ctrl + arrows thrust vectoring and / and \ laser designation have no T.O.R.E binding yet ([key placement](INPUT.md#key-placement)).
 
@@ -153,11 +263,32 @@ opinionated, requested by John on 2026-09-26 (the label and messages are agent
 choices). `--debug-panels` starts a launch with it on, and `--flight-panels
 thought,telemetry,guidance,comms,menu` also opens those panels, for captures.
 
+**Escape → Debug** is a tab after the retail ones with two AI test settings and
+a Back to defaults row, for measuring what the AI's observation costs and how it
+fights without part of it. *AI observation rate* cycles 120 Hz, 60 (the default
+since optimization round 2), 40, 30 and 20: AI aircraft observe that often, staggered across ticks, while
+their controllers and flight stay at 120 Hz. *Lean AI sensors* (On by default,
+and decisions are exactly those of the full sensors) leaves out the visual
+channel list and builds the received-radar list only when a missile warning
+needs it; Off gives the full sensors. Both apply at the next tick, are not
+saved, and are kept across a restart of the flight. In a game the player
+hosts they govern that game's AI; in a joined game the rows are dimmed (they
+read Host) and do nothing. The tab is an authored addition, not part of
+`FMENUD.MNU`; opinionated, requested by John on 2026-10-19 (the labels are
+agent choices). `--ai-observe-hz` and `--ai-lean-sensors [on|off]` start a launch
+with them set. Details:
+[AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors).
+
 Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, weapon diagnostics, debug panels, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
+
+With multiplayer `respawn revive`, the running-flight aircraft/loadout selector
+uses this same menu widget and navigation. It does not pause the mission. Done
+stages a draft for the normal Enter-to-revive request; Escape discards menu edits.
+The timer remains visible. See [multiplayer revival](MULTIPLAYER.md#ai-aircraft-and-player-choice).
 
 ## HUD and presentation limits
 
-The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, G, throttle, afterburner and actual gear/flap/brake/hook state. AGL and vertical speed are reserved for ILS approaches. The enlarged pitch ladder uses five-degree steps, dashed below zero, and a 25% tighter attitude scale whose spacing and motion follow actual pitch and bank, including readable +/-90-degree marks. The zero bar separately projects the true horizon and aligns with level-flight velocity. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
+The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, G, throttle, afterburner and actual gear/flap/brake/hook state. AGL and vertical speed are reserved for ILS approaches. The enlarged pitch ladder uses five-degree steps, dashed below zero, and a literal degree scale (equal spacing, about 7.26 pixels per degree at unit zoom, no compression or growth) whose spacing and motion follow actual pitch and bank, including readable +/-90-degree marks. The zero bar is the ladder's zero rung on that same scale and meets level-flight velocity to within a few pixels. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
 
 Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors render live rear views every visible frame. ILS appears only with the runway threshold inside the aircraft's full 90-degree
 forward cone and existing 5-NM/4,000-foot airport-relative band. The airport
@@ -166,7 +297,7 @@ service publishes tested localizer and glide deviations, but dedicated ILS HUD a
 See [recovery details](formats/aircraft.md), [progress](research/progress.md), and [validation](baselines/cockpit-controls.md).
 
 
-The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation for angular cues; the pitch ladder adds its requested 25% spacing compression. TAS and MSL primary numbers have transparent backgrounds; surrounding tape numbers and hash marks are omitted. With the cockpit visible, HUD symbols are clipped to its reviewed glass aperture
+The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation for angular cues; the pitch ladder is a literal degree scale with no compression. TAS and MSL primary numbers have transparent backgrounds; surrounding tape numbers and hash marks are omitted. With the cockpit visible, HUD symbols are clipped to its reviewed glass aperture
 and drawn behind the cockpit frame. Cockpit-off and below-1x wide views retain
 the independent HUD. Static cockpit artwork, glass masks and unchanged
 instrument rasters are cached.
@@ -212,11 +343,20 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 
 ## Exterior animations
 
-The seven added aircraft now have fitted moving flaps, pitch/roll/yaw surfaces,
-rigid gear and continuous airbrakes. MiG-23 wings sweep visually with speed.
-F-22 main bays open with O or an armed guided-weapon designation; this does
-not delay firing. Its exterior canopy is amber and 75% opaque; cockpit rendering stays clear.
-See the [animation contract](spec/aircraft-animation.md) for fits and limits.
+All 37 playable profiles have bounded headless checks for their applicable
+control surfaces and devices. Gear wheels, braces and doors use separate
+reviewed attachments; retractable hooks, vector nozzles, nacelles and rotor
+cyclic motion have aircraft-specific fits. Remaining source gaps include the
+AC-130 hook, individual rotor feathering and A-4E forward flap-branch strips.
+See the [fleet audit](baselines/aircraft-animations.md) and
+[animation contract](spec/aircraft-animation.md) for coverage and limits.
+
+MiG-23 and F-14 wings sweep visually with speed and flap demand. F-22 bays open
+with O or automatically on a ready bay-weapon trigger. Automatic release waits
+for the doors, about one second, then they close one second after release;
+designating a target alone does not open them. Its exterior canopy remains
+amber and 75% opaque, with clear cockpit rendering. These are the existing
+[fitted bay and canopy rules](spec/aircraft-animation.md#f-22-main-weapon-bays).
 
 
 Use **6** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; the rudder keys move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).
@@ -282,7 +422,7 @@ sessions and survive aircraft changes/restarts. [Full settings contract](INPUT.m
 `[` and `]` cycle NAV and weapons. Weapon selection arms; NAV disarms.
 The HUD status reads NAV, LCOS for the armed gun, or ARM for missiles.
 There is no separate master-arm control. **L** clears designation and **K**
-jettisons the selected external group in the live range. Class and station-fault
+jettisons the selected external group in any flight (the AC-130, which carries nothing external, is unchanged). Class and station-fault
 fixtures remain available through the controls editor and command-line setup.
 Restart repairs/reloads. Selection releases the trigger before another press.
 T cycles current radar contacts nearest first and Shift-T backwards, skipping
@@ -290,7 +430,7 @@ friendly aircraft and wrecks. Enter selects the visible radar or infrared
 contact nearest the nose. A mouse click on the scope designates a contact
 directly. A target the scope loses drops completely
 ([rules](spec/radar.md#target-selection-keys)); only the F4, F7 and F8 views
-keep following it while it is within visual range (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
+keep following it while it is within visual range (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range advisories are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).
@@ -383,6 +523,7 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 | Enemy AI? → Novice / Average / Unchanged | Every enemy aircraft flies at that skill from now on; Unchanged restores each one's mission skill. Friendly aircraft are unaffected. |
 | Air combat guns only? | Every aircraft may fire only its gun. The player's weapon keys skip the other stations and a selected missile switches to the gun; AI aircraft stop choosing their other stores. Turning it off restores them. |
 | Ignore midair collisions? | Aircraft pass through each other. With it off, two aircraft whose 28 ft contact spheres touch are both destroyed and nobody is credited with a kill; an Invulnerable player survives. |
+| Easy flight physics? | Appended after the imported rows. The AV-8, Yak-141, V-22, AH-64, Mi-24 and CH-47 lose the hazards of their physics: rotor torque, the vortex ring state, retreating blade stall, an unrecoverable rotor stall (rotor speed holds at 85 percent or more in flight), the jets' low-speed roll-off and undamped puffers at stability level Off, and dynamic rollover. The helicopters (and the V-22 in helicopter mode) also get a weak attitude retention at Damper and Off, so a few taps of forward cyclic trim settle them in forward flight hands-off. Weight, power, the loaded jet's inability to hover and the V-22's corridor protection stay. Fixed-wing aircraft ignore it. In a session only the server sets it. |
 
 Every missile or bomb burst on an aircraft, the player's or an AI's, now jolts
 it: a fading roll, pitch and push away from the burst, even with Invulnerable
@@ -487,9 +628,8 @@ The upper range-scale value is now an estimated maximum for the observed
 engagement, refreshed twice per simulation second. Launcher speed and attitude,
 target direction/speed, altitude-dependent motor performance and turning losses
 change it. Active-radar shots can be cued beyond the imported nominal launch
-maximum and acquire with their own seeker later. Other guidance types still
-require prelaunch acquisition within seeker range. The lower scale value remains
-the imported minimum range. Onboard seeker limits are unchanged. The percentage and IN RNG use the predicted
+maximum and acquire with their own seeker later. Player missiles may also fire without acquisition or a predicted intercept. The lower scale value remains
+the imported minimum range as an advisory. Onboard seeker angle and maximum-range limits remain. The percentage and IN RNG use the predicted
 intercept. Target evasion and future loss of guidance are not predicted.
 Two short horizontal bars inside the vertical scale mark the favorable firing
 window. They move with the estimated engagement and disappear when no favorable
@@ -512,10 +652,14 @@ diagnostic panel when it is shown, to clear
 selection. The manual's targeting list does not establish a retail release key.
 `weapon-seeker-mode` remains rebindable but has no default key; the panel's mode
 label is clickable only while the panel is shown (**Pref → Weapon diagnostics?**). With radar power off, radar-missile bore, tones and target cues
-turn off; armed A2A IR missiles retain bore search and guidance; weapon selection still permits an unguided release. That missile stays unguided
-after radar power returns. Selecting the passive IR channel alone does not turn
+turn off; armed A2A IR missiles retain bore search and guidance; active missiles release maddog with their own seeker searching immediately. SARH
+flies unguided until launcher illumination begins, including unsupported
+surface SARH releases waiting for the A-G track. Selecting the passive IR channel alone does not turn
 off the power switch. Supported radar weapons need aircraft lock for guided shots.
-A detected bore target inside minimum range displays MIN RANGE and blocks release.
+Minimum and maximum range are advisory. A missile can fire outside them and
+attempts to guide. CUED IR without lock starts BORE search. Active maddog
+search uses the full imported seeker cone and can lock friendlies.
+The range scale and IN RNG still describe the recommended envelope.
 AGM-65 and other surface profiles cannot engage the practice aircraft or use A2A
 BORESIGHT. Surface designation is still deferred. See the
 [minimum range and target-role rules](spec/missiles.md#minimum-engagement-and-target-role).

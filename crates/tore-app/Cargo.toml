@@ -1,6 +1,6 @@
 [package]
 name = "tore-app"
-version = "0.1.3"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
@@ -10,18 +10,34 @@ build = "build.rs"
 
 [dependencies]
 tore-diagnostics-native = { path = "../tore-diagnostics-native" }
+tore-realtime-native = { path = "../tore-realtime-native" }
 log = "0.4"
+# Loading photographs. Default features stay off: scalar decode, no SIMD.
+zune-jpeg = { version = "0.5.15", default-features = false }
 # Forward winit's existing tracing events to the same small log sink.
 tracing = { version = "0.1", default-features = false, features = ["log"] }
 tore-input = { path = "../tore-input" }
 tore-input-native = { path = "../tore-input-native" }
 tore-sim = { path = "../tore-sim" }
+tore-world = { path = "../tore-world" }
+tore-workers = { path = "../tore-workers" }
+tore-codec = { path = "../tore-codec" }
 tore-replay = { path = "../tore-replay" }
+tore-session = { path = "../tore-session" }
+tore-net = { path = "../tore-net" }
 cpal = "0.16"
 tore-formats = { path = "../tore-formats" }
+tore-import = { path = "../tore-import" }
 pollster = "0.4"
 wgpu = { version = "27.0.1", default-features = false, features = ["std", "parking_lot", "metal", "dx12", "vulkan", "gles", "wgsl"] }
 winit = "0.30.12"
+
+[dev-dependencies]
+# The master server, for the Internet Lobby's browse and join tests.
+tore-master = { path = "../tore-master" }
+tore-session = { path = "../tore-session", features = ["test-support"] }
+tore-world = { path = "../tore-world", features = ["test-support"] }
+tore-workers = { path = "../tore-workers", features = ["test-support"] }
 
 [lints]
 workspace = true

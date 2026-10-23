@@ -21,26 +21,26 @@ use crate::turbulence::Disturbance;
 // Recorded on macOS aarch64. See the module comment in golden_tests.rs before
 // changing any of these.
 const LEGACY: [(&str, u64); 8] = [
-    ("cruise-roll-rudder", 0xdf13_3efa_e953_0ae7),
-    ("burner-loop", 0x919d_ddec_36c5_6529),
-    ("stall-and-spin", 0x0ab3_9175_f69d_6f73),
-    ("devices-and-switches", 0x525e_f6b0_d477_8e4b),
-    ("damage-and-disturbance", 0x6c94_a6dc_35eb_6eed),
-    ("cheats-and-ricochet", 0x5052_42ea_2853_4ffc),
-    ("ground-impact", 0x1426_67c2_df3b_e929),
-    ("airborne-destruction", 0x842c_0532_6413_4cd0),
+    ("cruise-roll-rudder", 0xbe1e_8a94_1d9f_cb8d),
+    ("burner-loop", 0xcb7a_1e22_e8c0_2813),
+    ("stall-and-spin", 0x0f2f_b35b_9b23_659f),
+    ("devices-and-switches", 0x3401_ff7d_6ec4_01cd),
+    ("damage-and-disturbance", 0x6141_488e_1bab_e357),
+    ("cheats-and-ricochet", 0xf715_6c24_9ecc_1d2e),
+    ("ground-impact", 0xf29c_5843_6ed7_24e9),
+    ("airborne-destruction", 0xe6a5_62b7_d005_a5f6),
 ];
 const HYBRID: [(&str, u64); 10] = [
-    ("cruise-roll-rudder", 0x3bcc_161c_b77e_4d49),
-    ("burner-loop", 0xac58_9973_3290_9cc5),
-    ("stall-and-spin", 0x237f_0852_acb6_2047),
-    ("devices-and-switches", 0x9190_d80a_c587_b31f),
-    ("damage-and-disturbance", 0xf99e_4502_333c_f5db),
-    ("cheats-and-ricochet", 0xa506_3272_8028_1a08),
-    ("ground-impact", 0xc0fb_092e_b136_6da9),
-    ("airborne-destruction", 0x1428_8eb9_7ce4_b276),
-    ("crosswind-takeoff", 0xcd91_0856_7e5c_2ffe),
-    ("approach-and-landing", 0x0316_96d3_99a2_f350),
+    ("cruise-roll-rudder", 0x947c_cadc_63ab_b7b5),
+    ("burner-loop", 0x5bbe_f6a2_8af5_21eb),
+    ("stall-and-spin", 0x1d6e_034b_6974_a966),
+    ("devices-and-switches", 0x2942_7a44_b60d_a2ed),
+    ("damage-and-disturbance", 0xbbef_fa6c_2269_63c4),
+    ("cheats-and-ricochet", 0x7302_18fa_975e_7c90),
+    ("ground-impact", 0x4eb0_1069_03e3_7584),
+    ("airborne-destruction", 0x51af_456f_a86b_5813),
+    ("crosswind-takeoff", 0x97cb_5ac8_3042_3784),
+    ("approach-and-landing", 0xee52_ca3d_2a78_e1cd),
 ];
 const NATIVE: [(&str, u64); 2] = [
     ("cruise-roll-rudder", 0xe239_05a8_a49b_d119),
@@ -787,11 +787,16 @@ fn approach_and_landing(_tick: u64, s: &mut State) -> PilotInput {
     let height = s.position[1] - 8.;
     let wanted_height = ((-3_200. - s.position[2]) * glide).max(0.);
     let wanted_sink = if height < 25. { -4. } else { -s.speed * glide };
+    // 250 ft/s, or the weight-scaled loaded minimum speed for 1 G with the flaps
+    // down where an aircraft's own stall speed is higher: the F-22 family's
+    // stall reference leaves its synthetic fixture at 380 ft/s clean, and at
+    // 270 ft/s it sank into the ground short of the runway.
+    let approach_speed = 250_f64.max(s.minimum_level_speed(0., 1.));
     PilotInput {
         pitch: (0.03 * (wanted_height - height) + 0.02 * (wanted_sink - s.velocity[1]))
             .clamp(-0.5, 0.5),
         roll: (-0.002 * s.position[0] - 1.5 * s.bank).clamp(-0.5, 0.5),
-        throttle: Some((0.45 + 0.01 * (250. - s.speed)).clamp(0., 1.)),
+        throttle: Some((0.45 + 0.01 * (approach_speed - s.speed)).clamp(0., 1.)),
         ..PilotInput::default()
     }
 }

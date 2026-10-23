@@ -9,6 +9,7 @@
 //! an error the flight start would treat as fatal, a panic or an impossible
 //! position is a problem. Nothing here opens a window or reads a display.
 use super::*;
+use crate::mission_layout::{GroundLayout, MissionLayout, place_on_runway};
 use crate::{AppResult, ai_wings, aircraft::Airframe, combat};
 use std::collections::BTreeMap;
 use tore_formats::aircraft::AircraftId;
@@ -41,10 +42,10 @@ impl Matrix<'_> {
         Ok(&self.airframes[key])
     }
 
-    fn describe(quick: &QuickMission, world: &World) -> String {
+    fn describe(quick: &QuickMission, world: &Terrain) -> String {
         let v = &quick.draft.values;
         format!(
-            "theater={} player={} weather={} alt={} sep={} start={}/{} wings=[{}x{}:{}, {}x{}:{}, {}x{}:{} | {}x{}:{}, {}x{}:{}, {}x{}:{}] orders={:?} ai={} guns_only={}",
+            "theater={} player={} weather={} alt={} sep={} start={}/{} enemy-start={}/{} wings=[{}x{}:{}, {}x{}:{}, {}x{}:{} | {}x{}:{}, {}x{}:{}, {}x{}:{}] orders={:?} ai={} guns_only={}",
             world.layout,
             quick.aircraft_files.get(v[6]).map_or("?", String::as_str),
             v[15],
@@ -52,6 +53,8 @@ impl Matrix<'_> {
             v[17],
             v[33],
             v[34],
+            v[ENEMY_START],
+            v[ENEMY_AIRPORT],
             v[4],
             v[5],
             v[6],
@@ -77,7 +80,7 @@ impl Matrix<'_> {
     }
 
     /// The flown-mission start, step by step.
-    fn start(&mut self, quick: &QuickMission, world: &World, full: bool) -> Outcome {
+    fn start(&mut self, quick: &QuickMission, world: &Terrain, full: bool) -> Outcome {
         if let Some(message) = quick.unsupported() {
             return Outcome::Refused(message);
         }
@@ -96,7 +99,38 @@ impl Matrix<'_> {
             Err(e) => return Outcome::Fatal(format!("loadout: {e}")),
         };
         let altitude = [5000., 10000., 20000., 40000.][quick.draft.values[14]];
-        let ground_object = quick.ground_runway();
+        // A spec the creator makes must be one the text form carries: the
+        // ground target, defenses and enemy nationality included.
+        match quick.mission_spec() {
+            Ok(spec) => {
+                if let Err(e) = spec.validate() {
+                    return Outcome::Fatal(format!("the spec is invalid: {e}"));
+                }
+                // The text form takes the sixteen theaters; a developer layout
+                // is not hosted (the lobby refuses it).
+                match MissionSpec::from_text(&spec.to_text()) {
+                    _ if spec.theater.starts_with('~') => {}
+                    Ok(read) if read == spec => {}
+                    Ok(_) => {
+                        return Outcome::Fatal("the spec's text reads back differently".into());
+                    }
+                    Err(e) => return Outcome::Fatal(format!("the spec's text is refused: {e}")),
+                }
+            }
+            Err(e) => return Outcome::Fatal(format!("no spec: {e}")),
+        }
+        // `start ground auto`: the runway the world picks (the same call the
+        // mission build makes).
+        let ground_object = match (quick.ground_runway(), quick.ground_auto()) {
+            (Some(object), _) => Some(object),
+            (None, true) => {
+                match crate::mission_layout::auto_runway(world, quick.player_wing_size()) {
+                    Ok(object) => Some(object),
+                    Err(e) => return Outcome::Refused(e.to_string()),
+                }
+            }
+            _ => None,
+        };
         let wings = match quick.wing_launches(None) {
             Ok(w) => w,
             Err(e) => return Outcome::Refused(e.to_string()),
@@ -108,7 +142,10 @@ impl Matrix<'_> {
                 let result = start
                     .enable_research(1)
                     .map_err(|e| e.to_string())
-                    .and_then(|()| ground_layout(world, object, parked).map_err(|e| e.to_string()))
+                    .and_then(|()| {
+                        crate::mission_layout::ground_layout(world, object, parked)
+                            .map_err(|e| e.to_string())
+                    })
                     .and_then(|layout| {
                         place_on_runway(world, &mut start, &layout, 0)
                             .map(|()| layout)
@@ -142,14 +179,19 @@ impl Matrix<'_> {
         if !full {
             return Outcome::Started;
         }
-        let mut combat = match combat::Combat::with_loadout(hornet, data, &load) {
-            Ok(c) => c,
-            Err(e) => return Outcome::Fatal(format!("combat build: {e}")),
-        };
+        // As a flown launch builds it: combat, then the art that draws it.
+        let (mut combat, mut view) =
+            match combat::Combat::with_loadout(hornet, &load).and_then(|c| {
+                let view = crate::combat_view::CombatView::new(&c, c.own_id(), data)?;
+                Ok((c, view))
+            }) {
+                Ok(built) => built,
+                Err(e) => return Outcome::Fatal(format!("combat build: {e}")),
+            };
         if let Err(e) = combat.add_airport_targets(&world.airport_scene) {
             return Outcome::Fatal(format!("airport targets: {e}"));
         }
-        if let Err(e) = combat.mission_aircraft(&wings, &layout, data) {
+        if let Err(e) = view.mission_aircraft(&mut combat, &wings, &layout, data) {
             return Outcome::Refused(e.to_string());
         }
         // FreeFlight: the same start again, then the reset and the AI build.
@@ -218,22 +260,24 @@ impl Matrix<'_> {
     }
 
     /// A setup through the whole start.
-    fn run(&mut self, quick: &QuickMission, world: &World, what: &str) {
+    fn run(&mut self, quick: &QuickMission, world: &Terrain, what: &str) {
         self.go(quick, world, what, true);
     }
 
     /// A setup through the creator's checks and layout only, which is quick.
-    fn plan(&mut self, quick: &QuickMission, world: &World, what: &str) {
+    fn plan(&mut self, quick: &QuickMission, world: &Terrain, what: &str) {
         self.go(quick, world, what, false);
     }
 
-    fn go(&mut self, quick: &QuickMission, world: &World, what: &str, full: bool) {
+    fn go(&mut self, quick: &QuickMission, world: &Terrain, what: &str, full: bool) {
         let described = Self::describe(quick, world);
         if let Some(id) = (3..quick.draft.values.len()).find(|id| {
-            !((30..=32).contains(id) && quick.draft.values[*id] == 0
-                || *id == 34
-                    && (!quick.ground_start()
-                        || quick.airport_names[quick.draft.values[13]].is_empty()))
+            !(*id == 34
+                && (!quick.ground_start()
+                    || quick.airport_names[quick.draft.values[13]].is_empty()))
+                && !(*id == ENEMY_AIRPORT
+                    && (!quick.enemy_ground_start()
+                        || quick.enemy_airport_names[quick.draft.values[13]].is_empty()))
                 && matches!(quick.value(*id).as_str(), "Unavailable" | "")
         }) {
             self.problems
@@ -272,7 +316,7 @@ impl Matrix<'_> {
 
 /// Positions and populations that must hold after a start.
 fn check_scene(
-    world: &World,
+    world: &Terrain,
     quick: &QuickMission,
     flight: &tore_sim::flight::State,
     combat: &combat::Combat,
@@ -280,7 +324,7 @@ fn check_scene(
     wings: &[WingLaunch],
     altitude: f64,
 ) -> Option<String> {
-    let bounds = map_bounds(world);
+    let bounds = crate::mission_layout::map_bounds(world);
     let inside = |x: f64, z: f64| {
         (bounds.min[0]..=bounds.max[0]).contains(&x) && (bounds.min[1]..=bounds.max[1]).contains(&z)
     };
@@ -295,7 +339,7 @@ fn check_scene(
             p[1]
         ));
     }
-    if quick.ground_runway().is_none() && (p[1] - altitude).abs() > 1. {
+    if !quick.ground_start() && (p[1] - altitude).abs() > 1. {
         return Some(format!(
             "airborne start at {:.0} ft, chose {altitude:.0}",
             p[1]
@@ -372,12 +416,45 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         if id <= 2 {
             continue;
         }
-        if len == 0 && !matches!(id, 30..=32 | 34) {
+        if len == 0 && id != 34 && id != ENEMY_AIRPORT {
             m.problems
                 .push(format!("field {id} has no dropdown values"));
         } else if len > 0 && value >= len {
             m.problems.push(format!(
                 "field {id} default {value} is outside its {len} values"
+            ));
+        }
+    }
+    // Each theater's ground target list is the retail template list, entry for
+    // entry, and the defense strengths are the creator's four words.
+    for (index, templates) in tore_formats::quick_template::tables::TEMPLATES
+        .iter()
+        .enumerate()
+    {
+        let code = tore_formats::quick_template::tables::THEATERS[index];
+        let listed = quick.options.targets[index].len();
+        if listed != templates.len() {
+            m.problems.push(format!(
+                "{code}: the creator lists {listed} ground targets, the templates {}",
+                templates.len()
+            ));
+        }
+        if tore_world::mission::ground_targets(code).len() + 1 != listed {
+            m.problems
+                .push(format!("{code}: the spec offers a different target count"));
+        }
+    }
+    let words = |id: usize| -> Vec<String> {
+        quick.options.fields[id]
+            .iter()
+            .map(|word| word.trim().to_lowercase())
+            .collect()
+    };
+    for id in [31, 32] {
+        if words(id) != ["not", "lightly", "moderately", "heavily"] {
+            m.problems.push(format!(
+                "field {id} reads {:?}, expected the retail strengths",
+                quick.options.fields[id]
             ));
         }
     }
@@ -391,7 +468,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // Loop 1: every theater layout, F/A-18D, airborne at every separation and
     // altitude, then a ground start on every runway with wings of one to five.
     for code in quick.theater_codes.clone() {
-        let world = match World::for_mission(data, &code, None) {
+        let world = match crate::scenery::launch_terrain(data, &code, None) {
             Ok(w) => w,
             Err(e) => {
                 m.problems
@@ -403,6 +480,33 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         quick.apply(13, index);
         quick.apply(33, 0);
         quick.apply(4, 2);
+        // The ground-start list is the player's side's and neutral fields
+        // only (slice AL1): none the world holds for the other side.
+        for object in quick.offered_airports(index) {
+            let scene = &world.airport_scene;
+            let serves = scene
+                .runway(*object)
+                .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+                .is_some_and(|a| a.serves(false));
+            if !serves {
+                m.problems.push(format!(
+                    "theater {code} offers runway {object:#x}, not a Blue or neutral field"
+                ));
+            }
+        }
+        // The enemy's list is Redfor's and the neutral fields (slice CL-R).
+        for object in quick.offered_enemy_airports(index) {
+            let scene = &world.airport_scene;
+            let serves = scene
+                .runway(*object)
+                .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+                .is_some_and(|a| a.serves(true));
+            if !serves {
+                m.problems.push(format!(
+                    "theater {code} offers the enemy runway {object:#x}, not a Redfor or neutral field"
+                ));
+            }
+        }
         for separation in 0..SEPARATION_NM.len() {
             for altitude in 0..4 {
                 quick.apply(17, separation);
@@ -434,6 +538,30 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         }
         quick.apply(4, 2);
         quick.apply(33, 0);
+        // Every ground target of the theater with a spread of defenses, then
+        // a ground start the world places from the target.
+        if !code.starts_with('~') {
+            for target in 1..quick.values(30).len() {
+                quick.apply(30, target);
+                for (aaa, sam) in [(0, 0), (1, 3), (2, 2), (3, 1), (3, 3)] {
+                    quick.apply(31, aaa);
+                    quick.apply(32, sam);
+                    if target == 1 && (aaa, sam) == (3, 3) {
+                        m.run(&quick, &world, "ground target sweep");
+                    } else {
+                        m.plan(&quick, &world, "ground target layout");
+                    }
+                }
+                if target == 1 && runways > 0 {
+                    quick.apply(33, 1);
+                    m.run(&quick, &world, "ground auto sweep");
+                    quick.apply(34, 1);
+                    m.plan(&quick, &world, "ground target, named runway");
+                    quick.apply(33, 0);
+                }
+            }
+            quick.apply(30, 0);
+        }
     }
 
     m.stage("start of weather sweep");
@@ -445,7 +573,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
             let Some(condition) = condition(weather) else {
                 continue;
             };
-            let world = match World::for_mission(data, &code, Some(condition)) {
+            let world = match crate::scenery::launch_terrain(data, &code, Some(condition)) {
                 Ok(w) => w,
                 Err(e) => {
                     m.problems.push(format!(
@@ -473,11 +601,11 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // theaters, against each enemy aircraft.
     for code in ["UKR"] {
         let index = quick.theater_codes.iter().position(|c| c == code).unwrap();
-        let world = World::for_mission(data, code, None)?;
+        let world = crate::scenery::launch_terrain(data, code, None)?;
         quick.apply(13, index);
         for player in 0..selectable {
             quick.apply(6, player);
-            for enemy in 0..selectable {
+            for enemy in 0..quick.wing_files.len() {
                 for field in [23, 26, 29] {
                     quick.apply(field, enemy);
                 }
@@ -504,7 +632,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
 
     m.stage("start of wing sweep");
     // Loop 4: every wing's count, skill and aircraft, one wing at a time.
-    let world = World::for_mission(data, "UKR", None)?;
+    let world = crate::scenery::launch_terrain(data, "UKR", None)?;
     let index = quick.theater_codes.iter().position(|c| c == "UKR").unwrap();
     quick.apply(13, index);
     for field in [4, 7, 10, 21, 24, 27] {
@@ -517,7 +645,14 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
             }
         }
         quick.apply(field, 2);
-        for aircraft in 0..selectable {
+        // Friendly wing 1 shares the player's list; the other five wings hold
+        // only what the AI can fly.
+        let choices = if field == 4 {
+            selectable
+        } else {
+            quick.wing_files.len()
+        };
+        for aircraft in 0..choices {
             quick.apply(field + 2, aircraft);
             m.run(&quick, &world, "wing aircraft sweep");
         }
@@ -578,7 +713,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // Loop 6: every other dropdown value once (nationalities, ordnance load,
     // and the fields the loops above do not vary).
     for id in 0..quick.draft.values.len() {
-        if matches!(id, 4..=14 | 17 | 21..=29 | 33 | 34) || quick.values(id).is_empty() {
+        if matches!(id, 4..=14 | 17 | 21..=29 | 33..=36) || quick.values(id).is_empty() {
             continue;
         }
         let saved = quick.draft.values[id];
@@ -588,12 +723,19 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         }
         quick.apply(id, saved);
     }
-    // Ground targets and defenses are refused with a message, never started.
-    for id in [30, 31, 32] {
-        quick.draft.values[id] = 1;
-        m.run(&quick, &world, &format!("ground field {id}"));
-        quick.draft.values[id] = 0;
+    // With no target the strengths stay: they are the enemy's area
+    // defenses (B23), and the mission says so.
+    quick.apply(31, 2);
+    quick.apply(32, 2);
+    let area = quick
+        .mission_spec()
+        .is_ok_and(|spec| spec.ground_target.is_none() && spec.area_defenses());
+    if (quick.draft.values[31], quick.draft.values[32]) != (2, 2) || !area {
+        m.problems
+            .push("the strengths with no ground target are not the area defenses".into());
     }
+    quick.apply(31, 0);
+    quick.apply(32, 0);
 
     println!(
         "creator matrix: {} setups started, {} refused with a message, {} problems",
@@ -624,7 +766,7 @@ pub fn render(
     data: &BTreeMap<String, Vec<u8>>,
     options: Options,
     sprites: &BTreeMap<String, Sprite>,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<()> {
     let mut quick = QuickMission::new(AircraftId::F18, options, data);
     let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
@@ -651,10 +793,12 @@ pub fn render(
             ));
         }
     };
-    let fields: Vec<usize> = (3..quick.draft.values.len())
-        .filter(|id| !(30..=32).contains(id))
-        .collect();
+    let fields: Vec<usize> = (3..quick.draft.values.len()).collect();
     for id in fields.iter().copied() {
+        // The defenses need a target to hold a strength.
+        if matches!(id, 31 | 32) {
+            quick.apply(30, 1);
+        }
         let saved = quick.draft.values[id];
         let count = quick.values(id).len();
         for value in 0..count {
@@ -681,6 +825,9 @@ pub fn render(
             );
         }
         quick.cancel();
+        if matches!(id, 31 | 32) {
+            quick.apply(30, 0);
+        }
     }
     for id in OBJECTIVE_BASE..OBJECTIVE_BASE + OBJECTIVE_COUNT {
         quick.open(id);
@@ -729,7 +876,7 @@ pub fn render(
                 let aircraft = longest(&quick, field + 2);
                 quick.apply(field + 2, aircraft);
             }
-            for id in [14, 15, 16, 17, 18, 19, 3, 20] {
+            for id in [14, 15, 16, 17, 18, 19, 3, 20, 30, 31, 32] {
                 let value = longest(&quick, id);
                 quick.apply(id, value);
             }
@@ -831,6 +978,7 @@ pub fn render(
                 enemy_sam: tally,
                 enemy_gun: tally,
                 enemy_aaa: tally,
+                shot_down_by: None,
             };
             let report = Report {
                 outcome: Outcome::Success,
@@ -873,12 +1021,18 @@ pub fn render(
     quick.help = true;
     draw(&mut quick, "help".into(), &mut problems);
     quick.help = false;
-    quick.notice =
-        Some("Ground targets and defenses are not available yet. Select none to fly.".into());
+    quick.notice = Some(NO_FIELD_NOTICE.into());
     draw(&mut quick, "notice".into(), &mut problems);
     quick.notice = None;
-    quick.show_ground_notice();
-    draw(&mut quick, "ground notice".into(), &mut problems);
+    // A ground target with defenses, and the ground start the world places.
+    quick.apply(30, 1);
+    quick.apply(31, 2);
+    quick.apply(32, 3);
+    draw(&mut quick, "ground target".into(), &mut problems);
+    quick.apply(33, 1);
+    draw(&mut quick, "ground start auto".into(), &mut problems);
+    quick.apply(33, 0);
+    quick.apply(30, 0);
     println!(
         "creator render sweep: {drawn} pictures, {} problems",
         problems.len()
@@ -936,7 +1090,7 @@ pub fn fuzz(
     data: &BTreeMap<String, Vec<u8>>,
     options: Options,
     sprites: &BTreeMap<String, Sprite>,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<()> {
     let mut problems: Vec<String> = Vec::new();
     let mut events = 0usize;
@@ -975,7 +1129,7 @@ pub fn fuzz(
             }
             if let Some(id) = (3..quick.draft.values.len()).find(|id| {
                 let len = quick.values(*id).len();
-                len > 0 && quick.draft.values[*id] >= len && !(30..=32).contains(id)
+                len > 0 && quick.draft.values[*id] >= len
             }) {
                 problems.push(format!(
                     "creator fuzz seed {seed} step {step}: field {id} left its list"
@@ -1166,6 +1320,8 @@ pub fn fuzz_screens(
             [true, true, true, seed % 2 == 0],
             "Main menu",
         );
+        // Half the runs know the window, so the resolution line draws too.
+        graphics.set_window((seed % 2 == 1).then_some([3840, 2160]));
         for step in 0..3000 {
             events += 1;
             let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1178,7 +1334,9 @@ pub fn fuzz_screens(
                     }
                     _ => {
                         let down = rng.below(2) == 0;
-                        graphics.pointer(point(&mut rng), down);
+                        let at = point(&mut rng);
+                        graphics.moved(at);
+                        graphics.pointer(at, down);
                     }
                 }
                 if step % 30 == 0 {

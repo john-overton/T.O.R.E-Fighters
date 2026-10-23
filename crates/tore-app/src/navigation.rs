@@ -1,5 +1,21 @@
 //! Player NAV destination selection. See docs/spec/weapon-navigation-selection.md.
-use tore_sim::airport::{Allegiance, Scene, Service};
+use tore_sim::airport::{Scene, Service};
+
+/// The airport Shift-N selects after `selected`, by airport id, wrapping to
+/// the first: a field the tower serves a pilot of this side (`redfor`), its
+/// own or a neutral one, and no short strip (John, 2026-09-30). The other
+/// side's fields are never offered (slice AL1).
+pub fn next_airport(scene: &Scene, selected: Option<u32>, redfor: bool) -> Option<u32> {
+    let mut listed = scene
+        .airports
+        .iter()
+        .filter(|a| !scene.airport_is_short_strip(a) && a.serves(redfor))
+        .map(|a| a.id);
+    listed
+        .clone()
+        .find(|id| Some(*id) > selected)
+        .or_else(|| listed.next())
+}
 
 #[derive(Clone, Debug)]
 pub struct Destination {
@@ -42,14 +58,15 @@ impl Navigation {
             .iter()
             .position(|entry| Some(entry.id) == selected)
     }
-    pub fn refresh(&mut self, scene: &Scene, service: &Service, position: [f64; 3]) {
+    /// Rebuilds the airport list for a pilot of one side (`redfor`): the
+    /// fields the tower serves that side, never an enemy one.
+    pub fn refresh(&mut self, scene: &Scene, service: &Service, position: [f64; 3], redfor: bool) {
         self.airports = scene
             .airports
             .iter()
-            .filter(|airport| {
-                airport.allegiance == Allegiance::Friendly
-                    || (airport.allegiance == Allegiance::Neutral && airport.neutral_permission)
-            })
+            .filter(|airport| airport.serves(redfor))
+            // A short strip is not on the list (John, 2026-09-30).
+            .filter(|airport| !scene.airport_is_short_strip(airport))
             .filter_map(|airport| {
                 let runway = airport
                     .runway_objects
@@ -64,7 +81,11 @@ impl Navigation {
                     })?;
                 Some(Destination {
                     id: airport.id,
-                    name: airport.name.clone(),
+                    // A STOL field says so (slice CL-AP, John 2026-10-11).
+                    name: tore_sim::stol::label(
+                        &airport.name,
+                        tore_sim::stol::airport(scene, airport),
+                    ),
                     position: runway.approach_center,
                 })
             })
@@ -98,7 +119,7 @@ impl Navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tore_sim::airport::{Airport, OrientedBox, Runway, SourceKey, StaticObject};
+    use tore_sim::airport::{Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject};
 
     fn scene() -> Scene {
         let mut scene = Scene::default();
@@ -131,6 +152,8 @@ mod tests {
                 category: 0,
                 radar_signature: 0.,
                 infrared_signature: 0.,
+                type_flags: 0,
+                max_visible: 0,
                 runway: true,
             });
             scene.runways.push(Runway {
@@ -141,7 +164,7 @@ mod tests {
                 approach_center: bounds.center,
                 elevation_ft: 0.,
                 heading: 0.,
-                length_ft: 1000.,
+                length_ft: 6000.,
             });
             scene.airports.push(Airport {
                 id,
@@ -160,7 +183,7 @@ mod tests {
         let mut service = Service::new(&scene).unwrap();
         service.damage(6, 100);
         let mut nav = Navigation::default();
-        nav.refresh(&scene, &service, [0.; 3]);
+        nav.refresh(&scene, &service, [0.; 3], false);
         assert_eq!(
             nav.airports.iter().map(|e| e.id).collect::<Vec<_>>(),
             [2, 7, 1]
@@ -169,13 +192,78 @@ mod tests {
         assert_eq!(nav.control(2), Some(2));
         assert_eq!(nav.control(0), Some(1));
         assert_eq!(nav.control(1), Some(2));
-        nav.refresh(&scene, &service, [0., 0., 2900.]);
+        nav.refresh(&scene, &service, [0., 0., 2900.], false);
         assert_eq!(nav.entries()[nav.index().unwrap()].id, 2);
         service.damage(2, 100);
-        nav.refresh(&scene, &service, [0., 0., 2900.]);
+        nav.refresh(&scene, &service, [0., 0., 2900.], false);
         assert_eq!(nav.entries()[nav.index().unwrap()].id, 1);
         assert_eq!(nav.control(2), None);
         assert!(nav.entries().is_empty());
+    }
+
+    #[test]
+    fn a_redfor_pilot_lists_red_and_neutral_fields_never_blue_ones() {
+        // The scene records Blue's view: airport 3 is Redfor's own, the
+        // friendly ones are Blue's and so the Redfor pilot's enemy fields.
+        let scene = scene();
+        let service = Service::new(&scene).unwrap();
+        let mut nav = Navigation::default();
+        nav.refresh(&scene, &service, [0.; 3], true);
+        assert_eq!(
+            nav.airports.iter().map(|e| e.id).collect::<Vec<_>>(),
+            [3, 2]
+        );
+        nav.refresh(&scene, &service, [0.; 3], false);
+        assert!(nav.airports.iter().all(|e| e.id != 3));
+    }
+
+    #[test]
+    fn shift_n_cycles_only_the_pilots_side_and_neutral_fields() {
+        let scene = scene();
+        // Blue: the friendly fields and the neutral one that grants
+        // permission, by id, wrapping; never the hostile, unknown or
+        // unpermitted ones.
+        let mut seen = Vec::new();
+        let mut at = None;
+        for _ in 0..5 {
+            at = next_airport(&scene, at, false);
+            seen.push(at.unwrap());
+        }
+        assert_eq!(seen, [1, 2, 6, 7, 1]);
+        // Redfor: its own (recorded hostile) and the neutral one.
+        assert_eq!(next_airport(&scene, None, true), Some(2));
+        assert_eq!(next_airport(&scene, Some(2), true), Some(3));
+        assert_eq!(next_airport(&scene, Some(3), true), Some(2));
+        // No field the side may use: nothing is selected.
+        let mut blue_only = scene.clone();
+        blue_only
+            .airports
+            .retain(|a| a.allegiance == Allegiance::Friendly);
+        assert_eq!(next_airport(&blue_only, None, true), None);
+    }
+
+    #[test]
+    fn a_short_strip_is_not_on_the_airport_list() {
+        let mut scene = scene();
+        let service = Service::new(&scene).unwrap();
+        let mut nav = Navigation::default();
+        nav.refresh(&scene, &service, [0.; 3], false);
+        let before = nav.airports.iter().map(|e| e.id).collect::<Vec<_>>();
+        assert!(before.contains(&2));
+        // A 1,074 ft strip (John, 2026-09-30) leaves the list the player cycles.
+        scene
+            .runways
+            .iter_mut()
+            .find(|r| r.airport == 2)
+            .unwrap()
+            .length_ft = 1_074.;
+        nav.refresh(&scene, &service, [0.; 3], false);
+        let after = nav.airports.iter().map(|e| e.id).collect::<Vec<_>>();
+        assert_eq!(
+            after,
+            before.into_iter().filter(|id| *id != 2).collect::<Vec<_>>()
+        );
+        assert_eq!(nav.control(2), Some(after[0]));
     }
 
     #[test]
@@ -197,7 +285,7 @@ mod tests {
         ];
         let scene = Scene::default();
         let service = Service::new(&scene).unwrap();
-        nav.refresh(&scene, &service, [0.; 3]);
+        nav.refresh(&scene, &service, [0.; 3], false);
         assert_eq!(nav.index(), Some(0));
         nav.control(0);
         assert_eq!(nav.index(), Some(1));

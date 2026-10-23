@@ -22,6 +22,20 @@ pub fn glide_path_height_ft(before_threshold_ft: f64) -> f64 {
 pub fn threshold_crossing_height_ft() -> f64 {
     glide_path_height_ft(0.0)
 }
+/// The longest runway a strip can have and still count as a short strip,
+/// feet. `fitted`, agent decision 2026-09-30 (John decided on 2026-09-30 that
+/// short strips leave the Quick Mission takeoff choice and the in-flight
+/// airport list; the number is the agent's): the 22 strips of Cuba, the
+/// Falklands, Pakistan, Panama and the Persian Gulf are about 1,074 ft and
+/// every other airport in the retail theaters is 4,060 ft or longer, so any
+/// line inside that gap picks the same airports. 2,000 ft sits well clear of
+/// both. A runway under it is too short for any aircraft's takeoff run at a
+/// normal load, for the player and far more for a wing.
+pub const SHORT_STRIP_FT: f64 = 2_000.0;
+/// Whether a runway of `length_ft` is a short strip.
+pub fn short_strip_length(length_ft: f64) -> bool {
+    length_ft < SHORT_STRIP_FT
+}
 pub const LANDING_SPEED_FPS: f64 = 30.0 * 6_076.12 / 3_600.0;
 pub const LANDING_TICKS: u16 = 240;
 
@@ -33,12 +47,36 @@ pub struct SourceKey {
     pub ordinal: u32,
 }
 
+/// An airport's owner, recorded from Blue's point of view: `Friendly` is
+/// Blue's, `Hostile` is Redfor's. [`Allegiance::seen_by`] gives a Redfor
+/// pilot's view (docs/spec/airports.md, "Allegiance").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Allegiance {
     Friendly,
     Neutral,
     Hostile,
     Unknown,
+}
+impl Allegiance {
+    /// The allegiance of a runway placed with layout owner `redfor` (the
+    /// nationality's side bit; `None` without an owner field): Blue's is
+    /// friendly, Redfor's hostile, an unowned one neutral.
+    pub fn of_owner(redfor: Option<bool>) -> Self {
+        match redfor {
+            Some(false) => Self::Friendly,
+            Some(true) => Self::Hostile,
+            None => Self::Neutral,
+        }
+    }
+    /// This allegiance as a pilot of one side sees it: Blue's view is the
+    /// recorded one, a Redfor pilot's swaps friendly and hostile.
+    pub fn seen_by(self, redfor: bool) -> Self {
+        match (self, redfor) {
+            (Self::Friendly, true) => Self::Hostile,
+            (Self::Hostile, true) => Self::Friendly,
+            (other, _) => other,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,12 +96,55 @@ impl OrientedBox {
                 .all(|v| v.is_finite())
     }
     pub fn contains_horizontal(&self, x: f64, z: f64) -> bool {
-        let (s, c) = self.heading.sin_cos();
         let dx = x - self.center[0];
         let dz = z - self.center[2];
+        // A point inside lies within the box's horizontal half diagonal at any
+        // heading. The margin is far above rounding, so this early answer never
+        // differs from the full test below; it only spares the trigonometry for
+        // the many runways nowhere near the point.
+        let diagonal = self.half[0] * self.half[0] + self.half[2] * self.half[2];
+        if dx * dx + dz * dz > diagonal * (1. + 1e-9) + 1e-6 {
+            return false;
+        }
+        let (s, c) = self.heading.sin_cos();
         let local_x = dx * c - dz * s;
         let local_z = dx * s + dz * c;
         local_x.abs() <= self.half[0] && local_z.abs() <= self.half[2]
+    }
+    /// The height of this box's top face above the point `(x, z)`, when the
+    /// point is over the face, the face tilts no more than `max_slope_deg`
+    /// from level, and both its half-extents are at least `min_half` (so a
+    /// pole is not a landing surface). The box is the collision volume, so
+    /// its top is a flat plane, however the object is drawn.
+    pub fn flat_top_height(
+        &self,
+        x: f64,
+        z: f64,
+        max_slope_deg: f64,
+        min_half: f64,
+    ) -> Option<f64> {
+        if self.half[0] < min_half || self.half[2] < min_half {
+            return None;
+        }
+        let diagonal = self.half[0] * self.half[0] + self.half[2] * self.half[2];
+        let (dx, dz) = (x - self.center[0], z - self.center[2]);
+        // Tilted boxes reach a little past the half diagonal; the early
+        // answer only spares work for the many boxes nowhere near.
+        let slack = self.half[1] + 1.;
+        if dx * dx + dz * dz > (diagonal.sqrt() + slack).powi(2) {
+            return None;
+        }
+        let basis = crate::attitude::Basis::new(self.heading, self.pitch, self.bank);
+        let up = basis.up;
+        if up[1] < max_slope_deg.to_radians().cos() {
+            return None;
+        }
+        let top = std::array::from_fn::<f64, 3, _>(|i| self.center[i] + up[i] * self.half[1]);
+        let y = top[1] - (up[0] * (x - top[0]) + up[2] * (z - top[2])) / up[1];
+        let d = [x - self.center[0], y - self.center[1], z - self.center[2]];
+        (crate::attitude::dot(d, basis.right).abs() <= self.half[0]
+            && crate::attitude::dot(d, basis.forward).abs() <= self.half[2])
+            .then_some(y)
     }
     pub fn segment_fraction(&self, from: [f64; 3], to: [f64; 3]) -> Option<f64> {
         let basis = crate::attitude::Basis::new(self.heading, self.pitch, self.bank);
@@ -112,6 +193,11 @@ pub struct StaticObject {
     pub category: u16,
     pub radar_signature: f64,
     pub infrared_signature: f64,
+    /// The type's OBJECT `flags` (0 when unknown): bit 0x20 lets a scope page
+    /// list it (docs/formats/radar.md, "A-G page").
+    pub type_flags: u32,
+    /// The type's `maxVisDist`, raw (256 ft units; 0 when unknown).
+    pub max_visible: i32,
     pub runway: bool,
 }
 
@@ -153,6 +239,45 @@ impl Runway {
                     / up[1],
         )
     }
+    /// Where [`Scene::runway_surface`] can answer for this runway and the
+    /// highest it answers there: the horizontal box around its surface
+    /// rectangle (x, z; a foot wider on each side than its corners) and the
+    /// highest corner of its plane, which a plane over a rectangle never
+    /// passes. `None` when it never answers.
+    pub fn surface_extent(&self) -> Option<([f64; 2], [f64; 2], f64)> {
+        let b = &self.surface;
+        let (s, c) = b.heading.sin_cos();
+        let corners = [(1., 1.), (1., -1.), (-1., 1.), (-1., -1.)].map(|(i, j)| {
+            let (x, z) = (b.half[0] * i, b.half[2] * j);
+            [b.center[0] + x * c + z * s, b.center[2] - x * s + z * c]
+        });
+        let top = corners
+            .iter()
+            .map(|p| self.support_height(p[0], p[1]))
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .reduce(f64::max)?;
+        let lo = std::array::from_fn(|i| {
+            corners.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min) - 1.
+        });
+        let hi = std::array::from_fn(|i| {
+            corners
+                .iter()
+                .map(|p| p[i])
+                .fold(f64::NEG_INFINITY, f64::max)
+                + 1.
+        });
+        Some((lo, hi, top))
+    }
+    /// A short strip (see [`SHORT_STRIP_FT`]): the tower and the AI do not
+    /// use it. A player may still start there (John, 2026-10-11).
+    pub fn short_strip(&self) -> bool {
+        short_strip_length(self.length_ft)
+    }
+    /// A STOL runway, labelled so for the player ([`crate::stol`]).
+    pub fn stol(&self) -> bool {
+        crate::stol::runway(self)
+    }
     pub fn departure_pose(&self) -> ([f64; 3], f64) {
         let mut position = self.threshold(ApproachEnd::Near);
         let inset = (self.length_ft * 0.05).min(100.);
@@ -188,12 +313,32 @@ pub struct Airport {
     pub allegiance: Allegiance,
     pub neutral_permission: bool,
 }
+impl Airport {
+    /// The airport's allegiance as a pilot of one side sees it.
+    pub fn allegiance_for(&self, redfor: bool) -> Allegiance {
+        self.allegiance.seen_by(redfor)
+    }
+    /// The tower's rule: a pilot of this side may use the airport when it is
+    /// the side's own or a neutral one that grants permission. Every list a
+    /// pilot or an AI aircraft picks a field from (the tower's, NAV's, the
+    /// wing's landing order, homes, ground starts) uses it, so an enemy
+    /// field is never offered.
+    pub fn serves(&self, redfor: bool) -> bool {
+        match self.allegiance_for(redfor) {
+            Allegiance::Friendly => true,
+            Allegiance::Neutral => self.neutral_permission,
+            Allegiance::Hostile | Allegiance::Unknown => false,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scene {
     pub objects: Vec<StaticObject>,
     pub runways: Vec<Runway>,
     pub airports: Vec<Airport>,
+    /// Legacy airport and runway IDs redirected to a merged field.
+    pub aliases: BTreeMap<u32, u32>,
 }
 impl Scene {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -224,8 +369,38 @@ impl Scene {
         }
         Ok(())
     }
+    pub fn canonical_id(&self, id: u32) -> u32 {
+        self.aliases.get(&id).copied().unwrap_or(id)
+    }
+    pub fn airport(&self, id: u32) -> Option<&Airport> {
+        let id = self.canonical_id(id);
+        self.airports.iter().find(|a| a.id == id)
+    }
     pub fn runway(&self, id: ObjectId) -> Option<&Runway> {
+        let id = self.canonical_id(id);
         self.runways.iter().find(|r| r.object == id)
+    }
+    /// Whether a runway object is on a short strip (see [`SHORT_STRIP_FT`]).
+    /// An object that is not a known runway is not.
+    pub fn short_strip(&self, runway: ObjectId) -> bool {
+        self.runway(runway).is_some_and(Runway::short_strip)
+    }
+    /// Whether every runway of the airport is a short strip. An airport with
+    /// no runway in the scene is not: the scene says nothing about it.
+    pub fn airport_is_short_strip(&self, airport: &Airport) -> bool {
+        let mut runways = airport
+            .runway_objects
+            .iter()
+            .filter_map(|id| self.runway(*id));
+        let Some(first) = runways.next() else {
+            return false;
+        };
+        first.short_strip() && runways.all(Runway::short_strip)
+    }
+    /// Whether airport `id` is a short strip.
+    pub fn airport_id_is_short_strip(&self, id: u32) -> bool {
+        self.airport(id)
+            .is_some_and(|a| self.airport_is_short_strip(a))
     }
     /// A vertical-landing pad (the DTSTRP type, type flags `$108021`), where
     /// conventional aircraft can neither take off nor land
@@ -245,6 +420,31 @@ impl Scene {
             .filter(|r| r.surface.contains_horizontal(x, z))
             .filter_map(|r| r.support_height(x, z).map(|height| (r.object, height)))
             .min_by_key(|(object, _)| *object)
+    }
+    /// The highest flat top of a standing object (`alive`) over `(x, z)`
+    /// that lies no higher than `bottom` plus [`crate::touchdown::TOP_REACH_FT`]:
+    /// what an aircraft above that point can come down on. Runway objects
+    /// are the airfield's own surface and are not counted.
+    pub fn flat_top_below(
+        &self,
+        x: f64,
+        z: f64,
+        bottom: f64,
+        alive: impl Fn(ObjectId) -> bool,
+    ) -> Option<f64> {
+        self.objects
+            .iter()
+            .filter(|o| !o.runway && alive(o.id))
+            .filter_map(|o| {
+                o.bounds.flat_top_height(
+                    x,
+                    z,
+                    crate::touchdown::MAX_SLOPE_DEG,
+                    crate::touchdown::MIN_TOP_HALF_FT,
+                )
+            })
+            .filter(|top| *top <= bottom + crate::touchdown::TOP_REACH_FT)
+            .max_by(f64::total_cmp)
     }
     pub fn earliest_object_hit(&self, from: [f64; 3], to: [f64; 3]) -> Option<(ObjectId, f64)> {
         self.objects
@@ -318,6 +518,9 @@ pub struct Aircraft {
     /// Height of the aircraft's origin above its wheels' contact plane, feet.
     /// The glide path is flown by the wheels, so it is taken off the height.
     pub ground_clearance_ft: f64,
+    /// The aircraft flies for Redfor: the tower reads airport allegiance from
+    /// its side ([`Airport::allegiance_for`]).
+    pub redfor: bool,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Guidance {
@@ -445,6 +648,53 @@ impl Service {
     pub fn selected(&self) -> Option<u32> {
         self.selected
     }
+    /// Selects `airport` again without a reply, as a player who comes back
+    /// to an aircraft finds NAV where it left it (slice FX-J). An airport
+    /// the tower does not list is not selected. No clearance comes with it.
+    pub fn reselect(&mut self, scene: &Scene, airport: u32) {
+        let airport = scene.canonical_id(airport);
+        if scene.airports.iter().any(|a| a.id == airport)
+            && !scene.airport_id_is_short_strip(airport)
+        {
+            self.selected = Some(airport);
+        }
+    }
+    /// The scene's objects out of action (no hit points left), in id order:
+    /// with the selected airport and the clearance, what a networked client
+    /// needs to rebuild this service's guidance ([`Self::presented`]).
+    pub fn out_of_action(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.health
+            .iter()
+            .filter(|(_, hp)| **hp <= 0)
+            .map(|(id, _)| *id)
+    }
+    /// A service as a networked client presents it: the scene's objects with
+    /// those in `out_of_action` down, the `selected` airport and the
+    /// `clearance` (airport, runway, end). It answers [`Self::guidance`] as
+    /// the host's does; it has no tower reply or landing count, which only
+    /// the host's service steps.
+    pub fn presented(
+        scene: &Scene,
+        selected: Option<u32>,
+        clearance: Option<(u32, ObjectId, ApproachEnd)>,
+        out_of_action: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<Self, &'static str> {
+        let mut service = Self::new(scene)?;
+        for id in out_of_action {
+            let id = scene.canonical_id(id);
+            if let Some(hp) = service.health.get_mut(&id) {
+                *hp = 0;
+                service.destroyed.insert(id);
+            }
+        }
+        service.selected = selected.map(|id| scene.canonical_id(id));
+        service.clearance = clearance.map(|(airport, runway, end)| Clearance {
+            airport: scene.canonical_id(airport),
+            runway: scene.canonical_id(runway),
+            end,
+        });
+        Ok(service)
+    }
     pub fn usable(&self, runway: ObjectId) -> bool {
         self.health.get(&runway).is_some_and(|hp| *hp > 0)
     }
@@ -480,7 +730,7 @@ impl Service {
         let a = scene.airports.iter().find(|a| a.id == airport)?;
         a.runway_objects
             .iter()
-            .filter(|id| self.usable(**id))
+            .filter(|id| self.usable(**id) && !scene.short_strip(**id))
             .filter_map(|id| {
                 scene.runway(*id).map(|r| {
                     let near = distance2(aircraft.position, r.threshold(ApproachEnd::Near));
@@ -502,9 +752,12 @@ impl Service {
     pub fn command(&mut self, scene: &Scene, aircraft: Aircraft, command: Command) -> Vec<Event> {
         let reply = match command {
             Command::SelectAirport(id) => {
+                let id = scene.canonical_id(id);
                 self.clearance = None;
                 self.landing_ticks = 0;
-                if scene.airports.iter().any(|a| a.id == id) {
+                // A short strip is not on the tower's list (John, 2026-09-30).
+                if scene.airports.iter().any(|a| a.id == id) && !scene.airport_id_is_short_strip(id)
+                {
                     self.selected = Some(id);
                     Reply::Selected { airport: id }
                 } else {
@@ -554,7 +807,7 @@ impl Service {
                         reason: DeclineReason::NoAirport,
                     });
                 };
-                let reason = match a.allegiance {
+                let reason = match a.allegiance_for(aircraft.redfor) {
                     Allegiance::Hostile => Some(DeclineReason::Hostile),
                     Allegiance::Unknown => Some(DeclineReason::UnknownAllegiance),
                     Allegiance::Neutral if !a.neutral_permission => {
@@ -601,9 +854,12 @@ impl Service {
                 let (runway, end) = self.choose(scene, aircraft, id)?;
                 (id, runway, end)
             } else {
+                // Automatic guidance finds only fields the aircraft's side
+                // may use: an enemy field is never offered.
                 scene
                     .airports
                     .iter()
+                    .filter(|a| a.serves(aircraft.redfor))
                     .filter_map(|a| {
                         let (runway, end) = self.choose(scene, aircraft, a.id)?;
                         let r = scene.runway(runway)?;
@@ -699,7 +955,81 @@ fn distance2(a: [f64; 3], b: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn scene() -> Scene {
+
+    /// The early distance answer agrees with the rotated test everywhere,
+    /// including points on and just outside the corners.
+    #[test]
+    fn contains_horizontal_matches_the_rotated_test() {
+        let rotated = |b: &OrientedBox, x: f64, z: f64| {
+            let (s, c) = b.heading.sin_cos();
+            let (dx, dz) = (x - b.center[0], z - b.center[2]);
+            (dx * c - dz * s).abs() <= b.half[0] && (dx * s + dz * c).abs() <= b.half[2]
+        };
+        let mut seed = 0x1234_5678_9abc_def1_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 2_000_000) as f64 / 100. - 10_000.
+        };
+        let mut inside = 0;
+        for _ in 0..200_000 {
+            let b = OrientedBox {
+                center: [next() * 50., 0., next() * 50.],
+                half: [next().abs() / 10. + 1., 10., next().abs() + 1.],
+                heading: next(),
+                pitch: 0.,
+                bank: 0.,
+            };
+            // Points near the box, and exactly on a corner.
+            let (s, c) = b.heading.sin_cos();
+            let corner = [
+                b.center[0] + b.half[0] * c + b.half[2] * s,
+                b.center[2] - b.half[0] * s + b.half[2] * c,
+            ];
+            for (x, z) in [
+                (b.center[0] + next() / 2., b.center[2] + next()),
+                (corner[0], corner[1]),
+            ] {
+                let expected = rotated(&b, x, z);
+                inside += usize::from(expected);
+                assert_eq!(b.contains_horizontal(x, z), expected, "{b:?} {x} {z}");
+            }
+        }
+        assert!(inside > 1000, "too few points inside: {inside}");
+    }
+
+    /// Every point a sloped, turned runway answers for lies in its extent's
+    /// box, no higher than its highest corner.
+    #[test]
+    fn a_runway_surface_extent_holds_every_point_of_it() {
+        let mut scene = scene();
+        let (lo, hi, top) = scene.runways[0].surface_extent().unwrap();
+        assert_eq!((lo, hi, top), ([-101., -5001.], [101., 5001.], 100.));
+        let runway = &mut scene.runways[0];
+        runway.surface.heading = 0.7;
+        runway.surface.pitch = 0.02;
+        runway.surface.bank = -0.01;
+        let (lo, hi, top) = scene.runways[0].surface_extent().unwrap();
+        assert!(
+            top > 100. + 50.,
+            "a slope over 5,000 ft raises a corner: {top}"
+        );
+        let mut answered = 0;
+        for x in (-6000..=6000).step_by(50) {
+            for z in (-6000..=6000).step_by(50) {
+                let (x, z) = (f64::from(x), f64::from(z));
+                if let Some((_, height)) = scene.runway_surface(x, z) {
+                    answered += 1;
+                    assert!(height <= top + 1e-6, "{height} above {top}");
+                    assert!(lo[0] <= x && x <= hi[0] && lo[1] <= z && z <= hi[1]);
+                }
+            }
+        }
+        assert!(answered > 100, "{answered}");
+    }
+
+    pub(super) fn scene() -> Scene {
         let bounds = OrientedBox {
             center: [0., 100., 0.],
             half: [100., 10., 5000.],
@@ -708,6 +1038,7 @@ mod tests {
             bank: 0.,
         };
         Scene {
+            aliases: Default::default(),
             objects: vec![StaticObject {
                 id: 1000,
                 source: SourceKey {
@@ -721,6 +1052,8 @@ mod tests {
                 category: 0x100,
                 radar_signature: 100.,
                 infrared_signature: 100.,
+                type_flags: 0,
+                max_visible: 0,
                 runway: true,
             }],
             runways: vec![Runway {
@@ -752,6 +1085,7 @@ mod tests {
             alive: true,
             speed_fps: 100.,
             ground_clearance_ft: 0.,
+            redfor: false,
         }
     }
     #[test]
@@ -967,6 +1301,67 @@ mod tests {
         assert_eq!(guidance.airport, 7);
     }
     #[test]
+    fn a_runways_layout_owner_gives_the_airport_its_side() {
+        assert_eq!(Allegiance::of_owner(Some(false)), Allegiance::Friendly);
+        assert_eq!(Allegiance::of_owner(Some(true)), Allegiance::Hostile);
+        assert_eq!(Allegiance::of_owner(None), Allegiance::Neutral);
+        // A Redfor pilot sees friendly and hostile swapped, nothing else.
+        assert_eq!(Allegiance::Friendly.seen_by(true), Allegiance::Hostile);
+        assert_eq!(Allegiance::Hostile.seen_by(true), Allegiance::Friendly);
+        assert_eq!(Allegiance::Neutral.seen_by(true), Allegiance::Neutral);
+        assert_eq!(Allegiance::Unknown.seen_by(true), Allegiance::Unknown);
+        assert_eq!(Allegiance::Hostile.seen_by(false), Allegiance::Hostile);
+        let mut a = scene().airports.remove(0);
+        assert!(a.serves(false) && !a.serves(true));
+        a.allegiance = Allegiance::Hostile;
+        assert!(!a.serves(false) && a.serves(true));
+        // A neutral field serves both sides when it grants permission.
+        a.allegiance = Allegiance::Neutral;
+        assert!(!a.serves(false) && !a.serves(true));
+        a.neutral_permission = true;
+        assert!(a.serves(false) && a.serves(true));
+        a.allegiance = Allegiance::Unknown;
+        assert!(!a.serves(false) && !a.serves(true));
+    }
+    #[test]
+    fn the_tower_clears_a_pilot_only_at_its_own_sides_field() {
+        let s = scene();
+        let mut blue = plane(-10000., 1000.);
+        let mut red = blue;
+        red.redfor = true;
+        // Blue's field: Blue is cleared, Redfor is told it is hostile.
+        let mut x = Service::new(&s).unwrap();
+        x.command(&s, red, Command::SelectAirport(7));
+        assert_eq!(
+            x.command(&s, red, Command::RequestLanding),
+            vec![Event::Reply(Reply::Declined {
+                airport: Some(7),
+                reason: DeclineReason::Hostile
+            })]
+        );
+        x.command(&s, blue, Command::RequestLanding);
+        assert_eq!(x.clearance(), Some((7, 1000, ApproachEnd::Near)));
+        // Redfor's field: the other way round.
+        let mut s = s;
+        s.airports[0].allegiance = Allegiance::Hostile;
+        let mut x = Service::new(&s).unwrap();
+        x.command(&s, blue, Command::SelectAirport(7));
+        assert!(matches!(
+            x.command(&s, blue, Command::RequestLanding)[0],
+            Event::Reply(Reply::Declined {
+                reason: DeclineReason::Hostile,
+                ..
+            })
+        ));
+        x.command(&s, red, Command::RequestLanding);
+        assert_eq!(x.clearance(), Some((7, 1000, ApproachEnd::Near)));
+        // Automatic guidance finds only the side's own fields.
+        let x = Service::new(&s).unwrap();
+        blue.position[1] = 1000.;
+        assert!(x.guidance(&s, blue).is_none());
+        assert_eq!(x.guidance(&s, red).unwrap().airport, 7);
+    }
+    #[test]
     fn repeating_preserves_reply_and_approach_end() {
         let s = scene();
         let mut x = Service::new(&s).unwrap();
@@ -1091,5 +1486,73 @@ mod tests {
             s.earliest_object_hit([101., 100., -6000.], [101., 100., 6000.]),
             None
         );
+    }
+    #[test]
+    fn a_short_strip_is_off_the_tower_and_the_guidance() {
+        // The retail strips are 1,074 ft and every other airport is 4,060 ft or
+        // longer; the line sits in the gap.
+        assert!(short_strip_length(1_074.));
+        assert!(!short_strip_length(4_060.));
+        assert!(!short_strip_length(SHORT_STRIP_FT));
+        let mut s = scene();
+        assert!(!s.short_strip(1000));
+        assert!(!s.airport_id_is_short_strip(7));
+        s.runways[0].length_ft = 1_074.;
+        assert!(s.short_strip(1000));
+        assert!(s.airport_id_is_short_strip(7));
+        assert!(s.airport_is_short_strip(&s.airports[0]));
+        // An unknown runway or airport is not a short strip.
+        assert!(!s.short_strip(9));
+        assert!(!s.airport_id_is_short_strip(99));
+        let mut service = Service::new(&s).unwrap();
+        let p = plane(-20_000., 2_000.);
+        // The airport cannot be selected, so no clearance follows.
+        assert_eq!(
+            service.command(&s, p, Command::SelectAirport(7)),
+            vec![Event::Reply(Reply::Declined {
+                airport: None,
+                reason: DeclineReason::NoAirport
+            })]
+        );
+        assert_eq!(service.selected(), None);
+        assert_eq!(
+            service.command(&s, p, Command::RequestLanding),
+            vec![Event::Reply(Reply::Declined {
+                airport: None,
+                reason: DeclineReason::NoAirport
+            })]
+        );
+        // Automatic guidance never picks it, even lined up on its centre line.
+        assert!(service.guidance(&s, p).is_none());
+        // The same field at full length is served as before.
+        s.runways[0].length_ft = 10_000.;
+        assert!(service.guidance(&s, p).is_some());
+    }
+}
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "airport_checkpoint.rs"]
+mod checkpoint;
+
+#[cfg(test)]
+mod merged_identity_tests {
+    use super::*;
+    #[test]
+    fn old_airport_and_runway_ids_select_the_single_field() {
+        let mut scene = super::tests::scene();
+        let airport = scene.airports[0].id;
+        let runway = scene.runways[0].object;
+        scene.aliases.insert(91, airport);
+        scene.aliases.insert(0x4000_0091, runway);
+        assert_eq!(scene.airport(91).unwrap().id, airport);
+        assert_eq!(scene.runway(0x4000_0091).unwrap().object, runway);
+        let mut service = Service::new(&scene).unwrap();
+        service.reselect(&scene, 91);
+        assert_eq!(service.selected(), Some(airport));
+        assert_eq!(scene.airports.len(), 1);
+        assert_eq!(scene.runways.len(), 1);
+        let destroyed = Service::presented(&scene, Some(91), None, [0x4000_0091]).unwrap();
+        assert!(!destroyed.usable(runway));
+        assert_eq!(destroyed.out_of_action().collect::<Vec<_>>(), vec![runway]);
     }
 }

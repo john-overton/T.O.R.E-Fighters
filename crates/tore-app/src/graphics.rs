@@ -1,8 +1,16 @@
 //! Player graphics choices for the 3D view: anti-aliasing, render scale, the
-//! spotting aid and terrain distance filtering. These are
+//! spotting aid, terrain distance filtering, city fill distances, the
+//! exploratory vegetation distances, the frame rate and the frame-rate
+//! counter, shadow quality and shadow distance. These are
 //! opinionated host additions requested by John on 2026-09-22; the original
-//! game had none of them. The values and defaults are agent choices. They are
-//! saved in their own small file, `graphics-v1.conf`, beside the preferences.
+//! game had none of them. The vegetation rows were added on 2026-10-16, and
+//! the frame-rate counter on 2026-10-17, and the frame rate choice on
+//! 2026-10-19 (John chose its steps and the V-sync default), and the shadow
+//! quality on 2026-10-20 (John asked for the setting; its levels and default
+//! are agent choices). John requested separate shadow distance following
+//! trees on 2026-10-21; its fixed steps are agent choices. The other values
+//! and defaults are agent choices. They are saved in their own small file, `graphics-v1.conf`,
+//! beside the preferences.
 use std::path::Path;
 
 /// Multisample anti-aliasing. 4x is the only count every GPU must support;
@@ -83,6 +91,384 @@ impl SpottingAid {
 
 /// Render scale steps, in percent of the window's pixel size.
 pub const RENDER_SCALES: [u32; 5] = [75, 100, 125, 150, 200];
+/// The size the 3D view is drawn at for an `output` size and a render scale
+/// in percent. The renderer and the Graphics screen both use it.
+pub fn scaled_size(output: [u32; 2], percent: u32) -> [u32; 2] {
+    let scale = percent as f32 / 100.;
+    output.map(|v| ((v as f32 * scale).round() as u32).clamp(1, 8192))
+}
+
+/// City fill building draw distance steps, nautical miles (CF0 prototype;
+/// John, 2026-10-10).
+pub const BUILDING_DISTANCES: [u32; 3] = [10, 20, 30];
+/// City fill building texture and detail distance steps, nautical miles:
+/// full detail inside, plain boxes beyond.
+pub const BUILDING_DETAILS: [u32; 5] = [1, 2, 5, 10, 20];
+/// The defaults: geometry to 30 nm, full detail inside 5 nm (John,
+/// 2026-10-10).
+pub const DEFAULT_BUILDING_DISTANCE: u32 = 30;
+pub const DEFAULT_BUILDING_DETAIL: u32 = 5;
+
+/// Close-range ground detail (fields, grass, sand, rock) on the terrain.
+/// Opinionated, 2026-10-16. Off draws the retail tile alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroundTexture {
+    Off,
+    On,
+    /// A finer grain, for a low pass.
+    Fine,
+}
+impl GroundTexture {
+    pub const ALL: [Self; 3] = [Self::Off, Self::On, Self::Fine];
+    /// Shader mode: 0 off, 1 on, 2 fine.
+    pub fn mode(self) -> f32 {
+        match self {
+            Self::Off => 0.,
+            Self::On => 1.,
+            Self::Fine => 2.,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::On => "On",
+            Self::Fine => "Fine",
+        }
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Fine => "fine",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.key() == text)
+    }
+}
+
+/// How thick the vegetation objects are, relative to the pre-Pass-5 High setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VegDensity {
+    Low,
+    Medium,
+    High,
+    Ultra,
+}
+impl VegDensity {
+    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Ultra];
+    /// John requested a one-step reduction on 2026-10-17. Low is an agent choice.
+    pub fn scale(self) -> f32 {
+        match self {
+            Self::Low => 0.2,
+            Self::Medium => 0.4,
+            Self::High => 0.7,
+            Self::Ultra => 1.,
+        }
+    }
+    pub fn object_budget(self) -> usize {
+        match self {
+            Self::Low => 32_768,
+            Self::Medium => 65_536,
+            Self::High => 131_072,
+            Self::Ultra => 262_144,
+        }
+    }
+    pub fn grass(self) -> (f32, u32) {
+        match self {
+            Self::Low => (450., 24),
+            Self::Medium => (700., 48),
+            Self::High => (1_100., 96),
+            Self::Ultra => (1_500., 160),
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Med",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+        }
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Ultra => "ultra",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.key() == text)
+    }
+}
+
+/// Presentation geometry only. Environment override is useful for the lead matrix.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum VegCards {
+    Billboard,
+    Cross,
+    CrossTop,
+    #[default]
+    BillboardTop,
+}
+impl VegCards {
+    pub const ALL: [Self; 4] = [
+        Self::Billboard,
+        Self::Cross,
+        Self::CrossTop,
+        Self::BillboardTop,
+    ];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Billboard => "billboard",
+            Self::Cross => "cross",
+            Self::CrossTop => "cross-top",
+            Self::BillboardTop => "billboard-top",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Billboard => "Facing",
+            Self::Cross => "Cross",
+            Self::CrossTop => "Cross+top",
+            Self::BillboardTop => "Face+top",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    pub fn effective(self) -> Self {
+        std::env::var("TORE_VEGETATION_CARDS")
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+            .unwrap_or(self)
+    }
+    pub fn vertices(self) -> u32 {
+        match self {
+            Self::Billboard => 6,
+            Self::CrossTop => 18,
+            _ => 12,
+        }
+    }
+}
+
+/// Presentation only. John requested procedural blades on 2026-10-17.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Grass {
+    #[default]
+    Blades,
+    Tufts,
+    Off,
+}
+impl Grass {
+    pub const ALL: [Self; 3] = [Self::Blades, Self::Tufts, Self::Off];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Blades => "blades",
+            Self::Tufts => "tufts",
+            Self::Off => "off",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Blades => "Blades",
+            Self::Tufts => "Tufts",
+            Self::Off => "Off",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    pub fn override_from_env() -> crate::AppResult<Option<Self>> {
+        match std::env::var("TORE_GRASS") {
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Ok(s) => Self::parse(&s)
+                .map(Some)
+                .ok_or_else(|| "TORE_GRASS must be blades, tufts or off".into()),
+            Err(e) => Err(e.into()),
+        }
+    }
+    pub fn effective(self) -> Self {
+        Self::override_from_env().ok().flatten().unwrap_or(self)
+    }
+}
+
+/// How often the window is drawn. V-sync draws one frame per display refresh,
+/// waiting for the display; the numbers cap the rate with a timer and present
+/// without waiting. John chose these steps and the V-sync default on
+/// 2026-10-19; `crate::frame_pacing` applies them, and `TORE_FRAME_LIMIT`
+/// overrides them for one run (including `off`, uncapped, for benchmarks).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameLimit {
+    Fps60,
+    Fps100,
+    Fps200,
+    #[default]
+    VSync,
+}
+impl FrameLimit {
+    pub const ALL: [Self; 4] = [Self::Fps60, Self::Fps100, Self::Fps200, Self::VSync];
+    /// Frames a second for the capped choices; None for V-sync.
+    pub fn rate(self) -> Option<u32> {
+        match self {
+            Self::Fps60 => Some(60),
+            Self::Fps100 => Some(100),
+            Self::Fps200 => Some(200),
+            Self::VSync => None,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fps60 => "60",
+            Self::Fps100 => "100",
+            Self::Fps200 => "200",
+            Self::VSync => "V-sync",
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Fps60 => "60",
+            Self::Fps100 => "100",
+            Self::Fps200 => "200",
+            Self::VSync => "vsync",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+}
+
+/// How detailed the geometric shadows are: the shadow map size, how many
+/// map cascades, the soft-edge sample count and which objects cast
+/// (`crate::surface_lighting::Settings`; docs/spec/surface-lighting.md).
+/// Off draws no geometric shadows. Medium is the default: the shadow maps
+/// from before the setting existed, with every ground object casting; the
+/// trees' shadows (High) cost about 0.5 to 0.8 ms at 1440p over woods
+/// (agent choice, 2026-10-20).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShadowQuality {
+    Off,
+    Low,
+    #[default]
+    Medium,
+    High,
+    Ultra,
+}
+impl ShadowQuality {
+    pub const ALL: [Self; 5] = [Self::Off, Self::Low, Self::Medium, Self::High, Self::Ultra];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Med",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Ultra => "ultra",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    /// `TORE_SHADOWS=off|low|medium|high|ultra` sets the quality for one
+    /// run (offscreen tools and captures included) without saving it.
+    pub fn effective(self) -> Self {
+        std::env::var("TORE_SHADOWS")
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+            .unwrap_or(self)
+    }
+}
+
+/// Shadow reach independent of quality. Trees follows the current vegetation
+/// draw distance; fixed steps are nautical miles (agent choices, 2026-10-21).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShadowDistance {
+    #[default]
+    Trees,
+    Nm1,
+    Nm2,
+    Nm4,
+    Nm6,
+    Nm8,
+}
+impl ShadowDistance {
+    pub const ALL: [Self; 6] = [
+        Self::Trees,
+        Self::Nm1,
+        Self::Nm2,
+        Self::Nm4,
+        Self::Nm6,
+        Self::Nm8,
+    ];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Trees => "trees",
+            Self::Nm1 => "1",
+            Self::Nm2 => "2",
+            Self::Nm4 => "4",
+            Self::Nm6 => "6",
+            Self::Nm8 => "8",
+        }
+    }
+    pub fn label(self) -> String {
+        if self == Self::Trees {
+            "Trees".into()
+        } else {
+            format!("{} nm", self.key())
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    pub fn nautical_miles(self, trees_nm: u32) -> u32 {
+        match self {
+            Self::Trees => trees_nm,
+            Self::Nm1 => 1,
+            Self::Nm2 => 2,
+            Self::Nm4 => 4,
+            Self::Nm6 => 6,
+            Self::Nm8 => 8,
+        }
+    }
+    /// Like TORE_SHADOWS, a measuring override that does not change the file.
+    pub fn effective(self) -> Self {
+        std::env::var("TORE_SHADOW_DISTANCE")
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+            .unwrap_or(self)
+    }
+}
+
+/// How far the close-range ground detail reaches, nautical miles.
+pub const GROUND_TEXTURE_DISTANCES: [u32; 3] = [1, 2, 4];
+/// How far vegetation objects are drawn, nautical miles.
+pub const VEGETATION_DISTANCES: [u32; 4] = [2, 4, 6, 8];
+/// Full vegetation meshes inside this, cheaper crosses beyond, nautical miles.
+pub const VEGETATION_DETAILS: [u32; 4] = [1, 2, 3, 4];
+/// Tuned for an RTX 4070 at 4K: detail close in, objects out to 4 nm, full
+/// meshes inside 2 nm, high density (2026-10-16).
+pub const DEFAULT_GROUND_TEXTURE: GroundTexture = GroundTexture::On;
+pub const DEFAULT_GROUND_TEXTURE_DISTANCE: u32 = 2;
+pub const DEFAULT_VEGETATION_DISTANCE: u32 = 4;
+pub const DEFAULT_VEGETATION_DETAIL: u32 = 2;
+pub const GRASS_DISTANCES: [u32; 4] = [250, 500, 750, 1000];
+pub const DEFAULT_GRASS_DISTANCE: u32 = 500;
+pub const DEFAULT_GRASS_DENSITY: Option<VegDensity> = Some(VegDensity::High);
+pub const DEFAULT_VEGETATION_DENSITY: VegDensity = VegDensity::High;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
@@ -91,6 +477,39 @@ pub struct Options {
     pub render_scale: u32,
     pub spotting_aid: SpottingAid,
     pub terrain_filtering: bool,
+    /// City fill buildings draw out to this, nautical miles; one of
+    /// `BUILDING_DISTANCES`.
+    pub building_distance_nm: u32,
+    /// City fill buildings draw with full texture and detail inside this,
+    /// nautical miles; one of `BUILDING_DETAILS`.
+    pub building_detail_nm: u32,
+    /// Close-range ground detail. One of `GroundTexture::ALL`.
+    pub ground_texture: GroundTexture,
+    /// How far that detail reaches, nautical miles; one of
+    /// `GROUND_TEXTURE_DISTANCES`.
+    pub ground_texture_distance_nm: u32,
+    /// Vegetation objects draw out to this, nautical miles; one of
+    /// `VEGETATION_DISTANCES`.
+    pub vegetation_distance_nm: u32,
+    /// Full vegetation meshes inside this, nautical miles; one of
+    /// `VEGETATION_DETAILS`.
+    pub vegetation_detail_nm: u32,
+    /// How thick the vegetation is. One of `VegDensity::ALL`.
+    pub vegetation_density: VegDensity,
+    pub vegetation_cards: VegCards,
+    pub grass: Grass,
+    pub grass_density: Option<VegDensity>,
+    pub grass_distance_ft: u32,
+    /// The frames-per-second readout in the window's top right. Off by
+    /// default (John, 2026-10-17). `TORE_SHOW_FPS=1` shows it for one run
+    /// without saving.
+    pub show_frame_rate: bool,
+    /// How often the window is drawn. V-sync by default (John, 2026-10-19).
+    pub frame_limit: FrameLimit,
+    /// How detailed the geometric shadows are, and what casts them.
+    pub shadow_quality: ShadowQuality,
+    /// Shadow reach, following trees by default.
+    pub shadow_distance: ShadowDistance,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -99,30 +518,122 @@ impl Default for Options {
             render_scale: 100,
             spotting_aid: SpottingAid::Subtle,
             terrain_filtering: true,
+            building_distance_nm: DEFAULT_BUILDING_DISTANCE,
+            building_detail_nm: DEFAULT_BUILDING_DETAIL,
+            ground_texture: DEFAULT_GROUND_TEXTURE,
+            ground_texture_distance_nm: DEFAULT_GROUND_TEXTURE_DISTANCE,
+            vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
+            vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
+            vegetation_density: DEFAULT_VEGETATION_DENSITY,
+            vegetation_cards: VegCards::default(),
+            grass: Grass::default(),
+            grass_density: DEFAULT_GRASS_DENSITY,
+            grass_distance_ft: DEFAULT_GRASS_DISTANCE,
+            show_frame_rate: false,
+            frame_limit: FrameLimit::default(),
+            shadow_quality: ShadowQuality::default(),
+            shadow_distance: ShadowDistance::default(),
         }
     }
 }
 impl Options {
     /// Every addition off: the unmodified presentation, for pixel tests.
+    /// Vegetation objects keep their distances, as the city buildings do;
+    /// the ground detail texture turns off with the other image filters.
     pub fn original() -> Self {
         Self {
             anti_aliasing: AntiAliasing::Off,
             render_scale: 100,
             spotting_aid: SpottingAid::Off,
             terrain_filtering: false,
+            building_distance_nm: DEFAULT_BUILDING_DISTANCE,
+            building_detail_nm: DEFAULT_BUILDING_DETAIL,
+            ground_texture: GroundTexture::Off,
+            ground_texture_distance_nm: DEFAULT_GROUND_TEXTURE_DISTANCE,
+            vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
+            vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
+            vegetation_density: DEFAULT_VEGETATION_DENSITY,
+            vegetation_cards: VegCards::Billboard,
+            grass: Grass::Tufts,
+            grass_density: DEFAULT_GRASS_DENSITY,
+            grass_distance_ft: DEFAULT_GRASS_DISTANCE,
+            show_frame_rate: false,
+            frame_limit: FrameLimit::default(),
+            shadow_quality: ShadowQuality::default(),
+            shadow_distance: ShadowDistance::default(),
         }
     }
     pub fn scale(&self) -> f32 {
         self.render_scale as f32 / 100.
     }
+    /// The size the 3D view is drawn at for an `output` (window) size in
+    /// physical pixels: the render scale applied, rounded, and kept within
+    /// the 8192 pixel texture limit.
+    pub fn scaled_size(&self, output: [u32; 2]) -> [u32; 2] {
+        scaled_size(output, self.render_scale)
+    }
+    /// The settings file. The city fill building distances are written only
+    /// when they differ from the defaults, so a default file is unchanged.
     pub fn text(&self) -> String {
-        format!(
+        let mut text = format!(
             "tore-graphics 1\nanti-aliasing {}\nrender-scale {}\nspotting-aid {}\nterrain-filtering {}\n",
             self.anti_aliasing.key(),
             self.render_scale,
             self.spotting_aid.key(),
             self.terrain_filtering,
-        )
+        );
+        if self.building_distance_nm != DEFAULT_BUILDING_DISTANCE {
+            text += &format!("building-distance {}\n", self.building_distance_nm);
+        }
+        if self.building_detail_nm != DEFAULT_BUILDING_DETAIL {
+            text += &format!("building-detail {}\n", self.building_detail_nm);
+        }
+        if self.ground_texture != DEFAULT_GROUND_TEXTURE {
+            text += &format!("vegetation-texture {}\n", self.ground_texture.key());
+        }
+        if self.ground_texture_distance_nm != DEFAULT_GROUND_TEXTURE_DISTANCE {
+            text += &format!(
+                "vegetation-texture-distance {}\n",
+                self.ground_texture_distance_nm
+            );
+        }
+        if self.vegetation_distance_nm != DEFAULT_VEGETATION_DISTANCE {
+            text += &format!("vegetation-distance {}\n", self.vegetation_distance_nm);
+        }
+        if self.vegetation_detail_nm != DEFAULT_VEGETATION_DETAIL {
+            text += &format!("vegetation-detail {}\n", self.vegetation_detail_nm);
+        }
+        if self.vegetation_density != DEFAULT_VEGETATION_DENSITY {
+            text += &format!("vegetation-density {}\n", self.vegetation_density.key());
+        }
+        if self.vegetation_cards != VegCards::default() {
+            text += &format!("vegetation-cards {}\n", self.vegetation_cards.key());
+        }
+        if self.grass != Grass::default() {
+            text += &format!("grass {}\n", self.grass.key());
+        }
+        if self.grass_density != DEFAULT_GRASS_DENSITY {
+            text += &format!(
+                "grass-density {}\n",
+                self.grass_density.map_or("off", VegDensity::key)
+            );
+        }
+        if self.grass_distance_ft != DEFAULT_GRASS_DISTANCE {
+            text += &format!("grass-distance {}\n", self.grass_distance_ft);
+        }
+        if self.show_frame_rate {
+            text += "frame-rate true\n";
+        }
+        if self.frame_limit != FrameLimit::default() {
+            text += &format!("frame-limit {}\n", self.frame_limit.key());
+        }
+        if self.shadow_distance != ShadowDistance::default() {
+            text += &format!("shadow-distance {}\n", self.shadow_distance.key());
+        }
+        if self.shadow_quality != ShadowQuality::default() {
+            text += &format!("shadows {}\n", self.shadow_quality.key());
+        }
+        text
     }
     pub fn parse(text: &str) -> Result<Self, String> {
         if text.len() > 4096 {
@@ -139,10 +650,38 @@ impl Options {
                 return Err("invalid or duplicate graphics setting".into());
             }
         }
-        if values.len() != 4 {
+        let optional = [
+            "building-distance",
+            "building-detail",
+            "vegetation-texture",
+            "vegetation-texture-distance",
+            "vegetation-distance",
+            "vegetation-detail",
+            "vegetation-density",
+            "vegetation-cards",
+            "grass",
+            "grass-density",
+            "grass-distance",
+            "frame-rate",
+            "frame-limit",
+            "shadows",
+            "shadow-distance",
+        ]
+        .iter()
+        .filter(|k| values.contains_key(*k))
+        .count();
+        if values.len() != 4 + optional {
             return Err("unknown or missing graphics setting".into());
         }
         let get = |k: &str| values.get(k).copied().ok_or(format!("missing {k}"));
+        let step = |k: &str, steps: &[u32], default: u32| match values.get(k) {
+            None => Ok(default),
+            Some(v) => v
+                .parse::<u32>()
+                .ok()
+                .filter(|n| steps.contains(n))
+                .ok_or(format!("invalid {k}")),
+        };
         let boolean = |k: &str| get(k)?.parse::<bool>().map_err(|_| format!("invalid {k}"));
         let render_scale = get("render-scale")?
             .parse::<u32>()
@@ -155,6 +694,69 @@ impl Options {
             render_scale,
             spotting_aid: SpottingAid::parse(get("spotting-aid")?).ok_or("invalid spotting-aid")?,
             terrain_filtering: boolean("terrain-filtering")?,
+            building_distance_nm: step(
+                "building-distance",
+                &BUILDING_DISTANCES,
+                DEFAULT_BUILDING_DISTANCE,
+            )?,
+            building_detail_nm: step(
+                "building-detail",
+                &BUILDING_DETAILS,
+                DEFAULT_BUILDING_DETAIL,
+            )?,
+            ground_texture: match values.get("vegetation-texture") {
+                None => DEFAULT_GROUND_TEXTURE,
+                Some(v) => GroundTexture::parse(v).ok_or("invalid vegetation-texture")?,
+            },
+            ground_texture_distance_nm: step(
+                "vegetation-texture-distance",
+                &GROUND_TEXTURE_DISTANCES,
+                DEFAULT_GROUND_TEXTURE_DISTANCE,
+            )?,
+            vegetation_distance_nm: step(
+                "vegetation-distance",
+                &VEGETATION_DISTANCES,
+                DEFAULT_VEGETATION_DISTANCE,
+            )?,
+            vegetation_detail_nm: step(
+                "vegetation-detail",
+                &VEGETATION_DETAILS,
+                DEFAULT_VEGETATION_DETAIL,
+            )?,
+            vegetation_density: match values.get("vegetation-density") {
+                None => DEFAULT_VEGETATION_DENSITY,
+                Some(v) => VegDensity::parse(v).ok_or("invalid vegetation-density")?,
+            },
+            vegetation_cards: match values.get("vegetation-cards") {
+                None => VegCards::default(),
+                Some(v) => VegCards::parse(v).ok_or("invalid vegetation-cards")?,
+            },
+            grass: match values.get("grass") {
+                None => Grass::default(),
+                Some(v) => Grass::parse(v).ok_or("invalid grass")?,
+            },
+            grass_density: match values.get("grass-density") {
+                None => DEFAULT_GRASS_DENSITY,
+                Some(&"off") => None,
+                Some(v) => Some(VegDensity::parse(v).ok_or("invalid grass-density")?),
+            },
+            grass_distance_ft: step("grass-distance", &GRASS_DISTANCES, DEFAULT_GRASS_DISTANCE)?,
+            show_frame_rate: match values.get("frame-rate") {
+                None => false,
+                Some(_) => boolean("frame-rate")?,
+            },
+            frame_limit: match values.get("frame-limit") {
+                None => FrameLimit::default(),
+                Some(v) => FrameLimit::parse(v).ok_or("invalid frame-limit")?,
+            },
+            shadow_distance: match values.get("shadow-distance") {
+                None => ShadowDistance::default(),
+                Some(v) => ShadowDistance::parse(v).ok_or("invalid shadow-distance")?,
+            },
+            shadow_quality: match values.get("shadows") {
+                None => ShadowQuality::default(),
+                Some(v) => ShadowQuality::parse(v).ok_or("invalid shadows")?,
+            },
         })
     }
     /// Command-line overrides for one run; they are not saved by themselves.
@@ -183,6 +785,57 @@ impl Options {
                         .ok_or("--spotting-aid needs off, subtle or strong")?
                 }
                 "--terrain-filtering" => self.terrain_filtering = switch(flag, value)?,
+                "--building-distance" => {
+                    self.building_distance_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| BUILDING_DISTANCES.contains(n))
+                        .ok_or("--building-distance needs 10, 20 or 30")?
+                }
+                "--building-detail" => {
+                    self.building_detail_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| BUILDING_DETAILS.contains(n))
+                        .ok_or("--building-detail needs 1, 2, 5, 10 or 20")?
+                }
+                "--vegetation-texture" => {
+                    self.ground_texture = GroundTexture::parse(value)
+                        .ok_or("--vegetation-texture needs off, on or fine")?
+                }
+                "--vegetation-texture-distance" => {
+                    self.ground_texture_distance_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| GROUND_TEXTURE_DISTANCES.contains(n))
+                        .ok_or("--vegetation-texture-distance needs 1, 2 or 4")?
+                }
+                "--vegetation-distance" => {
+                    self.vegetation_distance_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| VEGETATION_DISTANCES.contains(n))
+                        .ok_or("--vegetation-distance needs 2, 4, 6 or 8")?
+                }
+                "--vegetation-detail" => {
+                    self.vegetation_detail_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| VEGETATION_DETAILS.contains(n))
+                        .ok_or("--vegetation-detail needs 1, 2, 3 or 4")?
+                }
+                "--shadow-distance" => {
+                    self.shadow_distance = ShadowDistance::parse(value)
+                        .ok_or("--shadow-distance needs trees, 1, 2, 4, 6 or 8")?
+                }
+                "--shadows" => {
+                    self.shadow_quality = ShadowQuality::parse(value)
+                        .ok_or("--shadows needs off, low, medium, high or ultra")?
+                }
+                "--vegetation-density" => {
+                    self.vegetation_density = VegDensity::parse(value)
+                        .ok_or("--vegetation-density needs low, medium, high or ultra")?
+                }
                 _ => return Err(format!("unknown graphics flag {flag}")),
             }
         }
@@ -219,14 +872,125 @@ impl Options {
 mod tests {
     use super::*;
     #[test]
+    fn density_steps_shift_down_and_default_remains_high() {
+        assert_eq!(VegDensity::ALL.map(VegDensity::scale), [0.2, 0.4, 0.7, 1.]);
+        assert_eq!(
+            VegDensity::ALL.map(VegDensity::object_budget),
+            [32768, 65536, 131072, 262144]
+        );
+        assert_eq!(
+            VegDensity::ALL.map(VegDensity::grass),
+            [(450., 24), (700., 48), (1100., 96), (1500., 160)]
+        );
+        assert_eq!(Options::default().vegetation_density, VegDensity::High);
+    }
+    #[test]
+    fn all_card_modes_roundtrip_and_have_the_expected_card_count() {
+        for mode in VegCards::ALL {
+            assert_eq!(VegCards::parse(mode.key()), Some(mode));
+            let options = Options {
+                vegetation_cards: mode,
+                ..Options::default()
+            };
+            assert_eq!(
+                Options::parse(&options.text()).unwrap().vegetation_cards,
+                mode
+            );
+        }
+        assert_eq!(VegCards::default(), VegCards::BillboardTop);
+        assert_eq!(Options::default().vegetation_cards, VegCards::BillboardTop);
+        assert_eq!(
+            Options::parse(&Options::default().text())
+                .unwrap()
+                .vegetation_cards,
+            VegCards::BillboardTop
+        );
+        assert_eq!(Options::original().vegetation_cards, VegCards::Billboard);
+        assert_eq!(VegCards::ALL.map(VegCards::vertices), [6, 12, 18, 12]);
+        assert_eq!(VegCards::parse("triangle"), None);
+    }
+    #[test]
+    fn grass_density_and_distance_are_independent_and_backwards_compatible() {
+        let old = Options::default().text();
+        let parsed = Options::parse(&old).unwrap();
+        assert_eq!(parsed.grass_density, Some(VegDensity::High));
+        assert_eq!(parsed.grass_distance_ft, 500);
+        for density in std::iter::once(None).chain(VegDensity::ALL.map(Some)) {
+            for distance in GRASS_DISTANCES {
+                let options = Options {
+                    grass_density: density,
+                    grass_distance_ft: distance,
+                    ..parsed
+                };
+                assert_eq!(Options::parse(&options.text()).unwrap(), options);
+                assert_eq!(options.vegetation_density, parsed.vegetation_density);
+            }
+        }
+        for value in [
+            "grass-density invalid",
+            "grass-distance 0",
+            "grass-distance 501",
+        ] {
+            assert!(Options::parse(&format!("{old}{value}\n")).is_err());
+        }
+    }
+    #[test]
+    fn grass_modes_default_and_roundtrip() {
+        assert_eq!(Options::default().grass, Grass::Blades);
+        for grass in Grass::ALL {
+            let options = Options {
+                grass,
+                ..Default::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap().grass, grass);
+            assert_eq!(Grass::parse(grass.key()), Some(grass));
+        }
+        assert_eq!(Grass::parse("invalid"), None);
+        assert_eq!(
+            Options::parse(&Options::default().text()).unwrap().grass,
+            Grass::Blades
+        );
+    }
+    #[test]
     fn roundtrip_and_reject_malformed() {
         let options = Options {
             anti_aliasing: AntiAliasing::X8,
             render_scale: 150,
             spotting_aid: SpottingAid::Strong,
             terrain_filtering: false,
+            building_distance_nm: 20,
+            building_detail_nm: 2,
+            ground_texture: GroundTexture::Fine,
+            ground_texture_distance_nm: 4,
+            vegetation_distance_nm: 6,
+            vegetation_detail_nm: 1,
+            vegetation_density: VegDensity::Low,
+            vegetation_cards: VegCards::CrossTop,
+            grass: Grass::Off,
+            grass_density: Some(VegDensity::Ultra),
+            grass_distance_ft: 1000,
+            show_frame_rate: true,
+            frame_limit: FrameLimit::Fps100,
+            shadow_quality: ShadowQuality::Low,
+            shadow_distance: ShadowDistance::Nm6,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
+        // The default building and vegetation distances are not written, and
+        // a file without them reads as the defaults.
+        let defaults = Options::default().text();
+        assert!(!defaults.contains("building"));
+        assert!(!defaults.contains("vegetation"));
+        assert!(!defaults.contains("vegetation-texture"));
+        assert!(!defaults.contains("frame-rate"));
+        assert!(options.text().contains("frame-rate true"));
+        assert!(
+            Options::parse(
+                &options
+                    .text()
+                    .replace("building-detail 2", "building-detail 3")
+            )
+            .is_err()
+        );
         assert_eq!(
             Options::parse(&Options::default().text()).unwrap(),
             Options::default()
@@ -238,6 +1002,128 @@ mod tests {
         assert!(Options::parse(&(text.clone() + "sun-glint true\n")).is_err());
         assert!(Options::parse(&text.replace("tore-graphics 1", "tore-graphics 2")).is_err());
         assert!(Options::parse("tore-graphics 1\n").is_err());
+    }
+    #[test]
+    fn frame_limit_defaults_to_vsync_and_roundtrips() {
+        assert_eq!(Options::default().frame_limit, FrameLimit::VSync);
+        assert_eq!(Options::original().frame_limit, FrameLimit::VSync);
+        // A default file does not name it, and a file written before the
+        // choice existed reads as V-sync.
+        assert!(!Options::default().text().contains("frame-limit"));
+        let old = "tore-graphics 1\nanti-aliasing 4x\nrender-scale 100\nspotting-aid subtle\nterrain-filtering true\nframe-rate true\n";
+        let parsed = Options::parse(old).unwrap();
+        assert_eq!(parsed.frame_limit, FrameLimit::VSync);
+        assert!(parsed.show_frame_rate);
+        for limit in FrameLimit::ALL {
+            let options = Options {
+                frame_limit: limit,
+                ..Options::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap(), options);
+            assert_eq!(FrameLimit::parse(limit.key()), Some(limit));
+        }
+        assert!(
+            Options {
+                frame_limit: FrameLimit::Fps60,
+                ..Options::default()
+            }
+            .text()
+            .contains("frame-limit 60\n")
+        );
+        assert_eq!(
+            FrameLimit::ALL.map(FrameLimit::rate),
+            [Some(60), Some(100), Some(200), None]
+        );
+        assert_eq!(
+            FrameLimit::ALL.map(FrameLimit::label),
+            ["60", "100", "200", "V-sync"]
+        );
+        // Uncapped is not a saved choice.
+        for bad in ["off", "144", "unlimited", ""] {
+            assert!(Options::parse(&format!("{old}frame-limit {bad}\n")).is_err());
+        }
+    }
+    #[test]
+    fn shadow_distance_roundtrips_and_follows_only_in_trees_mode() {
+        let old = Options::default().text();
+        assert!(!old.contains("shadow-distance"));
+        assert_eq!(
+            Options::parse(&old).unwrap().shadow_distance,
+            ShadowDistance::Trees
+        );
+        for distance in ShadowDistance::ALL {
+            let mut options = Options {
+                shadow_distance: distance,
+                ..Options::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap(), options);
+            for trees in VEGETATION_DISTANCES {
+                options.vegetation_distance_nm = trees;
+                let expected = if distance == ShadowDistance::Trees {
+                    trees
+                } else {
+                    distance.key().parse().unwrap()
+                };
+                assert_eq!(
+                    distance.nautical_miles(options.vegetation_distance_nm),
+                    expected
+                );
+            }
+            let flags = [("--shadow-distance".to_owned(), distance.key().to_owned())];
+            let mut cli = Options::default();
+            cli.apply_flags(&flags).unwrap();
+            assert_eq!(cli.shadow_distance, distance);
+        }
+        for bad in ["0", "3", "10", "4nm", "-1", "NaN", ""] {
+            assert!(Options::parse(&format!("{old}shadow-distance {bad}\n")).is_err());
+            assert!(
+                Options::default()
+                    .apply_flags(&[("--shadow-distance".into(), bad.into())])
+                    .is_err()
+            );
+        }
+        assert!(Options::parse(&format!("{old}shadow-distance 2\nshadow-distance 4\n")).is_err());
+    }
+
+    #[test]
+    fn shadow_quality_defaults_to_medium_and_roundtrips() {
+        assert_eq!(Options::default().shadow_quality, ShadowQuality::Medium);
+        assert_eq!(Options::original().shadow_quality, ShadowQuality::Medium);
+        // A default file does not name it, and an older file reads as Medium.
+        assert!(!Options::default().text().contains("shadows"));
+        let old = "tore-graphics 1\nanti-aliasing 4x\nrender-scale 100\nspotting-aid subtle\nterrain-filtering true\n";
+        assert_eq!(
+            Options::parse(old).unwrap().shadow_quality,
+            ShadowQuality::Medium
+        );
+        for quality in ShadowQuality::ALL {
+            let options = Options {
+                shadow_quality: quality,
+                ..Options::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap(), options);
+            assert_eq!(ShadowQuality::parse(quality.key()), Some(quality));
+        }
+        assert!(
+            Options {
+                shadow_quality: ShadowQuality::Off,
+                ..Options::default()
+            }
+            .text()
+            .contains("shadows off\n")
+        );
+        assert_eq!(
+            ShadowQuality::ALL.map(ShadowQuality::label),
+            ["Off", "Low", "Med", "High", "Ultra"]
+        );
+        for bad in ["none", "max", ""] {
+            assert!(Options::parse(&format!("{old}shadows {bad}\n")).is_err());
+        }
+        let mut options = Options::default();
+        let flag = |v: &str| [("--shadows".to_owned(), v.to_owned())];
+        options.apply_flags(&flag("ultra")).unwrap();
+        assert_eq!(options.shadow_quality, ShadowQuality::Ultra);
+        assert!(options.apply_flags(&flag("on")).is_err());
     }
     #[test]
     fn a_missing_or_damaged_file_gives_the_defaults() {

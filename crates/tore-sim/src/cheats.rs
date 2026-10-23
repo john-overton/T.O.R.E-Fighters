@@ -40,6 +40,17 @@ pub struct Cheats {
     pub ignore_midair_collisions: bool,
     pub easy_targeting: bool,
     pub guns_only: bool,
+    /// Easy flight physics (VTOL overhaul, design 4.12; John, 2026-10-08):
+    /// the six powered-lift aircraft fly without the hazards of their
+    /// physics: torque, the vortex ring state, retreating blade stall,
+    /// unrecoverable rotor stall, the Harrier and Yak-141 roll-off, the
+    /// undamped puffers at stability level Off and dynamic rollover; and the
+    /// rotorcraft get a weak attitude retention about the trim attitude at
+    /// Damper and Off (`flight::powered::sas`). Weight,
+    /// power and the V-22's corridor protection stay. Fixed-wing aircraft
+    /// ignore it. It changes the simulation, so the server alone sets it in
+    /// a session.
+    pub easy_physics: bool,
     /// Enemy AI: every enemy aircraft at this level; None is Unchanged.
     pub enemy_ai: Option<crate::ai::Experience>,
 }

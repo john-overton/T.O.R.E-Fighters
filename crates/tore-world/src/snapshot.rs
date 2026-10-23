@@ -1,0 +1,1043 @@
+//! One plain-data picture of everything combat draws for a simulation tick.
+//!
+//! Live flight builds a [`RenderSnapshot`] at the end of every tick and keeps
+//! the last two. The frame's picture is their [`interpolate`]d mix at the
+//! frame's tick fraction, which the app owns (`CombatView`). Snapshots never
+//! feed back into sensors, physics or the AI. Nothing here draws: the vertex
+//! building that turns a snapshot into a picture is `render_snapshot.rs`.
+pub use crate::surface::SurfacePose;
+use std::collections::BTreeMap;
+use tore_formats::aircraft::AircraftId;
+use tore_sim::flight;
+use tore_sim::{
+    attitude::{Basis, Vector},
+    combat::live::{DAMAGE_SECTIONS, DamageSection, EffectKind},
+    ejection::Phase,
+    wreck,
+};
+
+/// Animated devices in snapshot order: gear, flaps, brake, hook, bay,
+/// exhaust, elevator, aileron, rudder, speed (feet per second), throttle,
+/// actual nozzle pitch/yaw, actual nacelle conversion and actual collective.
+pub const DEVICES: usize = 22;
+/// Six signed gun mount coordinates, followed by discrete group membership.
+pub const GUN_AIM: usize = 15;
+pub const GUN_GROUP: usize = 21;
+
+/// Everything combat draws after one simulation tick.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RenderSnapshot {
+    /// Combat tick this snapshot follows.
+    pub tick: u64,
+    /// The player's own aircraft, id 0. Live flight draws the player from its
+    /// full flight state; a replay rebuilds it with [`pose_state`].
+    pub player: AircraftPose,
+    /// Every combat target in target order: AI aircraft, straight-flight
+    /// fixtures and ground objects.
+    pub targets: Vec<AircraftPose>,
+    pub projectiles: Vec<ProjectilePose>,
+    pub effects: Vec<EffectPose>,
+    /// Craters and crash-site fires.
+    pub marks: Vec<MarkPose>,
+    pub debris: Vec<DebrisPose>,
+    /// Ejected pilots: the player's first, then AI aircraft in roster order.
+    pub pilots: Vec<PilotPose>,
+    /// Loaded aircraft models in draw order, one batch each.
+    pub models: Vec<AircraftId>,
+    /// The surface units that follow a route (columns, ships), in id order:
+    /// where each is now. A standing unit is part of the scenery and is not
+    /// listed. Empty in a mission with no routed unit.
+    pub surface: Vec<SurfacePose>,
+}
+impl RenderSnapshot {
+    #[allow(dead_code)] // Used by mission replays to find a recorded aircraft.
+    pub fn target(&self, id: u32) -> Option<&AircraftPose> {
+        self.targets.iter().find(|pose| pose.id == id)
+    }
+}
+
+/// Which airframe draws a pose, and in which pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Draw {
+    /// Not drawn: no model is loaded for it.
+    #[default]
+    Hidden,
+    /// Drawn in this identity's aircraft batch, over the model's start state.
+    Model(AircraftId),
+    /// Drawn in the combat pass with the player's airframe, over the player's
+    /// presented state: straight-flight fixtures and the player's debris.
+    Ownship,
+}
+
+/// One aircraft or ground object as drawn.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AircraftPose {
+    pub id: u32,
+    /// Exact aircraft identity; `None` for ground objects.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub aircraft: Option<AircraftId>,
+    pub draw: Draw,
+    pub position: Vector,
+    /// Yaw, pitch and bank as drawn. A straight-flight fixture is level and
+    /// faces along its velocity.
+    pub attitude: [f64; 3],
+    /// Ground-relative velocity, feet per second.
+    pub velocity: Vector,
+    /// The animated devices in [`DEVICES`] order. `None` when nothing
+    /// simulates them, so the drawing rules keep the neutral pose.
+    pub devices: Option<[f64; DEVICES]>,
+    /// Nozzle heat inputs as drawn. Aircraft drawn from a model start state
+    /// run their engine dry, so their nozzles follow the throttle.
+    pub engine: Engine,
+    pub damage: Damage,
+    /// Physical airborne presence; only airborne targets are drawn.
+    pub airborne: bool,
+    /// Wreck phase once destroyed. `Grounded` and `Exploded` hide an aircraft
+    /// drawn over the player's state (and the player itself).
+    pub wreck: Option<wreck::Phase>,
+    /// The player's crash flag, or a target with no hit points left.
+    pub crashed: bool,
+    /// The external stations it carries stores on, as drawn: pylons and
+    /// the stores still on them (B3). Empty for an aircraft with no combat
+    /// configuration, and for anything a client or a replay knows no loadout
+    /// for.
+    pub stores: Vec<StorePose>,
+}
+
+/// One external station's pylon and the stores still on it (B3,
+/// docs/spec/stores-on-pylons.md).
+#[derive(Debug, Default, PartialEq)]
+pub struct StorePose {
+    /// The source hardpoint record (PT ordinal) it hangs from: the drawing
+    /// finds the pylon's height under that aircraft's model with it.
+    pub hardpoint: u8,
+    /// The record's position, feet right, up and forward of the aircraft's
+    /// reference point: the right-hand pylon of a paired record.
+    pub mount: Vector,
+    pub rack: tore_sim::combat::hardpoints::Rack,
+    /// The store's own shape, when its record names one.
+    pub shape: Option<String>,
+    pub look: StoreLook,
+    /// Whole stores still on the station (pods, tanks and single stores).
+    pub items: u16,
+    /// Whole stores it was loaded with: the rack's layout.
+    pub loaded: u16,
+    /// A fitted body's length and diameter, feet (a pod or a tank, which
+    /// have no shape); zero for a store drawn with its own shape.
+    pub body: [f64; 2],
+}
+
+impl Clone for StorePose {
+    fn clone(&self) -> Self {
+        Self {
+            hardpoint: self.hardpoint,
+            mount: self.mount,
+            rack: self.rack,
+            shape: self.shape.clone(),
+            look: self.look,
+            items: self.items,
+            loaded: self.loaded,
+            body: self.body,
+        }
+    }
+    /// Writes over the shape's string in place, so a list of stores copied
+    /// over another allocates only for the stores it has more of.
+    fn clone_from(&mut self, source: &Self) {
+        self.hardpoint = source.hardpoint;
+        self.mount = source.mount;
+        self.rack = source.rack;
+        self.shape.clone_from(&source.shape);
+        self.look = source.look;
+        self.items = source.items;
+        self.loaded = source.loaded;
+        self.body = source.body;
+    }
+}
+
+impl StorePose {
+    /// The size it hangs by: the size its station's release uses
+    /// ([`tore_sim::combat::live::Station::size`]), so a drawn store and a
+    /// released one start at one point.
+    pub fn size(&self) -> tore_sim::combat::store_sizes::StoreSize {
+        use tore_sim::combat::store_sizes::{StoreSize, tank_body};
+        match self.look {
+            StoreLook::Store => StoreSize::of_shape(self.shape.as_deref()),
+            StoreLook::Pod if self.body[0] > 0. => StoreSize::body(self.body),
+            StoreLook::Pod => StoreSize::body(POD_BODY),
+            StoreLook::Tank if self.body[0] > 0. => StoreSize::body(self.body),
+            StoreLook::Tank => StoreSize::body(tank_body(2_000.)),
+        }
+    }
+}
+
+/// How a store is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StoreLook {
+    /// With its own shape (a missile or a bomb), or a plain body without one.
+    #[default]
+    Store,
+    /// A rocket pod: a fitted pod body, since retail has no pod shape.
+    Pod,
+    /// An external fuel tank: a fitted tank body, since retail has none.
+    Tank,
+}
+
+pub use tore_sim::combat::store_sizes::{POD_BODY, pod_body, tank_body};
+
+/// One drawn station's whole stores (B3): the part of an aircraft's stores
+/// that changes in flight, which the network (protocol 27, the Stores event)
+/// and mission recordings carry. Everything else a drawn store needs comes
+/// from the aircraft's loadout ([`store_poses_of`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StationStores {
+    /// Weapon station 0..31, or 55 + hardpoint for a tank row. Hardpoints 0
+    /// to 8 are codes 55 to 63. Hardpoint 9 (the F-16C inner wet pair and the
+    /// Rafale centreline) is code 64, which the Stores event carries in 7
+    /// bits (protocol 51).
+    pub station: u8,
+    /// Whole stores still on it (pods and single stores).
+    pub items: u16,
+}
+
+/// Whether a station's weapon is drawn on its pylon: every store but a gun,
+/// except a gun pod (the SUU-16, 2026-10-16), which is a store hung under the
+/// aircraft.
+fn drawn_store(weapon: &tore_formats::weapons::Weapon) -> bool {
+    use tore_sim::combat::live;
+    !live::is_gun(weapon) || live::is_gun_pod(weapon)
+}
+
+/// The stations `config` draws, in station order, with the whole stores
+/// each holds now: every drawn external or magazine station that is not a gun and was loaded
+/// at the start (`loaded`), whatever it holds now. `rounds` gives a
+/// station's rounds left. Tanks are not listed: they come from the loadout
+/// alone.
+pub fn station_stores(
+    config: &tore_sim::combat::live::Configuration,
+    rounds: impl Fn(usize) -> u32,
+    loaded: impl Fn(usize) -> bool,
+) -> Vec<StationStores> {
+    use tore_sim::combat::live;
+    let mut loads: Vec<_> = config
+        .stations
+        .iter()
+        .enumerate()
+        .filter(|(index, station)| {
+            station.rack.location().drawn() && drawn_store(&station.weapon) && loaded(*index)
+        })
+        .filter_map(|(index, station)| {
+            let per_item = live::pod_rounds(&station.weapon).max(1);
+            Some(StationStores {
+                station: u8::try_from(index).ok()?,
+                // A gun pod hangs as one store until it is removed, whatever
+                // rounds it has left (its hardware stays, a rocket pod's
+                // empties).
+                items: if live::is_gun_pod(&station.weapon) {
+                    1
+                } else {
+                    u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX)
+                },
+            })
+        })
+        .chain(config.tanks.iter().map(|tank| StationStores {
+            station: 55 + tank.hardpoint as u8,
+            items: tank.quantity,
+        }))
+        .collect();
+    loads.sort_by_key(|load| load.station);
+    loads
+}
+
+/// The stations `config` draws as the loadout built them: every station
+/// with a count full. A network client draws an aircraft the host has not
+/// told it about this way, and the host tells only an aircraft that differs.
+pub fn as_built_stores(config: &tore_sim::combat::live::Configuration) -> Vec<StationStores> {
+    station_stores(
+        config,
+        |index| {
+            config.stations.get(index).map_or(0, |s| {
+                u32::from(s.count) * tore_sim::combat::live::pod_rounds(&s.weapon)
+            })
+        },
+        |index| config.stations.get(index).is_some_and(|s| s.count > 0),
+    )
+}
+
+/// The stores `config` carries as drawn: every external or magazine station loaded at
+/// the mission's start, each with the whole stores it holds now. `rounds`
+/// gives a station's rounds left and `loaded` whether it was loaded at the
+/// start.
+pub fn store_poses(
+    config: &tore_sim::combat::live::Configuration,
+    rounds: impl Fn(usize) -> u32,
+    loaded: impl Fn(usize) -> bool,
+) -> Vec<StorePose> {
+    store_poses_of(config, &station_stores(config, rounds, loaded))
+}
+
+/// The stores `config` carries as drawn with `loads`, each listed station's
+/// whole stores ([`station_stores`]), plus the loadout's tanks. A listed
+/// station the loadout does not draw (out of range, an internal gun) is
+/// left out, so a load that does not fit the loadout draws nothing wrong.
+pub fn store_poses_of(
+    config: &tore_sim::combat::live::Configuration,
+    loads: &[StationStores],
+) -> Vec<StorePose> {
+    use tore_sim::combat::{hardpoints::Rack, live};
+    let hardpoint = |station: usize| {
+        config
+            .hardpoint_slots
+            .iter()
+            .position(|slot| *slot == Some(station))
+    };
+    let mut stores: Vec<StorePose> = loads
+        .iter()
+        .filter_map(|load| {
+            let index = usize::from(load.station);
+            let station = config.stations.get(index)?;
+            if !station.rack.location().drawn() || !drawn_store(&station.weapon) {
+                return None;
+            }
+            let pod = live::is_gun_pod(&station.weapon);
+            let per_item = live::pod_rounds(&station.weapon).max(1);
+            Some(StorePose {
+                hardpoint: u8::try_from(hardpoint(index)?).ok()?,
+                mount: station.mount,
+                rack: station.rack,
+                shape: station.weapon.shape.clone(),
+                look: if per_item > 1 || pod {
+                    StoreLook::Pod
+                } else {
+                    StoreLook::Store
+                },
+                body: if per_item > 1 || pod {
+                    pod_body(&station.weapon.source)
+                } else {
+                    [0.; 2]
+                },
+                items: load.items,
+                loaded: station.count,
+            })
+        })
+        .collect();
+    // Tanks: no record names a location, so a tank off the centreline
+    // pairs when there are two (fitted).
+    stores.extend(config.tanks.iter().filter_map(|tank| {
+        let store = tank.store.as_ref()?;
+        let quantity = loads
+            .iter()
+            .find(|load| load.station == 55 + tank.hardpoint as u8)
+            .map_or(tank.quantity, |load| load.items);
+        (quantity > 0).then(|| StorePose {
+            hardpoint: u8::try_from(tank.hardpoint).unwrap_or(u8::MAX),
+            mount: tank.mount,
+            rack: Rack {
+                // The record's location; a tank built without one (Rack's
+                // default, the centreline) off the centreline is a wing's.
+                location: if tank.rack.location().external()
+                    && !(tank.rack.location == 0 && tank.mount[0].abs() > 1e-9)
+                {
+                    tank.rack.location
+                } else if tank.mount[0].abs() > 1e-9 {
+                    4
+                } else {
+                    0
+                },
+                paired: tank.quantity > 1,
+                ..tank.rack
+            },
+            shape: None,
+            look: StoreLook::Tank,
+            items: quantity,
+            loaded: tank.quantity,
+            body: tank_body(f64::from(store.tank.fuel_weight)),
+        })
+    }));
+    stores
+}
+
+/// What the nozzle material reads, and whether the flame lights the scene.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Engine {
+    /// Engine running with internal fuel.
+    pub lit: bool,
+    /// Afterburner lit, as the flight model resolves it.
+    pub afterburner: bool,
+    /// Angular rates the X-31 paddles and plume follow.
+    pub rates: [f64; 3],
+    /// A rotorcraft's rotor speed, a share of its governed 100 percent; zero
+    /// on every other aircraft (VTOL overhaul slice P7). Presentation: the
+    /// rotor's sound and the drawn blade speed follow it.
+    pub rotor: f64,
+    /// How far the rotors have turned, seconds at 100 percent rotor speed
+    /// (slice P7b): the drawn blade angle. The flight's own
+    /// [`flight::powered::state::Drive::rotor_turns`] where a flight state
+    /// exists; a client's remote aircraft and a replay integrate the rotor
+    /// speed they receive instead.
+    pub rotor_turns: f64,
+    /// Each main rotor's disk tilt from its shaft, [longitudinal (forward
+    /// positive), lateral (right positive)] in radians, as the flight's
+    /// `lift_controls.rotors[..].tilt` (slice P7b): front or main rotor
+    /// first, then the CH-47's rear rotor or the V-22's right proprotor.
+    pub rotor_tilt: [[f64; 2]; 2],
+    /// The afterburner flame lights the scene
+    /// (docs/spec/engine-material.md#afterburner-glow): the player's while
+    /// its pilot is aboard and it has hit points, and an AI aircraft's
+    /// while it flies with hit points, whatever its nozzle draws.
+    pub flame: bool,
+}
+
+/// Damage as whole numbers. The drawn fractions derive from them exactly as
+/// live flight derives them, so thresholds compare the same way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Damage {
+    pub hp: i32,
+    pub initial_hp: i32,
+    /// Damage recorded against each section: nose, cockpit, core, left wing,
+    /// right wing and tail.
+    pub sections: [i32; DAMAGE_SECTIONS],
+    /// The section whose break selects the damaged model, once one broke.
+    pub structural: Option<DamageSection>,
+}
+impl Damage {
+    /// Lost fraction of the hit points; 1 selects the destroyed body.
+    pub fn fraction(&self) -> f64 {
+        (1. - f64::from(self.hp.max(0)) / f64::from(self.initial_hp.max(1))).clamp(0., 1.)
+    }
+    /// Per-section damage fractions for surface marks.
+    pub fn regions(&self) -> [f64; DAMAGE_SECTIONS] {
+        self.sections
+            .map(|amount| (f64::from(amount) / f64::from(self.initial_hp.max(1))).clamp(0., 1.))
+    }
+    /// Damage variant index, as the flight state stores it.
+    pub fn variant(&self) -> Option<usize> {
+        self.structural.map(|section| section as usize)
+    }
+}
+
+/// One projectile in flight.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ProjectilePose {
+    pub id: u32,
+    /// 0 is the player, otherwise the firing AI aircraft.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub owner: u32,
+    /// Source weapon record, for example `AIM120.JT`.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub weapon: String,
+    /// Shape drawn for a missile or store, when its record names one.
+    pub shape: Option<String>,
+    pub gun: bool,
+    /// A gun round drawn with a tracer ribbon.
+    pub tracer: bool,
+    pub position: Vector,
+    /// Position one tick earlier; tracers and missile strips span it.
+    pub previous: Vector,
+    pub direction: Vector,
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub target: Option<u32>,
+    /// Launched at the player.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub incoming: bool,
+    /// Speed in 1/256 feet per second, as simulated.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub speed_f8: i32,
+    /// Its motor is burning: a missile or rocket draws its flame only then
+    /// (bug B7). Gun rounds and bombs never are.
+    pub powered: bool,
+}
+
+/// One flare, chaff cloud, launch flash, hit or explosion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectPose {
+    pub kind: EffectKind,
+    pub position: Vector,
+    /// Ticks the effect has left.
+    pub ticks: u16,
+    /// The original explosion type it shows, when it has one.
+    pub blast: Option<u8>,
+    /// How big it is drawn against its type's size, percent
+    /// ([`tore_sim::combat::blast_scale`]); 100 for anything that is not a
+    /// weapon's impact.
+    pub scale: u8,
+}
+
+/// One crater or crash-site fire.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MarkPose {
+    pub kind: tore_sim::combat::blast::MarkKind,
+    pub position: Vector,
+    /// Ticks since it started, which sets a fire's frame.
+    pub age: u64,
+    /// A fire's strength, 1 until it fades in its last minute.
+    pub strength: f32,
+    /// A crater's drawn scale, percent (`Mark::scale`).
+    pub scale: u8,
+}
+impl MarkPose {
+    pub fn of(mark: &tore_sim::combat::blast::Mark, tick: u64) -> Self {
+        Self {
+            kind: mark.kind,
+            position: mark.position,
+            age: tick.saturating_sub(mark.born),
+            strength: mark.strength(),
+            scale: mark.scale,
+        }
+    }
+}
+
+/// One detached piece of a destroyed aircraft.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DebrisPose {
+    /// The destroyed aircraft; 0 is the player.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub owner: u32,
+    pub draw: Draw,
+    pub position: Vector,
+    pub attitude: [f64; 3],
+    /// Damage variant drawn, from the owner's structural section.
+    pub variant: Option<usize>,
+}
+
+/// One ejected pilot, seat or parachute.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PilotPose {
+    /// The aircraft the pilot left; 0 is the player.
+    #[allow(dead_code)] // Read by mission recordings and exports.
+    pub owner: u32,
+    pub position: Vector,
+    pub heading: f64,
+    pub phase: Phase,
+    /// The aircraft's second crew member rather than its pilot: a two-seater
+    /// ejects two seats (see [`flight::State::crew_escape`]).
+    pub crew: bool,
+}
+
+pub fn devices(s: &flight::State) -> [f64; DEVICES] {
+    [
+        s.gear,
+        s.flaps,
+        s.brake,
+        s.hook,
+        s.bay,
+        s.exhaust,
+        s.elevator,
+        s.aileron,
+        s.rudder,
+        s.speed,
+        s.throttle,
+        s.lift_controls.vector_pitch_actual,
+        s.lift_controls.vector_yaw_actual,
+        s.lift_controls.conversion_actual,
+        s.lift_controls.collective_actual,
+        s.gun_aim[0][0],
+        s.gun_aim[0][1],
+        s.gun_aim[1][0],
+        s.gun_aim[1][1],
+        s.gun_aim[2][0],
+        s.gun_aim[2][1],
+        f64::from(s.gun_group),
+    ]
+}
+pub fn set_devices(s: &mut flight::State, devices: [f64; DEVICES]) {
+    let group;
+    [
+        s.gear,
+        s.flaps,
+        s.brake,
+        s.hook,
+        s.bay,
+        s.exhaust,
+        s.elevator,
+        s.aileron,
+        s.rudder,
+        s.speed,
+        s.throttle,
+        s.lift_controls.vector_pitch_actual,
+        s.lift_controls.vector_yaw_actual,
+        s.lift_controls.conversion_actual,
+        s.lift_controls.collective_actual,
+        s.gun_aim[0][0],
+        s.gun_aim[0][1],
+        s.gun_aim[1][0],
+        s.gun_aim[1][1],
+        s.gun_aim[2][0],
+        s.gun_aim[2][1],
+        group,
+    ] = devices;
+    s.gun_group = if group.is_finite() && group.fract() == 0. && (0. ..=7.).contains(&group) {
+        group as u8
+    } else {
+        0
+    };
+}
+
+/// Apply combat-owned mount poses only to a display clone, leaving flight devices alone.
+pub fn set_gun_devices(s: &mut flight::State, devices: &[f64; DEVICES]) {
+    s.gun_aim = std::array::from_fn(|mount| {
+        [
+            devices[GUN_AIM + mount * 2],
+            devices[GUN_AIM + mount * 2 + 1],
+        ]
+    });
+    let group = devices[GUN_GROUP];
+    s.gun_group = if group.is_finite() && group.fract() == 0. && (0. ..=7.).contains(&group) {
+        group as u8
+    } else {
+        0
+    };
+}
+
+/// A flight's rotor blade angle and disk tilts, for its [`Engine`] (slice
+/// P7b): zero on an aircraft without rotors.
+pub fn rotor_pose(s: &flight::State) -> (f64, [[f64; 2]; 2]) {
+    (
+        s.lift_controls.drive.rotor_turns,
+        s.lift_controls.rotors.map(|rotor| rotor.tilt),
+    )
+}
+
+/// Draws a rotorcraft's rotors from `engine`: rotor speed, blade angle and
+/// disk tilts (slice P7b).
+pub fn set_rotor(s: &mut flight::State, engine: &Engine) {
+    let drive = &mut s.lift_controls.drive;
+    drive.rotor_speed = engine.rotor;
+    drive.rotor_turns = engine.rotor_turns;
+    for (rotor, tilt) in s.lift_controls.rotors.iter_mut().zip(engine.rotor_tilt) {
+        rotor.tilt = tilt;
+    }
+}
+
+/// The picture between two consecutive snapshots at tick fraction `alpha`.
+///
+/// Targets blend position and attitude from the previous tick and lerp their
+/// devices; everything else is the current tick's. A target new this tick is
+/// drawn where it is. The player follows its own presented-state rules. With
+/// no previous snapshot (the first tick after a restart) the player blends
+/// with itself, as live flight does.
+pub fn interpolate(
+    previous: Option<&RenderSnapshot>,
+    current: &RenderSnapshot,
+    alpha: f64,
+) -> RenderSnapshot {
+    let alpha = alpha.clamp(0., 1.);
+    let before: BTreeMap<u32, &AircraftPose> = previous
+        .map(|snapshot| {
+            snapshot
+                .targets
+                .iter()
+                .map(|pose| (pose.id, pose))
+                .collect()
+        })
+        .unwrap_or_default();
+    RenderSnapshot {
+        tick: current.tick,
+        player: presented_player(
+            previous.map_or(&current.player, |snapshot| &snapshot.player),
+            &current.player,
+            alpha,
+        ),
+        targets: current
+            .targets
+            .iter()
+            .map(|pose| blend(before.get(&pose.id).copied(), pose, alpha))
+            .collect(),
+        projectiles: current.projectiles.clone(),
+        effects: current.effects.clone(),
+        marks: current.marks.clone(),
+        debris: current.debris.clone(),
+        pilots: current.pilots.clone(),
+        models: current.models.clone(),
+        surface: blend_surface(
+            previous.map(|p| p.surface.as_slice()),
+            &current.surface,
+            alpha,
+        ),
+    }
+}
+
+/// The routed surface units between two snapshots at tick fraction `alpha`
+/// (already clamped): position and attitude blend from the previous tick; a
+/// unit new this tick is drawn where it is.
+pub fn blend_surface(
+    previous: Option<&[SurfacePose]>,
+    current: &[SurfacePose],
+    alpha: f64,
+) -> Vec<SurfacePose> {
+    current
+        .iter()
+        .map(|pose| {
+            let mut pose = pose.clone();
+            if let Some(before) =
+                previous.and_then(|all| all.iter().find(|before| before.id == pose.id))
+            {
+                pose.position = std::array::from_fn(|i| {
+                    before.position[i] + (pose.position[i] - before.position[i]) * alpha
+                });
+                let [yaw, pitch, bank] = before.attitude;
+                let [next_yaw, next_pitch, next_bank] = pose.attitude;
+                pose.attitude = Basis::new(yaw, pitch, bank)
+                    .blended(Basis::new(next_yaw, next_pitch, next_bank), alpha)
+                    .angles();
+            }
+            pose
+        })
+        .collect()
+}
+
+/// One target at tick fraction `alpha` (already clamped).
+pub fn blend(previous: Option<&AircraftPose>, current: &AircraftPose, alpha: f64) -> AircraftPose {
+    let mut pose = current.clone();
+    if let Some(previous) = previous {
+        pose.position = std::array::from_fn(|i| {
+            previous.position[i] + (current.position[i] - previous.position[i]) * alpha
+        });
+        let [yaw, pitch, bank] = previous.attitude;
+        let [next_yaw, next_pitch, next_bank] = current.attitude;
+        pose.attitude = Basis::new(yaw, pitch, bank)
+            .blended(Basis::new(next_yaw, next_pitch, next_bank), alpha)
+            .angles();
+    }
+    if let Some(previous) = previous {
+        blend_rotors(&mut pose.engine, &previous.engine, alpha);
+    }
+    if let Some(after) = current.devices {
+        let before = previous.and_then(|pose| pose.devices).unwrap_or(after);
+        pose.devices = Some(std::array::from_fn(|i| {
+            if i == GUN_GROUP {
+                after[i]
+            } else {
+                before[i] + (after[i] - before[i]) * alpha
+            }
+        }));
+    }
+    pose
+}
+
+/// The player between ticks, as [`flight::State::presented`] draws it: a
+/// crashed aircraft that is not falling holds, otherwise position, attitude,
+/// velocity and every device but the throttle follow the tick fraction.
+fn presented_player(previous: &AircraftPose, current: &AircraftPose, alpha: f64) -> AircraftPose {
+    if current.crashed && current.wreck != Some(wreck::Phase::Falling) {
+        return current.clone();
+    }
+    let lerp = |a: f64, b: f64| a + (b - a) * alpha;
+    let mut pose = current.clone();
+    pose.position = std::array::from_fn(|i| lerp(previous.position[i], current.position[i]));
+    let [yaw, pitch, bank] = previous.attitude;
+    let [next_yaw, next_pitch, next_bank] = current.attitude;
+    pose.attitude = Basis::new(yaw, pitch, bank)
+        .blended(Basis::new(next_yaw, next_pitch, next_bank), alpha)
+        .angles();
+    pose.velocity = std::array::from_fn(|i| lerp(previous.velocity[i], current.velocity[i]));
+    if let (Some(before), Some(mut after)) = (previous.devices, current.devices) {
+        for (slot, (value, before)) in after.iter_mut().zip(before).enumerate() {
+            if slot != 10 && slot != GUN_GROUP {
+                *value = lerp(before, *value);
+            }
+        }
+        pose.devices = Some(after);
+    }
+    blend_rotors(&mut pose.engine, &previous.engine, alpha);
+    pose
+}
+
+/// The rotors turn and tilt between the ticks as the flight's presented
+/// state does (slice P7b): `engine` is the current tick's.
+fn blend_rotors(engine: &mut Engine, before: &Engine, alpha: f64) {
+    let lerp = |a: f64, b: f64| a + (b - a) * alpha;
+    engine.rotor_turns = lerp(before.rotor_turns, engine.rotor_turns);
+    engine.rotor_tilt = std::array::from_fn(|k| {
+        std::array::from_fn(|i| lerp(before.rotor_tilt[k][i], engine.rotor_tilt[k][i]))
+    });
+}
+
+pub fn wreck_in(phase: wreck::Phase) -> wreck::Wreck {
+    let mut wreck = wreck::Wreck::new(0, 0, [0.; 3]);
+    wreck.phase = phase;
+    wreck
+}
+
+/// A drawable flight state for `pose`. `template` supplies the airframe's
+/// flight model and every field the picture does not read, and should be a
+/// start state (engine running, full fuel, undamaged systems). Without
+/// devices the neutral model pose applies: gear, flaps, exhaust and bay in.
+#[allow(dead_code)] // Used by mission replays to draw recorded aircraft.
+pub fn pose_state(template: &flight::State, pose: &AircraftPose) -> flight::State {
+    let mut s = template.clone();
+    s.position = pose.position;
+    [s.yaw, s.pitch, s.bank] = pose.attitude;
+    s.velocity = pose.velocity;
+    match pose.devices {
+        Some(devices) => set_devices(&mut s, devices),
+        None => {
+            [s.gear, s.flaps, s.exhaust, s.bay] = [0.; 4];
+            s.lift_controls.vector_pitch_actual = 0.;
+            s.lift_controls.vector_yaw_actual = 0.;
+            s.lift_controls.conversion_actual = 0.;
+            s.lift_controls.collective_actual = 0.;
+            s.gun_aim = [[0.; 2]; 3];
+            s.gun_group = 0;
+        }
+    }
+    s.engine = pose.engine.lit;
+    s.burner = pose.engine.afterburner;
+    s.auxiliary_rates = pose.engine.rates;
+    // Only a rotorcraft's rotor speed, blade angle and disk tilt are drawn
+    // from the pose; the rest keep the template's.
+    if pose.engine.rotor > 0. {
+        set_rotor(&mut s, &pose.engine);
+    }
+    s.crashed = pose.crashed;
+    s.wreck = pose.wreck.map(wreck_in);
+    s.damage_fraction = pose.damage.fraction();
+    s.damage_variant = pose.damage.variant();
+    s.damage_regions = pose.damage.regions();
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tore_sim::combat::live;
+
+    fn pose(id: u32, position: Vector, attitude: [f64; 3]) -> AircraftPose {
+        AircraftPose {
+            id,
+            position,
+            attitude,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_gun_pod_is_drawn_as_one_pod_whatever_rounds_it_has_left() {
+        use tore_sim::combat::hardpoints::{Location, Rack};
+        let mut config = crate::test_support::combat_fixture(false)
+            .own()
+            .configuration()
+            .clone();
+        let station = &mut config.stations[0];
+        station.weapon.source = "SUU16.JT".into();
+        station.count = 1;
+        station.internal = false;
+        station.rack = Rack {
+            location: Location::Centerline.byte(),
+            ..Rack::default()
+        };
+        config.hardpoint_slots = vec![Some(0)];
+        let loads = station_stores(&config, |_| 0, |index| index == 0);
+        // Out of ammunition, the pod hangs on.
+        assert_eq!(
+            loads,
+            [StationStores {
+                station: 0,
+                items: 1
+            }]
+        );
+        let poses = store_poses_of(&config, &loads);
+        assert_eq!(poses.len(), 1);
+        assert_eq!(poses[0].look, StoreLook::Pod);
+        assert_eq!(poses[0].body, pod_body("SUU16.JT"));
+        assert_eq!(poses[0].items, 1);
+        // A gun that is not a pod is still not drawn.
+        config.stations[0].weapon.source = "M61.JT".into();
+        assert!(station_stores(&config, |_| 9, |_| true).is_empty());
+    }
+
+    #[test]
+    fn devices_follow_the_tick_fraction() {
+        let mut previous = pose(1, [0.; 3], [0.; 3]);
+        previous.devices = Some([
+            1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        ]);
+        let mut current = previous.clone();
+        current.devices = Some([
+            0., 0., 1., 1., 1., 1., 0.4, -0.4, 0.2, 400., 1., 0.8, -0.6, 0.4, 0.2, 0., 0., 0., 0.,
+            0., 0., 0.,
+        ]);
+        let at = |alpha| blend(Some(&previous), &current, alpha).devices.unwrap();
+        assert_eq!(at(0.)[..2], [1., 1.]);
+        let quarter = at(0.25);
+        assert_eq!(
+            [quarter[0], quarter[1], quarter[2], quarter[9]],
+            [0.75, 0.75, 0.25, 100.]
+        );
+        assert_eq!(quarter[6..9], [0.1, -0.1, 0.05]);
+        assert_eq!(quarter[11..15], [0.2, -0.15, 0.1, 0.05]);
+        assert_eq!(at(1.)[..2], [0., 0.]);
+        // First seen this tick: drawn as simulated.
+        assert_eq!(blend(None, &current, 0.5).devices, current.devices);
+        // Nothing simulates them: the drawing rules keep the neutral pose.
+        current.devices = None;
+        assert_eq!(blend(Some(&previous), &current, 0.5).devices, None);
+    }
+
+    #[test]
+    fn rotors_turn_and_tilt_with_the_tick_fraction() {
+        let mut previous = pose(1, [0.; 3], [0.; 3]);
+        previous.engine.rotor = 0.9;
+        previous.engine.rotor_turns = 100.;
+        previous.engine.rotor_tilt = [[0.02, 0.], [-0.04, 0.08]];
+        let mut current = previous.clone();
+        current.engine.rotor = 0.92;
+        current.engine.rotor_turns = 100. + 0.92 / 120.;
+        current.engine.rotor_tilt = [[0.06, -0.04], [0., 0.]];
+        let quarter = blend(Some(&previous), &current, 0.25).engine;
+        assert!((quarter.rotor_turns - (100. + 0.23 / 120.)).abs() < 1e-12);
+        for (drawn, expected) in quarter
+            .rotor_tilt
+            .iter()
+            .flatten()
+            .zip([0.03, -0.01, -0.03, 0.06])
+        {
+            assert!((drawn - expected).abs() < 1e-12, "{drawn} {expected}");
+        }
+        // The rotor speed is the current tick's, as the rest of the engine.
+        assert_eq!(quarter.rotor, 0.92);
+        assert_eq!(blend(None, &current, 0.5).engine, current.engine);
+    }
+
+    #[test]
+    fn a_rotorcraft_pose_draws_its_rotors_and_another_keeps_the_templates() {
+        let template = flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
+        let mut rotorcraft = pose(3, [0.; 3], [0.; 3]);
+        rotorcraft.engine.rotor = 0.84;
+        rotorcraft.engine.rotor_turns = 42.5;
+        rotorcraft.engine.rotor_tilt = [[0.1, -0.1], [0.05, 0.]];
+        let s = pose_state(&template, &rotorcraft);
+        assert_eq!(s.lift_controls.drive.rotor_speed, 0.84);
+        assert_eq!(s.lift_controls.drive.rotor_turns, 42.5);
+        assert_eq!(
+            s.lift_controls.rotors.map(|r| r.tilt),
+            [[0.1, -0.1], [0.05, 0.]]
+        );
+        let mut fixed_wing = rotorcraft.clone();
+        fixed_wing.engine.rotor = 0.;
+        let s = pose_state(&template, &fixed_wing);
+        assert_eq!(s.lift_controls.drive, template.lift_controls.drive);
+        assert_eq!(s.lift_controls.rotors, template.lift_controls.rotors);
+    }
+
+    #[test]
+    fn targets_blend_from_the_previous_tick_and_new_ones_stay_put() {
+        let previous = RenderSnapshot {
+            targets: vec![pose(1, [0., 0., 0.], [0.1, 0., 0.])],
+            ..Default::default()
+        };
+        let mut current = RenderSnapshot {
+            targets: vec![
+                pose(1, [10., 20., 30.], [0.3, 0.1, 0.2]),
+                pose(2, [5., 5., 5.], [1., 0., 0.]),
+            ],
+            ..Default::default()
+        };
+        current.targets[0].velocity = [7., 8., 9.];
+        current.targets[0].damage.hp = 3;
+        let mid = interpolate(Some(&previous), &current, 0.5);
+        assert_eq!(mid.targets[0].position, [5., 10., 15.]);
+        assert!((mid.targets[0].attitude[0] - 0.2).abs() < 0.01);
+        // Everything but the pose is the current tick's.
+        assert_eq!(mid.targets[0].velocity, [7., 8., 9.]);
+        assert_eq!(mid.targets[0].damage.hp, 3);
+        assert_eq!(mid.targets[1], current.targets[1]);
+        // Tick fractions outside one tick clamp to it.
+        assert_eq!(
+            interpolate(Some(&previous), &current, 3.).targets[0].position,
+            [10., 20., 30.]
+        );
+        // Right after a restart nothing blends.
+        assert_eq!(interpolate(None, &current, 0.5).targets, current.targets);
+    }
+
+    #[test]
+    fn a_grounded_player_wreck_holds_and_the_throttle_never_blends() {
+        let mut previous = pose(0, [0.; 3], [0.; 3]);
+        previous.devices = Some([0.; DEVICES]);
+        let mut current = pose(0, [100., 0., 0.], [0.; 3]);
+        current.devices = Some([1.; DEVICES]);
+        let snapshot = |player: &AircraftPose| RenderSnapshot {
+            player: player.clone(),
+            ..Default::default()
+        };
+        let mid = interpolate(Some(&snapshot(&previous)), &snapshot(&current), 0.5).player;
+        assert_eq!(mid.position, [50., 0., 0.]);
+        let devices = mid.devices.unwrap();
+        assert!(
+            devices
+                .iter()
+                .enumerate()
+                .filter(|(slot, _)| *slot != 10 && *slot != GUN_GROUP)
+                .all(|(_, v)| *v == 0.5)
+        );
+        assert_eq!(devices[10], 1.);
+        assert_eq!(devices[GUN_GROUP], 1.);
+        current.crashed = true;
+        current.wreck = Some(wreck::Phase::Grounded);
+        let held = interpolate(Some(&snapshot(&previous)), &snapshot(&current), 0.5).player;
+        assert_eq!(held, current);
+        current.wreck = Some(wreck::Phase::Falling);
+        let falling = interpolate(Some(&snapshot(&previous)), &snapshot(&current), 0.5).player;
+        assert_eq!(falling.position, [50., 0., 0.]);
+    }
+
+    #[test]
+    fn damage_fractions_match_the_live_whole_number_rules() {
+        let target = |hp, initial_hp, amounts| {
+            let mut t = live::Target {
+                aircraft: None,
+                role: tore_sim::combat::missiles::TargetRole::Aircraft,
+                heat: tore_sim::combat::missiles::seeker::Heat::Unknown,
+                radar_emitting: false,
+                id: 1,
+                position: [0.; 3],
+                velocity: [0.; 3],
+                basis: Basis::new(0., 0., 0.),
+                configuration: tore_sim::sensors::Configuration::CLEAN,
+                signature: Default::default(),
+                jammer: None,
+                jammer_active: false,
+                airborne: true,
+                on_ground: false,
+                radius: 28.,
+                hp,
+                initial_hp,
+                fragment_offsets: [[0.; 3]; 2],
+                wreck: None,
+                wreck_power: Default::default(),
+                fragment_released: false,
+                localized_damage: Default::default(),
+                faults: Default::default(),
+                category: 0,
+                side: tore_sim::combat::live::NO_SIDE,
+            };
+            t.localized_damage.amounts = amounts;
+            t.localized_damage.structural_section = Some(DamageSection::Tail);
+            t
+        };
+        for (hp, initial_hp, amounts) in [
+            (100, 100, [0; DAMAGE_SECTIONS]),
+            (37, 113, [1, 2, 3, 40, 50, 60]),
+            (0, 90, [90, 0, 0, 0, 0, 200]),
+            (-5, 0, [3, 0, 0, 0, 0, 0]),
+        ] {
+            let t = target(hp, initial_hp, amounts);
+            let damage = Damage {
+                hp,
+                initial_hp,
+                sections: amounts,
+                structural: t.localized_damage.structural_section,
+            };
+            assert_eq!(damage.fraction().to_bits(), t.damage_fraction().to_bits());
+            assert_eq!(
+                damage.regions().map(f64::to_bits),
+                t.localized_damage.fractions(initial_hp).map(f64::to_bits)
+            );
+            assert_eq!(damage.variant(), Some(DamageSection::Tail as usize));
+        }
+    }
+}
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "snapshot_checkpoint.rs"]
+mod checkpoint;

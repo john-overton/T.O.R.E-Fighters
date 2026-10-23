@@ -811,3 +811,7 @@ mod tests {
         assert!(ScriptReason::IrLaunch > ScriptReason::RadarLaunch);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "threat_checkpoint.rs"]
+mod checkpoint;

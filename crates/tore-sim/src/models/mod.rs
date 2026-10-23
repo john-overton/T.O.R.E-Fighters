@@ -9,9 +9,11 @@ pub mod mig21;
 pub mod mig23;
 pub mod mig29;
 pub mod rafale_c;
+pub mod strike_class;
 pub mod su25;
 pub mod su27;
 pub mod su35;
+pub mod variety;
 pub mod x31;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -23,6 +25,10 @@ pub struct Tuning {
     pub rudder_rate: f64,
     /// Fitted drag/weight per squared lateral airspeed fraction.
     pub sideslip_drag: f64,
+    /// Fitted lateral slip damping, per second.
+    pub sideslip_force: f64,
+    /// Fitted roll rate per lateral airspeed fraction.
+    pub sideslip_roll: f64,
     pub trim_degrees: f64,
     pub pull_aoa_degrees_per_g: f64,
     pub thrust_lapse_feet: f64,
@@ -42,6 +48,8 @@ impl Tuning {
             self.alignment_rate,
             self.rudder_rate,
             self.sideslip_drag,
+            self.sideslip_force,
+            self.sideslip_roll,
             self.trim_degrees,
             self.pull_aoa_degrees_per_g,
             self.tire_scrub_rate,
@@ -86,9 +94,84 @@ pub enum AircraftModel {
     Mig23(mig23::Mig23FlightModel),
     Su35(su35::Su35FlightModel),
     F22(f22::F22FlightModel),
+    Variety(variety::VarietyFlightModel),
 }
+/// Stall reference fractions, one per aircraft (see
+/// [`AircraftModel::stall_reference_fraction`]). `fitted`: an agent decision
+/// (2026-09-30) fitted to John's unsourced liftoff and approach ranges, not a
+/// real weight. The reference weight is the empty weight times the fraction, so
+/// a lower fraction means higher liftoff and approach speeds and a longer roll.
+/// The F-22, F-22N and F/A-XX share one model and so one value. Each value sits
+/// at least 0.02 clear of the liftoff jumps the model's G rows make at larger
+/// scales (docs/spec/takeoff-ground-contact.md). The X-31 has no figure from
+/// John and keeps 1.00. The Su-25's was refit from 0.55 to 0.51 when its record
+/// was corrected (2026-10-13, docs/spec/aircraft-records.md): the same stall
+/// scale at its default takeoff load, on the corrected empty weight.
+pub const STALL_REFERENCE_FRACTIONS: [(&str, f64); 12] = [
+    ("F/A-18D", 1.33),
+    ("Rafale C", 1.38),
+    ("F-14D", 0.85),
+    ("A-4E", 1.20),
+    ("X-31", 1.00),
+    ("MiG-29", 1.20),
+    ("Su-27", 0.86),
+    ("MiG-21", 0.73),
+    ("Su-25", 0.51),
+    ("MiG-23", 0.78),
+    ("Su-35", 0.95),
+    ("F-22 family", 0.42),
+];
 impl AircraftModel {
+    /// The fitted stall reference fraction for this aircraft: its reference
+    /// weight for the weight-scaled stall speed is its empty weight times this.
+    /// Keyed by the aircraft's own model (its exact identity), never by weight,
+    /// and read the same for the player and every AI aircraft.
+    pub fn stall_reference_fraction(&self) -> f64 {
+        if matches!(self, Self::Variety(_)) {
+            return 1.;
+        }
+        STALL_REFERENCE_FRACTIONS[match self {
+            Self::F18(_) => 0,
+            Self::RafaleC(_) => 1,
+            Self::F14D(_) => 2,
+            Self::A4E(_) => 3,
+            Self::X31(_) => 4,
+            Self::Mig29(_) => 5,
+            Self::Su27(_) => 6,
+            Self::Mig21(_) => 7,
+            Self::Su25(_) => 8,
+            Self::Mig23(_) => 9,
+            Self::Su35(_) => 10,
+            Self::F22(_) => 11,
+            Self::Variety(_) => unreachable!(),
+        }]
+        .1
+    }
+    /// Authored fixed-gear behavior for the reviewed always-present rotorcraft gear.
+    pub fn fixed_gear(&self) -> bool {
+        matches!(self, Self::Variety(m) if matches!(m.id,
+            tore_formats::aircraft::AircraftId::Ah64 | tore_formats::aircraft::AircraftId::Ch47))
+    }
+    /// A rotorcraft's level cruise power at full internal fuel, ft·lbf/s
+    /// (the AI's fuel planning figure, slice HF3).
+    pub fn rotor_cruise_power(&self) -> Option<f64> {
+        match self {
+            Self::Variety(m) => m.cruise_power,
+            _ => None,
+        }
+    }
+    pub fn powered_lift(&self) -> Option<variety::PoweredLift> {
+        match self {
+            Self::Variety(m) => m.lift.as_deref().copied(),
+            _ => None,
+        }
+    }
     pub fn for_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
+        if variety::VarietyFlightModel::identity(a.id).is_some() {
+            return Ok(Self::Variety(variety::VarietyFlightModel::from_aircraft(
+                a,
+            )?));
+        }
         match (a.name.as_str(), a.shape.as_str()) {
             ("F/A-18D", "F18.SH") => Ok(Self::F18(f18::F18FlightModel::from_aircraft(a)?)),
             ("RAFALE", "RAF.SH") => Ok(Self::RafaleC(rafale_c::RafaleCFlightModel::from_aircraft(
@@ -117,6 +200,26 @@ impl AircraftModel {
         c.tuning = tuning;
         self.set_configuration(c)
     }
+    /// The configuration's shared allocation. A configuration is never
+    /// changed in place ([`Self::set_configuration`] installs a new one), so
+    /// while one is held its allocation is that configuration.
+    pub fn configuration_arc(&self) -> &std::sync::Arc<config::Configuration> {
+        match self {
+            Self::F18(m) => &m.configuration,
+            Self::RafaleC(m) => &m.configuration,
+            Self::F14D(m) => &m.configuration,
+            Self::A4E(m) => &m.configuration,
+            Self::X31(m) => &m.configuration,
+            Self::Mig29(m) => &m.configuration,
+            Self::Su27(m) => &m.configuration,
+            Self::Mig21(m) => &m.configuration,
+            Self::Su25(m) => &m.configuration,
+            Self::Mig23(m) => &m.configuration,
+            Self::Su35(m) => &m.configuration,
+            Self::F22(m) => &m.configuration,
+            Self::Variety(m) => &m.configuration,
+        }
+    }
     /// Validate before replacing; clones and other aircraft retain their configuration.
     pub fn set_configuration(
         &mut self,
@@ -137,6 +240,7 @@ impl AircraftModel {
             Self::Mig23(m) => m.configuration = configuration,
             Self::Su35(m) => m.configuration = configuration,
             Self::F22(m) => m.configuration = configuration,
+            Self::Variety(m) => m.configuration = configuration,
         }
         Ok(())
     }
@@ -156,6 +260,7 @@ impl FlightModel for AircraftModel {
             Self::Mig23(m) => m.configuration(),
             Self::Su35(m) => m.configuration(),
             Self::F22(m) => m.configuration(),
+            Self::Variety(m) => m.configuration(),
         }
     }
     fn response(&self, c: Conditions) -> Response {
@@ -172,6 +277,7 @@ impl FlightModel for AircraftModel {
             Self::Mig23(m) => m.response(c),
             Self::Su35(m) => m.response(c),
             Self::F22(m) => m.response(c),
+            Self::Variety(m) => m.response(c),
         }
     }
     fn tuning(&self) -> Tuning {
@@ -188,6 +294,7 @@ impl FlightModel for AircraftModel {
             Self::Mig23(m) => m.tuning(),
             Self::Su35(m) => m.tuning(),
             Self::F22(m) => m.tuning(),
+            Self::Variety(m) => m.tuning(),
         }
     }
 }
@@ -311,6 +418,49 @@ mod additional_tests {
     use super::*;
     use crate::flight::{PilotCommand, State, Switch};
     use tore_formats::aircraft::AircraftId;
+    #[test]
+    fn stall_reference_fraction_is_fitted_per_aircraft_identity() {
+        // The fitted values (`fitted`, 2026-09-30, see the takeoff spec), read
+        // from the model itself, so the player and every AI aircraft get them.
+        let mut seen = Vec::new();
+        for (id, name, shape, want) in [
+            (AircraftId::F18, "F/A-18D", "F18.SH", 1.33),
+            (AircraftId::Rafale, "RAFALE", "RAF.SH", 1.38),
+            (AircraftId::F14, "F-14", "F14.SH", 0.85),
+            (AircraftId::A4E, "A-4E", "A4.SH", 1.20),
+            (AircraftId::X31, "X-31", "F31.SH", 1.00),
+            (AircraftId::Mig29, "MiG-29", "MIG29.SH", 1.20),
+            (AircraftId::Su27, "Su-27", "SU27.SH", 0.86),
+            (AircraftId::Mig21, "MiG-21", "MIG21.SH", 0.73),
+            (AircraftId::Su25, "Su-25", "SU25.SH", 0.51),
+            (AircraftId::Mig23, "MiG-23", "MIG23.SH", 0.78),
+            (AircraftId::Su35, "Su-35", "SU35.SH", 0.95),
+            (AircraftId::F22, "F-22", "F22.SH", 0.42),
+            (AircraftId::F22n, "F-22", "F22N.SH", 0.42),
+        ] {
+            let mut a = crate::flight::integration_tests::profile();
+            a.id = id;
+            a.name = name.into();
+            a.shape = shape.into();
+            let model = AircraftModel::for_aircraft(&a).unwrap();
+            assert_eq!(model.stall_reference_fraction(), want, "{name} {shape}");
+            // The bare aircraft (no fuel, no stores) is at 1 / sqrt(fraction).
+            let mut state = State::from_model(model, [0., 10000., 0.]);
+            state.enable_research(1).unwrap();
+            state.fuel = 0.;
+            state.payload_lbs = 0.;
+            let scale = state.target_stall_scale();
+            assert!(
+                (scale - 1. / f64::sqrt(want)).abs() < 1e-9,
+                "{name} {scale}"
+            );
+            seen.push(want);
+        }
+        // Twelve rows in the table, thirteen models (the F-22 family shares one).
+        assert_eq!(STALL_REFERENCE_FRACTIONS.len(), 12);
+        assert_eq!(seen.len(), 13);
+        assert!(STALL_REFERENCE_FRACTIONS.iter().all(|(_, f)| *f > 0.));
+    }
     #[test]
     fn independent_models_preserve_identity_and_nonburning_aircraft_controls() {
         for (id, name, has_hook, ab) in [

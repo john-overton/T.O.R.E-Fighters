@@ -1,0 +1,215 @@
+{
+  "APA": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Chitre": "MPCE",
+      "Tocumen": "MPTO",
+      "Rio Hato": "MPSM",
+      "Punta Cocos": "MP26",
+      "Penonome": "MP18"
+    }
+  },
+  "BAL": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Liepaja": "EVLA",
+      "Vilnius": "EYVI",
+      "Parnu": "EEPU",
+      "Pskov": "ULOO",
+      "Siauliai": "EYSA"
+    }
+  },
+  "CUB": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Key West": "KNQX",
+      "San Julian": "MUSJ",
+      "Varadero": "MUVR",
+      "Cienfuegos": "MUCF"
+    }
+  },
+  "EGY": {
+    "grid": [
+      208,
+      200
+    ],
+    "airfields": {
+      "Cairo": "HECA",
+      "Bengurion": "LLBG",
+      "Ras Nasrani": "HESH",
+      "Al Arish": "HEAR",
+      "Fayid": "EG-0006",
+      "Bur Sa'id": "HEPS",
+      "Aqaba": "OJAQ",
+      "Hatserim": "LLHB"
+    }
+  },
+  "FRA": {
+    "grid": [
+      208,
+      200
+    ],
+    "airfields": {
+      "Bournemouth": "EGHH",
+      "Morlaix": "LFRU",
+      "Reims": "FR-1241",
+      "Brussels": "EBBR",
+      "Chateaudun": "LFOC",
+      "Florennes": "EBFS",
+      "St Dizier": "LFSI",
+      "Amiens": "LFAY",
+      "Rouen": "LFOP",
+      "Oostende": "EBOS",
+      "Southampton": "EGHI",
+      "Le Touquet": "LFAT"
+    }
+  },
+  "GRE": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Athinai": "GR-0098",
+      "Mikonos": "LGMK",
+      "Limnos": "LGLM",
+      "Iraklion": "LGIR",
+      "Maritza": "LGRD"
+    }
+  },
+  "IRA": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Basrah": "ORMM",
+      "Ali Al Salem": "OKAS",
+      "Ahvaz": "OIAW",
+      "Al Qaysumah": "OEPA"
+    }
+  },
+  "KURILE": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Burevestnik": "UHSB",
+      "Urup": "RU-0088"
+    }
+  },
+  "LFA": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Stanley": "SFAL",
+      "Walker Creek": "FK-0025"
+    }
+  },
+  "NSK": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Sunan": "ZKPY",
+      "Kimpo": "RKSS",
+      "Wonsan": "ZKWS",
+      "Kangnung": "RKNN"
+    }
+  },
+  "PGU": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Sharjah": "OMSJ",
+      "Fujairah": "OMFJ",
+      "Bandar Abbas": "OIKB",
+      "Khasab": "OOKB"
+    }
+  },
+  "SPA": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Jaisalmer": "VIJR",
+      "Nawabshah": "OPNH",
+      "Multan": "OPMT",
+      "Jodhpur": "VIJO",
+      "Bahawalpur": "OPBW",
+      "Bikaner": "VIBK",
+      "Hyderabad": "OPKD",
+      "Sukkur": "OPSK"
+    }
+  },
+  "TVIET": {
+    "grid": [
+      200,
+      200
+    ],
+    "airfields": {
+      "Vinh": "VVVH",
+      "Haiphong": "VVCI",
+      "Hanoi": "VVGL",
+      "Yen Bai": "VN-0004"
+    }
+  },
+  "UKR": {
+    "grid": [
+      208,
+      200
+    ],
+    "airfields": {
+      "L'viv": "UKLL",
+      "Kiev": "UKBB",
+      "Simferopol": "UKFF",
+      "Rostov": "RU-9991",
+      "KharKiv": "UKHH",
+      "Voronezh": "UUOO",
+      "Odesa": "UKOO"
+    }
+  },
+  "VLA": {
+    "grid": [
+      208,
+      200
+    ],
+    "airfields": {
+      "Spassk Dalniy": "RU-0331",
+      "Mudanjiang": "ZYMD",
+      "Vozdvizhenka": "RU-0327",
+      "Nikolayevka": "RU-0538",
+      "Varfolomeyevka": "RU-0299",
+      "Khoral": "RU-0329"
+    }
+  },
+  "WTA": {
+    "grid": [
+      256,
+      256
+    ],
+    "airfields": {
+      "Chiang Kai Shek": "RCTP",
+      "Hua-Lien": "RCYU",
+      "Tai-Nan": "RCNN",
+      "Qing Yang": "ZSQZ",
+      "Tai-Tung": "RCFN"
+    }
+  }
+}

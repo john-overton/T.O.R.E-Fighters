@@ -19,7 +19,7 @@ use crate::combat::FallState;
 use crate::combat::countermeasures::Devices;
 use crate::combat::ledger::Resolution;
 use crate::combat::live::{
-    ActorSupport, Command, Configuration, Event, Launcher, LocalizedDamage, PLAYER_OWNER,
+    ActorSupport, Command, Configuration, Event, Launcher, LocalizedDamage, OwnshipInput,
     Projectile, State, Station, Target,
 };
 use crate::combat::missiles::{self, Flight, LaunchMode, Motion, TargetRole, seeker};
@@ -27,9 +27,13 @@ use crate::sensors;
 
 // Recorded on macOS aarch64. See the module comment in golden_tests.rs before
 // changing any of these.
-const GUNS_AND_DAMAGE: u64 = 0xf991_b9ae_63b6_6d4b;
-const GUIDED_MISSILES: u64 = 0x1f24_4435_41d0_af2e;
-const PLAYER_COUNTERMEASURES: u64 = 0xda70_2332_e33b_0c5a;
+/// The ownship's aircraft in these scenarios.
+const OWN: u32 = 0;
+// Present wrecks now receive physical hits, remain observable/selectable, and
+// missiles stop orbiting passed memory points. Measured on Apple Silicon CI.
+const GUNS_AND_DAMAGE: u64 = 0x5a40_7a7e_c359_f7ac;
+const GUIDED_MISSILES: u64 = 0x7104_8d34_d745_e670;
+const PLAYER_COUNTERMEASURES: u64 = 0x11ae_b223_66c8_928f;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {
@@ -120,7 +124,7 @@ fn require(scenario: &str, seen: &BTreeMap<&'static str, u32>, wanted: &[&str]) 
 
 fn event_name(event: &Event) -> &'static str {
     match event {
-        Event::Fired(_) => "Fired",
+        Event::Fired { .. } => "Fired",
         Event::SeekerActivated(_) => "SeekerActivated",
         Event::Pitbull(_) => "Pitbull",
         Event::Hit(_) => "Hit",
@@ -128,11 +132,11 @@ fn event_name(event: &Event) -> &'static str {
         Event::Airburst(_) => "Airburst",
         Event::Ground => "Ground",
         Event::TrackLost(_) => "TrackLost",
-        Event::PlayerDamaged(_) => "PlayerDamaged",
-        Event::SubsystemDamaged(_) => "SubsystemDamaged",
-        Event::PlayerDestroyed => "PlayerDestroyed",
-        Event::PilotKilled => "PilotKilled",
-        Event::PlayerGroundImpact => "PlayerGroundImpact",
+        Event::OwnshipDamaged { .. } => "PlayerDamaged",
+        Event::SubsystemDamaged { .. } => "SubsystemDamaged",
+        Event::OwnshipDestroyed { .. } => "PlayerDestroyed",
+        Event::PilotKilled { .. } => "PilotKilled",
+        Event::OwnshipGroundImpact { .. } => "PlayerGroundImpact",
         Event::Defeated(_) => "Defeated",
         Event::Jolt(_) => "Jolt",
     }
@@ -141,7 +145,8 @@ fn event_name(event: &Event) -> &'static str {
 fn record_event(fp: &mut Fingerprint, event: &Event) {
     fp.text(event_name(event));
     match event {
-        Event::Fired(station) | Event::SubsystemDamaged(station) => fp.count(*station),
+        Event::Fired { station, .. } => fp.count(*station),
+        Event::SubsystemDamaged { index, .. } => fp.count(*index),
         Event::SeekerActivated(id)
         | Event::Pitbull(id)
         | Event::Hit(id)
@@ -149,14 +154,19 @@ fn record_event(fp: &mut Fingerprint, event: &Event) {
         | Event::Airburst(id)
         | Event::TrackLost(id)
         | Event::Defeated(id) => fp.int(*id),
-        Event::PlayerDamaged(amount) => fp.int(*amount),
+        Event::OwnshipDamaged { amount, .. } => fp.int(*amount),
         Event::Jolt(jolt) => {
-            fp.option(jolt.target, |fp, id| fp.int(id));
+            // The fingerprint keeps the earlier encoding: none for the ownship.
+            fp.option((jolt.target != OWN).then_some(jolt.target), |fp, id| {
+                fp.int(id)
+            });
             fp.vector(jolt.from);
             fp.f64(jolt.strength);
         }
-        Event::Ground | Event::PlayerDestroyed | Event::PilotKilled | Event::PlayerGroundImpact => {
-        }
+        Event::Ground
+        | Event::OwnshipDestroyed { .. }
+        | Event::PilotKilled { .. }
+        | Event::OwnshipGroundImpact { .. } => {}
     }
 }
 
@@ -206,7 +216,7 @@ fn record_projectile(fp: &mut Fingerprint, p: &Projectile) {
     });
     fp.option(p.guidance_ticks, |fp, ticks| fp.u64(ticks));
     fp.u64(p.age);
-    fp.bool(p.incoming);
+    fp.bool(p.incoming.is_some());
     fp.count(p.station);
     fp.vector(p.position);
     fp.vector(p.previous);
@@ -251,7 +261,9 @@ fn record_target(fp: &mut Fingerprint, t: &Target) {
 fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
     for strike in s.take_strikes() {
         fp.int(strike.owner);
-        fp.option(strike.victim, |fp, id| fp.int(id));
+        fp.option((strike.victim != OWN).then_some(strike.victim), |fp, id| {
+            fp.int(id)
+        });
         fp.int(strike.weapon_flags);
         fp.bool(strike.destroyed);
     }
@@ -261,21 +273,21 @@ fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
         fp.bool(sound.arrived);
     }
     fp.u64(s.tick());
-    fp.name(&s.release_readiness);
-    fp.name(&s.launch_mode);
-    record_seeker(fp, &s.mounted);
-    fp.option(s.bore_observation.as_ref(), record_observation);
+    fp.name(&s.own().release_readiness);
+    fp.name(&s.own().launch_mode);
+    record_seeker(fp, &s.own().mounted);
+    fp.option(s.own().bore_observation.as_ref(), record_observation);
     fp.name(&s.weapon_rules);
-    fp.count(s.ammo.len());
-    for ammo in &s.ammo {
+    fp.count(s.own().ammo.len());
+    for ammo in &s.own().ammo {
         fp.int(*ammo);
     }
-    fp.count(s.selected);
-    fp.bool(s.armed);
-    fp.option(s.sensors.selected(), |fp, id| fp.int(id));
-    fp.option(s.sensors.acquired(), |fp, id| fp.int(id));
-    fp.count(s.sensors.contacts().len());
-    for contact in s.sensors.contacts() {
+    fp.count(s.own().selected);
+    fp.bool(s.own().armed);
+    fp.option(s.own().sensors.selected(), |fp, id| fp.int(id));
+    fp.option(s.own().sensors.acquired(), |fp, id| fp.int(id));
+    fp.count(s.own().sensors.contacts().len());
+    for contact in s.own().sensors.contacts() {
         fp.int(contact.id);
         fp.name(&contact.channel);
         fp.vector(contact.position);
@@ -307,27 +319,27 @@ fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
         fp.vector(piece.position);
         fp.vector(piece.velocity);
     }
-    for count in [s.shots, s.hits, s.kills] {
+    for count in [s.own().shots, s.own().hits, s.own().kills] {
         fp.int(count);
     }
-    fp.int(s.player_hp);
-    fp.int(s.player_damage);
-    for count in s.subsystem_counts {
+    fp.int(s.own().hp);
+    fp.int(s.own().damage);
+    for count in s.own().subsystem_counts {
         fp.int(count);
     }
-    fp.option(s.last_subsystem, |fp, index| fp.count(index));
+    fp.option(s.own().last_subsystem, |fp, index| fp.count(index));
     for failed in [
-        s.radar_failed,
-        s.visual_failed,
-        s.infrared_failed,
-        s.rwr_failed,
-        s.ecm_failed,
+        s.own().radar_failed,
+        s.own().visual_failed,
+        s.own().infrared_failed,
+        s.own().rwr_failed,
+        s.own().ecm_failed,
         s.target_jammer,
     ] {
         fp.bool(failed);
     }
-    fp.int(s.chaff);
-    fp.int(s.flares);
+    fp.int(s.own().chaff);
+    fp.int(s.own().flares);
     fp.count(s.history.len());
     for record in &s.history {
         fp.u64(record.tick);
@@ -339,7 +351,7 @@ fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
         fp.int(record.hp_after);
     }
     fp.int(s.range_category);
-    let threats: Vec<_> = s.missile_threats.records().collect();
+    let threats: Vec<_> = s.own().missile_threats.records().collect();
     fp.count(threats.len());
     for record in threats {
         record_threat(fp, record);
@@ -370,7 +382,7 @@ fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
         fp.int(kill.category);
         fp.bool(kill.aircraft);
     }
-    let victims: Vec<u32> = std::iter::once(PLAYER_OWNER)
+    let victims: Vec<u32> = std::iter::once(OWN)
         .chain(s.targets.iter().map(|t| t.id))
         .collect();
     for victim in victims {
@@ -380,28 +392,30 @@ fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
         });
     }
     // What the cockpit shows and plays.
-    fp.name(&s.readiness(launcher));
-    fp.bool(s.can_lock(launcher));
-    fp.bool(s.guidance_available(launcher));
-    fp.option(s.seeker_tone(launcher), |fp, tone| {
+    fp.name(&s.own_view().readiness(launcher));
+    fp.bool(s.own_view().can_lock(launcher));
+    fp.bool(s.own_view().guidance_available(launcher));
+    fp.option(s.own_view().seeker_tone(launcher), |fp, tone| {
         fp.f64(tone.strength);
         fp.bool(tone.ground);
         fp.bool(tone.radar);
         fp.bool(tone.locked);
     });
-    fp.option(s.estimated_max_range(launcher), |fp, range| fp.f64(range));
-    fp.bool(s.in_estimated_range(launcher));
-    fp.int(s.estimated_hit_percent(launcher));
-    fp.option(s.favorable_firing_band(launcher), |fp, band| {
+    fp.option(s.own_view().estimated_max_range(launcher), |fp, range| {
+        fp.f64(range)
+    });
+    fp.bool(s.own_view().in_estimated_range(launcher));
+    fp.int(s.own_view().estimated_hit_percent(launcher));
+    fp.option(s.own_view().favorable_firing_band(launcher), |fp, band| {
         fp.f64(band.minimum);
         fp.f64(band.maximum);
     });
-    fp.option(s.designated(), |fp, id| fp.int(id));
-    for region in s.player_damage_regions() {
+    fp.option(s.own_view().designated(), |fp, id| fp.int(id));
+    for region in s.own().damage_regions() {
         fp.f64(region);
     }
-    fp.option(s.player_damage_section(), |fp, section| fp.name(&section));
-    fp.f64(s.payload_lbs());
+    fp.option(s.own().damage_section(), |fp, section| fp.name(&section));
+    fp.f64(s.own().payload_lbs());
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +523,11 @@ fn weapon(source: &str, signature: u8) -> Weapon {
 /// A longer-legged synthetic missile: 40 s of flight, 10 s of it powered.
 fn missile(source: &str, signature: u8, range: i32, decoy_percent: u8) -> Weapon {
     let mut w = weapon(source, signature);
+    w.flags = if matches!(source, "R530.JT" | "SYNTHETIC.JT") {
+        0x241
+    } else {
+        0x41
+    };
     w.movement.maximum_speed = 3_000;
     w.movement.initial_speed = 1_200;
     w.movement.final_speed = 1_500;
@@ -598,10 +617,11 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         damage_capacity: 60,
         afterburner_available: true,
         hardpoint_slots: (0..slots).map(Some).chain([None, None, None]).collect(),
-        radar_hardpoint: slots,
+        radar_hardpoint: Some(slots),
         visual_hardpoint: slots + 2,
-        ecm_hardpoint: slots + 1,
+        ecm_hardpoint: Some(slots + 1),
         aircraft: AircraftId::F18,
+        strike_class: crate::models::strike_class::StrikeClass::Fighter,
         stations: stations
             .into_iter()
             .map(|(weapon, count, internal)| Station {
@@ -609,10 +629,14 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
                 mount: [0.; 3],
                 count,
                 internal,
+                rack: Default::default(),
             })
             .collect(),
         hit_points: 20,
         target_category: 0x80,
+        fixed_external_equipment_lbs: 0,
+        tanks: vec![],
+        gun_pods: vec![],
         external_equipment_lbs: 0,
         external_fuel_lbs: [0.; 9],
         engines: 1,
@@ -620,6 +644,8 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         infrared_hardpoint: None,
         rwr_hardpoint: None,
         sensors: sensor_profiles(),
+        sight: None,
+        designator_pods: vec![],
     }
 }
 
@@ -654,6 +680,7 @@ fn aircraft_target(id: u32, position: [f64; 3], velocity: [f64; 3], hp: i32) -> 
         localized_damage: LocalizedDamage::default(),
         faults: Default::default(),
         category: 0x80,
+        side: crate::combat::live::NO_SIDE,
     }
 }
 
@@ -671,6 +698,7 @@ fn launcher(position: [f64; 3], heading: f64, pitch: f64, speed: f64) -> Launche
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: sensors::Controls::default(),
     }
 }
@@ -691,7 +719,7 @@ fn release_decoy(
     fp: &mut Fingerprint,
     seen: &mut BTreeMap<&'static str, u32>,
 ) {
-    let config = s.configuration().clone();
+    let config = s.own().configuration().clone();
     for p in &mut s.projectiles {
         let w = p.weapon(&config);
         let seeker = match w.seeker.signature {
@@ -757,7 +785,7 @@ fn owned_missile(
         motion: Some(Motion::launch(weapon, velocity, origin[1])),
         guidance_ticks: Some(profile.guidance_ticks),
         age: 0,
-        incoming: target == PLAYER_OWNER,
+        incoming: (target == OWN).then_some(OWN),
         station: 0,
         position: origin,
         previous: origin,
@@ -779,7 +807,14 @@ fn step(
     fp: &mut Fingerprint,
     seen: &mut BTreeMap<&'static str, u32>,
 ) {
-    let events = s.step(held, launcher, |_, _| 0.);
+    let events = s.step(
+        &[OwnshipInput {
+            aircraft: 0,
+            held,
+            launcher,
+        }],
+        |_, _| 0.,
+    );
     fp.bool(held);
     fp.count(events.len());
     for event in &events {
@@ -803,7 +838,7 @@ fn guns_and_damage(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
     // Recorded with the full damage model, system faults included.
     s.cheats.damage = crate::cheats::Damage::Realistic;
     let mut l = launcher([0., 3_000., 0.], 0., 0., 600.);
-    s.range_target(l);
+    s.range_target(0, l);
     s.targets.push(aircraft_target(
         20,
         [800., 3_150., 2_000.],
@@ -827,6 +862,7 @@ fn guns_and_damage(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         },
         30,
         0x100,
+        crate::combat::live::NO_SIDE,
     )
     .expect("ground target");
     for tick in 0..1_800u64 {
@@ -835,17 +871,17 @@ fn guns_and_damage(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         l.basis = basis;
         l.velocity = basis.forward.map(|axis| axis * l.speed_fps);
         match tick {
-            300 => s.command(Command::DamagePlayer, l),
-            360 | 420 => s.command(Command::Incoming, l),
+            300 => s.command(0, Command::DamagePlayer, l),
+            360 | 420 => s.command(0, Command::Incoming, l),
             480 => s.cheats.easy_aiming = true,
             600 => s.cheats.easy_aiming = false,
-            620 => s.command(Command::NextWeapon, l),
-            650 => s.command(Command::Incoming, l),
-            900 => s.command(Command::SelectNav, l),
-            920 => s.command(Command::NextSelection, l),
+            620 => s.command(0, Command::NextWeapon, l),
+            650 => s.command(0, Command::Incoming, l),
+            900 => s.command(0, Command::SelectNav, l),
+            920 => s.command(0, Command::NextSelection, l),
             950 => {
-                s.command(Command::ToggleArm, l);
-                s.command(Command::ToggleArm, l);
+                s.command(0, Command::ToggleArm, l);
+                s.command(0, Command::ToggleArm, l);
             }
             1_000 => {
                 let mut a = aircraft_target(30, [5_000., 3_000., 8_000.], [0., 0., 600.], 20);
@@ -854,16 +890,16 @@ fn guns_and_damage(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
                 b.velocity = [0., 0., -600.];
                 s.targets.extend([a, b]);
             }
-            1_350 => s.command(Command::FailStation, l),
+            1_350 => s.command(0, Command::FailStation, l),
             1_400 => {
-                s.command(Command::SelectNav, l);
-                s.command(Command::NextSelection, l);
+                s.command(0, Command::SelectNav, l);
+                s.command(0, Command::NextSelection, l);
                 s.cheats.unlimited_ammo = true;
             }
-            1_550 => s.command(Command::ReplaceTarget, l),
-            1_650 => s.command(Command::CycleClass, l),
-            1_700 => s.command(Command::TargetDistance(2_000), l),
-            1_750 => s.command(Command::ClearRange, l),
+            1_550 => s.command(0, Command::ReplaceTarget, l),
+            1_650 => s.command(0, Command::CycleClass, l),
+            1_700 => s.command(0, Command::TargetDistance(2_000), l),
+            1_750 => s.command(0, Command::ClearRange, l),
             _ => {}
         }
         let held = matches!(
@@ -940,27 +976,27 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         }
         match tick {
             2 => {
-                s.command(Command::NextWeapon, l);
-                s.command(Command::DesignateTarget(40), l);
+                s.command(0, Command::NextWeapon, l);
+                s.command(0, Command::DesignateTarget(40), l);
             }
-            320 => s.command(Command::DesignateTarget(41), l),
+            320 => s.command(0, Command::DesignateTarget(41), l),
             600 => {
-                s.command(Command::NextWeapon, l);
-                s.command(Command::DesignateTarget(41), l);
+                s.command(0, Command::NextWeapon, l);
+                s.command(0, Command::DesignateTarget(41), l);
             }
-            720 => s.command(Command::NextWeapon, l),
+            720 => s.command(0, Command::NextWeapon, l),
             760 => l.radar = false,
             880 => l.radar = true,
             1_000 => {
-                s.command(Command::NextWeapon, l);
-                s.command(Command::ClearDesignation, l);
+                s.command(0, Command::NextWeapon, l);
+                s.command(0, Command::ClearDesignation, l);
             }
-            1_300 => s.command(Command::ToggleTargetJammer, l),
+            1_300 => s.command(0, Command::ToggleTargetJammer, l),
             1_320 => {
-                s.command(Command::SelectNav, l);
-                s.command(Command::NextSelection, l);
-                s.command(Command::NextSelection, l);
-                s.command(Command::DesignateTarget(40), l);
+                s.command(0, Command::SelectNav, l);
+                s.command(0, Command::NextSelection, l);
+                s.command(0, Command::NextSelection, l);
+                s.command(0, Command::DesignateTarget(40), l);
             }
             1_500 => {
                 let aim = l.position;
@@ -969,7 +1005,7 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
                     7,
                     &active,
                     [2_000., 20_000., 15_000.],
-                    PLAYER_OWNER,
+                    OWN,
                     aim,
                     tick,
                 ));
@@ -996,7 +1032,7 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         s.set_actor_supports([ActorSupport {
             owner: 7,
             observation: Some(seeker::Observation {
-                id: PLAYER_OWNER,
+                id: OWN,
                 position: l.position,
                 velocity: l.velocity,
                 quality: 1.,
@@ -1022,7 +1058,7 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
             release_decoy(
                 &mut s,
                 SeekerClass::Radar,
-                PLAYER_OWNER,
+                OWN,
                 &mut decoys,
                 &mut fp,
                 &mut seen,
@@ -1084,19 +1120,19 @@ fn press(
         .projectiles
         .iter()
         .filter(|p| {
-            p.target == Some(PLAYER_OWNER)
+            p.target == Some(OWN)
                 && p.guidance.as_ref().is_none_or(|flight| {
                     flight.enabled && flight.seeker.acquired && flight.seeker.observation.is_some()
                 })
         })
-        .map(|p| (p.id, p.weapon(s.configuration()).seeker.signature))
+        .map(|p| (p.id, p.weapon(s.own().configuration()).seeker.signature))
         .collect();
-    let (chaff, flares) = (s.chaff, s.flares);
+    let (chaff, flares) = (s.own().chaff, s.own().flares);
     let devices = (s.devices.flares.len(), s.devices.chaff.len());
-    s.command(command, launcher);
+    s.command(0, command, launcher);
     fp.name(&command);
-    fp.int(s.chaff);
-    fp.int(s.flares);
+    fp.int(s.own().chaff);
+    fp.int(s.own().flares);
     for sound in s.take_sound_events() {
         fp.name(&sound.kind);
         fp.vector(sound.position);
@@ -1104,9 +1140,9 @@ fn press(
         fp.bool(sound.own);
     }
     let added = (s.devices.flares.len(), s.devices.chaff.len()) != devices;
-    let spent = (s.chaff, s.flares) != (chaff, flares);
+    let spent = (s.own().chaff, s.own().flares) != (chaff, flares);
     let label = match (added, spent) {
-        (false, _) if !launcher.alive || s.player_hp <= 0 => "Disabled",
+        (false, _) if !launcher.alive || s.own().hp <= 0 => "Disabled",
         (false, _) => "Empty",
         (true, false) => "Unlimited",
         (true, true) => "Spent",
@@ -1121,7 +1157,7 @@ fn press(
         let still = s
             .projectiles
             .iter()
-            .any(|p| p.id == id && p.target == Some(PLAYER_OWNER));
+            .any(|p| p.id == id && p.target == Some(OWN));
         fp.int(id);
         fp.bool(still);
         if added {
@@ -1168,7 +1204,7 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
             *owner,
             weapon,
             [*offset, 1_300., 16_000.],
-            PLAYER_OWNER,
+            OWN,
             aim,
             0,
         ));
@@ -1179,7 +1215,7 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         s.set_actor_supports([7, 8, 9].map(|owner| ActorSupport {
             owner,
             observation: Some(seeker::Observation {
-                id: PLAYER_OWNER,
+                id: OWN,
                 position: l.position,
                 velocity: l.velocity,
                 quality: 1.,
@@ -1192,10 +1228,10 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         }));
         if tick == 20 {
             for station in [1, 2, 1] {
-                s.selected = station;
-                s.command(Command::Incoming, l);
+                s.own_mut().selected = station;
+                s.command(0, Command::Incoming, l);
             }
-            s.selected = 0;
+            s.own_mut().selected = 0;
         }
         let presses: &[Command] = match tick {
             30 => &[Command::ReleaseFlare],
@@ -1211,7 +1247,7 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
             110 => {
                 // Refilled with unlimited ammunition on: nothing is spent.
                 s.cheats.unlimited_ammo = true;
-                (s.chaff, s.flares) = (2, 1);
+                (s.own_mut().chaff, s.own_mut().flares) = (2, 1);
                 &[
                     Command::ReleaseChaff,
                     Command::ReleaseFlare,
@@ -1234,7 +1270,7 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         };
         for command in presses {
             if *command == Command::DamagePlayer {
-                s.command(*command, l);
+                s.command(0, *command, l);
                 fp.name(command);
             } else {
                 press(&mut s, *command, l, &mut fp, &mut seen);
