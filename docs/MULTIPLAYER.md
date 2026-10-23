@@ -133,7 +133,7 @@ builds a mission as usual, then opens its slots to humans.
 | Respawn rules | None, into an open AI slot, or back at a base |
 | Revival | Retail's settings apply to every respawn: lives (0 to 10, or unlimited), delay (0 to 5 minutes), distance from the battle (1 to 40 miles as retail, up to 150 since the lobby pass) and weapons (with missiles, without missiles, guns only, half guns) |
 | AI respawn | On or off: whether a lost AI aircraft comes back under the revival rules; greyed while the respawn rule is None ([AI respawn](#ai-respawn)) |
-| Players, at least | A dedicated server's minimum players to start (John, 2026-10-16; 0 for none). Shown on the Revival page, always greyed: the server operator sets it in `server.conf` or per rotation entry, and until enough players holding slots are ready the lobby says "Waiting for 2 more ready players (minimum 4)." ([guide](DEDICATED-SERVER.md#minimum-players)) |
+| Minimum players | Settings > Revival: none, or 1 through the human seat capacity. The King edits it between missions, including on dedicated servers with `king-mission open`. Close/F10 applies; Escape discards. AI on and off share the gate and show "Waiting for 2 more ready players (minimum 4)." See [defaults and rules](spec/multiplayer-menus.md#minimum-players). |
 | Scoring | PvP: retail's fight type (sides or free for all), kill tally (total kills, total damage or kill ratio), time limit (1 to 30 minutes), kill limit (1 to 10) and kill owner (total, one side or one player) |
 | Difficulty and realism | Inherits the Quick Mission settings, locked for all humans |
 
@@ -313,8 +313,9 @@ the mission stays in the lobby too; the host's log names them separately
 from the players who were not ready.
 
 **Force Start** is not offered when nobody is ready, when everyone is ready
-(the button is **Fly**), when `min-players` is not met, or, with `ai off`,
-when an open slot is held by nobody. Those waits are not overridden. A
+(the button is **Fly**), or when `min-players` is not met. The ready-player
+minimum is not overridden. Empty slots do not block a start, including with
+`ai off`. A
 dedicated server has no King unless `king first-player`; the crowned player
 then force starts under the same rules, and `min-players` still gates the
 start. The host owns the countdown. A takeover drops it: it is not written
@@ -1897,8 +1898,9 @@ explicit in-flight selection keeps its chosen fuel. See the
 
 John requested these options on 2026-10-16. The Revival settings page includes
 **AI aircraft**, also available in the hosting creator. Off disables AI aircraft,
-AI respawn and idle handoff. The lobby reports how many open slots still need a
-ready human. The King cannot force an early start. Co-op is allowed with an empty
+AI respawn and idle handoff. The lobby waits for the configurable minimum of
+ready slot holders. The King can Force Start once that minimum is ready, even
+with empty slots. See [minimum players](spec/multiplayer-menus.md#minimum-players). Co-op is allowed with an empty
 enemy air force; ground defenses still operate. Live departures remove the plane
 without kill or loss credit; late joins use revive placement.
 

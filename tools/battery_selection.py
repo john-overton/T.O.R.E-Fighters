@@ -216,7 +216,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "revival, the lead hold, the idle AI, Autobalance, debrief, clean exit",
         (
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
-            "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive",
+            "net-server-min-players", "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive",
             "net-server-results", "net-server-away", "net-server-rejoin", "net-server-replies",
             "net-server-datalink", "net-server-datalink-lead", "net-server-smoke-pvp", "net-server-smoke-coop",
             "net-server-rate", "net-host-rate", "net-server-autobalance", "net-server-ai-respawn",

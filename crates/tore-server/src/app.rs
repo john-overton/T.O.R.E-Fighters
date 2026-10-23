@@ -200,7 +200,7 @@ pub fn serve_with(
 
 /// The line that says whether the mission is flying yet: `start now` flies at
 /// once only when nothing waits on ready players (`min-players` above 0, or
-/// `ai off`, which needs every open slot ready), and then the host's own
+/// `ai off`, which needs at least one ready player), and then the host's own
 /// note says how many it waits for.
 fn start_line(config: &crate::config::Config) -> String {
     use tore_session::settings::number;

@@ -735,8 +735,9 @@ old halves have saved loads, the most recently flown compatible load wins.
 
 Opinionated requirements from John, 2026-10-16:
 
-- The host can disable AI aircraft. Every open human slot must be ready before
-  flight starts. SAMs, AAA and ground targets remain active. An idle human keeps
+- The host can disable AI aircraft. Starts use the configurable
+  [ready-player minimum](multiplayer-menus.md#minimum-players), updated by John
+  on 2026-10-22; unfilled slots stay empty. SAMs, AAA and ground targets remain active. An idle human keeps
   neutral-control keepalive. Departure removes its live plane without a loss
   or kill, and a late join uses revive placement.
 - Each wing can be Player Choice with an AI-flyable default. Human choices may
@@ -754,7 +755,8 @@ Opinionated requirements from John, 2026-10-16:
   chosen one at the existing revival distance, side bearing, altitude and speed.
 
 Agent decisions: AI defaults stay mandatory with AI off; co-op without enemy
-humans is allowed, with no enemy aircraft; there is no force-start bypass.
+humans is allowed, with no enemy aircraft. Force Start requires the ready-player
+minimum and can bring unready slot holders in, including with AI off.
 Cancelling the lobby aircraft selector retains the previously displayed type
 and proceeds to its ordnance page; cancelling ordnance sends nothing.
 

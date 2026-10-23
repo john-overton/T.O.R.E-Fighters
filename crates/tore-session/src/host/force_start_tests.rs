@@ -1,8 +1,7 @@
 //! The King's force start (John, 2026-10-16): a 10 second countdown when
 //! someone holding a slot is not ready, owned by the host. At zero, slot
 //! holders who are still not ready fly with the loadout they have. Players
-//! without a slot stay in the lobby. The minimum and an unheld plane with
-//! the AI off are not overridden.
+//! without a slot stay in the lobby. The ready-player minimum is not overridden.
 //!
 //! Mounted inside `tests.rs`, whose rig it shares.
 
@@ -209,37 +208,38 @@ fn an_unready_slot_holder_flies_and_a_player_without_a_slot_stays() {
 }
 
 #[test]
-fn ai_off_refuses_while_a_slot_is_unheld_and_allows_it_once_every_slot_is_held() {
-    let mut rig = opened(3, king_config(&[(number::AI, 0)]));
+fn ai_off_force_start_allows_empty_slots_but_still_needs_the_ready_minimum() {
+    let mut rig = opened(4, king_config(&[(number::AI, 0), (number::MIN_PLAYERS, 2)]));
     let king = player(&mut rig, "Maverick");
     let hawk = player(&mut rig, "Hawk");
+    let goose = player(&mut rig, "Goose");
     rig.run(Duration::from_millis(400));
     hold(&mut rig, king, 0);
     hold(&mut rig, hawk, 1);
+    hold(&mut rig, goose, 2);
     mark_ready(&mut rig, king, true);
     rig.run(Duration::from_millis(300));
     force(&mut rig, king);
     rig.run(Duration::from_millis(300));
-    assert_eq!(rig.host.phase(), Phase::Lobby);
-    assert!(
-        refusal(&rig, king).is_some_and(|why| why.contains("AI") || why.contains("plane")),
-        "{:?}",
-        refusal(&rig, king)
-    );
-
-    let goose = player(&mut rig, "Goose");
-    rig.run(Duration::from_millis(400));
-    hold(&mut rig, goose, 2);
+    assert!(refusal(&rig, king).is_some_and(|why| why.contains("minimum 2")));
+    mark_ready(&mut rig, goose, true);
     rig.run(Duration::from_millis(300));
     force(&mut rig, king);
     rig.run(Duration::from_millis(400));
+    assert!(seconds(&rig, king).is_some());
+    assert!(rig.run_until(Duration::from_secs(12), |r| r.seated(king)
+        && r.seated(hawk)
+        && r.seated(goose)));
+    assert_eq!(rig.host.world.cockpits.len(), 3);
     assert!(
-        rig.clients[king]
-            .lobby
+        rig.host
+            .world
+            .ai_wings
             .as_ref()
-            .and_then(|lobby| lobby.force_seconds)
-            .is_some(),
-        "every slot is held, so the countdown runs"
+            .unwrap()
+            .mission()
+            .actors()
+            .is_empty()
     );
 }
 
@@ -378,8 +378,7 @@ fn the_king_leaving_mid_countdown_passes_the_crown_or_cancels() {
 /// A player unreadying or leaving mid-countdown. The gates still apply: the
 /// count continues while someone is ready and the minimum holds, and it
 /// cancels when the last ready player unreadies, when a departure drops the
-/// minimum, or when `ai off` is left with an empty slot. An unready player
-/// leaving while the AI is on starts at once, the same as everyone readying.
+/// minimum. An unready player leaving starts at once if everyone left is ready.
 #[test]
 fn a_player_leaving_or_unreadying_mid_countdown_follows_the_gates() {
     let mut rig = opened(3, king_config(&[]));
@@ -451,7 +450,7 @@ fn a_player_leaving_or_unreadying_mid_countdown_follows_the_gates() {
         notes(&rig)
     );
 
-    // AI off: the unready holder leaving empties a slot, so the count stops.
+    // AI off: an unready holder leaving allows the ready players to start.
     let mut rig = opened(2, king_config(&[(number::AI, 0)]));
     let king = player(&mut rig, "Maverick");
     let hawk = player(&mut rig, "Hawk");
@@ -466,15 +465,8 @@ fn a_player_leaving_or_unreadying_mid_countdown_follows_the_gates() {
     rig.clients[hawk].client.disconnect(DisconnectReason::Left);
     assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(hawk)));
     rig.run(Duration::from_millis(400));
-    assert_eq!(rig.host.phase(), Phase::Lobby);
-    assert_eq!(seconds(&rig, king), None);
-    assert!(
-        notes(&rig)
-            .iter()
-            .any(|n| n.contains("Force start cancelled") && n.contains("AI is off")),
-        "{:?}",
-        notes(&rig)
-    );
+    assert_eq!(rig.host.phase(), Phase::Flying);
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(king)));
 
     // AI on: the unready player leaving leaves everyone else ready, so the
     // mission starts at once.

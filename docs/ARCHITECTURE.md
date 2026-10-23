@@ -6154,8 +6154,15 @@ Messages, and the search starts again. The window title reads "Lobby".
 | Players... | the King | a player other than the King is selected in Players (gives the crown or kicks) |
 | Loadout | everyone | a slot is held, the player's game can play the mission, mission not flying; reads **Watch** while the mission flies |
 | Ready | everyone | a slot is held, the game can play the mission, not flying; reads **Not Ready** when ready and **Join** while the mission flies |
-| Fly | the King | every player holding a slot is ready (and one holds one); reads **End Mission** while the mission flies and ends it for everyone (a King who never joined the flight would otherwise have no way to stop it) |
+| Fly | the King | the ready-player minimum is met and every player holding a slot is ready (and one holds one); reads **End Mission** while the mission flies and ends it for everyone (a King who never joined the flight would otherwise have no way to stop it) |
 | Leave | everyone | always |
+
+The host and lobby use one ready-player minimum with AI on or off. Empty
+slots never add a start gate. Force Start can bring unready slot holders in
+once the ready minimum is met. Settings > Revival offers Minimum players to
+the King, subject to a dedicated server's `king-mission` permission, through
+the shared deferred Settings draft. Defaults, clamping and waiting text are
+specified in [minimum players](spec/multiplayer-menus.md#minimum-players).
 
 A button that cannot be pressed stays drawn disabled; clicking it says why in
 Messages ("Not ready: Hawk, Viper.", "Nobody holds a slot.", "Take a slot

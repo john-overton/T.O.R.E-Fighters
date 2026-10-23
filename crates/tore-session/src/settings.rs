@@ -539,11 +539,7 @@ pub const REGISTRY: [Setting; 25] = [
         change: Change::InLobby,
         pvp_only: false,
     },
-    // John, 2026-10-16: the mission does not start until this many players
-    // hold slots and are ready (0 for no minimum). A dedicated server's file
-    // and rotation entries set it; the King's change is refused, since the
-    // lobby screen does not offer it (agent decision), and a mode change
-    // keeps it, as it keeps the snapshot rate.
+    // The ready-player minimum, editable by the King where settings are open.
     Setting {
         number: number::MIN_PLAYERS,
         name: "min-players",
@@ -557,29 +553,23 @@ pub const REGISTRY: [Setting; 25] = [
     },
 ];
 
-/// Why a mission in the lobby is not starting yet, in words: `ai_missing`
-/// open slots still lack a ready player while AI is off, and `min_missing`
-/// more ready players are needed to reach the minimum `min`. Both waits are
-/// the same kind of fact, so the stricter (the one needing more players) is
-/// the one said. `None` when neither waits. The host's log and the lobby
-/// screen both say it this way.
-pub fn start_wait_text(ai_missing: usize, min_missing: usize, min: usize) -> Option<String> {
-    let players = |n: usize| {
-        if n == 1 {
-            "1 more ready player".to_owned()
-        } else {
-            format!("{n} more ready players")
-        }
-    };
-    if ai_missing == 0 && min_missing == 0 {
-        None
-    } else if ai_missing >= min_missing {
-        Some(format!("Waiting for {}: AI is off.", players(ai_missing)))
+/// Why the minimum keeps a mission in the lobby, shared by host and screen.
+pub fn start_wait_text(missing: usize, min: usize) -> Option<String> {
+    (missing > 0).then(|| {
+        let plural = if missing == 1 { "" } else { "s" };
+        format!("Waiting for {missing} more ready player{plural} (minimum {min}).")
+    })
+}
+
+/// Initial minimum when a configuration does not specify one. Opinionated:
+/// AI-off PvP waits for two, co-op for one; AI-on keeps no minimum.
+pub fn default_min_players(ai: bool, mode: Mode) -> u32 {
+    if ai {
+        0
+    } else if mode == Mode::Pvp {
+        2
     } else {
-        Some(format!(
-            "Waiting for {} (minimum {min}).",
-            players(min_missing)
-        ))
+        1
     }
 }
 
@@ -733,6 +723,16 @@ impl Store {
         // `HostConfig::validate` has checked them; a refused list changes
         // nothing.
         let _ = store.apply(&config.settings);
+        if !config
+            .settings
+            .iter()
+            .any(|(n, _)| *n == number::MIN_PLAYERS)
+        {
+            store.put(
+                number::MIN_PLAYERS,
+                default_min_players(store.ai(), store.mode()).min(config.max_players as u32),
+            );
+        }
         store.name = config.name.clone();
         store.password = config.password.clone();
         store.put(

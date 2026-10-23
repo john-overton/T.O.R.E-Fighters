@@ -1188,23 +1188,95 @@ fn the_rate_is_a_lobby_row_greyed_in_flight_and_for_a_joiner() {
 // ---- the minimum players row (John, 2026-10-16) ----
 
 #[test]
-fn the_minimum_players_row_shows_the_operators_value_and_nobody_turns_it() {
+fn minimum_players_is_bounded_and_editable_only_with_permission() {
     let row = Kind::Setting(number::MIN_PLAYERS);
     assert!(page_rows(Page::Revival).contains(&row));
-    assert_eq!(sp::row_label(row), "Players, at least");
+    assert_eq!(sp::row_label(row), "Minimum players");
     let mut lobby = king();
-    lobby.settings.retain(|s| s.0 != number::MIN_PLAYERS);
-    lobby.settings.push((number::MIN_PLAYERS, 4));
-    let king = ctx(&lobby);
-    assert_eq!(row_value(row, &king), "4");
-    assert_eq!(
-        row_state(row, &king),
-        Err("The server operator sets the minimum players.".to_owned())
-    );
-    assert_eq!(sp::click(row, &king, true), None);
-    lobby.settings.retain(|s| s.0 != number::MIN_PLAYERS);
-    lobby.settings.push((number::MIN_PLAYERS, 0));
+    set(&mut lobby, number::MIN_PLAYERS, 4);
+    set(&mut lobby, number::MAX_PLAYERS, 4);
+    assert_eq!(row_value(row, &ctx(&lobby)), "4");
+    let Some(Edit::Settings(change)) = sp::click(row, &ctx(&lobby), true) else {
+        panic!("editable");
+    };
+    assert_eq!(change.values, [(number::MIN_PLAYERS, 0)]);
+    set(&mut lobby, number::MIN_PLAYERS, 0);
     assert_eq!(row_value(row, &ctx(&lobby)), "none");
+    // Reverse wraps to capacity, counting a closed seat and the player limit.
+    lobby.slots.truncate(3);
+    lobby.slots[0].lock = Lock::Closed;
+    let Some(Edit::Settings(change)) = sp::click(row, &ctx(&lobby), false) else {
+        panic!("editable");
+    };
+    assert_eq!(change.values, [(number::MIN_PLAYERS, 2)]);
+    lobby.you = 2;
+    assert!(
+        row_state(row, &ctx(&lobby))
+            .unwrap_err()
+            .contains("Only the King")
+    );
+    assert_eq!(sp::click(row, &ctx(&lobby), true), None);
+    lobby.you = 1;
+    lobby.host = None;
+    lobby.mission_locked = true;
+    assert!(
+        row_state(row, &ctx(&lobby))
+            .unwrap_err()
+            .contains("operator")
+    );
+    lobby.mission_locked = false;
+    assert!(row_state(row, &ctx(&lobby)).is_ok());
+    lobby.phase = LobbyPhase::Flying;
+    assert!(
+        row_state(row, &ctx(&lobby))
+            .unwrap_err()
+            .contains("between missions")
+    );
+}
+
+#[test]
+fn minimum_draft_applies_once_on_close_or_f10_and_escape_discards() {
+    for finish in ["F10", "Escape", "Close"] {
+        let mut screen = screen_of(&king(), true);
+        click(&mut screen, button_centre(1));
+        screen
+            .settings_panel
+            .as_mut()
+            .unwrap()
+            .show_page(Page::Revival);
+        // Keyboard/controller use these same row actions.
+        screen.key("ArrowDown", false);
+        assert_eq!(screen.key("ArrowRight", false), None);
+        assert_eq!(screen.key("ArrowRight", false), None);
+        screen.update(Some(&king()), None);
+        assert_eq!(
+            screen
+                .settings_panel
+                .as_ref()
+                .unwrap()
+                .context()
+                .value(number::MIN_PLAYERS),
+            Some(2)
+        );
+        let answer = if finish == "Close" {
+            for _ in 1..page_rows(Page::Revival).len() {
+                screen.key("ArrowDown", false);
+            }
+            screen.key("Enter", false)
+        } else {
+            screen.key(finish, false)
+        };
+        if finish == "Escape" {
+            assert_eq!(answer, None);
+        } else {
+            let Some(Request::Settings(change)) = answer else {
+                panic!("one apply on {finish}");
+            };
+            assert_eq!(change.values, [(number::MIN_PLAYERS, 2)]);
+        }
+        assert!(screen.settings_open().is_none());
+        assert_eq!(screen.key("F10", false), None);
+    }
 }
 
 #[test]

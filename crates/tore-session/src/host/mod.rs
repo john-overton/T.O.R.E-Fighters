@@ -2847,8 +2847,8 @@ impl Host {
 
     /// Advances the countdown. Everyone ready starts at once. At zero the
     /// mission starts and slot holders who are still not ready fly with the
-    /// loadout they have. A gate that fails (the minimum, an unheld plane
-    /// with the AI off, nobody left ready) cancels it.
+    /// loadout they have. Losing the minimum or the last ready player
+    /// cancels the countdown, with AI either on or off.
     fn tick_force(&mut self) {
         if self.force_deadline.is_none() {
             return;
@@ -2899,7 +2899,7 @@ impl Host {
         if !matches!(self.life, Life::Lobby) {
             return Some("The mission is not in the lobby.".into());
         }
-        if self.min_missing() > 0 || (!self.settings.ai() && self.unheld_open() > 0) {
+        if self.min_missing() > 0 {
             return self
                 .start_wait_reason()
                 .or_else(|| Some("The lobby is still waiting for players.".into()));
@@ -2927,22 +2927,6 @@ impl Host {
                 && peer.lobby.unable.is_none()
                 && !matches!(peer.stage, Stage::Closing { .. })
         })
-    }
-
-    /// Open slots nobody holds. With the AI off a force start waits for
-    /// these; a player who holds one and is not ready still counts as
-    /// holding it.
-    fn unheld_open(&self) -> usize {
-        self.slots()
-            .iter()
-            .filter(|slot| {
-                !self.closed_slot(slot.id)
-                    && !self.peers.values().any(|peer| {
-                        peer.lobby.slot == Some(PlaneId(slot.id))
-                            && !matches!(peer.stage, Stage::Closing { .. })
-                    })
-            })
-            .count()
     }
 
     /// The seconds left, 1 to 10, while a countdown runs.
@@ -3289,16 +3273,8 @@ impl Host {
 
     // ----- The clock and the tick ----------------------------------------
 
-    /// Why an AI-off lobby is not starting: open slots not yet held by a
-    /// ready player (the console's `start now` cannot bypass it).
-    pub fn ai_wait_reason(&self) -> Option<String> {
-        let missing = self.ai_missing();
-        crate::settings::start_wait_text(missing, 0, 0).filter(|_| missing > 0)
-    }
-
     /// Whether `peer` counts as a ready player: it holds a slot, is ready,
-    /// can play the mission and is not leaving. The AI-off rule and the
-    /// minimum players both count this way (and so does the start rule).
+    /// can play the mission and is not leaving. All start rules count this way.
     fn ready_holder(peer: &Peer) -> bool {
         peer.lobby.slot.is_some()
             && peer.lobby.ready
@@ -3306,28 +3282,14 @@ impl Host {
             && !matches!(peer.stage, Stage::Closing { .. })
     }
 
-    /// With AI off, the open slots that no ready player holds yet; 0 with
-    /// AI on.
-    fn ai_missing(&self) -> usize {
-        if self.settings.ai() {
-            return 0;
-        }
-        self.slots()
-            .iter()
-            .filter(|slot| {
-                !self.closed_slot(slot.id)
-                    && !self.peers.values().any(|peer| {
-                        peer.lobby.slot == Some(PlaneId(slot.id)) && Self::ready_holder(peer)
-                    })
-            })
-            .count()
-    }
-
     /// The minimum players the lobby waits for: the `min-players` setting,
     /// never more than the host can seat (a player limit the King lowered
     /// or closed slots cannot make the mission wait for ever).
     pub fn min_players_needed(&self) -> usize {
-        self.settings.min_players().min(self.capacity())
+        self.settings
+            .min_players()
+            .max(usize::from(!self.settings.ai()))
+            .min(self.capacity())
     }
 
     /// How many more ready players the minimum needs; 0 when met.
@@ -3340,16 +3302,10 @@ impl Host {
         self.min_players_needed().saturating_sub(ready)
     }
 
-    /// Why the mission is not starting yet, in words: AI off with a slot
-    /// not yet held by a ready player, or fewer ready players than
-    /// `min-players`; whichever needs more players. `None` when neither
-    /// waits.
+    /// Why the mission is not starting yet: fewer ready slot holders than
+    /// the minimum. Empty slots do not add a separate gate when AI is off.
     pub fn start_wait_reason(&self) -> Option<String> {
-        crate::settings::start_wait_text(
-            self.ai_missing(),
-            self.min_missing(),
-            self.min_players_needed(),
-        )
+        crate::settings::start_wait_text(self.min_missing(), self.min_players_needed())
     }
 
     /// What stops the mission starting now, if anything.
@@ -3388,15 +3344,13 @@ impl Host {
     /// The mission starts flying: built again with the loadouts of the held
     /// slots, which every player is sent to build its copy again with, and
     /// every ready player holding a slot takes its plane at the first tick.
-    /// The AI-off rule and the minimum players cannot be bypassed, even from
-    /// the console: the lobby waits.
+    /// The minimum cannot be bypassed, even from the console.
     fn start_flying(&mut self) -> Result<(), String> {
         self.start_flying_in(false)
     }
 
     /// Starts the mission. `force` seats every slot holder whose game can
-    /// play, ready or not, and still refuses a minimum that is not met or
-    /// an unheld plane while the AI is off.
+    /// play, ready or not, and still refuses a minimum that is not met.
     fn start_flying_in(&mut self, force: bool) -> Result<(), String> {
         if !force {
             match self.start_block() {
@@ -3413,7 +3367,7 @@ impl Host {
             {
                 return Err(why);
             }
-            if self.min_missing() > 0 || (!self.settings.ai() && self.unheld_open() > 0) {
+            if self.min_missing() > 0 {
                 let why = self
                     .start_wait_reason()
                     .unwrap_or_else(|| "The lobby is still waiting for players.".into());

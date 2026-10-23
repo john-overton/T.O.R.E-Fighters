@@ -80,3 +80,42 @@ The existing Settings message gains an optional Realism payload under
 the former separate Settings and Mission messages would rebuild twice when
 Friendly Fire or Loadouts and Realism changed together. No new message kind
 or disconnect protocol is introduced.
+
+## Minimum players
+
+Implementation mode. **Opinionated**, requested by John on 2026-10-22.
+The agent chose the defaults and permission policy below.
+
+Settings > Revival keeps **Minimum players** beside AI aircraft. The row
+uses the existing imported controls and font. Its choices are **none**, then
+1 through the mission's human capacity, limited by the player limit and closed
+slots. Keyboard arrows and controller navigation edit the same draft as mouse
+clicks. Close or F10 applies it once; Escape discards it. Only the King can edit,
+only between missions. A dedicated server also requires `king-mission open`;
+otherwise its operator's value stays authoritative.
+
+AI-on and AI-off games share a ready-player minimum. A counted player holds a
+slot, is ready, can play the mission, and is not leaving. A first-player server
+starts when the minimum is met. A King still presses Fly once all slot holders
+are ready, or Force Start when some are not. Force Start requires the minimum
+number already ready and at least one ready player; its existing 10 second
+countdown can bring the remaining slot holders in with their current loadouts.
+An empty slot never blocks either start. With AI off it stays empty: no AI
+replacement, AI respawn or idle handoff. Join in progress continues to admit
+later players into those slots when enabled.
+
+An initial configuration without `min-players` uses 2 for AI-off PvP, 1 for
+AI-off co-op, and 0 (**none**) for AI-on. An explicit 0 means no extra minimum
+beyond the first ready player. AI-on `start now` retains its existing exception:
+it can start empty with 0. AI-off always waits for at least one ready player.
+Defaults are chosen when the configuration is loaded; later lobby edits to
+AI or game type keep the displayed minimum. Changing those controls does not
+silently replace a minimum the King has seen or chosen. Rotation overrides
+remain round-scoped. The effective minimum is capped at human capacity, so a
+closed slot or smaller mission cannot make the wait impossible.
+
+The lobby and server log share the wait text, for example:
+`Waiting for 2 more ready players (minimum 4).` There is no separate AI-off wait.
+The minimum gates mission start only; departures in flight do not pause it.
+Existing settings messages and `mission_locked` carry everything needed, so
+this change does not extend the wire format.

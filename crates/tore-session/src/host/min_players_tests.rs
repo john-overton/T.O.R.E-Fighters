@@ -155,31 +155,48 @@ fn start_now_waits_for_the_minimum_and_says_so_without_a_fault() {
 }
 
 #[test]
-fn ai_off_keeps_its_full_slots_rule_and_the_stricter_wait_is_said() {
-    // Three slots, AI off, a minimum of 2: the full-slots rule is stricter.
-    let mut rig = rig(3, server(2, &[(number::AI, 0)], StartMode::FirstPlayer));
-    let players: Vec<usize> = (0..3).map(|_| idle(&mut rig)).collect();
+fn ai_off_starts_at_the_minimum_with_empty_slots_and_accepts_a_late_join() {
+    let mut rig = rig(4, server(2, &[(number::AI, 0)], StartMode::FirstPlayer));
+    let a = idle(&mut rig);
     rig.run(Duration::from_secs(1));
-    for (index, &player) in players.iter().take(2).enumerate() {
-        rig.clients[player].take(Some(index as u32));
-        rig.run(Duration::from_millis(500));
-    }
-    // The minimum is met, the third slot is not held.
+    rig.clients[a].take(Some(0));
+    rig.run(Duration::from_millis(500));
     assert_eq!(rig.host.phase(), Phase::Lobby);
     assert_eq!(
         rig.host.start_wait_reason().as_deref(),
-        Some("Waiting for 1 more ready player: AI is off.")
+        Some("Waiting for 1 more ready player (minimum 2).")
     );
+    let b = idle(&mut rig);
+    rig.run(Duration::from_secs(1));
+    rig.clients[b].take(Some(1));
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(a) && r.seated(b)));
+    assert_eq!(rig.host.world.cockpits.len(), 2);
     assert!(
-        notes(&rig)
-            .iter()
-            .all(|note| !note.contains("minimum") || note.starts_with("Waiting for 2"))
+        rig.host
+            .world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actors()
+            .is_empty()
+    );
+    let c = idle(&mut rig);
+    rig.run(Duration::from_secs(1));
+    rig.clients[c].take(Some(2));
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(c)));
+    assert_eq!(rig.host.world.cockpits.len(), 3);
+    assert!(
+        rig.host
+            .world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actors()
+            .is_empty()
     );
     assert!(rig.faults().is_empty(), "{:?}", rig.faults());
-    rig.clients[players[2]].take(Some(2));
-    assert!(rig.run_until(Duration::from_secs(2), |r| {
-        players.iter().all(|&p| r.seated(p))
-    }));
 }
 
 #[test]
@@ -244,4 +261,16 @@ fn a_larger_minimum_than_the_player_limit_is_refused_at_the_host() {
         .validate()
         .is_ok()
     );
+}
+
+#[test]
+fn ai_off_start_now_with_none_still_waits_for_one_ready_human() {
+    let mut rig = rig(4, server(0, &[(number::AI, 0)], StartMode::Now));
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    rig.host.start_now();
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    let player = idle(&mut rig);
+    rig.run(Duration::from_secs(1));
+    rig.clients[player].take(Some(0));
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(player)));
 }

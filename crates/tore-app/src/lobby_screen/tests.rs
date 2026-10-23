@@ -455,15 +455,14 @@ fn the_lobby_says_it_waits_for_the_minimum_players_as_the_host_does() {
     assert_eq!(Facts::of(Some(&state), None).min_players, 6);
     set_setting(&mut state, number::MAX_PLAYERS, 3);
     assert_eq!(Facts::of(Some(&state), None).min_players, 3);
-    // AI off needs every open slot held and ready: its line is the
-    // stricter one and says so.
+    // AI off uses the same minimum, independent of the unfilled slots.
     set_setting(&mut state, number::MAX_PLAYERS, 30);
     set_setting(&mut state, number::MIN_PLAYERS, 2);
     set_setting(&mut state, number::AI, 0);
     let facts = Facts::of(Some(&state), None);
     assert_eq!(
         facts::hint(&facts),
-        "Waiting for 5 more ready players: AI is off."
+        "Waiting for 1 more ready player (minimum 2)."
     );
 }
 
@@ -964,4 +963,19 @@ fn the_screen_puts_a_players_gap_in_messages_once_never_its_build_and_shows_the_
         facts::hint(goose.facts()),
         "Goose's game has no Su-27, which this mission flies."
     );
+}
+
+#[test]
+fn ai_off_fly_and_force_start_ignore_empty_slots_but_require_the_minimum() {
+    use tore_session::settings::number;
+    let mut state = king();
+    set_setting(&mut state, number::AI, 0);
+    set_setting(&mut state, number::MIN_PLAYERS, 1);
+    let facts = Facts::of(Some(&state), None);
+    assert!(facts.force_start());
+    assert!(!facts.all_ready());
+    set_setting(&mut state, number::MIN_PLAYERS, 2);
+    assert!(!Facts::of(Some(&state), None).force_start());
+    state.players[0].ready = true;
+    assert!(Facts::of(Some(&state), None).all_ready());
 }
