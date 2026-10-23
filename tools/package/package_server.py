@@ -186,7 +186,9 @@ def smoke(binary, stamped):
     print(f"{binary.name} --version: {line}")
     if result.returncode != 0:
         raise SystemExit(f"{binary} --version exited with {result.returncode}")
-    expected = f"T.O.R.E server v{stamped} (" if stamped else "T.O.R.E server v"
+    # `tore-server --version` prints "T.O.R.E server - v<version> (code ...,
+    # commit ...)" since the compatibility code (0.2.1).
+    expected = f"T.O.R.E server - v{stamped} (" if stamped else "T.O.R.E server - v"
     if not line.startswith(expected):
         raise SystemExit(f"{binary} --version printed {line!r}, expected it to start with {expected!r}")
 
