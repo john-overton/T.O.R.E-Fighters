@@ -124,6 +124,8 @@ pub enum Outcome {
 /// The screen.
 pub struct DirectScreen {
     kit: Arc<Kit>,
+    /// Supplies this game's identity; tests supply their synthetic import.
+    own: fn() -> Own,
     background: Background,
     callsign: TextField,
     address: TextField,
@@ -251,6 +253,7 @@ impl DirectScreen {
         }
         let mut screen = Self {
             kit,
+            own: Own::this_game,
             background: Background::direct_connection(),
             callsign,
             address: TextField::line((110, 136), 216, Filter::Address).with_hint("host or address"),
@@ -465,7 +468,7 @@ impl DirectScreen {
     pub fn start_search(&mut self, now: Duration) {
         let port = self.settings.port;
         self.searched_port = port;
-        match Search::start(port, Own::this_game(), now) {
+        match Search::start(port, (self.own)(), now) {
             Ok(search) => {
                 // Said once for each port and outcome: a search that starts
                 // again after a refused join or a session says nothing new.
@@ -853,7 +856,7 @@ impl DirectScreen {
             (Compat::OtherBuild | Compat::OtherProtocol, ..) => Some(format!(
                 "The server's compatibility code is {:08X}; yours is {:08X}.",
                 game.answer.compatibility,
-                crate::net::session::compatibility_code()
+                (self.own)().build.compatibility
             )),
             (_, DiscoverPhase::Closed, _) => Some(format!("{name} is closing; try again soon.")),
             (_, _, true) => Some(format!("{name} is full.")),

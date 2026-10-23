@@ -37,7 +37,7 @@ fn with_token(dir: &std::path::Path) -> InternetScreen {
     let mut store = Store::default();
     store.keep(kept(2, "Viper"), "127.0.0.1:31000");
     store.save(dir).unwrap();
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
     s.settings.master = Some(NOBODY.into());
     s.callsign.set_text("Maverick");
     s
@@ -112,7 +112,7 @@ fn the_join_carries_the_token_kept_for_the_games_session() {
     let mut store = Store::default();
     store.keep(kept(2, "Viper"), "127.0.0.1:31000");
     store.save(&dir).unwrap();
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     assert!(master.pump(|| {
@@ -156,7 +156,7 @@ fn lines(s: &InternetScreen) -> String {
 #[test]
 fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     let dir = scratch("switch");
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     s.settings.master = Some(NOBODY.into());
     assert!(s.settings.may_host, "on by default");
     s.open_options();

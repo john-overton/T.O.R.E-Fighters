@@ -150,6 +150,8 @@ struct Joining {
 /// The screen.
 pub struct InternetScreen {
     kit: Arc<Kit>,
+    /// Supplies this game's identity; tests supply their synthetic import.
+    own: fn() -> tore_net::master::Build,
     background: Background,
     callsign: TextField,
     full: CheckBox,
@@ -284,6 +286,7 @@ impl InternetScreen {
         }
         let mut screen = Self {
             kit,
+            own: crate::net::browse::build,
             background: Background::internet_lobby(),
             callsign,
             full,
@@ -545,7 +548,12 @@ impl InternetScreen {
     /// Starts the browse on the master, saying in Messages what it asks.
     pub fn start_browse(&mut self) {
         let master = self.master_text();
-        match Browse::start(&master, self.other.checked(), self.full.checked()) {
+        match Browse::start(
+            &master,
+            self.other.checked(),
+            self.full.checked(),
+            (self.own)(),
+        ) {
             Ok(browse) => {
                 self.say(&format!(
                     "Asking the Internet Lobby at {} for games...",
@@ -1009,7 +1017,7 @@ impl InternetScreen {
             Some(format!(
                 "The server's compatibility code is {:08X}; yours is {:08X}.",
                 entry.compatibility,
-                crate::net::session::compatibility_code()
+                (self.own)().compatibility
             ))
         } else if entry.phase == DiscoverPhase::Closed {
             Some(format!("{name} is closing; try again soon."))
@@ -1034,7 +1042,7 @@ impl InternetScreen {
             return Outcome::None;
         }
         let now = self.last;
-        let through = match MasterJoin::start(&masters, listing_id, now) {
+        let through = match MasterJoin::start(&masters, listing_id, now, (self.own)()) {
             Ok(through) => through,
             Err(problem) => {
                 self.say(&problem);

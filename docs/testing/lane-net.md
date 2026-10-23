@@ -25,6 +25,22 @@ The Rust tests that stay outside the battery (the five-minute matrix and the
 loopback test) are listed in
 [Network tests outside the battery](README.md#network-tests-outside-the-battery).
 
+## Lounge unit test isolation
+
+The Direct and Internet Lounge unit tests supply a synthetic compatibility
+identity to their discovery, browse and introduction paths. Their loopback
+master registers that same identity. They do not load the installed profile
+or share its content cache. Run them with an imported `TORE_DATA_DIR` as well
+as an empty profile to detect accidental dependence on local content.
+
+Direct Lounge tests select temporary UDP ports. They do not require the
+normal game port 26900 to be free or query a live server on it. The busy-button
+test holds its lookup pending with a channel until after checking disabled
+Join, New and Options, enabled Cancel, ignored typing and cancellation. Its
+assertions therefore do not race a fixed sleep. The Internet tests still use
+the real loopback master and check its missing-game response and the saved
+session's rejoin token, including the absence of a token for another session.
+
 ## Running it
 
 ```sh
