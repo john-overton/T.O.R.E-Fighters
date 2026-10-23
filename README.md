@@ -12,7 +12,7 @@
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone 2 multiplayer released as v0.2.0, missions and campaigns next" src="https://img.shields.io/badge/milestone-M2%20released%2C%20M3%20next-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 2 multiplayer released, now at v0.2.1, missions and campaigns next" src="https://img.shields.io/badge/milestone-M2%20released%2C%20M3%20next-orange"></a>
 </p>
 
 <p align="center">
@@ -46,8 +46,22 @@ Download the package for your computer from the
 | Platform | Package | First launch |
 | --- | --- | --- |
 | Windows (x86_64, or 32-bit x86) | `.msi` installer; `-windows-x86.msi` is the 32-bit one | The build is unsigned, so SmartScreen warns you. Choose **More info**, then **Run anyway**. |
-| macOS, Apple Silicon or Intel | `.dmg` for your processor | The build is unsigned. Right-click the app, choose **Open**, then confirm. If macOS still refuses, use **System Settings > Privacy & Security > Open Anyway**. |
+| macOS, Apple Silicon or Intel | `.dmg` for your processor | Copy the app to Applications and open it. There is no Developer ID or notarization. If blocked, use **System Settings > Privacy & Security > Open Anyway**, then confirm **Open**. |
 | Linux (x86_64) | `.AppImage`, or `.tar.gz` | Make the AppImage executable (`chmod +x`), then run it. |
+
+On macOS, the **0.2.0 download** may say the app "is damaged". In Terminal,
+run `xattr -dr com.apple.quarantine /Applications/T.O.R.E-Fighters.app`, then
+open it again. Version 0.2.1 fixes the missing bundle seal. See
+[first-launch help](docs/DEVELOPMENT.md#unsigned-builds-and-first-launch) for
+the fallback on other builds; recent macOS no longer has the right-click Open
+bypass.
+
+The main menu's **Update Available** link opens a newer GitHub release, including
+prereleases. **Leave Feedback** opens the project's issues page. Automatic
+checks run in the background at most once a day per profile. They send an
+anonymous request to `api.github.com`; disable them with **Pref > Check for
+updates: Off**. Downloads and installation are manual. See the
+[update-check details](docs/spec/main-menu-presentation.md#updates-and-project-feedback).
 
 ### 2. Point it at your game
 
@@ -126,11 +140,14 @@ recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
 
 ## What works today
 
-Version 0.2.0 is the [Milestone 2: Multiplayer](docs/ROADMAP.md#milestone-2-multiplayer)
-release. Build a Quick Mission with friends, fly together or against each other,
-and return to the lobby for the next round. It also brings ground attacks,
-defended surface targets, more aircraft and a fuller world to single player.
-The [release notes](docs/release/v0.2.0.md) describe the changes.
+Version 0.2.1 follows the [Milestone 2: Multiplayer](docs/ROADMAP.md#milestone-2-multiplayer)
+release, 0.2.0. Build a Quick Mission with friends, fly together or against each
+other, and return to the lobby for the next round. 0.2.0 also brought ground
+attacks, defended surface targets, more aircraft and a fuller world to single
+player; 0.2.1 keeps scores across revivals, matches games by compatibility code
+and fixes the macOS first launch. The release notes for
+[0.2.1](docs/release/v0.2.1.md) and [0.2.0](docs/release/v0.2.0.md) describe
+the changes.
 
 **Menus.** The app launches into the original **Choose Activity** menu using
 artwork, button pieces, proportional fonts, sounds and recorded music imported
@@ -140,7 +157,7 @@ a planning map, ground targets, air defenses and ground starts for either side.
 Mission systems that are not built yet are refused before launch.
 
 **Multiplayer.** Open **Multi > Direct Connection** for a local game or a typed
-address, or **Multi > Internet Lobby** to browse online games. Press **New** to
+address, or **Multi > Internet...** to browse online games in the Internet Lounge. Press **New** to
 host, or **Join** to join. The King chooses the mission and rules; players take
 slots, choose their loadouts, mark themselves **Ready** and fly. Up to 30 humans
 can play co-op or PvP, with configurable sides, AI fill and respawn. Player
@@ -234,7 +251,10 @@ T.O.R.E has two ways to find an online game. **Direct Connection** (Multi menu)
 searches your local network and joins an address you type, and talks to no
 server of ours. **Internet Lobby** (Multi menu) lists games on a public list
 server, the *master*, at `master.jroverton.com` (UDP ports 26901 and 26902).
-You can point it at another master in **Options**.
+You can point it at another master in **Options > Master server**. **Default**
+restores `master.jroverton.com:26901`; **OK** saves your choice. Listing,
+hosting, relay and enabled anonymous statistics all use the chosen master.
+See [running your own master](docs/DEDICATED-SERVER.md#running-your-own-master).
 
 Listing a game on the master tells it the game's name, its mission, the
 callsigns in it and the address the game answers at, which is what anyone

@@ -38,6 +38,7 @@ proposal unless it is credited to John.
 - [Hosting from the game](#hosting-from-the-game)
 - [Finding games from the command line](#finding-games-from-the-command-line)
 - [Broadcasting on the Internet Lobby](#broadcasting-on-the-internet-lobby)
+  - [Running your own master](#running-your-own-master)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
@@ -102,34 +103,37 @@ already imported it: the server reads the game's data folder by default), then
 start it from that folder:
 
 ```sh
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-server-0.2.0-linux-x86_64.tar.gz
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-server-0.2.0-linux-x86_64.tar.gz.sha256
-sha256sum -c tore-server-0.2.0-linux-x86_64.tar.gz.sha256
-tar -xzf tore-server-0.2.0-linux-x86_64.tar.gz
-cd tore-server-0.2.0-linux-x86_64
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-server-0.2.1-linux-x86_64.tar.gz
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-server-0.2.1-linux-x86_64.tar.gz.sha256
+sha256sum -c tore-server-0.2.1-linux-x86_64.tar.gz.sha256
+tar -xzf tore-server-0.2.1-linux-x86_64.tar.gz
+cd tore-server-0.2.1-linux-x86_64
 ./tore-server --import /path/to/FIGHTERS
 ./tore-server --config server.conf --check
 ./tore-server --config server.conf
 ```
 
-(`v0.2.0` stands for the release you want; on macOS, `shasum -a 256 -c` checks
+(`v0.2.1` stands for the release you want; on macOS, `shasum -a 256 -c` checks
 the file.) On Windows, unzip it and run the three `tore-server` lines in PowerShell or
 a Command Prompt, as `.\tore-server.exe`; `Get-FileHash` prints the SHA-256 to
 compare with the `.sha256` file. Then see
 [ports and firewalls](#ports-and-firewalls) to let players in.
 
-Nothing is signed, as with the game
+There is no developer signing or notarization, as with the game
 ([first launch](DEVELOPMENT.md#unsigned-builds-and-first-launch)):
 
 - **Linux.** Built on Ubuntu 22.04 and checked not to need a newer C library
   than its glibc 2.35, so it runs on Ubuntu 22.04 or later and other
   distributions of that age or newer.
-- **macOS.** A file a browser downloaded is quarantined, and macOS refuses to
-  run the unsigned server ("cannot be verified"). In the unpacked folder,
-  `xattr -d com.apple.quarantine tore-server` clears it; or run it once, then
-  choose **Allow Anyway** for it under System Settings, Privacy & Security, and
-  run it again. A download made with `curl` is not quarantined. Needs macOS 11
-  or later, as the game does.
+- **macOS.** The binary is ad-hoc signed for integrity, without Developer ID
+  or notarization. A browser download is quarantined and may be blocked
+  ("cannot be verified"). Try running it from the unpacked folder, then if
+  blocked choose **System Settings > Privacy & Security > Open Anyway** and
+  run it again. Recent macOS no longer has the right-click Open bypass. For a
+  trusted project download that remains blocked, run
+  `xattr -dr com.apple.quarantine tore-server` in that folder and retry. A
+  download made with `curl` is not quarantined. Needs macOS 11 or later, as
+  the game does.
 - **Windows.** A zip a browser downloaded is marked as coming from the
   internet, and Windows may warn before the server first runs. Before
   unzipping, open the zip's Properties and tick **Unblock** (or run
@@ -178,7 +182,7 @@ tore-server --config server.conf
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
 | `--check` | Validate the configuration and import; with rotation, build every entry and report its summary/settings. Print the selected mission's aircraft, runways, manifest and import content. Exit without opening the port |
 | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` | AI test settings (slices S7b and S9), for measuring and trying, not for play: `N` is how often AI aircraft observe, 120, 60 (default since optimization round 2), 40, 30 or 20, staggered across ticks, and lean sensors (on by default; a bare flag means on, `off` runs the full sensors) have AI aircraft skip the visual channel and build the received-radar list only when a warning needs it, which decides exactly as full ones do. The server's setting governs the simulation and no player is told; a server running another rate or full sensors appoints no standby. See [AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors) |
-| `--help`, `--version` | Print the options, or the version and commit, and exit |
+| `--help`, `--version` | Print the options, or the version, compatibility code and commit for the selected data profile, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
 defaults apply (a configuration file named with `--config` must exist); a
@@ -213,7 +217,7 @@ server reads its Fighters Anthology build from the `FA.EXE:` line of
 `import-report.txt` beside the pack, and the importer is unknown
 ("imported by an unknown T.O.R.E"). No re-import is needed.
 
-At start it prints the version and commit, the data folder, a summary of the
+At start it prints the version, commit and compatibility code, the data folder, a summary of the
 mission, the port it listens on, whether it broadcasts on the Internet Lobby
 (`Broadcast: off ...` or `Broadcast: on, to the Internet Lobby at ...`) and
 "Waiting for players". It refuses to start,
@@ -794,8 +798,12 @@ manifest with the server's: the names and hashes of every resource the
 simulation reads for that mission (aircraft, weapons, theater, radio phrases).
 A 1.0 disc import and a 1.02F import play together, since they differ only in
 menu and HUD resources. A difference is refused with the names of the files
-that differ. The game version and protocol must match as well
-([wire protocol](formats/net-protocol.md#versions)). *Decided with the lead, 2026-09-30:* a build is a tagged release when the build stamped `TORE_BUILD_VERSION` at compile time (`option_env!("TORE_BUILD_VERSION").is_some()`, as the game's `version::version()` already tests); release builds match by version and other builds by commit. The server's rule is `app::is_release` in `crates/tore-server/src/app.rs`, and the game's `--connect` must use the same test.
+that differ. The protocol and [compatibility code](ARCHITECTURE.md#compatibility-code)
+must match as well. Different commits, release tags and version strings can
+join with the same code. `tore-server --data-dir /path/to/profile --version`
+prints the code of that import; without an import it labels an empty-content
+code explicitly. The code covers the whole playable import, so a change to
+an unused item also prevents joining.
 
 ## Hosting from the game
 
@@ -893,8 +901,7 @@ tore-app --find-games 8 [--port 26900]
 
 It looks for games on the local network for that many seconds (0.1 to 3600)
 and prints each game when it first answers, one line each on stdout, fields
-separated by tabs: address, whether the build matches (`same build`, `other
-build` or `other protocol`, with the host's version and commit), name, mission
+separated by tabs: address, whether the code matches (`matching code`, `other code` or `other protocol`, with the host's code, version and commit), name, mission
 summary, players and capacity, phase (`lobby`, `flying`, `closed`), the King
 (`-` for a dedicated server), `password` or `open`, `full` or `not full`.
 When nothing answers it prints `No games found.` and exits 0 all the same;
@@ -959,6 +966,65 @@ To try it on one machine, run a master on loopback ([testing on one
 machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`
 and `master 127.0.0.1:26911` in `server.conf`.
 
+### Running your own master
+
+Private environments and forks can run `tore-master` and have both servers and
+players use it. Releases ship a separate Linux
+`tore-master-<version>-linux-x86_64.tar.gz` archive, with a checksum, on the
+[releases page](https://github.com/john-overton/T.O.R.E-Fighters/releases).
+See [download instructions](MASTER-SERVER.md#downloading-a-release) or
+[build it from source](MASTER-SERVER.md#building-it).
+
+On the machine running the master, create `master.conf`:
+
+```text
+listen 0.0.0.0
+port 26901
+probe-port 26902
+state-dir state
+```
+
+Run `tore-master --config master.conf --check-config`, then
+`tore-master --config master.conf`. Allow incoming UDP 26901 and 26902 through
+the firewall and point your DNS name at that machine. The second port tests
+routers; relay traffic uses the main port. For a custom main port, use its
+port plus one for `probe-port`. The [master guide](MASTER-SERVER.md) covers
+IPv6 listeners, service installation, relay limits and logs.
+
+On each dedicated server, set these entries in `server.conf`:
+
+```text
+broadcast on
+master master.example.org:26901
+```
+
+Players open **Multi > Internet... > Options**, enter the same address in
+**Master server**, and press **OK**. Browsing, hosting with New, introductions,
+NAT traversal, relay and enabled anonymous statistics then use that master.
+**Default**, followed by **OK**, returns to `master.jroverton.com:26901`.
+Command-line players can use `tore-app --browse 5 --master master.example.org`
+or `tore-app --host mission.txt --list --master master.example.org` for a
+temporary override; it does not rewrite their preferences. For loopback tests,
+use a free pair such as 26911 and 26912 and enter `127.0.0.1:26911` on both
+server and player. Forks still need mutually compatible clients and servers;
+choosing a different master does not bypass the game's compatibility checks.
+
+### Running a master for old and new games
+
+The updated `tore-master` serves released 0.2.0 hosts and clients (master
+protocol 1, game protocol 67) alongside code-based hosts and clients (master
+protocol 2, game protocol 71 and later). Upgrade the master first. Existing
+0.2.0 servers can keep running and broadcasting without a game/server update.
+Old requests receive the old layout and only old-generation listings; new
+requests receive codes and only new-generation listings. Show other versions
+does not cross that boundary. Direct introductions and relay setup also stay
+within the generation. No new port or configuration setting is needed.
+
+See [running and updating the master](MASTER-SERVER.md#updating) and the
+[wire rules](formats/master-protocol.md#compatibility-codes-master-protocol-2).
+This supports a gradual rollout; it does not make game protocols 67 and 71
+play together.
+
 ## Console, status and logs
 
 The server reads commands from its standard input:
@@ -988,11 +1054,15 @@ console thread only reads lines, and the run loop acts on them within 4 ms.
 A status line every `status-interval` seconds:
 
 ```text
-00:12:30 tick 90000 players 2/15 aircraft 30 load 11% (1.1 ms a tick) up 64 KB/s down 7 KB/s
+00:12:30 tick 90000 players 2/15 aircraft 30 load 11% (1.1 ms a tick) up 64 KB/s down 7 KB/s, worst 52.3 ms
 ```
 
-While the server broadcasts, the line ends with where its listing stands,
-for example `, broadcast: listed, seen at 203.0.113.5:26900` (I3).
+While the server broadcasts, the line includes where its listing stands,
+for example `, broadcast: listed, seen at 203.0.113.5:26900` (I3), before
+`worst`. Both periodic lines and console `status` append the slowest tick
+since the previous status call, in milliseconds. With no ticks it is zero.
+The mean tick cost and load still cover the same interval; a low mean can
+hide a large pause, so use `worst` to see individual spikes.
 
 The log (`logs/server-<date>.log` in the data folder) records the start,
 every connection, refusal, seat change and departure with its reason, the
@@ -1329,6 +1399,25 @@ Files are named `server-<UTC seconds>-<nanoseconds>.tore-replay`; a `.log` with
 the same stem holds mission combat and server events. Normal mission end,
 rotation and console `quit` finish the recording. An interrupted process can
 leave a recoverable `.partial` recording.
+
+Replay encoding, writes, syncs and companion-log writes run on a dedicated
+writer thread. Flight hands off frames without waiting for the disk. Chunk
+size and sync cadence are unchanged: 120-frame chunks, a sync every 3,600
+written frames, and a final sync on finish. The queue and writer chunk share
+a 7,200-frame unwritten budget, about 60 seconds at 120 Hz. Multi-second disk
+stalls can therefore clear without ending the recording or disabling feedback.
+A process crash can lose these unwritten frames. A machine or power failure
+can also lose written frames from the current unsynced interval. The sync
+cadence counts written frames, not wall-clock time while disk work is stalled.
+This added crash exposure is accepted to preserve recording through realistic
+I/O delays. See [measured memory use](baselines/recorder-io.md) for sizing.
+When the full minute's budget is exhausted, the server logs
+`Recording failed: replay writer queue full`, stops recording and disables
+feedback for the rest of this mission. Flight continues. Accepted frames drain to a recoverable `.partial`
+file with its companion log; the file is never labeled complete.
+The next mission starts a fresh recording. Mission end, rotation, host
+handover, Stop and graceful shutdown wait for the writer to flush and join.
+See the [recording policy](spec/replay-feedback.md) for the precise bounds.
 
 After a mission finishes, rotation deletes the oldest complete, readable,
 unflagged `server-*.tore-replay` files above the limit, and their companion

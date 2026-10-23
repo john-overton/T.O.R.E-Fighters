@@ -51,3 +51,5 @@ pub use host::{
 pub use tore_sim::ai::test_settings::AiTestSettings;
 
 pub mod recording;
+
+pub mod compatibility;

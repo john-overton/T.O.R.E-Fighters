@@ -35,6 +35,9 @@ pub(in crate::host) fn save_scores(s: &mut Saver, scoring: &Scoring) -> Result<(
         // What each connection was last sent is not moved: the new host
         // sends Scores to everyone at once (docs/ARCHITECTURE.md).
         sent: _,
+        accounts,
+        members,
+        ai,
         players,
         sides,
         flyers,
@@ -44,6 +47,9 @@ pub(in crate::host) fn save_scores(s: &mut Saver, scoring: &Scoring) -> Result<(
         version,
         last_sent,
     } = scoring;
+    save_accounts(s, accounts)?;
+    members.save(s, None)?;
+    ai.save(s, None)?;
     s.count(players.len());
     for (order, player) in players {
         order.save(s, None)?;
@@ -54,15 +60,19 @@ pub(in crate::host) fn save_scores(s: &mut Saver, scoring: &Scoring) -> Result<(
     callsigns.save(s, None)?;
     changed.save(s, None)?;
     s.count(listed.len());
-    for (order, side) in listed {
+    for (order, side, left) in listed {
         order.save(s, None)?;
         save_option_side(s, *side);
+        left.save(s, None)?;
     }
     version.save(s, None)?;
     last_sent.save(s, None)
 }
 
 pub(in crate::host) fn load_scores(l: &mut Loader<'_>) -> Result<Scoring> {
+    let accounts = load_accounts(l)?;
+    let members = Checkpoint::load(l, None)?;
+    let ai = Checkpoint::load(l, None)?;
     let mut players = BTreeMap::new();
     for _ in 0..l.count()? {
         let order = u64::load(l, None)?;
@@ -76,9 +86,16 @@ pub(in crate::host) fn load_scores(l: &mut Loader<'_>) -> Result<Scoring> {
     let changed = bool::load(l, None)?;
     let mut listed = Vec::new();
     for _ in 0..l.count()? {
-        listed.push((u64::load(l, None)?, load_option_side(l)?));
+        listed.push((
+            u64::load(l, None)?,
+            load_option_side(l)?,
+            bool::load(l, None)?,
+        ));
     }
     Ok(Scoring {
+        accounts,
+        members,
+        ai,
         players,
         sides,
         flyers,
@@ -89,6 +106,65 @@ pub(in crate::host) fn load_scores(l: &mut Loader<'_>) -> Result<Scoring> {
         sent: BTreeMap::new(),
         last_sent: Checkpoint::load(l, None)?,
     })
+}
+
+fn save_accounts(s: &mut Saver, accounts: &super::super::flight_report::Accounts) -> Result<()> {
+    use crate::wire::messages::{Debrief, Message};
+    let super::super::flight_report::Accounts {
+        totals,
+        previous,
+        ai,
+        last_ai,
+        side_hits,
+    } = accounts;
+    for entries in [
+        totals.iter().map(|(k, v)| (*k, v)).collect::<Vec<_>>(),
+        previous.iter().map(|(k, v)| (u64::from(*k), v)).collect(),
+        ai.iter().map(|(k, v)| (u64::from(*k), v)).collect(),
+    ] {
+        s.count(entries.len());
+        for (key, pilot) in entries {
+            key.save(s, None)?;
+            let bytes = Message::Debrief(Box::new(Debrief {
+                player: pilot.clone(),
+                ..Debrief::default()
+            }))
+            .encode()
+            .map_err(|_| tore_sim::checkpoint::CheckpointError::Invalid("report".into()))?;
+            bytes.save(s, None)?;
+        }
+    }
+    last_ai.save(s, None)?;
+    side_hits.save(s, None)
+}
+
+fn load_accounts(l: &mut Loader<'_>) -> Result<super::super::flight_report::Accounts> {
+    use crate::wire::messages::{Message, kind};
+    let mut accounts = super::super::flight_report::Accounts::default();
+    for section in 0..3 {
+        for _ in 0..l.count()? {
+            let key = u64::load(l, None)?;
+            let bytes = Vec::<u8>::load(l, None)?;
+            let Ok(Message::Debrief(report)) = Message::decode(kind::DEBRIEF, &bytes) else {
+                return tore_sim::checkpoint::invalid("report");
+            };
+            if section != 0 {
+                let Ok(key) = u32::try_from(key) else {
+                    return tore_sim::checkpoint::invalid("plane");
+                };
+                if section == 1 {
+                    accounts.previous.insert(key, report.player);
+                } else {
+                    accounts.ai.insert(key, report.player);
+                }
+            } else {
+                accounts.totals.insert(key, report.player);
+            }
+        }
+    }
+    accounts.last_ai = Checkpoint::load(l, None)?;
+    accounts.side_hits = Checkpoint::load(l, None)?;
+    Ok(accounts)
 }
 
 #[cfg(test)]
@@ -107,7 +183,26 @@ mod tests {
             losses,
             damage,
         };
+        let pilot = crate::wire::messages::DebriefPilot {
+            kills: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            air_to_air: tore_sim::combat::ledger::Tally {
+                launched: 5,
+                hit: 3,
+                damage: 250,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let scoring = Scoring {
+            accounts: super::super::super::flight_report::Accounts {
+                totals: BTreeMap::from([(1, pilot.clone())]),
+                previous: BTreeMap::from([(0, pilot.clone())]),
+                ai: BTreeMap::from([(3, pilot)]),
+                last_ai: std::collections::BTreeSet::from([3]),
+                side_hits: [3, 3],
+            },
+            ai: BTreeMap::from([(tore_world::seats::PlaneId(3), tally(2, 1, 0.75))]),
+            members: BTreeMap::from([(1, (0, "Viper".into())), (4, (1, "Hawk".into()))]),
             players: BTreeMap::from([
                 (
                     1,
@@ -128,7 +223,7 @@ mod tests {
             flyers: BTreeMap::from([(PlaneId(0), 1), (PlaneId(5), 4)]),
             callsigns: BTreeMap::from([(PlaneId(0), "Viper".to_owned())]),
             changed: true,
-            listed: vec![(1, Some(Side::Friendly)), (4, None)],
+            listed: vec![(1, Some(Side::Friendly), false), (4, None, true)],
             version: 9,
             sent: BTreeMap::from([(tore_net::ConnectionId(3), 8)]),
             last_sent: Some(1_440),
@@ -136,6 +231,9 @@ mod tests {
         let bytes = to_bytes(|s| save_scores(s, &scoring)).unwrap();
         let restored = from_bytes(&bytes, load_scores).unwrap();
         assert_eq!(restored.players, scoring.players);
+        assert_eq!(restored.members, scoring.members);
+        assert_eq!(restored.ai, scoring.ai);
+        assert_eq!(restored.accounts, scoring.accounts);
         assert_eq!(restored.sides, scoring.sides);
         assert_eq!(restored.flyers, scoring.flyers);
         assert_eq!(restored.callsigns, scoring.callsigns);

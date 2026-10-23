@@ -85,10 +85,11 @@ pub enum AfterEnd {
     Quit,
 }
 
-/// The build a host runs, which a joining game must match
-/// (docs/ARCHITECTURE.md, "Joining, leaving and the end of a mission").
+/// Informational source labels and the compatibility identity used for admission.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuildId {
+    /// Protocol, simulation rules and playable content, displayed as eight hex digits.
+    pub compatibility: u32,
     /// The version string, for example `0.2.0`, or `0.2.0-4-gabc1234` for a
     /// build between tags.
     pub version: String,
@@ -99,20 +100,10 @@ pub struct BuildId {
 }
 
 impl BuildId {
-    /// Whether a game reporting `version` and `commit` may join. Two builds
-    /// of one commit always match. A tagged release host also takes a game
-    /// of the same plain version (no `-` suffix), since every tagged build
-    /// of a version is the same source.
-    ///
-    /// *Agent decision:* the game does not say whether it is a tagged build,
-    /// so a local build of another commit that still reports the crate's
-    /// plain version passes a release host's check. Release builds are what
-    /// players run; the corner is a developer's.
-    pub fn matches(&self, version: &str, commit: &str) -> bool {
-        if commit == self.commit && commit != "unknown" {
-            return true;
-        }
-        self.release && version == self.version && !version.contains('-')
+    /// Commits and release labels are informational. Only the compatibility
+    /// code gates a join; the mission manifest remains the detailed check.
+    pub fn matches(&self, compatibility: u32) -> bool {
+        self.compatibility == compatibility
     }
 }
 
@@ -141,7 +132,7 @@ pub struct HostConfig {
     pub after_end: AfterEnd,
     /// Between a mission's end and the next start.
     pub restart_delay: Duration,
-    /// The build, for the join check.
+    /// Source labels and compatibility code, derived from the loaded content.
     pub build: BuildId,
     /// Where the transport's secrets come from: [`Entropy::System`] on real
     /// sockets, [`Entropy::Seeded`] in tests and on the simulator only.
@@ -377,6 +368,7 @@ mod tests {
 
     fn build() -> BuildId {
         BuildId {
+            compatibility: 0,
             version: "0.2.0".into(),
             commit: "abc".into(),
             release: true,
@@ -510,23 +502,15 @@ mod tests {
     }
 
     #[test]
-    fn builds_match_by_commit_or_by_a_release_version() {
-        let release = build();
-        assert!(release.matches("0.2.0", "abc"));
-        assert!(release.matches("0.2.0", "def"), "another tagged build");
-        assert!(!release.matches("0.1.2", "def"));
-        assert!(!release.matches("0.2.0-4-gdef", "def"));
-        let dev = BuildId {
-            release: false,
-            ..build()
-        };
-        assert!(dev.matches("0.2.0-4-gabc", "abc"));
-        assert!(!dev.matches("0.2.0", "def"));
-        let unknown = BuildId {
-            commit: "unknown".into(),
-            release: false,
-            ..build()
-        };
-        assert!(!unknown.matches("0.2.0", "unknown"));
+    fn builds_match_only_by_compatibility_code() {
+        let mut release = build();
+        release.compatibility = 0x3FA9C21B;
+        let mut dev = release.clone();
+        dev.commit = "different".into();
+        dev.version = "0.2.0-99-gdifferent".into();
+        dev.release = false;
+        assert!(release.matches(dev.compatibility));
+        dev.compatibility ^= 1;
+        assert!(!release.matches(dev.compatibility));
     }
 }

@@ -361,7 +361,8 @@ impl App {
     /// screen but the flight pauses it, a menu or the pause over the flight
     /// too.
     pub(crate) fn input_paused(&self) -> bool {
-        self.loading.is_some()
+        self.leave_dialog.is_some()
+            || self.loading.is_some()
             || self.pending_join.is_some()
             || self.pending_host.is_some()
             || self.screen != Screen::Flight
@@ -417,7 +418,6 @@ impl App {
                 (true, true) => "ending the game",
             }
         );
-        session.hand_over_for_leave();
         self.net_ending = Some("You left the game.".into());
         self.end_session(event_loop);
     }

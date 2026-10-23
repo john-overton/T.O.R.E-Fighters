@@ -25,6 +25,11 @@ bindable dim/bright actions. [Levels and defaults](spec/cockpit-lighting.md).
 
 ## Quick start
 
+On Choose Activity, Tab or the menu arrows reach **Leave Feedback** and, when
+shown, **Update Available**. Enter/Space activates the focused item; controller
+menu directions and Accept do the same. The saved check toggle is in Pref.
+See the [project-link contract](spec/main-menu-presentation.md#updates-and-project-feedback).
+
 Every default key, mouse input and gamepad button is in the
 [controls master list](CONTROLS.md). On Linux a controller exposing the standard
 two-stick gamepad controls receives the following default mapping. The 8BitDo Ultimate 2 wireless controller's input
@@ -1228,7 +1233,7 @@ scrolls with Up/Down, the controller D-pad, Page Up/Down, Home/End, the mouse
 wheel or the red scroll bar. Escape or controller B closes it. The map retains
 its view when switching tabs. A/B and the D-pad do not also operate the aircraft
 while this page is open. In the in-flight respawn Loadout and Aircraft pages,
-select Mission... or press M for the same brief; Close, Escape/B or Enter/A
+select Mission... or press M outside search focus for the same brief; Close, Escape/B or Enter/A
 returns to the unchanged page. Pre-flight loadout menus are unchanged.
 Right-side map buttons toggle categories, with Buildings off by default.
 Selections last until flight restart; no category settings appear in Escape. See the
@@ -1236,7 +1241,14 @@ Selections last until flight restart; no category settings appear in Escape. See
 
 While waiting for multiplayer revival, Escape opens **Loadout...**, plus
 **Aircraft...** in Player Choice slots, throughout and after the delay. Done
-saves edits; Cancel or Escape discards unsaved edits. Close all menus and press
+saves edits; Cancel discards unsaved edits. Loadout stations open a searchable
+store list; Aircraft shows all available choices in one scrolling list.
+Click Search or Tab to focus it, type to filter, and use Backspace to erase.
+Tab toggles search/results focus. Up/Down or D-pad navigates results;
+Enter/A selects, Home/End and Page Up/Down navigate, and the wheel or red bar
+scrolls. Escape/B clears search first, then closes a station sub-menu, then
+cancels the page. M types into search when focused; Mission... remains clickable.
+Close all menus and press
 Enter or controller A to fly again when ready. Early presses do not queue a
 respawn, and closing a menu never confirms one. See [revival choices](MULTIPLAYER.md#ai-aircraft-and-player-choice).
 
@@ -1377,8 +1389,25 @@ M returns to main and X exits while open. Controller Left/Right move between
 lounge controls; Up/Down scroll the focused Games or Players list. Settings
 Close/F10 applies its draft and Escape discards it.
 
+Internet Lounge Options uses Tab and Shift+Tab between fields and buttons.
+The Master server field is followed by Default; Enter or Space on Default
+restores the public address in the draft. Enter in a field or OK saves, and
+Escape or Cancel discards the draft. These are the existing menu inputs.
+
 
 The dedicated-server [feedback form](spec/replay-feedback.md) uses existing
 menu inputs, with Tab between field and buttons and Escape to cancel. Its
 on-screen keyboard accepts the controller's existing menu directions and
 accept/back buttons. No global flight binding is added.
+
+While the multiplayer score board (K) is open, Ctrl+PageUp and Ctrl+PageDown
+page through its human and AI rows. These shortcuts leave ordinary flight
+controls unchanged when the board is closed. See [multiplayer](MULTIPLAYER.md#debrief).
+
+## Air target selection
+
+T and Shift+T cycle the displayed own-radar TWS contacts, friendlies included.
+Enter cycles visible aircraft left to right; Apostrophe selects the aircraft
+nearest the centre of the forward view. The two visual actions can be rebound
+separately. Neither requires a radar return. See the full
+[target-selection rules](spec/radar.md#target-selection-keys).

@@ -2,7 +2,8 @@ name: Release packages
 
 # Tag-triggered. A push to a release-test/... branch, or workflow_dispatch,
 # exercises the packaging path without publishing anything: the release job
-# only runs for a tag. Nothing built here is signed.
+# only runs for a tag. macOS code is ad-hoc signed for integrity only;
+# there is no Developer ID signing or notarization.
 
 on:
   push:
@@ -170,7 +171,9 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: tools/package/package-linux.sh
-      - name: Package (macOS)
+      # The script requires a bundle seal and strict signature verification
+      # both before packaging and inside the mounted DMG. Any failure stops CI.
+      - name: Package and verify ad-hoc signatures (macOS)
         if: runner.os == 'macOS'
         run: tools/package/package-macos.sh
       - name: Package (Windows)
@@ -196,8 +199,8 @@ jobs:
       # print the stamped version; writes tore-server-<version>-<platform>
       # (.tar.gz, or .zip on Windows) and its .sha256 into dist/server/; then
       # scans the archive and runs `--version` again from an unpacked copy.
-      # dist/server/ keeps it out of the packages-* upload above. Unsigned,
-      # like the game.
+      # dist/server/ keeps it out of the packages-* upload above. macOS also
+      # signs ad hoc and verifies the staged and unpacked server.
       - name: Package the dedicated server
         if: ${{ !matrix.target }}
         shell: bash
@@ -319,7 +322,7 @@ jobs:
               gh release create "$TAG" \
                 --title "$TAG" \
                 --prerelease \
-                --notes "Unsigned pre-release builds. On macOS the first launch is right-click, Open. On Windows SmartScreen, choose More info, then Run anyway. No retail media is included: point the app at your own Fighters Anthology copy on first run."
+                --notes "Pre-release builds without developer signing or notarization. On macOS, open the app, then if blocked use System Settings > Privacy & Security > Open Anyway. On Windows SmartScreen, choose More info, then Run anyway. No retail media is included: point the app at your own Fighters Anthology copy on first run."
             fi
           fi
           gh release upload "$TAG" dist/* --clobber

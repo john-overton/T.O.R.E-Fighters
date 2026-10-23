@@ -164,14 +164,16 @@ impl<'a> Loop<'a> {
 /// The status line, with where the listing stands while the server
 /// broadcasts: `..., broadcast: listed, seen at 203.0.113.5:26900`.
 fn status_text(host: &mut dyn Host, now: Time) -> String {
-    let mut line = status_line(&host.status(now));
+    let status = host.status(now);
+    let mut line = status_line(&status);
     if let Some(rotation) = host.rotation_status() {
         line.push_str(&format!(", {rotation}"));
     }
-    match host.listing() {
+    let line = match host.listing() {
         Some(listing) => format!("{line}, broadcast: {listing}"),
         None => line,
-    }
+    };
+    format!("{line}, worst {:.1} ms", status.worst_tick_ms)
 }
 
 #[cfg(test)]
@@ -401,6 +403,11 @@ mod tests {
             .filter(|l| l.contains(" tick "))
             .collect();
         assert_eq!(statuses.len(), 3, "{console_text}");
+        assert!(
+            statuses
+                .iter()
+                .all(|line| line.ends_with(", worst 52.3 ms"))
+        );
         assert!(statuses[0].starts_with("00:00:10 tick 1200 players 0/15 aircraft 30"));
         assert!(!rig.file().contains(" tick "));
     }
@@ -491,7 +498,7 @@ mod tests {
             "ending the mission",
             "restarting the mission",
             "console: broadcast on",
-            "down 7 KB/s, broadcast: listed",
+            "down 7 KB/s, broadcast: listed, worst 52.3 ms",
             "unknown command `bogus`",
             "Commands: status",
             "Stopped",

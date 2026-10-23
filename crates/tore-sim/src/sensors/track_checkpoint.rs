@@ -25,6 +25,7 @@ crate::checkpoint_enum!(Mode {
 // A pilot's picks, kept for an aircraft's next human (`combat::live::Kept`).
 crate::checkpoint_struct!(Picks {
     selected,
+    visual_selection,
     held,
     ground_retained,
     air_ground,
@@ -96,6 +97,7 @@ crate::checkpoint_struct!(Trail {
 crate::checkpoint_struct!(Sensors {
     controls,
     selected,
+    visual_selection,
     acquired,
     acquisition,
     active,

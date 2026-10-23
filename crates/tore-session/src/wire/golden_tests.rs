@@ -91,6 +91,7 @@ fn lines(version: u16) -> Vec<(String, String)> {
             password: "secret".into(),
             game_version: "0.1.3".into(),
             game_commit: "fb9c2ec".into(),
+            compatibility: 0,
             platform: super::Platform::Linux,
             path: tore_net::master::Path::Punched,
             // The rejoin token since protocol 13 (stage K).
@@ -136,6 +137,44 @@ fn lines(version: u16) -> Vec<(String, String)> {
         "transport-reach-answer".into(),
         hex(&answer.encode(version).unwrap()),
     ));
+    use tore_net::packet::{Packet, ReservationAnswer, ReservationQuery, ReservedSlot};
+    let query = ReservationQuery {
+        nonce: 0x99AA_BBCC_DDEE_FF00,
+        session_id: 0x1122_3344_5566_7788,
+        token: tore_net::Token(0x0123_4567_89ab_cdef_0011_2233_4455_6677),
+    };
+    for (name, packet) in [
+        (
+            "transport-reservation-query",
+            Packet::ReservationQuery(query),
+        ),
+        (
+            "transport-reservation-none",
+            Packet::ReservationAnswer(ReservationAnswer {
+                nonce: query.nonce,
+                session_id: query.session_id,
+                held: None,
+            }),
+        ),
+        (
+            "transport-reservation-held",
+            Packet::ReservationAnswer(ReservationAnswer {
+                nonce: query.nonce,
+                session_id: query.session_id,
+                held: Some(ReservedSlot {
+                    plane: 1,
+                    enemy: false,
+                    wing: 0,
+                    member: 1,
+                    token_seconds: 86_400,
+                    return_seconds: 192,
+                }),
+            }),
+        ),
+    ] {
+        out.push((name.into(), hex(&packet.encode(version).unwrap())));
+    }
+
     out
 }
 

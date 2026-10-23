@@ -780,3 +780,21 @@ compares the live terrain loader's ground palette with the family read from
 each retail base MM at all six weather choices and three altitudes. It prints
 mean land-cell RGB for each comparison and fails on any palette mismatch.
 [Diagnostic and optional offscreen captures](../DEVELOPMENT.md#ground-colour-regression).
+
+## Human air target selection
+
+`flight-sensor-target-select` flies a four-against-four Quick Mission through
+T, Shift+T, radar off, Enter and Apostrophe. `net-window-target-select` repeats
+those inputs on a private server with a bot, including opening and closing
+chat. Each saves before/after HUD and radar captures and checks the next key's
+authoritative selection to verify host acceptance and visual retention.
+The multiplayer fixture starts enemies 20 nmi out, uses their existing dummy
+flight mode and waits for host tick 6,000 before visual selection. Captures can
+block the client long enough to reset its network baseline, so the script
+waits 0.5 seconds after each shot for fresh contact lists. This avoids treating
+snapshot recovery as a target-selection regression.
+
+Run both with `python3 tools/battery.py --scenario '*target-select' --jobs 4
+--windows 1 --profile <private-import> --keep-data`. The battery wraps windows
+with `tools/agent-run.sh`. See the
+[target-selection specification](../spec/radar.md#target-selection-keys).

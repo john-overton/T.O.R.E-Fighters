@@ -108,6 +108,8 @@ version.
 | 11 | [Punch](#punch) (protocol 9) | host to client | versioned |
 | 12 | [Reach](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
 | 13 | [Reach answer](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
+| 14 | [Reservation query](#reservation-preflight-protocol-71) | lounge to host | versioned |
+| 15 | [Reservation answer](#reservation-preflight-protocol-71) | host to lounge | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -159,9 +161,9 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (22), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (16), client nonce (64), compatibility code (32, since 71), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
-| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
+| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), compatibility code (32, since 71), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
 | Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
 | Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
@@ -222,8 +224,9 @@ makes the answer malformed, and it is dropped. The host only shows the
 platform; nothing in the session depends on it. Its byte, its codes and the
 lobby's 3 bits are agent decisions. With a callsign of `c` bytes, a password
 of `p`, a game version of `v` and a commit of `m`, the byte is at offset
-`25 + c + p + v + m` of the packet (checksum 4, kind 1, nonce 8, cookie 8 and
-the four strings' length bytes), and zero padding follows it.
+`29 + c + p + v + m` in protocol 71 (checksum 4, kind 1, nonce 8, cookie 8,
+four strings' length bytes and compatibility code 4). The path and token
+fields follow it, then zero padding.
 
 The **cookie** is a keyed hash of the client's address and port, its nonce
 and the current 10-second time slot, with a key drawn at host start from the
@@ -324,6 +327,34 @@ Ten bytes since protocol 28 (nine before), smaller than the empty Payload
   alive. A joined game's peers router passes it to the client (it dropped
   the kind before protocol 28).
 
+## Reservation preflight (protocol 71)
+
+These private, connectionless packets use the versioned `TORE-NET` checksum.
+Discovery kinds 8 and 9 and the master protocol remain separate; the combined
+protocol-71 discovery layout also carries the compatibility code described
+below. No player is admitted and no slot is occupied by a query. Queries are unicast only, and
+share discovery's per-IP and global rate limit. Replies never exceed their
+37-byte queries. A token is never returned or written to a client-facing log.
+
+After the standard 5-byte checksum/kind header, little-endian fields are:
+
+| Kind | Fields | Total bytes |
+| --- | --- | --- |
+| 14 | nonce u64, session id u64, token u128 (low u64 first) | 37 |
+| 15, unavailable | nonce u64, requested session id u64, presence u8 = 0 | 22 |
+| 15, held | nonce u64, requested session id u64, presence u8 = 1, plane u32, enemy u8 (0 or 1), wing u8 (0 to 2), member u8 (zero based), token seconds u32 (0 to 86400), return seconds u32 (0 to token seconds) | 37 |
+
+Other presence/side values, out-of-range wing/time, trailing bytes and short
+packets are rejected. Invalid tokens and foreign sessions return unavailable.
+A held reply requires a valid token and a living aircraft reserved for it, or
+its still-present connection's reclaimable aircraft before the drop timeout.
+It never promotes a remembered lobby slot to a reservation. Token seconds is remaining identity validity. Return seconds is the minimum
+of that and any current mission time limit or active empty-mission timeout.
+It is an upper bound, not a promise of aircraft survival or unchanged settings.
+The caller checks source, session, nonce and freshness; the lounge's 2-second
+polling and 3-second freshness limit are in the
+[menu specification](../spec/multiplayer-menus.md#callsign-when-returning-to-a-game).
+
 ## Discovery
 
 *Built (EF5).* Any host answers "who is hosting here?", whether or not the
@@ -350,7 +381,7 @@ sequenceDiagram
 | Packet | Fields |
 | --- | --- |
 | Discover query | asker's protocol version (16), asker's nonce (64), zero padding to exactly 1,000 bytes. The padding must be zero when the asker's version is the host's; another version may put fields in it, which this build ignores |
-| Discover answer | nonce (64, the query's), protocol version (16, the host's), flags (8), players (8), capacity (8), session id (64), game version, game commit, game name, mission summary, King's callsign (each a string), count (8), then that many callsigns (strings) |
+| Discover answer | nonce (64, the query's), protocol version (16, the host's), flags (8), players (8), capacity (8), session id (64), game version and game commit (strings), compatibility code (32, since 71), game name, mission summary, King's callsign (strings), count (8), then that many callsigns (strings) |
 
 The answer's flags, from the least significant bit: password needed, full (no
 place for another player), the callsign list is truncated, then two bits of
@@ -1105,6 +1136,11 @@ the gun fires whatever store is selected; [the gun
 key](../spec/air-to-ground.md#the-gun-key)), also with no fields. The host
 keeps the key's state per aircraft; a trigger release (`ReleaseTrigger`) and a
 resume start it up.
+Extended code 5 is `JettisonTanks`. Protocol 71 adds code 6,
+`DesignateVisualTarget`, followed by an unsigned-varint aircraft id. Only a
+current ownship visual contact is accepted; the selection is marked visual
+for retention, independently of radar support. Unknown extended codes are
+refused.
 The seat's slew and zoom in the gunsight block steer the targeting sight of
 every aircraft with a laser designator or a FLIR too, and codes 28 and 29
 work it as they do the AC-130's ([the air-to-ground groups](#the-air-to-ground-groups)).
@@ -1691,8 +1727,8 @@ Refused (kind 20) with its words.
 | 28 | Revive | client to host | Mission number (varint), optional aircraft and optional loadout: fly again after a loss with an atomically validated choice |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
 | 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (6 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
-| 31 | Scores | host to client | The tally (2 bits: kills 0, damage 1, ratio 2), the fight (1 bit: sides 0, free for all 1), a presence bit and the seconds left (varint), the kill limit (4 bits, 0 for none), the kill owner (2 bits: total 0, side 1, player 2); the players (a count, at most 64; each: lobby id 8 bits, callsign a string, a presence bit and its side 1 bit, kills, losses and damage in thousandths of an aircraft, each a varint); each side's kills, losses and damage (six varints); and the winner (2 bits: 0 none yet, 1 a side then 1 bit, 2 a player then 8 bits, 3 a draw) |
-| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 6 bits, a presence bit and the callsign of its last human pilot, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
+| 31 | Scores | host to client | Tally (2 bits: kills 0, damage 1, ratio 2), fight (1 bit: sides 0, free for all 1), optional seconds left (presence bit, varint), kill limit (4 bits, 0 for none), kill owner (2 bits: total 0, side 1, individual 2). Combatants: count varint, at most 1,024; each has lobby id 8 bits, callsign string, left bit, optional AI lineage root (presence bit, varint u32), optional side (presence bit, side bit), then kills, losses, damage in thousandths of an aircraft, and tracked hits (four varints). Each side has kills, losses, damage and hits (eight varints total). Winner: 3 bits, 0 none, 1 side then side bit, 2 human then lobby id 8 bits, 3 AI then root varint u32, 4 draw; 5 to 7 invalid |
+| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 6 bits, a presence bit and the callsign of its last human pilot, a left bit, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
 | 33 | Observe | client to host | 1 bit: 0 stop watching; 1 watch, then the subject (2 bits: 0 none, 1 an aircraft then its id as a varint, 2 a point then x, y and z in whole feet as signed varints) |
 | 34 | Observing | host to client | 1 bit: 0 the observer flight has ended (nothing follows); 1 it starts: the connection's new [flight](#flights) (8 bits), the delay in seconds (8 bits), the tick the first snapshot will show (32 bits), the roster as the Roster message codes it, and the destroyed ground objects (a count and varints) |
 | 35 | Away | client to host | Nothing: the game has been away (a menu, no focus, a lost controller) for the `idle-ai` setting's seconds |
@@ -2947,7 +2983,7 @@ Decoders check every count and length against these before reading on.
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall; from a loading host (protocol 28) 2 a second to each player, for at most 3 minutes of build |
 | Punch (protocol 9) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second; a race tries at most 12 addresses |
-| Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
+| Phase 2 (protocol 8, updated 73) | Settings in one message 64; combatants in Scores 1,024; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 | Stage K (protocol 13) | Standbys 2; addresses of a standby or a candidate 8; candidates in a reach test 3, five Reaches to each address, one test every 10 seconds; Reaches answered 10 a second from one address; checkpoint chunks 4,096 bytes, 4 unacknowledged; ticks in a Ticks record 60; a Backlog 1,200 ticks and 256 commands; an Upload test 2 seconds; tokens a game keeps 32 |
 | Stage L (protocol 10) | Items in a Content 1,024 (at least 1); a key 32 bytes of printable ASCII; a label 64 bytes; gaps in a Content gaps 1,024; players named in one gap 64; the importer's version and commit 64 bytes each |
 
@@ -3204,6 +3240,26 @@ again with an observer; the capture format did not change for it.
   67 adds dedicated feedback (2026-10-22): Lobby begins with a feedback
   enabled bit, kind 80 submits feedback, and kind 81 returns the accepted
   flag to its sender. Protocol 66 is reserved for the parallel lobby change.
+  71 combines the compatibility-code handshake from the parallel 68 branch
+  and private reservation preflight from the parallel 70 branch (2026-10-23).
+  Connect request adds a 32-bit compatibility code after its nonce;
+  Challenge answer and Discover answer add it after the commit.
+  Protocol 71 replaces commit/tag admission with protocol, simulation and
+  content identity and adds transport packets 14 and 15, so lounges confirm
+  a reclaimable slot instead of trusting a saved token. Earlier 68 through
+  70 development numbers are superseded by this combined layout.
+  A protocol 71 or later Connect request keeps the code immediately after
+  its nonce so a mismatched protocol can still report both codes. Earlier
+  requests have no code and report `00000000` in that diagnostic.
+  72 adds human visual designation (target-select, 2026-10-23): extended combat
+  command 6 carries the target id as an unsigned varint. The host validates its
+  ownship's visual contact and keeps a separate visual-selection flag in sensor
+  checkpoints and saved pilot picks. AI selection is unchanged. It follows 71
+  in 0.2.1rc-1.
+  73 adds ongoing FlightReport, cumulative hit counts, departed-player and AI
+  score identity, and stable original member numbers on revival (2026-10-23),
+  on top of the protocol 72 target-selection and protocol 71 handshake layout.
+  The compatibility simulation version is 2 for these rules and checkpoint changes.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
@@ -3215,13 +3271,12 @@ again with an observer; the capture format did not change for it.
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the
   version, and refreshing changed bytes under the same version is refused.
-  The [discovery](#discovery) packets, which no version changes, have their own
+  The [discovery](#discovery) packets have their own
   golden file.
-- The **game build** is the version string and the commit the build stamps.
-  John's rule is that the build must match ([guide](../MULTIPLAYER.md#compatibility-handshake)).
-  *Agent decision:* two tagged release builds match when their versions are
-  equal; any other build must have the same commit, since compile-time tuning
-  changes the simulation and every prediction would be corrected.
+- The **game build** is the informational version string and commit. Admission
+  uses the [compatibility code](../ARCHITECTURE.md#compatibility-code), including
+  an explicit simulation version. Simulation and replay changes that can make
+  peers disagree raise both that version and the protocol, even without new bytes.
 - The **content** is checked after the mission loads, from the manifest in
   the Mission message ([architecture](../ARCHITECTURE.md#a-mission-with-no-window)).
 
@@ -3317,3 +3372,22 @@ replaces them with its own, and accepts only seated players while feedback is
 enabled. The shared chat rate limit applies. These messages use the ordinary
 reliable channel and are captured for local replay conversion. See
 [the replay event](replay-feedback.md).
+
+## Ongoing multiplayer reports (73)
+
+Reliable host-to-client kind 56, FlightReport: tick varint u32, current plane
+varint u32, followed by the existing Debrief body and Results body. It is a
+statistics snapshot, not a request to end the flight. Sent once per simulated
+second, on seating and before a clean departure. Captures retain it as an
+ordinary reliable message; the replay file grammar is unchanged.
+
+The current Scores and Results grammar is in the reliable-message table above.
+The new fields retain departed humans, identify AI lineages and carry hit totals.
+A departed human's lobby id may later be reused, so only non-left human rows
+identify current lobby members. Ranking puts a winning historical human first,
+even when its old lobby id was reused. Results carry scores in co-op too.
+Spawned, roster, snapshot and recording member fields keep
+the original flight position on revival, with a new plane id per life. No
+additional member field or replay-version change is needed. The session Scores
+checkpoint part now carries retained human identities, cumulative debrief
+counters, the previous per-plane counter samples, AI counters and last-controller flags, side hit totals and AI lineage tallies.

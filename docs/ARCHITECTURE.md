@@ -2359,9 +2359,8 @@ mission start: same slot, the seed rule (its rank among the wing's member
 numbers no human holds), fresh awareness, neutral, home the nearest runway its
 side may use. It leads if it is its wing's leader, and otherwise takes the
 lowest formation slot no living AI wingman of its wing holds (the lobby pass's
-slice R1, agent decision: its member number, which grows with every revival
-and respawn, could pass slot 9 and fail the AI step, and a rank could share a
-slot with a wingman in a wing with gaps). A new aircraft (a revival's or a
+slice R1, agent decision: formation slots are independent of the displayed
+member number, so gaps and older recordings with high numbers remain valid). A new aircraft (a revival's or a
 respawn's, `AiWings::insert_new`) is seeded by its plane id instead of the rank
 (`new_actor_seed`, apart from every mission seed), flies its wing's mission
 skill and takes its wing's orders. `ActorInsert::from_removed` puts an actor back as it left. The
@@ -4624,12 +4623,52 @@ sequenceDiagram
   developer option for the whole process: a server refuses to start with it
   and a client refuses to join with it, so every machine flies one
   configuration.
-- **Builds.** John's rule is that the build must match
-  ([guide](MULTIPLAYER.md#compatibility-handshake)). *Agent decision on what
-  that means:* two tagged release builds match when their versions are equal;
-  any other build must have the same commit, since compile-time tuning (for
-  example the stall reference fractions) changes the simulation and would make
-  every prediction wrong.
+- **Compatibility.** The protocol and [compatibility code](#compatibility-code) must match. Version labels and commits are information only.
+
+### Compatibility code
+
+Implementation mode, opinionated, requested by John on 2026-10-23. Peers
+match by protocol and content, never by commit, tag or version label. The
+code is eight uppercase hexadecimal digits. A mismatch says: "The server's
+compatibility code is 1234ABCD; yours is 3FA9C21B."
+
+Agent decision: the code covers the **whole playable import**, so changing
+missions does not change it. Missing or changed unused aircraft, theaters or
+weapons also change the code. Cosmetic resources outside these manifests,
+importer versions and retail build labels do not. The existing per-mission
+manifest remains the authoritative detailed check after admission, with its
+existing missing-aircraft and shared-flight-data messages. The short hash is
+not authentication and collisions are possible.
+
+The exact algorithm lives in `tore_session::compatibility`: FNV-1a/32, initial
+value `0x811C9DC5`, XOR each byte then multiply by `0x01000193` modulo 2^32.
+Its byte stream is `TORE-COMPAT-1` followed by a zero byte, protocol `u16`,
+simulation version `u32`, item count `u32`, then the existing content items in
+kind/key order. Each item has kind `u8` (aircraft 0, theater 1, weapon 2,
+shared 3), UTF-8 key length `u32`, key bytes, and its existing manifest digest
+`u64`. All integers are little endian. The content probes, rather than a new
+file list, determine the items and fingerprints.
+
+`SIMULATION_VERSION` is 2 for protocol 73: cumulative mission accounting, its
+checkpoint state and revival member retention. Raise it and the network protocol whenever
+simulation, rules, checkpoint or replay interpretation changes can make
+peers disagree, including compile-time tuning. Raise the protocol for wire
+changes too. Documentation, UI-only changes, commits and release tags do not
+change either version. This version discipline replaces the previous implicit
+assumption that identical commits guaranteed identical rules.
+
+The host and client derive the code from their loaded resources; migration
+keeps it. LAN discovery, master registration, browsing and introductions use
+it. The master serves both master protocols 1 and 2. Released 0.2.0 games
+(master 1, game protocol 67) keep their original packet layout and legacy
+matching rule. Master-2/game-68+ listings use the code and form a separate
+population, even with Show other versions. Replies use the request's version;
+introductions, retries and relay channels retain that version. See
+[master versions](formats/master-protocol.md#compatibility-codes-master-protocol-2).
+Protocol 71 and older games cannot join each other. The selected game's
+lounge details, lobby header, discovery commands, startup log and `--version`
+show the code. Version commands use the selected data profile; without an
+import they explicitly label the empty-content code "no imported content".
 
 ### A stalled game stays connected (EF-K)
 
@@ -5517,7 +5556,7 @@ and the internet are stage J. *Agent decision.*
   the kind as an unknown one either way); a separate rate limiter with the
   joins' limits, so queries cannot use up the joins' allowance; the answer
   carries the commit and the session id beside what the brief listed, the
-  commit so the screen can tell the same build from another and the session id
+  commit for information, and compatibility code so the screen can tell compatible games from others and the session id
   so one game answering from two addresses is listed once.
 - **The host's answer.** `Server::receive` rate-limits a query and hands it up
   as `ServerEvent::Discover`; `Host::pump` calls `answer_discover`
@@ -5536,7 +5575,7 @@ and the internet are stage J. *Agent decision.*
   `SearchEvent::Added`, `Changed` or `Dropped` for each change (a repeated
   identical answer is no event); `games()` is the list, by name, each game once
   at its best address (a network address before a loopback one) with a
-  `Compat` that says the same build, another build or another protocol
+  `Compat` that says matching code, another code or another protocol
   version; `poll_event()` takes the events. Dropping the `Search` stops it.
   *Agent decision (the lead's, 2026-10-01):* the search socket is bound to the
   game port itself when that port is free (`Search::start`), and to an
@@ -6127,8 +6166,8 @@ shows "Connecting to the game..." until the host's first lobby state arrives.
 The client's `auto_ready` is off, the King's game never starts a mission by
 itself and a joiner's End Mission in flight returns that player to the lobby
 (`client.leave`) instead of leaving the game. `--connect` and `--host` are
-unchanged. The lobby ends with the session: Leave (the King is asked first:
-"Leaving ends the game for everyone. Leave?"), a kick, the host leaving or a
+unchanged. The lobby ends with the session: Leave (after the shared
+[role-aware confirmation](spec/multiplayer-menus.md#leaving-a-session)), a kick, the host leaving or a
 connection that fails put its reason (`close_text`) in Direct Connection's
 Messages, and the search starts again. The window title reads "Lobby".
 
@@ -6195,7 +6234,8 @@ that player alone.
 
 **A dedicated server's lobby** has no King (unless its file says `king
 first-player`): no Players... or Fly, the crown column is empty, Mission... is
-read only, and the start rule is in the ready hint. Leave never asks.
+read only, and the start rule is in the ready hint. Leave uses the shared
+[session departure confirmation](spec/multiplayer-menus.md#leaving-a-session).
 
 **The creator in Accept mode** (the King's Mission...). The single-player
 creator opened on `Screen::Quick` with `QuickMission::lobby` set: its OK button
@@ -6728,9 +6768,9 @@ of the game. Phase 2 separates the two roles the guide already names:
 - **The King** is a player. In a hosted game it starts as the house. **Pass
   the crown** (message 23, the King only) gives it to another connected player.
   A King who leaves, or is dropped, passes it to the longest-connected player
-  (in a hosted game that is the house). The King's Leave asks "Leaving ends
-  the game for everyone." only of the house; a King who is not the house is
-  told "The crown passes to Hawk."
+  (in a hosted game that may be the house). The shared
+  [departure panel](spec/multiplayer-menus.md#leaving-a-session) distinguishes
+  the crown from the host and accounts for a ready standby.
 - **Only the King** changes the mission and the settings, locks slots, starts
   and ends the mission, kicks and passes the crown (EF4's refusal "Only the
   King may do that." stands). The house without the crown is an ordinary player
@@ -6991,7 +7031,7 @@ GiveBack):
   it.
 - `MissionCommand::Revive { seat, spawn }` abandons the seat's lost plane and
   seats it in a **new plane**: the next plane id after every plane the mission
-  has had, in the old plane's wing with the next free member number, the same
+  has had, in the old plane's wing with its original member number, the same
   aircraft, at the spawn's position, heading and speed, with the spawn's
   loadout and full fuel. It is built as the mission builds an AI aircraft with
   a lobby loadout (`plane_loadouts`), then taken by the existing handoff, so
@@ -7059,8 +7099,8 @@ build settled, each an agent decision unless the design above says it:
   players' orphans, and a held or abandoned plane is refused to anyone else
   ("Plane 0 is destroyed or has lost its pilot.").
 - **The new plane** takes the next id (one past every plane the mission has
-  had, retired ones included, and past any combat row) and the next member of
-  the old plane's wing (one past the wing's highest). Its combat row is made
+  had, retired ones included, and past any combat row) and retains the original
+  member number of its lineage. Its combat row is made
   as the mission's other aircraft are and given that id; the AI aircraft is
   built as an AI aircraft with a lobby loadout is (the stores, fuel and
   payload, fresh sensors from its configuration's profiles, the flares and
@@ -7190,15 +7230,15 @@ a wingman of its current lead). Agent decisions unless marked:
   (`ai_wings::new_actor_seed`), apart from every mission seed.
 - **The command.** `MissionCommand::Respawn { root, spawn }` (journal
   variant 6) adds an AI plane of the lineage's aircraft in its wing with the
-  next plane id and member number (`World::respawn_plane`). Every connection
+  next plane id and original member number (`World::respawn_plane`). Every connection
   is sent Spawned, as for a revival; a joiner gets it with the others. The
   host builds each Spawned from the plane the step made, so a revival and a
   respawn in one tick each name their own plane.
 - **Joining the flight.** An aircraft that joins a wing (`AiMission::
   insert_actor`) takes the lowest formation slot no living AI wingman holds,
-  never its member number, which grows with every revival and respawn and
-  once passed slot 9, failing the AI step. Its member number puts it last in
-  line for the lead.
+  independently of its displayed member number. The original member number
+  is retained across revival and respawn; the existing lead-hold and succession
+  rules still decide who leads.
 - **Retiring AI wrecks.** The AI wreck a respawn replaces joins the wrecks
   waiting to retire; it rests once combat's falling wreck has landed and its
   pilot's escape is over, and a later revival or respawn may retire it after
@@ -7335,7 +7375,7 @@ reach the kill limit.
   opponents (in aircraft: a whole aircraft's hit points is 1.0), losses, and the
   ratio (kills over losses, kills alone with no loss). A kill is credited to the
   player flying the shooter's plane at the kill's tick; a lost plane's late
-  missile credits the player who flew it; an AI shooter scores nothing.
+  missile credits the player who flew it; an AI shooter scores against its lineage, and both human and AI contributions count for the side.
   Opponents are the other side's aircraft under `sides`, and every aircraft
   but one's own under `free-for-all` (the AI on one's own side does not count;
   `free-for-all` changes the scoring only, never who can hit whom).
@@ -7369,9 +7409,9 @@ unless the design above says it:
   `aircraft` false. Each target's end is recorded once: the set of recorded
   targets is the recorder's only state between ticks.
 - **Tallies.** The host keeps them by connection (its join order, never
-  reused), so a lobby id given out again starts afresh; a player who leaves
-  leaves the list, and what it scored stays in its side's tally. A side's
-  tally is its players' only: the AI scores nothing, for its side either.
+  reused), so a lobby id given out again starts afresh. Departed players remain
+  listed, marked left, and their contributions stay in their side's tally.
+  AI lineages have their own rows and also contribute to side totals.
   Kills and damage count against opponents only; a kill of one's own side
   takes nothing away (retail's penalty, if any, is unknown).
 - **Co-op.** Scores go out in co-op too, so K works there, but the scoring
@@ -7408,6 +7448,18 @@ unless the design above says it:
 
 ##### The multiplayer debrief
 
+The multiplayer mission record is specified in
+[the debrief spec](spec/debrief.md#multiplayer-mission-record). `host/flight_report.rs`
+keeps human counter deltas by stable join order, AI counters by lineage, and
+hit totals by the side where each contribution happened. It samples before ownership
+changes and when producing reports; AI time is excluded from the former human's
+counters. `host/score.rs` retains human history, AI lineage tallies and side
+totals for the whole mission. The Scores checkpoint part carries all of them.
+Protocol 73's FlightReport supplies an ongoing debrief and results to the
+client once a second and at seating/departure. `client/flight_report.rs` keeps
+that report, sortie starts and received messages across aircraft changes and
+connection loss. The app's early-exit path reads it without needing final Results.
+
 `tore_world::debrief::results(&World)` gives a row for every plane the mission
 had, retired planes included, from the same `Ending::pilot` rule each seat's
 report uses: status, damage, kills by the ten rows summed, friendly fire,
@@ -7416,12 +7468,12 @@ or AI, and every callsign that flew it), the scores and the winner, and sends
 **Results** (message 32) to every connection at the mission's end, observers
 and players in the lobby included.
 
-The debrief keeps the retail pages for the player's own plane and, in a
-networked game, adds after the first page: **SCORES** (PvP only: the winner,
+The debrief keeps the retail pages, with cumulative human counters across
+lives, and adds after the first page: **SCORES** (co-op and PvP: any winner,
 the ranking with each player's kills, losses, damage and ratio) and
 **RESULTS** (every aircraft by side and wing, fifteen to a page:
 callsign or AI, aircraft, status, kills, hit percentage, damage). Single
-player's debrief is unchanged: the pages appear only with a Results message.
+player's debrief is unchanged. Early exits use the locally retained ongoing report.
 
 *Built (F2-D, 2026-10-05).* What the build settled, each an agent decision
 unless the design above says it:
@@ -7447,17 +7499,17 @@ unless the design above says it:
   human who flew the plane, remembered by the plane when its player leaves
   (`Scoring::callsigns`, noted every tick and again at the end); the wire
   holds one callsign, so a plane flown by several players names the last. The
-  final scores ride along in PvP only: co-op sends none.
+  final scores ride along in co-op and PvP.
 - **The client** keeps the newest Results (`Client::results`) until the next
   mission or flight starts, logs a `results` line (the words of
   `tore_session::client::results::summary`), and `tore-bot` prints it
   (`NAME: results: ...`).
 - **The pages** (`net/debrief.rs`, drawn by `debrief.rs`): the debrief screen
   turns **SCORES** and **RESULTS** in after the first page when the client
-  holds Results, in that order, then the retail pages 2 to 5. SCORES is PvP
-  only: the winner (or "No winner was named."), the heading of the tally, then
-  rank, pilot, side, kills, lost, damage in aircraft and ratio for fifteen
-  players a page, and each side's totals under the last when the fight is by
+  holds Results, in that order, then the retail pages 2 to 5. SCORES covers
+  co-op and PvP: any winner, the heading of the tally, then rank, pilot, side,
+  kills, lost, tracked hits, damage in aircraft and ratio for fifteen
+  combatants a page, and each side's totals under the last when the fight is by
   sides. RESULTS lists every aircraft fifteen to a page, **a page never mixing
   the two sides** (so 20 against 10 is three pages, not two), headed
   "RESULTS : FRIENDLY SIDE" or "ENEMY SIDE": wing and member, callsign or AI,
@@ -8066,11 +8118,12 @@ flowchart TD
   rules -->|yes| revive["Revive (a lost aircraft)<br/>or any free aircraft (a release)"]
   rules -->|no| dim["row dimmed, the reason<br/>beside it and on choosing it"]
   esc --> leave["Leave Game"]
-  leave --> host{"this game hosts?"}
-  host -->|"no (a dedicated server's,<br/>or a friend's game)"| gone["leaves: nothing to hand over,<br/>no confirmation"]
+  leave --> confirm["shared role-aware Leave / Cancel panel"]
+  confirm --> host{"this game hosts?"}
+  host -->|"no (a dedicated server's,<br/>or a friend's game)"| gone["leaves: nothing to hand over"]
   host -->|yes| standby{"a standby is ready?"}
   standby -->|yes| hand["the hosting thread hands the<br/>game over, then the game leaves"]
-  standby -->|no| confirm["asks twice: leaving ends<br/>the game for everyone"]
+  standby -->|no| ended["leaving ends the game"]
 ```
 
 - **The idle time (John).** `idle-ai` is never, 1, 2, 5 or 10 minutes, 5 by
@@ -8113,15 +8166,15 @@ flowchart TD
   frees an away player's reservation when its goodbye is a leave on purpose
   (`LeaveReason::Left`), so the aircraft stays with the AI, free for others.
   This is John's 2026-10-05 rule (End Mission releases; only a drop keeps the
-  aircraft) applied to leaving on purpose. **A game that only joined** (a
-  dedicated server's, a friend's) never hosts: it just leaves, with no
-  handover and no confirmation (John, 2026-10-06). **A hosting game** hands
+  aircraft) applied to leaving on purpose. **A game that is not currently
+  hosting** (a dedicated server's or a friend's client) leaves without
+  handover after the shared confirmation. **A hosting game** hands
   the game over to a ready standby: the hosting thread is stopped first, which
   hands over (`Host::hand_over`) before the game's own connection says
   goodbye, since the house leaving ends a game that has not handed over. With
-  no ready standby the row asks twice: its first choice reads "Choose again to
-  end it" beside the row, and the second leaves, which ends the game for
-  everyone. The game learns whether a standby is ready from the hosting
+  no ready standby the shared panel warns that leaving ends the game.
+  The [departure specification](spec/multiplayer-menus.md#leaving-a-session)
+  defines the current words for each role and destination. The game learns whether a standby is ready from the hosting
   thread's report ([`Report::Standby`](../crates/tore-app/src/net/hosting.rs)).
 - **The live menu's words.** The menu of a live view (an away player's own
   aircraft, or an observer's) no longer says "REPLAY PAUSED" or "Resume
@@ -8764,7 +8817,7 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
   `tore_net::master::Browser` state machine, `update(now)` every frame,
   events for added, changed and dropped games. It never blocks a frame.
 - The first time the screen opens it writes one line about telemetry in
-  Messages: "This game sends anonymous statistics to the Internet Lobby. Turn
+  Messages: "This game sends anonymous statistics to the chosen master server. Turn
   them off in Options." (John: on by default, with a switch and a one-time
   notice).
 - When the master cannot be reached the list stays empty and Messages says
@@ -10350,16 +10403,7 @@ In short:
 
 Read at `d7244b0c` (the `multiplayer` tip):
 
-- **The build rule.** The handshake refuses another protocol version (code
-  1) or another T.O.R.E build (code 2: two tagged releases match by version,
-  anything else by commit; `tore_session::host::config`,
-  `builds_match_by_commit_or_by_a_release_version`). Direct Connection and the
-  Internet Lobby already show a game of another build dimmed and say "runs
-  another version (...) and cannot be joined" (`direct_screen/mod.rs`,
-  `internet_screen/mod.rs`); the master filters by build
-  (`tore_master::browse::same_build`). Two players who can join each other
-  therefore run the same code, the same aircraft list and the same theater
-  list. Stage L leaves this alone.
+- **Compatibility rule.** Since protocol 71 the handshake and lounge filters compare the [compatibility code](#compatibility-code), with version and commit retained for information. Stage L keeps the detailed mission check.
 - **The content check.** `tore_world::resources::ResourceReads` notes every
   resource a build asks for; `Manifest` is the sorted names with an FNV-1a 64
   hash each, `Manifest::digest` one number for it, `Manifest::differences` the
@@ -11227,10 +11271,13 @@ dependency is needed (John's open question on `getrandom`).
   Internet Lobby whose session id matches (both show it); or the address the
   token came from. A game that joined by a typed address with no token and
   learns the session from Accepted sends it in a Rejoin message instead.
-- **A kick voids** the player's token; leaving does not.
+- **A kick voids** the player's token. A clean disconnect removes its host
+  record and reservation, and `TokenStore::forget` removes only that session
+  from the client's file. Delayed grants cannot save it again. Ending a flight
+  while remaining connected keeps the token.
+  [Behaviour](spec/multiplayer-menus.md#callsign-when-returning-to-a-game).
 
-**Reservations.** When a seated player is **dropped** (silence, a crash,
-quitting without ending the flight), its plane goes to the AI as today, but
+**Reservations.** When a seated player is **dropped** (silence or a crash), its plane goes to the AI as today, but
 **reserved** for that player while the plane is alive: nobody else takes it,
 and its slot reads "AI (Viper away)". A player who **ends its flight** (End
 Mission) frees the plane: a reservation is for someone who did not mean to
@@ -11238,7 +11285,7 @@ go. The idle-player rule ([F2-A](#the-ai-flies-an-idle-players-aircraft))
 keeps its planes in the same table.
 
 - **Rejoining** with a valid token, the player is that player again: its lobby
-  id when free, its callsign, its join order (so its scores and lives are its
+  id when free, its current requested callsign, its join order (so its scores and lives are its
   own), its side under lock sides, and in flight its reserved plane, taken
   back by its Join at the next tick (a Seated, a new flight; *as built, K5:*
   the game's Join, once its mission is built). A reservation admits its
@@ -11254,6 +11301,12 @@ keeps its planes in the same table.
 - **The end** of a mission clears every reservation; a player who rejoins in
   the lobby finds its slot and loadout, as the lobby keeps them.
 - **Dedicated servers** do all of this the same way.
+
+The lounges use the [protocol-71 reservation preflight](formats/net-protocol.md#reservation-preflight-protocol-71)
+for slot promises. `net::rejoin_check` polls a selected server without joining;
+the host answers from the live reservation/connection and token tables. An
+unreachable saved Internet address produces no claim. Detailed retention and
+expiry rules have one home in [the multiplayer guide](MULTIPLAYER.md#rejoin-and-observers).
 
 #### Rejoin tokens and reservations, as built (K5)
 
@@ -11289,16 +11342,16 @@ decision unless the design above or John's decisions say it.
   still connected (the game restarted before the host's 5 seconds of silence)
   is admitted too: the old connection is dropped as a drop would (its plane
   reserved, its crown moved) and the new one becomes the player.
-- **Drop, leave, kick.** A seated player whose connection ends by silence, a
-  crash or a disconnect that did not end its flight is dropped: its plane
-  goes to the AI at the next tick and is reserved (the log says "Viper dropped
+- **Drop, leave, kick.** A seated player whose connection ends by silence or a
+  crash is dropped: its plane goes to the AI at the next tick and is reserved (the log says "Viper dropped
   out: the AI flies plane 0, kept for it"). Leave (End Mission in the game),
   a kick, the host leaving and the mission's end keep nothing. An away player
   whose game says goodbye (disconnect Left) has left on purpose and frees its
-  plane; its silence or crash keeps it. A kick voids the token.
-- **Coming back.** The new connection is the player: its join order, callsign
-  and lobby id when free, in the lobby its slot and loadout when the slot is
-  still free, and "Welcome back, Viper: your aircraft is waiting." The plane is
+  plane; its silence or crash keeps it. Any clean disconnect removes its
+  token record too. A kick voids the token.
+- **Coming back.** The new connection is the player: its join order and
+  lobby id when free, with its newly requested callsign made unique, and in
+  the lobby its slot and loadout when the slot is still free, and "Welcome back, Viper: your aircraft is waiting." The plane is
   taken by the player's Join (the game's automatic ready sends it once its
   mission is built), at the next tick as a new flight, not by the host on its
   own: a Seated message before the game has built the mission would find
@@ -11776,8 +11829,20 @@ Dedicated recording uses `tore-session::recording`, with the ordinary
 `tore-replay::Writer`. Pose conversion, world identity and frame bounds are
 shared with the app's recorder. The host reads each completed authoritative
 tick; with no occupied cockpit it builds the observer's full-world picture,
-including recording-only stores and effects. Recording is opt-in and does not
-change the simulation. Named feedback events travel on the reliable session
-channel, are stamped with host identity and kept by the client capture's
+including recording-only stores and effects. The host batches new identities
+with each frame onto `recording::worker`'s bounded sync channel. That worker
+owns file creation, frame bounds, encoding, replay and companion-log writes,
+all syncs, finishing and retention. It uses the client's channel pattern;
+the server's stop-on-saturation policy is distinct. An atomic completed-chunk
+count bounds queued frames plus the current chunk to 7,200, 60 seconds at
+120 Hz. A pending sync returns no budget until it completes. This volatile
+buffer allows multi-second stalls without disabling recording; it increases
+crash exposure while preserving the writer's 3,600-frame sync cadence. On
+saturation the host closes the sender without joining; accepted frames drain to a synced partial file.
+Mission boundaries and graceful destruction flush the final pending frame
+and join, including migration handover. Recording is opt-in and does not
+change the simulation. The [recording policy](spec/replay-feedback.md)
+defines durability, error handling and lifecycle behavior. Named feedback
+events travel on the reliable session channel, are stamped with host identity and kept by the client capture's
 observer during conversion. See [the behavior spec](spec/replay-feedback.md)
 and [event layout](formats/replay-feedback.md).

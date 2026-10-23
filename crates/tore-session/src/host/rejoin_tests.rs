@@ -252,20 +252,7 @@ fn leaving_the_flight_or_the_game_on_purpose_keeps_nothing() {
     rig.clients[hawk].take(Some(0));
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(hawk)));
     assert_eq!(rig.clients[hawk].seated.as_ref().unwrap().plane, 0);
-    // Its token still works for 24 hours: leaving does not void it.
-    let now = rig.host.token_clock();
-    assert!(
-        rig.host.rejoin.keeps(
-            rig.host
-                .rejoin
-                .players
-                .iter()
-                .find(|(_, r)| r.callsign == "Viper")
-                .map(|(o, _)| *o)
-                .unwrap(),
-            now
-        )
-    );
+    assert!(rig.host.token_of_for_test("Viper").is_none());
     // Cobra's plane, kept for it after a drop, is cleared by the end of the
     // mission; its token and its lobby place stay.
     let cobra_token = token_of(&rig, cobra);
@@ -787,7 +774,7 @@ fn a_late_rejoin_replaces_the_old_connection_the_host_still_lists() {
 }
 
 #[test]
-fn scores_and_lives_follow_the_token_and_a_kick_clears_them() {
+fn scores_and_lives_follow_the_token_and_a_kick_preserves_mission_statistics() {
     let (mut rig, _, viper, _) = trio();
     let token = token_of(&rig, viper);
     let order = peer(&rig, "Viper").lobby.order;
@@ -810,12 +797,12 @@ fn scores_and_lives_follow_the_token_and_a_kick_clears_them() {
     assert_eq!(peer(&rig, "Viper").lobby.order, order);
     assert_eq!(rig.host.revival.players[&order].used, 1);
     assert!(rig.host.score.player(order).is_some());
-    // A kick voids the token and the tally goes with the player.
+    // A kick voids the token, but never erases mission statistics.
     let id = peer(&rig, "Viper").lobby.id;
     rig.host.kick_player(id, "").unwrap();
     assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(back)));
     rig.run(Duration::from_millis(500));
-    assert!(rig.host.score.player(order).is_none());
+    assert!(rig.host.score.player(order).is_some());
     assert!(rig.host.rejoin.reserved.is_empty(), "a kick keeps nothing");
 }
 
@@ -837,4 +824,265 @@ fn only_the_king_releases_and_a_kick_message_is_not_a_drop() {
     rig.run(Duration::from_millis(300));
     assert!(rig.host.rejoin.reserved.is_empty());
     assert_eq!(pilot(&rig, 0), Pilot::Ai);
+}
+
+#[test]
+fn clean_leave_then_renamed_rejoin_forgets_identity_on_host_and_dedicated() {
+    for hosted in [false, true] {
+        let mut cfg = config();
+        if hosted {
+            cfg.house = Some("10.0.0.2:40000".parse().unwrap());
+            cfg.start = StartMode::King;
+            cfg.crown = CrownRule::FirstPlayer;
+        }
+        let mut rig = Rig::new(spec(5, 1, 50), cfg, LinkConfig::one_way(5 * MS));
+        let hawk = rig.join(|c| c.callsign = "Hawk".into());
+        rig.clients[hawk].ready = None;
+        let viper = rig.join(|c| c.callsign = "Viper".into());
+        rig.clients[viper].ready = None;
+        assert!(rig.run_until(Duration::from_secs(3), |r| {
+            !r.clients[viper].tokens.is_empty()
+        }));
+        let token = token_of(&rig, viper);
+        let order = peer(&rig, "Viper").lobby.order;
+        rig.clients[viper].client.disconnect(DisconnectReason::Left);
+        assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(viper)));
+        assert!(rig.run_until(Duration::from_secs(1), |r| {
+            !r.host.rejoin.players.contains_key(&order)
+        }));
+        assert!(!rig.host.rejoin.reserved.contains_key(&order));
+        // Even an older client still sending the old token starts fresh.
+        let back = rig.join(|c| {
+            c.callsign = "Maverick".into();
+            c.token = Some(token);
+        });
+        rig.clients[back].ready = None;
+        assert!(rig.run_until(Duration::from_secs(3), |r| {
+            r.clients[back]
+                .lobby
+                .as_ref()
+                .and_then(|l| l.me())
+                .is_some_and(|p| p.callsign == "Maverick")
+        }));
+        assert_ne!(peer(&rig, "Maverick").lobby.order, order);
+        assert_ne!(token_of(&rig, back), token);
+    }
+}
+
+#[test]
+fn renamed_drop_rejoin_keeps_aircraft_identity_and_unique_callsign() {
+    for late in [false, true] {
+        let (mut rig, _, viper, _) = trio();
+        let token = token_of(&rig, viper);
+        let order = peer(&rig, "Viper").lobby.order;
+        drop_player(&mut rig, viper);
+        let back = rig.join(|c| {
+            c.callsign = "Cobra".into();
+            c.token = (!late).then_some(token);
+        });
+        rig.clients[back].ready = None;
+        assert!(rig.run_until(Duration::from_secs(3), |r| r.clients[back].lobby.is_some()));
+        if late {
+            rig.clients[back].send(&Message::Rejoin(token));
+        }
+        assert!(rig.run_until(Duration::from_secs(3), |r| {
+            r.clients[back]
+                .notices
+                .iter()
+                .any(|n| n == "Welcome back, Cobra_2: your aircraft is waiting.")
+        }));
+        assert_eq!(peer(&rig, "Cobra_2").lobby.order, order);
+        assert_eq!(rig.host.rejoin.reserved[&order].callsign, "Cobra_2");
+        assert_eq!(
+            rig.host.court.side_of("Cobra_2"),
+            Some(tore_sim::ai::launch::Side::Friendly)
+        );
+        rig.clients[back].take(None);
+        assert!(reseated(&mut rig, back));
+        assert_eq!(rig.clients[back].seated.as_ref().unwrap().plane, 0);
+        assert_eq!(rig.clients[back].tokens.last().unwrap().token, token);
+        no_errors(&rig);
+    }
+}
+
+#[test]
+fn reservation_preflight_reports_only_a_reclaimable_aircraft_and_its_token_time() {
+    use tore_net::packet::ReservationQuery;
+    let (mut rig, _, viper, _) = trio();
+    let query = ReservationQuery {
+        nonce: 23,
+        session_id: rig.host.session_id,
+        token: token_of(&rig, viper),
+    };
+    assert_eq!(
+        rig.host.reservation_answer(query).held.unwrap().plane,
+        0,
+        "a reconnect can replace its still-present connection before the timeout"
+    );
+    drop_player(&mut rig, viper);
+    let order = rig
+        .host
+        .rejoin
+        .claim(query.token, rig.host.token_clock())
+        .unwrap();
+    let first = rig.host.reservation_answer(query).held.unwrap();
+    assert_eq!(
+        (first.plane, first.wing, first.member, first.enemy),
+        (0, 0, 0, false)
+    );
+    assert!((86_398..=86_400).contains(&first.token_seconds));
+    rig.host
+        .advance_token_clock_for_test(Duration::from_secs(3600));
+    assert_eq!(
+        rig.host
+            .reservation_answer(query)
+            .held
+            .unwrap()
+            .token_seconds,
+        first.token_seconds - 3600
+    );
+    assert!(
+        rig.host
+            .reservation_answer(ReservationQuery {
+                session_id: query.session_id ^ 1,
+                ..query
+            })
+            .held
+            .is_none()
+    );
+    assert!(
+        rig.host
+            .reservation_answer(ReservationQuery {
+                token: Token(query.token.0 ^ 1),
+                ..query
+            })
+            .held
+            .is_none()
+    );
+    rig.host
+        .advance_token_clock_for_test(Duration::from_secs(86_401));
+    assert!(
+        rig.host.reservation_answer(query).held.is_none(),
+        "expired identity cannot reclaim"
+    );
+    assert!(
+        rig.host.rejoin.reserved.contains_key(&order),
+        "expiry itself is not a reservation release timer"
+    );
+}
+
+#[test]
+fn reservation_preflight_confirms_release_mission_end_and_clean_departure() {
+    use tore_net::packet::ReservationQuery;
+    for release in [false, true] {
+        let (mut rig, _, viper, _) = trio();
+        let query = ReservationQuery {
+            nonce: 23,
+            session_id: rig.host.session_id,
+            token: token_of(&rig, viper),
+        };
+        drop_player(&mut rig, viper);
+        assert!(rig.host.reservation_answer(query).held.is_some());
+        if release {
+            rig.host
+                .release_request(tore_net::ConnectionId(0), 0)
+                .unwrap();
+        } else {
+            rig.host.restart();
+        }
+        assert!(rig.host.reservation_answer(query).held.is_none());
+        assert!(
+            rig.host
+                .rejoin
+                .claim(query.token, rig.host.token_clock())
+                .is_ok(),
+            "identity survives release or round end"
+        );
+    }
+    let (mut rig, _, viper, _) = trio();
+    let query = ReservationQuery {
+        nonce: 23,
+        session_id: rig.host.session_id,
+        token: token_of(&rig, viper),
+    };
+    rig.clients[viper].leave();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(viper)));
+    rig.run(Duration::from_millis(100));
+    assert!(rig.host.reservation_answer(query).held.is_none());
+    assert!(
+        rig.host
+            .rejoin
+            .claim(query.token, rig.host.token_clock())
+            .is_err()
+    );
+}
+
+#[test]
+fn reservation_preflight_is_a_read_only_datagram_without_a_join() {
+    use tore_net::packet::{Packet, RESERVATION_QUERY_LEN, ReservationQuery};
+    let (mut rig, _, viper, _) = trio();
+    let query = ReservationQuery {
+        nonce: 23,
+        session_id: rig.host.session_id,
+        token: token_of(&rig, viper),
+    };
+    drop_player(&mut rig, viper);
+    let count = rig.host.peers.len();
+    let mut probe = rig.net.bind("10.0.0.9:45000".parse().unwrap()).unwrap();
+    let bytes = Packet::ReservationQuery(query)
+        .encode(PROTOCOL_VERSION)
+        .unwrap();
+    probe.send_datagram(host_address(), &bytes).unwrap();
+    rig.run(Duration::from_millis(30));
+    let mut buf = [0; tore_net::MAX_DATAGRAM];
+    let (len, _) = probe
+        .recv_datagram(&mut buf)
+        .unwrap()
+        .expect("server answers without joining");
+    assert!(len <= RESERVATION_QUERY_LEN);
+    let Packet::ReservationAnswer(answer) = Packet::decode(&buf[..len], PROTOCOL_VERSION).unwrap()
+    else {
+        panic!("reservation answer");
+    };
+    assert_eq!(answer.nonce, query.nonce);
+    assert_eq!(answer.held.unwrap().plane, 0);
+    assert_eq!(rig.host.peers.len(), count);
+}
+
+#[test]
+fn reservation_return_window_obeys_empty_and_mission_time_limits() {
+    use tore_net::packet::ReservationQuery;
+    let (mut rig, _, viper, _) = trio();
+    let query = ReservationQuery {
+        nonce: 23,
+        session_id: rig.host.session_id,
+        token: token_of(&rig, viper),
+    };
+    drop_player(&mut rig, viper);
+    // Cobra moved from index 2 to 1. Hawk only observes, so losing Cobra
+    // starts the default 60-second empty-mission timeout.
+    drop_player(&mut rig, 1);
+    let held = rig.host.reservation_answer(query).held.unwrap();
+    assert!((58..=60).contains(&held.return_seconds));
+    assert!(held.token_seconds > 86_300);
+    rig.run(Duration::from_secs(5));
+    let later = rig.host.reservation_answer(query).held.unwrap();
+    assert_eq!(later.return_seconds, held.return_seconds - 5);
+    rig.run(Duration::from_secs(60));
+    assert!(rig.host.reservation_answer(query).held.is_none());
+
+    let mut cfg = config();
+    cfg.time_limit = Some(Duration::from_secs(30));
+    let (mut rig, _, viper, _) = trio_with(cfg);
+    let query = ReservationQuery {
+        nonce: 23,
+        session_id: rig.host.session_id,
+        token: token_of(&rig, viper),
+    };
+    drop_player(&mut rig, viper);
+    let held = rig.host.reservation_answer(query).held.unwrap();
+    assert!((1..30).contains(&held.return_seconds));
+    assert!(held.token_seconds > 86_300);
+    rig.run(Duration::from_secs(30));
+    assert!(rig.host.reservation_answer(query).held.is_none());
 }

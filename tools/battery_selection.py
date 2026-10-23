@@ -149,8 +149,8 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     # Menus lane.
-    "replay-feedback": ("dedicated feedback form and authoritative recordings", ("net-replay-feedback-*",)),
-    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*")),
+    "replay-feedback": ("dedicated feedback form, recording lifecycle and writer recovery", ("net-replay-feedback-*",)),
+    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*", "menus-updates-bar-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
         ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-derived-stations", "menus-validate-creator", "menus-snap-quick-*"),
@@ -243,10 +243,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-content-builds",),
     ),
     "net-master": (
-        "the master server on this machine: its limits under the flood tool, a server listing itself",
+        "the master server on this machine: mixed released/current populations, its limits under the flood tool, a server listing itself",
         ("net-master-*",),
     ),
-    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing",)),
+    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing", "net-window-master-setting")),
     "net-introduce": (
         "a bot joining a listed dedicated server through an introduction from a master on this machine",
         ("net-master-introduce",),
@@ -265,7 +265,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-migrate-relay",),
     ),
     "net-window": (
-        "the game itself over the network, including menu disconnect and seat reuse",
+        "the game itself over the network, including menu disconnect, partial debriefs and seat reuse",
         ("net-window-*",),
     ),
     "net-surface": (
@@ -667,6 +667,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/flight_map/*", RENDER_FAMILIES + ("menus-screens", "menus-creator"), "flight map view", windowed=True),
     _r("crates/tore-app/src/mission_brief.rs", ("menus-screens", "menus-creator") + RENDER_FAMILIES, "mission brief", windowed=True),
     _r("crates/tore-app/src/flight_map_preview.rs", ("menus-screens",), "flight map preview"),
+    _r("crates/tore-app/src/target_select.rs", ("instruments", "net-window"), "human target selection", windowed=True),
     _r("crates/tore-app/src/scope.rs", RENDER_FAMILIES + ("link-cues",), "radar scope", windowed=True),
     _r("crates/tore-app/src/canvas_present.rs", RENDER_FAMILIES, "presentation", windowed=True),
     _r("crates/tore-app/src/static_art.rs", RENDER_FAMILIES, "art", windowed=True),
@@ -687,6 +688,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/pause_menu.rs", ("windowed-menus", "replay-live"), "pause menu", windowed=True),
     # tore-app: menus.
     _r("crates/tore-app/src/menu.rs", MENU_FAMILIES, "menus", windowed=True),
+    _r("crates/tore-app/src/updates*", ("menus-screens",), "main-menu release checks and fixtures"),
     _r("crates/tore-app/src/rocker.rs", MENU_FAMILIES, "menu rockers", windowed=True),
     _r("crates/tore-app/src/locate.rs", ("menus-screens", "replay-settings"), "locate screen", windowed=True),
     _r("crates/tore-app/src/quick_mission.rs", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),
@@ -755,6 +757,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/replay/net_convert.rs", ("net-convert",), "converting a capture into a replay"),
     _r("crates/tore-app/src/replay/net_effects.rs", ("net-convert",), "the smoke, contrails and gun rounds a converted capture carries"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
+    _r("crates/tore-app/src/net/rejoin_check.rs", ("net-fly", "net-window"), "server-confirmed return-slot checks and timeouts", unit_tests=("test_battery_net",)),
     _r("crates/tore-app/src/net/observe.rs", ("net-window", "replay-live"), "the observer screen's recording and watch; the window scenario watches a server", windowed=True),
     _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
     _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),
@@ -851,8 +854,10 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/net_observe.py", ("net-window",), "the observer screen scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_datalink.py", ("net-window", "link-cues"), "the data link's cues in a multiplayer flight (stage G, slice G10)", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_accept.py", ("net-window",), "stage F phase 2's acceptance scenarios: the away menu's Spawn in Aircraft and a host's Leave Game (slice F2-X)", windowed=True, unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/target_select.py", ("instruments", "net-window"), "human targeting live checks", unit_tests=("test_target_select",)),
     _r("tools/battery_scenarios/net_surface.py", ("net-surface",), "a ground target online (protocol 22, slice N1)", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_a2g.py", ("net-a2g",), "the air-to-ground round online (protocol 23, slice NA)", unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_debrief.py", ("net-window",), "partial reports, revival and retained AI/human scores", windowed=True),
     _r("tools/battery_scenarios/net_screens.py", ("net-window",), "the game's rejoin and its HUD through a host migration (stage K, slice K7b)", windowed=True),
     _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),

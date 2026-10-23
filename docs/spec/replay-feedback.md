@@ -40,6 +40,28 @@ dedicated servers whose operator enables it.
   debris, pilots and effects. There is no dedicated-server cockpit display
   or heard radio track. Its companion `.log` holds mission combat and server
   events. The ordinary viewer opens the recording.
+- Recording must not pause flight while files are written or synced. Chunks
+  remain 120 frames; syncs remain every 3,600 written frames and at finish.
+- At most 7,200 accepted frames, 60 seconds at 120 Hz, may await a completed
+  chunk write, excluding the host's existing one-frame event staging. A chunk
+  that is syncing still counts against this limit until its sync completes.
+  Recording and feedback remain available through a five-second disk stall.
+  This buffer is volatile: a process crash can lose up to 60 seconds of
+  unwritten frames. A machine or power failure can also lose written frames
+  from the current unsynced interval. Syncs are every 3,600 written frames,
+  not a guarantee of at most 30 seconds of wall time while the disk is stalled.
+  If a handoff would exceed the budget, the host never waits: it logs a
+  recording failure immediately, disables feedback for this mission, and
+  stops recording. Accepted frames are written and synced to a recoverable
+  `.partial` file without a completion footer. No frames are silently skipped
+  in a complete recording. Retention leaves this partial and its log alone.
+- Mission end, rotation, Stop, host handover and graceful shutdown wait for
+  accepted frames to finish writing. These boundaries may wait for disk
+  completion. They include the last staged frame and normal completion
+  footer unless recording already failed. A new mission can record again.
+- Periodic and console `status` lines append `, worst N.N ms` after all
+  existing fields. This is the slowest tick since the preceding status call;
+  an interval with no ticks reports zero. The existing mean and load remain.
 - `replays-kept` defaults to 10 and counts complete unflagged server recordings
   only. After finishing a mission, oldest eligible recordings and their logs
   are removed first. All flagged recordings survive, even with a limit of 0.
@@ -48,6 +70,14 @@ dedicated servers whose operator enables it.
 - `replays-folder` defaults to `replays/` inside the imported data folder,
   beside `logs/`. An explicit relative path is relative to the configuration
   file. Local player recording and retention settings are unchanged.
+
+The lead requested the 7,200-frame budget on 2026-10-23, relayed by John, to
+keep recordings and feedback through the measured multi-second disk stalls.
+The larger crash-loss exposure is accepted for that purpose. Stopping only
+when the budget fills remains an agent decision: a disk that makes no
+progress for about a minute must not block flight or consume unbounded
+memory. Frame sizes vary with mission activity; [measured memory and disk
+behavior](../baselines/recorder-io.md) describe the tested workload.
 
 The 1,000-character limit, controller keyboard, startup rejection, timestamp
 units, prefix-scoped retention and conservative handling of damaged files are

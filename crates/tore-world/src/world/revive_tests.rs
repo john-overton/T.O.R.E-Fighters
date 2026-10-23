@@ -302,7 +302,7 @@ fn a_revived_plane_takes_the_spawn_in_the_old_planes_wing_by_the_handoff() {
         new.slot,
         Slot {
             wing: FRIENDLY_WING,
-            member: 2
+            member: 0
         }
     );
     assert_eq!(new.aircraft, AircraftId::F18);
@@ -348,14 +348,14 @@ fn a_revived_plane_takes_the_spawn_in_the_old_planes_wing_by_the_handoff() {
     let quantities: Vec<u16> = spawn.loadout.stations.iter().map(|s| s.quantity).collect();
     assert_eq!(ammo(&world, PlaneId(4)), quantities);
     assert!(!world.plane_lost(PlaneId(4)));
-    // The next revival takes the next id and member.
+    // The next revival gets a new id and keeps the original position.
     kill_pilot(&mut world, PlaneId(4));
     fly(&mut world, 1);
     let spawn = world
         .revival_spawn(SeatId(0), start, 10. * NM, None, RevivalWeapons::Guns)
         .unwrap();
     let next = world.revival_plane(SeatId(0), &spawn).unwrap();
-    assert_eq!((next.plane, next.slot.member), (PlaneId(5), 3));
+    assert_eq!((next.plane, next.slot.member), (PlaneId(5), 0));
 }
 
 #[test]
@@ -527,7 +527,7 @@ fn a_clients_copy_adds_the_same_plane_from_the_spawned_message() {
             slot.wing_number,
             slot.member_number
         ),
-        (AircraftId::F18, Side::Friendly, 1, 3)
+        (AircraftId::F18, Side::Friendly, 1, 1)
     );
     // Its configuration and stores are the host's: what Seated reads.
     let config = wings.configuration(new.plane.0).unwrap();

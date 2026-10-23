@@ -1387,7 +1387,7 @@ pub(super) fn ai_respawns() -> Scenario {
         assert_eq!(world.lineage_head(PlaneId(4)), PlaneId(8));
         assert!(!world.lineage_lost(PlaneId(4)));
         let entry = world.roster.plane(PlaneId(8)).unwrap();
-        assert_eq!((entry.slot.wing.side, entry.slot.member), (Side::Enemy, 3));
+        assert_eq!((entry.slot.wing.side, entry.slot.member), (Side::Enemy, 1));
     }
     Scenario {
         name: "AI respawns, one pending",

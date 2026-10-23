@@ -518,6 +518,7 @@ fn transport(path: JoinPath, relay_now: bool, asked: Duration) -> Box<MasterTran
                 protocol_version: 1,
                 game_version: "test".into(),
                 game_commit: "test".into(),
+                compatibility: 0,
                 release: false,
             },
             listing_id: 1,

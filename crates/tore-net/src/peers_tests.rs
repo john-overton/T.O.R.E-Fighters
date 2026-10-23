@@ -216,6 +216,7 @@ fn a_player_drops_what_only_a_host_takes_and_a_host_takes_everything() {
         nonce: 1,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
     })
     .encode(VERSION)
     .unwrap();

@@ -14,6 +14,9 @@ the two stay in step. See docs/testing/lane-net.md.
 from __future__ import annotations
 
 import errno
+import json
+import struct
+import zlib
 import os
 import re
 import shutil
@@ -23,6 +26,7 @@ import time
 from pathlib import Path
 
 from battery import ROOT, Drive, DriveError, Proc, Scenario
+from battery_scenarios._master_compat import drive_master_mixed
 
 GUIDE = ROOT / "docs" / "DEDICATED-SERVER.md"
 LOCALHOST = "127.0.0.1"
@@ -475,6 +479,7 @@ def drive_scores(d: Drive) -> None:
     server.finish(40, 0)
     for problem in scores_problems(bots.text(), ["Bot1", "Bot2"]):
         d.problem(problem)
+    bots.expect(r"\(AI\) \((?:friendly|enemy)\) [1-9]\d*/\d+ ", "an AI kill in the live scores")
     bots.forbid(NET_BAD, "a network problem")
     server.forbid(NET_BAD, "a network problem")
 
@@ -484,7 +489,7 @@ def drive_results(d: Drive) -> None:
     bot hears one Results message, before the mission's end, with a row for every aircraft (the players' callsigns on
     their planes, the AI on the rest) and the winner of the final scores."""
     port = d.port()
-    server = start_server(d, port, guide_mission(separation_nm=5), mode="pvp", time_limit=1)
+    server = start_server(d, port, guide_mission(separation_nm=5), mode="pvp", time_limit=1, kill_limit=0)
     blue = start_bots(d, port, "blue", 100, "--callsign", "Blue", "--slot", "0")
     red = start_bots(d, port, "red", 100, "--callsign", "Red", "--slot", "6")
     if not server.wait_for(r"^mission ended: the time limit$", 150):
@@ -1142,13 +1147,60 @@ def rejoin_problems(text: str, name: str, plane: int) -> list[str]:
     return problems
 
 
+def reservation_answer(data: bytes, nonce: int, session: int, protocol: int) -> dict:
+    """Decode the bounded protocol-71 preflight reply, including its correlation and checksum."""
+    if len(data) not in (22, 37) or data[4] != 15:
+        raise ValueError("not a reservation answer")
+    crc, = struct.unpack_from("<I", data)
+    if crc != zlib.crc32(b"TORE-NET" + struct.pack("<H", protocol) + data[4:]):
+        raise ValueError("reservation checksum")
+    got_nonce, got_session, held = struct.unpack_from("<QQB", data, 5)
+    if (got_nonce, got_session) != (nonce, session):
+        raise ValueError("unrelated reservation answer")
+    if held == 0 and len(data) == 22:
+        return {"held": False}
+    if held != 1 or len(data) != 37:
+        raise ValueError("invalid reservation presence")
+    plane, enemy, wing, member, seconds, return_seconds = struct.unpack_from("<IBBBII", data, 22)
+    if enemy > 1 or wing >= 3 or seconds > 86400 or return_seconds > seconds:
+        raise ValueError("invalid reservation fields")
+    return {"held": True, "plane": plane, "side": "red" if enemy else "blue",
+            "wing": wing + 1, "member": member + 1, "token_seconds": seconds, "return_seconds": return_seconds}
+
+
+def query_reservation(port: int, token_text: str, timeout: float = 1.0) -> dict | None:
+    """Ask the live host without joining. None is silence, distinct from a confirmed no-slot reply."""
+    fields = token_text.split()
+    session, token = int(fields[1], 16), int(fields[2], 16)
+    source = (ROOT / "crates/tore-session/src/wire/mod.rs").read_text()
+    protocol = int(re.search(r"pub const PROTOCOL_VERSION: u16 = (\d+);", source).group(1))
+    nonce = int.from_bytes(os.urandom(8), "little")
+    body = bytes([14]) + struct.pack("<QQ", nonce, session) + token.to_bytes(16, "little")
+    data = struct.pack("<I", zlib.crc32(b"TORE-NET" + struct.pack("<H", protocol) + body)) + body
+    until = time.monotonic() + timeout
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.connect((LOCALHOST, port))
+        try:
+            sock.send(data)
+            while time.monotonic() < until:
+                sock.settimeout(max(0.001, until - time.monotonic()))
+                reply = sock.recv(1200)
+                try:
+                    return reservation_answer(reply, nonce, session, protocol)
+                except ValueError:
+                    continue
+        except OSError:
+            pass
+    return None
+
+
 def drive_rejoin(d: Drive) -> None:
     """Rejoin (slice K5): a bot flies plane 0 and keeps its token in a file; it is killed in flight (SIGKILL); the
     server drops it after 5 seconds and keeps plane 0 for it (the AI flies it, nobody else may take it); the bot
     started again with the same file sends its token and is back in plane 0, welcomed back, and leaves cleanly. A
     second bot keeps the mission going meanwhile."""
     port = d.port()
-    server = start_server(d, port, guide_mission(), empty_timeout=90)
+    server = start_server(d, port, weapons_hold(guide_mission(50)), empty_timeout=90)
     token_file = d.work / "viper.token"
     stay = start_bots(d, port, "stay", 75, "--callsign", "Stay", "--slot", "1")
     first = start_bots(
@@ -1161,6 +1213,7 @@ def drive_rejoin(d: Drive) -> None:
     d.sleep(4)
     if not token_file.exists():
         raise DriveError("the bot kept no token file")
+    token_text = token_file.read_text()
     # Killed in flight: no Leave, no goodbye.
     d.log("killing Viper (SIGKILL)")
     first.stopped = True
@@ -1169,26 +1222,46 @@ def drive_rejoin(d: Drive) -> None:
     if not server.wait_for(r"Viper dropped out: the AI flies plane 0, kept for it$", 40):
         d.problem("the server did not keep plane 0 for the dropped Viper")
     d.sleep(1)
+    held = query_reservation(port, token_text)
+    if not held or not held.get("held") or held.get("plane") != 0:
+        d.problem(f"the host did not confirm the dropped player's kept slot: {held}")
+    invalid = token_text.split()
+    invalid[2] = f"{int(invalid[2], 16) ^ 1:032x}"
+    unknown = query_reservation(port, " ".join(invalid))
+    if unknown != {"held": False}:
+        d.problem(f"an unknown token did not get a confirmed no-slot reply: {unknown}")
     second = d.start(
         "viper2",
-        [d.bot, "--connect", f"{LOCALHOST}:{port}", "--seconds", "20", "--callsign", "Viper", "--slot", "0",
+        [d.bot, "--connect", f"{LOCALHOST}:{port}", "--seconds", "20", "--callsign", "Maverick", "--slot", "0",
          "--token-file", str(token_file)],
     )
     second.finish(90, 0)
-    for problem in rejoin_problems(second.text(), "Viper", 0):
+    for problem in rejoin_problems(second.text(), "Maverick", 0):
         d.problem(problem)
-    second.expect(r"^Viper: debrief: ", "a debrief")
-    second.expect(r"^Viper: The connection ended: the player left\.$", "a clean leave")
+    second.expect(r"^Maverick: debrief: ", "a debrief")
+    second.expect(r"^Maverick: The connection ended: the player left\.$", "a clean leave")
     second.forbid(r"a protocol error|too many bad packets|the game data differs|No answer from the server", "a network problem")
+    if not server.wait_for(r"Maverick.*left: left$", 10):
+        d.problem("the server did not finish Maverick's clean departure")
+    after_leave = query_reservation(port, token_text)
+    if after_leave != {"held": False}:
+        d.problem(f"clean leave did not clear the server reservation: {after_leave}")
     stay.finish(120, 0)
     server.send("end")
     server.finish(40, 0)
+    offline = query_reservation(port, token_text)
+    if offline is not None:
+        d.problem("an offline server produced a reservation confirmation")
+    (d.work / "reservation-checks.json").write_text(json.dumps({
+        "after_drop": held, "unknown_token": unknown, "after_clean_leave": after_leave,
+        "offline": offline,
+    }, indent=2) + "\n")
     log_must(
         d,
         server_log(d),
         r"Viper dropped out: the AI flies plane 0, kept for it$",
-        r"Viper rejoined with its token: plane 0 is waiting$",
-        r"Viper took plane 0\b.*(?:\n.*)*Viper took plane 0\b",
+        r"Maverick rejoined with its token: plane 0 is waiting$",
+        r"Viper took plane 0\b.*(?:\n.*)*Maverick took plane 0\b",
         forbid=r"protocol error|bad packets|\bfault\b",
     )
     if re.search(r"Stay took plane 0\b", server_log(d)):
@@ -1520,7 +1593,7 @@ def drive_discovery(d: Drive) -> None:
     server = start_server(d, port, name="Battery discovery")
     found = d.run("find", [d.app, "--find-games", "3", "--port", str(port)], timeout=40)
     found.expect(
-        rf"^\S+:{port}\tsame build \([^)]+\)\tBattery discovery\tUKR, clear, airborne at 20000 ft: .*\t0/6 players\tlobby\tking -\topen\tnot full$",
+        rf"^\S+:{port}\tmatching code \([^)]+\)\tBattery discovery\tUKR, clear, airborne at 20000 ft: .*\t0/6 players\tlobby\tking -\topen\tnot full$",
         "the server's line",
     )
     nothing = d.run("empty", [d.app, "--find-games", "1.5", "--port", str(d.port())], timeout=40)
@@ -1583,7 +1656,7 @@ def drive_host(d: Drive) -> None:
     wait_for_listener(d, port, host, 90)
     seen = d.run("find", [d.app, "--find-games", "3", "--port", str(port)], timeout=40)
     seen.expect(
-        rf"^\S+:{port}\tsame build \([^)]+\)\tBattery host\t.*\t\d+/6 players\t(lobby|flying)\tking (Host|-)\topen\tnot full$",
+        rf"^\S+:{port}\tmatching code \([^)]+\)\tBattery host\t.*\t\d+/6 players\t(lobby|flying)\tking (Host|-)\topen\tnot full$",
         "the hosted game's line",
     )
     bot = start_bots(d, port, "bot", 90, "--callsign", "Joiner")
@@ -1702,7 +1775,7 @@ def drive_master_listing(d: Drive) -> None:
     # The Internet Lobby's own listing (slice I4): `tore-app --browse` lists the server with its details.
     browsed = d.run("browse", [d.app, "--browse", "4", "--master", f"{LOCALHOST}:{mport}"], timeout=60)
     browsed.expect(
-        r'^"T\.O\.R\.E server"  0/6 players, lobby, open, not full, this build, dedicated server; '
+        r'^"T\.O\.R\.E server"  0/6 players, lobby, open, not full, matching code, Code [0-9A-F]{8}, dedicated server; '
         r'mission "UKR, [^"]*"; king -; players -$',
         "the server's line in the Internet Lobby",
     )
@@ -1860,7 +1933,7 @@ def drive_internet(d: Drive) -> None:
         d.log(f"attempt {attempt}: the scripted clicks did not open the screen")
     # The screen's own lines are in the game's log (its text is drawn over the picture, not in the snapshots).
     for pattern, what in (
-        (r"Internet Lobby: This game sends anonymous statistics to the Internet Lobby\. Turn them off in Options\.", "the one-time notice"),
+        (r"Internet Lobby: This game sends anonymous statistics to the chosen master server\. Turn them off in Options\.", "the one-time notice"),
         (rf"Internet Lobby: Asking the Internet Lobby at {re.escape(LOCALHOST)}:{mport} for games\.\.\.", "the browse starting"),
         (r"Internet Lobby: 1 game is listed on the Internet Lobby\.", "the count"),
         (r"Internet Lobby: Asking the Internet Lobby to introduce you to 'T\.O\.R\.E server'\.\.\.", "Join asking"),
@@ -2204,38 +2277,20 @@ def drive_content_builds(d: Drive) -> None:
 
 
 def drive_content_missing(d: Drive) -> None:
-    """A bot whose import lacks the Su-27 joins the guide's mission (which flies it): every player gets the gap, the
-    bot is unable with the words and leaves, another bot flies, and the server's log names the gap and its end."""
+    """A missing playable aircraft changes the compatibility code and is refused before admission."""
     port = d.port()
     server = start_server(d, port, guide_mission(separation_nm=5), empty_timeout=3)
-    hawk = start_bots(d, port, "hawk", 15, "--callsign", "Hawk", "--drop-resource", "SU27.PT", "--expect-unable")
-    viper = start_bots(d, port, "viper", 35, "--callsign", "Viper")
-    hawk.finish(60, 0)
+    hawk = start_bots(d, port, "hawk", 10, "--callsign", "Hawk", "--drop-resource", "SU27.PT")
+    viper = start_bots(d, port, "viper", 15, "--callsign", "Viper")
+    hawk.finish(60, None)
     viper.finish(90, 0)
     server.finish(40, 0)
     hawk.expect(r"^dropped SU27\.PT from the import$", "the dropped profile")
-    hawk.expect(
-        r"^Hawk: Your game has no Su-27[^,]*, which this mission flies\. .*Re-import Fighters Anthology \(Pref, "
-        r"Re-import\) to add it\. \(",
-        "its own words",
-    )
-    hawk.expect(r"^Hawk: gaps: aircraft SU27\.PT \(Hawk lacks it\)$", "the gap")
-    hawk.expect(r"^Hawk: Your game differs from the host's: no Su-27[^.]*\.$", "its own difference line")
-    hawk.expect(r"^Hawk: The connection ended: the player left\.$", "a clean leave")
+    hawk.expect(r"The server's compatibility code is [0-9A-F]{8}; yours is [0-9A-F]{8}\.", "the compatibility refusal")
     hawk.forbid(r"^Hawk: seat \d+", "a seating")
-    viper.expect(r"^Viper: gaps: aircraft SU27\.PT \(Hawk lacks it\)$", "the gap")
-    viper.expect(r"^Viper: Hawk's game differs from the host's: no Su-27[^.]*\.$", "Hawk's difference line")
-    viper.expect(r"^Viper: lobby: .*Hawk no slot unable", "Hawk unable in the lobby")
-    viper.expect(r"^Viper: seat \d+, plane \d+, at tick \d+$", "a seating")
-    viper.expect(r"^Viper: debrief: ", "a debrief")
+    viper.expect(r"^Viper: seat \d+, plane \d+, at tick \d+$", "a matching import joining")
     viper.forbid(NET_BAD, "a network problem")
-    log_must(
-        d, server_log(d), r"joined as Hawk", r"joined as Viper",
-        r"content Hawk: .*; lacks aircraft SU27\.PT$",
-        r"gaps: aircraft SU27\.PT \(Hawk lacks it\)$",
-        r"Hawk cannot play the mission: Hawk's game has no Su-27[^,]*, which this mission flies\.",
-        r"gaps: none$",
-    )
+    log_must(d, server_log(d), r"joined as Viper", forbid=r"joined as Hawk")
 
 
 def drive_slow_load(d: Drive) -> None:
@@ -2629,6 +2684,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-window-host", lane="net", args=[], driver=drive_host, uses=("bot",), window=True, timeout=300,
             notes="a hosted game answers the search, a bot joins, and the host leaving ends the game for it",
+        ),
+        Scenario(
+            name="net-master-mixed", lane="net", args=[], driver=drive_master_mixed, timeout=60,
+            notes="released protocol-1 and current protocol-2 registrations and browsers share one master with isolated listings and details",
         ),
         Scenario(
             name="net-master-flood", lane="net", args=[], driver=drive_master_flood, timeout=120,

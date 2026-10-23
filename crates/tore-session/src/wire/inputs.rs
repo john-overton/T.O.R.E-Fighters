@@ -1148,6 +1148,7 @@ const SIGHT_NEXT: u64 = 2;
 const GUN_KEY_DOWN: u64 = 3;
 const GUN_KEY_UP: u64 = 4;
 const JETTISON_TANKS: u64 = 5;
+const DESIGNATE_VISUAL_TARGET: u64 = 6;
 
 /// A combat command's code, exhaustively, so a new command cannot go
 /// uncoded.
@@ -1169,7 +1170,7 @@ fn live_code(command: live::Command) -> u64 {
         C::ClearDesignation => 12,
         C::ToggleArm => 13,
         C::Jettison => 14,
-        C::JettisonTanks => EXTENDED,
+        C::JettisonTanks | C::DesignateVisualTarget(_) => EXTENDED,
         C::ReplaceTarget => 15,
         C::CycleClass => 16,
         C::FailStation => 17,
@@ -1204,6 +1205,10 @@ fn write_live(w: &mut BitWriter, command: live::Command) {
         live::Command::GunKeyDown => w.write_varint(GUN_KEY_DOWN),
         live::Command::GunKeyUp => w.write_varint(GUN_KEY_UP),
         live::Command::JettisonTanks => w.write_varint(JETTISON_TANKS),
+        live::Command::DesignateVisualTarget(id) => {
+            w.write_varint(DESIGNATE_VISUAL_TARGET);
+            w.write_varint(u64::from(id));
+        }
         _ => {}
     }
 }
@@ -1225,6 +1230,7 @@ fn read_live(r: &mut BitReader<'_>) -> WireResult<live::Command> {
             GUN_KEY_DOWN => live::Command::GunKeyDown,
             GUN_KEY_UP => live::Command::GunKeyUp,
             JETTISON_TANKS => live::Command::JettisonTanks,
+            DESIGNATE_VISUAL_TARGET => live::Command::DesignateVisualTarget(read_u32(r)?),
             _ => return Err(WireError::Invalid("extended combat command")),
         },
         code => *LIVE

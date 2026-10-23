@@ -149,7 +149,7 @@ fn a_lost_player_is_told_and_flies_again_in_a_new_plane() {
         assert_eq!(spawned.plane, 4);
         assert_eq!(
             (spawned.wing.side, spawned.wing.index, spawned.member),
-            (Side::Friendly, 0, 2)
+            (Side::Friendly, 0, 0)
         );
         assert_eq!(spawned.aircraft, AircraftId::F18);
     }
@@ -424,3 +424,78 @@ mod lead_hold_tests;
 // players' callsigns, on this file's rig.
 #[path = "lineage_take_tests.rs"]
 mod lineage_take_tests;
+
+#[test]
+fn debrief_and_scoreboard_keep_kills_and_hits_across_two_revivals() {
+    use tore_sim::combat::ledger::{Kill, Resolution, ShotKind};
+    let (mut rig, viper, _) = two_sides(
+        2,
+        4,
+        &[
+            respawn(Respawn::Revive),
+            (number::KILL_LIMIT, 0),
+            (number::AI_RESPAWN, 0),
+            (number::LIVES, 255),
+        ],
+    );
+    for life in 0..3 {
+        let owner = plane_of(&rig, viper);
+        let victim = 3 + life;
+        let state = &mut rig.host.world.combat.state;
+        state
+            .ledger
+            .launch(100 + life, owner, Some(victim), ShotKind::AirToAir);
+        state.ledger.resolve(100 + life, Resolution::Hit(100));
+        state.ledger.kill(Kill {
+            owner,
+            victim,
+            category: 0x8000,
+            aircraft: true,
+        });
+        state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == victim)
+            .unwrap()
+            .hp = 0;
+        rig.run(Duration::from_millis(1200));
+        if life < 2 {
+            lose(&mut rig, viper);
+            revive(&mut rig, viper);
+            assert!(reseated(&mut rig, viper, owner));
+        }
+    }
+    let connection = rig
+        .host
+        .peers
+        .iter()
+        .find(|(_, p)| p.callsign == "Viper")
+        .unwrap()
+        .0;
+    let report = rig.host.player_report(*connection).unwrap();
+    assert_eq!(report.player.kills[0], 3);
+    assert_eq!(report.player.air_to_air.launched, 3);
+    assert_eq!(report.player.air_to_air.hit, 3);
+    // The old capture path reads only the current life, reproducing the bug.
+    let raw =
+        tore_world::debrief::capture(&rig.host.world, rig.host.peers[connection].seat.unwrap())
+            .unwrap();
+    assert_eq!(raw.player.kills[0], 1);
+    let scores = rig.clients[viper].scores.last().unwrap();
+    let own = scores
+        .players
+        .iter()
+        .find(|p| p.callsign == "Viper")
+        .unwrap();
+    assert_eq!((own.kills, own.losses, own.hits), (3, 2, 3));
+    assert_eq!(scores.sides[0].hits, 3);
+    back_to_lobby(&mut rig, viper);
+    let report = rig.clients[viper].debrief.as_ref().unwrap();
+    assert_eq!(report.player.kills[0], 3);
+    assert_eq!(report.player.air_to_air.hit, 3);
+    assert!(
+        rig.clients[viper].results.is_empty(),
+        "no final results when leaving early"
+    );
+    assert!(rig.clients.iter().all(|c| c.errors.is_empty()));
+}

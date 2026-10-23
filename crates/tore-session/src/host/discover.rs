@@ -44,6 +44,7 @@ impl Host {
             protocol_version: crate::wire::PROTOCOL_VERSION,
             game_version: self.config.build.version.clone(),
             game_commit: self.config.build.commit.clone(),
+            compatibility: self.config.build.compatibility,
             session_id: self.session_id,
             name: self.settings.name().to_owned(),
             summary: self.spec.summary(),
@@ -81,6 +82,7 @@ mod tests {
 
     fn build() -> BuildId {
         BuildId {
+            compatibility: 0,
             version: "0.2.0-1-gtest".into(),
             commit: "test-commit".into(),
             release: false,
@@ -129,6 +131,7 @@ mod tests {
                 let config = ClientConfig {
                     game_version: build.version.clone(),
                     game_commit: build.commit.clone(),
+                    compatibility: build.compatibility,
                     password: password.clone(),
                     entropy: Entropy::Seeded(100 + i as u64),
                     ..ClientConfig::new(PROTOCOL_VERSION, callsign)

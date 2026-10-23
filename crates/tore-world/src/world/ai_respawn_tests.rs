@@ -1,11 +1,11 @@
 //! AI respawn in the mission core (the lobby pass's slice R1;
 //! docs/ARCHITECTURE.md, "Death, revival and lives"), on an open mission
 //! built from synthetic resources as a host builds it: lineages and their
-//! roots; Respawn adds an AI plane in the lost one's wing with the next
+//! roots; Respawn adds an AI plane in the lost one's wing with its original
 //! member number at the spawn the host chose, the lineage's original spawn
 //! point, stepped back when it is taken; the weapons rule; a human's lost
 //! plane is not the AI's, an abandoned one is; the replaced AI wreck retires
-//! once rested; member 255 stops a wing; a client's copy adds the same
+//! once rested; callsign numbers do not run out; a client's copy adds the same
 //! plane; the revival point stays on the map at 150 nm; and a checkpoint
 //! keeps the roots.
 
@@ -172,7 +172,7 @@ fn a_respawn_adds_an_ai_plane_in_the_wing_at_its_original_spawn() {
         new.slot,
         Slot {
             wing: FRIENDLY_WING,
-            member: 2
+            member: 1
         }
     );
     step(
@@ -474,20 +474,20 @@ fn a_lineage_whose_newest_plane_retired_still_respawns() {
     let entry = world.roster.plane(new).unwrap();
     assert_eq!(
         (entry.slot.wing, entry.slot.member, entry.pilot),
-        (FRIENDLY_WING, 2, Pilot::Ai)
+        (FRIENDLY_WING, 0, Pilot::Ai)
     );
 }
 
 #[test]
-fn a_wing_out_of_member_numbers_stops_respawning() {
+fn repeated_respawns_do_not_consume_flight_position_numbers() {
     let mut world = open_mission(Skill::Average);
     let origins = origins(&world);
     fly(&mut world, 2);
     destroy_ai(&mut world, WINGMAN);
     step(&mut world, &[]);
     let spawn = respawn_at_origin(&world, WINGMAN, origins[&WINGMAN]);
-    // A wing that has had member 254 (by hand: 250 respawns' worth) gives
-    // 255 to nobody: the wire's member is a byte, 255 kept back.
+    // Earlier lives do not consume callsign numbers, even in an old
+    // mission that once assigned high member numbers.
     world.revival.retired.push(Plane {
         id: PlaneId(90),
         slot: Slot {
@@ -496,8 +496,8 @@ fn a_wing_out_of_member_numbers_stops_respawning() {
         },
         pilot: Pilot::Lost,
     });
-    let error = world.can_respawn(WINGMAN, &spawn).unwrap_err().to_string();
-    assert!(error.contains("no member number left"), "{error}");
+    let new = world.respawn_new(WINGMAN, &spawn).unwrap();
+    assert_eq!(new.slot.member, 1);
     // The other side's wings are unaffected.
     destroy_ai(&mut world, ENEMY);
     step(&mut world, &[]);

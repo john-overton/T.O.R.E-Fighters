@@ -96,12 +96,38 @@ pub struct Built {
 /// The build this game is, which the host's must match.
 pub fn build_id() -> BuildId {
     BuildId {
+        compatibility: compatibility_code(),
         version: crate::version::version().to_owned(),
         commit: crate::version::commit().to_owned(),
         // The same rule as the server and the bot: a stamped tag is a
         // release build.
         release: option_env!("TORE_BUILD_VERSION").is_some(),
     }
+}
+
+/// The code of the content worker's import, or the selected installed profile
+/// for command-line discovery before the menu has loaded resources.
+pub fn compatibility_code() -> u32 {
+    let resources = {
+        let slot = CONTENT.0.lock().unwrap_or_else(|e| e.into_inner());
+        match &*slot {
+            ContentSlot::Ready(_, content) => {
+                return tore_session::compatibility::current(&content.content);
+            }
+            ContentSlot::Computing(resources, _) => Some(Arc::clone(resources)),
+            ContentSlot::Idle => None,
+        }
+    };
+    if let Some(resources) = resources {
+        return tore_session::compatibility::current(&game_content(&resources).content);
+    }
+    static INSTALLED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *INSTALLED.get_or_init(|| {
+        tore_import::data_directory()
+            .ok()
+            .and_then(|dir| tore_session::compatibility::installed(&dir).ok())
+            .unwrap_or_else(|| tore_session::compatibility::current(&Default::default()))
+    })
 }
 
 /// What the game's multiplayer screens know about this game's content
@@ -1102,7 +1128,7 @@ impl NetSession {
         })
     }
 
-    /// Whether this game hosts the session: its player is the King.
+    /// Whether this game currently runs the host, independently of the crown.
     pub fn hosting(&self) -> bool {
         self.hosting.is_some()
     }
@@ -1836,6 +1862,7 @@ impl NetSession {
 
     /// The shared polite disconnect used by Leave, Return to Main Menu and Exit.
     pub fn disconnect(&mut self) {
+        self.hand_over_for_leave();
         let now = self.now();
         self.client.disconnect(now);
         self.flush();

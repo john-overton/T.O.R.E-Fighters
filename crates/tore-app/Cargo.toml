@@ -1,6 +1,6 @@
 [package]
 name = "tore-app"
-version = "0.2.0"
+version = "0.2.1"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
@@ -9,6 +9,10 @@ publish.workspace = true
 build = "build.rs"
 
 [dependencies]
+# Background GitHub release checks: no async runtime or system TLS library.
+ureq = { version = "3.1", default-features = false, features = ["rustls"] }
+serde_json = "1"
+semver = "1"
 tore-diagnostics-native = { path = "../tore-diagnostics-native" }
 tore-realtime-native = { path = "../tore-realtime-native" }
 log = "0.4"

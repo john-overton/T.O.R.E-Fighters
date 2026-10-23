@@ -25,7 +25,7 @@ const FIELD_X: i32 = 240;
 /// The longest game name: the dedicated server's limit.
 const MAX_NAME: usize = crate::net::options::MAX_NAME;
 /// The longest master address typed.
-const MAX_MASTER: usize = 120;
+const MAX_MASTER: usize = 255;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Id {
@@ -33,6 +33,7 @@ enum Id {
     Password,
     Name,
     Master,
+    DefaultMaster,
     Forward,
     MayHost,
     Statistics,
@@ -69,6 +70,7 @@ pub struct OptionsPanel {
     password: TextField,
     name: TextField,
     master: TextField,
+    default_master: Button,
     forward: CheckBox,
     may_host: CheckBox,
     statistics: CheckBox,
@@ -92,16 +94,21 @@ impl OptionsPanel {
             .with_max(MAX_NAME)
             .with_hint(default_name.to_owned());
         name_field.set_text(settings.game_name.as_deref().unwrap_or(""));
-        let mut master_field = TextField::line((FIELD_X, 229), 216, Filter::Text)
-            .with_max(MAX_MASTER)
-            .with_hint(format!("built in: {}", tore_net::master::DEFAULT_MASTER));
-        master_field.set_text(settings.master.as_deref().unwrap_or(""));
+        let mut master_field =
+            TextField::line((FIELD_X, 229), 216, Filter::Text).with_max(MAX_MASTER);
+        master_field.set_text(
+            settings
+                .master
+                .as_deref()
+                .unwrap_or(tore_net::master::DEFAULT_MASTER),
+        );
         let mut focus = Focus::new(
             vec![
                 Id::Port,
                 Id::Password,
                 Id::Name,
                 Id::Master,
+                Id::DefaultMaster,
                 Id::Forward,
                 Id::MayHost,
                 Id::Statistics,
@@ -116,6 +123,7 @@ impl OptionsPanel {
             password: password_field,
             name: name_field,
             master: master_field,
+            default_master: Button::new("Default", (463, 226), 65),
             forward: CheckBox::new(
                 (LABEL_X, 252),
                 "Forward the game port on my router",
@@ -161,8 +169,7 @@ impl OptionsPanel {
         };
         let master = self.master.text().trim();
         if !master.is_empty() && !master_ok(master) {
-            self.error =
-                Some("The master must be a name or address, then a port if it is not 26901.");
+            self.error = Some("Invalid master: use a host or IP, port 1-65535; [IPv6]:port.");
             self.focus.set(Id::Master);
             return Answer::None;
         }
@@ -171,11 +178,18 @@ impl OptionsPanel {
             port,
             password: self.password.text().to_owned(),
             name: (!name.is_empty()).then(|| name.to_owned()),
-            master: (!master.is_empty()).then(|| master.to_owned()),
+            master: (!master.is_empty() && master != tore_net::master::DEFAULT_MASTER)
+                .then(|| master.to_owned()),
             port_forward: self.forward.checked(),
             may_host: self.may_host.checked(),
             telemetry: self.statistics.checked(),
         })
+    }
+
+    fn restore_master(&mut self) -> Answer {
+        self.master.set_text(tore_net::master::DEFAULT_MASTER);
+        self.error = None;
+        Answer::None
     }
 
     pub fn text_input(&mut self, text: &str) {
@@ -212,6 +226,7 @@ impl OptionsPanel {
                     Id::Password => self.password.key(name),
                     Id::Name => self.name.key(name),
                     Id::Master => self.master.key(name),
+                    Id::DefaultMaster => self.default_master.key(name),
                     // Enter turns a check box; it does not accept the panel.
                     Id::Forward => {
                         let outcome = self.forward.key(name, now);
@@ -230,6 +245,7 @@ impl OptionsPanel {
                 };
                 match (id, outcome) {
                     (Id::Ok, Outcome::Activated) => self.accept(),
+                    (Id::DefaultMaster, Outcome::Activated) => self.restore_master(),
                     (Id::Port | Id::Password | Id::Name | Id::Master, Outcome::Activated) => {
                         self.accept()
                     }
@@ -259,6 +275,7 @@ impl OptionsPanel {
     }
 
     pub fn moved(&mut self, point: Option<Point>) {
+        self.default_master.pointer_move(point);
         self.ok.pointer_move(point);
         self.cancel.pointer_move(point);
     }
@@ -270,6 +287,7 @@ impl OptionsPanel {
         let now = Instant::now();
         let Some(point) = point else {
             if !pressed {
+                self.default_master.release((-1, -1));
                 self.ok.release((-1, -1));
                 self.cancel.release((-1, -1));
                 self.forward.release((-1, -1), now);
@@ -294,6 +312,10 @@ impl OptionsPanel {
                 self.focus.set(Id::Forward);
                 self.forward.press(point);
             }
+            if self.default_master.hit(point) {
+                self.focus.set(Id::DefaultMaster);
+                self.default_master.press(point);
+            }
             if self.may_host.hit(point) {
                 self.focus.set(Id::MayHost);
                 self.may_host.press(point);
@@ -311,7 +333,9 @@ impl OptionsPanel {
         self.statistics.release(point, now);
         let ok = self.ok.release(point) == Outcome::Activated;
         let cancel = self.cancel.release(point) == Outcome::Activated;
-        if ok {
+        if self.default_master.release(point) == Outcome::Activated {
+            self.restore_master()
+        } else if ok {
             self.accept()
         } else if cancel {
             Answer::Cancel
@@ -350,18 +374,26 @@ impl OptionsPanel {
         text(canvas, kit, font, "Port:", (LABEL_X, 142), None, None);
         text(canvas, kit, font, "Password:", (LABEL_X, 172), None, None);
         text(canvas, kit, font, "Game name:", (LABEL_X, 202), None, None);
-        text(canvas, kit, font, "Master:", (LABEL_X, 232), None, None);
+        text(
+            canvas,
+            kit,
+            font,
+            "Master server:",
+            (LABEL_X, 232),
+            None,
+            None,
+        );
         for (line, y) in [
             (
                 "The password is sent when you join and used when you host. It is never saved.",
                 330,
             ),
             (
-                "Statistics: an anonymous id, how long you played, how many players, how you",
+                "Statistics go to the chosen master: anonymous id, play time, player count,",
                 348,
             ),
             (
-                "connected. No names, no addresses. The README says what is sent.",
+                "connection details. No names or addresses. See the README for details.",
                 364,
             ),
         ] {
@@ -372,6 +404,8 @@ impl OptionsPanel {
         self.password.draw(canvas, kit, self.focus.is(Id::Password));
         self.name.draw(canvas, kit, self.focus.is(Id::Name));
         self.master.draw(canvas, kit, self.focus.is(Id::Master));
+        self.default_master
+            .draw(canvas, kit, marked(Id::DefaultMaster));
         self.forward.draw(canvas, kit, marked(Id::Forward));
         self.may_host.draw(canvas, kit, marked(Id::MayHost));
         self.statistics.draw(canvas, kit, marked(Id::Statistics));

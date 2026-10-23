@@ -165,9 +165,10 @@ const KINDS: [&str; 16] = [
 
 fn build() -> Build {
     Build {
-        protocol_version: 0,
+        protocol_version: 71,
         game_version: FLOOD_VERSION.into(),
         game_commit: "flood".into(),
+        compatibility: 0,
         release: false,
     }
 }
@@ -176,6 +177,7 @@ fn build() -> Build {
 fn datagram(kind: &str, rng: &mut SplitMix64, target: SocketAddr) -> (SocketAddr, Vec<u8>) {
     let n = rng.next_u64();
     let summary = ListingSummary {
+        protocol_version: 71,
         name: "flood".into(),
         ..ListingSummary::default()
     };

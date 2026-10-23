@@ -205,7 +205,7 @@ fn only_change(flown: &Flown) -> (u32, u32, bool, bool) {
 /// line, and a respawned aircraft joins last, as a wingman, and leads only
 /// when every earlier member is gone (John's AI leadership loop).
 #[test]
-fn an_ai_flight_passes_the_lead_down_and_respawns_join_last() {
+fn an_ai_respawn_keeps_its_number_without_displacing_the_current_leader() {
     let mut world = mission(true);
     run(&mut world, &[], 2);
     assert_eq!(leader(&world), Some(0));
@@ -213,12 +213,12 @@ fn an_ai_flight_passes_the_lead_down_and_respawns_join_last() {
     let flown = run(&mut world, &[], 2);
     assert_eq!(only_change(&flown), (1, 0, false, false));
     assert!(world.lead_owners().is_empty() && !world.lead_acting(WING));
-    // Plane 0's lineage respawns: plane 5, member 4, a wingman of plane 1.
+    // Plane 0's lineage respawns: plane 5 retains member 0, a wingman of plane 1.
     let command = respawn(&world, 0);
     let flown = run(&mut world, &[command], 2);
     assert!(flown.changes.is_empty());
     assert_eq!(world.lineage_head(PlaneId(0)), PlaneId(NEW));
-    assert_eq!(world.roster.plane(PlaneId(NEW)).unwrap().slot.member, 4);
+    assert_eq!(world.roster.plane(PlaneId(NEW)).unwrap().slot.member, 0);
     assert_eq!(leader(&world), Some(1));
     let actor = world
         .ai_wings
@@ -229,8 +229,8 @@ fn an_ai_flight_passes_the_lead_down_and_respawns_join_last() {
         .unwrap();
     assert!(!actor.identity().is_leader());
     assert_eq!(actor.wing_slot(), 3, "behind planes 2 and 3");
-    // The loop goes on: planes 2 and 3, then the respawn.
-    for (lost, next) in [(1, 2), (2, 3), (3, NEW)] {
+    // A later succession follows original member numbers: returning Red 1, then Red 3 and Red 4.
+    for (lost, next) in [(1, NEW), (NEW, 2), (2, 3)] {
         lose(&mut world, lost);
         let flown = run(&mut world, &[], 2);
         assert_eq!(only_change(&flown), (next, lost, false, false));

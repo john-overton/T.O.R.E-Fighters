@@ -19,15 +19,22 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// Synthetic identity shared with LoopbackMaster, without loading an installed import.
+pub(super) fn test_screen(kit: Arc<Kit>, data: Option<PathBuf>) -> InternetScreen {
+    let mut s = InternetScreen::new(kit, data);
+    s.own = crate::net::browse::testing::build;
+    s
+}
+
 fn screen() -> InternetScreen {
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(NOBODY.into());
     s
 }
 
 /// A screen kept in `dir`, on a master nothing listens on.
 fn kept_in(dir: &std::path::Path) -> InternetScreen {
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
+    let mut s = test_screen(Arc::new(test_kit::kit()), Some(dir.to_path_buf()));
     s.settings.master = Some(NOBODY.into());
     s
 }
@@ -199,11 +206,7 @@ fn the_selected_games_players_show_with_the_crown_and_its_mission_under_the_list
     assert_eq!(rows[0].cells[0], Cell::Icon(Icon::Crown));
     assert_eq!(rows[0].cells[1], Cell::Text("Iceman".into()));
     assert_eq!(rows[1].cells[0], Cell::Empty);
-    assert!(
-        s.selection_line()
-            .unwrap()
-            .starts_with("Mission: KOLA, clear")
-    );
+    assert!(s.selection_line().unwrap().contains("Mission: KOLA, clear"));
     // A game that says more players than it names: "and 2 more".
     let mut games = sample_entries();
     games[0].1.players = 5;
@@ -223,7 +226,7 @@ fn the_selected_games_players_show_with_the_crown_and_its_mission_under_the_list
     s.rebuild_players();
     assert_eq!(
         s.selection_line().unwrap(),
-        "This game's router may need the relay."
+        "Code 00000000. This game's router may need the relay."
     );
     // Another version has its own line.
     s.other.set_checked(true);
@@ -233,7 +236,7 @@ fn the_selected_games_players_show_with_the_crown_and_its_mission_under_the_list
     assert!(
         s.selection_line()
             .unwrap()
-            .contains("runs another version (0.1.2) and cannot be joined")
+            .contains("Code 00000000 (0.1.2) cannot be joined")
     );
 }
 
@@ -275,10 +278,7 @@ fn a_game_that_cannot_be_joined_is_refused_in_words_before_the_master_is_asked()
     s.other.set_checked(true);
     s.rebuild_games();
     for (name, wanted) in [
-        (
-            "Old build",
-            "runs another version (0.1.2); it cannot be joined.",
-        ),
+        ("Old build", "compatibility code is 00000000; yours is"),
         ("Top Gun test", "is full."),
         ("Going away", "is closing; try again soon."),
     ] {
@@ -336,7 +336,7 @@ fn on_dead_master() -> (InternetScreen, Duration) {
 fn join_goes_through_the_masters_introduction_to_a_race_of_the_hosts_addresses() {
     let mut master = LoopbackMaster::start();
     let (_id, host) = master.list("Friday night", 1, 8, false);
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     s.password = "secret".into();
@@ -390,7 +390,7 @@ fn join_goes_through_the_masters_introduction_to_a_race_of_the_hosts_addresses()
 #[test]
 fn a_game_the_master_no_longer_lists_is_a_line_in_messages_and_the_screen_goes_on() {
     let mut master = LoopbackMaster::start();
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     // The first (empty) list has arrived; then the screen is shown a game the
@@ -494,7 +494,7 @@ fn new_lists_a_game_on_the_master_after_checking_the_callsign() {
 #[test]
 fn the_built_in_master_is_used_only_when_no_other_is_chosen() {
     // Never turned: the screen would browse the built-in master.
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     assert_eq!(s.master_text(), tore_net::master::DEFAULT_MASTER);
     s.settings.master = Some("master.example.org:26911".into());
     assert_eq!(s.master_text(), "master.example.org:26911");
@@ -505,10 +505,10 @@ fn the_built_in_master_is_used_only_when_no_other_is_chosen() {
 #[test]
 fn the_notice_is_said_the_first_time_and_never_again() {
     let dir = scratch("notice");
-    let first = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let first = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert_eq!(first.message_lines(), [telemetry::NOTICE]);
     assert!(Remembered::load(&dir).telemetry_notice);
-    let second = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let second = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert!(second.message_lines().is_empty());
     // With statistics already off there is nothing to tell.
     let off = scratch("notice-off");
@@ -517,7 +517,7 @@ fn the_notice_is_said_the_first_time_and_never_again() {
         ..Remembered::default()
     };
     kept.save(&off).unwrap();
-    let third = InternetScreen::new(Arc::new(test_kit::kit()), Some(off.clone()));
+    let third = test_screen(Arc::new(test_kit::kit()), Some(off.clone()));
     assert!(third.message_lines().is_empty());
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::fs::remove_dir_all(off);
@@ -581,6 +581,7 @@ fn clear_field(s: &mut InternetScreen) {
 fn options_keeps_the_masters_address_and_refuses_bad_values() {
     let dir = scratch("options");
     let mut s = kept_in(&dir);
+    s.save();
     s.open_options();
     assert!(s.options_open() && s.typing());
     // Port: nothing is not a port, and the panel stays.
@@ -599,6 +600,8 @@ fn options_keeps_the_masters_address_and_refuses_bad_values() {
         s.options_open(),
         "a master that is not an address is refused"
     );
+    assert_eq!(s.master_text(), NOBODY);
+    assert_eq!(Remembered::load(&dir).master.as_deref(), Some(NOBODY));
     clear_field(&mut s);
     type_into(&mut s, "master.example.org:26911");
     s.key("Enter", false);
@@ -626,13 +629,14 @@ fn options_keeps_the_masters_address_and_refuses_bad_values() {
 fn an_empty_master_is_the_built_in_one_and_a_switch_turns_by_key() {
     let mut s = screen();
     s.open_options();
-    // Three Tabs reach the master; clear it. One more reaches "Forward the
+    // Three Tabs reach the master; clear it. Two more reach "Forward the
     // game port", Space turns it off; one more reaches "Let my game take
     // over hosting", Space turns it off; two more reach OK.
     for _ in 0..3 {
         s.key("Tab", false);
     }
     clear_field(&mut s);
+    s.key("Tab", false);
     s.key("Tab", false);
     s.key("Space", false);
     s.key("Tab", false);
@@ -661,6 +665,89 @@ fn another_master_restarts_the_browse() {
     assert_eq!(s.browsed, "127.0.0.1:10");
 }
 
+#[test]
+fn default_restores_the_public_master_as_a_cancellable_draft_by_mouse_and_keyboard() {
+    let dir = scratch("default-master");
+    let mut s = kept_in(&dir);
+    s.save();
+    s.open_options();
+    // The mouse reaches the retail Default button beside the master field.
+    s.moved(Some((495.0, 237.0)));
+    s.button(true);
+    s.button(false);
+    assert!(s.options_open());
+    assert_eq!(s.master_text(), NOBODY);
+    s.key("Escape", false);
+    assert_eq!(Remembered::load(&dir).master.as_deref(), Some(NOBODY));
+
+    s.open_options();
+    for _ in 0..4 {
+        s.key("Tab", false);
+    }
+    s.key("Space", false);
+    assert!(s.options_open(), "Default does not accept the panel");
+    s.key("Tab", true); // Back to the field, Enter accepts it.
+    s.key("Enter", false);
+    assert!(!s.options_open());
+    assert_eq!(s.master_text(), tore_net::master::DEFAULT_MASTER);
+    assert_eq!(Remembered::load(&dir).master, None);
+    let again = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
+    assert_eq!(again.master_text(), tore_net::master::DEFAULT_MASTER);
+    // Do not turn either screen: tests never query the public master.
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn editing_the_master_replaces_games_and_persists_the_hosting_and_browsing_choice() {
+    let dir = scratch("master-switch");
+    let mut old = LoopbackMaster::start();
+    let (_old_id, _old_host) = old.list("Old environment", 1, 8, false);
+    let mut chosen = LoopbackMaster::start();
+    let (_id, _host) = chosen.list("Private environment", 1, 8, false);
+    let mut s = kept_in(&dir);
+    s.settings.master = Some(old.text());
+    assert!(old.pump(|| {
+        s.update(false);
+        names(&s) == ["Old environment"]
+    }));
+    s.open_options();
+    for _ in 0..3 {
+        s.key("Tab", false);
+    }
+    clear_field(&mut s);
+    type_into(&mut s, &chosen.text());
+    s.key("Enter", false);
+    assert!(chosen.pump(|| {
+        s.update(false);
+        names(&s) == ["Private environment"]
+    }));
+    assert_eq!(s.browsed, chosen.text());
+    assert_eq!(s.master_text(), chosen.text());
+    s.callsign.set_text("Maverick");
+    let Outcome::Host(request) = s.new_game() else {
+        panic!("New must host on the chosen master");
+    };
+    assert_eq!(request.listing.master, chosen.text());
+    assert!(request.listing.listed);
+    assert!(request.listing.install_id.is_some());
+    let again = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
+    assert_eq!(again.master_text(), chosen.text());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_new_master_retries_after_a_failed_browse_start() {
+    let mut s = screen();
+    s.browse_failed = true;
+    s.options_answer(Answer::Ok(options::Values {
+        master: Some("127.0.0.1:10".into()),
+        ..values(false)
+    }));
+    s.update(false);
+    assert!(s.browsing());
+    assert_eq!(s.browsed, "127.0.0.1:10");
+}
+
 // ---- the check boxes and keys ----
 
 #[test]
@@ -676,7 +763,7 @@ fn the_check_boxes_filter_the_list_and_are_remembered() {
     assert_eq!(names(&s).len(), 7);
     let kept = Remembered::load(&dir);
     assert!(kept.show_full && kept.show_other);
-    let again = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    let again = test_screen(Arc::new(test_kit::kit()), Some(dir.clone()));
     assert!(again.full.checked() && again.other.checked());
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -735,7 +822,7 @@ fn the_screen_lists_the_games_a_real_master_lists_with_their_players() {
     let mut master = LoopbackMaster::start();
     let (_a, _host_a) = master.list("Friday night", 3, 8, false);
     let (_b, _host_b) = master.list("Packed", 8, 8, true);
-    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    let mut s = test_screen(Arc::new(test_kit::kit()), None);
     s.settings.master = Some(master.text());
     s.callsign.set_text("Maverick");
     assert!(master.pump(|| {
@@ -768,7 +855,12 @@ fn the_screen_lists_the_games_a_real_master_lists_with_their_players() {
     assert!(
         s.selection_line()
             .unwrap()
-            .starts_with("Mission: Friday night")
+            .starts_with(&format!("Code {:08X}", (s.own)().compatibility))
+    );
+    assert!(
+        s.selection_line()
+            .unwrap()
+            .contains("Mission: Friday night")
     );
 }
 

@@ -614,6 +614,7 @@ class HostLeaveTests(unittest.TestCase):
     HANDOVER_GAME = (
         COMMON
         + "Host: a ready standby: true\n"
+        + "Leave confirmation: Another player will take over hosting. Are you sure?\n"
         + "Network: Leave Game (handing the game over)\n"
         + "Host: handing the game over to player 1\n"
         + "Host: handed the game over to player 1 after tick 11610\n"
@@ -627,6 +628,7 @@ class HostLeaveTests(unittest.TestCase):
     CONFIRM_GAME = (
         COMMON
         + "Host: a ready standby: false\n"
+        + "Leave confirmation: Leaving ends the game for everyone. Are you sure?\n"
         + "Network: Leave Game (ending the game)\n"
         + "Host: tick 13289: mission ended: the host left the game\n"
     )
@@ -739,11 +741,13 @@ class AcceptScenarioTests(unittest.TestCase):
         for name in net_accept.AWAY_LOST_PICTURES:
             self.assertIn(f"{name}.ppm", net_accept.AWAY_LOST_SCRIPT)
 
-    def test_the_second_enter_is_in_the_script_only_with_no_standby(self):
+    def test_both_host_roles_use_the_shared_confirmation(self):
         with_standby = net_accept.host_leave_script("/s", True)
         without = net_accept.host_leave_script("/s", False)
-        self.assertEqual(with_standby.count("key Enter"), 1)
+        self.assertEqual(with_standby.count("key Enter"), 2)
         self.assertEqual(without.count("key Enter"), 2)
+        self.assertIn("key Tab\nkey Enter", with_standby)
+        self.assertIn("key Tab\nkey Enter", without)
         self.assertNotIn("CONFIRM", without)
         self.assertNotIn("JOINWAIT", without)
 
@@ -946,3 +950,23 @@ class StoresTests(unittest.TestCase):
         self.assertEqual((scenario.lane, scenario.window), ("net", False))
         self.assertIn("wing enemy 1 MIG29.PT 2 average", net_a2g.STORES_MISSION)
         self.assertIn("damage=invulnerable", net_a2g.STORES_MISSION)
+
+
+class ReservationReplyTests(unittest.TestCase):
+    def test_live_probe_reads_the_rust_wire_golden_and_rejects_unrelated_replies(self):
+        golden = (battery.ROOT / "crates/tore-session/wire-golden.txt").read_text()
+        protocol = int(re.search(r"(?m)^version (\d+)$", golden).group(1))
+        def sample(name):
+            return bytes.fromhex(re.search(rf"(?m)^{name} ([0-9a-f]+)$", golden).group(1))
+        held = sample("transport-reservation-held")
+        nonce, session = 0x99AABBCCDDEEFF00, 0x1122334455667788
+        self.assertEqual(net.reservation_answer(held, nonce, session, protocol), {
+            "held": True, "plane": 1, "side": "blue", "wing": 1, "member": 2, "token_seconds": 86400, "return_seconds": 192,
+        })
+        self.assertEqual(net.reservation_answer(sample("transport-reservation-none"), nonce, session, protocol), {"held": False})
+        for data, n, sid, version in [(held[:-1], nonce, session, protocol),
+                                      (held, nonce ^ 1, session, protocol),
+                                      (held, nonce, session ^ 1, protocol),
+                                      (held, nonce, session, protocol - 1)]:
+            with self.assertRaises(ValueError):
+                net.reservation_answer(data, n, sid, version)

@@ -102,7 +102,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_status_line_is_the_guides_example() {
+    fn the_status_prefix_stays_compatible_with_existing_parsers() {
         let status = Status {
             tick: 90_000,
             players: 2,
@@ -110,6 +110,7 @@ mod tests {
             aircraft: 30,
             load_percent: 11.0,
             tick_ms: 1.1,
+            worst_tick_ms: 52.3,
             up_bytes_per_second: 64_000.0,
             down_bytes_per_second: 7_000.0,
         };

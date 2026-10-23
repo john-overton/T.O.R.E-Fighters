@@ -514,10 +514,16 @@ impl HostThread {
         let HostSetup {
             spec,
             resources,
-            config,
+            mut config,
             listen,
             port,
         } = setup;
+        let content = config
+            .content
+            .clone()
+            .unwrap_or_else(|| tore_session::host::content::GameContent::shared(&resources));
+        config.build.compatibility = tore_session::compatibility::current(&content.content);
+        config.content = Some(content);
         let socket = ServerSocket::bind(listen, port).map_err(|error| {
             format!(
                 "Cannot host on UDP port {port}: {error}. Is another game or server using it? \
@@ -830,6 +836,7 @@ fn rendezvous_config(build: &tore_session::BuildId, install_id: Option<u64>) -> 
             protocol_version: tore_session::wire::PROTOCOL_VERSION,
             game_version: build.version.clone(),
             game_commit: build.commit.clone(),
+            compatibility: build.compatibility,
             release: build.release,
         },
         dedicated: false,

@@ -15,18 +15,35 @@ use tore_net::packet::DiscoverPhase;
 use crate::listings::{Listing, Listings};
 use tore_net::master::MAX_BROWSE_MATCHES;
 
-/// True when an asker of build `asker` can join a host of build `host`: the
-/// same protocol version, and the game's own build rule (the same commit, or
-/// a tagged release host of the same plain version; the rule in
-/// `tore_session`'s `BuildId::matches`).
+/// The same protocol and compatibility code, regardless of commit or release label.
 pub fn same_build(host: &Build, asker: &Build) -> bool {
-    if host.protocol_version != asker.protocol_version {
+    host.protocol_version == asker.protocol_version && host.compatibility == asker.compatibility
+}
+
+/// Released games use master 1, while protocol 71 and later use master 2.
+pub fn supports_game(master_version: u16, game_protocol: u16) -> bool {
+    match master_version {
+        1 => game_protocol < tore_net::packet::COMPATIBILITY_PROTOCOL_VERSION,
+        2 => game_protocol >= tore_net::packet::COMPATIBILITY_PROTOCOL_VERSION,
+        _ => false,
+    }
+}
+
+/// Keep the released matching rule for protocol-1 clients only.
+pub fn matches_in(version: u16, host: &Build, asker: &Build) -> bool {
+    if !supports_game(version, host.protocol_version)
+        || host.protocol_version != asker.protocol_version
+    {
         return false;
     }
-    if host.game_commit == asker.game_commit && host.game_commit != "unknown" {
-        return true;
+    if version == 1 {
+        (host.game_commit == asker.game_commit && host.game_commit != "unknown")
+            || (host.release
+                && host.game_version == asker.game_version
+                && !asker.game_version.contains('-'))
+    } else {
+        same_build(host, asker)
     }
-    host.release && asker.game_version == host.game_version && !asker.game_version.contains('-')
 }
 
 fn phase_rank(phase: DiscoverPhase) -> u8 {
@@ -38,11 +55,15 @@ fn phase_rank(phase: DiscoverPhase) -> u8 {
 }
 
 /// The page a Browse gets, fitted to `max_len` bytes (the Browse's length).
-pub fn page(listings: &Listings, browse: &Browse, max_len: usize) -> Page {
+pub fn page(listings: &Listings, browse: &Browse, max_len: usize, version: u16) -> Page {
     let mut matches: Vec<(&Listing, bool)> = listings
         .iter()
+        .filter(|listing| {
+            listing.master_version == version
+                && supports_game(version, listing.build.protocol_version)
+        })
         .filter_map(|listing| {
-            let other = !same_build(&listing.build, &browse.build);
+            let other = !matches_in(version, &listing.build, &browse.build);
             let wanted =
                 (!other || browse.other_builds) && (!listing.summary.full || browse.full_games);
             wanted.then_some((listing, other))
@@ -80,6 +101,7 @@ pub fn page(listings: &Listings, browse: &Browse, max_len: usize) -> Page {
 fn entry(listing: &Listing, other_build: bool) -> PageEntry {
     let summary = &listing.summary;
     PageEntry {
+        compatibility: listing.build.compatibility,
         listing_id: listing.id,
         password: summary.password,
         full: summary.full,
@@ -105,27 +127,25 @@ mod tests {
 
     fn build(version: &str, commit: &str, release: bool) -> Build {
         Build {
-            protocol_version: 7,
+            protocol_version: 71,
             game_version: version.into(),
             game_commit: commit.into(),
+            compatibility: 0,
             release,
         }
     }
 
     #[test]
     fn the_build_rule_is_the_games() {
-        let release = build("0.2.0", "abc", true);
-        assert!(same_build(&release, &build("0.2.0", "abc", true)));
-        assert!(same_build(&release, &build("0.2.0", "def", true)));
-        assert!(!same_build(&release, &build("0.1.2", "def", true)));
-        assert!(!same_build(&release, &build("0.2.0-4-gdef", "def", false)));
-        let dev = build("0.2.0-4-gabc", "abc", false);
-        assert!(same_build(&dev, &build("0.2.0-4-gabc", "abc", false)));
-        assert!(!same_build(&dev, &build("0.2.0", "def", true)));
-        let unknown = build("0.2.0", "unknown", false);
-        assert!(!same_build(&unknown, &build("0.2.0", "unknown", false)));
-        let mut other_protocol = build("0.2.0", "abc", true);
-        other_protocol.protocol_version = 8;
-        assert!(!same_build(&other_protocol, &release));
+        let mut host = build("0.2.0", "abc", true);
+        host.compatibility = 0x3FA9C21B;
+        let mut client = build("0.9.0-dev", "different", false);
+        client.compatibility = host.compatibility;
+        assert!(same_build(&host, &client));
+        client.compatibility ^= 1;
+        assert!(!same_build(&host, &client));
+        client.compatibility = host.compatibility;
+        client.protocol_version += 1;
+        assert!(!same_build(&host, &client));
     }
 }

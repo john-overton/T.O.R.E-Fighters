@@ -29,7 +29,7 @@ use tore_net::{
     ServerConfig, ServerEvent,
 };
 
-const VERSION: u16 = 9;
+const VERSION: u16 = 71;
 const MAIN_V4: &str = "198.51.100.1:26901";
 const MAIN_V6: &str = "[2001:db8:ffff::1]:26901";
 const PROBE_V4: &str = "198.51.100.1:26902";
@@ -53,6 +53,7 @@ fn build() -> Build {
         protocol_version: VERSION,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         release: true,
     }
 }
@@ -185,6 +186,7 @@ impl Row {
             phase: DiscoverPhase::Lobby,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
             name: "Friday night".into(),
             ..ListingSummary::default()
         };

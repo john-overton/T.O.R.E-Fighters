@@ -26,6 +26,7 @@ fn build() -> Build {
         protocol_version: 9,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         release: true,
     }
 }

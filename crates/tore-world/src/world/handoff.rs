@@ -439,6 +439,7 @@ impl World {
 fn designating(target: u32, cockpit: &StrikeCockpit, air_ground: bool) -> Picks {
     Picks {
         selected: Some(target),
+        visual_selection: false,
         held: (cockpit.sight.and_then(|s| s.target()) == Some(target)).then_some(target),
         ground_retained: Some(target),
         air_ground,

@@ -88,7 +88,7 @@ fn ended_page(retail: &[String], ended: &Ended) -> Vec<String> {
         seen += 1;
         match seen {
             1 => page.push(ended.title.clone()),
-            2 => page.push(ended.sentence.clone()),
+            2 => page.extend(ended.sentence.lines().map(str::to_owned)),
             _ => {}
         }
     }
@@ -96,7 +96,8 @@ fn ended_page(retail: &[String], ended: &Ended) -> Vec<String> {
         page = vec![".center".into(), ".header".into(), ended.title.clone()];
     }
     if seen < 2 {
-        page.extend([".body".into(), String::new(), ended.sentence.clone()]);
+        page.extend([".body".into(), String::new()]);
+        page.extend(ended.sentence.lines().map(str::to_owned));
     }
     page
 }
@@ -838,6 +839,18 @@ mod net_pages {
     /// The clipboard paper's right edge, and the lowest line that fits.
     const RIGHT: i32 = 581;
     const BOTTOM: i32 = 466;
+
+    #[test]
+    fn partial_report_pages_fit_the_clipboard() {
+        let record = crate::net::debrief::local_tests::record();
+        for page in crate::net::debrief::local_pages(&record) {
+            let (_, _, right, bottom) = bounds(&bundled_fonts(), &page);
+            assert!(
+                right <= RIGHT && bottom <= BOTTOM,
+                "{right},{bottom}: {page:?}"
+            );
+        }
+    }
 
     /// The retail fonts' places taken by the bundled font.
     fn bundled_fonts() -> BTreeMap<String, Sprite> {

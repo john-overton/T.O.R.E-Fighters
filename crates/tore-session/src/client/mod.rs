@@ -54,6 +54,7 @@ pub mod convert;
 #[cfg(test)]
 mod convert_tests;
 pub mod diagnostics;
+pub mod flight_report;
 #[cfg(test)]
 mod gun_key_tests;
 pub mod interpolation;
@@ -834,6 +835,7 @@ pub struct Client {
     scores: Option<scores::Kept>,
     /// The results of the mission that ended (slice F2-D).
     results: Option<Box<Results>>,
+    flight_record: flight_report::Record,
     /// The newest Revival since the player's plane was lost, and the
     /// revivals' new planes of the mission (slice F2-V, [`revival`]).
     revival: Option<revival::Kept>,
@@ -907,6 +909,16 @@ fn ticks_time(ticks: u64) -> Duration {
 }
 
 impl Client {
+    #[cfg(test)]
+    pub(crate) fn collide_content_for_test(
+        &mut self,
+        resources: Arc<BTreeMap<String, Vec<u8>>>,
+        content: Arc<crate::host::content::GameContent>,
+    ) {
+        self.resources = resources;
+        self.content = content;
+    }
+
     /// Starts joining `config.server` at `now`, with the game data
     /// `resources` the mission will be built from. Refuses a callsign or
     /// strings the protocol cannot carry, and the retail stall-speed switch.
@@ -920,7 +932,7 @@ impl Client {
     }
 
     pub(crate) fn start(
-        config: ClientConfig,
+        mut config: ClientConfig,
         resources: Arc<BTreeMap<String, Vec<u8>>>,
         now: Duration,
         seed: u64,
@@ -928,9 +940,15 @@ impl Client {
         if config.retail_stall_speeds || tore_sim::flight::retail_stall_speeds() {
             return Err(ClientError::RetailStallSpeeds);
         }
+        let content = config
+            .content
+            .clone()
+            .unwrap_or_else(|| crate::host::content::GameContent::shared(&resources));
+        config.build.compatibility = crate::compatibility::current(&content.content);
         let net_config = tore_net::ClientConfig {
             game_version: config.build.version.clone(),
             game_commit: config.build.commit.clone(),
+            compatibility: config.build.compatibility,
             password: config.password.clone(),
             platform: config.platform,
             token: config.token,
@@ -948,10 +966,6 @@ impl Client {
             None => tore_net::Client::connect(net_config, config.server, now),
         }
         .map_err(|error| ClientError::Config(error.to_string()))?;
-        let content = config
-            .content
-            .clone()
-            .unwrap_or_else(|| crate::host::content::GameContent::shared(&resources));
         Ok(Client {
             content,
             gaps: None,
@@ -1000,6 +1014,7 @@ impl Client {
             lobby: None,
             scores: None,
             results: None,
+            flight_record: Default::default(),
             revival: None,
             spawned: Vec::new(),
             number: None,
@@ -1318,6 +1333,7 @@ impl Client {
     /// client quits once the debrief is in (the caller gives it a few
     /// seconds); anywhere else it quits at once.
     pub fn leave_game(&mut self, now: Duration) {
+        self.rejoin_forget();
         if let Some(capture) = &mut self.capture {
             capture.leave_game(now);
         }
@@ -1676,6 +1692,7 @@ impl Client {
 
     /// Quits at once: Disconnect goes to the host three times.
     pub fn disconnect(&mut self, now: Duration) {
+        self.rejoin_forget();
         if let Some(capture) = &mut self.capture {
             capture.disconnect(now);
         }
@@ -2170,6 +2187,7 @@ impl Client {
             Message::Mission(mission) => {
                 self.scores = None;
                 self.results = None;
+                self.flight_record = Default::default();
                 self.revival = None;
                 self.spawned.clear();
                 self.mission_arrived(mission);
@@ -2225,6 +2243,7 @@ impl Client {
                 self.event(ClientEvent::Chat(line));
             }
             Message::Debrief(debrief) => {
+                self.flight_record.debrief_seen = true;
                 self.log("debrief", &[]);
                 self.event(ClientEvent::Debrief(debrief));
                 // The flight is over for this player: back in the lobby.
@@ -2236,6 +2255,7 @@ impl Client {
                 }
             }
             Message::MissionEnded(ended) => {
+                self.flight_record.finished = true;
                 self.log("mission-ended", &[&format!("{:?}", ended.reason)]);
                 self.revival = None;
                 self.end_flight();
@@ -2278,6 +2298,7 @@ impl Client {
                 // afresh.
                 self.scores = None;
                 self.results = None;
+                self.flight_record = Default::default();
                 self.revival = None;
                 self.spawned.clear();
                 self.flight_loadouts(loadouts);
@@ -2292,6 +2313,7 @@ impl Client {
                 });
                 self.event(ClientEvent::Scores(scores));
             }
+            Message::FlightReport(report) => self.flight_record.receive(*report),
             Message::Results(results) => {
                 self.log("results", &[&results::summary(&results)]);
                 self.results = Some(results.clone());
@@ -2780,6 +2802,9 @@ impl Client {
                 &seated.tick.to_string(),
             ],
         );
+        if let Some(aircraft) = aircraft {
+            self.flight_record.seated(plane, aircraft, seated.tick);
+        }
         self.event(ClientEvent::Seated {
             seat: seated.seat,
             plane,
@@ -2908,6 +2933,7 @@ impl Client {
             }
         };
         let tick = header.tick;
+        self.flight_record.tick = self.flight_record.tick.max(tick);
         self.stats.snapshots += 1;
         self.net.note_arrival(ticks_time(u64::from(tick)), now);
         match self.snapshot_tick {
@@ -3087,6 +3113,7 @@ impl Client {
     /// An event from the host: the seat's cues are released at once, the
     /// mission-wide ones when the picture reaches their tick.
     fn route(&mut self, event: ReceivedEvent) {
+        self.flight_record.event(&event);
         if let Some(observed) = &mut self.observed {
             observed.event(self.now, &event);
         }

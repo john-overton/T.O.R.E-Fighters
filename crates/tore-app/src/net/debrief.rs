@@ -1,5 +1,5 @@
-//! The debrief of a networked flight: the report the host sends when the
-//! player leaves or the mission ends, in the form the debrief screen reads.
+//! Full multiplayer results and partial reports from the client's retained
+//! mission record, in the form the debrief screen reads.
 //! The host builds it from its own ledger (`tore_world::debrief::capture`);
 //! the wire's [`Debrief`] mirrors [`Report`] field for field.
 use crate::debrief::{Ended, Objective, Outcome, Pilot, Report, Status};
@@ -121,10 +121,10 @@ pub const PER_PAGE: usize = 15;
 
 /// Where each column of the SCORES and RESULTS pages starts, in the debrief
 /// screen's pixels. The clipboard's text column runs from 294 to about 580.
-const SCORE_COLUMNS: [i32; 7] = [294, 312, 374, 420, 458, 490, 538];
+const SCORE_COLUMNS: [i32; 8] = [294, 312, 366, 410, 446, 474, 502, 542];
 const RESULT_COLUMNS: [i32; 7] = [294, 324, 388, 434, 482, 520, 548];
 /// The longest callsign a column shows before it is cut.
-const SCORE_NAME: usize = 9;
+const SCORE_NAME: usize = 8;
 const RESULT_NAME: usize = 9;
 
 /// `text` cut to `limit` characters, with a dot where it was cut.
@@ -136,6 +136,16 @@ fn cut(text: &str, limit: usize) -> String {
             .take(limit.saturating_sub(1))
             .collect::<String>()
             + "."
+    }
+}
+
+fn pilot_name(name: &str, left: bool, ai: bool, width: usize) -> String {
+    if ai {
+        format!("{} A", cut(&name.replace(' ', ""), width - 2))
+    } else if left {
+        format!("{} L", cut(name, width - 2))
+    } else {
+        cut(name, width)
     }
 }
 
@@ -171,10 +181,10 @@ fn side_word(side: Side) -> &'static str {
     }
 }
 
-/// The SCORES pages of a PvP mission's results: the winner, the players
+/// The SCORES pages of a multiplayer mission's results: the winner, the players
 /// ranked as the tally ranks them with their side, kills, losses, damage in
 /// aircraft and ratio, fifteen to a page, and each side's totals when the
-/// fight is by sides, on the last. Empty without scores (co-op).
+/// fight is by sides, on the last. Empty without scores.
 pub fn scores_pages(scores: &Scores) -> Vec<Vec<String>> {
     let chunks: Vec<&[tore_session::wire::messages::PlayerScore]> = if scores.players.is_empty() {
         vec![&[]]
@@ -198,19 +208,28 @@ pub fn scores_pages(scores: &Scores) -> Vec<Vec<String>> {
                 });
                 lines.push(String::new());
             }
+            if players.iter().any(|p| p.left || p.ai.is_some()) {
+                *lines.last_mut().unwrap() = "A = AI, L = left the mission".into();
+            }
             lines.extend(bold(heading(scores.tally).to_owned()));
             lines.extend(bold(
-                ["", "PILOT", "SIDE", "KILLS", "LOST", "DAMAGE", "RATIO"].join("\t"),
+                ["", "PILOT", "SIDE", "KILLS", "LOST", "HITS", "DMG", "RATIO"].join("\t"),
             ));
             for player in *players {
                 rank += 1;
                 lines.push(
                     [
                         rank.to_string(),
-                        cut(&player.callsign, SCORE_NAME),
+                        pilot_name(
+                            &player.callsign,
+                            player.left,
+                            player.ai.is_some(),
+                            SCORE_NAME,
+                        ),
                         player.side.map_or("-", side_word).to_owned(),
                         player.kills.to_string(),
                         player.losses.to_string(),
+                        player.hits.to_string(),
                         format!("{:.2}", f64::from(player.damage) / 1000.),
                         format!("{:.2}", ratio(player.kills, player.losses)),
                     ]
@@ -230,6 +249,7 @@ pub fn scores_pages(scores: &Scores) -> Vec<Vec<String>> {
                             String::new(),
                             tally.kills.to_string(),
                             tally.losses.to_string(),
+                            tally.hits.to_string(),
                             format!("{:.2}", f64::from(tally.damage) / 1000.),
                             format!("{:.2}", ratio(tally.kills, tally.losses)),
                         ]
@@ -267,9 +287,10 @@ fn result_line(row: &ResultRow) -> String {
             u32::from(row.wing.index) + 1,
             u32::from(row.member) + 1
         ),
-        row.callsign
-            .as_deref()
-            .map_or_else(|| "AI".to_owned(), |name| cut(name, RESULT_NAME)),
+        row.callsign.as_deref().map_or_else(
+            || "AI".to_owned(),
+            |name| pilot_name(name, row.left, false, RESULT_NAME),
+        ),
         short_name(row.aircraft).to_owned(),
         {
             let mut status = status_word(row.status).to_owned();
@@ -305,19 +326,31 @@ pub fn results_pages(results: &Results) -> Vec<Vec<String>> {
                 side_name(side).to_uppercase()
             ));
             lines.push(columns(&RESULT_COLUMNS));
-            lines.push(String::new());
+            lines.push(if chunk.iter().any(|r| r.left) {
+                "L = left the mission".into()
+            } else {
+                String::new()
+            });
             lines.extend(bold(
                 ["WING", "PILOT", "TYPE", "STATUS", "KILLS", "HIT", "DMG"].join("\t"),
             ));
-            lines.extend(chunk.iter().map(|row| result_line(row)));
+            lines.extend(chunk.iter().map(|row| {
+                let mut row = (*row).clone();
+                if row.callsign.is_none() {
+                    row.callsign = Some(format!(
+                        "{} AI",
+                        tore_session::client::results::flight_label(results, &row).replace(' ', "")
+                    ));
+                }
+                result_line(&row)
+            }));
             pages.push(lines);
         }
     }
     pages
 }
 
-/// The pages a networked debrief turns in after its first: SCORES (PvP
-/// only), then RESULTS.
+/// The pages a networked debrief turns in after its first: SCORES, then RESULTS.
 pub fn extra_pages(results: &Results) -> Vec<Vec<String>> {
     let mut pages = results
         .scores
@@ -370,6 +403,7 @@ pub(crate) fn sample_results(per_side: usize, humans: usize) -> Results {
                 ResultStatus::Retired,
             ][n % 4];
             rows.push(ResultRow {
+                left: false,
                 plane,
                 wing: WingId {
                     side,
@@ -400,6 +434,9 @@ pub(crate) fn sample_results(per_side: usize, humans: usize) -> Results {
             });
             if flown {
                 players.push(PlayerScore {
+                    hits: 0,
+                    ai: None,
+                    left: false,
                     id: plane as u8,
                     callsign: names[(s * humans + n) % names.len()].to_owned(),
                     side: Some(side),
@@ -422,11 +459,13 @@ pub(crate) fn sample_results(per_side: usize, humans: usize) -> Results {
             players,
             sides: [
                 SideScore {
+                    hits: 0,
                     kills: 5,
                     losses: 2,
                     damage: 6_500,
                 },
                 SideScore {
+                    hits: 0,
                     kills: 2,
                     losses: 5,
                     damage: 3_250,
@@ -706,10 +745,10 @@ mod tests {
         assert!(page.contains(&"The friendly side wins.".to_string()));
         assert!(page.contains(&"PLAYERS RANKED BY KILLS".to_string()));
         // Rank, pilot, side, kills, lost, damage in aircraft, ratio.
-        assert!(page.contains(&"1\tViper\tFRIEND\t1\t0\t1.25\t1.00".to_string()));
-        assert!(page.contains(&"4\tMaverick\tENEMY\t1\t0\t1.25\t1.00".to_string()));
-        assert!(page.contains(&"\tFRIENDLY SIDE\t\t5\t2\t6.50\t2.50".to_string()));
-        assert!(page.contains(&"\tENEMY SIDE\t\t2\t5\t3.25\t0.40".to_string()));
+        assert!(page.contains(&"1\tViper\tFRIEND\t1\t0\t0\t1.25\t1.00".to_string()));
+        assert!(page.contains(&"4\tMaverick\tENEMY\t1\t0\t0\t1.25\t1.00".to_string()));
+        assert!(page.contains(&"\tFRIENDLY SIDE\t\t5\t2\t0\t6.50\t2.50".to_string()));
+        assert!(page.contains(&"\tENEMY SIDE\t\t2\t5\t0\t3.25\t0.40".to_string()));
         // A mission ended with no winner says so; a free-for-all has no
         // side totals.
         let mut scores = results.scores.clone().unwrap();
@@ -724,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn co_op_results_add_only_the_results_pages() {
+    fn results_without_scores_add_only_the_results_pages() {
         let mut results = sample_results(4, 2);
         let with_scores = extra_pages(&results).len();
         results.scores = None;
@@ -732,5 +771,191 @@ mod tests {
         assert_eq!(with_scores, co_op.len() + 1);
         assert!(co_op.iter().all(|p| !p.contains(&"SCORES".to_string())));
         assert!(co_op[0].contains(&"RESULTS : FRIENDLY SIDE".to_string()));
+    }
+}
+
+/// Pages built from the client's record, even if the connection has gone.
+pub fn local_pages(record: &tore_session::client::flight_report::Record) -> Vec<Vec<String>> {
+    let mut pages = Vec::new();
+    let seconds = u64::from(record.tick) / 120;
+    let mut lines = vec![
+        format!("Left at: {}", clock(seconds)),
+        format!(
+            "Time in mission: {}",
+            clock(
+                seconds.saturating_sub(
+                    record
+                        .sorties
+                        .first()
+                        .map_or(0, |s| u64::from(s.started) / 120)
+                )
+            )
+        ),
+        format!("Sorties: {}", record.sorties.len()),
+        format!(
+            "Revivals used: {}",
+            record
+                .sorties
+                .windows(2)
+                .filter(|pair| pair[0].ended.is_some_and(
+                    |(_, status)| status != tore_session::wire::messages::ResultStatus::Alive
+                ))
+                .count()
+        ),
+    ];
+    if let Some(latest) = &record.latest {
+        lines.push(format!(
+            "Last report: {}",
+            clock(u64::from(latest.tick) / 120)
+        ));
+        if let Some(scores) = &latest.results.scores {
+            pages.extend(scores_pages(scores));
+        }
+    } else {
+        lines.push("No statistics received yet.".into());
+    }
+    for (index, sortie) in record.sorties.iter().enumerate() {
+        lines.push(String::new());
+        lines.push(format!(
+            "{}: {} at {}",
+            index + 1,
+            short_name(sortie.aircraft),
+            clock(u64::from(sortie.started) / 120)
+        ));
+        lines.push(match sortie.ended {
+            Some((tick, status)) => format!(
+                "  {} at {}",
+                status_word(status),
+                clock(u64::from(tick) / 120)
+            ),
+            None if index + 1 < record.sorties.len() => "  Aircraft returned".into(),
+            None => "  Flying when you left".into(),
+        });
+    }
+    pages.splice(0..0, text_pages("YOUR SORTIES", lines));
+    if let Some(latest) = &record.latest {
+        pages.extend(results_pages(&latest.results));
+    }
+    let mut lines = vec!["Observed mission messages".into()];
+    for (tick, text) in &record.events {
+        // Wrap prose within the clipboard's narrow text column.
+        let mut line = format!("{} ", clock(u64::from(*tick) / 120));
+        for word in text.split_whitespace() {
+            if line.chars().count() + word.chars().count() > 42 {
+                lines.push(line);
+                line = "  ".into();
+            }
+            line.push_str(word);
+            line.push(' ');
+        }
+        lines.push(line);
+    }
+    if !record.events.is_empty() {
+        pages.extend(text_pages("MISSION EVENTS", lines));
+    }
+    pages
+}
+
+fn text_pages(heading: &str, lines: Vec<String>) -> Vec<Vec<String>> {
+    lines
+        .chunks(PER_PAGE)
+        .map(|chunk| {
+            let mut page = title(heading);
+            page.push(String::new());
+            page.extend_from_slice(chunk);
+            page
+        })
+        .collect()
+}
+
+fn clock(seconds: u64) -> String {
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+pub fn partial_ending(tick: u32, disconnected: bool) -> Ended {
+    Ended {
+        title: "PARTIAL REPORT".into(),
+        sentence: format!(
+            "{} at {};\nthe mission continued.",
+            if disconnected {
+                "Connection lost"
+            } else {
+                "You left"
+            },
+            clock(u64::from(tick) / 120)
+        ),
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod local_tests {
+    use super::*;
+    use tore_session::client::flight_report::{Record, Sortie};
+    use tore_session::wire::messages::{FlightReport, ResultStatus};
+
+    pub(crate) fn record() -> Record {
+        let mut results = sample_results(4, 2);
+        let scores = results.scores.as_mut().unwrap();
+        scores.players[1].left = true;
+        scores.players[2].ai = Some(4);
+        scores.players[2].callsign = "Red 1".into();
+        Record {
+            tick: 89_280,
+            sorties: (0..3)
+                .map(|n| Sortie {
+                    plane: n,
+                    aircraft: AircraftId::F18,
+                    started: 120 + n * 1200,
+                    ended: (n < 2).then_some((1000 + n * 1200, ResultStatus::Ejected)),
+                })
+                .collect(),
+            events: vec![(1200, "Red two: target destroyed".into())],
+            latest: Some(FlightReport {
+                tick: 89_160,
+                plane: 2,
+                results,
+                debrief: Debrief {
+                    player: DebriefPilot {
+                        kills: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn partial_pages_include_lives_ai_departed_players_and_received_events() {
+        let record = record();
+        let pages = local_pages(&record);
+        let text = pages
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Sorties: 3"));
+        assert!(text.contains("Revivals used: 2"));
+        assert!(text.contains("Last report: 12:23"));
+        assert!(text.contains("A = AI, L = left the mission"));
+        assert!(text.contains("Red1 A"));
+        assert!(text.contains("target destroyed"));
+        assert_eq!(report(&record.latest.unwrap().debrief).player.kills[0], 3);
+    }
+
+    #[test]
+    fn leaving_and_disconnection_are_explicit_partial_outcomes() {
+        for disconnected in [false, true] {
+            let ending = partial_ending(89_280, disconnected);
+            assert_eq!(ending.title, "PARTIAL REPORT");
+            assert!(ending.sentence.contains("12:24;\nthe mission continued."));
+            assert!(ending.sentence.starts_with(if disconnected {
+                "Connection lost"
+            } else {
+                "You left"
+            }));
+        }
     }
 }

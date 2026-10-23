@@ -36,6 +36,7 @@ fn every_new_kind_names_its_message_and_its_direction() {
         kind::SPAWNED,
         kind::SCORES,
         kind::RESULTS,
+        kind::FLIGHT_REPORT,
         kind::OBSERVING,
     ];
     for message in samples::phase_two_messages() {
@@ -85,10 +86,10 @@ fn writers_refuse_what_the_protocol_does_not_allow() {
         Err(WireError::Invalid("kill limit"))
     );
     let mut scores = samples::scores();
-    scores.players = vec![scores.players[0].clone(); 65];
+    scores.players = vec![scores.players[0].clone(); 1025];
     assert!(matches!(
         Message::Scores(Box::new(scores)).encode(),
-        Err(WireError::TooMany { limit: 64, .. })
+        Err(WireError::TooMany { limit: 1024, .. })
     ));
     let Message::Results(results) = samples::phase_two_messages()
         .into_iter()

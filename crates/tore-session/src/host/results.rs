@@ -1,6 +1,6 @@
 //! The results at a mission's end (stage F phase 2; docs/ARCHITECTURE.md,
-//! "The multiplayer debrief"): every plane's row, with its pilot and, in PvP,
-//! the final scores, sent to every connection.
+//! "The multiplayer debrief"): every plane's row, with its pilot and
+//! the final human and AI scores, sent to every connection.
 //!
 //! The mission core reads each plane's row (`tore_world::debrief::results`:
 //! status, damage, kills, friendly fire, shots and hits, retired planes
@@ -9,7 +9,6 @@
 //! the AI ever flew has none.
 
 use super::{ConnectionId, Host, Life, Stage};
-use crate::settings::Mode;
 use crate::wire::messages::{EndReason, Message, ResultRow, ResultStatus, Results, Shots};
 use std::collections::BTreeMap;
 use tore_sim::combat::ledger::Tally;
@@ -33,6 +32,7 @@ fn shots(tally: Tally) -> Shots {
 /// A plane's result as the wire carries it.
 pub(super) fn row(result: &PlaneResult, callsign: Option<String>) -> ResultRow {
     ResultRow {
+        left: false,
         plane: result.plane.0,
         wing: result.slot.wing,
         member: result.slot.member,
@@ -68,18 +68,26 @@ impl Host {
     }
 
     /// The results as the mission ends for `reason`: a row for every plane,
-    /// and the final scores in PvP.
+    /// and the final scores in co-op and PvP.
     pub(super) fn results(&mut self, reason: EndReason) -> Results {
         self.results_note_flyers();
         let rows = tore_world::debrief::results(&self.world)
             .iter()
-            .map(|result| row(result, self.score.callsigns.get(&result.plane).cloned()))
+            .map(|result| {
+                let mut row = row(result, self.score.callsigns.get(&result.plane).cloned());
+                row.left = self
+                    .score
+                    .flyers
+                    .get(&result.plane)
+                    .is_some_and(|order| self.score_left(*order));
+                row
+            })
             .take(ROWS_LIMIT)
             .collect();
         Results {
             reason,
             rows,
-            scores: (self.settings.mode() == Mode::Pvp).then(|| self.final_scores(reason)),
+            scores: Some(self.final_scores(reason)),
         }
     }
 

@@ -16,8 +16,20 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// Synthetic identity and a temporary discovery port, independent of the user's game.
+pub(super) fn test_screen(
+    kit: Arc<Kit>,
+    quick: Vec<QuickMessage>,
+    data: Option<PathBuf>,
+) -> DirectScreen {
+    let mut s = DirectScreen::new(kit, quick, data);
+    s.own = crate::net::browse::testing::own;
+    s.settings.port = free_port();
+    s
+}
+
 fn screen() -> DirectScreen {
-    DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), None)
+    test_screen(Arc::new(test_kit::kit()), Vec::new(), None)
 }
 
 /// A screen with a callsign and the six sample games, none selected.
@@ -154,7 +166,7 @@ fn a_remembered_callsign_starts_with_no_focus() {
     let mut kept = Remembered::default();
     kept.remember_callsign("Viper");
     kept.save(&dir).unwrap();
-    let s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let s = test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     assert_eq!(s.callsign_text(), "Viper");
     assert_eq!(s.focus.current(), None);
     let _ = std::fs::remove_dir_all(dir);
@@ -185,10 +197,11 @@ fn new_is_the_default_until_a_game_is_selected_or_an_address_typed() {
 #[test]
 fn the_buttons_are_disabled_while_something_is_going_on() {
     let mut s = with_games();
+    let (finish, pending) = std::sync::mpsc::channel::<()>();
     s.lookup = Some(Lookup::spawn(
         "x".into(),
-        || {
-            std::thread::sleep(Duration::from_millis(300));
+        move || {
+            let _ = pending.recv();
             Ok(Vec::new())
         },
         3,
@@ -206,6 +219,7 @@ fn the_buttons_are_disabled_while_something_is_going_on() {
     assert_eq!(s.key("Escape", false), Outcome::None);
     assert!(!s.looking_up());
     assert!(lines(&s).ends_with("Cancelled."));
+    drop(finish);
 }
 
 // ---- joining ----
@@ -271,7 +285,7 @@ fn a_game_that_cannot_be_joined_says_why_and_the_screen_stays() {
     s.full.set_checked(true);
     s.rebuild_games();
     // Row 3 (the old build) and row 4 (the full one).
-    for (index, words) in [(3, "another version"), (4, "is full")] {
+    for (index, words) in [(3, "compatibility code"), (4, "is full")] {
         s.select_game(index);
         s.focus.set(Id::Games);
         assert_eq!(s.key("Enter", false), Outcome::None, "{words}");
@@ -322,10 +336,10 @@ fn the_players_of_the_selected_game_show_with_the_crown() {
         Cell::Text("and 2 more".into())
     );
     // The mission shows under the box, or why the game cannot be joined.
-    assert!(s.selection_line().unwrap().starts_with("Mission: KOLA"));
+    assert!(s.selection_line().unwrap().contains("Mission: KOLA"));
     s.set_found(sample_games());
     s.select_game(3);
-    assert!(s.selection_line().unwrap().contains("another version"));
+    assert!(s.selection_line().unwrap().contains("Code 00000000"));
 }
 
 #[test]
@@ -592,7 +606,7 @@ fn games_the_search_finds_fill_the_list_and_messages() {
     let mut s = screen();
     s.settings.port = free_port();
     // Aim a search of our own at the fake host.
-    let own = Own::this_game();
+    let own = (s.own)();
     let search = Search::start_at(
         0,
         vec![SocketAddr::from(([127, 0, 0, 1], host_port))],
@@ -615,6 +629,7 @@ fn games_the_search_finds_fill_the_list_and_messages() {
     answer.protocol_version = own.protocol_version;
     answer.game_version = own.build.version.clone();
     answer.game_commit = own.build.commit.clone();
+    answer.compatibility = own.build.compatibility;
     let bytes = Packet::DiscoverAnswer(answer)
         .encode(own.protocol_version)
         .unwrap();
@@ -638,7 +653,7 @@ fn games_the_search_finds_fill_the_list_and_messages() {
 #[test]
 fn options_hold_the_port_password_and_name_and_save_all_but_the_password() {
     let dir = scratch("options");
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     s.settings.port = free_port();
     s.callsign.set_text("Maverick");
     // Open by mouse on the button.
@@ -681,7 +696,7 @@ fn options_hold_the_port_password_and_name_and_save_all_but_the_password() {
 #[test]
 fn the_port_forward_switch_turns_by_key_and_mouse_and_is_kept() {
     let dir = scratch("forward");
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     assert!(s.settings.port_forward, "on by default");
     s.open_options();
     // Port, Password, Name, then the switch; Space turns it off. Enter on the
@@ -745,7 +760,7 @@ fn a_bad_port_in_options_is_refused_in_the_panel_and_cancel_discards() {
 
 #[test]
 fn the_quick_messages_show_read_only() {
-    let mut s = DirectScreen::new(
+    let mut s = test_screen(
         Arc::new(test_kit::kit()),
         vec![
             QuickMessage {
@@ -777,7 +792,7 @@ fn the_quick_messages_show_read_only() {
 #[test]
 fn the_callsign_and_show_full_are_remembered_when_the_screen_goes() {
     let dir = scratch("save");
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     s.focus.set(Id::Callsign);
     type_text(&mut s, "Goose");
     s.focus.set(Id::Full);
@@ -787,7 +802,7 @@ fn the_callsign_and_show_full_are_remembered_when_the_screen_goes() {
     assert_eq!(kept.callsign.as_deref(), Some("Goose"));
     assert!(kept.show_full);
     // And the next visit starts from them.
-    let s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let s = test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     assert_eq!(s.callsign_text(), "Goose");
     assert!(s.full.checked());
     let _ = std::fs::remove_dir_all(dir);

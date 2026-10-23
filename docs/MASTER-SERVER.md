@@ -117,14 +117,14 @@ checked not to need a newer C library than that release's 2.35, so it runs on
 any current long-term Ubuntu (22.04 and later) without building anything:
 
 ```sh
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-master-0.2.0-linux-x86_64.tar.gz
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-master-0.2.0-linux-x86_64.tar.gz.sha256
-sha256sum -c tore-master-0.2.0-linux-x86_64.tar.gz.sha256
-tar -xzf tore-master-0.2.0-linux-x86_64.tar.gz
-tore-master-0.2.0-linux-x86_64/tore-master --version
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-master-0.2.1-linux-x86_64.tar.gz
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-master-0.2.1-linux-x86_64.tar.gz.sha256
+sha256sum -c tore-master-0.2.1-linux-x86_64.tar.gz.sha256
+tar -xzf tore-master-0.2.1-linux-x86_64.tar.gz
+tore-master-0.2.1-linux-x86_64/tore-master --version
 ```
 
-(`v0.2.0` stands for the release you want.) A workflow run that is not a tag
+(`v0.2.1` stands for the release you want.) A workflow run that is not a tag
 (a `release-test/...` branch, or a manual run) builds the same file as the
 `master-ubuntu-22.04` artifact without publishing it. The build is unsigned,
 like the game's. Run `--check-config` ([updating](#updating)) before it takes
@@ -416,6 +416,15 @@ month, UTC:
   else the machine serves, so the plan is never exceeded.
 
 ## Updating
+
+The current master serves master protocols 1 and 2 together. Released 0.2.0
+clients and servers keep working on protocol 1 with their original matching
+rule. Protocol-2 clients see the separate game-protocol-71+ population and
+match compatibility codes. Replies and relay setup use the appropriate
+version. Upgrade this master before rolling out new games, without forcing
+existing 0.2.0 servers to upgrade. No extra listener or configuration switch
+is required. The [wire contract](formats/master-protocol.md#compatibility-codes-master-protocol-2)
+describes both layouts and the frozen legacy golden.
 
 1. Build the new `tore-master` or [download the release's](#downloading-a-release).
 2. `tore-master --config /etc/tore-master/master.conf --check-config` with

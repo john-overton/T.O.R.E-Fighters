@@ -23,7 +23,9 @@ data (tools/check_assets.py), checks the server's runtime libraries
 gives) and runs `tore-server --version`. Afterwards it scans the archive,
 unpacks it into a folder whose name has spaces and runs `--version` again from
 there. When TORE_BUILD_VERSION is set, the version line must carry it, which
-proves the build was stamped. Nothing is signed.
+proves the build was stamped. On macOS the staged server is ad-hoc signed and
+verified, then verified again after unpacking. No Developer ID or notarization
+is used; Windows and Linux packages remain unsigned.
 
 The version is --version, then the tag the release workflow is running for,
 then `git describe`, then 0.0.0-dev, with a leading "v" stripped: the same
@@ -184,9 +186,17 @@ def smoke(binary, stamped):
     print(f"{binary.name} --version: {line}")
     if result.returncode != 0:
         raise SystemExit(f"{binary} --version exited with {result.returncode}")
-    expected = f"T.O.R.E server v{stamped} (" if stamped else "T.O.R.E server v"
+    # `tore-server --version` prints "T.O.R.E server - v<version> (code ...,
+    # commit ...)" since the compatibility code (0.2.1).
+    expected = f"T.O.R.E server - v{stamped} (" if stamped else "T.O.R.E server - v"
     if not line.startswith(expected):
         raise SystemExit(f"{binary} --version printed {line!r}, expected it to start with {expected!r}")
+
+
+def verify_macos_signature(binary):
+    """Fail packaging on an invalid signature and show its details in CI."""
+    subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(binary)], check=True)
+    subprocess.run(["codesign", "-dv", "--verbose=4", str(binary)], check=True)
 
 
 def main():
@@ -221,6 +231,14 @@ def main():
     run_tool("check_assets.py", stage_dir)
     glibc = ["--max-glibc", args.max_glibc] if args.max_glibc else []
     run_tool("check_runtime_dependencies.py", *glibc, stage_dir / executable)
+    if system == "darwin":
+        # A standalone Mach-O needs no bundle seal. Sign explicitly on both
+        # architectures instead of relying on the linker's signing defaults.
+        # No hardened runtime, Developer ID or notarization. No later step
+        # may modify the staged executable.
+        print("Ad-hoc signing the staged macOS server")
+        subprocess.run(["codesign", "--force", "--sign", "-", str(stage_dir / executable)], check=True)
+        verify_macos_signature(stage_dir / executable)
     smoke(stage_dir / executable, stamped)
 
     dist.mkdir(parents=True, exist_ok=True)
@@ -232,6 +250,9 @@ def main():
     run_tool("check_assets.py", archive)
     unpacked = ROOT / "dist" / "stage" / "server" / "server check with spaces"
     unpack(archive, kind, unpacked)
+    if system == "darwin":
+        print("Verifying the macOS server from the finished archive")
+        verify_macos_signature(unpacked / name / executable)
     smoke(unpacked / name / executable, stamped)
     checksum = write_checksum(archive)
     print(f"Wrote {checksum}: {checksum.read_text().strip()}")

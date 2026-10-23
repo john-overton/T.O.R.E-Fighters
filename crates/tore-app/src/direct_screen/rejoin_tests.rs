@@ -34,7 +34,7 @@ fn with_tokens(dir: &std::path::Path) -> DirectScreen {
     store.keep(kept(3, "Viper"), "192.168.1.23:26900");
     store.keep(kept(4, "Viper"), "192.168.1.24:26900");
     store.save(dir).unwrap();
-    let mut s = DirectScreen::new(
+    let mut s = super::tests::test_screen(
         Arc::new(test_kit::kit()),
         Vec::new(),
         Some(dir.to_path_buf()),
@@ -80,12 +80,43 @@ fn the_selection_line_and_the_join_carry_the_token() {
         .position(|row| row.cells.contains(&Cell::Text("Goose and co".into())))
         .unwrap();
     s.select_game(index);
-    let line = s.selection_line().expect("a line");
-    assert!(line.starts_with("You were in this game as Viper"), "{line}");
+    assert!(
+        s.selection_line().as_deref() == Some("Code 00000000"),
+        "a saved token does not prove a slot"
+    );
+    let target = s.rejoin_target().unwrap();
+    s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(
+        target,
+        Some(tore_net::packet::ReservedSlot {
+            plane: 1,
+            enemy: false,
+            wing: 0,
+            member: 1,
+            token_seconds: 86_400,
+            return_seconds: 192,
+        }),
+    );
+    let line = s.selection_line().unwrap();
+    assert!(line.starts_with("Code 00000000. "), "{line}");
+    assert!(line.contains("Blue Wing 1 #2"), "{line}");
+    s.rejoin_check = crate::net::rejoin_check::Check::confirmed_for_test(target, None);
+    assert_eq!(
+        s.selection_line().as_deref(),
+        Some("Code 00000000. No reserved slot is available for your return.")
+    );
+    s.rejoin_check = Default::default();
+    assert!(
+        s.selection_line().as_deref() == Some("Code 00000000"),
+        "unconfirmed or timed-out queries promise nothing"
+    );
     s.focus.set(Id::Games);
     let Outcome::Join(request) = s.key("Enter", false) else {
         panic!("a join: {}", s.message_lines().join("\n"));
     };
+    assert_eq!(
+        request.callsign, "Maverick",
+        "the field wins over the kept Viper token"
+    );
     assert_eq!(request.token, Some(Token(0xfeed_0003)));
     assert_eq!(
         request.address,
@@ -117,7 +148,7 @@ fn a_game_with_no_token_joins_without_one() {
         panic!("a join");
     };
     assert_eq!(request.token, None);
-    assert!(s.selection_line().unwrap().starts_with("Mission:"));
+    assert!(s.selection_line().unwrap().contains("Mission:"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -130,7 +161,7 @@ fn an_expired_token_marks_nothing() {
     store.keep(old, "192.168.1.23:26900");
     // The file keeps what it was given; the screen reads it as the game does.
     store.save(&dir).unwrap();
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     s.set_found(sample_games());
     assert_eq!(state_of(&s, "Goose and co"), "Lobby");
     let _ = std::fs::remove_dir_all(dir);
@@ -143,7 +174,7 @@ fn a_game_reached_by_a_typed_address_is_joined_with_the_token_kept_for_it() {
     let mut store = Store::default();
     store.keep(kept(9, "Viper"), &live.to_string());
     store.save(&dir).unwrap();
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     s.callsign.set_text("Maverick");
     s.focus.set(Id::Address);
     s.text_input(&live.to_string());
@@ -156,6 +187,7 @@ fn a_game_reached_by_a_typed_address_is_joined_with_the_token_kept_for_it() {
             _ => std::thread::sleep(Duration::from_millis(20)),
         }
     };
+    assert_eq!(request.callsign, "Maverick");
     assert_eq!(request.address, live);
     assert_eq!(request.token, Some(Token(0xfeed_0009)));
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -166,7 +198,7 @@ fn a_game_reached_by_a_typed_address_is_joined_with_the_token_kept_for_it() {
 #[test]
 fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     let dir = scratch("switch");
-    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    let mut s = super::tests::test_screen(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
     assert!(s.settings.may_host, "on by default");
     s.open_options();
     // Port, Password, Name, Forward, then the switch: Space turns it off;
@@ -205,5 +237,19 @@ fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     s.key("Space", false);
     s.key("Escape", false);
     assert!(s.settings.may_host);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn returning_to_the_lounge_reloads_cleared_rejoin_identity() {
+    let dir = scratch("cleared");
+    let mut s = with_tokens(&dir);
+    assert_eq!(state_of(&s, "Goose and co"), "Rejoin");
+    s.open_options();
+    s.session = true;
+    Store::default().save(&dir).unwrap();
+    s.update_at(Duration::from_millis(1), false);
+    assert!(s.tokens.entries.is_empty());
+    assert_ne!(state_of(&s, "Goose and co"), "Rejoin");
     let _ = std::fs::remove_dir_all(dir);
 }

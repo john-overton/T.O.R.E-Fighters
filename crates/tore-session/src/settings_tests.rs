@@ -194,6 +194,7 @@ fn the_lobby_list_carries_every_setting_and_only_whether_a_password_is_set() {
 #[test]
 fn a_host_starts_from_its_configuration() {
     let mut config = HostConfig::new(crate::host::BuildId {
+        compatibility: 0,
         version: "0.2.0".into(),
         commit: "abc".into(),
         release: false,
@@ -321,6 +322,7 @@ fn the_store_applies_the_rate_and_a_new_mode_keeps_it() {
 #[test]
 fn a_configurations_rate_is_kept_as_given_past_the_kings_list() {
     let mut config = HostConfig::new(crate::host::BuildId {
+        compatibility: 0,
         version: "test".into(),
         commit: "test".into(),
         release: false,
@@ -497,6 +499,7 @@ fn unset_minimum_defaults_follow_ai_and_mode_but_explicit_none_wins() {
     for mode in [Mode::Coop, Mode::Pvp] {
         for ai in [false, true] {
             let mut config = HostConfig::new(crate::host::BuildId {
+                compatibility: 0,
                 version: "0.2.0".into(),
                 commit: "test".into(),
                 release: false,

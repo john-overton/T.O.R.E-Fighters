@@ -60,6 +60,7 @@ pub struct ConnectDetails {
     pub game_version: String,
     /// The commit its build stamps.
     pub game_commit: String,
+    pub compatibility: u32,
     /// 1 to 15 printable ASCII characters. Making it unique (`Viper_2`) is
     /// the caller's job.
     pub callsign: String,
@@ -155,9 +156,12 @@ pub enum ServerEvent {
         /// What.
         event: Event,
     },
-    /// Someone asked who is hosting here (slice EF5). The caller answers with
-    /// [`Server::answer_discover`], or ignores it. The query has passed the
-    /// rate limit.
+    /// A versioned, rate-limited private reservation preflight.
+    Reservation {
+        from: SocketAddr,
+        query: packet::ReservationQuery,
+    },
+    /// Someone asked who is hosting here. The query has passed the rate limit.
     Discover {
         /// Who asked.
         from: SocketAddr,
@@ -252,6 +256,7 @@ impl ReachLimiter {
 /// tick), send what [`Server::poll_transmit`] gives, and handle
 /// [`Server::poll_event`].
 pub struct Server {
+    compatibility: u32,
     config: ServerConfig,
     rng: Rng,
     cookie_key: CookieKey,
@@ -273,11 +278,16 @@ pub struct Server {
 }
 
 impl Server {
+    pub fn set_compatibility(&mut self, code: u32) {
+        self.compatibility = code;
+    }
+
     /// A host with no connections.
     pub fn new(config: ServerConfig) -> Self {
         let mut rng = Rng::new(config.entropy);
         let cookie_key = CookieKey::new(config.entropy, &mut rng);
         Self {
+            compatibility: 0,
             config,
             rng,
             cookie_key,
@@ -496,21 +506,36 @@ impl Server {
             PacketKind::Discover => self.on_discover(now, from, datagram.len(), body),
             PacketKind::Keepalive => self.on_keepalive(now, from, body),
             PacketKind::Reach => self.on_reach(now, from, body),
+            PacketKind::ReservationQuery => {
+                let Ok(query) = packet::decode_reservation_query(body) else {
+                    self.counters.malformed += 1;
+                    return;
+                };
+                if self.discover_limiter.allow(now, from.ip()) {
+                    self.events
+                        .push_back(ServerEvent::Reservation { from, query });
+                } else {
+                    self.counters.rate_limited += 1;
+                }
+            }
             PacketKind::Challenge
             | PacketKind::Accepted
             | PacketKind::Refuse
             | PacketKind::DiscoverAnswer
             | PacketKind::Punch
-            | PacketKind::ReachAnswer => {
+            | PacketKind::ReachAnswer
+            | PacketKind::ReservationAnswer => {
                 self.counters.unexpected += 1;
             }
         }
     }
 
-    /// A Reach (stage K): answered as the host of the session it names,
-    /// never longer than itself. One for another session, or to a host that
-    /// answers none, is counted as unexpected; one past 10 a second from its
-    /// address as rate limited.
+    /// Answers a private reservation preflight, without admitting a player.
+    pub fn answer_reservation(&mut self, to: SocketAddr, answer: packet::ReservationAnswer) {
+        self.send(to, &Packet::ReservationAnswer(answer));
+    }
+
+    /// A Reach for this host's session, rate limited and no larger than its query.
     fn on_reach(&mut self, now: Duration, from: SocketAddr, body: &[u8]) {
         let Ok(reach) = packet::decode_reach(body) else {
             self.counters.malformed += 1;
@@ -591,8 +616,8 @@ impl Server {
         }
         if request.protocol_version != version {
             let text = format!(
-                "This server uses network protocol version {version}, and your game uses version {}. Both must be the same.",
-                request.protocol_version
+                "The server's compatibility code is {:08X}; yours is {:08X}. This server uses network protocol version {version}, and your game uses version {}.",
+                self.compatibility, request.compatibility, request.protocol_version
             );
             self.refuse(from, request.nonce, RefuseReason::ProtocolVersion, &text);
             return;
@@ -654,6 +679,7 @@ impl Server {
             protocol_version: self.config.protocol_version,
             game_version: answer.game_version,
             game_commit: answer.game_commit,
+            compatibility: answer.compatibility,
             callsign: answer.callsign,
             password: answer.password,
             platform: answer.platform,
@@ -893,6 +919,7 @@ mod tests {
             protocol_version: V,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
             session_id: 7,
             name: "Game".into(),
             summary: "UKR".into(),
@@ -996,6 +1023,7 @@ mod tests {
             nonce: 5,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
         })
         .encode(V)
         .unwrap();
@@ -1050,6 +1078,7 @@ mod tests {
                 nonce: 5,
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
             })
             .encode(V)
             .unwrap();
@@ -1066,6 +1095,7 @@ mod tests {
                 password: String::new(),
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
                 platform: Platform::Linux,
                 path: said,
                 token: None,
@@ -1185,6 +1215,7 @@ mod tests {
             nonce: 5,
             game_version: String::new(),
             game_commit: String::new(),
+            compatibility: 0,
         })
         .encode(V)
         .unwrap();
@@ -1217,6 +1248,7 @@ mod tests {
                 nonce: 5,
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
             })
             .encode(V)
             .unwrap();
@@ -1242,6 +1274,7 @@ mod tests {
                 password: String::new(),
                 game_version: String::new(),
                 game_commit: String::new(),
+                compatibility: 0,
                 platform: Platform::Linux,
                 path: Path::ByAddress,
                 token,

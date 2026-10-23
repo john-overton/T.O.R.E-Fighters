@@ -44,6 +44,7 @@ fn host_address() -> SocketAddr {
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
@@ -2252,4 +2253,111 @@ fn the_mission_countdown_keeps_its_deadline_through_handover() {
     for g in 1..rig.games.len() {
         assert_eq!(rig.games[g].client.seconds_left(), Some(expected));
     }
+}
+
+#[test]
+fn departed_player_and_side_scores_survive_handover_and_still_reach_the_limit() {
+    use crate::settings::{Mode, number};
+    use tore_world::score::{Fact, Flown, Victim};
+    let mut rig = Rig::new(crowd_spec(200));
+    rig.games[0]
+        .client
+        .change_settings(crate::wire::messages::SettingsChange {
+            values: vec![(number::MODE, Mode::Pvp.value()), (number::KILL_LIMIT, 3)],
+            ..Default::default()
+        });
+    rig.run(Duration::from_millis(200));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    rig.games[0].client.ready(Some(0));
+    rig.run(Duration::from_millis(500));
+    rig.fly();
+    rig.run(Duration::from_millis(1500));
+    let credit = |host: &mut Host, plane: u32| {
+        let flown = Flown {
+            plane: PlaneId(plane),
+            pilot: host.world.roster.plane(PlaneId(plane)).unwrap().pilot,
+        };
+        let seats = host
+            .peers
+            .values()
+            .filter_map(|p| Some((p.seat?, p.lobby.order)))
+            .collect();
+        host.tally(
+            Fact::Kill {
+                shooter: Some(flown),
+                victim: Victim {
+                    target: 4,
+                    flown: Some(Flown {
+                        plane: PlaneId(4),
+                        pilot: Pilot::Ai,
+                    }),
+                    aircraft: true,
+                },
+                pilot_aboard: true,
+            },
+            &seats,
+        );
+    };
+    credit(rig.host_mut(), 1);
+    credit(rig.host_mut(), 1);
+    let order = rig
+        .host()
+        .peers
+        .values()
+        .find(|p| p.callsign == "Viper")
+        .unwrap()
+        .lobby
+        .order;
+    // The accounting part includes nonzero shot and kill totals too.
+    let totals = rig
+        .host_mut()
+        .score
+        .accounts
+        .totals
+        .entry(order)
+        .or_default();
+    totals.kills[0] = 2;
+    totals.air_to_air.launched = 4;
+    totals.air_to_air.hit = 2;
+    rig.host_mut().score.accounts.side_hits[0] = 2;
+    rig.run(Duration::from_millis(1200));
+    rig.games[1].client.leave_game(rig.net.now());
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.games[1].client.phase()
+            == ClientPhase::Closed)
+    );
+    rig.games[1].gone = true;
+    rig.run(Duration::from_secs(2));
+    assert_eq!(
+        rig.host().world.roster.plane(PlaneId(1)).unwrap().pilot,
+        Pilot::Ai
+    );
+    rig.host_mut().hand_over().unwrap();
+    assert!(rig.run_until(Duration::from_secs(1), |r| r.host().handed_over()));
+    rig.games[0].gone = true;
+    assert!(rig.run_until(Duration::from_secs(2), |r| !r.takeovers.is_empty()));
+    let (game, took_at, _, _) = rig.takeovers[0].clone();
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        (2..r.games.len()).all(|g| r.games[g].snapshot_after(took_at).is_some())
+    }));
+    let host = rig.host_of(game);
+    let scores = host.final_scores(EndReason::EndedByServer);
+    assert_eq!(scores.sides[0].kills, 2);
+    assert_eq!(scores.sides[0].hits, 2);
+    assert!(
+        scores
+            .players
+            .iter()
+            .any(|p| p.callsign == "Viper" && p.left && p.kills == 2)
+    );
+    assert_eq!(host.score.accounts.totals[&order].air_to_air.hit, 2);
+    // The old contribution plus a remaining player's kill ends the mission.
+    credit(rig.games[game].host.as_mut().unwrap(), 3);
+    rig.run(Duration::from_secs(1));
+    let results = rig.games[2].client.results().unwrap();
+    assert_eq!(results.reason, EndReason::KillLimit);
+    assert_eq!(results.scores.as_ref().unwrap().sides[0].kills, 3);
+    assert!(results.rows.iter().any(|r| r.plane == 1 && r.left));
 }

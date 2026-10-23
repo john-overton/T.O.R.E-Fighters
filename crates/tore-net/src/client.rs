@@ -37,6 +37,7 @@ pub struct ClientConfig {
     pub game_version: String,
     /// The commit this build stamps.
     pub game_commit: String,
+    pub compatibility: u32,
     /// 1 to 15 printable ASCII characters.
     pub callsign: String,
     /// The server's password; empty for none.
@@ -62,6 +63,7 @@ impl ClientConfig {
             protocol_version,
             game_version: String::new(),
             game_commit: String::new(),
+            compatibility: 0,
             callsign: callsign.to_owned(),
             password: String::new(),
             platform: Platform::current(),
@@ -254,6 +256,7 @@ impl Client {
             nonce,
             game_version: config.game_version.clone(),
             game_commit: config.game_commit.clone(),
+            compatibility: config.compatibility,
         })
         .encode(config.protocol_version)
         .map_err(|_| ConfigError::StringTooLong)?;
@@ -522,7 +525,9 @@ impl Client {
             | PacketKind::DiscoverAnswer
             | PacketKind::Punch
             | PacketKind::Reach
-            | PacketKind::ReachAnswer => {
+            | PacketKind::ReachAnswer
+            | PacketKind::ReservationQuery
+            | PacketKind::ReservationAnswer => {
                 // A game's peers router (stage K) takes Reach packets before
                 // the client sees any.
                 self.counters.unexpected += 1;
@@ -585,6 +590,7 @@ impl Client {
             password: self.config.password.clone(),
             game_version: self.config.game_version.clone(),
             game_commit: self.config.game_commit.clone(),
+            compatibility: self.config.compatibility,
             platform: self.config.platform,
             path: self.path,
             token: self.config.token,

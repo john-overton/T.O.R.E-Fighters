@@ -1013,7 +1013,7 @@ impl FlightCanvas {
         self.layers.push(cache);
         true
     }
-    fn blit(&mut self, s: &Sprite, rect: (f64, f64, f64, f64)) {
+    pub(crate) fn blit(&mut self, s: &Sprite, rect: (f64, f64, f64, f64)) {
         self.blit_within(s, rect, None);
     }
     /// `blit`, writing only the destination pixels in `only` (row, columns)
