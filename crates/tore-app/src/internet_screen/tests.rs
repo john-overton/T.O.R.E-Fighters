@@ -581,6 +581,7 @@ fn clear_field(s: &mut InternetScreen) {
 fn options_keeps_the_masters_address_and_refuses_bad_values() {
     let dir = scratch("options");
     let mut s = kept_in(&dir);
+    s.save();
     s.open_options();
     assert!(s.options_open() && s.typing());
     // Port: nothing is not a port, and the panel stays.
@@ -599,6 +600,8 @@ fn options_keeps_the_masters_address_and_refuses_bad_values() {
         s.options_open(),
         "a master that is not an address is refused"
     );
+    assert_eq!(s.master_text(), NOBODY);
+    assert_eq!(Remembered::load(&dir).master.as_deref(), Some(NOBODY));
     clear_field(&mut s);
     type_into(&mut s, "master.example.org:26911");
     s.key("Enter", false);
@@ -626,13 +629,14 @@ fn options_keeps_the_masters_address_and_refuses_bad_values() {
 fn an_empty_master_is_the_built_in_one_and_a_switch_turns_by_key() {
     let mut s = screen();
     s.open_options();
-    // Three Tabs reach the master; clear it. One more reaches "Forward the
+    // Three Tabs reach the master; clear it. Two more reach "Forward the
     // game port", Space turns it off; one more reaches "Let my game take
     // over hosting", Space turns it off; two more reach OK.
     for _ in 0..3 {
         s.key("Tab", false);
     }
     clear_field(&mut s);
+    s.key("Tab", false);
     s.key("Tab", false);
     s.key("Space", false);
     s.key("Tab", false);
@@ -658,6 +662,89 @@ fn another_master_restarts_the_browse() {
         ..values(true)
     }));
     s.update(false);
+    assert_eq!(s.browsed, "127.0.0.1:10");
+}
+
+#[test]
+fn default_restores_the_public_master_as_a_cancellable_draft_by_mouse_and_keyboard() {
+    let dir = scratch("default-master");
+    let mut s = kept_in(&dir);
+    s.save();
+    s.open_options();
+    // The mouse reaches the retail Default button beside the master field.
+    s.moved(Some((495.0, 237.0)));
+    s.button(true);
+    s.button(false);
+    assert!(s.options_open());
+    assert_eq!(s.master_text(), NOBODY);
+    s.key("Escape", false);
+    assert_eq!(Remembered::load(&dir).master.as_deref(), Some(NOBODY));
+
+    s.open_options();
+    for _ in 0..4 {
+        s.key("Tab", false);
+    }
+    s.key("Space", false);
+    assert!(s.options_open(), "Default does not accept the panel");
+    s.key("Tab", true); // Back to the field, Enter accepts it.
+    s.key("Enter", false);
+    assert!(!s.options_open());
+    assert_eq!(s.master_text(), tore_net::master::DEFAULT_MASTER);
+    assert_eq!(Remembered::load(&dir).master, None);
+    let again = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    assert_eq!(again.master_text(), tore_net::master::DEFAULT_MASTER);
+    // Do not turn either screen: tests never query the public master.
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn editing_the_master_replaces_games_and_persists_the_hosting_and_browsing_choice() {
+    let dir = scratch("master-switch");
+    let mut old = LoopbackMaster::start();
+    let (_old_id, _old_host) = old.list("Old environment", 1, 8, false);
+    let mut chosen = LoopbackMaster::start();
+    let (_id, _host) = chosen.list("Private environment", 1, 8, false);
+    let mut s = kept_in(&dir);
+    s.settings.master = Some(old.text());
+    assert!(old.pump(|| {
+        s.update(false);
+        names(&s) == ["Old environment"]
+    }));
+    s.open_options();
+    for _ in 0..3 {
+        s.key("Tab", false);
+    }
+    clear_field(&mut s);
+    type_into(&mut s, &chosen.text());
+    s.key("Enter", false);
+    assert!(chosen.pump(|| {
+        s.update(false);
+        names(&s) == ["Private environment"]
+    }));
+    assert_eq!(s.browsed, chosen.text());
+    assert_eq!(s.master_text(), chosen.text());
+    s.callsign.set_text("Maverick");
+    let Outcome::Host(request) = s.new_game() else {
+        panic!("New must host on the chosen master");
+    };
+    assert_eq!(request.listing.master, chosen.text());
+    assert!(request.listing.listed);
+    assert!(request.listing.install_id.is_some());
+    let again = InternetScreen::new(Arc::new(test_kit::kit()), Some(dir.clone()));
+    assert_eq!(again.master_text(), chosen.text());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_new_master_retries_after_a_failed_browse_start() {
+    let mut s = screen();
+    s.browse_failed = true;
+    s.options_answer(Answer::Ok(options::Values {
+        master: Some("127.0.0.1:10".into()),
+        ..values(false)
+    }));
+    s.update(false);
+    assert!(s.browsing());
     assert_eq!(s.browsed, "127.0.0.1:10");
 }
 

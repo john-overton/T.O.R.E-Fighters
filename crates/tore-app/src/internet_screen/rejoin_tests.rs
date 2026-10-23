@@ -134,8 +134,8 @@ fn let_my_game_take_over_hosting_is_on_turns_by_key_and_mouse_and_is_kept() {
     s.settings.master = Some(NOBODY.into());
     assert!(s.settings.may_host, "on by default");
     s.open_options();
-    // Port, Password, Name, Master, Forward, then the switch.
-    for _ in 0..5 {
+    // Port, Password, Name, Master, Default, Forward, then the switch.
+    for _ in 0..6 {
         s.key("Tab", false);
     }
     s.key("Space", false);

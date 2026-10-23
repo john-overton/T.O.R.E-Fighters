@@ -234,7 +234,10 @@ T.O.R.E has two ways to find an online game. **Direct Connection** (Multi menu)
 searches your local network and joins an address you type, and talks to no
 server of ours. **Internet Lobby** (Multi menu) lists games on a public list
 server, the *master*, at `master.jroverton.com` (UDP ports 26901 and 26902).
-You can point it at another master in **Options**.
+You can point it at another master in **Options > Master server**. **Default**
+restores `master.jroverton.com:26901`; **OK** saves your choice. Listing,
+hosting, relay and enabled anonymous statistics all use the chosen master.
+See [running your own master](docs/DEDICATED-SERVER.md#running-your-own-master).
 
 Listing a game on the master tells it the game's name, its mission, the
 callsigns in it and the address the game answers at, which is what anyone

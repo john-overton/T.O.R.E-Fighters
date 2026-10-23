@@ -401,6 +401,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Menu left | Left | - | D-pad left |
 | Menu right | Right | - | D-pad right |
 | Menu select | Enter | - | A |
+| Internet Options: restore master (Default focused) | Enter or Space | - | - |
 | Menu back | Esc | - | B |
 | Fullscreen / window | Alt+Enter | - | - |
 | Exit to desktop | Alt+F4 | - | - |

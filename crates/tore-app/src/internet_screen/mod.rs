@@ -1117,6 +1117,11 @@ impl InternetScreen {
                     Some(name) => self.settings.remember_game_name(&name),
                     None => self.settings.game_name = None,
                 }
+                if self.settings.master != values.master {
+                    // A failed socket start must not prevent a new choice
+                    // from being queried on the screen's next turn.
+                    self.browse_failed = false;
+                }
                 self.settings.master = values.master;
                 self.settings.port_forward = values.port_forward;
                 self.settings.may_host = values.may_host;

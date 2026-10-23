@@ -246,7 +246,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "the master server on this machine: its limits under the flood tool, a server listing itself",
         ("net-master-*",),
     ),
-    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing",)),
+    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing", "net-window-master-setting")),
     "net-introduce": (
         "a bot joining a listed dedicated server through an introduction from a master on this machine",
         ("net-master-introduce",),

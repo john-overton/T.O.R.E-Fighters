@@ -305,19 +305,47 @@ fn yes_or_no(key: &str, value: &str) -> Result<bool, String> {
     }
 }
 
-/// A master address the screen may keep: at most 255 bytes, no spaces or
-/// control characters, and `HOST` or `HOST:PORT` with a host of letters,
-/// digits and `.-_` or an IPv6 address (nothing is looked up).
+/// A master address the screen may keep, checked without looking up DNS.
+/// IPv6 ports require brackets; bare IPv6 uses the default port. DNS names
+/// use labels of 1 to 63 letters, digits or internal hyphens, at most 253
+/// bytes overall, optionally followed by the DNS root dot.
 pub fn master_ok(text: &str) -> bool {
-    !text.is_empty()
-        && text.len() <= MAX_ADDRESS
-        && !text.chars().any(char::is_control)
-        && text == text.trim()
-        && tore_net::master::local::parse_master(text).is_ok_and(|(host, _)| {
-            !host.is_empty()
-                && host
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'))
+    if text.is_empty() || text.len() > MAX_ADDRESS || !text.is_ascii() || text != text.trim() {
+        return false;
+    }
+    let Ok((host, _)) = tore_net::master::local::parse_master(text) else {
+        return false;
+    };
+    // The shared splitter accepts a leading '+' in a port. The field's
+    // grammar is digits only, including for bracketed IPv6.
+    let port = if text.starts_with('[') {
+        text.split_once(']')
+            .and_then(|(_, tail)| tail.strip_prefix(':'))
+    } else if text.matches(':').count() == 1 {
+        text.split_once(':').map(|(_, port)| port)
+    } else {
+        None
+    };
+    if port.is_some_and(|port| !port.bytes().all(|c| c.is_ascii_digit())) {
+        return false;
+    }
+    if text.starts_with('[') || host.contains(':') {
+        return host.parse::<std::net::Ipv6Addr>().is_ok();
+    }
+    if host.bytes().all(|c| c.is_ascii_digit() || c == b'.') {
+        return host.parse::<std::net::Ipv4Addr>().is_ok();
+    }
+    let name = host.strip_suffix('.').unwrap_or(&host);
+    !name.is_empty()
+        && name.len() <= 253
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-')
         })
 }
 
@@ -331,6 +359,71 @@ fn name_ok(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn master_addresses_accept_hosts_and_ip_literals_without_dns() {
+        for (text, host, port) in [
+            ("master.example.org", "master.example.org", 26901),
+            ("localhost:1", "localhost", 1),
+            ("fork-1.EXAMPLE.org.:65535", "fork-1.EXAMPLE.org.", 65535),
+            ("192.0.2.1", "192.0.2.1", 26901),
+            ("192.0.2.1:26911", "192.0.2.1", 26911),
+            ("::1", "::1", 26901),
+            ("[::1]", "::1", 26901),
+            ("[2001:db8::1]:26911", "2001:db8::1", 26911),
+            ("[::ffff:192.0.2.1]:26911", "::ffff:192.0.2.1", 26911),
+        ] {
+            assert!(master_ok(text), "{text}");
+            assert_eq!(
+                tore_net::master::local::parse_master(text).unwrap(),
+                (host.to_owned(), port)
+            );
+        }
+        for text in [
+            "",
+            " ",
+            "two words",
+            "host\n",
+            "host:0",
+            "host:65536",
+            "host:",
+            "host:+1",
+            "host:-1",
+            "host:port",
+            "https://host",
+            "host/path",
+            "user@host",
+            "[localhost]:26901",
+            "[127.0.0.1]",
+            "[::1",
+            ":::",
+            "one:two:three",
+            "[2001:db8::g]:26901",
+            "[::1]:+1",
+            "999.2.3.4",
+            "127.1",
+            ".",
+            "-host",
+            "host-",
+            "a..b",
+            "a_b",
+            "host..",
+            "mástér.example",
+        ] {
+            assert!(!master_ok(text), "{text:?}");
+        }
+        assert!(master_ok(&format!("{}.example", "a".repeat(63))));
+        assert!(!master_ok(&format!("{}.example", "a".repeat(64))));
+        let longest = [
+            "a".repeat(63),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61),
+        ]
+        .join(".");
+        assert!(master_ok(&longest));
+        assert!(!master_ok(&(longest + "x")));
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir =

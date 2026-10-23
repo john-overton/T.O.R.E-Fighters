@@ -8764,7 +8764,7 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
   `tore_net::master::Browser` state machine, `update(now)` every frame,
   events for added, changed and dropped games. It never blocks a frame.
 - The first time the screen opens it writes one line about telemetry in
-  Messages: "This game sends anonymous statistics to the Internet Lobby. Turn
+  Messages: "This game sends anonymous statistics to the chosen master server. Turn
   them off in Options." (John: on by default, with a switch and a one-time
   notice).
 - When the master cannot be reached the list stays empty and Messages says

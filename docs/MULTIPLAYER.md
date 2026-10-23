@@ -1223,8 +1223,23 @@ the [master's wire](formats/master-protocol.md) and
   mission and players. **Join** joins it ([connection path](#connection-path)),
   **New** hosts a game that is listed, **Refresh** asks again, **Options**
   holds the port, password and game name (shared with Direct Connection),
-  the master's address, "Forward the game port on my router" and "Send
-  anonymous statistics". *Built (slice I4, 2026-10-05):* the screen is in the
+  **Master server**, "Forward the game port on my router" and "Send
+  anonymous statistics". Master server accepts a host name, IPv4 or IPv6
+  address with an optional port (26901 when omitted; use `[::1]:26911` for
+  IPv6 with a port). **Default** restores `master.jroverton.com:26901` in
+  the field. **OK** saves the choice and queries that master; **Cancel**
+  discards the edit. Invalid text keeps Options open and preserves the last
+  accepted choice. A valid but unreachable address is named in Messages.
+  "Games listed by ..." shows the current master. The saved choice covers
+  browsing, hosting with New, introductions, NAT traversal, relay and enabled
+  anonymous statistics. See [running your own master](DEDICATED-SERVER.md#running-your-own-master)
+  and the [editing rules](spec/multiplayer-menus.md#internet-lounge-master-server).
+  Command-line `--master HOST[:PORT]` takes precedence for `--browse` or
+  `--host FILE --list` for that invocation, without changing the saved choice.
+  Without it, `--browse` uses the saved choice and command-line listed hosting
+  uses the public default. `--master` alone is not a lounge override, and
+  there is no `TORE_MASTER` environment override.
+  *Built (slice I4, 2026-10-05):* the screen is in the
   game; Join asks the master to introduce the player and races the host's
   addresses from the same socket (J2); *built (J5):* when no address answers
   within 3 seconds the game asks for the relay and joins through it, and
@@ -1529,7 +1544,9 @@ desync report. Replays also record slot changes, joins, drops, host migrations
 and data link events.
 
 **Telemetry.** The heartbeat and the session end report anonymously to the
-master server:
+master selected in Internet Lounge Options, including a privately operated
+master. A listed dedicated server uses its `master` setting; command-line
+listed hosting uses its `--master` choice or the public default:
 
 - An anonymous install ID.
 - Session length and human count.
