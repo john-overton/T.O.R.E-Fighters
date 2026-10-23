@@ -54,6 +54,7 @@ pub mod convert;
 #[cfg(test)]
 mod convert_tests;
 pub mod diagnostics;
+pub mod flight_report;
 #[cfg(test)]
 mod gun_key_tests;
 pub mod interpolation;
@@ -834,6 +835,7 @@ pub struct Client {
     scores: Option<scores::Kept>,
     /// The results of the mission that ended (slice F2-D).
     results: Option<Box<Results>>,
+    flight_record: flight_report::Record,
     /// The newest Revival since the player's plane was lost, and the
     /// revivals' new planes of the mission (slice F2-V, [`revival`]).
     revival: Option<revival::Kept>,
@@ -1012,6 +1014,7 @@ impl Client {
             lobby: None,
             scores: None,
             results: None,
+            flight_record: Default::default(),
             revival: None,
             spawned: Vec::new(),
             number: None,
@@ -2184,6 +2187,7 @@ impl Client {
             Message::Mission(mission) => {
                 self.scores = None;
                 self.results = None;
+                self.flight_record = Default::default();
                 self.revival = None;
                 self.spawned.clear();
                 self.mission_arrived(mission);
@@ -2239,6 +2243,7 @@ impl Client {
                 self.event(ClientEvent::Chat(line));
             }
             Message::Debrief(debrief) => {
+                self.flight_record.debrief_seen = true;
                 self.log("debrief", &[]);
                 self.event(ClientEvent::Debrief(debrief));
                 // The flight is over for this player: back in the lobby.
@@ -2250,6 +2255,7 @@ impl Client {
                 }
             }
             Message::MissionEnded(ended) => {
+                self.flight_record.finished = true;
                 self.log("mission-ended", &[&format!("{:?}", ended.reason)]);
                 self.revival = None;
                 self.end_flight();
@@ -2292,6 +2298,7 @@ impl Client {
                 // afresh.
                 self.scores = None;
                 self.results = None;
+                self.flight_record = Default::default();
                 self.revival = None;
                 self.spawned.clear();
                 self.flight_loadouts(loadouts);
@@ -2306,6 +2313,7 @@ impl Client {
                 });
                 self.event(ClientEvent::Scores(scores));
             }
+            Message::FlightReport(report) => self.flight_record.receive(*report),
             Message::Results(results) => {
                 self.log("results", &[&results::summary(&results)]);
                 self.results = Some(results.clone());
@@ -2794,6 +2802,9 @@ impl Client {
                 &seated.tick.to_string(),
             ],
         );
+        if let Some(aircraft) = aircraft {
+            self.flight_record.seated(plane, aircraft, seated.tick);
+        }
         self.event(ClientEvent::Seated {
             seat: seated.seat,
             plane,
@@ -2922,6 +2933,7 @@ impl Client {
             }
         };
         let tick = header.tick;
+        self.flight_record.tick = self.flight_record.tick.max(tick);
         self.stats.snapshots += 1;
         self.net.note_arrival(ticks_time(u64::from(tick)), now);
         match self.snapshot_tick {
@@ -3101,6 +3113,7 @@ impl Client {
     /// An event from the host: the seat's cues are released at once, the
     /// mission-wide ones when the picture reaches their tick.
     fn route(&mut self, event: ReceivedEvent) {
+        self.flight_record.event(&event);
         if let Some(observed) = &mut self.observed {
             observed.event(self.now, &event);
         }

@@ -358,6 +358,7 @@ impl TestClient {
             Message::Token(grant) => self.tokens.push(grant),
             Message::Scores(scores) => self.scores.push(*scores),
             Message::Results(results) => self.results.push(*results),
+            Message::FlightReport(_) => {}
             Message::Revival(revival) => self.revivals.push(*revival),
             Message::Spawned(spawned) => self.spawned.push(*spawned),
             Message::Observing(observing) => self.observing.push(*observing),

@@ -98,6 +98,7 @@ pub struct NetFlight {
     was_burning: bool,
     /// K's score board is open (`scoreboard`).
     pub score_board: bool,
+    pub score_page: usize,
     /// When the revival prompt was last said, and whether it said the
     /// player may fly again (stage F phase 2, slice F2-V).
     revival_said: Option<(Instant, bool)>,
@@ -616,15 +617,22 @@ impl App {
         cause: debrief::Cause,
     ) -> crate::AppResult<crate::debrief::Debrief> {
         let lobby = self.net.as_ref().and_then(|s| s.client.lobby());
-        let ended = debrief::ending(debrief, cause, lobby);
-        // The results of the mission, when the host sent them (stage F
-        // phase 2): the SCORES and RESULTS pages after the first.
-        let extra = self
-            .net
-            .as_ref()
-            .and_then(|s| s.client.results())
-            .map(debrief::extra_pages)
-            .unwrap_or_default();
+        let record = self.net.as_ref().map(|s| s.client.flight_record());
+        let partial = matches!(cause, debrief::Cause::Left);
+        let ended = if partial {
+            Some(debrief::partial_ending(record.map_or(0, |r| r.tick), false))
+        } else {
+            debrief::ending(debrief, cause, lobby)
+        };
+        let extra = if partial {
+            record.map(debrief::local_pages).unwrap_or_default()
+        } else {
+            self.net
+                .as_ref()
+                .and_then(|s| s.client.results())
+                .map(debrief::extra_pages)
+                .unwrap_or_default()
+        };
         crate::debrief::Debrief::networked(
             debrief::report(debrief),
             &self.theater_resources,
@@ -892,6 +900,7 @@ impl App {
             was_crashed: false,
             was_burning: false,
             score_board: false,
+            score_page: 0,
             revival_said: None,
             respawn_menu: None,
             respawn_seen: false,
@@ -1186,11 +1195,44 @@ impl App {
         // The lobby goes with the session: its pages are put away, and the
         // reason shows on Direct Connection.
         self.close_lobby();
-        let debrief = self.net.as_mut().and_then(|session| session.debrief.take());
-        let screen = debrief.as_ref().map(|wire| {
-            let cause = self.net_cause();
-            self.net_debrief_screen(wire, cause)
-        });
+        let received = self.net.as_mut().and_then(|session| session.debrief.take());
+        let cause = self.net_cause();
+        let screen = if matches!(cause, debrief::Cause::Host(_)) && received.is_some() {
+            received
+                .as_ref()
+                .map(|wire| self.net_debrief_screen(wire, cause))
+        } else {
+            self.net.as_ref().and_then(|session| {
+                let record = session.client.flight_record();
+                if record.sorties.is_empty()
+                    || (record.finished && record.debrief_seen && received.is_none())
+                {
+                    return None;
+                }
+                let wire = received
+                    .as_ref()
+                    .or_else(|| record.latest.as_ref().map(|r| &r.debrief));
+                let report = wire.map(debrief::report).unwrap_or_default();
+                log::info!(
+                    "Network: partial report: {} kills, {} sorties, tick {}",
+                    report.player.kills.iter().sum::<u32>(),
+                    record.sorties.len(),
+                    record.tick
+                );
+                let mut ended = debrief::partial_ending(record.tick, session.left_at.is_none());
+                if record.finished {
+                    ended.sentence =
+                        "The mission ended.\nFinal personal report unavailable.".into();
+                }
+                Some(crate::debrief::Debrief::networked(
+                    report,
+                    &self.theater_resources,
+                    None,
+                    Some(&ended),
+                    &debrief::local_pages(record),
+                ))
+            })
+        };
         let capture = self.net.as_ref().and_then(|s| s.capture.clone());
         // A capture of a session that flew converts into a replay once it is
         // closed (below).

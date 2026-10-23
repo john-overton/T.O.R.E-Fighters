@@ -265,7 +265,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-migrate-relay",),
     ),
     "net-window": (
-        "the game itself over the network, including menu disconnect and seat reuse",
+        "the game itself over the network, including menu disconnect, partial debriefs and seat reuse",
         ("net-window-*",),
     ),
     "net-surface": (
@@ -857,6 +857,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/target_select.py", ("instruments", "net-window"), "human targeting live checks", unit_tests=("test_target_select",)),
     _r("tools/battery_scenarios/net_surface.py", ("net-surface",), "a ground target online (protocol 22, slice N1)", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_a2g.py", ("net-a2g",), "the air-to-ground round online (protocol 23, slice NA)", unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_debrief.py", ("net-window",), "partial reports, revival and retained AI/human scores", windowed=True),
     _r("tools/battery_scenarios/net_screens.py", ("net-window",), "the game's rejoin and its HUD through a host migration (stage K, slice K7b)", windowed=True),
     _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),

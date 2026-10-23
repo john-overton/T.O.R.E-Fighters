@@ -164,7 +164,7 @@ impl RevivalWeapons {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewPlane {
     pub plane: PlaneId,
-    /// Its wing, and the next free member number in it.
+    /// Its original wing and member number, shared by its successive lives.
     pub slot: Slot,
     pub aircraft: AircraftId,
     pub spawn: Spawn,
@@ -493,21 +493,17 @@ impl World {
         Err("the mission has no plane id left".into())
     }
 
-    /// The next free member number of `wing`: one past every member any
-    /// plane of the wing has had.
-    fn next_member(&self, wing: tore_sim::ai::launch::WingId) -> WorldResult<u8> {
-        let highest = self
-            .roster
+    /// A lineage keeps its original flight position, even after its root
+    /// wreck retires. Plane ids distinguish the different lives.
+    fn lineage_member(&self, plane: PlaneId) -> WorldResult<u8> {
+        let root = self.revival.root_of(plane);
+        self.roster
             .planes()
             .iter()
-            .chain(&self.revival.retired)
-            .filter(|plane| plane.slot.wing == wing)
-            .map(|plane| plane.slot.member)
-            .max();
-        match highest.map_or(Some(0), |member| member.checked_add(1)) {
-            Some(member) if member < u8::MAX => Ok(member),
-            _ => Err("the wing has no member number left".into()),
-        }
+            .chain(self.revival.retired())
+            .find(|p| p.id == root)
+            .map(|p| p.slot.member)
+            .ok_or_else(|| "the lineage has no original position".into())
     }
 
     /// The aircraft `plane` is.
@@ -946,7 +942,7 @@ impl World {
             plane: self.next_plane_id()?,
             slot: Slot {
                 wing,
-                member: self.next_member(wing)?,
+                member: self.lineage_member(old)?,
             },
             aircraft,
             spawn: spawn.clone(),
@@ -972,7 +968,7 @@ impl World {
             plane: self.next_plane_id()?,
             slot: Slot {
                 wing,
-                member: self.next_member(wing)?,
+                member: self.lineage_member(old)?,
             },
             aircraft,
             spawn: spawn.clone(),
@@ -1320,7 +1316,7 @@ impl World {
             plane: self.next_plane_id()?,
             slot: Slot {
                 wing,
-                member: self.next_member(wing)?,
+                member: self.lineage_member(root)?,
             },
             aircraft,
             spawn: spawn.clone(),
@@ -1342,8 +1338,8 @@ impl World {
 
     /// An AI respawn (slice R1, [`super::MissionCommand::Respawn`]): retires
     /// a wreck first if the mission is full, then adds a new AI plane of the
-    /// lineage's aircraft in its wing at `spawn`, the next plane id and
-    /// member number, and records its root. The AI wreck it replaces joins
+    /// lineage's aircraft in its wing at `spawn`, a new plane id and
+    /// its original member number, and records its root. The AI wreck it replaces joins
     /// the wrecks that retire once rested. Everything is checked first; a
     /// refusal changes nothing. Returns the new plane.
     pub fn respawn_plane(&mut self, root: PlaneId, spawn: &Spawn) -> WorldResult<PlaneId> {

@@ -260,12 +260,12 @@ pub fn kill_row(category: u16) -> Option<usize> {
 /// The aircraft in the wingman column for the plane `plane`: the first other
 /// member of its wing, human-flown or not.
 pub fn wingman_of(roster: &Roster, plane: PlaneId) -> Option<u32> {
-    let wing = roster.plane(plane)?.slot.wing;
+    let slot = roster.plane(plane)?.slot;
     roster
         .planes()
         .iter()
-        .filter(|p| p.id != plane && p.slot.wing == wing)
-        .min_by_key(|p| p.slot.member)
+        .filter(|p| p.slot.wing == slot.wing && p.slot.member != slot.member)
+        .min_by_key(|p| (p.slot.member, std::cmp::Reverse(p.id)))
         .map(|p| p.id.0)
 }
 
@@ -414,6 +414,15 @@ const NO_VIEWER: u32 = u32::MAX;
 /// Planes retired for room are rows of status [`RowStatus::Retired`]; a
 /// plane whose aircraft the mission cannot name has no row.
 pub fn results(world: &World) -> Vec<PlaneResult> {
+    pilot_results(world)
+        .into_iter()
+        .map(|(row, _)| row)
+        .collect()
+}
+
+/// Per-aircraft reports, including retired lives, for multiplayer accounting.
+/// Single-player capture remains a report of its one aircraft.
+pub fn pilot_results(world: &World) -> Vec<(PlaneResult, Pilot)> {
     let state = &world.combat.state;
     let retired = world.revival.retired();
     let planes: Vec<(Plane, bool)> = world
@@ -534,29 +543,32 @@ pub fn results(world: &World) -> Vec<PlaneResult> {
             damage: a.damage + b.damage,
             ..Tally::default()
         };
-        rows.push(PlaneResult {
-            plane: plane.id,
-            slot: plane.slot,
-            aircraft,
-            status: if *gone {
-                RowStatus::Retired
-            } else {
-                match pilot.status {
-                    Status::Alive => RowStatus::Alive,
-                    Status::Ejected => RowStatus::Ejected,
-                    Status::Dead => RowStatus::Dead,
-                }
+        rows.push((
+            PlaneResult {
+                plane: plane.id,
+                slot: plane.slot,
+                aircraft,
+                status: if *gone {
+                    RowStatus::Retired
+                } else {
+                    match pilot.status {
+                        Status::Alive => RowStatus::Alive,
+                        Status::Ejected => RowStatus::Ejected,
+                        Status::Dead => RowStatus::Dead,
+                    }
+                },
+                damage: pilot.damage,
+                aircraft_kills: sum(&[0, 1, 2]),
+                other_kills: sum(&[3, 4, 5, 6, 7, 8, 9]),
+                friendly_fire: pilot.friendly_fire,
+                air_to_air: pilot.air_to_air,
+                gun: pilot.gun,
+                air_to_ground: merged(pilot.air_to_ground, pilot.bombs),
             },
-            damage: pilot.damage,
-            aircraft_kills: sum(&[0, 1, 2]),
-            other_kills: sum(&[3, 4, 5, 6, 7, 8, 9]),
-            friendly_fire: pilot.friendly_fire,
-            air_to_air: pilot.air_to_air,
-            gun: pilot.gun,
-            air_to_ground: merged(pilot.air_to_ground, pilot.bombs),
-        });
+            pilot,
+        ));
     }
-    rows.sort_by_key(|row| {
+    rows.sort_by_key(|(row, _)| {
         (
             row.slot.wing.side.is_enemy(),
             row.slot.wing.index,
@@ -1001,6 +1013,24 @@ mod tests {
             ground: Vec::new(),
         }
     }
+    #[test]
+    fn a_revival_never_lists_the_players_previous_life_as_its_wingman() {
+        let member = |number| Slot {
+            member: number,
+            ..Slot::FRIENDLY_LEAD
+        };
+        let roster = Roster::open([
+            (PlaneId(0), member(0)),
+            (PlaneId(1), member(1)),
+            (PlaneId(4), member(0)),
+            (PlaneId(5), member(1)),
+        ]);
+        assert_eq!(wingman_of(&roster, PlaneId(4)), Some(5));
+        assert_eq!(wingman_of(&roster, PlaneId(5)), Some(4));
+        let alone = Roster::open([(PlaneId(0), member(0)), (PlaneId(4), member(0))]);
+        assert_eq!(wingman_of(&alone, PlaneId(4)), None);
+    }
+
     #[test]
     fn the_wingman_is_the_first_other_member_of_the_planes_own_wing() {
         let roster = two_seat_roster();

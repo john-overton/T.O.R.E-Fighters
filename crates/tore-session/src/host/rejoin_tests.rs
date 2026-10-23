@@ -774,7 +774,7 @@ fn a_late_rejoin_replaces_the_old_connection_the_host_still_lists() {
 }
 
 #[test]
-fn scores_and_lives_follow_the_token_and_a_kick_clears_them() {
+fn scores_and_lives_follow_the_token_and_a_kick_preserves_mission_statistics() {
     let (mut rig, _, viper, _) = trio();
     let token = token_of(&rig, viper);
     let order = peer(&rig, "Viper").lobby.order;
@@ -797,12 +797,12 @@ fn scores_and_lives_follow_the_token_and_a_kick_clears_them() {
     assert_eq!(peer(&rig, "Viper").lobby.order, order);
     assert_eq!(rig.host.revival.players[&order].used, 1);
     assert!(rig.host.score.player(order).is_some());
-    // A kick voids the token and the tally goes with the player.
+    // A kick voids the token, but never erases mission statistics.
     let id = peer(&rig, "Viper").lobby.id;
     rig.host.kick_player(id, "").unwrap();
     assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(back)));
     rig.run(Duration::from_millis(500));
-    assert!(rig.host.score.player(order).is_none());
+    assert!(rig.host.score.player(order).is_some());
     assert!(rig.host.rejoin.reserved.is_empty(), "a kick keeps nothing");
 }
 

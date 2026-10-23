@@ -1019,6 +1019,9 @@ pub fn scores() -> Scores {
         kill_owner: KillOwner::Side,
         players: vec![
             PlayerScore {
+                hits: 0,
+                ai: None,
+                left: false,
                 id: 0,
                 callsign: "Viper".into(),
                 side: Some(Side::Friendly),
@@ -1027,6 +1030,9 @@ pub fn scores() -> Scores {
                 damage: 2_750,
             },
             PlayerScore {
+                hits: 0,
+                ai: None,
+                left: true,
                 id: 3,
                 callsign: "Hawk".into(),
                 side: Some(Side::Enemy),
@@ -1035,6 +1041,9 @@ pub fn scores() -> Scores {
                 damage: 1_400,
             },
             PlayerScore {
+                hits: 0,
+                ai: None,
+                left: false,
                 id: 4,
                 callsign: "Lynx".into(),
                 side: None,
@@ -1045,11 +1054,13 @@ pub fn scores() -> Scores {
         ],
         sides: [
             SideScore {
+                hits: 0,
                 kills: 3,
                 losses: 1,
                 damage: 2_750,
             },
             SideScore {
+                hits: 0,
                 kills: 2,
                 losses: 2,
                 damage: 1_400,
@@ -1063,6 +1074,7 @@ pub fn scores() -> Scores {
 /// choices at least once.
 pub fn phase_two_messages() -> Vec<Message> {
     let row = |plane: u32, status: ResultStatus, callsign: Option<&str>| ResultRow {
+        left: status == ResultStatus::Retired,
         plane,
         wing: WingId::new(Side::Enemy, 1).unwrap(),
         member: 2,
@@ -1093,6 +1105,9 @@ pub fn phase_two_messages() -> Vec<Message> {
     free_for_all.kill_owner = KillOwner::Player;
     free_for_all.seconds_left = None;
     free_for_all.winner = Winner::Player(3);
+    let mut ai_winner = scores();
+    ai_winner.players[0].ai = Some(7);
+    ai_winner.winner = Winner::Aircraft(7);
     let mut draw = scores();
     draw.tally = ScoreTally::Kills;
     draw.kill_owner = KillOwner::Total;
@@ -1175,7 +1190,22 @@ pub fn phase_two_messages() -> Vec<Message> {
                 },
             },
         })),
+        Message::FlightReport(Box::new(crate::wire::messages::FlightReport {
+            tick: 7200,
+            plane: 40,
+            debrief: Debrief {
+                player: pilot(3),
+                elapsed_seconds: 60,
+                ..Debrief::default()
+            },
+            results: Results {
+                reason: EndReason::EveryoneLeft,
+                rows: vec![row(40, ResultStatus::Alive, Some("Viper"))],
+                scores: Some(scores()),
+            },
+        })),
         Message::Scores(Box::new(scores())),
+        Message::Scores(Box::new(ai_winner)),
         Message::Scores(Box::new(free_for_all)),
         Message::Scores(Box::new(draw)),
         Message::Scores(Box::new(none_yet)),

@@ -114,13 +114,22 @@ fn every_connection_gets_the_results_with_a_row_for_every_plane() {
 }
 
 #[test]
-fn co_op_results_carry_no_scores() {
+fn co_op_results_carry_human_and_ai_scores_without_a_winner() {
     let (mut rig, [viper, ..]) = crowd(Mode::Coop, &[]);
     rig.host.end_mission(EndReason::EndedByServer, None);
     rig.run(Duration::from_millis(300));
     let results = &rig.clients[viper].results[0];
     assert_eq!(results.reason, EndReason::EndedByServer);
-    assert!(results.scores.is_none(), "co-op has no winner to name");
+    assert_eq!(results.scores.as_ref().unwrap().winner, Winner::NoneYet);
+    assert!(
+        results
+            .scores
+            .as_ref()
+            .unwrap()
+            .players
+            .iter()
+            .any(|p| p.ai.is_some())
+    );
     assert_eq!(results.rows.len(), 4);
     // The words the log and the bots use for it.
     let summary = crate::client::results::summary(results);

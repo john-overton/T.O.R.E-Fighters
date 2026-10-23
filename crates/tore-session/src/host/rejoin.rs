@@ -216,14 +216,6 @@ impl Rejoin {
             .collect()
     }
 
-    /// Whether the host still keeps the player `order` for its token: its
-    /// scores stay while it does.
-    pub(super) fn keeps(&self, order: u64, now: Duration) -> bool {
-        self.players
-            .get(&order)
-            .is_some_and(|record| record.refusal(now).is_none())
-    }
-
     /// The player a plane is kept for, and its reservation.
     pub(super) fn reserved_plane(&self, plane: PlaneId) -> Option<(u64, &Reserved)> {
         self.reserved
@@ -391,6 +383,7 @@ impl Host {
         if fresh != order {
             self.rejoin.players.remove(&fresh);
         }
+        self.score.rejoined(fresh, order);
         if let Some(record) = self.rejoin.players.get_mut(&order) {
             record.left = None;
             record.callsign = callsign.clone();

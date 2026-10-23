@@ -1727,8 +1727,8 @@ Refused (kind 20) with its words.
 | 28 | Revive | client to host | Mission number (varint), optional aircraft and optional loadout: fly again after a loss with an atomically validated choice |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
 | 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (6 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
-| 31 | Scores | host to client | The tally (2 bits: kills 0, damage 1, ratio 2), the fight (1 bit: sides 0, free for all 1), a presence bit and the seconds left (varint), the kill limit (4 bits, 0 for none), the kill owner (2 bits: total 0, side 1, player 2); the players (a count, at most 64; each: lobby id 8 bits, callsign a string, a presence bit and its side 1 bit, kills, losses and damage in thousandths of an aircraft, each a varint); each side's kills, losses and damage (six varints); and the winner (2 bits: 0 none yet, 1 a side then 1 bit, 2 a player then 8 bits, 3 a draw) |
-| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 6 bits, a presence bit and the callsign of its last human pilot, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
+| 31 | Scores | host to client | Tally (2 bits: kills 0, damage 1, ratio 2), fight (1 bit: sides 0, free for all 1), optional seconds left (presence bit, varint), kill limit (4 bits, 0 for none), kill owner (2 bits: total 0, side 1, individual 2). Combatants: count varint, at most 1,024; each has lobby id 8 bits, callsign string, left bit, optional AI lineage root (presence bit, varint u32), optional side (presence bit, side bit), then kills, losses, damage in thousandths of an aircraft, and tracked hits (four varints). Each side has kills, losses, damage and hits (eight varints total). Winner: 3 bits, 0 none, 1 side then side bit, 2 human then lobby id 8 bits, 3 AI then root varint u32, 4 draw; 5 to 7 invalid |
+| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 6 bits, a presence bit and the callsign of its last human pilot, a left bit, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
 | 33 | Observe | client to host | 1 bit: 0 stop watching; 1 watch, then the subject (2 bits: 0 none, 1 an aircraft then its id as a varint, 2 a point then x, y and z in whole feet as signed varints) |
 | 34 | Observing | host to client | 1 bit: 0 the observer flight has ended (nothing follows); 1 it starts: the connection's new [flight](#flights) (8 bits), the delay in seconds (8 bits), the tick the first snapshot will show (32 bits), the roster as the Roster message codes it, and the destroyed ground objects (a count and varints) |
 | 35 | Away | client to host | Nothing: the game has been away (a menu, no focus, a lost controller) for the `idle-ai` setting's seconds |
@@ -2983,7 +2983,7 @@ Decoders check every count and length against these before reading on.
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall; from a loading host (protocol 28) 2 a second to each player, for at most 3 minutes of build |
 | Punch (protocol 9) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second; a race tries at most 12 addresses |
-| Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
+| Phase 2 (protocol 8, updated 73) | Settings in one message 64; combatants in Scores 1,024; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 | Stage K (protocol 13) | Standbys 2; addresses of a standby or a candidate 8; candidates in a reach test 3, five Reaches to each address, one test every 10 seconds; Reaches answered 10 a second from one address; checkpoint chunks 4,096 bytes, 4 unacknowledged; ticks in a Ticks record 60; a Backlog 1,200 ticks and 256 commands; an Upload test 2 seconds; tokens a game keeps 32 |
 | Stage L (protocol 10) | Items in a Content 1,024 (at least 1); a key 32 bytes of printable ASCII; a label 64 bytes; gaps in a Content gaps 1,024; players named in one gap 64; the importer's version and commit 64 bytes each |
 
@@ -3256,6 +3256,10 @@ again with an observer; the capture format did not change for it.
   ownship's visual contact and keeps a separate visual-selection flag in sensor
   checkpoints and saved pilot picks. AI selection is unchanged. It follows 71
   in 0.2.1rc-1.
+  73 adds ongoing FlightReport, cumulative hit counts, departed-player and AI
+  score identity, and stable original member numbers on revival (2026-10-23),
+  on top of the protocol 72 target-selection and protocol 71 handshake layout.
+  The compatibility simulation version is 2 for these rules and checkpoint changes.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
@@ -3368,3 +3372,22 @@ replaces them with its own, and accepts only seated players while feedback is
 enabled. The shared chat rate limit applies. These messages use the ordinary
 reliable channel and are captured for local replay conversion. See
 [the replay event](replay-feedback.md).
+
+## Ongoing multiplayer reports (73)
+
+Reliable host-to-client kind 56, FlightReport: tick varint u32, current plane
+varint u32, followed by the existing Debrief body and Results body. It is a
+statistics snapshot, not a request to end the flight. Sent once per simulated
+second, on seating and before a clean departure. Captures retain it as an
+ordinary reliable message; the replay file grammar is unchanged.
+
+The current Scores and Results grammar is in the reliable-message table above.
+The new fields retain departed humans, identify AI lineages and carry hit totals.
+A departed human's lobby id may later be reused, so only non-left human rows
+identify current lobby members. Ranking puts a winning historical human first,
+even when its old lobby id was reused. Results carry scores in co-op too.
+Spawned, roster, snapshot and recording member fields keep
+the original flight position on revival, with a new plane id per life. No
+additional member field or replay-version change is needed. The session Scores
+checkpoint part now carries retained human identities, cumulative debrief
+counters, the previous per-plane counter samples, AI counters and last-controller flags, side hit totals and AI lineage tallies.

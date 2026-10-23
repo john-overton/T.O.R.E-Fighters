@@ -473,6 +473,7 @@ struct App {
     /// Head-tracker view offset added to the player's look angles.
     head_look: [f32; 2],
     finished: bool,
+    exit_after_net_debrief: bool,
     next_frame: Option<Instant>,
     /// When a menu with a session open pumps the network and draws.
     menu_pace: net::pace::MenuPace,
@@ -3216,7 +3217,21 @@ impl App {
     }
 
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
-        if action == Action::Exit {
+        if action == Action::Exit
+            && self
+                .net
+                .as_ref()
+                .is_some_and(|s| !s.client.flight_record().sorties.is_empty())
+        {
+            self.exit_after_net_debrief = true;
+            self.leave_direct_session(event_loop);
+            if self.quick.debrief.is_some() {
+                return;
+            }
+        }
+        if action == Action::Exit
+            || (self.exit_after_net_debrief && self.net.is_none() && self.quick.debrief.is_none())
+        {
             self.finished = true;
             event_loop.exit();
             return;
@@ -3773,7 +3788,10 @@ impl App {
                 }
                 Step::Exit => {
                     println!("Input script: exit");
-                    self.action(event_loop, Action::Exit);
+                    // A test script's explicit terminator ends automation.
+                    // The UI Exit action first presents a network debrief.
+                    self.finished = true;
+                    event_loop.exit();
                 }
             }
         }
@@ -3790,6 +3808,21 @@ impl App {
         };
         if self.screen == Screen::Flight {
             name = flight_key(event.physical, &name);
+        }
+        if self.screen == Screen::Flight
+            && event.pressed
+            && self.modifiers.control_key()
+            && !self.flight_ui.frozen()
+            && net::scoreboard::page_key(
+                &mut self.net_flight,
+                &name,
+                self.net
+                    .as_ref()
+                    .and_then(|s| s.client.scores())
+                    .map_or(0, |s| s.players.len()),
+            )
+        {
+            return Action::None;
         }
         // Alt-Enter switches window mode on every screen, before any
         // screen claims the key. F11 is not used: it already opens the
@@ -16058,6 +16091,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         wheel: 0.,
         head_look: [0.; 2],
         finished: false,
+        exit_after_net_debrief: false,
         next_frame: None,
         menu_pace: net::pace::MenuPace::new(Instant::now()),
         pacer: Default::default(),

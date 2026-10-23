@@ -258,7 +258,8 @@ pub fn path_words(path: Path) -> &'static str {
 /// 71 combines compatibility-code handshakes with private reservation preflight
 /// packets 14 and 15 for confirmed lounge return slots.
 /// 72 adds human visual designation and its checkpoint retention state.
-pub const PROTOCOL_VERSION: u16 = 72;
+/// 73 adds cumulative flight reports and persistent human/AI score identities.
+pub const PROTOCOL_VERSION: u16 = 73;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

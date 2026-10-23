@@ -304,7 +304,8 @@ impl App {
 
     /// Cancel on the screen with a session running: leaves the game.
     pub(crate) fn leave_direct_session(&mut self, event_loop: &ActiveEventLoop) {
-        if self.net.is_some() {
+        if let Some(session) = &mut self.net {
+            session.left_at = Some(session.now());
             self.net_ending = Some("You left the game.".into());
             self.end_session(event_loop);
         }

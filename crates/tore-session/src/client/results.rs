@@ -15,6 +15,32 @@ impl Client {
     }
 }
 
+/// The same flight colour and position used by the radio, in compact form.
+pub fn flight_label(results: &Results, row: &ResultRow) -> String {
+    flight_label_for(results.rows.iter().map(|r| r.wing), row.wing, row.member)
+}
+
+/// The radio reserves Friendly Wing 1's Red colour even in an empty wing.
+pub fn flight_label_for(
+    wings: impl IntoIterator<Item = tore_sim::ai::launch::WingId>,
+    wing: tore_sim::ai::launch::WingId,
+    member: u8,
+) -> String {
+    let mut earlier: std::collections::BTreeSet<_> = wings
+        .into_iter()
+        .filter(|w| w.side == wing.side && w.index < wing.index)
+        .map(|w| w.index)
+        .collect();
+    if !wing.side.is_enemy() && wing.index > 0 {
+        earlier.insert(0);
+    }
+    let colour = tore_world::radio_calls::FLIGHTS
+        .get(earlier.len())
+        .copied()
+        .unwrap_or("Flight");
+    format!("{colour} {}", u32::from(member) + 1)
+}
+
 /// A status in a word.
 pub fn status_word(status: ResultStatus) -> &'static str {
     match status {
@@ -77,6 +103,7 @@ mod tests {
 
     fn row(plane: u32, callsign: Option<&str>, status: ResultStatus) -> ResultRow {
         ResultRow {
+            left: false,
             plane,
             wing: WingId {
                 side: Side::Friendly,

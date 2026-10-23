@@ -1151,6 +1151,10 @@ pub const ENTRIES: &[Entry] = &[
     cmd("end-flight", "End mission", Game, &["Ctrl-q"]),
     cmd("key:Ctrl-v", "Valkyries music", Game, &["Ctrl-v"]),
     cmd("key:k", "Score board (network games)", Game, &["k"]),
+    menu_shortcut(
+        "Score board: previous / next page (while open)",
+        &["Ctrl-PageUp", "Ctrl-PageDown"],
+    ),
     cmd("bookmark", "Mark replay moment", Game, &["Ctrl-b"]),
     cmd("restart", "Restart flight", Game, &[]),
     cmd("key:F11", "Keyboard help", Game, &["F11"]),
