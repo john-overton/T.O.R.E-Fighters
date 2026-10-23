@@ -122,7 +122,7 @@ Git hooks live in `.git/hooks/`, which is not version controlled, so every clone
 needs this step. A single push can skip the hook with `git push --no-verify`.
 
 The hook runs everything the CI job runs that a single machine can run. Other
-platforms stay in CI, which builds and tests four targets on every push:
+platforms stay in CI, which builds and tests four targets when it is run:
 Ubuntu 22.04, Windows 2022, macOS 14 on Apple Silicon, and macOS 15 on Intel.
 Linux stays on the oldest supported Ubuntu LTS because the binary uses the
 player's own glibc; a newer build host makes a program that will not start on
@@ -209,6 +209,16 @@ master server, [operations](MASTER-SERVER.md#downloading-a-release); and the
 four `server-*` artifacts, the dedicated server's archives,
 [downloading it](DEDICATED-SERVER.md#downloading-it)).
 `workflow_dispatch` does the same once the workflow exists on `main`.
+
+CI (`ci.yml`, Rust baseline, and `network.yml`, Network loopback) no longer runs
+on every push or pull request (John, 2026-10-23): the pre-push hook covers each
+push locally, and the full matrix runs when it is wanted. Start it against any
+branch from GitHub (Actions, the workflow, **Run workflow**, choose the branch)
+or with `gh workflow run ci.yml --ref BRANCH` and `gh workflow run network.yml
+--ref BRANCH`; watch it with `gh run watch`. Both also run on every `v*` tag. A
+newer run for the same branch replaces one that is still queued or running.
+Release packaging keeps its own triggers: `v*` tags, `release-test/...` branches
+and `workflow_dispatch`.
 
 Every script takes the version from `--version`, then from the tag the workflow
 is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
