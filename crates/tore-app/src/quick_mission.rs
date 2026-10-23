@@ -803,7 +803,7 @@ impl QuickMission {
     }
     fn value(&self, id: usize) -> String {
         if self.view.is_some() {
-            if NOT_CARRIED.contains(&id) {
+            if self.lobby && NOT_CARRIED.contains(&id) {
                 return AS_THE_KINGS.into();
             }
             if let Some(text) = self.shown.get(&id) {
@@ -2518,218 +2518,60 @@ impl QuickMission {
         }
         self.controls.push((0, (84, 35, 18, 24)));
         self.controls.extend(entries);
-        if self.lobby {
-            self.line(
-                &mut c,
-                font,
-                35,
-                120,
-                &[("AI aircraft: ", None), ("", Some(AI_AIRCRAFT))],
-            );
-        }
         c.text(font, "FRIENDLY SITUATION", 116, 104, None);
         c.text(font, "ENEMY SITUATION", 429, 104, None);
-        self.line(
-            &mut c,
-            font,
-            35,
-            137,
-            &[("Friendly forces are ", None), ("", Some(3))],
-        );
-        self.line(
-            &mut c,
-            font,
-            340,
-            137,
-            &[("Enemy forces are ", None), ("", Some(20))],
-        );
-        for (x, start) in [(35, 4), (340, 21)] {
-            for wing in 0..3 {
-                let id = start + wing * 3;
-                let y = 153 + wing as i32 * 14;
-                let heading = format!("Wing {}: ", wing + 1);
-                let group = wing + usize::from(start == 21) * 3;
-                let mut parts = vec![
-                    (heading.as_str(), None),
-                    ("", Some(id)),
-                    (" ", None),
-                    ("", Some(id + 1)),
-                    (" ", None),
-                ];
-                if self.lobby {
-                    parts.push(("", Some(CHOICE_BASE + group)));
-                    parts.push((
-                        if self.draft.values[CHOICE_BASE + group] != 0 {
-                            " AI: "
-                        } else {
-                            " "
-                        },
-                        None,
-                    ));
+        for sentence in self.sentences(font) {
+            if sentence.wrap {
+                for (text, id, x, y) in sentence.words(font, 605) {
+                    c.text(font, &text, x, y, None);
+                    if let Some(id) = id {
+                        let r = (
+                            x - 1,
+                            y - 1,
+                            text_width(font, &text) + 2,
+                            font.glyphs.iter().map(|g| g[2]).max().unwrap_or(9) as i32 + 2,
+                        );
+                        self.controls.push((id, r));
+                        c.rect(
+                            r,
+                            if self.hover == Some(id) {
+                                [127, 139, 144, 255]
+                            } else {
+                                [101, 107, 109, 255]
+                            },
+                        );
+                        bevel(&mut c, r, false);
+                        c.text(font, &text, x, y, None);
+                    }
                 }
-                parts.push(("", Some(id + 2)));
-                self.line(&mut c, font, x, y, &parts);
-            }
-            for wing in 0..3 {
-                let group = wing + usize::from(start == 21) * 3;
-                let prefix = self.objective_prefix(group);
-                self.line(
-                    &mut c,
-                    font,
-                    x,
-                    201 + wing as i32 * 14,
-                    &[
-                        (&prefix, None),
-                        ("", Some(OBJECTIVE_BASE + group)),
-                        (".", None),
-                    ],
-                );
-            }
-        }
-        for (x, side_offset) in [(35, 0), (340, 3)] {
-            for wing in 0..3 {
-                let group = side_offset + wing;
-                let prefix = if group == 0 {
-                    "Your group's survival is ".to_owned()
+            } else {
+                let parts: Vec<_> = sentence
+                    .parts
+                    .iter()
+                    .map(|(text, id)| (text.as_str(), *id))
+                    .collect();
+                self.line(&mut c, font, sentence.x, sentence.y, &parts);
+                let note = if sentence.parts.iter().any(|p| p.1 == Some(33))
+                    && self.ground_unavailable()
+                {
+                    Some((33, NO_FIELD_NOTE))
+                } else if sentence.parts.iter().any(|p| p.1 == Some(ENEMY_START))
+                    && self.enemy_ground_unavailable()
+                {
+                    Some((ENEMY_START, NO_ENEMY_FIELD_NOTE))
                 } else {
-                    format!("Wing {}'s survival is ", wing + 1)
+                    None
                 };
-                self.line(
-                    &mut c,
-                    font,
-                    x,
-                    249 + wing as i32 * 14,
-                    &[
-                        (&prefix, None),
-                        ("", Some(SURVIVAL_BASE + group)),
-                        (".", None),
-                    ],
-                );
-            }
-        }
-        for (y, parts) in [
-            (301, vec![("You are flying over ", None), ("", Some(13))]),
-            (
-                315,
-                vec![
-                    (
-                        if self.ground_start() {
-                            "Airborne wings at "
-                        } else {
-                            "You are at "
-                        },
-                        None,
-                    ),
-                    ("", Some(14)),
-                    (" feet. It is ", None),
-                    ("", Some(15)),
-                ],
-            ),
-            (329, vec![("Your situation is ", None), ("", Some(16))]),
-            (
-                343,
-                vec![
-                    ("You are ", None),
-                    ("", Some(17)),
-                    (" from enemy forces.", None),
-                ],
-            ),
-            (371, vec![("You are carrying ", None), ("", Some(18))]),
-            (385, vec![("Air combat is with ", None), ("", Some(19))]),
-        ] {
-            self.line(&mut c, font, 35, y, &parts);
-        }
-        self.line(&mut c, font, 35, 357, &[("Start: ", None), ("", Some(33))]);
-        if self.ground_unavailable() && self.view.is_none() {
-            // The short note beside the greyed Start: why Ground is not on
-            // offer (the notice gives the full words when it is touched).
-            let x = self
-                .controls
-                .iter()
-                .rev()
-                .find(|(id, _)| *id == 33)
-                .map_or(140, |(_, r)| r.0 + r.2 + 6);
-            c.text(font, NO_FIELD_NOTE, x, 357, Some(GAP_FIELD_TEXT));
-        }
-        if self.ground_start() {
-            self.line(
-                &mut c,
-                font,
-                35,
-                399,
-                &[("Airport: ", None), ("", Some(34))],
-            );
-        }
-        let (mut x, mut y) = (340, 301);
-        for (text, id) in [
-            ("Friendly ground target is ", None),
-            ("", Some(30)),
-            ("", Some(31)),
-            ("defended by AAA and ", None),
-            ("", Some(32)),
-            ("defended by SAMs.", None),
-        ] {
-            let text = id.map(|i| self.value(i)).unwrap_or_else(|| text.into());
-            for word in text.split_whitespace() {
-                let width = text_width(font, word);
-                if x + width > 605 {
-                    x = 340;
-                    y += 14;
+                if let Some((id, note)) = note.filter(|_| self.view.is_none()) {
+                    let x = self
+                        .controls
+                        .iter()
+                        .rev()
+                        .find(|(field, _)| *field == id)
+                        .map_or(sentence.x + 105, |(_, r)| r.0 + r.2 + 6);
+                    c.text(font, note, x, sentence.y, Some(GAP_FIELD_TEXT));
                 }
-                if let Some(id) = id {
-                    let rect = (
-                        x - 1,
-                        y - 1,
-                        width + 2,
-                        font.glyphs.iter().map(|g| g[2]).max().unwrap_or(9) as i32 + 2,
-                    );
-                    self.controls.push((id, rect));
-                    c.rect(
-                        rect,
-                        if self.hover == Some(id) {
-                            [127, 139, 144, 255]
-                        } else {
-                            [101, 107, 109, 255]
-                        },
-                    );
-                    bevel(&mut c, rect, false);
-                }
-                c.text(font, word, x, y, None);
-                x += width + text_width(font, " ") + if id.is_some() { 2 } else { 0 };
             }
-        }
-        // The enemy's start (slice CL-R) one blank line below the sentence,
-        // as the left column leaves one above Start. The longest retail
-        // sentence (all 124 target labels of the sixteen theaters with every
-        // pair of defense words) ends on its third line at y 329, so these
-        // rows fall at 343 and 357, or 357 and 371. A longer label (a
-        // modified game) cannot push them past 391 and 405, above the
-        // buttons at 419.
-        let enemy_y = (y + 28).min(ENEMY_ROWS_LAST_Y);
-        self.line(
-            &mut c,
-            font,
-            340,
-            enemy_y,
-            &[("Enemy start: ", None), ("", Some(ENEMY_START))],
-        );
-        if self.enemy_ground_unavailable() && self.view.is_none() {
-            let x = self
-                .controls
-                .iter()
-                .rev()
-                .find(|(id, _)| *id == ENEMY_START)
-                .map_or(460, |(_, r)| r.0 + r.2 + 6);
-            c.text(font, NO_ENEMY_FIELD_NOTE, x, enemy_y, Some(GAP_FIELD_TEXT));
-        }
-        if self.enemy_ground_start() {
-            self.line(
-                &mut c,
-                font,
-                340,
-                enemy_y + 14,
-                &[("Enemy airport: ", None), ("", Some(ENEMY_AIRPORT))],
-            );
         }
         if self.view.is_some() {
             // Read-only: one button, and the page says so in its header.
@@ -2825,6 +2667,187 @@ impl QuickMission {
         }
         animating
     }
+    /// One source of sentence text and variable values for setup and flight.
+    pub(crate) fn sentences(&self, font: &Sprite) -> Vec<crate::mission_brief::Sentence> {
+        use crate::mission_brief::Sentence;
+        let mut rows = Vec::new();
+        let mut line = |x, y, parts: &[(&str, Option<usize>)]| {
+            rows.push(Sentence {
+                x,
+                y,
+                wrap: false,
+                parts: parts
+                    .iter()
+                    .map(|(text, id)| {
+                        (
+                            id.map(|i| self.value(i)).unwrap_or_else(|| (*text).into()),
+                            *id,
+                        )
+                    })
+                    .collect(),
+            });
+        };
+        if self.lobby {
+            line(35, 120, &[("AI aircraft: ", None), ("", Some(AI_AIRCRAFT))]);
+        }
+
+        line(35, 137, &[("Friendly forces are ", None), ("", Some(3))]);
+        line(340, 137, &[("Enemy forces are ", None), ("", Some(20))]);
+        for (x, start) in [(35, 4), (340, 21)] {
+            for wing in 0..3 {
+                let id = start + wing * 3;
+                let y = 153 + wing as i32 * 14;
+                let heading = format!("Wing {}: ", wing + 1);
+                let group = wing + usize::from(start == 21) * 3;
+                let mut parts = vec![
+                    (heading.as_str(), None),
+                    ("", Some(id)),
+                    (" ", None),
+                    ("", Some(id + 1)),
+                    (" ", None),
+                ];
+                if self.lobby {
+                    parts.push(("", Some(CHOICE_BASE + group)));
+                    parts.push((
+                        if self.draft.values[CHOICE_BASE + group] != 0 {
+                            " AI: "
+                        } else {
+                            " "
+                        },
+                        None,
+                    ));
+                }
+                parts.push(("", Some(id + 2)));
+                line(x, y, &parts);
+            }
+            for wing in 0..3 {
+                let group = wing + usize::from(start == 21) * 3;
+                let prefix = self.objective_prefix(group);
+                line(
+                    x,
+                    201 + wing as i32 * 14,
+                    &[
+                        (&prefix, None),
+                        ("", Some(OBJECTIVE_BASE + group)),
+                        (".", None),
+                    ],
+                );
+            }
+        }
+        for (x, side_offset) in [(35, 0), (340, 3)] {
+            for wing in 0..3 {
+                let group = side_offset + wing;
+                let prefix = if group == 0 {
+                    "Your group's survival is ".to_owned()
+                } else {
+                    format!("Wing {}'s survival is ", wing + 1)
+                };
+                line(
+                    x,
+                    249 + wing as i32 * 14,
+                    &[
+                        (&prefix, None),
+                        ("", Some(SURVIVAL_BASE + group)),
+                        (".", None),
+                    ],
+                );
+            }
+        }
+        for (y, parts) in [
+            (301, vec![("You are flying over ", None), ("", Some(13))]),
+            (
+                315,
+                vec![
+                    (
+                        if self.ground_start() {
+                            "Airborne wings at "
+                        } else {
+                            "You are at "
+                        },
+                        None,
+                    ),
+                    ("", Some(14)),
+                    (" feet. It is ", None),
+                    ("", Some(15)),
+                ],
+            ),
+            (329, vec![("Your situation is ", None), ("", Some(16))]),
+            (
+                343,
+                vec![
+                    ("You are ", None),
+                    ("", Some(17)),
+                    (" from enemy forces.", None),
+                ],
+            ),
+            (371, vec![("You are carrying ", None), ("", Some(18))]),
+            (385, vec![("Air combat is with ", None), ("", Some(19))]),
+        ] {
+            line(35, y, &parts);
+        }
+        line(35, 357, &[("Start: ", None), ("", Some(33))]);
+        if self.ground_start() {
+            line(35, 399, &[("Airport: ", None), ("", Some(34))]);
+        }
+        let target = Sentence {
+            x: 340,
+            y: 301,
+            wrap: true,
+            parts: [
+                ("Friendly ground target is ", None),
+                ("", Some(30)),
+                ("", Some(31)),
+                ("defended by AAA and ", None),
+                ("", Some(32)),
+                ("defended by SAMs.", None),
+            ]
+            .iter()
+            .map(|(text, id)| {
+                (
+                    id.map(|i| self.value(i)).unwrap_or_else(|| (*text).into()),
+                    *id,
+                )
+            })
+            .collect(),
+        };
+        let enemy_y = (target.last_y(font, 605) + 28).min(ENEMY_ROWS_LAST_Y);
+        line(
+            340,
+            enemy_y,
+            &[("Enemy start: ", None), ("", Some(ENEMY_START))],
+        );
+        if self.enemy_ground_start() {
+            line(
+                340,
+                enemy_y + 14,
+                &[("Enemy airport: ", None), ("", Some(ENEMY_AIRPORT))],
+            );
+        }
+        rows.push(target);
+        rows
+    }
+    /// Reconstruct from the accepted mission, never from the current draft.
+    pub(crate) fn brief_sentences(
+        &self,
+        spec: &MissionSpec,
+        settings: Option<&tore_session::settings::Store>,
+        font: &Sprite,
+    ) -> Result<Vec<crate::mission_brief::Sentence>, String> {
+        let empty = BTreeMap::new();
+        let mut creator = Self::new(
+            spec.player(),
+            self.options.clone(),
+            self.resources.as_deref().unwrap_or(&empty),
+        );
+        creator.choose_theater_code(&spec.theater, self.resources.as_deref().unwrap_or(&empty));
+        creator.load_spec(spec, false)?;
+        creator.view = Some(ViewKind::Reader);
+        creator.lobby = settings.is_some();
+        if let Some(settings) = settings {
+            creator.draft.values[AI_AIRCRAFT] = usize::from(settings.ai());
+        }
+        Ok(creator.sentences(font))
+    }
     fn line(
         &mut self,
         c: &mut Canvas,
@@ -2908,7 +2931,7 @@ impl QuickMission {
         self.controls.push((id, hit));
     }
 }
-fn bevel(c: &mut Canvas, (x, y, w, h): Rect, inset: bool) {
+pub(crate) fn bevel(c: &mut Canvas, (x, y, w, h): Rect, inset: bool) {
     let light = [115, 120, 119, 255];
     let dark = [24, 27, 27, 255];
     let (top, bottom) = if inset { (dark, light) } else { (light, dark) };
@@ -4800,6 +4823,51 @@ mod tests {
     // ---- the lobby's mission read back, and read-only (lobby pass, L4) ----
 
     /// A creator as a lobby opens it: every aircraft offered.
+    #[test]
+    fn mission_brief_uses_the_creators_sentences_for_single_and_multiplayer_specs() {
+        let font = crate::menu::flat_font([232, 233, 230]);
+        let source = full_catalog();
+        let mut seed = 59;
+        let mut spec = made_spec(&source, &mut seed);
+        spec.player_choice[0] = true;
+        spec.ground_target = ground_targets(&spec.theater)
+            .first()
+            .map(|s| (*s).to_string());
+        spec.aaa = Defense::Heavy;
+        spec.sam = Defense::Moderate;
+        for multiplayer in [false, true] {
+            let mut settings =
+                tore_session::settings::Store::defaults(tore_session::settings::Mode::Pvp);
+            settings
+                .apply(&[(tore_session::settings::number::AI, 0)])
+                .unwrap();
+            let mut creator = full_catalog();
+            creator.load_spec(&spec, false).unwrap();
+            creator.view = Some(ViewKind::Reader);
+            creator.lobby = multiplayer;
+            creator.draft.values[AI_AIRCRAFT] = 0;
+            let expected = creator.sentences(&font);
+            let actual = source
+                .brief_sentences(&spec, multiplayer.then_some(&settings), &font)
+                .unwrap();
+            assert_eq!(actual, expected);
+            let field = |id| {
+                actual
+                    .iter()
+                    .flat_map(|s| &s.parts)
+                    .find(|p| p.1 == Some(id))
+                    .unwrap()
+                    .0
+                    .clone()
+            };
+            assert_eq!(field(31), "heavily");
+            assert_eq!(field(32), "moderately");
+            if multiplayer {
+                assert_eq!(field(CHOICE_BASE), "Player choice");
+                assert_eq!(field(AI_AIRCRAFT), "Off");
+            }
+        }
+    }
     fn lobby_creator() -> QuickMission {
         let mut q = full_catalog();
         q.lobby = true;

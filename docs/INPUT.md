@@ -1223,6 +1223,13 @@ legacy and restricted native modes remain available for airborne starts.
 Shift-M toggles the live map. Escape closes it, plus/minus zoom, arrows pan and
 Home resumes following the player. Map navigation takes priority over keyboard
 flight bindings for those keys while open. Other flight controls remain live.
+Enter or controller A switches between Map and Mission. The Mission brief
+scrolls with Up/Down, the controller D-pad, Page Up/Down, Home/End, the mouse
+wheel or the red scroll bar. Escape or controller B closes it. The map retains
+its view when switching tabs. A/B and the D-pad do not also operate the aircraft
+while this page is open. In the in-flight respawn Loadout and Aircraft pages,
+select Mission... or press M for the same brief; Close, Escape/B or Enter/A
+returns to the unchanged page. Pre-flight loadout menus are unchanged.
 Right-side map buttons toggle categories, with Buildings off by default.
 Selections last until flight restart; no category settings appear in Escape. See the
 [map specification](spec/flight-map.md).

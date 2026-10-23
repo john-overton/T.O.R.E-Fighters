@@ -63,6 +63,7 @@ fn sprites(assets: &crate::assets::Assets) -> AppResult<BTreeMap<String, Sprite>
             }
         }
     }
+    sprites.insert("QUICKFONT".into(), crate::menu::flat_font([232, 233, 230]));
     Ok(sprites)
 }
 
@@ -258,6 +259,85 @@ pub fn run() -> AppResult<()> {
         );
         if void > 50 {
             return Err(format!("{}: {void} void pixels show in the map's plot", shot.name).into());
+        }
+    }
+    if args.get(1).is_some_and(|arg| arg == "brief") {
+        use tore_session::settings::{Mode, Store, number};
+        let mut quick = crate::quick_mission::QuickMission::new(
+            AircraftId::F18,
+            assets.creator_options.clone(),
+            &resources,
+        );
+        quick.set_resources(std::sync::Arc::new(resources.clone()));
+        for multiplayer in [false, true] {
+            let mut flown = spec.clone();
+            for (i, wing) in flown.wings.iter_mut().enumerate() {
+                wing.count = i % 5 + 1;
+            }
+            flown.player_choice = [true, false, true, true, false, true];
+            let mut settings = Store::defaults(Mode::Pvp);
+            settings.apply(&[
+                (number::AI, 0),
+                (number::MIN_PLAYERS, 4),
+                (number::TIME_LIMIT, 600),
+                (number::KILL_LIMIT, 10),
+            ])?;
+            let sentences = quick.brief_sentences(
+                &flown,
+                multiplayer.then_some(&settings),
+                &sprites["QUICKFONT"],
+            )?;
+            let mut map = Map::default();
+            map.brief = Some(crate::mission_brief::Brief::new(
+                sentences,
+                multiplayer.then_some(&settings),
+                &sprites["QUICKFONT"],
+            ));
+            let world = World::new(&flown, &resources, Seating::SinglePlayer)?;
+            let start = world.cockpits[0].flight.clone();
+            let markup = crate::quick_mission::map::mission_plan(&world, false, None);
+            let readout = world
+                .combat
+                .cockpit_readout(
+                    PLAYER,
+                    tore_world::combat::launcher(&start),
+                    world.ai_wings.as_ref(),
+                    world.cockpits.first(),
+                )
+                .ok_or("no readout")?;
+            for page in ["map", "mission", "mission-bottom", "respawn-brief"] {
+                let mut pixels = vec![0; 640 * 480 * 4];
+                match page {
+                    "mission" => map.key("Enter"),
+                    "mission-bottom" => map.key("End"),
+                    "respawn-brief" => {
+                        map.key("Home");
+                    }
+                    _ => {}
+                }
+                if page == "respawn-brief" {
+                    map.brief.as_ref().unwrap().draw(&mut pixels, &sprites);
+                } else {
+                    map.draw(
+                        &mut pixels,
+                        &world.terrain,
+                        &scenery,
+                        &start,
+                        &readout,
+                        DEFAULT_OWNSHIP_SIDE,
+                        &font,
+                        &sprites,
+                        Some(&markup),
+                    );
+                }
+                let name = format!(
+                    "{}-{page}",
+                    if multiplayer { "multiplayer" } else { "single" }
+                );
+                let path = out.join(format!("{name}.png"));
+                std::fs::write(&path, crate::replay::png::encode_rgba(640, 480, &pixels)?)?;
+                println!("Mission brief preview: {}", path.display());
+            }
         }
     }
     Ok(())

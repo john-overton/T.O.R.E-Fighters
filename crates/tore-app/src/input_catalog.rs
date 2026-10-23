@@ -1147,6 +1147,22 @@ pub const ENTRIES: &[Entry] = &[
         "Multiplayer ? menu (controller Menu also opens it)",
         &["F1"],
     ),
+    menu_shortcut(
+        "In-flight Map/Mission: switch tab (controller A)",
+        &["Enter"],
+    ),
+    menu_shortcut(
+        "Mission brief: scroll (controller D-pad up/down)",
+        &["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"],
+    ),
+    menu_shortcut(
+        "In-flight respawn: mission brief (or select Mission...)",
+        &["m"],
+    ),
+    menu_shortcut(
+        "Mission brief: close (controller B; A also closes respawn brief)",
+        &["Escape"],
+    ),
     menu_shortcut("Multiplayer ? menu: return to main menu", &["M"]),
     menu_shortcut("Multiplayer ? menu: exit", &["X"]),
     menu_shortcut(

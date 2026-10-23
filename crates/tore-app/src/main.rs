@@ -104,6 +104,7 @@ mod mig29_animation;
 mod mirrors;
 mod missile_acceptance;
 mod missile_sag;
+mod mission_brief;
 mod multiplayer_menu;
 mod navigation;
 mod net;
@@ -500,6 +501,7 @@ struct App {
     /// and the approximate objective area, read from the mission as built.
     /// `None` for a free flight.
     mission_markup: Option<flight_map::Plan>,
+    mission_brief_sentences: Option<Vec<mission_brief::Sentence>>,
     /// A networked flight on screen, with the single-player state it set
     /// aside.
     net_flight: Option<net::play::NetFlight>,
@@ -1465,7 +1467,7 @@ impl App {
         }
         if let Some(key) = key {
             // Menu navigation buttons have no flight semantics while the menu is closed.
-            if self.flight_ui.menu || name == "menu" {
+            if self.flight_ui.menu || self.flight_ui.map.open || name == "menu" {
                 let command = self.flight_ui.key(
                     key,
                     false,
@@ -1517,6 +1519,7 @@ impl App {
             if shift {
                 key = &key[6..];
             }
+            let map_before = self.flight_ui.map.open;
             let command = self.flight_ui.key(
                 key,
                 shift,
@@ -1524,6 +1527,9 @@ impl App {
                 alt,
                 net::play::menu(&self.hornet, &self.net_flight),
             );
+            if !map_before && self.flight_ui.map.open {
+                self.flight_ui.map.brief = None;
+            }
             return self.flight_command(command);
         }
         // In the AC-130's sensor console the mouse wheel zooms the sight
@@ -2850,6 +2856,7 @@ impl App {
                 .loadout,
         ));
         spec.weather = scenery::launch_overrides().map_err(|error| error.to_string())?;
+        let brief_sentences = self.quick.sentences(&menu::flat_font([232, 233, 230]));
         let resources = Arc::clone(&self.theater_resources);
         let player = Arc::clone(&self.hornet.kind);
         let graphics = self
@@ -2897,7 +2904,12 @@ impl App {
                 };
                 let recording = start_recording(&mut built.world);
                 Ok(loading::Prepared::Mission(Box::new((
-                    built, view, scenery, graphics, recording,
+                    built,
+                    view,
+                    scenery,
+                    graphics,
+                    recording,
+                    brief_sentences,
                 ))))
             },
         )?);
@@ -3087,7 +3099,16 @@ impl App {
             &self.instruments,
             self.fullscreen_preference,
         );
+        // Automatic creator captures keep the requested map page across loading.
+        let map_page = self
+            .creator_loading_view
+            .as_ref()
+            .map(|_| (self.flight_ui.map.open, self.flight_ui.map.mission_tab));
         self.flight_ui.reset_for_flight();
+        if let Some((open, mission)) = map_page {
+            self.flight_ui.map.open = open;
+            self.flight_ui.map.mission_tab = mission;
+        }
         self.live_debug.reset();
         saved.apply(&mut self.flight_ui, &mut self.instruments);
         if self.world.setup.ground_start.is_some() {
@@ -3837,6 +3858,10 @@ impl App {
                         | "ArrowUp"
                         | "ArrowDown"
                         | "Home"
+                        | "Enter"
+                        | "PageUp"
+                        | "PageDown"
+                        | "End"
                 ))
             && !(event.pressed
                 && self.flight_ui.menu
@@ -3905,6 +3930,9 @@ impl App {
                 )
             };
             if self.flight_ui.map.open != map_before {
+                if self.flight_ui.map.open {
+                    self.flight_ui.map.brief = None;
+                }
                 self.flight_ui.map.cancel_press();
                 self.camera.keys.clear();
                 self.release_trigger();
@@ -4034,6 +4062,13 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         if self.finished {
             return;
+        }
+        if matches!(event, WindowEvent::RedrawRequested)
+            && self.screen == Screen::Flight
+            && (self.flight_ui.map.open || self.respawn_open())
+            && self.flight_ui.map.brief.is_none()
+        {
+            self.prepare_mission_brief();
         }
         self.note_menu_input(&event);
         // With the frame-rate counter under a capped rate, the timer draws
@@ -4343,6 +4378,11 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .is_some_and(|f| f.respawn_menu.is_some())
                 {
+                    if self.respawn_brief_open()
+                        && let Some(brief) = &mut self.flight_ui.map.brief
+                    {
+                        brief.moved(point);
+                    }
                     return;
                 }
                 if let Some(editor) = &mut self.graphics_screen {
@@ -4421,6 +4461,14 @@ impl ApplicationHandler for App {
                 }
                 if self.screen == Screen::Flight && self.respawn_open() {
                     self.respawn_key(if notches > 0 { "ArrowUp" } else { "ArrowDown" })
+                } else if self.screen == Screen::Flight
+                    && self.flight_ui.map.open
+                    && self.flight_ui.map.mission_tab
+                {
+                    self.flight_ui
+                        .map
+                        .key(if notches > 0 { "ArrowUp" } else { "ArrowDown" });
+                    Action::None
                 } else if let Some(screen) = &mut self.sound_screen {
                     let outcome = screen.wheel(notches);
                     self.sound_result(outcome)
@@ -6410,6 +6458,11 @@ impl ApplicationHandler for App {
                                 .and_then(|s| s.client.revival_prompt())
                                 .unwrap_or_default();
                             menu.draw(&mut self.menu.pixels, &self.hornet.font, &prompt);
+                            if menu.brief_open
+                                && let Some(brief) = &self.flight_ui.map.brief
+                            {
+                                brief.draw(&mut self.menu.pixels, &self.menu.quick_sprites);
+                            }
                         }
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
@@ -6721,7 +6774,9 @@ impl ApplicationHandler for App {
                                 mission::LoadoutSpec::of(&o.loadout),
                             );
                         }
-                        let (built, view, scenery, graphics, recording) = *parts;
+                        let (built, view, scenery, graphics, recording, brief_sentences) = *parts;
+                        self.mission_brief_sentences = Some(brief_sentences);
+                        self.flight_ui.map.brief = None;
                         self.prepared_recording = Some(recording);
                         self.prepared_scenery = Some((scenery, graphics));
                         self.begin_flight(event_loop, Some((built, view)));
@@ -6829,6 +6884,7 @@ impl ApplicationHandler for App {
         let gunship = cockpit
             .and_then(|cockpit| self.world.combat.state.ownship(cockpit.plane.0))
             .is_some_and(|own| own.gunship.is_some());
+        self.input.map_navigation = self.flight_ui.map.open || self.respawn_open();
         self.input.aircraft_controls(
             available(tore_input::FlightAxis::VectorPitch),
             available(tore_input::FlightAxis::Conversion),
@@ -11383,6 +11439,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut flight_zoom = 1f32;
     let mut flight_menu = false;
     let mut flight_map = false;
+    let mut mission_brief = false;
     let mut weapon_diagnostics = false;
     let mut debug_panels = false;
     let mut flight_panels = Vec::new();
@@ -12086,6 +12143,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err("--flight-view needs 0..11".into());
                 }
             }
+            "--mission-brief" => { mission_brief = true; flight_map = true; initial_screen = Screen::Flight; }
             "--flight-map" => { flight_map = true; initial_screen = Screen::Flight; }
             "--weapon-diagnostics" => weapon_diagnostics = true,
             "--debug-panels" => debug_panels = true,
@@ -15554,6 +15612,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         net: None,
         net_built: None,
         mission_markup: None,
+        mission_brief_sentences: None,
         net_flight: None,
         net_ending: None,
         observing: None,
@@ -15627,6 +15686,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ui.cheats.no_turbulence = !turbulence_enabled;
             ui.menu = flight_menu;
             ui.map.open = flight_map;
+            ui.map.mission_tab = mission_brief;
             ui.weapon_diagnostics = weapon_diagnostics;
             ui.debug_panels = debug_panels;
             ui.ai_test = probe_script.ai_test;

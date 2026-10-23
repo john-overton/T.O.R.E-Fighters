@@ -656,6 +656,7 @@ pub(crate) type MissionParts = (
     crate::scenery::Scenery,
     Option<crate::renderer::LoadingGraphics>,
     Option<crate::replay::recorder::Recorder>,
+    Vec<crate::mission_brief::Sentence>,
 );
 
 pub(crate) enum Prepared {

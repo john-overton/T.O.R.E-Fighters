@@ -16,6 +16,7 @@ AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su2
 # Every menu state `--snapshot-state` accepts (normal mode).
 NORMAL_STATES = [
     "loading", "loading-thunderbirds",
+    "respawn-loadout", "respawn-aircraft",
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "graphics-middle",
     "graphics-bottom", "graphics-scale", "graphics-shadows", "sound",
@@ -291,6 +292,23 @@ def ordnance_notes(warning: bool, helper: bool, lobby: bool = False):
 
 def flight_picture(size):
     return lambda output: picture_problems(output, r"Scene capture:", size, min_colors=200)
+
+
+def mission_brief_picture(output):
+    # The opaque brief panel must survive automatic creator loading. A cockpit
+    # screenshot is a failure even if it is a perfectly good flight picture.
+    problems = picture_problems(output, r"Scene capture:", min_colors=8)
+    match = re.search(r"Scene capture:\s*(\S+)", output)
+    ppm = read_ppm(Path(match.group(1))) if match else None
+    if ppm:
+        width, height, pixels = ppm
+        step = max(1, width * height // 20000)
+        samples = [pixels[i * 3:i * 3 + 3] for i in range(0, width * height, step)]
+        panel = sum(all(abs(c - expected) <= 2 for c, expected in zip(rgb, (58, 63, 65)))
+                    for rgb in samples)
+        if panel < len(samples) // 4:
+            problems.append("Mission brief panel is missing from the flight capture")
+    return problems
 
 
 def flown_inventory(choice: str):
@@ -625,6 +643,19 @@ def scenarios() -> list[Scenario]:
                     *[rf"Flight map preview: \S+/{name}\.png \(void pixels \d+\)"
                       for name in ("follow", "wide", "objective", "close", "scrolled", "red", "layer-off", "off-map")]],
             outputs=["follow.png", "wide.png", "objective.png", "off-map.png"],
+        )
+    )
+    out.append(
+        Scenario(
+            name="menus-flight-map-mission-brief",
+            lane="menus",
+            args=["--flight-map-preview", "{work}", "brief", "--no-audio"],
+            timeout=300,
+            expect=[rf"Mission brief preview: \S+/{kind}-{page}\.png"
+                    for kind in ("single", "multiplayer")
+                    for page in ("map", "mission", "mission-bottom", "respawn-brief")],
+            outputs=["single-map.png", "single-mission.png", "multiplayer-map.png",
+                     "multiplayer-mission.png", "multiplayer-mission-bottom.png", "multiplayer-respawn-brief.png"],
         )
     )
     out.append(
@@ -1007,6 +1038,7 @@ def scenarios() -> list[Scenario]:
         )
     for name, extra in (
         ("map", ["--flight-map"]),
+        ("mission-brief", ["--mission-brief", "--launch-quick-mission"]),
         ("panels", ["--dummy-aircraft", "mig29,2", "--flight-panels", "thought,telemetry,guidance,comms,menu", "--debug-panels"]),
         ("weapon-diagnostics", ["--weapon-diagnostics", "--dummy-aircraft", "mig29,1"]),
         ("small-layout", ["--instrument-layout", "small"]),
@@ -1022,7 +1054,8 @@ def scenarios() -> list[Scenario]:
                 args=[*extra, "--capture-flight", "{work}/flight.ppm", "--window-size", "960x720", "--no-audio"],
                 timeout=120,
                 expect=[r"Smoke test: requested screen presented successfully"],
-                check=flight_picture((960, 720)),
+                # A creator launch receives the display's physical HiDPI size.
+                check=mission_brief_picture if name == "mission-brief" else flight_picture((960, 720)),
             )
         )
     for flag in ("--free-flight", "--launch-quick-mission", "--quick-mission", "--controls-menu"):

@@ -61,6 +61,44 @@ held just inside the plot's frame. It shows only while that part of the edge
 is in view; scrolling or zooming out to it brings it into view. `opinionated`,
 John 2026-10-12.
 
+## Mission brief tab
+
+Opinionated addition requested by John, 2026-10-22. The page has **Map** and
+**Mission** tabs. Agent presentation decisions: the tabs sit below the existing
+plot so its size, scale and controls stay unchanged; Enter or controller A
+switches tabs. Clicking a tab selects it. Map zoom, pan, following and category
+choices survive a tab switch. Shift+M, Escape or controller B closes either tab.
+Tab keeps its gun binding. The page never pauses a multiplayer flight.
+
+The Mission tab reads the Quick Mission creator's shared sentence builder,
+including filled variables, wing types, counts, skill, objectives, survival,
+theater, condition, starts, separation, ground target and defenses. It uses the
+creator's font, field colours and bevels, with no editable fields. Single player
+keeps the sentences of the accepted setup that built the flight, including the
+creator-only situation text. Multiplayer reconstructs the host's MissionSpec,
+including Player Choice wings and their AI defaults, plus the session settings.
+This also applies to dedicated servers. The same read-only creator wording marks
+fields the network mission does not carry as the King's. Free flight explicitly
+says that no Quick Mission setup is available.
+
+Agent layout decisions: read each side's sentences down one column, then the
+mission settings, then multiplayer rules. The rules show mode, respawn, lives
+(revivals), revive delay, time and kill limits, friendly fire, AI and minimum
+players. Twenty-four rows fit; longer text wraps and scrolls. Up/Down or the
+controller D-pad scrolls one row, Page Up/Down moves 24 rows, Home/End reaches
+the first/last page, and the mouse wheel scrolls. The red retail scroll thumb
+can be dragged; clicking its track moves a page. Scrolling stops at the ends.
+Controller A/B and the D-pad operate the page without also changing aircraft
+gear, brakes, instruments or the gunship console. Other flight controls stay live.
+
+John's corrected scope, 2026-10-22: **Mission...** appears only on the in-flight
+spawn/respawn loadout and Player Choice aircraft pages. It is also a selectable
+row on each page, reachable with keyboard or controller navigation; M opens it
+directly. This opens the same brief with its own Close button. Escape,
+controller B, Enter or controller A returns to the unchanged loadout page.
+The pre-flight creator's Load Ordnance and lobby Loadout pages have no new
+button. The replay viewer has no in-flight map, so it has no new brief tab.
+
 ## Knowledge and detection
 
 All imported runways are known map locations. Other entities require a current

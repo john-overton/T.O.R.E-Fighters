@@ -14,7 +14,7 @@ use tore_world::{
 
 const LOOK: Look = Look {
     title: "RESPAWN LOADOUT",
-    buttons: &["Done", "Cancel"],
+    buttons: &["Done", "Cancel", "Mission..."],
     help: |_| vec![],
 };
 const PAGE: usize = 12;
@@ -27,6 +27,7 @@ fn row(label: String) -> MenuNode {
 }
 
 pub struct Menu {
+    pub brief_open: bool,
     widget: PauseMenu,
     tree: Vec<MenuNode>,
     pub load: Loadout,
@@ -71,6 +72,7 @@ impl Menu {
             .filter_map(|name| DesignatorStore::parse(name, data.get(*name)?).ok())
             .collect();
         let mut menu = Self {
+            brief_open: false,
             widget: PauseMenu::default(),
             tree: vec![],
             load,
@@ -179,6 +181,7 @@ impl Menu {
         )));
         loads.push(row("Standard load".into()));
         loads.push(row("Done".into()));
+        loads.push(row("Mission...".into()));
         self.tree = vec![MenuNode {
             label: "Loadout".into(),
             shortcut: String::new(),
@@ -202,6 +205,7 @@ impl Menu {
             if self.aircraft.len() > PAGE {
                 rows.push(row("Next aircraft page".into()));
             }
+            rows.push(row("Mission...".into()));
             self.tree.push(MenuNode {
                 label: "Aircraft".into(),
                 shortcut: String::new(),
@@ -225,6 +229,14 @@ impl Menu {
         data: &BTreeMap<String, Vec<u8>>,
         spec: &MissionSpec,
     ) -> Outcome {
+        if self.tree[self.widget.root]
+            .children
+            .get(index)
+            .is_some_and(|row| row.label == "Mission...")
+        {
+            self.brief_open = true;
+            return Outcome::Click;
+        }
         self.message = None;
         if self.widget.root == 1 {
             self.cycles.clear();
@@ -356,6 +368,10 @@ impl Menu {
         match event {
             Event::Select(index) => self.select(index, data, spec),
             Event::Button(0) => self.done(data, spec),
+            Event::Button(2) => {
+                self.brief_open = true;
+                Outcome::Click
+            }
             Event::Button(_) => Outcome::Cancel,
             Event::Tab(index) => {
                 self.widget.show_tab(index);
@@ -371,6 +387,10 @@ impl Menu {
         data: &BTreeMap<String, Vec<u8>>,
         spec: &MissionSpec,
     ) -> Outcome {
+        if key == "m" || key == "M" {
+            self.brief_open = true;
+            return Outcome::Click;
+        }
         if key == "Escape" {
             return Outcome::Cancel;
         }
@@ -412,6 +432,22 @@ impl Menu {
 }
 
 impl crate::App {
+    pub(crate) fn respawn_brief_open(&self) -> bool {
+        self.net_flight
+            .as_ref()
+            .and_then(|f| f.respawn_menu.as_ref())
+            .is_some_and(|m| m.brief_open)
+    }
+    fn close_respawn_brief(&mut self) {
+        if let Some(menu) = self
+            .net_flight
+            .as_mut()
+            .and_then(|f| f.respawn_menu.as_mut())
+        {
+            menu.brief_open = false;
+        }
+    }
+
     pub(crate) fn respawn_open(&self) -> bool {
         self.net_flight
             .as_ref()
@@ -532,7 +568,15 @@ impl crate::App {
                 flight.respawn_choice = Some((aircraft, loadout));
                 flight.respawn_menu = None;
             }
-            Outcome::Click => {}
+            Outcome::Click => {
+                if flight
+                    .respawn_menu
+                    .as_ref()
+                    .is_some_and(|menu| menu.brief_open)
+                {
+                    self.flight_ui.map.brief = None;
+                }
+            }
         }
         self.camera.keys.clear();
         self.mouse_look = None;
@@ -542,6 +586,20 @@ impl crate::App {
         crate::menu::Action::Click
     }
     pub(crate) fn respawn_key(&mut self, key: &str) -> crate::menu::Action {
+        if self.respawn_brief_open() {
+            if key == "Enter"
+                || self
+                    .flight_ui
+                    .map
+                    .brief
+                    .as_mut()
+                    .is_some_and(|b| b.key(key))
+            {
+                self.close_respawn_brief();
+            }
+            return crate::menu::Action::None;
+        }
+
         let Some(spec) = self.net.as_ref().and_then(|s| s.client.spec()) else {
             return crate::menu::Action::None;
         };
@@ -560,6 +618,18 @@ impl crate::App {
         point: Option<(f64, f64)>,
         down: bool,
     ) -> crate::menu::Action {
+        if self.respawn_brief_open() {
+            if self
+                .flight_ui
+                .map
+                .brief
+                .as_mut()
+                .is_some_and(|b| b.pointer(point, down))
+            {
+                self.close_respawn_brief();
+            }
+            return crate::menu::Action::None;
+        }
         let Some(spec) = self.net.as_ref().and_then(|s| s.client.spec()) else {
             return crate::menu::Action::None;
         };
@@ -588,6 +658,34 @@ mod tests {
         )
     }
     #[test]
+    fn mission_brief_is_reachable_from_both_tabs_and_preserves_loadout() {
+        let (data, spec) = setup();
+        let mut menu = Menu::new(
+            AircraftId::F18,
+            vec![AircraftId::F18, AircraftId::Ac130],
+            &data,
+            &spec,
+            RevivalWeapons::Missiles,
+            |_| false,
+        )
+        .unwrap();
+        let before = LoadoutSpec::of(&menu.load);
+        for tab in [0, 1] {
+            menu.widget.show_tab(tab);
+            let last = menu.tree[tab].children.len() - 1;
+            for _ in 0..last {
+                menu.key("ArrowDown", &data, &spec);
+            }
+            menu.key("Enter", &data, &spec);
+            assert!(menu.brief_open);
+            assert_eq!(LoadoutSpec::of(&menu.load), before);
+            menu.brief_open = false;
+        }
+        menu.key("m", &data, &spec);
+        assert!(menu.brief_open);
+        assert_eq!(LoadoutSpec::of(&menu.load), before);
+    }
+    #[test]
     fn respawn_overlay_uses_source_station_order_and_escape_discards() {
         let (data, spec) = setup();
         let mut menu = Menu::new(
@@ -601,7 +699,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             menu.tree[0].children.len(),
-            menu.load.station_display_order().len() + 3
+            menu.load.station_display_order().len() + 4
         );
         let before = LoadoutSpec::of(&menu.load);
         assert!(matches!(menu.key("Escape", &data, &spec), Outcome::Cancel));
