@@ -506,7 +506,7 @@ impl ListingSummary {
         self
     }
 
-    fn write(&self, w: &mut BitWriter) -> Result<(), MasterEncodeError> {
+    fn write_in(&self, w: &mut BitWriter, version: u16) -> Result<(), MasterEncodeError> {
         if self.callsigns.len() > usize::from(u8::MAX)
             || self.callsigns.iter().any(|c| !valid_callsign(c))
         {
@@ -523,7 +523,9 @@ impl ListingSummary {
         put(w, self.session_id, 64);
         put_text(w, &self.game_version, MAX_DISCOVER_BUILD)?;
         put_text(w, &self.game_commit, MAX_DISCOVER_BUILD)?;
-        put(w, u64::from(self.compatibility), 32);
+        if version >= 2 {
+            put(w, u64::from(self.compatibility), 32);
+        }
         put_text(w, &self.name, MAX_DISCOVER_NAME)?;
         put_text(w, &self.mission, MAX_DISCOVER_SUMMARY)?;
         put_text(w, &self.king, MAX_CALLSIGN)?;
@@ -534,7 +536,7 @@ impl ListingSummary {
         Ok(())
     }
 
-    fn read(r: &mut BitReader<'_>) -> Result<Self, MasterDecodeError> {
+    fn read(r: &mut BitReader<'_>, version: u16) -> Result<Self, MasterDecodeError> {
         let protocol_version = get(r, 16)? as u16;
         let flags = get(r, 8)?;
         if flags >> 5 != 0 {
@@ -546,7 +548,7 @@ impl ListingSummary {
         let session_id = get(r, 64)?;
         let game_version = get_text(r, MAX_DISCOVER_BUILD)?;
         let game_commit = get_text(r, MAX_DISCOVER_BUILD)?;
-        let compatibility = get(r, 32)? as u32;
+        let compatibility = if version >= 2 { get(r, 32)? as u32 } else { 0 };
         let name = get_text(r, MAX_DISCOVER_NAME)?;
         let mission = get_text(r, MAX_DISCOVER_SUMMARY)?;
         let king = get_text(r, MAX_CALLSIGN)?;
@@ -1191,9 +1193,8 @@ impl MasterPacket {
     }
 
     /// Writes the packet with `version` in its header. A master answers in
-    /// the version the request came in; with one version that is
-    /// [`MASTER_VERSION`], apart from an [`Unsupported`], whose layout no
-    /// version changes.
+    /// the version the request came in. Version 1 omits compatibility codes;
+    /// version 2 carries them. Unsupported has the same layout in every version.
     pub fn encode_in(&self, version: u16) -> Result<Vec<u8>, MasterEncodeError> {
         let mut bytes = self.write(version)?.finish();
         let len = self.kind().padded_len().unwrap_or(bytes.len());
@@ -1231,11 +1232,11 @@ impl MasterPacket {
         put(&mut w, 0, 32);
         put(&mut w, u64::from(self.kind().code()), 8);
         put(&mut w, u64::from(version), 16);
-        self.write_body(&mut w)?;
+        self.write_body(&mut w, version)?;
         Ok(w)
     }
 
-    fn write_body(&self, w: &mut BitWriter) -> Result<(), MasterEncodeError> {
+    fn write_body(&self, w: &mut BitWriter, version: u16) -> Result<(), MasterEncodeError> {
         match self {
             Self::Challenge(p) => {
                 put(w, p.nonce, 64);
@@ -1252,12 +1253,12 @@ impl MasterPacket {
                 }
                 put(w, p.nonce, 64);
                 put(w, p.cookie, 64);
-                write_build(w, &p.build)?;
+                write_build(w, &p.build, version)?;
                 put(w, u64::from(p.dedicated) | u64::from(p.telemetry) << 1, 8);
                 put(w, p.install_id, 64);
                 put(w, u64::from(p.platform), 8);
                 candidate::write_list(w, &p.candidates, true)?;
-                p.summary.write(w)?;
+                p.summary.write_in(w, version)?;
             }
             Self::Listed(p) => {
                 put(w, p.nonce, 64);
@@ -1272,7 +1273,7 @@ impl MasterPacket {
                 put(w, p.token, 64);
                 put(w, u64::from(p.change), 16);
                 candidate::write_list(w, &p.candidates, true)?;
-                p.summary.write(w)?;
+                p.summary.write_in(w, version)?;
             }
             Self::HeartbeatAck(p) => {
                 put(w, p.listing_id, 64);
@@ -1283,7 +1284,7 @@ impl MasterPacket {
             | Self::Unregister(Unregister { token }) => put(w, *token, 64),
             Self::Browse(p) => {
                 put(w, p.nonce, 64);
-                write_build(w, &p.build)?;
+                write_build(w, &p.build, version)?;
                 put(
                     w,
                     u64::from(p.other_builds) | u64::from(p.full_games) << 1,
@@ -1300,7 +1301,7 @@ impl MasterPacket {
                 put(w, u64::from(p.next_cursor), 32);
                 put(w, p.entries.len() as u64, 8);
                 for entry in &p.entries {
-                    write_entry(w, entry)?;
+                    write_entry(w, entry, version)?;
                 }
             }
             Self::Details(p) => {
@@ -1312,7 +1313,7 @@ impl MasterPacket {
                 put(w, p.listing_id, 64);
                 put(w, u64::from(p.summary.is_some()), 8);
                 if let Some(summary) = &p.summary {
-                    summary.write(w)?;
+                    summary.write_in(w, version)?;
                 }
             }
             Self::Probe(p) => put(w, p.nonce, 64),
@@ -1325,7 +1326,7 @@ impl MasterPacket {
                 put(w, p.nonce, 64);
                 put(w, p.cookie, 64);
                 put(w, p.listing_id, 64);
-                write_build(w, &p.build)?;
+                write_build(w, &p.build, version)?;
                 put(w, u64::from(p.mapping.code()), 8);
                 candidate::write_list(w, &p.candidates, true)?;
             }
@@ -1436,7 +1437,7 @@ impl MasterPacket {
             }));
         }
         let mut r = BitReader::new(body);
-        let packet = Self::read_body(kind, &mut r)?;
+        let packet = Self::read_body(kind, &mut r, version)?;
         let rest_is_padding = r.only_zero_padding_left();
         let ends = kind.padded_len().is_some() || r.bits_remaining() < 8;
         if !(rest_is_padding && ends) {
@@ -1445,7 +1446,11 @@ impl MasterPacket {
         Ok(packet)
     }
 
-    fn read_body(kind: MasterKind, r: &mut BitReader<'_>) -> Result<Self, MasterDecodeError> {
+    fn read_body(
+        kind: MasterKind,
+        r: &mut BitReader<'_>,
+        version: u16,
+    ) -> Result<Self, MasterDecodeError> {
         Ok(match kind {
             MasterKind::Challenge => Self::Challenge(Challenge {
                 nonce: get(r, 64)?,
@@ -1459,7 +1464,7 @@ impl MasterPacket {
             MasterKind::Register => {
                 let nonce = get(r, 64)?;
                 let cookie = get(r, 64)?;
-                let build = read_build(r)?;
+                let build = read_build(r, version)?;
                 let flags = get(r, 8)?;
                 if flags >> 2 != 0 {
                     return Err(MasterDecodeError::Malformed);
@@ -1478,7 +1483,7 @@ impl MasterPacket {
                     install_id,
                     platform: get(r, 8)? as u8,
                     candidates: candidate::read_list(r, true)?,
-                    summary: ListingSummary::read(r)?,
+                    summary: ListingSummary::read(r, version)?,
                 })
             }
             MasterKind::Listed => Self::Listed(Listed {
@@ -1494,7 +1499,7 @@ impl MasterPacket {
                 token: get(r, 64)?,
                 change: get(r, 16)? as u16,
                 candidates: candidate::read_list(r, true)?,
-                summary: ListingSummary::read(r)?,
+                summary: ListingSummary::read(r, version)?,
             }),
             MasterKind::HeartbeatAck => Self::HeartbeatAck(HeartbeatAck {
                 listing_id: get(r, 64)?,
@@ -1507,7 +1512,7 @@ impl MasterPacket {
             MasterKind::Unregister => Self::Unregister(Unregister { token: get(r, 64)? }),
             MasterKind::Browse => {
                 let nonce = get(r, 64)?;
-                let build = read_build(r)?;
+                let build = read_build(r, version)?;
                 let filters = get(r, 8)?;
                 if filters >> 2 != 0 {
                     return Err(MasterDecodeError::Malformed);
@@ -1527,7 +1532,7 @@ impl MasterPacket {
                 let count = get(r, 8)? as usize;
                 let mut entries = Vec::with_capacity(count);
                 for _ in 0..count {
-                    entries.push(read_entry(r)?);
+                    entries.push(read_entry(r, version)?);
                 }
                 Self::Page(Page {
                     nonce,
@@ -1546,7 +1551,7 @@ impl MasterPacket {
                 let found = get(r, 8)?;
                 let summary = match found {
                     0 => None,
-                    1 => Some(ListingSummary::read(r)?),
+                    1 => Some(ListingSummary::read(r, version)?),
                     _ => return Err(MasterDecodeError::Malformed),
                 };
                 Self::ListingDetails(ListingDetails {
@@ -1565,7 +1570,7 @@ impl MasterPacket {
                 nonce: get(r, 64)?,
                 cookie: get(r, 64)?,
                 listing_id: get(r, 64)?,
-                build: read_build(r)?,
+                build: read_build(r, version)?,
                 mapping: code(r, 8, MappingType::from_code)?,
                 candidates: candidate::read_list(r, true)?,
             }),
@@ -1715,20 +1720,22 @@ fn fit_ending<T: Clone>(
     packet
 }
 
-fn write_build(w: &mut BitWriter, build: &Build) -> Result<(), MasterEncodeError> {
+fn write_build(w: &mut BitWriter, build: &Build, version: u16) -> Result<(), MasterEncodeError> {
     put(w, u64::from(build.protocol_version), 16);
     put_text(w, &build.game_version, MAX_BUILD_TEXT)?;
     put_text(w, &build.game_commit, MAX_BUILD_TEXT)?;
-    put(w, u64::from(build.compatibility), 32);
+    if version >= 2 {
+        put(w, u64::from(build.compatibility), 32);
+    }
     put(w, u64::from(build.release), 8);
     Ok(())
 }
 
-fn read_build(r: &mut BitReader<'_>) -> Result<Build, MasterDecodeError> {
+fn read_build(r: &mut BitReader<'_>, version: u16) -> Result<Build, MasterDecodeError> {
     let protocol_version = get(r, 16)? as u16;
     let game_version = get_text(r, MAX_BUILD_TEXT)?;
     let game_commit = get_text(r, MAX_BUILD_TEXT)?;
-    let compatibility = get(r, 32)? as u32;
+    let compatibility = if version >= 2 { get(r, 32)? as u32 } else { 0 };
     let release = match get(r, 8)? {
         0 => false,
         1 => true,
@@ -1743,11 +1750,17 @@ fn read_build(r: &mut BitReader<'_>) -> Result<Build, MasterDecodeError> {
     })
 }
 
-fn write_entry(w: &mut BitWriter, entry: &PageEntry) -> Result<(), MasterEncodeError> {
+fn write_entry(
+    w: &mut BitWriter,
+    entry: &PageEntry,
+    version: u16,
+) -> Result<(), MasterEncodeError> {
     if entry.platform > MAX_PAGE_PLATFORM {
         return Err(MasterEncodeError::BadField);
     }
-    put(w, u64::from(entry.compatibility), 32);
+    if version >= 2 {
+        put(w, u64::from(entry.compatibility), 32);
+    }
     put(w, entry.listing_id, 64);
     let flags = u64::from(entry.password)
         | u64::from(entry.full) << 1
@@ -1765,8 +1778,8 @@ fn write_entry(w: &mut BitWriter, entry: &PageEntry) -> Result<(), MasterEncodeE
     put_text(w, &entry.name, MAX_DISCOVER_NAME)
 }
 
-fn read_entry(r: &mut BitReader<'_>) -> Result<PageEntry, MasterDecodeError> {
-    let compatibility = get(r, 32)? as u32;
+fn read_entry(r: &mut BitReader<'_>, version: u16) -> Result<PageEntry, MasterDecodeError> {
+    let compatibility = if version >= 2 { get(r, 32)? as u32 } else { 0 };
     let listing_id = get(r, 64)?;
     let flags = get(r, 8)?;
     if flags >> 5 != 0 {
@@ -2365,7 +2378,7 @@ mod tests {
             biggest_summary().cut(),
         ] {
             let mut w = BitWriter::new();
-            s.write(&mut w).unwrap();
+            s.write_in(&mut w, MASTER_VERSION).unwrap();
             assert_eq!(w.bit_len(), s.bits());
         }
         let Some((_, MasterPacket::Page(page))) = samples().into_iter().find(|(n, _)| *n == "page")
@@ -2374,7 +2387,7 @@ mod tests {
         };
         for entry in &page.entries {
             let mut w = BitWriter::new();
-            write_entry(&mut w, entry).unwrap();
+            write_entry(&mut w, entry, MASTER_VERSION).unwrap();
             assert_eq!(w.bit_len(), entry.bits());
         }
         let empty = Page {
@@ -2710,7 +2723,7 @@ mod tests {
         let keep = &all[6].1;
         let unsupported = &all[1].1;
         assert_eq!(keep.kind(), MasterKind::Keep);
-        for version in [0, 1, u16::MAX] {
+        for version in [0, 3, u16::MAX] {
             let bytes = keep.encode_in(version).unwrap();
             assert_eq!(
                 MasterPacket::decode(&bytes),
@@ -2918,7 +2931,7 @@ mod tests {
             .encode(7)
             .unwrap();
         let mut w = BitWriter::new();
-        summary.write(&mut w).unwrap();
+        summary.write_in(&mut w, MASTER_VERSION).unwrap();
         assert_eq!(w.finish(), discover[5 + 8..]);
     }
 
@@ -3336,6 +3349,30 @@ mod tests {
         }
         // The mutations reach the decoders: some decode, most do not.
         assert!(decoded > 1_000 && decoded < 90_000, "{decoded} decoded");
+    }
+
+    /// Frozen released 0.2.0 bytes, never regenerated by this version.
+    #[test]
+    fn released_v1_golden_remains_readable_and_byte_exact() {
+        let golden = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("master-v1-golden.txt"),
+        )
+        .unwrap();
+        for line in golden.lines().filter(|line| {
+            !line.starts_with('#') && !line.starts_with("master-version") && !line.is_empty()
+        }) {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            let len: usize = fields[1].parse().unwrap();
+            let mut bytes: Vec<u8> = fields[2]
+                .as_bytes()
+                .chunks_exact(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect();
+            bytes.resize(len, 0);
+            let packet = MasterPacket::decode(&bytes)
+                .unwrap_or_else(|error| panic!("{}: {error}", fields[0]));
+            assert_eq!(packet.encode_in(1).unwrap(), bytes, "{}", fields[0]);
+        }
     }
 
     /// The encodings of every sample, one line each: the master protocol's

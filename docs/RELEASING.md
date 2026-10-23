@@ -104,4 +104,7 @@ not affect multiplayer admission. Follow the protocol and simulation bump
 rules in [Compatibility code](ARCHITECTURE.md#compatibility-code). The code
 also depends on the player's imported content, so there is no single code
 assigned to a release artifact. Protocol 68 requires master protocol 2;
-upgrade the master before clients need its listings.
+upgrade the master before clients need its listings. The updated master also
+serves released master-protocol-1/game-protocol-67 clients and servers, using
+their original layout and a separate population. Existing 0.2.0 servers do
+not need to be upgraded at the same time. See [master rollout](DEDICATED-SERVER.md#running-a-master-for-old-and-new-games).

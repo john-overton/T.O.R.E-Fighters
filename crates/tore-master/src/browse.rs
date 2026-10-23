@@ -20,6 +20,32 @@ pub fn same_build(host: &Build, asker: &Build) -> bool {
     host.protocol_version == asker.protocol_version && host.compatibility == asker.compatibility
 }
 
+/// Released games use master 1, while protocol 68 and later use master 2.
+pub fn supports_game(master_version: u16, game_protocol: u16) -> bool {
+    match master_version {
+        1 => game_protocol <= 67,
+        2 => game_protocol >= 68,
+        _ => false,
+    }
+}
+
+/// Keep the released matching rule for protocol-1 clients only.
+pub fn matches_in(version: u16, host: &Build, asker: &Build) -> bool {
+    if !supports_game(version, host.protocol_version)
+        || host.protocol_version != asker.protocol_version
+    {
+        return false;
+    }
+    if version == 1 {
+        (host.game_commit == asker.game_commit && host.game_commit != "unknown")
+            || (host.release
+                && host.game_version == asker.game_version
+                && !asker.game_version.contains('-'))
+    } else {
+        same_build(host, asker)
+    }
+}
+
 fn phase_rank(phase: DiscoverPhase) -> u8 {
     match phase {
         DiscoverPhase::Lobby => 0,
@@ -29,11 +55,15 @@ fn phase_rank(phase: DiscoverPhase) -> u8 {
 }
 
 /// The page a Browse gets, fitted to `max_len` bytes (the Browse's length).
-pub fn page(listings: &Listings, browse: &Browse, max_len: usize) -> Page {
+pub fn page(listings: &Listings, browse: &Browse, max_len: usize, version: u16) -> Page {
     let mut matches: Vec<(&Listing, bool)> = listings
         .iter()
+        .filter(|listing| {
+            listing.master_version == version
+                && supports_game(version, listing.build.protocol_version)
+        })
         .filter_map(|listing| {
-            let other = !same_build(&listing.build, &browse.build);
+            let other = !matches_in(version, &listing.build, &browse.build);
             let wanted =
                 (!other || browse.other_builds) && (!listing.summary.full || browse.full_games);
             wanted.then_some((listing, other))
@@ -97,7 +127,7 @@ mod tests {
 
     fn build(version: &str, commit: &str, release: bool) -> Build {
         Build {
-            protocol_version: 7,
+            protocol_version: 68,
             game_version: version.into(),
             game_commit: commit.into(),
             compatibility: 0,

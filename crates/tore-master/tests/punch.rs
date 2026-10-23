@@ -29,7 +29,7 @@ use tore_net::{
     ServerConfig, ServerEvent,
 };
 
-const VERSION: u16 = 9;
+const VERSION: u16 = 68;
 const MAIN_V4: &str = "198.51.100.1:26901";
 const MAIN_V6: &str = "[2001:db8:ffff::1]:26901";
 const PROBE_V4: &str = "198.51.100.1:26902";

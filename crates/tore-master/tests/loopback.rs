@@ -15,7 +15,7 @@ use tore_net::{Datagrams, Entropy, Listen, bind_udp};
 
 fn build() -> Build {
     Build {
-        protocol_version: 7,
+        protocol_version: 68,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         compatibility: 0,
@@ -59,7 +59,7 @@ fn a_host_registers_and_a_browser_finds_it_on_real_sockets() {
     // The host: Register, Challenge, Register with the cookie, Listed.
     let mut host = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
     let summary = ListingSummary {
-        protocol_version: 7,
+        protocol_version: 68,
         players: 1,
         capacity: 8,
         game_version: "0.2.0".into(),
@@ -189,4 +189,140 @@ fn a_paced_idle_master_answers_a_probe_well_inside_the_handshake_retry() {
     );
     // The datagram made it busy: the next quiet turn sleeps a millisecond.
     assert_eq!(master.step(&mut out).unwrap(), BUSY_SLEEP);
+}
+
+/// Two real UDP registrations, with released and current clients browsing the
+/// same master. Protocol-1 codec bytes are also checked by the frozen golden.
+#[test]
+fn mixed_released_and_current_populations_on_real_udp() {
+    use tore_net::master::{Browse, Details, Heartbeat};
+    let mut config = Config::defaults(Path::new("."));
+    config.listen = Listen::Address(Ipv4Addr::LOCALHOST.into());
+    config.port = 0;
+    config.probe_port = 0;
+    let (mut master, _) = Running::bind(config, Entropy::System, false).unwrap();
+    let main = master.main_addresses()[0];
+    let exchange =
+        |master: &mut Running, socket: &mut UdpSocket, version: u16, packet: MasterPacket| {
+            socket
+                .send_datagram(main, &packet.encode_in(version).unwrap())
+                .unwrap();
+            let mut result = None;
+            assert!(
+                pump(master, || {
+                    let mut bytes = [0; 1500];
+                    if let Some((len, _)) = socket.recv_datagram(&mut bytes).unwrap() {
+                        assert_eq!(u16::from_le_bytes([bytes[5], bytes[6]]), version);
+                        result = Some(MasterPacket::decode(&bytes[..len]).unwrap());
+                    }
+                    result.is_some()
+                }),
+                "master answered protocol {version}"
+            );
+            result.unwrap()
+        };
+    let mut hosts = Vec::new();
+    for version in [1, 2] {
+        let mut host = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut identity = build();
+        identity.protocol_version = if version == 1 { 67 } else { 68 };
+        identity.compatibility = if version == 1 { 0 } else { 0x3FA9C21B };
+        let summary = ListingSummary {
+            protocol_version: identity.protocol_version,
+            compatibility: identity.compatibility,
+            game_version: identity.game_version.clone(),
+            game_commit: identity.game_commit.clone(),
+            name: format!("population-{version}"),
+            ..Default::default()
+        };
+        let mut request = Register {
+            nonce: version.into(),
+            cookie: 0,
+            build: identity.clone(),
+            dedicated: true,
+            telemetry: false,
+            install_id: 0,
+            platform: 3,
+            candidates: Vec::new(),
+            summary: summary.clone(),
+        };
+        let MasterPacket::Challenge(challenge) = exchange(
+            &mut master,
+            &mut host,
+            version,
+            MasterPacket::Register(request.clone()),
+        ) else {
+            panic!("challenge")
+        };
+        request.cookie = challenge.cookie;
+        let MasterPacket::Listed(listed) = exchange(
+            &mut master,
+            &mut host,
+            version,
+            MasterPacket::Register(request),
+        ) else {
+            panic!("listing")
+        };
+        hosts.push((version, host, identity, summary, listed));
+    }
+    for (version, _, identity, _, listed) in &hosts {
+        let mut browser = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut client = identity.clone();
+        client.game_commit = "another-release-build".into();
+        for other_builds in [false, true] {
+            let MasterPacket::Page(page) = exchange(
+                &mut master,
+                &mut browser,
+                *version,
+                MasterPacket::Browse(Browse {
+                    nonce: 44,
+                    build: client.clone(),
+                    other_builds,
+                    full_games: true,
+                    cursor: 0,
+                }),
+            ) else {
+                panic!("page")
+            };
+            assert_eq!(page.matching, 1);
+            assert_eq!(page.entries[0].listing_id, listed.listing_id);
+            assert_eq!(page.entries[0].name, format!("population-{version}"));
+            assert_eq!(page.entries[0].compatibility, identity.compatibility);
+        }
+        let MasterPacket::ListingDetails(details) = exchange(
+            &mut master,
+            &mut browser,
+            *version,
+            MasterPacket::Details(Details {
+                nonce: 45,
+                listing_id: listed.listing_id,
+            }),
+        ) else {
+            panic!("details")
+        };
+        assert_eq!(
+            details.summary.unwrap().protocol_version,
+            identity.protocol_version
+        );
+        println!(
+            "mixed UDP {main}: master-{version} browser sees only game protocol {}",
+            identity.protocol_version
+        );
+    }
+    for (version, mut host, _, summary, listed) in hosts {
+        assert!(matches!(
+            exchange(
+                &mut master,
+                &mut host,
+                version,
+                MasterPacket::Heartbeat(Heartbeat {
+                    token: listed.token,
+                    change: 1,
+                    candidates: Vec::new(),
+                    summary
+                })
+            ),
+            MasterPacket::HeartbeatAck(_)
+        ));
+    }
 }

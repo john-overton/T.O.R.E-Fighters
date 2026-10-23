@@ -962,6 +962,22 @@ To try it on one machine, run a master on loopback ([testing on one
 machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`
 and `master 127.0.0.1:26911` in `server.conf`.
 
+### Running a master for old and new games
+
+The updated `tore-master` serves released 0.2.0 hosts and clients (master
+protocol 1, game protocol 67) alongside code-based hosts and clients (master
+protocol 2, game protocol 68 and later). Upgrade the master first. Existing
+0.2.0 servers can keep running and broadcasting without a game/server update.
+Old requests receive the old layout and only old-generation listings; new
+requests receive codes and only new-generation listings. Show other versions
+does not cross that boundary. Direct introductions and relay setup also stay
+within the generation. No new port or configuration setting is needed.
+
+See [running and updating the master](MASTER-SERVER.md#updating) and the
+[wire rules](formats/master-protocol.md#compatibility-codes-master-protocol-2).
+This supports a gradual rollout; it does not make game protocols 67 and 68
+play together.
+
 ## Console, status and logs
 
 The server reads commands from its standard input:

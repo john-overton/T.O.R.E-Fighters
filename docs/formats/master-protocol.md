@@ -90,7 +90,7 @@ Every master packet starts with a byte-aligned header:
 | --- | --- | --- |
 | Checksum | 32 bits | CRC-32 (IEEE) over the 11 bytes `TORE-MASTER` followed by every byte after this field |
 | Kind | 8 bits | One of the kinds below |
-| Version | 16 bits | The sender's master protocol version, 2 since compatibility codes |
+| Version | 16 bits | The sender's master protocol version: 1 for released 0.2.0, 2 for compatibility codes |
 
 The header is 7 bytes. A datagram that is too short, too long, of an unknown
 kind or fails its checksum is dropped silently and counted.
@@ -162,7 +162,7 @@ from the game's protocol version
 ([net-protocol](net-protocol.md#versions)), because one master serves every
 build of the game at once: games of many builds talk to it for years.
 
-- The master supports a range of versions, today 2 to 2. It answers in the
+- The master supports a range of versions, today 1 to 2. It answers in the
   version the packet came in.
 - A packet of a version outside the range gets **Unsupported**, if it fits:
   the lowest and highest version supported (16 bits each) and a plain text
@@ -238,7 +238,7 @@ has none) is in the [architecture guide](../ARCHITECTURE.md#addresses-and-candid
 same outside port to both master ports, 3 a different outside port to each.
 
 **Build.** The game's protocol version (16), game version (string, at most 64
-bytes), game commit (string, at most 64 bytes), compatibility code (32),
+bytes), game commit (string, at most 64 bytes), compatibility code (32, protocol 2 only),
 and an informational release bit (1, then 7 zero bits). Matching uses the
 game protocol and code
 ([net-protocol](net-protocol.md#versions)).
@@ -822,6 +822,28 @@ the commit string. PageEntry begins with the 32-bit code before its listing
 id. The code's definition is in [architecture](../ARCHITECTURE.md#compatibility-code).
 Version and commit remain information only. Code mismatches use the existing
 other-build flag and Show other versions filter. Introductions require a
-match too. Master protocol 1 packets receive Unsupported instead of being
-parsed as protocol 2, so old listings cannot crash this decoder or match new
-games. Deploy the updated master with protocol 68 clients.
+match too.
+
+The same master also serves released 0.2.0 games using master protocol 1 and
+game protocol 67. Its protocol-1 reader and writer omit all three code fields.
+The packet header selects the layout, including in Register, Heartbeat,
+Browse, Page, Listing details and Introduce. The frozen released bytes in
+`crates/tore-net/master-v1-golden.txt` must remain byte-exact; the protocol-2
+golden remains unchanged by this backward-compatibility support.
+
+Registrations retain their master version. Protocol 1 accepts game protocols
+through 67; protocol 2 accepts 68 and later. Registration build and summary
+protocols must agree, and heartbeats cannot change the generation. Browsing
+and Details expose only the requester's generation, including when Show
+other versions is on. Within protocol 1 the original matching rule remains:
+equal game protocol and equal known commit, or a tagged host with the same
+plain game version. Within protocol 2 only game protocol and code match.
+Cross-generation introductions return NoListing.
+
+Responses, probes and cookie challenges use the request's master version.
+Meets, their retries, relay opens/offers/closes and relayed frames keep the
+introduction's version, including after another generation sends a request.
+Listing, source, bandwidth and telemetry limits remain shared in one master.
+Upgrade the master first; old games remain served while new clients and
+servers roll out independently. Games of the two generations cannot play
+together.

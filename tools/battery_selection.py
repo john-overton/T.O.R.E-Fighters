@@ -243,7 +243,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-content-builds",),
     ),
     "net-master": (
-        "the master server on this machine: its limits under the flood tool, a server listing itself",
+        "the master server on this machine: mixed released/current populations, its limits under the flood tool, a server listing itself",
         ("net-master-*",),
     ),
     "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing",)),

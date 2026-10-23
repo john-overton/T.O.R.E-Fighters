@@ -4659,7 +4659,12 @@ assumption that identical commits guaranteed identical rules.
 
 The host and client derive the code from their loaded resources; migration
 keeps it. LAN discovery, master registration, browsing and introductions use
-it. The master protocol is 2; older packets receive Unsupported safely.
+it. The master serves both master protocols 1 and 2. Released 0.2.0 games
+(master 1, game protocol 67) keep their original packet layout and legacy
+matching rule. Master-2/game-68+ listings use the code and form a separate
+population, even with Show other versions. Replies use the request's version;
+introductions, retries and relay channels retain that version. See
+[master versions](formats/master-protocol.md#compatibility-codes-master-protocol-2).
 Protocol 68 and older games cannot join each other. The selected game's
 lounge details, lobby header, discovery commands, startup log and `--version`
 show the code. Version commands use the selected data profile; without an

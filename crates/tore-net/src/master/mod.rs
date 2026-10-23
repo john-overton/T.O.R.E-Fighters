@@ -110,7 +110,7 @@ pub const MASTER_VERSION: u16 = 2;
 
 /// The master protocol versions this build reads. A master answers a packet
 /// of a version outside it with [`Unsupported`].
-pub const SUPPORTED_VERSIONS: RangeInclusive<u16> = 2..=2;
+pub const SUPPORTED_VERSIONS: RangeInclusive<u16> = 1..=2;
 
 /// The master's main UDP port: listings, browsing, introductions, the relay,
 /// reports (a master setting).

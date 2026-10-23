@@ -31,7 +31,7 @@ fn a(text: &str) -> SocketAddr {
 
 fn build() -> Build {
     Build {
-        protocol_version: 9,
+        protocol_version: 68,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         compatibility: 0,
@@ -177,7 +177,7 @@ impl Rig {
             self.host.set_summary(
                 now,
                 ListingSummary {
-                    protocol_version: 9,
+                    protocol_version: 68,
                     capacity: 8,
                     phase: DiscoverPhase::Lobby,
                     game_version: "0.2.0".into(),

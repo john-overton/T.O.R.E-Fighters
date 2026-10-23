@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from battery import ROOT, Drive, DriveError, Proc, Scenario
+from battery_scenarios._master_compat import drive_master_mixed
 
 GUIDE = ROOT / "docs" / "DEDICATED-SERVER.md"
 LOCALHOST = "127.0.0.1"
@@ -2611,6 +2612,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-window-host", lane="net", args=[], driver=drive_host, uses=("bot",), window=True, timeout=300,
             notes="a hosted game answers the search, a bot joins, and the host leaving ends the game for it",
+        ),
+        Scenario(
+            name="net-master-mixed", lane="net", args=[], driver=drive_master_mixed, timeout=60,
+            notes="released protocol-1 and current protocol-2 registrations and browsers share one master with isolated listings and details",
         ),
         Scenario(
             name="net-master-flood", lane="net", args=[], driver=drive_master_flood, timeout=120,

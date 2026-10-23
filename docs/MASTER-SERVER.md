@@ -417,6 +417,15 @@ month, UTC:
 
 ## Updating
 
+The current master serves master protocols 1 and 2 together. Released 0.2.0
+clients and servers keep working on protocol 1 with their original matching
+rule. Protocol-2 clients see the separate game-protocol-68+ population and
+match compatibility codes. Replies and relay setup use the appropriate
+version. Upgrade this master before rolling out new games, without forcing
+existing 0.2.0 servers to upgrade. No extra listener or configuration switch
+is required. The [wire contract](formats/master-protocol.md#compatibility-codes-master-protocol-2)
+describes both layouts and the frozen legacy golden.
+
 1. Build the new `tore-master` or [download the release's](#downloading-a-release).
 2. `tore-master --config /etc/tore-master/master.conf --check-config` with
    the new program. Read its `relay` line: from slice J3's build on it says

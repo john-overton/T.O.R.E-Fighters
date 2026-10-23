@@ -30,7 +30,7 @@ fn ms(n: u64) -> Duration {
 
 fn build() -> Build {
     Build {
-        protocol_version: 9,
+        protocol_version: 68,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         compatibility: 0,
@@ -90,7 +90,7 @@ impl Rig {
             received(&mut other);
         }
         let summary = ListingSummary {
-            protocol_version: 9,
+            protocol_version: 68,
             full,
             players: 1,
             capacity: 8,

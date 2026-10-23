@@ -113,6 +113,7 @@ impl RelaySettings {
 /// The two ends of an introduction under way, which a Relay request names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ends {
+    pub master_version: u16,
     /// The listing the player was introduced to.
     pub listing_id: u64,
     /// The host's listed address.
@@ -151,6 +152,7 @@ impl ByteBucket {
 
 #[derive(Debug, Clone)]
 struct Channel {
+    master_version: u16,
     key: u32,
     introduction_id: u64,
     nonce: u64,
@@ -261,6 +263,12 @@ impl Relays {
         }
     }
 
+    pub fn channel_version_matches(&self, channel: u32, version: u16) -> bool {
+        self.channels
+            .get(&channel)
+            .is_some_and(|c| c.master_version == version)
+    }
+
     /// The settings in force.
     pub fn settings(&self) -> &RelaySettings {
         &self.settings
@@ -329,17 +337,23 @@ impl Relays {
         self.log.pop_front()
     }
 
-    fn send(&mut self, to: SocketAddr, packet: &MasterPacket) {
-        if let Ok(datagram) = packet.encode() {
+    fn send(&mut self, to: SocketAddr, packet: &MasterPacket, version: u16) {
+        if let Ok(datagram) = packet.encode_in(version) {
             self.out.push_back((to, datagram));
         }
     }
 
-    fn offer(&mut self, to: SocketAddr, offer: RelayOffer) {
-        self.send(to, &MasterPacket::RelayOffer(offer));
+    fn offer(&mut self, to: SocketAddr, offer: RelayOffer, version: u16) {
+        self.send(to, &MasterPacket::RelayOffer(offer), version);
     }
 
-    fn refuse(&mut self, to: SocketAddr, request: &RelayRequest, result: RelayResult) {
+    fn refuse(
+        &mut self,
+        to: SocketAddr,
+        request: &RelayRequest,
+        result: RelayResult,
+        version: u16,
+    ) {
         self.counters.refused += 1;
         self.log.push_back(format!(
             "relay refused player={to} result={}",
@@ -355,6 +369,7 @@ impl Relays {
                 key: 0,
                 text: refusal_text(result).to_owned(),
             },
+            version,
         );
     }
 
@@ -384,7 +399,7 @@ impl Relays {
                     key: channel.key,
                     text: String::new(),
                 };
-                self.offer(from, offer);
+                self.offer(from, offer, channel.master_version);
             }
             return;
         }
@@ -415,7 +430,7 @@ impl Relays {
             None
         };
         if let Some(result) = refusal {
-            self.refuse(from, request, result);
+            self.refuse(from, request, result, ends.master_version);
             return;
         }
         let number = self.fresh_channel();
@@ -423,6 +438,7 @@ impl Relays {
         self.channels.insert(
             number,
             Channel {
+                master_version: ends.master_version,
                 key,
                 introduction_id: request.introduction_id,
                 nonce: request.nonce,
@@ -474,6 +490,7 @@ impl Relays {
             channel.opens_sent += 1;
             channel.next_open = now + MEET_RETRY;
             due.push((
+                channel.master_version,
                 channel.host,
                 RelayOpen {
                     introduction_id: channel.introduction_id,
@@ -483,9 +500,9 @@ impl Relays {
                 },
             ));
         }
-        due.sort_unstable_by_key(|(_, open)| open.channel);
-        for (host, open) in due {
-            self.send(host, &MasterPacket::RelayOpen(open));
+        due.sort_unstable_by_key(|(_, _, open)| open.channel);
+        for (version, host, open) in due {
+            self.send(host, &MasterPacket::RelayOpen(open), version);
         }
         silent.sort_unstable();
         for number in silent {
@@ -494,7 +511,12 @@ impl Relays {
                     nonce: channel.nonce,
                     introduction_id: channel.introduction_id,
                 };
-                self.refuse(channel.player, &request, RelayResult::HostSilent);
+                self.refuse(
+                    channel.player,
+                    &request,
+                    RelayResult::HostSilent,
+                    channel.master_version,
+                );
             }
         }
     }
@@ -544,9 +566,10 @@ impl Relays {
                 text: String::new(),
             },
         );
+        let version = channel.master_version;
         let host = channel.host;
         self.counters.opened += 1;
-        self.offer(player, offer);
+        self.offer(player, offer, version);
         self.log.push_back(format!(
             "relay opened channel={:08x} host={host} player={player} channels={}",
             ack.channel,
@@ -558,6 +581,17 @@ impl Relays {
     /// forwarded unchanged to the channel's other end.
     pub fn frame(&mut self, now: Duration, from: SocketAddr, frame: &RelayFrame<'_>, bytes: &[u8]) {
         let from = canonical(from);
+        let Some(header_version) = bytes.get(5..7) else {
+            self.dropped += 1;
+            return;
+        };
+        if !self.channel_version_matches(
+            frame.channel,
+            u16::from_le_bytes([header_version[0], header_version[1]]),
+        ) {
+            self.dropped += 1;
+            return;
+        }
         let rate = u64::from(self.settings.rate_kb) * KB;
         let spent = self.spent();
         let Some(channel) = self
@@ -652,12 +686,25 @@ impl Relays {
             channel.host
         };
         if channel.open {
-            self.say_goodbye(other, close.channel, channel.key, CloseReason::Closed);
+            self.say_goodbye(
+                other,
+                close.channel,
+                channel.key,
+                CloseReason::Closed,
+                channel.master_version,
+            );
         }
         self.closed(close.channel, &channel, "closed by an end");
     }
 
-    fn say_goodbye(&mut self, to: SocketAddr, channel: u32, key: u32, reason: CloseReason) {
+    fn say_goodbye(
+        &mut self,
+        to: SocketAddr,
+        channel: u32,
+        key: u32,
+        reason: CloseReason,
+        version: u16,
+    ) {
         for _ in 0..GOODBYE_COPIES {
             self.send(
                 to,
@@ -666,6 +713,7 @@ impl Relays {
                     key,
                     reason,
                 }),
+                version,
             );
         }
     }
@@ -689,8 +737,20 @@ impl Relays {
     fn shut(&mut self, number: u32, reason: CloseReason, why: &str) {
         if let Some(channel) = self.forget(number) {
             if channel.open {
-                self.say_goodbye(channel.host, number, channel.key, reason);
-                self.say_goodbye(channel.player, number, channel.key, reason);
+                self.say_goodbye(
+                    channel.host,
+                    number,
+                    channel.key,
+                    reason,
+                    channel.master_version,
+                );
+                self.say_goodbye(
+                    channel.player,
+                    number,
+                    channel.key,
+                    reason,
+                    channel.master_version,
+                );
             }
             self.closed(number, &channel, why);
         }
@@ -817,6 +877,7 @@ mod tests {
         let mut listings = Listings::default();
         listings.insert(
             Listing {
+                master_version: tore_net::master::MASTER_VERSION,
                 id: 7,
                 token: 77,
                 nonce: 1,
@@ -841,6 +902,7 @@ mod tests {
             introduction_id: 9,
         };
         let ends = Ends {
+            master_version: tore_net::master::MASTER_VERSION,
             listing_id: 7,
             host: old,
             player,
