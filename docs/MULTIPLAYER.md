@@ -1935,10 +1935,21 @@ Escape menu widget. Loadout lists stations in Load Ordnance display order, then
 internal fuel, Standard load and Done. Enter or a click cycles a station's legal
 stores and quantities; arrows and the wheel move through rows. Choice slots also
 have a paged Aircraft tab. The menu uses the existing controller menu bindings.
-Done keeps a draft for the next Enter-to-revive request. The `ai-slot` rule
-continues to take an existing aircraft with its existing revival weapon cut. Escape closes without
-accepting edits. The revive timer remains visible; closing or reviving releases
-menu input. Aircraft and loadout are validated together by the host, including
+Done saves the aircraft and loadout for the next Enter-to-revive request.
+Close the page and press Escape to open the flight menu: **Loadout...** stays
+available for the entire wait, and **Aircraft...** appears for Player Choice
+slots. Reopening restores the last saved aircraft, stores and fuel. Cancel or
+Escape discards only unsaved edits. **Mission...** still opens the mission brief.
+The pages have no timeout, including after the revival delay ends.
+
+With menus closed, press **Enter** or **controller A** after the countdown to
+fly again. Closing a page or reaching zero never respawns you. Enter before
+zero does nothing and does not queue a revival. The countdown and ready prompt
+show lives remaining. Waiting uses no life and has no time limit while the
+mission continues. The existing idle-AI rule excludes lost aircraft, so your
+dead slot stays yours; the usual away timer applies again once you are flying.
+The `ai-slot` rule continues to take an existing aircraft with its existing
+revival weapon cut. Closing or reviving releases menu input. Aircraft and loadout are validated together by the host, including
 shared content, normal/cheat loading, weight and revival-weapons restrictions.
 Explicit choices retain their selected internal fuel; an unedited legacy revive
 still starts with full fuel. The host distributes the accepted spawn and every

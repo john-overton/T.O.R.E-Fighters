@@ -1461,6 +1461,9 @@ impl App {
         if self.screen == Screen::Flight && self.respawn_open() {
             return key.map_or(Action::None, |key| self.respawn_key(key));
         }
+        if self.screen == Screen::Flight && name == "menu-accept" && self.fly_again() {
+            return Action::None;
+        }
         if self.screen != Screen::Flight {
             return match (self.screen, key) {
                 (Screen::Main, Some(key)) => self.menu.state.key(key, false),
@@ -2079,6 +2082,10 @@ impl App {
                 self.release_trigger();
                 self.flight_clock.remainder = 0.;
                 self.open_graphics("Flight paused");
+                Action::Click
+            }
+            Command::RespawnAircraft | Command::RespawnLoadout => {
+                self.open_respawn_menu(command == Command::RespawnAircraft);
                 Action::Click
             }
             Command::FeedbackOpen => {
@@ -3840,6 +3847,15 @@ impl App {
             let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
             let action = self.replays_result(result);
             self.action(event_loop, action);
+            return Action::None;
+        }
+        // A held menu key must not accept a newly opened page, close it,
+        // or carry a Done press into the separate respawn confirmation.
+        if self.screen == Screen::Flight
+            && self.waiting_to_respawn()
+            && event.repeat
+            && matches!(name.as_str(), "Enter" | "Space" | "Escape")
+        {
             return Action::None;
         }
         if self.screen == Screen::Flight && self.respawn_open() {
@@ -6992,7 +7008,7 @@ impl ApplicationHandler for App {
         let gunship = cockpit
             .and_then(|cockpit| self.world.combat.state.ownship(cockpit.plane.0))
             .is_some_and(|own| own.gunship.is_some());
-        self.input.map_navigation = self.flight_ui.map.open || self.respawn_open();
+        self.input.map_navigation = self.flight_ui.map.open || self.waiting_to_respawn();
         self.input.aircraft_controls(
             available(tore_input::FlightAxis::VectorPitch),
             available(tore_input::FlightAxis::Conversion),

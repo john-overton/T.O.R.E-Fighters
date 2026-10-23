@@ -1097,7 +1097,7 @@ impl App {
     /// 0:45"), said again every few seconds and when the player may fly
     /// again (slice F2-V).
     fn revival_prompt(&mut self) {
-        self.open_respawn_menu();
+        self.refresh_respawn_menu();
         let Some(session) = &self.net else {
             return;
         };
@@ -1124,7 +1124,11 @@ impl App {
     /// host's Revival allows it, else say why not. `false` when the plane is
     /// not lost, and the key designates as ever (slice F2-V).
     pub(crate) fn fly_again(&mut self) -> bool {
-        if self.net_flight.is_none() || self.flight_ui.frozen() {
+        if self.net_flight.is_none()
+            || self.flight_ui.frozen()
+            || self.flight_ui.map.open
+            || self.respawn_open()
+        {
             return false;
         }
         let Some(session) = &mut self.net else {
@@ -1136,11 +1140,13 @@ impl App {
         if session.client.may_fly_again() {
             if let Some((aircraft, loadout)) = self
                 .net_flight
-                .as_mut()
-                .and_then(|f| f.respawn_choice.take())
+                .as_ref()
+                .and_then(|f| f.respawn_choice.clone())
             {
+                log::info!("Respawn: confirmed choice {aircraft:?}");
                 session.client.revive_choice(Some(aircraft), Some(loadout));
             } else {
+                log::info!("Respawn: confirmed original aircraft");
                 session.client.revive();
             }
             self.flight_ui.message("Flying again...");

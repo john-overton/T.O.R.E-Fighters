@@ -290,8 +290,12 @@ fn the_delay_counts_from_the_loss() {
         "{refused:?}"
     );
     assert_ne!(refused[0], refused[1]);
-    // A minute after the loss Viper flies again.
+    // An early request is not queued. Passing the delay neither seats the
+    // player nor spends a life; a new explicit request is needed.
     rig.run(Duration::from_secs(59));
+    assert_eq!(rig.clients[viper].seated.as_ref().unwrap().plane, 0);
+    assert!(rig.clients[viper].spawned.is_empty());
+    assert!(rig.host.revival.pending.is_empty());
     revive(&mut rig, viper);
     assert!(reseated(&mut rig, viper, 0), "{:?}", refusals(&rig, viper));
 }

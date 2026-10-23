@@ -18,6 +18,42 @@ const LOOK: Look = Look {
     help: |_| vec![],
 };
 const PAGE: usize = 12;
+pub(crate) const AIRCRAFT: &str = "Aircraft...";
+pub(crate) const LOADOUT: &str = "Loadout...";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Access {
+    Hidden,
+    Loadout,
+    Aircraft,
+}
+impl Access {
+    fn waiting(revival: Option<&tore_session::wire::messages::Revival>, choice: bool) -> Self {
+        match revival {
+            Some(r) if r.rule == tore_session::settings::Respawn::Revive && r.lives != Some(0) => {
+                if choice {
+                    Self::Aircraft
+                } else {
+                    Self::Loadout
+                }
+            }
+            _ => Self::Hidden,
+        }
+    }
+
+    fn menu(self, tree: &mut [MenuNode]) {
+        if let Some(tab) = tree.first_mut() {
+            tab.children
+                .retain(|n| n.label != AIRCRAFT && n.label != LOADOUT);
+            if self == Self::Aircraft {
+                tab.children.push(row(AIRCRAFT.into()));
+            }
+            if self != Self::Hidden {
+                tab.children.push(row(LOADOUT.into()));
+            }
+        }
+    }
+}
 fn row(label: String) -> MenuNode {
     MenuNode {
         label,
@@ -121,6 +157,28 @@ impl Menu {
             Err(error) => self.message = Some(format!("Using standard load: {error}")),
         }
         self.refresh();
+    }
+
+    fn restore_choice(
+        &mut self,
+        aircraft: AircraftId,
+        selected: &LoadoutSpec,
+        data: &BTreeMap<String, Vec<u8>>,
+        spec: &MissionSpec,
+    ) {
+        if aircraft != self.load.aircraft {
+            if !self.aircraft.contains(&aircraft) {
+                return;
+            }
+            match Self::standard(aircraft, data, spec) {
+                Ok(load) => self.load = load,
+                Err(error) => {
+                    self.message = Some(error.to_string());
+                    return;
+                }
+            }
+        }
+        self.restore_selection(selected, data, spec);
     }
 
     fn refresh(&mut self) {
@@ -415,6 +473,10 @@ impl Menu {
 
     pub fn draw(&self, pixels: &mut [u8], font: &Font, prompt: &str) {
         self.widget.draw(pixels, font, &self.tree, &LOOK, &|_| None);
+        let prompt = prompt.strip_prefix("Press Enter").map_or_else(
+            || prompt.to_owned(),
+            |rest| format!("Close this page, then Enter / A{rest}"),
+        );
         crate::menu::Canvas(pixels).rect((10, 398, 620, 20), [24, 34, 45, 230]);
         if self.message.is_some() {
             crate::menu::Canvas(pixels).rect((10, 422, 620, 22), [24, 34, 45, 230]);
@@ -424,7 +486,7 @@ impl Menu {
             clip: (0, 0, 640, 480),
             color: [230, 240, 245, 255],
         };
-        paint.text(font, prompt, 16, 404);
+        paint.text(font, &prompt, 16, 404);
         if let Some(message) = &self.message {
             paint.text(font, message, 16, 426);
         }
@@ -432,6 +494,14 @@ impl Menu {
 }
 
 impl crate::App {
+    pub(crate) fn waiting_to_respawn(&self) -> bool {
+        self.net_flight.is_some()
+            && self
+                .net
+                .as_ref()
+                .is_some_and(|s| s.client.revival().is_some())
+    }
+
     pub(crate) fn respawn_brief_open(&self) -> bool {
         self.net_flight
             .as_ref()
@@ -453,20 +523,41 @@ impl crate::App {
             .as_ref()
             .is_some_and(|f| f.respawn_menu.is_some())
     }
-    pub(crate) fn open_respawn_menu(&mut self) {
-        let Some(flight) = &self.net_flight else {
-            return;
+    fn respawn_access(&self) -> Access {
+        let Some(session) = self.net.as_ref().filter(|_| self.net_flight.is_some()) else {
+            return Access::Hidden;
         };
-        if flight.respawn_seen {
+        let Some(spec) = session.client.spec() else {
+            return Access::Hidden;
+        };
+        let Some((_, plane)) = session.client.seat() else {
+            return Access::Hidden;
+        };
+        let Some(entry) = self.world.roster.plane(plane) else {
+            return Access::Hidden;
+        };
+        Access::waiting(
+            session.client.revival().map(|kept| &kept.revival),
+            spec.player_choice[MissionSpec::wing_index(entry.slot.wing)],
+        )
+    }
+
+    pub(crate) fn refresh_respawn_menu(&mut self) {
+        let access = self.respawn_access();
+        if let Some(flight) = &mut self.net_flight {
+            access.menu(&mut flight.menu);
+            if access != Access::Hidden && !flight.respawn_seen {
+                self.open_respawn_menu(false);
+            }
+        }
+    }
+
+    pub(crate) fn open_respawn_menu(&mut self, aircraft_tab: bool) {
+        let access = self.respawn_access();
+        if access == Access::Hidden || (aircraft_tab && access != Access::Aircraft) {
             return;
         }
         let Some(session) = &self.net else { return };
-        if session.client.revival().is_none_or(|kept| {
-            kept.revival.rule != tore_session::settings::Respawn::Revive
-                || kept.revival.lives == Some(0)
-        }) {
-            return;
-        }
         let Some(spec) = session.client.spec() else {
             return;
         };
@@ -522,28 +613,48 @@ impl crate::App {
         );
         let menu = menu.map(|mut menu| {
             let lobby = session.client.lobby();
-            let kept = session
-                .revival_draft
+            let kept = self
+                .net_flight
                 .as_ref()
-                .filter(|(mission, id, _)| {
-                    lobby.is_some_and(|l| l.mission == *mission) && *id == aircraft
+                .and_then(|f| f.respawn_choice.as_ref())
+                .map(|(id, load)| (*id, load))
+                .or_else(|| {
+                    session
+                        .revival_draft
+                        .as_ref()
+                        .filter(|(mission, id, _)| {
+                            lobby.is_some_and(|l| l.mission == *mission)
+                                && (choice || *id == aircraft)
+                        })
+                        .map(|(_, id, load)| (*id, load))
                 })
-                .map(|(_, _, load)| load)
                 .or_else(|| {
                     lobby
                         .and_then(|l| l.me())
                         .and_then(|p| p.slot)
                         .and_then(|slot| spec.plane_loadouts.get(&slot))
+                        .map(|load| (aircraft, load))
                 });
-            if let Some(kept) = kept {
-                menu.restore_selection(kept, &self.theater_resources, spec);
+            if let Some((id, kept)) = kept {
+                menu.restore_choice(id, kept, &self.theater_resources, spec);
+            }
+            if aircraft_tab {
+                menu.preview_aircraft();
             }
             menu
         });
         let flight = self.net_flight.as_mut().expect("checked");
         flight.respawn_seen = true;
         match menu {
-            Ok(menu) => flight.respawn_menu = Some(menu),
+            Ok(menu) => {
+                log::info!(
+                    "Respawn: opened {} for {:?}",
+                    if aircraft_tab { "Aircraft" } else { "Loadout" },
+                    menu.load.aircraft
+                );
+                flight.respawn_menu = Some(menu);
+                self.flight_ui.menu = false;
+            }
             Err(error) => self.flight_ui.message(error.to_string()),
         }
         self.camera.keys.clear();
@@ -558,8 +669,12 @@ impl crate::App {
         };
         match outcome {
             Outcome::None => return crate::menu::Action::None,
-            Outcome::Cancel => flight.respawn_menu = None,
+            Outcome::Cancel => {
+                log::info!("Respawn: cancelled edits");
+                flight.respawn_menu = None;
+            }
             Outcome::Done(aircraft, loadout) => {
+                log::info!("Respawn: saved choice {aircraft:?}");
                 if let Some(session) = &mut self.net
                     && let Some(lobby) = session.client.lobby()
                 {
@@ -648,6 +763,170 @@ impl crate::App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn escape_entries_last_through_the_delay_and_follow_slot_and_lives_rules() {
+        use std::time::Duration;
+        use tore_session::{client::revival::Kept, settings::Respawn, wire::messages::Revival};
+        let mut kept = Kept {
+            revival: Revival {
+                rule: Respawn::Revive,
+                lives: Some(2),
+                wait_seconds: 30,
+                why: None,
+            },
+            received: Duration::ZERO,
+        };
+        let mut tree = vec![MenuNode {
+            label: "Game".into(),
+            shortcut: String::new(),
+            children: vec![row("Mission...".into())],
+        }];
+        for seconds in [0, 25, 30, 300] {
+            let left = kept.seconds_left(Duration::from_secs(seconds));
+            assert_eq!(
+                tore_session::client::revival::may_fly_again(&kept.revival, left),
+                seconds >= 30
+            );
+            for choice in [false, true] {
+                let access = Access::waiting(Some(&kept.revival), choice);
+                access.menu(&mut tree);
+                access.menu(&mut tree);
+                let labels: Vec<_> = tree[0].children.iter().map(|r| r.label.as_str()).collect();
+                assert_eq!(
+                    labels,
+                    if choice {
+                        vec!["Mission...", AIRCRAFT, LOADOUT]
+                    } else {
+                        vec!["Mission...", LOADOUT]
+                    }
+                );
+                let mut ui = crate::flight_ui::FlightUi::default();
+                ui.key("Escape", false, false, false, &tree);
+                ui.key("ArrowUp", false, false, false, &tree);
+                assert_eq!(
+                    ui.key("Enter", false, false, false, &tree),
+                    crate::flight_ui::Command::RespawnLoadout
+                );
+                if choice {
+                    ui.key("ArrowUp", false, false, false, &tree);
+                    assert_eq!(
+                        ui.key("Enter", false, false, false, &tree),
+                        crate::flight_ui::Command::RespawnAircraft
+                    );
+                }
+            }
+        }
+        for rule in [Respawn::None, Respawn::AiSlot] {
+            kept.revival.rule = rule;
+            assert_eq!(Access::waiting(Some(&kept.revival), true), Access::Hidden);
+        }
+        kept.revival.rule = Respawn::Revive;
+        kept.revival.lives = Some(0);
+        assert_eq!(Access::waiting(Some(&kept.revival), true), Access::Hidden);
+        Access::waiting(None, true).menu(&mut tree);
+        assert_eq!(tree[0].children.len(), 1);
+    }
+
+    #[test]
+    fn saved_aircraft_and_stores_survive_reopening_and_cancel_keeps_the_saved_choice() {
+        let (data, spec) = setup();
+        let open = || {
+            Menu::new(
+                AircraftId::F18,
+                vec![AircraftId::F18, AircraftId::Ac130],
+                &data,
+                &spec,
+                RevivalWeapons::Missiles,
+                |_| false,
+            )
+            .unwrap()
+        };
+        let mut menu = open();
+        menu.preview_aircraft();
+        menu.select(1, &data, &spec);
+        menu.select(menu.load.station_display_order().len(), &data, &spec);
+        menu.select(0, &data, &spec);
+        let Outcome::Done(aircraft, selected) = menu.done(&data, &spec) else {
+            panic!("valid choice")
+        };
+        assert_eq!(aircraft, AircraftId::Ac130);
+        for _ in 0..3 {
+            let mut reopened = open();
+            reopened.restore_choice(aircraft, &selected, &data, &spec);
+            assert_eq!(reopened.load.aircraft, aircraft);
+            assert_eq!(LoadoutSpec::of(&reopened.load), selected);
+            reopened.select(reopened.load.station_display_order().len(), &data, &spec);
+            assert!(matches!(
+                reopened.key("Escape", &data, &spec),
+                Outcome::Cancel
+            ));
+        }
+        let mut fixed = Menu::new(
+            AircraftId::F18,
+            vec![],
+            &data,
+            &spec,
+            RevivalWeapons::Missiles,
+            |_| false,
+        )
+        .unwrap();
+        fixed.restore_choice(aircraft, &selected, &data, &spec);
+        assert_eq!(fixed.load.aircraft, AircraftId::F18);
+    }
+
+    #[test]
+    fn all_revival_weapon_rules_keep_their_cut_on_reopen() {
+        let (data, spec) = setup();
+        for rule in [
+            RevivalWeapons::Missiles,
+            RevivalWeapons::NoMissiles,
+            RevivalWeapons::Guns,
+            RevivalWeapons::HalfGuns,
+        ] {
+            let mut menu =
+                Menu::new(AircraftId::F18, vec![], &data, &spec, rule, |_| false).unwrap();
+            let selected = LoadoutSpec::of(&menu.load);
+            let rows: Vec<_> = menu.tree[0]
+                .children
+                .iter()
+                .map(|r| r.label.clone())
+                .collect();
+            menu.restore_choice(AircraftId::F18, &selected, &data, &spec);
+            assert_eq!(
+                menu.tree[0]
+                    .children
+                    .iter()
+                    .map(|r| r.label.clone())
+                    .collect::<Vec<_>>(),
+                rows
+            );
+            menu.check(&menu.load, &data, &spec).unwrap();
+            for (station, quantity) in menu
+                .load
+                .configuration
+                .stations
+                .iter()
+                .zip(&menu.load.quantities)
+            {
+                let cut = rule.cut(&station.weapon, *quantity);
+                if tore_sim::combat::live::is_gun(&station.weapon) {
+                    assert_eq!(
+                        cut,
+                        if rule == RevivalWeapons::HalfGuns {
+                            quantity.div_ceil(2)
+                        } else {
+                            *quantity
+                        }
+                    );
+                } else if matches!(rule, RevivalWeapons::Guns | RevivalWeapons::HalfGuns) {
+                    assert_eq!(cut, 0);
+                } else if rule == RevivalWeapons::Missiles {
+                    assert_eq!(cut, *quantity);
+                }
+            }
+        }
+    }
+
     fn setup() -> (BTreeMap<String, Vec<u8>>, MissionSpec) {
         (
             tore_world::test_support::resources::gunship_resources(),

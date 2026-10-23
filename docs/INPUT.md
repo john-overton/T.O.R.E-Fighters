@@ -1234,6 +1234,12 @@ Right-side map buttons toggle categories, with Buildings off by default.
 Selections last until flight restart; no category settings appear in Escape. See the
 [map specification](spec/flight-map.md).
 
+While waiting for multiplayer revival, Escape opens **Loadout...**, plus
+**Aircraft...** in Player Choice slots, throughout and after the delay. Done
+saves edits; Cancel or Escape discards unsaved edits. Close all menus and press
+Enter or controller A to fly again when ready. Early presses do not queue a
+respawn, and closing a menu never confirms one. See [revival choices](MULTIPLAYER.md#ai-aircraft-and-player-choice).
+
 Quick Mission inline options support right-click to cycle backward, wrapping to
 the last available value. Left-click retains forward cycling and the existing
 list pickers. The player's wing never cycles below one. Right-click requires a
