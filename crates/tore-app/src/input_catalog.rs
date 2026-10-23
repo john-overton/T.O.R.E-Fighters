@@ -1197,6 +1197,10 @@ pub const ENTRIES: &[Entry] = &[
         "Lobby Settings: apply and close (Escape discards)",
         &["F10"],
     ),
+    menu_shortcut(
+        "Main menu: select Leave Feedback, Update Available or Pref update check",
+        &["Tab", "Enter"],
+    ),
     fixed("menu-up", "Menu up", Game, &["ArrowUp"]),
     fixed("menu-down", "Menu down", Game, &["ArrowDown"]),
     fixed("menu-left", "Menu left", Game, &["ArrowLeft"]),

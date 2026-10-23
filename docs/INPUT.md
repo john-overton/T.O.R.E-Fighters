@@ -25,6 +25,11 @@ bindable dim/bright actions. [Levels and defaults](spec/cockpit-lighting.md).
 
 ## Quick start
 
+On Choose Activity, Tab or the menu arrows reach **Leave Feedback** and, when
+shown, **Update Available**. Enter/Space activates the focused item; controller
+menu directions and Accept do the same. The saved check toggle is in Pref.
+See the [project-link contract](spec/main-menu-presentation.md#updates-and-project-feedback).
+
 Every default key, mouse input and gamepad button is in the
 [controls master list](CONTROLS.md). On Linux a controller exposing the standard
 two-stick gamepad controls receives the following default mapping. The 8BitDo Ultimate 2 wireless controller's input
