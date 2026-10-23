@@ -49,6 +49,7 @@ fn a_15_against_15_mission_with_nobody_connected_fits_the_budget() {
         start: StartMode::Now,
         entropy: Entropy::Seeded(1),
         ..HostConfig::new(BuildId {
+            compatibility: 0,
             version: "test".into(),
             commit: "test".into(),
             release: false,

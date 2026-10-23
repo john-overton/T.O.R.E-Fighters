@@ -41,6 +41,7 @@ fn master_build() -> Build {
         protocol_version: crate::wire::PROTOCOL_VERSION,
         game_version: build.version,
         game_commit: build.commit,
+        compatibility: build.compatibility,
         release: build.release,
     }
 }

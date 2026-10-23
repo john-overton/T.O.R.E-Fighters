@@ -90,7 +90,7 @@ Every master packet starts with a byte-aligned header:
 | --- | --- | --- |
 | Checksum | 32 bits | CRC-32 (IEEE) over the 11 bytes `TORE-MASTER` followed by every byte after this field |
 | Kind | 8 bits | One of the kinds below |
-| Version | 16 bits | The sender's master protocol version, 1 for now |
+| Version | 16 bits | The sender's master protocol version, 2 since compatibility codes |
 
 The header is 7 bytes. A datagram that is too short, too long, of an unknown
 kind or fails its checksum is dropped silently and counted.
@@ -162,7 +162,7 @@ from the game's protocol version
 ([net-protocol](net-protocol.md#versions)), because one master serves every
 build of the game at once: games of many builds talk to it for years.
 
-- The master supports a range of versions, today 1 to 1. It answers in the
+- The master supports a range of versions, today 2 to 2. It answers in the
   version the packet came in.
 - A packet of a version outside the range gets **Unsupported**, if it fits:
   the lowest and highest version supported (16 bits each) and a plain text
@@ -238,8 +238,9 @@ has none) is in the [architecture guide](../ARCHITECTURE.md#addresses-and-candid
 same outside port to both master ports, 3 a different outside port to each.
 
 **Build.** The game's protocol version (16), game version (string, at most 64
-bytes), game commit (string, at most 64 bytes) and a release bit (1, then 7
-zero bits): the same three facts the game's build match rule reads
+bytes), game commit (string, at most 64 bytes), compatibility code (32),
+and an informational release bit (1, then 7 zero bits). Matching uses the
+game protocol and code
 ([net-protocol](net-protocol.md#versions)).
 
 ## Listing a game
@@ -731,7 +732,7 @@ wire and discovery packets are. Bytes that change without a new master
 protocol version fail the test.
 
 The test is `master_golden` in `tore-net`'s `master/packet.rs`. The file
-records the master version (`master-version 1`) and one line per sample:
+records the master version (`master-version 2`) and one line per sample:
 a name, the length, and the bytes in hex (a padded request's bytes up to
 its padding). The test also decodes every committed line back to its sample.
 To add a sample, or after raising `MASTER_VERSION`, refresh it with
@@ -812,3 +813,15 @@ the sections above say otherwise):
   introduction, the Meet's 250 ms and three tries, five punches 200 ms apart,
   3 seconds to the relay and 15 to give up, 30 seconds of relay idle, and
   200 matching listings.
+
+## Compatibility codes (master protocol 2)
+
+Protocol 2 replaces commit/tag matching with game protocol and compatibility
+code equality. Build and ListingSummary carry a 32-bit code immediately after
+the commit string. PageEntry begins with the 32-bit code before its listing
+id. The code's definition is in [architecture](../ARCHITECTURE.md#compatibility-code).
+Version and commit remain information only. Code mismatches use the existing
+other-build flag and Show other versions filter. Introductions require a
+match too. Master protocol 1 packets receive Unsupported instead of being
+parsed as protocol 2, so old listings cannot crash this decoder or match new
+games. Deploy the updated master with protocol 68 clients.

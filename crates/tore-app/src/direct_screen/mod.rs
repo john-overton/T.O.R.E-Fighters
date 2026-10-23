@@ -676,13 +676,21 @@ impl DirectScreen {
         Some(match game.compat {
             Compat::Same => match self.rejoin_as(game) {
                 Some(callsign) => format!(
-                    "You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies."
+                    "Code {:08X}. You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies.",
+                    a.compatibility
                 ),
-                None => format!("Mission: {}", a.summary),
+                None => format!(
+                    "Code {:08X} ({} {}). Mission: {}",
+                    a.compatibility,
+                    a.game_version,
+                    a.game_commit.chars().take(9).collect::<String>(),
+                    a.summary
+                ),
             },
             _ => format!(
-                "{} runs another version ({} {}) and cannot be joined.",
+                "{}: Code {:08X} ({} {}) cannot be joined.",
                 a.name,
+                a.compatibility,
                 a.game_version,
                 a.game_commit.chars().take(9).collect::<String>()
             ),
@@ -823,9 +831,9 @@ impl DirectScreen {
             .map(|entry| entry.kept.token);
         let problem = match (game.compat, game.answer.phase, game.answer.full) {
             (Compat::OtherBuild | Compat::OtherProtocol, ..) => Some(format!(
-                "{name} runs another version ({} {}); it cannot be joined.",
-                game.answer.game_version,
-                game.answer.game_commit.chars().take(9).collect::<String>()
+                "The server's compatibility code is {:08X}; yours is {:08X}.",
+                game.answer.compatibility,
+                crate::net::session::compatibility_code()
             )),
             (_, DiscoverPhase::Closed, _) => Some(format!("{name} is closing; try again soon.")),
             (_, _, true) => Some(format!("{name} is full.")),

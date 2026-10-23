@@ -50,6 +50,7 @@ pub fn build() -> Build {
         protocol_version: tore_session::wire::PROTOCOL_VERSION,
         game_version: id.version,
         game_commit: id.commit,
+        compatibility: id.compatibility,
         release: id.release,
     }
 }
@@ -338,16 +339,17 @@ pub fn entry_line(entry: &PageEntry, summary: Option<&ListingSummary>) -> String
         tore_net::packet::DiscoverPhase::Closed => "closed",
     };
     let build = match &entry.other_build {
-        None => "this build".to_owned(),
+        None => "matching code".to_owned(),
         Some(version) => format!("version {version}"),
     };
     let mut line = format!(
-        "{}  {}/{} players, {phase}, {}, {}, {build}",
+        "{}  {}/{} players, {phase}, {}, {}, {build}, Code {:08X}",
         quote(&entry.name),
         entry.players,
         entry.capacity,
         if entry.password { "password" } else { "open" },
         if entry.full { "full" } else { "not full" },
+        entry.compatibility,
     );
     if entry.dedicated {
         line += ", dedicated server";
@@ -415,9 +417,10 @@ pub fn browse_master(
 pub fn browse_games(seconds: f64, master: &str, other_builds: bool) -> io::Result<()> {
     use std::io::Write;
     use std::time::Instant;
+    // Loading the compatibility identity is setup, not part of the browse timeout.
+    let mut browse = Browse::start(master, other_builds, true).map_err(io::Error::other)?;
     let clock = Instant::now();
     let now = || clock.elapsed();
-    let mut browse = Browse::start(master, other_builds, true).map_err(io::Error::other)?;
     let mut out = io::stdout().lock();
     let end = Duration::from_secs_f64(seconds);
     let mut details: Vec<(u64, Option<ListingSummary>)> = Vec::new();
@@ -591,6 +594,7 @@ pub(crate) mod testing {
                 session_id: 7,
                 game_version: build.game_version.clone(),
                 game_commit: build.game_commit.clone(),
+                compatibility: build.compatibility,
                 name: name.to_owned(),
                 mission: format!("{name}: KOLA, clear"),
                 king: "Iceman".into(),
@@ -841,6 +845,7 @@ mod tests {
     #[test]
     fn a_listed_game_reads_as_one_line_with_its_details() {
         let entry = PageEntry {
+            compatibility: 0,
             listing_id: 9,
             password: true,
             full: false,
@@ -856,7 +861,7 @@ mod tests {
         let bare = entry_line(&entry, None);
         assert_eq!(
             bare,
-            "\"Say 'hi'\"  2/8 players, flying, password, not full, this build, dedicated server, relay likely"
+            "\"Say 'hi'\"  2/8 players, flying, password, not full, matching code, Code 00000000, dedicated server, relay likely"
         );
         let summary = ListingSummary {
             mission: "UKR, clear".into(),

@@ -38,6 +38,7 @@ use tore_world::mission::{MissionSpec, Skill, Start};
 
 fn build() -> BuildId {
     BuildId {
+        compatibility: 0,
         version: "test".into(),
         commit: "test".into(),
         release: false,

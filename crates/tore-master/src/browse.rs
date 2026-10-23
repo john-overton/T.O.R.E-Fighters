@@ -15,18 +15,9 @@ use tore_net::packet::DiscoverPhase;
 use crate::listings::{Listing, Listings};
 use tore_net::master::MAX_BROWSE_MATCHES;
 
-/// True when an asker of build `asker` can join a host of build `host`: the
-/// same protocol version, and the game's own build rule (the same commit, or
-/// a tagged release host of the same plain version; the rule in
-/// `tore_session`'s `BuildId::matches`).
+/// The same protocol and compatibility code, regardless of commit or release label.
 pub fn same_build(host: &Build, asker: &Build) -> bool {
-    if host.protocol_version != asker.protocol_version {
-        return false;
-    }
-    if host.game_commit == asker.game_commit && host.game_commit != "unknown" {
-        return true;
-    }
-    host.release && asker.game_version == host.game_version && !asker.game_version.contains('-')
+    host.protocol_version == asker.protocol_version && host.compatibility == asker.compatibility
 }
 
 fn phase_rank(phase: DiscoverPhase) -> u8 {
@@ -80,6 +71,7 @@ pub fn page(listings: &Listings, browse: &Browse, max_len: usize) -> Page {
 fn entry(listing: &Listing, other_build: bool) -> PageEntry {
     let summary = &listing.summary;
     PageEntry {
+        compatibility: listing.build.compatibility,
         listing_id: listing.id,
         password: summary.password,
         full: summary.full,
@@ -108,24 +100,22 @@ mod tests {
             protocol_version: 7,
             game_version: version.into(),
             game_commit: commit.into(),
+            compatibility: 0,
             release,
         }
     }
 
     #[test]
     fn the_build_rule_is_the_games() {
-        let release = build("0.2.0", "abc", true);
-        assert!(same_build(&release, &build("0.2.0", "abc", true)));
-        assert!(same_build(&release, &build("0.2.0", "def", true)));
-        assert!(!same_build(&release, &build("0.1.2", "def", true)));
-        assert!(!same_build(&release, &build("0.2.0-4-gdef", "def", false)));
-        let dev = build("0.2.0-4-gabc", "abc", false);
-        assert!(same_build(&dev, &build("0.2.0-4-gabc", "abc", false)));
-        assert!(!same_build(&dev, &build("0.2.0", "def", true)));
-        let unknown = build("0.2.0", "unknown", false);
-        assert!(!same_build(&unknown, &build("0.2.0", "unknown", false)));
-        let mut other_protocol = build("0.2.0", "abc", true);
-        other_protocol.protocol_version = 8;
-        assert!(!same_build(&other_protocol, &release));
+        let mut host = build("0.2.0", "abc", true);
+        host.compatibility = 0x3FA9C21B;
+        let mut client = build("0.9.0-dev", "different", false);
+        client.compatibility = host.compatibility;
+        assert!(same_build(&host, &client));
+        client.compatibility ^= 1;
+        assert!(!same_build(&host, &client));
+        client.compatibility = host.compatibility;
+        client.protocol_version += 1;
+        assert!(!same_build(&host, &client));
     }
 }

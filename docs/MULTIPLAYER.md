@@ -1218,7 +1218,7 @@ the [master's wire](formats/master-protocol.md) and
   INTERNET LOUNGE. It lists the games on the master, refreshed every 15
   seconds: a lock for a password, the name, players over capacity, *Lobby*
   or *Flying*, and a small mark when the master expects the relay. Games of
-  another build are hidden unless "Show other versions" is ticked, and then
+  another compatibility code or protocol are hidden unless "Show other versions" is ticked, and then
   shown dimmed, as Direct Connection shows them. Selecting a game shows its
   mission and players. **Join** joins it ([connection path](#connection-path)),
   **New** hosts a game that is listed, **Refresh** asks again, **Options**
@@ -1446,7 +1446,7 @@ secret from someone who can watch the network.
 
 On join, the game compares:
 
-- The T.O.R.E build and protocol version, which must match.
+- The protocol and eight-digit [compatibility code](ARCHITECTURE.md#compatibility-code), which must match. Commits and release versions are information only.
 - A manifest of content hashes per aircraft, theater and weapon set.
 
 T.O.R.E imports only Fighters Anthology, from the disc's 1.0 build or the 1.02F
@@ -1454,11 +1454,13 @@ patch ([first-run import](spec/first-run-import.md)). USNF-only and ATF Gold
 installs cannot run it, so today's differences come from the FA build and, later,
 from mods and custom aircraft such as the [F/A-XX](spec/fa-xx.md). The lobby
 only offers aircraft and theaters that every human in the session has. A player
-missing something sees why in plain language instead of a failed join.
+with a different playable import is refused with both compatibility codes. The detailed mission check still explains differences after admission.
 
-*Built (stage D):* a game of another T.O.R.E build is refused at the door and
-shown dimmed, "runs another version", in Direct Connection and the Internet
-Lobby. The content is checked once a mission loads: each game builds the
+Since protocol 68, different commits and tags can see and join each other
+when their codes match. **Show other versions** includes games whose code
+or protocol differs, dimmed and not joinable. The selected game's details
+and game lobby show **Code XXXXXXXX**. The code covers the whole playable
+import, including unused items, and remains stable when the mission changes. The content is checked once a mission loads: each game builds the
 mission from its own import and compares the files it read with the host's. A
 1.0 import and a 1.02F import pass it, since every file the simulation reads
 is the same in both (slice D3a, [the comparison](formats/esa-installer.md#the-import-pack-under-both-builds)).

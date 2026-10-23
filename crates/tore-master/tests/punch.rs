@@ -53,6 +53,7 @@ fn build() -> Build {
         protocol_version: VERSION,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         release: true,
     }
 }
@@ -185,6 +186,7 @@ impl Row {
             phase: DiscoverPhase::Lobby,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
             name: "Friday night".into(),
             ..ListingSummary::default()
         };

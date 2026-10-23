@@ -124,7 +124,8 @@ fn an_answer_with_an_unknown_platform_code_is_dropped_as_malformed() {
     w.players[0].client.disconnect(DisconnectReason::Left);
     w.run_for(Duration::from_secs(1));
     // The platform byte follows the nonce, the cookie and four strings.
-    let at = 5
+    let at = 4
+        + 5
         + 8
         + 8
         + [
@@ -415,6 +416,7 @@ fn connect_requests_are_rate_limited_per_address() {
             nonce,
             game_version: String::new(),
             game_commit: String::new(),
+            compatibility: 0,
         })
         .encode(VERSION)
         .unwrap();

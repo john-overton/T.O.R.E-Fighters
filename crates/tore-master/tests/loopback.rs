@@ -18,6 +18,7 @@ fn build() -> Build {
         protocol_version: 7,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         release: true,
     }
 }
@@ -63,6 +64,7 @@ fn a_host_registers_and_a_browser_finds_it_on_real_sockets() {
         capacity: 8,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         name: "Loopback game".into(),
         ..ListingSummary::default()
     };

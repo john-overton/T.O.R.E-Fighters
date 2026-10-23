@@ -1125,10 +1125,14 @@ fn a_hosted_game_is_found_by_the_search_loop() {
     let (_thread, link, address) = start_host(0);
     let mut game = Game::join(link);
     let socket = bind_udp("0.0.0.0:0".parse().unwrap()).expect("a socket");
+    let mut own = Own::this_game();
+    own.build.compatibility = tore_session::compatibility::current(
+        &tore_session::host::content::GameContent::shared(&import()).content,
+    );
     let mut search = Search::with(
         socket,
         vec![address],
-        Own::this_game(),
+        own,
         tore_net::reach::random_nonce(),
         Duration::ZERO,
     )

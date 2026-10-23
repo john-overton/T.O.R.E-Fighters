@@ -1427,7 +1427,11 @@ impl LobbyScreen {
         let font = kit.sprite("PANELFNT");
         let dim = kit.sprite("PANELFND");
         let text = ui_text::text;
-        let game = format!("Game: {}", self.game_name());
+        let game = format!(
+            "Code {:08X}. Game: {}",
+            crate::net::session::compatibility_code(),
+            self.game_name()
+        );
         text(
             canvas,
             kit,

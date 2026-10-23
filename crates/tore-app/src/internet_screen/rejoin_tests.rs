@@ -71,7 +71,7 @@ fn a_listed_game_whose_session_the_player_holds_a_token_for_says_rejoin() {
             .unwrap(),
     );
     let line = s.selection_line().expect("a line");
-    assert!(line.starts_with("You were in this game as Viper"), "{line}");
+    assert!(line.contains("You were in this game as Viper"), "{line}");
     // Before the master has said which session it is, nothing is marked.
     s.details.clear();
     s.rebuild_games();

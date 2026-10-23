@@ -106,11 +106,11 @@ pub use routed::{Routed, channel_of, is_relayed, relayed_address};
 
 /// The master protocol version this build speaks. It is separate from the
 /// game's protocol version: one master serves every build of the game.
-pub const MASTER_VERSION: u16 = 1;
+pub const MASTER_VERSION: u16 = 2;
 
 /// The master protocol versions this build reads. A master answers a packet
 /// of a version outside it with [`Unsupported`].
-pub const SUPPORTED_VERSIONS: RangeInclusive<u16> = 1..=1;
+pub const SUPPORTED_VERSIONS: RangeInclusive<u16> = 2..=2;
 
 /// The master's main UDP port: listings, browsing, introductions, the relay,
 /// reports (a master setting).

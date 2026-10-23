@@ -72,16 +72,11 @@ impl Own {
         }
     }
 
-    /// How a host's answer compares. The host's own rule (commit equal, or a
-    /// plain version equal on a tagged release) needs a release flag the
-    /// answer does not carry, so a plain-version match counts as the same
-    /// build here (agent decision); the host has the last word at the join.
+    /// Compare protocol and code; version labels and commits are informational.
     pub fn compare(&self, answer: &DiscoverAnswer) -> Compat {
         if answer.protocol_version != self.protocol_version {
             Compat::OtherProtocol
-        } else if (answer.game_commit == self.build.commit && answer.game_commit != "unknown")
-            || (answer.game_version == self.build.version && !answer.game_version.contains('-'))
-        {
+        } else if self.build.matches(answer.compatibility) {
             Compat::Same
         } else {
             Compat::OtherBuild
@@ -372,8 +367,8 @@ pub fn game_line(game: &Game) -> String {
     use tore_net::packet::DiscoverPhase;
     let a = &game.answer;
     let compat = match game.compat {
-        Compat::Same => "same build",
-        Compat::OtherBuild => "other build",
+        Compat::Same => "matching code",
+        Compat::OtherBuild => "other code",
         Compat::OtherProtocol => "other protocol",
     };
     let phase = match a.phase {
@@ -382,10 +377,11 @@ pub fn game_line(game: &Game) -> String {
         DiscoverPhase::Closed => "closed",
     };
     format!(
-        "{}\t{compat} ({} {})\t{}\t{}\t{}/{} players\t{phase}\tking {}\t{}\t{}",
+        "{}\t{compat} ({} {}, Code {:08X})\t{}\t{}\t{}/{} players\t{phase}\tking {}\t{}\t{}",
         game.address,
         a.game_version,
         a.game_commit.chars().take(9).collect::<String>(),
+        a.compatibility,
         a.name,
         a.summary,
         a.players,
@@ -447,12 +443,13 @@ mod tests {
     use std::rc::Rc;
     use tore_net::packet::DiscoverPhase;
 
-    const V: u16 = 3;
+    const V: u16 = 68;
 
     fn own() -> Own {
         Own {
             protocol_version: V,
             build: BuildId {
+                compatibility: 0,
                 version: "0.2.0-2-gabc".into(),
                 commit: "abc".into(),
                 release: false,
@@ -466,6 +463,7 @@ mod tests {
             protocol_version: V,
             game_version: "0.2.0-2-gabc".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
             session_id: session,
             name: name.into(),
             summary: "UKR".into(),
@@ -653,6 +651,12 @@ mod tests {
         let mut other_build = answer(0xABCD, 1, "Other build");
         other_build.game_version = "0.1.4-1-gdef".into();
         other_build.game_commit = "def".into();
+        assert_eq!(
+            own().compare(&other_build),
+            Compat::Same,
+            "commits are informational"
+        );
+        other_build.compatibility ^= 1;
         let mut other_protocol = answer(0xABCD, 2, "Other protocol");
         other_protocol.protocol_version = V + 1;
         let mut tagged = answer(0xABCD, 3, "Tagged");
@@ -771,7 +775,7 @@ mod tests {
             fields,
             [
                 "192.168.1.20:26900",
-                "same build (0.2.0-2-gabc abc)",
+                "matching code (0.2.0-2-gabc abc, Code 00000000)",
                 "Friday night",
                 "UKR",
                 "1/4 players",

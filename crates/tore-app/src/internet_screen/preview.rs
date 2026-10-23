@@ -107,6 +107,7 @@ pub(super) fn sample_entries() -> Vec<(PageEntry, ListingSummary)> {
         .zip(1u64..)
         .map(|(sample, id)| {
             let entry = PageEntry {
+                compatibility: 0,
                 listing_id: id,
                 password: sample.password,
                 full: sample.full,
@@ -129,6 +130,7 @@ pub(super) fn sample_entries() -> Vec<(PageEntry, ListingSummary)> {
                 session_id: id,
                 game_version: sample.other_build.unwrap_or("0.2.0").to_owned(),
                 game_commit: "1a2b3c4d5e6f".into(),
+                compatibility: 0,
                 name: sample.name.to_owned(),
                 mission: sample.mission.to_owned(),
                 king: sample

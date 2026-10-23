@@ -168,6 +168,7 @@ fn build() -> Build {
         protocol_version: 0,
         game_version: FLOOD_VERSION.into(),
         game_commit: "flood".into(),
+        compatibility: 0,
         release: false,
     }
 }

@@ -161,7 +161,12 @@ impl Introductions {
             return Some(self.refusal(from, request, IntroductionResult::NoListing));
         };
         if !same_build(&listing.build, &request.build) {
-            return Some(self.refusal(from, request, IntroductionResult::OtherBuild));
+            let mut refusal = self.refusal(from, request, IntroductionResult::OtherBuild);
+            refusal.text = format!(
+                "The server's compatibility code is {:08X}; yours is {:08X}.",
+                listing.build.compatibility, request.build.compatibility
+            );
+            return Some(refusal);
         }
         if listing.summary.full {
             return Some(self.refusal(from, request, IntroductionResult::Full));

@@ -178,7 +178,7 @@ tore-server --config server.conf
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
 | `--check` | Validate the configuration and import; with rotation, build every entry and report its summary/settings. Print the selected mission's aircraft, runways, manifest and import content. Exit without opening the port |
 | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` | AI test settings (slices S7b and S9), for measuring and trying, not for play: `N` is how often AI aircraft observe, 120, 60 (default since optimization round 2), 40, 30 or 20, staggered across ticks, and lean sensors (on by default; a bare flag means on, `off` runs the full sensors) have AI aircraft skip the visual channel and build the received-radar list only when a warning needs it, which decides exactly as full ones do. The server's setting governs the simulation and no player is told; a server running another rate or full sensors appoints no standby. See [AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors) |
-| `--help`, `--version` | Print the options, or the version and commit, and exit |
+| `--help`, `--version` | Print the options, or the version, compatibility code and commit for the selected data profile, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
 defaults apply (a configuration file named with `--config` must exist); a
@@ -213,7 +213,7 @@ server reads its Fighters Anthology build from the `FA.EXE:` line of
 `import-report.txt` beside the pack, and the importer is unknown
 ("imported by an unknown T.O.R.E"). No re-import is needed.
 
-At start it prints the version and commit, the data folder, a summary of the
+At start it prints the version, commit and compatibility code, the data folder, a summary of the
 mission, the port it listens on, whether it broadcasts on the Internet Lobby
 (`Broadcast: off ...` or `Broadcast: on, to the Internet Lobby at ...`) and
 "Waiting for players". It refuses to start,
@@ -794,8 +794,12 @@ manifest with the server's: the names and hashes of every resource the
 simulation reads for that mission (aircraft, weapons, theater, radio phrases).
 A 1.0 disc import and a 1.02F import play together, since they differ only in
 menu and HUD resources. A difference is refused with the names of the files
-that differ. The game version and protocol must match as well
-([wire protocol](formats/net-protocol.md#versions)). *Decided with the lead, 2026-09-30:* a build is a tagged release when the build stamped `TORE_BUILD_VERSION` at compile time (`option_env!("TORE_BUILD_VERSION").is_some()`, as the game's `version::version()` already tests); release builds match by version and other builds by commit. The server's rule is `app::is_release` in `crates/tore-server/src/app.rs`, and the game's `--connect` must use the same test.
+that differ. The protocol and [compatibility code](ARCHITECTURE.md#compatibility-code)
+must match as well. Different commits, release tags and version strings can
+join with the same code. `tore-server --data-dir /path/to/profile --version`
+prints the code of that import; without an import it labels an empty-content
+code explicitly. The code covers the whole playable import, so a change to
+an unused item also prevents joining.
 
 ## Hosting from the game
 
@@ -893,8 +897,7 @@ tore-app --find-games 8 [--port 26900]
 
 It looks for games on the local network for that many seconds (0.1 to 3600)
 and prints each game when it first answers, one line each on stdout, fields
-separated by tabs: address, whether the build matches (`same build`, `other
-build` or `other protocol`, with the host's version and commit), name, mission
+separated by tabs: address, whether the code matches (`matching code`, `other code` or `other protocol`, with the host's code, version and commit), name, mission
 summary, players and capacity, phase (`lobby`, `flying`, `closed`), the King
 (`-` for a dedicated server), `password` or `open`, `full` or `not full`.
 When nothing answers it prints `No games found.` and exits 0 all the same;

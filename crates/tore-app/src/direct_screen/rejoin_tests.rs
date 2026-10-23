@@ -81,7 +81,7 @@ fn the_selection_line_and_the_join_carry_the_token() {
         .unwrap();
     s.select_game(index);
     let line = s.selection_line().expect("a line");
-    assert!(line.starts_with("You were in this game as Viper"), "{line}");
+    assert!(line.contains("You were in this game as Viper"), "{line}");
     s.focus.set(Id::Games);
     let Outcome::Join(request) = s.key("Enter", false) else {
         panic!("a join: {}", s.message_lines().join("\n"));
@@ -117,7 +117,7 @@ fn a_game_with_no_token_joins_without_one() {
         panic!("a join");
     };
     assert_eq!(request.token, None);
-    assert!(s.selection_line().unwrap().starts_with("Mission:"));
+    assert!(s.selection_line().unwrap().contains("Mission:"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

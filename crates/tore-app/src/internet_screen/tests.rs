@@ -199,11 +199,7 @@ fn the_selected_games_players_show_with_the_crown_and_its_mission_under_the_list
     assert_eq!(rows[0].cells[0], Cell::Icon(Icon::Crown));
     assert_eq!(rows[0].cells[1], Cell::Text("Iceman".into()));
     assert_eq!(rows[1].cells[0], Cell::Empty);
-    assert!(
-        s.selection_line()
-            .unwrap()
-            .starts_with("Mission: KOLA, clear")
-    );
+    assert!(s.selection_line().unwrap().contains("Mission: KOLA, clear"));
     // A game that says more players than it names: "and 2 more".
     let mut games = sample_entries();
     games[0].1.players = 5;
@@ -223,7 +219,7 @@ fn the_selected_games_players_show_with_the_crown_and_its_mission_under_the_list
     s.rebuild_players();
     assert_eq!(
         s.selection_line().unwrap(),
-        "This game's router may need the relay."
+        "Code 00000000. This game's router may need the relay."
     );
     // Another version has its own line.
     s.other.set_checked(true);
@@ -233,7 +229,7 @@ fn the_selected_games_players_show_with_the_crown_and_its_mission_under_the_list
     assert!(
         s.selection_line()
             .unwrap()
-            .contains("runs another version (0.1.2) and cannot be joined")
+            .contains("Code 00000000 (0.1.2) cannot be joined")
     );
 }
 
@@ -275,10 +271,7 @@ fn a_game_that_cannot_be_joined_is_refused_in_words_before_the_master_is_asked()
     s.other.set_checked(true);
     s.rebuild_games();
     for (name, wanted) in [
-        (
-            "Old build",
-            "runs another version (0.1.2); it cannot be joined.",
-        ),
+        ("Old build", "compatibility code is 00000000; yours is"),
         ("Top Gun test", "is full."),
         ("Going away", "is closing; try again soon."),
     ] {
@@ -765,10 +758,14 @@ fn the_screen_lists_the_games_a_real_master_lists_with_their_players() {
         !s.players.is_empty()
     }));
     assert_eq!(s.players.rows()[0].cells[0], Cell::Icon(Icon::Crown));
+    assert!(s.selection_line().unwrap().starts_with(&format!(
+        "Code {:08X}",
+        crate::net::browse::build().compatibility
+    )));
     assert!(
         s.selection_line()
             .unwrap()
-            .starts_with("Mission: Friday night")
+            .contains("Mission: Friday night")
     );
 }
 

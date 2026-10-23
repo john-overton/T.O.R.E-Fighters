@@ -119,3 +119,13 @@ The lobby and server log share the wait text, for example:
 The minimum gates mission start only; departures in flight do not pause it.
 Existing settings messages and `mission_locked` carry everything needed, so
 this change does not extend the wire format.
+
+## Compatibility display and admission
+
+Opinionated, requested by John on 2026-10-23. Games with matching protocol
+and eight-digit uppercase compatibility codes can see and join one another
+regardless of source commit or release label. Show other versions includes
+incompatible games but leaves them unjoinable. The selected game's details
+and game lobby header show `Code XXXXXXXX`. A mismatch names both codes.
+The [code definition](../ARCHITECTURE.md#compatibility-code) records the agent's
+whole-import scope and hash choice. The detailed per-mission check remains.

@@ -14,6 +14,7 @@ fn join_by(rig: &mut Rig, callsign: &str, path: Path) -> usize {
     let config = ClientConfig {
         game_version: build().version,
         game_commit: build().commit,
+        compatibility: build().compatibility,
         entropy: Entropy::Seeded(u64::from(rig.next_port)),
         ..ClientConfig::new(PROTOCOL_VERSION, callsign)
     };

@@ -25,9 +25,7 @@ pub fn version() -> &'static str {
 /// version instead of by commit. The rule is that the build script's stamped
 /// tag, `TORE_BUILD_VERSION`, was set at compile time: the same test as the
 /// game's `version::version()` uses to choose the tag over the crate version.
-/// The game's client (slice D8) must use the same rule. `tore_session::BuildId::matches`
-/// decides what a release flag means: a release host also takes a game of the
-/// same plain version, and any host takes the same commit.
+/// This flag is informational; admission compares compatibility codes.
 pub fn is_release() -> bool {
     option_env!("TORE_BUILD_VERSION").is_some()
 }
@@ -69,7 +67,23 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Failure> {
         return Ok(());
     }
     if options.version {
-        say(&format!("T.O.R.E server v{} ({})", version(), commit()));
+        let dir = options
+            .data_dir
+            .clone()
+            .or_else(|| tore_import::data_directory().ok());
+        let code = dir.and_then(|dir| tore_session::compatibility::installed(&dir).ok());
+        let suffix = if code.is_some() {
+            ""
+        } else {
+            ", no imported content"
+        };
+        let code =
+            code.unwrap_or_else(|| tore_session::compatibility::current(&Default::default()));
+        say(&format!(
+            "T.O.R.E server - v{} (code {code:08X}{suffix}, commit {})",
+            version(),
+            commit()
+        ));
         return Ok(());
     }
     prepare::refuse_retail_stall_speeds(&options, std::env::var_os("TORE_RETAIL_STALL_SPEEDS"))?;
@@ -165,6 +179,12 @@ pub fn serve_with(
             version(),
             commit().chars().take(9).collect::<String>(),
             target()
+        ),
+        format!(
+            "Compatibility code: {:08X}",
+            tore_session::compatibility::current(
+                &tore_session::host::content::GameContent::shared(&resources).content
+            )
         ),
         format!("Server name: {}", config.name),
         format!("Data folder: {}", data_dir.display()),
@@ -355,18 +375,19 @@ mod tests {
             lines[0].starts_with(&format!("T.O.R.E server v{}", version())),
             "{text}"
         );
-        assert_eq!(lines[1], "Server name: T.O.R.E server");
-        assert!(lines[2].starts_with("Data folder: "));
+        assert!(lines[1].starts_with("Compatibility code: "));
+        assert_eq!(lines[2], "Server name: T.O.R.E server");
+        assert!(lines[3].starts_with("Data folder: "));
         assert!(
-            lines[3].starts_with("Mission: UKR (clear), airborne at 10000 ft"),
+            lines[4].starts_with("Mission: UKR (clear), airborne at 10000 ft"),
             "{text}"
         );
         assert!(
-            lines[4].starts_with("Listening on UDP 127.0.0.1:"),
+            lines[5].starts_with("Listening on UDP 127.0.0.1:"),
             "{text}"
         );
-        assert!(lines[5].starts_with("Broadcast: off"), "{text}");
-        assert_eq!(lines[6], "Waiting for players");
+        assert!(lines[6].starts_with("Broadcast: off"), "{text}");
+        assert_eq!(lines[7], "Waiting for players");
         assert!(text.contains("console: quit"));
         assert!(lines.last().unwrap().ends_with("Stopped"));
         let (config, spec, sockets, install) = received.unwrap();

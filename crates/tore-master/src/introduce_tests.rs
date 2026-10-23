@@ -33,6 +33,7 @@ fn build() -> Build {
         protocol_version: 9,
         game_version: "0.2.0".into(),
         game_commit: "abc".into(),
+        compatibility: 0,
         release: true,
     }
 }
@@ -96,6 +97,7 @@ impl Rig {
             phase: DiscoverPhase::Lobby,
             game_version: "0.2.0".into(),
             game_commit: "abc".into(),
+            compatibility: 0,
             name: "Friday night".into(),
             ..ListingSummary::default()
         };
@@ -365,6 +367,7 @@ fn refusals_say_why() {
     );
     let mut other = introduce(listing_id, 2, 0);
     other.build.game_commit = "def".into();
+    other.build.compatibility ^= 1;
     other.build.release = false;
     other.build.game_version = "0.1.4-1-gdef".into();
     assert_eq!(
