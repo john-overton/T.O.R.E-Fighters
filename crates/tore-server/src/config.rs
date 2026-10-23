@@ -597,6 +597,18 @@ mod tests {
         parse(text).expect_err("the file is refused").to_string()
     }
 
+    /// The release archives carry `samples/server.conf` and
+    /// `samples/mission.txt` (tools/package/package_server.py): the sample
+    /// configuration is the defaults written out, and the sample mission is
+    /// one the server reads.
+    #[test]
+    fn the_shipped_samples_are_the_defaults_and_a_mission() {
+        let config = parse(include_str!("../samples/server.conf")).unwrap();
+        assert_eq!(config, Config::defaults(&base()));
+        tore_world::mission::MissionSpec::from_text(include_str!("../samples/mission.txt"))
+            .unwrap();
+    }
+
     #[test]
     fn feedback_recording_settings_are_opt_in_and_server_wide() {
         let c = parse("").unwrap();

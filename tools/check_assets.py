@@ -6,9 +6,10 @@ packaging checks what it is about to publish.
 
 How release packages are scanned:
 
-- A `.tar.gz` (or `.tgz`, or a plain `.tar`) is opened with `tarfile` and each
-  member is scanned as if it were a loose file, so a retail extension or an
-  embedded EALIB or PIC signature inside the archive is caught.
+- A `.tar.gz` (or `.tgz`, or a plain `.tar`) is opened with `tarfile`, and a
+  `.zip` (the Windows dedicated server's archive) with `zipfile`; each member
+  is scanned as if it were a loose file, so a retail extension or an embedded
+  EALIB or PIC signature inside the archive is caught.
 - MSI, DMG and AppImage packages are scanned as raw bytes only. That catches an
   uncompressed EALIB or PIC signature sitting in the container, but it does not
   see inside a compressed payload, and all three formats compress. The real
@@ -24,6 +25,7 @@ import struct
 import subprocess
 import sys
 import tarfile
+import zipfile
 
 
 RETAIL_SUFFIXES = {".lib", ".esa", ".pic", ".pal", ".fnt", ".dlg", ".mnu", ".lay", ".11k", ".5k", ".xmi", ".mus", ".pack"}
@@ -109,6 +111,31 @@ def tarball_violations(path):
     return found
 
 
+def is_zip(path):
+    """True for a .zip, scanned member by member like a tarball."""
+    return path.name.lower().endswith(".zip")
+
+
+def zip_violations(path):
+    """Scan every file member of a zip archive. Returns (member, reason) pairs.
+
+    A member whose Unix mode marks it a symbolic link is reported, as a
+    tarball's link is.
+    """
+    found = []
+    with zipfile.ZipFile(path) as archive:
+        for member in archive.infolist():
+            if member.is_dir():
+                continue
+            if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                found.append((member.filename, "expected a regular file"))
+                continue
+            reason = violation(Path(member.filename), archive.read(member))
+            if reason:
+                found.append((member.filename, reason))
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path,
@@ -149,6 +176,14 @@ def main():
             try:
                 members = tarball_violations(path)
             except tarfile.TarError as error:
+                failures.append(f"{relative}: unreadable archive ({error})")
+                continue
+            failures.extend(f"{relative}:{member}: {reason}" for member, reason in members)
+            continue
+        if is_zip(path):
+            try:
+                members = zip_violations(path)
+            except (zipfile.BadZipFile, OSError) as error:
                 failures.append(f"{relative}: unreadable archive ({error})")
                 continue
             failures.extend(f"{relative}:{member}: {reason}" for member, reason in members)

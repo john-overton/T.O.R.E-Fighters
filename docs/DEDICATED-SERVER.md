@@ -26,6 +26,7 @@ proposal unless it is credited to John.
 ## Contents
 
 - [What it is](#what-it-is)
+- [Downloading it](#downloading-it)
 - [Importing the game](#importing-the-game)
 - [Running it](#running-it)
 - [The configuration file](#the-configuration-file)
@@ -50,8 +51,9 @@ proposal unless it is credited to John.
 `tore-server` is a separate program with no window, graphics or sound. It
 runs one Quick Mission at a time at a fixed 120 ticks a second, never paused.
 The AI flies every aircraft no human holds, and players join with the game and
-take aircraft in flight. It builds for Linux, Windows and macOS from the same
-workspace as the game:
+take aircraft in flight. Each release publishes it for Linux, Windows and
+macOS as its own download ([downloading it](#downloading-it)), and it builds
+from the same workspace as the game:
 
 ```sh
 cargo build --release --locked -p tore-server
@@ -65,6 +67,78 @@ data, so it needs its operator's own copy of Fighters Anthology, imported the
 same way the game imports it. Nothing derived from retail media is ever sent
 over the network: every player's game reads its own import, and the server
 checks that the two agree ([content check](#joining-from-the-game)).
+
+## Downloading it
+
+Since v0.2.0 every release publishes the server beside the game's packages on
+the [releases page](https://github.com/john-overton/T.O.R.E-Fighters/releases),
+as an archive of its own: an operator does not need the game installed.
+*Agent decision (2026-10-22):* a separate archive rather than a copy inside the
+game's packages, so a headless machine downloads only the server and nothing
+that opens a window.
+
+| Platform | Download |
+| --- | --- |
+| Windows, 64-bit | `tore-server-<version>-windows-x86_64.zip` |
+| macOS, Apple Silicon | `tore-server-<version>-macos-arm64.tar.gz` |
+| macOS, Intel | `tore-server-<version>-macos-x86_64.tar.gz` |
+| Linux, 64-bit Intel/AMD | `tore-server-<version>-linux-x86_64.tar.gz` |
+
+Each has a `.sha256` file beside it. The archive holds one folder, named like
+the archive, with:
+
+- `tore-server` (`tore-server.exe` on Windows), the server;
+- `server.conf`, a [configuration file](#the-configuration-file) holding the
+  defaults with a comment on each, to edit;
+- `mission.txt`, a [mission file](#the-mission-file): two friendly wings
+  against two enemy wings over Ukraine;
+- `DEDICATED-SERVER.md` (this guide), `LICENSE` and
+  `THIRD_PARTY_NOTICES.md`.
+
+No retail data is in it. Unpack it anywhere, [import](#importing-the-game) your
+own Fighters Anthology once (not needed on a machine where the game has
+already imported it: the server reads the game's data folder by default), then
+start it from that folder:
+
+```sh
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-server-0.2.0-linux-x86_64.tar.gz
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-server-0.2.0-linux-x86_64.tar.gz.sha256
+sha256sum -c tore-server-0.2.0-linux-x86_64.tar.gz.sha256
+tar -xzf tore-server-0.2.0-linux-x86_64.tar.gz
+cd tore-server-0.2.0-linux-x86_64
+./tore-server --import /path/to/FIGHTERS
+./tore-server --config server.conf --check
+./tore-server --config server.conf
+```
+
+(`v0.2.0` stands for the release you want; on macOS, `shasum -a 256 -c` checks
+the file.) On Windows, unzip it and run the three `tore-server` lines in PowerShell or
+a Command Prompt, as `.\tore-server.exe`; `Get-FileHash` prints the SHA-256 to
+compare with the `.sha256` file. Then see
+[ports and firewalls](#ports-and-firewalls) to let players in.
+
+Nothing is signed, as with the game
+([first launch](DEVELOPMENT.md#unsigned-builds-and-first-launch)):
+
+- **Linux.** Built on Ubuntu 22.04 and checked not to need a newer C library
+  than its glibc 2.35, so it runs on Ubuntu 22.04 or later and other
+  distributions of that age or newer.
+- **macOS.** A file a browser downloaded is quarantined, and macOS refuses to
+  run the unsigned server ("cannot be verified"). In the unpacked folder,
+  `xattr -d com.apple.quarantine tore-server` clears it; or run it once, then
+  choose **Allow Anyway** for it under System Settings, Privacy & Security, and
+  run it again. A download made with `curl` is not quarantined. Needs macOS 11
+  or later, as the game does.
+- **Windows.** A zip a browser downloaded is marked as coming from the
+  internet, and Windows may warn before the server first runs. Before
+  unzipping, open the zip's Properties and tick **Unblock** (or run
+  `Unblock-File` on it in PowerShell). The first run asks whether the program
+  may accept connections; allow it.
+
+There is no 32-bit Windows or ARM Linux download; build it from source there.
+A workflow run that is not a tag (a `release-test/...` branch, or a manual
+run) builds the same archives as the `server-<runner>` artifacts without
+publishing them ([packaging](DEVELOPMENT.md#packaging)).
 
 ## Importing the game
 

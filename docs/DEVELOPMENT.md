@@ -205,7 +205,9 @@ hand. A push to any branch named `release-test/...` runs the build half only,
 so the packaging path can be exercised without publishing anything; download
 the five `packages-*` artifacts from that run with `gh run download`
 (and `master-ubuntu-22.04`, the Linux `tore-master` for the Internet Lobby's
-master server; [operations](MASTER-SERVER.md#downloading-a-release)).
+master server, [operations](MASTER-SERVER.md#downloading-a-release); and the
+four `server-*` artifacts, the dedicated server's archives,
+[downloading it](DEDICATED-SERVER.md#downloading-it)).
 `workflow_dispatch` does the same once the workflow exists on `main`.
 
 Every script takes the version from `--version`, then from the tag the workflow
@@ -237,6 +239,7 @@ script the same target.
 | macOS | `tools/package/package-macos.sh` | `dist/*.dmg` holding `T.O.R.E-Fighters.app` |
 | Windows | `pwsh tools/package/package-windows.ps1` | `dist/*-windows-x86_64.msi` |
 | Windows 32-bit | `pwsh tools/package/package-windows.ps1 -Target i686-pc-windows-msvc` | `dist/*-windows-x86.msi` |
+| Dedicated server, any of the three | `python3 tools/package/package_server.py [--max-glibc 2.35]` after `cargo build --release --locked -p tore-server` | `dist/server/tore-server-<version>-<platform>.tar.gz` (`.zip` on Windows) and its `.sha256` |
 
 What each package contains:
 
@@ -259,6 +262,19 @@ What each package contains:
   The 32-bit MSI installs into `%ProgramFiles(x86)%\T.O.R.E-Fighters`
   instead; the two share the `UpgradeCode`, so installing either replaces the
   other. The installer's pages and its shortcut choices are described below.
+- **Dedicated server archive**: one folder named like the archive, holding
+  `tore-server` (`tore-server.exe`), `server.conf` and `mission.txt` (the
+  samples in `crates/tore-server/samples/`, which a `tore-server` test parses),
+  `DEDICATED-SERVER.md`, `LICENSE` and `THIRD_PARTY_NOTICES.md`. The release
+  workflow builds it on the Windows x86_64, both macOS and the Linux jobs, with
+  a cargo command of its own so the game's binaries are built exactly as
+  before, and uploads it as `server-<runner>` from `dist/server/`, apart from
+  the game's packages. The script scans the staged folder and the archive,
+  checks the runtime libraries, and runs `--version` (which must carry
+  `TORE_BUILD_VERSION` when it is set) from the stage and from an unpacked
+  copy. `tools/check_assets.py` scans a `.zip` member by member, as it does a
+  tarball. The guide's [download section](DEDICATED-SERVER.md#downloading-it)
+  is the operator's side.
 
 None of these contain retail media. The app imports the player's own Fighters
 Anthology copy at runtime; see [first-run import](spec/first-run-import.md).
@@ -360,10 +376,12 @@ share a GUID.
 
 ### appimagetool
 
-`appimagetool` is published only under a moving `continuous` tag, so the script
-downloads it and checks it against a SHA-256 pinned in `package-linux.sh`. When
-upstream rebuilds the asset the hash stops matching and the script refuses to
-run it; review the new build and update the pin deliberately. If the tool is
+The script downloads `appimagetool` from its versioned 1.9.1 release (John,
+2026-10-22; the moving `continuous` tag was rebuilt on 2026-10-04 and broke the
+earlier pin) and checks it against a SHA-256 pinned in `package-linux.sh`, which
+matches the digest GitHub lists for that asset. If the download ever stops
+matching, the script refuses to run it; review the build and update the pin
+deliberately. If the tool is
 already on `PATH` that copy is used instead. Locally, no AppImage is a warning
 and the tar.gz still succeeds; in CI it is a failure.
 
@@ -385,11 +403,14 @@ the package layout.
 ### What CI validates, and what it does not
 
 The release workflow runs formatting, Clippy, workspace tests, Python tool
-and Windows resource-layout tests, documentation and asset checks. Both it and
+and Windows resource-layout tests, documentation and asset checks. `ci.yml`
+also scans the debug `tore-server` and checks its runtime libraries (the 2.35
+glibc floor on Linux) on all five jobs, since it ships too. Both it and
 `ci.yml` run a fifth job on `windows-2022` for 32-bit Windows, which sets
 `CARGO_BUILD_TARGET=i686-pc-windows-msvc` so every crate is linted, tested and
 built for that target. The release workflow builds release binaries with
-matching debug information and retains PDB, dSYM or ELF symbols in separate
+matching debug information and retains PDB, dSYM or ELF symbols (the dedicated
+server's too, on the jobs that build it) in separate
 `symbols-*` workflow artifacts labelled by source commit.
 These artifacts are not added to the retail-free game packages.
 

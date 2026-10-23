@@ -21,12 +21,14 @@ icons="$root/crates/tore-app/assets/icon"
 # shellcheck source=tools/package/version.sh
 . "$here/version.sh"
 
-# appimagetool is published only under the moving "continuous" tag, so the
-# download is pinned by content hash. Recorded 2026-09-22 by downloading the
-# asset and running sha256sum. When upstream rebuilds it this script fails
-# loudly rather than running an unreviewed binary; re-pin deliberately.
-APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-APPIMAGETOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
+# appimagetool is pinned to the versioned 1.9.1 release (John, 2026-10-22),
+# not the moving "continuous" tag, whose 2026-10-04 rebuild broke the old pin.
+# The hash was recorded on 2026-10-22 by downloading the asset, running
+# sha256sum, and matching the digest GitHub lists for the release asset. A
+# mismatch still fails loudly rather than running an unreviewed binary;
+# re-pin deliberately.
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
+APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
 
 explicit=""
 while [ $# -gt 0 ]; do
