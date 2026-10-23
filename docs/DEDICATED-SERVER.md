@@ -118,18 +118,21 @@ a Command Prompt, as `.\tore-server.exe`; `Get-FileHash` prints the SHA-256 to
 compare with the `.sha256` file. Then see
 [ports and firewalls](#ports-and-firewalls) to let players in.
 
-Nothing is signed, as with the game
+There is no developer signing or notarization, as with the game
 ([first launch](DEVELOPMENT.md#unsigned-builds-and-first-launch)):
 
 - **Linux.** Built on Ubuntu 22.04 and checked not to need a newer C library
   than its glibc 2.35, so it runs on Ubuntu 22.04 or later and other
   distributions of that age or newer.
-- **macOS.** A file a browser downloaded is quarantined, and macOS refuses to
-  run the unsigned server ("cannot be verified"). In the unpacked folder,
-  `xattr -d com.apple.quarantine tore-server` clears it; or run it once, then
-  choose **Allow Anyway** for it under System Settings, Privacy & Security, and
-  run it again. A download made with `curl` is not quarantined. Needs macOS 11
-  or later, as the game does.
+- **macOS.** The binary is ad-hoc signed for integrity, without Developer ID
+  or notarization. A browser download is quarantined and may be blocked
+  ("cannot be verified"). Try running it from the unpacked folder, then if
+  blocked choose **System Settings > Privacy & Security > Open Anyway** and
+  run it again. Recent macOS no longer has the right-click Open bypass. For a
+  trusted project download that remains blocked, run
+  `xattr -dr com.apple.quarantine tore-server` in that folder and retry. A
+  download made with `curl` is not quarantined. Needs macOS 11 or later, as
+  the game does.
 - **Windows.** A zip a browser downloaded is marked as coming from the
   internet, and Windows may warn before the server first runs. Before
   unzipping, open the zip's Properties and tick **Unblock** (or run

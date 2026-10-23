@@ -5,9 +5,10 @@
 #   tools/package/package-macos.sh [--version 0.2.0]
 #
 # The DMG lands in dist/ and the staged .app stays in dist/stage/macos/ so the
-# asset guard can scan real files. The build is unsigned and not notarized: the
-# first launch is a right-click, Open, then Open again in the dialog.
-# Requires macOS: hdiutil, sips and iconutil are Apple tools.
+# asset guard can scan real files. Ad-hoc signing seals the bundle, but there
+# is no Developer ID or notarization. If first launch is blocked, use System
+# Settings > Privacy & Security > Open Anyway.
+# Requires macOS: codesign, hdiutil and iconutil are Apple tools.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -112,6 +113,19 @@ python3 "$root/tools/check_assets.py" "$app"
 python3 "$root/tools/check_runtime_dependencies.py" "$app/Contents/MacOS/tore-app" "$app/Contents/MacOS/tore-extract"
 python3 "$root/tools/check_startup_diagnostics.py" "$app/Contents/MacOS/tore-app"
 
+# Sign from the inside out after assembly. The linker's executable signatures
+# alone do not seal Info.plist and resources. No hardened runtime: this is an
+# integrity seal, not Developer ID signing or notarization. Do not modify the
+# bundle after this point, including its nested executables.
+echo "Ad-hoc signing the executables and complete app bundle"
+for binary in tore-app tore-extract; do
+    codesign --force --sign - "$app/Contents/MacOS/$binary"
+done
+codesign --force --sign - "$app"
+test -s "$app/Contents/_CodeSignature/CodeResources"
+codesign --verify --deep --strict --verbose=2 "$app"
+codesign -dv --verbose=4 "$app"
+
 dmgroot="$stage/dmg"
 rm -rf "$dmgroot"
 mkdir -p "$dmgroot"
@@ -128,6 +142,10 @@ mountpoint="$stage/dmg check with spaces"
 mkdir -p "$mountpoint"
 hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$dmg"
 trap 'hdiutil detach "$mountpoint"' EXIT
+echo "Verifying the sealed app in the finished DMG"
+test -s "$mountpoint/T.O.R.E-Fighters.app/Contents/_CodeSignature/CodeResources"
+codesign --verify --deep --strict --verbose=2 "$mountpoint/T.O.R.E-Fighters.app"
+codesign -dv --verbose=4 "$mountpoint/T.O.R.E-Fighters.app"
 python3 "$root/tools/check_startup_diagnostics.py" "$mountpoint/T.O.R.E-Fighters.app/Contents/MacOS/tore-app"
 hdiutil detach "$mountpoint"
 trap - EXIT

@@ -387,18 +387,42 @@ and the tar.gz still succeeds; in CI it is a failure.
 
 ### Unsigned builds and first launch
 
-Nothing is signed or notarized. Signing is a later change that does not alter
-the package layout.
+No release uses Developer ID signing or notarization. macOS packaging applies
+an ad-hoc signature to each executable and then the completed app bundle. This
+seals its contents but does not identify a trusted developer. The standalone
+macOS server is also ad-hoc signed. Windows and Linux packages remain unsigned.
 
-- **macOS**: double-clicking an unsigned app is refused. The first launch is
-  right-click (or Control-click) on `T.O.R.E-Fighters.app`, choose **Open**,
-  then **Open** again in the dialog. After that it launches normally.
+- **macOS**: copy `T.O.R.E-Fighters.app` from the DMG to Applications and open
+  it. If blocked, use **System Settings > Privacy & Security > Open Anyway**,
+  then confirm **Open**. Recent macOS versions removed the right-click Open
+  bypass. See [Apple's first-launch guidance](https://support.apple.com/en-us/102445).
 - **Windows**: the executable links the C runtime statically
   (`.cargo/config.toml`), so no Visual C++ Redistributable is needed.
   SmartScreen warns about an unrecognized publisher. Choose
   **More info**, then **Run anyway**. This applies to the MSI itself.
 - **Linux**: mark the AppImage executable (`chmod +x`) if the browser cleared
   the bit.
+
+For a trusted project download that still will not open, remove its download
+quarantine in Terminal, then open the app again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/T.O.R.E-Fighters.app
+```
+
+The **0.2.0 macOS download** needs this fallback when it says the app "is
+damaged and can't be opened". That release has linker-signed executables but
+no bundle seal covering its metadata and resources. The missing seal is fixed
+in the next build; it does not mean the 0.2.0 game data needs reinstalling.
+
+Packaging signs the nested executables first, then the assembled bundle, and
+does not modify it afterwards. It requires `Contents/_CodeSignature/CodeResources`
+and runs `codesign --verify --deep --strict --verbose=2` on both the staged app
+and the app mounted from the finished DMG; `codesign -dv --verbose=4` records
+the signature details in CI. Server packaging verifies the staged binary and
+the unpacked tarball copy the same way. Either verification failing stops the
+release job. Agent decision: no hardened runtime (`--options runtime`), since
+this repair needs an integrity seal without adding runtime restrictions.
 
 ### What CI validates, and what it does not
 
