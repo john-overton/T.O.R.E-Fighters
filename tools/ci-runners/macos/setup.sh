@@ -28,6 +28,15 @@ if [ "$arch" = x86_64 ] && ! /usr/bin/pgrep -q oahd; then
     softwareupdate --install-rosetta --agree-to-license
 fi
 
+# setup-python's macOS builds install only into /Users/runner/hostedtoolcache,
+# the hosted image's tool cache. Making it needs an administrator once:
+#   sudo mkdir -p /Users/runner/hostedtoolcache && sudo chown -R "$USER" /Users/runner
+toolcache=/Users/runner/hostedtoolcache
+if [ ! -w "$toolcache" ]; then
+    echo "$toolcache is missing or not writable; run the sudo line above first" >&2
+    exit 1
+fi
+
 base="$HOME/tore-ci/$arch"
 mkdir -p "$base/runner" "$base/work"
 export CARGO_HOME="$base/cargo" RUSTUP_HOME="$base/rustup"
@@ -50,6 +59,8 @@ fi
 cat > .env <<EOF
 CARGO_HOME=$CARGO_HOME
 RUSTUP_HOME=$RUSTUP_HOME
+RUNNER_TOOL_CACHE=$toolcache
+AGENT_TOOLSDIRECTORY=$toolcache
 EOF
 echo "$CARGO_HOME/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" > .path
 if [ ! -f .service ]; then

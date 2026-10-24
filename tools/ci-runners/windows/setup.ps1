@@ -24,6 +24,10 @@ New-Item -ItemType Directory -Force $ci | Out-Null
 Add-MpPreference -ExclusionPath $ci
 Add-MpPreference -ExclusionProcess 'cargo.exe', 'rustc.exe', 'link.exe', 'cl.exe'
 
+# setup-python runs its installer script with Windows PowerShell, which the
+# hosted image allows; the default policy refuses it.
+Set-ExecutionPolicy -Scope LocalMachine Unrestricted -Force
+
 # Paths over 260 characters occur in deep cargo target folders.
 New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1 -PropertyType DWord -Force | Out-Null
 
