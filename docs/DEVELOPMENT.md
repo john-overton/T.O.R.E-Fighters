@@ -220,6 +220,10 @@ newer run for the same branch replaces one that is still queued or running.
 Release packaging keeps its own triggers: `v*` tags, `release-test/...` branches
 and `workflow_dispatch`.
 
+The jobs run on GitHub's hosted runners, except on the platforms named in the
+`TORE_SELF_HOSTED` repository variable, which run on the project's own
+machines: [self-hosted runners](CI-RUNNERS.md).
+
 Every script takes the version from `--version`, then from the tag the workflow
 is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
 leading `v` is stripped. Packages are written to ignored `dist/`, and the

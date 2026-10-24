@@ -86,7 +86,11 @@ def dumpbin():
     if found:
         return found
     installer = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"
-    result = subprocess.run([str(installer), "-latest", "-property", "installationPath"], check=True, capture_output=True, text=True)
+    # -products * finds Build Tools installs too, not only full Visual Studio.
+    result = subprocess.run(
+        [str(installer), "-latest", "-products", "*", "-property", "installationPath"],
+        check=True, capture_output=True, text=True,
+    )
     candidates = sorted((Path(result.stdout.strip()) / "VC/Tools/MSVC").glob("*/bin/Hostx64/x64/dumpbin.exe"))
     if not candidates:
         raise RuntimeError("dumpbin not found")

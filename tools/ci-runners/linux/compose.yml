@@ -1,0 +1,47 @@
+# Self-hosted Linux runners for the ubuntu-22.04 jobs. Run from the deployment
+# folder (~/tore-ci/linux). See docs/CI-RUNNERS.md.
+name: tore-ci-linux
+x-runner: &runner
+  build: .
+  image: tore-ci-runner:22.04
+  # A game on the desktop keeps priority over the builds.
+  cpu_shares: 256
+  mem_limit: 20g
+  restart: unless-stopped
+services:
+  linux-1:
+    <<: *runner
+    hostname: tore-linux-1
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME: tore-linux-1
+    volumes:
+      - ./runners/1/actions-runner:/home/runner/actions-runner
+      - ./runners/1/work:/home/runner/work
+      - ./runners/1/cargo:/home/runner/.cargo
+      - ./runners/1/rustup:/home/runner/.rustup
+      - ./runners/1/toolcache:/opt/hostedtoolcache
+  linux-2:
+    <<: *runner
+    hostname: tore-linux-2
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME: tore-linux-2
+    volumes:
+      - ./runners/2/actions-runner:/home/runner/actions-runner
+      - ./runners/2/work:/home/runner/work
+      - ./runners/2/cargo:/home/runner/.cargo
+      - ./runners/2/rustup:/home/runner/.rustup
+      - ./runners/2/toolcache:/opt/hostedtoolcache
+  linux-3:
+    <<: *runner
+    hostname: tore-linux-3
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME: tore-linux-3
+    volumes:
+      - ./runners/3/actions-runner:/home/runner/actions-runner
+      - ./runners/3/work:/home/runner/work
+      - ./runners/3/cargo:/home/runner/.cargo
+      - ./runners/3/rustup:/home/runner/.rustup
+      - ./runners/3/toolcache:/opt/hostedtoolcache
