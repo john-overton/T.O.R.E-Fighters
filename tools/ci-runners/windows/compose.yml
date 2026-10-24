@@ -1,0 +1,34 @@
+# The Windows CI runner: a Windows 11 VM under KVM (dockurr/windows), separate
+# from Omarchy's own Windows VM. Run from the deployment folder
+# (~/tore-ci/windows), which holds .env (TORE_CI_WINDOWS_PASSWORD), storage/
+# (the VM disk) and oem/ (first-logon setup). See docs/CI-RUNNERS.md.
+name: tore-ci-windows
+services:
+  windows:
+    image: dockurr/windows
+    container_name: tore-ci-windows
+    environment:
+      VERSION: "11"
+      RAM_SIZE: "24G"
+      CPU_CORES: "12"
+      DISK_SIZE: "256G"
+      USERNAME: "runner"
+      PASSWORD: "${TORE_CI_WINDOWS_PASSWORD:?set it in .env}"
+      USER_PORTS: "22"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    # Local only: the web console (setup progress), RDP and SSH.
+    ports:
+      - 127.0.0.1:8016:8006
+      - 127.0.0.1:3399:3389/tcp
+      - 127.0.0.1:2222:22/tcp
+    volumes:
+      - ./storage:/storage
+      - ./oem:/oem
+    # A game on the desktop keeps priority over a build in the VM.
+    cpu_shares: 256
+    restart: unless-stopped
+    stop_grace_period: 2m

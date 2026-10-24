@@ -36,11 +36,20 @@ jobs:
           - os: windows-2022
           - os: windows-2022
             target: i686-pc-windows-msvc
-    runs-on: ${{ matrix.os }}
+    # TORE_SELF_HOSTED, a repository variable, lists the platforms that run on
+    # the project's own machines instead of GitHub's (docs/CI-RUNNERS.md).
+    runs-on: ${{ contains(vars.TORE_SELF_HOSTED, matrix.os) && fromJSON(format('["self-hosted","tore-{0}"]', matrix.os)) || matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # The packaging scripts fall back to `git describe`.
+          clean: false
+      # clean: false and the step after it keep cargo's target folder on a
+      # self-hosted runner, so its builds are incremental; everything else
+      # untracked goes, as checkout's own clean would remove it.
+      - name: Clean the checkout, keeping cargo's target folder
+        shell: bash
+        run: git clean -ffdx -e /target/
       - name: Install Linux windowing libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev libasound2-dev pkg-config
