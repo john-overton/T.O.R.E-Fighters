@@ -20,6 +20,7 @@ services:
       - ./runners/1/work:/home/runner/work
       - ./runners/1/cargo:/home/runner/.cargo
       - ./runners/1/rustup:/home/runner/.rustup
+      - ./runners/1/toolcache:/opt/hostedtoolcache
   linux-2:
     <<: *runner
     hostname: tore-linux-2
@@ -31,6 +32,7 @@ services:
       - ./runners/2/work:/home/runner/work
       - ./runners/2/cargo:/home/runner/.cargo
       - ./runners/2/rustup:/home/runner/.rustup
+      - ./runners/2/toolcache:/opt/hostedtoolcache
   linux-3:
     <<: *runner
     hostname: tore-linux-3
@@ -42,3 +44,4 @@ services:
       - ./runners/3/work:/home/runner/work
       - ./runners/3/cargo:/home/runner/.cargo
       - ./runners/3/rustup:/home/runner/.rustup
+      - ./runners/3/toolcache:/opt/hostedtoolcache

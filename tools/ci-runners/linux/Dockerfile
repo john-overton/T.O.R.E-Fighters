@@ -18,6 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --create-home --uid 1000 --shell /bin/bash runner \
     && echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner
 
+# setup-python's Linux builds find libpython through a fixed runpath,
+# /opt/hostedtoolcache/Python/<version>/x64/lib, so the tool cache must be
+# there, as on the hosted image; elsewhere a Python started with an empty
+# environment (tools/test_battery.py does) cannot load.
+RUN mkdir -p /opt/hostedtoolcache && chown runner:runner /opt/hostedtoolcache
+ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+
 RUN mkdir -p /opt/actions-runner \
     && curl -fsSL "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
         | tar -xz -C /opt/actions-runner \
