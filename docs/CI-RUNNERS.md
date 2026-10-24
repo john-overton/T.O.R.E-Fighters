@@ -108,7 +108,11 @@ The x86_64 runner is the runner's x64 build, so every step it starts runs as
 x86_64: `uname -m` says x86_64, the DMG is named for it and its rustup is
 the x86_64 one, with no change to the workflows. Each runner keeps its own
 rustup, cargo home and work folder in `~/tore-ci/<arch>`, apart from the
-user's own `~/.cargo`. The Mac must be awake for its jobs (`wake-macbook`
+user's own `~/.cargo`, and its own standalone Python 3.14 for its
+architecture (python-build-standalone) in `~/tore-ci/<arch>/bin`, first on
+its PATH: the workflows skip `actions/setup-python` on a self-hosted Mac,
+because its macOS builds install a system package with `sudo` on every run.
+The Mac must be awake for its jobs (`wake-macbook`
 from the Linux desktop wakes it over the network).
 
 ## Upkeep

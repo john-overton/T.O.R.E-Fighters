@@ -355,7 +355,9 @@ mod tests {
         crate::preferences::write(&dir.join(CACHE), &cache_text(now(), Some(&latest()))).unwrap();
         let mut state = Updates::new(Some(dir.clone()));
         state.poll();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        // Generous: a loaded CI machine can take seconds to start the worker,
+        // and the loop ends as soon as it is done.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
         while state.pending.is_some() && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
             state.poll();

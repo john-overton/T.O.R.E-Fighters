@@ -18,6 +18,8 @@ token="${2:?registration token}"
 url="${TORE_RUNNER_URL:-https://github.com/john-overton/T.O.R.E-Fighters}"
 version="${TORE_RUNNER_VERSION:-2.338.1}"
 toolchain="${TORE_TOOLCHAIN:-1.91.1}"
+python_version="${TORE_PYTHON:-3.14.9}"
+python_tag="${TORE_PYTHON_BUILD:-20261021}"
 
 case "$arch" in
     arm64) runner_arch=arm64; rust_host=aarch64-apple-darwin; label=tore-macos-14; run=(env) ;;
@@ -26,15 +28,6 @@ case "$arch" in
 esac
 if [ "$arch" = x86_64 ] && ! /usr/bin/pgrep -q oahd; then
     softwareupdate --install-rosetta --agree-to-license
-fi
-
-# setup-python's macOS builds install only into /Users/runner/hostedtoolcache,
-# the hosted image's tool cache. Making it needs an administrator once:
-#   sudo mkdir -p /Users/runner/hostedtoolcache && sudo chown -R "$USER" /Users/runner
-toolcache=/Users/runner/hostedtoolcache
-if [ ! -w "$toolcache" ]; then
-    echo "$toolcache is missing or not writable; run the sudo line above first" >&2
-    exit 1
 fi
 
 base="$HOME/tore-ci/$arch"
@@ -46,6 +39,20 @@ if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
     "${run[@]}" "$base/rustup-init" -y --profile minimal --default-toolchain none --no-modify-path
 fi
 "${run[@]}" "$CARGO_HOME/bin/rustup" toolchain install "$toolchain" --profile minimal --component rustfmt --component clippy
+
+# Python for the workflows' tools. setup-python's macOS builds install a
+# system package with sudo on every run, so the workflows skip that step on
+# a self-hosted Mac and use this one: a standalone CPython for the runner's
+# own architecture (python-build-standalone, as uv uses), so
+# platform.machine() names the server archive correctly. `python` and
+# `python3` in $base/bin lead the runner's PATH.
+if [ ! -x "$base/python/bin/python3" ]; then
+    curl -fsSL "https://github.com/astral-sh/python-build-standalone/releases/download/$python_tag/cpython-$python_version%2B$python_tag-$rust_host-install_only.tar.gz" \
+        | tar -xz -C "$base"
+fi
+mkdir -p "$base/bin"
+ln -sf "$base/python/bin/python3" "$base/bin/python"
+ln -sf "$base/python/bin/python3" "$base/bin/python3"
 
 cd "$base/runner"
 if [ ! -x ./run.sh ]; then
@@ -59,10 +66,8 @@ fi
 cat > .env <<EOF
 CARGO_HOME=$CARGO_HOME
 RUSTUP_HOME=$RUSTUP_HOME
-RUNNER_TOOL_CACHE=$toolcache
-AGENT_TOOLSDIRECTORY=$toolcache
 EOF
-echo "$CARGO_HOME/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" > .path
+echo "$base/bin:$CARGO_HOME/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" > .path
 if [ ! -f .service ]; then
     ./svc.sh install
 fi

@@ -66,7 +66,10 @@ jobs:
         run: |
           rustup target add "$TARGET"
           echo "CARGO_BUILD_TARGET=$TARGET" >> "$GITHUB_ENV"
+      # A self-hosted Mac brings its own Python 3.14 (tools/ci-runners/macos/setup.sh):
+      # setup-python's macOS builds need sudo to install.
       - uses: actions/setup-python@v7
+        if: runner.environment != 'self-hosted' || runner.os != 'macOS'
         with:
           python-version: '3.14'
 
