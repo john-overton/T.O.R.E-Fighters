@@ -1327,7 +1327,10 @@ the [master's wire](formats/master-protocol.md) and
   sent; the relay carries only pairs it introduced, at most 128 KB/s each way
   per pair and within a monthly allowance ([numbers](formats/master-protocol.md#limits)).
 - **When it is down,** the Internet Lobby is empty. Local games, Direct
-  Connection and joining by address never use the master.
+  Connection and joining by address never use the master. A listed game or
+  server keeps asking, round the master's addresses, and is listed again
+  within 15 seconds of the master answering, with no restart (0.2.2,
+  [finding the master again](formats/master-protocol.md#finding-the-master-again)).
 
 ### Connection path
 

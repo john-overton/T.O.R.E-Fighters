@@ -299,8 +299,11 @@ address and an AAAA record for its IPv6 address. With both records, games that h
 it over IPv6 too, which lets them learn their own IPv6 address for direct
 connections. A short time to live (300 seconds) while setting up makes a
 move to another machine quick. Moving the master later means pointing the
-name at the new machine: games ask the name again every 10 minutes and
-whenever the master falls silent.
+name at the new machine: games ask the name again every 10 minutes, and at
+once and then every minute while the master is silent. A host that cannot
+reach one of the addresses (a machine or container without an IPv6 route)
+uses the other and does not stick on the dead one
+([finding the master again](formats/master-protocol.md#finding-the-master-again)).
 
 ## Logs and statistics
 

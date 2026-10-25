@@ -948,7 +948,20 @@ connectivity](ARCHITECTURE.md#master-server-and-connectivity).
   router test's result, and `Broadcasting: the Internet Lobby at ... does
   not answer, so the server is not listed. Players can still join by
   address.` when the master is silent for 10 seconds. It then asks again
-  after 2, 4, 8 and up to 60 seconds, and looks the master's name up again.
+  after 2, 4, 8 and up to 15 seconds, at the master's next address each
+  time (round and back to the first), and looks the master's name up again
+  at once and every minute while the master stays silent. Each change of
+  address is one line, `Broadcasting: the Internet Lobby at HOST:PORT: now
+  trying ADDRESS instead of ADDRESS (no answer)` (or `(cannot send there:
+  ...)` for a failed send, which moves on at once, `(the master answered
+  from it)`, `(a new lookup of the master's name)`), and a send that fails
+  with nowhere else to go is `Broadcasting: cannot send to the Internet
+  Lobby at ADDRESS: ...`, once per address until the next lookup. An
+  address the server's socket or the machine has no route to (an IPv6 one
+  on a machine or container without IPv6) is tried only when nothing else
+  is left, so a server lists itself again within 15 seconds of the master
+  answering, with no restart
+  ([finding the master again](formats/master-protocol.md#finding-the-master-again)).
 - **Anonymous statistics.** While broadcasting with `telemetry on` (the
   default), the server sends the master one report at the end of each
   mission: its version and system, the mission's minutes, the most players
@@ -960,7 +973,8 @@ connectivity](ARCHITECTURE.md#master-server-and-connectivity).
   A server that does not broadcast sends nothing.
 - *Agent decisions:* the master's second port, for the router test, is its
   main port plus one (26902 for 26901); the master's name is looked up on a
-  thread at start and every 10 minutes.
+  thread at start and every 10 minutes, and every minute while the master is
+  silent.
 
 To try it on one machine, run a master on loopback ([testing on one
 machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`

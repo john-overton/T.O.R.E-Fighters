@@ -8781,7 +8781,15 @@ not, *password* lists with the lock). The hosting thread takes
    No answer to anything for 10 seconds means the master is silent: the game
    reads "The Internet Lobby does not answer, so the game is not listed.
    Players can still join by address." and tries again after 2, 4, 8 and up
-   to 60 seconds.
+   to 15 seconds, each time at the master's next address, round and back to
+   the first. A send that fails (no route, no such address, a family the
+   socket lacks) moves to the next address at once; addresses the socket
+   cannot send to, or the system has no route to, are tried last; the name
+   is looked up again every minute while the master is silent, and an
+   answer from any address makes it the one in use, so the game is listed
+   again within 15 seconds of the master answering
+   ([finding the master again](formats/master-protocol.md#finding-the-master-again),
+   0.2.2).
 5. Stopping, or unlisting, sends Unregister three times.
 
 The rendezvous reports to the hosting thread, which passes it to the game as
