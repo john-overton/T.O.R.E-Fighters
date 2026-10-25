@@ -1543,7 +1543,10 @@ Imported AI stores use the same payload convention as player live combat:
 external equipment plus non-internal remaining rounds times nonnegative source
 weapon weight. A release subtracts only the mass of ammunition actually debited.
 Remaining health still reduces requested G and roll authority linearly as a
-fitted controller restriction. Actual axis-specific faults and regional damage
+fitted controller restriction, but never asks for less than 1.25 G, or the
+healthy limit where that is lower: a hit aircraft must still hold its flight
+path (fitted, review 2026-10-25; a fault-free but hit F/A-18 on a heavy final
+was held below 1 G and flew into the ground short of the runway). Actual axis-specific faults and regional damage
 also act through the shared flight model. [Fault responses](systems-damage.md#ai-pilot-response-to-faults)
 end offensive engagement when recovery is needed and add protective power,
 speed and maneuver requests. These never overwrite achieved flight motion.

@@ -5206,7 +5206,7 @@ impl AiActor {
             self.identity.human_controlled,
         );
         (
-            positive * self.control_health(),
+            health_scaled_positive_g(positive, self.control_health()),
             negative * self.control_health(),
         )
     }
@@ -5994,6 +5994,20 @@ pub fn simple_dispensers(each: u32) -> Vec<DispenserStore> {
 pub fn is_ported(aircraft: AircraftId) -> bool {
     AircraftId::ALL.contains(&aircraft.source())
 }
+
+/// The health-scaled positive G request. The caution factor never takes the
+/// request below [`HEALTH_SCALED_G_FLOOR`], or the healthy limit where that is
+/// lower: a damaged aircraft that the flight model still lets pull 1 G must be
+/// able to hold its flight path. Without the floor a hit but fault-free
+/// aircraft flying a heavy final was held below 1 G and flew into the ground
+/// short of the runway (review of branch ai-defense, 2026-10-25).
+pub(crate) fn health_scaled_positive_g(positive: f64, health: f64) -> f64 {
+    (positive * health).max(positive.min(HEALTH_SCALED_G_FLOOR))
+}
+
+/// Fitted (agent decision, 2026-10-25): the lowest positive G the health
+/// caution factor asks for.
+pub const HEALTH_SCALED_G_FLOOR: f64 = 1.25;
 
 #[cfg(test)]
 mod tests {
@@ -7988,6 +8002,23 @@ mod tests {
         assert_eq!(mission.actor(1).unwrap().controller.target(), None);
         assert!(mission.actor(2).unwrap().controller.target().is_some());
         assert!(mission.actor(3).unwrap().controller.target().is_some());
+    }
+
+    #[test]
+    fn health_caution_never_holds_a_damaged_aircraft_below_its_flight_path_load() {
+        // The ai-long-5v5 case: a heavy final, 24 percent airframe damage.
+        let healthy = 1.16;
+        assert_eq!(
+            health_scaled_positive_g(healthy, 0.759),
+            HEALTH_SCALED_G_FLOOR.min(healthy)
+        );
+        // Maneuvering authority is still reduced, never raised.
+        assert!((health_scaled_positive_g(7.0, 0.5) - 3.5).abs() < 1e-12);
+        assert_eq!(health_scaled_positive_g(7.0, 1.0), 7.0);
+        assert_eq!(health_scaled_positive_g(7.0, 0.0), HEALTH_SCALED_G_FLOOR);
+        // A loaded limit already below the floor is kept, not raised.
+        assert_eq!(health_scaled_positive_g(0.9, 0.5), 0.9);
+        assert_eq!(health_scaled_positive_g(1.1, 1.0), 1.1);
     }
 
     #[test]
