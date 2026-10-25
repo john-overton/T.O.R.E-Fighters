@@ -59,7 +59,7 @@ names emitted by `tools/package/`:
 | Platform | Required filename suffix | Primary download |
 | --- | --- | --- |
 | Windows Intel/AMD 64-bit | `-windows-x86_64.msi` | MSI |
-| Windows 32-bit | `-windows-x86.msi` | Additional link on the Windows card, shown only when present |
+| Windows 32-bit | `-windows-x86.msi` | Additional link on the Windows card, shown only when present. Releases after 0.2.1 have none (32-bit builds dropped 2026-10-25) |
 | macOS Apple Silicon | `-macos-arm64.dmg` | DMG |
 | macOS Intel | `-macos-x86_64.dmg` | DMG |
 | Linux Intel/AMD 64-bit | `-x86_64.AppImage` (also matches the older `-linux-x86_64.AppImage`) | AppImage |

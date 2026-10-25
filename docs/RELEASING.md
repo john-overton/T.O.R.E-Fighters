@@ -79,7 +79,7 @@ so the version must be changed before tagging. The app's menu label and
 [packaging](DEVELOPMENT.md#packaging).
 
 The release carries, for each platform: the game's installer
-(`T.O.R.E-Fighters-<version>-windows-x86_64.msi`, `-windows-x86.msi`,
+(`T.O.R.E-Fighters-<version>-windows-x86_64.msi`,
 `-macos-arm64.dmg`, `-macos-x86_64.dmg`, `-x86_64.AppImage`) and the Linux
 `T.O.R.E-Fighters-<version>-linux-x86_64.tar.gz`; the dedicated server,
 `tore-server-<version>-windows-x86_64.zip`, `-macos-arm64.tar.gz`,

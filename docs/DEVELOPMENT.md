@@ -243,16 +243,17 @@ carry:
 TORE_BUILD_VERSION=0.2.1 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
-For the 32-bit Windows package, run `rustup target add i686-pc-windows-msvc`
-once, add `--target i686-pc-windows-msvc` to that build, and give the packaging
-script the same target.
+CI and releases no longer build 32-bit Windows (dropped 2026-10-25). The
+scripts still support it for a local build: run `rustup target add
+i686-pc-windows-msvc` once, add `--target i686-pc-windows-msvc` to that build,
+and give the packaging script the same target.
 
 | Platform | Command | Produces |
 | --- | --- | --- |
 | Linux | `tools/package/package-linux.sh` | `dist/*.tar.gz` and `dist/*.AppImage` |
 | macOS | `tools/package/package-macos.sh` | `dist/*.dmg` holding `T.O.R.E-Fighters.app` |
 | Windows | `pwsh tools/package/package-windows.ps1` | `dist/*-windows-x86_64.msi` |
-| Windows 32-bit | `pwsh tools/package/package-windows.ps1 -Target i686-pc-windows-msvc` | `dist/*-windows-x86.msi` |
+| Windows 32-bit, local builds only | `pwsh tools/package/package-windows.ps1 -Target i686-pc-windows-msvc` | `dist/*-windows-x86.msi` |
 | Dedicated server, any of the three | `python3 tools/package/package_server.py [--max-glibc 2.35]` after `cargo build --release --locked -p tore-server` | `dist/server/tore-server-<version>-<platform>.tar.gz` (`.zip` on Windows) and its `.sha256` |
 
 What each package contains:
@@ -443,10 +444,10 @@ this repair needs an integrity seal without adding runtime restrictions.
 The release workflow runs formatting, Clippy, workspace tests, Python tool
 and Windows resource-layout tests, documentation and asset checks. `ci.yml`
 also scans the debug `tore-server` and checks its runtime libraries (the 2.35
-glibc floor on Linux) on all five jobs, since it ships too. Both it and
-`ci.yml` run a fifth job on `windows-2022` for 32-bit Windows, which sets
-`CARGO_BUILD_TARGET=i686-pc-windows-msvc` so every crate is linted, tested and
-built for that target. The release workflow builds release binaries with
+glibc floor on Linux) on all four jobs, since it ships too. Neither runs a
+32-bit Windows job any more (dropped 2026-10-25); a matrix entry that names a
+`target` sets `CARGO_BUILD_TARGET` so every crate is linted, tested and built
+for it. The release workflow builds release binaries with
 matching debug information and retains PDB, dSYM or ELF symbols (the dedicated
 server's too, on the jobs that build it) in separate
 `symbols-*` workflow artifacts labelled by source commit.

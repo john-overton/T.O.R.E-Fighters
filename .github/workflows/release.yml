@@ -21,21 +21,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The same five jobs as ci.yml. macos-14 is Apple Silicon;
+        # The same four jobs as ci.yml. macos-14 is Apple Silicon;
         # macos-15-intel is the last x86_64 macOS image GitHub will offer. The
         # Linux build uses the player's own glibc, so it runs on the oldest
         # supported Ubuntu LTS: a newer host makes a binary that will not start
-        # on older distributions. The second windows-2022 job builds the
-        # 32-bit Windows package. Every job is its own include entry: a plain
-        # os list would merge the 32-bit entry into the 64-bit Windows job
-        # instead of adding one.
+        # on older distributions. There is no 32-bit Windows package since
+        # 2026-10-25 (John). An entry may still name a `target` to cross-build;
+        # such a job skips the dedicated server.
         include:
           - os: macos-14
           - os: macos-15-intel
           - os: ubuntu-22.04
           - os: windows-2022
-          - os: windows-2022
-            target: i686-pc-windows-msvc
     # TORE_SELF_HOSTED, a repository variable, lists the platforms that run on
     # the project's own machines instead of GitHub's (docs/CI-RUNNERS.md).
     runs-on: ${{ contains(vars.TORE_SELF_HOSTED, matrix.os) && fromJSON(format('["self-hosted","tore-{0}"]', matrix.os)) || matrix.os }}
@@ -115,9 +112,8 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --locked -p tore-app -p tore-extract
       # The dedicated server (docs/DEDICATED-SERVER.md) ships as its own
-      # archive for Windows x86_64, both macOS architectures and Linux; the
-      # 32-bit Windows job does not build it (agent decision: the game's x86
-      # MSI is for old player machines, not servers). It is a cargo command of
+      # archive for Windows x86_64, both macOS architectures and Linux; a
+      # cross-target job does not build it. It is a cargo command of
       # its own because one command for both would unify their dependencies'
       # features, which could change the game's binaries.
       - name: Build the dedicated server
@@ -178,8 +174,6 @@ jobs:
       # ImageMagick. The Windows script passes -ext WixUtilExtension to candle
       # and light for the exit dialog's launch checkbox; it ships with the
       # WiX 3.14 install on the windows-2022 image alongside WixUIExtension.
-      # It reads CARGO_BUILD_TARGET to package the 32-bit build as
-      # ...-windows-x86.msi.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: tools/package/package-linux.sh

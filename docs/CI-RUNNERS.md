@@ -17,7 +17,7 @@ their build folders kept between runs so later builds are incremental
 | Workflow platform | Runner label | Where | Runners |
 | --- | --- | --- | --- |
 | `ubuntu-22.04` | `tore-ubuntu-22.04` | Docker containers from Ubuntu 22.04 on the Linux desktop | `tore-linux-1` to `-3` |
-| `windows-2022` (64-bit and 32-bit jobs) | `tore-windows-2022` | A Windows 11 VM under KVM on the Linux desktop | `tore-windows-1`, `-2` |
+| `windows-2022` | `tore-windows-2022` | A Windows 11 VM under KVM on the Linux desktop | `tore-windows-1`, `-2` |
 | `macos-14` | `tore-macos-14` | John's Apple Silicon MacBook, natively | `tore-mac-arm64` |
 | `macos-15-intel` | `tore-macos-15-intel` | The same MacBook, under Rosetta | `tore-mac-x86_64` |
 

@@ -12,7 +12,7 @@ name: Network loopback
 # hosting tests (slice EF-Y), ignored in the normal suite, one at a time on
 # Linux, whose sleeps are accurate: no correction or mismatch of the hosting
 # player's plane, a window stall's tick count and snapshot gaps to 150 ms.
-# The normal suite runs forms that a starved macOS or 32-bit Windows runner
+# The normal suite runs forms that a starved macOS or Windows runner
 # meets (docs/ARCHITECTURE.md, "Real-time tests on shared runners").
 
 on:

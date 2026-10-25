@@ -45,7 +45,7 @@ Download the package for your computer from the
 
 | Platform | Package | First launch |
 | --- | --- | --- |
-| Windows (x86_64, or 32-bit x86) | `.msi` installer; `-windows-x86.msi` is the 32-bit one | The build is unsigned, so SmartScreen warns you. Choose **More info**, then **Run anyway**. |
+| Windows (64-bit, x86_64) | `.msi` installer | The build is unsigned, so SmartScreen warns you. Choose **More info**, then **Run anyway**. |
 | macOS, Apple Silicon or Intel | `.dmg` for your processor | Copy the app to Applications and open it. There is no Developer ID or notarization. If blocked, use **System Settings > Privacy & Security > Open Anyway**, then confirm **Open**. |
 | Linux (x86_64) | `.AppImage`, or `.tar.gz` | Make the AppImage executable (`chmod +x`), then run it. |
 
