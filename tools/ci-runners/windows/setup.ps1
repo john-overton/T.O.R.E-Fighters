@@ -1,5 +1,5 @@
 # Turns the CI Windows VM into two GitHub Actions runners for the
-# windows-2022 jobs (64-bit and 32-bit), with the tools the hosted
+# windows-2022 jobs, with the tools the hosted
 # windows-2022 image gives those jobs: Git for Windows (its bash), PowerShell
 # 7, Visual Studio 2022 Build Tools with the C++ workload and Windows SDK,
 # WiX 3.14, and rustup with the pinned toolchain. Run over SSH as the VM's
@@ -52,7 +52,7 @@ if (-not (Test-Path "$ci\cargo\bin\rustup.exe")) {
 }
 # Installed here, before either runner starts, so two first jobs never
 # install the same toolchain at once.
-& "$ci\cargo\bin\rustup.exe" toolchain install $Toolchain --profile minimal --component rustfmt --component clippy --target i686-pc-windows-msvc
+& "$ci\cargo\bin\rustup.exe" toolchain install $Toolchain --profile minimal --component rustfmt --component clippy
 
 # Git's bash first, as on the hosted image, then cargo.
 $path = [Environment]::GetEnvironmentVariable('Path', 'Machine')
