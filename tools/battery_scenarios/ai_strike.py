@@ -1040,10 +1040,12 @@ def scenarios() -> list[Scenario]:
         # (`--place-site`): it holds off that known ring, resumes once the column has driven out of
         # it and fires; on its way out (the exit turns away and masks) an SA-7 it had not seen
         # engages it: it breaks, leaves that ring, holds off, resumes and fires again, killing the
-        # tank. The run follows it (`--follow-threat`) to the shot after the resume.
+        # tank. The run follows it (`--follow-threat`) to the shot after the resume. Since the tanks'
+        # air rules (John, 2026-10-24: a 3 s lay, a 20 degree ceiling, wider aim) the column's tanks
+        # fire at it less, so it breaks once (two BREAK lines) where it broke twice (six).
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420",
                    "--follow-threat", "--place-site", "0x50000019,240,5000"),
-         dict(label="mi24 ambushed", decisions=["hold_off", "resume", "leave", "resume"], breaks=5,
+         dict(label="mi24 ambushed", decisions=["hold_off", "resume", "leave", "resume"], breaks=2,
               release=True, kill=True)),
         # From 4 nm at 200 ft on seed 1 the AI would choose the stand-off under the SAMs; it holds off.
         (pilot_run("UKR", "QUCOL", "--aircraft", "mi24", "--load", "AT2", "--altitude", "200", "--from", "4",

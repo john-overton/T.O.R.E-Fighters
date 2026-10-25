@@ -618,6 +618,19 @@ impl WeaponArms {
     pub fn aims_at_aircraft(&self) -> bool {
         live::engages_aircraft(&self.record)
     }
+    /// The highest a target aircraft may stand above the hull's horizontal
+    /// plane for the weapon to engage it, degrees: a tank gun's
+    /// [`surface_guns::TANK_MAX_ELEVATION_DEG`] (opinionated, John,
+    /// 2026-10-24). `None` for every other weapon, whose mount arcs alone
+    /// limit it.
+    pub fn air_ceiling_deg(&self) -> Option<f64> {
+        self.tank_gun()
+            .then_some(surface_guns::TANK_MAX_ELEVATION_DEG)
+    }
+    /// A main battle tank's gun ([`surface_guns::is_tank_gun`]).
+    pub fn tank_gun(&self) -> bool {
+        matches!(self.kind, Kind::Gun { .. }) && surface_guns::is_tank_gun(&self.record.source)
+    }
     /// Whether the weapon may be aimed at some ground unit or ship: its
     /// record's surface target flag ([`live::engages_surface`], retail) or
     /// [`Self::ground_fire`] (a land AAA gun), for a gun whose rounds strike
@@ -1055,6 +1068,28 @@ fn bearing_elevation(d: Vector) -> (f64, f64) {
     (d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])).to_degrees())
 }
 
+/// The elevation of `d` above the horizontal plane of a hull with `basis`,
+/// degrees: the vehicle's own frame, so a tank on a slope elevates its gun
+/// from its own deck.
+pub fn hull_elevation_deg(basis: &Basis, d: Vector) -> f64 {
+    let up = attitude::dot(d, basis.up);
+    let flat = attitude::dot(d, basis.right).hypot(attitude::dot(d, basis.forward));
+    up.atan2(flat).to_degrees()
+}
+
+/// The angular rate of a target at `offset` from a gun moving at
+/// `own_velocity`, the target moving at `velocity`, degrees a second: how fast
+/// the line of sight turns.
+pub fn angular_rate_deg_s(offset: Vector, velocity: Vector, own_velocity: Vector) -> f64 {
+    let range2 = attitude::dot(offset, offset);
+    if range2 < 1. {
+        return 0.;
+    }
+    let relative = sub(velocity, own_velocity);
+    let turn = attitude::cross(offset, relative);
+    (length(turn) / range2).to_degrees()
+}
+
 /// No terrain between `from` and `to`.
 pub fn line_of_sight(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
     let d = sub(to, from);
@@ -1129,6 +1164,10 @@ struct Look<'a> {
     /// It engages ground units and ships before aircraft.
     prefer_surface: bool,
     line_of_sight_needed: bool,
+    /// A tank gun's hull and elevation ceiling: an aircraft higher above
+    /// the hull's horizontal plane is not eligible
+    /// ([`WeaponArms::air_ceiling_deg`]).
+    ceiling: Option<(Basis, f64)>,
 }
 
 impl Look<'_> {
@@ -1161,6 +1200,10 @@ impl Look<'_> {
             in_range = true;
             if !self.band.contains(distance, d[1])
                 || self.search_limit.is_some_and(|limit| distance > limit)
+                || (!contact.surface
+                    && self
+                        .ceiling
+                        .is_some_and(|(basis, ceiling)| hull_elevation_deg(&basis, d) > ceiling))
                 || (self.line_of_sight_needed && !scene.line_of_sight(self.from, contact.position))
             {
                 continue;
@@ -1394,6 +1437,7 @@ pub fn step(
                     search_limit: None,
                     prefer_surface: false,
                     line_of_sight_needed: true,
+                    ceiling: None,
                 }
                 .sees(contacts, scene)
             }
@@ -1443,6 +1487,7 @@ pub fn step(
                 blind,
                 slow: optical,
                 hold: false,
+                lay: 0,
             },
         );
         let phase = slot.controller.phase();
@@ -1635,6 +1680,7 @@ fn step_weapon(
             search_limit: None,
             prefer_surface: false,
             line_of_sight_needed: false,
+            ceiling: None,
         }
         .sees(seen.contacts, scene),
         None => match seen.team {
@@ -1654,6 +1700,7 @@ fn step_weapon(
                 search_limit: arms.search_limit,
                 prefer_surface: seen.prefer_surface,
                 line_of_sight_needed: true,
+                ceiling: weapon.air_ceiling_deg().map(|c| (place.basis, c)),
             }
             .sees(seen.contacts, scene),
         },
@@ -1683,8 +1730,19 @@ fn step_weapon(
             weapon.launch.contains(length(d), d[1])
                 && arc.covers_heading((bearing - place.heading).to_degrees())
                 && arc.covers_elevation(elevation)
+                && (aircraft.surface
+                    || weapon
+                        .air_ceiling_deg()
+                        .is_none_or(|ceiling| hull_elevation_deg(&place.basis, d) <= ceiling))
                 && scene.line_of_sight(muzzle, aircraft.position)
         }
+    };
+    // A tank gun lays on an aircraft before its first round at it.
+    let lay = match target {
+        Some(target) if weapon.tank_gun() && !is_surface_id(target) => {
+            (control::TANK_AIR_LAY_S * 120.).round() as u64
+        }
+        _ => 0,
     };
     // A flak team holds its fire until it engages the target's group.
     let hold = match (seen.team, target) {
@@ -1724,6 +1782,7 @@ fn step_weapon(
             blind: false,
             slow: false,
             hold,
+            lay,
         },
     );
     let after = (engager.controller.phase(), engager.controller.target());
@@ -2089,6 +2148,15 @@ fn fire_gun(
         // or ship); a jammer widens a radar gun's.
         let mut error = if aircraft.surface {
             control::surface_aim_error_deg(arms.skill, radar)
+        } else if weapon.tank_gun() {
+            // A tank gun's error at an aircraft grows with how fast the
+            // gunner must track it.
+            let rate = angular_rate_deg_s(
+                sub(observed.position, muzzle),
+                observed.velocity,
+                place.velocity,
+            );
+            control::tank_air_aim_error_deg(arms.skill, rate)
         } else if surface_guns::is_small_arms(&weapon.record.source) {
             control::small_arms_aim_error_deg(arms.skill)
         } else {
@@ -2125,6 +2193,14 @@ fn fire_gun(
     let aim = gun_aim_point(weapon, &place, muzzle, observed);
     let distance = length(sub(aim, muzzle));
     let mut direction = deflect(sub(aim, muzzle), offset[0], offset[1]);
+    // A tank gun cannot elevate past its ceiling: a round laid higher (the
+    // lead on a climbing line, or the aim error above it) is not fired, and
+    // stays in the magazine.
+    let holding = holding
+        || (!aircraft.surface
+            && weapon
+                .air_ceiling_deg()
+                .is_some_and(|ceiling| hull_elevation_deg(&place.basis, direction) > ceiling));
     let mut end_tick = if flak {
         live::ticks_to_range(&weapon.record, distance)
     } else {
