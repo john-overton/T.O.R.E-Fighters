@@ -20,7 +20,7 @@ NORMAL_STATES = [
     "respawn-aircraft-filtered", "respawn-station-scrolled", "respawn-station-filtered",
     "update-available", "update-focus", "updates-off",
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
-    "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "graphics-middle",
+    "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "controls-inv", "graphics", "graphics-middle",
     "graphics-bottom", "graphics-scale", "graphics-shadows", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
     "direct-help", "internet-help", "lobby-help", "lobby-internet", "lobby-internet-help", "lobby-internet-settings", "lobby-internet-players",
