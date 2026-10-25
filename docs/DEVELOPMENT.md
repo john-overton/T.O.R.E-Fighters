@@ -1457,8 +1457,8 @@ standard|hybrid` picks the single-player (default) or networked AI flight
 model and `--trace` prints the AI target's flight and defence every quarter
 second. `--decoy-model lure` is available only with `--missile-model spec` and is
 a what-if, not game behaviour: a decoyed missile steers for the device that
-decoyed it and bursts there instead of flying straight on. `--catalog` writes
-`catalog.csv` (each missile's decoy susceptibility, seeker and turn rates, each
+decoyed it and bursts there instead of flying straight on. `--catalog` writes only
+`catalog.csv` and exits (each missile's decoy susceptibility, seeker and turn rates, each
 aircraft's dispensers). Output is `runs.csv`, one row per shot, and
 `cells.csv`, one row per cell with Wilson 95 percent intervals. Runs also
 record the first observed loss of control speed and ground impact separately;

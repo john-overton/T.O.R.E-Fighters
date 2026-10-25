@@ -1,6 +1,6 @@
 //! `--missile-study OUT_DIR [--seeds N] [--missiles A,B] [--profiles P,Q]
-//! [--ranges short,medium,long] [--aspects head,beam,tail] [--altitudes
-//! co,up,down] [--shooter ID] [--target ID] [--threads N] [--decoy-model
+//! [--ranges short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes
+//! deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--decoy-model
 //! coast|lure] [--ai [--skill S] [--ai-model standard|hybrid] [--theater T]
 //! [--trace]] [--catalog]`: a headless Monte Carlo of air-to-air missile shots, for studying missile accuracy and
 //! countermeasures (docs/DEVELOPMENT.md, "Missile study"). No window opens
@@ -942,7 +942,9 @@ fn release_device(
                 && p.guidance.as_ref().is_none_or(|f| {
                     f.enabled && f.seeker.acquired && f.seeker.observation.is_some()
                 }),
-            decoy_susceptibility_percent: chance,
+            // This branch deliberately reproduces the historical Spec API.
+            // Energy already returned above and clamps the complete product.
+            decoy_susceptibility_percent: chance.min(100),
         };
         let outcome = threat::decoy_missile(&missile, class, effectiveness, random)
             .map_err(|e| e.to_string())?;
@@ -1047,7 +1049,7 @@ struct Options {
     ai: Option<ai::AiSetup>,
 }
 
-const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@idle|@burner]] [--ranges short,medium,long] [--aspects head,beam,tail] [--altitudes co,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
+const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();

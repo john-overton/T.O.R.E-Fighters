@@ -187,7 +187,7 @@ Phase 2 implementation and regression validation completed on Linux x86-64.
 `cargo fmt --all -- --check`, workspace/all-target clippy with warnings denied,
 workspace tests and workspace build passed with the locked Rust 1.91.1 toolchain.
 Tests: 7,181 passed, zero failed, 106 ignored across 59 suites. Python tooling:
-505 passed with five skips. Source/binary asset guards and documentation checks
+505 run, five skipped. Source/binary asset guards and documentation checks
 passed. No expected golden constants were changed.
 
 Selected battery coverage includes bombs/rocket pods, laser and command weapons,
