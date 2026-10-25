@@ -29,7 +29,8 @@ weight limit. AGM84A.JT weighs 1,165 lb, so the old weight-derived maximum
 was 3 and is now 2. AS16.JT weighs 2,640 lb, giving an old maximum of 1,
 now the requested minimum pair of 2. The latter is 5,280 lb, an explicit
 1,280 lb exception to that old row limit. Aircraft takeoff limits still apply.
-F16C.PT row 6 Harpoons similarly change from 1 to 2.
+F16C.PT row 6 (2,700 lb class) is unchanged for AGM84A.JT, already 2
+(2,700 / 1,165); its AGM84E.JT (1,380 lb) changes from 1 to 2.
 
 Aircraft with no changed maxima: F22.PT, F22N.PT, C130.PT, AC130.PT,
 E3.PT, IL76.PT, E2.PT, V22.PT, MI24.PT, CH47.PT, B747.PT and A310.PT.
