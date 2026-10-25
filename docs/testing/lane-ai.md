@@ -284,14 +284,18 @@ record with what changed (see "Sixth round" above).
 
 1. **Dithering between gun and missile.** Fixed in the fifth round from B13
    (timed motions run to their deadline); left here for the record.
-2. **Notch side on a head-on shot.** The notch turns 90 degrees toward the
-   smaller turn with a tie break; with the radar source dead ahead the side
-   flipped after one second (heading 288, then 108), wasting the roll-in.
-3. **Missile defense that dives and turns at once.** The fitted pitch law
-   pushes negative G to reach a 20 degree dive while banked, which turns the
-   aircraft the other way: a wingman asked to turn 90 degrees achieved 2 degrees
-   in 3.5 s and was hit. Steep and inverted tracking is a documented
-   approximation of the input-only controller.
+2. **Notch side on a head-on shot.** Resolved by the fitted
+   [missile defense policy](../spec/ai.md#missile-defense-flown-by-ai): the side
+   stays committed unless terrain makes it unsafe and the other side safe.
+3. **Missile defense that dives and turns at once.** Resolved by positive-G
+   defensive steering with a shallow descent and terrain recovery. The headless
+   `ai-regress-missile-positive-g-standard` and `-hybrid` scenarios fly an
+   AIM-9M tail shot against an Ace and check positive G, at least 20 degrees of
+   heading change, stable beam requests and no wrong-class devices.
+   `ai-regress-missile-head-on-break` also checks that a missile directly ahead
+   produces a hard crossing break instead of a straightening command. The unit
+   tests cover skill limits, phase sequencing, terrain, device budgets and
+   return to ordinary control. Missile flight and decoy outcomes are separate.
 4. **Leaderless wingmen after a fight.** Changed (John, 2026-09-29): leader
    succession (`7366700`), and after the fight the wing returns to base
    (`475cafc`). Later (John, 2026-09-29): in the multiplayer work this succession was replaced by

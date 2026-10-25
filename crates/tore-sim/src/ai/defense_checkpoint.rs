@@ -15,12 +15,16 @@ use super::{
 crate::checkpoint_enum!(Maneuver {
     Jink = 0,
     Notch = 1,
+    Drag = 2,
+    Beam = 3,
+    Break = 4,
 });
 
 crate::checkpoint_struct!(MotionSuggestion {
     maneuver,
     heading_deg,
     flight_path_pitch_deg,
+    reduce_heat,
 });
 
 crate::checkpoint_struct!(BurstRequest { chaff, flares });
@@ -52,6 +56,12 @@ crate::checkpoint_struct!(DefenseDecision {
 
 crate::checkpoint_struct!(DefenseState {
     selected_threat,
+    known_classes,
+    observed_tick,
+    phase,
+    beam_side,
+    break_heading_deg,
+    routine_devices,
     jink_base_heading_deg,
     jink_heading_deg,
     jink_started_tick,

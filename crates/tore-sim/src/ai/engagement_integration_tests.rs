@@ -710,7 +710,7 @@ fn explicit_target_order_replaces_a_prior_intercept_assignment() {
 #[test]
 fn weapons_hold_preserves_missile_defense_and_blocks_offense() {
     let mut mission = AiMission::new();
-    mission.push(AiActor::new(setup(1, 1, 0, [0., 20_000., 0.], 0.)).unwrap());
+    mission.push(perception_actor(Experience::Ace));
     mission
         .order(1, WingRequest::TargetAssignment(TargetOrder::HoldFire))
         .unwrap()

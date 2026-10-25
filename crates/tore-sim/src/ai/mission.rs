@@ -3221,6 +3221,7 @@ impl AiMission {
         // Write-only records start afresh on every mission step.
         actor.trace = ActorTrace::begin(tick);
         actor.adapter.set_gun_aim(None);
+        actor.adapter.set_defense(None);
         actor
             .adapter
             .set_strike_handling(super::strike::Handling::PLAIN);
@@ -3959,6 +3960,30 @@ impl AiMission {
                 .push((tick, devices.class, devices.count));
         }
         if let Some(burst) = actor.last_defense.and_then(|d| d.burst) {
+            let available = |class| {
+                let stock: u32 = actor
+                    .dispensers
+                    .iter()
+                    .filter(|d| d.class == class)
+                    .map(|d| d.count)
+                    .sum();
+                let queued: u32 = actor
+                    .device_schedule
+                    .iter()
+                    .filter(|(_, c, _)| *c == class)
+                    .map(|(_, _, count)| u32::from(*count))
+                    .sum();
+                stock.saturating_sub(queued)
+            };
+            let last_ditch = actor
+                .last_defense
+                .and_then(|d| d.motion)
+                .is_some_and(|m| m.maneuver == defense::Maneuver::Break);
+            let burst = burst.with_inventory(
+                available(SeekerClass::Radar),
+                available(SeekerClass::Infrared),
+                last_ditch,
+            );
             let mut classes = Vec::new();
             for index in 0..burst.chaff.max(burst.flares) {
                 if index < burst.chaff {
@@ -4004,6 +4029,16 @@ impl AiMission {
         // 6. Motion through the adapter and this actor's own flight model.
         actor.adapter.set_gun_aim(batch.gun_aim);
         actor.adapter.set_strike_handling(handling);
+        let defensive =
+            actor.controller.defending() && !actor.fire_defending && !actor.is_rotorcraft();
+        let reduce_heat = !actor.fire_defending
+            && actor
+                .last_defense
+                .and_then(|d| d.motion)
+                .is_some_and(|m| m.reduce_heat);
+        actor
+            .adapter
+            .set_defense(defensive.then_some((actor.controller.experience().level, reduce_heat)));
         let motion = batch
             .motion
             .map(|intent| actor.avoid_traffic(tick, intent, world));
@@ -4752,7 +4787,8 @@ impl AiActor {
             usable_turn_rate_deg_s: coordinated_rate * 0.5,
             usable_pitch_rate_deg_s: (32.174 * (g - 1.0) / speed).to_degrees() * 0.5,
             roll_in_time_s: (bank + own.bank_deg.abs()) / own.roll_limit_deg_per_s.max(1.0) + 0.7,
-            dive_speed_safe: own.speed.0 + 32.174 * 20_f64.to_radians().sin() * 5.0
+            dive_speed_safe: own.speed.0
+                + 32.174 * (-defense::DIVE_PITCH_DEG).to_radians().sin() * 5.0
                 <= own.limits.maximum.0,
         };
         self.last_defense = defense::decide(
@@ -4785,6 +4821,11 @@ impl AiActor {
         let mut every_round = self.incoming_fire.clone();
         #[cfg(test)]
         every_round.observe(tick, self.id(), defense_own, rounds.all(), visible, clear);
+        let gunfire_own = defense::DefenseOwn {
+            dive_speed_safe: own.speed.0 + 32.174 * 20_f64.to_radians().sin() * 5.0
+                <= own.limits.maximum.0,
+            ..defense_own
+        };
         self.incoming_fire.observe_near(
             tick,
             self.id(),
@@ -4802,7 +4843,7 @@ impl AiActor {
         );
         let fire_motion = self
             .incoming_fire
-            .motion(tick, self.id(), defense_own, |p| ground(p[0], p[2]));
+            .motion(tick, self.id(), gunfire_own, |p| ground(p[0], p[2]));
         let missile_motion = self.last_defense.and_then(|d| d.motion);
         let fire_selected = fire_motion.is_some()
             && (missile_motion.is_none()
@@ -4848,6 +4889,7 @@ impl AiActor {
         } else if rotorcraft && self.last_defense.is_some() {
             Some(missile_motion.unwrap_or(defense::MotionSuggestion {
                 maneuver: defense::Maneuver::Jink,
+                reduce_heat: false,
                 heading_deg: own.heading_deg,
                 flight_path_pitch_deg: 0.,
             }))
@@ -4910,6 +4952,8 @@ impl AiActor {
                     heading_deg,
                     pitch_deg,
                     rotorcraft,
+                    extend: !fire_selected
+                        && missile_motion.is_some_and(|m| m.maneuver == defense::Maneuver::Drag),
                 }
             }));
     }
@@ -6648,7 +6692,7 @@ mod tests {
             }
         }
         let actor = mission.actor(1).unwrap();
-        assert_eq!(actor.activity(), Activity::Defending);
+        assert!(actor.defense_decision().unwrap().motion.is_none());
         assert!(
             actor
                 .missile_threats()
@@ -6714,7 +6758,7 @@ mod tests {
     }
 
     #[test]
-    fn supported_warning_defends_immediately_and_debits_two_chaff_on_schedule() {
+    fn novice_reaction_delays_defense_then_debits_two_chaff_on_schedule() {
         use crate::combat::missiles::Guidance;
         let mut mission = AiMission::new();
         let mut actor = perception_actor(Experience::Novice);
@@ -6733,12 +6777,12 @@ mod tests {
             [0., 20000., -1000.],
         )]);
         let mut releases = Vec::new();
-        for tick in 0..90 {
+        for tick in 0..270 {
             let output = mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
             assert!(output.launches.is_empty());
             if tick == 0 {
                 let actor = mission.actor(1).unwrap();
-                assert_eq!(actor.activity(), Activity::Defending);
+                assert!(actor.defense_decision().unwrap().motion.is_none());
                 assert!(actor.missile_threats().any(|r| r.targeting_receiver));
             }
             for device in output.devices {
@@ -6747,7 +6791,7 @@ mod tests {
         }
         assert_eq!(
             releases,
-            [(0, SeekerClass::Radar, 1), (30, SeekerClass::Radar, 1)]
+            [(180, SeekerClass::Radar, 1), (210, SeekerClass::Radar, 1)]
         );
         assert_eq!(mission.actor(1).unwrap().dispensers()[1].count, initial - 2);
     }
@@ -6773,7 +6817,7 @@ mod tests {
     fn pitbull_acquisition_and_receiver_failure_gate_the_same_ai_service() {
         use crate::combat::missiles::Guidance;
         let mut mission = AiMission::new();
-        mission.push(perception_actor(Experience::Novice));
+        mission.push(perception_actor(Experience::Ace));
         let mut missile = incoming_snapshot(Guidance::Active, [0., 20000., -1000.]);
         missile.radar_active = true;
         mission.set_missiles(vec![missile]);
@@ -6784,7 +6828,7 @@ mod tests {
         mission.step(&[], &flat, TimeOfDay(1)).unwrap();
         assert_eq!(mission.actor(1).unwrap().activity(), Activity::Defending);
         let mut failed = AiMission::new();
-        let mut actor = perception_actor(Experience::Novice);
+        let mut actor = perception_actor(Experience::Ace);
         actor.flight_mut().systems.counts[32] = 2;
         failed.push(actor);
         failed.set_missiles(vec![missile]);
@@ -6793,10 +6837,10 @@ mod tests {
     }
 
     #[test]
-    fn a_visually_observed_ir_threat_requests_a_mixed_burst_without_hidden_classification() {
+    fn a_visually_observed_ir_threat_requests_only_flares_without_hidden_classification() {
         use crate::combat::missiles::Guidance;
         let mut mission = AiMission::new();
-        mission.push(perception_actor(Experience::Novice));
+        mission.push(perception_actor(Experience::Ace));
         let mut missile = incoming_snapshot(Guidance::Infrared, [0., 20000., 5000.]);
         missile.velocity = [0., 0., -3000.];
         mission.set_missiles(vec![missile]);
@@ -6809,14 +6853,14 @@ mod tests {
         assert_eq!(actor.activity(), Activity::Defending);
         assert_eq!(
             actor.defense_decision().unwrap().burst,
-            Some(defense::BurstRequest::MIXED)
+            Some(defense::BurstRequest::INFRARED)
         );
         assert!(actor.missile_threats().all(|r| r.guidance_class.is_none()));
         assert_eq!(output.devices.len(), 1);
     }
 
     #[test]
-    fn a_distant_novice_maneuvers_without_devices_while_an_ace_preserves_its_flight() {
+    fn a_distant_ace_drags_without_devices_while_a_novice_reacts_late() {
         use crate::combat::missiles::Guidance;
         for skill in [Experience::Novice, Experience::Ace] {
             let mut mission = AiMission::new();
@@ -6830,7 +6874,7 @@ mod tests {
             let output = mission.step(&[], &flat, TimeOfDay(0)).unwrap();
             let actor = mission.actor(1).unwrap();
             let decision = actor.defense_decision().unwrap();
-            assert_eq!(decision.motion.is_some(), skill == Experience::Novice);
+            assert_eq!(decision.motion.is_some(), skill == Experience::Ace);
             assert!(decision.burst.is_none());
             assert!(output.devices.is_empty());
             assert!(decision.debug.estimated_threat_time_s.unwrap() > 30.);

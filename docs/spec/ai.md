@@ -1525,8 +1525,8 @@ degrees or more that needs more than a 1 G push rolls inverted and pulls
 held off while the lift is more than 45 degrees from its bank. **Planned dive**:
 the terrain floor is the dive's planned pull-out (the physical pull-out arc at
 the AI's G limit plus 1 s of sink, bottoming out 1,000 ft over the highest
-ground ahead) instead of the floor above. Every other motion, air combat
-included, is flown exactly as described here.
+ground ahead) instead of the floor above. Other motions use the plain handling
+above except for the [missile defensive turn policy](#missile-defense-flown-by-ai).
 Invert the model's loaded stick-to-G mapping, with low-speed authority floored
 at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
 For the researched model, this includes its flap-adjusted minimum speed,
@@ -1614,6 +1614,69 @@ throttle and the caller must choose a runway: the airfield sequence takes the
 retail short takeoff and the runway landing for a jet that needs more than 90%
 throttle to hover (slice H2, [vertical takeoff and
 landing](ai-airfield.md#vertical-takeoff-and-landing)).
+
+## Missile defense flown by AI
+
+John requested effective missile defense on 2026-10-25. The following policy
+is **fitted, agent-authored**, not measured retail behavior. It uses only the
+actor's observed threats. Missile energy is unknown in that observation API;
+time to closest approach is a timing estimate, not an energy estimate.
+
+After first observing a threat in an encounter, Novice, Average, Experienced
+and Ace pilots wait
+1.5, 0.75, 0.25 and 0 seconds respectively. Sensor warning delays still apply.
+With more than 18 seconds to closest approach for radar, or 14 for IR, turn
+cold and extend at maximum dry speed. At shorter times beam the missile, or
+notch the supporting radar bearing when known. A drag enters the beam at 14
+seconds for radar and 10 for IR. Do not return to drag during that encounter.
+At 1.5, 2.5, 3.5 and 4.5 seconds respectively, commit to a hard break toward
+the missile's side until that threat disappears, requesting at least a 90-degree
+heading change. Within 15 degrees of the nose, keep the current turn side when
+bank exceeds 5 degrees; otherwise keep the committed beam side, or turn right
+if no side is established. This avoids straightening at a head-on missile. Bearing-only or
+non-closing observations use the beam, without inventing a range or energy.
+
+Choose the shorter beam turn. Add up to 30 degrees of cost for pointing toward
+other observed threats, and 360 degrees for insufficient terrain clearance
+along the turn. Hold the chosen side as the bearing moves. Only an unsafe
+terrain path with a safe opposite path can reverse it. Threats classified as passive
+use alternating 45 degree jinks. Each leg lasts at least 4 seconds,
+or the estimated 90 degree turn plus roll-in and a skill-dependent dwell of
+3, 2.5, 2 or 1.5 seconds, whichever is longer. Do not reverse before reaching
+within 15 degrees of the leg's heading.
+
+Missile defensive fixed-wing turns use bank and positive pull. The usable positive G
+limit is the existing aircraft/pilot limit multiplied by 0.55, 0.70, 0.85 or
+1.0 by skill, with a 1 G floor where available. Bank is bounded by the aircraft
+and the coordinated bank for that load, up to 85 degrees. As bank builds,
+command the positive load needed to hold the flight path. Defensive roll
+feedback uses bank error divided by 0.25 seconds minus 0.25 times measured
+roll rate, bounded by the aircraft roll authority; this lets the turn establish
+before the missile arrives. At altitude a
+slight nose-low path, at most 5 degrees, uses gravity to preserve speed;
+reduce vertical lift by at most 15 percent, never push negative G. The terrain
+floor overrides the turn and levels the wings for recovery. Before descending,
+check the current and requested headings and intermediate turn directions over
+5 seconds, retaining at least 1,000 ft above sampled ground. This sampling
+cannot guarantee clearance over unresolved narrow terrain. No defense unload
+is currently needed. Ordinary pursuit and formation control are unchanged.
+
+Radar beams dispense two chaff at most every 6, 4, 3 or 3 seconds by skill,
+once within 60, 45, 30 or 20 degrees of the beam heading respectively.
+IR beams and breaks turn afterburner off and cap throttle at 65 percent unless
+below 1.3 times minimum speed. IR flares begin inside 2, 3, 5 or 6 seconds to
+closest approach. Routine defense spends at most eight devices per encounter and retains the
+last two devices of each class, counting already queued releases.
+The last-ditch break may exceed that budget, with two appropriate devices every
+2, 1.5, 1 or 0.75 seconds. Devices within a pair are 0.25 seconds apart. A
+known radar threat gets only chaff; a known IR threat gets only flares. Retain
+observed classification across electronic-to-visual handoff and priority changes
+while that contact remains in the threat picture. For
+unclassified visual threats, flares are a precaution, not inferred seeker
+knowledge; unclassified electronic threats use chaff. Stale threats get no
+new bursts. Switching threats retains the pilot's reaction progress, the aircraft's
+release cooldown and routine budget. Defense ends when observations clear, resuming existing
+orders, formation or combat without changing aggression or launch gates.
 
 ## Live integration and authored boundaries
 
