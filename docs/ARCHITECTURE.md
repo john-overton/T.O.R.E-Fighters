@@ -4650,8 +4650,10 @@ shared 3), UTF-8 key length `u32`, key bytes, and its existing manifest digest
 `u64`. All integers are little endian. The content probes, rather than a new
 file list, determine the items and fingerprints.
 
-`SIMULATION_VERSION` is 2 for protocol 73: cumulative mission accounting, its
-checkpoint state and revival member retention. Raise it and the network protocol whenever
+`SIMULATION_VERSION` is 3 for protocol 74: tanks against aircraft (a 20 degree
+gun ceiling, a lay and wider aim) and the host migration resume fixes, on top of
+version 2's cumulative mission accounting, its checkpoint state and revival
+member retention. Raise it and the network protocol whenever
 simulation, rules, checkpoint or replay interpretation changes can make
 peers disagree, including compile-time tuning. Raise the protocol for wire
 changes too. Documentation, UI-only changes, commits and release tags do not
