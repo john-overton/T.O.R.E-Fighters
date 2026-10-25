@@ -39,6 +39,9 @@ struct VertexOutput {
 
 pub(crate) struct CanvasPresenter {
     first_frame: crate::startup::FirstFrame,
+    /// Presents in a row whose surface gave no image (see
+    /// [`CanvasPresenter::surface_retry`]).
+    surface_failures: u32,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -156,6 +159,7 @@ impl CanvasPresenter {
         crate::diagnostics::stage_done();
         Ok(Self {
             first_frame: Default::default(),
+            surface_failures: 0,
             surface,
             device,
             queue,
@@ -174,13 +178,30 @@ impl CanvasPresenter {
     }
 
     pub(crate) fn resize(&mut self) {
+        if self.configure() {
+            self.window.request_redraw();
+        }
+    }
+
+    /// Configures the surface for the window's size; false at no size.
+    fn configure(&mut self) -> bool {
         let size = self.window.inner_size();
         if size.width > 0 && size.height > 0 {
             self.config.width = size.width;
             self.config.height = size.height;
             self.surface.configure(&self.device, &self.config);
-            self.window.request_redraw();
+            true
+        } else {
+            false
         }
+    }
+
+    /// After a present the surface gave no image for: how long to wait
+    /// before trying again, as the game's renderer does
+    /// ([`crate::frame_pacing::surface_retry`]); None after a good one.
+    pub(crate) fn surface_retry(&self) -> Option<std::time::Duration> {
+        (self.surface_failures > 0)
+            .then(|| crate::frame_pacing::surface_retry(self.surface_failures))
     }
 
     /// Upload one 640x480 RGBA frame and show it, letterboxed.
@@ -194,13 +215,17 @@ impl CanvasPresenter {
             return Ok(false);
         }
         let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
+            Ok(frame) => {
+                self.surface_failures = 0;
+                frame
+            }
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.resize();
+                self.configure();
+                self.surface_failures = self.surface_failures.saturating_add(1);
                 return Ok(false);
             }
             Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => {
-                self.window.request_redraw();
+                self.surface_failures = self.surface_failures.saturating_add(1);
                 return Ok(false);
             }
             Err(error) => return Err(error.into()),

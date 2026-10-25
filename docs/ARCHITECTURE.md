@@ -299,7 +299,7 @@ of zero reproduces world-coordinate vertices exactly. Target-window framing
 converts those relative mesh vertices back to world positions before fitting
 them against its world-space camera.
 
-Frame pacing lives in `frame_pacing.rs`, following the Graphics screen's [frame rate](spec/graphics-options.md#frame-rate) choice (V-sync by default). V-sync presents with `Fifo` and a maximum frame latency of one, and live views (flight, the terrain viewer, replays) ask for the next redraw as soon as a frame is presented, so the display paces them; with `Fifo` the window requests Wayland frame callbacks. The 60, 100 and 200 choices present with `Mailbox` (else `Immediate`) and `about_to_wait` sleeps (`WaitUntil`) until a timer's evenly spaced slot. A stopped single-player flight whose camera pose has settled waits for an event or its next notice to expire; an unfocused window draws about ten frames a second; a hidden one (`WindowEvent::Occluded`, or a zero-size window) draws nothing, and a hidden or minimised single-player flight pauses as on focus loss. A session's network turn (`net_tick`) also runs from `about_to_wait` whenever its next wake is due and no redraw is, so multiplayer keeps ticking and sending keepalives while drawing waits. Input scripts, performance measurements, captures and smoke tests draw uncapped and unthrottled unless `TORE_FRAME_LIMIT` is set; `TORE_FRAME_LIMIT=off` gives uncapped rendering for benchmarks. Idle menus draw only on input or news (see Menu pacing below). With the frame-rate counter shown every screen is a live view instead: `frame_pacing::counted` turns whatever a screen wants after its frame into "again as often as the frame rate allows" (the menus, the lobby, the replay viewer and a paused flight alike), the menu-pace and 20 Hz loading redraws step aside for the same timer (`App::loading_next_frame`, `loading_wait`), and `frame_pacing::too_soon` holds an event's redraw request for the timer's slot under a capped rate so the counter never reads above the cap. The check is live: `Renderer::counter_shown` reads the setting each frame, so it applies at once either way. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
+Frame pacing lives in `frame_pacing.rs`, following the Graphics screen's [frame rate](spec/graphics-options.md#frame-rate) choice (V-sync by default). V-sync presents with `Fifo` and a maximum frame latency of one, and live views (flight, the terrain viewer, replays) ask for the next redraw as soon as a frame is presented, so the display paces them; with `Fifo` the window requests Wayland frame callbacks. The 60, 100 and 200 choices present with `Mailbox` (else `Immediate`) and `about_to_wait` sleeps (`WaitUntil`) until a timer's evenly spaced slot. A stopped single-player flight whose camera pose has settled waits for an event or its next notice to expire; an unfocused window draws about ten frames a second; a hidden one (`WindowEvent::Occluded`, or a zero-size window) draws nothing, and a hidden or minimised single-player flight pauses as on focus loss. A session's network turn (`net_tick`) also runs from `about_to_wait` whenever its next wake is due and no redraw is, so multiplayer keeps ticking and sending keepalives while drawing waits. Input scripts, performance measurements, captures and smoke tests draw uncapped and unthrottled unless `TORE_FRAME_LIMIT` is set; `TORE_FRAME_LIMIT=off` gives uncapped rendering for benchmarks. Idle menus draw only on input or news (see Menu pacing below). With the frame-rate counter shown every screen is a live view instead: `frame_pacing::counted` turns whatever a screen wants after its frame into "again as often as the frame rate allows" (the menus, the lobby, the replay viewer and a paused flight alike), the menu-pace and 20 Hz loading redraws step aside for the same timer (`App::loading_next_frame`, `loading_wait`), and `frame_pacing::too_soon` holds an event's redraw request for the timer's slot under a capped rate so the counter never reads above the cap. The check is live: `Renderer::counter_shown` reads the setting each frame, so it applies at once either way. An unfocused window's redraw requests wait for its frame already due in the same way (`too_soon`), counter or not, so the pointer passing over a background window or a menu's news cannot add frames to its ten a second. A zero-size window draws nothing. A frame whose surface gives no image (`Lost`, `Outdated`, `Timeout` or `Other` from `get_current_texture`) never asks for its own redraw: the surface is configured again where that helps, and `App::pace` schedules the next try after `frame_pacing::surface_retry` (16 ms, doubling to 256 ms while it keeps failing, and never while hidden), so a surface stuck failing, as one can be while a Windows window minimises or changes mode, costs a few frames a second instead of a loop at full speed; the first-run window (`CanvasPresenter`) does the same. While the window is unfocused or hidden, controllers are polled at the menus' cadence, since the bindings ignore them there. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
 
 The GPU cockpit texture survives view and size changes; projection uniforms track the current aspect. Aircraft GPU resources are prepared when the renderer/theater loads. Live camera panels submit bounded asynchronous readbacks (at most one pending per camera page), consume completed rasters on later frames, and retain their last image while pending. The simulation renderer caches world-pass attachments (depth, multisampled colour and the render-scale image) for up to five output sizes, so the display, mirrors and 138×114 panels do not reallocate at every refresh. The rear mirrors are one 768×384 rear camera, 66 degrees vertical (10% wider than a 1x view), drawn on every other visible flight frame (`mirrors::Cadence`; always for a capture) and cropped by the cockpit shader into each mirror; on a frame that skips it, the flown aircraft's vertex buffer is still left as the mirror pass leaves it, so the main view is the same either way. Work that does not depend on the camera is done once per frame and shared by the views: the effect sprites' fire fitting and their glows (until the next `effects` or `emitters` call), the airfield flasher pattern (per weather tick), and the burning city's frame, which the mirror takes from the main view. The mirror keeps its own encoder and submission: every view writes the same uniform, vertex and cull buffers with `Queue::write_buffer`, which a submission applies before any of its commands, so two views in one submission would both see the second view's data. World pipelines live together in `sim_renderer::Pipelines` and are rebuilt when the anti-aliasing sample count changes. After the world pass, an optional resample pass scales the render-scale image to the output, and the spotting-aid pass draws single-sampled outlines using the world depth; `graphics.rs` holds the options and the [graphics options](spec/graphics-options.md) page specifies them. Offline captures retain an explicit blocking readback so smoke evidence contains the requested image. Direct GPU panel composition, full GPU UI rendering and native terrain LOD remain future optimization work.
 
@@ -3814,8 +3814,9 @@ naps sleep with no spin tail. A flying host with nobody connected wakes for its
 ticks alone. A host that is not flying honours `next_wake` (10 ms) and never
 spins, and with no connection at all it sleeps 20 ms (`EMPTY_NAP`), so a lobby
 join, keepalive, console command or status line is served at most that much
-later. Tick pacing and catch-up are the host's and are unchanged; the Windows
-margin (2 ms) is unchanged and should be re-measured there. Stage E runs the same host, with the same loop, on a
+later. Tick pacing and catch-up are the host's and are unchanged. The Windows
+margin, 2 ms until 0.2.2, was re-measured on Windows 11 and is now 0.75 ms
+([sleep and wait accuracy](#sleep-and-wait-accuracy-on-each-system-ef-x)). Stage E runs the same host, with the same loop, on a
 thread inside the game ([the host inside the game](#the-host-inside-the-game-stage-e)).
 
 **The calls** (agreed with the server slice, D7b). `Host::new(spec,
@@ -5447,7 +5448,7 @@ since EF7 and EF8 from its menus (New on Direct Connection opens a lobby).
   binds the socket itself, so a port in use is refused at once, then the
   thread builds the `Host` and runs the dedicated server's loop: receive,
   update, transmit, then wait until the next wake or 4 ms, whichever is
-  sooner, sleeping and then spinning the last 0.4 ms (2 ms on Windows). The
+  sooner, sleeping and then spinning the last 0.4 ms (0.75 ms on Windows). The
   game's client starts joining at once; its first handshake packets wait in
   the link until the host is built (a client retries for 10 seconds).
 - **Commands and reports.** In: `Stop`. *EF4:* the lobby's verbs are not
@@ -5791,8 +5792,20 @@ three runs each, and a C probe on macOS; a range is the runs' spread:
 | macos-14 (Apple silicon) | 4.4 to 8.4 / 11.7 ms | 48 to 90 / 154 ms | 6.2 to 7.5 / 36 ms |
 | macos-15-intel | 1.9 to 6.5 / 10.1 ms | 27 to 66 / 142 ms | 1.2 to 2.1 / 20 ms |
 
-A Windows host has no such problem: the 2 ms spin margin is more than its
-sleeps need. The macOS runners' processes run at utility QoS (0x11) and
+A Windows host has no such problem: the 2 ms spin margin was more than its
+sleeps need. *Re-measured (2026-10-24, Windows 11 24H2 CI machine, a
+12-thread virtual machine):* the standard library's sleep uses a
+high-resolution waitable timer there, so a 1 or 2 ms sleep overshoots by
+0.53 to 0.55 ms typically and 0.59 to 0.77 ms at the 99th percentile (4 and
+7.5 ms sleeps: 0.09 to 0.12 ms typically). In a host's loop whose tick does
+1 to 2.5 ms of work, 10 seconds a run, the 2 ms margin spun 1.65 to 1.72 ms
+a tick, 20 to 21 percent of a core, while 0.75 ms spun 0.23 to 0.62 ms (2.7
+to 7.4 percent) and 0.4 ms 0.12 to 0.19 ms; lateness did not change with the
+margin (99th percentile 0.02 to 0.3 ms at every margin, the worst 1 to 2 ms
+from preemption). *Agent decision, fitted:* the Windows margin is 0.75 ms,
+covering the measured sleep overshoot; Linux and macOS keep 0.4 ms. The
+same machine's `thread::park_timeout` is not high resolution: 4 ms lasts
+15.9 ms and 16 ms lasts 31.7 ms. The macOS runners' processes run at utility QoS (0x11) and
 the kernel's timer coalescing lets their timers slip by up to 75 ms
 (`kern.timer_coalesce_tier3_ns_max`). In a C probe on the same runners,
 user-interactive QoS and `taskpolicy -l 0 -t 0` changed nothing, and a Mach
@@ -9612,7 +9625,12 @@ help:
   a loop that is late. The host loop (`Host::fly`, so a hosted game and the
   dedicated server) reports after each batch of ticks, late meaning more than
   one tick owed; the flight frame loop (`main.rs`) reports once per frame,
-  late meaning a frame over 100 ms.
+  late meaning more than 100 ms since the last frame that the frame pacer
+  did not ask to wait (`Pacer::busy`): an unfocused window's tenth of a
+  second between frames, a capped rate's slot and a still picture's wait for
+  events are not lateness (before, an unfocused multiplayer flight counted
+  each of its ten frames a second as late and kept the four workers busy in
+  the background: [the measurement](baselines/away-cpu.md)).
 - **Back to serial** a second after the last report of pressure
   (`KEEP_UP`), so a loop hovering at its budget does not flap every frame.
   The pool stays parked, not spinning: rayon's idle workers sleep.

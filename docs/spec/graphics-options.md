@@ -118,7 +118,16 @@ Throttles that need no setting:
   map and the [frame-rate counter](#frame-rate-counter) keep it drawing. The first running frame
   after a stop turns at most 1/30 s of wall time into ticks; every resume
   already restarts the flight clock, so this only guards a missed one.
-- An unfocused window draws about ten frames a second.
+- An unfocused window draws about ten frames a second. Events do not add
+  frames to those: the pointer passing over a background window waits for
+  the frame already due. Those slower frames are not counted as the game
+  running late, so they never wake the extra simulation workers. Controllers
+  are read at the menus' slower rate while the window is unfocused or hidden,
+  since nothing acts on them there.
+- A frame the graphics driver gives no picture for (the surface lost,
+  outdated or timed out, as can happen while a window minimises or changes
+  mode) is tried again after 16 ms, doubling up to a quarter of a second
+  while it keeps failing, never in a tight loop.
 - A hidden window draws nothing until it shows again: `Occluded` where the
   platform reports it (X11, macOS), or minimised to no size (Windows).
   Wayland reports neither; there V-sync's frame callbacks stop the drawing,

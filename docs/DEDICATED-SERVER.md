@@ -1115,8 +1115,9 @@ to the console only, and each player's once-a-minute figures line to the log
 file only. The figures line also carries the bytes
 sent to and received from that player since it joined. A log file that cannot
 be written is reported once on the console and the server carries on without
-it. The clock the run loop waits on sleeps until 0.4 ms (2 ms on Windows, whose
-sleep can be coarse) before each deadline and then spins; the host catches up
+it. The clock the run loop waits on sleeps until 0.4 ms (0.75 ms on Windows, whose
+short sleeps overshoot by about half a millisecond; 2 ms before 0.2.2, which
+kept a Windows server spinning about a fifth of a core) before each deadline and then spins; the host catches up
 any tick a late wake-up missed (agent decision).
 
 **How late the loop wakes (measured on the CI runners, EF-X, 2026-10-01).**
