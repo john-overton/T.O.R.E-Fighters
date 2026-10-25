@@ -27,6 +27,60 @@ closer together in the tunnel with the front pair back where the tanks
 hung, and the AIM-120 under the glove pylon beside the AIM-9 on its
 shoulder rail ([the F-14](#the-f-14)).
 
+## Even wing loads
+
+**Opinionated, requested by John on 2026-10-25 (issue #6).** A physical
+left/right wing point loads complete pairs. After the existing compatibility
+and weight calculation, a positive odd maximum above 1 rounds down (3 to 2,
+5 to 4); a maximum of 1 becomes 2. Zero remains zero. Wing, wingtip,
+shoulder-rail and separate-underwing pairs use this rule. Centreline,
+unpaired, fuselage and internal-bay points keep their existing capacities.
+The classification uses the resolved carrier, so the A-4E row moved to the
+centreline stays a single point. Original PT/JT records are not rewritten.
+
+Loading, unloading and moving weapons or tanks between wing points steps by
+2. Moving between a pair and a single point also moves 2, or nothing when
+either end cannot supply or accept a pair. A fresh default load uses the
+same even-count conversion for human and AI aircraft. AI tactics do not change.
+Designator equipment and gun-pod single installations retain their separate
+existing equipment rules.
+
+The one-to-two case is an explicit minimum-pair exception to a source row's
+weight-derived maximum: two stores can exceed that row's old weight class.
+Their full weight and tank fuel are counted. The aircraft's maximum takeoff
+weight remains enforced; a heavy pair may require removing fuel or other
+stores. This exception implements John's requested maximum of 2, rather than
+silently making the store unavailable. Other positive odd weight-limited
+maxima round down, after the weight calculation.
+
+Saved preflight loads migrate when applied: paired layout capacities convert
+to the new even maximum and clamp to the current capacity; quantities clamp
+to capacity and round down to even (3 becomes 2, 1 becomes 0). Empty loads stay
+empty. Migration never adds stores or weight. Current multiplayer loadout
+requests must already use valid even capacities and quantities; old odd
+requests are rejected. In-flight ammunition, checkpoints and recorded replay
+layouts are not migrated: firing one store can legitimately leave an odd count.
+
+Each loaded pair has equal left/right counts, mass and mirrored store positions.
+The existing release rule remains left, right, left, right for a selected
+point, returning it to symmetry every two shots. After the left store leaves,
+the right is heavier and fires next. Jettison removes the actual remaining
+stores. The aircraft flight adapter uses total payload mass and a total
+load-dependent drag term; it has no lateral store-CG or per-wing drag torque.
+No new asymmetric flight model is introduced by this loadout rule.
+
+Retail has aggregate source-row capacities and a per-row alternating release
+offset. That evidence does not assign its odd maximum to a rendered wing:
+John confirms retail drew neither these pylons nor their loaded stores.
+T.O.R.E's former visible odd-extra pile-up came from applying its own
+right-extra layout independently to every row. Keeping retail eligibility
+while requiring even loads is a deliberate departure from retail's quantity
+selection, not a correction to the source data. The evidence and remaining
+unknowns are in [the source-row research](../formats/aircraft-ordnance.md#paired-point-counts-and-physics).
+
+The [roster validation](../baselines/even-wing-loads.md) lists every changed
+aircraft, row and store maximum, including setup-only definitions.
+
 ## What the player sees
 
 - **Every store leaves from where it hangs.** A missile, bomb or rocket
@@ -91,7 +145,7 @@ shoulder rail ([the F-14](#the-f-14)).
 | Fuselage pairs one behind another | A Fuselage record whose side holds two stores, or four or more, has two pylons on that side, one ahead of the other: their stores' middles are half a store length and 0.5 ft either side of the record's position, so they clear by 1 ft. The front pylon's store leaves first, so four leave left front, right front, left rear, right rear. Four or more a side: two side by side on each pylon's rack | opinionated, John 2026-10-13 ("fuselage missile pairs one behind another: fix"); the gap and the front-first order are agent decisions (the real aircraft's firing order is not published; front first keeps a rear missile from passing under a loaded front one) |
 | Fuselage pair on the centreline | A paired Fuselage weapon record at x 0 holding two or more (the F-4E's and F-4G's four Sparrows) hangs 3 ft either side of the centreline, in the Sparrow wells | agent decision, 2026-10-13 (fitted) |
 | Never paired | An internal gun, whatever its flags; a record on the centreline (nothing to mirror) | agent decision |
-| Which side | The mirror (left) when the whole releases left on the station after this one (rounds over `actualRoundsPerGame`) is odd; so the left side empties first and the right holds the odd store | retail parity rule; whether retail counts before or after the debit is unknown, the order is fitted |
+| Which side | The mirror (left) when the whole releases left on the station after this one (rounds over `actualRoundsPerGame`) is odd. Even wing loads start symmetric and release left then right; a partially spent point can hold one extra on the right | fitted release order based on the documented retail per-row alternation; no claim of a retail drawn-store split |
 | Unlimited ammunition cheat | The count never moves, so the side follows the release's projectile number (alternates) | agent decision |
 | Who | The player, the AI (strike stores, missiles and seeker missiles alike) and every network seat. Retail releases a distant AI aircraft from its centre; T.O.R.E releases every aircraft from its pylon | agent decision |
 | Guns | Keep their muzzle (gun mount, AC-130 barrel) | unchanged |

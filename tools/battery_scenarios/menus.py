@@ -454,13 +454,28 @@ def scenarios() -> list[Scenario]:
             r"derived stations F22N.PT: 2 extra tanks, 7920 lb fuel, 850 lb shells; feed, jettison, save and old load passed",
             r"derived stations MIG29.PT: 1 extra tanks, 2614 lb fuel, 281 lb shells; feed, jettison, save and old load passed",
             r"derived stations RAFALE.PT: 1 extra tanks, 3485 lb fuel, 374 lb shells; feed, jettison, save and old load passed",
-            r"F-16C wingtip AIM-120: two a load \(one a tip\), saved, restored and fired guided from each tip edge; every other tip store unchanged",
+            r"F-16C wingtip AIM-120: two a load \(one a tip\), saved, restored and fired guided from each tip edge; pair-sized editing checked",
             r"derived weapons F15.PT row 6: MK82.JT:3, MK84.JT:2, .*GBU12.JT:3, .*GBU38.JT:3",
             r"(?m)derived weapons F22.PT row 8: AIM9X.JT:4, AIM120.JT:4, AIM9M.JT:4, AIM9B.JT:4$",
             r"gun pod F4B.PT: row 3 takes one SUU-16 in place of AIM9B.JT x4; weight, 600 logical units \(1,200 rounds\), Tab, Guns only, save, lobby rule, firing from the pod's nose and jettison passed",
         ],
         notes="Derived Eagle, Falcon, Raptor, Fulcrum-C and Rafale C rows through normal selection, capacity, fuel, jettison, mission and profile saves, and old-load restoration; the F-4B's centreline SUU-16 gun pod (weight, rounds, Tab, Guns only, save, lobby rule, fired from its nose, jettisoned).",
     ))
+    out.append(
+        Scenario(
+            name="menus-ordnance-wing-pairs",
+            lane="menus",
+            args=["--validate-ordnance", "--no-audio"],
+            expect=[
+                r"wing-pair maximum: F18.PT row=6 AGM84A.JT 3->2",
+                r"wing-pair maximum: F18.PT row=7 AGM84A.JT 3->2",
+                r"wing-pair maximum: F18.PT row=7 AS16.JT 1->2",
+                r"wing-pair audit: F16C.PT defaults, maxima, steps, saved loads and lobby checked",
+                r"ordnance audit: .* passed",
+            ],
+            notes="Issue 6: complete imported roster of even wing maxima, pair-sized edits, human/AI defaults, old odd save migration and strict lobby validation. Includes Harpoon 3 to 2 and Kickback 1 to 2.",
+        )
+    )
     out.append(
         Scenario(
             name="menus-ordnance-availability",

@@ -473,7 +473,7 @@ impl LoadoutSpec {
             let pod = tore_sim::combat::sight::DesignatorStore::parse(&name, bytes)?;
             base.load_designator(index, pod)?;
         }
-        base.refresh_equipment()?;
+        base.normalize_saved_wing_pairs()?;
         Ok(base)
     }
 }
@@ -544,6 +544,28 @@ impl LoadoutSpec {
                 .ok_or_else(|| std::io::Error::other(format!("missing loadout resource {name}")))
         })?;
         let load = self.apply(standard.clone(), resources, None)?;
+        // Saved local loads migrate in apply; a live lobby request must
+        // already obey the current pair rule, including its layout count.
+        for (requested, actual) in self.stations.iter().zip(&load.configuration.stations) {
+            if requested.count != actual.count {
+                return Err("Paired wing loadout capacity must match the current loadout.".into());
+            }
+        }
+        for (index, requested) in self.stations.iter().enumerate() {
+            if !requested.weapon.ends_with(".SEE") && requested.quantity != load.quantities[index] {
+                return Err("Paired wing stores must be loaded in pairs within capacity.".into());
+            }
+        }
+        if let Some(tanks) = &self.tanks {
+            for requested in tanks {
+                if load.configuration.tanks.iter().any(|t| {
+                    t.hardpoint == usize::from(requested.hardpoint)
+                        && t.quantity != requested.quantity
+                }) {
+                    return Err("Paired wing tanks must be loaded in pairs within capacity.".into());
+                }
+            }
+        }
         for (index, station) in load.configuration.stations.iter().enumerate() {
             let default = &standard.configuration.stations[index];
             if default.count == 0 && station.count == 0 && load.quantities[index] == 0 {

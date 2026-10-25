@@ -152,7 +152,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "replay-feedback": ("dedicated feedback form, recording lifecycle and writer recovery", ("net-replay-feedback-*",)),
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*", "menus-replays-bar-*", "menus-updates-bar-*")),
     "menus-creator": (
-        "the Quick Mission creator, start-up runs and loadout pages",
+        "the Quick Mission creator, start-up runs and loadout pages, including even wing-pair maxima and saved-load migration",
         ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-derived-stations", "menus-validate-creator", "menus-snap-quick-*"),
     ),
     "menus-validate": (

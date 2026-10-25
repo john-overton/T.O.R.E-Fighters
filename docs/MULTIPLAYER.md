@@ -34,6 +34,11 @@ The client now prepares received missions on a background worker and shows a
 keepalives continue while it builds. Escape during mission preparation cancels
 the join. Host and join content checks are polled too. Remaining validation is listed in that spec.
 
+Loadout requests must obey the [even-wing-load rule](spec/stores-on-pylons.md#even-wing-loads).
+Local old saved loads migrate before submission. Live requests with odd wing
+quantities or obsolete capacities are rejected. The stores event layout is
+unchanged, but peers need the same capacity and validation rules.
+
 ## Contents
 
 - [Goals](#goals)

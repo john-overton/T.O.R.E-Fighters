@@ -1197,6 +1197,18 @@ impl Configuration {
                 }
             }
         }
+        // Shared by human and AI default loads. Keep source records intact;
+        // only the physical T.O.R.E wing carriers load whole pairs.
+        for station in &mut self.stations {
+            let policy = super::loading::WingPairs::of(station.rack, station.mount);
+            station.count = policy.maximum(i32::from(station.count)) as u16;
+        }
+        for tank in &mut self.tanks {
+            let quantity = super::loading::WingPairs::of(tank.rack, tank.mount)
+                .maximum(i32::from(tank.quantity)) as u16;
+            changed |= quantity != tank.quantity;
+            tank.quantity = quantity;
+        }
         if changed {
             self.refresh_tanks()?;
         }
@@ -7268,7 +7280,7 @@ mod tests {
         ] {
             let tank = TankStore::parse(name, &resources[name]).unwrap();
             let h = Hardpoint {
-                location: if row == 6 { 0 } else { 4 },
+                location: if count == 1 { 0 } else { 4 },
                 flags: 0x205,
                 position: [0; 3],
                 store: None,
@@ -7290,7 +7302,7 @@ mod tests {
             config.hardpoint_slots = vec![None; row + 1];
             config.tanks = vec![TankStation {
                 hardpoint: row,
-                mount: [7., -5., -1.],
+                mount: [if count == 1 { 0. } else { 7. }, -5., -1.],
                 rack: crate::combat::hardpoints::Rack::from_source(&h),
                 store: None,
                 quantity: 0,
@@ -9214,6 +9226,90 @@ mod tests {
         );
         assert_eq!(s.targets[0].localized_damage.structural_section, None);
     }
+    #[test]
+    fn wing_pair_loadout_steps_migration_mass_and_weight_limits() {
+        use crate::combat::{hardpoints::Rack, loadout::Loadout};
+        use tore_formats::aircraft::Hardpoint;
+        let mut configuration = fixture(true).own().configuration().clone();
+        let station = &mut configuration.stations[0];
+        station.weapon.source = "AIM120.JT".into();
+        station.weapon.weight = 300;
+        station.internal = false;
+        station.count = 4;
+        station.mount = [10., -2., 0.];
+        station.rack = Rack {
+            location: 4,
+            paired: true,
+            ..Rack::default()
+        };
+        configuration
+            .stations
+            .push(configuration.stations[0].clone());
+        configuration.hardpoint_slots = vec![Some(0), Some(1)];
+        let h = Hardpoint {
+            location: 4,
+            flags: 0x85,
+            position: [30, -6, 0],
+            store: Some("AIM120.JT".into()),
+            count: 4,
+            weight_class: 10,
+        };
+        let mut load = Loadout {
+            aircraft: AircraftId::F18,
+            configuration,
+            quantities: vec![4, 0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 10000.,
+            maximum_lbs: 20000.,
+            cheat: false,
+            tank_hardpoints: vec![],
+            hardpoints: vec![h.clone(), h],
+        };
+        let weapon = load.configuration.stations[0].weapon.clone();
+        assert_eq!(load.capacity_before_wing_pairs(0, &weapon), 3);
+        assert_eq!(load.capacity(0, &weapon), 2);
+        load.select(0, weapon.clone()).unwrap();
+        assert_eq!(load.quantities, [2, 0]);
+        load.change(0, -1);
+        assert_eq!(load.quantities, [0, 0]);
+        load.change(0, 1);
+        load.transfer(0, 1).unwrap();
+        assert_eq!(load.quantities, [0, 2]);
+        assert_eq!(load.total_lbs(), 10600.);
+        let own = Ownship::new(1, Side(0), load.configuration.clone(), true).unwrap();
+        let mut own = own;
+        own.ammo = load.ammunition().unwrap();
+        assert_eq!(own.payload_lbs(), 600.);
+        load.quantities[0] = 1;
+        assert!(load.validate().is_err());
+        load.configuration.stations[0].count = 3;
+        load.normalize_saved_wing_pairs().unwrap();
+        assert_eq!(load.quantities, [0, 2]);
+        assert_eq!(load.configuration.stations[0].count, 2);
+        // The requested minimum pair can exceed the old row weight class,
+        // but never bypasses aircraft takeoff weight validation.
+        load.hardpoints[0].weight_class = 5;
+        assert_eq!(load.capacity_before_wing_pairs(0, &weapon), 1);
+        assert_eq!(load.capacity(0, &weapon), 2);
+        load.select(0, weapon).unwrap();
+        load.maximum_lbs = 11000.;
+        assert!(
+            load.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("too heavy")
+        );
+        load.configuration.stations[1].rack.paired = false;
+        load.quantities = vec![2, 1];
+        load.transfer(1, 0).unwrap();
+        assert_eq!(
+            load.quantities,
+            [2, 1],
+            "a single store cannot split a pair"
+        );
+    }
+
     #[test]
     fn preflight_transfers_conserve_counts_and_respect_capacity_steps() {
         use crate::combat::loadout::Loadout;
