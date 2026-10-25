@@ -6,6 +6,33 @@ use crate::{
 use std::sync::Arc;
 use winit::window::Window;
 
+/// A window surface that is left to process exit when dropped during a panic.
+///
+/// wgpu skips discarding an unpresented frame while the thread panics, so the
+/// Vulkan backend would then panic tearing down the swapchain, and that second
+/// panic during unwinding aborts the process before the fatal report dialog.
+/// A panic always ends the game, so nothing is lost by not tearing it down.
+pub(crate) struct WindowSurface(Arc<wgpu::Surface<'static>>);
+impl WindowSurface {
+    pub(crate) fn new(surface: wgpu::Surface<'static>) -> Self {
+        Self(Arc::new(surface))
+    }
+}
+impl std::ops::Deref for WindowSurface {
+    type Target = wgpu::Surface<'static>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl Drop for WindowSurface {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // A reference that is never released keeps the surface alive.
+            std::mem::forget(Arc::clone(&self.0));
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Viewport {
     pub x: f32,
@@ -141,7 +168,7 @@ pub struct Renderer {
     /// Frames in a row whose surface gave no image; the caller waits
     /// [`crate::frame_pacing::surface_retry`] before trying again.
     surface_failures: u32,
-    surface: wgpu::Surface<'static>,
+    surface: WindowSurface,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -760,7 +787,7 @@ impl Renderer {
             readbacks: Default::default(),
             sim,
             window,
-            surface,
+            surface: WindowSurface::new(surface),
             device,
             queue,
             config,

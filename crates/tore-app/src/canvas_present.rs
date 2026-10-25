@@ -10,7 +10,7 @@
 use crate::{
     AppResult,
     menu::{HEIGHT, WIDTH},
-    renderer::Viewport,
+    renderer::{Viewport, WindowSurface},
 };
 use std::sync::Arc;
 use winit::window::Window;
@@ -42,7 +42,7 @@ pub(crate) struct CanvasPresenter {
     /// Presents in a row whose surface gave no image (see
     /// [`CanvasPresenter::surface_retry`]).
     surface_failures: u32,
-    surface: wgpu::Surface<'static>,
+    surface: WindowSurface,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -160,7 +160,7 @@ impl CanvasPresenter {
         Ok(Self {
             first_frame: Default::default(),
             surface_failures: 0,
-            surface,
+            surface: WindowSurface::new(surface),
             device,
             queue,
             config,

@@ -65,16 +65,21 @@ entry from Vulkan swapchain destruction. In the installed wgpu 27.0.1 source,
 `SurfaceTexture::drop` skips `texture_discard` when the thread is panicking.
 In wgpu-hal 27.0.4, `Swapchain::release_resources` requires exclusive ownership
 of acquire semaphores and panics if an acquired texture still holds one. This
-explains the reported unwind sequence and its extra noise.
+explains the reported unwind sequence. The second panic happens inside a
+destructor while unwinding, so Rust aborts the process ("panic in a destructor
+during cleanup"): `main` never reaches its panic report, so the player gets no
+error dialog naming the report (the fatal file and Windows event are written
+earlier, by the panic hook).
 
-No teardown workaround was added. Correctly releasing a frame before resuming
-unwind requires an explicit panic boundary around encoding/submission in both
-presenters, or a backend lifetime fix. Catching only the failing dispatch or
-leaking the surface would not cover the other acquired-frame failures safely.
-This remains a separate backend/unwind issue; fixing MSAA removes its trigger
-in this report. The offscreen reproduction has no swapchain and cannot validate
-this secondary Windows panic. Main-thread gameplay is never resumed after a
-panic.
+Review follow-up: both presenters now hold their window surface in
+`renderer::WindowSurface`, which leaves the surface to process exit when it is
+dropped during a panic. A main-thread panic always ends the game, so nothing
+needs the swapchain afterwards. This covers every acquired-frame failure, not
+only this dispatch. A local check that panicked right after acquiring a frame
+(Linux, Vulkan, RTX 4070, an uncommitted panic injected for the check, run
+through `tools/agent-run.sh`) recorded three fatal entries and aborted with
+status 134 before the change; after it, one fatal entry and exit status 101
+through the normal panic report. Windows was not tested.
 
 ## Validation
 
