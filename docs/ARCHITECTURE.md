@@ -11060,6 +11060,14 @@ does.
 6. A player still absent 5 seconds after the takeover (the drop timeout) is
    dropped: its plane goes to the AI, reserved for it
    ([rejoin](#rejoin-tokens-and-reservations)).
+   *Changed 2026-10-24 (agent decision):* the drop timeout counts from the
+   new host's first update after the takeover, when it can first answer
+   anyone, not from before its restore and replay. A standby that took
+   seconds to replay (a cold one, or a warm one far behind on a busy machine;
+   `net-window-migrate-smoke` saw 4.8 seconds in a debug build) had spent the
+   5 seconds before it, and every player, its own included, was dropped at
+   its first update. The resume window still counts from the takeover: once
+   it is over the host goes on, and the players resume with it live.
 
 **The present** is where the old host's clock would be now. The standby's own
 client already estimates the host's newest tick from the snapshots' arrivals

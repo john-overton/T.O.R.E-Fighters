@@ -1232,7 +1232,10 @@ second. The game runs it from slice K7a.
 send its kept inputs after a takeover (the new host's own game on a busy
 machine, say) no longer loses its snapshots for the rest of the flight, and a
 standby that needed one fresh checkpoint gets one, rather than one every 10
-seconds that it refused ([architecture](ARCHITECTURE.md#host-migration-and-rejoin)).
+seconds that it refused, and a takeover that takes seconds to catch up no
+longer drops every player the moment it is done: the 5 seconds the players
+have to come back count from when the new host can answer them
+([architecture](ARCHITECTURE.md#host-migration-and-rejoin)).
 
 The [architecture](ARCHITECTURE.md#host-migration-and-rejoin) has the design
 and its slices, the [wire protocol](formats/net-protocol.md#host-migration-and-rejoin-stage-k)

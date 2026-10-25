@@ -209,6 +209,9 @@ struct Rig {
     platform: Platform,
     /// The original host's game is stalled: nothing of it runs.
     stalled: bool,
+    /// How long a takeover's restore and replay take, as the new host sees
+    /// it: its Resumption is that much older than its first update.
+    replay_time: Duration,
 }
 
 impl Rig {
@@ -257,6 +260,7 @@ impl Rig {
             takeovers: Vec::new(),
             platform: Platform::current(),
             stalled: false,
+            replay_time: Duration::ZERO,
         };
         rig.games.push(Game {
             callsign: "Lead".into(),
@@ -612,7 +616,7 @@ impl Rig {
             config(1_000 + index as u64),
             Resumption {
                 house,
-                now,
+                now: now.saturating_sub(self.replay_time),
                 present,
             },
         )
@@ -1581,6 +1585,48 @@ fn a_backlog_after_the_host_went_live_is_taken_and_the_snapshots_follow() {
         .map(|(id, _)| *id)
         .unwrap();
     assert!(!host.awaiting_resume(connection));
+}
+
+/// A takeover whose restore and replay took 5 seconds (a standby far
+/// behind on a busy machine; `net-window-migrate-smoke`, 2026-10-24, saw
+/// 4.8): the drop timeout counts from the new host's first update, so every
+/// player resumes, with the host live by then, and none is dropped. It had
+/// counted from before the replay, and every player, the new host's own
+/// included, was dropped at its first update.
+#[test]
+fn a_takeover_that_took_seconds_to_replay_drops_nobody() {
+    let (mut rig, _, _) = flying(20, true);
+    rig.run(Duration::from_secs(2));
+    rig.replay_time = DROP_AFTER;
+    rig.cut(0);
+    let back = rig.back_after_cut(Duration::from_secs(5));
+    eprintln!("snapshots again after a 5-second replay: {back:?}");
+    let (game, _, _, _) = rig.takeovers[0].clone();
+    rig.run(DROP_AFTER);
+    let dropped: Vec<String> = rig.games[game]
+        .host
+        .as_mut()
+        .unwrap()
+        .take_resume_notes()
+        .into_iter()
+        .filter_map(|note| match note {
+            ResumeNote::Dropped { callsign } => Some(callsign),
+            _ => None,
+        })
+        .collect();
+    // Only the old host's own player, lost with it, is dropped.
+    assert_eq!(dropped, ["Lead"]);
+    let new = rig.host_of(game);
+    assert!(!new.resuming(), "the new host is live");
+    assert_eq!(new.absent_players(), Vec::<String>::new());
+    for g in 1..rig.games.len() {
+        assert!(rig.flying(g), "{} flies", rig.games[g].callsign);
+        assert_eq!(rig.games[g].client.migration_counts().resumed, 1);
+    }
+    assert!(
+        new.rejoin.reserved_plane(PlaneId(0)).is_some(),
+        "the old host's plane is kept for its player"
+    );
 }
 
 /// A standby the new host appoints in the middle of its fast-forward (the

@@ -219,6 +219,9 @@ struct Active {
     /// The old house when the host was lost (no handover), by join order:
     /// its game was the host, so the resume window does not wait for it.
     lost_house: Option<u64>,
+    /// When an absent player is dropped: [`DROP_AFTER`] from the new host's
+    /// first update since the takeover, set by it.
+    drop_at: Option<Duration>,
 }
 
 /// The migration's state on the host.
@@ -426,6 +429,7 @@ impl Host {
             clock,
             handed_house,
             lost_house,
+            drop_at: None,
         });
         host.resuming.notes.push(ResumeNote::TookOver {
             tick,
@@ -958,10 +962,18 @@ impl Host {
             // A host that handed over steps no more.
             return true;
         }
-        let Some(active) = &self.resuming.active else {
+        let Some(active) = &mut self.resuming.active else {
             return false;
         };
-        if now >= active.started + DROP_AFTER && !active.absent.is_empty() {
+        // The drop timeout counts from the new host's first update, when it
+        // can first answer anyone: a standby that took seconds to restore
+        // and replay (a cold one, or a warm one far behind on a busy machine)
+        // had spent them before it, and every player was dropped at once
+        // (agent decision, 2026-10-24, found by `net-window-migrate-smoke`).
+        // The resume window still counts from the takeover: once it is over
+        // the host goes on, and players resume with it live.
+        let drop_at = *active.drop_at.get_or_insert(now + DROP_AFTER);
+        if now >= drop_at && !active.absent.is_empty() {
             self.drop_absent();
         }
         let Some(active) = &self.resuming.active else {
