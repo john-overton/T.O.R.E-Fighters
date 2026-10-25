@@ -1,5 +1,13 @@
 # CPU while the window is in use, away or hidden (0.2.2, 2026-10-24)
 
+> **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
+> The thing being reverse engineered is the *experience*, not the executable. We
+> trace what a player does and what the game does back, down to the numbers they
+> would notice. How the original code achieved it is history: useful evidence,
+> never a blueprint. If a sentence below reads like an instruction to reproduce
+> the original's internals, it is out of date.
+> <!-- tore-header v2 -->
+
 Players on Windows 11 reported the game's CPU climbing at times, and when they
 alt-tabbed away from it. This pass measured what the game does with the
 processor in each window state, fixed what was spending it for no reason, and
@@ -64,9 +72,15 @@ joined and flying.
 | Unfocused | 17.4, 13.9 | 16.1, 13.9 | before: main 10.8 to 13.7 plus four workers 3.1 to 3.5; after: main thread alone |
 | Hidden | 9.8, 7.5 | 8.3, 8.3 | main thread (the session's 120 Hz ticks) |
 
-Single player (`--free-flight`), before: focused 33.6, unfocused 0.9 (the
-flight pauses and its still picture is not redrawn), hidden 1.0. Main menu,
-before: 0.4 focused, 0.9 unfocused, 0.9 hidden.
+The first "after" run had every change but the hold on an unfocused window's
+redraw requests; the second had all of them. The focused flight's difference
+is the mission's fight and the machine's load, not this pass: nothing on the
+focused path changed.
+
+Single player (`--free-flight`): focused 33.6 before and 25.5 after (again
+the fight); unfocused 0.9 and 0.6, hidden 1.0 and 0.6 (the flight pauses
+and its still picture is not redrawn). Main menu: focused 0.4 and 0.7,
+unfocused 0.9 and 0.7, hidden 0.9 and 0.8.
 
 On Linux the workers' wakeups cost little: the work they did moved back to the
 main thread and the unfocused total is within the runs' spread. The change
@@ -95,6 +109,14 @@ Sleep overshoot on the same machine: 1 ms 0.53 ms typical (worst 0.62), 2 ms
 does not use the high-resolution timer: 4 ms lasts 15.9 ms and 16 ms lasts
 31.7 ms, so the controller thread there polls about 63 times a second in
 flight rather than 250 (not changed by this pass).
+
+With the new margin the repository's own probe
+(`cargo test -p tore-realtime-native --test wait_probe -- --ignored`) on the
+same machine: 120 Hz ticks late 2.3 to 8.1 µs on average, 0.55 to 1.09 ms at
+worst across its four variants, as EF-X measured with 2 ms (0.2 to 3.7 µs,
+1.2 ms). `tore-app` builds and passes clippy there; started with no imported
+data it waits on its first-run screen at 0.0 percent of a core over 20
+seconds (4 threads).
 
 What could not be measured on Windows: the game's own window (no GPU),
 focus changes, minimising, alt-tab from full screen, and the workers' cost
