@@ -2015,7 +2015,9 @@ reservation ends (the King's Release).
 
 With `respawn revive`, the flight continues beneath a menu while waiting, using the in-flight
 Escape menu widget. Loadout lists stations in Load Ordnance display order, then
-internal fuel, Standard load and Done. Select a station to open its compatible
+internal fuel (a click raises it a tenth and wraps from full to a tenth; a
+right click lowers it a tenth and wraps from a tenth to full), Standard load and
+Done. Select a station to open its compatible
 stores and quantities, grouped and ordered like the pre-flight Load Ordnance
 catalog. Player Choice slots have one complete Aircraft list in creator/lobby
 order. Both lists have a red scroll bar and a case-insensitive search by name

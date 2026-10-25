@@ -72,7 +72,8 @@ keys change with the aircraft ([the full table](INPUT.md#vtol-tiltrotor-and-heli
   helicopter mode. Z and X stay rudder keys.
 - **All six**: **Ctrl+Shift+A** cycles the stability level, announced as
   `Stability: Off`, `Damper` or `Attitude`; Pref → Stability level does the
-  same and the choice is kept for later flights. **Damper** (the default)
+  same and the choice is kept for later flights; a right click on the row turns
+  the level back (Off, Attitude, Damper). **Damper** (the default)
   stops the aircraft rotating when you let go of the stick and leaves it at
   the attitude you left it; **Attitude** also returns it to the trimmed
   attitude, and at the Attitude level Ctrl+arrows move that attitude
