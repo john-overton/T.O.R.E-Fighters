@@ -546,23 +546,49 @@ impl LoadoutSpec {
         let load = self.apply(standard.clone(), resources, None)?;
         // Saved local loads migrate in apply; a live lobby request must
         // already obey the current pair rule, including its layout count.
-        for (requested, actual) in self.stations.iter().zip(&load.configuration.stations) {
+        // The refusal names pairing only when an odd count on a two-sided
+        // point is the cause.
+        for (index, (requested, actual)) in self
+            .stations
+            .iter()
+            .zip(&load.configuration.stations)
+            .enumerate()
+        {
             if requested.count != actual.count {
-                return Err("Loadout capacity must match the current loadout.".into());
+                return Err(if load.store_pairs(index).valid(requested.count) {
+                    "Loadout capacity must match the current loadout."
+                } else {
+                    "Paired stores must be loaded in pairs."
+                }
+                .into());
             }
         }
         for (index, requested) in self.stations.iter().enumerate() {
             if !requested.weapon.ends_with(".SEE") && requested.quantity != load.quantities[index] {
-                return Err("Store quantity must match the current loadout limits.".into());
+                return Err(if load.store_pairs(index).valid(requested.quantity) {
+                    "Store quantity must match the current loadout limits."
+                } else {
+                    "Paired stores must be loaded in pairs."
+                }
+                .into());
             }
         }
         if let Some(tanks) = &self.tanks {
             for requested in tanks {
-                if load.configuration.tanks.iter().any(|t| {
+                if let Some(t) = load.configuration.tanks.iter().find(|t| {
                     t.hardpoint == usize::from(requested.hardpoint)
                         && t.quantity != requested.quantity
                 }) {
-                    return Err("Tank quantity must match the current loadout limits.".into());
+                    return Err(
+                        if tore_sim::combat::loading::StorePairs::of(t.rack, t.mount)
+                            .valid(requested.quantity)
+                        {
+                            "Tank quantity must match the current loadout limits."
+                        } else {
+                            "Paired tanks must be loaded in pairs."
+                        }
+                        .into(),
+                    );
                 }
             }
         }

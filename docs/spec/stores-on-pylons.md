@@ -64,8 +64,10 @@ load. Non-interactive single-player mission construction also applies the
 migration, then refuses an overweight start with that same error through
 `Combat::with_loadout`. It does not drop the pair, reduce fuel, substitute a
 default load or begin simulation. Network requests must already obey current
-counts and aircraft weight limits; old odd requests are refused. A generic
-layout or quantity mismatch is reported without attributing it to pairing.
+counts and aircraft weight limits; old odd requests are refused. An odd
+count on a two-sided point is refused with `Paired stores must be loaded in
+pairs.` (or `Paired tanks ...`); any other layout or quantity mismatch is
+reported without attributing it to pairing.
 
 In-flight ammunition, checkpoints and recorded store layouts are not
 migrated: firing one store legitimately leaves an odd count. Each even load
