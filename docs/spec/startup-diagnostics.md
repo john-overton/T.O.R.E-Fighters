@@ -35,7 +35,7 @@ No graphics or flight adapter selection changes as a side effect of logging.
 summary bins and phase boundaries are agent decisions. No simulation behavior,
 flight adapter or graphics adapter selection changes.
 
-Once the game renderer starts, one `Session system` record identifies the
+Before configuring the game surface, one `Session system` record identifies the
 adapter name, vendor/device IDs, backend, device type, driver and driver info,
 surface format and present mode, window pixels and scale, logical CPU cores,
 OS/architecture, graphics options, frame limit and shared worker pool sizing.

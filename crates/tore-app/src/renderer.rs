@@ -596,7 +596,6 @@ impl Renderer {
             frame_limit,
             config.desired_maximum_frame_latency
         );
-        surface.configure(&device, &config);
         let sample_counts: Vec<u32> = [1, 2, 4, 8]
             .into_iter()
             .filter(|&n| {
@@ -640,6 +639,8 @@ impl Renderer {
                 .unwrap_or(1),
             tore_workers::shared()
         );
+        // Keep the selected system details even when a driver cannot create a swapchain.
+        surface.configure(&device, &config);
         let samples = sample_counts
             .iter()
             .copied()
