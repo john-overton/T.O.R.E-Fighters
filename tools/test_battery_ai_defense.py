@@ -5,20 +5,25 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from battery_scenarios.ai_defense import defense_problems, head_break_problems
+from battery_scenarios.ai_defense import defense_problems, head_break_problems, chaff_timing_problems
 
 
 class DefenseChecks(unittest.TestCase):
-    def check_case(self, g=3.0, turn=60, wrong=0, headings=(270, 271, 272, 273)):
+    def check_case(self, g=3.0, turn=60, wrong=0, headings=(270, 271, 272, 273), bank=60, devices=4, passed=False, late_release=False):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
             (work / "study").mkdir()
             (work / "study/runs.csv").write_text(
-                f"fired,target_turn_deg,other_devices\n1,{turn},{wrong}\n")
+                f"fired,target_turn_deg,devices,other_devices\n1,{turn},{devices},{wrong}\n")
+            phase = "Break" if passed else "Beam"
+            time = "None" if passed else "Some(3.0)"
             trace = "\n".join(
-                f"missile-study: trace AIM9M seed 0 g={g} alt=5000 activity=Defending "
-                f"defense=Some((Some(MotionSuggestion {{ maneuver: Beam, heading_deg: {h}"
+                f"missile-study: trace AIM9M seed 0 bank={bank} g={g} alt=5000 activity=Defending "
+                f"defense=Some((Some(MotionSuggestion {{ maneuver: {phase}, heading_deg: {h}, "
+                f"flight_path_pitch_deg: -5.0, reduce_heat: false }}), None, {time}, true))"
                 for h in headings)
+            if late_release:
+                trace += "\nmissile-study: device AIM9M seed 0 t=6.0 kind=Flare defense=Some((None, None, true))"
             return defense_problems(work, trace)
 
     def test_positive_turn_passes(self):
@@ -30,13 +35,42 @@ class DefenseChecks(unittest.TestCase):
     def test_notch_flip_fails(self):
         self.assertIn("beam/notch side flipped", self.check_case(headings=(270, 271, 90, 89)))
 
+    def test_inverted_overshoot_fails(self):
+        self.assertIn("defensive bank exceeded 90 degrees", self.check_case(bank=-105))
+
+    def test_break_after_passage_fails(self):
+        self.assertIn("last-ditch break continued without a closing estimate", self.check_case(passed=True))
+
+    def test_a_queued_release_after_passage_fails(self):
+        self.assertIn("device released after the threat passed", self.check_case(late_release=True))
+
+    def test_exceeding_the_budget_fails(self):
+        self.assertIn("single-threat defense exceeded its eight-device budget", self.check_case(devices=10))
+
+    def test_low_skill_chaff_must_precede_the_break_and_keep_radar_heat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "study").mkdir()
+            runs = work / "study/runs.csv"
+            header = "fired,target_turn_deg,devices,other_devices,first_device_s\n"
+            runs.write_text(header + "1,30,4,0,2.00\n")
+            trace = "\n".join(
+                f"missile-study: trace AIM120 seed 0 t={t:.2f} bank=60 g=3 alt=5000 activity=Defending "
+                f"defense=Some((Some(MotionSuggestion {{ maneuver: {phase}, heading_deg: 270, "
+                "flight_path_pitch_deg: -5.0, reduce_heat: false }), None, Some(3.0), true))"
+                for t, phase in [(2.0, "Notch"), (2.25, "Notch"), (4.0, "Break"), (4.25, "Break")])
+            self.assertEqual(chaff_timing_problems(work, trace), [])
+            self.assertIn("radar threat requested an IR heat cut", chaff_timing_problems(work, trace.replace("reduce_heat: false", "reduce_heat: true")))
+            runs.write_text(header + "1,30,4,0,4.00\n")
+            self.assertIn("first chaff waited for the last-ditch break", chaff_timing_problems(work, trace))
+
 
 class HeadOnChecks(unittest.TestCase):
     def test_a_straight_command_cannot_count_as_a_head_on_break(self):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
             (work / "study").mkdir()
-            (work / "study/runs.csv").write_text("fired,target_turn_deg,other_devices\n1,10,0\n")
+            (work / "study/runs.csv").write_text("fired,target_turn_deg,devices,other_devices\n1,10,4,0\n")
             trace = "\n".join(
                 "missile-study: trace AIM9M seed 0 yaw=0 g=3 alt=5000 activity=Defending "
                 "defense=Some((Some(MotionSuggestion { maneuver: Break, heading_deg: 0"

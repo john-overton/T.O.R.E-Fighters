@@ -10592,9 +10592,9 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
             .filter(|(_, count)| **count > 0)
             .map(|(index, count)| (index, *count))
             .collect();
-        if !faults.is_empty() {
+        if !faults.is_empty() || flight.damage_fraction > 0.0 {
             println!(
-                "AI damage: actor={} faults={faults:?} return={:?} landing={:?} throttle={:.3} power={:.3} oil={:.3} temp={:.3} wounded={} escaped={}",
+                "AI damage: actor={} faults={faults:?} return={:?} landing={:?} throttle={:.3} power={:.3} oil={:.3} temp={:.3} wounded={} escaped={} damage_fraction={}",
                 actor.id(),
                 actor.damage_return(),
                 actor.airfield_phase(),
@@ -10603,7 +10603,8 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                 flight.systems.oil_pressure(),
                 flight.systems.engine.temperature,
                 flight.systems.pilot.wounded(),
-                flight.escape.is_some()
+                flight.escape.is_some(),
+                flight.damage_fraction
             );
         }
         // What each aircraft still carries: AI jettison evidence

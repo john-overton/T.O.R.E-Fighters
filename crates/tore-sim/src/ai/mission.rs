@@ -400,7 +400,8 @@ pub struct AiActor {
     route_random: super::DecisionRandom,
     pending_threats: Vec<ThreatReport>,
     pending_events: Vec<FrameEvent>,
-    device_schedule: Vec<(u64, SeekerClass, u8)>,
+    /// Due tick, class, count, and whether loss of the observed threat cancels it.
+    device_schedule: Vec<(u64, SeekerClass, u8, bool)>,
     activity: Activity,
     last_input: PilotInput,
     alive: bool,
@@ -3957,7 +3958,7 @@ impl AiMission {
         if let Some(devices) = batch.devices {
             actor
                 .device_schedule
-                .push((tick, devices.class, devices.count));
+                .push((tick, devices.class, devices.count, false));
         }
         if let Some(burst) = actor.last_defense.and_then(|d| d.burst) {
             let available = |class| {
@@ -3970,19 +3971,14 @@ impl AiMission {
                 let queued: u32 = actor
                     .device_schedule
                     .iter()
-                    .filter(|(_, c, _)| *c == class)
-                    .map(|(_, _, count)| u32::from(*count))
+                    .filter(|(_, c, _, _)| *c == class)
+                    .map(|(_, _, count, _)| u32::from(*count))
                     .sum();
                 stock.saturating_sub(queued)
             };
-            let last_ditch = actor
-                .last_defense
-                .and_then(|d| d.motion)
-                .is_some_and(|m| m.maneuver == defense::Maneuver::Break);
             let burst = burst.with_inventory(
                 available(SeekerClass::Radar),
                 available(SeekerClass::Infrared),
-                last_ditch,
             );
             let mut classes = Vec::new();
             for index in 0..burst.chaff.max(burst.flares) {
@@ -4007,13 +4003,22 @@ impl AiMission {
                     tick + index as u64 * super::QUARTER_SECOND_TICKS,
                     class,
                     1,
+                    true,
                 ));
             }
         }
         let schedule = std::mem::take(&mut actor.device_schedule);
-        for (due, class, remaining) in schedule {
+        let current_threat = actor
+            .last_defense
+            .is_some_and(|d| !d.debug.passed && !d.debug.stale);
+        for (due, class, remaining, defensive) in schedule {
+            if defensive && !current_threat {
+                continue;
+            }
             if tick < due {
-                actor.device_schedule.push((due, class, remaining));
+                actor
+                    .device_schedule
+                    .push((due, class, remaining, defensive));
             } else if let Some(event) = actor.release_devices(class, 1) {
                 output.devices.push(event);
                 if remaining > 1 {
@@ -4021,6 +4026,7 @@ impl AiMission {
                         due + super::QUARTER_SECOND_TICKS,
                         class,
                         remaining - 1,
+                        defensive,
                     ));
                 }
             }
@@ -6772,6 +6778,33 @@ mod tests {
     }
 
     #[test]
+    fn a_passed_missile_cancels_its_queued_pair_but_keeps_compatibility_releases() {
+        use crate::combat::missiles::Guidance;
+        let mut mission = AiMission::new();
+        mission.push(perception_actor(Experience::Ace));
+        let mut missile = incoming_snapshot(Guidance::Supported, [0.0, 20000.0, -1000.0]);
+        mission.set_missiles(vec![missile]);
+        let first = mission.step(&[], &flat, TimeOfDay(0)).unwrap();
+        assert_eq!(first.devices.len(), 1);
+        assert_eq!(first.devices[0].class, SeekerClass::Radar);
+        assert!(!mission.actor(1).unwrap().device_schedule.is_empty());
+        missile.velocity = [0.0, 0.0, -2000.0];
+        mission.set_missiles(vec![missile]);
+        mission
+            .actor_mut(1)
+            .unwrap()
+            .device_schedule
+            .push((30, SeekerClass::Infrared, 1, false));
+        let mut later = Vec::new();
+        for tick in 1..=31 {
+            later.extend(mission.step(&[], &flat, TimeOfDay(tick)).unwrap().devices);
+        }
+        assert_eq!(later.len(), 1);
+        assert_eq!(later[0].class, SeekerClass::Infrared);
+        assert!(mission.actor(1).unwrap().device_schedule.is_empty());
+    }
+
+    #[test]
     fn novice_reaction_delays_defense_then_debits_two_chaff_on_schedule() {
         use crate::combat::missiles::Guidance;
         let mut mission = AiMission::new();
@@ -7910,7 +7943,9 @@ mod tests {
         let mut mission = AiMission::new();
         let mut actor = AiActor::new(setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0)).unwrap();
         actor.dispensers[0].count = 2;
-        actor.device_schedule.push((0, SeekerClass::Infrared, 3));
+        actor
+            .device_schedule
+            .push((0, SeekerClass::Infrared, 3, false));
         mission.push(actor);
         let mut releases = Vec::new();
         for tick in 0..100 {

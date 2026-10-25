@@ -270,7 +270,7 @@ impl ControlAdapter {
             effective.roll_deg_per_s
         };
         let (roll_seconds, roll_damping) = if self.defense.is_some() {
-            (0.25, 0.25)
+            (0.4, 1.0)
         } else {
             (0.7, 0.5)
         };
@@ -752,6 +752,74 @@ mod tests {
     }
 
     #[test]
+    fn defensive_roll_brakes_before_crossing_ninety_degrees() {
+        use crate::models::handling::Profile;
+        use tore_formats::flight_model::normal_control::LoadedAxis;
+        for hybrid in [false, true] {
+            for direction in [-1.0, 1.0] {
+                for (rate, acceleration, deceleration) in
+                    [(225, 286, 571), (180, 214, 427), (345, 498, 996)]
+                {
+                    let mut model = state().import_model();
+                    let mut config = model.configuration().clone();
+                    config.controls = Some(Profile {
+                        roll: LoadedAxis {
+                            minimum: -rate,
+                            maximum: rate,
+                            acceleration,
+                            deceleration,
+                        },
+                        hybrid_roll: None,
+                        auxiliary: [LoadedAxis {
+                            minimum: 0,
+                            maximum: 0,
+                            acceleration: 200,
+                            deceleration: 400,
+                        }; 3],
+                    });
+                    model.set_configuration(config).unwrap();
+                    let mut s = State::from_model(model, [0.0, 3000.0, 0.0]);
+                    if hybrid {
+                        s.enable_research(1).unwrap();
+                    }
+                    s.yaw = 0.0;
+                    s.pitch = 0.0;
+                    s.bank = 0.0;
+                    s.speed = 850.0;
+                    s.velocity = [0.0, 0.0, s.speed];
+                    let mut adapter = ControlAdapter::new();
+                    adapter.set_defense(Some((Experience::Ace, false)));
+                    let mut command = intent(direction * 90.0, -5.0, s.speed);
+                    command.bank = Bank::Explicit((direction * 85.0) as i32);
+                    let mut peak = 0.0_f64;
+                    for _ in 0..960 {
+                        command.heading_deg = s.yaw.to_degrees() + direction * 90.0;
+                        let out = adapter
+                            .controls(
+                                &s,
+                                &command,
+                                &limits(),
+                                G_LIMIT,
+                                ROLL_LIMIT,
+                                85.0,
+                                None,
+                                crate::flight::DT,
+                            )
+                            .unwrap();
+                        s.step(&out.input, |_, _| 0.0);
+                        peak = peak.max(s.bank.to_degrees().abs());
+                        assert!(s.g >= 0.0 && !s.crashed);
+                    }
+                    assert!(
+                        peak <= 90.0,
+                        "hybrid={hybrid} direction={direction} rate={rate}: peak={peak}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn defensive_bank_pulls_positive_g_and_skill_changes_the_flown_turn() {
         for hybrid in [false, true] {
             let mut turns = Vec::new();
@@ -766,6 +834,7 @@ mod tests {
                 command.mode = CommandMode::OtherState;
                 let mut adapter = ControlAdapter::new();
                 adapter.set_defense(Some((skill, false)));
+                let pilot_limit = ai_g_limits(skill, G_LIMIT, -3.0, false).0;
                 let mut peak_g = 0.0_f64;
                 for _ in 0..600 {
                     let out = adapter
@@ -773,7 +842,7 @@ mod tests {
                             &s,
                             &command,
                             &limits(),
-                            G_LIMIT,
+                            pilot_limit,
                             ROLL_LIMIT,
                             MAXIMUM_BANK,
                             None,
@@ -790,7 +859,7 @@ mod tests {
                 assert!(!s.crashed);
                 turns.push(turn);
             }
-            assert!(turns[3] > turns[0] * 1.3, "hybrid={hybrid}: {turns:?}");
+            assert!(turns[3] > turns[0], "hybrid={hybrid}: {turns:?}");
         }
     }
 

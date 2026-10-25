@@ -1533,9 +1533,9 @@ fn thought_defense(tree: &mut Tree, t: &Thought) {
         "Countermeasures",
         burst_text(d.burst),
         if d.burst.is_some() {
-            "released now"
+            "requested now"
         } else if d.debug.release_now && !d.debug.may_burst {
-            "waiting for cooldown or routine device budget exhausted"
+            "waiting for cooldown or encounter device budget exhausted"
         } else {
             ""
         },
@@ -1589,6 +1589,7 @@ pub fn defense_maneuver(d: &DefenseDecision) -> (&'static str, String) {
                 }
             ),
         ),
+        None if d.debug.passed => ("complete", "missile passed or no longer closing".into()),
         None => (
             "not yet",
             format!(
@@ -1623,7 +1624,9 @@ pub fn burst_text(burst: Option<defense::BurstRequest>) -> String {
 pub fn defense_reasons(d: &DefenseDecision, _experience: Option<ResolvedExperience>) -> String {
     let g = d.debug;
     let mut why = Vec::new();
-    if !g.maneuver_now {
+    if g.passed {
+        why.push("missile passed or no longer closing");
+    } else if !g.maneuver_now {
         why.push("pilot reaction delay");
     }
     if g.bearing_only {

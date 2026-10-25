@@ -1633,11 +1633,15 @@ cold and extend at maximum dry speed. At shorter times beam the missile, or
 notch the supporting radar bearing when known. A drag enters the beam at 14
 seconds for radar and 10 for IR. Do not return to drag during that encounter.
 At 1.5, 2.5, 3.5 and 4.5 seconds respectively, commit to a hard break toward
-the missile's side until that threat disappears, requesting at least a 90-degree
+the missile's side while it is closing, requesting at least a 90-degree
 heading change. Within 15 degrees of the nose, keep the current turn side when
 bank exceeds 5 degrees; otherwise keep the committed beam side, or turn right
 if no side is established. This avoids straightening at a head-on missile. Bearing-only or
-non-closing observations use the beam, without inventing a range or energy.
+observations without a closing estimate use the beam without inventing a range
+or energy. A measured non-closing missile ends its defense and bursts. A break
+also ends when its closest-approach estimate becomes unavailable; it does not
+restart for that missile until closing motion is observed again. Passed contacts cannot outrank another closing missile, including after their
+motion estimate is lost. Renewed observed closure makes them threats again.
 
 Choose the shorter beam turn. Add up to 30 degrees of cost for pointing toward
 other observed threats, and 360 degrees for insufficient terrain clearance
@@ -1649,38 +1653,49 @@ or the estimated 90 degree turn plus roll-in and a skill-dependent dwell of
 within 15 degrees of the leg's heading.
 
 Missile defensive fixed-wing turns use bank and positive pull. The usable positive G
-limit is the existing aircraft/pilot limit multiplied by 0.55, 0.70, 0.85 or
-1.0 by skill, with a 1 G floor where available. Bank is bounded by the aircraft
+limit is the existing aircraft/pilot limit multiplied by 0.85, 0.90, 1.0 or
+1.0 by skill (lead decision, 2026-10-25), with a 1 G floor where available. Bank is bounded by the aircraft
 and the coordinated bank for that load, up to 85 degrees. As bank builds,
 command the positive load needed to hold the flight path. Defensive roll
-feedback uses bank error divided by 0.25 seconds minus 0.25 times measured
+feedback uses bank error divided by 0.4 seconds minus 1.0 times measured
 roll rate, bounded by the aircraft roll authority; this lets the turn establish
 before the missile arrives. At altitude a
 slight nose-low path, at most 5 degrees, uses gravity to preserve speed;
 reduce vertical lift by at most 15 percent, never push negative G. The terrain
 floor overrides the turn and levels the wings for recovery. Before descending,
 check the current and requested headings and intermediate turn directions over
-5 seconds, retaining at least 1,000 ft above sampled ground. This sampling
+5 seconds, retaining at least 1,000 ft above sampled ground. Repeated horizontal sample positions share a terrain read within that decision.
+After selecting a beam side, only that side is checked unless it becomes unsafe;
+then the opposite side is checked before switching. The active path is still
+sampled every tick with the same points and clearance. This sampling
 cannot guarantee clearance over unresolved narrow terrain. No defense unload
 is currently needed. Ordinary pursuit and formation control are unchanged.
 
 Radar beams dispense two chaff at most every 6, 4, 3 or 3 seconds by skill,
-once within 60, 45, 30 or 20 degrees of the beam heading respectively.
-IR beams and breaks turn afterburner off and cap throttle at 65 percent unless
+once the turn is established (at least 5 degrees of bank toward its requested
+heading), already within 20 degrees of that heading, or within 6 seconds of
+closest approach, whichever comes first. These are fitted turn-start thresholds;
+the all-skill release rule is the lead's decision of 2026-10-25.
+Beams and breaks against a **known IR** threat turn afterburner off and cap throttle at 65 percent unless
 below 1.3 times minimum speed. IR flares begin inside 2, 3, 5 or 6 seconds to
-closest approach. Routine defense spends at most eight devices per encounter and retains the
+closest approach. All missile defense, including the last-ditch break, requests at most eight
+devices per encounter and retains the
 last two devices of each class, counting already queued releases.
-The last-ditch break may exceed that budget, with two appropriate devices every
-2, 1.5, 1 or 0.75 seconds. Devices within a pair are 0.25 seconds apart. A
+Within that budget and reserve, the last-ditch break requests two appropriate
+devices every 2, 1.5, 1 or 0.75 seconds. Queued defensive releases are canceled
+once the threat has passed or no current threat supports them; compatibility
+warning releases keep their own schedule. Devices within a pair are 0.25 seconds apart. A
 known radar threat gets only chaff; a known IR threat gets only flares. Retain
 observed classification across electronic-to-visual handoff and priority changes
 while that contact remains in the threat picture. For
 unclassified visual threats, flares are a precaution, not inferred seeker
-knowledge; unclassified electronic threats use chaff. Stale threats get no
+knowledge; they do not authorize a throttle cut. Unclassified electronic
+threats use chaff. Stale threats get no
 new bursts. Switching threats retains the pilot's reaction progress, the aircraft's
-release cooldown and routine budget. An encounter outlives a gap of up to 2
+release cooldown, shared device budget and completed drag phase. A threat
+switch cannot restart a drag after the encounter has entered beam or break. An encounter outlives a gap of up to 2
 seconds (the threat picture's lost-contact grace) with no selected threat:
-the reaction, committed phase and side and routine budget resume, so an
+the reaction, committed phase and side and shared budget resume, so an
 end-game record that drops out for a moment does not restart the reaction
 delay. A longer quiet spell starts a new encounter. Defense ends when observations clear, resuming existing
 orders, formation or combat without changing aggression or launch gates.

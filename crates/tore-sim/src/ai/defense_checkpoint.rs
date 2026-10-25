@@ -43,6 +43,7 @@ crate::checkpoint_struct!(DefenseDebug {
     insufficient_time,
     stale,
     maneuver_now,
+    passed,
     may_burst,
     release_now,
 });
@@ -57,11 +58,14 @@ crate::checkpoint_struct!(DefenseDecision {
 crate::checkpoint_struct!(DefenseState {
     selected_threat,
     known_classes,
+    passed_threats,
     observed_tick,
     phase,
+    extension_finished,
+    passed,
     beam_side,
     break_heading_deg,
-    routine_devices,
+    devices_requested,
     last_threat_tick,
     jink_base_heading_deg,
     jink_heading_deg,

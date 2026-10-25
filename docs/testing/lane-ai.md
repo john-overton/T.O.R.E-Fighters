@@ -293,7 +293,11 @@ record with what changed (see "Sixth round" above).
    AIM-9M tail shot against an Ace and check positive G, at least 20 degrees of
    heading change, stable beam requests and no wrong-class devices.
    `ai-regress-missile-head-on-break` also checks that a missile directly ahead
-   produces a hard crossing break instead of a straightening command. The unit
+   produces a hard crossing break instead of a straightening command. The
+   `ai-regress-missile-bank-low-{standard,hybrid}` cases check bank at 3,000 ft;
+   `ai-regress-missile-chaff-{novice,average}` requires chaff during the notch,
+   before the break. These checks use traces and release timing, not hit rates:
+   the current study repeats its fixed decoy stream across seeds. The unit
    tests cover skill limits, phase sequencing, terrain, device budgets and
    return to ordinary control. Missile flight and decoy outcomes are separate.
 4. **Leaderless wingmen after a fight.** Changed (John, 2026-09-29): leader

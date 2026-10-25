@@ -1444,7 +1444,11 @@ the game's own AI on weapons hold in a fresh Quick Mission world instead, so
 it perceives, maneuvers and dispenses as in a mission; `--ai-model
 standard|hybrid` picks the single-player (default) or networked AI flight
 model and `--trace` prints the AI target's flight and defence every quarter
-second. `--decoy-model lure` is
+second, plus every actual device release with its current closest-approach
+estimate, maneuver and passage flag. The AI study currently repeats its fixed countermeasure random stream across
+shots, so seed-to-seed hit counts are not independent survival samples. Use its
+G, heading and release-time traces to assess defensive control until that stream
+is replaced. `--decoy-model lure` is
 a what-if, not game behaviour: a decoyed missile steers for the device that
 decoyed it and bursts there instead of flying straight on. `--catalog` writes
 `catalog.csv` (each missile's decoy susceptibility, seeker and turn rates, each
@@ -1554,6 +1558,8 @@ recovery phase and physical throttle/power/temperature. [Validation](baselines/a
 `--probe-ai-guns-only` restricts AI stores to their carried gun without changing
 the player script. It is useful for sustained [gun-employment checks](baselines/ai-gun-implementation.md). `--probe-trace SECONDS` also
 prints enemy observation sources, permission, target and incoming-fire cues. `--probe-fuel-trace SECONDS` prints one `AI fuel:` line per AI aircraft at that interval (tick, aircraft, fuel, endurance, time home, fuel state, activity). `--probe-fuel POUNDS` starts every AI aircraft with that much internal fuel, so a return on low fuel can be probed in a minute. `--probe-rotor-trace SECONDS` prints one `AI rotor:` line per AI helicopter or V-22 at that interval: height over the ground, speed, climb, pitch, bank, heading, nacelles, collective, rotor speed, the rotor adapter's regime and commanded heading, path, speed, climb and nacelles, the requested path, the terrain floor and the envelope maximum (slice HF1).
+Structural damage without a system fault also prints an `AI damage:` line,
+with its exact `damage_fraction`, so a damaged crash is not labeled undamaged.
 Every probe prints first visual acquisition, first release, first gun/hit defense
 and peak bank for each enemy.
 
