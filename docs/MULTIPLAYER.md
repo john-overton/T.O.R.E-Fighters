@@ -34,6 +34,15 @@ The client now prepares received missions on a background worker and shows a
 keepalives continue while it builds. Escape during mission preparation cancels
 the join. Host and join content checks are polled too. Remaining validation is listed in that spec.
 
+Loadout requests must obey the [even-paired-load rule](spec/stores-on-pylons.md#even-paired-loads).
+The lobby's Load Ordnance page starts from the standard load, or the page
+already edited in this session, so there is no saved multiplayer load to
+migrate. Live requests, and plane loadouts written
+into a server's mission text, with odd paired quantities or obsolete
+capacities are rejected (an odd paired count says `Paired stores must be
+loaded in pairs.`). The stores event layout is unchanged, but peers need the
+same capacity and validation rules.
+
 ## Contents
 
 - [Goals](#goals)
