@@ -13,6 +13,32 @@ def scenario(**kw):
     return battery.Scenario(name="t", lane="ai", args=[], **kw)
 
 
+class ProfileTests(unittest.TestCase):
+    def test_inherited_recordings_never_enter_a_scenario(self):
+        from unittest.mock import patch
+
+        for fallback in (False, True):
+            with self.subTest(fallback=fallback), tempfile.TemporaryDirectory() as folder:
+                source = Path(folder) / "source"
+                dest = Path(folder) / "work" / "data"
+                (source / "replays").mkdir(parents=True)
+                (source / "replays" / "old.tore-replay").write_text("finished")
+                (source / "replays" / "old.partial").write_text("unfinished")
+                (source / "import").mkdir()
+                (source / "import" / "fixture").write_text("synthetic import")
+                (source / "settings.conf").write_text("settings")
+                if fallback:
+                    with patch.object(battery.subprocess, "run", side_effect=OSError):
+                        battery.clone_profile(source, dest)
+                else:
+                    battery.clone_profile(source, dest)
+                self.assertFalse((dest / "replays").exists())
+                self.assertEqual((dest / "import" / "fixture").read_text(), "synthetic import")
+                self.assertEqual((dest / "settings.conf").read_text(), "settings")
+                self.assertEqual((source / "replays" / "old.tore-replay").read_text(), "finished")
+                self.assertEqual((source / "replays" / "old.partial").read_text(), "unfinished")
+
+
 class JudgeTests(unittest.TestCase):
     def judge(self, s, output, code=0, timed_out=False):
         with tempfile.TemporaryDirectory() as d:

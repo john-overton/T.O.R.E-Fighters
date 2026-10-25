@@ -9953,7 +9953,11 @@ compared before and after):
   and the strings in them are reused. The four per-actor maps are one id-sorted
   walk of the roster; the AI aircraft's drawn stores are kept per actor
   (`RenderHistory::ai_stores`, forgotten at a restart) while their loads and
-  loadout stay as they were; `places` is a sorted list; a piece of debris finds
+  loadout stay as they were. The cache compares the drawing inputs by value,
+  including weapon shapes, rack geometry, hardpoint mapping and tank sizes. A
+  handoff can replace a configuration at the same address with the same store
+  counts, so neither its address nor those counts establish an unchanged loadout.
+  `places` is a sorted list; a piece of debris finds
   its owner's row by id. Debug builds make every history snapshot a second time
   from nothing and compare. `snapshot()` keeps its signature for the host's
   per-seat pictures.
