@@ -39,10 +39,10 @@ mission (heavy, seed 1, an SA-14) at 4,000 ft and expects it to launch.
 `surface-grounding` (B13, 2026-10-12; slice GROUND, 2026-10-13) runs `--surface-dump
 --grounding`, the grounding audit: every OT, NT and PT the import and the retail media hold, stood on flat
 ground through the placement path and drawn through the scenery's own code (faces, the hit box, and a man's
-sprites or cards at 300 ft and boosted at 6,000 ft). Everything but runways, bridges, roads and ships stands on the
+sprites or cards at 300 ft and boosted at 6,000 ft). Everything but runways, roads and ships stands on the
 bottom of its shape within 0.05 ft (the factory hall FACTD lifted 42.7 ft, the hangar 26.7 ft, the airfield
-squad TROOPS 3.3 ft), that bottom agrees with the shape's F2 ground offset within 3 ft, and bridges, roads
-and ships are not lifted.
+squad TROOPS 3.3 ft), that bottom agrees with the shape's F2 ground offset within 3 ft, and roads
+and ships are not lifted. Bridges have their own shared-bottom and corridor audit.
 
 `surface-small-arms-airfield` flies a 400 kt, 300 ft pass over an airfield target's squads (B17, BD2): one
 squad at each experience, the squads around it at average and at ace, and a 1,000 ft, a 600 kt and a 1,500 ft
@@ -1003,6 +1003,24 @@ def grounding_problems(output: str) -> list[str]:
 
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="bridge-audit", lane="ai",
+            args=["--bridge-audit", "{work}/bridges", "UKR", "BAL", "--strict"], timeout=300,
+            expect=[r"^bridge-audit: [1-9]\d* layouts [1-9]\d* placements 0 flagged 0 missing textures$"],
+            notes="Imported bridge damage assets and shared deck/footing clearance, including sloping Ukraine crossings and bridge objectives.",
+        ),
+        Scenario(
+            name="a2g-bridge-destruction", lane="flight",
+            args=["--a2g-run", "UKR", "QUBRI", "--aircraft", "a10", "--load", "AGM65G",
+                  "--attack", "maverick", "--from", "3", "--heading", "90", "--altitude", "3000",
+                  "--defenses", "0", "0", "--seconds", "35", "--record", "{work}/bridge.toreplay",
+                  "--verify-render"], timeout=300,
+            expect=[r"^a2g-run: target box center 979636 568 801861 half 128\.0 24\.0 2456\.0$",
+                    r"^a2g-run: kill 0x50000000 class 0x0100$",
+                    r"^a2g-run: target 0x50000000 hp 0/100$",
+                    r"^a2g-run: verify-render: PASS ticks=[1-9]\d* missing=0 differing=0"],
+            notes="A real Maverick release destroys the Ukraine bridge span; recorded render snapshots retain its damage and effects.",
+        ),
         Scenario(
             name="surface-grounding", lane="ai",
             args=["--surface-dump", "--grounding"], timeout=300,

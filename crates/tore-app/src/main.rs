@@ -26,6 +26,7 @@ mod awacs_animation;
 mod b747_animation;
 mod blast_climate;
 mod blast_preview;
+mod bridge_audit;
 mod c130_animation;
 mod camera;
 mod canvas_present;
@@ -11761,6 +11762,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-dump") {
         city_fill_dump::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--bridge-audit") {
+        bridge_audit::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-dump") {

@@ -90,7 +90,8 @@ pads, factory floors, open-bottomed buildings, revetments, bunkers, compound
 sites and broad rocks without naming individual types. Fixed NT units whose
 recorded maximum speed is zero, including the SA-2 site, use the same rule.
 Mobile units, ships,
-bridges, roads, runways and tilted or explicitly raised placements retain their own rules.
+roads, runways and tilted or explicitly raised placements retain their own rules.
+Bridges use their [shared bottom support and terrain corridor](bridges.md).
 
 The foundation uses the world-axis rectangle enclosing the complete shape,
 with 2 ft of clearance at each edge. Intersecting rectangles merge into one
@@ -115,9 +116,9 @@ stay at the foundation height. This recess alone is not the slope fix.
 Other small shapes retain the existing fitted slope lift: translate the
 complete shape vertically to meet the terrain, unless its reach exceeds
 400 ft or the resulting downhill gap exceeds 30 ft. Nonqualifying placements
-retain origin support when the slope lift refuses them. Runways, bridges,
-roads and ships retain
-pavement, map-height and waterline support. Driving units tilt and settle
+retain origin support when the slope lift refuses them. Runways, roads and ships
+retain pavement, map-height and waterline support. Bridges follow the separate
+rule linked above. Driving units tilt and settle
 against the finished terrain. Buildings on a foundation therefore stand on
 the same plane as its pad.
 
@@ -2165,7 +2166,7 @@ John accepted the recommended looks (12.4).
 | Carriers | The `_A` hull, the island's own damage branch (`shape::DAMAGED_WORD`), the deck tractors as they were and the deck crew gone, burning | retail shapes, fitted parts rule |
 | Ground vehicles, SAM launchers, AAA guns (and a layout's vehicles with no unit record, such as parked fuel trucks) | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces; about half of them burn with fire and smoke for 15 minutes, the others only smoke ([wreck fires](#wreck-fires)) | retail wreck object; the swap rule is untraced (fitted); the half that burn: John, 2026-10-12 |
 | Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; burns | retail look; fire John, 2026-10-12 |
-| Buildings whose shape holds a damage branch (57 types: hangars, towers, fuel tanks, factories, stores, bunkers, masts, bridge spans; [the survey](../formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)) | The shape's own damaged copy (`shape::DAMAGED_WORD`), on its own lowest point; burns, except a bridge, whose span breaks or drops | retail shapes (B16, 2026-10-12); the condition the original draws it on is unknown, here destruction |
+| Buildings whose shape holds a damage branch (57 types: hangars, towers, fuel tanks, factories, stores, bunkers, masts, bridge spans; [the survey](../formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)) | The shape's own damaged copy (`shape::DAMAGED_WORD`), on its own lowest point; burns, except a bridge, whose span breaks or drops at the intact bridge's datum | retail shapes (B16, 2026-10-12); the condition the original draws it on is unknown, here destruction |
 | Other buildings (city and town blocks, houses, apartments, industry without a branch, sites, tents, crates) | A ruin generated from the intact shape: split, sunk to 6 to 30 percent of its height, its fallen roof partly charred; burns | fitted, agent decision (B16, 2026-10-12) |
 | Runways, roads, lots, crops, bridge ends, rocks | Stay as they stood; a runway keeps the craters of every weapon that hit it | runway B15; the rest agent decision (B16) |
 | Parked aircraft | A burnt hulk: its own shape sunk, torn and charred ([parked aircraft](#parked-aircraft)), after the type 30 explosion; a scorch (none on a deck), fire and smoke for 15 minutes; no crater, no crash site and no flying piece | John, 2026-10-13 (hulk); the hulk's numbers and the fire: agent decision |

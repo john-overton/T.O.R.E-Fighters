@@ -965,7 +965,9 @@ Surface impacts use the shared [solid contact box](../formats/objects-and-shapes
 filled polygons and sprites bound the body, while thin line primitives do
 not enlarge it. Grounding still includes the lines. This applies equally to
 missiles, bombs and gun rounds, and avoids an invisible wall below a bridge
-cable. Solid towers and other intervening bodies still block a shot.
+cable. Bridge contact also excludes the reviewed flat colour-6 shadow decal,
+which would otherwise fill the space below the deck. Grounding and drawing
+retain that decal. Solid towers and other intervening bodies still block a shot.
 
 ### Terrain at lock and launch
 

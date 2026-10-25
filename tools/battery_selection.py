@@ -169,7 +169,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "surface": (
         "surface units: ground target templates resolved, base-layout air defenses and their sides",
-        ("surface-*",),
+        ("surface-*", "bridge-audit", "a2g-bridge-destruction"),
     ),
     "a2g": (
         "air-to-ground: the A-G, IR and HARM pages and designation (--a2g-radar), and the weapons flown through the real trigger by --a2g-run",
@@ -731,6 +731,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/navigation.rs", ("flight-landing", "airports", "ai-airfield", "menus-creator"), "navigation and airport lists"),
     _r("crates/tore-app/src/airfield_audit.rs", ("airports", "ai-airfield"), "airfield audit"),
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
+    _r("crates/tore-app/src/bridge_audit.rs", ("surface",), "bridge placement, imported damage assets and captures"),
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
     _r("crates/tore-app/src/flak_pass.rs", ("surface",), "the flak team probe (--flak-pass)"),

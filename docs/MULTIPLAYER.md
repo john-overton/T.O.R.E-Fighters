@@ -43,6 +43,11 @@ capacities are rejected (an odd paired count says `Paired stores must be
 loaded in pairs.`). The stores event layout is unchanged, but peers need the
 same capacity and validation rules.
 
+Bridge HP and destruction use the existing authoritative surface snapshots and
+recorded surface HP. The [bridge correction](spec/bridges.md) changes shared
+world geometry, including geometry rebuilt for old recordings, without adding
+wire fields or changing replay/checkpoint layouts.
+
 ## Contents
 
 - [Goals](#goals)

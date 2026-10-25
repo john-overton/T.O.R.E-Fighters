@@ -915,7 +915,13 @@ impl Placements {
         );
         let mut stance = self.stance(placement, ground)?;
         let definition = self.definitions.get(&placement.object_type)?;
-        if crate::grounding::footing(definition) == crate::grounding::Footing::Bottom {
+        if crate::grounding::footing(definition) == crate::grounding::Footing::Bridge {
+            let datum = crate::grounding::bridges::datum(self, placement, &height)?;
+            let lift = datum + f64::from(placement.position[1]) - stance.origin[1];
+            stance.origin[1] += lift;
+            stance.center[1] += lift;
+            stance.slope_lift = lift;
+        } else if crate::grounding::footing(definition) == crate::grounding::Footing::Bottom {
             let shape = self.shapes.get(&placement.object_type)?;
             // The lift is measured from the ground, then the authored height
             // stays above it.
@@ -954,7 +960,7 @@ impl Placements {
         let mut max = [f64::NEG_INFINITY; 3];
         // Contact bounds exclude thin lines; the origin below still uses the
         // complete drawn shape for grounding and compact-object slope lift.
-        for point in crate::grounding::solid_points(shape) {
+        for point in crate::grounding::placement_solid_points(definition, shape) {
             let mapped = [
                 f64::from(point[0]),
                 f64::from(point[2]),
@@ -989,7 +995,7 @@ impl Placements {
             f64::from(placement.position[2]),
         ];
         // Every object stands on the bottom of its shape (crate::grounding);
-        // a runway on its pavement, ships and bridges on their origin.
+        // a runway on its pavement, ships and roads on their origin.
         let grounding_offset = if runway {
             -pavement_height(shape) * scale
         } else {
@@ -1023,7 +1029,7 @@ impl Placements {
 }
 
 impl Terrain {
-    /// Shared drawing/contact stance. Runway planes, map-tied grades and ship
+    /// Shared drawing/contact stance. Runway planes, road grades and ship
     /// waterlines keep the imported datum even when a nearby foundation's
     /// skirt changes the terrain under their placement anchor.
     pub fn placement_stance(
@@ -1031,8 +1037,10 @@ impl Terrain {
         sources: &Placements,
         p: &tore_formats::mission::Placement,
     ) -> Option<Stance> {
-        let foundation = crate::grounding::footing(sources.definitions.get(&p.object_type)?)
-            == crate::grounding::Footing::Bottom;
+        let foundation = matches!(
+            crate::grounding::footing(sources.definitions.get(&p.object_type)?),
+            crate::grounding::Footing::Bottom | crate::grounding::Footing::Bridge
+        );
         sources.stance_on_terrain(p, |x, z| {
             f64::from(if foundation {
                 self.height(x as f32, z as f32)
@@ -1361,12 +1369,14 @@ impl Terrain {
                 ))
             })
             .collect();
+        let bridge_pads = crate::grounding::bridges::foundations(&sources);
         let pads = sources
             .placed()
             .filter_map(|placed| {
                 let (_, p) = placed.ok()?;
                 sources.foundation(p)
             })
+            .chain(bridge_pads.iter().copied())
             .collect();
         self.foundations = crate::grounding::pads::Mesh::build_with_support(
             pads,
@@ -1378,6 +1388,11 @@ impl Terrain {
                     .iter()
                     .find(|field| pad.meets_airfield(field))
                     .map(|field| field.center[1])
+                    .or_else(|| {
+                        crate::grounding::bridges::support(pad, &bridge_pads, |x, z| {
+                            self.raw_height(x, z)
+                        })
+                    })
             },
         );
         let mut objects = Vec::new();
