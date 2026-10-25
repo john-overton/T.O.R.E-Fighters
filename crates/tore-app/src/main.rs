@@ -105,6 +105,7 @@ mod mig29_animation;
 mod mirrors;
 mod missile_acceptance;
 mod missile_sag;
+mod missile_study;
 mod mission_brief;
 mod mission_timer;
 mod multiplayer_menu;
@@ -11741,6 +11742,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--airfield-sheets") {
         airfield_sheets::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--missile-study") {
+        missile_study::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--a2g-run") {

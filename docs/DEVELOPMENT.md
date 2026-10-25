@@ -1418,6 +1418,44 @@ bounded to 1..1,000,000 feet. Version-4 tapes record these commands, full world
 velocity and bay permission. Use fresh tape paths because recording never
 overwrites an existing file. [Missile acceptance](baselines/missiles.md).
 
+### Missile study
+
+`--missile-study OUT_DIR` (first argument) is a headless Monte Carlo of
+air-to-air shots for studying missile accuracy and countermeasures. No window
+opens. Each shot builds a fresh combat state: the shooter (`--shooter`, default
+F-16C) flies straight and level at 0.9 Mach, designates the target through its
+own radar, waits for its mounted IR seeker where there is one and fires the
+study missile through the player trigger; the real combat step flies the
+missile. The target (`--target`, default MiG-29, with its imported signatures,
+hit points and ECM record) is scripted, and each profile in `--profiles` names
+what it does: `straight`, `break` (7 G onto the missile's beam 3 to 5 seconds
+before impact), `beam` (5 G onto the radar source's beam after 1 to 3
+seconds), `drag` (5 G away from the missile), with devices `cm-ai` (the AI's
+two-device bursts every 2 seconds inside 6 seconds), `cm-hammer` (four a
+second from one second after launch until empty) or `cm-atNs` (one device N
+seconds before closest approach), joined with `+`, and `@idle` or `@burner`
+for engine heat. Flares meet IR seekers and chaff radar seekers; each device
+rolls the decoy rule as an AI release does. `--ranges short,medium,long`,
+`--aspects head,beam,tail` and `--altitudes co,up,down` set the cells,
+`--seeds N` the shots per cell (range, aspect, speed and reaction time are
+jittered per seed, deterministically), `--threads N` the workers.
+`--ai [--skill novice|average|experienced|ace]` flies the same shots against
+the game's own AI on weapons hold in a fresh Quick Mission world instead, so
+it perceives, maneuvers and dispenses as in a mission; `--ai-model
+standard|hybrid` picks the single-player (default) or networked AI flight
+model and `--trace` prints the AI target's flight and defence every quarter
+second. `--decoy-model lure` is
+a what-if, not game behaviour: a decoyed missile steers for the device that
+decoyed it and bursts there instead of flying straight on. `--catalog` writes
+`catalog.csv` (each missile's decoy susceptibility, seeker and turn rates, each
+aircraft's dispensers). Output is `runs.csv`, one row per shot, and
+`cells.csv`, one row per cell with Wilson 95 percent intervals.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --missile-study .local/study \
+  --missiles AIM9M,AIM120 --profiles straight,cm-ai,break+cm-ai --seeds 60
+```
+
 `--missile-sag --no-audio` measures coasting A2A and SAM motion without a window.
 Use a private profile copy. [Probe and battery contract](testing/lane-flight.md),
 [before/after measurements](baselines/missile-sag.md).
