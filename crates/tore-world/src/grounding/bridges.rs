@@ -259,6 +259,24 @@ mod tests {
     }
 
     #[test]
+    fn the_bridge_inventory_is_exactly_the_twelve_br_types() {
+        // `is_bridge` slices the map-tied list; reordering it must not
+        // silently turn a road into a bridge or drop a bridge type.
+        let bridges: Vec<_> = crate::terrain::MAP_TIED_TYPES
+            .iter()
+            .filter(|n| is_bridge(n))
+            .collect();
+        assert_eq!(bridges.len(), 12);
+        assert!(bridges.iter().all(|n| n.starts_with("BR")));
+        assert!(
+            crate::terrain::MAP_TIED_TYPES
+                .iter()
+                .filter(|n| !is_bridge(n))
+                .all(|n| n.starts_with("ROAD"))
+        );
+    }
+
+    #[test]
     fn connected_spans_share_support_in_both_directions() {
         let sources = sources();
         let height = |_: f64, z: f64| if z > 5000. { 1000. } else { z.max(0.) * 0.1 };
