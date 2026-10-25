@@ -62,6 +62,7 @@ crate::checkpoint_struct!(DefenseState {
     beam_side,
     break_heading_deg,
     routine_devices,
+    last_threat_tick,
     jink_base_heading_deg,
     jink_heading_deg,
     jink_started_tick,

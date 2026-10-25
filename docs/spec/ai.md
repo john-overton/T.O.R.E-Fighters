@@ -1678,7 +1678,11 @@ while that contact remains in the threat picture. For
 unclassified visual threats, flares are a precaution, not inferred seeker
 knowledge; unclassified electronic threats use chaff. Stale threats get no
 new bursts. Switching threats retains the pilot's reaction progress, the aircraft's
-release cooldown and routine budget. Defense ends when observations clear, resuming existing
+release cooldown and routine budget. An encounter outlives a gap of up to 2
+seconds (the threat picture's lost-contact grace) with no selected threat:
+the reaction, committed phase and side and routine budget resume, so an
+end-game record that drops out for a moment does not restart the reaction
+delay. A longer quiet spell starts a new encounter. Defense ends when observations clear, resuming existing
 orders, formation or combat without changing aggression or launch gates.
 
 ## Live integration and authored boundaries
