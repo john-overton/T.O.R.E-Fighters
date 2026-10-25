@@ -1039,14 +1039,16 @@ quarter seconds.
 | --- | --- | --- | --- |
 | Radar guns (flag 0x4000: ZSU-23, 2S6, Phalanx, AAA30) | Observed target, refreshed every tick while tracking | Time of flight and drop from the existing gunsight solution, plus aim error by skill | retail (the flag); error fitted |
 | Flak (KS-12, KS-19, radar directed) | Observed target, refreshed every tick while tracking | The same lead point, then a burst point drawn inside an egg 300 m wide and 100 m tall around it, with no aim error by skill ([flak](#flak)) | retail (the flag); egg opinionated, John, 2026-10-13 |
-| Visual guns (ZSU-57, M1939, AAA30BAD, tank and APC guns) | Observation refreshed every 0.5 s | Lead from that stale velocity, larger aim error by skill | manual pp. 157 to 158; numbers fitted |
+| Visual guns (ZSU-57, M1939, AAA30BAD, IFV and APC guns, tank guns at a ground target) | Observation refreshed every 0.5 s | Lead from that stale velocity, larger aim error by skill | manual pp. 157 to 158; numbers fitted |
+| Tank guns (M1, and the T-72 record of the T-72, T-80 and T-90) at an aircraft | The same stale observation, and only an aircraft within 20 degrees above the hull | The visual guns' lead, the visual guns' error plus 0.4 degrees, plus 0.2 s of the sight line's turn rate; a 3 s lay before the first round ([tanks against aircraft](#tanks-against-aircraft)) | fitted, agent; the 20 degrees John's, 2026-10-24 |
 | Small arms (a squad's SMLARMS) at an aircraft | The same stale observation as a visual gun, carried on at 30 percent of the target's velocity | Lead 30 percent of the gunsight solution and four times the visual guns' aim error by skill ([small arms](#small-arms)) | fitted, agent, 2026-10-12 |
 
 Aim error by skill is a random angular offset per burst plus the existing
 per-round dispersion: radar guns 0.6, 0.4, 0.3 and 0.2 degrees; visual guns 1.5,
 1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted. A jammer
 on the target widens a radar-directed gun's aim error two times; visual guns
-are unaffected (defined, John, 2026-10-10: "fine for now").
+are unaffected (defined, John, 2026-10-10: "fine for now"). A tank gun at an
+aircraft aims wider still ([tanks against aircraft](#tanks-against-aircraft)).
 
 #### Small arms
 
@@ -1163,6 +1165,66 @@ unit with no side, or an aircraft that is still on the ground. The unit tests
 `an_airfields_squad_and_gun_fire_at_enemies_target_or_not_and_never_at_their_own_side`
 and `guns_fire_only_at_the_other_sides_airborne_aircraft` hold it for a squad
 and a ZSU-23 with and without the target flag.
+
+#### Tanks against aircraft
+
+John, 2026-10-24: "Tanks accuracy on aircraft need a nerf and max elevation of
+fire set to like 20 degrees up. Whatever the current accuracy is we need to
+make realistic changes to cut it by 66%. Tanks should be a surprise if they
+kill you, not be godlike snipers." Before this, a tank fired its 125 mm or
+120 mm gun at an aircraft as any visual AAA gun does, at any elevation its
+fire zone allowed, and one hit kills a helicopter or a fighter (200 damage),
+so an average T-72 killed a 450 kt jet passing 200 ft over it in two passes
+of three and a helicopter hovering 0.5 km out almost every time.
+
+The rules, for the M1's M256 and the 2A46 the T-72, T-80 and T-90 fire, only
+at an aircraft (a tank's fire at ground units and ships is unchanged):
+
+| Rule | What the player sees | Why | Basis |
+| --- | --- | --- | --- |
+| Elevation ceiling | A tank never takes, tracks, turns to or fires at an aircraft more than 20 degrees above its hull's horizontal plane (the hull's own frame, so a tank on a slope measures from its deck). It stays awake and takes the aircraft once it is lower in the sky; a round whose lead would leave above 20 degrees is not fired and stays in the magazine | The M1's gun elevates to +20 degrees, the T-72's to about +14 | opinionated (John, 2026-10-24) |
+| Lay before the first round | The first round at an aircraft leaves 3 s after the aircraft has been inside the gun's reach and ceiling, on top of the record's 1 s lock; if the aircraft leaves them, the lay starts again when it is back. Later rounds follow the gun's own cycle | The gunner must lay, lase and track for the fire control to settle a lead, and can only do it once the target is in the sight inside the gun's reach | fitted (agent) |
+| Fire control error | The visual guns' error by skill plus 0.4 degrees, the same at every experience: 1.9, 1.4, 1.1 and 0.9 degrees at a hovering helicopter for novice, average, veteran and ace | A tank's ballistic computer has no air target mode, its laser ranges poorly on a small target against the sky, and its round must strike (no proximity fuze); a better crew tracks better but cannot range better | fitted (agent) |
+| Tracking lag | The error grows by 0.2 s of the sight line's turn rate: nothing for a hovering helicopter or a head-on aircraft, 0.6 degrees for a 100 kt helicopter crossing 3,000 ft away, 9 degrees for a 450 kt jet crossing 1,000 ft away | Turret and gun drives and the stabiliser are built to hold a slow ground target; a gunner tracking a crossing aircraft lags it, and the lead taken from that tracking carries the lag | fitted (agent) |
+| Rate of fire | Unchanged: the M1 one round every 9.75 s, the T-72 every 7.25 s ([AAA tuning](#aaa-tuning)) | Already a real loader's and autoloader's pace; a faster rate was not the problem | fitted (unchanged) |
+| Machine guns | None: every tank NT carries its main gun only (survey 2.3 to 2.5), so there is no roof or coaxial machine gun to tune | retail data | retail |
+
+The armoured cars and APCs keep the visual guns' rules (John's scope, 2026-10-24,
+"tanks only"; they are listed for a later decision): the BMP-2's 2A42 30 mm
+(300 rounds a minute, 20-round bursts, a 3 s pause, 3,150 ft/s, 1.5 to 0.5
+degrees by skill), the BTR-80's KPVT 14.5 mm (600, 10-round bursts), the
+M113's M2HB .50 cal (500, 21-round bursts) and the Bradley's (M2) M242 25 mm
+(200, 20-round bursts), all to 3,000 ft and 3,000 ft up with no elevation
+ceiling beyond their records' zones.
+
+Measured on 2026-10-24 with the surface trace (one T-72 of `~QIRRETR` armed,
+an AH-64 or F-16C on a scripted line, 40 to 60 passes a row; the method and
+every row are in the [baseline](../baselines/tank-air-accuracy.md)). Kill a
+pass is the share of passes in which the tank killed the aircraft (one hit
+kills either):
+
+| Pass (average experience unless stated) | Before | After |
+| --- | ---: | ---: |
+| Helicopter hovering 300 ft up, 0.5 km out (60 s) | 98% | 80% |
+| Helicopter hovering 300 ft up, 1 km out | 33% | 18% |
+| Helicopter hovering 1,500 ft up, 1 km out (24 degrees up) | 48% | 0% (not engaged) |
+| Helicopter at 80 kt, 500 ft, 0.5 km to the side | 92% | 32% |
+| Helicopter at 120 kt, 1,000 ft, straight over | 95% | 0% |
+| Jet at 450 kt, 200 ft, straight over | 68% | 3% |
+| Jet at 500 kt, 300 ft, 0.5 km to the side | 18% | 0% |
+| Jet at 400 kt, 2,500 ft, straight over | 15% | 0% (always above 20 degrees in reach) |
+| Mean of the 13 passes in reach, average | 45% | 14% (a 70 percent cut) |
+| The same, ace | 76% | 25% (67 percent) |
+| The same, novice | 28% | 8% (70 percent) |
+
+The ceiling alone takes a little over a third of the cut (average: 45 to 28
+percent); the lay, the ranging error and the lag the rest. The battery
+scenario `surface-tank-aa` holds the rules: no round at a helicopter 24
+degrees up, the first round at a low hovering one 4 s after the lock, every
+round at a jet 200 ft over the tank at 20 degrees or less and none at a jet
+2,500 ft over it. A network client remakes a tank's round from the host's
+burst as before (one round a burst, so its direction is the host's); a round
+the ceiling holds back is never sent, and no wire field changed.
 
 #### Flak
 
@@ -1536,7 +1598,7 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart; the flak's are 0.75 s apart (KS-12 and KS-19: 8 shells in 6 s; John, 2026-10-14) | fitted; flak opinionated |
 | Where rounds leave from | A **missile** leaves its rail: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain. A **land gun** leaves the end of its drawn barrel ([muzzles](#muzzles)), and a **ship's gun** its hardpoint, which sits at the gun. Radars and sights look from 10 ft above the unit's reference point | fitted |
 | RWR reception of a ground radar | The terrain test ends at least 10 ft above the ground under the radar (its antenna), so a unit whose contact volume sits low on a slope still shows its square | fitted |
-| Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc | inference, fitted |
+| Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc. A tank gun takes, and fires at, no aircraft more than 20 degrees above its hull's horizontal plane ([tanks against aircraft](#tanks-against-aircraft)) | inference, fitted; the tank ceiling opinionated (John, 2026-10-24) |
 | Altitude bands | Zone altitudes are the target's height above the unit, as the AI's envelopes take them | spec-derived (B45) |
 | Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to its own burst point in the egg around the lead point ([flak](#flak)) | fitted |
 | Lead | A radar gun observes its target every tick; a visual gun every 0.5 s and leads from that stale track; both through the shared gunsight time-of-flight solution | spec-derived, fitted refresh |
