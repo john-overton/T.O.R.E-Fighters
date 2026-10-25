@@ -191,7 +191,13 @@ pub(super) fn observe_ownship(
                 .chain(peers(context.rows, own_index))
                 .filter(|t| t.body_present())
                 .filter(|t| bore || assigned == Some(t.id))
-                .filter_map(|t| seeker::observe(w, profile, &view, t))
+                .filter_map(|t| {
+                    if context.weapon_rules == Rules::Energy {
+                        seeker::observe_energy(w, profile, &view, t)
+                    } else {
+                        seeker::observe(w, profile, &view, t)
+                    }
+                })
                 .filter(|o| {
                     !bore
                         || profile.guidance != Guidance::Active
@@ -253,6 +259,9 @@ pub(super) fn observe_ownship(
         own.bore_observation = None;
         own.mounted = Seeker::default();
         own.mounted_key = None;
+    }
+    if context.weapon_rules == Rules::Energy {
+        return;
     }
     if let Some(o) = weapon_observation(own, launcher, context.weapon_rules, |id| {
         context

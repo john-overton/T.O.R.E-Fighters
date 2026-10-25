@@ -404,6 +404,18 @@ than 4 ms on average.
 
 #### The firing estimate and its exact shortcuts
 
+The following describes the preserved Spec path. Energy-mode flight uses a
+world-owned bounded prediction service, described in the
+[energy specification](spec/missile-energy.md#estimates-and-acceptance).
+Its checkpointed observation snapshots and cache tolerances are deliberately
+separate from these exact historical shortcuts. All powered-guided release
+constructors pass the selected rules to the same force kernel; bombs and
+rocket pods keep their existing paths. Public carried masses are resolved
+without rewriting decoded weapon fields, so damage and radar-signature
+proxies remain on the reviewed data. New mission recordings store actual motor
+phase intervals in extensible launch-event fields; old recordings retain
+imported timers. The renderer reads the existing powered flag.
+
 While a missile is selected and a target is designated, each ownship works out
 the weapon's maximum range and favourable firing band every 60 ticks
 (`maximum_range` and `firing_band` in `tore-sim/src/combat/missiles.rs`,

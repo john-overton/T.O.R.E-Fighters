@@ -160,6 +160,7 @@ fn station_view(
         employment_fit: None,
         minimum_range_ft: range.0,
         maximum_range_ft: range.1,
+        energy_target: None,
         infrared_envelope: None,
         requires_radar: false,
         requires_sensor: false,

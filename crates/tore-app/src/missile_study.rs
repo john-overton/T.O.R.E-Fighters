@@ -18,16 +18,12 @@
 //! The target is scripted, not flown by the AI: straight and level, or a
 //! constant-G level break, beam or drag, and it dispenses flares (against
 //! infrared seekers) or chaff (against radar seekers) on the AI's burst
-//! program or at a hammered rate. Each device rolls the decoy rule exactly as
-//! an AI release does in `tore_world::ai_wings` (`realise_device`): every
-//! missile of the matching class guiding on the releaser, with its seeker
-//! enabled, acquired and observing, rolls `susceptibility x effectiveness /
-//! 100` through [`threat::decoy_missile`]. The geometry is jittered per seed
-//! (range, aspect, target speed, reaction time), so a cell's shots sample a
-//! spread of engagements rather than repeating one. `--ai` flies the same
-//! shots against the game's own AI instead ([`ai`]). `--decoy-model lure` is a
-//! what-if for tuning studies, not game behaviour: a decoyed missile steers
-//! for its device and bursts there.
+//! program or at a hammered rate. Energy mode uses the live physical device
+//! scene and collects its actual episode rolls. `--missile-model spec` retains
+//! the older per-device evaluator for comparison. Geometry is jittered per
+//! seed independently from the explicit gameplay decoy seed. `--ai` flies
+//! against the existing AI; its defensive schedule is not modified here.
+//! `--decoy-model lure` is an old Spec-only what-if, not Energy behaviour.
 //!
 //! Output: `runs.csv` (one row per shot), `cells.csv` (one row per cell with
 //! Wilson 95 percent intervals) and, with `--catalog`, `catalog.csv` (each
@@ -78,7 +74,7 @@ const AI_RELEASE_WINDOW_S: f64 = 6.;
 const HAMMER_GAP_TICKS: u64 = 30;
 /// Every IR and radar air-to-air store with a reviewed profile, oldest
 /// generation first within each class.
-pub const MISSILES: [&str; 20] = [
+pub const MISSILES: [&str; 21] = [
     "AIM9B.JT",
     "AA2.JT",
     "AA8.JT",
@@ -99,6 +95,7 @@ pub const MISSILES: [&str; 20] = [
     "MICA.JT",
     "AIM54C.JT",
     "AAML.JT",
+    "AEMP1.JT",
 ];
 
 /// Speed of sound in the standard troposphere, feet per second.
@@ -132,6 +129,7 @@ fn uniform(seed: u64, stream: u64, lo: f64, hi: f64) -> f64 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Aspect {
+    Quarter,
     Head,
     Beam,
     Tail,
@@ -139,6 +137,7 @@ pub enum Aspect {
 impl Aspect {
     fn name(self) -> &'static str {
         match self {
+            Self::Quarter => "quarter",
             Self::Head => "head",
             Self::Beam => "beam",
             Self::Tail => "tail",
@@ -146,6 +145,7 @@ impl Aspect {
     }
     fn parse(s: &str) -> AppResult<Self> {
         Ok(match s {
+            "quarter" | "45" => Self::Quarter,
             "head" => Self::Head,
             "beam" => Self::Beam,
             "tail" => Self::Tail,
@@ -156,6 +156,9 @@ impl Aspect {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Altitudes {
+    Low,
+    High,
+    Deck,
     /// Both at 15,000 ft.
     Co,
     /// Shooter at 5,000 ft, target at 20,000 ft.
@@ -166,6 +169,9 @@ pub enum Altitudes {
 impl Altitudes {
     fn name(self) -> &'static str {
         match self {
+            Self::Low => "low",
+            Self::High => "high",
+            Self::Deck => "deck",
             Self::Co => "co",
             Self::Up => "up",
             Self::Down => "down",
@@ -173,6 +179,9 @@ impl Altitudes {
     }
     fn feet(self) -> (f64, f64) {
         match self {
+            Self::Low => (5_000., 5_000.),
+            Self::High => (35_000., 35_000.),
+            Self::Deck => (500., 500.),
             Self::Co => (15_000., 15_000.),
             Self::Up => (5_000., 20_000.),
             Self::Down => (20_000., 3_000.),
@@ -180,6 +189,9 @@ impl Altitudes {
     }
     fn parse(s: &str) -> AppResult<Self> {
         Ok(match s {
+            "low" => Self::Low,
+            "high" => Self::High,
+            "deck" => Self::Deck,
             "co" => Self::Co,
             "up" => Self::Up,
             "down" => Self::Down,
@@ -231,6 +243,8 @@ impl Band {
 /// What the target does about the shot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Maneuver {
+    /// Descend at 25 degrees to 100 feet, then level.
+    Dive,
     /// Straight and level.
     None,
     /// A 7 G level break that puts the missile on the beam, 3 to 5 seconds
@@ -265,6 +279,7 @@ pub struct Tactic {
 impl Tactic {
     pub fn name(self) -> String {
         let maneuver = match self.maneuver {
+            Maneuver::Dive => "dive",
             Maneuver::None => "",
             Maneuver::Break => "break",
             Maneuver::Beam => "beam",
@@ -288,12 +303,14 @@ impl Tactic {
         match self.heat {
             0 => name + "@idle",
             2 => name + "@burner",
+            3 => name + "@off",
             _ => name,
         }
     }
     pub fn parse(s: &str) -> AppResult<Self> {
         let (body, heat) = match s.split_once('@') {
             Some((b, "idle")) => (b, 0),
+            Some((b, "off")) => (b, 3),
             Some((b, "burner")) => (b, 2),
             Some((_, other)) => return Err(format!("unknown heat {other}").into()),
             None => (s, 1),
@@ -309,6 +326,7 @@ impl Tactic {
                 "break" => t.maneuver = Maneuver::Break,
                 "beam" => t.maneuver = Maneuver::Beam,
                 "drag" => t.maneuver = Maneuver::Drag,
+                "dive" => t.maneuver = Maneuver::Dive,
                 "cm-ai" => t.devices = Devices::Ai,
                 "cm-hammer" => t.devices = Devices::Hammer,
                 "ai" => t.maneuver = Maneuver::Ai,
@@ -348,6 +366,8 @@ pub struct Shot {
     pub time_s: f64,
     pub devices: u32,
     pub rolls: u32,
+    pub control_loss_s: Option<f64>,
+    pub ground_impact: bool,
     pub decoyed_at_s: Option<f64>,
     /// The closest approach was this many seconds away when the decoy took.
     pub decoyed_tcpa_s: Option<f64>,
@@ -369,6 +389,7 @@ pub struct Shot {
 
 /// The aircraft and missile records a cell needs, loaded once.
 pub struct Base {
+    pub rules: missiles::Rules,
     /// What-if, not game behaviour: a decoyed missile steers for the device
     /// that decoyed it and bursts there, instead of flying straight on
     /// (`--decoy-model lure`).
@@ -385,10 +406,15 @@ struct Flyer {
     heading: f64,
     speed: f64,
     bank: f64,
+    pitch: f64,
 }
 impl Flyer {
     fn forward(&self) -> Vector {
-        [self.heading.sin(), 0., self.heading.cos()]
+        [
+            self.heading.sin() * self.pitch.cos(),
+            self.pitch.sin(),
+            self.heading.cos() * self.pitch.cos(),
+        ]
     }
     fn velocity(&self) -> Vector {
         self.forward().map(|v| v * self.speed)
@@ -465,6 +491,9 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
     config.stations[base.station].weapon = weapon.clone();
     config.stations[base.station].count = 2;
     let mut state = live::State::new(config, true)?;
+    state.weapon_rules = base.rules;
+    state.energy_predictions_enabled = false;
+    state.set_energy_seed(seed);
     let serial = Executor::serial();
     let ground = |_: f64, _: f64| 0.;
     let step = |state: &mut live::State, l: Launcher, held: bool| {
@@ -513,6 +542,7 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         position: [0., target_alt, range],
         heading: wrap(
             match cell.aspect {
+                Aspect::Quarter => side * std::f64::consts::FRAC_PI_4,
                 Aspect::Head => std::f64::consts::PI,
                 Aspect::Beam => side * std::f64::consts::FRAC_PI_2,
                 Aspect::Tail => 0.,
@@ -520,6 +550,7 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         ),
         speed: target_speed,
         bank: 0.,
+        pitch: 0.,
     };
     let target_id = state.targets[0].id;
     let heat = match cell.tactic.heat {
@@ -548,7 +579,7 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         let t = &mut state.targets[0];
         t.position = target.position;
         t.velocity = target.velocity();
-        t.basis = Basis::new(target.heading, 0., target.bank);
+        t.basis = Basis::new(target.heading, target.pitch, target.bank);
     };
     place(&mut state, &target);
     step(&mut state, l, false);
@@ -617,9 +648,20 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
     let mut decoyed = false;
     let mut lure: Option<u32> = None;
     let mut last_heading = target.heading;
-    let limit = u64::from(weapon.movement.remove_t) * 30 + 240;
+    let limit = if base.rules == missiles::Rules::Energy {
+        u64::from(missiles::energy_profile::body(weapon).life) + 240
+    } else {
+        u64::from(weapon.movement.remove_t) * 30 + 240
+    };
     for tick in 1..=limit {
         let t = tick as f64 * DT;
+        if cell.tactic.heat == 3 && t >= reaction_s {
+            state.targets[0].heat = missiles::seeker::Heat::Engine {
+                on: false,
+                throttle: 0.,
+                afterburner: false,
+            };
+        }
         let Some(p) = state.projectiles.iter().find(|p| p.id == id) else {
             break;
         };
@@ -634,6 +676,15 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         // The scripted defence.
         let to_missile = heading_of(sub(missile, target.position));
         match cell.tactic.maneuver {
+            Maneuver::Dive => {
+                if t >= reaction_s {
+                    target.pitch = if target.position[1] > 100. {
+                        -25f64.to_radians()
+                    } else {
+                        0.
+                    };
+                }
+            }
             Maneuver::None => target.bank = 0.,
             Maneuver::Break => {
                 if !maneuvering && tcpa > 0. && tcpa <= break_at_s {
@@ -735,6 +786,20 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         place(&mut state, &target);
         let previous_missile = missile;
         let events = step(&mut state, l, false);
+        if base.rules == missiles::Rules::Energy {
+            for roll in state
+                .take_decoy_rolls()
+                .into_iter()
+                .filter(|r| r.projectile == id)
+            {
+                shot.rolls += 1;
+                if roll.decoyed && !decoyed {
+                    decoyed = true;
+                    shot.decoyed_at_s = Some(t);
+                    shot.decoyed_tcpa_s = Some(tcpa);
+                }
+            }
+        }
         let hit = events
             .iter()
             .any(|e| matches!(e, Event::Hit(v) if *v == target_id));
@@ -750,6 +815,12 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         let u = (-dot(a, d) / dot(d, d).max(1e-12)).clamp(0., 1.);
         miss = miss.min(length(std::array::from_fn(|i| a[i] + d[i] * u)));
         if let Some(p) = now {
+            if p.motion
+                .and_then(|m| m.energy)
+                .is_some_and(|e| e.flight.lost)
+            {
+                shot.control_loss_s.get_or_insert(t);
+            }
             last_speed = p.motion.map_or(0., |m| length(m.velocity));
             if let Some(flight) = &p.guidance {
                 last_status = flight.seeker.status;
@@ -771,12 +842,14 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
             break;
         }
         if events.contains(&Event::Ground) && now.is_none() {
+            shot.ground_impact = true;
             shot.outcome = "ground";
         }
         shot.time_s = t;
         // A decoyed missile flies straight on: once it is past and opening it
         // can no longer reach the target, so stop early.
         if let Some(p) = now
+            && base.rules != missiles::Rules::Energy
             && p.guidance.is_none()
             && p.motion
                 .is_some_and(|m| dot(b, sub(m.velocity, target.velocity())) > 0.)
@@ -832,6 +905,17 @@ fn release_device(
         },
         releaser,
     );
+    if state.weapon_rules == missiles::Rules::Energy {
+        state.energy_devices.effectiveness(
+            releaser,
+            match class {
+                SeekerClass::Infrared => missiles::decoys::Kind::Flare,
+                SeekerClass::Radar => missiles::decoys::Kind::Chaff,
+            },
+            effectiveness,
+        );
+        return Ok((0, Vec::new(), None));
+    }
     let seekers: Vec<(u8, u8)> = state
         .projectiles
         .iter()
@@ -858,7 +942,7 @@ fn release_device(
                 && p.guidance.as_ref().is_none_or(|f| {
                     f.enabled && f.seeker.acquired && f.seeker.observation.is_some()
                 }),
-            decoy_susceptibility_percent: chance.min(100),
+            decoy_susceptibility_percent: chance,
         };
         let outcome = threat::decoy_missile(&missile, class, effectiveness, random)
             .map_err(|e| e.to_string())?;
@@ -957,12 +1041,13 @@ struct Options {
     target: AircraftId,
     threads: usize,
     catalog: bool,
+    rules: missiles::Rules,
     follow_decoy: bool,
     /// Fly the shots against the game's AI instead of the scripted target.
     ai: Option<ai::AiSetup>,
 }
 
-const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@idle|@burner]] [--ranges short,medium,long] [--aspects head,beam,tail] [--altitudes co,up,down] [--shooter ID] [--target ID] [--threads N] [--decoy-model coast|lure] [--catalog]";
+const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@idle|@burner]] [--ranges short,medium,long] [--aspects head,beam,tail] [--altitudes co,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -995,6 +1080,7 @@ fn options() -> AppResult<Options> {
         target: AircraftId::Mig29,
         threads: std::thread::available_parallelism().map_or(4, |n| n.get()),
         catalog: false,
+        rules: missiles::Rules::Energy,
         follow_decoy: false,
         ai: None,
     };
@@ -1047,6 +1133,13 @@ fn options() -> AppResult<Options> {
             "--target" => o.target = AircraftId::parse(next()?)?,
             "--threads" => o.threads = next()?.parse::<usize>()?.max(1),
             "--catalog" => o.catalog = true,
+            "--missile-model" => {
+                o.rules = match next()?.as_str() {
+                    "energy" => missiles::Rules::Energy,
+                    "spec" => missiles::Rules::Spec,
+                    _ => return Err("missile model must be energy or spec".into()),
+                }
+            }
             "--decoy-model" => {
                 o.follow_decoy = match next()?.as_str() {
                     "coast" => false,
@@ -1181,7 +1274,12 @@ pub fn run() -> AppResult<()> {
         .iter()
         .position(|s| Profile::for_weapon(&s.weapon).is_some())
         .ok_or("the shooter has no missile station")?;
+    if o.follow_decoy && o.rules == missiles::Rules::Energy {
+        return Err("the lure what-if is only available with --missile-model spec".into());
+    }
+    std::fs::write(o.out.join("model.txt"), format!("{:?}\n", o.rules))?;
     let base = Base {
+        rules: o.rules,
         follow_decoy: o.follow_decoy,
         shooter,
         target: configuration(&resources, o.target)?,
@@ -1219,6 +1317,7 @@ pub fn run() -> AppResult<()> {
                             &base.weapons[&cells[c].missile],
                             &cells[c],
                             seed,
+                            base.rules,
                         ),
                         None => fly(&base, &cells[c], seed),
                     };
@@ -1255,13 +1354,13 @@ fn write_results(
     let mut runs = std::io::BufWriter::new(std::fs::File::create(o.out.join("runs.csv"))?);
     writeln!(
         runs,
-        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end"
+        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact"
     )?;
     for (c, seed, s) in results {
         let cell = &cells[*c];
         writeln!(
             runs,
-            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{}",
+            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{}",
             cell.missile,
             cell.altitudes.name(),
             cell.band.name(),
@@ -1290,6 +1389,9 @@ fn write_results(
             s.speed_at_end_fps,
             s.target_speed_fps,
             s.status_at_end,
+            s.control_loss_s
+                .map_or(String::new(), |t| format!("{t:.3}")),
+            u8::from(s.ground_impact),
         )?;
     }
     let mut summary = std::io::BufWriter::new(std::fs::File::create(o.out.join("cells.csv"))?);
@@ -1297,12 +1399,19 @@ fn write_results(
         summary,
         "missile,altitudes,range,aspect,profile,n,fired,hits,hit_rate,hit_lo,hit_hi,kills,decoyed,decoy_rate,decoy_lo,decoy_hi,mean_devices,mean_rolls,mean_miss_ft,mean_time_s,outcomes,shooter,target,flare_chance,chaff_chance"
     )?;
+    // Results are sorted by cell/seed. Summarize each run once, even for a
+    // million-shot matrix, rather than scanning the matrix for every cell.
+    let mut first = 0;
     for (c, cell) in cells.iter().enumerate() {
-        let shots: Vec<&Shot> = results
+        let mut end = first;
+        while end < results.len() && results[end].0 == c {
+            end += 1;
+        }
+        let shots: Vec<&Shot> = results[first..end]
             .iter()
-            .filter(|(i, _, _)| *i == c)
-            .map(|(_, _, s)| s)
+            .map(|(_, _, shot)| shot)
             .collect();
+        first = end;
         let n = shots.len();
         let fired = shots.iter().filter(|s| s.fired).count();
         let hits = shots.iter().filter(|s| s.hit).count();
@@ -1390,6 +1499,7 @@ mod tests {
             heading: 0.,
             speed: 900.,
             bank: 0.,
+            pitch: 0.,
         };
         // 7 G at 900 ft/s: g sqrt(48) / v = 0.2477 rad/s.
         for _ in 0..120 {

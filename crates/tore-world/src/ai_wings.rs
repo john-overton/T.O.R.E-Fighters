@@ -631,6 +631,18 @@ fn hovers(flight: &flight::State) -> bool {
 
 /// Jet throttle is a heat input. Rotor collective is not engine heat; retain
 /// the existing observation (including a handoff's engine snapshot).
+pub(crate) fn energy_heat(flight: &flight::State, previous: seeker::Heat) -> seeker::Heat {
+    if hovers(flight) {
+        seeker::Heat::Engine {
+            on: flight.engine,
+            throttle: 1.,
+            afterburner: false,
+        }
+    } else {
+        aircraft_heat(flight, previous)
+    }
+}
+
 pub(crate) fn aircraft_heat(flight: &flight::State, previous: seeker::Heat) -> seeker::Heat {
     if hovers(flight) {
         previous
@@ -2188,6 +2200,7 @@ impl AiWings {
         gunship::step(self, state, &ground);
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
+        self.prepare_energy_launches(state);
         let output = self.advance_on_ground(
             objects,
             &mut state.targets,
@@ -3138,7 +3151,11 @@ impl AiWings {
             target.position = f.position;
             target.velocity = f.velocity;
             target.basis = Basis::new(f.yaw, f.pitch, f.bank);
-            target.heat = aircraft_heat(f, target.heat);
+            target.heat = if self.weapon_rules == Rules::Energy {
+                energy_heat(f, target.heat)
+            } else {
+                aircraft_heat(f, target.heat)
+            };
             target.radar_emitting = f.radar;
             target.on_ground = f.research.as_ref().is_some_and(|r| r.on_ground);
             target.wreck_power = f.wreck_power(target.wreck_power.engine_count.max(1));
@@ -3339,6 +3356,112 @@ impl AiWings {
             emitted += 1;
         }
         emitted
+    }
+
+    /// Missile kinematics are supplied by combat's bounded prediction service.
+    /// This changes neither the defense controller nor the dispense schedule.
+    fn prepare_energy_launches(&mut self, state: &mut live::State) {
+        for actor in self.mission.actors_mut() {
+            let id = actor.id();
+            let launcher = crate::combat::launcher(actor.flight());
+            let observed = actor
+                .current_target()
+                .and_then(|id| actor.sensors()?.observation(id))
+                .map(|o| seeker::Observation {
+                    id: o.id,
+                    position: o.position,
+                    velocity: o.velocity,
+                    quality: 1.,
+                    range: missiles::length(missiles::sub(o.position, launcher.position)),
+                    off_axis: 0.,
+                });
+            for station in actor.stations_mut() {
+                let Some(w) = self.weapons.get(&(id, station.station.0)) else {
+                    continue;
+                };
+                if !station.guided || w.movement.fuel_t <= w.movement.ignite_t {
+                    continue;
+                }
+                let mut mount = launcher;
+                mount.position = std::array::from_fn(|i| {
+                    launcher.position[i]
+                        + launcher.basis.right[i] * station.mount[0]
+                        + launcher.basis.up[i] * station.mount[1]
+                        + launcher.basis.forward[i] * station.mount[2]
+                });
+                if state.weapon_rules == Rules::Energy {
+                    station.energy_target = Some(None);
+                    station.maximum_range_ft = None;
+                    if let Some(zone) = &mut station.employment_zone {
+                        zone.maximum_range = i32::MAX;
+                    }
+                    if let Some(o) = observed {
+                        state.request_energy_solution(
+                            id,
+                            usize::from(station.station.0),
+                            w,
+                            mount,
+                            o,
+                        );
+                        if state
+                            .energy_solution(id, usize::from(station.station.0), w, mount, o)
+                            .is_some()
+                        {
+                            station.energy_target = Some(Some(o.id));
+                        }
+                    }
+                } else if station.energy_target.take().is_some() {
+                    station.maximum_range_ft = Some(f64::from(w.seeker.zones[1].maximum_range));
+                    if let Some(zone) = &mut station.employment_zone {
+                        zone.maximum_range = w.seeker.zones[1].maximum_range;
+                    }
+                }
+            }
+            if state.weapon_rules == Rules::Energy
+                && let Some(config) = self.configs.get(&id)
+                && let Some(cockpit) = state.strike_cockpit(id)
+                && cockpit.armed
+                && let Some(w) = config.stations.get(cockpit.selected).map(|s| &s.weapon)
+                && w.movement.fuel_t > w.movement.ignite_t
+                && tore_sim::combat::guided::kind(w).is_some()
+            {
+                let station = cockpit.selected;
+                // The already-owned laser/sight point, not a hidden aircraft.
+                let kind = tore_sim::combat::guided::kind(w).unwrap();
+                let point = if kind == tore_sim::combat::missiles::Guidance::Laser {
+                    cockpit.laser.point
+                } else {
+                    match cockpit.target {
+                        Some(live::StrikeTarget::Point(point)) => Some(point),
+                        Some(live::StrikeTarget::Object(target)) => state
+                            .targets
+                            .iter()
+                            .find(|t| t.id == target)
+                            .map(|t| t.position),
+                        None => None,
+                    }
+                };
+                if let Some(point) = point {
+                    state.request_energy_solution(
+                        id,
+                        station,
+                        w,
+                        launcher,
+                        seeker::Observation {
+                            id: u32::MAX,
+                            position: point,
+                            velocity: state.guided_point_velocity(
+                                id,
+                                tore_sim::combat::guided::kind(w).unwrap(),
+                            ),
+                            quality: 1.,
+                            range: missiles::length(missiles::sub(point, launcher.position)),
+                            off_axis: 0.,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     fn realise_device(

@@ -396,6 +396,9 @@ pub const GUIDED_LATE_SHARE: f64 = 0.05;
 /// reads it here and holds its release until the line clears, as it did
 /// when a blocked line cleared IN RNG.
 pub fn guided_due(sight: &GuidedSight) -> bool {
+    if let Some(hit) = sight.energy_intercept {
+        return hit && sight.in_reach && sight.advisory.is_none();
+    }
     let (Some(range), Some(bar), Some(reach)) =
         (sight.ground_range_ft, sight.release_range_ft(), sight.reach)
     else {
@@ -617,7 +620,7 @@ impl State {
         ground: &impl Fn(f64, f64) -> f64,
     ) -> Option<GuidedSight> {
         let (side, cockpit) = self.cockpits_with(&self.ownships).get(aircraft)?;
-        super::guided::sight(
+        let sight = super::guided::sight(
             aircraft,
             side,
             cockpit,
@@ -629,7 +632,9 @@ impl State {
                 weather: &self.sensor_weather,
                 ground,
             },
-        )
+        )?;
+        let w = &config.stations.get(cockpit.selected)?.weapon;
+        Some(self.energy_guided_output(aircraft, cockpit.selected, w, *launcher, sight))
     }
 
     /// Whether the AI flying `aircraft` should release its selected store

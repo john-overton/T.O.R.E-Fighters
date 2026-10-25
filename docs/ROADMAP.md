@@ -807,11 +807,17 @@ implementation: four guidance types, pitbull activation, launch velocity and ran
 motor burn, guidance lifetime, uncued seeker search and HUD/tone feedback, with
 delivery stages, [measured acceptance and remaining limits](baselines/missiles.md).
 
-#### Missile flight overhaul (later)
+#### Missile flight overhaul (implementation complete, study next)
 
-Deferred at John's request on 2026-10-20. The time-to-impact cost work preserves
-existing answers; it does not change propulsion or launch policy. A later pass
-needs decisions on the current [fitted launch model](spec/missiles.md#launch-velocity-and-intercept-estimates).
+Authorized by John on 2026-10-25. The shared finite-energy kernel, physical
+decoy pursuit, bounded predictions, public/class physical data and full A2A
+calibration are implemented in new worlds. Linux compatibility, regression and
+prediction-cost checks passed. The extended statistical study is next. [Behaviour](spec/missile-energy.md),
+[data provenance](formats/missile-energy-data.md) and
+[measured baseline](baselines/missile-energy.md) own the details.
+
+The findings below describe the preserved earlier Spec adapter. Its exact
+cost shortcuts and old-tape resimulation remain available.
 
 Current findings, checked after the cost commit `8d883e95`:
 

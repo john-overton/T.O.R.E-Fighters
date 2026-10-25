@@ -1,6 +1,46 @@
 //! Fitted seeker slew and terrain-Doppler rejection for the energy profile.
 use crate::attitude::{Vector, cross, dot, unit};
 
+/// The reviewed A2A aspect overrides are authoritative. Other profiles keep
+/// their existing game aspect allowance; the A2A field interpretation is not
+/// silently imposed on unreviewed SAM records.
+pub fn all_aspect(w: &tore_formats::weapons::Weapon) -> bool {
+    tore_formats::weapons::corrections::infrared_aspect(&w.source).unwrap_or(true)
+}
+#[derive(Clone, Copy, Debug)]
+pub struct Settings {
+    pub rate: f64,
+    pub fov: f64,
+    pub gimbal: f64,
+    pub imaging: bool,
+}
+impl Settings {
+    pub fn for_weapon(w: &tore_formats::weapons::Weapon) -> Self {
+        let reference = tore_formats::missile_data::reference(&w.source);
+        let imaging = reference.is_some_and(|r| r.imaging);
+        let (rate, fov) = if imaging {
+            (90., 10.)
+        } else if w.seeker.signature == 2 && !all_aspect(w) {
+            (15., 4.)
+        } else {
+            (35., 5.)
+        };
+        Self {
+            rate: reference
+                .and_then(|r| r.tracking_deg_s)
+                .unwrap_or(rate)
+                .to_radians(),
+            fov: reference
+                .and_then(|r| r.fov_half_deg)
+                .unwrap_or(fov)
+                .to_radians(),
+            gimbal: super::half_angle(w.seeker.zones[0].heading)
+                .max(super::half_angle(w.seeker.zones[0].pitch)),
+            imaging,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Tracking {
     pub head: Option<Vector>,
@@ -52,8 +92,9 @@ impl Tracking {
         } else {
             slew(head, line, rate / 120.)
         };
+        let head = slew(nose, head, gimbal);
         self.head = Some(head);
-        let visible = dot(head, line) >= fov.cos();
+        let visible = dot(nose, line) >= gimbal.cos() && dot(head, line) >= fov.cos();
         if visible && notch >= 0.75 {
             self.notch_ticks = self.notch_ticks.saturating_add(1);
             self.clear_ticks = 0;

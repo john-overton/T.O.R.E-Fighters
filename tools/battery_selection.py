@@ -83,7 +83,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "guns, missiles, F-22A/F-22N bays and live fire, jettison, countermeasures, combat smoke and evidence",
         (
             "flight-fight-*", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
-            "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-missile-sag", "flight-jettison-*", "flight-bay-*",
+            "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-missile-sag", "flight-missile-energy", "flight-jettison-*", "flight-bay-*",
             "flight-wreckcontact-*", "flight-ac130-*",
             "flight-countermeasures-*", "replay-combat-smoke-*", "menus-combat-smoke-*",
         ),
@@ -406,6 +406,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/combat/live/delivery*", ("a2g", "flight-combat"), "the bomb and rocket sights in the live adapter"),
     _r("crates/tore-sim/src/combat/laser*", ("a2g", "flight-combat", "ai-strike"), "the laser designator, its spot and states"),
     _r("crates/tore-sim/src/combat/live/sighting*", ("a2g", "flight-combat", "ai-strike"), "the targeting sight and laser step, and the spots every aircraft's laser weapons home on"),
+    _r("crates/tore-sim/src/combat/missiles/*", ("flight-combat", "ai-fights", "surface", "a2g", "ai-strike"), "shared energy flight, seekers and bounded predictions"),
+    _r("crates/tore-formats/src/missile_data.rs", ("flight-combat", "surface", "a2g"), "authored physical weapon data"),
     _r("crates/tore-sim/src/combat/missiles.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage", "surface", "a2g", "ai-strike"), "missile motion and prediction, and the terrain line a command launch and a laser spot need"),
     _r("crates/tore-sim/src/combat/*", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/aircraft_systems/*", ("flight-damage", "flight-combat", "ai-damage", "instruments"), "aircraft systems"),

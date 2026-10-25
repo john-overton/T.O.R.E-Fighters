@@ -8,6 +8,11 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+New worlds use [energy flight](missile-energy.md) for every supported powered
+guided store, with model-based estimates and public/class carried masses.
+Bombs, rocket pods, targeting channels, laser/command lock contracts and damage
+rules below remain. Historical Spec powered motion is retained for old tapes.
+
 Status: **implemented** (the A2G round, 2026-10-10 and 11: the specification
 came first, then the slices below built every section, and the acceptance pass
 flew every weapon class on two carriers; see the

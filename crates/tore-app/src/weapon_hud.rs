@@ -274,7 +274,11 @@ pub fn draw(
         271,
     );
     let ready = ro.estimates.readiness;
-    let percent = format!("{}%", ro.estimates.hit_percent);
+    let percent = if ro.estimates.max_range.is_some() {
+        format!("{}%", ro.estimates.hit_percent)
+    } else {
+        "--%".into()
+    };
     paint.text(font, &percent, 207, 283);
     if in_range && ro.sensors.tick % 60 < 30 {
         let width: usize = percent
@@ -757,12 +761,15 @@ pub fn debug(
     {
         let f = shot.guidance.as_ref().unwrap();
         let weapon = state.weapon(shot);
-        let remaining = shot
-            .guidance_ticks
-            .unwrap_or(f.profile.guidance_ticks)
-            .saturating_sub(shot.age) as f64
-            / 120.;
-        let motor = match missiles::phase(&weapon.movement, shot.age) {
+        let lifetime = shot.motion.and_then(|m| m.energy).map_or(
+            shot.guidance_ticks.unwrap_or(f.profile.guidance_ticks),
+            |e| u64::from(e.body.life),
+        );
+        let remaining = lifetime.saturating_sub(shot.age) as f64 / 120.;
+        let motor = match shot.motion.map_or_else(
+            || missiles::phase(&weapon.movement, shot.age),
+            |m| m.engine_phase(&weapon.movement, shot.age),
+        ) {
             tore_sim::combat::EnginePhase::BeforeIgnition => "WAIT",
             tore_sim::combat::EnginePhase::Powered => "BURN",
             tore_sim::combat::EnginePhase::Coast => "COAST",

@@ -7,10 +7,11 @@ Every scenario is one `tore-app` run. The headless ones use the flight probe
 See docs/testing/lane-flight.md.
 """
 import os
+import csv
 import re
 import time
 
-from battery import Scenario
+from battery import Scenario, Step
 from battery_scenarios._debrief import kill_hit_problems
 from battery_scenarios._powered import powered_scenarios
 from battery_scenarios._strips import ground_airport
@@ -780,10 +781,45 @@ def check_missile_sag(output: str) -> list[str]:
     return problems
 
 
+def check_missile_energy(work, _output):
+    """Actual episode logs must not compound; scripted worker counts must agree."""
+    problems = []
+    try:
+        runs = work / "energy" / "runs.csv"
+        if runs.read_bytes() != (work / "energy-serial" / "runs.csv").read_bytes():
+            problems.append("energy study differs between serial and parallel workers")
+        with runs.open() as stream:
+            rows = list(csv.DictReader(stream))
+        if len(rows) != 160:
+            problems.append(f"expected 160 energy shots, got {len(rows)}")
+        for row in rows:
+            devices, rolls = int(row["devices"]), int(row["rolls"])
+            limit = (devices + 7) // 8 if row["profile"] == "cm-hammer" else devices
+            if rolls > limit:
+                problems.append(f"repeated episode rolls: {row['missile']} {rolls} from {devices} devices")
+                break
+        outcomes = {row["outcome"] for row in rows}
+        if "hit" not in outcomes or not outcomes.intersection({"ground", "energy", "seeker-lost"}):
+            problems.append("energy study lacks both an intercept and a physical/seeker miss")
+        if not any(int(row["rolls"]) for row in rows):
+            problems.append("energy study did not exercise a decoy roll")
+    except (OSError, ValueError, KeyError) as error:
+        problems.append(f"unreadable energy study: {error}")
+    return problems
+
+
 def combat_scenarios() -> list[Scenario]:
     out = [Scenario(name="flight-wreckcontact-f18", lane="flight",
                     args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
                     check=check_wreck_contacts, timeout=300)]
+    study = ["--missiles", "AIM9M,AIM120", "--profiles", "straight,break,beam+cm-ai@off,dive,cm-hammer",
+             "--ranges", "short,medium", "--aspects", "head,tail", "--altitudes", "low,high",
+             "--seeds", "2", "--missile-model", "energy"]
+    out.append(Scenario(name="flight-missile-energy", lane="flight",
+                        args=["--missile-study", "{work}/energy", "--threads", "4"] + study,
+                        then=[Step(args=["--missile-study", "{work}/energy-serial", "--threads", "1"] + study)],
+                        outputs=["energy/runs.csv", "energy-serial/runs.csv"], check_work=check_missile_energy,
+                        timeout=180, notes="Shared energy flight, physical decoy episodes and worker determinism"))
     out.append(Scenario(name="flight-missile-sag", lane="flight",
                         args=["--missile-sag", "--no-audio"],
                         check=check_missile_sag, timeout=120))

@@ -9,6 +9,7 @@ pub mod energy;
 pub mod energy_estimate;
 pub mod energy_profile;
 pub mod energy_seeker;
+pub mod prediction;
 mod terrain;
 pub use terrain::launch_line_clear;
 
@@ -23,7 +24,7 @@ pub enum Rules {
     Compatibility,
     #[default]
     Spec,
-    /// Explicit opt-in until the calibration and performance gates pass.
+    /// Finite-energy rules selected by new worlds; historical tools retain Spec.
     Energy,
 }
 impl Rules {
@@ -592,6 +593,7 @@ impl Motion {
                     [0., 0., 1.],
                 ),
                 target: None,
+                observed: false,
                 wind: [0.; 3],
                 decoy: Default::default(),
                 tracking: Default::default(),
@@ -606,15 +608,17 @@ impl Motion {
         if let Some(e) = &mut self.energy {
             e.flight.position = position.map(|v| v * energy::FT);
             if age == 0 {
-                e.flight.axis = axis;
+                e.flight.axis = e.body.launch_axis(axis);
             }
             e.flight.age = age.min(u64::from(u32::MAX - 1)) as u32;
             e.wind = wind.map(|v| v * energy::FT);
             e.target = None;
+            e.observed = false;
         }
     }
     pub fn track(&mut self, position: Vector, velocity: Vector) {
         if let Some(e) = &mut self.energy {
+            e.observed = true;
             e.target = Some(energy::Observation {
                 position: position.map(|v| v * energy::FT),
                 velocity: velocity.map(|v| v * energy::FT),
@@ -682,9 +686,20 @@ impl Motion {
         }
     }
     pub fn step(&mut self, m: &Movement, age: u64, forward: Vector) -> Vector {
+        self.step_over_terrain(m, age, forward, &|_, _| 0.)
+    }
+    pub fn step_over_terrain(
+        &mut self,
+        m: &Movement,
+        age: u64,
+        forward: Vector,
+        ground: &impl Fn(f64, f64) -> f64,
+    ) -> Vector {
         if let Some(e) = &mut self.energy {
             let before = e.flight.position;
-            e.flight.step(e.body, e.wind, e.target);
+            e.flight.step_terrain(e.body, e.wind, e.target, &|x, z| {
+                ground(x / energy::FT, z / energy::FT) * energy::FT
+            });
             self.velocity = e.flight.velocity.map(|v| v / energy::FT);
             return std::array::from_fn(|i| (e.flight.position[i] - before[i]) / energy::FT);
         }

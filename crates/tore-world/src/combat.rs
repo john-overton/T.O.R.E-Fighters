@@ -832,11 +832,14 @@ impl Combat {
         ))
     }
     fn with_state(
-        state: live::State,
+        mut state: live::State,
         contrail_offsets: Vec<Vector>,
         range: bool,
         initial_ammo: Option<Vec<u16>>,
     ) -> Self {
+        // New worlds select the approved energy rules. The lower-level State
+        // constructor remains Spec for historical tools and unmarked tapes.
+        state.weapon_rules = tore_sim::combat::missiles::Rules::Energy;
         Self {
             contrail_offsets,
             contrail_sortie: 0,
@@ -1773,6 +1776,7 @@ impl Combat {
         self.last_launcher = Some(l);
         self.terrain_tti.clear();
         let weapon_rules = self.state.weapon_rules;
+        let energy_seed = self.state.energy_seed();
         let friendly_fire = self.state.friendly_fire;
         let host = if self.open {
             self.state = live::State::open_mission();
@@ -1792,6 +1796,7 @@ impl Combat {
             Some(aircraft)
         };
         self.state.weapon_rules = weapon_rules;
+        self.state.set_energy_seed(energy_seed);
         self.state.friendly_fire = friendly_fire;
         if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility {
             self.record_tape("compatibility-weapons", l);
@@ -2058,7 +2063,7 @@ impl Combat {
             let energy = self.state.weapon_rules == tore_sim::combat::missiles::Rules::Energy;
             if let Some(own) = self.state.ownship_mut(aircraft) {
                 if energy {
-                    own.heat = crate::ai_wings::aircraft_heat(s, own.heat);
+                    own.heat = crate::ai_wings::energy_heat(s, own.heat);
                 }
                 own.note_loaded();
             }

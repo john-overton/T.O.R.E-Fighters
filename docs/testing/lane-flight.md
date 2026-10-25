@@ -16,6 +16,13 @@ file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flig
 runner works is in the [testing overview](README.md). The `render-*` capture scenarios live in
 [`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
+`flight-missile-energy` runs 160 headless imported shots through the Energy
+model twice, with four workers and with one. It checks identical rows, real
+hits and misses, and an upper bound of one roll per two-second hammered
+episode. This is a regression for overlapping episode re-rolls, not a fixed
+Monte Carlo hit-rate target. The broad calibration/study results are in the
+[missile energy baseline](../baselines/missile-energy.md).
+
 ## Variety aircraft checks
 
 `flight-variety-*` checks each of the 23 new identities through real application

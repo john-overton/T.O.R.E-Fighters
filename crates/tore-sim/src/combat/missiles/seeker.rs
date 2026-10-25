@@ -100,8 +100,59 @@ pub fn observe(
     view: &View<'_>,
     target: &Target,
 ) -> Option<Observation> {
+    observe_model(w, profile, view, target, false)
+}
+pub fn observe_energy(
+    w: &Weapon,
+    profile: Profile,
+    view: &View<'_>,
+    target: &Target,
+) -> Option<Observation> {
+    observe_model(w, profile, view, target, true)
+}
+/// Signal changes acquisition distance, rather than making a sufficiently
+/// nearby residual-heat target impossible to see at every distance.
+pub fn energy_infrared_quality(
+    all_aspect: bool,
+    nominal: f64,
+    strength: f64,
+    facing: f64,
+    distance: f64,
+) -> f64 {
+    if nominal <= 0. || strength <= 0. || (!all_aspect && facing > -std::f64::consts::FRAC_1_SQRT_2)
+    {
+        return 0.;
+    }
+    let aspect = 0.7 - 0.3 * facing.clamp(-1., 1.);
+    let reach = nominal * (strength * aspect).sqrt();
+    if distance > reach {
+        0.
+    } else {
+        1. / (1. + (distance / reach).powi(2))
+    }
+}
+fn observe_model(
+    w: &Weapon,
+    profile: Profile,
+    view: &View<'_>,
+    target: &Target,
+    energy: bool,
+) -> Option<Observation> {
     let mut zone = w.seeker.zones[0];
-    if !surface_launched(&w.source) {
+    let nominal = f64::from(zone.maximum_range);
+    if energy && profile.guidance == Guidance::Infrared && profile.role == TargetRole::Aircraft {
+        let facing = dot(
+            target.basis.forward,
+            unit(sub(view.position, target.position)),
+        );
+        let strength = target.signature.infrared.max(0.) / 100.
+            * target.heat.factor()
+            * (0.7 - 0.3 * facing.clamp(-1., 1.));
+        zone.maximum_range = (nominal * strength.sqrt()).ceil() as i32;
+    }
+    // Minimum launch distance is an employment gate, not a near-target blind
+    // zone for the energy seeker. Historical Spec SAMs retain their old rule.
+    if energy || !surface_launched(&w.source) {
         zone.minimum_range = 0;
     }
     if !profile.accepts(target)
@@ -111,7 +162,6 @@ pub fn observe(
         return None;
     }
     let range = length(sub(target.position, view.position));
-    let nominal = f64::from(zone.maximum_range);
     let quality = match profile.guidance {
         Guidance::Infrared if profile.role == TargetRole::Surface => {
             let contrast = target.signature.infrared.max(0.) / 100.;
@@ -119,6 +169,19 @@ pub fn observe(
                 return None;
             }
             contrast / (1. + (range / nominal).powi(2))
+        }
+        Guidance::Infrared if energy => {
+            let facing = dot(
+                target.basis.forward,
+                unit(sub(view.position, target.position)),
+            );
+            energy_infrared_quality(
+                super::energy_seeker::all_aspect(w),
+                nominal,
+                target.signature.infrared.max(0.) / 100. * target.heat.factor(),
+                facing,
+                range,
+            )
         }
         Guidance::Infrared => heat_quality(w, target, view.position, nominal),
         Guidance::Active | Guidance::Supported => {

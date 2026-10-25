@@ -1,6 +1,6 @@
 //! Physical countermeasure targets, independent of presentation pool limits.
 //! SI units. One cartridge is one logical target and one episode contribution.
-use super::energy::{DT, G, Observation};
+use super::energy::{DT, Observation};
 use crate::attitude::{Vector, dot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub struct Device {
     pub age: u32,
     pub alive: bool,
     pub effectiveness: u8,
+    pub side: Vector,
+    pub resting: bool,
 }
 impl Device {
     pub fn release(
@@ -42,7 +44,40 @@ impl Device {
             age: 0,
             alive: true,
             effectiveness: 35,
+            side: [0.; 3],
+            resting: false,
         }
+    }
+    /// The same release and throw as the visible pair, retained independently
+    /// when presentation evicts an older device from its bounded pool.
+    pub fn from_release(
+        id: u64,
+        owner: u32,
+        kind: Kind,
+        release: super::super::countermeasures::Release,
+        side_index: u8,
+    ) -> Self {
+        let ft = super::energy::FT;
+        let position = std::array::from_fn(|i| {
+            (release.position[i] - 15. * release.basis.forward[i] - 2. * release.basis.up[i]) * ft
+        });
+        let velocity = std::array::from_fn(|i| {
+            (release.velocity[i]
+                - if kind == Kind::Flare {
+                    15. * release.basis.up[i]
+                } else {
+                    0.
+                })
+                * ft
+        });
+        let mut device = Self::release(id, owner, kind, id, position, velocity);
+        if kind == Kind::Flare {
+            let seed = mix(mix(id) ^ u64::from(side_index));
+            let draw = (mix(seed ^ mix(0)) >> 11) as f64 / ((1u64 << 53) as f64);
+            let distance = (20. + 10. * draw) * if side_index == 0 { ft } else { -ft };
+            device.side = release.basis.right.map(|v| v * distance);
+        }
+        device
     }
     pub fn observation(self) -> Observation {
         Observation {
@@ -71,24 +106,42 @@ impl Device {
             return;
         }
         self.previous = self.position;
+        if self.resting {
+            self.age += 1;
+            self.alive = self.age < self.lifetime();
+            return;
+        }
         let air: Vector = std::array::from_fn(|i| self.velocity[i] - wind[i]);
         let damping = match self.kind {
-            Kind::Flare => 1. / (1. + G / (30.48 * 30.48) * dot(air, air).sqrt() * DT),
+            Kind::Flare => {
+                1. / (1.
+                    + (32.174 * super::energy::FT) / (30.48 * 30.48) * dot(air, air).sqrt() * DT)
+            }
             Kind::Chaff => (-DT / 0.12).exp(),
         };
         self.velocity = std::array::from_fn(|i| wind[i] + air[i] * damping);
         match self.kind {
-            Kind::Flare => self.velocity[1] -= G * DT,
+            Kind::Flare => self.velocity[1] -= 32.174 * super::energy::FT * DT,
             Kind::Chaff => self.velocity[1] -= 1.2192 * (1. - damping),
         }
+        let time = f64::from(self.age) * DT;
+        let throw = (-time / 0.25).exp() - (-(time + DT) / 0.25).exp();
         for i in 0..3 {
-            self.position[i] += self.velocity[i] * DT;
+            self.position[i] += self.velocity[i] * DT + self.side[i] * throw;
         }
         self.age += 1;
-        // Physical targets retire on ground contact. Presentation may leave
-        // a burning flare resting at its existing grounded visual position.
-        self.alive = self.age < self.lifetime()
-            && super::super::live::terrain_hit(self.previous, self.position, ground).is_none();
+        let rest = ground(self.position[0], self.position[2])
+            + if self.kind == Kind::Flare {
+                1.5 * super::energy::FT
+            } else {
+                0.
+            };
+        if self.position[1] <= rest {
+            self.position[1] = rest;
+            self.velocity = [0.; 3];
+            self.resting = true;
+        }
+        self.alive = self.age < self.lifetime();
     }
 }
 
@@ -162,13 +215,16 @@ impl Scene {
         self.devices.push(device);
     }
     pub fn effectiveness(&mut self, owner: u32, kind: Kind, value: u8) {
-        if let Some(device) = self
+        if let Some(id) = self
             .devices
-            .iter_mut()
+            .iter()
             .rev()
             .find(|d| d.owner == owner && d.kind == kind)
+            .map(|d| d.id)
         {
-            device.effectiveness = value;
+            for device in self.devices.iter_mut().filter(|d| d.id == id) {
+                device.effectiveness = value;
+            }
         }
     }
     pub fn step(&mut self, wind: Vector, ground: &impl Fn(f64, f64) -> f64) {
@@ -188,7 +244,10 @@ pub struct Memory {
 }
 impl Memory {
     pub fn eligible(&self, episode: u64) -> bool {
-        self.pursuit.is_none() && self.last_episode != Some(episode)
+        // Scene episode IDs are the monotonically increasing global release count.
+        // An older still-visible cloud cannot reopen a consumed episode when a
+        // newer episode fails its roll. Reacquired stale clouds are ineligible.
+        self.pursuit.is_none() && self.last_episode.is_none_or(|last| episode > last)
     }
     pub fn evaluate(
         &mut self,
@@ -263,7 +322,9 @@ crate::checkpoint_struct!(Device {
     velocity,
     age,
     alive,
-    effectiveness
+    effectiveness,
+    side,
+    resting
 });
 crate::checkpoint_struct!(Scene { devices, episodes });
 crate::checkpoint_struct!(Pursuit { device, passed });
@@ -281,6 +342,41 @@ crate::checkpoint_struct!(Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn physical_flare_matches_the_visible_release_without_sharing_its_pool() {
+        use super::super::super::countermeasures::{Devices, Release};
+        use crate::attitude::Basis;
+        let release = Release {
+            position: [100., 1000., -200.],
+            velocity: [0., 0., 700.],
+            basis: Basis::new(0.2, 0.1, 0.3),
+        };
+        let mut visible = Devices::default();
+        visible.release_flare(release);
+        let mut physical = Device::from_release(1, 0, Kind::Flare, release, 0);
+        for _ in 0..120 {
+            visible.step(&|_, _| 0.);
+            physical.step([0.; 3], &|_, _| 0.);
+            let expected = visible.flares.front().unwrap().position;
+            for (actual, expected) in physical.position.into_iter().zip(expected) {
+                assert!((actual / super::super::energy::FT - expected).abs() < 1e-6);
+            }
+        }
+    }
+    #[test]
+    fn changing_the_explicit_seed_changes_episode_draws_reproducibly() {
+        let d = Device::release(1, 1, Kind::Flare, 1, [0., 1000., 0.], [0.; 3]);
+        let count = (0..1000)
+            .filter(|seed| Memory::default().evaluate(d, 0.35, *seed, 7) == Some(true))
+            .count();
+        assert!((300..400).contains(&count), "{count}");
+        for seed in 0..100 {
+            assert_eq!(
+                Memory::default().evaluate(d, 0.35, seed, 7),
+                Memory::default().evaluate(d, 0.35, seed, 7)
+            );
+        }
+    }
     #[test]
     fn episode_does_not_compound_and_preserves_large_susceptibilities() {
         let device = Device::release(1, 2, Kind::Flare, 10, [0., 1000., 0.], [0., 0., 200.]);
@@ -326,6 +422,32 @@ mod tests {
         };
         assert!(e.includes(2, Kind::Flare, 249));
         assert!(!e.includes(2, Kind::Flare, 250));
+    }
+    #[test]
+    fn overlapping_episodes_cannot_alternate_into_repeated_rolls() {
+        let mut scene = Scene::default();
+        let mut memory = Memory::default();
+        let mut rolls = 0;
+        for tick in 0..1000u64 {
+            if tick.is_multiple_of(30) {
+                scene.release(
+                    Device::release(tick / 30 + 1, 2, Kind::Chaff, 0, [0., 1000., 0.], [0.; 3]),
+                    tick,
+                );
+            }
+            if let Some(d) = scene
+                .devices
+                .iter()
+                .rev()
+                .find(|d| memory.eligible(d.episode))
+                .copied()
+            {
+                rolls += usize::from(memory.evaluate(d, 0., 123, 7).is_some());
+            }
+            scene.step([0.; 3], &|_, _| 0.);
+        }
+        assert_eq!(rolls, 5);
+        assert!(!memory.eligible(1));
     }
     #[test]
     fn weaker_target_signal_increases_flare_odds_and_imaging_resists() {

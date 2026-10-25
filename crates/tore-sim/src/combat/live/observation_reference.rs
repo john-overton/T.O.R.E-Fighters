@@ -169,7 +169,13 @@ pub(super) fn observe(
                 .chain(peers(rows, k))
                 .filter(|t| t.body_present())
                 .filter(|t| bore || assigned == Some(t.id))
-                .filter_map(|t| seeker::observe(w, profile, &view, t))
+                .filter_map(|t| {
+                    if state.weapon_rules == Rules::Energy {
+                        seeker::observe_energy(w, profile, &view, t)
+                    } else {
+                        seeker::observe(w, profile, &view, t)
+                    }
+                })
                 .filter(|o| {
                     !bore
                         || profile.guidance != Guidance::Active

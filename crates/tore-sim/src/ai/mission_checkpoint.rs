@@ -76,6 +76,7 @@ crate::checkpoint_struct!(StationSpec {
     tracking_delay,
     pacing,
     maximum_range_ft,
+    energy_target,
     minimum_range_ft,
     requires_radar,
     requires_sensor,

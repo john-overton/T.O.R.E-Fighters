@@ -8,6 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+The energy-flight overhaul has its own [behaviour contract](missile-energy.md)
+and [calibration baseline](../baselines/missile-energy.md). This page remains
+the home of reviewed roles, acquisition/support and the previous Spec motion.
+Energy-specific flight, estimates and physical decoy consequences supersede
+those parts only when Energy rules are selected.
+
 Implementation mode, 2026-09-17. Delivery status is in the
 [feature matrix](../features.md) and measured checks in the
 [baseline](../baselines/missiles.md).

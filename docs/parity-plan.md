@@ -11,6 +11,13 @@
 One page. What is specified, what is built, what is next. Milestones live in
 [ROADMAP.md](ROADMAP.md); how agents work is in [AGENTS.md](../AGENTS.md).
 
+**Missile energy overhaul, 2026-10-25.** New worlds use one finite-energy
+model and physical decoy pursuit for supported powered guided weapons.
+Public/class masses, sourced range anchors and complete A2A calibration are
+recorded. Linux regression and prediction-cost checks passed. The extended
+statistical study is next. This is John's opinionated extension, not a retail parity claim.
+[Behaviour](spec/missile-energy.md), [baseline](baselines/missile-energy.md).
+
 **Air-to-ground weapons, 2026-10-11.** A player can now designate ground
 targets (the A-G radar page, the FLIR, the targeting sight, the HARM page), use
 CCIP and level-release bomb sights with John's "T" guide, fire rocket pods, guided

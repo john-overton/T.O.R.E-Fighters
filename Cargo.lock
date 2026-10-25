@@ -2238,9 +2238,11 @@ dependencies = [
 name = "tore-world"
 version = "0.2.1"
 dependencies = [
+ "rustix 1.1.4",
  "tore-codec",
  "tore-formats",
  "tore-input",
+ "tore-import",
  "tore-sim",
 ]
 

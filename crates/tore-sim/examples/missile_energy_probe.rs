@@ -30,6 +30,8 @@ fn body() -> Body {
         navigation_gain: 3.5,
         loft_height: 0.,
         loft_range: 0.,
+        cruise_feet: None,
+        launch_elevation: -std::f64::consts::FRAC_PI_2,
     }
 }
 fn trial(id: u64) -> Trial {
@@ -54,6 +56,35 @@ fn percentile(samples: &mut [f64], p: f64) -> f64 {
     samples[((samples.len() - 1) as f64 * p).round() as usize]
 }
 fn main() {
+    if std::env::args().any(|a| a == "--guidance") {
+        println!("altitude_m,range_m,aspect,hit,seconds,closest_m,impact_mps");
+        for altitude in [1500., 4500., 10668.] {
+            for range in [10000., 20000., 30000., 40000., 60000.] {
+                for (name, velocity) in [
+                    ("head", [0., 0., -250.]),
+                    ("beam", [250., 0., 0.]),
+                    ("tail", [0., 0., 250.]),
+                ] {
+                    let result = Trial::new(
+                        body(),
+                        Flight::launch([0., altitude, 0.], [0., 0., 300.], [0., 0., 1.]),
+                        Observation {
+                            position: [0., altitude, range],
+                            velocity,
+                        },
+                        30.,
+                        0,
+                    )
+                    .finish(&|_, _| 0.);
+                    println!(
+                        "{altitude},{range},{name},{},{:.3},{:.3},{:.3}",
+                        result.hit, result.seconds, result.closest, result.impact_speed
+                    );
+                }
+            }
+        }
+        return;
+    }
     let mut q = Queue::default();
     for id in 0..24 {
         q.submit(Request {
@@ -83,7 +114,7 @@ fn main() {
         }
         warm.push(started.elapsed().as_secs_f64() * 1000.);
     }
-    println!("workload,calls,p50_ms,p95_ms,max_ms,steps,completion_world_ticks");
+    println!("workload,calls,p50_ms,p95_ms,max_ms,work_units,completion_world_ticks");
     let p50 = percentile(&mut cold, 0.5);
     let p95 = percentile(&mut cold, 0.95);
     println!(

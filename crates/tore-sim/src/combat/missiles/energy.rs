@@ -67,9 +67,24 @@ pub struct Body {
     pub navigation_gain: f64,
     pub loft_height: f64,
     pub loft_range: f64,
+    /// Imported surface cruise schedule; its units are explicitly feet.
+    pub cruise_feet: Option<super::Cruise>,
+    pub launch_elevation: f64,
 }
 
 impl Body {
+    pub fn launch_axis(self, axis: Vector) -> Vector {
+        if axis[1] >= self.launch_elevation.sin() {
+            return axis;
+        }
+        let horizontal = (axis[0] * axis[0] + axis[2] * axis[2]).sqrt().max(1e-12);
+        [
+            axis[0] / horizontal * self.launch_elevation.cos(),
+            self.launch_elevation.sin(),
+            axis[2] / horizontal * self.launch_elevation.cos(),
+        ]
+    }
+
     pub fn dry_mass(self) -> f64 {
         self.mass - self.boost.propellant - self.sustain.propellant
     }
@@ -164,6 +179,8 @@ pub struct Flight {
     pub loft_decided: bool,
     pub terminal: bool,
     pub launch_height: f64,
+    pub waypoint: Option<Vector>,
+    pub path_active: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -175,6 +192,7 @@ pub struct Forces {
     pub available_g: f64,
     pub applied_g: f64,
     pub mach: f64,
+    pub terrain_samples: usize,
 }
 
 fn norm(v: Vector) -> f64 {
@@ -207,6 +225,8 @@ impl Flight {
             loft_decided: false,
             terminal: false,
             launch_height: position[1],
+            waypoint: None,
+            path_active: false,
         }
     }
     /// PN or capture against a measured target. No observations means ballistic.
@@ -234,27 +254,30 @@ impl Flight {
         let line = unit(r);
         let cosine = dot(axis, line).clamp(-1., 1.);
         let closing = -dot(vr, line);
-        let steer =
-            if closing > 0. && cosine > 30f64.to_radians().cos() && !self.lofted_or_climbing() {
-                let omega = cross(r, vr).map(|x| x / dot(r, r).max(1.));
-                cross(omega, axis).map(|x| x * body.navigation_gain * closing)
+        let steer = if closing > 0.
+            && cosine > 30f64.to_radians().cos()
+            && !self.lofted_or_climbing()
+            && !self.path_active
+        {
+            let omega = cross(r, vr).map(|x| x / dot(r, r).max(1.));
+            cross(omega, axis).map(|x| x * body.navigation_gain * closing)
+        } else {
+            let direction = perpendicular(line, axis);
+            let direction = if norm(direction) < 1e-9 && cosine < 0. {
+                // Stable reversal axis, including a vertical initial flight path.
+                unit(cross(
+                    axis,
+                    if axis[1].abs() < 0.9 {
+                        [0., 1., 0.]
+                    } else {
+                        [1., 0., 0.]
+                    },
+                ))
             } else {
-                let direction = perpendicular(line, axis);
-                let direction = if norm(direction) < 1e-9 && cosine < 0. {
-                    // Stable reversal axis, including a vertical initial flight path.
-                    unit(cross(
-                        axis,
-                        if axis[1].abs() < 0.9 {
-                            [0., 1., 0.]
-                        } else {
-                            [1., 0., 0.]
-                        },
-                    ))
-                } else {
-                    unit(direction)
-                };
-                direction.map(|x| x * speed * cosine.acos() / 0.5)
+                unit(direction)
             };
+            direction.map(|x| x * speed * cosine.acos() / 0.5)
+        };
         let gravity = perpendicular([0., -G, 0.], axis);
         std::array::from_fn(|i| steer[i] - gravity[i])
     }
@@ -263,7 +286,51 @@ impl Flight {
     }
 
     pub fn step(&mut self, body: Body, wind: Vector, target: Option<Observation>) -> Forces {
-        self.step_in(body, wind, target, atmosphere(self.position[1]))
+        self.step_terrain(body, wind, target, &|_, _| 0.)
+    }
+    pub fn step_terrain(
+        &mut self,
+        body: Body,
+        wind: Vector,
+        target: Option<Observation>,
+        ground: &impl Fn(f64, f64) -> f64,
+    ) -> Forces {
+        let samples = std::cell::Cell::new(0usize);
+        let measured_ground = |x: f64, z: f64| {
+            samples.set(samples.get() + 1);
+            ground(x * FT, z * FT) / FT
+        };
+        let target = target.map(|observed| {
+            if body.cruise_feet.is_none() {
+                return observed;
+            }
+            if self.waypoint.is_none() || self.age.is_multiple_of(12) {
+                let (aim, active) = super::terrain::energy_cruise_aim(
+                    body.cruise_feet.unwrap(),
+                    self.velocity.map(|v| v / FT),
+                    self.position.map(|v| v / FT),
+                    observed.position.map(|v| v / FT),
+                    &measured_ground,
+                );
+                self.waypoint = Some(aim.map(|v| v * FT));
+                self.path_active = active;
+            }
+            if self.path_active {
+                Observation {
+                    position: self.waypoint.unwrap(),
+                    velocity: [0.; 3],
+                }
+            } else {
+                observed
+            }
+        });
+        if target.is_none() {
+            self.waypoint = None;
+            self.path_active = false;
+        }
+        let mut forces = self.step_in(body, wind, target, atmosphere(self.position[1]));
+        forces.terrain_samples = samples.get();
+        forces
     }
 
     fn step_in(
@@ -350,6 +417,7 @@ impl Flight {
             available_g: max_accel / G,
             applied_g: acceleration / G,
             mach: speed / air.sound,
+            terrain_samples: 0,
         }
     }
 }
@@ -366,7 +434,9 @@ crate::checkpoint_struct!(Flight {
     lofted,
     loft_decided,
     terminal,
-    launch_height
+    launch_height,
+    waypoint,
+    path_active
 });
 
 #[cfg(test)]
@@ -397,6 +467,8 @@ pub(super) mod tests {
             navigation_gain: 3.5,
             loft_height: 0.,
             loft_range: 0.,
+            cruise_feet: None,
+            launch_elevation: -std::f64::consts::FRAC_PI_2,
         }
     }
     #[test]

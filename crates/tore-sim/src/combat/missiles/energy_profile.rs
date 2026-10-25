@@ -1,5 +1,5 @@
 //! Resolves authored physical metadata and explicit fitted class defaults.
-//! No weapon-name flight branches. Calibration must precede enabling defaults.
+//! No weapon-name flight branches. Calibration is recorded in the feature baseline.
 use super::energy::{Body, FT, Motor};
 use tore_formats::weapons::{SeekerKind, Weapon};
 
@@ -42,13 +42,22 @@ pub fn body(w: &Weapon) -> Body {
     };
     let boost_ticks = (burn * 120.).round() as u32;
     let sustain_ticks = (sustain * 120.).round() as u32;
-    let boost_fuel = fuel * 0.65;
+    let boost_fuel = if sustain_ticks == 0 {
+        fuel
+    } else {
+        fuel * 0.65
+    };
     let sustain_fuel = fuel - boost_fuel;
     let radar = matches!(
         w.seeker_kind(),
         SeekerKind::ActiveRadar | SeekerKind::SemiActiveRadar
     );
-    Body {
+    let mut body = Body {
+        launch_elevation: if surface {
+            12f64.to_radians()
+        } else {
+            -std::f64::consts::FRAC_PI_2
+        },
         mass,
         diameter,
         boost: Motor {
@@ -84,9 +93,15 @@ pub fn body(w: &Weapon) -> Body {
         },
         lift_coefficient: 12.,
         induced_factor: 0.03,
-        drag_scale: 1.,
+        drag_scale: tore_formats::missile_data::fallback(&w.source).map_or(1., |r| r.drag_scale),
         cruise_drag: cruise,
-        minimum_speed: if cruise { 70. } else { 120. },
+        minimum_speed: if cruise
+            || super::Guidance::air_to_ground(w) == Some(super::Guidance::Command)
+        {
+            70.
+        } else {
+            120.
+        },
         navigation_gain: 3.5,
         loft_height: if !surface && !strike && radar && range >= 37040. {
             (range * 0.08).min(6000.)
@@ -94,7 +109,32 @@ pub fn body(w: &Weapon) -> Body {
             0.
         },
         loft_range: range * 0.6,
+        cruise_feet: strike.then(|| super::Cruise::for_weapon(w)).flatten(),
+    };
+    body.life = body.life.max((2. * range / 300. * 120.).ceil() as u32);
+    if let Some(reference) = reference {
+        body.drag_scale = reference.drag_scale;
+        if let Some(g) = reference.structural_g {
+            body.structural_g = g;
+        }
+        if reference.imaging && !strike {
+            body.structural_g = 40.;
+            body.navigation_gain = 4.;
+        }
+        if let Some([boost, burn, sustain, coast]) = reference.motor {
+            body.boost = Motor {
+                ticks: (burn * 120.).round() as u32,
+                thrust: boost,
+                propellant: boost * burn / reference.motor_exhaust_mps,
+            };
+            body.sustain = Motor {
+                ticks: (coast * 120.).round() as u32,
+                thrust: sustain,
+                propellant: sustain * coast / reference.motor_exhaust_mps,
+            };
+        }
     }
+    body
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,6 +142,8 @@ pub struct Motion {
     pub body: Body,
     pub flight: super::energy::Flight,
     pub target: Option<super::energy::Observation>,
+    /// Current qualified observation, as distinct from a frozen memory waypoint.
+    pub observed: bool,
     pub wind: crate::attitude::Vector,
     pub decoy: super::decoys::Memory,
     pub tracking: super::energy_seeker::Tracking,
@@ -110,6 +152,7 @@ crate::checkpoint_struct!(Motion {
     body,
     flight,
     target,
+    observed,
     wind,
     decoy,
     tracking

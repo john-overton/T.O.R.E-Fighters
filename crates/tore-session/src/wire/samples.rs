@@ -1526,6 +1526,7 @@ pub fn guided() -> tore_sim::combat::guided::GuidedSight {
     use tore_sim::combat::guided::{Advisory, GuidedLevel, GuidedSight};
     use tore_sim::combat::missiles::Guidance;
     GuidedSight {
+        energy_intercept: None,
         kind: Guidance::Laser,
         aim: Some([39_000., 190., -27_000.]),
         buddy: true,

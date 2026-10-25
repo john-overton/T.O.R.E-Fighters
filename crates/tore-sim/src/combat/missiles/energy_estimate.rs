@@ -2,8 +2,11 @@
 use super::energy::{Body, DT, Flight, Motor, Observation};
 use crate::attitude::{Vector, dot};
 
-/// A global world budget, not a budget multiplied by the number of aircraft.
-pub const STEP_BUDGET: usize = 4096;
+/// Global quarter-step units: integration costs four, a terrain sample one.
+/// The 4096 integration-equivalent budget is not multiplied by aircraft count.
+pub const STEP_BUDGET: usize = 16_384;
+/// A cruise scan plus a refined terrain crossing costs at most 75 units.
+const MAX_STEP_WORK: usize = 80;
 pub const MAX_REQUESTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,12 +51,21 @@ impl Trial {
     }
     /// One fixed simulation step. Terrain and contact use a swept segment.
     pub fn step(&mut self, ground: &impl Fn(f64, f64) -> f64) {
+        self.step_over(ground, &|_, _| false);
+    }
+    pub fn step_over(
+        &mut self,
+        ground: &impl Fn(f64, f64) -> f64,
+        clear: &impl Fn(Vector, Vector) -> bool,
+    ) -> usize {
         if self.answer.is_some() {
-            return;
+            return 0;
         }
         let previous = self.flight.position;
         let gap: Vector = std::array::from_fn(|i| self.target.position[i] - previous[i]);
-        self.flight.step(self.body, self.wind, Some(self.target));
+        let forces = self
+            .flight
+            .step_terrain(self.body, self.wind, Some(self.target), ground);
         for i in 0..3 {
             self.target.position[i] += self.target.velocity[i] * DT;
         }
@@ -65,10 +77,19 @@ impl Trial {
         self.closest = self.closest.min(dot(nearest, nearest).sqrt());
         let contact = super::super::live::segment_sphere(gap, after, self.radius)
             .filter(|_| self.flight.age > self.arming_age);
-        let ground_hit = super::super::live::terrain_hit(previous, self.flight.position, ground);
+        let samples = std::cell::Cell::new(0usize);
+        let sampled = |x, z| {
+            samples.set(samples.get() + 1);
+            ground(x, z)
+        };
+        let ground_hit = if clear(previous, self.flight.position) {
+            None
+        } else {
+            super::super::live::terrain_hit(previous, self.flight.position, &sampled)
+        };
         let hit =
             contact.is_some_and(|contact| ground_hit.is_none_or(|fraction| contact < fraction));
-        if hit || ground_hit.is_some() || self.flight.age >= self.body.life {
+        if hit || ground_hit.is_some() || self.flight.lost || self.flight.age >= self.body.life {
             self.answer = Some(Answer {
                 hit,
                 seconds: f64::from(self.flight.age - self.start_age) * DT,
@@ -76,6 +97,7 @@ impl Trial {
                 impact_speed: dot(self.flight.velocity, self.flight.velocity).sqrt(),
             });
         }
+        4 + forces.terrain_samples + samples.get()
     }
     pub fn finish(mut self, ground: &impl Fn(f64, f64) -> f64) -> Answer {
         while self.answer.is_none() {
@@ -121,19 +143,41 @@ impl Queue {
     /// A fixed work limit makes pending-answer timing checkpointable and
     /// independent of CPU speed, cache warmth, frame rate or worker count.
     pub fn advance(&mut self, ground: &impl Fn(f64, f64) -> f64) -> usize {
+        self.advance_over(ground, &|_, _| false)
+    }
+    pub fn advance_over(
+        &mut self,
+        ground: &impl Fn(f64, f64) -> f64,
+        clear: &impl Fn(Vector, Vector) -> bool,
+    ) -> usize {
+        if self.requests.is_empty() {
+            return 0;
+        }
+        let count = self.requests.len();
+        let start = self.cursor % count;
+        // Completed answers stay available to the publisher. Build the active
+        // ring once, rather than walking every completed slot for every step.
+        let mut active: Vec<usize> = (0..count)
+            .map(|offset| (start + offset) % count)
+            .filter(|&index| self.requests[index].trial.answer.is_none())
+            .collect();
+        let mut at = 0;
         let mut used = 0;
-        let mut idle = 0;
-        while used < STEP_BUDGET && idle < self.requests.len() {
-            self.cursor %= self.requests.len();
-            let request = &mut self.requests[self.cursor];
-            if request.trial.answer.is_none() {
-                request.trial.step(ground);
-                used += 1;
-                idle = 0;
+        while used + MAX_STEP_WORK <= STEP_BUDGET && !active.is_empty() {
+            let index = active[at];
+            let request = &mut self.requests[index];
+            let spent = request.trial.step_over(ground, clear);
+            debug_assert!(spent <= MAX_STEP_WORK);
+            used += spent;
+            self.cursor = index + 1;
+            if request.trial.answer.is_some() {
+                active.remove(at);
             } else {
-                idle += 1;
+                at += 1;
             }
-            self.cursor += 1;
+            if !active.is_empty() {
+                at %= active.len();
+            }
         }
         used
     }
@@ -159,7 +203,9 @@ crate::checkpoint_struct!(Body {
     minimum_speed,
     navigation_gain,
     loft_height,
-    loft_range
+    loft_range,
+    cruise_feet,
+    launch_elevation
 });
 crate::checkpoint_struct!(Observation { position, velocity });
 crate::checkpoint_struct!(Answer {
@@ -212,18 +258,45 @@ mod tests {
                 trial: trial()
             }));
         }
-        assert_eq!(q.advance(&|_, _| 0.), STEP_BUDGET);
+        assert!((1..=STEP_BUDGET).contains(&q.advance(&|_, _| 0.)));
         let mut q =
             crate::checkpoint::round_trip(&q, &crate::checkpoint::Models::default()).unwrap();
         let expected = trial().finish(&|_, _| 0.);
         assert!(expected.hit, "{expected:?}");
-        for _ in 0..200 {
+        for _ in 0..5000 {
             assert!(q.advance(&|_, _| 0.) <= STEP_BUDGET);
         }
         for id in 0..24 {
             assert_eq!(q.answer(id), Some((10, expected)));
         }
         assert_eq!(q.advance(&|_, _| 0.), 0);
+    }
+    #[test]
+    fn a_tail_chase_runs_out_of_energy_sooner_in_dense_air() {
+        let shot = |altitude| {
+            Trial::new(
+                body(),
+                Flight::launch([0., altitude, 0.], [0., 0., 300.], [0., 0., 1.]),
+                Observation {
+                    position: [0., altitude, 20000.],
+                    velocity: [0., 0., 250.],
+                },
+                30.,
+                0,
+            )
+            .finish(&|_, _| 0.)
+        };
+        assert!(!shot(1500.).hit);
+        assert!(shot(10668.).hit);
+    }
+    #[test]
+    fn proven_clear_terrain_shortcut_keeps_the_same_trajectory_and_contact() {
+        let expected = trial().finish(&|_, _| 0.);
+        let mut q = trial();
+        while q.answer.is_none() {
+            q.step_over(&|_, _| 0., &|a, b| a[1] > 0. && b[1] > 0.);
+        }
+        assert_eq!(q.answer, Some(expected));
     }
     #[test]
     fn saturated_queue_refuses_without_dropping_existing_work() {
