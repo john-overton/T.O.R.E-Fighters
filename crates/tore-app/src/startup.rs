@@ -55,6 +55,7 @@ fn interactive_arguments(args: impl Iterator<Item = OsString>) -> bool {
                     | "--combat-smoke"
                     | "--combat-probe-ticks"
                     | "--missile-acceptance"
+                    | "--missile-study"
                     | "--ai-probe-ticks"
                     | "--ai-roster-probe-ticks"
                     | "--rotor-probe"
