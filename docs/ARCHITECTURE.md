@@ -11004,7 +11004,16 @@ never paced.
 **Status.** At most twice a second a standby reports the newest tick it
 holds, whether it is ready, warm or cold, its mean step cost, the last check's
 result and whether it needs a checkpoint. The host's log and status line show
-each standby.
+each standby. *Fixed 2026-10-24 (agent decision):* the host goes by the
+newest status. It had kept an ask for a checkpoint from any status, so the
+statuses a standby sent while a resync checkpoint was still on its way asked
+for a second one, sent 2 seconds after the first had gone out. A warm copy
+restored from the first and stepped on refused the second ("a checkpoint at
+tick T the journal does not continue"), which asked for another, and so on
+every 10 seconds for the rest of the flight (the battery's planned handover,
+`net-migrate-handover`). The standby now also drops a checkpoint its copy in
+good standing has no use for before it judges the journal, so a checkpoint it
+does not need is never refused.
 
 **On the standby's side** (`tore_session::standby`): a state machine that takes
 the records in order, builds the fresh world (`World::new` from the flight's
@@ -11077,6 +11086,14 @@ does.
 6. A player still absent 5 seconds after the takeover (the drop timeout) is
    dropped: its plane goes to the AI, reserved for it
    ([rejoin](#rejoin-tokens-and-reservations)).
+   *Changed 2026-10-24 (agent decision):* the drop timeout counts from the
+   new host's first update after the takeover, when it can first answer
+   anyone, not from before its restore and replay. A standby that took
+   seconds to replay (a cold one, or a warm one far behind on a busy machine;
+   `net-window-migrate-smoke` saw 4.8 seconds in a debug build) had spent the
+   5 seconds before it, and every player, its own included, was dropped at
+   its first update. The resume window still counts from the takeover: once
+   it is over the host goes on, and the players resume with it live.
 
 **The present** is where the old host's clock would be now. The standby's own
 client already estimates the host's newest tick from the snapshots' arrivals
@@ -11109,7 +11126,15 @@ were.
   under load with "corrected 1" where the old host had repeated the pilots'
   inputs (up to 57 ticks behind, frames more than 120 ticks ahead dropped).
 - **Backlog** sends its inputs from T to its newest tick and the commands not
-  yet applied, numbered afresh for the new flight.
+  yet applied, numbered afresh for the new flight. *Fixed 2026-10-24 (agent
+  decision):* a player whose Resume the new host answered in the resume window
+  but whose Backlog came only after the host went live keeps its kept inputs
+  until the Backlog comes; its Inputs meanwhile are kept and fed tick by tick,
+  as for a player resumed after the host went live. Going live had dropped
+  them, the late Backlog was refused ("Nothing is being resumed for you
+  here."), the player never counted as done resuming, and no snapshot went to
+  it again. The battery's planned handover (`net-migrate-handover`) met it
+  with the new host's own game, whose Backlog came late on a busy machine.
 - A new flight starts the wire state afresh (baselines, names, events) but
   keeps the prediction, the clocks and the other aircraft's histories: the
   others hold still through the gap and then jump to the present, as after a

@@ -1228,6 +1228,15 @@ after the loss when the old host's own player is lost with it); a handover
 takes 20 ms and the players have snapshots again within a quarter of a
 second. The game runs it from slice K7a.
 
+*Changed 2026-10-24 (agent decision, 0.2.2):* a player whose game is slow to
+send its kept inputs after a takeover (the new host's own game on a busy
+machine, say) no longer loses its snapshots for the rest of the flight, and a
+standby that needed one fresh checkpoint gets one, rather than one every 10
+seconds that it refused, and a takeover that takes seconds to catch up no
+longer drops every player the moment it is done: the 5 seconds the players
+have to come back count from when the new host can answer them
+([architecture](ARCHITECTURE.md#host-migration-and-rejoin)).
+
 The [architecture](ARCHITECTURE.md#host-migration-and-rejoin) has the design
 and its slices, the [wire protocol](formats/net-protocol.md#host-migration-and-rejoin-stage-k)
 the bytes.
