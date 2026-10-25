@@ -302,6 +302,26 @@ Measured evidence of a battery pass goes in [`docs/baselines/`](../baselines/),
 one file per pass, following the baseline rules in [AGENTS.md](../../AGENTS.md).
 The first pass is [battery-2026-09-28](../baselines/battery-2026-09-28.md).
 
+## Runtime graphics regression
+
+`CARGO_BUILD_JOBS=8 nice -n 10 cargo test --locked -p tore-app
+ gpu_runtime_graphics_changes_keep_sun_and_spotting_valid -- --ignored
+ --nocapture --test-threads=1` (on one line) runs without a window or retail data.
+It uses the production world renderer with synthetic weather, terrain, a contact,
+buildings and a vegetation atlas, plus the authored vegetation pack. Validation
+is explicitly enabled. For RGBA and sRGB BGRA output it cycles Off, every
+supported 2x/4x/8x level, then Off, drawing main, mirror and sensor views between
+changes. The sun is in view, and the contact exercises the spotting pass.
+Scale, shadow quality, vegetation and ground detail change while the renderer
+and its caches remain alive; output sizes also change. An unavailable GPU is
+a failure, not a silent pass. The battery's `menus-window-graphics-runtime`
+scenario runs this test after a wrapped menu smoke test. Its family is
+`windowed-menus`, which already covers `menus-window-*`.
+
+The offscreen test does not exercise an OS swapchain or frame pacing.
+See the [runtime graphics audit](../baselines/runtime-graphics-2026-10-25.md)
+for the inspected dependencies and platform limits.
+
 ## Ground decal depth regression
 
 `CARGO_BUILD_JOBS=4 nice -n 10 cargo test --locked -p tore-app

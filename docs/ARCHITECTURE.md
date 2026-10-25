@@ -966,7 +966,11 @@ in view: after the world pass a one-workgroup compute pass
 eases the fraction per camera slot into a small storage buffer, and the
 composition reads it the same frame (no readback); points off the view take the
 share of five terrain rays (`lens_flare::terrain_clear`) that the whiteout also
-uses, and the world pass keeps its depth when a flare is drawn. Water's solar glint tests geometric light visibility
+uses, and the world pass keeps its depth when a flare is drawn. Runtime
+anti-aliasing changes rebuild the measurement pipeline against the new world
+depth layout, retaining its per-camera visibility buffer, timing and probe
+bindings. The [runtime graphics audit](baselines/runtime-graphics-2026-10-25.md)
+lists the other dependent resources. Water's solar glint tests geometric light visibility
 before adding reflected sunlight; ordinary water shadow tint is a separate
 operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 [water reflection](spec/ocean.md#separate-sun-and-environment-reflection-trial).
