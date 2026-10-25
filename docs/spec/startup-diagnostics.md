@@ -29,6 +29,78 @@ failure identifies the unfinished stage and the available error cause chain.
 Recoverable failures, including unavailable audio, remain recoverable warnings.
 No graphics or flight adapter selection changes as a side effect of logging.
 
+## Graphics session and slow frames
+
+**Opinionated**, requested by John on 2026-10-25. Rate limits, threshold,
+summary bins and phase boundaries are agent decisions. No simulation behavior,
+flight adapter or graphics adapter selection changes.
+
+Once the game renderer starts, one `Session system` record identifies the
+adapter name, vendor/device IDs, backend, device type, driver and driver info,
+surface format and present mode, window pixels and scale, logical CPU cores,
+OS/architecture, graphics options, frame limit and shared worker pool sizing.
+The pool is lazy: its configured worker count is not a claim that those threads
+are currently active. Changes to graphics/presentation are logged separately.
+A CPU adapter produces a software-rendering warning with driver and Windows
+High performance advice. An integrated adapter with an enumerated discrete GPU
+also warns. Enumeration does not establish that the other GPU can present to
+this window. Selection still uses the existing high-performance request.
+
+`--frame-log [MS]` enables slow-frame logging, with 50 ms when omitted.
+`TORE_FRAME_LOG=on` or a positive millisecond threshold enables it too; the
+command line overrides the environment. `off` or `0` disables it. Thresholds
+must be finite, greater than zero and no greater than 60000 ms. Escape > Debug
+> **Slow-frame log** toggles it for the session, starting at 50 ms. This local
+row works in joined games too. Like the other Debug settings it is not saved.
+The existing Back to defaults row still resets only the AI test settings.
+
+A completed presentation whose wall interval exceeds the threshold writes one
+`Slow frame` record, at most ten in a one-second window. The next completed
+frame after that window reports any suppressed slow frames. Every sixty
+seconds of presented frames there is a `Frame log minute` summary of all frames,
+including fast and suppressed frames: mean, maximum, percentile upper bounds
+and the five phases with the highest accumulated time (mean and maximum).
+The fixed histogram uses 0.25 ms bins through 1000 ms and powers of two above
+that, capped at 65536000 ms. Idle screens are not forced to redraw for logging;
+there is no timer wakeup just to print a summary.
+
+Wall time runs from the previous presentation's completion to this one's.
+The first frame starts at its accepted redraw, excluding startup. The
+`idle_event_ms` remainder before redraw includes pacing, event handling,
+focus throttling and OS scheduling. Network work there is charged to network
+instead. `unaccounted_ms` exposes remaining work, rather than assigning it to
+simulation or a wait without evidence. The CPU phase times are exclusive
+main-thread wall milliseconds: nested phases are subtracted from parents,
+and worker execution is included in the caller's wait, not summed CPU time.
+
+Phases cover local simulation ticks, network work, terrain chunk preparation
+and encoding, vegetation, cities/scenery, aircraft and stores, surface units,
+effects/smoke, sky/stars, HUD, cockpit/panels/mirrors, overlays/text, remaining
+render preparation, command encoding/finalization, queue submission, surface
+acquire and present, GPU-result polling/mapping and canvas uploads. Timed render
+work includes camera panels and mirrors.
+AI is inside the shared simulation/network step and explicitly marked as such;
+there is no separate AI figure or host-thread simulation figure. GPU time is
+asynchronous earlier submitted work, labeled `gpu_previous_ms`, or unavailable.
+It is not added to CPU phase times or presented as this frame's matching GPU
+sample. Acquire/present are host API wall times, not a pure GPU execution time.
+
+Counts use available CPU-side quantities across every camera drawn in the
+frame: local ticks, network prediction tick advancement (which can include clock corrections), visible terrain chunks, placed vegetation (before GPU
+culling), aircraft contacts, submitted surface vertices, routed surface units,
+effect/smoke instances, mirror/panel views and draw calls in the world, city,
+vegetation and effect passes. They are not unique objects across cameras.
+Terrain is submitted as spatial chunks, not texture tiles. GPU-indirect city
+and vegetation visibility is not read back for this log; placed instances and
+draw calls must not be described as exact visible objects. Context includes
+screen, view, theater, single-player/host/client role, focus and time scale.
+
+Disabled hooks return at a relaxed atomic flag check, before clock reads,
+thread-local access, counting, formatting or allocation. Enabled summaries use
+bounded memory. Existing GPU/FPS measurement and ordinary startup logs are
+independent of this switch. The normal session log retention and size cap
+below still apply.
+
 ## Files and retention
 
 Default log directories:

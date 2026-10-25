@@ -573,6 +573,7 @@ impl Renderer {
         origin: [f64; 3],
         size: [u32; 2],
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Vegetation);
         if self.repeat_frame && !self.suppressed {
             self.encode_cull(encoder);
             return;
@@ -953,6 +954,7 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         bind: &wgpu::BindGroup,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Vegetation);
         if !self.prepared || self.suppressed || self.trees_ft <= 0. || self.view.1 == 0 {
             return;
         }
@@ -962,11 +964,13 @@ impl Renderer {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_vertex_buffer(1, self.shadow_drawn.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::VegetationDraws, 1);
             pass.draw_indirect(&self.args, offset);
         });
     }
 
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, bind: &'a wgpu::BindGroup) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Vegetation);
         if !self.prepared {
             return;
         }
@@ -975,8 +979,10 @@ impl Renderer {
             pass.set_pipeline(&self.depth_pipeline);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_vertex_buffer(1, self.drawn.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::VegetationDraws, 1);
             pass.draw_indirect(&self.args, 0);
             pass.set_pipeline(&self.pipeline);
+            crate::frame_log::count(crate::frame_log::Count::VegetationDraws, 1);
             pass.draw_indirect(&self.args, 0);
         }
         if self.grass_suppressed {
@@ -989,6 +995,7 @@ impl Renderer {
             pass.set_pipeline(&self.grass_pipeline);
             pass.set_vertex_buffer(0, self.patches.slice(..));
             for (range, tufts) in &self.rings {
+                crate::frame_log::count(crate::frame_log::Count::VegetationDraws, 1);
                 pass.draw(0..tufts * 6, range.clone());
             }
         }

@@ -118,6 +118,14 @@ PNG, ZIP or PDF. The [control reference](docs/FLIGHT-CONTROLS.md) lists every ke
 **Escape > Control** remaps keys, gamepads, joysticks and head tracking
 ([controller setup](docs/INPUT.md)).
 
+For slow frame rates, turn on **Escape > Debug > Slow-frame log** during flight,
+play through the slowdown, then send that session's log. Logs are in
+`%LOCALAPPDATA%\T.O.R.E-Fighters\logs` on Windows,
+`~/Library/Logs/T.O.R.E-Fighters` on macOS, and
+`~/.local/state/T.O.R.E-Fighters/logs` on Linux (or under `$XDG_STATE_HOME`).
+[Slow-frame troubleshooting](docs/DEVELOPMENT.md#diagnosing-slow-frames) explains
+command-line options and software-renderer warnings.
+
 If the game does not start, it writes logs and a crash report that help us find
 out why. [Startup troubleshooting](docs/DEVELOPMENT.md#startup-logs-and-fatal-errors)
 says where to find them. Bugs and questions are welcome in

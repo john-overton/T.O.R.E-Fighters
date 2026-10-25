@@ -88,6 +88,7 @@ pub fn draw(
     aim: Option<&aim_box::Marks>,
     gun_key: bool,
 ) {
+    let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Hud);
     let s = frame.presented();
     let ro = &frame.readout;
     if target_cue {

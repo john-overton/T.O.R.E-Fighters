@@ -252,13 +252,19 @@ pub const STABILITY_LEVEL: &str = "Stability level";
 pub const DEBUG_TAB: &str = "Debug";
 pub const AI_OBSERVATION_RATE: &str = "AI observation rate";
 pub const LEAN_AI_SENSORS: &str = "Lean AI sensors";
+pub const FRAME_LOG: &str = "Slow-frame log";
 pub const DEBUG_DEFAULTS: &str = "Back to defaults";
 /// What a joined game's Debug rows say: the host's settings govern the AI.
 pub const AI_TEST_LOCKED: &str = "The host's AI test settings apply in a joined game";
 /// The Debug rows, in order.
-const DEBUG_ROWS: [&str; 3] = [AI_OBSERVATION_RATE, LEAN_AI_SENSORS, DEBUG_DEFAULTS];
+const DEBUG_ROWS: [&str; 4] = [
+    AI_OBSERVATION_RATE,
+    LEAN_AI_SENSORS,
+    DEBUG_DEFAULTS,
+    FRAME_LOG,
+];
 /// The rows a joined game dims.
-const AI_TEST_ROWS: [&str; 3] = DEBUG_ROWS;
+const AI_TEST_ROWS: [&str; 3] = [AI_OBSERVATION_RATE, LEAN_AI_SENSORS, DEBUG_DEFAULTS];
 /// The name an observation rate is shown by.
 pub fn observation_rate_name(hz: u32) -> &'static str {
     match hz {
@@ -454,6 +460,7 @@ fn turns_back(label: &str) -> bool {
             | "HUD colour"
             | AI_OBSERVATION_RATE
             | LEAN_AI_SENSORS
+            | FRAME_LOG
             | WEAPON_DIAGNOSTICS
             | DEBUG_PANELS
             | "HUD pitch ladder?"
@@ -593,6 +600,7 @@ impl FlightUi {
         }
         let mut cheats = self.cheats;
         let on = match label {
+            FRAME_LOG => crate::frame_log::enabled(),
             WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
             DEBUG_PANELS => self.debug_panels,
             _ if is_target_info(label) => self.target_info,
@@ -859,6 +867,15 @@ impl FlightUi {
             "Brighten HUD" => {
                 self.brightness = (self.brightness + 16).min(256);
                 self.message(format!("HUD {}/33", (self.brightness + 256) / 16 + 1));
+                Command::Click
+            }
+            FRAME_LOG => {
+                crate::frame_log::toggle();
+                self.message(if crate::frame_log::enabled() {
+                    "Slow-frame log: on (50 ms), send this session's log"
+                } else {
+                    "Slow-frame log: off"
+                });
                 Command::Click
             }
             AI_OBSERVATION_RATE | LEAN_AI_SENSORS | DEBUG_DEFAULTS => {
@@ -3006,5 +3023,10 @@ mod tests {
         assert!(menu.iter().any(|node| node.label == DEBUG_TAB));
         assert_eq!(session_refusal(AI_OBSERVATION_RATE), None);
         assert_eq!(session_refusal(LEAN_AI_SENSORS), None);
+        assert_eq!(session_refusal(FRAME_LOG), None);
+        let mut ui = FlightUi::default();
+        ui.lock_ai_test(true);
+        assert!(!ui.pause.dim.iter().any(|label| label == FRAME_LOG));
+        assert!(turns_back(FRAME_LOG));
     }
 }

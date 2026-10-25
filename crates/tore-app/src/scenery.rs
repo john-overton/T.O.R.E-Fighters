@@ -1035,6 +1035,7 @@ impl Scenery {
         &mut self,
         looks: BTreeMap<u32, surface_art::Look>,
     ) -> &Arc<StaticGeometry> {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Cities);
         if self
             .standing_geometry
             .as_ref()
@@ -1094,6 +1095,8 @@ impl Scenery {
         standing: &dyn Fn(u32) -> bool,
         camera: &Camera,
     ) -> Vec<f32> {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Surface);
+        crate::frame_log::count(crate::frame_log::Count::SurfaceUnits, picture.surface.len());
         self.surface.frame(
             picture,
             standing,
@@ -1110,6 +1113,7 @@ impl Scenery {
     /// Each fixed camera slot advances once per simulation tick, even if hidden.
     /// Slots have independent seeded presentation state; queries never consume RNG.
     pub fn step_view_weather(&mut self, terrain: &Terrain, camera: &Camera, speed_fps: f64) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Sky);
         let altitude = camera.position[1];
         let glare = self.glare_enabled();
         // The weather layer at the camera's altitude and the direction the
@@ -1192,6 +1196,7 @@ impl Scenery {
     /// Presentation only: resolves the palette for one camera altitude without
     /// advancing state, so mirrors and camera panels stay on the same instant.
     pub fn resolve_palette(&mut self, terrain: &Terrain, altitude_ft: f64) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Sky);
         let view = self.sample_view(terrain, altitude_ft, 0);
         self.palette = view.palette;
         self.fog_palette = view.fog_palette;
