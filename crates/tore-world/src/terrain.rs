@@ -490,6 +490,65 @@ impl SurfaceSite {
         Ok(surface)
     }
 
+    /// Read-only placement geometry for development audits. Uses the same
+    /// terrain classes, tile coverage and authored footprints as placement.
+    pub fn inspection_ground<'t>(
+        &self,
+        resources: &dyn ResourceSource,
+        theater: &'t Theater,
+    ) -> crate::surface::layout::Ground<'t> {
+        surface_ground(
+            theater,
+            &self.sources,
+            &mut type_infos(resources, &self.sources),
+        )
+    }
+
+    /// The completed airport scene's footprints, after airport replacement.
+    /// Terrain classes and texture coverage retain the placement query's rule.
+    pub fn inspection_scene_ground<'t>(
+        &self,
+        terrain: &'t Terrain,
+    ) -> crate::surface::layout::Ground<'t> {
+        use crate::surface::layout::{Footprint, Ground, Placed};
+        let placed = |object: &tore_sim::airport::StaticObject| {
+            let b = &object.bounds;
+            Placed {
+                id: object.id,
+                at: [b.center[0].round() as i64, b.center[2].round() as i64],
+                heading: b.heading.to_degrees().round() as i32,
+                footprint: Footprint {
+                    min: [-(b.half[0].ceil() as i64), -(b.half[2].ceil() as i64)],
+                    max: [b.half[0].ceil() as i64, b.half[2].ceil() as i64],
+                },
+            }
+        };
+        let (runways, objects): (Vec<_>, Vec<_>) = terrain
+            .airport_scene
+            .objects
+            .iter()
+            .filter(|o| {
+                o.runway || crate::surface::UnitId(o.id).range() == crate::surface::IdRange::Layout
+            })
+            .partition(|o| o.runway);
+        Ground::new(
+            &terrain.theater,
+            objects.into_iter().map(placed).collect(),
+            runways.into_iter().map(placed).collect(),
+            self.front(),
+        )
+        .with_tiles(self.sources.tiles.iter().copied())
+    }
+
+    /// A resource's footprint at its actual placed scale, for audits.
+    pub fn inspection_type(
+        &self,
+        resources: &dyn ResourceSource,
+        name: &str,
+    ) -> crate::surface::layout::TypeInfo {
+        placed_type_info(resources, &self.sources, name)
+    }
+
     /// The layout's front (the centroids of its Blue and Red placements).
     pub fn front(&self) -> Option<crate::surface::layout::Front> {
         layout_front(&self.sources.layout)
@@ -1299,6 +1358,7 @@ impl Terrain {
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
         };
         let mut sources = Placements::load(resources, code)?;
+        let original_front = layout_front(&sources.layout);
         self.surface = Self::resolve_surface(resources, &sources.layout, target, area)?;
         self.place_surface(resources, &sources, code);
         // The template's placements join before the redraw, which redraws
@@ -1614,6 +1674,14 @@ impl Terrain {
             anchor_points(found).all(|p| scene.runway_surface(p[0], p[2]).is_some())
         });
         self.airfield_anchors = anchors;
+        // Airport replacement can move target structures and parked aircraft.
+        // The mission must follow their final positions and actual runway centers.
+        self.surface.starts = crate::surface::layout::scene_starts(
+            &self.surface,
+            &self.theater,
+            &self.airport_scene,
+            original_front,
+        );
         // What the armed units fight with, read once from their records.
         let arsenal = crate::surface::fire::Arsenal::load(&self.surface, resources, &|x, z| {
             f64::from(self.height(x as f32, z as f32))

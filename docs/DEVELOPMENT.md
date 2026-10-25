@@ -1886,6 +1886,78 @@ of dome turn apart). Both read `TORE_DATA_DIR`, like `--blast-preview`
 
 ## Surface unit inspection
 
+### Quick Mission objective placement audit
+
+Run the complete CPU surface matrix against an isolated imported profile:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile python3 tools/objectives_audit.py --output .local/objective-audit --seeds 3 --supplemental
+```
+
+Build `tore-app` first with `cargo build --locked -p tore-app`. The runner does
+not build or open a window. The application can write its usual logs and city
+cache inside the selected profile. The runner retains every command's log,
+exit status and a complete `findings.tsv` table. Each table row names the theater,
+separation, template, both defense strengths, seed, object, position in feet and
+rule. Use a new output directory to preserve a previous run. Add `--theater UKR`
+(repeatable) to restrict theaters. `--fast --seeds 1` selects the first target, the first airport/strip target when different,
+and no-target area defenses in each theater, with the four matched strengths.
+The battery scenario `surface-objectives-audit` uses that subset in Ukraine and
+the Falklands. It expects the audit's nonzero exit for 242 known support-slope
+violations around the Falklands cargo template, requires each to have an explicit
+unresolved-placement report, and rejects stale objective anchors and new generated
+support violations. Passing this detector scenario does not mean those placements
+are valid. Equipment counts are preserved pending a fallback-policy decision.
+
+The underlying command is `--surface-dump --objectives [--seeds N] [--fast]
+[THEATER ...]`. The full matrix uses every offered non-empty template plus area
+defenses without a target, all sixteen AAA/SAM strength pairs, seeds 1 through
+N, and all eleven values from the game's separation list. Every case goes through
+the real surface resolver and placer, including the front line. Checks use the
+completed airport scene and its foundations. Identical object layouts reuse
+geometry checks only after comparing their complete placement inputs; starts
+are calculated for the current separation. `--uncached` rebuilds and checks every
+scene directly. The battery compares both modes' cases, findings and digests.
+The first distance repeats the raw placement for every strength pair, and the
+zero-defense scene for every template and seed, to check determinism. The table
+includes authored positions that older sweeps exempt.
+
+Checks cover map bounds, terrain class at the center and conservative footprint
+corners, the existing 256 ft cell-corner slope limit, rotated footprint overlap,
+route segments sampled every 250 ft, IDs and resolved template counts, missing
+layout additions, truck reach, the start/objective distances, final target
+centroids, shape-bottom clearance through shared grounding, ship waterlines and
+city-fill contact at unit centers. Horizontal
+footprint overlap is a review finding, not proof of solid-mesh collision: a road,
+bridge, airport assembly or hollow structure can intentionally share that area.
+The class query is the placement grid with texture coverage, not a pixel-by-pixel
+coastline. Route findings do not certify painted-road alignment or simulate
+turning, lanes and movement. Surface Y coordinates are authored offsets above
+support, not absolute world heights.
+
+Separation means Blue to Red, within 0.02 nm for integer rounding. Red can be
+5 nm from the target, so the objective-distance check allows 5.02 nm. A shortened
+long-distance start is reported even though the current specification permits it.
+Ground starts override separation. The command reports strict findings separately
+from placement-contract errors; it fails on the latter. Thus a zero exit status
+is not a claim that every row is clear.
+
+`--supplemental` also runs `--surface-dump --objective-starts` through the full
+mission builder with five exact F/A-18D aircraft in each of six wings, every
+listed target, distance and seed at 20,000 ft. It checks final aircraft bounds
+and terrain clearance, actual separation, CAP regions and intercept/escort
+references, and exercises Strike role assignment. Every available runway also
+runs the five-aircraft ground-layout checks, with both sides' automatic choices
+reported; refusals remain explicit in the log. It then runs the existing grounding-sites, airport,
+parked-aircraft and merged-airport audits. These supplemental geometry audits
+have their own sampling scopes and logs; they are not the full surface matrix.
+The measured results are in the [objective placement baseline](baselines/objectives-audit.md).
+No aircraft or surface AI is stepped by the new audit. Retail gameplay comparison
+is unavailable, and these checks do not establish retail parity.
+
+
+### Surface dumps and captures
+
 `--surface-dump` prints a theater's surface units as a mission resolves and
 places them ([surface defenses](spec/surface-defenses.md)): each unit's id,
 type, side, position, destroyed look and whether the scene can draw it (added

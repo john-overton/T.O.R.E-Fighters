@@ -195,6 +195,31 @@ SUBJECT = re.compile(r"^surface-trace: subject (0x[0-9a-f]+) (\S+) side (\d+)", 
 RADAR = re.compile(r"^surface-trace: radar (0x[0-9a-f]+)$", re.M)
 
 
+def objective_audit_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 2:
+        return ["expected cached and direct objective audit runs"]
+
+    def rows(text):
+        return [line for line in text.splitlines() if line.startswith(("objective-case:", "finding\t"))]
+
+    if rows(parts[0]) != rows(parts[1]):
+        return ["cached and direct objective audit cases/findings/digests differ"]
+    findings = [line.split("\t") for line in parts[0].splitlines() if line.startswith("finding\t")]
+    pending = {tuple(row[1:8]) for row in findings if row[-1].startswith("unresolved-support-placement:")}
+    bad = [row for row in findings if row[7].startswith(("0x580", "0x5c0")) and row[-1] in {
+        "land-on-water", "outside-map", "footprint-outside-map", "footprint-terrain-class", "slope-over-256ft-per-cell",
+    }]
+    # These authored neighborhoods have no valid support spot within the
+    # specified ring. Retain equipment pending John's placement-policy choice,
+    # but require every violation to be exposed, never silently accepted.
+    if len(bad) != 242 or any(row[1] != "LFA" or row[3] != "QLFCARG" or row[-1] != "slope-over-256ft-per-cell" for row in bad):
+        return ["unexpected generated-support violations (known LFA slope conflicts changed)"]
+    if any(tuple(row[1:8]) not in pending for row in bad):
+        return ["a generated-support violation was not explicitly reported as unresolved"]
+    return []
+
+
 def runs(output: str) -> list[str]:
     """The output of each run: the main command, then each `then` step."""
     return re.split(r"^\$ then \d+:.*$", output, flags=re.M)
@@ -1274,6 +1299,17 @@ def scenarios() -> list[Scenario]:
             notes=TRACE_NOTES + " The first area SAM unit (heavy SAM strength, no guns) drained at the start "
                   "rearms from its supply truck in 300 to 600 s; with the truck killed at once it does not "
                   "(nr-b23b).",
+        ),
+        Scenario(
+            name="surface-objectives-audit", lane="ai",
+            args=["--surface-dump", "--objectives", "--fast", "--seeds", "1", "LFA", "UKR"],
+            timeout=600,
+            expect_exit=1,
+            expect=[r"^objective-audit: cases 264 findings \d+ errors 242$"],
+            forbid=[r"^finding\t.*\t(?:objective-anchor-stale|nondeterministic|duplicate-id|object-count|missing-element|unavailable-grounding-geometry)"],
+            then=[Step(args=("--surface-dump", "--objectives", "--fast", "--seeds", "1", "LFA", "UKR", "--uncached"), timeout=600, expect_exit=1)],
+            check=objective_audit_problems,
+            notes="All eleven separations, four defense levels, fleet/shore, airport and area layouts. The audit intentionally fails on 242 known LFA support-slope checks; the scenario pins that remaining policy conflict, requires explicit fallback reports, rejects stale objective anchors and compares cached/direct output.",
         ),
         Scenario(
             name="surface-start-placement", lane="ai",
