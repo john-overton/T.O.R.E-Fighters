@@ -473,7 +473,7 @@ impl LoadoutSpec {
             let pod = tore_sim::combat::sight::DesignatorStore::parse(&name, bytes)?;
             base.load_designator(index, pod)?;
         }
-        base.normalize_saved_wing_pairs()?;
+        base.normalize_saved_store_pairs()?;
         Ok(base)
     }
 }
@@ -548,12 +548,12 @@ impl LoadoutSpec {
         // already obey the current pair rule, including its layout count.
         for (requested, actual) in self.stations.iter().zip(&load.configuration.stations) {
             if requested.count != actual.count {
-                return Err("Paired wing loadout capacity must match the current loadout.".into());
+                return Err("Loadout capacity must match the current loadout.".into());
             }
         }
         for (index, requested) in self.stations.iter().enumerate() {
             if !requested.weapon.ends_with(".SEE") && requested.quantity != load.quantities[index] {
-                return Err("Paired wing stores must be loaded in pairs within capacity.".into());
+                return Err("Store quantity must match the current loadout limits.".into());
             }
         }
         if let Some(tanks) = &self.tanks {
@@ -562,7 +562,7 @@ impl LoadoutSpec {
                     t.hardpoint == usize::from(requested.hardpoint)
                         && t.quantity != requested.quantity
                 }) {
-                    return Err("Paired wing tanks must be loaded in pairs within capacity.".into());
+                    return Err("Tank quantity must match the current loadout limits.".into());
                 }
             }
         }

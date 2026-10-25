@@ -229,7 +229,7 @@ do not prove absence across the executable. Next research step: trace the
 flight consumers of the row quantities and `HARDStoreWeight`, specifically
 any lateral-offset multiplication feeding roll or yaw. T.O.R.E currently
 uses aggregate payload mass and aggregate load drag, with no store-CG term.
-The [even-wing-load contract](../spec/stores-on-pylons.md#even-wing-loads)
+The [even-paired-load contract](../spec/stores-on-pylons.md#even-paired-loads)
 is explicitly opinionated and does not depend on closing that research.
 
 ## Quantity, weight and pod follow-up

@@ -483,8 +483,8 @@ impl Ordnance {
             return self.edit_loadout(|load| {
                 if one {
                     let capacity = load.capacity(slot, &load.configuration.stations[slot].weapon);
-                    // One store, or one pair on a paired wing station.
-                    let step = load.wing_pairs(slot).step(1);
+                    // One store, or one pair on a paired station.
+                    let step = load.store_pairs(slot).step(1);
                     if direction > 0 && i32::from(load.quantities[slot]) + step <= capacity {
                         load.quantities[slot] += step as u16;
                     }
@@ -1999,14 +1999,11 @@ pub fn validate_tanks(
     {
         return Err("F14 tank probe source differs from the reviewed 2 x F250 contract".into());
     }
-    for quantity in 0..=2 {
+    for quantity in [0, 2] {
         let mut draft = standard.clone();
         draft.clear_tanks()?;
         if quantity > 0 {
             draft.select_tank(slot, store.clone())?;
-            for _ in quantity..2 {
-                draft.change_tank(slot, -1)?;
-            }
         }
         draft.validate()?;
         let accepted = LoadoutSpec::of(&draft);
@@ -2033,6 +2030,35 @@ pub fn validate_tanks(
             draft.total_lbs()
         );
     }
+    let mut edited = standard.clone();
+    edited.change_tank(slot, -1)?;
+    if edited.configuration.tanks[slot].quantity != 0 {
+        return Err("F14 tank minus must remove the pair".into());
+    }
+    edited.change_tank(slot, 1)?;
+    if edited.configuration.tanks[slot].quantity != 2 {
+        return Err("F14 tank plus must restore the pair".into());
+    }
+    let mut single = LoadoutSpec::of(&standard);
+    single
+        .tanks
+        .as_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|tank| tank.hardpoint == 5)
+        .unwrap()
+        .quantity = 1;
+    let migrated = single.apply(standard.clone(), data, None)?;
+    migrated.validate()?;
+    if migrated.configuration.tanks[slot].quantity != 2
+        || migrated.external_fuel_lbs() != 3300.
+        || migrated.tank_shell_lbs() != 396.
+    {
+        return Err("F14 saved single tank did not become the full pair".into());
+    }
+    println!(
+        "F14 saved single tank: 1 to 2, external 3300 shells 396; pair editing and migration passed"
+    );
     let mut fuel = tore_sim::aircraft_systems::Fuel::new(standard.configuration.external_fuel_lbs);
     let mut internal = standard.fuel_lbs;
     fuel.consume(&mut internal, 3300.);
@@ -3766,21 +3792,56 @@ mod tests {
         assert_eq!(ui.loadout.quantities, [4, 0, 499]);
     }
     #[test]
-    fn loaded_station_click_adds_a_whole_pair_on_a_paired_wing_station() {
+    fn loaded_station_click_adds_a_whole_pair_on_every_two_sided_carrier() {
+        for location in [
+            4,
+            5,
+            1,
+            tore_sim::combat::hardpoints::TUNNEL_BYTE,
+            tore_sim::combat::hardpoints::MAGAZINE_BYTE,
+        ] {
+            let mut ui = fixture();
+            let station = &mut ui.loadout.configuration.stations[0];
+            station.rack = tore_sim::combat::hardpoints::Rack {
+                location,
+                paired: true,
+                ..Default::default()
+            };
+            station.mount = [8., -2., 0.];
+            assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+            drag(&mut ui, (500., 145.), (500., 145.));
+            assert_eq!(ui.loadout.quantities, [4, 0, 500]);
+            drag(&mut ui, (500., 145.), (500., 145.));
+            assert_eq!(ui.loadout.quantities, [4, 0, 500], "never past capacity");
+            ui.loadout.validate().unwrap();
+        }
+    }
+    #[test]
+    fn a_saved_single_restores_as_an_overweight_pair_until_the_player_adjusts_it() {
         let mut ui = fixture();
         let station = &mut ui.loadout.configuration.stations[0];
-        station.rack = tore_sim::combat::hardpoints::Rack {
-            location: 4,
-            paired: true,
-            ..Default::default()
-        };
-        station.mount = [8., -2., 0.];
-        assert_eq!(ui.loadout.quantities, [2, 0, 500]);
-        drag(&mut ui, (500., 145.), (500., 145.));
-        assert_eq!(ui.loadout.quantities, [4, 0, 500]);
-        drag(&mut ui, (500., 145.), (500., 145.));
-        assert_eq!(ui.loadout.quantities, [4, 0, 500], "never past capacity");
-        ui.loadout.validate().unwrap();
+        station.rack.location = 1;
+        station.rack.paired = true;
+        station.mount = [3., -2., 0.];
+        ui.loadout.quantities[0] = 1;
+        let weight = f64::from(station.weapon.weight);
+        assert!(weight > 0.);
+        ui.loadout.maximum_lbs = ui.loadout.total_lbs() + weight / 2.;
+        let saved = tore_world::mission::LoadoutSpec::of(&ui.loadout);
+        let restored = saved
+            .apply(ui.loadout.clone(), &BTreeMap::new(), None)
+            .unwrap();
+        restored.validate_for_editing().unwrap();
+        assert_eq!(restored.quantities[0], 2);
+        assert!(restored.total_lbs() > restored.maximum_lbs);
+        ui.loadout = restored;
+        assert_eq!(ui.activate(7), Action::Click);
+        assert_eq!(
+            ui.message.as_deref(),
+            Some("This plane is too heavy to take off. Remove stores or fuel.")
+        );
+        ui.loadout.change(0, -1);
+        assert_eq!(ui.activate(7), Action::MissionFly);
     }
     #[test]
     fn ordnance_sounds_follow_successful_edits_and_not_failed_or_empty_actions() {

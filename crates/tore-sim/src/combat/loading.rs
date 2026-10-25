@@ -6,22 +6,15 @@ use tore_formats::{
     weapons::{Countermeasures, Tank, Weapon},
 };
 
-/// T.O.R.E's physical wing-pair policy, applied after retail compatibility
+/// T.O.R.E's physical store-pair policy, applied after retail compatibility
 /// and weight arithmetic. Source records remain unchanged. John, 2026-10-25:
-/// odd maxima above one round down; one becomes two, one on each wing.
+/// odd maxima above one round down; one becomes two, one on each side.
 #[derive(Clone, Copy, Debug)]
-pub struct WingPairs(bool);
+pub struct StorePairs(bool);
 
-impl WingPairs {
+impl StorePairs {
     pub fn of(rack: super::hardpoints::Rack, mount: crate::attitude::Vector) -> Self {
-        use super::hardpoints::Location;
-        Self(
-            rack.two_sided(mount)
-                && matches!(
-                    rack.location(),
-                    Location::Wing | Location::Wingtip | Location::Shoulder | Location::Separate
-                ),
-        )
+        Self(rack.two_sided(mount))
     }
 
     pub fn maximum(self, count: i32) -> i32 {
@@ -32,11 +25,11 @@ impl WingPairs {
         }
     }
 
-    /// Old saved quantities only lose stores; migration never adds weight.
+    /// Preserve a saved single as a pair; larger odd quantities round down.
+    /// Aircraft takeoff weight is checked after migration, not by this rule.
     pub fn saved_quantity(self, count: u16, maximum: i32) -> u16 {
         if self.0 {
-            let count = i32::from(count).min(maximum.max(0));
-            (count - count % 2) as u16
+            self.maximum(i32::from(count)).min(maximum.max(0)) as u16
         } else {
             count
         }
@@ -189,7 +182,7 @@ mod tests {
     use crate::combat::hardpoints::{Location, Rack};
 
     #[test]
-    fn wing_pair_maxima_and_saved_quantities_keep_single_stations_unchanged() {
+    fn store_pair_maxima_and_saved_quantities_keep_single_stations_unchanged() {
         for (location, paired, mount, applies) in [
             (Location::Wing, true, [8., -2., 0.], true),
             (Location::Wingtip, true, [20., 0., 0.], true),
@@ -198,10 +191,14 @@ mod tests {
             (Location::Wing, false, [8., -2., 0.], false),
             (Location::Wing, true, [0., -2., 0.], false),
             (Location::Centerline, false, [0., -2., 0.], false),
-            (Location::Fuselage, true, [3., -2., 0.], false),
-            (Location::Magazine, true, [3., -2., 0.], false),
+            (Location::Fuselage, true, [3., -2., 0.], true),
+            (Location::Magazine, true, [3., -2., 0.], true),
+            (Location::InternalBay, true, [3., -2., 0.], true),
+            (Location::Tunnel, true, [3., -2., 0.], true),
+            (Location::Tunnel, true, [0., -2., 0.], false),
+            (Location::Fuselage, false, [3., -2., 0.], false),
         ] {
-            let rule = WingPairs::of(
+            let rule = StorePairs::of(
                 Rack {
                     location: location.byte(),
                     paired,
@@ -223,58 +220,64 @@ mod tests {
                 assert_eq!(rule.step(1), if applies { 2 } else { 1 });
                 assert_eq!(
                     rule.saved_quantity(old as u16, new),
-                    if applies {
-                        (old.min(new) / 2 * 2) as u16
-                    } else {
-                        old as u16
-                    }
+                    if applies { new as u16 } else { old as u16 }
                 );
             }
         }
     }
 
     #[test]
-    fn even_wing_loads_have_equal_mass_zero_lateral_moment_and_balanced_release() {
-        let rack = Rack {
-            location: 4,
-            paired: true,
-            ..Rack::default()
-        };
-        let size = crate::combat::store_sizes::StoreSize::body([8., 1.]);
-        // Single odd maximum, two odd maxima, mixed even/odd, plus centreline.
-        for counts in [vec![3], vec![3, 3], vec![4, 5, 1]] {
-            let mut moment = 0.;
-            let mut mass = [0.; 2];
-            for (row, old) in counts.into_iter().enumerate() {
-                let mount = [8. + row as f64 * 4., -2., 0.];
-                let count = WingPairs::of(rack, mount).maximum(old) as u16;
-                let sides = rack.sides(mount, count);
-                assert_eq!(sides[0], sides[1]);
-                for side in 0..2 {
-                    for slot in 0..sides[side] {
-                        mass[side] += 300.;
-                        moment += 300. * rack.store_point(mount, count, side, slot, size)[0];
+    fn even_paired_loads_have_equal_mass_zero_lateral_moment_and_balanced_release() {
+        for location in [
+            Location::Wing,
+            Location::Wingtip,
+            Location::Fuselage,
+            Location::Tunnel,
+            Location::Magazine,
+            Location::InternalBay,
+        ] {
+            let rack = Rack {
+                location: location.byte(),
+                paired: true,
+                ..Rack::default()
+            };
+            let size = crate::combat::store_sizes::StoreSize::body([8., 1.]);
+            // Single odd maximum, two odd maxima, mixed even/odd, plus centreline.
+            for counts in [vec![3], vec![3, 3], vec![4, 5, 1]] {
+                let mut moment = 0.;
+                let mut mass = [0.; 2];
+                for (row, old) in counts.into_iter().enumerate() {
+                    let mount = [8. + row as f64 * 4., -2., 0.];
+                    let count = StorePairs::of(rack, mount).maximum(old) as u16;
+                    let sides = rack.sides(mount, count);
+                    assert_eq!(sides[0], sides[1]);
+                    for side in 0..2 {
+                        for slot in 0..sides[side] {
+                            mass[side] += 300.;
+                            moment += 300. * rack.store_point(mount, count, side, slot, size)[0];
+                        }
+                    }
+                    for remaining in (1..=count).rev() {
+                        let before = rack.sides(mount, remaining);
+                        let side = usize::from(
+                            rack.release_mount(mount, u32::from(remaining - 1))[0] < 0.,
+                        );
+                        assert!(
+                            before[side] >= before[1 - side],
+                            "fire the heavier side, left on a tie"
+                        );
+                        let after = rack.sides(mount, remaining - 1);
+                        assert_eq!(before[side], after[side] + 1);
+                        assert_eq!(before[1 - side], after[1 - side]);
+                        assert!(after[0].abs_diff(after[1]) <= 1);
                     }
                 }
-                for remaining in (1..=count).rev() {
-                    let before = rack.sides(mount, remaining);
-                    let side =
-                        usize::from(rack.release_mount(mount, u32::from(remaining - 1))[0] < 0.);
-                    assert!(
-                        before[side] >= before[1 - side],
-                        "fire the heavier side, left on a tie"
-                    );
-                    let after = rack.sides(mount, remaining - 1);
-                    assert_eq!(before[side], after[side] + 1);
-                    assert_eq!(before[1 - side], after[1 - side]);
-                    assert!(after[0].abs_diff(after[1]) <= 1);
-                }
+                // A centreline store adds mass, but no lateral moment.
+                let center = Rack::default();
+                assert_eq!(StorePairs::of(center, [0.; 3]).maximum(3), 3);
+                assert_eq!(mass[0], mass[1]);
+                assert!(moment.abs() < 1e-9);
             }
-            // A centreline store adds mass, but no lateral moment.
-            let center = Rack::default();
-            assert_eq!(WingPairs::of(center, [0.; 3]).maximum(3), 3);
-            assert_eq!(mass[0], mass[1]);
-            assert!(moment.abs() < 1e-9);
         }
     }
     #[test]

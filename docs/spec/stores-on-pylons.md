@@ -27,59 +27,64 @@ closer together in the tunnel with the front pair back where the tanks
 hung, and the AIM-120 under the glove pylon beside the AIM-9 on its
 shoulder rail ([the F-14](#the-f-14)).
 
-## Even wing loads
+## Even paired loads
 
-**Opinionated, requested by John on 2026-10-25 (issue #6).** A physical
-left/right wing point loads complete pairs. After the existing compatibility
-and weight calculation, a positive odd maximum above 1 rounds down (3 to 2,
-5 to 4); a maximum of 1 becomes 2. Zero remains zero. Wing, wingtip,
-shoulder-rail and separate-underwing pairs use this rule. Centreline,
-unpaired, fuselage and internal-bay points keep their existing capacities.
-The classification uses the resolved carrier, so the A-4E row moved to the
-centreline stays a single point. Original PT/JT records are not rewritten.
+**Opinionated, requested by John on 2026-10-25 (issue #6), expanded by his
+review follow-up.** Every point that carries stores on both sides of the
+aircraft loads complete pairs. This includes wings, wingtips, shoulder rails,
+fuselage pairs, tunnel pairs and paired internal bays, even while bay doors
+hide their stores. Use the resolved carrier's pairing and nonzero lateral
+position, the same `Rack::two_sided` predicate as drawing and release.
+Centreline and genuinely single-sided points keep their counts. Original
+PT/JT records are not rewritten.
 
-Loading, unloading and moving weapons or tanks between wing points steps by
-2. Moving between a pair and a single point also moves 2, or nothing when
-either end cannot supply or accept a pair. A fresh default load uses the
-same even-count conversion for human and AI aircraft. AI tactics do not change.
-Designator equipment and gun-pod single installations retain their separate
-existing equipment rules.
+After existing compatibility and weight arithmetic, a positive odd maximum
+above 1 rounds down (3 to 2, 5 to 4); a maximum of 1 becomes 2. Zero stays
+zero. Quantity editing, including clicking a loaded station, steps by 2.
+Moving between a pair and a single point also moves 2, or nothing if either
+end cannot supply or accept a pair. The same conversion builds human and
+AI default loads; AI tactics do not change. Existing singleton designator
+and gun-pod equipment paths keep their separate rules.
 
-The one-to-two case is an explicit minimum-pair exception to a source row's
-weight-derived maximum: two stores can exceed that row's old weight class.
-Their full weight and tank fuel are counted. The aircraft's maximum takeoff
-weight remains enforced; a heavy pair may require removing fuel or other
-stores. This exception implements John's requested maximum of 2, rather than
-silently making the store unavailable. Other positive odd weight-limited
-maxima round down, after the weight calculation.
+A maximum of one becoming two is an explicit minimum-pair exception to the
+old row weight class. Both stores' full weight, including tank fuel, counts
+toward aircraft takeoff weight. This can require removing other stores or
+fuel. All other odd maxima round down after the weight calculation.
 
-Saved preflight loads migrate when applied: paired layout capacities convert
-to the new even maximum and clamp to the current capacity; quantities clamp
-to capacity and round down to even (3 becomes 2, 1 becomes 0). Empty loads stay
-empty. Migration never adds stores or weight. Current multiplayer loadout
-requests must already use valid even capacities and quantities; old odd
-requests are rejected. In-flight ammunition, checkpoints and recorded replay
-layouts are not migrated: firing one store can legitimately leave an odd count.
+**Saved preflight loads:** a saved single on a paired point becomes a pair
+(1 to 2), as John requested. Larger odd quantities round down (3 to 2).
+Clamp to the current maximum; zero stays zero. Layout maxima use the same
+rule. A saved single is not silently removed to avoid overweight.
 
-Each loaded pair has equal left/right counts, mass and mirrored store positions.
-The existing release rule remains left, right, left, right for a selected
-point, returning it to symmetry every two shots. After the left store leaves,
-the right is heavier and fires next. Jettison removes the actual remaining
-stores. The aircraft flight adapter uses total payload mass and a total
-load-dependent drag term; it has no lateral store-CG or per-wing drag torque.
-No new asymmetric flight model is introduced by this loadout rule.
+Quick Mission restores a structurally valid migrated load into the editor
+even if overweight. The existing weight display shows the excess. Fly refuses
+with `This plane is too heavy to take off. Remove stores or fuel.` until the
+player changes stores or fuel. Invalid records still fall back to the normal
+load. Non-interactive single-player mission construction also applies the
+migration, then refuses an overweight start with that same error through
+`Combat::with_loadout`. It does not drop the pair, reduce fuel, substitute a
+default load or begin simulation. Network requests must already obey current
+counts and aircraft weight limits; old odd requests are refused. A generic
+layout or quantity mismatch is reported without attributing it to pairing.
 
-Retail has aggregate source-row capacities and a per-row alternating release
-offset. That evidence does not assign its odd maximum to a rendered wing:
-John confirms retail drew neither these pylons nor their loaded stores.
-T.O.R.E's former visible odd-extra pile-up came from applying its own
-right-extra layout independently to every row. Keeping retail eligibility
-while requiring even loads is a deliberate departure from retail's quantity
-selection, not a correction to the source data. The evidence and remaining
-unknowns are in [the source-row research](../formats/aircraft-ordnance.md#paired-point-counts-and-physics).
+In-flight ammunition, checkpoints and recorded store layouts are not
+migrated: firing one store legitimately leaves an odd count. Each even load
+starts with equal side counts and mass at mirrored positions. The existing
+release rule remains left, right, left, right for the selected point, so the
+heavier remaining side of that point fires next after its first shot.
+Jettison removes actual remaining stores. The flight adapter still uses total
+payload mass and total load-dependent drag; no lateral store-CG or per-side
+drag torque model is introduced.
 
-The [roster validation](../baselines/even-wing-loads.md) lists every changed
-aircraft, row and store maximum, including setup-only definitions.
+Retail has aggregate source-row capacities and an alternating per-row release
+offset. John confirms it did not draw these pylons and loaded stores.
+T.O.R.E's old right-extra layout independently applied to every row caused
+the visible pile-up. Even preflight loads are a deliberate departure from
+retail quantity editing, not a correction to the original records.
+[Source-row research](../formats/aircraft-ordnance.md#paired-point-counts-and-physics)
+owns that evidence and its limitations. The
+[roster validation](../baselines/even-paired-loads.md) lists every changed
+maximum and reports the default-load audit.
 
 ## What the player sees
 

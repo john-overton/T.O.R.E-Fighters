@@ -1198,13 +1198,13 @@ impl Configuration {
             }
         }
         // Shared by human and AI default loads. Keep source records intact;
-        // only the physical T.O.R.E wing carriers load whole pairs.
+        // every physical two-sided carrier loads whole pairs.
         for station in &mut self.stations {
-            let policy = super::loading::WingPairs::of(station.rack, station.mount);
+            let policy = super::loading::StorePairs::of(station.rack, station.mount);
             station.count = policy.maximum(i32::from(station.count)) as u16;
         }
         for tank in &mut self.tanks {
-            let quantity = super::loading::WingPairs::of(tank.rack, tank.mount)
+            let quantity = super::loading::StorePairs::of(tank.rack, tank.mount)
                 .maximum(i32::from(tank.quantity)) as u16;
             changed |= quantity != tank.quantity;
             tank.quantity = quantity;
@@ -9227,7 +9227,7 @@ mod tests {
         assert_eq!(s.targets[0].localized_damage.structural_section, None);
     }
     #[test]
-    fn wing_pair_loadout_steps_migration_mass_and_weight_limits() {
+    fn store_pair_loadout_steps_migration_mass_and_weight_limits() {
         use crate::combat::{hardpoints::Rack, loadout::Loadout};
         use tore_formats::aircraft::Hardpoint;
         let mut configuration = fixture(true).own().configuration().clone();
@@ -9267,7 +9267,7 @@ mod tests {
             hardpoints: vec![h.clone(), h],
         };
         let weapon = load.configuration.stations[0].weapon.clone();
-        assert_eq!(load.capacity_before_wing_pairs(0, &weapon), 3);
+        assert_eq!(load.capacity_before_store_pairs(0, &weapon), 3);
         assert_eq!(load.capacity(0, &weapon), 2);
         load.select(0, weapon.clone()).unwrap();
         assert_eq!(load.quantities, [2, 0]);
@@ -9284,16 +9284,17 @@ mod tests {
         load.quantities[0] = 1;
         assert!(load.validate().is_err());
         load.configuration.stations[0].count = 3;
-        load.normalize_saved_wing_pairs().unwrap();
-        assert_eq!(load.quantities, [0, 2]);
+        load.normalize_saved_store_pairs().unwrap();
+        assert_eq!(load.quantities, [2, 2]);
         assert_eq!(load.configuration.stations[0].count, 2);
         // The requested minimum pair can exceed the old row weight class,
         // but never bypasses aircraft takeoff weight validation.
         load.hardpoints[0].weight_class = 5;
-        assert_eq!(load.capacity_before_wing_pairs(0, &weapon), 1);
+        assert_eq!(load.capacity_before_store_pairs(0, &weapon), 1);
         assert_eq!(load.capacity(0, &weapon), 2);
         load.select(0, weapon).unwrap();
         load.maximum_lbs = 11000.;
+        load.validate_for_editing().unwrap();
         assert!(
             load.validate()
                 .unwrap_err()

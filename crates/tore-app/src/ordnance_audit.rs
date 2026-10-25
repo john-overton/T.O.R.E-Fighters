@@ -13,7 +13,7 @@ use tore_sim::combat::{
 };
 use tore_world::mission::{LoadoutSpec, MissionSpec};
 
-mod wing_pairs;
+mod store_pairs;
 
 /// What the audit must find: a short count of anything fails the run, so a
 /// partial import cannot pass with fewer checks. Raise these on purpose, and
@@ -136,7 +136,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("ordnance audit missing {name}")))
         })?;
-        wing_pairs::audit(&standard, &aircraft, data)?;
+        store_pairs::audit(&standard, &aircraft, data)?;
         extra_stations(&standard, &aircraft, data)?;
         let rows = standard.editable_stations();
         if !rows
@@ -171,7 +171,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 0
             };
             if source.store.as_deref() != Some(station.weapon.source.as_str())
-                || loading::WingPairs::of(station.rack, station.mount).maximum(count)
+                || loading::StorePairs::of(station.rack, station.mount).maximum(count)
                     != i32::from(station.count)
             {
                 return Err(format!("{} default weapon or quantity changed", id.pt()).into());
@@ -185,11 +185,8 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 .filter(|name| name.ends_with(".GAS"));
             if tank.store.as_ref().map(|s| s.source.as_str()) != default
                 || i32::from(tank.quantity)
-                    != loading::WingPairs::of(tank.rack, tank.mount).maximum(if default.is_some() {
-                        source.count
-                    } else {
-                        0
-                    })
+                    != loading::StorePairs::of(tank.rack, tank.mount)
+                        .maximum(if default.is_some() { source.count } else { 0 })
             {
                 return Err(format!("{} default tank or quantity changed", id.pt()).into());
             }
@@ -327,7 +324,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                             weapon.source
                         )
                     })?;
-                let expected = standard.wing_pairs(slot).maximum(expected);
+                let expected = standard.store_pairs(slot).maximum(expected);
                 if standard.capacity(slot, weapon) != expected {
                     return Err(format!(
                         "{} source station {} capacity differs for {}",
@@ -361,7 +358,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                         .and_then(|r| r.weapon)
                     {
                         let mut overlap = draft.clone();
-                        overlap.quantities[weapon] = overlap.wing_pairs(weapon).step(1) as u16;
+                        overlap.quantities[weapon] = overlap.store_pairs(weapon).step(1) as u16;
                         overlap.refresh_equipment()?;
                         if !overlap
                             .validate()
@@ -459,7 +456,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             .cloned()
             .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
     })?;
-    wing_pairs::audit(&load, &concept, data)?;
+    store_pairs::audit(&load, &concept, data)?;
     Ok(())
 }
 
@@ -526,6 +523,16 @@ fn check_pods(
                 return Err(format!("{pt} station {slot} did not take {}", pod.source).into());
             }
             assert_roundtrip(&draft, standard, aircraft, data)?;
+            let mut malformed = LoadoutSpec::of(&draft);
+            malformed.stations[slot].count = malformed.stations[slot].count.saturating_add(2);
+            let error = malformed
+                .check_for_plane(aircraft, data, false)
+                .err()
+                .ok_or("malformed designator layout accepted")?
+                .to_string();
+            if error != "Loadout capacity must match the current loadout." {
+                return Err(format!("non-pairing loadout error differs: {error}").into());
+            }
             // A weapon taking the station back removes the pod.
             let weapon = draft.configuration.stations[slot].weapon.clone();
             let mut back = draft.clone();
@@ -606,7 +613,7 @@ fn check_novelty(standard: &Loadout, novelty: &[Weapon], pt: &str) -> AppResult<
             draft.fuel_lbs = 0.;
             for index in 0..draft.quantities.len() {
                 draft.quantities[index] =
-                    draft.quantities[index].min(draft.wing_pairs(index).step(1) as u16);
+                    draft.quantities[index].min(draft.store_pairs(index).step(1) as u16);
             }
             draft.refresh_equipment()?;
             draft.validate()?;
@@ -1020,7 +1027,7 @@ fn gun_pod_row(
 
 /// The F-16C wingtip pair (stations 1 and 9) takes the AIM-120 as well as the
 /// AIM-9, one a tip. Other supported weapons keep source compatibility and
-/// weight arithmetic followed by the shared wing-pair policy. The AIM-120
+/// weight arithmetic followed by the shared store-pair policy. The AIM-120
 /// loads, saves, restores and leaves like any other store.
 fn check_f16_tip(
     standard: &Loadout,
@@ -1057,7 +1064,7 @@ fn check_f16_tip(
             expected
         };
         let capacity = standard.capacity(slot, &weapon);
-        let expected = standard.wing_pairs(slot).maximum(expected);
+        let expected = standard.store_pairs(slot).maximum(expected);
         if capacity != expected {
             return Err(
                 format!("F-16C wingtip {name}: capacity {capacity}, expected {expected}").into(),
@@ -1159,7 +1166,7 @@ fn check_f16_tip(
                     h.store.as_deref() == Some("AIM120.JT"),
                 )
                 .max(0);
-            if standard.capacity(other, &amraam) != standard.wing_pairs(other).maximum(want) {
+            if standard.capacity(other, &amraam) != standard.store_pairs(other).maximum(want) {
                 return Err(format!("F-16C row {row} AIM-120 capacity changed").into());
             }
         }
@@ -1209,12 +1216,12 @@ fn assert_roundtrip(
     let mut light = restored;
     light.fuel_lbs = 0.;
     for slot in 0..light.quantities.len() {
-        light.quantities[slot] = light.quantities[slot].min(light.wing_pairs(slot).step(1) as u16);
+        light.quantities[slot] = light.quantities[slot].min(light.store_pairs(slot).step(1) as u16);
     }
     for tank in &mut light.configuration.tanks {
         tank.quantity = tank
             .quantity
-            .min(loading::WingPairs::of(tank.rack, tank.mount).step(1) as u16);
+            .min(loading::StorePairs::of(tank.rack, tank.mount).step(1) as u16);
     }
     light.refresh_equipment()?;
     light.validate()?;

@@ -25,7 +25,7 @@ unsupported contact; ordinary free flight has working authored ground contact.
 This is separate from legacy and hybrid.
 [Acceptance and limits](baselines/native-live-flight.md).
 
-Store loading follows the [even-wing-load contract](spec/stores-on-pylons.md#even-wing-loads).
+Store loading follows the [even-paired-load contract](spec/stores-on-pylons.md#even-paired-loads).
 Its rounded quantities feed the existing total payload mass and load-dependent
 drag. There is no per-wing store drag torque or lateral store-CG model; paired
 loads start with equal masses at mirrored positions.

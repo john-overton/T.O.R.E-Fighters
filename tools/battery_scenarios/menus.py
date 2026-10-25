@@ -463,17 +463,21 @@ def scenarios() -> list[Scenario]:
     ))
     out.append(
         Scenario(
-            name="menus-ordnance-wing-pairs",
+            name="menus-ordnance-store-pairs",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
             expect=[
-                r"wing-pair maximum: F18.PT row=6 AGM84A.JT 3->2",
-                r"wing-pair maximum: F18.PT row=7 AGM84A.JT 3->2",
-                r"wing-pair maximum: F18.PT row=7 AS16.JT 1->2",
-                r"wing-pair audit: F16C.PT defaults, maxima, steps, saved loads and lobby checked",
+                r"store-pair maximum: F18.PT row=5 AGM84A.JT 1->2",
+                r"store-pair maximum: F15.PT row=4 MK84.JT 3->2",
+                r"store-pair maximum: F22.PT row=7 MICA.JT 3->2",
+                r"store-pair overweight save: .*non-interactive start refused with existing weight message",
+                r"store-pair maximum: F18.PT row=6 AGM84A.JT 3->2",
+                r"store-pair maximum: F18.PT row=7 AGM84A.JT 3->2",
+                r"store-pair maximum: F18.PT row=7 AS16.JT 1->2",
+                r"store-pair audit: F16C.PT defaults, maxima, steps, saved loads and lobby checked",
                 r"ordnance audit: .* passed",
             ],
-            notes="Issue 6: complete imported roster of even wing maxima, pair-sized edits, human/AI defaults, old odd save migration and strict lobby validation. Includes Harpoon 3 to 2 and Kickback 1 to 2.",
+            notes="Issue 6: complete imported roster of even paired maxima, pair-sized edits, human/AI defaults, old odd save migration and strict lobby validation. Includes Harpoon 3 to 2 and Kickback 1 to 2.",
         )
     )
     out.append(
@@ -492,11 +496,11 @@ def scenarios() -> list[Scenario]:
             args=["--validate-tanks", "--aircraft", "f14", "--no-audio"],
             expect=[
                 r"F14 tank selection 0: internal 15741 external 0 shells 0 .*restart passed",
-                r"F14 tank selection 1: internal 15741 external 1650 shells 198 .*restart passed",
+                r"F14 saved single tank: 1 to 2, external 3300 shells 396; pair editing and migration passed",
                 r"F14 tank selection 2: internal 15741 external 3300 shells 396 .*restart passed",
                 r"F14 tanks: full selection, removal, empty shells, old defaults and accepted restart passed",
             ],
-            notes="Source F14 GAS quantities, mass, removal and accepted-load restart without a display.",
+            notes="F14 tank pairs: 0 or 2, full mass and fuel, pair-sized editing, old single migration and accepted-load restart without a display.",
         )
     )
     out.append(

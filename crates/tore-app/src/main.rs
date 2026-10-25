@@ -3404,12 +3404,16 @@ impl App {
                         let mut load =
                             tore_sim::combat::loadout::Loadout::new(&self.hornet.profile, read)?;
                         if let quick_mission::loadout_memory::Choice::Remembered(spec) = &choice {
-                            // A saved load the aircraft or the import no
-                            // longer fits falls back to the standard load.
+                            // Keep valid overweight loads open for adjustment;
+                            // Fly still enforces the takeoff-weight limit.
+                            // Invalid records fall back to the standard load.
                             match spec
                                 .apply(load.clone(), &*self.theater_resources, None)
-                                .and_then(|kept| kept.validate().map_err(Into::into).map(|()| kept))
-                            {
+                                .and_then(|kept| {
+                                    kept.validate_for_editing()
+                                        .map_err(Into::into)
+                                        .map(|()| kept)
+                                }) {
                                 Ok(kept) => load = kept,
                                 Err(error) => log::warn!(
                                     "Quick Mission: the saved loadout no longer fits: {error}"

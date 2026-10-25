@@ -1204,7 +1204,7 @@ placement limits and [future weapon passes](ROADMAP.md#weapon-catalog-update-pas
 In Load Ordnance click a catalog weapon then a compatible station, or drag between
 them. The weapon thumbnail follows the pointer. Drag from station to station
 to transfer ammunition, or from a station into the catalog to empty it.
-Left-click a loaded station to add one (a pair on a paired wing station), or an empty station to load the selected
+Left-click a loaded station to add one (a pair on a paired station), or an empty station to load the selected
 catalog weapon. Tab changes selected station; +/- changes ammunition;
 right-click decrements.
 Fuel rocker edits 500 lb at a time. Successful edits play the original weapon,
