@@ -1287,7 +1287,8 @@ commands are unchanged, and the keys still turn forward only.
 In Load Ordnance, drag a catalog weapon onto a compatible station to load it.
 Its picture follows the pointer. Drag a loaded station to another station to
 transfer ammunition, or back into the catalog area to empty it. Escape cancels
-a drag. Left-click a loaded station to add one, up to its capacity. Click an
+a drag. Left-click a loaded station to add one (a pair on a paired wing
+station), up to its capacity. Click an
 empty station to load the selected catalog weapon. Empty stations retain a red
 outline. See the
 [drag and quantity rules](spec/ordnance-presentation.md#dragging-and-empty-stations).

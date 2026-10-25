@@ -483,8 +483,10 @@ impl Ordnance {
             return self.edit_loadout(|load| {
                 if one {
                     let capacity = load.capacity(slot, &load.configuration.stations[slot].weapon);
-                    if direction > 0 && i32::from(load.quantities[slot]) < capacity {
-                        load.quantities[slot] += 1;
+                    // One store, or one pair on a paired wing station.
+                    let step = load.wing_pairs(slot).step(1);
+                    if direction > 0 && i32::from(load.quantities[slot]) + step <= capacity {
+                        load.quantities[slot] += step as u16;
                     }
                     load.refresh_equipment()
                 } else {
@@ -3762,6 +3764,23 @@ mod tests {
         ui.loadout.quantities[2] = 498;
         drag(&mut ui, (400., 145.), (400., 145.));
         assert_eq!(ui.loadout.quantities, [4, 0, 499]);
+    }
+    #[test]
+    fn loaded_station_click_adds_a_whole_pair_on_a_paired_wing_station() {
+        let mut ui = fixture();
+        let station = &mut ui.loadout.configuration.stations[0];
+        station.rack = tore_sim::combat::hardpoints::Rack {
+            location: 4,
+            paired: true,
+            ..Default::default()
+        };
+        station.mount = [8., -2., 0.];
+        assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+        drag(&mut ui, (500., 145.), (500., 145.));
+        assert_eq!(ui.loadout.quantities, [4, 0, 500]);
+        drag(&mut ui, (500., 145.), (500., 145.));
+        assert_eq!(ui.loadout.quantities, [4, 0, 500], "never past capacity");
+        ui.loadout.validate().unwrap();
     }
     #[test]
     fn ordnance_sounds_follow_successful_edits_and_not_failed_or_empty_actions() {
