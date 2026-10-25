@@ -121,7 +121,7 @@ pub(super) fn observe_ownship(
     };
     let w = &station.weapon;
     if let Some(profile) =
-        missiles::Profile::for_weapon(w).filter(|_| context.weapon_rules == Rules::Spec)
+        missiles::Profile::for_weapon(w).filter(|_| context.weapon_rules.uses_seeker())
     {
         if !profile.guidance_available(launcher.radar_power) || !profile.supports_boresight() {
             own.cockpit.launch_mode = LaunchMode::Cued;

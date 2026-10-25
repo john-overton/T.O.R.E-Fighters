@@ -108,7 +108,7 @@ pub(super) fn observe(
     let index = own.selected;
     let w = &own.config.stations[index].weapon;
     if let Some(profile) =
-        missiles::Profile::for_weapon(w).filter(|_| state.weapon_rules == Rules::Spec)
+        missiles::Profile::for_weapon(w).filter(|_| state.weapon_rules.uses_seeker())
     {
         if !profile.guidance_available(launcher.radar_power) || !profile.supports_boresight() {
             own.cockpit.launch_mode = LaunchMode::Cued;
@@ -273,7 +273,7 @@ fn original_weapon_observation(
     own: &Ownship,
     launcher: Launcher,
 ) -> Option<seeker::Observation> {
-    if !own.armed || (state.weapon_rules == Rules::Spec && !own.guidance_available(launcher)) {
+    if !own.armed || (state.weapon_rules.uses_seeker() && !own.guidance_available(launcher)) {
         return None;
     }
     if own.launch_mode == LaunchMode::Boresight {
@@ -303,7 +303,7 @@ fn original_weapon_observation(
     own.mounted.observation.or_else(|| {
         let id = own.designated()?;
         let w = &own.config.stations[own.selected].weapon;
-        if state.weapon_rules == Rules::Spec
+        if state.weapon_rules.uses_seeker()
             && missiles::Profile::for_weapon(w)
                 .is_some_and(|p| view(state, own).contact(id).is_none_or(|t| !p.accepts(t)))
         {

@@ -373,14 +373,22 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     {
         if !glide {
             let aim = motion.aim_over_terrain(p.position, point, cx.ground);
-            let desired = missiles::commanded_heading(
-                p.direction,
-                motion.path(),
-                unit(missiles::sub(aim, p.position)),
-            );
-            let next = missiles::steer(&w.movement, p.age, p.direction, desired);
-            motion.turn(p.direction, next);
-            p.direction = next;
+            if motion.energy.is_some() {
+                let velocity = flight
+                    .target
+                    .and_then(|id| row(cx.targets, cx.rows, id))
+                    .map_or([0.; 3], |t| t.velocity);
+                motion.track(aim, velocity);
+            } else {
+                let desired = missiles::commanded_heading(
+                    p.direction,
+                    motion.path(),
+                    unit(missiles::sub(aim, p.position)),
+                );
+                let next = missiles::steer(&w.movement, p.age, p.direction, desired);
+                motion.turn(p.direction, next);
+                p.direction = next;
+            }
         }
         // A cruise profile's fly-out samples the terrain on every step to
         // impact, so it is worked out on the first guiding tick and then

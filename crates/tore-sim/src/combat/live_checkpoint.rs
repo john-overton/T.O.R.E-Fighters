@@ -536,6 +536,7 @@ crate::checkpoint_struct!(Ownship {
     release_readiness,
     cockpit,
     mounted,
+    heat,
     bore_observation,
     mounted_key,
     range_estimate,
@@ -593,6 +594,7 @@ impl Checkpoint for State {
             sound_events,
             smoke,
             devices,
+            energy_devices,
             // Why-record: the releases for a recording, drained by the host.
             device_log: _,
             // Why-record: the decoy rolls for a recording, drained by the host.
@@ -649,6 +651,7 @@ impl Checkpoint for State {
         sound_events.save(s, None)?;
         smoke.save(s, None)?;
         devices.save(s, None)?;
+        energy_devices.save(s, None)?;
         debris.save(s, None)?;
         ledger.save(s, None)?;
         target_jammer.save(s, None)?;
@@ -710,6 +713,7 @@ impl Checkpoint for State {
             sound_events: Checkpoint::load(l, None)?,
             smoke: Checkpoint::load(l, None)?,
             devices: Checkpoint::load(l, None)?,
+            energy_devices: Checkpoint::load(l, None)?,
             device_log: VecDeque::<DeviceNote>::new(),
             decoy_log: VecDeque::<DecoyRoll>::new(),
             ground_bursts: Vec::new(),

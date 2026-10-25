@@ -113,6 +113,7 @@ fn save_rules(s: &mut Saver, rules: Rules) {
     s.writer().write_varint(match rules {
         Rules::Compatibility => 0,
         Rules::Spec => 1,
+        Rules::Energy => 2,
     });
 }
 
@@ -120,6 +121,7 @@ fn load_rules(l: &mut Loader<'_>) -> Result<Rules, CheckpointError> {
     match l.reader().read_varint()? {
         0 => Ok(Rules::Compatibility),
         1 => Ok(Rules::Spec),
+        2 => Ok(Rules::Energy),
         other => invalid(format!("the weapon rules have no variant {other}")),
     }
 }

@@ -2055,7 +2055,11 @@ impl Combat {
                 self.last_launcher = Some(l);
                 self.record_tape(if held { "fire" } else { "tick" }, l);
             }
+            let energy = self.state.weapon_rules == tore_sim::combat::missiles::Rules::Energy;
             if let Some(own) = self.state.ownship_mut(aircraft) {
+                if energy {
+                    own.heat = crate::ai_wings::aircraft_heat(s, own.heat);
+                }
                 own.note_loaded();
             }
             if s.airburst()

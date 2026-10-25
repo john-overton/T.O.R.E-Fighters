@@ -31,8 +31,8 @@
 //! (ST-T) draws. Opinionated (John, 2026-10-11) for the principle; the
 //! record layout and the target copy are agent decisions.
 use super::{
-    Configuration, Kept, Launcher, MAX_PROJECTILES, Ownship, Projectile, Readiness, Rules, Side,
-    State, Station, Target,
+    Configuration, Kept, Launcher, MAX_PROJECTILES, Ownship, Projectile, Readiness, Side, State,
+    Station, Target,
 };
 use crate::attitude::{Vector, dot};
 use crate::combat::delivery::{self, Delivery, DeliveryMode};
@@ -497,7 +497,7 @@ impl State {
         if self.projectiles.len() >= MAX_PROJECTILES {
             return Readiness::Capacity;
         }
-        match (self.weapon_rules == Rules::Spec)
+        match (self.weapon_rules.uses_seeker())
             .then(|| crate::combat::guided::kind(w))
             .flatten()
         {
@@ -880,7 +880,7 @@ impl State {
         if let Some(release) = bomb {
             direction = ballistics::BombMotion::new(release).direction(0.);
         }
-        let spec = self.weapon_rules == Rules::Spec;
+        let spec = self.weapon_rules.uses_seeker();
         // A guided air-to-ground weapon flies its own guidance on a motion,
         // never the legacy pursuit: its projectile target stays empty.
         let guided_kind = spec.then(|| crate::combat::guided::kind(w)).flatten();
@@ -911,10 +911,16 @@ impl State {
             guidance: r.guidance,
             guidance_ticks: spec.then(|| profile.map(|p| p.guidance_ticks)).flatten(),
             motion: if let Some(velocity) = guided_velocity {
-                Some(Motion::launch(w, velocity, position[1]))
+                Some(Motion::launch_rules(
+                    w,
+                    velocity,
+                    position[1],
+                    self.weapon_rules,
+                ))
             } else {
-                (spec && profile.is_some())
-                    .then(|| Motion::launch(w, launcher.velocity, position[1]))
+                (spec && profile.is_some()).then(|| {
+                    Motion::launch_rules(w, launcher.velocity, position[1], self.weapon_rules)
+                })
             },
             age: 0,
             incoming: r.incoming,

@@ -631,7 +631,7 @@ fn hovers(flight: &flight::State) -> bool {
 
 /// Jet throttle is a heat input. Rotor collective is not engine heat; retain
 /// the existing observation (including a handoff's engine snapshot).
-fn aircraft_heat(flight: &flight::State, previous: seeker::Heat) -> seeker::Heat {
+pub(crate) fn aircraft_heat(flight: &flight::State, previous: seeker::Heat) -> seeker::Heat {
     if hovers(flight) {
         previous
     } else {
@@ -2157,7 +2157,7 @@ impl AiWings {
         self.decoy_rolls.clear();
         self.weapon_rules = state.weapon_rules;
         self.mission
-            .set_missiles(if state.weapon_rules == Rules::Spec {
+            .set_missiles(if state.weapon_rules.uses_seeker() {
                 state.missile_snapshots(&human_launchers(state, &humans))
             } else {
                 Vec::new()
@@ -3267,7 +3267,7 @@ impl AiWings {
             self.dropped_launches += event.projectiles;
             return 0;
         };
-        let profile = (self.weapon_rules == Rules::Spec)
+        let profile = (self.weapon_rules.uses_seeker())
             .then(|| missiles::Profile::for_weapon(weapon))
             .flatten();
         let guidance = profile.map(|profile| {
@@ -3315,7 +3315,9 @@ impl AiWings {
                 owner: event.actor,
                 weapon: Some(weapon.clone()),
                 guidance: guidance.clone(),
-                motion: profile.map(|_| Motion::launch(weapon, launch_velocity, origin[1])),
+                motion: profile.map(|_| {
+                    Motion::launch_rules(weapon, launch_velocity, origin[1], self.weapon_rules)
+                }),
                 guidance_ticks: profile.map(|p| p.guidance_ticks),
                 age: 0,
                 incoming,
@@ -3378,6 +3380,17 @@ impl AiWings {
             // The number this device was given, which each roll below is
             // against.
             let device = state.devices.released();
+            if state.weapon_rules == Rules::Energy {
+                state.energy_devices.effectiveness(
+                    event.actor,
+                    match event.class {
+                        SeekerClass::Infrared => missiles::decoys::Kind::Flare,
+                        SeekerClass::Radar => missiles::decoys::Kind::Chaff,
+                    },
+                    effectiveness,
+                );
+                continue;
+            }
             // The seeker and decoy chance of each round, from the weapon it
             // carries, so no particular ownship is needed.
             let seekers: Vec<(u8, u8)> = state
