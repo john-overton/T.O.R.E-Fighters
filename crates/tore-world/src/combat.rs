@@ -111,30 +111,66 @@ fn target_pose_kept(
     }
 }
 
-/// An AI aircraft's drawn stores as last worked out, with what they were
-/// worked out from: the loadout (by identity) and the stations' loads.
+/// An AI aircraft's drawn stores and the inputs they were built from.
+/// Configurations can be replaced at the same address during a handoff, so
+/// addresses and aggregate counts cannot identify the drawn loadout.
 struct StoresEntry {
-    identity: (usize, AircraftId, usize, usize, u64),
+    config: live::Configuration,
     loads: Vec<crate::snapshot::StationStores>,
     poses: Arc<Vec<crate::snapshot::StorePose>>,
 }
 impl StoresEntry {
-    /// Where the loadout lives, which aircraft it is, how many stations and
-    /// tanks it has, and the total of their counts: a loadout that was
-    /// replaced or edited reads as another.
-    fn identity(config: &live::Configuration) -> (usize, AircraftId, usize, usize, u64) {
-        (
-            std::ptr::from_ref(config) as usize,
-            config.aircraft,
-            config.stations.len(),
-            config.tanks.len(),
-            config
-                .stations
-                .iter()
-                .map(|station| u64::from(station.count))
-                .chain(config.tanks.iter().map(|tank| u64::from(tank.quantity)))
-                .sum(),
-        )
+    /// Compares every loadout input read by `snapshot::store_poses_of`.
+    /// The unchanged path compares borrowed fields without building poses.
+    fn matches(
+        &self,
+        config: &live::Configuration,
+        loads: &[crate::snapshot::StationStores],
+    ) -> bool {
+        let old = &self.config;
+        self.loads == loads
+            && old.hardpoint_slots == config.hardpoint_slots
+            && old.stations.len() == config.stations.len()
+            && old.stations.iter().zip(&config.stations).all(|(a, b)| {
+                a.mount == b.mount
+                    && a.rack == b.rack
+                    && a.count == b.count
+                    && a.weapon.source == b.weapon.source
+                    && a.weapon.shape == b.weapon.shape
+                    && live::pod_rounds(&a.weapon) == live::pod_rounds(&b.weapon)
+            })
+            && old.tanks.len() == config.tanks.len()
+            && old.tanks.iter().zip(&config.tanks).all(|(a, b)| {
+                a.hardpoint == b.hardpoint
+                    && a.mount == b.mount
+                    && a.rack == b.rack
+                    && a.quantity == b.quantity
+                    && a.store.as_ref().map(|s| s.tank.fuel_weight)
+                        == b.store.as_ref().map(|s| s.tank.fuel_weight)
+            })
+    }
+
+    fn cached(
+        stored: &mut BTreeMap<u32, Self>,
+        id: u32,
+        config: &live::Configuration,
+        loads: Vec<crate::snapshot::StationStores>,
+    ) -> Arc<Vec<crate::snapshot::StorePose>> {
+        if let Some(entry) = stored.get(&id)
+            && entry.matches(config, &loads)
+        {
+            return entry.poses.clone();
+        }
+        let poses = Arc::new(crate::snapshot::store_poses_of(config, &loads));
+        stored.insert(
+            id,
+            Self {
+                config: config.clone(),
+                loads,
+                poses: poses.clone(),
+            },
+        );
+        poses
     }
 }
 
@@ -946,24 +982,7 @@ impl Combat {
             // another.
             let mut stored = ai_stores.lock().unwrap_or_else(|e| e.into_inner());
             for (id, config, loads) in ai_station_stores(wings) {
-                let identity = StoresEntry::identity(config);
-                let entry = match stored.get(&id) {
-                    Some(entry) if entry.identity == identity && entry.loads == loads => {
-                        entry.poses.clone()
-                    }
-                    _ => {
-                        let poses = Arc::new(crate::snapshot::store_poses_of(config, &loads));
-                        stored.insert(
-                            id,
-                            StoresEntry {
-                                identity,
-                                loads,
-                                poses: poses.clone(),
-                            },
-                        );
-                        poses
-                    }
-                };
+                let entry = StoresEntry::cached(&mut stored, id, config, loads);
                 if let Ok(index) = actors.binary_search_by_key(&id, |actor| actor.id) {
                     actors[index].stores = Some(entry);
                 }

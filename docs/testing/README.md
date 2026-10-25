@@ -225,6 +225,9 @@ python3 tools/battery.py --changed --budget 120   # only what your changes can a
 
 Each scenario gets its own copy of the profile (a cheap copy-on-write copy on
 btrfs, APFS and similar), so runs never touch each other or your real profile.
+The copy excludes `replays/`: completed recordings and unfinished writers from
+an earlier session must not affect readiness waits, counts or newest-file checks.
+Scenarios that need existing recordings create their own fixtures.
 Results land in `.local/battery/<timestamp>/`: `summary.md` first, then
 `logs/<scenario>.log` for the full output of each run and `results.json` for
 tools. `--keep-data` keeps each run's data folder (replays, logs) for a

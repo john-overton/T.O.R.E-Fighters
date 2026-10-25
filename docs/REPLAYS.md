@@ -47,6 +47,8 @@ the scene is placed, and the first frame is the scene before the first
 tick. It stops when the flight ends: End mission (after the debrief is
 taken, so the footer carries its result), Restart (the old recording
 finishes and a new one starts), quitting the game, or re-importing media.
+Alt+F4 is a normal quit and finishes the recording, including over flight
+settings screens. A forced process kill instead leaves a recoverable `.partial`.
 The session log names each file as it starts and when it is saved; nothing
 is printed to the terminal. Captures, `--smoke-test` and frame timing runs
 do not record. `TORE_RECORD_MISSIONS=0` turns recording off for a run and
