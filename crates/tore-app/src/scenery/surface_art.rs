@@ -1817,6 +1817,38 @@ mod tests {
     }
 
     #[test]
+    fn bridge_damage_and_replay_restore_preserve_the_placed_datum() {
+        let mut fallen = cube();
+        for face in &mut fallen.faces {
+            for p in &mut face.positions {
+                p[2] -= 10.;
+            }
+        }
+        let stand = level([100., 200., 300.]);
+        let mut art = SurfaceArt::default();
+        let drawn = art
+            .ruin_drawn(&Ruined::Branch(fallen), &stand, 40., false)
+            .unwrap();
+        let low = positions(&drawn.vertices)
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::INFINITY, f32::min);
+        // A fallen span is allowed below the intact datum. Regrounding its
+        // new lowest point would incorrectly raise it back into the road.
+        assert!((low - 180.).abs() < 1e-5);
+        art.wrecks.insert(7, drawn);
+        for hp in [500, 250, 1, 0, 250, 0, 500] {
+            assert_eq!(
+                art.look(7, hp > 0, true, None),
+                if hp > 0 { None } else { Some(Look::Wreck) }
+            );
+        }
+        // An END type has no alternate geometry and stays visible at zero HP.
+        art.keep(8);
+        assert_eq!(art.look(8, false, true, None), None);
+    }
+
+    #[test]
     fn a_destroyed_runway_stays_drawn() {
         // B15: a runway at zero hit points keeps its pavement (its intact
         // look), whether or not combat registered it; any other placement

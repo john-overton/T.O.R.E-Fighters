@@ -34,6 +34,11 @@ The client now prepares received missions on a background worker and shows a
 keepalives continue while it builds. Escape during mission preparation cancels
 the join. Host and join content checks are polled too. Remaining validation is listed in that spec.
 
+Bridge HP and destruction use the existing authoritative surface snapshots and
+recorded surface HP. The [bridge correction](spec/bridges.md) changes shared
+world geometry, including geometry rebuilt for old recordings, without adding
+wire fields or changing replay/checkpoint layouts.
+
 ## Contents
 
 - [Goals](#goals)

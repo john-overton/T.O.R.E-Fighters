@@ -2002,6 +2002,32 @@ coverage, missing geometry, footing exceptions and before/after clearance.
 `surface-grounding-sites` runs it in the battery. The separate
 `surface-grounding-radar-render` scenario captures a radar objective offscreen.
 
+`--bridge-audit OUT_DIR [LAYOUT ...] [--strict] [--capture]` reads only the
+imported pack and writes `assets.tsv` and `placements.tsv`. By default it
+checks all 75 layouts plus every offered template that names bridge pieces
+(heavy defenses, seed 1, ordinary placement). Named layouts limit the run.
+The tables record every bridge's deck/ramp samples, endpoint clearances,
+lowest geometry versus ground, sea-plane clearance, source orientation and
+nearby object overlap candidates. `--strict` fails for buried decks, unknown
+decks, support gaps over 30 ft or missing assets. Sampling is at most 64 ft;
+road/river artwork alignment and candidate overlaps still need visual review.
+
+`--capture` renders every bridge intact and destroyed with the existing
+scene renderer, plus half-health appearance for the first of each type.
+It checks that bridge geometry remains present and that live HP and replay
+HP produce identical geometry. This uses the GPU and must run through
+`tools/agent-run.sh`. Keep the output outside tracked directories. Example:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --bridge-audit .local/bridges --strict
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh target/debug/tore-app --bridge-audit .local/bridge-images UKR --capture --strict
+```
+
+The battery's `bridge-audit` checks Ukraine and the Baltics, including the
+sloping crossings and bridge objectives. `a2g-bridge-destruction` fires a
+Maverick broadside at the Ukraine span and verifies its recorded damage and
+effect snapshots. [Behavior and limitations](spec/bridges.md).
+
 `--surface-scene OUT_DIR THEATER STEM` renders a ground target as the game
 draws it, offscreen at 1080p (no window): it steps the whole world
 `--seconds S` (`--surface-only` steps just the moving units, for long
