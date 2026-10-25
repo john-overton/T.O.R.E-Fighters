@@ -1017,7 +1017,18 @@ impl Host {
         let present = active.present;
         let after = now.saturating_sub(active.started);
         let fast_forward = active.fast_forward;
-        let flushed: Vec<ConnectionId> = active.stores.keys().copied().collect();
+        // A player whose Backlog is still on its way keeps its store: the
+        // Backlog finds it, and its Inputs meanwhile are kept and fed from it
+        // tick by tick, as for a player resumed after the host went live
+        // (the battery's planned handover, 2026-10-24: dropped here, the late
+        // Backlog was refused, the player was never done resuming, and no
+        // snapshot went to it again).
+        let flushed: Vec<ConnectionId> = active
+            .stores
+            .iter()
+            .filter(|(_, store)| store.backlog)
+            .map(|(connection, _)| *connection)
+            .collect();
         for connection in flushed {
             self.flush_store(connection);
         }

@@ -118,6 +118,13 @@ struct Game {
     armed: bool,
     /// A laser bomber's run (protocol 23, slice NA).
     a2g: Option<crate::wire::readout_a2g_tests::A2gPilot>,
+    /// Until then the game's datagrams to the network wait, and go out in
+    /// order after: a game that falls silent for a while, as a busy machine
+    /// is.
+    hold_until: Option<Duration>,
+    held: Vec<(SocketAddr, Vec<u8>)>,
+    /// Its standby's notes, with when.
+    notes: Vec<(Duration, crate::standby::Note)>,
 }
 
 impl Game {
@@ -272,6 +279,9 @@ impl Rig {
             shooter: false,
             armed: false,
             a2g: None,
+            hold_until: None,
+            held: Vec::new(),
+            notes: Vec::new(),
         });
         assert!(
             rig.run_until(Duration::from_secs(2), |r| r.games[0]
@@ -352,6 +362,9 @@ impl Rig {
             shooter: false,
             armed: false,
             a2g: None,
+            hold_until: None,
+            held: Vec::new(),
+            notes: Vec::new(),
         });
         let index = self.games.len() - 1;
         assert!(
@@ -533,7 +546,9 @@ impl Rig {
             if !standby.has_work() {
                 standby.prepare();
             }
-            let _ = standby.take_notes();
+            for note in standby.take_notes() {
+                game.notes.push((now, note));
+            }
             if standby.appointed().is_some()
                 && game
                     .status_at
@@ -553,11 +568,19 @@ impl Rig {
             game.peers.update(now);
             game.peers.transmit(&mut game.socket).unwrap();
         }
+        let holding = game.hold_until.is_some_and(|until| now < until);
+        if !holding {
+            for (to, datagram) in std::mem::take(&mut game.held) {
+                game.socket.send_datagram(to, &datagram).unwrap();
+            }
+        }
         while let Some(t) = game.client.poll_transmit() {
             if t.to == LINK_ADDRESS {
                 if let Some(host) = &mut game.host {
                     host.receive(now, LINK_ADDRESS, &t.datagram);
                 }
+            } else if holding {
+                game.held.push((t.to, t.datagram));
             } else {
                 game.socket.send_datagram(t.to, &t.datagram).unwrap();
             }
@@ -1481,6 +1504,149 @@ fn a_late_resume_gets_no_snapshot_before_resumed() {
     );
     assert!(rig.flying(late));
     assert_eq!(rig.games[late].client.server(), rig.games[first].address());
+}
+
+/// A player whose Resume the new host answered in the resume window, but
+/// whose Backlog came only after the host went live (the battery's planned
+/// handover, 2026-10-24, where the new host's own game was that player): the
+/// host kept its kept inputs until the Backlog, took the Backlog, and sent
+/// the player snapshots again. Before, going live dropped every store, the
+/// Backlog was refused ("Nothing is being resumed for you here."), the player
+/// counted as never done resuming, and no snapshot went to it again.
+#[test]
+fn a_backlog_after_the_host_went_live_is_taken_and_the_snapshots_follow() {
+    let (mut rig, first, second) = flying(20, true);
+    let late = (1..rig.games.len())
+        .find(|&g| g != first && g != second)
+        .unwrap();
+    rig.run(Duration::from_secs(1));
+    rig.cut(0);
+    // Once the new host has answered the late player's Resume, the late
+    // game is silent for 2 seconds, past the 1.5 second window: its Backlog
+    // comes after the host went live.
+    let late_address = rig.games[late].address();
+    let answered = rig.run_until(Duration::from_secs(8), |r| {
+        r.games[first].host.as_ref().is_some_and(|host| {
+            let connection = host
+                .peers
+                .iter()
+                .find(|(_, p)| p.address == late_address)
+                .map(|(id, _)| *id);
+            // Resuming, the player back and not waiting for Resumed: its
+            // Resume answered, its Backlog not yet in.
+            host.resuming()
+                && connection.is_some_and(|c| {
+                    !host.awaiting_resume(c) && r.games[late].client.migration_counts().resumed == 0
+                })
+        })
+    });
+    assert!(
+        answered,
+        "the new host answers the late Resume in its window"
+    );
+    let now = rig.net.now();
+    rig.games[late].hold_until = Some(now + Duration::from_secs(2));
+    let (_, took_at, _, _) = rig.takeovers[0].clone();
+    assert!(
+        rig.run_until(Duration::from_secs(2), |r| !r.host_of(first).resuming()),
+        "the new host goes live without the late Backlog"
+    );
+    assert!(
+        rig.net.now() < now + Duration::from_secs(2),
+        "live while the late game is silent"
+    );
+    assert!(
+        rig.run_until(Duration::from_secs(4), |r| r.games[late]
+            .snapshot_after(now + Duration::from_secs(2))
+            .is_some()),
+        "the late player has snapshots again"
+    );
+    let refused: Vec<String> = rig.games[late]
+        .events
+        .iter()
+        .filter_map(|(_, e)| match e {
+            ClientEvent::Refused { reason, .. } => Some(reason.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(refused.is_empty(), "refused: {refused:?}");
+    assert!(rig.flying(late));
+    assert_eq!(rig.games[late].client.migration_counts().resumed, 1);
+    assert!(rig.games[late].snapshot_after(took_at).is_some());
+    let host = rig.host_of(first);
+    let connection = host
+        .peers
+        .iter()
+        .find(|(_, p)| p.address == late_address)
+        .map(|(id, _)| *id)
+        .unwrap();
+    assert!(!host.awaiting_resume(connection));
+}
+
+/// A standby the new host appoints in the middle of its fast-forward (the
+/// battery's planned handover, 2026-10-24, saw one there fail its first
+/// check on the real import): its checkpoint is of the world between two
+/// fast-forward ticks, and the copy restored from it steps on as the new
+/// host's world does, warm and with every check equal.
+#[test]
+fn a_standby_appointed_in_the_fast_forward_follows_the_new_host() {
+    use crate::standby::Note;
+    let (mut rig, first, _) = flying(20, true);
+    rig.run(Duration::from_secs(3));
+    rig.cut(0);
+    assert!(rig.run_until(Duration::from_secs(5), |r| !r.takeovers.is_empty()));
+    let (game, _, tick, _) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    rig.games[game]
+        .host
+        .as_mut()
+        .unwrap()
+        .set_standbys_enabled(false);
+    assert!(
+        rig.run_until(Duration::from_secs(5), |r| {
+            let host = r.host_of(game);
+            host.resuming() && host.world.tick() > tick
+        }),
+        "the new host fast-forwards"
+    );
+    let from = rig.host_of(game).world.tick();
+    rig.games[game]
+        .host
+        .as_mut()
+        .unwrap()
+        .set_standbys_enabled(true);
+    rig.run(Duration::from_secs(20));
+    let standbys: Vec<usize> = (1..rig.games.len()).filter(|&g| g != game).collect();
+    for g in standbys {
+        let notes: Vec<&Note> = rig.games[g].notes.iter().map(|(_, n)| n).collect();
+        let restored = notes.iter().find_map(|n| match n {
+            Note::Checkpoint {
+                tick,
+                restored: true,
+            } => Some(*tick),
+            _ => None,
+        });
+        let callsign = &rig.games[g].callsign;
+        assert!(
+            restored.is_some_and(|t| (from..=from + FAST_FORWARD_TICKS).contains(&t)),
+            "{callsign} restored the new host's checkpoint from the fast-forward: {notes:?}"
+        );
+        assert!(
+            notes.iter().any(|n| matches!(n, Note::Warm { .. })),
+            "{callsign} is warm: {notes:?}"
+        );
+        assert!(
+            !notes
+                .iter()
+                .any(|n| matches!(n, Note::Mismatch { .. } | Note::Refused(_))),
+            "{callsign}: {notes:?}"
+        );
+    }
+    let figures = rig.host_of(game).standby_figures();
+    assert_eq!(figures.len(), 2);
+    for f in figures {
+        assert!(f.checks_equal >= 1 && f.mismatches == 0, "{f:?}");
+    }
 }
 
 /// The lobby moves to a better host (a handover in the lobby, as the host's
