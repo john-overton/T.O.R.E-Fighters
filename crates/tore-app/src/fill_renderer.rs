@@ -1158,13 +1158,13 @@ impl FillRenderer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use tore_world::city::{self, CityFill};
 
     /// One box-shaped kit piece, `half` feet each way and `height` tall, at
     /// each `(x, z)` on flat ground, its full detail mesh the far box.
-    fn synthetic(at: &[(i32, i32)], half: i64, height: i64) -> FillArt {
+    pub(crate) fn synthetic(at: &[(i32, i32)], half: i64, height: i64) -> FillArt {
         let piece = city::kit::Piece {
             source: "T.OT".into(),
             shape: "T.SH".into(),

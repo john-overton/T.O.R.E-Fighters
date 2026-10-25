@@ -145,7 +145,10 @@ stage and available causes. Panic reports include thread, source location and
 a best-effort backtrace without requiring `RUST_BACKTRACE`. Panic logging must
 not wait for its own held mutex or recursively panic. Worker panics are logged;
 normal worker failure handling determines whether the application must stop.
-The app does not attempt to resume gameplay after a main-thread panic.
+The app does not attempt to resume gameplay after a main-thread panic. A window
+surface dropped during a panic is left to process exit rather than torn
+down, because tearing down a swapchain with an unpresented frame can panic
+again and abort the process before the report and dialog.
 
 Interactive Windows failures use a native error dialog independent of winit,
 wgpu and imported assets. macOS uses an AppKit alert on the main thread. Linux

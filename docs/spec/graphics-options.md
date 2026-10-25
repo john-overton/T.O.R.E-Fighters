@@ -155,7 +155,9 @@ vapor, tracers and smoke. The cockpit art and HUD are unchanged. 4x works on
 every graphics card; 2x and 8x are offered only when the card supports them for
 the display format, and unsupported levels are shown struck through. A saved
 level the card cannot draw falls back to the next lower level. Changing the
-level applies immediately, including in flight.
+level applies immediately, including in flight and replay. The sun's lens flare
+and spotting outline remain usable when switching between Off and multisampling;
+each camera keeps its existing sun-visibility fade through the change.
 
 Cutout edges (water shorelines, airport markings) are decided once per pixel,
 so anti-aliasing does not smooth them; render scale does.

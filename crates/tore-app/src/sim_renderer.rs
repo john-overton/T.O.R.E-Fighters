@@ -1738,6 +1738,8 @@ impl SimRenderer {
                 },
             ],
         });
+        self.lens_flare
+            .set_samples(device, &self.p.rim_depth_layout, samples);
         self.smoke
             .set_samples(device, self.format, &self.shader, samples);
         self.effects
@@ -3807,3 +3809,7 @@ mod lighting_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "sim_renderer_graphics_tests.rs"]
+mod graphics_tests;

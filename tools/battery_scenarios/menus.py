@@ -6,6 +6,7 @@ several window sizes) go through tools/agent-run.sh and are kept few.
 """
 import re
 import json
+import shutil
 from pathlib import Path
 
 from battery import Scenario, Step
@@ -1064,6 +1065,18 @@ def scenarios() -> list[Scenario]:
                 outputs=["panel.ppm"],
             )
         )
+    priority = ["nice", "-n", "10"] if shutil.which("nice") else []
+    out.append(Scenario(
+        name="menus-window-graphics-runtime", lane="menus", window=True,
+        args=["--smoke-test", "--no-audio"], timeout=600,
+        env={"CARGO_BUILD_JOBS": "8"},
+        then=[Step([*priority, "cargo", "test", "--locked", "-p", "tore-app",
+                    "gpu_runtime_graphics_changes_keep_sun_and_spotting_valid",
+                    "--", "--ignored", "--nocapture", "--test-threads=1"],
+                   app=False, timeout=600)],
+        expect=[r"1 passed; 0 failed"],
+        notes="Runtime MSAA transitions with sun visibility, spotting, scale, shadows and resized views under GPU validation.",
+    ))
     # Every graphics option value, and the preview and panel switches, in a
     # real window.
     for option in (
