@@ -1,13 +1,26 @@
 //! World-owned prediction jobs. Pending work and published observation ages
 //! are simulation state, so frame readers cannot spend or change the budget.
 use super::{
-    energy::{DT, Observation},
+    energy::{Body, DT, Observation},
     energy_estimate::{Answer, Queue, Request, Trial},
 };
 use crate::attitude::{Vector, dot, unit};
 
 pub const ENVELOPE_BIT: u64 = 1 << 63;
 pub const MISSILE_BIT: u64 = 1 << 62;
+
+/// Probe both sides of the data-driven loft transition. A farther lofted
+/// intercept can succeed after an unlofted shot has already become unreachable.
+/// Coarse doubling alone can miss that disconnected successful interval.
+pub fn envelope_probe_scales(body: Body) -> &'static [f64] {
+    if body.loft_height > 0. {
+        &[
+            0.0625, 0.125, 0.25, 0.5, 0.6, 0.600001, 0.625, 0.65, 0.675, 0.7, 0.75, 1., 1.5, 2., 4.,
+        ]
+    } else {
+        &[0.0625, 0.125, 0.25, 0.5, 0.75, 1., 1.5, 2., 4.]
+    }
+}
 
 fn norm(v: Vector) -> f64 {
     dot(v, v).sqrt()
@@ -113,10 +126,10 @@ impl RangeSearch {
                 } else if self.distance > self.low {
                     self.high = self.high.min(self.distance);
                 }
-                const SCALES: [f64; 9] = [0.0625, 0.125, 0.25, 0.5, 0.75, 1., 1.5, 2., 4.];
+                let scales = envelope_probe_scales(self.template.body);
                 let anchor = (self.template.body.loft_range / 0.6).max(1600.);
-                if usize::from(self.iteration) < SCALES.len() {
-                    self.distance = (anchor * SCALES[usize::from(self.iteration)])
+                if usize::from(self.iteration) < scales.len() {
+                    self.distance = (anchor * scales[usize::from(self.iteration)])
                         .max(
                             (self.template.target.position[1] - self.template.flight.position[1])
                                 .abs()
@@ -510,6 +523,29 @@ mod tests {
             30.,
             0,
         )
+    }
+    #[test]
+    fn the_range_search_finds_a_disconnected_success_band_after_loft_starts() {
+        let mut q = question();
+        q.body.loft_height = 1000.;
+        q.body.loft_range = 6000.;
+        let mut search = RangeSearch::new(1, 2, 0, q);
+        for _ in 0..100 {
+            if search.done {
+                break;
+            }
+            let hit = (1000. ..=5000.).contains(&search.distance)
+                || (6100. ..=6500.).contains(&search.distance);
+            search.accept(Answer {
+                hit,
+                seconds: 10.,
+                closest: if hit { 0. } else { 100. },
+                impact_speed: 300.,
+            });
+        }
+        assert!(search.done);
+        let maximum = search.result.unwrap().maximum;
+        assert!((6499. ..=6500.).contains(&maximum), "{maximum}");
     }
     #[test]
     fn published_jobs_survive_checkpoint_and_readers_do_not_advance_them() {

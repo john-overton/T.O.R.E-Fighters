@@ -19,8 +19,10 @@ runner works is in the [testing overview](README.md). The `render-*` capture sce
 `flight-missile-energy` runs 160 headless imported shots through the Energy
 model twice, with four workers and with one. It checks identical rows, real
 hits and misses, and an upper bound of one roll per two-second hammered
-episode. This is a regression for overlapping episode re-rolls, not a fixed
-Monte Carlo hit-rate target. The broad calibration/study results are in the
+episode. Eight historical Spec AIM9B shots also cover raw susceptibility above
+100, which that preserved percentage-only API must clamp before evaluating.
+These are regressions for repeated rolls and comparison compatibility, not
+fixed Monte Carlo hit-rate targets. The broad calibration/study results are in the
 [missile energy baseline](../baselines/missile-energy.md).
 
 ## Variety aircraft checks

@@ -1,12 +1,13 @@
 //! Real headless world: eight AI aircraft, sixteen replenished missiles and
-//! eight requested launch/envelope solutions. Never opens a window or socket.
+//! eight envelope searches and one to eight candidate stations per aircraft.
+//! Never opens a window or socket.
 use std::{path::Path, time::Instant};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
     attitude::unit,
     combat::{
         FallState,
-        live::Projectile,
+        live::{Launcher, Projectile},
         missiles::{self, Flight, LaunchMode, Motion, Rules, seeker::Observation},
     },
 };
@@ -34,17 +35,36 @@ fn percentile(samples: &mut [f64], p: f64) -> f64 {
     samples.sort_by(f64::total_cmp);
     samples[((samples.len() - 1) as f64 * p).round() as usize]
 }
+fn station_geometry(
+    mut launcher: Launcher,
+    mut observed: Observation,
+    station: usize,
+) -> (Launcher, Observation) {
+    // Distinct synthetic mounts prevent identical-input reuse from hiding
+    // the cold cost of several candidate stations on the same aircraft.
+    for i in 0..3 {
+        launcher.position[i] += launcher.basis.right[i] * station as f64 * 4.;
+    }
+    observed.range = missiles::length(missiles::sub(observed.position, launcher.position));
+    (launcher, observed)
+}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
-    let pack = args
-        .get(1)
-        .ok_or("usage: missile_energy_cost PACK [TICKS] [THEATER]")?;
+    let pack = args.get(1).ok_or(
+        "usage: missile_energy_cost PACK [TICKS] [THEATER] [frozen|moving] [WEAPON] [STATIONS]",
+    )?;
     let ticks = args
         .get(2)
         .map(|s| s.parse())
         .transpose()?
         .unwrap_or(2400u64);
     let theater = args.get(3).map_or("UKR", String::as_str);
+    let stations = args
+        .get(6)
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(1)
+        .clamp(1, 8);
     let resources = tore_import::pack::read_pack(Path::new(pack))?;
     let mut spec = MissionSpec::new(theater, AircraftId::F16C);
     spec.preset = Preset::Hold;
@@ -112,7 +132,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap()
                 .actor_flight_mut(slot.id)
                 .ok_or("AI disappeared")?;
-            launchers.push(tore_world::combat::launcher(flight));
+            let launcher = tore_world::combat::launcher(flight);
+            if !launcher.alive {
+                return Err(format!("AI {} stopped flying at tick {tick}", slot.id).into());
+            }
+            launchers.push(launcher);
         }
         let queries = if fixed {
             frozen.get_or_insert_with(|| launchers.clone()).clone()
@@ -145,15 +169,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             })
             .collect();
-        // A reserved probe station avoids replacing an actor's real launch job.
+        // Reserved probe stations avoid replacing an actor's real launch jobs.
         for (i, slot) in slots.iter().enumerate() {
-            world.combat.state.request_energy_solution(
-                slot.id,
-                65535,
-                &weapon,
-                queries[i],
-                observations[i],
-            );
+            for station in 0..stations {
+                let (launcher, observed) = station_geometry(queries[i], observations[i], station);
+                world.combat.state.request_energy_solution(
+                    slot.id,
+                    65535 - station,
+                    &weapon,
+                    launcher,
+                    observed,
+                );
+            }
             world.combat.state.request_energy_range(
                 slot.id,
                 65535,
@@ -248,16 +275,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let start = Instant::now();
         // Same-state frame readers: no job submission or simulation work.
         for (i, slot) in slots.iter().enumerate() {
-            let observed = observations[i];
-            answers += usize::from(
-                std::hint::black_box(
-                    world
-                        .combat
-                        .state
-                        .energy_solution(slot.id, 65535, &weapon, queries[i], observed),
-                )
-                .is_some(),
-            );
+            for station in 0..stations {
+                let (launcher, observed) = station_geometry(queries[i], observations[i], station);
+                answers += usize::from(
+                    std::hint::black_box(world.combat.state.energy_solution(
+                        slot.id,
+                        65535 - station,
+                        &weapon,
+                        launcher,
+                        observed,
+                    ))
+                    .is_some(),
+                );
+            }
         }
         warm.push(start.elapsed().as_secs_f64() * 1000.);
         if tick.is_multiple_of(30) {
@@ -286,7 +316,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     eprintln!(
-        "max_pending={max_pending} max_ready_envelopes={max_envelopes} successful_cached_reads={answers} frozen_queries={fixed}"
+        "max_pending={max_pending} max_ready_envelopes={max_envelopes} successful_cached_reads={answers} frozen_queries={fixed} stations_per_aircraft={stations}"
     );
     Ok(())
 }

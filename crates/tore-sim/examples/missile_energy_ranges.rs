@@ -255,15 +255,30 @@ fn maximum(w: &Weapon, alt: f64, aspect: usize, drag: Option<f64>, seeker: bool)
     let mut low = 0.;
     let mut high = 100.;
     let mut upper: f64 = 1_000_000.;
+    let mut distances = Vec::new();
+    let body = missiles::energy_profile::body(w);
+    if body.loft_height > 0. {
+        distances.extend(
+            prediction::envelope_probe_scales(body)
+                .iter()
+                .map(|scale| body.loft_range / 0.6 * scale)
+                .filter(|d| *d < 1_000_000.),
+        );
+    }
     // Search every increasing range, including minimum-range failures.
     while high < 1_000_000. {
-        if hit(w, alt, aspect, high, drag) {
-            low = high;
-            upper = 1_000_000.;
-        } else if high > low {
-            upper = upper.min(high);
-        }
+        distances.push(high);
         high *= 1.5;
+    }
+    distances.sort_by(f64::total_cmp);
+    distances.dedup();
+    for distance in distances {
+        if hit(w, alt, aspect, distance, drag) {
+            low = distance;
+            upper = 1_000_000.;
+        } else if distance > low {
+            upper = upper.min(distance);
+        }
     }
     if low == 0. {
         return 0.;
@@ -282,6 +297,33 @@ fn maximum(w: &Weapon, alt: f64, aspect: usize, drag: Option<f64>, seeker: bool)
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
+    if args.get(2).is_some_and(|s| s == "--point") {
+        let source = args
+            .get(3)
+            .ok_or("--point SOURCE ALTITUDE_FT ASPECT RANGE_M")?;
+        let alt = args.get(4).ok_or("altitude required")?.parse::<f64>()? * FT;
+        let aspect = match args.get(5).map(String::as_str) {
+            Some("head") => 0,
+            Some("beam") => 1,
+            Some("tail") => 2,
+            Some("stationary") => 3,
+            _ => return Err("head, beam, tail or stationary required".into()),
+        };
+        let range = args
+            .get(6)
+            .ok_or("range in meters required")?
+            .parse::<f64>()?;
+        if !alt.is_finite() || alt < 0. || !range.is_finite() || range <= 0. {
+            return Err("finite nonnegative altitude and positive range required".into());
+        }
+        let w = Weapon::parse(source, &fs::read(dir.join(source))?)?;
+        println!(
+            "source={source} range_m={range} physical_hit={} seeker_hit={}",
+            hit(&w, alt, aspect, range, None),
+            seeker_hit(&w, alt, aspect, range, None)
+        );
+        return Ok(());
+    }
     let fit = args.iter().any(|a| a == "--fit");
     println!(
         "source,altitude_ft,aspect,physical_km,seeker_valid_km,anchor_km,drag_scale,retail_lb,physical_lb,anchor_evidence"

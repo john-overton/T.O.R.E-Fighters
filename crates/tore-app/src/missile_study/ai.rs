@@ -340,11 +340,17 @@ pub fn fly(
             .map(|t| (t.position, t.hp));
         let missile = world.combat.state.projectiles.iter().find(|p| p.id == id);
         if let (Some(p), Some((position, _))) = (missile, target) {
-            if p.motion
-                .and_then(|m| m.energy)
-                .is_some_and(|e| e.flight.lost)
-            {
-                shot.control_loss_s.get_or_insert(t);
+            if let Some(energy) = p.motion.and_then(|m| m.energy) {
+                if energy.flight.lost {
+                    shot.control_loss_s.get_or_insert(t);
+                }
+                if energy.tracking.notched
+                    && !energy.flight.lost
+                    && p.guidance.as_ref().is_some_and(|f| f.enabled)
+                {
+                    shot.first_notch_s.get_or_insert(t);
+                    shot.notched_s += DT;
+                }
             }
             let now = (p.position, position);
             if let Some((pm, pt)) = previous {

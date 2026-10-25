@@ -1446,9 +1446,12 @@ player-triggered release or missile motion; AI studies retain it.
 45 degrees from the tail heading), and `--altitudes deck,low,co,high,up,down` set the cells.
 Deck/low/co/high are 500/5000/15000/35000 ft for both aircraft; up/down retain
 the earlier unequal-altitude cases. Range bands retain the decoded historical
-values to make old/new study comparisons reproducible. These are distinct
+values to make old/new study comparisons reproducible. Additional `near` and
+`close` bands use 0.25 and 0.5 nmi, each raised to 1.1 times the decoded launch
+minimum before the same range jitter, for studying physically reachable short
+shots. They are opt-in and do not change the historical bands. These are distinct
 from the public-anchor calibration sweep. `model.txt` records the selected
-rules. `--seeds N` the shots per cell (range, aspect, speed and reaction time are
+rules and physical-table fingerprint. `--seeds N` the shots per cell (range, aspect, speed and reaction time are
 jittered per seed, deterministically), `--threads N` the workers.
 `--ai [--skill novice|average|experienced|ace]` flies the same shots against
 the game's own AI on weapons hold in a fresh Quick Mission world instead, so
@@ -1461,7 +1464,9 @@ decoyed it and bursts there instead of flying straight on. `--catalog` writes on
 `catalog.csv` and exits (each missile's decoy susceptibility, seeker and turn rates, each
 aircraft's dispensers). Output is `runs.csv`, one row per shot, and
 `cells.csv`, one row per cell with Wilson 95 percent intervals. Runs also
-record the first observed loss of control speed and ground impact separately;
+record the first observed loss of control speed, ground impact and Energy
+seeker notch state while enabled and controlled (first time and total duration)
+separately;
 absence of an earlier control-loss sample does not prove a cause for an impact.
 AI trials explicitly reapply weapons hold after mission group objectives and
 attribute hits through the launched projectile's ledger outcome.

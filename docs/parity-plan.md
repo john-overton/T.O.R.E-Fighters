@@ -14,8 +14,9 @@ One page. What is specified, what is built, what is next. Milestones live in
 **Missile energy overhaul, 2026-10-25.** New worlds use one finite-energy
 model and physical decoy pursuit for supported powered guided weapons.
 Public/class masses, sourced range anchors and complete A2A calibration are
-recorded. Linux regression and prediction-cost checks passed. The extended
-statistical study is next. This is John's opinionated extension, not a retail parity claim.
+recorded as pre-fix evidence. Linux regression checks passed. Phase 3 stopped
+after review invalidated its results; study and prediction-cost acceptance
+await corrections and fresh validation. This is John's opinionated extension, not a retail parity claim.
 [Behaviour](spec/missile-energy.md), [baseline](baselines/missile-energy.md).
 
 **Air-to-ground weapons, 2026-10-11.** A player can now designate ground

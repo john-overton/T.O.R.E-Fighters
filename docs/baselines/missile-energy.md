@@ -16,6 +16,11 @@ is `cargo run --locked --release -p tore-sim --example missile_energy_ranges
 -- LOCAL_JT_DIRECTORY`. `--fit` searches the drag coefficient and prints a
 candidate table; it never changes source or runs during gameplay.
 
+**Pre-fix, review pending.** John stopped Phase 3 on 2026-10-25 after an
+independent reviewer found defects that invalidate the study results. All
+numerical study and calibration results below are retained as pre-fix evidence,
+not acceptance. Reviewer patches and fresh validation are pending.
+
 ## Conditions and limits
 
 A2A launcher velocity is 300 m/s, target 250 m/s, wings level, no wind or
@@ -23,7 +28,8 @@ jammer, flat sea-level ground. Altitudes are MSL. Head, beam and tail mean
 180, 90 and 0 degrees target heading relative to launch heading. All distances
 below are km of initial separation, not missile path length. Numbers are
 rounded to 0.01 km. The sweep samples ranges by factor 1.5 from 100 m to
-1000 km, then bisects the last successful interval ten times. It can miss a
+1000 km and adds the shared anchor/loft-transition probes, then bisects the last
+successful interval ten times. It can miss a
 narrow disconnected island of success. It is not a mathematical proof of a
 continuous no-escape envelope.
 
@@ -58,60 +64,60 @@ including held records measured diagnostically without enabling them.
 
 | Store | Public/class anchor km | 5,000 ft | 15,000 ft | 35,000 ft |
 | --- | ---: | --- | --- | --- |
-| AA10.JT | 73 | 25.70 / 7.75 / 5.04 | 32.37 / 10.62 / 7.16 | 73.00 / 20.44 / 14.44 |
+| AA10.JT | 73 | 25.70 / 7.75 / 5.04 | 47.22 / 10.62 / 7.16 | 73.00 / 20.44 / 14.45 |
 | AA11.JT | 30 | 13.97 / 3.93 / 2.55 | 18.00 / 5.38 / 3.62 | 29.99 / 10.31 / 7.34 |
 | AA11B.JT | 30 | 13.97 / 3.93 / 2.55 | 18.00 / 5.38 / 3.62 | 29.99 / 10.31 / 7.34 |
-| AA12.JT | 50 | 18.29 / 5.26 / 3.40 | 23.30 / 7.21 / 4.86 | 49.99 / 13.86 / 9.87 |
+| AA12.JT | 50 | 18.29 / 5.26 / 3.40 | 33.33 / 7.21 / 4.86 | 50.00 / 13.86 / 9.86 |
 | AA2.JT | 7.6 | 14.08 / 3.96 / 2.72 | 18.03 / 5.32 / 3.74 | 30.02 / 10.34 / 7.60 |
 | AA6.JT | 30 | 14.44 / 4.04 / 2.57 | 18.39 / 5.54 / 3.66 | 29.99 / 10.53 / 7.41 |
 | AA8.JT | 10 | 4.51 / 0.89 / 0.57 | 5.71 / 1.40 / 0.87 | 10.00 / 2.88 / 2.01 |
-| AA9.JT | 120 | 42.53 / 14.33 / 9.21 | 52.51 / 19.44 / 12.86 | 119.98 / 36.73 / 25.28 |
-| AAML.JT | 150 | 56.15 / 18.68 / 12.21 | 100.50 / 25.34 / 16.97 | 149.95 / 48.94 / 33.87 |
-| AEMP1.JT | 50 | 18.28 / 5.19 / 3.38 | 23.28 / 7.14 / 4.85 | 49.99 / 13.57 / 9.85 |
-| AIM120.JT | 60 | 21.78 / 6.42 / 4.20 | 27.54 / 8.79 / 5.97 | 60.00 / 16.91 / 12.07 |
-| AIM54C.JT | 150 | 52.79 / 18.54 / 11.98 | 101.85 / 25.01 / 16.60 | 149.95 / 46.95 / 32.36 |
-| AIM7.JT | 70 | 24.38 / 7.45 / 4.76 | 45.82 / 10.20 / 6.77 | 69.98 / 19.27 / 13.54 |
+| AA9.JT | 120 | 42.54 / 14.34 / 9.21 | 81.37 / 19.44 / 12.86 | 120.00 / 36.73 / 25.28 |
+| AAML.JT | 150 | 56.15 / 18.68 / 12.21 | 100.54 / 25.34 / 16.97 | 150.00 / 48.94 / 33.87 |
+| AEMP1.JT | 50 | 18.28 / 5.19 / 3.38 | 33.33 / 7.14 / 4.85 | 50.00 / 13.57 / 9.85 |
+| AIM120.JT | 60 | 21.78 / 6.43 / 4.20 | 39.72 / 8.79 / 5.97 | 60.00 / 16.91 / 12.07 |
+| AIM54C.JT | 150 | 52.79 / 18.54 / 11.98 | 101.86 / 25.01 / 16.60 | 150.00 / 46.95 / 32.37 |
+| AIM7.JT | 70 | 24.38 / 7.45 / 4.76 | 45.82 / 10.19 / 6.77 | 70.00 / 19.27 / 13.54 |
 | AIM7E.JT | 35 | 17.28 / 5.00 / 3.26 | 21.76 / 6.76 / 4.56 | 34.99 / 12.89 / 9.20 |
 | AIM9B.JT | 4.8 | 11.78 / 0.00 / 1.65 | 15.09 / 3.31 / 2.30 | 20.34 / 6.53 / 4.80 |
 | AIM9M.JT | 18 | 8.28 / 2.13 / 1.36 | 10.67 / 2.96 / 2.02 | 18.00 / 5.65 / 4.17 |
 | AIM9X.JT | 18 | 8.27 / 2.12 / 1.36 | 10.66 / 2.94 / 2.01 | 18.00 / 5.65 / 4.15 |
-| MICA.JT | 60 | 21.95 / 6.48 / 4.20 | 27.84 / 8.87 / 5.97 | 60.00 / 17.05 / 12.08 |
-| PL10.JT | 50 | 18.30 / 5.19 / 3.26 | 22.86 / 7.17 / 4.68 | 49.99 / 13.64 / 9.50 |
+| MICA.JT | 60 | 21.95 / 6.48 / 4.20 | 39.98 / 8.87 / 5.98 | 60.00 / 17.06 / 12.08 |
+| PL10.JT | 50 | 18.30 / 5.19 / 3.26 | 33.78 / 7.17 / 4.68 | 50.00 / 13.64 / 9.50 |
 | PL7.JT | 14 | 6.30 / 1.55 / 0.94 | 8.08 / 2.16 / 1.39 | 13.99 / 4.24 / 3.02 |
-| R27ER.JT | 117 | 43.70 / 14.47 / 9.54 | 54.01 / 19.63 / 13.27 | 117.00 / 37.87 / 26.49 |
+| R27ER.JT | 117 | 43.70 / 14.47 / 9.54 | 77.81 / 19.63 / 13.27 | 117.00 / 37.87 / 26.49 |
 | R27ET.JT | 104 | 54.46 / 18.85 / 12.68 | 66.71 / 25.19 / 17.24 | 103.96 / 48.92 / 34.31 |
 | R27T.JT | 63 | 31.84 / 10.06 / 6.72 | 39.70 / 13.45 / 9.18 | 62.99 / 26.24 / 18.48 |
-| R530.JT | 40 | 14.58 / 4.06 / 2.59 | 18.70 / 5.60 / 3.74 | 40.00 / 10.76 / 7.65 |
+| R530.JT | 40 | 14.58 / 4.06 / 2.59 | 26.54 / 5.60 / 3.74 | 40.00 / 10.76 / 7.65 |
 | R550.JT | 15 | 6.74 / 1.69 / 1.02 | 8.67 / 2.35 / 1.52 | 15.00 / 4.59 / 3.26 |
 
 ## Complete A2A seeker-valid reach
 
 | Store | 5,000 ft | 15,000 ft | 35,000 ft |
 | --- | --- | --- | --- |
-| AA10.JT | 25.70 / 7.75 / 5.04 | 32.37 / 10.62 / 7.16 | 70.50 / 20.44 / 14.44 |
+| AA10.JT | 25.70 / 7.75 / 5.04 | 47.13 / 10.62 / 7.16 | 70.52 / 20.44 / 14.45 |
 | AA11.JT | 11.56 / 3.92 / 2.55 | 11.56 / 5.37 / 3.63 | 11.56 / 10.29 / 7.34 |
 | AA11B.JT | 11.56 / 3.92 / 2.55 | 11.56 / 5.37 / 3.63 | 11.56 / 10.29 / 7.34 |
-| AA12.JT | 18.29 / 5.24 / 3.40 | 23.29 / 7.19 / 4.86 | 49.99 / 13.83 / 9.87 |
+| AA12.JT | 18.29 / 5.24 / 3.40 | 33.30 / 7.19 / 4.86 | 50.00 / 13.83 / 9.87 |
 | AA2.JT | 0.00 / 0.00 / 2.72 | 0.00 / 0.00 / 3.74 | 0.00 / 0.00 / 7.60 |
 | AA6.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
 | AA8.JT | 4.51 / 0.00 / 0.57 | 5.71 / 1.33 / 0.87 | 5.78 / 2.85 / 2.02 |
 | AA9.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
-| AAML.JT | 56.15 / 18.65 / 12.21 | 100.50 / 25.30 / 16.97 | 149.95 / 48.86 / 33.87 |
-| AEMP1.JT | 18.28 / 5.18 / 3.38 | 23.28 / 7.12 / 4.85 | 49.99 / 13.51 / 9.85 |
-| AIM120.JT | 21.78 / 6.41 / 4.20 | 27.54 / 8.78 / 5.97 | 60.00 / 16.86 / 12.07 |
-| AIM54C.JT | 52.77 / 18.54 / 11.98 | 101.85 / 24.99 / 16.60 | 149.95 / 46.91 / 32.37 |
-| AIM7.JT | 24.38 / 7.45 / 4.76 | 45.73 / 10.20 / 6.77 | 69.05 / 19.27 / 13.54 |
+| AAML.JT | 56.15 / 18.65 / 12.21 | 100.54 / 25.30 / 16.97 | 150.00 / 48.86 / 33.87 |
+| AEMP1.JT | 18.28 / 5.18 / 3.38 | 33.33 / 7.11 / 4.85 | 50.00 / 13.51 / 9.85 |
+| AIM120.JT | 21.78 / 6.41 / 4.20 | 39.72 / 8.78 / 5.97 | 60.00 / 16.86 / 12.07 |
+| AIM54C.JT | 52.77 / 18.54 / 11.98 | 101.86 / 24.99 / 16.60 | 150.00 / 46.91 / 32.37 |
+| AIM7.JT | 24.38 / 7.45 / 4.76 | 45.75 / 10.19 / 6.77 | 69.08 / 19.27 / 13.54 |
 | AIM7E.JT | 17.28 / 5.00 / 3.26 | 21.76 / 6.76 / 4.56 | 34.78 / 12.87 / 9.20 |
 | AIM9B.JT | 0.00 / 0.00 / 1.65 | 0.00 / 0.00 / 2.30 | 0.00 / 0.00 / 4.80 |
 | AIM9M.JT | 8.28 / 2.09 / 1.36 | 9.64 / 2.92 / 2.02 | 9.64 / 5.62 / 4.17 |
 | AIM9X.JT | 8.27 / 2.08 / 1.36 | 9.64 / 2.91 / 2.01 | 9.64 / 5.63 / 4.15 |
-| MICA.JT | 21.95 / 6.46 / 4.20 | 27.84 / 8.86 / 5.98 | 60.00 / 17.02 / 12.08 |
+| MICA.JT | 21.95 / 6.46 / 4.20 | 39.98 / 8.86 / 5.98 | 60.00 / 17.03 / 12.08 |
 | PL10.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
 | PL7.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
-| R27ER.JT | 43.70 / 14.47 / 9.54 | 54.01 / 19.63 / 13.27 | 115.61 / 37.87 / 26.49 |
+| R27ER.JT | 43.70 / 14.47 / 9.54 | 77.58 / 19.63 / 13.27 | 115.65 / 37.87 / 26.49 |
 | R27ET.JT | 11.56 / 15.30 / 12.68 | 11.56 / 15.30 / 17.25 | 11.56 / 15.30 / 18.28 |
 | R27T.JT | 11.56 / 10.04 / 6.72 | 11.56 / 13.44 / 9.18 | 11.56 / 15.30 / 18.28 |
-| R530.JT | 14.58 / 4.06 / 2.59 | 18.70 / 5.60 / 3.74 | 39.98 / 10.74 / 7.65 |
+| R530.JT | 14.58 / 4.06 / 2.59 | 26.54 / 5.60 / 3.74 | 39.99 / 10.74 / 7.65 |
 | R550.JT | 6.73 / 1.65 / 1.02 | 8.67 / 2.31 / 1.52 | 9.64 / 4.57 / 3.26 |
 
 ## SAM and powered A-G calibration
@@ -181,12 +187,29 @@ The SAM aspect allowance continues the previous game policy where the
 original aspect field has no reviewed interpretation. In particular, this
 is not a claim that every real infrared SAM is all-aspect.
 
+## Loft-transition coverage
+
+The range search explicitly samples around loft activation. Under the A2A
+reference conditions at 15,000 ft, AIM120 misses at 30 and 36 km but hits at
+37 and 39 km. Its physical maximum is about 39.72 km. A sparse geometric sweep
+alone had found only the earlier, unlofted interval, ending near 27.54 km.
+The bounded runtime search and offline calibration now share these additional
+probes. The regression uses synthetic disconnected success intervals. No motor,
+drag or other physical coefficient changed. All 25 A2A physical calibration
+anchors remain within 0.04% of their selected targets under the fitted reference
+conditions; that is calibration agreement, not independent engineering evidence.
+
+A single reference shot can be reproduced with the offline example:
+`missile_energy_ranges LOCAL_JT_DIRECTORY --point AIM120.JT 15000 head 39000`.
+Altitude is feet, range meters. The maximum is not a promise that every shorter
+shot succeeds; IN RNG and AI release permission still use the point forecast.
+
 ## Validation status
 
 Phase 2 implementation and regression validation completed on Linux x86-64.
 `cargo fmt --all -- --check`, workspace/all-target clippy with warnings denied,
 workspace tests and workspace build passed with the locked Rust 1.91.1 toolchain.
-Tests: 7,181 passed, zero failed, 106 ignored across 59 suites. Python tooling:
+Tests: 7,183 passed, zero failed, 106 ignored across 59 suites. Python tooling:
 505 run, five skipped. Source/binary asset guards and documentation checks
 passed. No expected golden constants were changed.
 
@@ -205,35 +228,53 @@ contains its crashed live-fire setup, so it is not a clean visual demonstration
 of flare separation. Physical/visible release agreement is covered by the
 synthetic deterministic test. A 32-shot actual-AI study smoke completed.
 Windows/macOS runtime and Apple Silicon fingerprints were not measured here.
-The full Phase 3 statistical study follows separately.
+Phase 3 stopped after 1,270,080 main-matrix shots. The historical comparison
+was abandoned before exporting its partial results. Focused timing, heat,
+full actual-AI, near-range and instrumented notch studies remain unrun. All
+available data and logs are retained in local scratch with pre-fix labels.
 
 ## Prediction cost
 
-Release build on this Linux x86-64 host, nice 10, eight AI aircraft and exactly
-sixteen replenished zero-damage missiles in a real UKR world. Eight additional
-launch/envelope clients exercise the same service. `missile_energy_cost`
-measures request/read work plus the entire prediction-service advance.
-The first 240 ticks are cold; subsequent ticks include refresh and cache work.
-The stable-query lanes freeze only the eight probe geometries, while the world
-and its missiles continue moving. Each row is one sequential run.
+Release build on an AMD Ryzen 9 7900X (12 cores, 24 threads), Linux x86-64,
+nice 10. The fixture starts eight AI aircraft and replenishes sixteen
+zero-damage missiles. A2A logs counted up to 24 projectiles, including eight
+jettisoned tanks identified by a later diagnostic. The probe asserts that every
+AI remains alive. These measurements are pre-fix and do not establish acceptance. Each
+actor has eight synthetic candidate stations with distinct mount positions,
+for 64 launch-point requests plus eight range searches and live missile work.
+`missile_energy_cost PACK 2400 UKR frozen AIM120.JT 8` reproduces the stable
+lane; use `moving` for changing geometry or `AGM84A.JT` for cruise-query stress.
 
-| Lane | Ticks | Cold p50 / p95 ms | Subsequent p50 / p95 ms | Maximum ms | Cached reads p95 ms |
-| --- | ---: | --- | --- | ---: | ---: |
-| AIM120 stable queries | 12000 | 0.684 / 0.807 | 0.003 / 0.652 | 0.841 | 0.00148 |
-| AIM120 moving queries | 2400 | 0.673 / 0.723 | 0.647 / 0.748 | 0.864 | 0.00160 |
-| AGM84A cruise-query stress | 4800 | 0.597 / 0.639 | 0.627 / 0.657 | 0.916 | 0.00212 |
+Each lane runs 2,400 ticks (20 simulated seconds). The first 240 ticks are cold;
+the rest include refresh/cache work. Request cost plus the entire prediction
+advance is measured together; 64 frame reads are timed separately. Stable probe
+geometries are frozen, while actual actors and missiles keep moving. Each row
+is a sequential run. The earlier 100-second stable sample is excluded from
+acceptance: the stronger alive check found an AI no longer alive at tick 2,783;
+the cause was not established. The final
+20-second samples pass that check throughout, with ample completed warm work.
 
-Linux thread CPU timing independently confirms cold/subsequent p95 of
-0.806/0.652, 0.725/0.747 and 0.637/0.656 ms, respectively. This optional
-developer probe uses a Linux-only dev dependency already in the lockfile;
-neither the runtime library nor deterministic work scheduling uses host CPU
-clocks. The fixed budget is 16,384 quarter-step units, at most 4096 integration
-steps, with terrain samples also charged. There is no synchronous fallback.
+| Lane | Cold p50 / p95 ms | Subsequent p50 / p95 ms | Maximum ms | Frame reads p95 / max ms |
+| --- | --- | --- | ---: | --- |
+| AIM120 stable queries | 0.699 / 0.824 | 0.009 / 0.014 | 0.940 | 0.0101 / 0.0198 |
+| AIM120 moving queries | 0.688 / 0.708 | 0.632 / 0.697 | 0.802 | 0.0105 / 0.0178 |
+| AGM84A cruise-query stress | 0.643 / 0.667 | 0.641 / 0.676 | 0.950 | 0.0141 / 0.0236 |
 
-Latency is separate from CPU cost. Eight stable AIM120 envelopes completed;
-moving envelopes stayed pending as geometry changed. Eight cold cruise range
-envelopes were still pending after 40 simulated seconds under this load,
-although 37,652 cached point reads succeeded. IN RNG and missile TTI consume
-point forecasts without waiting for the complete range scale. A pending cue
-is shown as unknown and cannot authorize an AI shot. This bounded-latency
-limitation remains, especially for very long cruise trajectories.
+Even adding the separate maxima conservatively gives less than 0.974 ms per
+tick across these pre-fix lanes. The approximately 2 ms acceptance gate remains
+unvalidated pending review and a corrected fixture. Linux thread CPU
+p95 independently confirms cold/subsequent costs of 0.822/0.016,
+0.705/0.696 and 0.665/0.674 ms. This optional developer probe uses a Linux-only
+dev dependency already in the lockfile. Neither the runtime library nor
+scheduling uses host CPU clocks. The unchanged deterministic budget is 16,384
+quarter-step units, at most 4096 integration steps, with terrain samples charged.
+There is no synchronous fallback. Queue saturation reaches the 64-job bound.
+
+Latency is separate from CPU cost. Eight stable AIM120 maximums were published
+by 2.25 simulated seconds and the envelope work completed within the sample.
+Moving envelopes stayed pending as geometry changed. Eight cold cruise range
+envelopes were still pending after 20 simulated seconds, although 129,172
+cached point reads succeeded. IN RNG and missile TTI use point forecasts
+without waiting for the complete range scale. A pending cue is unknown and
+cannot authorize an AI shot. This latency limit remains, especially for long
+cruise trajectories and changing geometry.

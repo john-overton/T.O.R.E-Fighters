@@ -803,6 +803,10 @@ def check_missile_energy(work, _output):
             problems.append("energy study lacks both an intercept and a physical/seeker miss")
         if not any(int(row["rolls"]) for row in rows):
             problems.append("energy study did not exercise a decoy roll")
+        with (work / "spec-compat" / "runs.csv").open() as stream:
+            legacy = list(csv.DictReader(stream))
+        if len(legacy) != 8 or not any(int(row["rolls"]) for row in legacy):
+            problems.append("historical high-susceptibility study did not finish eight decoy trials")
     except (OSError, ValueError, KeyError) as error:
         problems.append(f"unreadable energy study: {error}")
     return problems
@@ -817,8 +821,11 @@ def combat_scenarios() -> list[Scenario]:
              "--seeds", "2", "--missile-model", "energy"]
     out.append(Scenario(name="flight-missile-energy", lane="flight",
                         args=["--missile-study", "{work}/energy", "--threads", "4"] + study,
-                        then=[Step(args=["--missile-study", "{work}/energy-serial", "--threads", "1"] + study)],
-                        outputs=["energy/runs.csv", "energy-serial/runs.csv"], check_work=check_missile_energy,
+                        then=[Step(args=["--missile-study", "{work}/energy-serial", "--threads", "1"] + study),
+                              Step(args=["--missile-study", "{work}/spec-compat", "--threads", "1",
+                                         "--missile-model", "spec", "--missiles", "AIM9B", "--profiles", "cm-hammer",
+                                         "--ranges", "short", "--aspects", "tail", "--altitudes", "co", "--seeds", "8"])],
+                        outputs=["energy/runs.csv", "energy-serial/runs.csv", "spec-compat/runs.csv"], check_work=check_missile_energy,
                         timeout=180, notes="Shared energy flight, physical decoy episodes and worker determinism"))
     out.append(Scenario(name="flight-missile-sag", lane="flight",
                         args=["--missile-sag", "--no-audio"],

@@ -198,8 +198,11 @@ fire from a pending/failed point answer, and ordinary sensor/support and
 minimum-range launch gates remain. A surface seeker does not acquire a blind
 zone near impact from that launch minimum. Long range queries do not block the world.
 
-Range search samples around the physical reference anchor, brackets the last
-successful interval and bisects ten times. It publishes that maximum before
+Range search samples around the physical reference anchor and both sides of
+the data-driven loft transition, brackets the last successful interval and
+bisects ten times. A lofted shot can succeed beyond a shorter failing unlofted
+shot, so the maximum does not imply that every shorter shot will hit. The point
+forecast still governs IN RNG and AI launch permission. It publishes that maximum before
 finishing the 17-sample favorable band. The fitted band uses ideal observation
 quality, range fraction and flight-time/lifetime, threshold 70 of 95; it is not
 a measured kill probability. A-G predictions retain the real target while the

@@ -1,5 +1,5 @@
 //! `--missile-study OUT_DIR [--seeds N] [--missiles A,B] [--profiles P,Q]
-//! [--ranges short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes
+//! [--ranges near,close,short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes
 //! deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--decoy-model
 //! coast|lure] [--ai [--skill S] [--ai-model standard|hybrid] [--theater T]
 //! [--trace]] [--catalog]`: a headless Monte Carlo of air-to-air missile shots, for studying missile accuracy and
@@ -202,6 +202,8 @@ impl Altitudes {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Band {
+    Near,
+    Close,
     Short,
     Medium,
     Long,
@@ -209,6 +211,8 @@ pub enum Band {
 impl Band {
     fn name(self) -> &'static str {
         match self {
+            Self::Near => "near",
+            Self::Close => "close",
             Self::Short => "short",
             Self::Medium => "medium",
             Self::Long => "long",
@@ -216,13 +220,16 @@ impl Band {
     }
     fn parse(s: &str) -> AppResult<Self> {
         Ok(match s {
+            "near" => Self::Near,
+            "close" => Self::Close,
             "short" => Self::Short,
             "medium" => Self::Medium,
             "long" => Self::Long,
             _ => return Err(format!("unknown range band {s}").into()),
         })
     }
-    /// The nominal horizontal launch range for a weapon, feet: short is
+    /// The nominal horizontal launch range for a weapon, feet: near/close are
+    /// 0.25/0.5 nmi, both raised to 1.1 times the decoded minimum. Short is
     /// 1.5 nmi (or just past the record's minimum), medium is 5 nmi for a
     /// radar missile (clamped to 60 percent of its maximum) and two thirds of
     /// an IR missile's maximum, long is 90 percent of the rated maximum.
@@ -232,6 +239,8 @@ impl Band {
         let min = f64::from(zone.minimum_range);
         let infrared = w.seeker.signature == 2;
         match self {
+            Self::Near => (0.25 * NMI).max(min * 1.1),
+            Self::Close => (0.5 * NMI).max(min * 1.1),
             Self::Short => (1.5 * NMI).max(min * 1.1).min(max * 0.5),
             Self::Medium if infrared => max * 0.65,
             Self::Medium => (5. * NMI).min(max * 0.6).max(min * 1.5),
@@ -368,6 +377,8 @@ pub struct Shot {
     pub rolls: u32,
     pub control_loss_s: Option<f64>,
     pub ground_impact: bool,
+    pub first_notch_s: Option<f64>,
+    pub notched_s: f64,
     pub decoyed_at_s: Option<f64>,
     /// The closest approach was this many seconds away when the decoy took.
     pub decoyed_tcpa_s: Option<f64>,
@@ -815,11 +826,17 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         let u = (-dot(a, d) / dot(d, d).max(1e-12)).clamp(0., 1.);
         miss = miss.min(length(std::array::from_fn(|i| a[i] + d[i] * u)));
         if let Some(p) = now {
-            if p.motion
-                .and_then(|m| m.energy)
-                .is_some_and(|e| e.flight.lost)
-            {
-                shot.control_loss_s.get_or_insert(t);
+            if let Some(energy) = p.motion.and_then(|m| m.energy) {
+                if energy.flight.lost {
+                    shot.control_loss_s.get_or_insert(t);
+                }
+                if energy.tracking.notched
+                    && !energy.flight.lost
+                    && p.guidance.as_ref().is_some_and(|f| f.enabled)
+                {
+                    shot.first_notch_s.get_or_insert(t);
+                    shot.notched_s += DT;
+                }
             }
             last_speed = p.motion.map_or(0., |m| length(m.velocity));
             if let Some(flight) = &p.guidance {
@@ -1049,7 +1066,7 @@ struct Options {
     ai: Option<ai::AiSetup>,
 }
 
-const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
+const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges near,close,short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -1279,7 +1296,14 @@ pub fn run() -> AppResult<()> {
     if o.follow_decoy && o.rules == missiles::Rules::Energy {
         return Err("the lure what-if is only available with --missile-model spec".into());
     }
-    std::fs::write(o.out.join("model.txt"), format!("{:?}\n", o.rules))?;
+    std::fs::write(
+        o.out.join("model.txt"),
+        format!(
+            "{:?}\nphysical-table={:016x}\n",
+            o.rules,
+            tore_formats::missile_data::fingerprint()
+        ),
+    )?;
     let base = Base {
         rules: o.rules,
         follow_decoy: o.follow_decoy,
@@ -1356,13 +1380,13 @@ fn write_results(
     let mut runs = std::io::BufWriter::new(std::fs::File::create(o.out.join("runs.csv"))?);
     writeln!(
         runs,
-        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact"
+        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact,first_notch_s,notched_s"
     )?;
     for (c, seed, s) in results {
         let cell = &cells[*c];
         writeln!(
             runs,
-            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{}",
+            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{},{},{:.3}",
             cell.missile,
             cell.altitudes.name(),
             cell.band.name(),
@@ -1394,6 +1418,8 @@ fn write_results(
             s.control_loss_s
                 .map_or(String::new(), |t| format!("{t:.3}")),
             u8::from(s.ground_impact),
+            s.first_notch_s.map_or(String::new(), |t| format!("{t:.3}")),
+            s.notched_s,
         )?;
     }
     let mut summary = std::io::BufWriter::new(std::fs::File::create(o.out.join("cells.csv"))?);
@@ -1492,6 +1518,26 @@ mod tests {
             assert_eq!(Tactic::parse(name).unwrap().name(), name);
         }
         assert!(Tactic::parse("loop").is_err());
+    }
+
+    #[test]
+    fn close_study_ranges_respect_the_minimum_without_changing_old_bands() {
+        let state = tore_world::test_support::combat_fixture(true);
+        let mut w = state.own().configuration().stations[0].weapon.clone();
+        w.seeker.signature = 3;
+        w.seeker.zones[1].minimum_range = 1000;
+        w.seeker.zones[1].maximum_range = 100000;
+        assert_eq!(Band::Near.feet(&w), 1519.);
+        assert_eq!(Band::Close.feet(&w), 3038.);
+        assert_eq!(Band::Short.feet(&w), 9114.);
+        assert_eq!(Band::Medium.feet(&w), 30380.);
+        assert_eq!(Band::Long.feet(&w), 90000.);
+        w.seeker.zones[1].minimum_range = 4000;
+        assert_eq!(Band::Near.feet(&w), 4400.);
+        assert_eq!(Band::Close.feet(&w), 4400.);
+        for name in ["near", "close", "short", "medium", "long"] {
+            assert_eq!(Band::parse(name).unwrap().name(), name);
+        }
     }
 
     #[test]
