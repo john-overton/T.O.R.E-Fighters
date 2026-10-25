@@ -2811,12 +2811,24 @@ impl App {
     /// When to draw again after a frame that wants `want`; None waits for
     /// an event. The frame-rate counter keeps every view drawing while it
     /// measures.
+    /// A frame whose surface gave no image is tried again after a short,
+    /// growing wait (`frame_pacing::surface_retry`), whatever it wanted.
     fn pace(&mut self, want: frame_pacing::Want) -> Option<Instant> {
         let renderer = self.renderer.as_ref()?;
         let limit = renderer.frame_limit();
         let want = frame_pacing::counted(want, renderer.counter_shown());
+        let retry = renderer.surface_retry();
         let window = self.pace_window();
-        self.pacer.next(limit, want, window, Instant::now())
+        let now = Instant::now();
+        let next = self.pacer.next(limit, want, window, now);
+        match retry {
+            Some(wait) => frame_pacing::after_surface_failure(
+                self.pacer.soonest(limit, window, now),
+                wait,
+                now,
+            ),
+            None => next,
+        }
     }
     /// Whether the frame-rate counter is shown, which keeps every screen
     /// drawing at the frame rate setting so it measures real frames.
@@ -2825,7 +2837,8 @@ impl App {
     }
     /// Whether a redraw request arriving now waits for the frame timer
     /// (`frame_pacing::too_soon`): with the counter shown under a capped rate,
-    /// events add no frames beyond the timer's.
+    /// or while the window is unfocused, events add no frames beyond the
+    /// timer's.
     fn redraw_too_soon(&self) -> bool {
         let Some(renderer) = &self.renderer else {
             return false;
@@ -2833,7 +2846,7 @@ impl App {
         frame_pacing::too_soon(
             renderer.frame_limit(),
             renderer.counter_shown(),
-            self.pace_window().automated,
+            self.pace_window(),
             self.next_frame,
             Instant::now(),
         )
@@ -4288,8 +4301,9 @@ impl ApplicationHandler for App {
             return;
         }
         self.note_menu_input(&event);
-        // With the frame-rate counter under a capped rate, the timer draws
-        // the frames: a request from an event waits for the next slot.
+        // With the frame-rate counter under a capped rate, or an unfocused
+        // window, the timer draws the frames: a request from an event waits
+        // for the next slot.
         if matches!(event, WindowEvent::RedrawRequested) && self.redraw_too_soon() {
             return;
         }
@@ -5224,6 +5238,11 @@ impl ApplicationHandler for App {
                     Screen::Flight => {
                         self.scenery.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
                         let now = Instant::now();
+                        // The part of the gap since the last frame that the
+                        // pacer did not choose to wait: what says the loop
+                        // ran late (an unfocused window's tenth of a second
+                        // or a still picture's wait does not).
+                        let busy = self.pacer.busy(self.frame_time, now);
                         // Captures draw the explicitly prepared state. Startup
                         // and GPU initialization time must not advance it.
                         let elapsed = if self.capture_terrain.is_some() {
@@ -5429,7 +5448,9 @@ impl ApplicationHandler for App {
                         self.performance.ticks(steps, self.flight_ui.time_scale);
                         // Slice S9: the shared workers fan out only while the
                         // flight is compressed, a tick ran over its budget or
-                        // a frame ran long (over 100 ms).
+                        // a frame ran long (over 100 ms that the pacer did not
+                        // ask to wait: an unfocused window drawing ten frames
+                        // a second is not late).
                         tore_workers::observe(tore_workers::Load {
                             compression: if steps > 0 {
                                 self.flight_ui.time_scale
@@ -5437,7 +5458,7 @@ impl ApplicationHandler for App {
                                 1.
                             },
                             tick_cost: ticks_started.elapsed() / steps.max(1) as u32,
-                            late: elapsed > LATE_FRAME_SECONDS,
+                            late: busy.as_secs_f64() > LATE_FRAME_SECONDS,
                         });
                         self.input.feedback_flush();
                         // In the sensor console the look keys and axes fly
@@ -7251,11 +7272,16 @@ impl ApplicationHandler for App {
         let paused = self.input_paused();
         self.input.context(paused, self.focused);
         // Controllers are polled every 8 ms in flight, the replay viewer and
-        // the controls screen; the menus poll less often.
+        // the controls screen; the menus poll less often, and so does an
+        // unfocused or hidden window, whose bindings ignore the controllers
+        // anyway (a multiplayer flight keeps flying: its session is not
+        // paced by input polls).
+        let window = self.pace_window();
         self.input.set_pace(
-            self.screen == Screen::Replay
-                || self.controls.is_some()
-                || (self.screen == Screen::Flight && !paused),
+            (window.automated || (window.focused && !window.hidden))
+                && (self.screen == Screen::Replay
+                    || self.controls.is_some()
+                    || (self.screen == Screen::Flight && !paused)),
         );
         let cockpit = self
             .world
@@ -10882,6 +10908,9 @@ struct LocateShell {
     fullscreen: bool,
     /// Alt state, which winit reports separately from the key event.
     modifiers: ModifiersState,
+    /// When to draw again after a present the surface gave no image for
+    /// (`CanvasPresenter::surface_retry`).
+    retry_at: Option<Instant>,
 }
 
 /// winit key names the locate screen understands. Printable characters go
@@ -11173,11 +11202,14 @@ impl ApplicationHandler for LocateShell {
                     self.background.as_deref(),
                 );
                 let pixels = std::mem::take(&mut self.pixels);
-                if let Some(presenter) = &mut self.presenter
-                    && let Err(error) = presenter.present(&pixels)
-                {
-                    self.error = Some(error);
-                    event_loop.exit();
+                if let Some(presenter) = &mut self.presenter {
+                    if let Err(error) = presenter.present(&pixels) {
+                        self.error = Some(error);
+                        event_loop.exit();
+                    }
+                    // A surface that gave no image is tried again after a
+                    // wait, never at once.
+                    self.retry_at = presenter.surface_retry().map(|wait| Instant::now() + wait);
                 }
                 self.pixels = pixels;
             }
@@ -11194,14 +11226,21 @@ impl ApplicationHandler for LocateShell {
         if animating {
             self.last_tick = Instant::now();
         }
-        if changed || animating {
+        let retry = self.retry_at.is_some_and(|at| Instant::now() >= at);
+        if retry {
+            self.retry_at = None;
+        }
+        if changed || animating || retry {
             self.redraw();
         }
-        event_loop.set_control_flow(if self.worker.is_some() {
-            // Poll the import often enough for a smooth progress bar.
-            ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(33))
-        } else {
-            ControlFlow::Wait
+        // Poll the import often enough for a smooth progress bar.
+        let poll = self
+            .worker
+            .is_some()
+            .then(|| Instant::now() + Duration::from_millis(33));
+        event_loop.set_control_flow(match poll.into_iter().chain(self.retry_at).min() {
+            Some(at) => ControlFlow::WaitUntil(at),
+            None => ControlFlow::Wait,
         });
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -11266,6 +11305,7 @@ fn locate_shell(
         last_pointer: None,
         fullscreen: window.fullscreen,
         modifiers: ModifiersState::empty(),
+        retry_at: None,
     };
     event_loop.run_app_on_demand(&mut shell)?;
     if shell.fullscreen != window.fullscreen {

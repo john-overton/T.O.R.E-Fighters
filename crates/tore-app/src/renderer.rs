@@ -138,6 +138,9 @@ pub struct Renderer {
     previews: std::collections::BTreeMap<u8, Readback>,
     readbacks: ReadbackPool,
     first_frame: crate::startup::FirstFrame,
+    /// Frames in a row whose surface gave no image; the caller waits
+    /// [`crate::frame_pacing::surface_retry`] before trying again.
+    surface_failures: u32,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -688,6 +691,7 @@ impl Renderer {
             console_last: None,
             console_repeat: false,
             first_frame: Default::default(),
+            surface_failures: 0,
             mirror_camera: crate::camera::Camera::new(),
             mirror_vertices: Vec::new(),
             mirror_frames: 0,
@@ -1198,13 +1202,31 @@ impl Renderer {
         Viewport::new(s.width, s.height)
     }
     pub fn resize(&mut self) {
+        if self.configure() {
+            self.window.request_redraw();
+        }
+    }
+    /// Configures the surface for the window's size; false at no size.
+    fn configure(&mut self) -> bool {
         let s = self.window.inner_size();
         if s.width > 0 && s.height > 0 {
             self.config.width = s.width;
             self.config.height = s.height;
             self.surface.configure(&self.device, &self.config);
-            self.window.request_redraw();
+            true
+        } else {
+            false
         }
+    }
+    /// After a frame that drew nothing because the surface gave no image
+    /// (lost, outdated, timed out): how long to wait before the next try.
+    /// None when the last frame had its image. The frame never asks for its
+    /// own redraw on such a failure, so a surface that keeps failing (a
+    /// window being minimised or changing mode on Windows) is tried a few
+    /// times a second, not in a tight loop.
+    pub fn surface_retry(&self) -> Option<std::time::Duration> {
+        (self.surface_failures > 0)
+            .then(|| crate::frame_pacing::surface_retry(self.surface_failures))
     }
     pub fn draw(
         &mut self,
@@ -1232,13 +1254,17 @@ impl Renderer {
             .take()
             .map_or(0., |start| start.elapsed().as_secs_f64());
         let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
+            Ok(frame) => {
+                self.surface_failures = 0;
+                frame
+            }
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.resize();
+                self.configure();
+                self.surface_failures = self.surface_failures.saturating_add(1);
                 return Ok(false);
             }
             Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => {
-                self.window.request_redraw();
+                self.surface_failures = self.surface_failures.saturating_add(1);
                 return Ok(false);
             }
             Err(error) => return Err(error.into()),
