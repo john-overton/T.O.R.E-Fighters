@@ -264,6 +264,7 @@ impl SmokeRenderer {
         aspect: f32,
         flares: &[FlareLight],
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         let frustum = Frustum::new(camera, aspect);
         // Retain the whole history for other views and for later camera turns.
         // Only the visible instances are sorted and uploaded for this draw.
@@ -290,6 +291,7 @@ impl SmokeRenderer {
         crate::sim_renderer::write_floats(queue, &self.buffer, 0, &instances);
     }
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         if self.count == 0 {
             return;
         }
@@ -299,6 +301,8 @@ impl SmokeRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, bind, &[]);
         pass.set_vertex_buffer(0, self.buffer.slice(..));
+        crate::frame_log::count(crate::frame_log::Count::Smoke, self.count as usize);
+        crate::frame_log::count(crate::frame_log::Count::EffectDraws, 1);
         pass.draw(0..6, 0..self.count);
     }
 }

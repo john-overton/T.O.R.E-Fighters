@@ -1921,8 +1921,10 @@ impl SimRenderer {
         world: &Terrain,
         scenery: &Scenery,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Render);
         // The world renders at the render-scale size; the lens flare and the
         // resample work at the output size.
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Sky);
         let output = size;
         self.airfield_lights.update(device, queue, world);
         let slot = self.targets(device, output);
@@ -2195,6 +2197,8 @@ impl SimRenderer {
         );
         // The burning city fill buildings: the nearest fires and columns of
         // the camera, replaced every draw (`crate::city_fires`).
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Cities);
         match world.city_fill.as_ref().filter(|_| self.city_fires_on) {
             Some(fill) => {
                 // Flames flicker on the wall clock; a replay's columns age
@@ -2229,6 +2233,8 @@ impl SimRenderer {
                 self.smoke.set_city_smoke(&[]);
             }
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         self.effects.update(queue, camera, world);
         // The night glow of every explosion and fire, and the ground light
         // of the nearest fires beside the flares' (nr-fx3).
@@ -2250,6 +2256,8 @@ impl SimRenderer {
                 crate::countermeasure_renderer::MAX_FLARE_LIGHTS,
             );
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Sky);
         let mut entries = Vec::with_capacity(12 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
             for rgb in row {
@@ -2318,6 +2326,8 @@ impl SimRenderer {
                 &weather.palette,
             )
         };
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
         // The fill's cull runs first: its lists feed the shadow maps too.
         if let Some(fill) = &mut self.fill {
             fill.prepare(queue, encoder, camera, scenery.origin, size);
@@ -2412,6 +2422,8 @@ impl SimRenderer {
                 vegetation.draw_shadows(&self.lighting, encoder, &self.bind);
             }
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
         // The spotting aid covers other aircraft in the main view and the
         // mirrors, not the instrument camera panels. The ownship batch is
         // excluded; combat targets share its airframe when no dummies load.
@@ -2438,6 +2450,22 @@ impl SimRenderer {
             }
             write_floats(queue, &self.spot_instances, 0, &spot_instances(&contacts));
         }
+        if crate::frame_log::enabled() {
+            crate::frame_log::count(
+                crate::frame_log::Count::Aircraft,
+                self.battle_contacts.len()
+                    + self
+                        .dummies
+                        .iter()
+                        .map(|(_, _, contacts, _)| contacts.len())
+                        .sum::<usize>()
+                    + usize::from(self.aircraft_visible),
+            );
+            crate::frame_log::count(
+                crate::frame_log::Count::Vegetation,
+                self.vegetation.as_ref().map_or(0, |v| v.placed() as usize),
+            );
+        }
         let destination = flare_target.as_ref().unwrap_or(target);
         let targets = &self.targets[slot];
         // Multisampled color resolves into the render-scale image when there
@@ -2459,6 +2487,8 @@ impl SimRenderer {
             resolve_target.is_some(),
             flares || spotting || flare_target.is_some(),
         );
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2499,6 +2529,8 @@ impl SimRenderer {
         if let Some(fill) = &self.fill {
             fill.draw(&mut pass, &self.bind);
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Terrain);
         // The terrain chunks in view, nearest first, so nearer hills hide
         // farther ground before it is shaded.
         self.chunks
@@ -2508,8 +2540,12 @@ impl SimRenderer {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
         for range in &self.chunk_order {
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(range.clone(), 0..1);
         }
+        crate::frame_log::count(crate::frame_log::Count::Terrain, self.chunk_order.len());
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Sky);
         // The sky after the opaque fill and terrain, only where neither
         // wrote depth (the clear value 0): each sample takes exactly the
         // colour it took when the sky went first and was drawn over, but
@@ -2517,54 +2553,70 @@ impl SimRenderer {
         // onto the sky under the same test. Everything before here writes
         // colour only with depth, without blending.
         pass.set_pipeline(&self.p.sky_pipeline);
+        crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
         pass.draw(0..3, 0..1);
         if celestial_count > 0 {
             pass.set_pipeline(&self.p.celestial_pipeline);
             pass.set_vertex_buffer(0, self.celestial_vertices.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..celestial_count, 0..1);
         }
         if let Some(vegetation) = &self.vegetation {
             vegetation.draw(&mut pass, &self.bind);
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Cities);
         if let Some((bind, buffer, count)) = &self.escapees {
             pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
         if let Some((buffer, count)) = &self.airports {
             pass.set_pipeline(&self.p.airport_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
             pass.set_pipeline(&self.p.airport_decal_pipeline);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
         if let Some((buffer, count)) = &self.surface_units
             && *count > 0
         {
+            let _surface_log = crate::frame_log::span(crate::frame_log::Phase::Surface);
+            crate::frame_log::count(crate::frame_log::Count::Surface, *count as usize);
             pass.set_pipeline(&self.p.moving_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
             pass.set_pipeline(&self.p.moving_decal_pipeline);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
         if let Some((buffer, count)) = &self.airport_lines {
             pass.set_pipeline(&self.p.scenery_line_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
         pass.set_pipeline(&self.p.pipeline);
         if let Some((bind, vertices, count)) = &self.aircraft {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
             if self.aircraft_visible {
+                crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
                 pass.draw(0..*count, 0..1);
             }
             if let Some((buffer, count)) = &self.battle {
                 pass.set_vertex_buffer(0, buffer.slice(..));
+                crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
                 pass.draw(0..*count, 0..1);
             }
         }
@@ -2572,10 +2624,13 @@ impl SimRenderer {
             pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
             pass.set_pipeline(&self.p.canopy_depth_pipeline);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
             pass.set_pipeline(&self.p.canopy_pipeline);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
         if self.canopy_visible
@@ -2584,16 +2639,23 @@ impl SimRenderer {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
             pass.set_pipeline(&self.p.canopy_depth_pipeline);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
             pass.set_pipeline(&self.p.canopy_pipeline);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Sky);
         if cloud_count > 0 {
             pass.set_pipeline(&self.p.cloud_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, self.cloud_vertices.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..cloud_count, 0..1);
         }
+        drop(phase_log);
+        let phase_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         // Blended and depth-tested but not depth-writing, so trails read behind
         // terrain and aircraft without occluding each other.
         if let Some((buffer, count)) = &self.vapor
@@ -2602,12 +2664,14 @@ impl SimRenderer {
             pass.set_pipeline(&self.p.vapor_pipeline);
             pass.set_bind_group(0, &self.vapor_bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
         if let Some((buffer, count)) = &self.battle {
             pass.set_pipeline(&self.p.tracer_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..*count, 0..1);
         }
         self.effects.draw(&mut pass);
@@ -2619,6 +2683,8 @@ impl SimRenderer {
         self.airfield_lights
             .draw(&mut pass, &self.p.airfield_lights);
         self.glow_points.draw(&mut pass, &self.p.night_glow);
+        drop(phase_log);
+        let _phase_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
         drop(pass);
         if let Some((_, bind)) = &targets.scaled {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2636,6 +2702,7 @@ impl SimRenderer {
             });
             pass.set_pipeline(&self.resample);
             pass.set_bind_group(0, bind, &[]);
+            crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
             pass.draw(0..3, 0..1);
         }
         // Flare glare goes over the finished image, where it can spill across
@@ -2705,6 +2772,7 @@ impl SimRenderer {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     for contact in contacts.iter() {
                         let base = slot * SPOT_INSTANCES as u32;
+                        crate::frame_log::count(crate::frame_log::Count::WorldDraws, 1);
                         pass.draw(
                             contact.first..contact.first + contact.count,
                             base..base + SPOT_INSTANCES as u32,

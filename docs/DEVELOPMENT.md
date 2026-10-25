@@ -552,6 +552,39 @@ startup problem; logs can contain local paths and device names.
 
 An editor with rust-analyzer is useful but optional. No global editor configuration is required.
 
+### Diagnosing slow frames
+
+In flight, open **Escape > Debug > Slow-frame log** and turn it on. Play
+through the slowdown, then send the current session log from the locations in
+[startup logs](#startup-logs-and-fatal-errors). It starts at a 50 ms threshold,
+is local to this session, and can be turned off with the same row. It does not
+change the graphics settings or keep a paused menu drawing.
+
+From a terminal, use `tore-app --frame-log` or `tore-app --frame-log 20`.
+`TORE_FRAME_LOG=on` or `TORE_FRAME_LOG=20` works too. `--frame-log off` overrides
+the environment. For an isolated developer run on a hidden workspace:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh target/debug/tore-app --free-flight --no-audio --frame-log 1
+```
+
+The always-on `Session system` line describes the adapter, driver, presentation,
+CPU cores, worker pool and graphics settings. A software renderer warns that
+graphics run on the CPU. On Windows, update the graphics driver and select
+**High performance** for the game under **Settings > System > Display >
+Graphics** if the log reports software rendering or an integrated GPU while a
+discrete GPU is available.
+
+`Slow frame` lines split CPU wall time by existing work phases and waits, with
+counts and flight context. `idle_event_ms` includes frame pacing and focus
+throttling; `unaccounted_ms` shows the remaining gap. GPU time is from earlier
+work and AI is included in simulation/network. Counts distinguish placed
+instances from GPU visibility. Output is limited to ten slow lines per second,
+plus a suppressed count, with percentiles and worst phases every minute.
+See the [measurement contract](spec/startup-diagnostics.md#graphics-session-and-slow-frames)
+for exact boundaries and limitations. The existing 5 MiB session log cap still
+applies, so capture the slowdown soon after enabling it.
+
 ## Terrain development loop
 
 The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with editable briefing fields and standard/custom weapons selection. The terrain inspection camera is now a CLI diagnostic. This supports airborne missions with straight-flying practice aircraft; combat AI and mission objectives remain open. Launch it with `--quick-mission`, or skip to the world with `--viewer`.

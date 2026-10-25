@@ -344,6 +344,7 @@ impl Renderer {
         pixels: &[u8],
         colors: &[[u8; 3]; 256],
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Panels);
         self.cockpit.weather(&self.queue, colors);
         self.cockpit.update(
             &self.queue,
@@ -368,6 +369,7 @@ impl Renderer {
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
         self.mirror_camera = crate::mirrors::camera(state);
         if !visible {
             self.mirror_vertices = hornet.vertices(state, &self.mirror_camera, world, scenery);
@@ -389,19 +391,24 @@ impl Renderer {
             Vec<crate::sim_renderer::Contact>,
         )>,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
         self.sim.dummies(&self.device, &self.queue, geometry);
     }
     pub fn combat(&mut self, geometry: &crate::sim_renderer::CombatGeometry) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
         self.sim.combat(&self.device, &self.queue, geometry);
     }
     pub fn escapees(&mut self, art: &crate::ejection_art::Art, vertices: &[f32]) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
         self.sim.escapees(&self.device, &self.queue, art, vertices);
     }
     pub fn airports(&mut self, geometry: &Arc<crate::scenery::StaticGeometry>) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Cities);
         self.sim.airports(&self.device, &self.queue, geometry);
     }
     /// This frame's moving surface units, sprites and parked aircraft pieces.
     pub fn surface_units(&mut self, vertices: &[f32]) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Surface);
         self.sim.surface_units(&self.device, &self.queue, vertices);
     }
     /// Smoke puffs, flare smoke and the released chaff and flares.
@@ -411,6 +418,7 @@ impl Renderer {
         smoke: [&tore_sim::combat::smoke::Smoke; 2],
         devices: &tore_sim::combat::countermeasures::Devices,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         self.sim
             .smoke(&self.device, &self.queue, art, smoke, devices);
     }
@@ -425,6 +433,7 @@ impl Renderer {
         effects: &[crate::snapshot::EffectPose],
         marks: &[crate::snapshot::MarkPose],
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         self.sim
             .effects(&self.device, &self.queue, art, effects, marks);
     }
@@ -436,9 +445,11 @@ impl Renderer {
         afterburners: &[crate::countermeasure_renderer::Afterburner],
         guns: &crate::gun_flash::Drawn,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         self.sim.emitters(&self.queue, devices, afterburners, guns);
     }
     pub fn vapor(&mut self, vertices: &[f32]) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Effects);
         self.sim.vapor(&self.device, &self.queue, vertices);
     }
     pub fn set_scenery(&mut self, scenery: &crate::scenery::Scenery) {
@@ -462,6 +473,7 @@ impl Renderer {
     /// Apply graphics choices at once; an anti-aliasing change rebuilds the
     /// world pipelines.
     pub fn set_graphics(&mut self, options: crate::graphics::Options) {
+        log::info!("Graphics changed: {options:?}");
         self.graphics = options;
         let samples = self.samples(options.anti_aliasing);
         self.sim.set_graphics(&self.device, options, samples);
@@ -534,15 +546,24 @@ impl Renderer {
             })
             .await?;
         crate::diagnostics::stage_done();
-        log::info!("game adapter: {:?}", adapter.get_info());
+        let discrete_available = adapter.get_info().device_type == wgpu::DeviceType::IntegratedGpu
+            && instance
+                .enumerate_adapters(wgpu::Backends::all())
+                .iter()
+                .any(|a| a.get_info().device_type == wgpu::DeviceType::DiscreteGpu);
         crate::diagnostics::stage("game graphics device creation");
         let info = adapter.get_info();
-        log::info!(
-            "Renderer: {} ({:?}, {:?})",
-            info.name,
-            info.backend,
-            info.device_type
-        );
+        if info.device_type == wgpu::DeviceType::Cpu {
+            log::warn!(
+                "Software rendering: '{}' runs graphics on the CPU and can be very slow. Update the graphics driver; on Windows set this game to High performance in Settings > System > Display > Graphics.",
+                info.name
+            );
+        } else if discrete_available {
+            log::warn!(
+                "Integrated GPU '{}' selected although a discrete GPU is available. On Windows set this game to High performance in Settings > System > Display > Graphics and update the graphics driver. Adapter selection is unchanged.",
+                info.name
+            );
+        }
         // Sample counts beyond 1 and 4 are adapter specific; opt in when
         // offered so 2x and 8x anti-aliasing can be used.
         let specific =
@@ -568,13 +589,13 @@ impl Renderer {
         let frame_limit = crate::frame_pacing::Limit::for_run(graphics.frame_limit, false);
         config.present_mode = frame_limit.present_mode(&present_modes);
         config.desired_maximum_frame_latency = 1;
+
         log::info!(
             "Presentation: {:?} for frame rate {:?}, maximum queued frames: {}",
             config.present_mode,
             frame_limit,
             config.desired_maximum_frame_latency
         );
-        surface.configure(&device, &config);
         let sample_counts: Vec<u32> = [1, 2, 4, 8]
             .into_iter()
             .filter(|&n| {
@@ -591,6 +612,35 @@ impl Renderer {
                     })
             })
             .collect();
+        log::info!(
+            "Session system: adapter={:?} vendor=0x{:04x} device=0x{:04x} backend={:?} type={:?} driver={:?} driver_info={:?}; surface={:?} present={:?} window={}x{} scale={} logical_cores={} os={}/{}; graphics={:?} frame_limit={:?} effective_msaa={}; worker_pool={:?}",
+            info.name,
+            info.vendor,
+            info.device,
+            info.backend,
+            info.device_type,
+            info.driver,
+            info.driver_info,
+            config.format,
+            config.present_mode,
+            size.width,
+            size.height,
+            window.scale_factor(),
+            std::thread::available_parallelism().map_or(1, usize::from),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            graphics,
+            frame_limit,
+            sample_counts
+                .iter()
+                .copied()
+                .filter(|n| *n <= graphics.anti_aliasing.samples())
+                .max()
+                .unwrap_or(1),
+            tore_workers::shared()
+        );
+        // Keep the selected system details even when a driver cannot create a swapchain.
+        surface.configure(&device, &config);
         let samples = sample_counts
             .iter()
             .copied()
@@ -738,6 +788,7 @@ impl Renderer {
         timed: bool,
         cadence: bool,
     ) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Panels);
         let visible = self.mirrors_enabled && self.cockpit.mirrors_visible;
         let due = if cadence {
             self.mirror_cadence.due(visible)
@@ -758,7 +809,7 @@ impl Renderer {
         }
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        let timed = timed && self.counter_shown();
+        let timed = timed && (self.counter_shown() || crate::frame_log::enabled());
         if timed {
             self.frame_gpu.begin(&mut encoder);
         }
@@ -776,8 +827,14 @@ impl Renderer {
         if timed {
             self.frame_gpu.end(&mut encoder);
         }
-        self.queue.submit([encoder.finish()]);
+        let encode_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
+        let commands = encoder.finish();
+        drop(encode_log);
+        let submit_log = crate::frame_log::span(crate::frame_log::Phase::Submit);
+        self.queue.submit([commands]);
+        drop(submit_log);
         self.sim.hide_aircraft();
+        crate::frame_log::count(crate::frame_log::Count::Mirrors, 1);
         self.mirror_frames += 1;
     }
     /// Saves the console picture last drawn (the HUD camera's tape, the
@@ -836,7 +893,12 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
-        self.queue.submit([encoder.finish()]);
+        let encode_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
+        let commands = encoder.finish();
+        drop(encode_log);
+        let submit_log = crate::frame_log::span(crate::frame_log::Phase::Submit);
+        self.queue.submit([commands]);
+        drop(submit_log);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
@@ -923,6 +985,7 @@ impl Renderer {
     }
     /// Live panels consume a previous completed frame; never wait for GPU completion.
     pub fn poll_previews(&mut self) -> AppResult<Vec<(u8, Vec<u8>)>> {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Panels);
         self.device.poll(wgpu::PollType::Poll)?;
         let mut ready = Vec::new();
         for (&page, pending) in &self.previews {
@@ -950,6 +1013,7 @@ impl Renderer {
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
     ) -> AppResult<bool> {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Panels);
         if !matches!(page, 2..=4) {
             return Err("invalid camera instrument".into());
         }
@@ -964,6 +1028,7 @@ impl Renderer {
                 false,
                 true,
             )?;
+            crate::frame_log::count(crate::frame_log::Count::Panels, 1);
             self.previews.insert(page, pending);
             return Ok(true);
         }
@@ -981,6 +1046,7 @@ impl Renderer {
         overlay: bool,
         timed: bool,
     ) -> AppResult<Readback> {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Panels);
         if width == 0 || height == 0 || width > 1920 || height > 1080 {
             return Err("capture dimensions outside bounds".into());
         }
@@ -993,7 +1059,7 @@ impl Renderer {
         let view = texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // Live camera panels are part of the frame's GPU work.
-        let timed = timed && self.counter_shown();
+        let timed = timed && (self.counter_shown() || crate::frame_log::enabled());
         if timed {
             self.frame_gpu.begin(&mut encoder);
         }
@@ -1058,7 +1124,12 @@ impl Renderer {
         if timed {
             self.frame_gpu.end(&mut encoder);
         }
-        self.queue.submit([encoder.finish()]);
+        let encode_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
+        let commands = encoder.finish();
+        drop(encode_log);
+        let submit_log = crate::frame_log::span(crate::frame_log::Phase::Submit);
+        self.queue.submit([commands]);
+        drop(submit_log);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
@@ -1137,6 +1208,7 @@ impl Renderer {
     /// text), and whether it is shown: the app turns it on only while a screen
     /// that records its text is up.
     pub fn set_menu_text(&mut self, layer: Option<&crate::ui_text::Layer>) {
+        let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Ui);
         let quads = layer.map_or_else(Vec::new, |layer| layer.quads(self.ui_text.linear()));
         self.ui_text.set(&self.device, &self.queue, &quads);
     }
@@ -1243,7 +1315,7 @@ impl Renderer {
         if self.leave_dialog.is_some() {
             self.window.set_cursor_visible(true);
         }
-        let frame_started = std::time::Instant::now();
+        let draw_log = crate::frame_log::span(crate::frame_log::Phase::Render);
         self.first_frame.begin("game first frame presentation");
         let s = self.window.inner_size();
         if s.width == 0 || s.height == 0 {
@@ -1253,6 +1325,7 @@ impl Renderer {
             .frame_cpu
             .take()
             .map_or(0., |start| start.elapsed().as_secs_f64());
+        let acquire_log = crate::frame_log::span(crate::frame_log::Phase::Acquire);
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => {
                 self.surface_failures = 0;
@@ -1269,10 +1342,15 @@ impl Renderer {
             }
             Err(error) => return Err(error.into()),
         };
+        drop(acquire_log);
         crate::frame_rate::trace_present(readout);
         let cpu_started = std::time::Instant::now();
         let show_counter = crate::frame_rate::shown(self.graphics.show_frame_rate);
+        let time_gpu = show_counter || crate::frame_log::enabled();
+        let poll_log = crate::frame_log::span(crate::frame_log::Phase::Readback);
         let gpu_ms = self.frame_gpu.poll(&self.device);
+        drop(poll_log);
+        let upload_log = crate::frame_log::span(crate::frame_log::Phase::Upload);
         let size = flight_size.unwrap_or([WIDTH as u32, HEIGHT as u32]);
         self.canvas_texture(size);
         self.write_veil(flight_size.is_some());
@@ -1330,6 +1408,7 @@ impl Renderer {
                 },
             );
         }
+        drop(upload_log);
         if flight_size.is_some()
             && let Some((_, world, scenery)) = scene
         {
@@ -1337,7 +1416,7 @@ impl Renderer {
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        if show_counter {
+        if time_gpu {
             self.frame_gpu.begin(&mut encoder);
         } else {
             self.frame_gpu.cancel();
@@ -1410,6 +1489,7 @@ impl Renderer {
                 scenery,
             );
         }
+        let ui_log = crate::frame_log::span(crate::frame_log::Phase::Ui);
         // The frame rate's glyphs are uploaded before the one pass that draws
         // the cockpit, the canvas and them.
         if show_counter {
@@ -1485,18 +1565,21 @@ impl Renderer {
                 self.ui_text.draw_window_in(&mut pass, glyphs);
             }
         }
-        if frame_started.elapsed() > std::time::Duration::from_millis(100) {
-            log::info!(
-                "slow render preparation: {:.3} ms",
-                frame_started.elapsed().as_secs_f64() * 1000.
-            );
-        }
-        if show_counter {
+        drop(ui_log);
+        if time_gpu {
             self.frame_gpu.end(&mut encoder);
         }
-        self.queue.submit([encoder.finish()]);
-        if show_counter {
+        let encode_log = crate::frame_log::span(crate::frame_log::Phase::Encoding);
+        let commands = encoder.finish();
+        drop(encode_log);
+        let submit_log = crate::frame_log::span(crate::frame_log::Phase::Submit);
+        self.queue.submit([commands]);
+        drop(submit_log);
+        if time_gpu {
+            let _poll_log = crate::frame_log::span(crate::frame_log::Phase::Readback);
             self.frame_gpu.submitted();
+        }
+        if show_counter {
             self.frame_rate.work(
                 (cpu_before_acquire + cpu_started.elapsed().as_secs_f64()) * 1000.,
                 gpu_ms,
@@ -1508,8 +1591,12 @@ impl Renderer {
         if self.config.present_mode == wgpu::PresentMode::Fifo {
             self.window.pre_present_notify();
         }
+        let present_log = crate::frame_log::span(crate::frame_log::Phase::Present);
         frame.present();
+        drop(present_log);
         self.first_frame.complete();
+        drop(draw_log);
+        crate::frame_log::finish(gpu_ms);
         Ok(true)
     }
 }

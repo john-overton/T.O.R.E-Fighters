@@ -398,8 +398,43 @@ def wing_loadout_recording_problems(work: Path, output: str) -> list[str]:
     return problems
 
 
+def frame_log_check(work: Path, output: str) -> list[str]:
+    logs = sorted((work / "frame-logs").glob("*.log"))
+    if len(logs) != 1:
+        return [f"expected one diagnostic session, got {len(logs)}"]
+    text = logs[0].read_text()
+    problems = []
+    markers = ["Frame log enabled: threshold_ms=2.000", "Frame log enabled: threshold_ms=1.000",
+               "Session system:", "Slow frame:", "Frame log disabled",
+               "Frame log enabled: threshold_ms=50.000"]
+    at = 0
+    for marker in markers:
+        found = text.find(marker, at)
+        if found < 0:
+            problems.append(f"missing ordered frame-log marker: {marker}")
+        else:
+            at = found + len(marker)
+    for marker in ("screen=flight", "role=single", "compression=1", "gpu_previous_ms=",
+                   "simulation:", "submit:", "acquire:", "present:", "mirror_views:"):
+        if marker not in text:
+            problems.append(f"missing frame-log field: {marker}")
+    if "Slow frame:" in text.split("Frame log disabled")[-1].split("Frame log enabled:")[0]:
+        problems.append("slow-frame logging continued while disabled")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
+    out.append(Scenario(
+        name="menus-window-frame-log", lane="menus", window=True,
+        args=["--free-flight", "--no-audio", "--window-size", "960x720", "--frame-log", "1",
+              "--input-script", str(Path(__file__).parent / "scripts" / "frame-log.txt")],
+        env={"TORE_FRAME_LOG": "2", "TORE_LOG_DIR": "{work}/frame-logs", "TORE_SCRIPT_OUT": "{work}"},
+        timeout=180, expect=[r"Input script: exit"],
+        outputs=["debug-frame-log-off.ppm", "debug-frame-log-on.ppm"],
+        check_work=frame_log_check,
+        notes="CLI overrides environment; Escape Debug toggles slow-frame logging off and on through normal key handlers, with real session records.",
+    ))
     out.append(Scenario(
         name="qmc-wing-loadout", lane="menus",
         args=["--validate-wing-loadout", "{work}/wing-loadout", "--no-audio"],
