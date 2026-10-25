@@ -25,18 +25,15 @@ jobs:
       matrix:
         # macos-14 is Apple Silicon; macos-15-intel is the last x86_64 macOS image
         # GitHub will offer, retiring August 2027. After that, Intel Mac coverage
-        # means cross-compiling x86_64-apple-darwin from an arm64 runner. The
-        # second windows-2022 job checks the 32-bit Windows build. Every job is
-        # its own include entry: a plain os list would merge the 32-bit entry
-        # into the 64-bit Windows job instead of adding one. Linux builds on
-        # ubuntu-22.04, the release floor, so CI tests what ships.
+        # means cross-compiling x86_64-apple-darwin from an arm64 runner. Linux
+        # builds on ubuntu-22.04, the release floor, so CI tests what ships.
+        # 32-bit Windows was dropped on 2026-10-25 (John): every Windows player
+        # is on 64-bit. An entry may still name a `target` to cross-build.
         include:
           - os: macos-14
           - os: macos-15-intel
           - os: ubuntu-22.04
           - os: windows-2022
-          - os: windows-2022
-            target: i686-pc-windows-msvc
     # TORE_SELF_HOSTED, a repository variable, lists the platforms that run on
     # the project's own machines instead of GitHub's (docs/CI-RUNNERS.md).
     runs-on: ${{ contains(vars.TORE_SELF_HOSTED, matrix.os) && fromJSON(format('["self-hosted","tore-{0}"]', matrix.os)) || matrix.os }}
