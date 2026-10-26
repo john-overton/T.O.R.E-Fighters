@@ -26,6 +26,8 @@ fn body() -> Body {
         lift_coefficient: 12.,
         induced_factor: 0.03,
         drag_scale: 1.,
+        low_altitude_drag: 1.,
+        altitude_drag_exponent: 1.,
         cruise_drag: false,
         minimum_speed: 120.,
         navigation_gain: 3.5,

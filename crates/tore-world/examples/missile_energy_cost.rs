@@ -114,7 +114,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cfg!(target_os = "linux") && thread_cpu_ns().is_some() {
         world.combat.state.prediction_cpu_clock = Some(thread_cpu_ns);
     }
-    let player_cue = args.iter().any(|s| s == "--player-cue");
+    let turn_rate = args
+        .iter()
+        .find_map(|s| s.strip_prefix("--player-turn="))
+        .map(str::parse::<f64>)
+        .transpose()?
+        .unwrap_or(0.);
+    if ![0., 3., 10.].contains(&turn_rate) {
+        return Err("player turn must be 3 or 10 degrees/s".into());
+    }
+    let player_cue = args.iter().any(|s| s == "--player-cue") || turn_rate != 0.;
+    let player_start = world.cockpits[0].flight.position;
+    let player_heading = world.cockpits[0].flight.yaw;
     world.combat.state.own_mut().armed = player_cue;
     if player_cue {
         let station = world
@@ -158,8 +169,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut refused = 0;
     let mut starved = 0;
     let mut max_wait = 0;
+    let mut player_samples = [0u64; 3];
     println!("tick,estimate_ms,request_ms,missiles,pending,ready_envelopes");
     for tick in 0..ticks {
+        if turn_rate != 0. {
+            // Scripted kinematic player fixture, no AI steering policy changes.
+            let speed = 300. / missiles::energy::FT;
+            let rate = turn_rate.to_radians();
+            let angle = player_heading + rate * tick as f64 / 120.;
+            let flight = &mut world.cockpits[0].flight;
+            flight.position = [
+                player_start[0] + speed / rate * (player_heading.cos() - angle.cos()),
+                player_start[1],
+                player_start[2] + speed / rate * (angle.sin() - player_heading.sin()),
+            ];
+            flight.velocity = [speed * angle.sin(), 0., speed * angle.cos()];
+            flight.yaw = angle;
+            flight.pitch = 0.;
+            flight.bank = (300. * rate / 9.80665).atan();
+            flight.speed = speed;
+            flight.roll_rate = 0.;
+            flight.pitch_rate = 0.;
+            flight.auxiliary_rates = [0.; 3];
+            flight.vertical_speed = 0.;
+        }
         let mut launchers = Vec::new();
         for slot in &slots {
             let flight = world
@@ -284,11 +317,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if player_cue {
             let launcher = tore_world::combat::launcher(&world.cockpits[0].flight);
-            if let Some(target) = slots
-                .iter()
-                .zip(&launchers)
-                .find(|(slot, pose)| slot.side.is_enemy() && pose.alive)
-            {
+            if let Some(target) = slots.iter().zip(&launchers).find(|(slot, pose)| {
+                slot.side.is_enemy()
+                    && pose.alive
+                    && (turn_rate == 0.
+                        || world
+                            .combat
+                            .state
+                            .own()
+                            .sensors
+                            .observation(slot.id)
+                            .is_some())
+            }) {
                 world
                     .combat
                     .state
@@ -336,6 +376,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             moving.push(cost);
         }
         let start = Instant::now();
+        if player_cue {
+            let launcher = tore_world::combat::launcher(&world.cockpits[0].flight);
+            let view = world.combat.state.own_view();
+            let frame = view.at(launcher);
+            if frame.weapon_observation().is_some() {
+                let result = frame.energy_prediction();
+                player_samples[result.map_or(2, |a| usize::from(!a.hit))] += 1;
+                if frame.mounted_solution().is_some() != result.is_some_and(|a| a.hit) {
+                    return Err("HUD solution and measured forecast disagree".into());
+                }
+            }
+        }
         // Same-state frame readers: no job submission or simulation work.
         for (i, slot) in slots.iter().enumerate().filter(|_| !natural) {
             for station in 0..stations {
@@ -393,8 +445,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         world.combat.state.ledger.total(|_| true)
     );
     eprintln!(
-        "player_cue_samples={:?} ticks={ticks}",
-        world.combat.state.prediction_player_samples
+        "player_cue_samples={:?} ticks={ticks} turn_deg_s={turn_rate}",
+        player_samples
     );
     if refused != 0 || starved != 0 {
         return Err("prediction admission regression".into());

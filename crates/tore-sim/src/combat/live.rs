@@ -2962,6 +2962,25 @@ impl<'a> LauncherView<'a> {
             .get_or_init(|| self.compute_weapon_observation())
     }
 
+    /// The exact physical forecast used by the player HUD: a miss is an
+    /// available answer, distinct from a pending forecast or absent track.
+    pub fn energy_prediction(&self) -> Option<missiles::energy_estimate::Answer> {
+        let w = &self
+            .view
+            .own
+            .config
+            .stations
+            .get(self.view.own.selected)?
+            .weapon;
+        self.view.state.player_energy_answer(
+            self.view.own.aircraft,
+            self.view.own.selected,
+            w,
+            self.launcher,
+            self.weapon_observation()?,
+        )
+    }
+
     fn compute_mounted_solution(&self) -> Option<missiles::Solution> {
         let launcher = self.launcher;
         let w = &self
@@ -2974,13 +2993,13 @@ impl<'a> LauncherView<'a> {
         let profile = missiles::Profile::for_weapon(w)?;
         let observed = self.weapon_observation()?;
         if self.view.state.weapon_rules == Rules::Energy {
-            return self.view.state.energy_solution(
-                self.view.own.aircraft,
-                self.view.own.selected,
-                w,
-                launcher,
-                observed,
-            );
+            let answer = self.energy_prediction()?;
+            return answer.hit.then(|| missiles::Solution {
+                seconds: answer.seconds,
+                point: std::array::from_fn(|i| {
+                    observed.position[i] + observed.velocity[i] * answer.seconds
+                }),
+            });
         }
         // Repeated readers of exactly this launcher and observation share the
         // fly-out. An interpolated frame launcher remains a separate key.

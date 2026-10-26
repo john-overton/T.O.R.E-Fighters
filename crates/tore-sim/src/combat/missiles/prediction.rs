@@ -4,7 +4,7 @@ use super::{
     energy::{Body, DT, Observation},
     energy_estimate::{Answer, Queue, Request, Trial},
 };
-use crate::attitude::{Vector, dot, unit};
+use crate::attitude::{Vector, cross, dot, unit};
 
 pub const ENVELOPE_BIT: u64 = 1 << 63;
 pub const MISSILE_BIT: u64 = 1 << 62;
@@ -45,6 +45,106 @@ pub struct Client {
     pub pending: bool,
     pub waiting_since: u64,
     pub result: Option<Published>,
+    pub player: bool,
+    pub observed: Option<ObservedMotion>,
+    pub pending_turn: TurnRates,
+    pub result_turn: TurnRates,
+}
+
+/// Rates are measured from consecutive observations, never inferred from a
+/// future target pose. They qualify player advice only, not AI permission.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TurnRates {
+    pub launcher: Vector,
+    pub axis: Vector,
+    pub target: Vector,
+    pub valid: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObservedMotion {
+    pub at: u64,
+    pub question: Trial,
+    pub rates: TurnRates,
+}
+fn angular_rate(a: Vector, b: Vector, seconds: f64) -> Option<Vector> {
+    if norm(a) < 1e-9 || norm(b) < 1e-9 {
+        return Some([0.; 3]);
+    }
+    let a = unit(a);
+    let b = unit(b);
+    let normal = cross(a, b);
+    let sine = norm(normal);
+    let angle = sine.atan2(dot(a, b));
+    if angle / seconds > 20f64.to_radians() {
+        return None;
+    }
+    Some(normal.map(|v| v * angle / seconds / sine.max(1e-12)))
+}
+fn rotate(v: Vector, rate: Vector, seconds: f64) -> Vector {
+    let speed = norm(rate);
+    if speed < 1e-9 {
+        return v;
+    }
+    let axis = rate.map(|v| v / speed);
+    let (sin, cos) = (speed * seconds).sin_cos();
+    let side = cross(axis, v);
+    let along = dot(axis, v);
+    std::array::from_fn(|i| v[i] * cos + side[i] * sin + axis[i] * along * (1. - cos))
+}
+fn arc(position: Vector, velocity: Vector, rate: Vector, seconds: f64) -> Vector {
+    let speed = norm(rate);
+    if speed < 1e-9 {
+        return std::array::from_fn(|i| position[i] + velocity[i] * seconds);
+    }
+    let axis = rate.map(|v| v / speed);
+    let along = dot(axis, velocity);
+    let side = cross(axis, velocity);
+    let (sin, cos) = (speed * seconds).sin_cos();
+    std::array::from_fn(|i| {
+        position[i]
+            + axis[i] * along * seconds
+            + (velocity[i] - axis[i] * along) * sin / speed
+            + side[i] * (1. - cos) / speed
+    })
+}
+fn player_compatible(
+    result: Published,
+    rates: TurnRates,
+    current: Trial,
+    observed: TurnRates,
+    tick: u64,
+) -> bool {
+    let ticks = tick.saturating_sub(result.at);
+    if !rates.valid || !observed.valid || ticks > 120 || current.flight.age != 0 {
+        return false;
+    }
+    for (a, b) in [
+        (rates.launcher, observed.launcher),
+        (rates.axis, observed.axis),
+        (rates.target, observed.target),
+    ] {
+        if norm(sub(a, b)) > 2f64.to_radians() {
+            return false;
+        }
+    }
+    let seconds = ticks as f64 * DT;
+    let mut moved = result.question;
+    moved.flight.position = arc(
+        moved.flight.position,
+        moved.flight.velocity,
+        rates.launcher,
+        seconds,
+    );
+    moved.flight.velocity = rotate(moved.flight.velocity, rates.launcher, seconds);
+    moved.flight.axis = rotate(moved.flight.axis, rates.axis, seconds);
+    moved.target.position = arc(
+        moved.target.position,
+        moved.target.velocity,
+        rates.target,
+        seconds,
+    );
+    moved.target.velocity = rotate(moved.target.velocity, rates.target, seconds);
+    compatible(moved, current, 0)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -250,6 +350,10 @@ impl Service {
                 pending: false,
                 waiting_since: tick,
                 result: Some(result),
+                player: false,
+                observed: None,
+                pending_turn: TurnRates::default(),
+                result_turn: TurnRates::default(),
             };
             if let Some(client) = self.clients.iter_mut().find(|c| c.id == id) {
                 *client = replacement;
@@ -260,6 +364,7 @@ impl Service {
         }
         if let Some(client) = self.clients.iter_mut().find(|c| c.id == id) {
             client.touched = tick;
+            client.player = false;
             if client.target != target || client.question.body != question.body {
                 client.target = target;
                 client.pending = false;
@@ -303,7 +408,71 @@ impl Service {
             pending: true,
             waiting_since: tick,
             result: None,
+            player: false,
+            observed: None,
+            pending_turn: TurnRates::default(),
+            result_turn: TurnRates::default(),
         });
+    }
+    pub fn request_player(&mut self, id: u64, target: u32, tick: u64, question: Trial) {
+        let before = self
+            .clients
+            .iter()
+            .find(|c| c.id == id && c.target == target)
+            .and_then(|c| c.observed);
+        let rates = before
+            .and_then(|old| {
+                let ticks = tick.checked_sub(old.at)?;
+                if ticks == 0 || ticks > 12 {
+                    return None;
+                }
+                let dt = ticks as f64 * DT;
+                Some(TurnRates {
+                    launcher: angular_rate(
+                        old.question.flight.velocity,
+                        question.flight.velocity,
+                        dt,
+                    )?,
+                    axis: angular_rate(old.question.flight.axis, question.flight.axis, dt)?,
+                    target: angular_rate(
+                        old.question.target.velocity,
+                        question.target.velocity,
+                        dt,
+                    )?,
+                    valid: true,
+                })
+            })
+            .unwrap_or_default();
+        self.request(id, target, tick, question, 30);
+        let client = self.clients.iter_mut().find(|c| c.id == id).unwrap();
+        client.player = true;
+        client.observed = Some(ObservedMotion {
+            at: tick,
+            question,
+            rates,
+        });
+        if client.pending && client.submitted == tick {
+            client.pending_turn = rates;
+        }
+    }
+    /// Display-only qualification. AI callers must keep using `answer`.
+    pub fn player_answer(
+        &self,
+        id: u64,
+        target: u32,
+        question: Trial,
+        tick: u64,
+    ) -> Option<Published> {
+        if let Some(answer) = self.answer(id, target, question, tick) {
+            return Some(answer);
+        }
+        let c = self
+            .clients
+            .iter()
+            .find(|c| c.id == id && c.target == target && c.player)?;
+        let result = c.result?;
+        player_compatible(result, c.result_turn, question, c.observed?.rates, tick)
+            .then_some(result)
     }
     pub fn request_range(&mut self, id: u64, target: u32, tick: u64, question: Trial) {
         let id = id | ENVELOPE_BIT;
@@ -350,9 +519,40 @@ impl Service {
         if count == 0 {
             return;
         }
+        let mut players: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|c| c.player && c.pending)
+            .collect();
+        // Multiple human seats share this service. A refreshed early seat
+        // must not take a reserved slot ahead of an older waiting question.
+        players.sort_by_key(|c| (c.waiting_since, c.id));
+        for c in players {
+            if self.queue.requests.len() >= super::energy_estimate::MAX_REQUESTS {
+                break;
+            }
+            if !self.queue.requests.iter().any(|r| r.id == c.id) {
+                self.queue.submit(Request {
+                    id: c.id,
+                    observed_tick: c.submitted,
+                    trial: c.question,
+                });
+            }
+        }
+        let mut background = self
+            .queue
+            .requests
+            .iter()
+            .filter(|r| !self.clients.iter().any(|c| c.id == r.id && c.player))
+            .count();
         let start = self.admission_cursor % count;
         for offset in 0..count {
-            if self.queue.requests.len() >= super::energy_estimate::MAX_REQUESTS {
+            // Player requests were admitted above. Stop at the background cap
+            // so the cursor remains after the last admitted client instead of
+            // wrapping back to the start through requests we cannot admit.
+            if self.queue.requests.len() >= super::energy_estimate::MAX_REQUESTS
+                || background >= super::energy_estimate::MAX_REQUESTS - 8
+            {
                 break;
             }
             let index = (start + offset) % count;
@@ -374,7 +574,11 @@ impl Service {
             if let Some(request) = request
                 && !self.queue.requests.iter().any(|r| r.id == request.id)
             {
-                self.queue.submit(request);
+                let player = self.clients.iter().any(|c| c.id == request.id && c.player);
+                if player || background < super::energy_estimate::MAX_REQUESTS - 8 {
+                    self.queue.submit(request);
+                    background += usize::from(!player);
+                }
             }
             self.admission_cursor = (index + 1) % count;
         }
@@ -439,13 +643,23 @@ impl Service {
         ground: &impl Fn(f64, f64) -> f64,
         clear: &impl Fn(Vector, Vector) -> bool,
     ) -> usize {
+        for c in &mut self.clients {
+            c.player &= c.observed.is_some_and(|o| o.at == tick);
+        }
         self.admit();
-        let used = self.queue.advance_over(ground, clear);
+        let priority: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|c| c.player && c.touched == tick)
+            .map(|c| c.id)
+            .collect();
+        let used = self.queue.advance_prioritized(ground, clear, &priority);
         for client in &mut self.clients {
             if client.pending
                 && let Some((at, answer)) = self.queue.answer(client.id)
             {
                 client.pending = false;
+                client.result_turn = client.pending_turn;
                 client.result = Some(Published {
                     at,
                     question: client.question,
@@ -608,7 +822,22 @@ crate::checkpoint_struct!(Client {
     question,
     pending,
     waiting_since,
-    result
+    result,
+    player,
+    observed,
+    pending_turn,
+    result_turn
+});
+crate::checkpoint_struct!(TurnRates {
+    launcher,
+    axis,
+    target,
+    valid
+});
+crate::checkpoint_struct!(ObservedMotion {
+    at,
+    question,
+    rates
 });
 crate::checkpoint_struct!(Envelope { maximum, favorable });
 crate::checkpoint_struct!(RangeSnapshot {
@@ -658,6 +887,135 @@ mod tests {
             30.,
             0,
         )
+    }
+    fn turning_question(rate: f64, tick: u64) -> Trial {
+        let mut q = question();
+        let angle = rate * tick as f64 * DT;
+        let radius = 300. / rate;
+        q.flight.position[0] = radius * (1. - angle.cos());
+        q.flight.position[2] = radius * angle.sin();
+        q.flight.velocity = [300. * angle.sin(), 0., 300. * angle.cos()];
+        q.flight.axis = [angle.sin(), 0., angle.cos()];
+        q.target.position[2] -= 250. * tick as f64 * DT;
+        q
+    }
+    #[test]
+    fn turning_player_stays_answered_with_thirty_competing_jobs() {
+        for degrees in [3f64, 10.] {
+            let mut service = Service::default();
+            let mut answered = 0;
+            for tick in 0..1200 {
+                for id in 1..=30 {
+                    let mut q = question();
+                    q.target.position[2] = 100000. + tick as f64 + id as f64 * 100.;
+                    service.request(id << 16, 2, tick, q, 30);
+                }
+                let q = turning_question(degrees.to_radians(), tick);
+                service.request_player(0, 2, tick, q);
+                assert!(
+                    service.advance(tick, &|_, _| 0.) <= super::super::energy_estimate::STEP_BUDGET
+                );
+                answered += usize::from(service.player_answer(0, 2, q, tick).is_some());
+            }
+            assert!(answered >= 1080, "{degrees} degrees/s: {answered}/1200");
+            let copy =
+                crate::checkpoint::round_trip(&service, &crate::checkpoint::Models::default())
+                    .unwrap();
+            assert_eq!(service, copy);
+        }
+    }
+    #[test]
+    fn player_turn_projection_never_relaxes_ai_permission_or_accepts_a_reversal() {
+        let rate = 10f64.to_radians();
+        let old = turning_question(rate, 1);
+        let now = turning_question(rate, 61);
+        let rates = TurnRates {
+            launcher: [0., rate, 0.],
+            axis: [0., rate, 0.],
+            target: [0.; 3],
+            valid: true,
+        };
+        let result = Published {
+            at: 1,
+            question: old,
+            answer: old.finish(&|_, _| 0.),
+        };
+        assert!(result.answer.hit);
+        assert!(player_compatible(result, rates, now, rates, 61));
+        assert!(
+            !compatible(old, now, 60),
+            "AI must not fire from the turned snapshot"
+        );
+        let mut reversal = now;
+        reversal.flight.axis = reversal.flight.axis.map(|v| -v);
+        assert!(!player_compatible(result, rates, reversal, rates, 61));
+        let mut wrong = now;
+        wrong.target.position[0] += 1000.;
+        assert!(!player_compatible(result, rates, wrong, rates, 61));
+        let changed = TurnRates {
+            target: [0., rate, 0.],
+            ..rates
+        };
+        assert!(!player_compatible(result, rates, now, changed, 61));
+        assert!(!player_compatible(result, rates, now, rates, 122));
+    }
+    #[test]
+    fn reserved_player_admission_serves_oldest_questions_across_seats() {
+        let mut s = Service::default();
+        let q = question();
+        for id in 100..348 {
+            s.request(id, 2, 0, q, 30);
+        }
+        s.admit();
+        for id in 1..=10 {
+            s.request_player(id, 2, 11 - id, q);
+        }
+        s.admit();
+        for id in 3..=10 {
+            assert!(s.queue.requests.iter().any(|r| r.id == id));
+        }
+        assert!(!s.queue.requests.iter().any(|r| r.id == 1 || r.id == 2));
+        // A completed early seat refreshing cannot jump the older waiter.
+        s.queue.remove(10);
+        s.clients
+            .iter_mut()
+            .find(|c| c.id == 10)
+            .unwrap()
+            .waiting_since = 20;
+        s.admit();
+        assert!(s.queue.requests.iter().any(|r| r.id == 2));
+        assert!(!s.queue.requests.iter().any(|r| r.id == 10));
+    }
+    #[test]
+    fn a_late_player_has_reserved_admission_and_background_still_progresses() {
+        let mut s = Service::default();
+        let q = question();
+        for id in 1..=300 {
+            s.request(id << 16, 2, 0, q, 30);
+        }
+        s.advance(0, &|_, _| 0.);
+        s.request_player(0, 2, 1, q);
+        s.advance(1, &|_, _| 0.);
+        assert!(
+            s.queue.requests.iter().any(|r| r.id == 0)
+                || s.clients.iter().any(|c| c.id == 0 && c.result.is_some())
+        );
+        let before = s
+            .queue
+            .requests
+            .iter()
+            .find(|r| r.id != 0)
+            .unwrap()
+            .trial
+            .flight
+            .age;
+        s.advance(2, &|_, _| 0.);
+        assert!(
+            s.queue
+                .requests
+                .iter()
+                .any(|r| r.id != 0 && r.trial.flight.age > before)
+        );
     }
     #[test]
     fn delayed_launch_answer_projects_both_aircraft_and_range_rejects_reversal() {

@@ -407,6 +407,10 @@ than 4 ms on average.
 The following describes the preserved Spec path. Energy-mode flight uses a
 world-owned bounded prediction service, described in the
 [energy specification](spec/missile-energy.md#estimates-and-acceptance).
+Player point jobs receive reserved admission and a quarter of the unchanged
+work budget first. Turn-projected advice is exposed through the player launcher
+view; AI launch authorization retains strict point compatibility. Both measured
+turn rates and pending/publication rates are checkpoint state.
 Its checkpointed observation snapshots and cache tolerances are deliberately
 separate from these exact historical shortcuts. All powered-guided release
 constructors pass the selected rules to the same force kernel; bombs and

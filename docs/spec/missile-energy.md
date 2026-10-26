@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-25. **Energy is selected by new worlds; validation is in progress.**
+Implementation mode, 2026-10-26. **Energy is selected by new worlds; Linux regression validation passed.**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
@@ -56,6 +56,21 @@ Cruise-class coefficients are 0.20/0.24/0.65/0.60/0.45/0.38/0.34. Endpoint
 values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
+John's 2026-10-26 geometry rule multiplies total zero-lift plus induced drag
+by `1 + (Fsea - 1)*(1 - smoothstep(x))^80`, where
+`x = clamp(altitude_ft/35000, 0, 1)` and
+`Fsea = 5.6*(largest_deployed_span/body_diameter)/(0.52578/0.1778)`.
+The existing per-store drag scale still applies. Dimensions and class estimates
+are listed per field in [the data table](../formats/missile-energy-data.md#geometry-scaled-low-altitude-drag).
+This is an opinionated additional multiplier, not a measured aerodynamic law.
+The smoothstep and exponent 80 are agent-fitted choices: full factor at sea
+level, continuous slope, exactly one at 35,000 ft, but effectively one much
+sooner. The severe concentration below 5,000 ft is needed to keep every A2A
+entry above 2 km astern. It does not solve the low-head reference mismatch;
+[the baseline](../baselines/missile-energy.md) records that trade-off. There are
+no per-missile exemptions. Thrust, fuel mass, phase duration, loft and control
+life continue to affect each trajectory independently of geometry.
+
 Lateral acceleration cannot exceed min(structural_G*g, q*S*CLmax/m). The initial
 effective body-area CLmax is 12, induced-drag coefficient k is 0.03, and
 induced drag is k*lift_force²/(q*S). Gravity compensation and loft demands use
@@ -82,7 +97,7 @@ release, independent of motor duration and body removal. At expiry guidance is
 irreversibly lost, including decoy pursuit. The body continues under thrust,
 drag and gravity until collision or removal. The forecast reports controlled
 intercepts only; an unguided body can still collide. This cutoff is John's
-2026-10-26 decision. Sourced and class-derived times are listed in the
+2026-10-26 decision. Sourced times and times fitted per missile to its head-on reference are listed in the
 [data table](../formats/missile-energy-data.md).
 
 A missile never acquires, guides toward, fuzes on, or damages its firing aircraft,
@@ -190,7 +205,10 @@ from physical reach. Player range and lock remain advisory at release.
 The existing AI defensive schedule and flying are owned by a separate task.
 
 A world-owned resumable queue admits at most 256 active flyouts. Waiting point
-and envelope requests are retained and admitted in round-robin rotation; a large mission's AI stations, SAM rails and missiles in flight
+and envelope requests are retained and admitted in round-robin rotation;
+player point questions enter first, with eight of the 256 slots reserved from
+background admission and up to one quarter of the same work budget spent on
+player jobs first. Unused priority work returns to the common queue; a large mission's AI stations, SAM rails and missiles in flight
 must not starve each other out of a full table. A fixed 16,384 quarter-step work units per world tick pays for
 integration (four units) and terrain samples (one unit). This permits at most
 4096 integration steps, with terrain work reducing that count. It is not multiplied by the number of aircraft, and it does
@@ -218,7 +236,15 @@ A changed motor phase, more than 2% mass change, or a material trajectory
 change rejects it. Launch snapshots advance launcher and target positions by the elapsed world
 ticks since submission, using the same mean observed velocities. Their missile
 age stays zero; launch answers expire after 600 ticks unless the inputs are
-identical. Player IN RNG and AI gates read the same qualified answers. Envelope searches
+identical. AI launch gates retain those strict point tests. Player IN RNG and
+A-G advice can also use a turn-qualified answer up to 120 ticks old. Angular
+velocities are measured from consecutive observations 1..12 ticks apart,
+limited to 20 degrees/s. Both positions follow constant-rate circular arcs;
+launcher velocity, target velocity and launch axis rotate at their measured
+rates. The same strict point tolerances apply to the residual after projection.
+A rate change above 2 degrees/s rejects the answer. Identity/model checks still
+apply, and no synchronous flyout runs in a frame reader. These are agent-fitted
+advisory tolerances, not a relaxation of AI launch permission. Envelope searches
 allow 150 m altitude, 1 km origin displacement and three degrees bearing drift,
 10 m/s launcher speed and five degrees launcher axis and velocity direction,
 and 25 m/s target velocity. A restarted search can show the previous envelope

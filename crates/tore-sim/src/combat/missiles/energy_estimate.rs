@@ -155,6 +155,28 @@ impl Queue {
         ground: &impl Fn(f64, f64) -> f64,
         clear: &impl Fn(Vector, Vector) -> bool,
     ) -> usize {
+        self.advance_prioritized(ground, clear, &[])
+    }
+    pub fn advance_prioritized(
+        &mut self,
+        ground: &impl Fn(f64, f64) -> f64,
+        clear: &impl Fn(Vector, Vector) -> bool,
+        priority: &[u64],
+    ) -> usize {
+        let first = if priority.is_empty() {
+            0
+        } else {
+            self.advance_budget(ground, clear, priority, STEP_BUDGET / 4)
+        };
+        first + self.advance_budget(ground, clear, &[], STEP_BUDGET - first)
+    }
+    fn advance_budget(
+        &mut self,
+        ground: &impl Fn(f64, f64) -> f64,
+        clear: &impl Fn(Vector, Vector) -> bool,
+        only: &[u64],
+        budget: usize,
+    ) -> usize {
         if self.requests.is_empty() {
             return 0;
         }
@@ -166,14 +188,16 @@ impl Queue {
         let mut len = 0;
         for offset in 0..count {
             let index = (start + offset) % count;
-            if self.requests[index].trial.answer.is_none() {
+            if self.requests[index].trial.answer.is_none()
+                && (only.is_empty() || only.contains(&self.requests[index].id))
+            {
                 active[len] = index;
                 len += 1;
             }
         }
         let mut at = 0;
         let mut used = 0;
-        while used + MAX_STEP_WORK <= STEP_BUDGET && len > 0 {
+        while used + MAX_STEP_WORK <= budget && len > 0 {
             let index = active[at];
             let request = &mut self.requests[index];
             let spent = request.trial.step_over(ground, clear);
@@ -211,6 +235,8 @@ crate::checkpoint_struct!(Body {
     lift_coefficient,
     induced_factor,
     drag_scale,
+    low_altitude_drag,
+    altitude_drag_exponent,
     cruise_drag,
     minimum_speed,
     navigation_gain,

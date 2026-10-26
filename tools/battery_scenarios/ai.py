@@ -1019,12 +1019,31 @@ def prediction_player_cue_regression(d):
             d.problem(f"{name}: opening 20-second player cue must have answers on 75% of all ticks and 90% of observed-cue ticks: {counts}")
 
 
+def prediction_turning_cue_regression(d):
+    executable = ROOT / "target" / "release" / "examples" / ("missile_energy_cost.exe" if os.name == "nt" else "missile_energy_cost")
+    packs = sorted(d.data.glob("menu-*.pack"))
+    if not executable.exists() or not packs:
+        d.problem("release cost example and imported menu pack required")
+        return
+    for rate in [3, 10]:
+        output = d.run(str(rate), [executable, packs[-1], "2400", "UKR", "moving", "AIM120.JT", "1", "--natural", "--big", f"--player-turn={rate}"], timeout=240).text()
+        match = re.search(r"player_cue_samples=\[(\d+), (\d+), (\d+)\]", output)
+        c = list(map(int, match.groups())) if match else [0, 0, 0]
+        clients = re.search(r"max_clients=(\d+)", output)
+        if sum(c) < 600 or sum(c[:2]) < .9 * sum(c):
+            d.problem(f"{rate} deg/s: need 600 observed ticks and 90% answered: {c}")
+        if not clients or int(clients[1]) < 31:
+            d.problem(f"{rate} deg/s: insufficient competing requests")
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = [Scenario(name="ai-missile-launch-regression", lane="ai", args=[],
         driver=prediction_launch_regression, timeout=1000,
         notes="Four 120-second natural 4v4 fights within 30% of reviewed Spec counts; 23+ AI admission stress. Build the release missile_energy_cost example first.")]
     out.append(Scenario(name="ai-missile-player-cue", lane="ai", args=[], driver=prediction_player_cue_regression, timeout=600,
         notes="Actual player HUD queries in the opening 20 seconds of 4v4 and 23-AI fights: answers on 75% of all ticks and 90% of observed-cue ticks."))
+    out.append(Scenario(name="ai-missile-turning-cue", lane="ai", args=[], driver=prediction_turning_cue_regression, timeout=600,
+        notes="3 and 10 deg/s scripted player turns in a natural 23-AI fight; observed HUD availability under real shared load."))
     attack = ["--probe-attack", "600:10"]
 
     # 1. Fight sizes, even and lopsided, the default F/A-18D against itself.

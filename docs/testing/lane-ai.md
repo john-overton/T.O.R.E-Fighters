@@ -782,6 +782,16 @@ zero clients waiting over ten simulated seconds for admission. The example
 also prints cost percentiles and maximums; use a sequential release run for
 performance acceptance, since concurrent battery jobs can perturb wall time.
 
+`ai-missile-player-cue` measures the actual launcher-view HUD consumer in the
+opening 20 seconds of natural 4v4 and 23-AI fights. It requires answered hit or
+miss forecasts on 75% of all ticks and 90% of ticks with a sensor observation.
+`ai-missile-turning-cue` prescribes level player circles at 3 and 10 degrees/s
+in the same big fight, with at least 31 prediction clients, 600 observed ticks
+and 90% answers on observed ticks. The aircraft pose is scripted; enemy flying
+and sensor observations remain the normal world simulation. Missing tracks
+are reported separately from prediction latency. Use `--player-turn=3` or
+`--player-turn=10` with the example's `--natural --big` flags to repeat it.
+
 `surface-moving-hit-sa2a-*`, `surface-moving-hit-sa3-*` and
 `surface-moving-hit-sa6-*` require hits on straight, vulnerable jets at
 10,000 and 20,000 ft. They complement `surface-battery-sa2`, which checks

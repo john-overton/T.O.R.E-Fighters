@@ -236,6 +236,29 @@ impl State {
         }
         self.prediction_request_finish(measured);
     }
+    /// Player advisory only. AI employment reads `energy_solution` instead.
+    pub(super) fn player_energy_answer(
+        &self,
+        owner: u32,
+        station: usize,
+        w: &Weapon,
+        launcher: Launcher,
+        observed: seeker::Observation,
+    ) -> Option<missiles::energy_estimate::Answer> {
+        if self.weapon_rules != Rules::Energy || !powered(w) {
+            return None;
+        }
+        let question = prediction::launch_question(
+            w,
+            launcher,
+            observed,
+            prediction_radius(w),
+            self.devices.wind,
+        );
+        self.energy_predictions
+            .player_answer(key(owner, station), observed.id, question, self.tick)
+            .map(|p| p.answer)
+    }
     pub fn energy_solution(
         &self,
         owner: u32,
@@ -300,7 +323,7 @@ impl State {
                 prediction::launch_question(w, row.launcher, observed, radius, self.devices.wind);
             let id = key(own.aircraft, own.selected);
             self.energy_predictions
-                .request(id, observed.id, self.tick, question, 30);
+                .request_player(id, observed.id, self.tick, question);
             self.energy_predictions
                 .request_range(id, observed.id, self.tick, question);
         }
@@ -369,9 +392,9 @@ impl State {
                 self.devices.wind,
             );
             let id = key(own.aircraft, own.selected);
-            let answer = self
-                .energy_predictions
-                .answer(id, observed.id, question, self.tick);
+            let answer =
+                self.energy_predictions
+                    .player_answer(id, observed.id, question, self.tick);
             if self.measure_prediction_cost && own.aircraft == 0 {
                 self.prediction_player_samples[answer.map_or(2, |r| usize::from(!r.answer.hit))] +=
                     1;
@@ -518,6 +541,100 @@ mod tests {
             gun_round: None,
             tracer: false,
         }
+    }
+    // Golden behaviour, separate from the input/revision identity. Quantize
+    // sampled metres and seconds to avoid insignificant platform roundoff.
+    // A failing trace requires investigation and a semantic revision bump,
+    // then review of the new (identity, trace) pair, never just a new digest.
+    fn behavior_trace(navigation_multiplier: f64) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        let mut add = |value: f64| {
+            for byte in ((value * 100.).round() as i64).to_le_bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        };
+        for source in ["AIM9M.JT", "AIM120.JT", "AIM7.JT"] {
+            let w = weapon(source, if source == "AIM9M.JT" { 2 } else { 3 });
+            for altitude in [500., 5000., 35000.] {
+                let mut body = missiles::energy_profile::body(&w);
+                body.navigation_gain *= navigation_multiplier;
+                let mut trial = Trial::new(
+                    body,
+                    missiles::energy::Flight::launch(
+                        [0., altitude * FT, 0.],
+                        [0., 0., 300.],
+                        [0., 0., 1.],
+                    ),
+                    missiles::energy::Observation {
+                        position: [300., altitude * FT, 4000.],
+                        velocity: [80., 0., -150.],
+                    },
+                    10.,
+                    12,
+                );
+                for tick in 0..2400 {
+                    trial.step(&|_, _| 0.);
+                    if tick % 120 == 0 {
+                        for value in trial
+                            .flight
+                            .position
+                            .into_iter()
+                            .chain(trial.flight.velocity)
+                        {
+                            add(value);
+                        }
+                    }
+                    if let Some(a) = trial.answer {
+                        add(f64::from(a.hit));
+                        add(a.seconds);
+                        add(a.closest);
+                        break;
+                    }
+                }
+            }
+        }
+        // Exercise live seeker/support, contact and launcher exclusion too.
+        for owner in [0, 100] {
+            let mut state = super::super::tests::fixture(true);
+            state.weapon_rules = Rules::Energy;
+            state.energy_predictions_enabled = false;
+            let mut target = super::super::tests::target(100, [0., 10000., 3000.], 10000, 0x80);
+            target.signature.infrared = 100.;
+            let w = weapon("AIM9M.JT", 2);
+            let mut p = projectile(&w, &target);
+            p.owner = owner;
+            state.targets = vec![target];
+            state.projectiles = vec![p];
+            for _ in 0..1200 {
+                state.step_surface(&[], |_, _| 0., |_, _| false);
+            }
+            add(f64::from(state.targets[0].hp));
+            add(state.projectiles.len() as f64);
+        }
+        hash
+    }
+    #[test]
+    fn behavior_hash_requires_a_model_revision_for_rule_changes() {
+        let identity = missiles::energy_profile::fingerprint();
+        let trace = behavior_trace(1.);
+        // A real PN-law perturbation changes behaviour without changing data
+        // or declared revisions. This is the defect this tripwire catches.
+        assert_ne!(trace, behavior_trace(1.1));
+        assert_eq!(identity, missiles::energy_profile::fingerprint());
+        let fixture = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/golden_tests/missile-energy.txt"
+        ))
+        .unwrap();
+        let expected: Vec<u64> = fixture
+            .split_whitespace()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(
+            [identity, trace].as_slice(),
+            expected.as_slice(),
+            "review behavior and bump its semantic revision before updating this pair"
+        );
     }
     #[test]
     fn expired_guidance_does_not_remove_the_live_body() {

@@ -352,7 +352,11 @@ fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4])
     }
     low / 1000.
 }
-fn fit_pairs(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+fn fit_pairs(
+    dir: &Path,
+    filter: Option<&str>,
+    measure_only: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "source,fraction,drag_scale,guidance_seconds,primary_target_km,primary_km,secondary_target_km,secondary_km,tail5_km,smooth_relative"
     );
@@ -363,14 +367,30 @@ fn fit_pairs(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error:
         let w = Weapon::parse(motor.source, &fs::read(dir.join(motor.source))?)?;
         let original = missiles::energy_profile::body(&w);
         let air = !missiles::surface_launched(&w.source) && w.flags & 0x20000 == 0;
-        let fractions: Vec<_> = if motor.thrust.is_some() || !motor.fit_propellant {
+        let fractions: Vec<_> = if measure_only {
+            vec![]
+        } else if motor.thrust.is_some() || !motor.fit_propellant {
             vec![motor.propellant_fraction]
         } else {
             (6..=25).map(|n| n as f64 * 0.02).collect()
         };
         let tail_anchor = [5000., 2., 0., 250.];
         let tail_floor = (motor.primary[2] * 0.08).clamp(2., 6.);
-        let mut best = None;
+        let mut best = if measure_only {
+            Some((
+                motor.propellant_fraction,
+                original,
+                candidate_maximum(&w, original, motor.secondary),
+                if air {
+                    candidate_maximum(&w, original, tail_anchor)
+                } else {
+                    0.
+                },
+                0.,
+            ))
+        } else {
+            None
+        };
         for fraction in fractions {
             let drags: &[f64] = if matches!(motor.source, "SSN9.JT" | "AS16.JT") {
                 &[0.25, 0.3, 0.4, 0.5, 0.75, 1., 1.5, 2., 2.5, 3.]
@@ -407,8 +427,9 @@ fn fit_pairs(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error:
                 if !answer.hit {
                     continue;
                 }
-                // Class-derived controlled life: rounded-up intercept time at
+                // Controlled life fitted per missile to its head-on reference:
                 // the documented anchor, with the selected physical motor.
+                // Ground/ship cases use their stationary or receding reference.
                 body.guidance_ticks = if motor.guidance_evidence.starts_with("NAVWEPS") {
                     original.guidance_ticks
                 } else {
@@ -500,7 +521,7 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
             [35000., 2., 0., 250.],
         ];
         let reach = anchors.map(|a| candidate_maximum(&w, body, a));
-        if reach[0] < 2. || reach[0] >= reach[1] || reach[1] >= reach[2] {
+        if reach[0] <= 2. || reach[0] >= reach[1] || reach[1] >= reach[2] {
             failures.push(format!(
                 "{}: inadequate or reversed tail reach {reach:?}",
                 m.source
@@ -567,6 +588,57 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    // Sparrow must win every cell. R27 has one documented unshootable
+    // deck-beam cell; require strict wins elsewhere, never a reversal.
+    for (new, old) in [
+        ("AIM7.JT", "AIM7E.JT"),
+        ("R27ER.JT", "AA10.JT"),
+        ("R27ET.JT", "R27T.JT"),
+    ] {
+        let newer = Weapon::parse(new, &fs::read(dir.join(new))?)?;
+        let older = Weapon::parse(old, &fs::read(dir.join(old))?)?;
+        for altitude in [500., 5000., 15000., 35000.] {
+            for aspect in [0., 1., 2.] {
+                let condition = [altitude, aspect, 0., 250.];
+                let a =
+                    candidate_maximum(&newer, missiles::energy_profile::body(&newer), condition);
+                let b =
+                    candidate_maximum(&older, missiles::energy_profile::body(&older), condition);
+                let unreachable_deck_beam =
+                    new != "AIM7.JT" && altitude == 500. && aspect == 1. && a == 0. && b == 0.;
+                if a <= b && !unreachable_deck_beam {
+                    failures.push(format!(
+                        "{new} <= {old} at {altitude} ft aspect {aspect}: {a:.3}/{b:.3}"
+                    ));
+                }
+            }
+        }
+    }
+    // Cross-family ordering is justified by the high-head reference, not by
+    // generation alone: burn duration and drag can reverse other geometries.
+    for new in ["AIM120.JT", "AA12.JT", "MICA.JT"] {
+        let newer = Weapon::parse(new, &fs::read(dir.join(new))?)?;
+        for old in ["AIM7E.JT", "AA6.JT", "R530.JT"] {
+            let older = Weapon::parse(old, &fs::read(dir.join(old))?)?;
+            let condition = [35000., 0., 0., 250.];
+            if candidate_maximum(&newer, missiles::energy_profile::body(&newer), condition)
+                <= candidate_maximum(&older, missiles::energy_profile::body(&older), condition)
+            {
+                failures.push(format!("high-head generation reversal {new}/{old}"));
+            }
+        }
+    }
+    for name in ["AIM9M.JT", "AIM9X.JT", "AA11.JT"] {
+        let w = Weapon::parse(name, &fs::read(dir.join(name))?)?;
+        if candidate_hit(
+            &w,
+            missiles::energy_profile::body(&w),
+            [500., 2., 12., 250.],
+            12000.,
+        ) {
+            failures.push(format!("{name}: 12 km deck drag did not escape"));
+        }
+    }
     if failures.is_empty() {
         Ok(())
     } else {
@@ -574,9 +646,186 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn geometry_data(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!("source,span_m,diameter_m,ratio,sea_factor,span_evidence,diameter_evidence");
+    for m in tore_formats::missile_motors::MOTORS {
+        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+        let b = missiles::energy_profile::body(&w);
+        let ratio = missiles::energy_profile::span_ratio(&w, b.diameter);
+        let r = tore_formats::missile_data::reference(m.source);
+        println!(
+            "{},{:.6},{:.6},{ratio:.6},{:.6},{},{}",
+            m.source,
+            ratio * b.diameter,
+            b.diameter,
+            b.low_altitude_drag,
+            r.map_or("CLASS-SPAN-RATIO", |r| r.span_evidence),
+            r.map_or("FITTED-CLASS", |r| r.dimensions_evidence)
+        );
+    }
+    Ok(())
+}
+
+fn geometry_sweep(
+    dir: &Path,
+    anchors: &[f64],
+    powers: &[f64],
+    filter: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "source,span_m,diameter_m,ratio,span_evidence,anchor,power,factor,altitude_ft,aspect,reach_km,reference_km,residual_percent"
+    );
+    for m in tore_formats::missile_motors::MOTORS {
+        if filter.is_some_and(|f| !f.split(',').any(|s| s == m.source)) {
+            continue;
+        }
+        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+        if missiles::surface_launched(&w.source) || w.flags & 0x20000 != 0 {
+            continue;
+        }
+        let original = missiles::energy_profile::body(&w);
+        let ratio = missiles::energy_profile::span_ratio(&w, original.diameter);
+        let evidence = tore_formats::missile_data::reference(m.source)
+            .map_or("CLASS-SPAN-RATIO", |r| r.span_evidence);
+        for (&anchor, &power) in anchors
+            .iter()
+            .flat_map(|a| powers.iter().map(move |p| (a, p)))
+        {
+            let mut b = original;
+            b.altitude_drag_exponent = power;
+            b.low_altitude_drag = if anchor == 0. {
+                1.
+            } else {
+                anchor * ratio / missiles::energy::AMRAAM_SPAN_DIAMETER
+            };
+            for altitude in [500., 5000., 15000., 35000.] {
+                // Diagnostic reference curve only: low-head comparison is .45
+                // of primary; interpolate/extrapolate linearly in altitude.
+                let reference = m.primary[2] * (0.45 + (altitude - 5000.) / 30000. * 0.55);
+                for aspect in [0, 2] {
+                    let reach = candidate_maximum(&w, b, [altitude, aspect as f64, 0., 250.]);
+                    println!(
+                        "{},{:.6},{:.6},{ratio:.6},{evidence},{anchor},{power},{:.6},{altitude},{},{reach:.3},{reference:.3},{:.3}",
+                        m.source,
+                        ratio * b.diameter,
+                        b.diameter,
+                        b.low_altitude_drag,
+                        ["head", "beam", "tail"][aspect],
+                        100. * (reach / reference - 1.)
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+fn fit_sparrow(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let w = Weapon::parse("AIM7.JT", &fs::read(dir.join("AIM7.JT"))?)?;
+    let old = Weapon::parse("AIM7E.JT", &fs::read(dir.join("AIM7E.JT"))?)?;
+    let original = missiles::energy_profile::body(&w);
+    let mut cases = Vec::new();
+    for geometry in [false, true] {
+        let mut older = missiles::energy_profile::body(&old);
+        if !geometry {
+            older.low_altitude_drag = 1.;
+        }
+        for altitude in [500., 5000., 15000., 35000.] {
+            for aspect in 0..3 {
+                let condition = [altitude, aspect as f64, 0., 250.];
+                cases.push((
+                    geometry,
+                    condition,
+                    candidate_maximum(&old, older, condition),
+                ));
+            }
+        }
+    }
+    println!("fraction,drag,ignition_seconds,guidance_seconds,min_advantage,score");
+    for fraction in [0.35, 0.4, 0.45, 0.5] {
+        for drag in [0.5, 0.75, 1., 1.5, 2., 2.5, 3.] {
+            for ignition in [0f64, 0.25, 0.5, 1.] {
+                let mut b = original;
+                let scale = fraction
+                    / tore_formats::missile_motors::motor("AIM7.JT")
+                        .unwrap()
+                        .propellant_fraction;
+                b.boost.propellant *= scale;
+                b.boost.thrust *= scale;
+                b.sustain.propellant *= scale;
+                b.sustain.thrust *= scale;
+                b.ignition = (ignition * 120.) as u32;
+                b.drag_scale = drag;
+                b.guidance_ticks = b.life;
+                let mut q = question(&w, 35000. * FT, 0, 70000.);
+                q.body = b;
+                while q.answer.is_none() {
+                    q.step_over(&|_, _| 0., &|a, b| a[1] > 0. && b[1] > 0.);
+                }
+                let a = q.answer.unwrap();
+                if !a.hit {
+                    continue;
+                }
+                b.guidance_ticks = (a.seconds * 120.).ceil() as u32 + 1;
+                let mut minimum = f64::INFINITY;
+                for &(geometry, condition, reference) in &cases {
+                    let mut tested = b;
+                    if !geometry {
+                        tested.low_altitude_drag = 1.;
+                    }
+                    let reach = candidate_maximum(&w, tested, condition);
+                    // A zero/zero beam cell is a failure, never a NaN that
+                    // f64::min silently ignores. Require an actual intercept.
+                    let advantage = if reach == 0. {
+                        0.
+                    } else if reference == 0. {
+                        f64::INFINITY
+                    } else {
+                        reach / reference
+                    };
+                    minimum = minimum.min(advantage);
+                    if minimum < 1.05 {
+                        break;
+                    }
+                }
+                if minimum >= 1.05 {
+                    let score = (fraction - 0.35).powi(2)
+                        + 0.02 * drag.ln().powi(2)
+                        + 0.01 * (1. - ignition).powi(2);
+                    println!(
+                        "{fraction},{drag},{ignition},{:.6},{minimum:.4},{score:.6}",
+                        f64::from(b.guidance_ticks) / 120.
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
+    if args.get(2).is_some_and(|s| s == "--geometry-data") {
+        return geometry_data(dir);
+    }
+    if args.get(2).is_some_and(|s| s == "--geometry-sweep") {
+        let anchors = args
+            .get(3)
+            .map_or("0,5.0,5.6,6.2", String::as_str)
+            .split(',')
+            .map(str::parse)
+            .collect::<Result<Vec<f64>, _>>()?;
+        let powers = args
+            .get(4)
+            .map_or("80", String::as_str)
+            .split(',')
+            .map(str::parse)
+            .collect::<Result<Vec<f64>, _>>()?;
+        return geometry_sweep(dir, &anchors, &powers, args.get(5).map(String::as_str));
+    }
+    if args.get(2).is_some_and(|s| s == "--fit-sparrow") {
+        return fit_sparrow(dir);
+    }
     if args.get(2).is_some_and(|s| s == "--verify") {
         return verify(dir);
     }
@@ -607,8 +856,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
-    if args.iter().any(|s| s == "--fit-pair") {
-        fit_pairs(dir, args.get(3).map(String::as_str))?;
+    if args
+        .iter()
+        .any(|s| s == "--fit-pair" || s == "--measure-pairs")
+    {
+        fit_pairs(
+            dir,
+            args.get(3).map(String::as_str),
+            args[2] == "--measure-pairs",
+        )?;
         return Ok(());
     }
     println!(
@@ -634,6 +890,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 source,
                 mass_kg: body.mass,
                 diameter_m: body.diameter,
+                span_m: None,
+                span_evidence: "CLASS-SPAN-RATIO",
                 range_km: f64::from(w.seeker.zones[1].maximum_range) * FT / 1000.,
                 dimensions_evidence: "RETAIL-AMBIGUOUS",
                 range_evidence: "RETAIL-AMBIGUOUS",

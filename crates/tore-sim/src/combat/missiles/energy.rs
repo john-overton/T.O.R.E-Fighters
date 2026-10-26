@@ -9,6 +9,11 @@ pub const DRAG_CURVES: [[f64; 7]; 3] = [
     [0.30, 0.30, 0.65, 0.55, 0.36, 0.30, 0.26],
     [0.20, 0.24, 0.65, 0.60, 0.45, 0.38, 0.34],
 ];
+/// John's geometry rule, referenced to the early AIM-120 span/diameter.
+pub const LOW_ALTITUDE_ANCHOR: f64 = 5.6;
+pub const LOW_ALTITUDE_EXPONENT: f64 = 80.;
+pub const LOW_ALTITUDE_CEILING_FT: f64 = 35000.;
+pub const AMRAAM_SPAN_DIAMETER: f64 = 0.52578 / 0.1778;
 pub const FT: f64 = 0.3048;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,6 +73,9 @@ pub struct Body {
     pub lift_coefficient: f64,
     pub induced_factor: f64,
     pub drag_scale: f64,
+    /// Sea-level geometry factor, blended to one at LOW_ALTITUDE_CEILING_FT.
+    pub low_altitude_drag: f64,
+    pub altitude_drag_exponent: f64,
     pub cruise_drag: bool,
     pub minimum_speed: f64,
     pub navigation_gain: f64,
@@ -101,6 +109,8 @@ impl Body {
             self.structural_g,
             self.lift_coefficient,
             self.drag_scale,
+            self.low_altitude_drag,
+            self.altitude_drag_exponent,
             self.minimum_speed,
             self.navigation_gain,
         ]
@@ -148,6 +158,13 @@ impl Body {
     }
     pub fn area(self) -> f64 {
         std::f64::consts::PI * self.diameter * self.diameter * 0.25
+    }
+    pub fn altitude_drag(self, altitude_m: f64) -> f64 {
+        let x = (altitude_m / (LOW_ALTITUDE_CEILING_FT * FT)).clamp(0., 1.);
+        1. + (self.low_altitude_drag - 1.)
+            * (1. - x * x * (3. - 2. * x))
+                .clamp(0., 1.)
+                .powf(self.altitude_drag_exponent)
     }
     pub fn drag_coefficient(self, mach: f64) -> f64 {
         let mach_points = DRAG_CURVES[0];
@@ -395,7 +412,8 @@ impl Flight {
         } else {
             0.
         };
-        let drag = qs * body.drag_coefficient(speed / air.sound) + induced;
+        let drag = (qs * body.drag_coefficient(speed / air.sound) + induced)
+            * body.altitude_drag(self.position[1]);
         let thrust = body.motor(self.age).map_or(0., |(motor, _)| motor.thrust);
         // Axial drag integration cannot reverse the velocity in one step.
         let damping = 1. / (1. + drag / (mass * speed.max(1e-6)) * DT);
@@ -479,6 +497,8 @@ pub(super) mod tests {
             lift_coefficient: 12.,
             induced_factor: 0.03,
             drag_scale: 1.,
+            low_altitude_drag: 1.,
+            altitude_drag_exponent: 1.,
             cruise_drag: false,
             minimum_speed: 120.,
             navigation_gain: 3.5,

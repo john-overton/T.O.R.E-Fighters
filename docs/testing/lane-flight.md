@@ -16,7 +16,7 @@ file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flig
 runner works is in the [testing overview](README.md). The `render-*` capture scenarios live in
 [`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
-`flight-missile-energy` runs 160 headless imported shots through the Energy
+`flight-missile-energy` runs 240 headless imported shots through the Energy
 model twice, with four workers and with one. It checks identical rows, real
 hits and misses, and an upper bound of one roll per two-second hammered
 episode. Eight historical Spec AIM9B shots also cover raw susceptibility above
@@ -24,6 +24,24 @@ episode. Eight historical Spec AIM9B shots also cover raw susceptibility above
 These are regressions for repeated rolls and comparison compatibility, not
 fixed Monte Carlo hit-rate targets. The broad calibration/study results are in the
 [missile energy baseline](../baselines/missile-energy.md).
+
+The offline `missile_energy_ranges` example accepts a local JT directory.
+`--verify` checks the documented A2A floors, generation orderings, long-low
+escape and local perturbations. `--measure-pairs` measures existing parameters;
+`--fit-pair` searches candidates but never edits data. `--geometry-data` prints
+all 59 resolved dimensions, evidence IDs and sea-level factors.
+`--geometry-sweep ANCHORS_CSV EXPONENTS_CSV [SOURCES_CSV]` compares A2A physical
+reach using the shared force kernel. Zero anchor disables the extra factor
+for diagnosis. References at unmeasured heights are explicitly fitted
+comparators, not public observations. `--fit-sparrow` searches the constrained
+newer-Sparrow refit and its complete family ordering grid.
+
+The synthetic `behavior_hash_requires_a_model_revision_for_rule_changes` test
+pairs the model identity with a quantized trajectory/contact trace. A changed
+trace requires investigating the behavior, incrementing the relevant semantic
+revision, and reviewing the new pair. An injected PN perturbation verifies that
+behavior changes independently of the declared identity. This finite set of
+traces is a tripwire, not exhaustive proof for every branch or platform.
 
 ## Variety aircraft checks
 

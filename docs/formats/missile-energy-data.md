@@ -132,20 +132,23 @@ Sourced fields:
   sustain thrust uses OPEN-HARPOON; SSN9 uses OPEN-P120. Their remaining
   phase fields are fitted. AS7 fuel fraction uses the cited 289/225 kg
   loaded/burnout masses; phase allocation is fitted.
-- All other motor fields are labelled FITTED-PER-STORE. Initial classes are
+- AIM7 phase durations use Navy P-825; its other refitted fields are described
+  below. All other motor fields are labelled FITTED-PER-STORE. Initial classes are
   short IR, radar boost/sustain, surface and powered strike. Fictional records
   use the same method without changing their game identities.
 
 No exact-variant primary guidance-duration figure was found for the other 58
-profiles. Their times are class-derived, then calibrated to the documented
-primary intercept using the selected motor. These are labelled
-FITTED-CLASS-CONTROL-TIME, not attributed to John or a manufacturer.
+profiles. Their times are fitted per missile to its head-on reference, using the
+selected motor. For surface targets, this is the documented stationary or
+receding reference instead of a head-on aircraft. These are labelled
+FITTED-PER-MISSILE-REFERENCE-TIME, not attributed to John or a manufacturer.
 For comparison, [NAVWEPS OP 3352, section 1-2](https://www.bulletpicker.com/pdf/OP-3352.pdf)
 gives 60 seconds for AIM9D. That is a different variant, so it is not silently
 assigned to M or X. Finding exact-variant control-power duration remains the
 next evidence step for those fitted fields.
 
-The deterministic fit searches unknown fuel fractions 0.12..0.50 in 0.02
+The original per-store deterministic fit, before the geometry multiplier,
+searched unknown fuel fractions 0.12..0.50 in 0.02
 steps, with sourced thrusts and AS7 fuel held fixed. Drag candidates are 0.5,
 0.75, 1, 1.5, 2, 2.5 and 3. Controlled lifetime is the primary intercept time
 rounded up to a simulation tick, plus one tick; AIM9B retains its sourced
@@ -173,69 +176,94 @@ anchors closely, but several old low-head/low-tail comparison targets cannot
 be matched simultaneously in this simple model. The baseline exposes every
 residual. Those comparison targets have not been raised to conceal the
 mismatch. The verified requirements are useful tail reach, altitude dependence,
-IR generation ordering, finite long-shot guidance and local fit smoothness.
+generation orderings where physically justified, finite long-shot guidance
+and local fit smoothness. The geometry addition substantially reduces SAM and
+low-flying strike reach too; these unchanged per-store fits no longer imply
+that their primary anchors are met. Current measurements are in the baseline.
 
 | Store | Fuel fraction | Boost N / s | Sustain N / s | Controlled s | Motor evidence | Guidance evidence |
 | --- | ---: | --- | --- | ---: | --- | --- |
-| AA10.JT | 0.38000 | 34370.0 / 4 | 12338.0 / 6 | 107.733 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA11.JT | 0.28000 | 12936.0 / 5 | 0.0 / 0 | 31.058 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA11B.JT | 0.28000 | 12936.0 / 5 | 0.0 / 0 | 31.058 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA12.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 43.083 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA2.JT | 0.12000 | 9360.0 / 2.2 | 0.0 / 0 | 29.092 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA6.JT | 0.50000 | 149285.7 / 3.5 | 0.0 / 0 | 27.017 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA8.JT | 0.24000 | 4646.4 / 5 | 0.0 / 0 | 11.375 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AA9.JT | 0.22000 | 21739.7 / 6 | 5336.1 / 20 | 204.483 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AAML.JT | 0.42000 | 42350.0 / 6 | 10395.0 / 20 | 200.917 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AEMP1.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 43.108 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AGM45.JT | 0.38000 | 40692.3 / 2 | 11097.9 / 6 | 77.483 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AGM65A.JT | 0.30000 | 37933.5 / 2 | 10345.5 / 6 | 86.950 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AGM65G.JT | 0.32000 | 58836.4 / 2 | 16046.3 / 6 | 80.558 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AGM84A.JT | 0.21378 | 0.0 / 0 | 3000.0 / 962 | 584.883 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
-| AGM84E.JT | 0.09256 | 0.0 / 0 | 3000.0 / 483.6 | 296.408 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
-| AGM88.JT | 0.38000 | 83424.7 / 2 | 22752.2 / 6 | 86.275 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AIM120.JT | 0.50000 | 28215.7 / 4 | 10128.7 / 6 | 52.308 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AIM54C.JT | 0.24000 | 22409.2 / 6 | 5500.4 / 20 | 244.150 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AIM7.JT | 0.30000 | 24774.7 / 4 | 8893.5 / 6 | 104.992 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AIM7E.JT | 0.50000 | 35213.8 / 4 | 12640.8 / 6 | 32.408 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA10.JT | 0.38000 | 34370.0 / 4 | 12338.0 / 6 | 107.733 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA11.JT | 0.28000 | 12936.0 / 5 | 0.0 / 0 | 31.058 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA11B.JT | 0.28000 | 12936.0 / 5 | 0.0 / 0 | 31.058 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA12.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 43.083 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA2.JT | 0.12000 | 9360.0 / 2.2 | 0.0 / 0 | 29.092 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA6.JT | 0.50000 | 149285.7 / 3.5 | 0.0 / 0 | 27.017 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA8.JT | 0.24000 | 4646.4 / 5 | 0.0 / 0 | 11.375 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AA9.JT | 0.22000 | 21739.7 / 6 | 5336.1 / 20 | 204.483 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AAML.JT | 0.42000 | 42350.0 / 6 | 10395.0 / 20 | 200.917 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AEMP1.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 43.108 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AGM45.JT | 0.38000 | 40692.3 / 2 | 11097.9 / 6 | 77.483 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AGM65A.JT | 0.30000 | 37933.5 / 2 | 10345.5 / 6 | 86.950 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AGM65G.JT | 0.32000 | 58836.4 / 2 | 16046.3 / 6 | 80.558 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AGM84A.JT | 0.21378 | 0.0 / 0 | 3000.0 / 962 | 584.883 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AGM84E.JT | 0.09256 | 0.0 / 0 | 3000.0 / 483.6 | 296.408 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AGM88.JT | 0.38000 | 83424.7 / 2 | 22752.2 / 6 | 86.275 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AIM120.JT | 0.50000 | 28215.7 / 4 | 10128.7 / 6 | 52.308 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AIM54C.JT | 0.24000 | 22409.2 / 6 | 5500.4 / 20 | 244.150 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AIM7.JT | 0.40000 | 37752.0 / 3.5 | 5691.8 / 12.5 | 51.550 | CNATRA-P825-SPARROW-PHASES;FITTED-FUEL | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AIM7E.JT | 0.50000 | 35213.8 / 4 | 12640.8 / 6 | 32.408 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
 | AIM9B.JT | 0.24379 | 17065.0 / 2.2 | 0.0 / 0 | 20.000 | NAVWEPS-OP2309-MK15;FITTED-EXHAUST | NAVWEPS-OP2309-20S |
-| AIM9M.JT | 0.33783 | 12810.9 / 5 | 0.0 / 0 | 16.492 | CNATRA-P825-MK36;FITTED-EXHAUST | FITTED-CLASS-CONTROL-TIME |
-| AIM9X.JT | 0.34143 | 12810.9 / 5 | 0.0 / 0 | 16.417 | CNATRA-P825-MK36;FITTED-EXHAUST | FITTED-CLASS-CONTROL-TIME |
-| AM39.JT | 0.34000 | 137819.0 / 2 | 37587.0 / 6 | 179.183 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AS14.JT | 0.30000 | 119790.0 / 2 | 32670.0 / 6 | 14.183 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AS15.JT | 0.34000 | 20526.9 / 2 | 5598.2 / 6 | 23.850 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AS16.JT | 0.36000 | 261360.0 / 2 | 71280.0 / 6 | 337.792 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AS30.JT | 0.34000 | 106964.0 / 2 | 29172.0 / 6 | 14.383 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AS7.JT | 0.22145 | 38720.0 / 2 | 10560.0 / 6 | 20.650 | OPEN-KH23-BURNOUT;FITTED-PHASES | FITTED-CLASS-CONTROL-TIME |
-| AT12.JT | 0.36000 | 13040.6 / 2 | 3556.5 / 6 | 11.667 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| AT2.JT | 0.30000 | 5717.2 / 2 | 1559.2 / 6 | 10.592 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| FIM92.JT | 0.34000 | 1555.8 / 3 | 389.0 / 8 | 9.583 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| MICA.JT | 0.50000 | 20020.0 / 4 | 7186.7 / 6 | 75.725 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| MIS.JT | 0.30000 | 2468.4 / 3 | 617.1 / 8 | 16.267 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| PL10.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 49.667 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| PL7.JT | 0.50000 | 19580.0 / 5 | 0.0 / 0 | 10.583 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| R27ER.JT | 0.24000 | 24024.0 / 5 | 6468.0 / 10 | 191.217 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| R27ET.JT | 0.36000 | 35315.3 / 5 | 9508.0 / 10 | 145.550 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| R27T.JT | 0.50000 | 43793.7 / 4 | 15720.8 / 6 | 82.158 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| R440.JT | 0.41786 | 20550.0 / 1.75 | 17550.0 / 2.3 | 14.050 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
-| R530.JT | 0.50000 | 48262.5 / 4 | 17325.0 / 6 | 36.975 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| R550.JT | 0.50000 | 19580.0 / 5 | 0.0 / 0 | 11.517 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA13.JT | 0.38000 | 6688.0 / 3 | 1672.0 / 8 | 9.992 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA14.JT | 0.34000 | 1540.9 / 3 | 385.2 / 8 | 10.625 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA15.JT | 0.32000 | 23232.0 / 3 | 5808.0 / 8 | 29.475 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA16.JT | 0.32000 | 1520.6 / 3 | 380.2 / 8 | 12.508 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA19.JT | 0.30000 | 5544.0 / 3 | 1386.0 / 8 | 23.892 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA2A.JT | 0.34000 | 323584.8 / 3 | 80896.2 / 8 | 83.150 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA3.JT | 0.28000 | 117409.6 / 3 | 29352.4 / 8 | 69.533 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA6.JT | 0.30000 | 79068.0 / 3 | 19767.0 / 8 | 68.783 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA7.JT | 0.34000 | 1368.8 / 3 | 342.2 / 8 | 10.275 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SA9.JT | 0.34000 | 4488.0 / 3 | 1122.0 / 8 | 9.983 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SAN11.JT | 0.30000 | 5544.0 / 3 | 1386.0 / 8 | 23.892 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SAN3.JT | 0.38000 | 308316.8 / 3 | 77079.2 / 8 | 88.517 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SAN4.JT | 0.30000 | 16896.0 / 3 | 4224.0 / 8 | 25.175 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SAN7.JT | 0.34000 | 103224.0 / 3 | 25806.0 / 8 | 72.933 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SAN9.JT | 0.32000 | 23232.0 / 3 | 5808.0 / 8 | 29.475 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SEA_SPAR.JT | 0.28000 | 28459.2 / 3 | 7114.8 / 8 | 69.242 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
-| SSN9.JT | 0.52108 | 303160.0 / 3 | 7600.0 / 360 | 528.533 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
+| AIM9M.JT | 0.33783 | 12810.9 / 5 | 0.0 / 0 | 16.492 | CNATRA-P825-MK36;FITTED-EXHAUST | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AIM9X.JT | 0.34143 | 12810.9 / 5 | 0.0 / 0 | 16.417 | CNATRA-P825-MK36;FITTED-EXHAUST | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AM39.JT | 0.34000 | 137819.0 / 2 | 37587.0 / 6 | 179.183 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AS14.JT | 0.30000 | 119790.0 / 2 | 32670.0 / 6 | 14.183 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AS15.JT | 0.34000 | 20526.9 / 2 | 5598.2 / 6 | 23.850 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AS16.JT | 0.36000 | 261360.0 / 2 | 71280.0 / 6 | 337.792 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AS30.JT | 0.34000 | 106964.0 / 2 | 29172.0 / 6 | 14.383 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AS7.JT | 0.22145 | 38720.0 / 2 | 10560.0 / 6 | 20.650 | OPEN-KH23-BURNOUT;FITTED-PHASES | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AT12.JT | 0.36000 | 13040.6 / 2 | 3556.5 / 6 | 11.667 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| AT2.JT | 0.30000 | 5717.2 / 2 | 1559.2 / 6 | 10.592 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| FIM92.JT | 0.34000 | 1555.8 / 3 | 389.0 / 8 | 9.583 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| MICA.JT | 0.50000 | 20020.0 / 4 | 7186.7 / 6 | 75.725 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| MIS.JT | 0.30000 | 2468.4 / 3 | 617.1 / 8 | 16.267 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| PL10.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 49.667 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| PL7.JT | 0.50000 | 19580.0 / 5 | 0.0 / 0 | 10.583 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| R27ER.JT | 0.24000 | 24024.0 / 5 | 6468.0 / 10 | 191.217 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| R27ET.JT | 0.36000 | 35315.3 / 5 | 9508.0 / 10 | 145.550 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| R27T.JT | 0.50000 | 43793.7 / 4 | 15720.8 / 6 | 82.158 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| R440.JT | 0.41786 | 20550.0 / 1.75 | 17550.0 / 2.3 | 14.050 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| R530.JT | 0.50000 | 48262.5 / 4 | 17325.0 / 6 | 36.975 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| R550.JT | 0.50000 | 19580.0 / 5 | 0.0 / 0 | 11.517 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA13.JT | 0.38000 | 6688.0 / 3 | 1672.0 / 8 | 9.992 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA14.JT | 0.34000 | 1540.9 / 3 | 385.2 / 8 | 10.625 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA15.JT | 0.32000 | 23232.0 / 3 | 5808.0 / 8 | 29.475 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA16.JT | 0.32000 | 1520.6 / 3 | 380.2 / 8 | 12.508 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA19.JT | 0.30000 | 5544.0 / 3 | 1386.0 / 8 | 23.892 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA2A.JT | 0.34000 | 323584.8 / 3 | 80896.2 / 8 | 83.150 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA3.JT | 0.28000 | 117409.6 / 3 | 29352.4 / 8 | 69.533 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA6.JT | 0.30000 | 79068.0 / 3 | 19767.0 / 8 | 68.783 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA7.JT | 0.34000 | 1368.8 / 3 | 342.2 / 8 | 10.275 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SA9.JT | 0.34000 | 4488.0 / 3 | 1122.0 / 8 | 9.983 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SAN11.JT | 0.30000 | 5544.0 / 3 | 1386.0 / 8 | 23.892 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SAN3.JT | 0.38000 | 308316.8 / 3 | 77079.2 / 8 | 88.517 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SAN4.JT | 0.30000 | 16896.0 / 3 | 4224.0 / 8 | 25.175 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SAN7.JT | 0.34000 | 103224.0 / 3 | 25806.0 / 8 | 72.933 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SAN9.JT | 0.32000 | 23232.0 / 3 | 5808.0 / 8 | 29.475 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SEA_SPAR.JT | 0.28000 | 28459.2 / 3 | 7114.8 / 8 | 69.242 | FITTED-PER-STORE | FITTED-PER-MISSILE-REFERENCE-TIME |
+| SSN9.JT | 0.52108 | 303160.0 / 3 | 7600.0 / 360 | 528.533 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-PER-MISSILE-REFERENCE-TIME |
+
+### Newer Sparrow refit
+
+AIM7 uses the existing explicit F/M proxy. Navy P-825's printed 14-5 motor
+table gives 3.5 s boost and 12.5 s sustain. The agent refit uses fuel fraction
+0.40, drag scale 0.5, 51.55 s controlled life fitted to its 70 km high-head
+reference, and a fitted 0.5 s post-release ignition delay instead of the imported
+2 s. That delay is not inferred from the manual's trigger-to-launch time.
+The shorter drop and lower base drag are needed to preserve an actual
+500 ft beam intercept under the geometry rule. The offline search checks
+fuel fractions 0.35/0.40/0.45/0.50, base drag 0.5/0.75/1/1.5/2/2.5/3 and
+ignition delays 0/0.25/0.5/1 s. Every cell must have a positive newer reach
+and at least 5% advantage wherever the older missile can intercept, with
+geometry drag both enabled and disabled. Zero/zero is never an upgrade win.
+Among feasible candidates the agent score is `(fuel-0.35)^2 + 0.02*ln(drag)^2
++ 0.01*(1-ignition_seconds)^2`. The selected candidate minimizes that score;
+these penalties are agent choices, not manufacturer's constraints. Only this missile's per-store motor/drag/control
+parameters changed in this round. Other guidance times retain their previous
+per-missile fit, except the sourced AIM9B value. Ground/ship controlled times
+are fitted to their stationary or receding primary reference, not a head-on
+A2A reference. The [baseline](../baselines/missile-energy.md) records all family
+ordering checks and the limits of cross-family comparisons.
 
 ### Drag exceptions
 
@@ -253,6 +281,105 @@ exception rescales the base Cd curve or increases a head-on anchor.
 | --- | ---: |
 | AS16.JT | 0.25 |
 | SSN9.JT | 0.4 |
+
+## Geometry-scaled low-altitude drag
+
+John requested the span/diameter rule on 2026-10-26. Span means the largest
+fully deployed wing or fin tip-to-tip dimension, not body width or the smallest
+wing pair. The [specification](../spec/missile-energy.md#motion) owns the formula
+and altitude blend. The table below separates span evidence from the existing
+diameter evidence. Missing span measurements use an explicitly class-derived
+ratio: 3.0 for strike/cruise, 3.5 for remaining IR or surface-launched profiles,
+3.0 otherwise. Fictional derivatives use the labelled family span proxy.
+These are agent choices, not recovered or published dimensions. Missing public
+span is still unknown; next research is a variant-specific manufacturer drawing.
+
+The literal ratio does not yield the intuitive ordering in the request:
+AIM-9M is 4.95 body diameters across its fins, against AIM-120's 2.957, and
+AIM-54C is 2.421. Thus Sidewinder's extra factor is larger and Phoenix's smaller
+than AMRAAM's. The requested formula is preserved without individual overrides.
+This ratio alone is not a physical estimate of drag area or missile reach.
+
+| Span evidence ID | Field and source |
+| --- | --- |
+| USAF-AMRAAM-SPAN | 20.7 in, 0.52578 m, [USAF AIM-120 fact sheet](https://www.af.mil/News/Fact-Sheets/Display/Article/104576/aim-120-amraam/). |
+| NAVAIR-SIDEWINDER-SPAN | AIM-9M 24.75 in, 0.62865 m, [NAVAIR](https://www.navair.navy.mil/product/AIM-9M-Sidewinder). |
+| USNAVY-SIDEWINDER-X-SPAN | AIM-9X largest fin span 17.6 in, 0.44704 m, [Navy fact file](https://www.navy.mil/Resources/Fact-Files/Display-FactFiles/Article/2168989/aim-9x-sidewinder-missile/aim-9x-sidewinder-missile/). Smaller forward wing span is not substituted. |
+| NAVWEPS-OP2309-SPAN | AIM-9B 22 in including rollerons, 0.5588 m, OP 2309 section 1-2, [manual reproduction](https://www.scribd.com/document/1041639431/OP-2309-3rd-AIM-9B). |
+| NAVAIR-PHOENIX-C | AIM-54C 0.92 m, [NAVAIR](https://www.navair.navy.mil/node/12701). |
+| CNATRA-P825-SPARROW-SPAN | AIM-7 family 40 in, 1.016 m, [Navy P-825](https://falcon.blu3wolf.com/Docs/P-825.pdf#page=284). |
+| USNAVY-AIM-RIM7-SPAN | AIM/RIM-7 40 in, 1.016 m, [Navy environmental statement](https://www.nepa.navy.mil/Portals/20/Documents/aftteis1/virginia-capes/nepa-eo/vacapes-feis-vol2-appendices-full.pdf). |
+| ROE2005-R27 / ROE2005-R73 / ROE2005-RVVAE / ROE2005-R33 / ROE2005-KH29L | Manufacturer catalogue printed pp. 118-120, 122: R27 variants largest stabilizer 0.97 m (wing 0.77 m is smaller), R73 0.51 m, RVV-AE 0.70 m, R33 1.10 m, Kh29L empennage 1.10 m, [Rosoboronexport](https://server.3rd-wing.net/public/tiengo/Doc/r%C3%A9aliste%20avionics%20russes.pdf). |
+| US-WEG-R60-SPAN | R60 0.39 m, [Army ODIN equipment guide](https://odin.t2com.army.mil/WEG/Asset/7d3e19d07bd4ac462c9404e8eef55457). |
+| USAF-MAVERICK-SPAN | AGM-65 28 in, 0.7112 m, [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104577/agm-65-maverick/). |
+| USAF-HARM-SPAN | AGM-88 44 in, 1.1176 m, [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104574/agm-88-harm/). Its parenthetical 101.60 cm is inconsistent; this field uses the explicit imperial measurement. |
+| OPEN-SUPER530D | Super 530D 0.62 m, [Conservatoire de l'air](https://c-aea.fr/fr/50-collection/armement). Do not substitute older R530 or Super530F dimensions. |
+| NAVAIR-HARPOON-SPAN | Harpoon 3 ft, 0.9144 m, [NAVAIR](https://www.navair.navy.mil/product/Harpoon). |
+| CLASS-HARPOON-SPAN / CLASS-R73-SPAN / CLASS-PHOENIX-SPAN / CLASS-RVVAE-SPAN | Explicit family proxies for AGM84E / AA11B / AAML / PL10 and AEMP1 respectively. |
+| CLASS-SPAN-RATIO | Span unknown in reviewed sources; agent class estimate above. MICA's reviewed manufacturer sheet supplies diameter but not span. |
+
+| Store | Span m | Diameter m | Ratio | Sea-level factor | Span evidence | Diameter evidence |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| AA10.JT | 0.9700 | 0.2300 | 4.217 | 7.987 | ROE2005-R27 | ROE2005-R27 |
+| AA11.JT | 0.5100 | 0.1700 | 3.000 | 5.681 | ROE2005-R73 | ROE2005-R73 |
+| AA11B.JT | 0.5100 | 0.1700 | 3.000 | 5.681 | CLASS-R73-SPAN | FITTED-AGILE-IR-CLASS |
+| AA12.JT | 0.7000 | 0.2000 | 3.500 | 6.628 | ROE2005-RVVAE | ROE2005-RVVAE |
+| AA2.JT | 0.4445 | 0.1270 | 3.500 | 6.628 | CLASS-SPAN-RATIO | RWD-R3S |
+| AA6.JT | 1.0650 | 0.3550 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-R40-FAMILY |
+| AA8.JT | 0.3900 | 0.1200 | 3.250 | 6.155 | US-WEG-R60-SPAN | OPEN-R60M |
+| AA9.JT | 1.1000 | 0.3800 | 2.895 | 5.482 | ROE2005-R33 | ROE2005-R33 |
+| AAML.JT | 0.9200 | 0.3800 | 2.421 | 4.585 | CLASS-PHOENIX-SPAN | FITTED-HEAVY-RADAR-CLASS |
+| AEMP1.JT | 0.7000 | 0.2000 | 3.500 | 6.628 | CLASS-RVVAE-SPAN | FITTED-RADAR-CLASS |
+| AGM45.JT | 0.6096 | 0.2032 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-SHRIKE-B-PROXY |
+| AGM65A.JT | 0.7112 | 0.3048 | 2.333 | 4.419 | USAF-MAVERICK-SPAN | OPEN-MAVERICK-A |
+| AGM65G.JT | 0.7112 | 0.3048 | 2.333 | 4.419 | USAF-MAVERICK-SPAN | USAF-MAVERICK-G |
+| AGM84A.JT | 0.9144 | 0.3430 | 2.666 | 5.048 | NAVAIR-HARPOON-SPAN | OPEN-HARPOON |
+| AGM84E.JT | 0.9144 | 0.3430 | 2.666 | 5.048 | CLASS-HARPOON-SPAN | OPEN-SLAM |
+| AGM88.JT | 1.1176 | 0.2540 | 4.400 | 8.332 | USAF-HARM-SPAN | USAF-HARM |
+| AIM120.JT | 0.5258 | 0.1778 | 2.957 | 5.600 | USAF-AMRAAM-SPAN | NAVAIR-AMRAAM |
+| AIM54C.JT | 0.9200 | 0.3800 | 2.421 | 4.585 | NAVAIR-PHOENIX-C | NAVAIR-PHOENIX-C |
+| AIM7.JT | 1.0160 | 0.2032 | 5.000 | 9.469 | CNATRA-P825-SPARROW-SPAN | OPEN-SPARROW-FM-PROXY |
+| AIM7E.JT | 1.0160 | 0.2032 | 5.000 | 9.469 | CNATRA-P825-SPARROW-SPAN | OPEN-SPARROW-E |
+| AIM9B.JT | 0.5588 | 0.1270 | 4.400 | 8.332 | NAVWEPS-OP2309-SPAN | OPEN-SIDEWINDER-B |
+| AIM9M.JT | 0.6287 | 0.1270 | 4.950 | 9.374 | NAVAIR-SIDEWINDER-SPAN | USAF-SIDEWINDER |
+| AIM9X.JT | 0.4470 | 0.1270 | 3.520 | 6.666 | USNAVY-SIDEWINDER-X-SPAN | NAVAIR-SIDEWINDER |
+| AM39.JT | 1.0500 | 0.3500 | 3.000 | 5.681 | CLASS-SPAN-RATIO | MBDA-AM39 |
+| AS14.JT | 1.1000 | 0.3800 | 2.895 | 5.482 | ROE2005-KH29L | ROE2005-KH29L |
+| AS15.JT | 0.4004 | 0.1335 | 3.000 | 5.681 | CLASS-SPAN-RATIO | FITTED-CLASS |
+| AS16.JT | 1.3650 | 0.4550 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-KH15S-PROXY |
+| AS30.JT | 1.0260 | 0.3420 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-AS30L |
+| AS7.JT | 0.8250 | 0.2750 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-KH23 |
+| AT12.JT | 0.3377 | 0.1126 | 3.000 | 5.681 | CLASS-SPAN-RATIO | FITTED-CLASS |
+| AT2.JT | 0.4260 | 0.1420 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-FALANGA-M-PROXY |
+| FIM92.JT | 0.2450 | 0.0700 | 3.500 | 6.628 | CLASS-SPAN-RATIO | US-ORDNANCE-STINGER |
+| MICA.JT | 0.4800 | 0.1600 | 3.000 | 5.681 | CLASS-SPAN-RATIO | MBDA-MICA |
+| MIS.JT | 0.3150 | 0.0900 | 3.500 | 6.628 | CLASS-SPAN-RATIO | MBDA-MISTRAL-PHYSICAL-PROXY |
+| PL10.JT | 0.7000 | 0.2000 | 3.500 | 6.628 | CLASS-RVVAE-SPAN | FITTED-RADAR-CLASS |
+| PL7.JT | 0.5495 | 0.1570 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-PL7 |
+| R27ER.JT | 0.9700 | 0.2600 | 3.731 | 7.065 | ROE2005-R27 | ROE2005-R27 |
+| R27ET.JT | 0.9700 | 0.2600 | 3.731 | 7.065 | ROE2005-R27 | ROE2005-R27 |
+| R27T.JT | 0.9700 | 0.2300 | 4.217 | 7.987 | ROE2005-R27 | ROE2005-R27 |
+| R440.JT | 0.5250 | 0.1500 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-R440 |
+| R530.JT | 0.6200 | 0.2630 | 2.357 | 4.464 | OPEN-SUPER530D | OPEN-SUPER530D |
+| R550.JT | 0.5600 | 0.1600 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-MAGIC2 |
+| SA13.JT | 0.4200 | 0.1200 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M37 |
+| SA14.JT | 0.2520 | 0.0720 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA14 |
+| SA15.JT | 0.8050 | 0.2300 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA15 |
+| SA16.JT | 0.2520 | 0.0720 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA16 |
+| SA19.JT | 0.5320 | 0.1520 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M311 |
+| SA2A.JT | 2.2890 | 0.6540 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-V750V-PROXY |
+| SA3.JT | 1.3125 | 0.3750 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-V601-PROXY |
+| SA6.JT | 1.1725 | 0.3350 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GULFLINK-SA6 |
+| SA7.JT | 0.2520 | 0.0720 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA7B-PROXY |
+| SA9.JT | 0.4200 | 0.1200 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GULFLINK-SA9 |
+| SAN11.JT | 0.5320 | 0.1520 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M311 |
+| SAN3.JT | 2.2750 | 0.6500 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-V611 |
+| SAN4.JT | 0.7210 | 0.2060 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-OSA-M1-PROXY |
+| SAN7.JT | 1.4000 | 0.4000 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M38-NAVAL |
+| SAN9.JT | 0.8050 | 0.2300 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA15 |
+| SEA_SPAR.JT | 1.0160 | 0.2032 | 5.000 | 9.469 | USNAVY-AIM-RIM7-SPAN | OPEN-SPARROW-FM-PROXY |
+| SSN9.JT | 2.4000 | 0.8000 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-P120 |
+
 
 ## Other fitted fields
 
