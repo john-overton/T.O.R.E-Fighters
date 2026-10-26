@@ -248,6 +248,8 @@ pub struct DefenseMotion {
     /// "Helicopter defence"): flown at maximum speed, not corner speed, which
     /// sinks a helicopter.
     pub rotorcraft: bool,
+    /// Turn cold at maximum dry speed instead of corner speed.
+    pub extend: bool,
 }
 
 /// A launch warning delivered to this actor and nobody else (B47).
@@ -1339,6 +1341,11 @@ impl Controller {
                 // A helicopter's break keeps its strike speed (slice HF1).
                 let speed = super::helicopter_defense::strike_speed(&frame.own.limits);
                 (SpeedRequest::Explicit(speed), speed)
+            } else if defense.extend {
+                (
+                    SpeedRequest::Explicit(frame.own.limits.maximum),
+                    frame.own.limits.maximum,
+                )
             } else {
                 (SpeedRequest::Corner, frame.own.limits.corner)
             };
@@ -4319,6 +4326,7 @@ mod tests {
                 heading_deg: 90.,
                 pitch_deg: -4.,
                 rotorcraft,
+                extend: false,
             }));
             let motion = c.step(&scene.frame(0, own())).unwrap().motion.unwrap();
             assert_eq!(motion.speed, speed, "rotorcraft {rotorcraft}");

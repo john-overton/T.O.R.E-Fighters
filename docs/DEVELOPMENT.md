@@ -1478,7 +1478,11 @@ the game's own AI on weapons hold in a fresh Quick Mission world instead, so
 it perceives, maneuvers and dispenses as in a mission; `--ai-model
 standard|hybrid` picks the single-player (default) or networked AI flight
 model and `--trace` prints the AI target's flight and defence every quarter
-second. `--decoy-model lure` is
+second, plus every actual device release with its current closest-approach
+estimate, maneuver and passage flag. The AI study currently repeats its fixed countermeasure random stream across
+shots, so seed-to-seed hit counts are not independent survival samples. Use its
+G, heading and release-time traces to assess defensive control until that stream
+is replaced. `--decoy-model lure` is
 a what-if, not game behaviour: a decoyed missile steers for the device that
 decoyed it and bursts there instead of flying straight on. `--catalog` writes
 `catalog.csv` (each missile's decoy susceptibility, seeker and turn rates, each
@@ -1588,6 +1592,11 @@ recovery phase and physical throttle/power/temperature. [Validation](baselines/a
 `--probe-ai-guns-only` restricts AI stores to their carried gun without changing
 the player script. It is useful for sustained [gun-employment checks](baselines/ai-gun-implementation.md). `--probe-trace SECONDS` also
 prints enemy observation sources, permission, target and incoming-fire cues. `--probe-fuel-trace SECONDS` prints one `AI fuel:` line per AI aircraft at that interval (tick, aircraft, fuel, endurance, time home, fuel state, activity). `--probe-fuel POUNDS` starts every AI aircraft with that much internal fuel, so a return on low fuel can be probed in a minute. `--probe-rotor-trace SECONDS` prints one `AI rotor:` line per AI helicopter or V-22 at that interval: height over the ground, speed, climb, pitch, bank, heading, nacelles, collective, rotor speed, the rotor adapter's regime and commanded heading, path, speed, climb and nacelles, the requested path, the terrain floor and the envelope maximum (slice HF1).
+Structural damage without a system fault also prints an `AI damage:` line,
+with its exact `damage_fraction`, so a damaged crash is not labeled undamaged.
+That value is the aircraft's damage before any crash: a ground impact sets
+the flight's damage to 1, which would otherwise hide an undamaged aircraft
+that flew into the ground.
 Every probe prints first visual acquisition, first release, first gun/hit defense
 and peak bank for each enemy.
 
@@ -2089,19 +2098,27 @@ coverage, missing geometry, footing exceptions and before/after clearance.
 `surface-grounding-radar-render` scenario captures a radar objective offscreen.
 
 `--bridge-audit OUT_DIR [LAYOUT ...] [--strict] [--capture]` reads only the
-imported pack and writes `assets.tsv` and `placements.tsv`. By default it
+imported pack and writes `assets.tsv`, `placements.tsv` and `banks.tsv`.
+The bank table measures excavation and constructed approach grades; strict
+audits reject cuts over 1 ft, grades over 8.1 percent (rounding tolerance)
+and END road toes more than 30 ft above terrain. By default it
 checks all 75 layouts plus every offered template that names bridge pieces
 (heavy defenses, seed 1, ordinary placement). Named layouts limit the run.
 The tables record every bridge's deck/ramp samples, endpoint clearances,
-lowest geometry versus ground, sea-plane clearance, source orientation and
+physical feet of the connected assembly versus ground, sea-plane clearance, source orientation and
 nearby object overlap candidates. `--strict` fails for buried decks, unknown
 decks, support gaps over 30 ft or missing assets. Sampling is at most 64 ft;
 road/river artwork alignment and candidate overlaps still need visual review.
 
 `--capture` renders every bridge intact and destroyed with the existing
 scene renderer, plus half-health appearance for the first of each type.
+Optional `--view=side`, `--view=along` or `--view=near` selects a bridge
+inspection angle; `--id=40000082,40000092` limits captures to those IDs
+without narrowing the numeric audit.
 It checks that bridge geometry remains present and that live HP and replay
-HP produce identical geometry. This uses the GPU and must run through
+HP produce identical geometry, positive HP retains intact art, and zero HP
+changes the drawn geometry. `bridge-end-ruins` covers all four END types in
+the battery. This uses the GPU and must run through
 `tools/agent-run.sh`. Keep the output outside tracked directories. Example:
 
 ```sh

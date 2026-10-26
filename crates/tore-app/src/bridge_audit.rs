@@ -152,6 +152,11 @@ pub fn run() -> AppResult<()> {
         table,
         "layout\tid\ttype\tx\ty\tz\theading\tpitch\tbank\tdeck_samples\tdeck_min_clearance_ft\tdeck_max_clearance_ft\tend_a_ft\tend_b_ft\tbottom_min_ft\tbottom_max_ft\twater_min_ft\toverlaps\tstatus"
     )?;
+    let mut banks_table = std::fs::File::create(out.join("banks.tsv"))?;
+    writeln!(
+        banks_table,
+        "layout\tbank_x\tbank_z\tsupport_ft\tmax_cut_ft\tmax_approach_grade\tramp_toe_x\tramp_toe_z"
+    )?;
     let mut total = 0;
     let mut bad = 0;
     let mut layouts = 0;
@@ -208,6 +213,59 @@ pub fn run() -> AppResult<()> {
             target.as_ref(),
         )?;
         let sources = Placements::for_terrain(&resources, &terrain, &code)?;
+        let (_, banks) = tore_world::grounding::bridges::graded_foundations(
+            &sources,
+            |x, z| terrain.raw_height(x, z),
+            |bounds| {
+                !terrain
+                    .airport_scene
+                    .runways
+                    .iter()
+                    .any(|r| bounds.meets_airfield(&r.surface))
+            },
+        );
+        for bank in &banks {
+            let [start, end] = bank.approach();
+            let distance = (end[0] - start[0]).hypot(end[1] - start[1]);
+            let steps = (distance / 16.).ceil().max(1.) as usize;
+            let mut grade: f64 = 0.;
+            let mut last = f64::from(terrain.height(start[0] as f32, start[1] as f32));
+            for i in 1..=steps {
+                let at = std::array::from_fn::<_, 2, _>(|a| {
+                    start[a] + (end[a] - start[a]) * i as f64 / steps as f64
+                });
+                let h = f64::from(terrain.height(at[0] as f32, at[1] as f32));
+                // Measure the constructed road, stopping where raw terrain
+                // takes over. Unmodified terrain has no new grade guarantee.
+                if last > f64::from(terrain.raw_height(at[0] as f32, at[1] as f32)) + 1. {
+                    grade = grade.max((h - last).abs() / (distance / steps as f64));
+                }
+                last = h;
+            }
+            let mut cut: f64 = 0.;
+            for x in 0..=32 {
+                for z in 0..=32 {
+                    let at = [x, z].map(|v| v as f64 / 32.);
+                    let x =
+                        (bank.core.min[0] + (bank.core.max[0] - bank.core.min[0]) * at[0]) as f32;
+                    let z =
+                        (bank.core.min[1] + (bank.core.max[1] - bank.core.min[1]) * at[1]) as f32;
+                    cut = cut.max(f64::from(terrain.raw_height(x, z) - terrain.height(x, z)));
+                }
+            }
+            writeln!(
+                banks_table,
+                "{label}\t{:.2}\t{:.2}\t{:.2}\t{cut:.3}\t{grade:.5}\t{:.2}\t{:.2}",
+                (bank.core.min[0] + bank.core.max[0]) * 0.5,
+                (bank.core.min[1] + bank.core.max[1]) * 0.5,
+                bank.core.height,
+                start[0],
+                start[1]
+            )?;
+            if cut > 1. || grade > 0.081 {
+                bad += 1;
+            }
+        }
         let has_bridges = sources
             .placed()
             .flatten()
@@ -264,12 +322,10 @@ pub fn run() -> AppResult<()> {
                 // Sea plane is zero. Painted inland rivers share terrain height.
                 water = water.min(at[1]);
             }
-            let low = tore_world::grounding::bottom(shape).ok_or("empty bridge")?;
+            let feet = tore_world::grounding::bridges::footing_points(&sources, p);
             let mut bottom = [f64::INFINITY, f64::NEG_INFINITY];
-            for point in tore_world::grounding::points(shape)
-                .filter(|p| f64::from(p[2]) <= low + 1. / s.scale)
-            {
-                let at = world(point.map(|v| f64::from(v) * s.scale), &s);
+            for mut at in feet.iter().copied() {
+                at[1] += s.origin[1];
                 let gap = at[1] - f64::from(terrain.height(at[0] as f32, at[2] as f32));
                 bottom[0] = bottom[0].min(gap);
                 bottom[1] = bottom[1].max(gap);
@@ -290,8 +346,12 @@ pub fn run() -> AppResult<()> {
                 .collect();
             let status = if points.is_empty() {
                 "unknown-deck"
+            } else if feet.is_empty() {
+                "unknown-support"
             } else if min < -1. || water < -1. {
                 "buried"
+            } else if p.object_type.ends_with("END.OT") && ends[0].1.min(ends[1].1) > 30. {
+                "approach-gap"
             } else if bottom[1] > 30. {
                 "support-gap"
             } else {
@@ -318,10 +378,35 @@ pub fn run() -> AppResult<()> {
                 overlaps.join(",")
             )?;
             if let (Some(scenery), Some(gpu)) = (&mut scenery, &mut gpu) {
+                if let Some(wanted) = args.iter().find_map(|a| a.strip_prefix("--id="))
+                    && wanted.split(',').all(|v| {
+                        u32::from_str_radix(v.trim_start_matches("0x"), 16).ok() != Some(id)
+                    })
+                {
+                    continue;
+                }
                 let mut camera = Camera::new();
                 camera.yaw = (s.heading + 45f64.to_radians()) as f32;
                 camera.pitch = -25f32.to_radians();
-                let distance = s.half[0].hypot(s.half[2]).max(200.) * 2.6;
+                let view = args.iter().find_map(|a| a.strip_prefix("--view="));
+                match view {
+                    Some("side") => {
+                        camera.yaw = (s.heading + std::f64::consts::FRAC_PI_2) as f32;
+                        camera.pitch = -8f32.to_radians();
+                    }
+                    Some("along") => {
+                        camera.yaw = s.heading as f32;
+                        camera.pitch = -8f32.to_radians();
+                    }
+                    Some("near") => {
+                        camera.yaw = s.heading as f32;
+                        camera.pitch = -4f32.to_radians();
+                    }
+                    Some(_) => return Err("bridge view must be side, along or near".into()),
+                    None => {}
+                }
+                let distance = s.half[0].hypot(s.half[2]).max(200.)
+                    * if view == Some("near") { 2.1 } else { 2.6 };
                 camera.position = [
                     s.center[0] - f64::from(camera.yaw.sin() * camera.pitch.cos()) * distance,
                     s.center[1] - f64::from(camera.pitch.sin()) * distance,
@@ -343,6 +428,7 @@ pub fn run() -> AppResult<()> {
                 if pictured_types.insert(p.object_type.clone()) {
                     states.insert(1, ("damaged", (hp / 2).max(1)));
                 }
+                let mut intact_geometry = None;
                 for (state, health) in states {
                     combat.targets.iter_mut().find(|t| t.id == id).unwrap().hp = health;
                     if scenery.drawn_vertex_floats(id, &combat.targets, &surface) == 0 {
@@ -352,6 +438,18 @@ pub fn run() -> AppResult<()> {
                     }
                     let geometry =
                         std::sync::Arc::clone(scenery.static_geometry(&combat.targets, &surface));
+                    if state == "intact" {
+                        intact_geometry = Some(std::sync::Arc::clone(&geometry));
+                    } else if let Some(intact) = &intact_geometry {
+                        let same =
+                            geometry.vertices == intact.vertices && geometry.lines == intact.lines;
+                        if same != (health > 0) {
+                            return Err(format!(
+                                "{label} {id:#x} {state}: wrong damage appearance"
+                            )
+                            .into());
+                        }
+                    }
                     let hidden = if health > 0 {
                         BTreeSet::new()
                     } else {

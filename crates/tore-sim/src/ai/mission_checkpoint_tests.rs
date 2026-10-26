@@ -674,11 +674,18 @@ fn awareness_defense_and_assignment_values_round_trip() {
     });
     same(DefenseState::default());
     same(BurstRequest::MIXED);
-    for maneuver in [Maneuver::Jink, Maneuver::Notch] {
+    for maneuver in [
+        Maneuver::Jink,
+        Maneuver::Notch,
+        Maneuver::Drag,
+        Maneuver::Beam,
+        Maneuver::Break,
+    ] {
         same(MotionSuggestion {
             maneuver,
             heading_deg: -45.,
             flight_path_pitch_deg: 3.5,
+            reduce_heat: true,
         });
     }
     same(engagement::Policy::default());

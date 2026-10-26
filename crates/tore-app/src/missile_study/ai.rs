@@ -245,6 +245,23 @@ pub fn fly(
             if let DeviceNote::Released(r) = note
                 && r.owner == enemy
             {
+                if setup.trace {
+                    let defense = world
+                        .ai_wings
+                        .as_ref()
+                        .and_then(|w| w.mission().actor(enemy))
+                        .and_then(|actor| actor.defense_decision());
+                    println!(
+                        "missile-study: device {} seed {seed} t={t:.3} kind={:?} defense={:?}",
+                        weapon.source,
+                        r.kind,
+                        defense.map(|d| (
+                            d.debug.estimated_threat_time_s,
+                            d.motion.map(|m| m.maneuver),
+                            d.debug.passed
+                        )),
+                    );
+                }
                 // Devices of the missile's own class count; the other class
                 // (a mixed burst for an unclassified visual missile) is
                 // counted apart.

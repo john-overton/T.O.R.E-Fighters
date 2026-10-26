@@ -46,7 +46,9 @@ same capacity and validation rules.
 Bridge HP and destruction use the existing authoritative surface snapshots and
 recorded surface HP. The [bridge correction](spec/bridges.md) changes shared
 world geometry, including geometry rebuilt for old recordings, without adding
-wire fields or changing replay/checkpoint layouts.
+wire fields or changing replay/checkpoint layouts. Bridge END generated ruins
+are selected at zero HP and use the same deterministic collapse on every client
+and replay; span types retain their retail broken art.
 
 ## Contents
 

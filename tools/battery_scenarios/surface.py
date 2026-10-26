@@ -1061,7 +1061,16 @@ def scenarios() -> list[Scenario]:
             name="bridge-audit", lane="ai",
             args=["--bridge-audit", "{work}/bridges", "UKR", "BAL", "--strict"], timeout=300,
             expect=[r"^bridge-audit: [1-9]\d* layouts [1-9]\d* placements 0 flagged 0 missing textures$"],
-            notes="Imported bridge damage assets and shared deck/footing clearance, including sloping Ukraine crossings and bridge objectives.",
+            notes="Imported bridge damage assets and shared deck/footing clearance, including bank cuts, 8 percent approaches, supported toes, sloping Ukraine crossings and bridge objectives.",
+        ),
+        Scenario(
+            name="bridge-end-ruins", lane="flight", window=True,
+            args=["--bridge-audit", "{work}/bridge-ends", "TVIET", "UKR", "--strict", "--capture",
+                  "--id=400000eb,400000b7,400000bc,40000092"], timeout=300,
+            expect=[r"^bridge-audit: [1-9]\d* layouts [1-9]\d* placements 0 flagged 0 missing textures$"],
+            outputs=["bridge-ends/TVIET-400000eb-destroyed.png", "bridge-ends/TVIET-400000b7-destroyed.png",
+                     "bridge-ends/TVIET-400000bc-destroyed.png", "bridge-ends/UKR-40000092-destroyed.png"],
+            notes="All four END types change only at zero HP, retain geometry, and match replay HP; uses the ordinary GPU scenery path.",
         ),
         Scenario(
             name="a2g-bridge-destruction", lane="flight",
