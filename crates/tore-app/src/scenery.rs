@@ -792,6 +792,13 @@ impl Scenery {
             )?;
             match object_type {
                 Some(object_type) => {
+                    if tore_world::grounding::bridges::is_bridge(object_type) {
+                        surface_art::ground_bridge_shadows(
+                            &mut geometry,
+                            terrain,
+                            surface_art::BUDGET - static_float_count,
+                        )?;
+                    }
                     // Wrecks, rails, carrier parts and sprites; a unit that
                     // follows a route is drawn every frame instead.
                     let (parts, moves) =

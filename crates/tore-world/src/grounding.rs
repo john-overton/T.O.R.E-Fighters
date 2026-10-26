@@ -122,19 +122,21 @@ pub fn placement_solid_points<'a>(
     shape
         .faces
         .iter()
-        .filter(move |face| {
-            !(bridge
-                && face.subtype == 0x41
-                && !face.colors.is_empty()
-                && face.colors.iter().all(|c| *c == 6)
-                && !face.positions.is_empty()
-                && face
-                    .positions
-                    .iter()
-                    .all(|p| p[2] <= low + 1.5 && (p[2] - face.positions[0][2]).abs() < 0.5))
-        })
+        .filter(move |face| !(bridge && bridge_shadow(face, low)))
         .flat_map(|f| f.positions.iter().copied())
         .chain(sprite_points(shape))
+}
+
+/// Reviewed flat colour-6 bridge shadow, not structural support.
+pub fn bridge_shadow(face: &tore_formats::shape::Face, low: f32) -> bool {
+    face.subtype == 0x41
+        && !face.colors.is_empty()
+        && face.colors.iter().all(|c| *c == 6)
+        && !face.positions.is_empty()
+        && face
+            .positions
+            .iter()
+            .all(|p| p[2] <= low + 1.5 && (p[2] - face.positions[0][2]).abs() < 0.5)
 }
 
 fn sprite_points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {

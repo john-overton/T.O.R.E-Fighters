@@ -472,7 +472,9 @@ point of their faces, the same rule.)
 
 **Bridges** use the bottom of their complete shape and a shared support
 corridor through `grounding::bridges`. Connected spans retain one datum,
-including their destroyed copies. The [bridge specification](../spec/bridges.md)
+including their destroyed copies. Sloping crossings now fill the physical
+bank supports and grade the outward terrain approaches; a painted shadow
+does not make a foundation across the river. The [bridge specification](../spec/bridges.md)
 records the fitted grouping, terrain grading and sampling constants.
 
 **Objective sites on slopes (nr-objg, 2026-10-14).** The complete shape,
@@ -709,7 +711,7 @@ variant when it has one, else its shape's damage branch, else a generated
 ruin (`scenery/rubble.rs`: the intact shape split into small triangles that
 sink to 6 to 30 percent of its height by a fixed function of each point,
 the fallen level pieces partly charred; fitted, agent decision) for anything
-that burns, else (pavement, a bridge end, a rock) its intact look. The
+that burns or is a bridge END, else (pavement or a rock) its intact look. The
 branch is drawn with `Shape::with_export_state`; it stands on its own lowest
 point like the variants. What a player sees is in
 [destroyed looks](../spec/surface-defenses.md#destroyed-looks).

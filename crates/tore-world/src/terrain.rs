@@ -1369,7 +1369,11 @@ impl Terrain {
                 ))
             })
             .collect();
-        let bridge_pads = crate::grounding::bridges::foundations(&sources);
+        let (bridge_pads, bridge_banks) = crate::grounding::bridges::graded_foundations(
+            &sources,
+            |x, z| self.raw_height(x, z),
+            |bounds| !airfields.iter().any(|field| bounds.meets_airfield(field)),
+        );
         let pads = sources
             .placed()
             .filter_map(|placed| {
@@ -1378,7 +1382,7 @@ impl Terrain {
             })
             .chain(bridge_pads.iter().copied())
             .collect();
-        self.foundations = crate::grounding::pads::Mesh::build_with_support(
+        self.foundations = crate::grounding::pads::Mesh::build_with_banks(
             pads,
             self.theater.cols,
             self.theater.rows,
@@ -1394,6 +1398,7 @@ impl Terrain {
                         })
                     })
             },
+            &bridge_banks,
         );
         let mut objects = Vec::new();
         let mut slope_lifts = BTreeMap::new();
