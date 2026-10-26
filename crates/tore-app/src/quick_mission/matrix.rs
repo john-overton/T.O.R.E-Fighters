@@ -165,6 +165,17 @@ impl Matrix<'_> {
             &crate::ai_wings::enemy_group_offsets(&wings),
             quick.separation_feet(),
         );
+        if let Some(problem) = tore_world::mission_layout::availability::surface_problem(
+            &world.surface,
+            quick.separation_nm() as u32,
+            ground_layout.is_none(),
+            false,
+        ) {
+            return Outcome::Refused(problem);
+        }
+        if layout.enemy.shortened() {
+            return Outcome::Refused("This separation does not fit the theater and start.".into());
+        }
         let ground = f64::from(world.height(start.position[0] as f32, start.position[2] as f32));
         let airborne_wings = wings.iter().any(|wing| {
             !wing.is_empty()

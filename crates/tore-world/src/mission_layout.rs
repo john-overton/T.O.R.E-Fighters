@@ -7,6 +7,8 @@
 //! core can use it. The geometry functions are plain functions of numbers, so
 //! every rule can be tested with synthetic bounds and runways.
 
+pub mod availability;
+
 use crate::terrain::Terrain;
 use tore_sim::{
     ai::airfield::AirfieldAnchors,

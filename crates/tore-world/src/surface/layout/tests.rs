@@ -1952,7 +1952,7 @@ fn starts_follow_targets_after_the_airport_moves_them() {
     let before = s.starts.clone().unwrap();
     s.units[0].position[0] += 8_000;
     let scene = tore_sim::airport::Scene::default();
-    let after = scene_starts(&s, &grid, &scene, None).unwrap();
+    let after = scene_starts(&s, &ground, &scene).unwrap();
     assert_eq!(after.target, [MID + 8_000, MID]);
     assert_ne!(after.blue, before.blue);
     assert_ne!(after.red, before.red);
@@ -1962,11 +1962,11 @@ fn starts_follow_targets_after_the_airport_moves_them() {
     );
     let distance = (distance2(after.blue.map(i64::from), after.red.map(i64::from)) as f64).sqrt();
     assert!((distance - 20. * NM_FT as f64).abs() <= 2.);
-    assert_eq!(Some(after), scene_starts(&s, &grid, &scene, None));
+    assert_eq!(Some(after), scene_starts(&s, &ground, &scene));
 }
 
 #[test]
-fn automatic_airfields_rank_the_final_runway_centers() {
+fn automatic_airfields_rank_integer_origins_and_canonicalize_ids() {
     use tore_sim::airport::{OrientedBox, Runway, Scene};
     let grid = Grid::land(128);
     let mut target_unit = unit(t(0), "HANGAR.OT", class::STRUCTURE, [MID, MID], ENEMY_SIDE);
@@ -2000,7 +2000,26 @@ fn automatic_airfields_rank_the_final_runway_centers() {
         ],
         ..Scene::default()
     };
-    let starts = scene_starts(&s, &grid, &scene, None).unwrap();
+    let ground = Ground::new(
+        &grid,
+        vec![],
+        vec![
+            Placed {
+                id: l(0).0,
+                at: [i64::from(MID), i64::from(MID) + 25 * NM_FT],
+                heading: 0,
+                footprint: Footprint::default(),
+            },
+            Placed {
+                id: l(1).0,
+                at: [i64::from(MID), i64::from(MID) + 16 * NM_FT],
+                heading: 0,
+                footprint: Footprint::default(),
+            },
+        ],
+        None,
+    );
+    let starts = scene_starts(&s, &ground, &scene).unwrap();
     assert_eq!(starts.blue_airfields, vec![l(1).0, l(0).0]);
     assert!(starts.red_airfields.is_empty());
 }
@@ -2058,5 +2077,198 @@ fn relocation_rejects_land_centers_whose_footprints_cross_water() {
             target.retail
         )
         .is_none()
+    );
+}
+
+#[test]
+fn vehicle_grade_uses_its_footprint_and_type_limit() {
+    let mut grid = Grid::land(4);
+    // 8 elevation units per cell: exactly 25 percent grade.
+    for row in 0..4 {
+        for col in 0..4 {
+            grid.cells[row * 4 + col].elevation = (col * 8) as u8;
+        }
+    }
+    let ground = Ground::new(&grid, vec![], vec![], None);
+    let p = Placed {
+        id: 1,
+        at: [10_000, 10_000],
+        heading: 0,
+        footprint: Footprint {
+            min: [-10, -20],
+            max: [10, 20],
+        },
+    };
+    assert!(footing::slope_ok(&ground, p, 30));
+    assert!(!footing::slope_ok(&ground, p, 20));
+    assert!(footing::slope_ok(&ground, p, 25));
+    assert!(!ground.level(p.at, LEVEL_UNITS));
+}
+
+#[test]
+fn vehicle_repair_chooses_nearest_valid_grid_point_and_retains_equipment() {
+    let grid = Grid::land(128);
+    let obstruction = Placed {
+        id: l(99).0,
+        at: [i64::from(MID), i64::from(MID)],
+        heading: 0,
+        footprint: Footprint {
+            min: [-50, -50],
+            max: [50, 50],
+        },
+    };
+    let ground = Ground::new(&grid, vec![obstruction], vec![], None);
+    let u = unit(
+        UnitId::supply_truck(0).unwrap(),
+        "TRUCK.NT",
+        class::VEHICLE,
+        [MID, MID],
+        ENEMY_SIDE,
+    );
+    let mut s = surface(vec![u], Some(target(1, Variation::OFF)));
+    footing::repair(&mut s, &ground, &mut types);
+    assert_eq!(s.units.len(), 1);
+    assert!(footing::violations(&ground, &s.units[0], types("TRUCK.NT")).is_empty());
+    let chosen = xz(s.units[0].position);
+    let distance = distance2(chosen, [i64::from(MID); 2]);
+    for x in -10..=10 {
+        for z in -10..=10 {
+            let mut candidate = s.units[0].clone();
+            candidate.position[0] = MID + x * 25;
+            candidate.position[2] = MID + z * 25;
+            if distance2(xz(candidate.position), [i64::from(MID); 2]) < distance {
+                assert!(!footing::violations(&ground, &candidate, types("TRUCK.NT")).is_empty());
+            }
+        }
+    }
+    let water = Grid::uniform(128, ground::WATER_CLASS, 0);
+    let sea = Ground::new(&water, vec![], vec![], None);
+    footing::repair(&mut s, &sea, &mut types);
+    assert_eq!(s.units.len(), 1);
+    assert_eq!(xz(s.units[0].position), chosen);
+    assert!(
+        s.layout_notes
+            .iter()
+            .any(|n| n.starts_with("placement unresolved "))
+    );
+}
+
+#[test]
+fn an_added_fixed_radar_keeps_an_explicit_failure_when_no_footprint_fits() {
+    let mut grid = Grid::land(4);
+    for row in 0..4 {
+        for col in 0..4 {
+            grid.cells[row * 4 + col].elevation = (col * 8) as u8;
+        }
+    }
+    let ground = Ground::new(&grid, vec![], vec![], None);
+    let radar = unit(
+        UnitId::battery_radar(0).unwrap(),
+        "GCI.NT",
+        class::STRUCTURE,
+        [10_000, 10_000],
+        ENEMY_SIDE,
+    );
+    let mut s = surface(vec![radar], None);
+    s.layout_notes
+        .push("support fallback 0x5c000000 GCI.NT: initial search exhausted".into());
+    footing::repair(&mut s, &ground, &mut types);
+    assert_eq!(s.units.len(), 1);
+    assert_eq!(xz(s.units[0].position), [10_000, 10_000]);
+    assert!(
+        s.layout_notes
+            .iter()
+            .any(|n| n.starts_with("placement unresolved ") && n.contains("footprint-slope"))
+    );
+    let authored = unit(
+        l(0),
+        "GCI.NT",
+        class::STRUCTURE,
+        [10_000, 10_000],
+        ENEMY_SIDE,
+    );
+    assert!(!footing::vehicle(&authored));
+}
+
+#[test]
+fn the_final_front_avoids_a_vehicle_at_its_previous_candidate() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, vec![], vec![], None);
+    let variation = Variation {
+        jitter: false,
+        relocate: false,
+        front: true,
+    };
+    let mut s = surface(
+        vec![unit(
+            t(0),
+            "BUNKER.OT",
+            class::STRUCTURE,
+            [MID, MID],
+            ENEMY_SIDE,
+        )],
+        Some(target(17, variation)),
+    );
+    lay(&mut s, &ground, &[]);
+    let count = front_units(&s).len();
+    assert!(count > 0);
+    let at = xz(front_units(&s)[0].position);
+    let base = unit(
+        l(99),
+        "T72.NT",
+        class::TANK,
+        at.map(|v| v as i32),
+        ENEMY_SIDE,
+    );
+    let obstacle = Placed {
+        id: base.id.0,
+        at,
+        heading: base.angles[0],
+        footprint: types(&base.resource).footprint,
+    };
+    s.units.push(base);
+    s.units.sort_by_key(|u| u.id);
+    let mut added = |name: &str| Some(entry(name));
+    finish_layout(
+        &mut s,
+        &mut Inputs {
+            ground: &ground,
+            types: &mut types,
+            added: &mut added,
+            layout: "TEST.MM",
+        },
+    );
+    assert_eq!(front_units(&s).len(), count);
+    for unit in front_units(&s) {
+        assert!(!obstacle.within(xz(unit.position), types(&unit.resource).footprint.radius()));
+    }
+}
+
+#[test]
+fn relocating_fixed_structures_keeps_the_coarse_site_limit() {
+    let mut grid = Grid::land(128);
+    for row in 0..128 {
+        for col in 0..128 {
+            grid.cells[row * 128 + col].elevation = (col * 2) as u8;
+        }
+    }
+    let ground = Ground::new(&grid, vec![], vec![], None);
+    let mut bunker = unit(t(0), "BUNKER.OT", class::STRUCTURE, [MID, MID], ENEMY_SIDE);
+    bunker.flags |= 0x80;
+    let mut s = surface(
+        vec![bunker],
+        Some(target(
+            14,
+            Variation {
+                jitter: false,
+                relocate: true,
+                front: false,
+            },
+        )),
+    );
+    lay(&mut s, &ground, &[]);
+    assert!(
+        s.transform.is_identity(),
+        "fixed structures must not relocate onto 512-ft cell spans"
     );
 }

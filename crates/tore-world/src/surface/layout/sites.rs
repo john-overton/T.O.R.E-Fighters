@@ -189,6 +189,11 @@ fn site_ok(ground: &Ground<'_>, object: &Object, at: [i64; 2], open_sea: bool) -
     if !ground.inside(at, RELOCATE_EDGE_CELLS * CELL_FT) {
         return false;
     }
+    // Fixed land structures retain the coarse site rule. Vehicle footing is
+    // checked over its footprint, then repaired after airport replacement.
+    if !object.water && object.rule == Rule::Fixed && !ground.level(at, LEVEL_UNITS) {
+        return false;
+    }
     let empty = Obstacles {
         fixed: &[],
         strips: &[],
@@ -562,8 +567,25 @@ pub fn audit(
     for unit in surface.template_units() {
         let rule = Rule::of(unit);
         let at = xz(unit.position);
-        let size = types(&unit.resource).footprint.radius();
-        let ship = rule == Rule::Ship;
+        let info = types(&unit.resource);
+        let size = info.footprint.radius();
+        let ship = unit.class & class::SHIP != 0;
+        let level = if ship || unit.resource == BARRAGE_ZONE {
+            true
+        } else if footing::vehicle(unit) {
+            footing::slope_ok(
+                ground,
+                Placed {
+                    id: unit.id.0,
+                    at,
+                    heading: unit.angles[0],
+                    footprint: info.footprint,
+                },
+                footing::slope_limit(unit),
+            )
+        } else {
+            ground.level(at, LEVEL_UNITS)
+        };
         let fails = if !ground.inside(at, RELOCATE_EDGE_CELLS * CELL_FT - jitter_slack(rule)) {
             Some("off the map edge")
         } else if ground.water(at) != ship {
@@ -572,7 +594,7 @@ pub fn audit(
             } else {
                 "a land unit on water"
             })
-        } else if !ship && !ground.level(at, LEVEL_UNITS) {
+        } else if !level {
             Some("on a slope")
         } else if ground.near_runway(at, RUNWAY_CLEARANCE_FT + size) {
             Some("on a runway")

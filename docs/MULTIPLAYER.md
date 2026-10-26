@@ -116,6 +116,14 @@ suffix: "Viper" and "Viper_2".
 **Rejoin token.** On first join the server issues a token that the game saves in
 the background. Tokens are specific to one server and expire after 24 hours.
 
+Vehicle placement and canonical airfield ranking follow the deterministic rules
+in [surface defenses](spec/surface-defenses.md#jitter). The creator retains the
+seed used to audit its distance choices. Invalid distances are refused at mission
+build instead of shortened. CAP checkpoints now include the optional map rectangle
+that clips their region. These changes alter surface digests, scene positions and
+checkpoint bytes; the release integration must handle the protocol/replay version
+bump together with the other 0.2.2-rc1 changes.
+
 ## Lobby and Quick Mission flow
 
 v1 multiplayer runs through the existing Quick Mission creator. The creator

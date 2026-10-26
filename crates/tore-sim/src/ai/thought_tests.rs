@@ -474,6 +474,7 @@ fn the_engagement_explanation_names_the_same_choice_as_the_selection() {
         duty(Role::FreeEngagement, Stance::EngageAssigned),
         Assignment {
             patrol: Some(PatrolRegion {
+                clip: None,
                 center_ft: [0., 20_000., 10_000.],
                 radius_ft: 15_000.,
             }),

@@ -928,6 +928,8 @@ pub struct Departure {
 /// What the AI needs to know about the theater's airfields at launch.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Airfields {
+    /// Map bounds used to clip creator CAP regions. Setup, retained on restore.
+    pub patrol_bounds: Option<[[f64; 2]; 2]>,
     pub runways: Vec<HomeRunway>,
     /// Present when the player's wing starts on the ground.
     pub departure: Option<Departure>,
@@ -971,6 +973,7 @@ impl Airfields {
             }
         }
         Self {
+            patrol_bounds: None,
             runways,
             departure,
             enemy_departure: None,
@@ -980,6 +983,13 @@ impl Airfields {
     /// [`from_scene`](Self::from_scene) with each runway's airfield points.
     pub fn from_world(world: &Terrain, departure: Option<Departure>) -> Self {
         let mut fields = Self::from_scene(&world.airport_scene, departure);
+        fields.patrol_bounds = Some([
+            [0., 0.],
+            [
+                (world.theater.cols - 1) as f64 * 8192.,
+                (world.theater.rows - 1) as f64 * 8192.,
+            ],
+        ]);
         for runway in &mut fields.runways {
             runway.view.anchors = world.airfield_anchors.get(&runway.view.object).copied();
         }
@@ -3887,6 +3897,7 @@ mod tests {
         let pad = runway_view(7, [0., 30., 3000.]);
         let field = runway_view(9, [0., 10., 30_000.]);
         let airfields = Airfields {
+            patrol_bounds: None,
             runways: vec![HomeRunway {
                 view: field,
                 friendly: true,
@@ -3949,6 +3960,7 @@ mod tests {
         let departure_runway = runway_view(7, [0., 30., 3000.]);
         let slots = vec![[0., 30., 1100.], [40., 30., 850.], [-40., 30., 600.]];
         let airfields = Airfields {
+            patrol_bounds: None,
             runways: vec![HomeRunway {
                 view: departure_runway,
                 friendly: true,
@@ -3992,6 +4004,7 @@ mod tests {
         let red_runway = runway_view(8, [0., 10., 90_000.]);
         let slots = vec![[0., 10., 88_000.], [40., 10., 87_750.]];
         let airfields = Airfields {
+            patrol_bounds: None,
             runways: vec![
                 HomeRunway {
                     view: runway_view(7, [0., 30., 3000.]),
@@ -4045,6 +4058,7 @@ mod tests {
         let departure_runway = runway_view(7, [0., 30., 3000.]);
         let slots = vec![[0., 30., 1100.], [40., 30., 850.], [-40., 30., 600.]];
         let airfields = Airfields {
+            patrol_bounds: None,
             runways: vec![
                 HomeRunway {
                     view: departure_runway,
@@ -5336,6 +5350,7 @@ mod tests {
         use tore_sim::ai::route::FuelState;
         let runway = runway_view(9, [0., 10., 2_400_000.]);
         let airfields = Airfields {
+            patrol_bounds: None,
             runways: vec![HomeRunway {
                 view: runway,
                 friendly: true,
@@ -5417,6 +5432,7 @@ mod tests {
     fn fuel_wings(home_ft: f64) -> (AiWings, Vec<live::Target>) {
         let runway = runway_view(9, [0., 10., home_ft]);
         let airfields = Airfields {
+            patrol_bounds: None,
             runways: vec![HomeRunway {
                 view: runway,
                 friendly: true,

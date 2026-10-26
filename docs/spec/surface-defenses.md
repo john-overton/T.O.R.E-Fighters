@@ -389,8 +389,8 @@ All defined (agent): ids are an implementation contract.
 John's decision: template positions vary, they are not fixed (defined, John).
 The rules below are defined (agent) with fitted numbers.
 
-**Seed.** The creator rolls a 32-bit `surface_seed` when the player presses Fly,
-and the multiplayer lobby when the flight starts. A restart reuses it, so a
+**Seed.** The creator reserves a 32-bit `surface_seed` for its placement check,
+and Fly and the multiplayer lobby retain that checked seed. A restart reuses it, so a
 restarted mission has the same defenses and positions (retail restarts re-fly
 the same written `quick.M`). A dedicated server's mission file may name a seed;
 without one the host draws it and the mission text sent to clients carries it.
@@ -429,8 +429,26 @@ many others survive.
   `surface-class-sweep` battery scenario (`--surface-dump --classes`) checks
   every offered template with 20 seeds and every base layout and fails on any
   moved unit on the wrong class.
-- Land units refuse a cell whose four corner elevations span more than one
-  elevation unit (256 ft).
+- Vehicle footing uses the final airport layout and the oriented shape footprint,
+  with nine terrain samples and pairwise grade checks. Fitted agent limits are
+  30% for tanks, 20% for other vehicles, and 10% for launchers, guns and added radars.
+  These are grades, not angles and not recovered retail limits. A preliminary
+  conservative 10% check covers the footprint's enclosing square.
+- John requested per-unit slope placement on 2026-10-25. After airport replacement,
+  a vehicle that fails slope, solid-object clearance, runway clearance, land/water
+  or map bounds moves to the nearest valid point on a 25 ft lattice within one
+  terrain cell (8,192 ft).
+  Units are processed in ascending stable ID order, reserving other units' current
+  positions. Equal distances sort by X then Z. These search constants are fitted
+  agent choices.
+  Added trucks stay within the existing 528 ft supply reach. No equipment is removed
+  on exhaustion: the placement audit and creator show the unresolved limitation,
+  and launch is refused instead of flying an invalid placement. Authored vehicles
+  are moved for slope or bounds failures; coarse shoreline and assembly overlaps
+  alone are review findings until rendered-water or solid-geometry evidence exists.
+  Generated support must also pass object and runway clearance. The latter means
+  the drawn runway lanes plus 300 ft, not the entire airport apron or grass box.
+  Authored ships remain subject to rendered-water review before relocation.
 - Footprint clearance from every fixed template object and theater layout
   object, plus 300 ft from every runway's box. Jitter also avoids other template
   units, reserving each later unit's fallback until its position is chosen.
@@ -507,7 +525,7 @@ the retail spot is the fallback). Radius ranges are default, pending John.
 | Distance from the retail spot | 3 to 30 nm, radius drawn as the square root of a uniform value so area is uniform (default, pending John) |
 | Map edge | every object at least two cells (16,384 ft) inside |
 | Terrain class | land units and structures on land; ships on water (water as defined under Validity, shore cells drawn as the sea included), with the 8 neighbouring cells also water when the retail spot had that (open sea stays open sea; a harbor keeps a coast) |
-| Slope | land objects only on cells whose four corner elevations span at most one unit (256 ft) |
+| Slope | Fixed land structures require cell corners spanning at most one unit (256 ft); vehicles use footprint grades, with the final per-type check under [Jitter](#jitter) |
 | Clearance | 2,000 ft from every theater layout object; 3 nm from every theater runway |
 | Side | the front axis runs from the centroid of the theater's Blue-side layout placements to the centroid of its Red-side ones; the candidate's depth along it must be within 15 nm of the retail spot's depth and on the same side of the midpoint (default, pending John) |
 | Completeness | every target and structure must pass; a defense, vehicle or truck that fails gets 8 local tries within 2,000 ft; if any still fails the candidate is rejected, so the retail rolls and counts never change because of relocation |
@@ -529,8 +547,9 @@ from the seed and is inside the digest.
   the chosen altitude. If the point does not fit the map the bearing is
   searched one degree at a time, as the enemy-placement rule does
   ([Keeping the enemy on the map](quick-mission-menu.md#keeping-the-enemy-on-the-map));
-  if no bearing fits at the full distance, the farthest that does, a mile at
-  a time. Friendly wings 2 and 3 keep their offsets from the player.
+  if no bearing fits, that distance is unavailable in the creator and launch
+  refuses it. The diagnostic solver may calculate a shorter candidate to measure
+  the limit, but a mission never launches with that substitution (John, 2026-10-25). Friendly wings 2 and 3 keep their offsets from the player.
 - **Ground starts.** An explicit runway choice is kept. With none picked, the
   default runway becomes the Blue-side airfield nearest the target that is at
   least 15 nm from it (default, pending John). An airfield's side is its
@@ -553,9 +572,11 @@ from the seed and is inside the digest.
   shares the player's runway.
 - The target point is the targets' placed centroid. Compute the starts after
   airport replacement has moved target buildings and parked aircraft. Rank
-  airfields from their final runway centers. Correcting the stale objective
-  point is spec-derived. Choosing runway centers for the distance ranking is
-  fitted, an agent decision on 2026-10-25. A theater with no front
+  airfields from their integer placement origins, including template-added strips,
+  then canonicalize merged runway IDs. Rendering trigonometry does not feed this
+  ranking or its digest. The front line is regenerated against the final target
+  and starts before scene grounding. Correcting stale objective and front geometry
+  is spec-derived; the ranking datum is fitted, an agent decision on 2026-10-25. A theater with no front
   (no owned placements on one side) starts Blue toward the middle of the map
   (fitted).
 - No ground target: unchanged (the [area defenses](#area-defenses) add no
@@ -771,7 +792,7 @@ below is fitted (agent).
   surface digest only when set, so every other mission's digest is unchanged;
   the replay header keeps them as `world.area_defense`
   ([Replays](#replays)). Online no wire byte changes: the mission text carries
-  the strengths and the host draws the seed, as for a ground target
+  the strengths and the checked seed, as for a ground target
   ([Multiplayer](#multiplayer)); a build with the area defenses and one
   without disagree on the digest and refuse each other. So do a build with
   the rolled counts and one with the first build's fixed counts: the surface
@@ -1831,11 +1852,11 @@ flowchart TD
    six-rail ring), with the jitter validity rules and clear of its launchers,
    moving with its template's group transform. The bounded support search
    tries 128 candidates and also avoids other solid units and earlier additions.
-   If none stands, retain the existing first-candidate fallback and record its
-   unit ID explicitly in the layout notes and objective audit. Changing requested
-   equipment counts or moving its authored owner needs a placement-policy
-   decision. The longer search and collision checks are fitted agent decisions
-   from the objective audit on 2026-10-25; an exhausted search is not a valid site.
+   The completed airport layout then applies the nearest valid footprint search
+   under [Jitter](#jitter). If that search also exhausts, the unit remains in the
+   diagnostic scene with its ID and separate failure reasons; normal launch is
+   refused. No equipment count is reduced. The ring search and collision checks
+   are fitted agent choices; the per-unit repair policy is John's 2026-10-25 decision.
    Added radars are never targets. Base layouts draw their
    radars from seed 0, so a base layout looks the same in every flight. A
    battery whose radar element the import cannot place (its record or shape
@@ -2582,7 +2603,7 @@ and the player's view in [the multiplayer guide](../MULTIPLAYER.md#ground-target
 
 - **Authority.** The host (or dedicated server) runs all surface AI, movement,
   firing, resupply and damage. Every client builds the same surface world from
-  the mission text and the seed the host draws, and checks the digest
+  the mission text and its accepted seed, and checks the digest
   ([Jitter](#jitter)) at seating and at a resume: placement, relocation,
   batteries, trucks, parked aircraft, both sides' starts and the
   [area defenses](#area-defenses) all come from the seed, so none of it

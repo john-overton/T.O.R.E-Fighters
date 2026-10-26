@@ -9601,6 +9601,20 @@ fn ai_probe_run(
         &ai_wings::enemy_group_offsets(&wings),
         quick.separation_feet(),
     );
+    if let Some(problem) = tore_world::mission_layout::availability::surface_problem(
+        &world.surface,
+        quick.separation_nm() as u32,
+        parked.is_none(),
+        false,
+    ) {
+        return Err(problem.into());
+    }
+    if layout.enemy.shortened() {
+        return Err(tore_world::mission_layout::availability::distance_problem(
+            quick.separation_nm() as u32,
+        )
+        .into());
+    }
     combat_view.mission_aircraft(&mut combat, &wings, &layout, resources)?;
     let heading = match &parked {
         Some(ground) => {
@@ -11985,6 +11999,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     // creator's ground target for a launched flight or a capture.
     let mut ground_target: Option<String> = None;
     let mut target_defenses = (3_usize, 3_usize);
+    let mut target_defenses_given = false;
     let mut target_seed = 1_u32;
     let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
@@ -12029,6 +12044,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     value.ok_or(usage)?.parse::<usize>().ok().filter(|n| *n <= 3).ok_or_else(|| usage.to_owned())
                 };
                 target_defenses = (level(args.next())?, level(args.next())?);
+                target_defenses_given = true;
             }
             "--surface-seed" => {
                 target_seed = args.next().ok_or("--surface-seed needs a number")?.parse().map_err(|e| bad_number(&arg, &e))?;
@@ -14883,6 +14899,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             // the command line gives (slice CL-R).
             if let Some(stem) = &ground_target {
                 quick.choose_ground_target(stem, target_defenses, target_seed)?;
+            } else if target_defenses_given {
+                quick.choose_area_defenses(target_defenses, target_seed);
             }
             if let Some(id) = enemy_ground_start_airport {
                 let object = world
@@ -14893,11 +14911,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .ok_or("Selected enemy ground-start airport is unavailable")?;
                 quick.choose_enemy_runway(object)?;
             }
-            if snapshot_state.starts_with("map") {
-                quick.set_resources(Arc::new(theater_resources.clone()));
+            if let Some(nm) = separation_nm {
+                quick.draft.values[17] = mission_layout::SEPARATION_NM
+                    .iter()
+                    .position(|choice| *choice == nm)
+                    .unwrap_or(quick.draft.values[17]);
             }
+            quick.set_resources(Arc::new(theater_resources.clone()));
+            quick.wait_placement();
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             quick.preview_selector(&snapshot_state)?;
+            quick.wait_placement();
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             if snapshot_state.starts_with("map") {
                 if let Some(words) = quick.notice.as_deref().filter(|_| !quick.map_open()) {
@@ -15142,6 +15166,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if let Some(stem) = &ground_target {
         quick.choose_ground_target(stem, target_defenses, target_seed)?;
+    } else if target_defenses_given {
+        quick.choose_area_defenses(target_defenses, target_seed);
     }
     if let Some(id) = enemy_ground_start_airport {
         // Enemy Wing 1's ground start at a Redfor field (slice CL-R).
@@ -16075,6 +16101,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && ground_target.is_none()
         && enemy_ground_start_airport.is_none()
         && separation_nm.is_none()
+        && !target_defenses_given
         && probe_script.wing_size.is_none()
         && !probe_script.wing_only
         && !probe_script.redfor;

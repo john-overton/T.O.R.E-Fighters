@@ -127,9 +127,11 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   (fitted), and never an enemy field (slice AL1): with none the start is
   refused.
 - **Seed.** Pressing OK on a mission with a target, or with area defenses,
-  draws a new number that the layout is rolled from, so each flight can differ and a restart
-  of the same flight repeats it. The lobby sends none; the host draws it when
-  the flight starts.
+  keeps the number reserved by the placement check, so the chosen distances
+  remain valid. A new flight reserves a new seed and a restart repeats the
+  accepted one. The lobby sends the checked seed to the host. Selecting a theater
+  or target again reserves a fresh layout (fitted interface choice, agent,
+  2026-10-25), including when the current layout cannot place all vehicles.
 - **Lobby.** The King edits the fields like any other; everyone else sees the
   King's choice read-only, with the same dimming rule as the other fields.
   A multiplayer start stays airborne, so `start ground auto` does not reach
@@ -371,14 +373,24 @@ the selected separation would put it off the edge. Rule (the numbers are
   heading and the friendly wings turn with the enemy, so the enemy is still
   straight ahead. In a ground start the parked wing cannot turn, so only the
   enemy group moves around the airport and still faces it.
-- If no bearing fits at the full distance, the bearing that allows the longest
-  distance is used at that distance, and the flight opens with a message such
-  as "Enemy forces start 142 miles away: 300 miles does not fit this theater."
-  Restart keeps the same placement.
+- If no bearing fits at the full distance, the creator greys that distance with
+  a short reason. It audits all eleven choices against the selected imported
+  theater, target, seed and wing geometry in the background. Changing those
+  inputs invalidates the result. While it checks, launch is unavailable. No
+  silent shortening is allowed; launch independently refuses an impossible
+  separation (John, 2026-10-25). Ground starts retain their documented overrides.
+- The creator keeps the audited seed for launch and reports unsupported target
+  elements, including missing Kiev deck aircraft, and area-defense shortfalls
+  before launch. These are limitations, not claims that missing equipment exists.
+- CAP regions retain their ten-nautical-mile radius and are intersected with the
+  theater rectangle. Clipping does not shrink the whole circle or change its
+  station (John, 2026-10-25; an out-of-map station is clamped to the map).
 
 From the default airborne start near the middle of a 208 by 200 cell theater,
-200 and 300 miles never fit at full distance; in the 256 by 256 cell Baltic and
-Kurile theaters 200 miles fits only toward a corner.
+200 and 300 miles never fit at full distance; in the 256 by 256 cell Cuban, Baltic and
+Kurile theaters 200 miles can fit toward a corner. The Ukraine's offset airborne
+reference also fits 200 miles. Availability is measured from the selected setup,
+not inferred from a theater-wide cap.
 
 ### Home airfields
 
@@ -429,7 +441,7 @@ selection. These are practice fixtures, not friendly/enemy combat AI.
 
 Agent-selected fitted placement: all dummies start at the player's altitude and
 heading, forward at the selected separation in nautical miles (see
-[Separation](#separation)), shortened if it does not fit the map. In an
+[Separation](#separation)), unavailable if it does not fit the map. In an
 airborne start they turn with the player; in a ground start only the player is
 parked and the dummies keep the runway heading. The first is directly ahead. Successive pairs are 500 feet farther
 forward and 500 feet farther to either side per pair. Speed is 300 feet/second;
@@ -628,8 +640,7 @@ positions)". An addition: retail's creator has no map.
   changes while the map builds, that result is stale: it is dropped and the
   map is built again for the settings now in force, so the map that opens is
   always the draft's. The result is the same as before for the same
-  settings and seed, and single player still draws the flight's seed when
-  Map is clicked and keeps it on OK.
+  settings and seed. The map and OK retain the seed reserved by the placement check.
 - **Zoom, scroll and rocker** (opinionated, John 2026-10-11: "it should start
   zoomed in and have the scroll bars for the map, there should also be a rocker
   switch to zoom in and out"). The map opens zoomed in on the objective area
@@ -657,10 +668,9 @@ positions)". An addition: retail's creator has no map.
   is marked **BLUE WING n** or **RED WING n**. A line under the map says
   whether each side starts in the air or on the ground.
 - The positions are the flight's: opening the map builds the mission the
-  creator would fly. In single player that draws the ground target's seed
-  then, and OK keeps it once, so the flight flies the layout the map showed.
-  In the lobby the host draws the seed when the flight starts, so the map
-  shows the target's retail spot and says the target and starts may move.
+  creator would fly, using the seed reserved by the placement check. OK keeps
+  it once, so the flight flies the layout the map showed.
+  The lobby map uses the same checked seed and placement that the host receives.
 - **The objective area** (opinionated, John 2026-10-11; numbers fitted): a
   circle of 5 nm radius around a centre moved 0.5 to 2.5 nm off the targets'
   centroid, in a direction and by a distance hashed from the theater, the

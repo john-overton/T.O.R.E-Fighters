@@ -79,6 +79,7 @@ pub(crate) fn world_without_front(
         resources,
         seating,
         &mut tore_world::world::Hooks {
+            inspect_invalid_placement: true,
             ground_variation: Some(Variation {
                 front: false,
                 ..Variation::ON

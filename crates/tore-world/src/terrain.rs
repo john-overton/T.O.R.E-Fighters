@@ -27,6 +27,10 @@ pub struct Terrain {
     pub environment: Environment,
     /// Immutable imported placement/airport geometry. Mutable health belongs to combat.
     pub airport_scene: tore_sim::airport::Scene,
+    /// Exact static obstacles used before the final front and grounding pass.
+    pub placement_objects: Vec<crate::surface::layout::Placed>,
+    /// Integer runway-lane clearance boxes used by final vehicle placement.
+    pub placement_runways: Vec<crate::surface::layout::Placed>,
     /// Each runway's taxi, takeoff, landing and parking points from its STRIP
     /// shape, by runway object id. A runway is absent when its shape lacks a
     /// point or a point is off the airport surface.
@@ -523,7 +527,7 @@ impl SurfaceSite {
                 },
             }
         };
-        let (runways, objects): (Vec<_>, Vec<_>) = terrain
+        let (_runways, objects): (Vec<_>, Vec<_>) = terrain
             .airport_scene
             .objects
             .iter()
@@ -534,10 +538,101 @@ impl SurfaceSite {
         Ground::new(
             &terrain.theater,
             objects.into_iter().map(placed).collect(),
-            runways.into_iter().map(placed).collect(),
+            terrain.placement_runways.clone(),
             self.front(),
         )
         .with_tiles(self.sources.tiles.iter().copied())
+    }
+
+    /// Verify that reuse across separations preserves the final front. Equal raw
+    /// placements alone are insufficient: replacement airports change obstacles.
+    /// This repeats the production front pass against its exact integer geometry.
+    pub fn inspection_front_matches(
+        &self,
+        resources: &dyn ResourceSource,
+        terrain: &Terrain,
+        raw: &crate::surface::Surface,
+    ) -> bool {
+        use crate::surface::{
+            IdRange, Surface, UnitId,
+            catalog::Catalog,
+            layout::{self, Ground, Inputs},
+        };
+        let is_front = |id: UnitId| id.range() == IdRange::FrontLine;
+        let front_note = |n: &str| {
+            n.starts_with("no front line:") || n.starts_with("front clearance unresolved:")
+        };
+        let mut candidate = terrain.surface.clone();
+        candidate.template.clone_from(&raw.template);
+        candidate.units.retain(|u| !is_front(u.id));
+        candidate
+            .units
+            .extend(raw.units.iter().filter(|u| is_front(u.id)).cloned());
+        candidate.placements.retain(|(id, _)| !is_front(*id));
+        candidate.placements.extend(
+            raw.placements
+                .iter()
+                .filter(|(id, _)| is_front(*id))
+                .cloned(),
+        );
+        candidate
+            .object_sides
+            .retain(|id, _| !is_front(UnitId(*id)));
+        candidate.object_sides.extend(
+            raw.object_sides
+                .iter()
+                .filter(|(id, _)| is_front(UnitId(**id)))
+                .map(|(id, side)| (*id, *side)),
+        );
+        candidate.layout_notes.retain(|n| !front_note(n));
+        candidate
+            .layout_notes
+            .extend(raw.layout_notes.iter().filter(|n| front_note(n)).cloned());
+        let ground = Ground::new(
+            &terrain.theater,
+            terrain.placement_objects.clone(),
+            terrain.placement_runways.clone(),
+            self.front(),
+        )
+        .with_tiles(self.sources.tiles.iter().copied());
+        let mut types = type_infos(resources, &self.sources);
+        let mut catalog = Catalog::new(resources);
+        let mut added = |name: &str| {
+            placeable(resources, name)
+                .then(|| catalog.entry(name).ok())
+                .flatten()
+        };
+        layout::recheck_front(
+            &mut candidate,
+            &mut Inputs {
+                ground: &ground,
+                types: &mut types,
+                added: &mut added,
+                layout: &format!("{}.MM", self.code),
+            },
+        );
+        let units = |surface: &Surface| {
+            surface
+                .units
+                .iter()
+                .filter(|u| is_front(u.id))
+                .cloned()
+                .map(|mut u| {
+                    // Contact-volume availability is set by the later grounding pass.
+                    u.in_scene = false;
+                    u
+                })
+                .collect::<Vec<_>>()
+        };
+        let notes = |surface: &Surface| {
+            surface
+                .layout_notes
+                .iter()
+                .filter(|n| front_note(n))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        units(&candidate) == units(&terrain.surface) && notes(&candidate) == notes(&terrain.surface)
     }
 
     /// A resource's footprint at its actual placed scale, for audits.
@@ -647,6 +742,92 @@ fn surface_ground<'t>(
     }
     Ground::new(theater, objects, runways, layout_front(&sources.layout))
         .with_tiles(sources.tiles.iter().copied())
+}
+
+/// Integer clearance boxes for the actual drawn runway lanes, excluding aprons.
+/// Redrawn merged fields translate on a 2048-foot grid. Recover that grid offset,
+/// then transform the plan's whole-foot dimensions with the placement trig table.
+fn placement_runways(
+    sources: &Placements,
+    built: &[redrawn::Built],
+    mut fallback: Vec<crate::surface::layout::Placed>,
+) -> Vec<crate::surface::layout::Placed> {
+    use crate::surface::layout::{Footprint, Placed, trig};
+    for field in built {
+        if field.runways.is_empty() {
+            continue;
+        }
+        let Some((_, p)) = sources
+            .placed()
+            .filter_map(Result::ok)
+            .find(|(id, _)| *id == field.strip_id)
+        else {
+            continue;
+        };
+        let heading = p.angles[0];
+        let anchor = sources
+            .runway_anchors
+            .get(&p.object_type)
+            .copied()
+            .unwrap_or([0.; 3]);
+        let d = trig::rotate(
+            [anchor[0].round() as i64, anchor[2].round() as i64],
+            heading,
+        );
+        let mut origin = [
+            i64::from(p.position[0]) + d[0],
+            i64::from(p.position[2]) + d[1],
+        ];
+        if let Some(tile_id) = field.merged_from
+            && let Some((_, tile)) = sources
+                .placed()
+                .filter_map(Result::ok)
+                .find(|(id, _)| *id == tile_id)
+        {
+            // Compact paired fields are centered between the two authored
+            // origins, with the frame 6000 feet behind that midpoint.
+            let forward = trig::along(heading, 6000);
+            origin = [
+                (i64::from(p.position[0]) + i64::from(tile.position[0]) + 1) / 2 - forward[0],
+                (i64::from(p.position[2]) + i64::from(tile.position[2]) + 1) / 2 - forward[1],
+            ];
+        }
+        for (axis, world_axis) in [(0, 0), (1, 2)] {
+            origin[axis] += ((field.frame.origin[world_axis] - origin[axis] as f64) / 2048.).round()
+                as i64
+                * 2048;
+        }
+        fallback.retain(|r| r.id != field.strip_id && Some(r.id) != field.merged_from);
+        for runway in &field.runways {
+            let turn = runway.heading.round() as i32;
+            let length = runway.length.ceil() as i64;
+            let milli = (runway.heading * 1000.).round() as i32;
+            // The clearance box uses whole degrees like all placement boxes.
+            // Expand it to enclose a fractional-degree lane, not rotate its
+            // center away from the actual pavement.
+            let error = i64::from((milli - turn * 1000).abs());
+            let width = (runway.width / 2.).ceil() as i64;
+            let side_pad = (length * error * 18 + 1_999_999) / 2_000_000;
+            let end_pad = (width * error * 18 + 999_999) / 1_000_000;
+            let half_width = width + side_pad;
+            let along = trig::along_millidegrees(milli, length / 2);
+            let local = [
+                runway.from[0].round() as i64 + along[0],
+                runway.from[1].round() as i64 + along[1],
+            ];
+            let delta = trig::rotate(local, heading);
+            fallback.push(Placed {
+                id: field.strip_id,
+                at: [origin[0] + delta[0], origin[1] + delta[1]],
+                heading: heading + turn,
+                footprint: Footprint {
+                    min: [-half_width, -length / 2 - end_pad],
+                    max: [half_width, (length + 1) / 2 + end_pad],
+                },
+            });
+        }
+    }
+    fallback
 }
 
 /// The front of a theater layout: the centroids of its Blue-side and
@@ -843,6 +1024,16 @@ impl Placements {
     ) -> WorldResult<Self> {
         let mut out = Self::load(resources, code)?;
         redrawn::reapply(resources, &terrain.redrawn, &mut out)?;
+        // Vehicle footing can move a base-layout NT too. Drawing must use the
+        // same final pose as contact and simulation.
+        for p in &mut out.layout.placements {
+            if let Some(id) = crate::surface::UnitId::layout(p.key.ordinal)
+                && let Some(unit) = terrain.surface.unit(id)
+            {
+                p.position = unit.position;
+                p.angles = unit.angles;
+            }
+        }
         out.add_surface(resources, &terrain.surface)?;
         Ok(out)
     }
@@ -1279,6 +1470,8 @@ impl Terrain {
             condition,
             environment,
             airport_scene: tore_sim::airport::Scene::default(),
+            placement_objects: Vec::new(),
+            placement_runways: Vec::new(),
             airfield_anchors: BTreeMap::new(),
             static_manifest: Vec::new(),
             catalog,
@@ -1398,6 +1591,81 @@ impl Terrain {
             if let Some(unit) = self.surface.units.iter_mut().find(|u| u.id.0 == *id) {
                 unit.position = p.position;
                 unit.angles = p.angles;
+            }
+        }
+        // Airport replacement changes obstacles and target positions. Resolve
+        // the front and vehicle footing before the shared grounding pass.
+        {
+            use crate::surface::{
+                catalog::Catalog,
+                layout::{self, Ground, Inputs, Placed},
+            };
+            let mut types = type_infos(resources, &sources);
+            let movable: BTreeSet<_> = self
+                .surface
+                .units
+                .iter()
+                .filter(|u| layout::footing::vehicle(u))
+                .map(|u| u.id.0)
+                .collect();
+            let mut objects = Vec::new();
+            let mut runways = Vec::new();
+            for (id, p) in sources.placed().filter_map(Result::ok) {
+                let info = types(&p.object_type);
+                let placed = Placed {
+                    id,
+                    at: [i64::from(p.position[0]), i64::from(p.position[2])],
+                    heading: p.angles[0],
+                    footprint: info.footprint,
+                };
+                if info.strip {
+                    runways.push(placed);
+                } else if !movable.contains(&id) && !info.bridge_or_road {
+                    objects.push(placed);
+                }
+            }
+            let runways = placement_runways(&sources, &self.redrawn, runways);
+            self.placement_objects = objects.clone();
+            self.placement_runways = runways.clone();
+            let ground = Ground::new(&self.theater, objects, runways, original_front)
+                .with_tiles(sources.tiles.iter().copied());
+            let mut catalog = Catalog::new(resources);
+            let mut added = |name: &str| {
+                placeable(resources, name)
+                    .then(|| catalog.entry(name).ok())
+                    .flatten()
+            };
+            layout::finish_layout(
+                &mut self.surface,
+                &mut Inputs {
+                    ground: &ground,
+                    types: &mut types,
+                    added: &mut added,
+                    layout: &format!("{code}.MM"),
+                },
+            );
+        }
+        // Refresh the scene inputs without retaining any previous front units.
+        sources.surface.retain(|(id, _)| {
+            crate::surface::UnitId(*id).range() != crate::surface::IdRange::FrontLine
+        });
+        for (id, p) in &self.surface.placements {
+            sources.add_type(resources, &p.key.layout, &p.object_type)?;
+            if let Some((_, old)) = sources.surface.iter_mut().find(|(old, _)| *old == id.0) {
+                *old = p.clone();
+            } else {
+                sources.surface.push((id.0, p.clone()));
+            }
+        }
+        for p in &mut sources.layout.placements {
+            if let Some(u) = self
+                .surface
+                .units
+                .iter()
+                .find(|u| u.id == crate::surface::UnitId::layout(p.key.ordinal).unwrap())
+            {
+                p.position = u.position;
+                p.angles = u.angles;
             }
         }
         // Keep the existing airport planes authoritative. A foundation beside
@@ -1672,17 +1940,6 @@ impl Terrain {
             airports,
             aliases,
         };
-        // Template auto-start ranking may contain either old half. Keep only
-        // one canonical runway, preserving the source ranking of other fields.
-        if let Some(starts) = &mut self.surface.starts {
-            for ids in [&mut starts.blue_airfields, &mut starts.red_airfields] {
-                let mut seen = BTreeSet::new();
-                for id in ids.iter_mut() {
-                    *id = self.airport_scene.canonical_id(*id);
-                }
-                ids.retain(|id| seen.insert(*id));
-            }
-        }
         // Every point must stand on the airport's landable surface.
         let scene = &self.airport_scene;
         anchors.retain(|_, found: &mut tore_sim::ai::airfield::AirfieldAnchors| {
@@ -1690,13 +1947,23 @@ impl Terrain {
         });
         self.airfield_anchors = anchors;
         // Airport replacement can move target structures and parked aircraft.
-        // The mission must follow their final positions and actual runway centers.
-        self.surface.starts = crate::surface::layout::scene_starts(
-            &self.surface,
-            &self.theater,
-            &self.airport_scene,
-            original_front,
-        );
+        // The mission must follow their final positions and integer runway origins.
+        let mut types = type_infos(resources, &sources);
+        let mut ground = surface_ground(&self.theater, &sources, &mut types);
+        ground.front = original_front;
+        for (id, p) in &sources.surface {
+            let info = types(&p.object_type);
+            if info.strip {
+                ground.runways.push(crate::surface::layout::Placed {
+                    id: *id,
+                    at: [i64::from(p.position[0]), i64::from(p.position[2])],
+                    heading: p.angles[0],
+                    footprint: info.footprint,
+                });
+            }
+        }
+        self.surface.starts =
+            crate::surface::layout::scene_starts(&self.surface, &ground, &self.airport_scene);
         // What the armed units fight with, read once from their records.
         let arsenal = crate::surface::fire::Arsenal::load(&self.surface, resources, &|x, z| {
             f64::from(self.height(x as f32, z as f32))

@@ -150,6 +150,7 @@ fn fight() -> AiMission {
                 escort_id: 4,
             }],
             patrol: Some(PatrolRegion {
+                clip: None,
                 center_ft: [0., 20_000., 20_000.],
                 radius_ft: 30_000.,
             }),

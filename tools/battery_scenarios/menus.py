@@ -844,7 +844,8 @@ def scenarios() -> list[Scenario]:
                     lane="menus",
                     args=["--separation", str(sep), "--theater", theater, "--probe-fight", "2:2", *probe],
                     timeout=300,
-                    expect=[r"AI probe totals:"],
+                    expect_exit=1 if sep == 300 else 0,
+                    expect=[r"Separation .* does not fit"] if sep == 300 else [r"AI probe totals:", rf"AI probe layout:.*enemy_nm={sep}\.0 requested_nm={sep}\.0"],
                     forbid=[r"OFF-MAP"],
                 )
             )

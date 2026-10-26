@@ -51,6 +51,11 @@ class JudgeTests(unittest.TestCase):
         self.assertTrue(self.judge(scenario(), "", code=101))
         self.assertIn("timed out", self.judge(scenario(timeout=5), "", code=None, timed_out=True)[0])
 
+    def test_detector_can_accept_either_reported_or_clean_exit(self):
+        for code in (0, 1):
+            self.assertEqual(self.judge(scenario(expect_exit=None), "", code=code), [])
+        self.assertTrue(self.judge(scenario(expect_exit=None), "", code=None, timed_out=True))
+
     def test_generic_problems(self):
         self.assertTrue(self.judge(scenario(), "thread 'main' panicked at src/x.rs:1"))
         self.assertTrue(self.judge(scenario(), "speed=NaN"))

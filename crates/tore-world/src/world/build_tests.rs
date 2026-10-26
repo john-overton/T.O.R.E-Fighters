@@ -294,6 +294,7 @@ fn the_callers_hooks_supply_the_types_and_the_weapon_labels() {
             load: Some(&mut load),
             weapon_label: Some(&label),
             ground_variation: None,
+            inspect_invalid_placement: false,
         },
     )
     .unwrap();
@@ -507,4 +508,37 @@ fn an_enemy_ground_start_parks_enemy_wing_one_at_a_redfor_field() {
     // As a single-player ground start begins: on NAV, the field selected.
     assert!(cockpit.airport_nav_mode);
     assert!(cockpit.airport_service.selected().is_some());
+}
+
+#[test]
+fn creator_distance_audit_matches_launch_and_never_silently_shortens() {
+    let data = resources();
+    let mut mission = spec();
+    let choices = crate::mission_layout::availability::audit(&data, &mission).unwrap();
+    assert!(choices.separations[1], "two nm fits the synthetic map");
+    assert!(!choices.separations[10], "300 nm cannot fit");
+    for (index, nm) in crate::mission_layout::SEPARATION_NM.into_iter().enumerate() {
+        mission.separation_nm = nm as u32;
+        match World::build(
+            &mission,
+            &data,
+            Seating::SinglePlayer,
+            &mut Hooks::default(),
+        ) {
+            Ok(built) => {
+                assert!(
+                    choices.separations[index],
+                    "{nm} nm launched but was hidden"
+                );
+                assert!(!built.restarted.layout.as_ref().unwrap().enemy.shortened());
+            }
+            Err(e) => {
+                assert!(
+                    !choices.separations[index],
+                    "{nm} nm offered but refused: {e}"
+                );
+                assert!(e.to_string().starts_with("Separation "), "{e}");
+            }
+        }
+    }
 }

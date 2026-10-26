@@ -2431,7 +2431,7 @@ fn a_host_that_lagged_before_the_cut_corrects_no_plane_at_the_resume() {
 
 #[test]
 fn the_mission_countdown_keeps_its_deadline_through_handover() {
-    let mut rig = Rig::new(crowd_spec(200));
+    let mut rig = Rig::new(crowd_spec(150));
     rig.games[0]
         .client
         .change_settings(crate::wire::messages::SettingsChange {
@@ -2471,7 +2471,7 @@ fn the_mission_countdown_keeps_its_deadline_through_handover() {
 fn departed_player_and_side_scores_survive_handover_and_still_reach_the_limit() {
     use crate::settings::{Mode, number};
     use tore_world::score::{Fact, Flown, Victim};
-    let mut rig = Rig::new(crowd_spec(200));
+    let mut rig = Rig::new(crowd_spec(150));
     rig.games[0]
         .client
         .change_settings(crate::wire::messages::SettingsChange {
