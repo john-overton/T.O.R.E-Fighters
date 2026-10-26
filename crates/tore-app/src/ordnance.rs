@@ -2491,6 +2491,51 @@ pub fn designator_sources(
         .collect())
 }
 
+/// Check an isolated weapon drag into an empty destination. Catalog refills
+/// and saved-load migration happen before this snapshot and can change totals.
+fn check_station_transfer(
+    before: &Loadout,
+    after: &Loadout,
+    source: usize,
+    target: usize,
+) -> AppResult<u16> {
+    use tore_world::mission::LoadoutSpec;
+    let weapon = &before.configuration.stations[source].weapon;
+    let capacity = before.capacity(target, weapon) as u16;
+    let paired = before.store_pairs(source).step(1) == 2 || before.store_pairs(target).step(1) == 2;
+    let available = before.quantities[source].min(capacity);
+    let moved = if paired {
+        if available >= 2 { 2 } else { 0 }
+    } else {
+        let step = match capacity {
+            301.. => 100,
+            101..=300 => 10,
+            _ => 1,
+        };
+        available.min(step)
+    };
+    let mut expected = LoadoutSpec::of(before);
+    if expected.stations[target].quantity != 0 {
+        return Err("station transfer probe needs an empty weapon destination".into());
+    }
+    if moved > 0 {
+        expected.stations[source].quantity -= moved;
+        expected.stations[target] = tore_world::mission::StationLoad {
+            weapon: weapon.source.clone(),
+            count: capacity,
+            quantity: moved,
+        };
+    }
+    let actual = LoadoutSpec::of(after);
+    if actual != expected || (after.total_lbs() - before.total_lbs()).abs() > 0.01 {
+        return Err(format!(
+            "station transfer mismatch: {} {} slots {source}->{target}, expected {moved} moved; expected {expected:?}, got {actual:?}",
+            before.aircraft.label(), weapon.source,
+        ).into());
+    }
+    Ok(moved)
+}
+
 fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let mut ui = Ordnance::new(load.clone(), data)?;
     let mut pixels = vec![0; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
@@ -2521,30 +2566,58 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
         return Err("catalog drop did not empty the imported station".into());
     }
     source_catalog_drag(&mut ui, source, weapon, &mut pixels)?;
-    if let Some(target) =
-        (0..load.quantities.len()).find(|i| *i != source && load.capacity(*i, weapon) > 0)
+    // Isolate weapon conservation from deliberate replacement of a tank.
+    ui.loadout.clear_tanks()?;
+    let filled = ui.loadout.clone();
+    let mut checked = 0;
+    let mut skipped = 0;
+    for target in (0..load.quantities.len())
+        .filter(|i| *i != source && (1..32767).contains(&load.capacity(*i, weapon)))
     {
+        ui.loadout = filled.clone();
         ui.loadout.quantities[target] = 0;
-        let before = ui.loadout.quantities[source];
+        ui.loadout.refresh_equipment()?;
+        let before = ui.loadout.clone();
         let from = source_station_point(&mut ui, source, &mut pixels)?;
         let source_page = ui.station_page;
         let to = source_station_point(&mut ui, target, &mut pixels)?;
-        // Display order can put two compatible stations on different pages.
-        // Only the visible page has hit targets, so the transfer is checked
-        // when both cards are showing and skipped otherwise.
+        // Only the visible page has hit targets. Report skipped pairs rather
+        // than allowing the first cross-page target to end the aircraft's sweep.
         if ui.station_page != source_page {
-            return Ok(());
+            skipped += 1;
+            continue;
         }
         ui.pointer(Some(from));
         ui.down();
         ui.pointer(Some(to));
         ui.up();
-        if ui.loadout.quantities[target] == 0
-            || ui.loadout.quantities[source] + ui.loadout.quantities[target] != before
-        {
-            return Err("station transfer did not conserve imported ammunition".into());
-        }
+        let moved = check_station_transfer(&before, &ui.loadout, source, target)?;
+        let row = |slot| {
+            load.configuration
+                .hardpoint_slots
+                .iter()
+                .position(|candidate| *candidate == Some(slot))
+                .unwrap()
+        };
+        println!(
+            "station transfer {} {}: row {} (paired={}) -> row {} (paired={}, capacity={}): [{}, 0] -> [{}, {}], moved={moved}; passed",
+            load.aircraft.selection_key(),
+            weapon.source,
+            row(source),
+            before.store_pairs(source).step(1) == 2,
+            row(target),
+            before.store_pairs(target).step(1) == 2,
+            before.capacity(target, weapon),
+            before.quantities[source],
+            ui.loadout.quantities[source],
+            ui.loadout.quantities[target],
+        );
+        checked += 1;
     }
+    println!(
+        "{}: {checked} station transfers checked, {skipped} cross-page transfers skipped",
+        load.aircraft.label()
+    );
     Ok(())
 }
 
@@ -3416,6 +3489,66 @@ mod tests {
         drag(&mut ui, (500., 145.), (100., 120.));
         assert_eq!(ui.loadout.quantities, [0, 0, 500]);
         assert!(ui.selected.is_none());
+    }
+    #[test]
+    fn creator_transfer_check_accepts_pair_refusals_and_successful_drags() {
+        for (source_pair, target_pair, supply, capacity, expected) in [
+            (false, true, 1, 2, [1, 0, 500]), // Su-35's single to a pair.
+            (true, false, 2, 1, [2, 0, 500]),
+            (false, false, 1, 1, [0, 1, 500]),
+            (false, true, 2, 2, [0, 2, 500]),
+            (true, false, 4, 3, [2, 2, 500]),
+            (true, true, 4, 4, [2, 2, 500]),
+        ] {
+            let mut ui = fixture();
+            for (slot, paired) in [(0, source_pair), (1, target_pair)] {
+                let station = &mut ui.loadout.configuration.stations[slot];
+                station.rack.location = 4;
+                station.rack.paired = paired;
+                station.mount = [8., -2., 0.];
+            }
+            ui.loadout.quantities[0] = supply;
+            ui.loadout.hardpoints[1].count = capacity;
+            let before = ui.loadout.clone();
+            let mut pixels = vec![0; WIDTH * HEIGHT * 4];
+            let from = source_station_point(&mut ui, 0, &mut pixels).unwrap();
+            let to = source_station_point(&mut ui, 1, &mut pixels).unwrap();
+            drag(&mut ui, from, to);
+            assert_eq!(ui.loadout.quantities, expected);
+            assert_eq!(
+                check_station_transfer(&before, &ui.loadout, 0, 1).unwrap(),
+                expected[1]
+            );
+        }
+    }
+
+    #[test]
+    fn creator_transfer_check_rejects_loss_duplication_wrong_identity_and_unrelated_edits() {
+        let before = fixture().loadout;
+        let mut after = before.clone();
+        after.transfer(0, 1).unwrap();
+        assert_eq!(check_station_transfer(&before, &after, 0, 1).unwrap(), 1);
+        for quantities in [[0, 1, 500], [2, 1, 500], [1, 1, 499], [2, 0, 500]] {
+            let mut bad = after.clone();
+            bad.quantities = quantities.to_vec();
+            assert!(check_station_transfer(&before, &bad, 0, 1).is_err());
+        }
+        let mut wrong_weapon = after.clone();
+        wrong_weapon.configuration.stations[1].weapon.source = "OTHER.JT".into();
+        assert!(check_station_transfer(&before, &wrong_weapon, 0, 1).is_err());
+        let mut changed_fuel = after;
+        changed_fuel.fuel_lbs -= 1.;
+        assert!(check_station_transfer(&before, &changed_fuel, 0, 1).is_err());
+
+        let mut single = before;
+        single.quantities[0] = 1;
+        single.configuration.stations[1].rack.paired = true;
+        single.configuration.stations[1].rack.location = 4;
+        single.configuration.stations[1].mount = [8., -2., 0.];
+        assert_eq!(check_station_transfer(&single, &single, 0, 1).unwrap(), 0);
+        let mut split = single.clone();
+        split.quantities = vec![0, 1, 500];
+        assert!(check_station_transfer(&single, &split, 0, 1).is_err());
     }
     const AIM9M_WORDS: &str = "Not everyone has the AIM-9M: Hawk's game has no AIM-9M.";
     #[test]
