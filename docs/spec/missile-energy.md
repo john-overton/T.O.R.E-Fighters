@@ -77,6 +77,18 @@ control the body is ballistic and cannot regain guidance by accelerating in a
 dive. Ground/water collision and lifetime remove it. Ordinary seeker memory
 loss remains separate and retains its specified reacquisition policy.
 
+Every profile also has an explicit controlled-flight lifetime, in seconds from
+release, independent of motor duration and body removal. At expiry guidance is
+irreversibly lost, including decoy pursuit. The body continues under thrust,
+drag and gravity until collision or removal. The forecast reports controlled
+intercepts only; an unguided body can still collide. This cutoff is John's
+2026-10-26 decision. Sourced and class-derived times are listed in the
+[data table](../formats/missile-energy-data.md).
+
+A missile never acquires, guides toward, fuzes on, or damages its firing aircraft,
+including blast damage. This permanent exclusion is John's 2026-10-26 decision;
+bomb launch grace remains separate.
+
 ## Guidance
 
 Proportional navigation uses only observed position and velocity. With relative
@@ -90,8 +102,13 @@ Opening targets or heading error above 30 degrees use a bounded capture command
 V*heading_error/0.5 s toward the observed LOS. There is a stable reversal axis
 for opposite headings. Capture and PN share the same physical lift and drag.
 Long-range radar profiles may request a loft waypoint; climb slope is limited
-to 0.36, about 20 degrees. Profile data specify loft height and entry distance;
-terminal guidance resumes at 0.4 of that distance. No A2A ground avoidance or
+to 0.36, about 20 degrees. Profile data specify loft height and entry distance. Initial loft weight is
+smoothstep(clamp(initial range / entry distance - 0.5, 0, 1)). Its terminal
+factor is smoothstep(clamp((current range / entry distance - 0.4)/0.3, 0, 1)).
+Their product blends the vertical aim toward the slope-limited loft waypoint,
+observed target velocity toward a stationary waypoint, and PN toward capture.
+Smoothstep(x) is x*x*(3-2*x). This agent-fitted path law avoids an abrupt
+launch-range branch and fades to terminal guidance at 0.4 of entry distance. No A2A ground avoidance or
 forced miss occurs. A sufficiently late turn/dive can cause physical ground
 impact, overshoot or energy exhaustion; a short-range shot can still hit.
 
@@ -198,16 +215,22 @@ cruise profiles). In-flight snapshots
 are aged along the mean observed velocities before comparing positions, so a
 stable cruise TTI is not discarded solely because the missile moved forward.
 A changed motor phase, more than 2% mass change, or a material trajectory
-change rejects it. Launch snapshots retain their zero-age geometry checks. Envelope searches
+change rejects it. Launch snapshots advance launcher and target positions by the elapsed world
+ticks since submission, using the same mean observed velocities. Their missile
+age stays zero; launch answers expire after 600 ticks unless the inputs are
+identical. Player IN RNG and AI gates read the same qualified answers. Envelope searches
 allow 150 m altitude, 1 km origin displacement and three degrees bearing drift,
 10 m/s launcher speed and five degrees launcher axis and velocity direction,
-and 25 m/s target velocity. A restarted search keeps showing the last
-completed envelope until it finishes, for display only. A cold search finishes
+and 25 m/s target velocity. A restarted search can show the previous envelope
+only while its own observation is no more than 1,200 ticks old and geometry
+still matches. Display-only angular limits are 15 degrees of axis/velocity
+direction and 10 degrees of bearing, allowing a gentle turn while the tighter
+5/3-degree replacement search finishes. Other limits stay the same. These
+are agent-fitted display tolerances; they never authorize a shot. A cold search finishes
 its first maximum before restarting for changed geometry, so continuous turns
 cannot prevent the first publication. Target, body, arming, radius or wind
-changes invalidate it immediately. While a geometry refresh runs, the last
-completed range cue can remain stale; only the fresh qualified point forecast
-can grant IN RNG or an AI launch. These tolerances are agent-fitted cache approximations, not
+changes invalidate it immediately. A reversal removes the old head-on range
+immediately. Only a qualified point forecast can grant IN RNG or an AI launch. These tolerances are agent-fitted cache approximations, not
 exact proofs about the current pose. Turns may leave a cue pending. AI cannot
 fire from a pending/failed point answer, and ordinary sensor/support and
 minimum-range launch gates remain. A surface seeker does not acquire a blind
@@ -228,19 +251,23 @@ threats without changing the AI defensive schedule or renaming its inputs.
 
 The [calibration baseline](../baselines/missile-energy.md) gives all 25 A2A
 records and SAM/A-G references. New worlds select Energy. The lower-level combat State constructor retains
-Spec for historical tools and tapes. The Phase 2 review corrections pass the
-[recorded Linux validation](../baselines/missile-energy.md#validation-status);
+Spec for historical tools and tapes. Second-review correction progress is in
+[the validation baseline](../baselines/missile-energy.md#validation-status);
 the invalidated Phase 3 study remains stopped. Estimate overhead must stay
 about 2 ms per world tick with eight AI aircraft and sixteen missiles, reporting
 cold/warm p50/p95. If the gate cannot be met, report options
 instead of enabling a synchronous fallback.
 
 Explicit old weapon modes remain. Unmarked combat tapes 2/3 select
-Compatibility, 4..8 select Spec. New Energy tapes carry an explicit model fingerprint (data, motor derivation,
-force/drag, seeker and decoy rules)
-marker and seed after the existing header. An old reader rejects that new
+Compatibility, 4..8 select Spec. New Energy tapes carry an explicit model
+fingerprint marker and seed after the existing header. An old reader rejects that new
 marker rather than silently using old physics. No version constant is changed
-here; the lead owns the coordinated version bump.
+here; the lead owns the coordinated version bump. The fingerprint includes
+physical data, motor/fuel and controlled-life numeric inputs, drag-curve knots,
+and explicit semantic revisions for derivation, integration/atmosphere,
+guidance, seeker, decoy, prediction and fuze/contact rules. Any behavior change
+must update its rule revision; comments, citation wording in motor data and
+calibration targets do not invalidate a tape. It does not hash source files.
 
 Mission recordings play recorded poses. New weapon-launch events carry the
 actual boost/sustain intervals and powered flags, so flame playback does not

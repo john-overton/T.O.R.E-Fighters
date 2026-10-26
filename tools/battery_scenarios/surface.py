@@ -351,6 +351,8 @@ def battery_sa2_problems(output: str) -> list[str]:
         problems.append(f"the launcher {unit} showed on the RWR")
     if int(summary(live).get("missiles", "0")) == 0 or summary(live).get("radar-lock-tone") != "true":
         problems.append(f"the battery did not lock and launch: {summary(live)}")
+    if int(summary(live).get("hits", "0")) == 0:
+        problems.append("live SA-2 battery registered no hits")
     s = summary(optical)
     if int(s.get("missiles", "0")) == 0:
         problems.append("no optical launch in daylight")
@@ -1101,8 +1103,8 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="surface-battery-sa2", lane="ai", timeout=400,
-            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
-                       "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots"),
+            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--solo", "--altitude", "20000",
+                       "--from", "20", "--seconds", "200", "--quiet-shots"),
             then=[
                 Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
                            "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots",

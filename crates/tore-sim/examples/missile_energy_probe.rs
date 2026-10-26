@@ -21,6 +21,7 @@ fn body() -> Body {
         },
         ignition: 0,
         life: 24000,
+        guidance_ticks: 120 * 120,
         structural_g: 30.,
         lift_coefficient: 12.,
         induced_factor: 0.03,

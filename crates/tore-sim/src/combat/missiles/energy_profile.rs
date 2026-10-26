@@ -84,6 +84,7 @@ pub fn body(w: &Weapon) -> Body {
         } else {
             0
         }),
+        guidance_ticks: (range / 600. * 120.).max(1200.) as u32,
         structural_g: if strike {
             12.
         } else if mass > 400. {
@@ -123,6 +124,7 @@ pub fn body(w: &Weapon) -> Body {
         }
     }
     if let Some(m) = tore_formats::missile_motors::motor(&w.source) {
+        body.guidance_ticks = (m.guidance_seconds * 120.).round() as u32;
         let fuel = mass * m.propellant_fraction;
         let phase = |seconds: f64, share: f64, thrust: Option<f64>| Motor {
             ticks: (seconds * 120.).round() as u32,
@@ -145,6 +147,7 @@ pub fn body(w: &Weapon) -> Body {
             .life
             .max(body.ignition + body.boost.ticks + body.sustain.ticks + 1200);
     }
+    body.life = body.life.max(body.guidance_ticks + 1200);
     body
 }
 
@@ -169,44 +172,79 @@ crate::checkpoint_struct!(Motion {
     tracking
 });
 
-/// Tape identity covers authored data, derivation rules and aerodynamic curves.
-/// Source text is repository-owned Rust, never retail media. Even a source-only
-/// change conservatively invalidates Energy resimulation rather than hiding drift.
+// Semantic revisions, updated only when behavior changes. Order: derivation,
+// integration/atmosphere, guidance, seeker, decoy, prediction, fuze/contact.
+// Numeric inputs and drag curves are hashed directly; comments and evidence
+// wording are not model inputs. Changes to rules must increment their revision.
+const RULES: [u64; 7] = [2, 1, 2, 1, 1, 2, 2];
+/// Stable tape identity for numeric inputs, curves and semantic rule revisions.
 pub fn fingerprint() -> u64 {
-    fingerprint_sources(
+    fingerprint_model(
         tore_formats::missile_data::fingerprint(),
-        &[
-            include_str!("energy_profile.rs"),
-            include_str!("../../../../tore-formats/src/missile_motors.rs"),
-            include_str!("energy.rs"),
-            include_str!("energy_seeker.rs"),
-            include_str!("decoys.rs"),
-            include_str!("prediction.rs"),
-            include_str!("energy_estimate.rs"),
-        ],
+        tore_formats::missile_motors::MOTORS,
+        RULES,
     )
 }
-fn fingerprint_sources(mut hash: u64, sources: &[&str]) -> u64 {
-    for source in sources {
-        for byte in source.bytes().filter(|byte| *byte != b'\r') {
-            hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+fn fingerprint_model(
+    mut hash: u64,
+    motors: &[tore_formats::missile_motors::MotorData],
+    rules: [u64; 7],
+) -> u64 {
+    let mut add = |bytes: &[u8]| {
+        for byte in bytes {
+            hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+    };
+    for rule in rules {
+        add(&rule.to_le_bytes());
+    }
+    for curve in super::energy::DRAG_CURVES {
+        for value in curve {
+            add(&value.to_le_bytes());
+        }
+    }
+    for m in motors {
+        add(m.source.as_bytes());
+        add(&[0]);
+        for value in [
+            m.propellant_fraction,
+            m.boost_seconds,
+            m.sustain_seconds,
+            m.boost_share,
+            m.exhaust_mps,
+            m.guidance_seconds,
+        ] {
+            add(&value.to_le_bytes());
+        }
+        add(&[u8::from(m.thrust.is_some())]);
+        if let Some(thrust) = m.thrust {
+            for value in thrust {
+                add(&value.to_le_bytes());
+            }
         }
     }
     hash
 }
-
 #[cfg(test)]
 mod fingerprint_tests {
     use super::*;
     #[test]
-    fn model_identity_covers_rules_and_curves_with_portable_line_endings() {
-        let a = fingerprint_sources(1, &["derive=35\n", "drag=0.3\n"]);
-        assert_eq!(
+    fn semantic_identity_covers_inputs_and_fuze_but_not_provenance_text() {
+        let mut motors = tore_formats::missile_motors::MOTORS.to_vec();
+        let a = fingerprint_model(1, &motors, RULES);
+        motors[0].motor_evidence = "a corrected citation";
+        assert_eq!(a, fingerprint_model(1, &motors, RULES));
+        motors[0].guidance_seconds += 1.;
+        assert_ne!(a, fingerprint_model(1, &motors, RULES));
+        let mut rules = RULES;
+        rules[6] += 1;
+        assert_ne!(
             a,
-            fingerprint_sources(1, &["derive=35\r\n", "drag=0.3\r\n"])
+            fingerprint_model(1, tore_formats::missile_motors::MOTORS, rules)
         );
-        assert_ne!(a, fingerprint_sources(1, &["derive=30\n", "drag=0.3\n"]));
-        assert_ne!(a, fingerprint_sources(1, &["derive=35\n", "drag=0.4\n"]));
-        assert_ne!(a, fingerprint_sources(2, &["derive=35\n", "drag=0.3\n"]));
+        assert_ne!(
+            a,
+            fingerprint_model(2, tore_formats::missile_motors::MOTORS, RULES)
+        );
     }
 }

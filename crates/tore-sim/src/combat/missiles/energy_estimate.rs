@@ -206,6 +206,7 @@ crate::checkpoint_struct!(Body {
     sustain,
     ignition,
     life,
+    guidance_ticks,
     structural_g,
     lift_coefficient,
     induced_factor,

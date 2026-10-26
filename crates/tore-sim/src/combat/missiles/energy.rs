@@ -4,6 +4,11 @@ use crate::attitude::{Vector, cross, dot, unit};
 
 pub const DT: f64 = 1. / 120.;
 pub const G: f64 = 9.80665;
+pub const DRAG_CURVES: [[f64; 7]; 3] = [
+    [0., 0.8, 1., 1.2, 2., 3., 5.],
+    [0.30, 0.30, 0.65, 0.55, 0.36, 0.30, 0.26],
+    [0.20, 0.24, 0.65, 0.60, 0.45, 0.38, 0.34],
+];
 pub const FT: f64 = 0.3048;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +63,7 @@ pub struct Body {
     pub sustain: Motor,
     pub ignition: u32,
     pub life: u32,
+    pub guidance_ticks: u32,
     pub structural_g: f64,
     pub lift_coefficient: f64,
     pub induced_factor: f64,
@@ -104,6 +110,7 @@ impl Body {
             && self.induced_factor >= 0.
             && self.dry_mass() > 0.
             && self.life > 0
+            && self.guidance_ticks > 0
             && [self.boost, self.sustain].into_iter().all(|m| {
                 m.thrust.is_finite()
                     && m.thrust >= 0.
@@ -143,15 +150,12 @@ impl Body {
         std::f64::consts::PI * self.diameter * self.diameter * 0.25
     }
     pub fn drag_coefficient(self, mach: f64) -> f64 {
-        const MACH: [f64; 7] = [0., 0.8, 1., 1.2, 2., 3., 5.];
-        let values = if self.cruise_drag {
-            [0.20, 0.24, 0.65, 0.60, 0.45, 0.38, 0.34]
-        } else {
-            [0.30, 0.30, 0.65, 0.55, 0.36, 0.30, 0.26]
-        };
-        for i in 1..MACH.len() {
-            if mach < MACH[i] {
-                let t = ((mach - MACH[i - 1]) / (MACH[i] - MACH[i - 1])).clamp(0., 1.);
+        let mach_points = DRAG_CURVES[0];
+        let values = DRAG_CURVES[if self.cruise_drag { 2 } else { 1 }];
+        for i in 1..mach_points.len() {
+            if mach < mach_points[i] {
+                let t = ((mach - mach_points[i - 1]) / (mach_points[i] - mach_points[i - 1]))
+                    .clamp(0., 1.);
                 return (values[i - 1] + t * (values[i] - values[i - 1])) * self.drag_scale;
             }
         }
@@ -177,6 +181,7 @@ pub struct Flight {
     pub lost: bool,
     pub lofted: bool,
     pub loft_decided: bool,
+    pub loft_weight: f64,
     pub terminal: bool,
     pub launch_height: f64,
     pub waypoint: Option<Vector>,
@@ -223,6 +228,7 @@ impl Flight {
             lost: false,
             lofted: false,
             loft_decided: false,
+            loft_weight: 0.,
             terminal: false,
             launch_height: position[1],
             waypoint: None,
@@ -234,19 +240,28 @@ impl Flight {
         let mut r = sub(target.position, self.position);
         let mut vr = sub(target.velocity, self.velocity);
         let range = norm(r).max(1.);
+        let mut path_weight = f64::from(self.path_active);
         if !self.terminal && body.loft_height > 0. {
             if !self.loft_decided {
-                self.lofted = range > body.loft_range;
+                let x = (range / body.loft_range.max(1.) - 0.5).clamp(0., 1.);
+                self.loft_weight = x * x * (3. - 2. * x);
+                self.lofted = self.loft_weight > 0.;
                 self.loft_decided = true;
             }
             if range <= body.loft_range * 0.4 {
                 self.terminal = true;
             } else if self.lofted {
+                let x = ((range / body.loft_range.max(1.) - 0.4) / 0.3).clamp(0., 1.);
+                path_weight = self.loft_weight * x * x * (3. - 2. * x);
                 let height = self.launch_height.max(target.position[1]) + body.loft_height;
                 let horizontal = r[0].hypot(r[2]).max(1.);
-                r[1] = (height - self.position[1]).clamp(-0.36 * horizontal, 0.36 * horizontal);
-                // A virtual path waypoint, not knowledge of future target motion.
-                vr = sub([0.; 3], self.velocity);
+                let climb =
+                    (height - self.position[1]).clamp(-0.36 * horizontal, 0.36 * horizontal);
+                r[1] += (climb - r[1]) * path_weight;
+                vr = sub(
+                    target.velocity.map(|v| v * (1. - path_weight)),
+                    self.velocity,
+                );
             }
         }
         let speed = norm(u);
@@ -254,14 +269,7 @@ impl Flight {
         let line = unit(r);
         let cosine = dot(axis, line).clamp(-1., 1.);
         let closing = -dot(vr, line);
-        let steer = if closing > 0.
-            && cosine > 30f64.to_radians().cos()
-            && !self.lofted_or_climbing()
-            && !self.path_active
-        {
-            let omega = cross(r, vr).map(|x| x / dot(r, r).max(1.));
-            cross(omega, axis).map(|x| x * body.navigation_gain * closing)
-        } else {
+        let capture = {
             let direction = perpendicular(line, axis);
             let direction = if norm(direction) < 1e-9 && cosine < 0. {
                 // Stable reversal axis, including a vertical initial flight path.
@@ -278,11 +286,15 @@ impl Flight {
             };
             direction.map(|x| x * speed * cosine.acos() / 0.5)
         };
+        let steer = if closing > 0. && cosine > 30f64.to_radians().cos() {
+            let omega = cross(r, vr).map(|x| x / dot(r, r).max(1.));
+            let pn = cross(omega, axis).map(|x| x * body.navigation_gain * closing);
+            std::array::from_fn(|i| pn[i] * (1. - path_weight) + capture[i] * path_weight)
+        } else {
+            capture
+        };
         let gravity = perpendicular([0., -G, 0.], axis);
         std::array::from_fn(|i| steer[i] - gravity[i])
-    }
-    fn lofted_or_climbing(&self) -> bool {
-        self.lofted && !self.terminal
     }
 
     pub fn step(&mut self, body: Body, wind: Vector, target: Option<Observation>) -> Forces {
@@ -340,6 +352,9 @@ impl Flight {
         target: Option<Observation>,
         air: Air,
     ) -> Forces {
+        if self.age >= body.guidance_ticks {
+            self.lost = true;
+        }
         let before = self.velocity;
         let relative = sub(before, wind);
         let speed = norm(relative);
@@ -433,6 +448,7 @@ crate::checkpoint_struct!(Flight {
     lost,
     lofted,
     loft_decided,
+    loft_weight,
     terminal,
     launch_height,
     waypoint,
@@ -458,6 +474,7 @@ pub(super) mod tests {
             },
             ignition: 0,
             life: 24000,
+            guidance_ticks: 120 * 120,
             structural_g: 30.,
             lift_coefficient: 12.,
             induced_factor: 0.03,
@@ -470,6 +487,28 @@ pub(super) mod tests {
             cruise_feet: None,
             launch_elevation: -std::f64::consts::FRAC_PI_2,
         }
+    }
+    #[test]
+    fn battery_expiry_is_irreversible_and_leaves_ballistic_motion() {
+        let mut b = body();
+        b.guidance_ticks = 2;
+        let mut f = Flight::launch([0., 3000., 0.], [0., 0., 400.], [0., 0., 1.]);
+        let target = Some(Observation {
+            position: [1000., 3000., 4000.],
+            velocity: [0.; 3],
+        });
+        f.step(b, [0.; 3], target);
+        assert!(!f.lost);
+        f.step(b, [0.; 3], target);
+        let before = f.position;
+        f.step(b, [0.; 3], target);
+        assert!(f.lost);
+        assert_eq!(f.demand, [0.; 3]);
+        assert_ne!(f.position, before);
+        b.guidance_ticks = 12000;
+        f.step(b, [0.; 3], target);
+        assert!(f.lost);
+        assert_eq!(f.demand, [0.; 3]);
     }
     #[test]
     fn atmosphere_matches_standard_and_has_continuous_layers() {

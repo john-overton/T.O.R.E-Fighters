@@ -1967,24 +1967,18 @@ the player included. Missiles were split: one aimed at the player could hit only
 the player, and any other could hit any aircraft row, its own launcher included,
 but never the player.
 
-Built in B1's fourth step (rule from John, 2026-09-28, single player included): **a
-gun round can hit any aircraft except the one that fired it, and a missile or
-bomb can hit any aircraft once its fuze has armed**, whether it is an aircraft
-that gets in the way, a new target it shifts to or its own launcher. One search
-covers every aircraft row and every ownship, and the nearest contact along the
-round's path wins. This ended the missile split: an enemy missile aimed at the
-player can hit a wingman in its path, a missile aimed at someone else can hit the
-player, and a decoyed missile no longer keeps aiming its hit at the player alone.
-Damage follows the pilot: a hit on an ownship goes through the player pipeline, a
-hit on an AI row through the AI pipeline.
+The shared hit search covers every aircraft row and every ownship, choosing
+the nearest contact along the round's path. Guns and missiles exclude their
+own firing aircraft. Missiles additionally exclude it from seeker observations
+and collateral damage, per John's 2026-10-26 decision in the
+[weapon contract](spec/missiles.md#launch-grace). Bombs and unguided stores
+retain their geometry-based launch grace and can damage their launcher after
+it ends. Arming time and friendly-fire policy remain separate gates.
 
-*Agent decisions:* a round that starts inside its own launcher's hit volume
-(every rocket and bomb with no arming delay does) is not a hit, so it cannot
-explode on its pylon; only a round that comes back into the volume from outside
-counts. This matches John's words at the design review: "missiles should be
-able to hit anything once it leaves the shooting aircraft". Easy aiming widens the volume of other aircraft, never the shooter's own.
-Missile and bomb records in the synthetic test fixtures keep an arming delay of
-zero, so their tests rely on that rule.
+An enemy missile aimed at the player can hit a wingman in its path, and a
+missile aimed elsewhere can hit the player. Damage follows the pilot: an
+ownship uses the player pipeline and an AI row uses the AI pipeline. Easy
+aiming widens the volume of other aircraft, never the shooter's own.
 
 Friendly fire is a mission setting, `State::friendly_fire`. `On` is single
 player's behaviour and the default. `Off`, a lobby choice, means no round damages

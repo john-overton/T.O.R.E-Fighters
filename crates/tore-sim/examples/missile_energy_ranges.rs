@@ -354,7 +354,7 @@ fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4])
 }
 fn fit_pairs(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "source,fraction,drag_scale,primary_target_km,primary_km,secondary_target_km,secondary_km,relative_error"
+        "source,fraction,drag_scale,guidance_seconds,primary_target_km,primary_km,secondary_target_km,secondary_km,tail5_km,smooth_relative"
     );
     for motor in tore_formats::missile_motors::MOTORS {
         if filter.is_some_and(|s| !s.split(',').any(|name| name == motor.source)) {
@@ -362,77 +362,224 @@ fn fit_pairs(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error:
         }
         let w = Weapon::parse(motor.source, &fs::read(dir.join(motor.source))?)?;
         let original = missiles::energy_profile::body(&w);
-        let mut best = None;
+        let air = !missiles::surface_launched(&w.source) && w.flags & 0x20000 == 0;
         let fractions: Vec<_> = if motor.thrust.is_some() || !motor.fit_propellant {
             vec![motor.propellant_fraction]
         } else {
             (6..=25).map(|n| n as f64 * 0.02).collect()
         };
+        let tail_anchor = [5000., 2., 0., 250.];
+        let tail_floor = (motor.primary[2] * 0.08).clamp(2., 6.);
+        let mut best = None;
         for fraction in fractions {
-            let mut body = original;
-            if motor.thrust.is_none() {
-                let ratio = fraction / motor.propellant_fraction;
-                body.boost.propellant *= ratio;
-                body.boost.thrust *= ratio;
-                body.sustain.propellant *= ratio;
-                body.sustain.thrust *= ratio;
-            }
-            let mut low: f64 = 0.05;
-            let mut high: f64 = 64.;
-            for _ in 0..18 {
-                body.drag_scale = (low * high).sqrt();
-                if candidate_hit(&w, body, motor.primary, motor.primary[2] * 1000.) {
-                    low = body.drag_scale;
+            let drags: &[f64] = if matches!(motor.source, "SSN9.JT" | "AS16.JT") {
+                &[0.25, 0.3, 0.4, 0.5, 0.75, 1., 1.5, 2., 2.5, 3.]
+            } else {
+                &[0.5, 0.75, 1., 1.5, 2., 2.5, 3.]
+            };
+            for &drag in drags {
+                let mut body = original;
+                if motor.thrust.is_none() {
+                    let ratio = fraction / motor.propellant_fraction;
+                    body.boost.propellant *= ratio;
+                    body.boost.thrust *= ratio;
+                    body.sustain.propellant *= ratio;
+                    body.sustain.thrust *= ratio;
+                }
+                body.drag_scale = drag;
+                body.guidance_ticks = body.life;
+                let mut q = question(
+                    &w,
+                    motor.primary[0] * FT,
+                    motor.primary[1] as usize,
+                    motor.primary[2] * 1000.,
+                );
+                q.body = body;
+                q.target.velocity = match motor.primary[1] as usize {
+                    0 => [0., 0., -motor.primary[3]],
+                    2 => [0., 0., motor.primary[3]],
+                    _ => [0.; 3],
+                };
+                while q.answer.is_none() {
+                    q.step_over(&|_, _| 0., &|a, b| a[1] > 0. && b[1] > 0.);
+                }
+                let answer = q.answer.unwrap();
+                if !answer.hit {
+                    continue;
+                }
+                // Class-derived controlled life: rounded-up intercept time at
+                // the documented anchor, with the selected physical motor.
+                body.guidance_ticks = if motor.guidance_evidence.starts_with("NAVWEPS") {
+                    original.guidance_ticks
                 } else {
-                    high = body.drag_scale;
+                    (answer.seconds * 120.).ceil() as u32 + 1
+                };
+                let secondary = candidate_maximum(&w, body, motor.secondary);
+                let tail = if air {
+                    candidate_maximum(&w, body, tail_anchor)
+                } else {
+                    0.
+                };
+                let penalty = 0.15 * drag.ln().powi(2) + 0.03 * ((fraction - 0.35) / 0.15).powi(2);
+                let primary_error = if motor.guidance_evidence.starts_with("NAVWEPS") {
+                    (candidate_maximum(&w, body, motor.primary) / motor.primary[2] - 1.).abs()
+                } else {
+                    0.
+                };
+                let score = if drag < 0.5 {
+                    1. + (0.5 / drag).ln().powi(2)
+                } else {
+                    0.
+                } + 4. * primary_error
+                    + 4. * (secondary / motor.secondary[2] - 1.).abs()
+                    + penalty
+                    + if air {
+                        10. * (1. - tail / tail_floor).max(0.)
+                    } else {
+                        0.
+                    };
+                if best.is_none_or(|(_, _, _, _, old)| score < old) {
+                    best = Some((fraction, body, secondary, tail, score));
                 }
             }
-            body.drag_scale = low;
-            if !candidate_hit(&w, body, motor.primary, motor.primary[2] * 1000.) {
-                continue;
-            }
-            let secondary = candidate_maximum(&w, body, motor.secondary);
-            let error = (secondary / motor.secondary[2] - 1.).abs();
-            // Prefer a plausible multiplier among fits of similar accuracy.
-            let penalty = if (0.5..=3.).contains(&low) {
-                0.
-            } else {
-                0.01 * (low / 3.).ln().abs()
-            };
-            let score = error + penalty;
-            if best.is_none_or(|(_, _, _, _, best_score)| score < best_score) {
-                best = Some((fraction, low, secondary, body, score));
+        }
+        let (fraction, body, secondary, tail, _) =
+            best.ok_or_else(|| format!("{}: no feasible primary", motor.source))?;
+        let primary = candidate_maximum(&w, body, motor.primary);
+        let mut smooth: f64 = 0.;
+        for ratio in [0.98, 1.02] {
+            for field in 0..3 {
+                let mut nearby = body;
+                match field {
+                    0 => {
+                        nearby.boost.propellant *= ratio;
+                        nearby.boost.thrust *= ratio;
+                        nearby.sustain.propellant *= ratio;
+                        nearby.sustain.thrust *= ratio;
+                    }
+                    1 => nearby.drag_scale *= ratio,
+                    _ => {
+                        nearby.guidance_ticks =
+                            (f64::from(nearby.guidance_ticks) * ratio).round() as u32
+                    }
+                }
+                for (anchor, base) in [(motor.primary, primary), (motor.secondary, secondary)] {
+                    let reach = candidate_maximum(&w, nearby, anchor);
+                    smooth = smooth.max((reach / base - 1.).abs());
+                }
             }
         }
-        let (fraction, drag, _, body, _) = best.ok_or("no feasible primary anchor")?;
-        let mut pair = None;
-        for n in (70..=130).step_by(5) {
-            let mut candidate = body;
-            candidate.drag_scale = drag * n as f64 / 100.;
-            let primary = candidate_maximum(&w, candidate, motor.primary);
-            let secondary = candidate_maximum(&w, candidate, motor.secondary);
-            let score = (primary / motor.primary[2] - 1.)
-                .abs()
-                .max((secondary / motor.secondary[2] - 1.).abs());
-            if pair.is_none_or(|(_, _, _, old)| score < old) {
-                pair = Some((candidate.drag_scale, primary, secondary, score));
-            }
-        }
-        let (drag, primary, secondary, _) = pair.unwrap();
         println!(
-            "{},{fraction:.9},{drag:.8},{},{primary:.3},{},{secondary:.3},{:.4}",
+            "{},{fraction:.9},{:.8},{:.6},{},{primary:.3},{},{secondary:.3},{tail:.3},{smooth:.5}",
             motor.source,
+            body.drag_scale,
+            f64::from(body.guidance_ticks) / 120.,
             motor.primary[2],
-            motor.secondary[2],
-            (secondary / motor.secondary[2] - 1.).abs()
+            motor.secondary[2]
         );
     }
     Ok(())
 }
 
+fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!("source,guidance_seconds,drag_scale,tail5_km,tail15_km,tail35_km,smooth_relative");
+    let mut failures = Vec::new();
+    let mut tails = std::collections::BTreeMap::new();
+    for m in tore_formats::missile_motors::MOTORS {
+        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+        let body = missiles::energy_profile::body(&w);
+        if !(0.5..=3.).contains(&body.drag_scale) && !matches!(m.source, "SSN9.JT" | "AS16.JT") {
+            failures.push(format!("{}: unapproved drag exception", m.source));
+        }
+        if missiles::surface_launched(&w.source) || w.flags & 0x20000 != 0 {
+            continue;
+        }
+        let anchors = [
+            [5000., 2., 0., 250.],
+            [15000., 2., 0., 250.],
+            [35000., 2., 0., 250.],
+        ];
+        let reach = anchors.map(|a| candidate_maximum(&w, body, a));
+        if reach[0] < 2. || reach[0] >= reach[1] || reach[1] >= reach[2] {
+            failures.push(format!(
+                "{}: inadequate or reversed tail reach {reach:?}",
+                m.source
+            ));
+        }
+        tails.insert(m.source, reach);
+        let primary = candidate_maximum(&w, body, m.primary);
+        if candidate_hit(&w, body, m.primary, m.primary[2] * 1500.) {
+            failures.push(format!("{}: 150% head-on anchor still hits", m.source));
+        }
+        let mut smooth: f64 = 0.;
+        for ratio in [0.98, 1.02] {
+            for field in 0..4 {
+                let mut nearby = body;
+                match field {
+                    0 => {
+                        nearby.boost.propellant *= ratio;
+                        nearby.boost.thrust *= ratio;
+                        nearby.sustain.propellant *= ratio;
+                        nearby.sustain.thrust *= ratio;
+                    }
+                    1 => nearby.drag_scale *= ratio,
+                    2 => {
+                        nearby.guidance_ticks =
+                            (f64::from(nearby.guidance_ticks) * ratio).round() as u32
+                    }
+                    _ => {
+                        nearby.boost.ticks = (f64::from(nearby.boost.ticks) * ratio).round() as u32;
+                        nearby.sustain.ticks =
+                            (f64::from(nearby.sustain.ticks) * ratio).round() as u32;
+                        nearby.boost.thrust /= ratio;
+                        nearby.sustain.thrust /= ratio;
+                    }
+                }
+                for (anchor, base) in [
+                    (m.primary, primary),
+                    (anchors[0], reach[0]),
+                    (anchors[2], reach[2]),
+                ] {
+                    let value = candidate_maximum(&w, nearby, anchor);
+                    smooth = smooth.max((value / base - 1.).abs());
+                }
+            }
+        }
+        if smooth > 0.10 {
+            failures.push(format!("{}: discontinuous reach {smooth}", m.source));
+        }
+        println!(
+            "{},{:.6},{:.4},{:.3},{:.3},{:.3},{smooth:.5}",
+            m.source,
+            f64::from(body.guidance_ticks) / 120.,
+            body.drag_scale,
+            reach[0],
+            reach[1],
+            reach[2]
+        );
+    }
+    for modern in ["AIM9M.JT", "AIM9X.JT", "AA11.JT"] {
+        for old in ["AIM9B.JT", "AA2.JT", "AA8.JT"] {
+            if tails[modern].iter().zip(tails[old]).any(|(a, b)| *a <= b) {
+                failures.push(format!(
+                    "{modern} does not exceed {old} at every tail altitude"
+                ));
+            }
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n").into())
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
+    if args.get(2).is_some_and(|s| s == "--verify") {
+        return verify(dir);
+    }
     if args.get(2).is_some_and(|s| s == "--point") {
         let source = args
             .get(3)
@@ -464,7 +611,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fit_pairs(dir, args.get(3).map(String::as_str))?;
         return Ok(());
     }
-    let fit = args.iter().any(|a| a == "--fit");
     println!(
         "source,altitude_ft,aspect,physical_km,seeker_valid_km,anchor_km,drag_scale,retail_lb,physical_lb,anchor_evidence"
     );
@@ -512,40 +658,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             continue;
         }
-        let mut drag = None;
-        if fit {
-            let alt = if surface {
-                (row.range_km * 200.).clamp(300., 3000.)
-            } else if tore_sim::combat::guided::kind(&w) == Some(missiles::Guidance::Command) {
-                100.
-            } else if strike {
-                1500.
-            } else {
-                35000. * FT
-            };
-            let aspect = if surface && !strike {
-                3
-            } else if row.range_evidence.ends_with("TAIL") {
-                2
-            } else {
-                0
-            };
-            let target = row.range_km * 1000.;
-            let mut low: f64 = 0.05;
-            let mut high: f64 = 30.;
-            while high < 1024. && hit(&w, alt, aspect, target, Some(high)) {
-                high *= 2.;
-            }
-            for _ in 0..16 {
-                let mid: f64 = (low * high).sqrt();
-                if hit(&w, alt, aspect, target, Some(mid)) {
-                    low = mid
-                } else {
-                    high = mid;
-                }
-            }
-            drag = Some(low);
-        }
+        let drag = None;
         for altitude in if surface || strike {
             vec![if surface {
                 (row.range_km * 200.).clamp(300., 3000.) / FT
@@ -565,7 +678,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 3
             } {
                 let max = maximum(&w, altitude * FT, aspect, drag, false);
-                let valid = if !fit && missiles::Profile::for_weapon(&w).is_some() {
+                let valid = if missiles::Profile::for_weapon(&w).is_some() {
                     format!(
                         "{:.3}",
                         maximum(&w, altitude * FT, aspect, drag, true) / 1000.
@@ -579,7 +692,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ["head", "beam", "tail", "stationary"][aspect],
                     max / 1000.,
                     row.range_km,
-                    drag.unwrap_or(question(&w, altitude * FT, aspect, 1000.).body.drag_scale),
+                    body.drag_scale,
                     w.weight,
                     row.mass_kg / 0.45359237,
                     row.range_evidence

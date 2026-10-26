@@ -790,8 +790,8 @@ def check_missile_energy(work, _output):
             problems.append("energy study differs between serial and parallel workers")
         with runs.open() as stream:
             rows = list(csv.DictReader(stream))
-        if len(rows) != 160:
-            problems.append(f"expected 160 energy shots, got {len(rows)}")
+        if len(rows) != 240:
+            problems.append(f"expected 240 energy shots, got {len(rows)}")
         for row in rows:
             devices, rolls = int(row["devices"]), int(row["rolls"])
             limit = (devices + 7) // 8 if row["profile"] == "cm-hammer" else devices
@@ -799,8 +799,10 @@ def check_missile_energy(work, _output):
                 problems.append(f"repeated episode rolls: {row['missile']} {rolls} from {devices} devices")
                 break
         outcomes = {row["outcome"] for row in rows}
-        if "hit" not in outcomes or not outcomes.intersection({"ground", "energy", "seeker-lost"}):
+        if "hit" not in outcomes or not outcomes.intersection({"ground", "energy", "seeker-lost", "expired"}):
             problems.append("energy study lacks both an intercept and a physical/seeker miss")
+        if not any(row["range"] == "long" and row["hit"] == "0" and row["control_loss_s"] for row in rows):
+            problems.append("long energy shots never lost physical control")
         if not any(int(row["rolls"]) for row in rows):
             problems.append("energy study did not exercise a decoy roll")
         with (work / "spec-compat" / "runs.csv").open() as stream:
@@ -817,7 +819,7 @@ def combat_scenarios() -> list[Scenario]:
                     args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
                     check=check_wreck_contacts, timeout=300)]
     study = ["--missiles", "AIM9M,AIM120", "--profiles", "straight,break,beam+cm-ai@off,dive,cm-hammer",
-             "--ranges", "short,medium", "--aspects", "head,tail", "--altitudes", "low,high",
+             "--ranges", "short,medium,long", "--aspects", "head,tail", "--altitudes", "low,high",
              "--seeds", "2", "--missile-model", "energy"]
     out.append(Scenario(name="flight-missile-energy", lane="flight",
                         args=["--missile-study", "{work}/energy", "--threads", "4"] + study,

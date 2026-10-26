@@ -194,13 +194,13 @@ impl State {
         );
         let hit = self
             .energy_predictions
-            .answer(key(owner, station), u32::MAX, question)
+            .answer(key(owner, station), u32::MAX, question, self.tick)
             .is_some_and(|r| r.answer.hit);
         sight.energy_intercept = Some(hit);
         sight.in_reach &= hit;
         sight.reach = self
             .energy_predictions
-            .envelope(key(owner, station), u32::MAX, question)
+            .envelope(key(owner, station), u32::MAX, question, self.tick)
             .map(|e| super::super::guided::Reach {
                 minimum_ft: f64::from(w.seeker.zones[1].minimum_range),
                 maximum_ft: e.maximum / FT,
@@ -225,9 +225,12 @@ impl State {
         self.energy_predictions
             .request(key(owner, station), observed.id, self.tick, question, 30);
         if self.measure_prediction_cost {
-            let result = self
-                .energy_predictions
-                .answer(key(owner, station), observed.id, question);
+            let result = self.energy_predictions.answer(
+                key(owner, station),
+                observed.id,
+                question,
+                self.tick,
+            );
             let index = result.map_or(2, |r| usize::from(!r.answer.hit));
             self.prediction_gate_samples[index] += 1;
         }
@@ -247,9 +250,12 @@ impl State {
         let radius = prediction_radius(w);
         let question =
             prediction::launch_question(w, launcher, observed, radius, self.devices.wind);
-        let result = self
-            .energy_predictions
-            .answer(key(owner, station), observed.id, question)?;
+        let result = self.energy_predictions.answer(
+            key(owner, station),
+            observed.id,
+            question,
+            self.tick,
+        )?;
         if !result.answer.hit {
             return None;
         }
@@ -363,24 +369,30 @@ impl State {
                 self.devices.wind,
             );
             let id = key(own.aircraft, own.selected);
-            own.energy_hit = self
+            let answer = self
                 .energy_predictions
-                .answer(id, observed.id, question)
-                .filter(|r| r.answer.hit)
-                .map(|_| observed.id);
+                .answer(id, observed.id, question, self.tick);
+            if self.measure_prediction_cost && own.aircraft == 0 {
+                self.prediction_player_samples[answer.map_or(2, |r| usize::from(!r.answer.hit))] +=
+                    1;
+            }
+            own.energy_hit = answer.filter(|r| r.answer.hit).map(|_| observed.id);
             if let Some(sight) = &mut own.guided_sight {
                 let hit = own.energy_hit == Some(observed.id);
                 sight.energy_intercept = Some(hit);
                 sight.in_reach &= hit;
                 sight.reach = self
                     .energy_predictions
-                    .envelope(id, observed.id, question)
+                    .envelope(id, observed.id, question, self.tick)
                     .map(|e| super::super::guided::Reach {
                         minimum_ft: f64::from(w.seeker.zones[1].minimum_range),
                         maximum_ft: e.maximum / FT,
                     });
             }
-            if let Some(envelope) = self.energy_predictions.envelope(id, observed.id, question) {
+            if let Some(envelope) =
+                self.energy_predictions
+                    .envelope(id, observed.id, question, self.tick)
+            {
                 own.range_estimate = Some(RangeEstimate {
                     station: own.selected,
                     target: observed.id,
@@ -418,7 +430,7 @@ impl State {
                 question.wind = energy.wind;
                 let result = self
                     .energy_predictions
-                    .answer(client.id, id, question)
+                    .answer(client.id, id, question, self.tick)
                     .filter(|r| r.answer.hit)?;
                 Some(missiles::Solution {
                     seconds: result.answer.seconds,
@@ -505,6 +517,85 @@ mod tests {
             fall: FallState::default(),
             gun_round: None,
             tracer: false,
+        }
+    }
+    #[test]
+    fn expired_guidance_does_not_remove_the_live_body() {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        state.energy_predictions_enabled = false;
+        let target = super::super::tests::target(100, [0., 1000. / FT, 5000. / FT], 10000, 0x80);
+        let w = weapon("AIM120.JT", 3);
+        let mut p = projectile(&w, &target);
+        p.motion
+            .as_mut()
+            .unwrap()
+            .energy
+            .as_mut()
+            .unwrap()
+            .body
+            .guidance_ticks = 2;
+        state.targets = vec![target];
+        state.projectiles = vec![p];
+        for _ in 0..10 {
+            state.step_surface(&[], |_, _| 0., |_, _| false);
+        }
+        assert_eq!(state.projectiles.len(), 1);
+        assert!(
+            state.projectiles[0]
+                .motion
+                .unwrap()
+                .energy
+                .unwrap()
+                .flight
+                .lost
+        );
+        assert!(state.projectiles[0].guidance.as_ref().unwrap().unguided);
+    }
+    #[test]
+    fn missile_never_fuzes_on_its_launcher_but_hits_another_aircraft() {
+        for owner in [0, 100] {
+            let mut state = super::super::tests::fixture(true);
+            state.weapon_rules = Rules::Energy;
+            state.energy_predictions_enabled = false;
+            let mut target =
+                super::super::tests::target(100, [0., 1000. / FT, 300. / FT], 10000, 0x80);
+            target.side = Side(2);
+            let w = weapon("AIM120.JT", 3);
+            let mut p = projectile(&w, &target);
+            p.owner = owner;
+            p.guidance.as_mut().unwrap().unguided = true;
+            state.targets = vec![target];
+            state.projectiles = vec![p];
+            let mut hit = false;
+            for _ in 0..240 {
+                hit |= state
+                    .step_surface(&[], |_, _| 0., |_, _| false)
+                    .iter()
+                    .any(|e| matches!(e, Event::Hit(100)));
+            }
+            assert_eq!(hit, owner != 100, "owner={owner}");
+        }
+    }
+    #[test]
+    fn seeker_discards_its_launcher_including_a_preexisting_memory_cue() {
+        let target = super::super::tests::target(100, [0., 1000. / FT, 300. / FT], 10000, 0x80);
+        let w = weapon("AIM120.JT", 3);
+        let mut p = projectile(&w, &target);
+        p.owner = 100;
+        for _ in 0..120 {
+            guide_owned(
+                &mut p,
+                &w,
+                std::slice::from_ref(&target),
+                std::iter::empty(),
+                None,
+                &|_, _| false,
+                &|_, _| 0.,
+            );
+            assert_ne!(p.target, Some(100));
+            assert!(p.motion.unwrap().energy.unwrap().target.is_none());
+            assert!(p.guidance.as_ref().unwrap().last_intercept.is_none());
         }
     }
     #[test]

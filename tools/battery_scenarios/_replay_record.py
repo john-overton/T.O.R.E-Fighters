@@ -403,9 +403,8 @@ def unlocked_release_problems(work: Path, output: str, *, mode: str) -> list[str
         if not intended or None in intended or any(target is None for target in intended.values()):
             problems.append("beyond-energy shot has no recorded designated target")
         if any(r.get("kind") == "combat.hit" and r.get("subject") == 0
-               and r.get("fields", {}).get("projectile") in intended
-               and r.get("object") == intended.get(r.get("fields", {}).get("projectile")) for r in rows):
-            problems.append("beyond-energy shot hit its designated target")
+               and r.get("fields", {}).get("projectile") in intended for r in rows):
+            problems.append("beyond-energy shot produced an unintended hit")
     if mode != "maddog" and not any(r.get("kind") == "weapon.outcome"
             and r.get("subject") == 0 for r in rows):
         problems.append("shot has no recorded physical outcome")

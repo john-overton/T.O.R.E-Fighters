@@ -106,202 +106,162 @@ record values. No public number is invented to fill that gap.
 
 ## Per-store motors and paired anchors
 
-John requested two-condition calibration and individual motors on 2026-10-25.
-The motor table is `tore-formats::missile_motors::MOTORS`. Each row has its own
-propellant fraction, boost/sustain duration, fuel split and exhaust velocity.
-Thrust is fuel mass times effective exhaust velocity divided by burn duration,
-unless the row supplies a public thrust override. No common 35% fuel fraction
-is used for these 59 stores. Unsupported future records retain the explicitly
-fitted fallback derivation; it is not used for a reviewed row.
+Implementation mode, review corrections of 2026-10-26. John requested explicit
+guidance life, plausible drag and useful tail chase. The per-store table records
+59 profiles. These are game-model fits, not engineering performance claims.
+Thrust is fuel mass times effective exhaust divided by phase duration unless
+an explicit thrust override is supplied. Burn phase patterns remain fitted
+where no phase-resolved measurements exist; their fuel and derived thrust are
+refitted. Every profile has controlled-flight seconds from release, independent
+of fuel burn and the later removal lifetime.
 
-Field provenance:
+Sourced fields:
 
-- **CNATRA-P825-MK36:** AIM-9M boost is 12,810.878 N for 5.0 seconds, converted
-  from 2,880 lbf in the Navy's [P-825, July 2014, printed p.14-5](https://falcon.blu3wolf.com/Docs/P-825.pdf#page=284).
-  X shares that motor by the [USAF fact sheet](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104557/aim-9-sidewinder/).
-  Their 2,200 m/s effective exhaust and resulting fuel fractions are fitted,
-  not sourced propellant measurements. Sustain is zero, an agent approximation
-  to the cited single burn.
-- **EXISTING-MOTOR-FIELD-EVIDENCE:** AIM-9B thrust/duration use
-  OPEN-SIDEWINDER-B above. R440 uses OPEN-R440's two thrusts/durations and
-  16.1/19 kg charges; its 2,200 m/s field is unused by the thrust override.
-  AGM84A/E sustainer thrust uses OPEN-HARPOON; boost, duration, exhaust and
-  fuel split remain fitted. SSN9 uses OPEN-P120's sustain estimate; launch
-  boost, exhaust and derived propellant remain fitted. These are the exact
-  source/approximation distinctions in the evidence table, not independent
-  measurements of all motor fields.
-- **OPEN-KH23-BURNOUT;FITTED-PHASES:** AS7's propellant fraction is
-  (289-225)/289 from OPEN-KH23 above. Phase durations, split, exhaust and
-  hence thrust are fitted. This measured mass difference is held fixed.
-- **FITTED-PER-STORE:** all motor fields are agent fits where no reviewed
-  phase-resolved public numbers were found. A short IR single-burn, radar
-  boost/sustain or surface/strike class supplies the initial phase pattern;
-  the offline fit selects each row's fuel fraction and drag. Fictional
-  family peers use the same class method. No inferred number is attributed
-  to John or to a manufacturer.
+- AIM9B guidance is 20 seconds, from [NAVWEPS OP 2309, third revision,
+  13 August 1966, section 2-1.1](https://www.scribd.com/document/1041639431/OP-2309-3rd-AIM-9B).
+  Section 2-1.6 gives 8,440 lbf seconds over 2.2 seconds. The model uses their
+  mean thrust, 17,064.995 N, replacing the older 17,800 N estimate. Constant
+  thrust and 2,200 m/s effective exhaust are fitted; fuel follows that impulse.
+  The manual's self-destruction rule is not adopted: John's rule leaves an
+  unguided body after control expires.
+- AIM9M boost is 12,810.878 N for five seconds from [Navy P-825,
+  printed p.14-5](https://falcon.blu3wolf.com/Docs/P-825.pdf#page=284).
+  X shares M's motor according to the [USAF fact sheet](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104557/aim-9-sidewinder/).
+  Effective exhaust and derived fuel remain fitted.
+- R440's two thrusts/durations and charges use OPEN-R440 above. AGM84A/E
+  sustain thrust uses OPEN-HARPOON; SSN9 uses OPEN-P120. Their remaining
+  phase fields are fitted. AS7 fuel fraction uses the cited 289/225 kg
+  loaded/burnout masses; phase allocation is fitted.
+- All other motor fields are labelled FITTED-PER-STORE. Initial classes are
+  short IR, radar boost/sustain, surface and powered strike. Fictional records
+  use the same method without changing their game identities.
 
-The period motor reference [AD-A142508](https://apps.dtic.mil/sti/pdfs/ADA142508.pdf)
-could not be retrieved in this pass. Circulated Sparrow/Phoenix motor tables
-are therefore research leads, not verified inputs here. Validating those
-primary tables is the next evidence step for the fitted radar-motor fields;
-this access limitation does not establish that public numbers do not exist.
+No exact-variant primary guidance-duration figure was found for the other 58
+profiles. Their times are class-derived, then calibrated to the documented
+primary intercept using the selected motor. These are labelled
+FITTED-CLASS-CONTROL-TIME, not attributed to John or a manufacturer.
+For comparison, [NAVWEPS OP 3352, section 1-2](https://www.bulletpicker.com/pdf/OP-3352.pdf)
+gives 60 seconds for AIM9D. That is a different variant, so it is not silently
+assigned to M or X. Finding exact-variant control-power duration remains the
+next evidence step for those fitted fields.
 
-The paired conditions are also explicit agent fits, except for the cited
-unqualified public range figures they constrain. Both aircraft fly level,
-launcher 300 m/s and target 250 m/s. Head means the target approaches; tail
-means it recedes. The old fit incorrectly treated every unqualified public
-range as a 35,000-foot head-on separation. M/X now use a fitted 35 km high-head
-anchor plus 3.2 km tail at 5,000 ft; their low head reach is also compared with
-the published 18 km estimate. R73/class uses 35 km and 3.4 km. B/R3S use
-20 km physical high-head and 1.65 km low-tail; their rear-only seekers still
-reject head-on shots. The source's B 4.8 km and R3S 7.6 km figures remain
-unqualified historical estimates, not asserted to hold in every geometry.
-These condition choices, including revising the earlier high-head IR anchors,
-are agent decisions made to fit the two requested behaviours.
+The deterministic fit searches unknown fuel fractions 0.12..0.50 in 0.02
+steps, with sourced thrusts and AS7 fuel held fixed. Drag candidates are 0.5,
+0.75, 1, 1.5, 2, 2.5 and 3. Controlled lifetime is the primary intercept time
+rounded up to a simulation tick, plus one tick; AIM9B retains its sourced
+20 seconds. The score is four times secondary relative range error, plus
+0.15*ln(drag)^2 and 0.03*((fuel_fraction-0.35)/0.15)^2. Tail reach below
+clamp(0.08*primary_km,2,6) km at 5,000 ft adds ten times its fractional
+shortfall. This makes tail reach and aerodynamic plausibility material fit
+constraints. The drag band is a hard constraint except the two identified
+cases below, which also pay 1+ln(0.5/drag)^2 outside it. Runtime never fits.
 
-Other A2A secondary targets are low-head at 5,000 ft, 45% of the high-head
-anchor, a class-derived constraint rather than a second public measurement.
-SAM primary/secondary targets are stationary at the heights in the table;
-the second is half the height (at least 300 ft), at 102% of the primary
-range because it costs less climb energy. This is not a test of equal-height
-air launch density. A-G secondary launch altitude is halved, with a target
-range of 98% of the primary. AT2 uses 200 ft; the ship-launched SSN9 instead
-uses a 15 m/s receding target and a 135 km anchor. All figures below are
-initial separation. Held profiles remain held.
+M/X high-head targets are restored to 18 km and R73/class to 30 km, instead
+of the previous pass's 35 km. Their secondary tail targets are fitted 6/7 km
+at 5,000 ft. Other head-on targets have not been raised. B/R3S retain fitted
+20 km high-head and 1.65 km low-tail comparison targets. Rear-only seekers
+still reject head-on shots. Other A2A low-head targets retain 45% of their
+high-head value. Aircraft speeds are launcher 300/target 250 m/s. SAM primary
+and secondary targets are stationary; the second height is halved, at least
+300 ft, and the target range is 102% of primary. Strike secondary altitude is
+halved and range 98%; AT2 uses 200 ft. SSN9 uses a 15 m/s receding secondary.
+All of these conditions are agent choices, not manufacturer test conditions.
 
-The deterministic offline fit first searches propellant fractions 0.12 to
-0.50 in steps of 0.02 where fuel is unknown, keeping sourced motor thrusts
-and the AS7 mass difference fixed. It brackets drag against the primary,
-then searches 70% to 130% of that multiplier in 5% steps to minimize the
-larger relative error across both conditions. A 15% paired-anchor tolerance
-is an agent-selected acceptance bound for these fitted conditions, not
-manufacturer accuracy. The full residuals are in the baseline. Runtime
-never fits parameters.
+The earlier claim that every paired condition is within 15% is withdrawn.
+Guidance expiry and the constrained drag fit preserve the primary head-on
+anchors closely, but several old low-head/low-tail comparison targets cannot
+be matched simultaneously in this simple model. The baseline exposes every
+residual. Those comparison targets have not been raised to conceal the
+mismatch. The verified requirements are useful tail reach, altitude dependence,
+IR generation ordering, finite long-shot guidance and local fit smoothness.
 
-| Store | Fuel fraction | Boost N / s | Sustain N / s | Boost fuel share | Exhaust m/s | Field evidence |
-| --- | ---: | --- | --- | ---: | ---: | --- |
-| AA10.JT | 0.20000 | 18089.5 / 4 | 6493.7 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| AA11.JT | 0.38000 | 17556.0 / 5 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| AA11B.JT | 0.38000 | 17556.0 / 5 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| AA12.JT | 0.20000 | 12512.5 / 4 | 4491.7 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| AA2.JT | 0.34000 | 26520.0 / 2.2 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| AA6.JT | 0.50000 | 149285.7 / 3.5 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| AA8.JT | 0.42000 | 8131.2 / 5 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| AA9.JT | 0.22000 | 21739.7 / 6 | 5336.1 / 20 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AAML.JT | 0.26000 | 26216.7 / 6 | 6435.0 / 20 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AEMP1.JT | 0.20000 | 12512.5 / 4 | 4491.7 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| AGM45.JT | 0.50000 | 53542.5 / 2 | 14602.5 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AGM65A.JT | 0.12000 | 15173.4 / 2 | 4138.2 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AGM65G.JT | 0.12000 | 22063.6 / 2 | 6017.4 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AGM84A.JT | 0.21378 | 0.0 / 0 | 3000.0 / 962 | 0.00000 | 25000 | EXISTING-MOTOR-FIELD-EVIDENCE |
-| AGM84E.JT | 0.09256 | 0.0 / 0 | 3000.0 / 483.6 | 0.00000 | 25000 | EXISTING-MOTOR-FIELD-EVIDENCE |
-| AGM88.JT | 0.50000 | 109769.4 / 2 | 29937.1 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AIM120.JT | 0.20000 | 11286.3 / 4 | 4051.5 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| AIM54C.JT | 0.22000 | 20541.8 / 6 | 5042.1 / 20 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AIM7.JT | 0.20000 | 16516.5 / 4 | 5929.0 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| AIM7E.JT | 0.42000 | 29579.6 / 4 | 10618.3 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| AIM9B.JT | 0.25429 | 17800.0 / 2.2 | 0.0 / 0 | 1.00000 | 2200 | EXISTING-MOTOR-FIELD-EVIDENCE |
-| AIM9M.JT | 0.33783 | 12810.9 / 5 | 0.0 / 0 | 1.00000 | 2200 | CNATRA-P825-MK36;FITTED-EXHAUST |
-| AIM9X.JT | 0.34143 | 12810.9 / 5 | 0.0 / 0 | 1.00000 | 2200 | CNATRA-P825-MK36;FITTED-EXHAUST |
-| AM39.JT | 0.24000 | 97284.0 / 2 | 26532.0 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AS14.JT | 0.48000 | 191664.0 / 2 | 52272.0 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AS15.JT | 0.12000 | 7244.8 / 2 | 1975.8 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AS16.JT | 0.50000 | 363000.0 / 2 | 99000.0 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AS30.JT | 0.44000 | 138424.0 / 2 | 37752.0 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AS7.JT | 0.22145 | 38720.0 / 2 | 10560.0 / 6 | 0.55000 | 2200 | OPEN-KH23-BURNOUT;FITTED-PHASES |
-| AT12.JT | 0.48000 | 17387.5 / 2 | 4742.0 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| AT2.JT | 0.16000 | 3049.2 / 2 | 831.6 / 6 | 0.55000 | 2200 | FITTED-PER-STORE |
-| FIM92.JT | 0.42000 | 1921.9 / 3 | 480.5 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| MICA.JT | 0.18000 | 7207.2 / 4 | 2587.2 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| MIS.JT | 0.50000 | 4114.0 / 3 | 1028.5 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| PL10.JT | 0.18000 | 11261.3 / 4 | 4042.5 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| PL7.JT | 0.40000 | 15664.0 / 5 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| R27ER.JT | 0.26000 | 26026.0 / 5 | 7007.0 / 10 | 0.65000 | 2200 | FITTED-PER-STORE |
-| R27ET.JT | 0.50000 | 49049.0 / 5 | 13205.5 / 10 | 0.65000 | 2200 | FITTED-PER-STORE |
-| R27T.JT | 0.50000 | 43793.7 / 4 | 15720.8 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| R440.JT | 0.41786 | 20550.0 / 1.75 | 17550.0 / 2.3 | 0.45869 | 2200 | EXISTING-MOTOR-FIELD-EVIDENCE |
-| R530.JT | 0.20000 | 19305.0 / 4 | 6930.0 / 6 | 0.65000 | 2200 | FITTED-PER-STORE |
-| R550.JT | 0.40000 | 15664.0 / 5 | 0.0 / 0 | 1.00000 | 2200 | FITTED-PER-STORE |
-| SA13.JT | 0.50000 | 8800.0 / 3 | 2200.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA14.JT | 0.48000 | 2175.4 / 3 | 543.8 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA15.JT | 0.50000 | 36300.0 / 3 | 9075.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA16.JT | 0.50000 | 2376.0 / 3 | 594.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA19.JT | 0.50000 | 9240.0 / 3 | 2310.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA2A.JT | 0.50000 | 475860.0 / 3 | 118965.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA3.JT | 0.50000 | 209660.0 / 3 | 52415.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA6.JT | 0.50000 | 131780.0 / 3 | 32945.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA7.JT | 0.44000 | 1771.4 / 3 | 442.9 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SA9.JT | 0.44000 | 5808.0 / 3 | 1452.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SAN11.JT | 0.50000 | 9240.0 / 3 | 2310.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SAN3.JT | 0.50000 | 405680.0 / 3 | 101420.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SAN4.JT | 0.50000 | 28160.0 / 3 | 7040.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SAN7.JT | 0.50000 | 151800.0 / 3 | 37950.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SAN9.JT | 0.50000 | 36300.0 / 3 | 9075.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SEA_SPAR.JT | 0.50000 | 50820.0 / 3 | 12705.0 / 8 | 0.60000 | 2200 | FITTED-PER-STORE |
-| SSN9.JT | 0.52108 | 303160.0 / 3 | 7600.0 / 360 | 0.24948 | 2200 | EXISTING-MOTOR-FIELD-EVIDENCE |
+| Store | Fuel fraction | Boost N / s | Sustain N / s | Controlled s | Motor evidence | Guidance evidence |
+| --- | ---: | --- | --- | ---: | --- | --- |
+| AA10.JT | 0.38000 | 34370.0 / 4 | 12338.0 / 6 | 107.733 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA11.JT | 0.28000 | 12936.0 / 5 | 0.0 / 0 | 31.058 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA11B.JT | 0.28000 | 12936.0 / 5 | 0.0 / 0 | 31.058 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA12.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 43.083 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA2.JT | 0.12000 | 9360.0 / 2.2 | 0.0 / 0 | 29.092 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA6.JT | 0.50000 | 149285.7 / 3.5 | 0.0 / 0 | 27.017 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA8.JT | 0.24000 | 4646.4 / 5 | 0.0 / 0 | 11.375 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AA9.JT | 0.22000 | 21739.7 / 6 | 5336.1 / 20 | 204.483 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AAML.JT | 0.42000 | 42350.0 / 6 | 10395.0 / 20 | 200.917 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AEMP1.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 43.108 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AGM45.JT | 0.38000 | 40692.3 / 2 | 11097.9 / 6 | 77.483 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AGM65A.JT | 0.30000 | 37933.5 / 2 | 10345.5 / 6 | 86.950 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AGM65G.JT | 0.32000 | 58836.4 / 2 | 16046.3 / 6 | 80.558 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AGM84A.JT | 0.21378 | 0.0 / 0 | 3000.0 / 962 | 584.883 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
+| AGM84E.JT | 0.09256 | 0.0 / 0 | 3000.0 / 483.6 | 296.408 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
+| AGM88.JT | 0.38000 | 83424.7 / 2 | 22752.2 / 6 | 86.275 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AIM120.JT | 0.50000 | 28215.7 / 4 | 10128.7 / 6 | 52.308 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AIM54C.JT | 0.24000 | 22409.2 / 6 | 5500.4 / 20 | 244.150 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AIM7.JT | 0.30000 | 24774.7 / 4 | 8893.5 / 6 | 104.992 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AIM7E.JT | 0.50000 | 35213.8 / 4 | 12640.8 / 6 | 32.408 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AIM9B.JT | 0.24379 | 17065.0 / 2.2 | 0.0 / 0 | 20.000 | NAVWEPS-OP2309-MK15;FITTED-EXHAUST | NAVWEPS-OP2309-20S |
+| AIM9M.JT | 0.33783 | 12810.9 / 5 | 0.0 / 0 | 16.492 | CNATRA-P825-MK36;FITTED-EXHAUST | FITTED-CLASS-CONTROL-TIME |
+| AIM9X.JT | 0.34143 | 12810.9 / 5 | 0.0 / 0 | 16.417 | CNATRA-P825-MK36;FITTED-EXHAUST | FITTED-CLASS-CONTROL-TIME |
+| AM39.JT | 0.34000 | 137819.0 / 2 | 37587.0 / 6 | 179.183 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AS14.JT | 0.30000 | 119790.0 / 2 | 32670.0 / 6 | 14.183 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AS15.JT | 0.34000 | 20526.9 / 2 | 5598.2 / 6 | 23.850 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AS16.JT | 0.36000 | 261360.0 / 2 | 71280.0 / 6 | 337.792 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AS30.JT | 0.34000 | 106964.0 / 2 | 29172.0 / 6 | 14.383 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AS7.JT | 0.22145 | 38720.0 / 2 | 10560.0 / 6 | 20.650 | OPEN-KH23-BURNOUT;FITTED-PHASES | FITTED-CLASS-CONTROL-TIME |
+| AT12.JT | 0.36000 | 13040.6 / 2 | 3556.5 / 6 | 11.667 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| AT2.JT | 0.30000 | 5717.2 / 2 | 1559.2 / 6 | 10.592 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| FIM92.JT | 0.34000 | 1555.8 / 3 | 389.0 / 8 | 9.583 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| MICA.JT | 0.50000 | 20020.0 / 4 | 7186.7 / 6 | 75.725 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| MIS.JT | 0.30000 | 2468.4 / 3 | 617.1 / 8 | 16.267 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| PL10.JT | 0.50000 | 31281.3 / 4 | 11229.2 / 6 | 49.667 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| PL7.JT | 0.50000 | 19580.0 / 5 | 0.0 / 0 | 10.583 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| R27ER.JT | 0.24000 | 24024.0 / 5 | 6468.0 / 10 | 191.217 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| R27ET.JT | 0.36000 | 35315.3 / 5 | 9508.0 / 10 | 145.550 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| R27T.JT | 0.50000 | 43793.7 / 4 | 15720.8 / 6 | 82.158 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| R440.JT | 0.41786 | 20550.0 / 1.75 | 17550.0 / 2.3 | 14.050 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
+| R530.JT | 0.50000 | 48262.5 / 4 | 17325.0 / 6 | 36.975 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| R550.JT | 0.50000 | 19580.0 / 5 | 0.0 / 0 | 11.517 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA13.JT | 0.38000 | 6688.0 / 3 | 1672.0 / 8 | 9.992 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA14.JT | 0.34000 | 1540.9 / 3 | 385.2 / 8 | 10.625 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA15.JT | 0.32000 | 23232.0 / 3 | 5808.0 / 8 | 29.475 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA16.JT | 0.32000 | 1520.6 / 3 | 380.2 / 8 | 12.508 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA19.JT | 0.30000 | 5544.0 / 3 | 1386.0 / 8 | 23.892 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA2A.JT | 0.34000 | 323584.8 / 3 | 80896.2 / 8 | 83.150 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA3.JT | 0.28000 | 117409.6 / 3 | 29352.4 / 8 | 69.533 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA6.JT | 0.30000 | 79068.0 / 3 | 19767.0 / 8 | 68.783 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA7.JT | 0.34000 | 1368.8 / 3 | 342.2 / 8 | 10.275 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SA9.JT | 0.34000 | 4488.0 / 3 | 1122.0 / 8 | 9.983 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SAN11.JT | 0.30000 | 5544.0 / 3 | 1386.0 / 8 | 23.892 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SAN3.JT | 0.38000 | 308316.8 / 3 | 77079.2 / 8 | 88.517 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SAN4.JT | 0.30000 | 16896.0 / 3 | 4224.0 / 8 | 25.175 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SAN7.JT | 0.34000 | 103224.0 / 3 | 25806.0 / 8 | 72.933 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SAN9.JT | 0.32000 | 23232.0 / 3 | 5808.0 / 8 | 29.475 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SEA_SPAR.JT | 0.28000 | 28459.2 / 3 | 7114.8 / 8 | 69.242 | FITTED-PER-STORE | FITTED-CLASS-CONTROL-TIME |
+| SSN9.JT | 0.52108 | 303160.0 / 3 | 7600.0 / 360 | 528.533 | EXISTING-MOTOR-FIELD-EVIDENCE | FITTED-CLASS-CONTROL-TIME |
 
-### Drag scale limitations
+### Drag exceptions
 
-The multiplier acts on the documented frontal-area curve, not a newly enlarged
-reference area. Values outside 0.5 to 3 have not been hidden by renormalizing
-that curve. The table below exposes every exception. Short-range/old IR fits
-still need large effective drag because a slender frontal-area body with the
-available motor impulse and permissive low-speed control otherwise coasts well
-beyond the short conditional anchors. Their unmeasured fin/base drag and
-control-loss envelope are not independently resolved. This is a material
-model limitation, not evidence that the real missile has that body Cd.
-The Harpoon/SLAM exceptions combine long fixed-thrust air-breathing sustain
-with the game's cruise path and are effective whole-airframe drag. Unknown
-AT12 combines a synthetic diameter with a short decoded range, so its large
-scale has no real-variant interpretation. SSN9 below 0.5 is an equivalent
-body for a staged naval cruise profile. The remaining exceptions similarly
-lack aerodynamic measurements and must be treated as fitted, not engineering
-validation. These are reported exceptions to the preferred range, not a claim
-that every multiplier became physically plausible.
+57 of 59 profiles use 0.5..3. SSN9 uses 0.4: the single equivalent body with
+public 360-second sustain cannot reach its unchanged 150 km anchor with 0.5.
+This combines staged ship launch and cruise into one body, so its multiplier
+is an effective approximation, not a measured coefficient. AS16 uses the value
+below: the game's low-altitude powered-strike path cannot reproduce the
+150 km conventional Kh15 proxy with 0.5. The model does not reproduce its real
+high-altitude ballistic path. That trajectory difference is the individual
+reason for this exception, not evidence of the real missile's drag. Neither
+exception rescales the base Cd curve or increases a head-on anchor.
 
 | Store | Drag multiplier |
 | --- | ---: |
-| AA11.JT | 4.40229 |
-| AA11B.JT | 4.40229 |
-| AA12.JT | 3.68315 |
-| AA2.JT | 10.65584 |
-| AA6.JT | 5.12116 |
-| AA8.JT | 19.23411 |
-| AEMP1.JT | 3.68315 |
-| AGM84A.JT | 6.14250 |
-| AGM84E.JT | 6.11791 |
-| AIM120.JT | 3.22817 |
-| AIM7E.JT | 6.12119 |
-| AIM9B.JT | 7.86786 |
-| AIM9M.JT | 6.06570 |
-| AIM9X.JT | 6.04686 |
-| AS14.JT | 5.62542 |
-| AS16.JT | 0.27410 |
-| AS30.JT | 4.84078 |
-| AS7.JT | 4.13647 |
-| AT12.JT | 10.66591 |
-| AT2.JT | 4.75125 |
-| FIM92.JT | 7.40483 |
-| MIS.JT | 3.61888 |
-| PL10.JT | 3.35995 |
-| PL7.JT | 13.86697 |
-| R530.JT | 4.40469 |
-| R550.JT | 12.27334 |
-| SA13.JT | 6.46996 |
-| SA14.JT | 5.63079 |
-| SA16.JT | 4.52410 |
-| SA7.JT | 5.61790 |
-| SA9.JT | 6.62326 |
-| SSN9.JT | 0.47686 |
+| AS16.JT | 0.25 |
+| SSN9.JT | 0.4 |
 
 ## Other fitted fields
 
-Diameter fallback is 0.127*(mass/86)^(1/3) m, limited to 0.07..0.6 m.
-Structural limits, lift, induced drag, PN, lifetime and control-speed rules
-remain those in the [behaviour spec](../spec/missile-energy.md).
-Seeker type, gimbal, activation, arming, fuze and damage retain reviewed game
-data. Public motor facts do not establish these values. No raw susceptibility
-is clipped before evaluating the combined Energy decoy probability.
+The [behaviour specification](../spec/missile-energy.md) owns atmosphere,
+force curves, control-speed, loft, seeker, decoy and fuze rules. Diameter
+fallback is 0.127*(mass/86)^(1/3) m, limited to 0.07..0.6 m. Public motor data do
+not establish seeker identity, gimbal, activation, arming, fuze or damage.
+Those retain their reviewed game contracts. No susceptibility is clipped
+before evaluating the combined Energy decoy probability.
 
 ## Loaded aircraft mass changes
 

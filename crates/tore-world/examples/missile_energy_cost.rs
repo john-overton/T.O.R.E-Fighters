@@ -7,7 +7,7 @@ use tore_sim::{
     attitude::unit,
     combat::{
         FallState,
-        live::{Launcher, Projectile},
+        live::{Command, Launcher, Projectile},
         missiles::{self, Flight, LaunchMode, Motion, Rules, seeker::Observation},
     },
 };
@@ -114,7 +114,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cfg!(target_os = "linux") && thread_cpu_ns().is_some() {
         world.combat.state.prediction_cpu_clock = Some(thread_cpu_ns);
     }
-    world.combat.state.own_mut().armed = false;
+    let player_cue = args.iter().any(|s| s == "--player-cue");
+    world.combat.state.own_mut().armed = player_cue;
+    if player_cue {
+        let station = world
+            .combat
+            .state
+            .own()
+            .configuration()
+            .stations
+            .iter()
+            .position(|s| s.weapon.source == "AIM120.JT")
+            .ok_or("player has no AIM120")?;
+        world.combat.state.own_mut().selected = station;
+    }
     let slots = world.ai_wings.as_ref().ok_or("no AI")?.slots().to_vec();
     if slots.len() != 8 && !natural {
         return Err(format!("expected eight AI, got {}", slots.len()).into());
@@ -269,6 +282,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
             next += 1;
         }
+        if player_cue {
+            let launcher = tore_world::combat::launcher(&world.cockpits[0].flight);
+            if let Some(target) = slots
+                .iter()
+                .zip(&launchers)
+                .find(|(slot, pose)| slot.side.is_enemy() && pose.alive)
+            {
+                world
+                    .combat
+                    .state
+                    .command(0, Command::DesignateTarget(target.0.id), launcher);
+            }
+        }
         let input = SeatInput {
             seat: SeatId(0),
             tick: world.tick(),
@@ -365,6 +391,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         world.combat.state.prediction_gate_samples,
         world.combat.state.ledger.kills().len(),
         world.combat.state.ledger.total(|_| true)
+    );
+    eprintln!(
+        "player_cue_samples={:?} ticks={ticks}",
+        world.combat.state.prediction_player_samples
     );
     if refused != 0 || starved != 0 {
         return Err("prediction admission regression".into());

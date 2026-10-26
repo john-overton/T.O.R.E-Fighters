@@ -52,6 +52,12 @@ pub struct Envelope {
     pub maximum: f64,
     pub favorable: Option<(f64, f64)>,
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RangeSnapshot {
+    pub at: u64,
+    pub question: Trial,
+    pub envelope: Envelope,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct RangeSearch {
     pub id: u64,
@@ -70,9 +76,9 @@ pub struct RangeSearch {
     pub run: Option<(f64, f64)>,
     pub best: Option<(f64, f64)>,
     pub result: Option<Envelope>,
-    /// The last completed envelope of an earlier geometry, shown while a
-    /// restarted search runs so a manoeuvring launcher keeps a range cue.
-    pub previous: Option<Envelope>,
+    /// Earlier envelope and its original observation. It can remain visible
+    /// during a restarted search only while its age and geometry qualify.
+    pub previous: Option<RangeSnapshot>,
     pub done: bool,
 }
 impl RangeSearch {
@@ -228,7 +234,7 @@ impl Service {
                     .filter_map(|c| c.result)
                     .filter(|r| {
                         (tick.saturating_sub(r.at) < refresh || r.question == question)
-                            && compatible(r.question, question)
+                            && compatible(r.question, question, tick.saturating_sub(r.at))
                     })
                     .max_by_key(|r| r.at)
             })
@@ -275,7 +281,7 @@ impl Service {
             // a few ticks of launcher motion.
             let stale = client
                 .result
-                .is_some_and(|r| !compatible(r.question, question));
+                .is_some_and(|r| !compatible(r.question, question, tick.saturating_sub(r.at)));
             if !client.pending
                 && (client.result.is_none()
                     || stale
@@ -310,12 +316,23 @@ impl Service {
             // Finish a cold search before resampling moving geometry. Otherwise
             // a sustained turn can restart it forever without one publication.
             if same_model
-                && (range.result.is_none() || envelope_compatible(range.template, question))
+                && (range.result.is_none()
+                    || (tick.saturating_sub(range.submitted) <= 1200
+                        && envelope_compatible(range.template, question)))
             {
                 return;
             }
             let previous = same_model
-                .then_some(range.result.or(range.previous))
+                .then_some(
+                    range
+                        .result
+                        .map(|envelope| RangeSnapshot {
+                            at: range.submitted,
+                            question: range.template,
+                            envelope,
+                        })
+                        .or(range.previous),
+                )
                 .flatten();
             self.queue.remove(id);
             *range = RangeSearch::new(id, target, tick, question);
@@ -362,13 +379,13 @@ impl Service {
             self.admission_cursor = (index + 1) % count;
         }
     }
-    pub fn answer(&self, id: u64, target: u32, current: Trial) -> Option<Published> {
+    pub fn answer(&self, id: u64, target: u32, current: Trial, tick: u64) -> Option<Published> {
         let client = self
             .clients
             .iter()
             .find(|c| c.id == id && c.target == target)?;
         let mut result = client.result?;
-        if !compatible(result.question, current) {
+        if !compatible(result.question, current, tick.saturating_sub(result.at)) {
             return None;
         }
         result.answer.seconds = (result.answer.seconds
@@ -381,7 +398,7 @@ impl Service {
             .max(0.);
         Some(result)
     }
-    pub fn envelope(&self, id: u64, target: u32, current: Trial) -> Option<Envelope> {
+    pub fn envelope(&self, id: u64, target: u32, current: Trial, tick: u64) -> Option<Envelope> {
         let range = self
             .ranges
             .iter()
@@ -389,11 +406,20 @@ impl Service {
         if !envelope_model_matches(range.template, current) {
             return None;
         }
-        if envelope_compatible(range.template, current) {
-            range.result.or(range.previous)
-        } else {
-            range.previous
-        }
+        range
+            .result
+            .map(|envelope| RangeSnapshot {
+                at: range.submitted,
+                question: range.template,
+                envelope,
+            })
+            .into_iter()
+            .chain(range.previous)
+            .find(|snapshot| {
+                tick.saturating_sub(snapshot.at) <= 1200
+                    && envelope_geometry(snapshot.question, current, 15., 10.)
+            })
+            .map(|snapshot| snapshot.envelope)
     }
     pub fn advance(&mut self, tick: u64, ground: &impl Fn(f64, f64) -> f64) -> usize {
         self.advance_over(tick, ground, &|_, _| false)
@@ -449,10 +475,20 @@ impl Service {
 /// A published answer is explicitly an observation-snapshot estimate, not a
 /// proof about future manoeuvres. Reject material changes instead of spending
 /// unbounded synchronous work in a frame reader.
-fn compatible(a: Trial, b: Trial) -> bool {
+fn compatible(a: Trial, b: Trial, ticks: u64) -> bool {
     let ra = sub(a.target.position, a.flight.position);
     let rb = sub(b.target.position, b.flight.position);
-    let elapsed = f64::from(b.flight.age.saturating_sub(a.flight.age)) * DT;
+    if a == b {
+        return true;
+    }
+    let launch = a.flight.age == 0 && b.flight.age == 0;
+    // Launch questions have no missile age. Advance both aircraft from the
+    // observation tick, while in-flight answers use the actual missile age.
+    let elapsed = if launch {
+        ticks as f64
+    } else {
+        f64::from(b.flight.age.saturating_sub(a.flight.age))
+    } * DT;
     let projected: Vector = std::array::from_fn(|i| {
         ra[i]
             + 0.5
@@ -465,7 +501,8 @@ fn compatible(a: Trial, b: Trial) -> bool {
         a.flight.position[i] + 0.5 * (a.flight.velocity[i] + b.flight.velocity[i]) * elapsed
     });
     let tolerance = 30f64.max(norm(ra) * 0.02);
-    a.body == b.body
+    (a == b || !launch || ticks <= 600)
+        && a.body == b.body
         && a.radius == b.radius
         && a.arming_age == b.arming_age
         && a.wind == b.wind
@@ -487,13 +524,17 @@ fn envelope_model_matches(a: Trial, b: Trial) -> bool {
 }
 
 fn envelope_compatible(a: Trial, b: Trial) -> bool {
+    envelope_geometry(a, b, 5., 3.)
+}
+fn envelope_geometry(a: Trial, b: Trial, heading_degrees: f64, bearing_degrees: f64) -> bool {
     // The launch axis only shapes the first second of a range-scale flight;
     // a 1 degree tolerance restarted every search during gentle turns.
     envelope_model_matches(a, b)
         && norm(sub(a.flight.position, b.flight.position)) <= 1000.
-        && dot(a.flight.axis, b.flight.axis) >= 5f64.to_radians().cos()
+        && dot(a.flight.axis, b.flight.axis) >= heading_degrees.to_radians().cos()
         && (norm(a.flight.velocity) - norm(b.flight.velocity)).abs() <= 10.
-        && dot(unit(a.flight.velocity), unit(b.flight.velocity)) >= 5f64.to_radians().cos()
+        && dot(unit(a.flight.velocity), unit(b.flight.velocity))
+            >= heading_degrees.to_radians().cos()
         && norm(sub(a.target.velocity, b.target.velocity)) <= 25.
         && (a.flight.position[1] - b.flight.position[1]).abs() <= 150.
         && (a.target.position[1] - b.target.position[1]).abs() <= 150.
@@ -508,7 +549,7 @@ fn envelope_compatible(a: Trial, b: Trial) -> bool {
                 0.,
                 b.target.position[2] - b.flight.position[2],
             ]),
-        ) >= 3f64.to_radians().cos()
+        ) >= bearing_degrees.to_radians().cos()
 }
 
 pub fn launch_question(
@@ -561,6 +602,11 @@ crate::checkpoint_struct!(Client {
     result
 });
 crate::checkpoint_struct!(Envelope { maximum, favorable });
+crate::checkpoint_struct!(RangeSnapshot {
+    at,
+    question,
+    envelope
+});
 crate::checkpoint_struct!(RangeSearch {
     id,
     target,
@@ -605,6 +651,29 @@ mod tests {
         )
     }
     #[test]
+    fn delayed_launch_answer_projects_both_aircraft_and_range_rejects_reversal() {
+        let q = question();
+        let mut current = q;
+        for i in 0..3 {
+            current.flight.position[i] += q.flight.velocity[i] * 2.;
+            current.target.position[i] += q.target.velocity[i] * 2.;
+        }
+        assert!(compatible(q, current, 240));
+        assert!(!compatible(q, current, 0));
+        let mut service = Service::default();
+        service.request_range(1, 2, 0, q);
+        service.ranges[0].result = Some(Envelope {
+            maximum: 10000.,
+            favorable: None,
+        });
+        assert!(service.envelope(1, 2, q, 10).is_some());
+        current.flight.axis = [0., 0., -1.];
+        current.flight.velocity = [0., 0., -300.];
+        service.request_range(1, 2, 240, current);
+        assert!(service.envelope(1, 2, current, 240).is_none());
+        assert!(service.envelope(1, 2, q, 1201).is_none());
+    }
+    #[test]
     fn the_range_search_finds_a_disconnected_success_band_after_loft_starts() {
         let mut q = question();
         q.body.loft_height = 1000.;
@@ -644,7 +713,7 @@ mod tests {
         }
         assert_eq!(service, copy);
         for _ in 0..100 {
-            assert_eq!(service.answer(1, 2, q).unwrap().answer, expected);
+            assert_eq!(service.answer(1, 2, q, 0).unwrap().answer, expected);
         }
         assert_eq!(service, copy);
         service.request(1, 2, 400, q, 30);
@@ -654,11 +723,11 @@ mod tests {
         );
         let mut turned = q;
         turned.flight.axis = [1., 0., 0.];
-        assert!(service.answer(1, 2, turned).is_none());
+        assert!(service.answer(1, 2, turned, 0).is_none());
         let mut far = q;
         far.target.position[2] += 1000.;
-        assert!(service.answer(1, 2, far).is_none());
-        assert!(service.answer(1, 3, q).is_none());
+        assert!(service.answer(1, 2, far, 0).is_none());
+        assert!(service.answer(1, 3, q, 0).is_none());
     }
     /// A short shot's launch question changes faster than the refresh
     /// interval. The published answer must be renewed as soon as it no
@@ -674,7 +743,7 @@ mod tests {
                 q.body.life = 30;
                 q.target.position[2] += tick as f64;
                 service.request(id as u64, id as u32 + 2, tick, q, 1);
-                *seen |= service.answer(id as u64, id as u32 + 2, q).is_some();
+                *seen |= service.answer(id as u64, id as u32 + 2, q, tick).is_some();
             }
             service.advance(tick, &|_, _| 0.);
             if seen.iter().all(|v| *v) {
@@ -698,13 +767,13 @@ mod tests {
         let mut nearby = q;
         nearby.flight.position[0] += 2.;
         service.request(2, 2, 1, nearby, 30);
-        assert!(service.answer(2, 2, nearby).is_some());
+        assert!(service.answer(2, 2, nearby, 0).is_some());
         assert!(service.queue.requests.is_empty());
         service.request(3, 3, 1, nearby, 30);
-        assert!(service.answer(3, 3, nearby).is_none());
+        assert!(service.answer(3, 3, nearby, 0).is_none());
         service.request(4, 2, 40, nearby, 30);
         assert!(
-            service.answer(4, 2, nearby).is_none(),
+            service.answer(4, 2, nearby, 0).is_none(),
             "old geometry is not a fresh neighboring-rail answer"
         );
     }
@@ -723,12 +792,12 @@ mod tests {
             }
             service.request(1, 2, tick, current, 30);
             service.advance(tick, &|_, _| 0.);
-            answered += usize::from(service.answer(1, 2, current).is_some());
+            answered += usize::from(service.answer(1, 2, current, tick).is_some());
         }
         assert!(answered >= 432, "answered {answered} of 480 ticks");
     }
     #[test]
-    fn a_continuous_fast_turn_cannot_restart_a_cold_search_forever() {
+    fn a_fast_turn_finishes_cold_search_but_hides_incompatible_ranges() {
         let mut service = Service::default();
         let mut shown = 0;
         for tick in 0..480u64 {
@@ -740,14 +809,24 @@ mod tests {
             assert!(
                 service.advance(tick, &|_, _| 0.) <= super::super::energy_estimate::STEP_BUDGET
             );
-            shown += usize::from(service.envelope(1, 2, q).is_some());
+            shown += usize::from(service.envelope(1, 2, q, tick).is_some());
         }
-        assert!(shown >= 240, "range shown {shown} of 480 ticks");
+        assert!(
+            shown < 240,
+            "stale turning ranges shown {shown} of 480 ticks"
+        );
+        assert!(
+            service
+                .ranges
+                .iter()
+                .any(|r| r.result.is_some() || r.previous.is_some()),
+            "cold search never published"
+        );
         let mut other = question();
         other.wind[0] = 30.;
         service.request_range(1, 3, 480, other);
         assert!(
-            service.envelope(1, 3, other).is_none(),
+            service.envelope(1, 3, other, 0).is_none(),
             "a different target/model must not inherit the old cue"
         );
     }
@@ -762,7 +841,7 @@ mod tests {
             q.flight.velocity = q.flight.axis.map(|v| v * 300.);
             service.request_range(1, 2, tick, q);
             service.advance(tick, &|_, _| 0.);
-            shown += usize::from(service.envelope(1, 2, q).is_some());
+            shown += usize::from(service.envelope(1, 2, q, tick).is_some());
         }
         assert!(shown >= 600, "envelope shown {shown} of 1200 ticks");
     }
@@ -777,12 +856,12 @@ mod tests {
             current.flight.position[i] += q.flight.velocity[i] * 2.5;
             current.target.position[i] += q.target.velocity[i] * 2.5;
         }
-        assert!(compatible(q, current));
+        assert!(compatible(q, current, 0));
         current.flight.position[0] += 1000.;
-        assert!(!compatible(q, current));
+        assert!(!compatible(q, current, 0));
         current = q;
         current.flight.age = 1801;
-        assert!(!compatible(q, current));
+        assert!(!compatible(q, current, 0));
     }
     #[test]
     fn changing_surface_range_keeps_the_target_above_the_same_ground() {

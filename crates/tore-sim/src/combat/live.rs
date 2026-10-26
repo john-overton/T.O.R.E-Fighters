@@ -1738,6 +1738,8 @@ pub struct State {
     prediction_request_cpu_ns: u64,
     /// Profiling only: readable hit, readable miss, unavailable launch answers.
     pub prediction_gate_samples: [u64; 3],
+    /// Player HUD point answers: hit, miss, unavailable, only while a cue exists.
+    pub prediction_player_samples: [u64; 3],
     /// Every release since the host last drained them, for recordings.
     device_log: std::collections::VecDeque<DeviceNote>,
     /// The ownships' decoy rolls since the last drain, for recordings.
@@ -3196,6 +3198,7 @@ impl State {
             prediction_request_ns: 0,
             prediction_request_cpu_ns: 0,
             prediction_gate_samples: [0; 3],
+            prediction_player_samples: [0; 3],
             device_log: Default::default(),
             decoy_log: Default::default(),
             ground_bursts: Vec::new(),
@@ -5796,8 +5799,7 @@ impl State {
                 })
             };
             // One search over every aircraft row and every ownship. A gun round
-            // can hit any aircraft but the one that fired it; a missile or bomb
-            // can hit any aircraft once its fuze has armed, even its launcher.
+            // and missile never hit their own launcher. Bomb launch grace remains separate.
             if armed {
                 for (n, r) in rows.iter().enumerate() {
                     if let (Some(reach), Some(Some(row))) = (reach, row_bounds.get(n))
@@ -5806,6 +5808,9 @@ impl State {
                         continue;
                     }
                     let t = &r.target;
+                    if t.id == p.owner && launcher_immune(w) {
+                        continue;
+                    }
                     if gun && past_missed(t.id) {
                         continue;
                     }
@@ -5867,7 +5872,7 @@ impl State {
                         continue;
                     }
                     if !(t.body_present()
-                        && (!gun || t.id != p.owner)
+                        && (!(gun || launcher_immune(w)) || t.id != p.owner)
                         && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side)))
                     {
                         continue;
@@ -11727,6 +11732,11 @@ fn energy_decoy(
     })
 }
 
+/// John's permanent own-launcher exclusion includes powered A-G guidance.
+fn launcher_immune(w: &Weapon) -> bool {
+    w.flags & 1 != 0 && !super::guided::is_glide_bomb(w)
+}
+
 /// One tick of actor-owned guidance, shared with offline calibration probes.
 pub fn guide_owned<'a>(
     p: &mut Projectile,
@@ -11737,6 +11747,22 @@ pub fn guide_owned<'a>(
     obscured: &dyn Fn(Vector, Vector) -> bool,
     ground: &dyn Fn(f64, f64) -> f64,
 ) {
+    if let Some(flight) = &mut p.guidance
+        && (p.target == Some(p.owner)
+            || flight.seeker.target == Some(p.owner)
+            || flight.seeker.observation.is_some_and(|o| o.id == p.owner))
+    {
+        flight.seeker.target = None;
+        flight.seeker.candidate = None;
+        flight.seeker.observation = None;
+        flight.seeker.acquired = false;
+        flight.last_intercept = None;
+        flight.solution = None;
+        p.target = None;
+        if let Some(energy) = p.motion.as_mut().and_then(|m| m.energy.as_mut()) {
+            energy.target = None;
+        }
+    }
     if let Some(energy) = p.motion.as_mut().and_then(|motion| motion.energy.as_mut()) {
         if let Some(pursuit) = &mut energy.decoy.pursuit {
             pursuit.device.step(energy.wind, &|x, z| {
@@ -11774,7 +11800,7 @@ pub fn guide_owned<'a>(
         .motion
         .and_then(|m| m.energy)
         .map_or(p.guidance_ticks.unwrap_or(profile.guidance_ticks), |e| {
-            u64::from(e.body.life)
+            u64::from(e.body.guidance_ticks)
         });
     if p.age >= guidance_end {
         flight.seeker.status = Status::Expired;
@@ -11789,6 +11815,7 @@ pub fn guide_owned<'a>(
                 .then(|| support.and_then(|s| s.observation.map(|o| o.id)))
                 .flatten()
         })
+        .filter(|id| *id != p.owner)
         .filter(|id| {
             support.is_some_and(|answer| {
                 answer.supported
@@ -11866,7 +11893,7 @@ pub fn guide_owned<'a>(
         let mut observations: Vec<_> = targets
             .iter()
             .chain(others)
-            .filter(|t| flight.eligible(w, t))
+            .filter(|t| t.id != p.owner && flight.eligible(w, t))
             .filter(|t| {
                 profile.guidance != Guidance::Supported || supported.is_some_and(|o| o.id == t.id)
             })

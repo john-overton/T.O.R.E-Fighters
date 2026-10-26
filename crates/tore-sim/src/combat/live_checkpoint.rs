@@ -606,6 +606,7 @@ impl Checkpoint for State {
             prediction_request_ns: _,
             prediction_request_cpu_ns: _,
             prediction_gate_samples: _,
+            prediction_player_samples: _,
             // Why-record: the releases for a recording, drained by the host.
             device_log: _,
             // Why-record: the decoy rolls for a recording, drained by the host.
@@ -738,6 +739,7 @@ impl Checkpoint for State {
             prediction_request_ns: 0,
             prediction_request_cpu_ns: 0,
             prediction_gate_samples: [0; 3],
+            prediction_player_samples: [0; 3],
             device_log: VecDeque::<DeviceNote>::new(),
             decoy_log: VecDeque::<DecoyRoll>::new(),
             ground_bursts: Vec::new(),

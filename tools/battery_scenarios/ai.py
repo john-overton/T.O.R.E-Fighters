@@ -999,15 +999,32 @@ def prediction_launch_regression(d):
         match = re.search(r"guided_launches=(\d+) ai=8 .*refused=0 starved=0", text)
         if not match or not .7 * baseline <= int(match[1]) <= 1.3 * baseline:
             d.problem(f"{theater}: guided launch count outside 30% of reviewed pre-overhaul {baseline}")
-    d.run("big", [executable, packs[-1], "7200", "UKR", "moving", "AIM120.JT", "1", "--natural", "--big"], timeout=180)
-    if not re.search(r"ai=2[3-9] .*refused=0 starved=0", d.output()):
-        d.problem("big natural fight did not exercise 23+ AI with zero refusals/starvation")
+    big = d.run("big", [executable, packs[-1], "7200", "UKR", "moving", "AIM120.JT", "1", "--natural", "--big"], timeout=240).text()
+    match = re.search(r"guided_launches=(\d+) ai=23 .*refused=0 starved=0", big)
+    if not match or not .7 * 24 <= int(match[1]) <= 1.3 * 24:
+        d.problem("big natural fight launches outside 30% of Spec's 24, or admission failed")
+
+
+def prediction_player_cue_regression(d):
+    executable = ROOT / "target" / "release" / "examples" / ("missile_energy_cost.exe" if os.name == "nt" else "missile_energy_cost")
+    packs = sorted(d.data.glob("menu-*.pack"))
+    if not executable.exists() or not packs:
+        d.problem("release cost example and imported menu pack required")
+        return
+    for name, flags in [("4v4", []), ("big", ["--big"])]:
+        output = d.run(name, [executable, packs[-1], "2400", "UKR", "moving", "AIM120.JT", "1", "--natural", "--player-cue", *flags], timeout=240).text()
+        match = re.search(r"player_cue_samples=\[(\d+), (\d+), (\d+)\]", output)
+        counts = list(map(int, match.groups())) if match else [0, 0, 0]
+        if sum(counts[:2]) < 1800 or sum(counts[:2]) < .9 * sum(counts):
+            d.problem(f"{name}: opening 20-second player cue must have answers on 75% of all ticks and 90% of observed-cue ticks: {counts}")
 
 
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = [Scenario(name="ai-missile-launch-regression", lane="ai", args=[],
         driver=prediction_launch_regression, timeout=1000,
         notes="Four 120-second natural 4v4 fights within 30% of reviewed Spec counts; 23+ AI admission stress. Build the release missile_energy_cost example first.")]
+    out.append(Scenario(name="ai-missile-player-cue", lane="ai", args=[], driver=prediction_player_cue_regression, timeout=600,
+        notes="Actual player HUD queries in the opening 20 seconds of 4v4 and 23-AI fights: answers on 75% of all ticks and 90% of observed-cue ticks."))
     attack = ["--probe-attack", "600:10"]
 
     # 1. Fight sizes, even and lopsided, the default F/A-18D against itself.

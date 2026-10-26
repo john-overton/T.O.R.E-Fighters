@@ -22,7 +22,7 @@ pub struct Reference {
 /// a different missile variant. Physics calibration is a separate fitted layer.
 pub const REFERENCES: &[Reference] = &[
     Reference {
-        drag_scale: 3.22817294,
+        drag_scale: 2.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -35,7 +35,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "OPEN-AMRAAM-A-50-70",
     },
     Reference {
-        drag_scale: 6.06570289,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -43,12 +43,12 @@ pub const REFERENCES: &[Reference] = &[
         source: "AIM9M.JT",
         mass_kg: 86.183,
         diameter_m: 0.127,
-        range_km: 35.0,
+        range_km: 18.,
         dimensions_evidence: "USAF-SIDEWINDER",
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 6.04685959,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -56,12 +56,12 @@ pub const REFERENCES: &[Reference] = &[
         source: "AIM9X.JT",
         mass_kg: 85.275,
         diameter_m: 0.127,
-        range_km: 35.0,
+        range_km: 18.,
         dimensions_evidence: "NAVAIR-SIDEWINDER",
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 0.69623404,
+        drag_scale: 0.75000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -74,7 +74,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "NAVAIR-PHOENIX-C",
     },
     Reference {
-        drag_scale: 2.41885941,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -87,7 +87,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 1.59611704,
+        drag_scale: 1.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -100,7 +100,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 2.82012452,
+        drag_scale: 2.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -113,7 +113,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 1.72532716,
+        drag_scale: 1.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -126,7 +126,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 4.40229087,
+        drag_scale: 1.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -134,12 +134,12 @@ pub const REFERENCES: &[Reference] = &[
         source: "AA11.JT",
         mass_kg: 105.,
         diameter_m: 0.17,
-        range_km: 35.0,
+        range_km: 30.,
         dimensions_evidence: "ROE2005-R73",
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 3.68314615,
+        drag_scale: 2.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -152,7 +152,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ROE2005-RVVAE-FIGHTER-PROXY",
     },
     Reference {
-        drag_scale: 0.99362933,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -165,7 +165,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ROE2005-R33-EXPORT-PROXY",
     },
     Reference {
-        drag_scale: 0.69513279,
+        drag_scale: 0.75000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -178,7 +178,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "MAVERICK-OPEN-ESTIMATE",
     },
     Reference {
-        drag_scale: 0.99147901,
+        drag_scale: 0.75000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -191,7 +191,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "USAF-HARM-LOWER-BOUND",
     },
     Reference {
-        drag_scale: 0.51121344,
+        drag_scale: 0.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -204,7 +204,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "OPEN-AM39-RANGE",
     },
     Reference {
-        drag_scale: 7.86786012,
+        drag_scale: 3.00000000,
         structural_g: Some(12.),
         tracking_deg_s: Some(11.),
         fov_half_deg: Some(2.),
@@ -217,7 +217,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 10.65583946,
+        drag_scale: 2.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -230,7 +230,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 19.23411324,
+        drag_scale: 3.00000000,
         structural_g: Some(47.),
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -243,7 +243,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 12.27334214,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -256,20 +256,20 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 4.40229087,
+        drag_scale: 1.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
         source: "AA11B.JT",
         mass_kg: 105.0,
         diameter_m: 0.17,
-        range_km: 35.0,
+        range_km: 30.,
         dimensions_evidence: "FITTED-AGILE-IR-CLASS",
         range_evidence: "FITTED-TWO-CONDITION-IR",
         imaging: false,
     },
     Reference {
-        drag_scale: 6.12119304,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -282,7 +282,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.71679753,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -295,7 +295,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 4.40469454,
+        drag_scale: 2.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -308,7 +308,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 0.86965277,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -321,7 +321,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.73614476,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -334,7 +334,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 13.86697085,
+        drag_scale: 3.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -347,7 +347,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.35995443,
+        drag_scale: 2.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -360,7 +360,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.68314615,
+        drag_scale: 2.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -373,7 +373,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 5.12116092,
+        drag_scale: 2.50000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -386,7 +386,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 5.61790021,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -399,7 +399,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 5.63079450,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -412,7 +412,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 4.52409587,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -425,7 +425,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.40556063,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -438,7 +438,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 1.85883311,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -451,7 +451,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 6.62325858,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -464,7 +464,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.61887619,
+        drag_scale: 1.00000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -477,7 +477,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 1.78529388,
+        drag_scale: 0.75000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -490,7 +490,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 7.40483164,
+        drag_scale: 1.00000000,
         source: "FIM92.JT",
         mass_kg: 10.4,
         diameter_m: 0.07,
@@ -503,7 +503,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 2.81161969,
+        drag_scale: 1.00000000,
         source: "R440.JT",
         mass_kg: 84.0,
         diameter_m: 0.15,
@@ -516,7 +516,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 1.44888450,
+        drag_scale: 1.00000000,
         source: "SA2A.JT",
         mass_kg: 2163.0,
         diameter_m: 0.654,
@@ -529,7 +529,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 2.22815169,
+        drag_scale: 1.00000000,
         source: "SA3.JT",
         mass_kg: 953.0,
         diameter_m: 0.375,
@@ -542,7 +542,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 6.46996275,
+        drag_scale: 1.00000000,
         source: "SA13.JT",
         mass_kg: 40.0,
         diameter_m: 0.12,
@@ -555,7 +555,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 2.22044190,
+        drag_scale: 1.00000000,
         source: "SA19.JT",
         mass_kg: 42.0,
         diameter_m: 0.152,
@@ -568,7 +568,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 1.21836847,
+        drag_scale: 1.00000000,
         source: "SAN3.JT",
         mass_kg: 1844.0,
         diameter_m: 0.65,
@@ -581,7 +581,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 2.82971076,
+        drag_scale: 1.00000000,
         source: "SAN4.JT",
         mass_kg: 128.0,
         diameter_m: 0.206,
@@ -594,7 +594,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 1.45427247,
+        drag_scale: 1.00000000,
         source: "SAN7.JT",
         mass_kg: 690.0,
         diameter_m: 0.4,
@@ -607,7 +607,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 2.40556063,
+        drag_scale: 1.00000000,
         source: "SAN9.JT",
         mass_kg: 165.0,
         diameter_m: 0.23,
@@ -620,7 +620,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 2.22044190,
+        drag_scale: 1.00000000,
         source: "SAN11.JT",
         mass_kg: 42.0,
         diameter_m: 0.152,
@@ -633,7 +633,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 0.47685965,
+        drag_scale: 0.40000000,
         source: "SSN9.JT",
         mass_kg: 3180.0,
         diameter_m: 0.8,
@@ -646,7 +646,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 0.96515353,
+        drag_scale: 0.75000000,
         source: "AGM45.JT",
         mass_kg: 177.0,
         diameter_m: 0.2032,
@@ -659,7 +659,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 0.64742660,
+        drag_scale: 0.75000000,
         source: "AGM65A.JT",
         mass_kg: 209.0,
         diameter_m: 0.3048,
@@ -672,7 +672,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 6.14250328,
+        drag_scale: 1.00000000,
         source: "AGM84A.JT",
         mass_kg: 540.0,
         diameter_m: 0.343,
@@ -685,7 +685,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 6.11790877,
+        drag_scale: 1.00000000,
         source: "AGM84E.JT",
         mass_kg: 627.0,
         diameter_m: 0.343,
@@ -698,7 +698,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 4.13647153,
+        drag_scale: 1.50000000,
         source: "AS7.JT",
         mass_kg: 289.0,
         diameter_m: 0.275,
@@ -711,7 +711,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 0.27409553,
+        drag_scale: 0.25000000,
         source: "AS16.JT",
         mass_kg: 1200.0,
         diameter_m: 0.455,
@@ -724,7 +724,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 5.62541829,
+        drag_scale: 1.00000000,
         source: "AS14.JT",
         mass_kg: 660.0,
         diameter_m: 0.38,
@@ -737,7 +737,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 4.84078226,
+        drag_scale: 1.00000000,
         source: "AS30.JT",
         mass_kg: 520.0,
         diameter_m: 0.342,
@@ -750,7 +750,7 @@ pub const REFERENCES: &[Reference] = &[
         fov_half_deg: None,
     },
     Reference {
-        drag_scale: 4.75125185,
+        drag_scale: 1.00000000,
         source: "AT2.JT",
         mass_kg: 31.5,
         diameter_m: 0.142,
@@ -774,11 +774,11 @@ pub struct Fallback {
 pub const FALLBACKS: &[Fallback] = &[
     Fallback {
         source: "AS15.JT",
-        drag_scale: 2.23668169,
+        drag_scale: 1.00000000,
     },
     Fallback {
         source: "AT12.JT",
-        drag_scale: 10.66591310,
+        drag_scale: 0.75000000,
     },
 ];
 pub fn fallback(source: &str) -> Option<&'static Fallback> {
@@ -812,10 +812,8 @@ fn fingerprint_of(rows: &[Reference]) -> u64 {
         }
     };
     for row in rows {
-        for text in [row.source, row.dimensions_evidence, row.range_evidence] {
-            add(text.as_bytes());
-            add(&[0]);
-        }
+        add(row.source.as_bytes());
+        add(&[0]);
         for value in [row.mass_kg, row.diameter_m, row.range_km, row.drag_scale] {
             add(&value.to_bits().to_le_bytes());
         }
