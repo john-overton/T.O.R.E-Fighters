@@ -732,6 +732,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/airfield_audit.rs", ("airports", "ai-airfield"), "airfield audit"),
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
     _r("crates/tore-app/src/bridge_audit.rs", ("surface",), "bridge placement, imported damage assets and captures"),
+    _r("crates/tore-app/src/surface_dump/*", ("surface",), "objective placement and mission start audits"),
+    _r("tools/objectives_audit.py", ("surface",), "objective audit runner"),
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
     _r("crates/tore-app/src/flak_pass.rs", ("surface",), "the flak team probe (--flak-pass)"),

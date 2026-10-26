@@ -31,7 +31,9 @@
 //! [`TypeInfo`]; nothing here assumes one.
 pub mod area;
 mod batteries;
+mod final_starts;
 mod front;
+pub use final_starts::place as scene_starts;
 pub mod ground;
 mod sites;
 mod starts;
@@ -66,12 +68,17 @@ pub const VEHICLE_JITTER_DEG: i32 = 30;
 /// rotation about its centroid.
 pub const FLEET_SHIFT_FT: i64 = 6_000;
 pub const FLEET_TURN_DEG: i32 = 20;
+/// Bounded search for a valid fleet move within the existing shift/turn limits.
+pub const FLEET_CANDIDATES: usize = 128;
 /// Each ship after the fleet's move.
 pub const SHIP_JITTER_FT: i64 = 300;
 pub const SHIP_JITTER_DEG: i32 = 10;
 /// Candidates per jittered object; the first that stands wins, else the
 /// retail (or relocated) spot.
 pub const JITTER_CANDIDATES: usize = 8;
+/// Fitted bounded search for an added radar or truck. Exhaustion is reported;
+/// the existing equipment count remains pending a fallback-policy decision.
+pub const SUPPORT_CANDIDATES: usize = 128;
 /// A placed unit keeps this far, plus its own radius, from every runway.
 pub const RUNWAY_CLEARANCE_FT: i64 = 300;
 /// Land units stand where the four corner elevations span at most this many
@@ -384,7 +391,10 @@ pub(crate) fn stands(
         [at[0] - radius, at[1] + radius],
         [at[0] + radius, at[1] + radius],
     ];
-    if corners.iter().any(|c| ground.water(*c) != ship) {
+    if corners
+        .iter()
+        .any(|c| !ground.inside(*c, 0) || ground.water(*c) != ship)
+    {
         return false;
     }
     if !ship && !ground.level(at, LEVEL_UNITS) {
@@ -395,6 +405,27 @@ pub(crate) fn stands(
         || obstacles.fixed.iter().any(|o| o.within(at, radius))
         || ground.near_runway(at, runway)
         || obstacles.strips.iter().any(|o| o.within(at, runway)))
+}
+
+/// Occupied solid unit footprints for support placement. Pavement, roads and
+/// the invisible barrage controller are not bodies to avoid here.
+pub(crate) fn occupied<'a>(
+    units: impl Iterator<Item = &'a Unit>,
+    types: &mut dyn FnMut(&str) -> TypeInfo,
+) -> Vec<([i64; 2], i64)> {
+    units
+        .filter_map(|unit| {
+            let info = types(&unit.resource);
+            (!info.strip && !info.bridge_or_road && unit.resource != BARRAGE_ZONE)
+                .then_some((xz(unit.position), info.footprint.radius()))
+        })
+        .collect()
+}
+
+pub(crate) fn clear_of_units(at: [i64; 2], radius: i64, occupied: &[([i64; 2], i64)]) -> bool {
+    occupied
+        .iter()
+        .all(|(other, size)| distance2(at, *other) >= (radius + size).pow(2))
 }
 
 /// A point uniformly inside a disc of `radius` feet (rejection sampling).

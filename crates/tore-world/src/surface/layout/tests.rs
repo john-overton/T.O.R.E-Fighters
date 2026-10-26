@@ -411,6 +411,7 @@ fn object(ordinal: u32, at: [i64; 2], target: bool) -> sites::Object {
         retail: at,
         heading: 0,
         rule: Rule::Defense,
+        water: false,
         info: TypeInfo::default(),
         target,
         routed: false,
@@ -1828,4 +1829,234 @@ fn no_area_defenses_without_a_front_with_a_target_or_at_none() {
     both.area = Some(area(3, 3, 1));
     lay(&mut both, &ground, &[]);
     assert!(area_units(&both).is_empty());
+}
+
+#[test]
+fn exhausted_support_search_is_explicit_without_removing_equipment() {
+    // Authored launchers may leave no valid support spot in the allowed ring.
+    // Keep the existing requested equipment, but expose every unresolved spot.
+    let grid = Grid::uniform(128, ground::WATER_CLASS, 0);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut s = surface(
+        vec![unit(t(0), "SA6.NT", class::SAM, [MID, MID], ENEMY_SIDE)],
+        Some(target(1, Variation::OFF)),
+    );
+    lay(&mut s, &ground, &[]);
+    assert_eq!(s.batteries.len(), 1);
+    assert_eq!(s.trucks.len(), 2);
+    assert_eq!(s.units.len(), 4);
+    assert_eq!(
+        s.layout_notes
+            .iter()
+            .filter(|n| n.starts_with("support fallback "))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn a_ship_footprint_cannot_extend_beyond_the_map_into_implicit_water() {
+    let grid = Grid::uniform(8, ground::WATER_CLASS, 0);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let obstacles = Obstacles {
+        fixed: &[],
+        strips: &[],
+    };
+    assert!(!stands(&ground, &obstacles, [10, 8192], 50, true));
+    assert!(stands(&ground, &obstacles, [100, 8192], 50, true));
+}
+
+#[test]
+fn support_units_do_not_overlap_other_mobile_units_or_each_other() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    for seed in 1..=20 {
+        let mut units = vec![unit(t(0), "SA6.NT", class::SAM, [MID, MID], ENEMY_SIDE)];
+        // A crowded target, including a unit that owns no supply truck.
+        for ordinal in 1..=5 {
+            units.push(unit(
+                t(ordinal),
+                "T72.NT",
+                class::VEHICLE,
+                [MID + 200 * ordinal as i32 - 500, MID + 220],
+                ENEMY_SIDE,
+            ));
+        }
+        let mut s = surface(units, Some(target(seed, Variation::OFF)));
+        lay(&mut s, &ground, &[]);
+        assert!(!s.trucks.is_empty());
+        for added in s
+            .units
+            .iter()
+            .filter(|u| matches!(u.id.range(), IdRange::SupplyTruck | IdRange::BatteryRadar))
+        {
+            for other in s.units.iter().filter(|u| u.id != added.id) {
+                let clearance = types(&added.resource).footprint.radius()
+                    + types(&other.resource).footprint.radius();
+                assert!(
+                    distance2(xz(added.position), xz(other.position)) >= clearance.pow(2),
+                    "seed {seed}: {:?} overlaps {:?}",
+                    added.id,
+                    other.id
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn jitter_reserves_neighbours_fallbacks_and_accepted_spots() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    for seed in 1..=20 {
+        let units = (0..20)
+            .map(|ordinal| {
+                unit(
+                    t(ordinal),
+                    "T72.NT",
+                    class::VEHICLE,
+                    [
+                        MID + (ordinal % 5) as i32 * 200,
+                        MID + (ordinal / 5) as i32 * 200,
+                    ],
+                    ENEMY_SIDE,
+                )
+            })
+            .collect();
+        let mut s = surface(units, Some(target(seed, JITTER_ONLY)));
+        lay(&mut s, &ground, &[]);
+        let units: Vec<_> = s.template_units().collect();
+        for (index, a) in units.iter().enumerate() {
+            for b in &units[index + 1..] {
+                let clearance =
+                    types(&a.resource).footprint.radius() + types(&b.resource).footprint.radius();
+                assert!(
+                    distance2(xz(a.position), xz(b.position)) >= clearance.pow(2),
+                    "seed {seed}: {:?} overlaps {:?}",
+                    a.id,
+                    b.id
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn starts_follow_targets_after_the_airport_moves_them() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut target_unit = unit(t(0), "HANGAR.OT", class::STRUCTURE, [MID, MID], ENEMY_SIDE);
+    target_unit.flags |= 0x80;
+    let mut s = surface(vec![target_unit], Some(target(3, Variation::OFF)));
+    lay(&mut s, &ground, &[]);
+    let before = s.starts.clone().unwrap();
+    s.units[0].position[0] += 8_000;
+    let scene = tore_sim::airport::Scene::default();
+    let after = scene_starts(&s, &grid, &scene, None).unwrap();
+    assert_eq!(after.target, [MID + 8_000, MID]);
+    assert_ne!(after.blue, before.blue);
+    assert_ne!(after.red, before.red);
+    assert!(
+        distance2(after.red.map(i64::from), after.target.map(i64::from))
+            <= (RED_START_NM * NM_FT).pow(2)
+    );
+    let distance = (distance2(after.blue.map(i64::from), after.red.map(i64::from)) as f64).sqrt();
+    assert!((distance - 20. * NM_FT as f64).abs() <= 2.);
+    assert_eq!(Some(after), scene_starts(&s, &grid, &scene, None));
+}
+
+#[test]
+fn automatic_airfields_rank_the_final_runway_centers() {
+    use tore_sim::airport::{OrientedBox, Runway, Scene};
+    let grid = Grid::land(128);
+    let mut target_unit = unit(t(0), "HANGAR.OT", class::STRUCTURE, [MID, MID], ENEMY_SIDE);
+    target_unit.flags |= 0x80;
+    let mut s = surface(vec![target_unit], Some(target(3, Variation::OFF)));
+    let runway = |id, distance| {
+        let center = [f64::from(MID), 0., f64::from(MID) + distance];
+        Runway {
+            object: id,
+            airport: id,
+            name: "synthetic".into(),
+            surface: OrientedBox {
+                center,
+                half: [100., 1., 5_000.],
+                heading: 0.,
+                pitch: 0.,
+                bank: 0.,
+            },
+            approach_center: center,
+            elevation_ft: 0.,
+            heading: 0.,
+            length_ft: 10_000.,
+        }
+    };
+    s.object_sides.insert(l(0).0, FRIENDLY_SIDE);
+    s.object_sides.insert(l(1).0, FRIENDLY_SIDE);
+    let scene = Scene {
+        runways: vec![
+            runway(l(0).0, 25. * NM_FT as f64),
+            runway(l(1).0, 16. * NM_FT as f64),
+        ],
+        ..Scene::default()
+    };
+    let starts = scene_starts(&s, &grid, &scene, None).unwrap();
+    assert_eq!(starts.blue_airfields, vec![l(1).0, l(0).0]);
+    assert!(starts.red_airfields.is_empty());
+}
+
+#[test]
+fn a_carrier_and_its_deck_aircraft_relocate_together_on_water() {
+    let grid = Grid::uniform(128, ground::WATER_CLASS, 0);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut carrier = unit(t(0), "CLEM.NT", class::SHIP, [MID, MID], ENEMY_SIDE);
+    carrier.flags |= 0x80;
+    let mut s = surface(vec![carrier], Some(target(1, Variation::ON)));
+    s.parked.push(ParkedAircraft {
+        id: t(1),
+        resource: "SPE.PT".into(),
+        position: [MID + 40, 0, MID + 200],
+        angles: [0; 3],
+        nationality: Some(0x83),
+        side: ENEMY_SIDE,
+        target: false,
+        deck: Some(t(0)),
+    });
+    lay(&mut s, &ground, &[]);
+    assert!(
+        !s.transform.is_identity(),
+        "fixed-in-group must not mean land-only"
+    );
+    assert!(ground.water(xz(s.unit(t(0)).unwrap().position)));
+    assert!(ground.water(xz(s.parked[0].position)));
+    let gap =
+        (distance2(xz(s.unit(t(0)).unwrap().position), xz(s.parked[0].position)) as f64).sqrt();
+    assert!((gap - 40_f64.hypot(200.)).abs() < 2.);
+}
+
+#[test]
+fn relocation_rejects_land_centers_whose_footprints_cross_water() {
+    let mut grid = Grid::land(128);
+    for col in (1..128).step_by(2) {
+        for row in 0..128 {
+            grid.set(col, row, ground::WATER_CLASS);
+        }
+    }
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut target = object(0, [i64::from(MID) + 4096, i64::from(MID)], true);
+    target.info.footprint = Footprint {
+        min: [-3500; 2],
+        max: [3500; 2],
+    };
+    // Every land band is one cell wide; this footprint cannot fit inside it.
+    assert!(
+        sites::relocate(
+            std::slice::from_ref(&target),
+            &ground,
+            1,
+            "QTEST",
+            target.retail
+        )
+        .is_none()
+    );
 }

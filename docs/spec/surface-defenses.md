@@ -411,7 +411,10 @@ many others survive.
 **Validity** uses integer data only, so every platform decides the same:
 
 - Land units need a land cell and ships a water cell, checked at the unit's
-  centre and at the four corners of its footprint. A cell is water when its
+  centre and at the four corners of its footprint. All five points must be
+  inside the map, including for ships: the water query outside the map is not
+  a valid placement. A fleet's common move must pass the same footprint and
+  fixed-obstacle checks before it can become an individual ship's fallback. A cell is water when its
   integer class byte is 1 (open water) or when its colour byte is 255 (the
   water cutout) and no ground texture placement covers it. Those colour-255
   cells with a land class are shore cells at sea level (every one in all
@@ -429,7 +432,15 @@ many others survive.
 - Land units refuse a cell whose four corner elevations span more than one
   elevation unit (256 ft).
 - Footprint clearance from every fixed template object and theater layout
-  object, plus 300 ft from every runway's box.
+  object, plus 300 ft from every runway's box. Jitter also avoids other template
+  units, reserving each later unit's fallback until its position is chosen.
+  Added trucks and radars avoid all solid surface units and earlier additions.
+  This collision prevention is fitted, an agent decision on 2026-10-25. Authored
+  overlaps and invalid authored fallback positions are still reported by the
+  objective audit; jitter does not repair the source assemblies.
+- A fleet's common shift tries up to 128 candidates within the same 6,000 ft
+  and 20 degree limits (fitted agent decision, 2026-10-25). The individual
+  ship still has its 300 ft and 10 degree jitter.
 - Up to 8 candidates per object from the same stream; if none passes, the
   original retail position is used (the relocated one in a relocated
   template). An NT structure (the GCI radar site) stays put like a building.
@@ -474,6 +485,11 @@ dirt strip (`DTSTRP`, a `_STRIPProc` runway) counts as a runway, so `~QCCMHQ`
 templates relocate; the 16 "nothing" templates have no objects. The
 `surface-relocate-sweep` battery scenario pins the list. The per-theater split is
 in [Per-theater notes](#per-theater-notes).
+
+Carriers with parked aircraft and their deck aircraft retain their relative
+positions during a group move and require water. They skip individual jitter.
+Relocation checks the full conservative footprint, including for fixed objects,
+through the same validity query as jitter (spec-derived corrections, 2026-10-25).
 
 **Group transform.** A relocatable template moves as a rigid group: a rotation
 about its targets' centroid by a whole number of degrees (0 to 359) and a
@@ -535,7 +551,11 @@ from the seed and is inside the digest.
   target, so the enemy distance setting measures Blue's run to the defended
   target, not to Red's airfield. Enemy Wing 1 must have aircraft, and it never
   shares the player's runway.
-- The target point is the targets' placed centroid. A theater with no front
+- The target point is the targets' placed centroid. Compute the starts after
+  airport replacement has moved target buildings and parked aircraft. Rank
+  airfields from their final runway centers. Correcting the stale objective
+  point is spec-derived. Choosing runway centers for the distance ranking is
+  fitted, an agent decision on 2026-10-25. A theater with no front
   (no owned placements on one side) starts Blue toward the middle of the map
   (fitted).
 - No ground target: unchanged (the [area defenses](#area-defenses) add no
@@ -1809,8 +1829,14 @@ flowchart TD
 4. **New element.** Otherwise a radar is added: 600 to 1,000 ft from the
    launcher centroid (1,000 to 1,500 ft from an SA2A site's centre, outside the
    six-rail ring), with the jitter validity rules and clear of its launchers,
-   moving with its template's group transform; if no candidate stands, the
-   first drawn. Added radars are never targets. Base layouts draw their
+   moving with its template's group transform. The bounded support search
+   tries 128 candidates and also avoids other solid units and earlier additions.
+   If none stands, retain the existing first-candidate fallback and record its
+   unit ID explicitly in the layout notes and objective audit. Changing requested
+   equipment counts or moving its authored owner needs a placement-policy
+   decision. The longer search and collision checks are fitted agent decisions
+   from the objective audit on 2026-10-25; an exhausted search is not a valid site.
+   Added radars are never targets. Base layouts draw their
    radars from seed 0, so a base layout looks the same in every flight. A
    battery whose radar element the import cannot place (its record or shape
    missing) is not formed and its launchers stay self-contained, so a mission
@@ -1868,8 +1894,13 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
   serves essentially one slot. A battery's own truck serves its first launcher
   that has no slot truck (a named launcher), else its first launcher. Placed
   200 to 400 ft from the unit it serves (after that unit's jitter), with the
-  same validity rules and clear of it; the first drawn spot when none stands;
-  ownership is the slot's. Ids `0x5800_0000` up, in the order of the units
+  same validity rules and clear of every solid unit and earlier support addition.
+  The search tries 128 seeded candidates. With none valid, retain the existing
+  first-candidate fallback and identify the truck and served unit in the layout
+  notes. The audit still reports every broken rule. Omitting requested support
+  or moving its authored owner needs a placement-policy decision. The longer
+  search and collision checks are fitted agent decisions from the objective
+  audit on 2026-10-25. Ownership is the slot's. Ids `0x5800_0000` up, in the order of the units
   served (a slot's truck before its battery's).
   Trucks are passive units, targetable, Vehicle class (0x0200), and move with the
   defended group's relocation. Never targets. Number and placement: fitted,
