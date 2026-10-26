@@ -767,3 +767,22 @@ scripted jet leader's straight departure. Spassk's northern map edge is too
 close for that long jet departure. The 264,000-tick run leaves time for the
 last aircraft to taxi back from the far end of a 12,000 ft runway. The
 existing taxi/landing checker requires every AI member to park.
+
+## Missile prediction admission and launch counts
+
+`ai-missile-launch-regression` uses the natural fight mode of the release
+`missile_energy_cost` example. Build it with
+`cargo build --locked --release -p tore-world --example missile_energy_cost`.
+It reads the battery's isolated imported pack. Four F-16C 4v4 worlds run for
+120 seconds, requiring guided launch counts within 30% of the independent
+review's pre-overhaul counts: UKR 11, BAL/SPA/GRE 12. This tolerance is an
+agent-selected regression bound, not an assertion of identical combat outcomes.
+A 60-second 23+ AI free fight must have zero refused prediction requests and
+zero clients waiting over ten simulated seconds for admission. The example
+also prints cost percentiles and maximums; use a sequential release run for
+performance acceptance, since concurrent battery jobs can perturb wall time.
+
+`surface-moving-hit-sa2a-*`, `surface-moving-hit-sa3-*` and
+`surface-moving-hit-sa6-*` require hits on straight, vulnerable jets at
+10,000 and 20,000 ft. They complement `surface-battery-sa2`, which checks
+battery coordination with invulnerability enabled.

@@ -807,13 +807,14 @@ implementation: four guidance types, pitbull activation, launch velocity and ran
 motor burn, guidance lifetime, uncued seeker search and HUD/tone feedback, with
 delivery stages, [measured acceptance and remaining limits](baselines/missiles.md).
 
-#### Missile flight overhaul (implemented, review corrections pending)
+#### Missile flight overhaul (review corrections validated, study stopped)
 
 Authorized by John on 2026-10-25. The shared finite-energy kernel, physical
 decoy pursuit, bounded predictions, public/class physical data and full A2A
 calibration are implemented in new worlds. Linux compatibility and regression
-checks passed. Phase 3 was stopped after review invalidated its results; study
-and prediction-cost acceptance await corrections and fresh validation. [Behaviour](spec/missile-energy.md),
+checks passed. Phase 2 review corrections now pass the expanded regression
+battery and prediction-cost gate. Phase 3 remains stopped pending lead review;
+its earlier results remain invalidated. [Behaviour](spec/missile-energy.md),
 [data provenance](formats/missile-energy-data.md) and
 [measured baseline](baselines/missile-energy.md) own the details.
 

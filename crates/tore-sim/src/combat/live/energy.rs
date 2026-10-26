@@ -57,6 +57,27 @@ fn powered(w: &Weapon) -> bool {
     w.movement.fuel_t > w.movement.ignite_t
 }
 impl State {
+    fn prediction_request_start(&self) -> Option<(std::time::Instant, Option<u64>)> {
+        self.measure_prediction_cost.then(|| {
+            (
+                std::time::Instant::now(),
+                self.prediction_cpu_clock.and_then(|clock| clock()),
+            )
+        })
+    }
+    fn prediction_request_finish(&mut self, start: Option<(std::time::Instant, Option<u64>)>) {
+        if let Some((wall, cpu)) = start {
+            self.prediction_request_ns +=
+                wall.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+            if let Some(elapsed) = cpu
+                .zip(self.prediction_cpu_clock.and_then(|clock| clock()))
+                .and_then(|(a, b)| b.checked_sub(a))
+            {
+                self.prediction_request_cpu_ns += elapsed;
+            }
+        }
+    }
+
     /// Motion of a designated command target, already owned by the strike cockpit.
     pub fn guided_point_velocity(&self, owner: u32, kind: Guidance) -> Vector {
         if kind != Guidance::Command {
@@ -90,6 +111,7 @@ impl State {
         if self.weapon_rules != Rules::Energy || !powered(w) {
             return;
         }
+        let measured = self.prediction_request_start();
         let question = prediction::launch_question(
             w,
             launcher,
@@ -103,6 +125,7 @@ impl State {
             self.tick,
             question,
         );
+        self.prediction_request_finish(measured);
     }
     /// Admission starvation means a requested point has waited over ten
     /// simulated seconds without an active slot. Completion latency is separate.
@@ -112,7 +135,14 @@ impl State {
             .clients
             .iter()
             .filter(|c| c.pending && !service.queue.requests.iter().any(|r| r.id == c.id))
-            .map(|c| self.tick.saturating_sub(c.waiting_since));
+            .map(|c| self.tick.saturating_sub(c.waiting_since))
+            .chain(
+                service
+                    .ranges
+                    .iter()
+                    .filter(|r| !r.done && !service.queue.requests.iter().any(|job| job.id == r.id))
+                    .map(|r| self.tick.saturating_sub(r.waiting_since)),
+            );
         (
             service.queue.refused,
             waits.clone().filter(|wait| *wait > 1200).count(),
@@ -126,7 +156,7 @@ impl State {
             self.energy_predictions
                 .ranges
                 .iter()
-                .filter(|r| r.result.is_some())
+                .filter(|r| r.result.is_some() || r.previous.is_some())
                 .count(),
         )
     }
@@ -188,11 +218,20 @@ impl State {
         if self.weapon_rules != Rules::Energy || !powered(w) {
             return;
         }
+        let measured = self.prediction_request_start();
         let radius = prediction_radius(w);
         let question =
             prediction::launch_question(w, launcher, observed, radius, self.devices.wind);
         self.energy_predictions
             .request(key(owner, station), observed.id, self.tick, question, 30);
+        if self.measure_prediction_cost {
+            let result = self
+                .energy_predictions
+                .answer(key(owner, station), observed.id, question);
+            let index = result.map_or(2, |r| usize::from(!r.answer.hit));
+            self.prediction_gate_samples[index] += 1;
+        }
+        self.prediction_request_finish(measured);
     }
     pub fn energy_solution(
         &self,
@@ -396,11 +435,13 @@ impl State {
             }
         }
         if let Some(started) = started {
-            self.prediction_cost_ns = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+            self.prediction_cost_ns = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+                + std::mem::take(&mut self.prediction_request_ns);
             self.prediction_cpu_cost_ns = cpu_start.and_then(|from| {
                 self.prediction_cpu_clock
                     .and_then(|clock| clock())
                     .and_then(|to| to.checked_sub(from))
+                    .map(|elapsed| elapsed + std::mem::take(&mut self.prediction_request_cpu_ns))
             });
         }
     }
@@ -785,5 +826,42 @@ mod tests {
                 .any(|event| matches!(event, Event::Hit(100)));
         }
         assert!(!hit, "passing the decoy permanently disables the fuze");
+    }
+    #[test]
+    fn modern_ir_motors_catch_a_straight_fighter_astern_but_a_long_low_drag_escapes() {
+        for source in ["AIM9M.JT", "AIM9X.JT", "AA11.JT"] {
+            let w = weapon(source, 2);
+            let body = missiles::energy_profile::body(&w);
+            assert!(body.valid(), "{source}");
+            let shot = |alt: f64, distance: f64| {
+                missiles::energy_estimate::Trial::new(
+                    body,
+                    missiles::energy::Flight::launch(
+                        [0., alt * FT, 0.],
+                        [0., 0., 300.],
+                        [0., 0., 1.],
+                    ),
+                    missiles::energy::Observation {
+                        position: [0., alt * FT, distance],
+                        velocity: [0., 0., 250.],
+                    },
+                    10.,
+                    0,
+                )
+                .finish(&|_, _| 0.)
+            };
+            assert!(
+                shot(15000., 2700.).hit,
+                "{source}: 2.7 km astern at 15,000 ft"
+            );
+            assert!(
+                shot(5000., 2700.).hit,
+                "{source}: 2.7 km astern at 5,000 ft"
+            );
+            assert!(
+                !shot(500., 12000.).hit,
+                "{source}: a 12 km deck drag escapes"
+            );
+        }
     }
 }

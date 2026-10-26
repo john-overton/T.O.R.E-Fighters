@@ -67,7 +67,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clamp(1, 8);
     let resources = tore_import::pack::read_pack(Path::new(pack))?;
     let mut spec = MissionSpec::new(theater, AircraftId::F16C);
-    spec.preset = Preset::Hold;
+    let natural = args.iter().any(|s| s == "--natural");
+    let big = args.iter().any(|s| s == "--big");
+    spec.preset = if natural { Preset::Free } else { Preset::Hold };
     spec.wings[1] = WingSpec {
         aircraft: AircraftId::F16C,
         count: 4,
@@ -78,6 +80,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         count: 4,
         skill: Skill::Average,
     };
+    if big {
+        for wing in [0usize, 2, 4, 5] {
+            spec.wings[wing] = WingSpec {
+                aircraft: AircraftId::F16C,
+                count: 4,
+                skill: Skill::Average,
+            };
+        }
+    }
     let mut world = World::build(
         &spec,
         &resources,
@@ -90,15 +101,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ai_wings
         .as_mut()
         .ok_or("no AI")?
-        .apply_mission_preset(Preset::Hold, player_position);
-    world.combat.state.weapon_rules = Rules::Energy;
+        .apply_mission_preset(
+            if natural { Preset::Free } else { Preset::Hold },
+            player_position,
+        );
+    world.combat.state.weapon_rules = if args.iter().any(|s| s == "--spec") {
+        Rules::Spec
+    } else {
+        Rules::Energy
+    };
     world.combat.state.measure_prediction_cost = true;
     if cfg!(target_os = "linux") && thread_cpu_ns().is_some() {
         world.combat.state.prediction_cpu_clock = Some(thread_cpu_ns);
     }
     world.combat.state.own_mut().armed = false;
     let slots = world.ai_wings.as_ref().ok_or("no AI")?.slots().to_vec();
-    if slots.len() != 8 {
+    if slots.len() != 8 && !natural {
         return Err(format!("expected eight AI, got {}", slots.len()).into());
     }
     let weapon_name = args.get(5).map_or("AIM120.JT", String::as_str);
@@ -122,6 +140,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut frozen = None;
     let fixed = args.get(4).is_some_and(|s| s == "frozen");
     let mut answers = 0usize;
+    let mut launched = std::collections::BTreeSet::new();
+    let mut max_clients = 0;
+    let mut refused = 0;
+    let mut starved = 0;
+    let mut max_wait = 0;
     println!("tick,estimate_ms,request_ms,missiles,pending,ready_envelopes");
     for tick in 0..ticks {
         let mut launchers = Vec::new();
@@ -133,7 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .actor_flight_mut(slot.id)
                 .ok_or("AI disappeared")?;
             let launcher = tore_world::combat::launcher(flight);
-            if !launcher.alive {
+            if !natural && !launcher.alive {
                 return Err(format!("AI {} stopped flying at tick {tick}", slot.id).into());
             }
             launchers.push(launcher);
@@ -143,7 +166,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             launchers.clone()
         };
-        let request_cpu_start = thread_cpu_ns();
         let start = Instant::now();
         let observations: Vec<_> = (0..slots.len())
             .map(|i| {
@@ -170,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect();
         // Reserved probe stations avoid replacing an actor's real launch jobs.
-        for (i, slot) in slots.iter().enumerate() {
+        for (i, slot) in slots.iter().enumerate().filter(|_| !natural) {
             for station in 0..stations {
                 let (launcher, observed) = station_geometry(queries[i], observations[i], station);
                 world.combat.state.request_energy_solution(
@@ -190,10 +212,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         let requests = start.elapsed().as_secs_f64() * 1000.;
-        let request_cpu = request_cpu_start
-            .zip(thread_cpu_ns())
-            .and_then(|(a, b)| b.checked_sub(a));
-        while world.combat.state.projectiles.len() < 16 {
+        while !natural
+            && world
+                .combat
+                .state
+                .projectiles
+                .iter()
+                .filter(|p| p.id >= 0x2000_0000)
+                .count()
+                < 16
+        {
             let i = (next as usize) % 8;
             let target = (i + 4) % 8;
             let direction = unit(missiles::sub(
@@ -247,13 +275,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
         world.step(&[input], &mut out)?;
-        let cost = world.combat.state.prediction_cost_ns as f64 / 1e6 + requests;
+        for p in &world.combat.state.projectiles {
+            if p.guidance.is_some() {
+                launched.insert(p.id);
+            }
+        }
+        let (rejected, starving, wait) = world.combat.state.energy_prediction_admission_stats();
+        refused = refused.max(rejected);
+        starved = starved.max(starving);
+        max_wait = max_wait.max(wait);
+        let cost = world.combat.state.prediction_cost_ns as f64 / 1e6;
         let cpu = world
             .combat
             .state
             .prediction_cpu_cost_ns
-            .zip(request_cpu)
-            .map(|(a, b)| a.saturating_add(b) as f64 / 1e6);
+            .map(|n| n as f64 / 1e6);
         if let Some(cpu) = cpu {
             if tick < 240 {
                 cold_cpu.push(cpu)
@@ -264,7 +300,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if cost > 2. {
             eprintln!("wall_outlier tick={tick} wall_ms={cost:.6} cpu_ms={cpu:?}");
         }
-        let (pending, _, envelopes) = world.combat.state.energy_prediction_counts();
+        let (pending, clients, envelopes) = world.combat.state.energy_prediction_counts();
+        max_clients = max_clients.max(clients);
         max_pending = max_pending.max(pending);
         max_envelopes = max_envelopes.max(envelopes);
         if tick < 240 {
@@ -274,7 +311,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let start = Instant::now();
         // Same-state frame readers: no job submission or simulation work.
-        for (i, slot) in slots.iter().enumerate() {
+        for (i, slot) in slots.iter().enumerate().filter(|_| !natural) {
             for station in 0..stations {
                 let (launcher, observed) = station_geometry(queries[i], observations[i], station);
                 answers += usize::from(
@@ -318,5 +355,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "max_pending={max_pending} max_ready_envelopes={max_envelopes} successful_cached_reads={answers} frozen_queries={fixed} stations_per_aircraft={stations}"
     );
+    eprintln!(
+        "guided_launches={} ai={} max_clients={max_clients} refused={refused} starved={starved} max_admission_wait_ticks={max_wait}",
+        launched.len(),
+        slots.len()
+    );
+    eprintln!(
+        "gate_samples={:?} kills={} tally={:?}",
+        world.combat.state.prediction_gate_samples,
+        world.combat.state.ledger.kills().len(),
+        world.combat.state.ledger.total(|_| true)
+    );
+    if refused != 0 || starved != 0 {
+        return Err("prediction admission regression".into());
+    }
     Ok(())
 }

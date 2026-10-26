@@ -1734,6 +1734,10 @@ pub struct State {
     pub prediction_cpu_clock: Option<fn() -> Option<u64>>,
     pub prediction_cpu_cost_ns: Option<u64>,
     pub prediction_cost_ns: u64,
+    prediction_request_ns: u64,
+    prediction_request_cpu_ns: u64,
+    /// Profiling only: readable hit, readable miss, unavailable launch answers.
+    pub prediction_gate_samples: [u64; 3],
     /// Every release since the host last drained them, for recordings.
     device_log: std::collections::VecDeque<DeviceNote>,
     /// The ownships' decoy rolls since the last drain, for recordings.
@@ -3189,6 +3193,9 @@ impl State {
             prediction_cpu_clock: None,
             prediction_cpu_cost_ns: None,
             prediction_cost_ns: 0,
+            prediction_request_ns: 0,
+            prediction_request_cpu_ns: 0,
+            prediction_gate_samples: [0; 3],
             device_log: Default::default(),
             decoy_log: Default::default(),
             ground_bursts: Vec::new(),
@@ -6256,7 +6263,13 @@ impl State {
                     if burst.collateral() {
                         bursts.push(burst);
                     }
-                } else if super::ballistics::is_bomb(w) && !armed {
+                } else if (super::ballistics::is_bomb(w) && !armed)
+                    || (at >= fuze_until
+                        && p.motion
+                            .and_then(|m| m.energy)
+                            .and_then(|e| e.decoy.pursuit)
+                            .is_some_and(|p| p.passed))
+                {
                     // A bomb that reaches the ground before its fuze arms is a
                     // dud: no burst, no splash, no crater, only a puff of dirt
                     // where it lands (opinionated, lead, 2026-10-10;

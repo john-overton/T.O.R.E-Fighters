@@ -281,17 +281,99 @@ at 10,000 and 20,000 ft test SA2A, SA3 and SA6 separately.
 
 ## Validation status
 
-Required workspace checks and the review battery are in progress. Results
-will be recorded here before this correction pass is finished. No Phase 3
-study acceptance is claimed. Windows/macOS, Apple Silicon fingerprints and
-retail comparison were not run in this Linux pass.
+Implementation mode, Linux x86-64, Rust 1.91.1. Workspace tests: 7,193
+passed, zero failed, 106 ignored across 59 suites. Workspace/all-target
+clippy with warnings denied, formatting, workspace build, source/both binary
+asset guards and documentation checks passed. Python: 505 tests, five skipped.
+All Cargo validation used `--locked`. No expected golden constants changed.
+
+The final review battery passed all 33 scenarios, including six vulnerable
+moving-jet SAM cases, natural AI launch counts, old Spec comparison compatibility,
+serial/parallel Energy rows, launch advisories, countermeasures, replay tape,
+weapon-chase playback, cruise and strike weapons. Windowed scenarios ran through
+the agent workspace wrapper, with two battery jobs and at most one window.
+The head-on IR replay records Ready, a flare seduction and no later target hit.
+The beyond-range replay checks that the designated target is not hit; a
+returning missile can still hit its own launcher under the existing fuze rules.
+SA3 uses Spain's QSPSAM mission's actual SA3.NT/SA3.JT launcher.
+
+| SAM | Jet altitude ft | Missiles | Hits | Remaining player HP |
+| --- | ---: | ---: | ---: | ---: |
+| SA2A | 10000 | 2 | 1 | 0 |
+| SA2A | 20000 | 2 | 1 | 0 |
+| SA3 | 10000 | 2 | 2 | 0 |
+| SA3 | 20000 | 2 | 2 | 0 |
+| SA6 | 10000 | 3 | 3 | 4 |
+| SA6 | 20000 | 3 | 3 | 4 |
+
+Windows/macOS execution, Apple Silicon fingerprints and retail comparison
+were not run. The earlier Phase 3 study remains invalidated and stopped;
+this is the post-review Phase 2 correction pass, not new study acceptance.
 
 ## Prediction cost
 
-The corrected release example supports natural 4v4 and 23+ AI fights with
-real launch-gate clients, plus the eight-aircraft injected-missile stress
-lanes. It measures prediction p50/p95/max, queue refusals and admission
-starvation. An admission wait over 1,200 ticks counts as starvation;
-completion latency is separate. The saturation unit test also requires every
-one of 320 continuously requesting clients to receive an answer. Results of
-the corrected performance runs are pending.
+Sequential release runs on AMD Ryzen 9 7900X, Linux x86-64, nice 10.
+The natural lanes run real AI launch gates and ordinary damage for 120 seconds
+(4v4) or 60 seconds (23 AI). Injected lanes run 20 seconds with eight living
+AI, sixteen maintained zero-damage missiles, 64 candidate station requests
+and eight envelope requests. The alive guard passes throughout. Jettisoned
+tanks are additional projectiles and never count toward the sixteen missiles.
+Cruise is AGM84A query stress; the other lanes use AIM120 queries.
+
+The first 240 ticks are cold. Subsequent samples include refresh work and
+missile TTI forecasts when their observations qualify. Timing includes public
+request construction/submission and the whole prediction advance. Frame reads
+are timed separately. No CPU clock controls simulation work or decisions.
+
+| Lane | Cold p50 / p95 ms | Subsequent p50 / p95 ms | Maximum prediction ms | Frame reads maximum ms |
+| --- | --- | --- | ---: | ---: |
+| natural-ukr | 0.682 / 0.726 | 0.686 / 0.784 | 1.606 | 0.0004 |
+| natural-bal | 0.688 / 0.787 | 0.200 / 0.709 | 0.938 | 0.0031 |
+| natural-spa | 0.679 / 0.702 | 0.032 / 0.711 | 0.934 | 0.0013 |
+| natural-gre | 0.682 / 0.727 | 0.030 / 0.716 | 0.930 | 0.0030 |
+| natural-big | 0.738 / 0.828 | 0.722 / 0.778 | 0.991 | 0.0030 |
+| injected-frozen | 0.757 / 0.875 | 0.708 / 0.808 | 0.936 | 0.0198 |
+| injected-moving | 0.751 / 0.780 | 0.711 / 0.805 | 0.970 | 0.0257 |
+| injected-cruise | 0.691 / 0.717 | 0.891 / 0.962 | 1.002 | 0.0276 |
+
+The conservative sum of each lane's independent prediction/read maxima stays
+below 1.606 ms, inside the approximately 2 ms gate. All eight lanes have
+zero refused requests and zero admission starvation. Starvation instrumentation
+counts any point or range client waiting more than 1,200 ticks for an active
+slot. Completion latency is separate. The 23-AI run reaches
+83 point clients. A synthetic 320-client saturation regression
+requires every persistent requester to receive an answer under the unchanged
+16,384 quarter-step work budget, with no synchronous fallback.
+
+Cold range searches now finish a first maximum before resampling changing
+geometry. Previous maxima remain visible during refresh, but never grant a
+point launch. Continuous 45-degree/s rotation has a regression test, alongside
+the reviewer's moving-shot and gentler-turn tests. Different target/model/wind
+inputs invalidate the old envelope immediately.
+
+| Injected lane | Maximum published envelopes | First sample with all eight, seconds |
+| --- | ---: | ---: |
+| injected-frozen | 8 | 5.25 |
+| injected-moving | 0 | not within 20 s |
+| injected-cruise | 0 | not within 20 s |
+
+A control with one requested station per aircraft, still moving with sixteen
+missiles, publishes all eight maxima by 5.75 seconds. Before the cold-search
+fix the same 20-second control published none. Its subsequent prediction
+p50/p95 is 0.701/0.769 ms, maximum 0.910 ms. The heavier table above requests
+eight stations per aircraft.
+
+This latency table counts published or retained maxima, not a claim that every
+one is current or that every favorable band has completed. Rapid motion and
+long cruise trajectories can still leave optional range/band work pending;
+IN RNG and launch permission use the separately qualified point solution.
+
+| Natural 120-second 4v4 | Reviewed pre-overhaul guided launches | Corrected Energy launches |
+| --- | ---: | ---: |
+| UKR | 11 | 8 |
+| BAL | 12 | 10 |
+| SPA | 12 | 11 |
+| GRE | 12 | 11 |
+
+All four are within the stated 30% regression tolerance. No AI defensive
+policy or dispense schedule was changed.

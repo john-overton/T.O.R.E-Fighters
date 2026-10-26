@@ -1451,7 +1451,8 @@ values to make old/new study comparisons reproducible. Additional `near` and
 minimum before the same range jitter, for studying physically reachable short
 shots. They are opt-in and do not change the historical bands. These are distinct
 from the public-anchor calibration sweep. `model.txt` records the selected
-rules and physical-table fingerprint. `--seeds N` the shots per cell (range, aspect, speed and reaction time are
+rules and the model fingerprint (physical and motor data, derivation rules,
+force/drag curves, seeker and decoy source). `--seeds N` the shots per cell (range, aspect, speed and reaction time are
 jittered per seed, deterministically), `--threads N` the workers.
 `--ai [--skill novice|average|experienced|ace]` flies the same shots against
 the game's own AI on weapons hold in a fresh Quick Mission world instead, so
@@ -2258,3 +2259,20 @@ directory, first with the previous default-wing policy and then with sharing.
 It asserts the accepted load survives airborne and ground starts and restart.
 The battery scenario is `qmc-wing-loadout`. This probe requires imported media
 but no display; do not point it at a shared profile.
+
+### Missile motor calibration and prediction cost
+
+The offline `missile_energy_ranges LOCAL_JT_DIRECTORY --fit-pair` example
+prints candidate fuel fractions, drag and both anchor residuals; it never
+writes runtime data. An optional comma-separated source list limits the fit.
+The default sweep prints physical and seeker-valid ranges including the
+500-foot deck case. Conditions and data provenance live in the
+[missile energy data](formats/missile-energy-data.md) and
+[baseline](baselines/missile-energy.md).
+
+The release `missile_energy_cost PACK TICKS THEATER moving WEAPON STATIONS`
+example accepts `--natural` for real AI launch clients, `--big` for 23+ AI,
+and `--spec` for the historical missile comparison. Without `--natural` it
+uses Hold, eight AI and sixteen replenished synthetic missiles; jettisoned
+tanks do not count toward those sixteen. The alive guard applies to that
+injected fixture, while natural fights retain real damage and casualties.

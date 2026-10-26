@@ -983,8 +983,31 @@ KNOWN_FAILURES = {
 }
 
 
+def prediction_launch_regression(d):
+    """Same natural fight fixture as the independent review, no injected shots."""
+    executable = ROOT / "target" / "release" / "examples" / ("missile_energy_cost.exe" if os.name == "nt" else "missile_energy_cost")
+    if not executable.exists():
+        d.problem("build --release -p tore-world --example missile_energy_cost before this scenario")
+        return
+    packs = sorted(d.data.glob("menu-*.pack"))
+    if not packs:
+        d.problem("no imported menu pack")
+        return
+    for theater, baseline in [("UKR", 11), ("BAL", 12), ("SPA", 12), ("GRE", 12)]:
+        proc = d.run(theater, [executable, packs[-1], "14400", theater, "moving", "AIM120.JT", "1", "--natural"], timeout=180)
+        text = proc.text()
+        match = re.search(r"guided_launches=(\d+) ai=8 .*refused=0 starved=0", text)
+        if not match or not .7 * baseline <= int(match[1]) <= 1.3 * baseline:
+            d.problem(f"{theater}: guided launch count outside 30% of reviewed pre-overhaul {baseline}")
+    d.run("big", [executable, packs[-1], "7200", "UKR", "moving", "AIM120.JT", "1", "--natural", "--big"], timeout=180)
+    if not re.search(r"ai=2[3-9] .*refused=0 starved=0", d.output()):
+        d.problem("big natural fight did not exercise 23+ AI with zero refusals/starvation")
+
+
 def scenarios() -> list[Scenario]:
-    out: list[Scenario] = []
+    out: list[Scenario] = [Scenario(name="ai-missile-launch-regression", lane="ai", args=[],
+        driver=prediction_launch_regression, timeout=1000,
+        notes="Four 120-second natural 4v4 fights within 30% of reviewed Spec counts; 23+ AI admission stress. Build the release missile_energy_cost example first.")]
     attack = ["--probe-attack", "600:10"]
 
     # 1. Fight sizes, even and lopsided, the default F/A-18D against itself.

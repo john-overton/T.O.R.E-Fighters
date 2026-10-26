@@ -186,7 +186,11 @@ is resubmitted at once when its published answer no longer matches the
 current question (a stale answer cannot be read, so waiting would leave the
 cue and the AI launch gate dark through most of a short-range fight). Identical
 physical inputs reuse the completed answer without another flyout; each
-service belongs to one world's fixed terrain. Changed identity,
+service belongs to one world's fixed terrain. Neighboring rails on the same
+actor may reuse a recent compatible answer for the same target and body,
+within the unchanged point tolerances. Different targets and stale geometry
+never share an answer. This avoids duplicate rail flyouts delaying launch
+cues in turning fights. Changed identity,
 body, wind, arming or radius invalidates a result. Point compatibility allows
 30 m or 2% relative-position error, 10 m/s velocity error, 30 m altitude and
 one degree axis error, at most 600 ticks of in-flight age (3600 for stable
@@ -198,7 +202,12 @@ change rejects it. Launch snapshots retain their zero-age geometry checks. Envel
 allow 150 m altitude, 1 km origin displacement and three degrees bearing drift,
 10 m/s launcher speed and five degrees launcher axis and velocity direction,
 and 25 m/s target velocity. A restarted search keeps showing the last
-completed envelope until it finishes. These tolerances are agent-fitted cache approximations, not
+completed envelope until it finishes, for display only. A cold search finishes
+its first maximum before restarting for changed geometry, so continuous turns
+cannot prevent the first publication. Target, body, arming, radius or wind
+changes invalidate it immediately. While a geometry refresh runs, the last
+completed range cue can remain stale; only the fresh qualified point forecast
+can grant IN RNG or an AI launch. These tolerances are agent-fitted cache approximations, not
 exact proofs about the current pose. Turns may leave a cue pending. AI cannot
 fire from a pending/failed point answer, and ordinary sensor/support and
 minimum-range launch gates remain. A surface seeker does not acquire a blind
@@ -219,14 +228,16 @@ threats without changing the AI defensive schedule or renaming its inputs.
 
 The [calibration baseline](../baselines/missile-energy.md) gives all 25 A2A
 records and SAM/A-G references. New worlds select Energy. The lower-level combat State constructor retains
-Spec for historical tools and tapes. Linux regression and the prediction-cost
-gate passed; the full study follows separately. Estimate overhead must stay
+Spec for historical tools and tapes. The Phase 2 review corrections pass the
+[recorded Linux validation](../baselines/missile-energy.md#validation-status);
+the invalidated Phase 3 study remains stopped. Estimate overhead must stay
 about 2 ms per world tick with eight AI aircraft and sixteen missiles, reporting
 cold/warm p50/p95. If the gate cannot be met, report options
 instead of enabling a synchronous fallback.
 
 Explicit old weapon modes remain. Unmarked combat tapes 2/3 select
-Compatibility, 4..8 select Spec. New Energy tapes carry an explicit model/table
+Compatibility, 4..8 select Spec. New Energy tapes carry an explicit model fingerprint (data, motor derivation,
+force/drag, seeker and decoy rules)
 marker and seed after the existing header. An old reader rejects that new
 marker rather than silently using old physics. No version constant is changed
 here; the lead owns the coordinated version bump.

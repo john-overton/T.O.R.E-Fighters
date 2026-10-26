@@ -58,6 +58,7 @@ pub struct RangeSearch {
     pub target: u32,
     pub touched: u64,
     pub submitted: u64,
+    pub waiting_since: u64,
     pub template: Trial,
     pub bearing: Vector,
     pub cap: f64,
@@ -91,6 +92,7 @@ impl RangeSearch {
             target,
             touched: tick,
             submitted: tick,
+            waiting_since: tick,
             template,
             bearing: unit([
                 template.target.position[0] - template.flight.position[0],
@@ -215,6 +217,41 @@ pub struct Service {
 }
 impl Service {
     pub fn request(&mut self, id: u64, target: u32, tick: u64, question: Trial, refresh: u64) {
+        // Same-aircraft rails can share a qualified recent answer. They already
+        // use the same geometric compatibility tolerance; duplicating identical
+        // flyouts on every rail delays fresh answers in a turning fight.
+        let reused = (id & MISSILE_BIT == 0 && question.flight.age == 0)
+            .then(|| {
+                self.clients
+                    .iter()
+                    .filter(|c| c.id != id && c.id >> 16 == id >> 16 && c.target == target)
+                    .filter_map(|c| c.result)
+                    .filter(|r| {
+                        (tick.saturating_sub(r.at) < refresh || r.question == question)
+                            && compatible(r.question, question)
+                    })
+                    .max_by_key(|r| r.at)
+            })
+            .flatten();
+        if let Some(result) = reused {
+            self.queue.remove(id);
+            let replacement = Client {
+                id,
+                target,
+                touched: tick,
+                submitted: result.at,
+                question,
+                pending: false,
+                waiting_since: tick,
+                result: Some(result),
+            };
+            if let Some(client) = self.clients.iter_mut().find(|c| c.id == id) {
+                *client = replacement;
+            } else {
+                self.clients.push(replacement);
+            }
+            return;
+        }
         if let Some(client) = self.clients.iter_mut().find(|c| c.id == id) {
             client.touched = tick;
             if client.target != target || client.question.body != question.body {
@@ -268,10 +305,16 @@ impl Service {
             range.touched = tick;
             // A range does not depend on the present distance. Keep the
             // normalized geometry while a long cold search is still running.
-            if range.target == target && envelope_compatible(range.template, question) {
+            let same_model =
+                range.target == target && envelope_model_matches(range.template, question);
+            // Finish a cold search before resampling moving geometry. Otherwise
+            // a sustained turn can restart it forever without one publication.
+            if same_model
+                && (range.result.is_none() || envelope_compatible(range.template, question))
+            {
                 return;
             }
-            let previous = (range.target == target && range.template.body == question.body)
+            let previous = same_model
                 .then_some(range.result.or(range.previous))
                 .flatten();
             self.queue.remove(id);
@@ -343,9 +386,14 @@ impl Service {
             .ranges
             .iter()
             .find(|r| r.id == (id | ENVELOPE_BIT) && r.target == target)?;
-        envelope_compatible(range.template, current)
-            .then_some(range.result.or(range.previous))
-            .flatten()
+        if !envelope_model_matches(range.template, current) {
+            return None;
+        }
+        if envelope_compatible(range.template, current) {
+            range.result.or(range.previous)
+        } else {
+            range.previous
+        }
     }
     pub fn advance(&mut self, tick: u64, ground: &impl Fn(f64, f64) -> f64) -> usize {
         self.advance_over(tick, ground, &|_, _| false)
@@ -376,6 +424,7 @@ impl Service {
                 && let Some((_, answer)) = self.queue.answer(range.id)
             {
                 range.accept(answer);
+                range.waiting_since = tick;
                 self.queue.remove(range.id);
             }
         }
@@ -433,13 +482,15 @@ fn compatible(a: Trial, b: Trial) -> bool {
         && norm(sub(a.target.velocity, b.target.velocity)) <= 10.
 }
 
+fn envelope_model_matches(a: Trial, b: Trial) -> bool {
+    a.body == b.body && a.radius == b.radius && a.arming_age == b.arming_age && a.wind == b.wind
+}
+
 fn envelope_compatible(a: Trial, b: Trial) -> bool {
     // The launch axis only shapes the first second of a range-scale flight;
     // a 1 degree tolerance restarted every search during gentle turns.
-    a.body == b.body
+    envelope_model_matches(a, b)
         && norm(sub(a.flight.position, b.flight.position)) <= 1000.
-        && a.radius == b.radius
-        && a.wind == b.wind
         && dot(a.flight.axis, b.flight.axis) >= 5f64.to_radians().cos()
         && (norm(a.flight.velocity) - norm(b.flight.velocity)).abs() <= 10.
         && dot(unit(a.flight.velocity), unit(b.flight.velocity)) >= 5f64.to_radians().cos()
@@ -515,6 +566,7 @@ crate::checkpoint_struct!(RangeSearch {
     target,
     touched,
     submitted,
+    waiting_since,
     template,
     bearing,
     cap,
@@ -621,8 +673,8 @@ mod tests {
                 let mut q = question();
                 q.body.life = 30;
                 q.target.position[2] += tick as f64;
-                service.request(id as u64, 2, tick, q, 1);
-                *seen |= service.answer(id as u64, 2, q).is_some();
+                service.request(id as u64, id as u32 + 2, tick, q, 1);
+                *seen |= service.answer(id as u64, id as u32 + 2, q).is_some();
             }
             service.advance(tick, &|_, _| 0.);
             if seen.iter().all(|v| *v) {
@@ -635,6 +687,26 @@ mod tests {
             seen.iter().filter(|v| !**v).count()
         );
         assert_eq!(service.clients.len(), count);
+    }
+    #[test]
+    fn neighboring_rails_reuse_only_a_recent_compatible_answer_for_the_same_target() {
+        let mut q = question();
+        q.body.life = 1;
+        let mut service = Service::default();
+        service.request(1, 2, 0, q, 30);
+        service.advance(0, &|_, _| 0.);
+        let mut nearby = q;
+        nearby.flight.position[0] += 2.;
+        service.request(2, 2, 1, nearby, 30);
+        assert!(service.answer(2, 2, nearby).is_some());
+        assert!(service.queue.requests.is_empty());
+        service.request(3, 3, 1, nearby, 30);
+        assert!(service.answer(3, 3, nearby).is_none());
+        service.request(4, 2, 40, nearby, 30);
+        assert!(
+            service.answer(4, 2, nearby).is_none(),
+            "old geometry is not a fresh neighboring-rail answer"
+        );
     }
     #[test]
     fn a_moving_short_range_launch_question_stays_answered() {
@@ -654,6 +726,30 @@ mod tests {
             answered += usize::from(service.answer(1, 2, current).is_some());
         }
         assert!(answered >= 432, "answered {answered} of 480 ticks");
+    }
+    #[test]
+    fn a_continuous_fast_turn_cannot_restart_a_cold_search_forever() {
+        let mut service = Service::default();
+        let mut shown = 0;
+        for tick in 0..480u64 {
+            let heading = (45f64 * tick as f64 * DT).to_radians();
+            let mut q = question();
+            q.flight.axis = [heading.sin(), 0., heading.cos()];
+            q.flight.velocity = q.flight.axis.map(|v| v * 300.);
+            service.request_range(1, 2, tick, q);
+            assert!(
+                service.advance(tick, &|_, _| 0.) <= super::super::energy_estimate::STEP_BUDGET
+            );
+            shown += usize::from(service.envelope(1, 2, q).is_some());
+        }
+        assert!(shown >= 240, "range shown {shown} of 480 ticks");
+        let mut other = question();
+        other.wind[0] = 30.;
+        service.request_range(1, 3, 480, other);
+        assert!(
+            service.envelope(1, 3, other).is_none(),
+            "a different target/model must not inherit the old cue"
+        );
     }
     #[test]
     fn a_turning_launcher_keeps_its_range_envelope() {
