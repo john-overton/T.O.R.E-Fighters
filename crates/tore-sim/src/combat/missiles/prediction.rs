@@ -43,6 +43,7 @@ pub struct Client {
     pub submitted: u64,
     pub question: Trial,
     pub pending: bool,
+    pub waiting_since: u64,
     pub result: Option<Published>,
 }
 
@@ -68,6 +69,9 @@ pub struct RangeSearch {
     pub run: Option<(f64, f64)>,
     pub best: Option<(f64, f64)>,
     pub result: Option<Envelope>,
+    /// The last completed envelope of an earlier geometry, shown while a
+    /// restarted search runs so a manoeuvring launcher keeps a range cue.
+    pub previous: Option<Envelope>,
     pub done: bool,
 }
 impl RangeSearch {
@@ -104,6 +108,7 @@ impl RangeSearch {
             run: None,
             best: None,
             result: None,
+            previous: None,
             done: false,
         }
     }
@@ -205,6 +210,8 @@ pub struct Service {
     pub queue: Queue,
     pub clients: Vec<Client>,
     pub ranges: Vec<RangeSearch>,
+    /// Admission rotates across waiting point and range clients, never actor order.
+    pub admission_cursor: usize,
 }
 impl Service {
     pub fn request(&mut self, id: u64, target: u32, tick: u64, question: Trial, refresh: u64) {
@@ -216,32 +223,32 @@ impl Service {
                 client.result = None;
                 self.queue.remove(id);
             }
+            if client.pending && !self.queue.requests.iter().any(|r| r.id == id) {
+                client.question = question;
+                client.submitted = tick;
+            }
             // The world terrain is fixed. Identical physical inputs need no
             // new flyout merely because a refresh interval passed.
             if client.result.is_some_and(|r| r.question == question) {
                 return;
             }
+            // A published answer that no longer matches the question cannot be
+            // read (see `answer`), so waiting for the refresh interval only
+            // leaves the cue and the AI gate dark. Short shots go stale within
+            // a few ticks of launcher motion.
+            let stale = client
+                .result
+                .is_some_and(|r| !compatible(r.question, question));
             if !client.pending
-                && (client.result.is_none() || tick.saturating_sub(client.submitted) >= refresh)
-                && self.queue.submit(Request {
-                    id,
-                    observed_tick: tick,
-                    trial: question,
-                })
+                && (client.result.is_none()
+                    || stale
+                    || tick.saturating_sub(client.submitted) >= refresh)
             {
                 client.question = question;
                 client.submitted = tick;
                 client.pending = true;
+                client.waiting_since = tick;
             }
-            return;
-        }
-        if self.clients.len() >= 64
-            || !self.queue.submit(Request {
-                id,
-                observed_tick: tick,
-                trial: question,
-            })
-        {
             return;
         }
         self.clients.push(Client {
@@ -251,6 +258,7 @@ impl Service {
             submitted: tick,
             question,
             pending: true,
+            waiting_since: tick,
             result: None,
         });
     }
@@ -261,33 +269,54 @@ impl Service {
             // A range does not depend on the present distance. Keep the
             // normalized geometry while a long cold search is still running.
             if range.target == target && envelope_compatible(range.template, question) {
-                if !range.done && !self.queue.requests.iter().any(|r| r.id == id) {
-                    self.queue.submit(Request {
-                        id,
-                        observed_tick: range.submitted,
-                        trial: range.trial(),
-                    });
-                }
                 return;
             }
+            let previous = (range.target == target && range.template.body == question.body)
+                .then_some(range.result.or(range.previous))
+                .flatten();
+            self.queue.remove(id);
             *range = RangeSearch::new(id, target, tick, question);
-            self.queue.submit(Request {
-                id,
-                observed_tick: tick,
-                trial: range.trial(),
-            });
+            range.previous = previous;
             return;
         }
-        if self.ranges.len() >= 8 {
+        self.ranges
+            .push(RangeSearch::new(id, target, tick, question));
+    }
+    /// Waiting requests are retained even when all active slots are occupied.
+    /// Each admitted flyout finishes before its slot is reused. A persistent
+    /// round-robin cursor gives every waiting client a turn under saturation.
+    fn admit(&mut self) {
+        let count = self.clients.len() + self.ranges.len();
+        if count == 0 {
             return;
         }
-        let range = RangeSearch::new(id, target, tick, question);
-        if self.queue.submit(Request {
-            id,
-            observed_tick: tick,
-            trial: range.trial(),
-        }) {
-            self.ranges.push(range);
+        let start = self.admission_cursor % count;
+        for offset in 0..count {
+            if self.queue.requests.len() >= super::energy_estimate::MAX_REQUESTS {
+                break;
+            }
+            let index = (start + offset) % count;
+            let request = if index < self.clients.len() {
+                let c = &self.clients[index];
+                c.pending.then_some(Request {
+                    id: c.id,
+                    observed_tick: c.submitted,
+                    trial: c.question,
+                })
+            } else {
+                let r = &self.ranges[index - self.clients.len()];
+                (!r.done).then(|| Request {
+                    id: r.id,
+                    observed_tick: r.submitted,
+                    trial: r.trial(),
+                })
+            };
+            if let Some(request) = request
+                && !self.queue.requests.iter().any(|r| r.id == request.id)
+            {
+                self.queue.submit(request);
+            }
+            self.admission_cursor = (index + 1) % count;
         }
     }
     pub fn answer(&self, id: u64, target: u32, current: Trial) -> Option<Published> {
@@ -315,7 +344,7 @@ impl Service {
             .iter()
             .find(|r| r.id == (id | ENVELOPE_BIT) && r.target == target)?;
         envelope_compatible(range.template, current)
-            .then_some(range.result)
+            .then_some(range.result.or(range.previous))
             .flatten()
     }
     pub fn advance(&mut self, tick: u64, ground: &impl Fn(f64, f64) -> f64) -> usize {
@@ -327,6 +356,7 @@ impl Service {
         ground: &impl Fn(f64, f64) -> f64,
         clear: &impl Fn(Vector, Vector) -> bool,
     ) -> usize {
+        self.admit();
         let used = self.queue.advance_over(ground, clear);
         for client in &mut self.clients {
             if client.pending
@@ -346,15 +376,7 @@ impl Service {
                 && let Some((_, answer)) = self.queue.answer(range.id)
             {
                 range.accept(answer);
-                if !range.done {
-                    self.queue.submit(Request {
-                        id: range.id,
-                        observed_tick: range.submitted,
-                        trial: range.trial(),
-                    });
-                } else {
-                    self.queue.remove(range.id);
-                }
+                self.queue.remove(range.id);
             }
         }
         for client in &self.clients {
@@ -412,13 +434,16 @@ fn compatible(a: Trial, b: Trial) -> bool {
 }
 
 fn envelope_compatible(a: Trial, b: Trial) -> bool {
+    // The launch axis only shapes the first second of a range-scale flight;
+    // a 1 degree tolerance restarted every search during gentle turns.
     a.body == b.body
         && norm(sub(a.flight.position, b.flight.position)) <= 1000.
         && a.radius == b.radius
         && a.wind == b.wind
-        && dot(a.flight.axis, b.flight.axis) >= 1f64.to_radians().cos()
-        && norm(sub(a.flight.velocity, b.flight.velocity)) <= 10.
-        && norm(sub(a.target.velocity, b.target.velocity)) <= 10.
+        && dot(a.flight.axis, b.flight.axis) >= 5f64.to_radians().cos()
+        && (norm(a.flight.velocity) - norm(b.flight.velocity)).abs() <= 10.
+        && dot(unit(a.flight.velocity), unit(b.flight.velocity)) >= 5f64.to_radians().cos()
+        && norm(sub(a.target.velocity, b.target.velocity)) <= 25.
         && (a.flight.position[1] - b.flight.position[1]).abs() <= 150.
         && (a.target.position[1] - b.target.position[1]).abs() <= 150.
         && dot(
@@ -481,6 +506,7 @@ crate::checkpoint_struct!(Client {
     submitted,
     question,
     pending,
+    waiting_since,
     result
 });
 crate::checkpoint_struct!(Envelope { maximum, favorable });
@@ -500,12 +526,14 @@ crate::checkpoint_struct!(RangeSearch {
     run,
     best,
     result,
+    previous,
     done
 });
 crate::checkpoint_struct!(Service {
     queue,
     clients,
-    ranges
+    ranges,
+    admission_cursor
 });
 
 #[cfg(test)]
@@ -579,6 +607,68 @@ mod tests {
         far.target.position[2] += 1000.;
         assert!(service.answer(1, 2, far).is_none());
         assert!(service.answer(1, 3, q).is_none());
+    }
+    /// A short shot's launch question changes faster than the refresh
+    /// interval. The published answer must be renewed as soon as it no
+    /// longer matches, or the cue and the AI launch gate stay dark.
+    #[test]
+    fn saturation_serves_every_client_even_when_early_clients_refresh() {
+        let mut service = Service::default();
+        let count = super::super::energy_estimate::MAX_REQUESTS + 64;
+        let mut seen = vec![false; count];
+        for tick in 0..4000 {
+            for (id, seen) in seen.iter_mut().enumerate() {
+                let mut q = question();
+                q.body.life = 30;
+                q.target.position[2] += tick as f64;
+                service.request(id as u64, 2, tick, q, 1);
+                *seen |= service.answer(id as u64, 2, q).is_some();
+            }
+            service.advance(tick, &|_, _| 0.);
+            if seen.iter().all(|v| *v) {
+                break;
+            }
+        }
+        assert!(
+            seen.iter().all(|v| *v),
+            "starved {}",
+            seen.iter().filter(|v| !**v).count()
+        );
+        assert_eq!(service.clients.len(), count);
+    }
+    #[test]
+    fn a_moving_short_range_launch_question_stays_answered() {
+        let mut q = question();
+        q.target.position[2] = 3000.;
+        let mut service = Service::default();
+        let mut answered = 0;
+        for tick in 0..480u64 {
+            let t = tick as f64 * DT;
+            let mut current = q;
+            for i in 0..3 {
+                current.flight.position[i] += q.flight.velocity[i] * t;
+                current.target.position[i] += q.target.velocity[i] * t;
+            }
+            service.request(1, 2, tick, current, 30);
+            service.advance(tick, &|_, _| 0.);
+            answered += usize::from(service.answer(1, 2, current).is_some());
+        }
+        assert!(answered >= 432, "answered {answered} of 480 ticks");
+    }
+    #[test]
+    fn a_turning_launcher_keeps_its_range_envelope() {
+        let mut service = Service::default();
+        let mut shown = 0;
+        for tick in 0..1200u64 {
+            let heading = (3f64 * tick as f64 * DT).to_radians();
+            let mut q = question();
+            q.flight.axis = [heading.sin(), 0., heading.cos()];
+            q.flight.velocity = q.flight.axis.map(|v| v * 300.);
+            service.request_range(1, 2, tick, q);
+            service.advance(tick, &|_, _| 0.);
+            shown += usize::from(service.envelope(1, 2, q).is_some());
+        }
+        assert!(shown >= 600, "envelope shown {shown} of 1200 ticks");
     }
     #[test]
     fn a_stable_inflight_estimate_ages_with_observed_relative_motion() {

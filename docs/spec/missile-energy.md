@@ -117,7 +117,8 @@ air mass. Rendered-device capacity cannot delete a guiding missile's decoy.
 The missile uses the same finite-energy guidance against that device. It cannot
 fuze on a device. It can still fuze on a real aircraft while pursuing the decoy,
 including a late flare beside the original target. After passing the decoy it
-permanently ends guidance and coasts/falls until ground collision or lifetime,
+permanently disables its fuze and ends guidance (John, 2026-10-25). It then
+coasts/falls until ground collision or lifetime,
 without reacquiring any aircraft or device. Motor thrust is not replenished.
 
 One roll per missile/releaser/device-class in a two-second episode. Monotonic
@@ -171,15 +172,19 @@ authorize a new-model intercept. Keep observed support/seeker gates separate
 from physical reach. Player range and lock remain advisory at release.
 The existing AI defensive schedule and flying are owned by a separate task.
 
-A world-owned resumable queue has 64 point jobs and at most eight envelope
-searches. A fixed 16,384 quarter-step work units per world tick pays for
+A world-owned resumable queue admits at most 256 active flyouts. Waiting point
+and envelope requests are retained and admitted in round-robin rotation; a large mission's AI stations, SAM rails and missiles in flight
+must not starve each other out of a full table. A fixed 16,384 quarter-step work units per world tick pays for
 integration (four units) and terrain samples (one unit). This permits at most
 4096 integration steps, with terrain work reducing that count. It is not multiplied by the number of aircraft, and it does
 not depend on wall-clock timing or render frequency. Ground-ceiling shortcuts
 skip only provably clear terrain. Requests, cursor, partial searches and
 published snapshots are checkpointed. Frame readers never run a flyout.
 
-TTI snapshots refresh after 15 ticks, launch points after 30. Identical
+TTI snapshots refresh after 15 ticks, launch points after 30, and either
+is resubmitted at once when its published answer no longer matches the
+current question (a stale answer cannot be read, so waiting would leave the
+cue and the AI launch gate dark through most of a short-range fight). Identical
 physical inputs reuse the completed answer without another flyout; each
 service belongs to one world's fixed terrain. Changed identity,
 body, wind, arming or radius invalidates a result. Point compatibility allows
@@ -191,12 +196,14 @@ stable cruise TTI is not discarded solely because the missile moved forward.
 A changed motor phase, more than 2% mass change, or a material trajectory
 change rejects it. Launch snapshots retain their zero-age geometry checks. Envelope searches
 allow 150 m altitude, 1 km origin displacement and three degrees bearing drift,
-with the same velocity
-and axis checks. These tolerances are agent-fitted cache approximations, not
+10 m/s launcher speed and five degrees launcher axis and velocity direction,
+and 25 m/s target velocity. A restarted search keeps showing the last
+completed envelope until it finishes. These tolerances are agent-fitted cache approximations, not
 exact proofs about the current pose. Turns may leave a cue pending. AI cannot
 fire from a pending/failed point answer, and ordinary sensor/support and
 minimum-range launch gates remain. A surface seeker does not acquire a blind
-zone near impact from that launch minimum. Long range queries do not block the world.
+zone near impact from that launch minimum or the site-relative decoded altitude
+band. Those employment limits are applied at launch. Long range queries do not block the world.
 
 Range search samples around the physical reference anchor and both sides of
 the data-driven loft transition, brackets the last successful interval and

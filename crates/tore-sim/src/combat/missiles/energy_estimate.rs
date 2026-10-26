@@ -7,7 +7,10 @@ use crate::attitude::{Vector, dot};
 pub const STEP_BUDGET: usize = 16_384;
 /// A cruise scan plus a refined terrain crossing costs at most 75 units.
 const MAX_STEP_WORK: usize = 80;
-pub const MAX_REQUESTS: usize = 64;
+/// Sized for large missions: every AI station with a target, every SAM rail
+/// and every missile in flight is one client. The step budget, not this cap,
+/// bounds the work per tick; a full table silently starves later requesters.
+pub const MAX_REQUESTS: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Answer {
@@ -119,6 +122,7 @@ pub struct Request {
 pub struct Queue {
     pub requests: Vec<Request>,
     pub cursor: usize,
+    pub refused: u64,
 }
 impl Queue {
     pub fn submit(&mut self, request: Request) -> bool {
@@ -126,6 +130,7 @@ impl Queue {
             *existing = request;
         } else {
             if self.requests.len() == MAX_REQUESTS {
+                self.refused += 1;
                 return false;
             }
             self.requests.push(request);
@@ -157,13 +162,18 @@ impl Queue {
         let start = self.cursor % count;
         // Completed answers stay available to the publisher. Build the active
         // ring once, rather than walking every completed slot for every step.
-        let mut active: Vec<usize> = (0..count)
-            .map(|offset| (start + offset) % count)
-            .filter(|&index| self.requests[index].trial.answer.is_none())
-            .collect();
+        let mut active = [0usize; MAX_REQUESTS];
+        let mut len = 0;
+        for offset in 0..count {
+            let index = (start + offset) % count;
+            if self.requests[index].trial.answer.is_none() {
+                active[len] = index;
+                len += 1;
+            }
+        }
         let mut at = 0;
         let mut used = 0;
-        while used + MAX_STEP_WORK <= STEP_BUDGET && !active.is_empty() {
+        while used + MAX_STEP_WORK <= STEP_BUDGET && len > 0 {
             let index = active[at];
             let request = &mut self.requests[index];
             let spent = request.trial.step_over(ground, clear);
@@ -171,12 +181,13 @@ impl Queue {
             used += spent;
             self.cursor = index + 1;
             if request.trial.answer.is_some() {
-                active.remove(at);
+                active.copy_within(at + 1..len, at);
+                len -= 1;
             } else {
                 at += 1;
             }
-            if !active.is_empty() {
-                at %= active.len();
+            if len > 0 {
+                at %= len;
             }
         }
         used
@@ -230,7 +241,11 @@ crate::checkpoint_struct!(Request {
     observed_tick,
     trial
 });
-crate::checkpoint_struct!(Queue { requests, cursor });
+crate::checkpoint_struct!(Queue {
+    requests,
+    cursor,
+    refused
+});
 
 #[cfg(test)]
 mod tests {

@@ -577,10 +577,12 @@ pub(crate) fn station_specs_loaded(
         // The reviewed default inventory owns the record used at release.
         spec.debit = u32::from(w.burst.actual_rounds_per_game).max(1);
         // A rocket pod's weight is the full pod's: each rocket takes its share.
+        // The same carried mass as a player's loadout (`carried_weight_lb`),
+        // so one loadout weighs the same under the AI and a human.
         spec.external_round_lbs = if station.internal || w.source == "SUU16.JT" {
             0.0
         } else {
-            f64::from(w.weight.max(0)) / f64::from(live::pod_rounds(w))
+            w.carried_weight_lb() / f64::from(live::pod_rounds(w))
         };
         // Fitted: one representative projectile per release, as in
         // the player live adapter. The source ammunition debit remains separate.

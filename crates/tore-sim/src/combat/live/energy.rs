@@ -104,6 +104,21 @@ impl State {
             question,
         );
     }
+    /// Admission starvation means a requested point has waited over ten
+    /// simulated seconds without an active slot. Completion latency is separate.
+    pub fn energy_prediction_admission_stats(&self) -> (u64, usize, u64) {
+        let service = &self.energy_predictions;
+        let waits = service
+            .clients
+            .iter()
+            .filter(|c| c.pending && !service.queue.requests.iter().any(|r| r.id == c.id))
+            .map(|c| self.tick.saturating_sub(c.waiting_since));
+        (
+            service.queue.refused,
+            waits.clone().filter(|wait| *wait > 1200).count(),
+            waits.max().unwrap_or(0),
+        )
+    }
     pub fn energy_prediction_counts(&self) -> (usize, usize, usize) {
         (
             self.energy_predictions.queue.requests.len(),
@@ -577,6 +592,25 @@ mod tests {
         assert!(seeker::observe(&w, profile, &view, &target).is_none());
         assert_eq!(w.seeker.zones[0].minimum_range, 7500);
     }
+    /// The SA-2's decoded 3,000 ft zone floor is a look-up limit from the
+    /// site. Measured from the climbing missile it hid every target within
+    /// 3,000 ft of the missile's own altitude, so no moving target was hit.
+    #[test]
+    fn an_energy_sam_keeps_its_target_near_the_target_altitude() {
+        let mut w = weapon("FIM92.JT", 2);
+        w.seeker.zones[0].minimum_altitude = 3000;
+        w.seeker.zones[0].maximum_range = 100_000;
+        let target = super::super::tests::target(100, [0., 9000., 3000.], 10000, 0x80);
+        let profile = missiles::Profile::for_weapon(&w).unwrap();
+        let view = seeker::View {
+            position: [0., 8000., 0.],
+            basis: Basis::new(0., (1000f64).atan2(3000.), 0.),
+            cap: None,
+            obscured: &|_, _| false,
+        };
+        assert!(seeker::observe_energy(&w, profile, &view, &target).is_some());
+        assert!(seeker::observe(&w, profile, &view, &target).is_none());
+    }
     #[test]
     fn live_contact_tick_matches_the_shared_point_estimate() {
         let mut state = super::super::tests::fixture(true);
@@ -710,5 +744,46 @@ mod tests {
                 .any(|event| matches!(event, Event::Hit(100)));
         }
         assert!(hit, "the aircraft is encountered before the nearby decoy");
+    }
+    #[test]
+    fn a_missile_that_passed_its_decoy_cannot_fuze_on_a_later_aircraft() {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        state.own_mut().side = Side(1);
+        let mut target =
+            super::super::tests::target(100, [0., 1000. / FT, 1000. / FT], 10000, 0x80);
+        target.side = Side(2);
+        target.radius = AIRCRAFT_RADIUS_FT;
+        let w = weapon("AIM120.JT", 3);
+        let mut p = projectile(&w, &target);
+        p.target = None;
+        p.motion
+            .as_mut()
+            .unwrap()
+            .energy
+            .as_mut()
+            .unwrap()
+            .decoy
+            .pursuit = Some(missiles::decoys::Pursuit {
+            device: missiles::decoys::Device::release(
+                1,
+                100,
+                missiles::decoys::Kind::Chaff,
+                1,
+                [0., 1000., 10.],
+                [0.; 3],
+            ),
+            passed: false,
+        });
+        state.targets = vec![target];
+        state.projectiles = vec![p];
+        let mut hit = false;
+        for _ in 0..600 {
+            hit |= state
+                .step_surface(&[], |_, _| 0., |_, _| false)
+                .iter()
+                .any(|event| matches!(event, Event::Hit(100)));
+        }
+        assert!(!hit, "passing the decoy permanently disables the fuze");
     }
 }

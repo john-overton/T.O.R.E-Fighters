@@ -155,6 +155,16 @@ fn observe_model(
     if energy || !surface_launched(&w.source) {
         zone.minimum_range = 0;
     }
+    // The decoded altitude band of a surface seeker zone is the site's
+    // look-up limit (SA-2: targets at least 3,000 ft above the site), an
+    // employment gate the launch band already applies. Measured from the
+    // climbing missile it blinds the seeker as soon as the missile nears the
+    // target's altitude, and the energy steering has no ground-track fallback,
+    // so every moving target was missed.
+    if energy {
+        zone.minimum_altitude = i32::MIN;
+        zone.maximum_altitude = i32::MAX;
+    }
     if !profile.accepts(target)
         || !geometry(&zone, view.position, view.basis, target.position, view.cap)
         || (view.obscured)(view.position, target.position)

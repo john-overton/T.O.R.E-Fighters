@@ -153,15 +153,21 @@ pub struct Pursuit {
 impl Pursuit {
     /// Relative swept closest approach detects passage even when a fast
     /// missile crosses the entire device position between fixed ticks.
-    pub fn after_motion(&mut self, previous: Vector, position: Vector) {
-        if self.passed {
-            return;
+    pub fn after_motion(&mut self, previous: Vector, position: Vector) -> f64 {
+        if self.passed || !self.device.alive {
+            self.passed = true;
+            return 0.;
         }
         let before: Vector = std::array::from_fn(|i| self.device.previous[i] - previous[i]);
         let after: Vector = std::array::from_fn(|i| self.device.position[i] - position[i]);
         let delta: Vector = std::array::from_fn(|i| after[i] - before[i]);
         // The relative range has passed its minimum during this step.
-        self.passed = !self.device.alive || (dot(before, delta) < 0. && dot(after, delta) >= 0.);
+        self.passed = dot(before, delta) < 0. && dot(after, delta) >= 0.;
+        if self.passed {
+            (-dot(before, delta) / dot(delta, delta).max(1e-12)).clamp(0., 1.)
+        } else {
+            1.
+        }
     }
     pub fn target(self) -> Option<Observation> {
         (!self.passed && self.device.alive).then(|| self.device.observation())

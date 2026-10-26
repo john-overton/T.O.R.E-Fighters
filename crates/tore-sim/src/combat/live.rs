@@ -5488,6 +5488,7 @@ impl State {
                 return false;
             }
             p.previous = p.position;
+            let mut fuze_until = 1.;
             let phase = if let Some(motion) = &p.motion {
                 motion.engine_phase(m, p.age)
             } else {
@@ -5697,7 +5698,7 @@ impl State {
                 if let Some(e) = &mut motion.energy {
                     p.direction = e.flight.axis;
                     if let Some(pursuit) = &mut e.decoy.pursuit {
-                        pursuit.after_motion(
+                        fuze_until = pursuit.after_motion(
                             p.previous.map(|v| v * missiles::energy::FT),
                             e.flight.position,
                         );
@@ -5833,6 +5834,7 @@ impl State {
                                 segment_sphere(start, sub(p.position, t.position), radius)
                             }
                         }
+                        && at < fuze_until
                         && first.is_none_or(|f| at < f.0)
                     {
                         first = Some((at, Some(Hit::Ownship(n))));
@@ -5913,6 +5915,7 @@ impl State {
                         }
                     };
                     if let Some(at) = at
+                        && at < fuze_until
                         && first.is_none_or(|f| at < f.0)
                     {
                         first = Some((at, Some(Hit::Target(i))));
