@@ -1918,10 +1918,18 @@ and no-target area defenses in each theater, with the four matched strengths.
 The battery scenario `surface-objectives-audit` uses that subset in Ukraine and
 the Falklands. It compares independent ceilings for slope, runway clearance,
 object clearance, terrain class and bounds, so an improvement does not fail the
-scenario. The current 264-case ceiling is eleven generated-support footprint
+scenario. The 264-case regression gate now requires zero generated-support footprint
 slope failures and zero for every other contract category. Zero-error and
 reported-error exits are both inspected. Passing this
 scenario does not certify authored shoreline or assembly overlaps.
+
+The `menus-snap-quick-target-ground-distances` scenario verifies all eleven distance
+choices in a ground-target runway start and launches its 300 nm setup. CPU Quick
+Mission snapshots honor `--ground-start`, including when it selects the creator
+without an explicit `--quick-mission`. Their `quick-snapshot` line records the
+actual start mode and selectable distances. The same regression verifies that
+an explicit airport 9 remains Odesa after choosing a target; the target's added
+Automatic row must not shift it to the preceding airport (L'viv, airport 8).
 
 The `surface-objectives-cache-kuril` scenario exercises all 4,224 Kuril cases
 and independently rebuilds two silo setups where equal raw fronts previously
@@ -1942,6 +1950,10 @@ are retained from the built scene because they do not depend on separation.
 The first distance repeats the raw placement for every strength pair, and the
 zero-defense scene for every template and seed, to check determinism. The table
 includes authored positions that older sweeps exempt.
+
+A `placement-refused` row also records every setup the normal launch guard would
+refuse for placement, including authored vehicles and retained front groups.
+Distance refusals remain separate.
 
 Checks cover map bounds, terrain class at the center and conservative footprint
 corners, per-vehicle footprint grades, separate runway and object clearance,

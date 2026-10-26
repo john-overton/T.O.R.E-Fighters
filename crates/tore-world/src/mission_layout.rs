@@ -8,6 +8,7 @@
 //! every rule can be tested with synthetic bounds and runways.
 
 pub mod availability;
+pub mod seed_retry;
 
 use crate::terrain::Terrain;
 use tore_sim::{

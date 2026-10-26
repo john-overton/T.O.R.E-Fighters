@@ -2272,3 +2272,35 @@ fn relocating_fixed_structures_keeps_the_coarse_site_limit() {
         "fixed structures must not relocate onto 512-ft cell spans"
     );
 }
+
+#[test]
+fn launchers_guns_and_added_radars_accept_twenty_percent_grades() {
+    let mut grid = Grid::land(4);
+    for row in 0..4 {
+        for col in 0..4 {
+            grid.cells[row * 4 + col].elevation = (col * 6) as u8;
+        }
+    }
+    let ground = Ground::new(&grid, vec![], vec![], None);
+    for (id, resource, class) in [
+        (UnitId::template(0).unwrap(), "SA6.NT", class::SAM),
+        (UnitId::template(1).unwrap(), "ZSU23.NT", class::AAA),
+        (
+            UnitId::battery_radar(0).unwrap(),
+            "GCI.NT",
+            class::STRUCTURE,
+        ),
+    ] {
+        let u = unit(id, resource, class, [10_000, 10_000], ENEMY_SIDE);
+        assert_eq!(footing::slope_limit(&u), 20);
+        let info = types(resource);
+        let p = Placed {
+            id: id.0,
+            at: [10_000, 10_000],
+            heading: 0,
+            footprint: info.footprint,
+        };
+        assert!(!footing::slope_ok(&ground, p, 10));
+        assert!(footing::slope_ok(&ground, p, footing::slope_limit(&u)));
+    }
+}

@@ -376,12 +376,24 @@ the selected separation would put it off the edge. Rule (the numbers are
 - If no bearing fits at the full distance, the creator greys that distance with
   a short reason. It audits all eleven choices against the selected imported
   theater, target, seed and wing geometry in the background. Changing those
-  inputs invalidates the result. While it checks, launch is unavailable. No
+  inputs invalidates the result. Wing skill, mission orders and loadout changes
+  retain a completed check: the cache key includes geometry and surface-selection
+  inputs, not the whole mission text. While it checks, launch is unavailable. No
   silent shortening is allowed; launch independently refuses an impossible
-  separation (John, 2026-10-25). Ground starts retain their documented overrides.
+  separation (John, 2026-10-25). With a ground target, either an automatic or
+  explicit runway start offers all eleven distances: the enemy is placed by
+  the target, independently of the distance setting (lead decision, 2026-10-26).
+  Without a target, the distance still controls enemy placement and must fit.
 - The creator keeps the audited seed for launch and reports unsupported target
   elements, including missing Kiev deck aircraft, and area-defense shortfalls
   before launch. These are limitations, not claims that missing equipment exists.
+- The footprint grade limits are 30% for tanks and 20% for vehicles, launchers,
+  guns and added radars. These are fitted values; John requested the relaxed
+  launcher/gun/radar policy on 2026-10-26. The bounded nearest-valid search,
+  supply reach and retained-equipment behavior follow [vehicle footing](surface-defenses.md#jitter).
+- A host retries a placement-refused seed in deterministic order, at most sixteen
+  attempts, before publishing its mission. Only the host chooses a replacement;
+  every client builds the accepted seed. See the [server policy](../DEDICATED-SERVER.md#surface-placement-seeds).
 - CAP regions retain their ten-nautical-mile radius and are intersected with the
   theater rectangle. Clipping does not shrink the whole circle or change its
   station (John, 2026-10-25; an out-of-map station is clamped to the map).

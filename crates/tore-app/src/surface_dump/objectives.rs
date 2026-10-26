@@ -246,6 +246,17 @@ fn inspect(
     if let Some(why) = &surface.unresolved {
         out.push(finding("template", [0; 3], format!("unresolved:{why}")));
     }
+    // Count every normal-flight placement refusal, including retained front
+    // groups and authored units, separately from individual support violations.
+    if let Some(reason) =
+        tore_world::mission_layout::availability::surface_problem(surface, 0, false, false)
+    {
+        out.push(finding(
+            "mission",
+            [0; 3],
+            format!("placement-refused:{reason}"),
+        ));
+    }
     for note in &surface.layout_notes {
         if note.starts_with("support fallback ") || note.starts_with("placement unresolved ") {
             let unit = note
@@ -629,6 +640,7 @@ pub(super) fn run(
                                 .filter(|f| {
                                     f.rule.starts_with("runway-clearance-datum-error")
                                         || f.rule == "scene-placement-stale"
+                                        || f.rule.starts_with("placement-refused:")
                                 })
                                 .count();
                             errors += broken

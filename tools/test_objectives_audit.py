@@ -18,17 +18,16 @@ def output(rule=None, count=0):
 
 
 class ObjectiveCeilingTests(unittest.TestCase):
-    def test_zero_and_lower_slope_counts_pass(self):
-        for count in (0, 1, 10, 11):
-            self.assertEqual(objective_audit_problems(output("vehicle-footprint-slope", count)), [])
+    def test_zero_contract_failures_pass(self):
+        self.assertEqual(objective_audit_problems(output()), [])
 
     def test_increases_and_new_categories_fail(self):
-        self.assertTrue(objective_audit_problems(output("vehicle-footprint-slope", 12)))
+        self.assertTrue(objective_audit_problems(output("vehicle-footprint-slope", 1)))
         for rule in ("vehicle-runway-clearance", "vehicle-object-clearance", "land-on-water"):
             self.assertTrue(objective_audit_problems(output(rule, 1)))
 
-    def test_slope_headroom_cannot_hide_another_contract_failure(self):
-        text = output("vehicle-footprint-slope", 1).replace("errors 1", "errors 2")
+    def test_unlisted_contract_failures_cannot_hide_in_the_total(self):
+        text = output().replace("errors 0", "errors 1")
         self.assertTrue(objective_audit_problems(text))
 
     def test_direct_summary_must_be_complete_and_agree(self):

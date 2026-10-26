@@ -681,8 +681,29 @@ def scenarios() -> list[Scenario]:
                 check=menu_picture(),
             )
         )
+    out.append(
+        Scenario(
+            name="menus-snap-quick-target-ground-distances", lane="menus",
+            args=["--theater", "UKR", "--aircraft", "f18", "--ground-start", "2",
+                  "--ground-target", "QUCITY", "--defenses", "0", "0", "--surface-seed", "7",
+                  "--separation", "300", "--snapshot", "{work}/shot.ppm",
+                  "--snapshot-state", "field-17", "--no-audio"],
+            timeout=180,
+            expect=[r"quick-snapshot: start ground enabled-distances 1,2,5,10,20,50,75,100,150,200,300$", r"Menu preview:",
+                    r"creator map: BLUE START: ODESA at"],
+            check=menu_picture(),
+            then=[Step(args=("--theater", "UKR", "--aircraft", "f18", "--launch-quick-mission",
+                             "--ground-start", "2", "--ground-target", "QUCITY", "--defenses", "0", "0",
+                             "--surface-seed", "7", "--separation", "300", "--smoke-test", "--no-audio"),
+                       window=True, timeout=180),
+                  Step(args=("--theater", "UKR", "--aircraft", "f18", "--ground-start", "9",
+                             "--ground-target", "QUCITY", "--defenses", "0", "0", "--surface-seed", "7",
+                             "--snapshot", "{work}/explicit-airport.ppm", "--snapshot-state", "map", "--no-audio"), timeout=180)],
+            notes="An explicit ground-start snapshot applies its runway after its target. All distances stay selectable, and 300 nm launches with the target's ground-start override.",
+        )
+    )
     # The creator's Map (slice CL-R) on the Ukraine with a ground target, a
-    # Blue ground start at L'viv (airport 9) and Enemy Wing 1 parked at
+    # Blue ground start at L'viv (airport 8) and Enemy Wing 1 parked at
     # Donets'k (airport 5): both starts are named and the objective is an
     # area, built from the mission the creator would fly.
     for state in ("map", "map-lobby", "map-wide", "map-close"):
@@ -690,7 +711,7 @@ def scenarios() -> list[Scenario]:
             Scenario(
                 name=f"menus-snap-quick-{state}-ukr-target-ground",
                 lane="menus",
-                args=["--theater", "UKR", "--quick-mission", "--ground-start", "9", "--enemy-ground-start", "5",
+                args=["--theater", "UKR", "--quick-mission", "--ground-start", "8", "--enemy-ground-start", "5",
                       "--ground-target", "QUCITY", "--defenses", "2", "2", "--surface-seed", "12345",
                       "--snapshot", "{work}/shot.ppm", "--snapshot-state", state, "--no-audio"],
                 timeout=180,

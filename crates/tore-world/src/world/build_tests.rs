@@ -542,3 +542,49 @@ fn creator_distance_audit_matches_launch_and_never_silently_shortens() {
         }
     }
 }
+
+#[test]
+fn ground_starts_offer_every_distance_and_target_launches_accept_them() {
+    use crate::test_support::surface::{spec_with_target, surface_resources, target};
+    let mut data = surface_resources();
+    data.extend(crate::test_support::resources::airport_resources());
+    let mut mission = spec_with_target(&target("QUCITY", 0, 0, 7));
+    mission.start = Start::GroundAuto { altitude_ft: 5000 };
+    let first = World::new(&mission, &data, Seating::SinglePlayer).unwrap();
+    let runway = first.setup.ground_start.unwrap();
+    for start in [
+        Start::GroundAuto { altitude_ft: 5000 },
+        Start::Ground {
+            runway,
+            altitude_ft: 5000,
+        },
+    ] {
+        mission.start = start;
+        let choices = crate::mission_layout::availability::audit(&data, &mission).unwrap();
+        assert!(choices.separations.into_iter().all(|fits| fits));
+        for nm in crate::mission_layout::SEPARATION_NM {
+            mission.separation_nm = nm as u32;
+            World::new(&mission, &data, Seating::SinglePlayer).unwrap();
+        }
+    }
+    mission.start = Start::Airborne { altitude_ft: 5000 };
+    assert!(
+        !crate::mission_layout::availability::audit(&data, &mission)
+            .unwrap()
+            .separations[10]
+    );
+}
+
+#[test]
+fn ground_start_without_target_still_requires_the_requested_distance_to_fit() {
+    let data = crate::test_support::resources::airport_resources();
+    let mut mission = spec();
+    mission.start = Start::GroundAuto { altitude_ft: 5000 };
+    mission.separation_nm = 300;
+    let choices = crate::mission_layout::availability::audit(&data, &mission).unwrap();
+    assert!(!choices.separations[10]);
+    let error = World::new(&mission, &data, Seating::SinglePlayer)
+        .err()
+        .unwrap();
+    assert!(error.to_string().starts_with("Separation "));
+}

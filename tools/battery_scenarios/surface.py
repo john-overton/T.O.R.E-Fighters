@@ -209,7 +209,7 @@ def objective_audit_problems(output: str) -> list[str]:
     # Independent ceilings accept improvements, while new regressions fail.
     ceilings = {
         "land-on-water": 0, "outside-map": 0, "footprint-outside-map": 0,
-        "footprint-terrain-class": 0, "vehicle-footprint-slope": 11,
+        "footprint-terrain-class": 0, "vehicle-footprint-slope": 0,
         "vehicle-runway-clearance": 0, "vehicle-object-clearance": 0,
     }
     counted = 0

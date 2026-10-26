@@ -126,6 +126,18 @@ that clips their region. These changes alter surface digests, scene positions an
 checkpoint bytes; the release integration must handle the protocol/replay version
 bump together with the other 0.2.2-rc1 changes.
 
+The launcher, gun and added-radar footing limit is now a fitted 20%, matching
+other vehicles; tanks keep 30% (John requested loosening on 2026-10-26). With a
+ground target and a player ground start, the creator offers every distance because
+the target determines the enemy position. Skills and other non-placement edits
+retain the completed placement check.
+
+Hosts try at most sixteen consecutive seeds after a placement refusal, then send
+only the successfully built seed. Startup, King's mission changes, restart and
+rotation share this rule; clients never choose their own replacement. Each
+successful choice is logged. Distance errors and missing resources do not trigger
+seed retries. See [the server seed policy](DEDICATED-SERVER.md#surface-placement-seeds).
+
 ## Lobby and Quick Mission flow
 
 v1 multiplayer runs through the existing Quick Mission creator. The creator

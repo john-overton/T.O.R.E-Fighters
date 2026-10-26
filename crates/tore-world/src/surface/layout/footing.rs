@@ -3,15 +3,14 @@ use super::*;
 use tore_formats::surface_unit::class;
 
 /// Maximum rise per 100 horizontal feet. Agent fitted defaults, not retail
-/// measurements: tanks 30%, other vehicles 20%, guns/launchers/radars 10%.
+/// measurements: tanks 30%; vehicles, guns, launchers and added radars 20%.
+/// John requested loosening the latter policy on 2026-10-26.
 pub fn slope_limit(unit: &Unit) -> i64 {
     if unit.class & class::TANK != 0 {
         30
-    } else if unit.class & (class::SAM | class::AAA) != 0
+    } else if unit.class & (class::SAM | class::AAA | class::VEHICLE) != 0
         || unit.id.range() == super::super::IdRange::BatteryRadar
     {
-        10
-    } else if unit.class & class::VEHICLE != 0 {
         20
     } else {
         10

@@ -76,7 +76,9 @@ pub fn audit(resources: &dyn ResourceSource, spec: &MissionSpec) -> WorldResult<
         .and_then(|id| ground_layout(&terrain, id, spec.player_wing_size()).ok())
         .map_or([start[0], start[2]], |g| [g.slots[0][0], g.slots[0][2]]);
     for (i, nm) in SEPARATION_NM.into_iter().enumerate() {
-        separations[i] = if let Some(template) = &mut surface.template {
+        separations[i] = if spec.start.on_ground() && target.is_some() {
+            true
+        } else if let Some(template) = &mut surface.template {
             template.settings.separation_nm = nm as u32;
             layout::scene_starts(&surface, &ground, &terrain.airport_scene).is_some_and(|s| {
                 let distance =

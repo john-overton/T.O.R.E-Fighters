@@ -431,7 +431,9 @@ many others survive.
   moved unit on the wrong class.
 - Vehicle footing uses the final airport layout and the oriented shape footprint,
   with nine terrain samples and pairwise grade checks. Fitted agent limits are
-  30% for tanks, 20% for other vehicles, and 10% for launchers, guns and added radars.
+  30% for tanks and 20% for other vehicles, launchers, guns and added radars.
+  John requested loosening the launcher/gun/radar policy on 2026-10-26; the
+  20% value is the agent-selected fitted limit, matching other vehicles.
   These are grades, not angles and not recovered retail limits. A preliminary
   conservative 10% check covers the footprint's enclosing square.
 - John requested per-unit slope placement on 2026-10-25. After airport replacement,

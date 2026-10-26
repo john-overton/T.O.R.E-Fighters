@@ -89,6 +89,36 @@ impl Host {
         self.loader.config = config;
     }
 
+    /// Select a viable layout at a mission boundary, before publishing its seed.
+    pub(super) fn build_seeded(
+        &mut self,
+        spec: &mut MissionSpec,
+    ) -> Result<(super::journal::Driver, Manifest), HostError> {
+        let initial = spec.surface_seed;
+        let (built, attempts) = tore_world::mission_layout::seed_retry::build(spec, |candidate| {
+            self.build(candidate).map_err(|error| match error {
+                HostError::Mission(text) => text,
+                other => other.to_string(),
+            })
+        })
+        .map_err(HostError::Mission)?;
+        self.log_surface_seed(spec, initial, attempts);
+        Ok(built)
+    }
+
+    pub(super) fn log_surface_seed(&mut self, spec: &MissionSpec, initial: u32, attempts: usize) {
+        if spec.lays_out_surface() {
+            self.log(HostLog::Note {
+                tick: self.world.tick(),
+                text: tore_world::mission_layout::seed_retry::notice(
+                    initial,
+                    spec.surface_seed,
+                    attempts,
+                ),
+            });
+        }
+    }
+
     /// Builds `spec` on this loop with the loading thread speaking for the
     /// host meanwhile, and logs how long it took when the thread spoke.
     pub(super) fn build(
