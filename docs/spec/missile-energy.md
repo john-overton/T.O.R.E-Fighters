@@ -223,7 +223,9 @@ allow 150 m altitude, 1 km origin displacement and three degrees bearing drift,
 10 m/s launcher speed and five degrees launcher axis and velocity direction,
 and 25 m/s target velocity. A restarted search can show the previous envelope
 only while its own observation is no more than 1,200 ticks old and geometry
-still matches. Display-only angular limits are 15 degrees of axis/velocity
+still matches after both observed positions are carried forward along their
+observed velocities for the elapsed ticks, so a straight run keeps its range
+cue while each 1,000 m restart searches. Display-only angular limits are 15 degrees of axis/velocity
 direction and 10 degrees of bearing, allowing a gentle turn while the tighter
 5/3-degree replacement search finishes. Other limits stay the same. These
 are agent-fitted display tolerances; they never authorize a shot. A cold search finishes

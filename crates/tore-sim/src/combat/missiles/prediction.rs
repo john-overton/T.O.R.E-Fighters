@@ -416,8 +416,17 @@ impl Service {
             .into_iter()
             .chain(range.previous)
             .find(|snapshot| {
-                tick.saturating_sub(snapshot.at) <= 1200
-                    && envelope_geometry(snapshot.question, current, 15., 10.)
+                let ticks = tick.saturating_sub(snapshot.at);
+                // Carry the observation forward along both observed
+                // velocities, as launch answers do, so straight flight
+                // keeps its range while turns and reversals still drop it.
+                let mut moved = snapshot.question;
+                let seconds = ticks as f64 * DT;
+                for i in 0..3 {
+                    moved.flight.position[i] += moved.flight.velocity[i] * seconds;
+                    moved.target.position[i] += moved.target.velocity[i] * seconds;
+                }
+                ticks <= 1200 && envelope_geometry(moved, current, 15., 10.)
             })
             .map(|snapshot| snapshot.envelope)
     }
@@ -844,6 +853,34 @@ mod tests {
             shown += usize::from(service.envelope(1, 2, q, tick).is_some());
         }
         assert!(shown >= 600, "envelope shown {shown} of 1200 ticks");
+    }
+    /// A straight run restarts the range search every 1000 m of travel. The
+    /// last range must stay on the HUD while the replacement search runs.
+    #[test]
+    fn a_straight_run_keeps_its_range_envelope_through_search_restarts() {
+        for closing in [-250., 0., 250.] {
+            let mut service = Service::default();
+            let mut first = None;
+            let mut shown = 0;
+            for tick in 0..3600u64 {
+                let t = tick as f64 * DT;
+                let mut q = question();
+                q.flight.position[2] = 300. * t;
+                q.target.velocity = [0., 0., closing];
+                q.target.position[2] = 25000. + closing * t;
+                service.request_range(1, 2, tick, q);
+                service.advance(tick, &|_, _| 0.);
+                let visible = service.envelope(1, 2, q, tick).is_some();
+                first = first.or(visible.then_some(tick));
+                shown += usize::from(first.is_some() && visible);
+            }
+            let first = first.expect("range published");
+            assert!(
+                shown as u64 >= 3600 - first,
+                "closing {closing}: range shown {shown} of {} ticks",
+                3600 - first
+            );
+        }
     }
     #[test]
     fn a_stable_inflight_estimate_ages_with_observed_relative_motion() {
