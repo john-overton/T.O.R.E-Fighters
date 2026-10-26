@@ -770,7 +770,9 @@ mod tests {
                 100,
                 missiles::decoys::Kind::Chaff,
                 1,
-                [0., 1000., 60.],
+                // Far beyond the aircraft: the missile is still pursuing the
+                // decoy, not in the step that passes it, when it meets the jet.
+                [0., 1000., 2000.],
                 [0.; 3],
             ),
             passed: false,
@@ -784,19 +786,25 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::Hit(100)));
         }
-        assert!(hit, "the aircraft is encountered before the nearby decoy");
+        assert!(
+            hit,
+            "the aircraft is encountered while the missile still pursues the decoy"
+        );
     }
     #[test]
     fn a_missile_that_passed_its_decoy_cannot_fuze_on_a_later_aircraft() {
         let mut state = super::super::tests::fixture(true);
         state.weapon_rules = Rules::Energy;
         state.own_mut().side = Side(1);
+        // The aircraft sits on the coasting missile's sagging path about
+        // 2.7 s after it passes the decoy, so only the disabled fuze spares it.
         let mut target =
             super::super::tests::target(100, [0., 1000. / FT, 1000. / FT], 10000, 0x80);
         target.side = Side(2);
         target.radius = AIRCRAFT_RADIUS_FT;
         let w = weapon("AIM120.JT", 3);
         let mut p = projectile(&w, &target);
+        target.position = [0., 3052.5, 3251.4];
         p.target = None;
         p.motion
             .as_mut()
@@ -819,13 +827,26 @@ mod tests {
         state.targets = vec![target];
         state.projectiles = vec![p];
         let mut hit = false;
+        let mut closest = f64::INFINITY;
         for _ in 0..600 {
             hit |= state
                 .step_surface(&[], |_, _| 0., |_, _| false)
                 .iter()
                 .any(|event| matches!(event, Event::Hit(100)));
+            if let Some(p) = state.projectiles.first() {
+                closest = closest.min(missiles::length(missiles::sub(
+                    p.position,
+                    state.targets[0].position,
+                )));
+            }
         }
         assert!(!hit, "passing the decoy permanently disables the fuze");
+        // Without that rule the coasting missile would have fuzed here.
+        let reach = AIRCRAFT_RADIUS_FT + f64::from(w.damage.fuze_radius.max(0));
+        assert!(
+            closest < reach,
+            "the passed missile met the aircraft at {closest:.0} ft"
+        );
     }
     #[test]
     fn modern_ir_motors_catch_a_straight_fighter_astern_but_a_long_low_drag_escapes() {
