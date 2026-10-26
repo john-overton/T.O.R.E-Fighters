@@ -1589,7 +1589,10 @@ pub fn defense_maneuver(d: &DefenseDecision) -> (&'static str, String) {
                 }
             ),
         ),
-        None if d.debug.passed => ("complete", "missile passed or no longer closing".into()),
+        None if d.debug.passed => (
+            "complete",
+            "missile passage confirmed by opening range".into(),
+        ),
         None => (
             "not yet",
             format!(
@@ -1625,7 +1628,7 @@ pub fn defense_reasons(d: &DefenseDecision, _experience: Option<ResolvedExperien
     let g = d.debug;
     let mut why = Vec::new();
     if g.passed {
-        why.push("missile passed or no longer closing");
+        why.push("missile passage confirmed by opening range");
     } else if !g.maneuver_now {
         why.push("pilot reaction delay");
     }

@@ -65,10 +65,10 @@ pub struct BurstRequest {
 }
 
 impl BurstRequest {
-    /// Every defense phase keeps a final pair in each dispenser class.
+    /// Keep a final pair for another missile's last-ditch break.
     /// Counts exclude devices already queued.
-    pub fn with_inventory(self, chaff: u32, flares: u32) -> Self {
-        let reserve = 2;
+    pub fn with_inventory(self, chaff: u32, flares: u32, reserve_allowed: bool) -> Self {
+        let reserve = if reserve_allowed { 0 } else { 2 };
         Self {
             chaff: u32::from(self.chaff).min(chaff.saturating_sub(reserve)) as u8,
             flares: u32::from(self.flares).min(flares.saturating_sub(reserve)) as u8,
@@ -113,9 +113,9 @@ pub struct DefenseDebug {
     pub insufficient_time: bool,
     pub stale: bool,
     pub maneuver_now: bool,
-    /// The missile has passed, or its closing estimate was lost during a break.
+    /// Fresh observations confirm sustained opening range.
     pub passed: bool,
-    /// The skill/phase cooldown and routine device budget allow a burst.
+    /// Cooldown, encounter budget and second-missile reserve allow a burst.
     pub may_burst: bool,
     /// The evidence calls for devices now.
     pub release_now: bool,
@@ -124,16 +124,86 @@ pub struct DefenseDebug {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DefenseDecision {
     pub threat_id: u32,
+    pub reserve_allowed: bool,
     pub motion: Option<MotionSuggestion>,
     pub burst: Option<BurstRequest>,
     pub debug: DefenseDebug,
 }
 
+/// Observed history only, retained through report gaps for this encounter.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct MissileMemory {
+    id: u32,
+    class: Option<GuidanceClass>,
+    sample_tick: Option<u64>,
+    range_ft: Option<f64>,
+    opening_tick: Option<u64>,
+    opening_range_ft: f64,
+    passed: bool,
+    break_heading: Option<f64>,
+    devices: u8,
+}
+
+impl MissileMemory {
+    fn observe(&mut self, own: DefenseOwn, contact: ThreatRecord) {
+        if let Some(class) = contact.guidance_class.or_else(|| {
+            matches!(
+                contact.source,
+                EvidenceSource::ElectronicActive | EvidenceSource::ElectronicSupported
+            )
+            .then_some(GuidanceClass::Radar)
+        }) {
+            self.class = Some(class);
+        }
+        if contact.stale || self.sample_tick == Some(contact.observed_tick) {
+            return;
+        }
+        let Some(position) = contact.position else {
+            return;
+        };
+        // A sample after a report gap starts a fresh confirmation window.
+        // The unobserved interval cannot establish that range kept opening.
+        if self.sample_tick.is_some_and(|last| {
+            contact.observed_tick.saturating_sub(last)
+                > 2 * crate::combat::threats::REPORT_INTERVAL_TICKS
+        }) {
+            self.opening_tick = None;
+            self.range_ft = None;
+        }
+        let range = position
+            .iter()
+            .zip(own.position)
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if signed_time_to_cpa(own, &contact).is_some_and(|t| t > 0.0)
+            || self.range_ft.is_some_and(|last| range < last - 0.25)
+        {
+            self.opening_tick = None;
+            self.passed = false;
+        } else if self.range_ft.is_some_and(|last| range > last + 0.25) {
+            let since = *self.opening_tick.get_or_insert_with(|| {
+                self.opening_range_ft = self.range_ft.unwrap_or(range);
+                self.sample_tick.unwrap_or(contact.observed_tick)
+            });
+            if contact.observed_tick.saturating_sub(since) >= 90
+                && range - self.opening_range_ft >= 500.0
+                && range >= 1500.0
+            {
+                self.passed = true;
+            }
+        }
+        self.sample_tick = Some(contact.observed_tick);
+        self.range_ft = Some(range);
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DefenseState {
     selected_threat: Option<u32>,
-    known_classes: Vec<(u32, GuidanceClass)>,
-    passed_threats: Vec<u32>,
+    missiles: Vec<MissileMemory>,
+    last_contact: Option<ThreatRecord>,
+    first_device_threat: Option<u32>,
     observed_tick: u64,
     phase: Option<Maneuver>,
     extension_finished: bool,
@@ -141,9 +211,9 @@ pub struct DefenseState {
     beam_side: Option<f64>,
     break_heading_deg: Option<f64>,
     devices_requested: u8,
-    /// The last tick a threat was selected: an encounter's memory outlives a
-    /// brief gap in the threat picture.
+    /// Last fresh selected observation, used for the short motion grace.
     last_threat_tick: Option<u64>,
+    last_encounter_tick: Option<u64>,
     jink_base_heading_deg: Option<f64>,
     jink_heading_deg: Option<f64>,
     jink_started_tick: u64,
@@ -151,31 +221,30 @@ pub struct DefenseState {
 }
 
 impl DefenseState {
-    /// No threat is selected this tick. The encounter (reaction progress,
-    /// committed phase and side, routine budget) is kept for
-    /// [`THREAT_MEMORY_TICKS`], so a threat that drops out of the picture for
-    /// a moment, as a missile's emitter or a sighting can near closest
-    /// approach, does not restart the pilot's reaction delay in the end game.
+    /// No observation supports motion now. Keep the encounter memory until
+    /// its quiet timeout, including class, break heading, reaction and budget.
     pub fn clear_threat(&mut self) {
         self.jink_base_heading_deg = None;
         self.jink_heading_deg = None;
     }
 
-    /// A new encounter after a longer quiet spell. Classifications and the
-    /// aircraft's release cooldown carry over.
+    /// A new encounter after a longer quiet spell. The aircraft's release
+    /// cooldown carries over; missile-specific memory starts afresh.
     fn start_encounter(&mut self, tick: u64) {
         *self = Self {
-            known_classes: std::mem::take(&mut self.known_classes),
             observed_tick: tick,
+            last_encounter_tick: Some(tick),
             last_burst_tick: self.last_burst_tick,
             ..Self::default()
         };
     }
 }
 
-/// Fitted (review, 2026-10-25): an encounter's memory lasts 2 s without a
-/// selected threat, the threat picture's own lost-contact grace.
+/// Fitted: a lost observation supports committed motion for two seconds,
+/// the threat picture's own lost-contact grace. Encounter memory lasts longer.
 pub const THREAT_MEMORY_TICKS: u64 = crate::combat::threats::LOST_GRACE_TICKS;
+/// Fitted quiet window for classification, budget and phase memory.
+pub const ENCOUNTER_MEMORY_TICKS: u64 = 30 * 120;
 
 pub fn decide<F>(
     tick: u64,
@@ -188,82 +257,82 @@ pub fn decide<F>(
 where
     F: FnMut(Vector) -> f64,
 {
-    // Retain observed classification while a contact remains in the threat
-    // picture, including a switch from electronic evidence to eyesight.
-    state
-        .known_classes
-        .retain(|(id, _)| contacts.iter().any(|c| c.missile_id == *id));
-    for contact in contacts {
-        if let Some(class) = contact.guidance_class {
-            if let Some((_, known)) = state
-                .known_classes
-                .iter_mut()
-                .find(|(id, _)| *id == contact.missile_id)
-            {
-                *known = class;
-            } else {
-                state.known_classes.push((contact.missile_id, class));
-            }
-        }
-    }
-    // Keep a completed, now bearing-only record from outranking a different
-    // missile that is still closing. Observed renewed closure makes it a
-    // candidate again; this memory is bounded by the current contact list.
-    if (state.passed || state.phase == Some(Maneuver::Break))
-        && let Some(id) = state.selected_threat
-        && !state.passed_threats.contains(&id)
-    {
-        state.passed_threats.push(id);
-    }
-    state.passed_threats.retain(|id| {
-        contacts
-            .iter()
-            .any(|c| c.missile_id == *id && time_to_cpa(own, c).is_none())
-    });
-    let Some(selected) = select_threat(own, contacts, state.selected_threat, &state.passed_threats)
-    else {
-        state.clear_threat();
-        return None;
-    };
     if state
-        .last_threat_tick
-        .is_none_or(|last| tick.saturating_sub(last) > THREAT_MEMORY_TICKS)
+        .last_encounter_tick
+        .is_none_or(|last| tick.saturating_sub(last) > ENCOUNTER_MEMORY_TICKS)
     {
         state.start_encounter(tick);
     }
-    state.last_threat_tick = Some(tick);
+    if contacts.iter().any(|c| !c.stale) {
+        state.last_encounter_tick = Some(tick);
+    }
+    for contact in contacts {
+        let index = state
+            .missiles
+            .iter()
+            .position(|m| m.id == contact.missile_id)
+            .unwrap_or_else(|| {
+                state.missiles.push(MissileMemory {
+                    id: contact.missile_id,
+                    ..MissileMemory::default()
+                });
+                state.missiles.len() - 1
+            });
+        state.missiles[index].observe(own, *contact);
+    }
+    let passed_ids: Vec<_> = state
+        .missiles
+        .iter()
+        .filter(|m| m.passed)
+        .map(|m| m.id)
+        .collect();
+    let selected = select_threat(own, contacts, state.selected_threat, &passed_ids).copied();
+    if let Some(contact) = selected
+        && !contact.stale
+    {
+        if state.last_threat_tick.is_none() {
+            state.observed_tick = tick;
+        }
+        state.last_threat_tick = Some(tick);
+        state.last_contact = Some(contact);
+    }
+    let Some(selected) = selected.or_else(|| {
+        state
+            .last_contact
+            .filter(|_| {
+                state
+                    .last_threat_tick
+                    .is_some_and(|last| tick.saturating_sub(last) <= THREAT_MEMORY_TICKS)
+            })
+            .map(|mut contact| {
+                contact.stale = true;
+                contact
+            })
+    }) else {
+        state.clear_threat();
+        return None;
+    };
+    let index = state
+        .missiles
+        .iter()
+        .position(|m| m.id == selected.missile_id)
+        .unwrap();
     let changed = state.selected_threat != Some(selected.missile_id);
     if changed {
-        state.phase = None;
+        state.phase = state.missiles[index].break_heading.map(|_| Maneuver::Break);
         state.beam_side = None;
-        state.break_heading_deg = None;
-        state.passed = false;
+        state.break_heading_deg = state.missiles[index].break_heading;
     }
     state.selected_threat = Some(selected.missile_id);
     let skill = skill_index(experience);
-    let closest = signed_time_to_cpa(own, selected);
-    let time = closest.filter(|t| *t > 0.0);
-    let passed = closest.is_some_and(|t| t <= 0.0)
-        || time.is_none()
-            && (state.phase == Some(Maneuver::Break)
-                || state.passed
-                || state.passed_threats.contains(&selected.missile_id));
+    let time = time_to_cpa(own, &selected);
+    let passed = state.missiles[index].passed;
     state.passed = passed;
     if passed {
-        if !state.passed_threats.contains(&selected.missile_id) {
-            state.passed_threats.push(selected.missile_id);
-        }
         state.phase = None;
-        state.break_heading_deg = None;
         state.extension_finished = true;
     }
-    // Visual evidence alone does not identify a seeker. Flares are the
-    // precaution for an unknown visual missile, not new sensor knowledge.
-    let known_class = state
-        .known_classes
-        .iter()
-        .find(|(id, _)| *id == selected.missile_id)
-        .map(|(_, class)| *class);
+    let known_class = state.missiles[index].class;
     let radar = match known_class {
         Some(GuidanceClass::Radar) => true,
         Some(GuidanceClass::Infrared | GuidanceClass::Passive) => false,
@@ -318,7 +387,9 @@ where
             Maneuver::Drag => wrap(missile_world + 180.0),
             Maneuver::Break => {
                 let heading = break_heading(own, missile_world, state.beam_side);
-                *state.break_heading_deg.get_or_insert(heading)
+                let heading = *state.break_heading_deg.get_or_insert(heading);
+                state.missiles[index].break_heading = Some(heading);
+                heading
             }
             Maneuver::Notch | Maneuver::Beam => {
                 beam_heading(own, reference, contacts, state, &mut terrain)
@@ -343,10 +414,17 @@ where
     } else {
         [720, 480, 360, 360][skill]
     };
-    let may_burst = state
-        .last_burst_tick
-        .is_none_or(|last| tick.saturating_sub(last) >= interval)
-        && state.devices_requested < 8;
+    let reserve_allowed = last_ditch
+        && state
+            .first_device_threat
+            .is_some_and(|id| id != selected.missile_id);
+    let reserve_now = reserve_allowed && state.missiles[index].devices == 0;
+    let may_burst = (reserve_now
+        || state
+            .last_burst_tick
+            .is_none_or(|last| tick.saturating_sub(last) >= interval))
+        && state.devices_requested < if reserve_allowed { 8 } else { 6 }
+        && state.missiles[index].devices < 6;
     let release_now = maneuver_now
         && (last_ditch
             || radar
@@ -361,15 +439,20 @@ where
     if burst.is_some() {
         state.last_burst_tick = Some(tick);
         state.devices_requested += 2;
+        state.missiles[index].devices += 2;
+        state.first_device_threat.get_or_insert(selected.missile_id);
     }
 
     Some(DefenseDecision {
         threat_id: selected.missile_id,
+        reserve_allowed,
         motion: maneuver_now.then_some(MotionSuggestion {
             maneuver: preferred,
             heading_deg: heading,
             flight_path_pitch_deg: pitch,
-            reduce_heat: known_class == Some(GuidanceClass::Infrared)
+            reduce_heat: !radar
+                && (known_class == Some(GuidanceClass::Infrared)
+                    || selected.source == EvidenceSource::Visual)
                 && preferred != Maneuver::Drag,
         }),
         burst,
@@ -675,25 +758,32 @@ mod tests {
         tick: u64,
         skill: Experience,
         own: DefenseOwn,
-        contact: ThreatRecord,
+        mut contact: ThreatRecord,
         state: &mut DefenseState,
     ) -> DefenseDecision {
+        contact.observed_tick = tick;
         decide(tick, skill, own, &[contact], state, |_| 0.0).unwrap()
     }
 
     #[test]
-    fn a_passed_bearing_only_record_cannot_hide_a_second_closing_missile() {
+    fn a_confirmed_passed_record_cannot_hide_a_second_closing_missile() {
         let mut state = DefenseState::default();
         let mut first = threat(EvidenceSource::ElectronicActive, Some(GuidanceClass::Radar));
         first.position = Some([0.0, 5000.0, 1000.0]);
         assess(0, Experience::Ace, own(), first, &mut state);
+        first.velocity = Some([0.0, 0.0, 2000.0]);
+        for tick in [30, 60, 90, 120] {
+            first.position = Some([0.0, 5000.0, 1000.0 + tick as f64 * 10.0]);
+            assess(tick, Experience::Ace, own(), first, &mut state);
+        }
         first.velocity = None;
+        first.observed_tick = 120;
         let second = ThreatRecord {
             missile_id: 3,
             position: Some([0.0, 5000.0, 2000.0]),
-            ..threat(EvidenceSource::Visual, Some(GuidanceClass::Infrared))
+            ..threat(EvidenceSource::Visual, None)
         };
-        for tick in 1..120 {
+        for tick in 121..200 {
             let d = decide(
                 tick,
                 Experience::Ace,
@@ -705,28 +795,124 @@ mod tests {
             .unwrap();
             assert_eq!(d.threat_id, second.missile_id);
             assert!(!d.debug.passed && d.motion.is_some());
-            if tick == 60 {
+            if tick == 160 {
                 state =
                     crate::checkpoint::round_trip(&state, &crate::checkpoint::Models::default())
                         .unwrap();
             }
         }
-        let quiet = decide(120, Experience::Ace, own(), &[first], &mut state, |_| 0.0).unwrap();
+        let quiet = assess(200, Experience::Ace, own(), first, &mut state);
         assert!(quiet.debug.passed && quiet.motion.is_none() && quiet.burst.is_none());
-        // The first missile is again a live threat if it is observed closing.
-        first.velocity = Some([0.0, 0.0, -2000.0]);
-        assert_eq!(
-            decide(
-                120,
-                Experience::Ace,
-                own(),
-                &[first, second],
-                &mut state,
-                |_| 0.0
-            )
+    }
+
+    #[test]
+    fn missing_or_briefly_opening_estimates_keep_the_break_and_heading() {
+        let mut contact = threat(
+            EvidenceSource::ElectronicSupported,
+            Some(GuidanceClass::Radar),
+        );
+        contact.position = Some([0.0, 5000.0, 1000.0]);
+        let mut state = DefenseState::default();
+        let heading = assess(0, Experience::Ace, own(), contact, &mut state)
+            .motion
             .unwrap()
-            .threat_id,
-            first.missile_id
+            .heading_deg;
+        for tick in 1..=300 {
+            contact.velocity = if tick % 60 < 30 {
+                None
+            } else {
+                Some([0.0, 0.0, 2000.0])
+            };
+            contact.position = Some([0.0, 5000.0, 1000.0 + (tick % 60) as f64 * 2.0]);
+            let d = assess(tick, Experience::Ace, own(), contact, &mut state);
+            assert!(!d.debug.passed);
+            let motion = d.motion.unwrap();
+            assert_eq!(motion.maneuver, Maneuver::Break);
+            assert_eq!(motion.heading_deg, heading);
+        }
+    }
+
+    #[test]
+    fn classification_and_break_survive_a_gap_longer_than_two_seconds() {
+        let mut contact = threat(
+            EvidenceSource::ElectronicSupported,
+            Some(GuidanceClass::Radar),
+        );
+        contact.position = Some([0.0, 5000.0, 1000.0]);
+        let mut state = DefenseState::default();
+        let first = assess(0, Experience::Ace, own(), contact, &mut state);
+        for tick in 1..600 {
+            decide(tick, Experience::Ace, own(), &[], &mut state, |_| 0.0);
+        }
+        contact.source = EvidenceSource::Visual;
+        contact.guidance_class = None;
+        contact.velocity = None;
+        let resumed = assess(600, Experience::Ace, own(), contact, &mut state);
+        assert_eq!(resumed.burst, Some(BurstRequest::RADAR));
+        assert_eq!(
+            resumed.motion.unwrap().heading_deg,
+            first.motion.unwrap().heading_deg
+        );
+        assert!(!resumed.motion.unwrap().reduce_heat);
+    }
+
+    #[test]
+    fn another_missile_keeps_the_final_pair_within_the_encounter_budget() {
+        let mut contact = threat(
+            EvidenceSource::ElectronicSupported,
+            Some(GuidanceClass::Radar),
+        );
+        contact.position = Some([0.0, 5000.0, 1000.0]);
+        let mut state = DefenseState::default();
+        let mut requests = 0;
+        for tick in 0..400 {
+            requests += assess(tick, Experience::Ace, own(), contact, &mut state)
+                .burst
+                .map_or(0, |b| b.chaff);
+        }
+        assert_eq!(requests, 6);
+        contact.missile_id += 1;
+        let second = assess(400, Experience::Ace, own(), contact, &mut state);
+        assert!(second.reserve_allowed);
+        assert_eq!(
+            second
+                .burst
+                .unwrap()
+                .with_inventory(2, 0, second.reserve_allowed)
+                .chaff,
+            2
+        );
+        for tick in 401..800 {
+            assert!(
+                assess(tick, Experience::Ace, own(), contact, &mut state)
+                    .burst
+                    .is_none()
+            );
+        }
+        assert_eq!(state.devices_requested, 8);
+    }
+
+    #[test]
+    fn reaction_starts_at_the_first_incoming_warning_not_mission_start() {
+        let mut state = DefenseState::default();
+        for tick in 0..600 {
+            assert!(decide(tick, Experience::Novice, own(), &[], &mut state, |_| 0.0).is_none());
+        }
+        let contact = threat(EvidenceSource::ElectronicActive, Some(GuidanceClass::Radar));
+        assert!(
+            assess(600, Experience::Novice, own(), contact, &mut state)
+                .motion
+                .is_none()
+        );
+        assert!(
+            assess(779, Experience::Novice, own(), contact, &mut state)
+                .motion
+                .is_none()
+        );
+        assert!(
+            assess(780, Experience::Novice, own(), contact, &mut state)
+                .motion
+                .is_some()
         );
     }
 
@@ -767,33 +953,41 @@ mod tests {
     }
 
     #[test]
-    fn a_passed_missile_ends_the_break_and_cannot_spend_the_reserve() {
+    fn passage_needs_fresh_opening_ranges_over_the_confirmation_window() {
         let mut contact = threat(EvidenceSource::ElectronicActive, Some(GuidanceClass::Radar));
         contact.position = Some([0.0, 5000.0, 1000.0]);
         let mut state = DefenseState::default();
-        let mut devices = 0;
-        for tick in 0..600 {
-            let answer = assess(tick, Experience::Ace, own(), contact, &mut state);
-            assert_eq!(answer.motion.unwrap().maneuver, Maneuver::Break);
-            devices += answer.burst.map_or(0, |b| b.chaff);
-        }
-        assert_eq!(devices, 8);
-        assert_eq!(BurstRequest::RADAR.with_inventory(2, 30).chaff, 0);
-        contact.velocity = Some([0.0, 0.0, 1000.0]);
-        for tick in 600..840 {
-            let answer = assess(tick, Experience::Ace, own(), contact, &mut state);
-            assert!(answer.debug.passed && answer.motion.is_none() && answer.burst.is_none());
-        }
-        // Losing the motion estimate during a break also ends it, rather
-        // than turning and dispensing forever from a frozen record.
-        let mut state = DefenseState::default();
-        contact.velocity = Some([0.0, 0.0, -1000.0]);
         assess(0, Experience::Ace, own(), contact, &mut state);
-        contact.velocity = None;
-        for tick in 1..200 {
-            let answer = assess(tick, Experience::Ace, own(), contact, &mut state);
-            assert!(answer.debug.passed && answer.motion.is_none() && answer.burst.is_none());
+        contact.velocity = Some([0.0, 0.0, 2000.0]);
+        contact.position = Some([0.0, 5000.0, 1300.0]);
+        contact.observed_tick = 30;
+        for tick in 30..120 {
+            let d = decide(tick, Experience::Ace, own(), &[contact], &mut state, |_| {
+                0.0
+            })
+            .unwrap();
+            assert!(
+                !d.debug.passed,
+                "re-reading one frozen report is not opening evidence"
+            );
         }
+        contact.position = Some([0.0, 5000.0, 2300.0]);
+        let d = assess(120, Experience::Ace, own(), contact, &mut state);
+        assert!(
+            !d.debug.passed,
+            "a gap cannot count as observed opening range"
+        );
+        for tick in [150, 180] {
+            contact.position = Some([0.0, 5000.0, 2300.0 + (tick - 120) as f64 * 10.0]);
+            assert!(
+                !assess(tick, Experience::Ace, own(), contact, &mut state)
+                    .debug
+                    .passed
+            );
+        }
+        contact.position = Some([0.0, 5000.0, 3200.0]);
+        let d = assess(210, Experience::Ace, own(), contact, &mut state);
+        assert!(d.debug.passed && d.motion.is_none() && d.burst.is_none());
     }
 
     #[test]
@@ -828,10 +1022,16 @@ mod tests {
             Maneuver::Notch
         );
         assert_eq!(
-            assess(481, Experience::Ace, own(), contact, &mut restored)
-                .motion
-                .unwrap()
-                .maneuver,
+            assess(
+                241 + ENCOUNTER_MEMORY_TICKS,
+                Experience::Ace,
+                own(),
+                contact,
+                &mut restored
+            )
+            .motion
+            .unwrap()
+            .maneuver,
             Maneuver::Drag
         );
     }
@@ -912,7 +1112,12 @@ mod tests {
             Some(BurstRequest::RADAR)
         );
         decide(2, Experience::Ace, own(), &[], &mut state, |_| 0.0);
-        assert!(state.known_classes.is_empty());
+        assert!(
+            state
+                .missiles
+                .iter()
+                .any(|m| m.class == Some(GuidanceClass::Radar))
+        );
     }
 
     #[test]
@@ -951,25 +1156,25 @@ mod tests {
     #[test]
     fn routine_bursts_keep_a_final_pair_and_never_substitute_the_other_class() {
         assert_eq!(
-            BurstRequest::RADAR.with_inventory(2, 30),
+            BurstRequest::RADAR.with_inventory(2, 30, false),
             BurstRequest {
                 chaff: 0,
                 flares: 0
             }
         );
         assert_eq!(
-            BurstRequest::RADAR.with_inventory(3, 30),
+            BurstRequest::RADAR.with_inventory(3, 30, false),
             BurstRequest {
                 chaff: 1,
                 flares: 0
             }
         );
         assert_eq!(
-            BurstRequest::RADAR.with_inventory(4, 30),
+            BurstRequest::RADAR.with_inventory(4, 30, false),
             BurstRequest::RADAR
         );
         assert_eq!(
-            BurstRequest::INFRARED.with_inventory(30, 3),
+            BurstRequest::INFRARED.with_inventory(30, 3, false),
             BurstRequest {
                 chaff: 0,
                 flares: 1
@@ -1048,15 +1253,13 @@ mod tests {
         assert_eq!(last.motion.unwrap().heading_deg, 270.0);
         assert_eq!(last.burst, Some(BurstRequest::RADAR));
         contact.velocity = Some([0.0, 0.0, 1_000.0]);
-        let passed = assess(301, Experience::Ace, own(), contact, &mut state);
-        assert!(passed.motion.is_none() && passed.burst.is_none() && passed.debug.passed);
-        assert!(decide(302, Experience::Ace, own(), &[], &mut state, |_| 0.0).is_none());
-        // Passage has ended the break; the encounter survives a brief gap.
-        assert_eq!(state.phase, None);
+        let opening = assess(301, Experience::Ace, own(), contact, &mut state);
+        assert!(!opening.debug.passed);
+        assert_eq!(opening.motion.unwrap().maneuver, Maneuver::Break);
         contact.position = Some([0.0, 5_000.0, 30_000.0]);
         contact.velocity = Some([0.0, 0.0, -1_000.0]);
         let later = assess(
-            302 + THREAT_MEMORY_TICKS + 1,
+            302 + ENCOUNTER_MEMORY_TICKS + 1,
             Experience::Ace,
             own(),
             contact,
@@ -1078,7 +1281,13 @@ mod tests {
             .unwrap();
         // The end-game record drops out for a few ticks and comes back.
         for tick in 92..100 {
-            assert!(decide(tick, Experience::Average, own(), &[], &mut state, |_| 0.0).is_none());
+            assert_eq!(
+                decide(tick, Experience::Average, own(), &[], &mut state, |_| 0.0)
+                    .unwrap()
+                    .motion
+                    .unwrap(),
+                before
+            );
         }
         let resumed = assess(100, Experience::Average, own(), contact, &mut state);
         assert_eq!(resumed.motion.unwrap().maneuver, before.maneuver);
@@ -1086,7 +1295,7 @@ mod tests {
         // After a quiet spell longer than the memory, a new encounter starts
         // with the pilot's reaction delay again.
         let fresh = assess(
-            101 + THREAT_MEMORY_TICKS,
+            101 + ENCOUNTER_MEMORY_TICKS,
             Experience::Average,
             own(),
             contact,
@@ -1103,10 +1312,7 @@ mod tests {
             contact.position = Some([0.0, 5_000.0, 10_000.0]);
             let beam = assess(0, Experience::Ace, own(), contact, &mut state);
             assert_eq!(beam.motion.unwrap().maneuver, Maneuver::Beam);
-            assert_eq!(
-                beam.motion.unwrap().reduce_heat,
-                class == Some(GuidanceClass::Infrared)
-            );
+            assert!(beam.motion.unwrap().reduce_heat);
             assert_eq!(beam.burst, None);
             contact.position = Some([0.0, 5_000.0, 5_000.0]);
             assert_eq!(
@@ -1261,7 +1467,7 @@ mod tests {
                 bursts.push(tick);
             }
         }
-        assert_eq!(bursts, [0, 360, 720, 1080]);
+        assert_eq!(bursts, [0, 360, 720]);
         contact.missile_id += 1;
         assert_eq!(
             assess(1440, Experience::Ace, own(), contact, &mut state).burst,
@@ -1270,7 +1476,7 @@ mod tests {
         contact.position = Some([0.0, 5_000.0, 1000.0]);
         assert_eq!(
             assess(1441, Experience::Ace, own(), contact, &mut state).burst,
-            None
+            Some(BurstRequest::RADAR)
         );
         contact.stale = true;
         assert_eq!(
@@ -1288,7 +1494,12 @@ mod tests {
                 .burst
                 .is_some()
         );
-        assert!(decide(1, Experience::Ace, own(), &[], &mut state, |_| 0.0).is_none());
+        assert!(
+            decide(1, Experience::Ace, own(), &[], &mut state, |_| 0.0)
+                .unwrap()
+                .burst
+                .is_none()
+        );
         assert_eq!(
             assess(100, Experience::Ace, own(), contact, &mut state).burst,
             None

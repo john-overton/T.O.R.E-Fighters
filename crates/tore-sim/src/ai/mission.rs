@@ -3979,6 +3979,7 @@ impl AiMission {
             let burst = burst.with_inventory(
                 available(SeekerClass::Radar),
                 available(SeekerClass::Infrared),
+                actor.last_defense.is_some_and(|d| d.reserve_allowed),
             );
             let mut classes = Vec::new();
             for index in 0..burst.chaff.max(burst.flares) {
@@ -4008,9 +4009,7 @@ impl AiMission {
             }
         }
         let schedule = std::mem::take(&mut actor.device_schedule);
-        let current_threat = actor
-            .last_defense
-            .is_some_and(|d| !d.debug.passed && !d.debug.stale);
+        let current_threat = actor.last_defense.is_some_and(|d| !d.debug.passed);
         for (due, class, remaining, defensive) in schedule {
             if defensive && !current_threat {
                 continue;
@@ -6778,7 +6777,7 @@ mod tests {
     }
 
     #[test]
-    fn a_passed_missile_cancels_its_queued_pair_but_keeps_compatibility_releases() {
+    fn an_uncertain_pass_keeps_its_queued_pair_and_compatibility_releases() {
         use crate::combat::missiles::Guidance;
         let mut mission = AiMission::new();
         mission.push(perception_actor(Experience::Ace));
@@ -6799,8 +6798,9 @@ mod tests {
         for tick in 1..=31 {
             later.extend(mission.step(&[], &flat, TimeOfDay(tick)).unwrap().devices);
         }
-        assert_eq!(later.len(), 1);
-        assert_eq!(later[0].class, SeekerClass::Infrared);
+        assert_eq!(later.len(), 2);
+        assert!(later.iter().any(|d| d.class == SeekerClass::Radar));
+        assert!(later.iter().any(|d| d.class == SeekerClass::Infrared));
         assert!(mission.actor(1).unwrap().device_schedule.is_empty());
     }
 

@@ -9,7 +9,8 @@
 //! decision compares equal.
 
 use super::{
-    BurstRequest, DefenseDebug, DefenseDecision, DefenseState, Maneuver, MotionSuggestion,
+    BurstRequest, DefenseDebug, DefenseDecision, DefenseState, Maneuver, MissileMemory,
+    MotionSuggestion,
 };
 
 crate::checkpoint_enum!(Maneuver {
@@ -50,6 +51,7 @@ crate::checkpoint_struct!(DefenseDebug {
 
 crate::checkpoint_struct!(DefenseDecision {
     threat_id,
+    reserve_allowed,
     motion,
     burst,
     debug,
@@ -57,8 +59,9 @@ crate::checkpoint_struct!(DefenseDecision {
 
 crate::checkpoint_struct!(DefenseState {
     selected_threat,
-    known_classes,
-    passed_threats,
+    missiles,
+    last_contact,
+    first_device_threat,
     observed_tick,
     phase,
     extension_finished,
@@ -67,8 +70,21 @@ crate::checkpoint_struct!(DefenseState {
     break_heading_deg,
     devices_requested,
     last_threat_tick,
+    last_encounter_tick,
     jink_base_heading_deg,
     jink_heading_deg,
     jink_started_tick,
     last_burst_tick,
+});
+
+crate::checkpoint_struct!(MissileMemory {
+    id,
+    class,
+    sample_tick,
+    range_ft,
+    opening_tick,
+    opening_range_ft,
+    passed,
+    break_heading,
+    devices
 });

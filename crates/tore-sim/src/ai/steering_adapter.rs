@@ -269,13 +269,33 @@ impl ControlAdapter {
         } else {
             effective.roll_deg_per_s
         };
-        let (roll_seconds, roll_damping) = if self.defense.is_some() {
-            (0.4, 1.0)
+        let desired_roll = if self.defense.is_some() {
+            if let Some(profile) = config.controls {
+                let axis = if state.research.is_some() {
+                    profile.hybrid_roll.unwrap_or(profile.roll)
+                } else {
+                    profile.roll
+                };
+                let stopping = state.roll_rate.powi(2)
+                    / (2.0 * f64::from(axis.deceleration).to_radians())
+                    + state.roll_rate.abs() * dt_s
+                    + 0.5_f64.to_radians();
+                if bank_error * state.roll_rate > 0.0 && bank_error.abs() <= stopping
+                    || bank_error.abs() < 0.5_f64.to_radians()
+                {
+                    0.0
+                } else {
+                    bank_error / 0.10
+                }
+            } else {
+                // Cancel the remaining roll of the aircraft's lag response,
+                // then close the bank error quickly without an inverted overshoot.
+                (bank_error - state.roll_rate * config.tuning.roll_response_seconds) / 0.10
+            }
         } else {
-            (0.7, 0.5)
-        };
-        let desired_roll = (bank_error / roll_seconds - state.roll_rate * roll_damping)
-            .clamp(-roll_authority.to_radians(), roll_authority.to_radians());
+            bank_error / 0.7 - state.roll_rate * 0.5
+        }
+        .clamp(-roll_authority.to_radians(), roll_authority.to_radians());
         let roll_limit = if let Some(profile) = config.controls {
             let axis = if state.research.is_some() {
                 profile.hybrid_roll.unwrap_or(profile.roll)
@@ -382,13 +402,19 @@ impl ControlAdapter {
                     }
                     + self.gun_aim.map_or(0., |a| a.pitch_rate))
                 / 32.174;
-        // Defense rolls into a positive pull, allowing only a small loss of
-        // vertical lift for the shallow descent. A pitch target must never
-        // reverse lift and cancel the horizontal turn. Terrain still wins.
+        // Defense pulls to its skill limit once lift is on the turn side.
+        // Pitch feedback cannot reduce a committed break's lateral lift.
+        // Terrain recovery still takes priority.
         let desired_g = if self.defense.is_some() {
-            (vertical_g.max(current.flight_path_pitch_deg.to_radians().cos().max(0.0) * 0.85)
-                / state.bank.cos().max(0.05))
-            .clamp(0.0, g_limit.max(0.0))
+            if !below_terrain_floor && bank_request_deg.abs() >= 35.0 {
+                // Pull to the skill limit as soon as lift is on the turn side.
+                // Roll-in blends from 1 G to full pull over the first 30 degrees.
+                let lift_on_turn =
+                    (state.bank.to_degrees() * bank_request_deg.signum() / 30.0).clamp(0.0, 1.0);
+                (1.0 + (g_limit - 1.0) * lift_on_turn).clamp(0.0, g_limit.max(0.0))
+            } else {
+                (vertical_g / state.bank.cos().max(0.05)).clamp(0.0, g_limit.max(0.0))
+            }
         } else {
             (vertical_g / state.bank.cos().max(0.25)).clamp(low, g_limit.max(low))
         };
@@ -834,7 +860,11 @@ mod tests {
                 command.mode = CommandMode::OtherState;
                 let mut adapter = ControlAdapter::new();
                 adapter.set_defense(Some((skill, false)));
-                let pilot_limit = ai_g_limits(skill, G_LIMIT, -3.0, false).0;
+                // This synthetic airframe has a 6 G row, not the generic
+                // test helper's 7 G request. Supply its actual loaded limit
+                // as the mission does, so clipping cannot erase skill differences.
+                let loaded_limit = 6.0 / (1.0 + (s.fuel + s.carried_lbs()) / 10000.0 * 0.4);
+                let pilot_limit = ai_g_limits(skill, loaded_limit, -3.0, false).0;
                 let mut peak_g = 0.0_f64;
                 for _ in 0..600 {
                     let out = adapter
@@ -855,11 +885,15 @@ mod tests {
                 }
                 let turn = heading_error_deg(0.0, s.yaw.to_degrees()).abs();
                 assert!(turn > 20.0, "{skill:?} hybrid={hybrid}: {turn} degrees");
-                assert!(peak_g > 2.0, "{skill:?}: {peak_g} G");
+                let skill_limit = pilot_limit * super::super::defense::load_fraction(skill);
+                assert!(
+                    peak_g >= 0.95 * skill_limit,
+                    "{skill:?} hybrid={hybrid}: peak {peak_g} G, limit {skill_limit}"
+                );
                 assert!(!s.crashed);
                 turns.push(turn);
             }
-            assert!(turns[3] > turns[0], "hybrid={hybrid}: {turns:?}");
+            assert!(turns[3] > turns[0] * 1.3, "hybrid={hybrid}: {turns:?}");
         }
     }
 

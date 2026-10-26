@@ -17,10 +17,26 @@ def defense_problems(work: Path, output: str, *, minimum_turn: float = 20) -> li
         problems.append("too few defensive flight samples")
     if any(float(g) <= 0 for g, _, _ in samples):
         problems.append("defense flew non-positive G")
-    for (_, phase, heading), (_, next_phase, next_heading) in zip(samples, samples[1:]):
-        delta = abs((float(next_heading) - float(heading) + 180) % 360 - 180)
-        if phase == next_phase and phase in ("Beam", "Notch") and delta > 120:
-            problems.append("beam/notch side flipped")
+    previous = None
+    last_time = None
+    for line in output.splitlines():
+        if not line.startswith("missile-study: trace "):
+            continue
+        sample = TRACE.search(line)
+        time = re.search(r" t=([\d.]+)", line)
+        if time and last_time is not None and float(time[1]) < last_time:
+            previous = None
+        if time:
+            last_time = float(time[1])
+        if not sample:
+            continue
+        _, phase, heading = sample.groups()
+        if previous:
+            prior_phase, prior_heading = previous
+            delta = abs((float(heading) - prior_heading + 180) % 360 - 180)
+            if prior_phase == phase and phase in ("Beam", "Notch") and delta > 120:
+                problems.append("beam/notch side flipped")
+        previous = phase, float(heading)
     runs = work / "study" / "runs.csv"
     if runs.exists():
         with runs.open() as source:
@@ -40,8 +56,6 @@ def defense_problems(work: Path, output: str, *, minimum_turn: float = 20) -> li
         if bank and abs(float(bank[1])) > 90.0:
             problems.append("defensive bank exceeded 90 degrees")
             break
-    if re.search(r"maneuver: Break,.*\}\), (?:None|Some\(BurstRequest \{.*?\}\)), None, true", output):
-        problems.append("last-ditch break continued without a closing estimate")
     if re.search(r"^missile-study: device .*defense=Some\(\(.*true\)\)$", output, re.M):
         problems.append("device released after the threat passed")
     if runs.exists() and any(int(row["devices"]) + int(row["other_devices"]) > 8 for row in rows):
@@ -77,8 +91,50 @@ def chaff_timing_problems(work: Path, output: str) -> list[str]:
     after_release = next((phase for at, phase in samples if first_device <= at <= first_device + 0.26), None)
     if after_release != "Notch":
         problems.append("first chaff waited for the last-ditch break")
-    if "reduce_heat: true" in output:
-        problems.append("radar threat requested an IR heat cut")
+    if any("reduce_heat: true" in line and float(at[1]) >= first_device
+           for line in output.splitlines() if (at := re.search(r" t=([\d.]+)", line))):
+        problems.append("known radar threat requested an IR heat cut")
+    return problems
+
+
+def skill_pull_problems(skill: str):
+    def check(work: Path, output: str) -> list[str]:
+        problems = defense_problems(work, output, minimum_turn=5)
+        rows = []
+        for line in output.splitlines():
+            match = re.search(r" t=([\d.]+).* g=(-?[\d.]+).*activity=Defending.*maneuver: (Beam|Notch|Break),", line)
+            if match:
+                rows.append((float(match[1]), float(match[2])))
+        minimum = {"novice": 3.4, "average": 3.6, "experienced": 4.9, "ace": 4.9}[skill]
+        if not rows or max(g for t, g in rows if t <= rows[0][0] + 1.25) < minimum:
+            problems.append(f"{skill} did not build {minimum:g} G within 1.25 s of turn entry")
+        return problems
+    return check
+
+
+def radar_memory_problems(work: Path, output: str) -> list[str]:
+    problems = defense_problems(work, output, minimum_turn=0)
+    shots = []
+    last = float("inf")
+    for line in output.splitlines():
+        time = re.search(r"^missile-study: trace .* t=([\d.]+)", line)
+        if not time:
+            continue
+        at = float(time[1])
+        if at < last:
+            shots.append([])
+        last = at
+        maneuver = re.search(r"maneuver: (\w+), heading_deg: (-?[\d.e+]+)", line)
+        shots[-1].append((maneuver[1], float(maneuver[2])) if maneuver else (None, None))
+    for rows in shots:
+        indices = [i for i, row in enumerate(rows) if row[0] == "Break"]
+        if not indices:
+            continue
+        if any(rows[i][0] != "Break" for i in range(indices[0], indices[-1])):
+            problems.append("radar break dropped and restarted")
+        heading = rows[indices[0]][1]
+        if any(abs((rows[i][1] - heading + 180) % 360 - 180) > 1 for i in indices):
+            problems.append("committed radar break heading changed")
     return problems
 
 
@@ -121,5 +177,24 @@ def scenarios() -> list[Scenario]:
             timeout=180, outputs=["study/runs.csv", "study/cells.csv"],
             check_work=chaff_timing_problems,
             notes="Chaff starts in the notch phase for lower skills; no IR throttle cut for a radar threat.",
+        ))
+    for skill in ("novice", "average", "experienced", "ace"):
+        turns.append(Scenario(
+            name=f"ai-regress-missile-pull-{skill}", lane="ai",
+            args=["--missile-study", "{work}/study", "--ai", "--trace", "--skill", skill,
+                  "--missiles", "AIM9M", "--ranges", "medium", "--aspects", "tail",
+                  "--altitudes", "co", "--seeds", "1", "--threads", "1"],
+            timeout=180, outputs=["study/runs.csv", "study/cells.csv"],
+            check_work=skill_pull_problems(skill),
+            notes="Each skill promptly reaches its useful G load while rolling upright.",
+        ))
+        turns.append(Scenario(
+            name=f"ai-regress-missile-radar-memory-{skill}", lane="ai",
+            args=["--missile-study", "{work}/study", "--ai", "--trace", "--skill", skill,
+                  "--missiles", "AIM7", "--ranges", "short,medium,long", "--aspects", "head,beam,tail",
+                  "--altitudes", "co", "--seeds", "2", "--threads", "1"],
+            timeout=300, outputs=["study/runs.csv", "study/cells.csv"],
+            check_work=radar_memory_problems,
+            notes="AIM-7 motion-report gaps preserve the break and learned radar class; no flares.",
         ))
     return turns

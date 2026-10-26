@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from battery_scenarios.ai_defense import defense_problems, head_break_problems, chaff_timing_problems
+from battery_scenarios.ai_defense import defense_problems, head_break_problems, chaff_timing_problems, skill_pull_problems, radar_memory_problems
 
 
 class DefenseChecks(unittest.TestCase):
@@ -38,8 +38,8 @@ class DefenseChecks(unittest.TestCase):
     def test_inverted_overshoot_fails(self):
         self.assertIn("defensive bank exceeded 90 degrees", self.check_case(bank=-105))
 
-    def test_break_after_passage_fails(self):
-        self.assertIn("last-ditch break continued without a closing estimate", self.check_case(passed=True))
+    def test_a_missing_estimate_is_not_confirmed_passage(self):
+        self.assertEqual(self.check_case(passed=True), [])
 
     def test_a_queued_release_after_passage_fails(self):
         self.assertIn("device released after the threat passed", self.check_case(late_release=True))
@@ -60,9 +60,37 @@ class DefenseChecks(unittest.TestCase):
                 "flight_path_pitch_deg: -5.0, reduce_heat: false }), None, Some(3.0), true))"
                 for t, phase in [(2.0, "Notch"), (2.25, "Notch"), (4.0, "Break"), (4.25, "Break")])
             self.assertEqual(chaff_timing_problems(work, trace), [])
-            self.assertIn("radar threat requested an IR heat cut", chaff_timing_problems(work, trace.replace("reduce_heat: false", "reduce_heat: true")))
+            self.assertIn("known radar threat requested an IR heat cut", chaff_timing_problems(work, trace.replace("reduce_heat: false", "reduce_heat: true")))
             runs.write_text(header + "1,30,4,0,4.00\n")
             self.assertIn("first chaff waited for the last-ditch break", chaff_timing_problems(work, trace))
+
+
+class ReviewTwoChecks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.work = Path(self.tmp.name)
+        (self.work / "study").mkdir()
+        (self.work / "study/runs.csv").write_text("fired,target_turn_deg,devices,other_devices\n1,40,6,0\n")
+
+    def trace(self, phases, loads):
+        return "\n".join(
+            f"missile-study: trace AIM7 seed 0 t={i * .5:.2f} bank=75 g={g} alt=5000 activity=Defending "
+            f"defense=Some((Some(MotionSuggestion {{ maneuver: {phase}, heading_deg: 270, reduce_heat: false }}), None, None, true))"
+            for i, (phase, g) in enumerate(zip(phases, loads)))
+
+    def test_slow_pull_is_rejected_even_if_it_eventually_reaches_full_g(self):
+        check = skill_pull_problems("ace")
+        slow = self.trace(["Break"] * 5, [1, 2, 3, 4, 5.4])
+        self.assertTrue(any("did not build" in p for p in check(self.work, slow)))
+        self.assertEqual(check(self.work, self.trace(["Break"] * 5, [1, 4, 5.4, 5.4, 5.4])), [])
+
+    def test_missing_estimate_is_allowed_but_restarting_a_break_is_not(self):
+        self.assertEqual(radar_memory_problems(self.work, self.trace(["Break"] * 5, [4] * 5)), [])
+        interrupted = self.trace(["Break", "Break", "Beam", "Break", "Break"], [4] * 5)
+        self.assertIn("radar break dropped and restarted", radar_memory_problems(self.work, interrupted))
+        (self.work / "study/runs.csv").write_text("fired,target_turn_deg,devices,other_devices\n1,40,4,2\n")
+        self.assertIn("released wrong-class devices", radar_memory_problems(self.work, interrupted))
 
 
 class HeadOnChecks(unittest.TestCase):

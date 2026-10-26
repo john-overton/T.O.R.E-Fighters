@@ -296,10 +296,15 @@ record with what changed (see "Sixth round" above).
    produces a hard crossing break instead of a straightening command. The
    `ai-regress-missile-bank-low-{standard,hybrid}` cases check bank at 3,000 ft;
    `ai-regress-missile-chaff-{novice,average}` requires chaff during the notch,
-   before the break. These checks use traces and release timing, not hit rates:
+   before the break. `ai-regress-missile-pull-*` requires useful G within 1.25 s
+   of turn entry at every skill. `ai-regress-missile-radar-memory-*` checks AIM-7
+   break continuity and zero flares across ranges and aspects.
+   These checks use traces and release timing, not hit rates:
    the current study repeats its fixed decoy stream across seeds. The unit
-   tests cover skill limits, phase sequencing, terrain, device budgets and
-   return to ordinary control. Missile flight and decoy outcomes are separate.
+   tests cover skill limits, the 1.3x Ace/Novice turn requirement, phase sequencing,
+   terrain, opening-range confirmation, classification across gaps, the second
+   missile reserve and return to ordinary control. A missing motion estimate
+   alone is not passage. Missile flight and decoy outcomes are separate.
 4. **Leaderless wingmen after a fight.** Changed (John, 2026-09-29): leader
    succession (`7366700`), and after the fight the wing returns to base
    (`475cafc`). Later (John, 2026-09-29): in the multiplayer work this succession was replaced by
