@@ -588,8 +588,7 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    // Sparrow must win every cell. R27 has one documented unshootable
-    // deck-beam cell; require strict wins elsewhere, never a reversal.
+    // Within-family upgrades must win every measured altitude/aspect cell.
     for (new, old) in [
         ("AIM7.JT", "AIM7E.JT"),
         ("R27ER.JT", "AA10.JT"),
@@ -604,9 +603,7 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
                     candidate_maximum(&newer, missiles::energy_profile::body(&newer), condition);
                 let b =
                     candidate_maximum(&older, missiles::energy_profile::body(&older), condition);
-                let unreachable_deck_beam =
-                    new != "AIM7.JT" && altitude == 500. && aspect == 1. && a == 0. && b == 0.;
-                if a <= b && !unreachable_deck_beam {
+                if a <= b {
                     failures.push(format!(
                         "{new} <= {old} at {altitude} ft aspect {aspect}: {a:.3}/{b:.3}"
                     ));
@@ -646,98 +643,16 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn geometry_data(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    println!("source,span_m,diameter_m,ratio,sea_factor,span_evidence,diameter_evidence");
-    for m in tore_formats::missile_motors::MOTORS {
-        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
-        let b = missiles::energy_profile::body(&w);
-        let ratio = missiles::energy_profile::span_ratio(&w, b.diameter);
-        let r = tore_formats::missile_data::reference(m.source);
-        println!(
-            "{},{:.6},{:.6},{ratio:.6},{:.6},{},{}",
-            m.source,
-            ratio * b.diameter,
-            b.diameter,
-            b.low_altitude_drag,
-            r.map_or("CLASS-SPAN-RATIO", |r| r.span_evidence),
-            r.map_or("FITTED-CLASS", |r| r.dimensions_evidence)
-        );
-    }
-    Ok(())
-}
-
-fn geometry_sweep(
-    dir: &Path,
-    anchors: &[f64],
-    powers: &[f64],
-    filter: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "source,span_m,diameter_m,ratio,span_evidence,anchor,power,factor,altitude_ft,aspect,reach_km,reference_km,residual_percent"
-    );
-    for m in tore_formats::missile_motors::MOTORS {
-        if filter.is_some_and(|f| !f.split(',').any(|s| s == m.source)) {
-            continue;
-        }
-        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
-        if missiles::surface_launched(&w.source) || w.flags & 0x20000 != 0 {
-            continue;
-        }
-        let original = missiles::energy_profile::body(&w);
-        let ratio = missiles::energy_profile::span_ratio(&w, original.diameter);
-        let evidence = tore_formats::missile_data::reference(m.source)
-            .map_or("CLASS-SPAN-RATIO", |r| r.span_evidence);
-        for (&anchor, &power) in anchors
-            .iter()
-            .flat_map(|a| powers.iter().map(move |p| (a, p)))
-        {
-            let mut b = original;
-            b.altitude_drag_exponent = power;
-            b.low_altitude_drag = if anchor == 0. {
-                1.
-            } else {
-                anchor * ratio / missiles::energy::AMRAAM_SPAN_DIAMETER
-            };
-            for altitude in [500., 5000., 15000., 35000.] {
-                // Diagnostic reference curve only: low-head comparison is .45
-                // of primary; interpolate/extrapolate linearly in altitude.
-                let reference = m.primary[2] * (0.45 + (altitude - 5000.) / 30000. * 0.55);
-                for aspect in [0, 2] {
-                    let reach = candidate_maximum(&w, b, [altitude, aspect as f64, 0., 250.]);
-                    println!(
-                        "{},{:.6},{:.6},{ratio:.6},{evidence},{anchor},{power},{:.6},{altitude},{},{reach:.3},{reference:.3},{:.3}",
-                        m.source,
-                        ratio * b.diameter,
-                        b.diameter,
-                        b.low_altitude_drag,
-                        ["head", "beam", "tail"][aspect],
-                        100. * (reach / reference - 1.)
-                    );
-                }
-            }
-        }
-    }
-    Ok(())
-}
 fn fit_sparrow(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let w = Weapon::parse("AIM7.JT", &fs::read(dir.join("AIM7.JT"))?)?;
     let old = Weapon::parse("AIM7E.JT", &fs::read(dir.join("AIM7E.JT"))?)?;
     let original = missiles::energy_profile::body(&w);
     let mut cases = Vec::new();
-    for geometry in [false, true] {
-        let mut older = missiles::energy_profile::body(&old);
-        if !geometry {
-            older.low_altitude_drag = 1.;
-        }
-        for altitude in [500., 5000., 15000., 35000.] {
-            for aspect in 0..3 {
-                let condition = [altitude, aspect as f64, 0., 250.];
-                cases.push((
-                    geometry,
-                    condition,
-                    candidate_maximum(&old, older, condition),
-                ));
-            }
+    let older = missiles::energy_profile::body(&old);
+    for altitude in [500., 5000., 15000., 35000.] {
+        for aspect in 0..3 {
+            let condition = [altitude, aspect as f64, 0., 250.];
+            cases.push((condition, candidate_maximum(&old, older, condition)));
         }
     }
     println!("fraction,drag,ignition_seconds,guidance_seconds,min_advantage,score");
@@ -767,12 +682,8 @@ fn fit_sparrow(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 b.guidance_ticks = (a.seconds * 120.).ceil() as u32 + 1;
                 let mut minimum = f64::INFINITY;
-                for &(geometry, condition, reference) in &cases {
-                    let mut tested = b;
-                    if !geometry {
-                        tested.low_altitude_drag = 1.;
-                    }
-                    let reach = candidate_maximum(&w, tested, condition);
+                for &(condition, reference) in &cases {
+                    let reach = candidate_maximum(&w, b, condition);
                     // A zero/zero beam cell is a failure, never a NaN that
                     // f64::min silently ignores. Require an actual intercept.
                     let advantage = if reach == 0. {
@@ -805,24 +716,6 @@ fn fit_sparrow(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
-    if args.get(2).is_some_and(|s| s == "--geometry-data") {
-        return geometry_data(dir);
-    }
-    if args.get(2).is_some_and(|s| s == "--geometry-sweep") {
-        let anchors = args
-            .get(3)
-            .map_or("0,5.0,5.6,6.2", String::as_str)
-            .split(',')
-            .map(str::parse)
-            .collect::<Result<Vec<f64>, _>>()?;
-        let powers = args
-            .get(4)
-            .map_or("80", String::as_str)
-            .split(',')
-            .map(str::parse)
-            .collect::<Result<Vec<f64>, _>>()?;
-        return geometry_sweep(dir, &anchors, &powers, args.get(5).map(String::as_str));
-    }
     if args.get(2).is_some_and(|s| s == "--fit-sparrow") {
         return fit_sparrow(dir);
     }
@@ -890,8 +783,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 source,
                 mass_kg: body.mass,
                 diameter_m: body.diameter,
-                span_m: None,
-                span_evidence: "CLASS-SPAN-RATIO",
                 range_km: f64::from(w.seeker.zones[1].maximum_range) * FT / 1000.,
                 dimensions_evidence: "RETAIL-AMBIGUOUS",
                 range_evidence: "RETAIL-AMBIGUOUS",

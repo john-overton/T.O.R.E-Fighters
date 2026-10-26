@@ -28,13 +28,10 @@ fixed Monte Carlo hit-rate targets. The broad calibration/study results are in t
 The offline `missile_energy_ranges` example accepts a local JT directory.
 `--verify` checks the documented A2A floors, generation orderings, long-low
 escape and local perturbations. `--measure-pairs` measures existing parameters;
-`--fit-pair` searches candidates but never edits data. `--geometry-data` prints
-all 59 resolved dimensions, evidence IDs and sea-level factors.
-`--geometry-sweep ANCHORS_CSV EXPONENTS_CSV [SOURCES_CSV]` compares A2A physical
-reach using the shared force kernel. Zero anchor disables the extra factor
-for diagnosis. References at unmeasured heights are explicitly fitted
-comparators, not public observations. `--fit-sparrow` searches the constrained
-newer-Sparrow refit and its complete family ordering grid.
+`--fit-pair` searches candidates but never edits data. `--fit-sparrow` searches
+the constrained newer-Sparrow refit and its complete family ordering grid.
+The geometry-data and geometry-sweep modes were removed with the unused force
+multiplier. Supplementary spans remain reference data in the data document.
 
 The synthetic `behavior_hash_requires_a_model_revision_for_rule_changes` test
 pairs the model identity with a quantized trajectory/contact trace. A changed

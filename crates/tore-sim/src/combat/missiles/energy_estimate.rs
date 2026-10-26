@@ -235,8 +235,6 @@ crate::checkpoint_struct!(Body {
     lift_coefficient,
     induced_factor,
     drag_scale,
-    low_altitude_drag,
-    altitude_drag_exponent,
     cruise_drag,
     minimum_speed,
     navigation_gain,

@@ -56,20 +56,14 @@ Cruise-class coefficients are 0.20/0.24/0.65/0.60/0.45/0.38/0.34. Endpoint
 values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
-John's 2026-10-26 geometry rule multiplies total zero-lift plus induced drag
-by `1 + (Fsea - 1)*(1 - smoothstep(x))^80`, where
-`x = clamp(altitude_ft/35000, 0, 1)` and
-`Fsea = 5.6*(largest_deployed_span/body_diameter)/(0.52578/0.1778)`.
-The existing per-store drag scale still applies. Dimensions and class estimates
-are listed per field in [the data table](../formats/missile-energy-data.md#geometry-scaled-low-altitude-drag).
-This is an opinionated additional multiplier, not a measured aerodynamic law.
-The smoothstep and exponent 80 are agent-fitted choices: full factor at sea
-level, continuous slope, exactly one at 35,000 ft, but effectively one much
-sooner. The severe concentration below 5,000 ft is needed to keep every A2A
-entry above 2 km astern. It does not solve the low-head reference mismatch;
-[the baseline](../baselines/missile-energy.md) records that trade-off. There are
-no per-missile exemptions. Thrust, fuel mass, phase duration, loft and control
-life continue to affect each trajectory independently of geometry.
+John's round-3 decision removes the supplemental geometry-based drag factor.
+Drag uses the round-2 force law and per-profile fits, with the retained newer
+Sparrow refit. Altitude affects density and sound speed through the standard
+atmosphere above; there is no additional altitude fade or span/diameter factor.
+The supplementary [span reference data](../formats/missile-energy-data.md#span-reference-data)
+do not affect simulation. Body diameter still supplies the original frontal
+reference area. Thrust, fuel mass, phase duration, loft and controlled life
+continue to affect each trajectory.
 
 Lateral acceleration cannot exceed min(structural_G*g, q*S*CLmax/m). The initial
 effective body-area CLmax is 12, induced-drag coefficient k is 0.03, and

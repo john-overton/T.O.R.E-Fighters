@@ -14,10 +14,11 @@ One page. What is specified, what is built, what is next. Milestones live in
 **Missile energy overhaul, 2026-10-26.** New worlds use one finite-energy
 model and physical decoy pursuit for supported powered guided weapons.
 Public/class masses, sourced range anchors and measured A2A envelopes are
-recorded with per-store motors and paired fitted conditions. Geometry-scaled
-low drag and turning-player advice are implemented. Third-review corrections
-pass Linux checks and 35 battery scenarios; low-head reference errors remain
-explicit, with turning-cue availability and cost measured in the baseline.
+recorded with per-store motors and paired fitted conditions. John's round-3
+decision removes the geometry drag multiplier while retaining the newer-Sparrow
+refit and turning-player advice. Drag returns to the round-2 fits. Regenerated
+measurements match round 2 outside Sparrow; Linux checks and all 35 battery
+scenarios pass, with current prediction costs in the baseline.
 Phase 3 remains stopped pending lead review; its old results are invalidated.
 This is John's opinionated extension, not a retail parity claim.
 [Behaviour](spec/missile-energy.md), [baseline](baselines/missile-energy.md).

@@ -95,9 +95,6 @@ pub fn body(w: &Weapon) -> Body {
         lift_coefficient: 12.,
         induced_factor: 0.03,
         drag_scale: tore_formats::missile_data::fallback(&w.source).map_or(1., |r| r.drag_scale),
-        low_altitude_drag: super::energy::LOW_ALTITUDE_ANCHOR * span_ratio(w, diameter)
-            / super::energy::AMRAAM_SPAN_DIAMETER,
-        altitude_drag_exponent: super::energy::LOW_ALTITUDE_EXPONENT,
         cruise_drag: cruise,
         minimum_speed: if cruise
             || super::Guidance::air_to_ground(w) == Some(super::Guidance::Command)
@@ -157,26 +154,6 @@ pub fn body(w: &Weapon) -> Body {
     body
 }
 
-/// Largest span/body ratio. Missing fields use one explicit class estimate,
-/// never a per-store tuning parameter. Existing diameter provenance is retained.
-pub fn span_ratio(w: &Weapon, diameter: f64) -> f64 {
-    tore_formats::missile_data::reference(&w.source)
-        .and_then(|r| r.span_m)
-        .map_or_else(
-            || {
-                if w.flags & 0x20000 == 0
-                    && (w.seeker_kind() == SeekerKind::Infrared
-                        || super::surface_launched(&w.source))
-                {
-                    3.5
-                } else {
-                    3.0
-                }
-            },
-            |span| span / diameter,
-        )
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Motion {
     pub body: Body,
@@ -202,7 +179,7 @@ crate::checkpoint_struct!(Motion {
 // integration/atmosphere, guidance, seeker, decoy, prediction, fuze/contact.
 // Numeric inputs and drag curves are hashed directly; comments and evidence
 // wording are not model inputs. Changes to rules must increment their revision.
-const RULES: [u64; 7] = [3, 2, 2, 1, 1, 3, 2];
+const RULES: [u64; 7] = [4, 3, 2, 1, 1, 3, 2];
 /// Stable tape identity for numeric inputs, curves and semantic rule revisions.
 pub fn fingerprint() -> u64 {
     fingerprint_model(
@@ -223,14 +200,6 @@ fn fingerprint_model(
     };
     for rule in rules {
         add(&rule.to_le_bytes());
-    }
-    for value in [
-        super::energy::LOW_ALTITUDE_ANCHOR,
-        super::energy::LOW_ALTITUDE_EXPONENT,
-        super::energy::LOW_ALTITUDE_CEILING_FT,
-        super::energy::AMRAAM_SPAN_DIAMETER,
-    ] {
-        add(&value.to_le_bytes());
     }
     for curve in super::energy::DRAG_CURVES {
         for value in curve {

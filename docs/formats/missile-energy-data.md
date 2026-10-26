@@ -147,8 +147,7 @@ gives 60 seconds for AIM9D. That is a different variant, so it is not silently
 assigned to M or X. Finding exact-variant control-power duration remains the
 next evidence step for those fitted fields.
 
-The original per-store deterministic fit, before the geometry multiplier,
-searched unknown fuel fractions 0.12..0.50 in 0.02
+The per-store deterministic fit searched unknown fuel fractions 0.12..0.50 in 0.02
 steps, with sourced thrusts and AS7 fuel held fixed. Drag candidates are 0.5,
 0.75, 1, 1.5, 2, 2.5 and 3. Controlled lifetime is the primary intercept time
 rounded up to a simulation tick, plus one tick; AIM9B retains its sourced
@@ -177,9 +176,9 @@ be matched simultaneously in this simple model. The baseline exposes every
 residual. Those comparison targets have not been raised to conceal the
 mismatch. The verified requirements are useful tail reach, altitude dependence,
 generation orderings where physically justified, finite long-shot guidance
-and local fit smoothness. The geometry addition substantially reduces SAM and
-low-flying strike reach too; these unchanged per-store fits no longer imply
-that their primary anchors are met. Current measurements are in the baseline.
+and local fit smoothness. John removed the supplemental geometry multiplier
+after round 3. The round-2 drag fits are restored, with the newer-Sparrow
+refit retained. Current measurements are in the baseline.
 
 | Store | Fuel fraction | Boost N / s | Sustain N / s | Controlled s | Motor evidence | Guidance evidence |
 | --- | ---: | --- | --- | ---: | --- | --- |
@@ -250,16 +249,17 @@ table gives 3.5 s boost and 12.5 s sustain. The agent refit uses fuel fraction
 0.40, drag scale 0.5, 51.55 s controlled life fitted to its 70 km high-head
 reference, and a fitted 0.5 s post-release ignition delay instead of the imported
 2 s. That delay is not inferred from the manual's trigger-to-launch time.
-The shorter drop and lower base drag are needed to preserve an actual
-500 ft beam intercept under the geometry rule. The offline search checks
+The shorter drop and lower base drag were selected during round 3. John
+explicitly retained this refit when removing the geometry multiplier. The offline search checks
 fuel fractions 0.35/0.40/0.45/0.50, base drag 0.5/0.75/1/1.5/2/2.5/3 and
 ignition delays 0/0.25/0.5/1 s. Every cell must have a positive newer reach
-and at least 5% advantage wherever the older missile can intercept, with
-geometry drag both enabled and disabled. Zero/zero is never an upgrade win.
+and at least 5% advantage wherever the older missile can intercept. The
+original round-3 search checked both drag variants; the retained offline tool
+now uses only the current force law. Zero/zero is never an upgrade win.
 Among feasible candidates the agent score is `(fuel-0.35)^2 + 0.02*ln(drag)^2
-+ 0.01*(1-ignition_seconds)^2`. The selected candidate minimizes that score;
-these penalties are agent choices, not manufacturer's constraints. Only this missile's per-store motor/drag/control
-parameters changed in this round. Other guidance times retain their previous
++ 0.01*(1-ignition_seconds)^2`. The retained candidate was selected by that round-3 search;
+these penalties are agent choices, not manufacturer's constraints. This missile's
+round-3 motor/drag/control parameters are unchanged by the geometry rollback. Other guidance times retain their previous
 per-missile fit, except the sourced AIM9B value. Ground/ship controlled times
 are fitted to their stationary or receding primary reference, not a head-on
 A2A reference. The [baseline](../baselines/missile-energy.md) records all family
@@ -282,23 +282,20 @@ exception rescales the base Cd curve or increases a head-on anchor.
 | AS16.JT | 0.25 |
 | SSN9.JT | 0.4 |
 
-## Geometry-scaled low-altitude drag
+## Span reference data
 
-John requested the span/diameter rule on 2026-10-26. Span means the largest
-fully deployed wing or fin tip-to-tip dimension, not body width or the smallest
-wing pair. The [specification](../spec/missile-energy.md#motion) owns the formula
-and altitude blend. The table below separates span evidence from the existing
-diameter evidence. Missing span measurements use an explicitly class-derived
-ratio: 3.0 for strike/cruise, 3.5 for remaining IR or surface-launched profiles,
-3.0 otherwise. Fictional derivatives use the labelled family span proxy.
-These are agent choices, not recovered or published dimensions. Missing public
-span is still unknown; next research is a variant-specific manufacturer drawing.
+**Reference only.** John removed the geometry-based drag factor after round 3.
+Largest deployed spans and span/diameter ratios below do not enter the force
+kernel or model fingerprint. Body diameter retains its existing use in frontal
+reference area; the physical diameter and mass sources elsewhere are unchanged.
+No additional altitude multiplier or fade is applied.
 
-The literal ratio does not yield the intuitive ordering in the request:
-AIM-9M is 4.95 body diameters across its fins, against AIM-120's 2.957, and
-AIM-54C is 2.421. Thus Sidewinder's extra factor is larger and Phoenix's smaller
-than AMRAAM's. The requested formula is preserved without individual overrides.
-This ratio alone is not a physical estimate of drag area or missile reach.
+Span means the largest fully deployed wing or fin tip-to-tip dimension. Missing
+measurements in the reviewed sources remain unknown. The table retains explicit
+agent estimates: ratio 3.0 for strike/cruise, 3.5 for remaining IR or surface
+profiles, 3.0 otherwise, plus labelled fictional-family proxies. These are
+reference estimates, not recovered or published dimensions and not simulation
+inputs. The next evidence step is a variant-specific manufacturer drawing.
 
 | Span evidence ID | Field and source |
 | --- | --- |
@@ -318,67 +315,68 @@ This ratio alone is not a physical estimate of drag area or missile reach.
 | CLASS-HARPOON-SPAN / CLASS-R73-SPAN / CLASS-PHOENIX-SPAN / CLASS-RVVAE-SPAN | Explicit family proxies for AGM84E / AA11B / AAML / PL10 and AEMP1 respectively. |
 | CLASS-SPAN-RATIO | Span unknown in reviewed sources; agent class estimate above. MICA's reviewed manufacturer sheet supplies diameter but not span. |
 
-| Store | Span m | Diameter m | Ratio | Sea-level factor | Span evidence | Diameter evidence |
-| --- | ---: | ---: | ---: | ---: | --- | --- |
-| AA10.JT | 0.9700 | 0.2300 | 4.217 | 7.987 | ROE2005-R27 | ROE2005-R27 |
-| AA11.JT | 0.5100 | 0.1700 | 3.000 | 5.681 | ROE2005-R73 | ROE2005-R73 |
-| AA11B.JT | 0.5100 | 0.1700 | 3.000 | 5.681 | CLASS-R73-SPAN | FITTED-AGILE-IR-CLASS |
-| AA12.JT | 0.7000 | 0.2000 | 3.500 | 6.628 | ROE2005-RVVAE | ROE2005-RVVAE |
-| AA2.JT | 0.4445 | 0.1270 | 3.500 | 6.628 | CLASS-SPAN-RATIO | RWD-R3S |
-| AA6.JT | 1.0650 | 0.3550 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-R40-FAMILY |
-| AA8.JT | 0.3900 | 0.1200 | 3.250 | 6.155 | US-WEG-R60-SPAN | OPEN-R60M |
-| AA9.JT | 1.1000 | 0.3800 | 2.895 | 5.482 | ROE2005-R33 | ROE2005-R33 |
-| AAML.JT | 0.9200 | 0.3800 | 2.421 | 4.585 | CLASS-PHOENIX-SPAN | FITTED-HEAVY-RADAR-CLASS |
-| AEMP1.JT | 0.7000 | 0.2000 | 3.500 | 6.628 | CLASS-RVVAE-SPAN | FITTED-RADAR-CLASS |
-| AGM45.JT | 0.6096 | 0.2032 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-SHRIKE-B-PROXY |
-| AGM65A.JT | 0.7112 | 0.3048 | 2.333 | 4.419 | USAF-MAVERICK-SPAN | OPEN-MAVERICK-A |
-| AGM65G.JT | 0.7112 | 0.3048 | 2.333 | 4.419 | USAF-MAVERICK-SPAN | USAF-MAVERICK-G |
-| AGM84A.JT | 0.9144 | 0.3430 | 2.666 | 5.048 | NAVAIR-HARPOON-SPAN | OPEN-HARPOON |
-| AGM84E.JT | 0.9144 | 0.3430 | 2.666 | 5.048 | CLASS-HARPOON-SPAN | OPEN-SLAM |
-| AGM88.JT | 1.1176 | 0.2540 | 4.400 | 8.332 | USAF-HARM-SPAN | USAF-HARM |
-| AIM120.JT | 0.5258 | 0.1778 | 2.957 | 5.600 | USAF-AMRAAM-SPAN | NAVAIR-AMRAAM |
-| AIM54C.JT | 0.9200 | 0.3800 | 2.421 | 4.585 | NAVAIR-PHOENIX-C | NAVAIR-PHOENIX-C |
-| AIM7.JT | 1.0160 | 0.2032 | 5.000 | 9.469 | CNATRA-P825-SPARROW-SPAN | OPEN-SPARROW-FM-PROXY |
-| AIM7E.JT | 1.0160 | 0.2032 | 5.000 | 9.469 | CNATRA-P825-SPARROW-SPAN | OPEN-SPARROW-E |
-| AIM9B.JT | 0.5588 | 0.1270 | 4.400 | 8.332 | NAVWEPS-OP2309-SPAN | OPEN-SIDEWINDER-B |
-| AIM9M.JT | 0.6287 | 0.1270 | 4.950 | 9.374 | NAVAIR-SIDEWINDER-SPAN | USAF-SIDEWINDER |
-| AIM9X.JT | 0.4470 | 0.1270 | 3.520 | 6.666 | USNAVY-SIDEWINDER-X-SPAN | NAVAIR-SIDEWINDER |
-| AM39.JT | 1.0500 | 0.3500 | 3.000 | 5.681 | CLASS-SPAN-RATIO | MBDA-AM39 |
-| AS14.JT | 1.1000 | 0.3800 | 2.895 | 5.482 | ROE2005-KH29L | ROE2005-KH29L |
-| AS15.JT | 0.4004 | 0.1335 | 3.000 | 5.681 | CLASS-SPAN-RATIO | FITTED-CLASS |
-| AS16.JT | 1.3650 | 0.4550 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-KH15S-PROXY |
-| AS30.JT | 1.0260 | 0.3420 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-AS30L |
-| AS7.JT | 0.8250 | 0.2750 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-KH23 |
-| AT12.JT | 0.3377 | 0.1126 | 3.000 | 5.681 | CLASS-SPAN-RATIO | FITTED-CLASS |
-| AT2.JT | 0.4260 | 0.1420 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-FALANGA-M-PROXY |
-| FIM92.JT | 0.2450 | 0.0700 | 3.500 | 6.628 | CLASS-SPAN-RATIO | US-ORDNANCE-STINGER |
-| MICA.JT | 0.4800 | 0.1600 | 3.000 | 5.681 | CLASS-SPAN-RATIO | MBDA-MICA |
-| MIS.JT | 0.3150 | 0.0900 | 3.500 | 6.628 | CLASS-SPAN-RATIO | MBDA-MISTRAL-PHYSICAL-PROXY |
-| PL10.JT | 0.7000 | 0.2000 | 3.500 | 6.628 | CLASS-RVVAE-SPAN | FITTED-RADAR-CLASS |
-| PL7.JT | 0.5495 | 0.1570 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-PL7 |
-| R27ER.JT | 0.9700 | 0.2600 | 3.731 | 7.065 | ROE2005-R27 | ROE2005-R27 |
-| R27ET.JT | 0.9700 | 0.2600 | 3.731 | 7.065 | ROE2005-R27 | ROE2005-R27 |
-| R27T.JT | 0.9700 | 0.2300 | 4.217 | 7.987 | ROE2005-R27 | ROE2005-R27 |
-| R440.JT | 0.5250 | 0.1500 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-R440 |
-| R530.JT | 0.6200 | 0.2630 | 2.357 | 4.464 | OPEN-SUPER530D | OPEN-SUPER530D |
-| R550.JT | 0.5600 | 0.1600 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-MAGIC2 |
-| SA13.JT | 0.4200 | 0.1200 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M37 |
-| SA14.JT | 0.2520 | 0.0720 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA14 |
-| SA15.JT | 0.8050 | 0.2300 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA15 |
-| SA16.JT | 0.2520 | 0.0720 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA16 |
-| SA19.JT | 0.5320 | 0.1520 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M311 |
-| SA2A.JT | 2.2890 | 0.6540 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-V750V-PROXY |
-| SA3.JT | 1.3125 | 0.3750 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-V601-PROXY |
-| SA6.JT | 1.1725 | 0.3350 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GULFLINK-SA6 |
-| SA7.JT | 0.2520 | 0.0720 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA7B-PROXY |
-| SA9.JT | 0.4200 | 0.1200 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GULFLINK-SA9 |
-| SAN11.JT | 0.5320 | 0.1520 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M311 |
-| SAN3.JT | 2.2750 | 0.6500 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-V611 |
-| SAN4.JT | 0.7210 | 0.2060 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-OSA-M1-PROXY |
-| SAN7.JT | 1.4000 | 0.4000 | 3.500 | 6.628 | CLASS-SPAN-RATIO | OPEN-9M38-NAVAL |
-| SAN9.JT | 0.8050 | 0.2300 | 3.500 | 6.628 | CLASS-SPAN-RATIO | GICHD-SA15 |
-| SEA_SPAR.JT | 1.0160 | 0.2032 | 5.000 | 9.469 | USNAVY-AIM-RIM7-SPAN | OPEN-SPARROW-FM-PROXY |
-| SSN9.JT | 2.4000 | 0.8000 | 3.000 | 5.681 | CLASS-SPAN-RATIO | OPEN-P120 |
+| Store | Span m | Diameter m | Ratio | Span evidence | Diameter evidence |
+| --- | ---: | ---: | ---: | --- | --- |
+| AA10.JT | 0.9700 | 0.2300 | 4.217 | ROE2005-R27 | ROE2005-R27 |
+| AA11.JT | 0.5100 | 0.1700 | 3.000 | ROE2005-R73 | ROE2005-R73 |
+| AA11B.JT | 0.5100 | 0.1700 | 3.000 | CLASS-R73-SPAN | FITTED-AGILE-IR-CLASS |
+| AA12.JT | 0.7000 | 0.2000 | 3.500 | ROE2005-RVVAE | ROE2005-RVVAE |
+| AA2.JT | 0.4445 | 0.1270 | 3.500 | CLASS-SPAN-RATIO | RWD-R3S |
+| AA6.JT | 1.0650 | 0.3550 | 3.000 | CLASS-SPAN-RATIO | OPEN-R40-FAMILY |
+| AA8.JT | 0.3900 | 0.1200 | 3.250 | US-WEG-R60-SPAN | OPEN-R60M |
+| AA9.JT | 1.1000 | 0.3800 | 2.895 | ROE2005-R33 | ROE2005-R33 |
+| AAML.JT | 0.9200 | 0.3800 | 2.421 | CLASS-PHOENIX-SPAN | FITTED-HEAVY-RADAR-CLASS |
+| AEMP1.JT | 0.7000 | 0.2000 | 3.500 | CLASS-RVVAE-SPAN | FITTED-RADAR-CLASS |
+| AGM45.JT | 0.6096 | 0.2032 | 3.000 | CLASS-SPAN-RATIO | OPEN-SHRIKE-B-PROXY |
+| AGM65A.JT | 0.7112 | 0.3048 | 2.333 | USAF-MAVERICK-SPAN | OPEN-MAVERICK-A |
+| AGM65G.JT | 0.7112 | 0.3048 | 2.333 | USAF-MAVERICK-SPAN | USAF-MAVERICK-G |
+| AGM84A.JT | 0.9144 | 0.3430 | 2.666 | NAVAIR-HARPOON-SPAN | OPEN-HARPOON |
+| AGM84E.JT | 0.9144 | 0.3430 | 2.666 | CLASS-HARPOON-SPAN | OPEN-SLAM |
+| AGM88.JT | 1.1176 | 0.2540 | 4.400 | USAF-HARM-SPAN | USAF-HARM |
+| AIM120.JT | 0.5258 | 0.1778 | 2.957 | USAF-AMRAAM-SPAN | NAVAIR-AMRAAM |
+| AIM54C.JT | 0.9200 | 0.3800 | 2.421 | NAVAIR-PHOENIX-C | NAVAIR-PHOENIX-C |
+| AIM7.JT | 1.0160 | 0.2032 | 5.000 | CNATRA-P825-SPARROW-SPAN | OPEN-SPARROW-FM-PROXY |
+| AIM7E.JT | 1.0160 | 0.2032 | 5.000 | CNATRA-P825-SPARROW-SPAN | OPEN-SPARROW-E |
+| AIM9B.JT | 0.5588 | 0.1270 | 4.400 | NAVWEPS-OP2309-SPAN | OPEN-SIDEWINDER-B |
+| AIM9M.JT | 0.6287 | 0.1270 | 4.950 | NAVAIR-SIDEWINDER-SPAN | USAF-SIDEWINDER |
+| AIM9X.JT | 0.4470 | 0.1270 | 3.520 | USNAVY-SIDEWINDER-X-SPAN | NAVAIR-SIDEWINDER |
+| AM39.JT | 1.0500 | 0.3500 | 3.000 | CLASS-SPAN-RATIO | MBDA-AM39 |
+| AS14.JT | 1.1000 | 0.3800 | 2.895 | ROE2005-KH29L | ROE2005-KH29L |
+| AS15.JT | 0.4004 | 0.1335 | 3.000 | CLASS-SPAN-RATIO | FITTED-CLASS |
+| AS16.JT | 1.3650 | 0.4550 | 3.000 | CLASS-SPAN-RATIO | OPEN-KH15S-PROXY |
+| AS30.JT | 1.0260 | 0.3420 | 3.000 | CLASS-SPAN-RATIO | OPEN-AS30L |
+| AS7.JT | 0.8250 | 0.2750 | 3.000 | CLASS-SPAN-RATIO | OPEN-KH23 |
+| AT12.JT | 0.3377 | 0.1126 | 3.000 | CLASS-SPAN-RATIO | FITTED-CLASS |
+| AT2.JT | 0.4260 | 0.1420 | 3.000 | CLASS-SPAN-RATIO | OPEN-FALANGA-M-PROXY |
+| FIM92.JT | 0.2450 | 0.0700 | 3.500 | CLASS-SPAN-RATIO | US-ORDNANCE-STINGER |
+| MICA.JT | 0.4800 | 0.1600 | 3.000 | CLASS-SPAN-RATIO | MBDA-MICA |
+| MIS.JT | 0.3150 | 0.0900 | 3.500 | CLASS-SPAN-RATIO | MBDA-MISTRAL-PHYSICAL-PROXY |
+| PL10.JT | 0.7000 | 0.2000 | 3.500 | CLASS-RVVAE-SPAN | FITTED-RADAR-CLASS |
+| PL7.JT | 0.5495 | 0.1570 | 3.500 | CLASS-SPAN-RATIO | OPEN-PL7 |
+| R27ER.JT | 0.9700 | 0.2600 | 3.731 | ROE2005-R27 | ROE2005-R27 |
+| R27ET.JT | 0.9700 | 0.2600 | 3.731 | ROE2005-R27 | ROE2005-R27 |
+| R27T.JT | 0.9700 | 0.2300 | 4.217 | ROE2005-R27 | ROE2005-R27 |
+| R440.JT | 0.5250 | 0.1500 | 3.500 | CLASS-SPAN-RATIO | OPEN-R440 |
+| R530.JT | 0.6200 | 0.2630 | 2.357 | OPEN-SUPER530D | OPEN-SUPER530D |
+| R550.JT | 0.5600 | 0.1600 | 3.500 | CLASS-SPAN-RATIO | OPEN-MAGIC2 |
+| SA13.JT | 0.4200 | 0.1200 | 3.500 | CLASS-SPAN-RATIO | OPEN-9M37 |
+| SA14.JT | 0.2520 | 0.0720 | 3.500 | CLASS-SPAN-RATIO | GICHD-SA14 |
+| SA15.JT | 0.8050 | 0.2300 | 3.500 | CLASS-SPAN-RATIO | GICHD-SA15 |
+| SA16.JT | 0.2520 | 0.0720 | 3.500 | CLASS-SPAN-RATIO | GICHD-SA16 |
+| SA19.JT | 0.5320 | 0.1520 | 3.500 | CLASS-SPAN-RATIO | OPEN-9M311 |
+| SA2A.JT | 2.2890 | 0.6540 | 3.500 | CLASS-SPAN-RATIO | OPEN-V750V-PROXY |
+| SA3.JT | 1.3125 | 0.3750 | 3.500 | CLASS-SPAN-RATIO | GICHD-V601-PROXY |
+| SA6.JT | 1.1725 | 0.3350 | 3.500 | CLASS-SPAN-RATIO | GULFLINK-SA6 |
+| SA7.JT | 0.2520 | 0.0720 | 3.500 | CLASS-SPAN-RATIO | GICHD-SA7B-PROXY |
+| SA9.JT | 0.4200 | 0.1200 | 3.500 | CLASS-SPAN-RATIO | GULFLINK-SA9 |
+| SAN11.JT | 0.5320 | 0.1520 | 3.500 | CLASS-SPAN-RATIO | OPEN-9M311 |
+| SAN3.JT | 2.2750 | 0.6500 | 3.500 | CLASS-SPAN-RATIO | OPEN-V611 |
+| SAN4.JT | 0.7210 | 0.2060 | 3.500 | CLASS-SPAN-RATIO | OPEN-OSA-M1-PROXY |
+| SAN7.JT | 1.4000 | 0.4000 | 3.500 | CLASS-SPAN-RATIO | OPEN-9M38-NAVAL |
+| SAN9.JT | 0.8050 | 0.2300 | 3.500 | CLASS-SPAN-RATIO | GICHD-SA15 |
+| SEA_SPAR.JT | 1.0160 | 0.2032 | 5.000 | USNAVY-AIM-RIM7-SPAN | OPEN-SPARROW-FM-PROXY |
+| SSN9.JT | 2.4000 | 0.8000 | 3.000 | CLASS-SPAN-RATIO | OPEN-P120 |
+
 
 
 ## Other fitted fields

@@ -812,9 +812,10 @@ delivery stages, [measured acceptance and remaining limits](baselines/missiles.m
 Authorized by John on 2026-10-25. The shared finite-energy kernel, physical
 decoy pursuit, bounded predictions, public/class physical data and measured A2A
 envelopes are implemented in new worlds. Linux compatibility and regression
-checks passed. Third-review corrections pass the 35-scenario regression
-battery, with turning-player availability and cost measured. Geometry-scaled
-low-altitude drag retains the tail floor but leaves head-reference errors.
+checks passed for round 3. John's subsequent decision removes only the geometry
+drag multiplier, retaining the newer-Sparrow refit and turning-player advice.
+Regenerated range measurements, Linux workspace checks, all 35 battery
+scenarios and sequential cost lanes validate the restored drag.
 Phase 3 remains stopped pending lead review;
 its earlier results remain invalidated. [Behaviour](spec/missile-energy.md),
 [data provenance](formats/missile-energy-data.md) and
