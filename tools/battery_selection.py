@@ -169,7 +169,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "surface": (
         "surface units: ground target templates resolved, base-layout air defenses and their sides",
-        ("surface-*", "bridge-audit", "a2g-bridge-destruction"),
+        ("surface-*", "bridge-audit", "bridge-end-ruins", "a2g-bridge-destruction"),
     ),
     "a2g": (
         "air-to-ground: the A-G, IR and HARM pages and designation (--a2g-radar), and the weapons flown through the real trigger by --a2g-run",

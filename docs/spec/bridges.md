@@ -15,7 +15,7 @@ See [source evidence](../formats/objects-and-shapes.md#destroyed-looks-of-buildi
 
 ## Placement
 
-Bridge types retain their source position, heading, pitch, bank and full map
+Bridge types retain their source horizontal position, heading, pitch, bank and full map
 scale. Roads retain their existing map-height rule. Bridges stand on the
 bottom of their complete shape through `tore_world::grounding`. Using the
 shape origin as ground height buries the decks that lie below that origin.
@@ -27,22 +27,39 @@ bridges are independent. Footing includes complete geometry and samples face
 interiors at intervals no larger than 64 ft, capped at 256 subdivisions.
 Authored relative height is added after the correction. Source angles remain.
 
-Level bridge pieces at authored height zero also receive a terrain corridor.
-The complete shape footprint gets 2 ft of clearance on each side. Adjoining
-footprints merge through the existing foundation builder. A merged footprint
-containing bridge support uses the lowest of nine imported terrain samples
-(corners, edge midpoints and centre), clamped to sea level. Its 512 ft skirt
-blends into the unmodified terrain. Existing airport support takes precedence.
-This cuts a high bank instead of lifting an entire crossing above the low bank.
-The correction changes contact and drawing together. It leaves the source
-water mask and road artwork in place. The world-axis rectangle can also grade
-bare ground beside an irregular bridge; this is a known fitted difference.
+Level bridge pieces at authored height zero receive terrain support. Flat
+crossings keep the existing footprint, lowest-of-nine support samples and
+512 ft perimeter blend. For an assembly whose raw terrain varies by more
+than 1 ft, the bank rule replaces that corridor (John, 2026-10-25: graded
+approaches instead of trenches). Sample its bounds at intervals at most
+64 ft and use the highest terrain, clamped to sea level, for common bottom
+support. Fill beneath the physical feet of each part, with 2 ft clearance.
+A suspended MID's painted shadow is not a foot or a foundation across the
+river. Its connected END pieces carry the assembly.
+
+New earth approaches descend outward from each end at **8 percent** (1:12.5,
+about 4.6 degrees) until they meet natural terrain. Side and river-facing
+embankments use **1:4 slopes**. These constants and the high-bank datum are
+**fitted agent choices**. The imported END ramp meshes retain their source
+slope and dimensions; the 8 percent limit describes the new terrain roads,
+not those original ramps. Terrain is filled, never excavated by this rule.
+The river between banks retains its natural height. The source water mask
+and road artwork remain. World-axis support rectangles are conservative;
+they can fill bare ground beside the end pieces. Terrain drawing and contact
+share one mesh, split at support edges and at most every 64 ft locally.
+If either bank earthwork reaches an existing airport, the whole assembly
+keeps its earlier foundation rule so airport support retains precedence.
+Flat crossings do not change.
+
 Tilted or explicitly raised pieces keep their authored pose and receive only
 the shared support translation. The long suspension bridge's cables do not
 enlarge its solid hit box. A reviewed flat colour-6 shadow decal also stays
-out of bridge contact bounds. It remains part of the drawing and footing,
-so a shot below a suspension deck passes through air rather than hitting
-the shadow's enclosing box. Other objects retain their existing contact policy.
+out of bridge contact bounds. It remains part of the drawing and datum
+calculation, so a shot below a suspension deck passes through air rather
+than hitting the shadow's enclosing box. A lifted painted shadow is
+subdivided at most every 64 ft and projected onto terrain, with at most
+1 ft drawing clearance at sampled vertices. Other objects retain their
+existing contact policy.
 
 ## Damage and destruction
 
@@ -55,10 +72,15 @@ The twelve types and the exact imported asset inventory are measured by
 A bridge with positive hit points retains its intact geometry, including at
 half health. At zero hit points, the eight span types with an internal damage
 branch draw that branch: BR1MID, BR2MID, BR3MID, BRDMID and BRD1 through BRD4.
-The four END types have no separate damaged geometry and keep their intact
-appearance. These are the existing accepted destruction rules from
-[surface defenses](surface-defenses.md#destroyed-looks). There is no additional
-intermediate damaged model. The original game's threshold for selecting its
+The four END types have no retail damaged geometry. At zero HP they use the
+existing [generated building ruin](surface-defenses.md#destroyed-looks): each
+vertex retains 6 to 30 percent of its height above the intact bottom, with
+deterministic splitting and partly charred level faces. Applying that rule
+to BR1END, BR2END, BR3END and BRDEND is **opinionated**, requested by John on
+2026-10-25. The collapse constants remain the existing fitted agent choices.
+Bridge ends do not gain persistent fire or smoke. Eight span types retain
+their retail broken branches, which take precedence over generated ruins.
+There is no additional intermediate damaged model. The original game's threshold for selecting its
 damage branch remains **unknown**. Next research: the executable's consumer
 of the shape damage word, using the build identity in the source evidence.
 
@@ -87,8 +109,10 @@ before implementation. This review does not change autonomous movement.
 
 The development audit reports every selected imported MM bridge placement,
 its authored orientation, sampled road/ramp clearances at both ends and
-across the span, lowest-shape support clearances, sea-plane clearance and
-nearby object overlap candidates. Painted road and river alignment requires
+across the span, connected-assembly physical-foot support clearances,
+sea-plane clearance and nearby object overlap candidates. A separate bank table measures cuts and
+constructed terrain approach grades. END road toes also fail if more than
+30 ft above terrain. Painted road and river alignment requires
 visual inspection; source heading alone does not prove alignment. The
 imported terrain has no separate surveyed riverbed beneath painted rivers.
 
@@ -97,7 +121,7 @@ clearance is measured against the same world terrain as contact, rather
 than inferred from a screenshot. Asset coverage and visual fidelity are
 separate results. Missing geometry or an unknown deck must not count as a
 passing placement. A clear audit row means no burial beyond 1 ft and no
-lowest-geometry support gap above 30 ft. It does not mean every ramp vertex
+physical-foot support gap above 30 ft. It does not mean every ramp vertex
 is flush: the source pieces have small differences between their lowest
 points and their road edges, which remain visible in the endpoint columns.
 

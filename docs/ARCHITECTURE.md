@@ -44,7 +44,7 @@ source media or extracted assets. [Retention contract](spec/import-cache.md).
 
 Static ground foundations live in `tore_world::grounding::pads`. World construction
 levels qualifying base footprints before placing objects. Bridge footprints
-and their lower support datum come from `grounding::bridges`
+and their shared support datum and bank earthworks come from `grounding::bridges`
 ([behavior](spec/bridges.md)). Simulation and scenery
 share the resulting triangles, including the transition skirt. Vegetation
 workers retain this immutable terrain, and cached habitat and seam data

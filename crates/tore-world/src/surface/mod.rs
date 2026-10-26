@@ -206,8 +206,8 @@ pub enum DestroyedLook {
     /// Bunkers with a damaged variant: swap to that object (`~BNK5.OT`).
     DamagedObject(String),
     /// Other buildings: the scenery draws the damage branch of their shape,
-    /// a generated ruin, or (pavement, bridge ends) their intact look; they
-    /// never vanish (B16).
+    /// a generated ruin (bridge ends included), or (pavement, rocks) their
+    /// intact look; they never vanish (B16).
     Removed,
     /// Men whose shape holds a damaged model (the airfield squad TROOPS):
     /// that model, the men lying on the ground (retail shape, drawn when

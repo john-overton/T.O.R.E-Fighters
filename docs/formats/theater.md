@@ -32,7 +32,8 @@ Runtime terrain adds [shared static foundations](objects-and-shapes.md#grounding
 after resolving the layout and objective. These fitted triangles serve both
 contact and drawing; the imported BIT2 grid and its classification are unchanged.
 Bridge support includes the fitted [bridge corridor](../spec/bridges.md), which
-cuts sloping banks to keep the crossing supported.
+fills physical bank supports and grades outward terrain approaches on sloping
+crossings. Flat crossings retain their existing level corridor.
 
 ## BIT2 / T2: confirmed packed layout
 

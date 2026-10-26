@@ -2075,19 +2075,27 @@ coverage, missing geometry, footing exceptions and before/after clearance.
 `surface-grounding-radar-render` scenario captures a radar objective offscreen.
 
 `--bridge-audit OUT_DIR [LAYOUT ...] [--strict] [--capture]` reads only the
-imported pack and writes `assets.tsv` and `placements.tsv`. By default it
+imported pack and writes `assets.tsv`, `placements.tsv` and `banks.tsv`.
+The bank table measures excavation and constructed approach grades; strict
+audits reject cuts over 1 ft, grades over 8.1 percent (rounding tolerance)
+and END road toes more than 30 ft above terrain. By default it
 checks all 75 layouts plus every offered template that names bridge pieces
 (heavy defenses, seed 1, ordinary placement). Named layouts limit the run.
 The tables record every bridge's deck/ramp samples, endpoint clearances,
-lowest geometry versus ground, sea-plane clearance, source orientation and
+physical feet of the connected assembly versus ground, sea-plane clearance, source orientation and
 nearby object overlap candidates. `--strict` fails for buried decks, unknown
 decks, support gaps over 30 ft or missing assets. Sampling is at most 64 ft;
 road/river artwork alignment and candidate overlaps still need visual review.
 
 `--capture` renders every bridge intact and destroyed with the existing
 scene renderer, plus half-health appearance for the first of each type.
+Optional `--view=side`, `--view=along` or `--view=near` selects a bridge
+inspection angle; `--id=40000082,40000092` limits captures to those IDs
+without narrowing the numeric audit.
 It checks that bridge geometry remains present and that live HP and replay
-HP produce identical geometry. This uses the GPU and must run through
+HP produce identical geometry, positive HP retains intact art, and zero HP
+changes the drawn geometry. `bridge-end-ruins` covers all four END types in
+the battery. This uses the GPU and must run through
 `tools/agent-run.sh`. Keep the output outside tracked directories. Example:
 
 ```sh

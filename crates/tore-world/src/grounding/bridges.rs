@@ -115,9 +115,21 @@ impl<'a> Part<'a> {
 /// heights and all three source angles stay intact. Neither terrain nor roads
 /// are changed. The intact shape determines the datum of its destroyed copy.
 pub fn datum(sources: &Placements, p: &Placement, height: impl Fn(f64, f64) -> f64) -> Option<f64> {
+    sources.shapes.get(&p.object_type)?;
+    assembly(sources, p)
+        .iter()
+        .map(|part| part.support(&height))
+        .reduce(f64::max)
+        .filter(|v| v.is_finite())
+}
+
+fn assembly<'a>(sources: &'a Placements, p: &'a Placement) -> Vec<Part<'a>> {
     let mut parts = vec![Part::new(
         p,
-        sources.shapes.get(&p.object_type)?,
+        sources
+            .shapes
+            .get(&p.object_type)
+            .expect("checked bridge shape"),
         sources.shape_scale(&p.object_type),
     )];
     for (_, candidate) in sources.placed().flatten() {
@@ -147,12 +159,31 @@ pub fn datum(sources: &Placements, p: &Placement, height: impl Fn(f64, f64) -> f
         }
     }
     parts
-        .iter()
+        .into_iter()
         .zip(included)
-        .filter(|(_, keep)| *keep)
-        .map(|(part, _)| part.support(&height))
-        .reduce(f64::max)
-        .filter(|v| v.is_finite())
+        .filter_map(|(part, keep)| keep.then_some(part))
+        .collect()
+}
+
+/// Physical support samples for the whole connected assembly. A suspended
+/// MID is checked against its END feet, not against its shadow on the river.
+pub fn footing_points(sources: &Placements, p: &Placement) -> Vec<[f64; 3]> {
+    if !sources.shapes.contains_key(&p.object_type) {
+        return Vec::new();
+    }
+    assembly(sources, p)
+        .iter()
+        .flat_map(|part| {
+            let low = super::bottom(part.shape).unwrap_or(0.);
+            support_points(part.shape)
+                .filter(move |p| f64::from(p[2]) <= low + 1. / part.scale)
+                .map(|point| {
+                    let mut at = part.at(point.map(f64::from));
+                    at[1] += f64::from(part.placement.position[1]) - f64::from(p.position[1]);
+                    at
+                })
+        })
+        .collect()
 }
 
 /// Terrain support for zero-height, level authored bridge pieces. The shared
@@ -183,6 +214,187 @@ pub fn foundations(sources: &Placements) -> Vec<super::pads::Pad> {
             })
         })
         .collect()
+}
+
+/// Maximum grade of new road approaches. Side slopes use a 1:4 embankment.
+pub const APPROACH_GRADE: f64 = 0.08;
+const SIDE_GRADE: f64 = 0.25;
+
+/// Bank earthwork, separate from flat foundations so the river stays open.
+#[derive(Clone, Debug)]
+pub struct Bank {
+    pub core: super::pads::Pad,
+    pub bounds: super::pads::Pad,
+    // Negative/positive world-axis grades; only the outward road is gentle.
+    grades: [[f64; 2]; 2],
+}
+impl Bank {
+    /// Centreline from the road toe outward to untouched terrain.
+    pub fn approach(&self) -> [[f64; 2]; 2] {
+        let axis = usize::from(self.grades[1].contains(&APPROACH_GRADE));
+        let side = usize::from(self.grades[axis][1] == APPROACH_GRADE);
+        let mut start = std::array::from_fn(|a| (self.core.min[a] + self.core.max[a]) * 0.5);
+        start[axis] = if side == 0 {
+            self.core.min[axis]
+        } else {
+            self.core.max[axis]
+        };
+        let mut end = start;
+        end[axis] = if side == 0 {
+            self.bounds.min[axis]
+        } else {
+            self.bounds.max[axis]
+        };
+        [start, end]
+    }
+    pub fn height(&self, x: f64, z: f64, raw: f64) -> f64 {
+        let mut drop = 0.;
+        for (axis, at) in [x, z].into_iter().enumerate() {
+            drop += (self.core.min[axis] - at).max(0.) * self.grades[axis][0]
+                + (at - self.core.max[axis]).max(0.) * self.grades[axis][1];
+        }
+        raw.max(self.core.height - drop)
+    }
+}
+
+/// Replace only corridors that would cut more than one foot of bank.
+/// Their physical feet get a common high-bank datum and filled approaches.
+/// A span's shadow decal is not a foundation across the river.
+pub fn graded_foundations(
+    sources: &Placements,
+    raw: impl Fn(f32, f32) -> f32,
+    allow: impl Fn(&super::pads::Pad) -> bool,
+) -> (Vec<super::pads::Pad>, Vec<Bank>) {
+    let mut flat = foundations(sources);
+    let parts: Vec<_> = sources
+        .placed()
+        .flatten()
+        .filter_map(|(_, p)| {
+            (is_bridge(&p.object_type)
+                && p.position[1] == 0
+                && p.angles[1] == 0
+                && p.angles[2] == 0)
+                .then_some(p)
+                .and_then(|p| {
+                    Some(Part::new(
+                        p,
+                        sources.shapes.get(&p.object_type)?,
+                        sources.shape_scale(&p.object_type),
+                    ))
+                })
+        })
+        .collect();
+    let mut used = vec![false; parts.len()];
+    let mut banks = Vec::new();
+    for start in 0..parts.len() {
+        if used[start] {
+            continue;
+        }
+        let mut group = vec![start];
+        used[start] = true;
+        let mut i = 0;
+        while i < group.len() {
+            for j in 0..parts.len() {
+                if !used[j] && parts[group[i]].joins(&parts[j]) {
+                    used[j] = true;
+                    group.push(j);
+                }
+            }
+            i += 1;
+        }
+        let min = std::array::from_fn::<_, 2, _>(|a| {
+            group
+                .iter()
+                .map(|i| parts[*i].bounds[0][a])
+                .fold(f64::INFINITY, f64::min)
+        });
+        let max = std::array::from_fn::<_, 2, _>(|a| {
+            group
+                .iter()
+                .map(|i| parts[*i].bounds[1][a])
+                .fold(f64::NEG_INFINITY, f64::max)
+        });
+        let steps = [0, 1].map(|a| ((max[a] - min[a]) / 64.).ceil().max(1.) as usize);
+        let mut low = f64::INFINITY;
+        let mut high: f64 = 0.;
+        for x in 0..=steps[0] {
+            for z in 0..=steps[1] {
+                let h = f64::from(raw(
+                    (min[0] + (max[0] - min[0]) * x as f64 / steps[0] as f64) as f32,
+                    (min[1] + (max[1] - min[1]) * z as f64 / steps[1] as f64) as f32,
+                ))
+                .max(0.);
+                low = low.min(h);
+                high = high.max(h);
+            }
+        }
+        if high - low <= 1. {
+            continue;
+        }
+        let datum = group
+            .iter()
+            .map(|i| high - super::bottom(parts[*i].shape).unwrap_or(0.) * parts[*i].scale)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let axis = usize::from(max[1] - min[1] > max[0] - min[0]);
+        let mut group_banks = Vec::new();
+        for &i in &group {
+            let part = &parts[i];
+            let bottom = super::bottom(part.shape).unwrap_or(0.);
+            let has_feet =
+                support_points(part.shape).any(|p| f64::from(p[2]) <= bottom + 1. / part.scale);
+            if !has_feet {
+                continue;
+            }
+            // Include the approach toe, which sits slightly above the tower
+            // feet in the source mesh. Supporting feet alone leaves it in air.
+            let core = super::pads::Pad {
+                min: part.bounds[0].map(|v| v - 2.),
+                max: part.bounds[1].map(|v| v + 2.),
+                height: datum + bottom * part.scale,
+            };
+            let mut grades = [[SIDE_GRADE; 2]; 2];
+            let side = usize::from(core.min[axis] + core.max[axis] > min[axis] + max[axis]);
+            grades[axis][side] = APPROACH_GRADE;
+            let bounds = super::pads::Pad {
+                min: std::array::from_fn(|a| {
+                    core.min[a] - core.height.max(0.) / grades[a][0] - 64.
+                }),
+                max: std::array::from_fn(|a| {
+                    core.max[a] + core.height.max(0.) / grades[a][1] + 64.
+                }),
+                height: core.height,
+            };
+            group_banks.push(Bank {
+                core,
+                bounds,
+                grades,
+            });
+        }
+        // Airport support wins for the entire assembly. Dropping one bank
+        // after removing its old foundation would leave that end suspended.
+        if group_banks.is_empty() || group_banks.iter().any(|b| !allow(&b.bounds)) {
+            continue;
+        }
+        for i in group {
+            let part = &parts[i];
+            flat.retain(|p| {
+                p.min != part.bounds[0].map(|v| v - 2.) || p.max != part.bounds[1].map(|v| v + 2.)
+            });
+        }
+        banks.extend(group_banks);
+    }
+    (flat, banks)
+}
+
+/// Physical feet include tower lines, but never the painted shadow beneath a span.
+pub fn support_points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + '_ {
+    let low = super::bottom(shape).unwrap_or(0.) as f32;
+    shape
+        .faces
+        .iter()
+        .filter(move |f| !super::bridge_shadow(f, low))
+        .flat_map(|f| f.positions.iter().copied())
+        .chain(shape.lines.iter().flat_map(|l| l.positions))
 }
 
 /// A merged foundation that includes bridge support uses the lowest of its
@@ -314,6 +526,75 @@ mod tests {
             height: 0.,
         };
         assert_eq!(support(&p, &pads, raw), None);
+    }
+
+    #[test]
+    fn graded_banks_fill_instead_of_cutting_and_leave_flat_bridges_unchanged() {
+        let sources = sources();
+        let raw = |_: f32, z: f32| z.clamp(0., 480.) * 0.1;
+        let (flat, banks) = graded_foundations(&sources, raw, |_| true);
+        assert_eq!(flat.len(), 1, "the separate flat crossing stays unchanged");
+        assert_eq!(banks.len(), 3);
+        let mesh = super::super::pads::Mesh::build_with_banks(
+            flat.clone(),
+            3,
+            3,
+            raw,
+            |p| support(p, &flat, raw),
+            &banks,
+        );
+        for z in [0., 190., 380.] {
+            assert!((mesh.height(0., z).unwrap() - 48.).abs() < 0.001);
+        }
+        for z in (0..1200).step_by(8) {
+            assert!(mesh.height(0., z as f32).unwrap() >= raw(0., z as f32) - 0.001);
+        }
+        let (flat, banks) = graded_foundations(&sources, |_, _| 0., |_| true);
+        assert_eq!(flat.len(), foundations(&sources).len());
+        assert!(banks.is_empty());
+        let (flat, banks) = graded_foundations(&sources, raw, |p| p.min[1] > 300.);
+        assert!(
+            banks.is_empty(),
+            "one protected bank keeps the entire old assembly foundation"
+        );
+        assert_eq!(flat.len(), foundations(&sources).len());
+    }
+
+    #[test]
+    fn approaches_are_eight_percent_and_the_river_is_not_a_support_pad() {
+        let core = super::super::pads::Pad {
+            min: [2000., 2000.],
+            max: [2400., 3000.],
+            height: 352.,
+        };
+        let bank = Bank {
+            core,
+            bounds: super::super::pads::Pad {
+                min: [500., 500.],
+                max: [3900., 7500.],
+                height: 352.,
+            },
+            grades: [[SIDE_GRADE; 2], [SIDE_GRADE, APPROACH_GRADE]],
+        };
+        let mesh =
+            super::super::pads::Mesh::build_with_banks(vec![], 2, 2, |_, _| 0., |_| None, &[bank]);
+        for z in (3000..7392).step_by(8) {
+            let here = mesh.height(2200., z as f32).unwrap();
+            let next = mesh.height(2200., z as f32 + 8.).unwrap();
+            assert!((here - next).abs() / 8. <= APPROACH_GRADE as f32 + 0.00001);
+        }
+        assert_eq!(
+            mesh.height(2200., 200.),
+            Some(0.),
+            "river beyond the bank remains open"
+        );
+        assert_eq!(mesh.height(2200., 7500.), Some(0.));
+        for t in mesh.cells.values().flatten() {
+            let x = t.iter().map(|p| p[0]).sum::<f32>() / 3.;
+            let z = t.iter().map(|p| p[2]).sum::<f32>() / 3.;
+            let y = t.iter().map(|p| p[1]).sum::<f32>() / 3.;
+            assert!((mesh.height(x, z).unwrap() - y).abs() < 0.01);
+        }
     }
 
     #[test]

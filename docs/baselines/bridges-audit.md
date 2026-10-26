@@ -8,93 +8,58 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-25, branch `bridges-audit` from `cf36587a`.
-The [behavior specification](../spec/bridges.md) owns the fitted rules and
-remaining unknowns. This pass uses the task's freshly imported profile.
-The import identifies FA.EXE 1.02F, SHA-256
-`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`.
-No retail executable was run. No retail comparison was available.
+Implementation mode, 2026-10-25. This follow-up starts from the merged bridge
+correction at `80ad1ce2`. The [behavior specification](../spec/bridges.md) owns
+the rules and remaining unknowns. The imported profile identifies FA.EXE 1.02F,
+SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`.
+No retail executable was run. Retail visual comparison was unavailable.
 
-## Placement census
+## Placement and approaches
 
-The imported pack contains 75 layouts across sixteen theaters. The baseline
-`--bridge-audit` counted 624 placed bridge pieces, including repeated pieces
-in alternate layouts. It found 511 with road or ramp samples more than 1 ft
-below terrain or sea level. Twelve bridge types are present. This is a count
-of placement records, not 624 distinct physical crossings.
+The earlier audit found 511 buried pieces among 624 layout placements in 75
+layouts. Bottom grounding and shared assembly support corrected the burial.
+The follow-up review found that flattening whole corridors to their lowest
+sample cut a deep trench beside the Ukraine suspension bridge. It also found
+that four destroyed END types kept their intact appearance.
 
-| Theater | Layouts checked | Bridge pieces | Buried before |
-| --- | ---: | ---: | ---: |
-| APA | 2 | 0 | 0 |
-| BAL | 10 | 135 | 135 |
-| CUB | 2 | 0 | 0 |
-| EGY | 11 | 0 | 0 |
-| FRA | 12 | 72 | 48 |
-| GRE | 2 | 0 | 0 |
-| IRA | 2 | 0 | 0 |
-| KURILE | 2 | 0 | 0 |
-| LFA | 2 | 0 | 0 |
-| NSK | 2 | 0 | 0 |
-| PGU | 2 | 0 | 0 |
-| SPA | 2 | 0 | 0 |
-| TVIET | 2 | 132 | 128 |
-| UKR | 10 | 285 | 200 |
-| VLA | 10 | 0 | 0 |
-| WTA | 2 | 0 | 0 |
+The current audit checks all 75 layouts and four bridge-bearing templates,
+including repeated theater scenery: 862 placements in 79 cases. Physical
+support is measured at the connected assembly's feet. A suspended MID's
+painted shadow is excluded, since it cannot support a bridge. Separate checks
+cover road/deck burial, END toe gaps and constructed approach grades. The final
+strict run has zero flagged placements and zero missing textures. Its greatest
+physical-foot support gap is the existing 8 ft source-part difference.
 
-| Type | Layout placements | Buried before |
-| --- | ---: | ---: |
-| BR1END.OT | 8 | 8 |
-| BR1MID.OT | 4 | 0 |
-| BR2END.OT | 12 | 12 |
-| BR2MID.OT | 6 | 6 |
-| BR3END.OT | 68 | 68 |
-| BR3MID.OT | 34 | 34 |
-| BRD1.OT | 31 | 31 |
-| BRD2.OT | 45 | 45 |
-| BRD3.OT | 44 | 44 |
-| BRD4.OT | 15 | 15 |
-| BRDEND.OT | 238 | 238 |
-| BRDMID.OT | 119 | 10 |
+Only two physical crossings need the new filled-bank treatment, repeated in
+Ukraine's alternate layouts and the QUBRI scene. Other bridges keep their
+previous origins, source angles and scale. The printed origin comparison
+changes 63 repeated placement rows and leaves 799 unchanged.
 
-After bottom grounding, connected-piece support and shared terrain grading,
-all 624 layout placements clear the audit's burial and support limits.
-At the measured lowest geometry, 781 final rows touch their support plane
-and 81 joined BR3MID rows retain an 8 ft source-part gap. END ramp toes can
-also sit 8 ft above their tower feet. These are explicit fitted limits,
-not a claim of perfectly flush road joints.
+| Ukraine crossing | Previous maximum corridor cut | New bank support | New deck height | New cut | Maximum measured terrain approach grade |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `0x40000082`, large suspension bridge | about 352 ft | 352.94 ft | 920.94 ft | 0 ft | 8.008 percent |
+| `0x4000007c` | about 47.5 ft | 47.38 ft | 615.38 ft | 0 ft | 8.001 percent |
 
-The four offered bridge-bearing templates are also exercised at heavy defenses,
-seed 1: QBBRD, QTBRDG, QTTRUCK and QUBRI. Including their theater scenery,
-the final command checks 862 placements in 79 cases. It reports zero buried
-decks, zero unknown decks and zero support gaps above 30 ft.
+The bridge decks retain one assembly height, with filled support beneath both
+banks and open river terrain beneath the middle. END road toes retain their
+8 ft source clearance. New outward terrain approaches use the specified
+8 percent grade. Existing END mesh ramps retain their original steeper shape.
+The audit's 8.1 percent acceptance limit allows world-coordinate float rounding.
+Side and river-facing earthwork slopes are 1:4, not drivable road approaches.
 
-The whole-source origin rule was the first cause: the lowest geometry lies
-below the origin in all twelve types. The second was independent placement
-heights on long crossings. Review also found that the suspension span's
-flat colour-6 shadow was included in solid bounds. Bridge bounds now exclude
-that decal, preventing a false hit in the air below the deck. Raising every piece to the highest local support
-left two Ukraine assemblies suspended over their low banks. The shared
-corridor avoids that. Source angles, scales and horizontal locations remain. Contact sheets of
-146 distinct type/position/heading combinations were reviewed. The bridges
-follow the painted approach roads and cross the depicted rivers; no heading
-correction was indicated. This is visual inspection, not a pixel-level
-survey of artwork alignment.
+The before images supplied by the reviewer and the new side, along-corridor
+and north-end views are local evidence. Before images are the reviewer's
+supplied views; after images use explicit side, along and north camera
+presets. Framing differs, so these are visual comparisons, not matched-pixel
+tests or retail comparisons. Raised painted shadows are
+subdivided and projected onto the terrain so their corners cannot suspend a
+flat shadow across the river.
 
-The table's overlap column contains conservative solid-box candidates,
-including intentional END/MID joins and ROAD4 approaches in France. It is
-not a polygon intersection verdict. Painted roads and rivers have no decoded
-vector alignment contract. Source headings are preserved; exact artwork
-alignment remains a visual review, not a claimed numeric pass. No separate
-riverbed depth is supplied by the imported terrain.
+## Assets and destroyed ends
 
-## Asset census
-
-This census reads the imported pack directly. The older `--surface-dump`
-supplements its records from retail archives, which could otherwise conceal
-an import gap. Every shape and every intact/broken texture below is present
-and readable in the fresh pack. All types use category `0x0100`, weapon damage
-class index 2, explosion 35 and crater 0.
+The imported pack contains all twelve bridge types and their textures. All use
+structure category `0x0100`, weapon damage class 2, explosion 35 and crater 0.
+The following face counts describe source assets, before generated END ruins:
 
 | Type | Shape | HP | Intact / broken faces | Damage branch | Textures |
 | --- | --- | ---: | ---: | --- | --- |
@@ -111,71 +76,59 @@ class index 2, explosion 35 and crater 0.
 | BRDEND.OT | BRDEND.SH | 100 | 28 / 28 | false | _BRDEND.PIC |
 | BRDMID.OT | BRDMID.SH | 100 | 31 / 12 | true | _BRDMID.PIC, _BRDMIDD.PIC |
 
-No bridge asset needed importing or wiring. Eight span types already select
-their internal broken branch at zero HP. Four end types have no such branch
-and retain their intact geometry. Partial health uses the intact copy. There
-is no additional bridge ruin, crater or named DEBRIS.SH reference to activate.
-The generic DEBRIS.SH exists in retail, but its presence alone does not prove
-that bridge destruction uses it. No falling animation, convoy rerouting or
-river blockage behavior is claimed. The specification records those unknowns.
 
-Explosion 35 uses GRNDLRG.PIC, varying to 36/GRNDLRG2.PIC or 37/GRDLRGA.PIC.
-All three last two seconds, with nominal sizes 400, 400 and 380 before the
-existing size variation. Their sounds use the existing big-explosion pool.
-The existing effect renderer adds SMOKE.PIC shockwave dust. Bridges have no
-persistent wreck fire or smoke. Weapon impacts have their own effects and marks.
+The eight span types keep their source damage branches. BR1END, BR2END, BR3END
+and BRDEND now use the existing deterministic generated building ruin at zero
+HP, as requested by John. Positive HP keeps intact art. The original bottom
+and placed datum remain. No persistent bridge fire or smoke was added.
+
+The source has no separate bridge ruin, falling animation or named DEBRIS.SH
+reference. No convoy rerouting or river navigation behavior was added. Those
+original behaviors remain unknown. Explosion types 35/36/37 and their existing
+presentation remain unchanged.
 
 ## Evidence and validation
 
-Local evidence is in
-`/home/john/Development/T.O.R.E-Fighters/.local/next-round/0.2.2-rc1/bridges-audit/`.
-`before/placements.tsv` and `after/placements.tsv` contain the per-placement
-tables. `assets.tsv` in each directory contains the complete type inventory.
-Captures in `before/` and `after-final/` are named `LAYOUT-ID-intact.png` and `LAYOUT-ID-destroyed.png`.
-The final capture run also records `damaged` at half health for each type.
-There are 1,248 before images, eight before-template assembly images and
-1,752 after images. Every span image changes on destruction; every END
-image remains identical. All 28 half-health views, covering all twelve types, are identical to
-their intact counterparts. Live and replay geometry matched throughout.
-`before-templates/` holds the original mission-template assembly views.
-The scratch `report.md` lists checks, exact image paths and integration notes.
-No pictures, geometry exports, source bytes or other retail derivatives are
-committed. The reusable commands are in [development](../DEVELOPMENT.md).
+Evidence is kept outside Git in
+`/home/john/Development/T.O.R.E-Fighters/.local/next-round/0.2.2-rc1/bridges-followup/`.
+The scratch `report.md` records the final command results and capture paths.
+`before/placements.tsv` is the unmodified branch baseline. Final audits write
+`placements.tsv`, `assets.tsv` and `banks.tsv`. The bank table records cuts and
+sampled road grades. No extracted images, source geometry or retail derivatives
+are committed. Reusable commands are in [development](../DEVELOPMENT.md).
 
-The new tests cover connected support, independent crossings, authored height,
-sea-level clamping, interior ridge samples, terrain/contact agreement and
-intact/partial/destroyed/reversed-replay drawing. `bridge-audit` is the fast
-battery subset. `a2g-bridge-destruction` fires a real AGM-65G at QUBRI and
-compares recorded render snapshots. An initial approach along the bridge hit
-and destroyed an intervening END piece; a broadside approach destroyed the
-intended MID piece. This was expected obstruction, not a damage-state fix.
+Synthetic tests cover unchanged flat crossings, filled banks, the 8 percent
+terrain grade, shared contact/rendering triangles, shadow projection, all four
+END ruins, deterministic geometry and HP/reverse-replay transitions. The
+`bridge-audit` battery exercises the grading checks. `bridge-end-ruins` captures
+all four END types and requires intact positive-HP art, changed zero-HP art,
+nonempty geometry and identical live/replay geometry. `a2g-bridge-destruction`
+retains its real Maverick strike and recorded render checks.
 
-Final Linux validation passed: formatting; workspace clippy with warnings
-as errors; workspace build; 7,160 Rust tests (106 ignored); 500 Python tests
-(5 skipped); repository and app/extract binary asset checks; documentation
-check; and the wrapped GPU smoke test on an NVIDIA RTX 4070. Final build,
-test, audit and capture commands recorded zero exit codes.
+Final Linux validation passed: 7,172 Rust tests (107 ignored); workspace
+clippy with warnings denied; workspace build; formatting; 505 Python tests
+(5 skipped); documentation; repository and app/extract binary asset scans;
+and the wrapped GPU smoke test on an NVIDIA RTX 4070. The interrupted test
+run was discarded as acceptance evidence and the full workspace was rerun.
 
-Nine selected battery scenarios passed: `bridge-audit`,
-`a2g-bridge-destruction`, `surface-grounding`, `surface-grounding-sites`,
-`surface-ground-pads`, `surface-resolve-all`, `a2g-bomb-motion`,
-`a2g-maverick` and `net-surface-loopback`. The bridge strike destroyed its
-100 HP span and matched 1,267 recorded render snapshots with zero missing
-or differing frames. Its solid box has centre height 568 ft and vertical
-half-size 24 ft; the shadow-inflated box had centre height 296 ft and
-vertical half-size 296 ft after the initial footing correction.
+All eleven selected battery scenarios passed: `bridge-audit`,
+`bridge-end-ruins`, `a2g-bridge-destruction`, `surface-grounding`,
+`surface-grounding-sites`, `surface-grounding-radar-render`,
+`surface-ground-pads`, `net-surface-loopback`, `ai-ils-terrain-ukr-a8`,
+`ai-regress-terrain-f14-dive` and `ai-regress-terrain-f18-hill`.
+The pad audit covers 329 worlds and 49,934 placements with zero problems.
+The site audit covers all sixteen theaters with zero unread resources or
+problems. The Maverick strike matches 1,267 recorded render snapshots, with
+zero missing or differing frames. No existing probe expectation was edited.
 
-The corrected scene also changes the old northbound visual-designation
-probe in `a2g-maverick`: Enter now chooses the restored bridge behind the
-column (`0x40000085`) and the shot strikes an intervening bridge end
-(`0x40000091`). The test approaches at 90 degrees instead, retaining its
-original unobstructed column-shot purpose. It selects `0x50000001` and
-reduces it from 200 HP to 20. This is a test setup change; no missile
-implementation was modified. The original setup passed on the saved
-baseline, so this difference was traced rather than dismissed as flaky.
+There are 68 final PNGs in the three angle batches and the END battery
+capture. All 29 intact/destroyed pairs differ; all ten captured half-health
+views exactly match intact. Live/replay geometry comparisons pass throughout.
+Representative captures of all four END types were visually inspected.
+Windows/macOS builds and retail visual comparison were not run.
 
-The multiplayer HP snapshot, session recording and app recording paths already
-carry bridge damage. Replay seeking derives the same destroyed-ID set from HP.
-No wire, replay or checkpoint fields changed. Shared terrain, target positions
-and reconstructed old-recording geometry do change. Version decisions belong
-to the integration lead; no version was bumped on this branch.
+No serialized field, event, protocol version, replay version or checkpoint
+version changes. Terrain, bridge origins, contact bounds and target aim points
+change for the two sloping crossings. Rebuilding older recordings uses the new
+geometry. The integration lead owns the common release compatibility decision.
+No golden checksum assertion was changed. END ruins are HP-driven presentation.
