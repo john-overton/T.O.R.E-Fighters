@@ -1713,9 +1713,11 @@ request no new bursts.
 Switches retain reaction progress, cooldown, budget and the completed drag phase.
 A lost observation can support the committed motion and queued pair for two
 seconds. Encounter memory, including class and per-missile break heading,
-lasts until 30 seconds without a fresh missile observation, a fitted agent
-choice. A longer quiet spell starts a new encounter. When defense ends, resume
-existing orders, formation or combat without changing aggression or launch gates.
+lasts until 30 seconds without a fresh observation of a missile aimed at this
+aircraft, a fitted agent choice. The aircraft's own missiles in flight and
+missiles seen going elsewhere do not keep an encounter open. A longer quiet
+spell starts a new encounter. When defense ends, resume existing orders,
+formation or combat without changing aggression or launch gates.
 
 ## Live integration and authored boundaries
 

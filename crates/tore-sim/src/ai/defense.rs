@@ -243,7 +243,8 @@ impl DefenseState {
 /// Fitted: a lost observation supports committed motion for two seconds,
 /// the threat picture's own lost-contact grace. Encounter memory lasts longer.
 pub const THREAT_MEMORY_TICKS: u64 = crate::combat::threats::LOST_GRACE_TICKS;
-/// Fitted quiet window for classification, budget and phase memory.
+/// Fitted quiet window for classification, budget and phase memory: no
+/// fresh observation of a missile aimed at this aircraft for this long.
 pub const ENCOUNTER_MEMORY_TICKS: u64 = 30 * 120;
 
 pub fn decide<F>(
@@ -263,7 +264,9 @@ where
     {
         state.start_encounter(tick);
     }
-    if contacts.iter().any(|c| !c.stale) {
+    // Only a missile aimed at this aircraft keeps the encounter open. Its own
+    // missiles in flight and missiles seen going elsewhere are not threats.
+    if contacts.iter().any(|c| !c.stale && c.targeting_receiver) {
         state.last_encounter_tick = Some(tick);
     }
     for contact in contacts {
@@ -1483,6 +1486,55 @@ mod tests {
             assess(1800, Experience::Ace, own(), contact, &mut state).burst,
             None
         );
+    }
+
+    #[test]
+    fn own_missiles_in_flight_do_not_hold_the_encounter_budget() {
+        // An own missile in flight (or one seen going elsewhere) is not an
+        // incoming threat and must not keep an encounter, its spent budget and
+        // its finished reaction open for a later missile.
+        let mut own_missile = threat(EvidenceSource::OwnLaunch, Some(GuidanceClass::Radar));
+        own_missile.missile_id = 50;
+        own_missile.targeting_receiver = false;
+        own_missile.was_targeting_receiver = false;
+        own_missile.position = Some([0.0, 5000.0, 30_000.0]);
+        own_missile.velocity = Some([0.0, 0.0, 2000.0]);
+        let mut state = DefenseState::default();
+        let mut step = |tick: u64, incoming: Option<ThreatRecord>, state: &mut DefenseState| {
+            own_missile.observed_tick = tick;
+            let mut contacts = vec![own_missile];
+            if let Some(mut c) = incoming {
+                c.observed_tick = tick;
+                contacts.push(c);
+            }
+            decide(tick, Experience::Ace, own(), &contacts, state, |_| 0.0)
+                .and_then(|d| d.burst)
+                .map_or(0, |b| b.chaff)
+        };
+        let mut a = threat(
+            EvidenceSource::ElectronicSupported,
+            Some(GuidanceClass::Radar),
+        );
+        a.position = Some([0.0, 5000.0, 1000.0]);
+        let mut spent = 0;
+        for tick in 0..600 {
+            spent += step(tick, Some(a), &mut state);
+        }
+        a.missile_id = 3;
+        for tick in 600..1200 {
+            spent += step(tick, Some(a), &mut state);
+        }
+        assert_eq!(spent, 8);
+        for tick in 1200..20_000 {
+            step(tick, None, &mut state);
+        }
+        // Over two minutes later a new missile arrives.
+        a.missile_id = 4;
+        let mut later = 0;
+        for tick in 20_000..20_600 {
+            later += step(tick, Some(a), &mut state);
+        }
+        assert!(later > 0, "a missile 2.5 minutes later got no devices");
     }
 
     #[test]
