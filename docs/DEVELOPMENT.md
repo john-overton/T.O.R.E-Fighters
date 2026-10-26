@@ -1560,6 +1560,9 @@ the player script. It is useful for sustained [gun-employment checks](baselines/
 prints enemy observation sources, permission, target and incoming-fire cues. `--probe-fuel-trace SECONDS` prints one `AI fuel:` line per AI aircraft at that interval (tick, aircraft, fuel, endurance, time home, fuel state, activity). `--probe-fuel POUNDS` starts every AI aircraft with that much internal fuel, so a return on low fuel can be probed in a minute. `--probe-rotor-trace SECONDS` prints one `AI rotor:` line per AI helicopter or V-22 at that interval: height over the ground, speed, climb, pitch, bank, heading, nacelles, collective, rotor speed, the rotor adapter's regime and commanded heading, path, speed, climb and nacelles, the requested path, the terrain floor and the envelope maximum (slice HF1).
 Structural damage without a system fault also prints an `AI damage:` line,
 with its exact `damage_fraction`, so a damaged crash is not labeled undamaged.
+That value is the aircraft's damage before any crash: a ground impact sets
+the flight's damage to 1, which would otherwise hide an undamaged aircraft
+that flew into the ground.
 Every probe prints first visual acquisition, first release, first gun/hit defense
 and peak bank for each enemy.
 
