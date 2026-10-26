@@ -186,10 +186,18 @@ DAMAGED = re.compile(r"^AI damage: actor=(\d+) ", re.M)
 
 def ground_collisions(output: str, actors: dict) -> list[str]:
     """AI aircraft that flew into the ground undamaged: they died on the
-    ground with no weapon kill, no ejection and no system fault."""
+    ground with no weapon kill, no ejection, no structural damage and no system fault."""
     destroyed = set(re.findall(r"destroyed: (\S+ \d-\d)", output))
     ejected = set(re.findall(r"(\S+ \d-\d) pilot ejected", output))
-    damaged = set(DAMAGED.findall(output))
+    damaged = set()
+    for line in output.splitlines():
+        match = DAMAGED.match(line)
+        if match is None:
+            continue
+        fraction = re.search(r"\bdamage_fraction=([0-9.eE+-]+)", line)
+        faults = re.search(r"\bfaults=\[([^\]]*)\]", line)
+        if (fraction and float(fraction[1]) > 0) or (faults and faults[1].strip()):
+            damaged.add(match[1])
     ids = {m.group(2): m.group(1) for m in (ACTOR.match(line) for line in output.splitlines()) if m}
     problems = []
     for m in DEATH.finditer(output):

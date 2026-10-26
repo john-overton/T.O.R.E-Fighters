@@ -10222,6 +10222,10 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
     let mut patrol = std::collections::BTreeMap::<u32, (Option<u64>, u64, f64)>::new();
     let mut f12_rig = flight_views::Rig::default();
     let capture_f12 = script.render.is_some() && std::env::var_os("TORE_SCENE_F12").is_some();
+    // Each AI aircraft's damage before any crash: a ground impact sets the
+    // flight's damage to 1, so the final value cannot tell an undamaged
+    // aircraft that flew into the ground from one that was hit first.
+    let mut damage_before_crash = std::collections::BTreeMap::<u32, f64>::new();
     for tick in 0..ticks as u64 {
         if let Some(recording) = &mut recording {
             recording.start_tick(None, &mut mission.combat);
@@ -10604,6 +10608,17 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
             &mission.combat,
             &mission.terrain,
         );
+        for actor in mission
+            .ai_wings
+            .as_ref()
+            .expect(PROBE_BRIDGE)
+            .mission()
+            .actors()
+        {
+            if !actor.flight().crashed {
+                damage_before_crash.insert(actor.id(), actor.flight().damage_fraction);
+            }
+        }
     }
     let world = &mission.terrain;
     let flight = &mission.cockpits[OWN].flight;
@@ -10632,9 +10647,13 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
             .filter(|(_, count)| **count > 0)
             .map(|(index, count)| (index, *count))
             .collect();
-        if !faults.is_empty() {
+        let damage = damage_before_crash
+            .get(&actor.id())
+            .copied()
+            .unwrap_or(flight.damage_fraction);
+        if !faults.is_empty() || damage > 0.0 {
             println!(
-                "AI damage: actor={} faults={faults:?} return={:?} landing={:?} throttle={:.3} power={:.3} oil={:.3} temp={:.3} wounded={} escaped={}",
+                "AI damage: actor={} faults={faults:?} return={:?} landing={:?} throttle={:.3} power={:.3} oil={:.3} temp={:.3} wounded={} escaped={} damage_fraction={}",
                 actor.id(),
                 actor.damage_return(),
                 actor.airfield_phase(),
@@ -10643,7 +10662,8 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                 flight.systems.oil_pressure(),
                 flight.systems.engine.temperature,
                 flight.systems.pilot.wounded(),
-                flight.escape.is_some()
+                flight.escape.is_some(),
+                damage
             );
         }
         // What each aircraft still carries: AI jettison evidence
