@@ -84,7 +84,7 @@ impl Recorder {
             writeln!(
                 self.out,
                 "missile-energy 1 {:016x} {}",
-                tore_formats::missile_data::fingerprint(),
+                tore_sim::combat::missiles::energy_profile::fingerprint(),
                 state.energy_seed()
             )?;
         }
@@ -406,8 +406,10 @@ fn replay_reader(
             {
                 return Err("invalid missile model marker".into());
             }
-            if u64::from_str_radix(fields[1], 16)? != tore_formats::missile_data::fingerprint() {
-                return Err("missile physical table mismatch".into());
+            if u64::from_str_radix(fields[1], 16)?
+                != tore_sim::combat::missiles::energy_profile::fingerprint()
+            {
+                return Err("missile model fingerprint mismatch".into());
             }
             energy_seed = Some(fields[2].parse::<u64>()?);
             continue;
@@ -611,13 +613,16 @@ mod tests {
             if rules == Rules::Energy {
                 assert_eq!(result.energy_seed(), 987654321);
                 let text = std::fs::read_to_string(&path).unwrap().replace(
-                    &format!("{:016x}", tore_formats::missile_data::fingerprint()),
+                    &format!(
+                        "{:016x}",
+                        tore_sim::combat::missiles::energy_profile::fingerprint()
+                    ),
                     "0000000000000000",
                 );
                 std::fs::write(&path, text).unwrap();
                 let error = replay_without_airports(&path, &data, config.clone(), "UKR", &terrain)
                     .unwrap_err();
-                assert!(error.to_string().contains("physical table mismatch"));
+                assert!(error.to_string().contains("model fingerprint mismatch"));
             }
         }
         std::fs::remove_dir_all(dir).unwrap();

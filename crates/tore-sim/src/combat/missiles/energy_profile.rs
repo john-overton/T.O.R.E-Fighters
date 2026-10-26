@@ -121,18 +121,29 @@ pub fn body(w: &Weapon) -> Body {
             body.structural_g = 40.;
             body.navigation_gain = 4.;
         }
-        if let Some([boost, burn, sustain, coast]) = reference.motor {
-            body.boost = Motor {
-                ticks: (burn * 120.).round() as u32,
-                thrust: boost,
-                propellant: boost * burn / reference.motor_exhaust_mps,
-            };
-            body.sustain = Motor {
-                ticks: (coast * 120.).round() as u32,
-                thrust: sustain,
-                propellant: sustain * coast / reference.motor_exhaust_mps,
-            };
-        }
+    }
+    if let Some(m) = tore_formats::missile_motors::motor(&w.source) {
+        let fuel = mass * m.propellant_fraction;
+        let phase = |seconds: f64, share: f64, thrust: Option<f64>| Motor {
+            ticks: (seconds * 120.).round() as u32,
+            propellant: fuel * share,
+            thrust: thrust.unwrap_or_else(|| {
+                if seconds > 0. {
+                    fuel * share * m.exhaust_mps / seconds
+                } else {
+                    0.
+                }
+            }),
+        };
+        body.boost = phase(m.boost_seconds, m.boost_share, m.thrust.map(|v| v[0]));
+        body.sustain = phase(
+            m.sustain_seconds,
+            1. - m.boost_share,
+            m.thrust.map(|v| v[1]),
+        );
+        body.life = body
+            .life
+            .max(body.ignition + body.boost.ticks + body.sustain.ticks + 1200);
     }
     body
 }
@@ -157,3 +168,45 @@ crate::checkpoint_struct!(Motion {
     decoy,
     tracking
 });
+
+/// Tape identity covers authored data, derivation rules and aerodynamic curves.
+/// Source text is repository-owned Rust, never retail media. Even a source-only
+/// change conservatively invalidates Energy resimulation rather than hiding drift.
+pub fn fingerprint() -> u64 {
+    fingerprint_sources(
+        tore_formats::missile_data::fingerprint(),
+        &[
+            include_str!("energy_profile.rs"),
+            include_str!("../../../../tore-formats/src/missile_motors.rs"),
+            include_str!("energy.rs"),
+            include_str!("energy_seeker.rs"),
+            include_str!("decoys.rs"),
+            include_str!("prediction.rs"),
+            include_str!("energy_estimate.rs"),
+        ],
+    )
+}
+fn fingerprint_sources(mut hash: u64, sources: &[&str]) -> u64 {
+    for source in sources {
+        for byte in source.bytes().filter(|byte| *byte != b'\r') {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+    #[test]
+    fn model_identity_covers_rules_and_curves_with_portable_line_endings() {
+        let a = fingerprint_sources(1, &["derive=35\n", "drag=0.3\n"]);
+        assert_eq!(
+            a,
+            fingerprint_sources(1, &["derive=35\r\n", "drag=0.3\r\n"])
+        );
+        assert_ne!(a, fingerprint_sources(1, &["derive=30\n", "drag=0.3\n"]));
+        assert_ne!(a, fingerprint_sources(1, &["derive=35\n", "drag=0.4\n"]));
+        assert_ne!(a, fingerprint_sources(2, &["derive=35\n", "drag=0.3\n"]));
+    }
+}

@@ -1066,7 +1066,7 @@ struct Options {
     ai: Option<ai::AiSetup>,
 }
 
-const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges near,close,short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
+const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,dive,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges near,close,short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -1299,9 +1299,9 @@ pub fn run() -> AppResult<()> {
     std::fs::write(
         o.out.join("model.txt"),
         format!(
-            "{:?}\nphysical-table={:016x}\n",
+            "{:?}\nmodel-fingerprint={:016x}\n",
             o.rules,
-            tore_formats::missile_data::fingerprint()
+            tore_sim::combat::missiles::energy_profile::fingerprint()
         ),
     )?;
     let base = Base {

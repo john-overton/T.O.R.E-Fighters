@@ -294,6 +294,142 @@ fn maximum(w: &Weapon, alt: f64, aspect: usize, drag: Option<f64>, seeker: bool)
     }
     low
 }
+fn candidate_hit(
+    w: &Weapon,
+    body: missiles::energy::Body,
+    anchor: [f64; 4],
+    distance: f64,
+) -> bool {
+    let mut q = question(w, anchor[0] * FT, anchor[1] as usize, distance);
+    q.body = body;
+    q.target.velocity = match anchor[1] as usize {
+        0 => [0., 0., -anchor[3]],
+        1 => [anchor[3], 0., 0.],
+        2 => [0., 0., anchor[3]],
+        _ => [0.; 3],
+    };
+    while q.answer.is_none() {
+        q.step_over(&|_, _| 0., &|a, b| a[1] > 0. && b[1] > 0.);
+    }
+    q.answer.unwrap().hit
+}
+fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4]) -> f64 {
+    let mut low = 0.;
+    let mut high: f64 = 1_000_000.;
+    let mut distances = Vec::new();
+    let mut d = 100.;
+    while d < 1_000_000. {
+        distances.push(d);
+        d *= 1.5;
+    }
+    if body.loft_height > 0. {
+        distances.extend(
+            prediction::envelope_probe_scales(body)
+                .iter()
+                .map(|scale| body.loft_range / 0.6 * scale),
+        );
+    }
+    distances.sort_by(f64::total_cmp);
+    distances.dedup();
+    for d in distances {
+        if candidate_hit(w, body, anchor, d) {
+            low = d;
+            high = 1_000_000.;
+        } else if d > low {
+            high = high.min(d);
+        }
+    }
+    if low == 0. {
+        return 0.;
+    }
+    for _ in 0..12 {
+        let mid = (low + high) * 0.5;
+        if candidate_hit(w, body, anchor, mid) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    low / 1000.
+}
+fn fit_pairs(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "source,fraction,drag_scale,primary_target_km,primary_km,secondary_target_km,secondary_km,relative_error"
+    );
+    for motor in tore_formats::missile_motors::MOTORS {
+        if filter.is_some_and(|s| !s.split(',').any(|name| name == motor.source)) {
+            continue;
+        }
+        let w = Weapon::parse(motor.source, &fs::read(dir.join(motor.source))?)?;
+        let original = missiles::energy_profile::body(&w);
+        let mut best = None;
+        let fractions: Vec<_> = if motor.thrust.is_some() || !motor.fit_propellant {
+            vec![motor.propellant_fraction]
+        } else {
+            (6..=25).map(|n| n as f64 * 0.02).collect()
+        };
+        for fraction in fractions {
+            let mut body = original;
+            if motor.thrust.is_none() {
+                let ratio = fraction / motor.propellant_fraction;
+                body.boost.propellant *= ratio;
+                body.boost.thrust *= ratio;
+                body.sustain.propellant *= ratio;
+                body.sustain.thrust *= ratio;
+            }
+            let mut low: f64 = 0.05;
+            let mut high: f64 = 64.;
+            for _ in 0..18 {
+                body.drag_scale = (low * high).sqrt();
+                if candidate_hit(&w, body, motor.primary, motor.primary[2] * 1000.) {
+                    low = body.drag_scale;
+                } else {
+                    high = body.drag_scale;
+                }
+            }
+            body.drag_scale = low;
+            if !candidate_hit(&w, body, motor.primary, motor.primary[2] * 1000.) {
+                continue;
+            }
+            let secondary = candidate_maximum(&w, body, motor.secondary);
+            let error = (secondary / motor.secondary[2] - 1.).abs();
+            // Prefer a plausible multiplier among fits of similar accuracy.
+            let penalty = if (0.5..=3.).contains(&low) {
+                0.
+            } else {
+                0.01 * (low / 3.).ln().abs()
+            };
+            let score = error + penalty;
+            if best.is_none_or(|(_, _, _, _, best_score)| score < best_score) {
+                best = Some((fraction, low, secondary, body, score));
+            }
+        }
+        let (fraction, drag, _, body, _) = best.ok_or("no feasible primary anchor")?;
+        let mut pair = None;
+        for n in (70..=130).step_by(5) {
+            let mut candidate = body;
+            candidate.drag_scale = drag * n as f64 / 100.;
+            let primary = candidate_maximum(&w, candidate, motor.primary);
+            let secondary = candidate_maximum(&w, candidate, motor.secondary);
+            let score = (primary / motor.primary[2] - 1.)
+                .abs()
+                .max((secondary / motor.secondary[2] - 1.).abs());
+            if pair.is_none_or(|(_, _, _, old)| score < old) {
+                pair = Some((candidate.drag_scale, primary, secondary, score));
+            }
+        }
+        let (drag, primary, secondary, _) = pair.unwrap();
+        println!(
+            "{},{fraction:.9},{drag:.8},{},{primary:.3},{},{secondary:.3},{:.4}",
+            motor.source,
+            motor.primary[2],
+            motor.secondary[2],
+            (secondary / motor.secondary[2] - 1.).abs()
+        );
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
@@ -324,6 +460,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+    if args.iter().any(|s| s == "--fit-pair") {
+        fit_pairs(dir, args.get(3).map(String::as_str))?;
+        return Ok(());
+    }
     let fit = args.iter().any(|a| a == "--fit");
     println!(
         "source,altitude_ft,aspect,physical_km,seeker_valid_km,anchor_km,drag_scale,retail_lb,physical_lb,anchor_evidence"
@@ -352,12 +492,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 dimensions_evidence: "RETAIL-AMBIGUOUS",
                 range_evidence: "RETAIL-AMBIGUOUS",
                 drag_scale: body.drag_scale,
-                motor_exhaust_mps: 2200.,
                 imaging: false,
                 structural_g: None,
                 tracking_deg_s: None,
                 fov_half_deg: None,
-                motor: None,
             });
         let surface = missiles::surface_launched(&w.source);
         let strike = w.flags & 0x20000 != 0;
@@ -417,7 +555,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 1500. / FT
             }]
         } else {
-            vec![5000., 15000., 35000.]
+            vec![500., 5000., 15000., 35000.]
         } {
             for aspect in 0..if strike {
                 1
