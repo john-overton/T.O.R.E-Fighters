@@ -201,6 +201,11 @@ at constant impulse, and samples primary plus 5k/35k tail conditions instead.
 These different parameters and geometries explain the different percentages.
 Neither is an uncertainty bound or a public performance claim.
 
+"Controlled s" is the controlled-flight lifetime, fitted per missile to its
+head-on reference (FITTED-PER-MISSILE-REFERENCE-TIME). Ground and ship
+targets use their stationary or receding reference instead. AIM9B keeps its
+sourced 20 seconds. These times are not class-derived.
+
 | Store | Primary condition | Measured km | Secondary condition | Measured km | Drag | Controlled s | Paired perturbation change |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | AIM120.JT | 35000 / head / 250 / 60 | 60.017 | 5000 / head / 250 / 27 | 38.369 | 2 | 52.308 | 1.35% |
