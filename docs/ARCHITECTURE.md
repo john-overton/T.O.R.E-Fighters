@@ -407,7 +407,9 @@ than 4 ms on average.
 The following describes the preserved Spec path. Energy-mode flight uses a
 world-owned bounded prediction service. Its shared body carries explicit class
 control and post-burn defeat policy; the checkpointed flight carries the
-consecutive low-Mach count and permanent inert state, described in the
+consecutive low-Mach count and permanent inert state. A single projectile
+capability check suppresses inert threat snapshots and incoming/target cues
+while keeping the body visible, described in the
 [energy specification](spec/missile-energy.md#estimates-and-acceptance).
 Player point jobs receive reserved admission and a quarter of the unchanged
 work budget first. Turn-projected advice is exposed through the player launcher

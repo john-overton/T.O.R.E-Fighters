@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.5 Linux validation passed.**
+Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.6 validation is in progress.**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
@@ -57,7 +57,7 @@ values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
 John's round-3 decision removes the supplemental geometry-based drag factor.
-Drag uses the round-2 force law with Phase 2.5 one-anchor family fits. Altitude affects density and sound speed through the standard
+Drag uses the round-2 force law with Phase 2.6 conditional balance fits. Altitude affects density and sound speed through the standard
 atmosphere above; there is no additional altitude fade or span/diameter factor.
 The supplementary [span reference data](../formats/missile-energy-data.md#span-reference-data)
 do not affect simulation. Body diameter still supplies the original frontal
@@ -86,7 +86,8 @@ data knob `DEFEAT_MACH`; 0.9 and 1.1 are documented tuning alternatives,
 not additional runtime modes. Powered flight and the ignition delay never
 accumulate defeat ticks. There is no automatic defeat for a G deficit.
 Available G, required unclipped G, their positive deficit and closing speed
-are diagnostics only.
+are diagnostics only, evaluated only by an explicit diagnostic integration
+request. Ordinary prediction steps do not calculate them.
 
 Defeat is permanent: guidance and all direct, proximity, ground and collateral
 damage stop. The body falls ballistically under drag and gravity until ground
@@ -96,9 +97,17 @@ a contact at fraction zero. Contact in an earlier tick can score. Forecast
 and live flight share this policy and its checkpointed state. This is distinct
 from ordinary seeker loss and from control-time expiry.
 
+John's Phase 2.6 decision treats an inert body as no longer threatening in the
+same simulation tick. Defeated stores and stores that have passed their decoy
+are removed from missile threat snapshots, AI defense inputs, RWR launch and
+incoming warnings, voice inputs and HUD target/TTI cues. There is no lost-contact
+grace for an inert store. The physical body remains visible and continues its
+ballistic flight. Ordinary control expiry alone does not make a live fuze inert.
+Other threats and ordinary radar-lock warnings remain independent.
+
 Control budgets are explicit store classes, never fitted against range:
 short IR 20 seconds, medium air 70, long air 180, cruise 600, fast ground
-90, command 30, surface IR 25, surface radar 70 and long surface radar 120.
+90, short ground 30, command 30, surface IR 25, surface radar 70 and long surface radar 120.
 Medium/long air also explicitly contain the corresponding R-27 IR variants.
 AIM9B retains its cited 20 seconds; every other allocation is an opinionated
 game choice using John's approved class budgets. Exact allocations live in
@@ -241,7 +250,10 @@ cruise profiles). In-flight snapshots
 are aged along the mean observed velocities before comparing positions, so a
 stable cruise TTI is not discarded solely because the missile moved forward.
 A changed motor phase, more than 2% mass change, or a material trajectory
-change rejects it. Launch snapshots advance launcher and target positions by the elapsed world
+change rejects it. The low-Mach countdown is compared in six-tick (50 ms)
+buckets, while lost/defeated states are compared exactly. A cached hit on or
+after the earliest defeat time implied by the current countdown is withheld;
+only a new flyout can establish that later acceleration makes it reachable. Launch snapshots advance launcher and target positions by the elapsed world
 ticks since submission, using the same mean observed velocities. Their missile
 age stays zero; launch answers expire after 600 ticks unless the inputs are
 identical. AI launch gates retain those strict point tests. Player IN RNG and
@@ -302,7 +314,7 @@ here; the lead owns the coordinated version bump. The fingerprint includes
 physical data, motor/fuel, explicit class and control-time inputs, the global
 defeat threshold/dwell and drag-curve knots,
 and explicit semantic revisions for derivation, integration/atmosphere,
-guidance, seeker, decoy, prediction and fuze/contact rules. Any behavior change
+guidance, seeker, decoy, prediction, fuze/contact and inert-threat publication rules. Any behavior change
 must update its rule revision; comments, citation wording in motor data and
 calibration targets do not invalidate a tape. It does not hash source files.
 

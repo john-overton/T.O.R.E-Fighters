@@ -95,7 +95,7 @@ impl State {
         let p = self
             .projectiles
             .iter()
-            .find(|p| p.id == projectile && p.target == Some(target))?;
+            .find(|p| p.id == projectile && p.target == Some(target) && p.threatening())?;
         let flight = p.guidance.as_ref()?;
         flight.solution.map(|s| s.seconds)
     }
@@ -542,6 +542,97 @@ mod tests {
             tracer: false,
         }
     }
+    #[test]
+    fn inert_stores_clear_the_warning_picture_on_the_defeat_tick() {
+        for passed_decoy in [false, true] {
+            let mut state = super::super::tests::fixture(true);
+            state.weapon_rules = Rules::Energy;
+            state.energy_predictions_enabled = false;
+            state.targets.clear();
+            state.own_mut().config.sensors.signature.radar = 100.;
+            let target = super::super::tests::target(0, [0., 1000. / FT, -2000. / FT], 10000, 0x80);
+            let w = weapon("AIM120.JT", 3);
+            let mut p = projectile(&w, &target);
+            p.owner = 99;
+            p.incoming = Some(0);
+            p.previous = p.position;
+            p.direction = [0., 0., -1.];
+            let f = p.guidance.as_mut().unwrap();
+            f.enabled = true;
+            f.seeker.status = Status::Pitbull;
+            f.seeker.candidate = Some(target.id);
+            f.seeker.dwell = missiles::DWELL;
+            p.motion.as_mut().unwrap().velocity = [0., 0., -200. / FT];
+            let e = p.motion.as_mut().unwrap().energy.as_mut().unwrap();
+            e.tracking.head = Some(p.direction);
+            e.flight.position = p.position.map(|v| v * FT);
+            e.flight.velocity = [0., 0., -200.];
+            e.flight.axis = p.direction;
+            e.flight.age = e.body.ignition + e.body.boost.ticks + e.body.sustain.ticks;
+            e.flight.subsonic_ticks = 28;
+            p.age = u64::from(e.flight.age);
+            state.projectiles = vec![p];
+            let l = Launcher {
+                position: target.position,
+                basis: Basis::new(0., 0., 0.),
+                velocity: [0.; 3],
+                speed_fps: 0.,
+                bay_ready: true,
+                radar_power: true,
+                radar: true,
+                jammer: false,
+                alive: true,
+                body_present: true,
+                controls: Default::default(),
+            };
+            let input = [OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }];
+            state.step_surface(&input, |_, _| 0., |_, _| false);
+            assert!(
+                state
+                    .own()
+                    .missile_threats
+                    .records()
+                    .any(|r| r.targeting_receiver)
+            );
+            assert!(state.projectiles[0].threatening());
+            if passed_decoy {
+                let e = state.projectiles[0]
+                    .motion
+                    .as_mut()
+                    .unwrap()
+                    .energy
+                    .as_mut()
+                    .unwrap();
+                e.flight.subsonic_ticks = 0;
+                e.decoy.pursuit = Some(missiles::decoys::Pursuit {
+                    device: missiles::decoys::Device::release(
+                        1,
+                        0,
+                        missiles::decoys::Kind::Chaff,
+                        1,
+                        e.flight.position,
+                        [0.; 3],
+                    ),
+                    passed: true,
+                });
+            }
+            state.step_surface(&input, |_, _| 0., |_, _| false);
+            assert_eq!(state.projectiles.len(), 1, "the inert body must remain");
+            assert!(!state.projectiles[0].threatening());
+            assert_eq!(
+                state.own().missile_threats.records().count(),
+                0,
+                "no grace period for an inert store"
+            );
+            assert!(state.missile_snapshots(&[(0, l)]).is_empty());
+            assert_eq!(state.missile_time_to_impact(7, 0), None);
+        }
+    }
+
     // Start with 28/29/30 prior low-Mach samples. Contact in the next tick
     // is respectively before/at/after defeat. Sweep direct and proximity cases.
     fn defeat_contact(prior: u32, offset: f64, ground_contact: bool) -> (bool, bool, bool) {

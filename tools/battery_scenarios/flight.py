@@ -823,8 +823,19 @@ def check_missile_defeat(work: Path, _output: str) -> list[str]:
         first = (work / "defeat" / "runs.csv").read_bytes()
         second = (work / "defeat-serial" / "runs.csv").read_bytes()
         rows = list(csv.DictReader(first.decode().splitlines()))
+        near = (work / "defeat-near" / "runs.csv").read_bytes()
+        near_serial = (work / "defeat-near-serial" / "runs.csv").read_bytes()
+        rows += list(csv.DictReader(near.decode().splitlines()))
         defeated = [row for row in rows if row["defeat_s"]]
         problems = []
+        if near != near_serial:
+            problems.append("inert near-pass differs between serial and parallel workers")
+        if not any(row["closest_inert_ft"] and
+                   float(row["closest_inert_ft"]) <= float(row["inert_radius_ft"])
+                   for row in defeated):
+            problems.append("no inert body passed within its target's fuze/contact radius")
+        if any(int(row["inert_damage"]) for row in defeated):
+            problems.append("an inert body damaged its target")
         if first != second:
             problems.append("defeat study differs between serial and parallel workers")
         if not defeated:
@@ -856,8 +867,14 @@ def combat_scenarios() -> list[Scenario]:
               "--missile-model", "energy"]
     out.append(Scenario(name="flight-missile-defeat", lane="flight",
                         args=["--missile-study", "{work}/defeat", "--threads", "4"] + defeat,
-                        then=[Step(args=["--missile-study", "{work}/defeat-serial", "--threads", "1"] + defeat)],
-                        outputs=["defeat/runs.csv", "defeat-serial/runs.csv"],
+                        then=[Step(args=["--missile-study", "{work}/defeat-serial", "--threads", "1"] + defeat),
+                              Step(args=["--missile-study", "{work}/defeat-near", "--threads", "4",
+                                         "--missiles", "AIM120", "--profiles", "straight", "--ranges", "defeat-edge",
+                                         "--aspects", "head", "--altitudes", "low", "--seeds", "2", "--missile-model", "energy"]),
+                              Step(args=["--missile-study", "{work}/defeat-near-serial", "--threads", "1",
+                                         "--missiles", "AIM120", "--profiles", "straight", "--ranges", "defeat-edge",
+                                         "--aspects", "head", "--altitudes", "low", "--seeds", "2", "--missile-model", "energy"])],
+                        outputs=["defeat/runs.csv", "defeat-serial/runs.csv", "defeat-near/runs.csv", "defeat-near-serial/runs.csv"],
                         check_work=check_missile_defeat, timeout=180,
                         notes="Post-burn inert defeat and serial/parallel equality"))
     out.append(Scenario(name="flight-missile-sag", lane="flight",

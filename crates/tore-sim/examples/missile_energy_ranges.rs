@@ -235,7 +235,10 @@ fn seeker_hit(w: &Weapon, alt: f64, aspect: usize, range: f64, drag: Option<f64>
         let d = std::array::from_fn::<_, 3, _>(|i| after[i] - before[i]);
         let u = (-dot(before, d) / dot(d, d).max(1e-12)).clamp(0., 1.);
         let gap = std::array::from_fn::<_, 3, _>(|i| before[i] + d[i] * u);
-        if dot(gap, gap) <= radius * radius && age >= q.arming_age {
+        if dot(gap, gap) <= radius * radius
+            && age >= q.arming_age
+            && !m.energy.unwrap().flight.defeated
+        {
             return true;
         }
         if p.position[1] <= 0. || m.energy.unwrap().flight.lost {
@@ -257,7 +260,7 @@ fn maximum(w: &Weapon, alt: f64, aspect: usize, drag: Option<f64>, seeker: bool)
     let mut upper: f64 = 1_000_000.;
     let mut distances = Vec::new();
     let body = missiles::energy_profile::body(w);
-    if body.loft_height > 0. {
+    if body.loft_range > 0. {
         distances.extend(
             prediction::envelope_probe_scales(body)
                 .iter()
@@ -314,6 +317,49 @@ fn candidate_hit(
     q.answer.unwrap().hit
 }
 fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4]) -> f64 {
+    candidate_maximum_precision(w, body, anchor, 12)
+}
+fn candidate_maximum_precision(
+    w: &Weapon,
+    body: missiles::energy::Body,
+    anchor: [f64; 4],
+    precision: usize,
+) -> f64 {
+    if precision < 12 {
+        // Local bracketing for optimizer iterations. Every emitted candidate
+        // is remeasured with the complete loft-aware scan below.
+        let mut high = (anchor[2] * 1000.).clamp(100., 1_000_000.);
+        let mut low = high;
+        if candidate_hit(w, body, anchor, high) {
+            while high < 1_000_000. {
+                high = (high * 1.5).min(1_000_000.);
+                if !candidate_hit(w, body, anchor, high) {
+                    break;
+                }
+                low = high;
+            }
+        } else {
+            loop {
+                low /= 1.5;
+                if low < 100. {
+                    return 0.;
+                }
+                if candidate_hit(w, body, anchor, low) {
+                    break;
+                }
+                high = low;
+            }
+        }
+        for _ in 0..precision {
+            let mid = (low + high) * 0.5;
+            if candidate_hit(w, body, anchor, mid) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        return low / 1000.;
+    }
     let mut low = 0.;
     let mut high: f64 = 1_000_000.;
     let mut distances = Vec::new();
@@ -322,7 +368,7 @@ fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4])
         distances.push(d);
         d *= 1.5;
     }
-    if body.loft_height > 0. {
+    if body.loft_range > 0. {
         distances.extend(
             prediction::envelope_probe_scales(body)
                 .iter()
@@ -342,7 +388,7 @@ fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4])
     if low == 0. {
         return 0.;
     }
-    for _ in 0..12 {
+    for _ in 0..precision {
         let mid = (low + high) * 0.5;
         if candidate_hit(w, body, anchor, mid) {
             low = mid;
@@ -352,20 +398,26 @@ fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4])
     }
     low / 1000.
 }
-/// Candidate generation for the one-anchor joint family fit. No timers, ignition
-/// delays, secondary references, or class assignments are fitted here.
-/// The complete candidate grid is exported so family selection is reviewable.
-fn fit_class(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "source,class,fraction,drag,control_s,anchor_km,score,min_launch_km,floor_km,r500h,r500b,r500t,r5h,r5b,r5t,r15h,r15b,r15t,r35h,r35b,r35t"
-    );
+/// Fixed-budget balance fitting. The only adjustable parameters are fuel and
+/// drag. Explicit thrust overrides, burn durations and control budgets stay fixed.
+fn fit_class(
+    dir: &Path,
+    filter: Option<&str>,
+    ground_roles: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if ground_roles {
+        println!("source,class,fraction,drag,control_s,anchor_km,primary_km,score");
+    } else {
+        println!(
+            "source,class,fraction,drag,control_s,anchor_km,tail_target_km,score,min_launch_km,floor_km,r500h,r500b,r500t,r5h,r5b,r5t,r15h,r15b,r15t,r35h,r35b,r35t"
+        );
+    }
     for m in tore_formats::missile_motors::MOTORS {
-        if filter.is_some_and(|s| !s.split(',').any(|name| name == m.source)) {
+        if filter.is_some_and(|s| !s.split(',').any(|name| name == m.source))
+            || m.control_class.tail_floor_km().is_none() != ground_roles
+        {
             continue;
         }
-        let Some(floor) = m.control_class.tail_floor_km() else {
-            continue;
-        };
         let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
         let original = missiles::energy_profile::body(&w);
         let minimum = w
@@ -374,7 +426,10 @@ fn fit_class(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error:
             .iter()
             .map(|z| f64::from(z.minimum_range) * FT / 1000.)
             .fold(0f64, f64::max);
-        let floor = floor.max(1.2 * minimum + 0.01);
+        let floor = m
+            .control_class
+            .tail_floor_km()
+            .map_or(0., |v| v.max(1.2 * minimum + 0.01));
         let scaled = |fuel: f64, drag: f64| {
             let mut b = original;
             let ratio = fuel / m.propellant_fraction;
@@ -387,72 +442,429 @@ fn fit_class(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error:
             b.drag_scale = drag;
             b
         };
-        let mut drags: Vec<_> = (2..=12).map(|n| f64::from(n) * 0.25).collect();
-        // Refine the R73-family neighborhood where the fixed 20 s budget,
-        // high-head anchor and existing 12 km deck escape meet.
-        if matches!(m.source, "AA11.JT" | "AA11B.JT") {
-            drags.extend([1.05, 1.1, 1.15, 1.2]);
-            drags.sort_by(f64::total_cmp);
-        }
-        for drag in drags {
-            // Keep sourced thrust/impulse pairs intact; their dry-mass fraction
-            // is already in bounds. All other fuel fractions are fitted.
-            let mut fuel = m.propellant_fraction;
-            if m.thrust.is_none() {
-                let satisfies = |fuel| {
-                    let b = scaled(fuel, drag);
-                    candidate_hit(&w, b, m.primary, m.primary[2] * 1000.)
-                        && candidate_hit(&w, b, [5000., 2., 0., 250.], floor * 1000.)
-                };
+        for drag_step in 2..=12 {
+            let drag = f64::from(drag_step) * 0.25;
+            let threshold = |anchor: [f64; 4]| {
                 let mut lo = 0.12;
                 let mut hi = 0.5;
-                if satisfies(lo) {
-                    hi = lo;
-                } else if satisfies(hi) {
-                    for _ in 0..14 {
+                if candidate_hit(&w, scaled(lo, drag), anchor, anchor[2] * 1000.) {
+                    return lo;
+                }
+                if candidate_hit(&w, scaled(hi, drag), anchor, anchor[2] * 1000.) {
+                    for _ in 0..12 {
                         let mid = (lo + hi) * 0.5;
-                        if satisfies(mid) {
+                        if candidate_hit(&w, scaled(mid, drag), anchor, anchor[2] * 1000.) {
                             hi = mid;
                         } else {
                             lo = mid;
                         }
                     }
                 }
-                fuel = hi;
+                hi
+            };
+            let primary_fuel = threshold(m.primary);
+            let mut fuels = vec![0.12, primary_fuel, 0.5];
+            if !ground_roles {
+                let tail_fuel = threshold(m.secondary);
+                fuels.extend([
+                    tail_fuel,
+                    0.25 * primary_fuel + 0.75 * tail_fuel,
+                    0.5 * (primary_fuel + tail_fuel),
+                    0.75 * primary_fuel + 0.25 * tail_fuel,
+                ]);
             }
-            let b = scaled(fuel, drag);
-            let mut ranges = Vec::new();
-            for alt in [500., 5000., 15000., 35000.] {
-                for aspect in 0..3 {
-                    ranges.push(candidate_maximum(&w, b, [alt, f64::from(aspect), 0., 250.]));
+            fuels.sort_by(f64::total_cmp);
+            fuels.dedup_by(|a, b| (*a - *b).abs() < 0.00001);
+            for fuel in fuels {
+                let b = scaled(fuel, drag);
+                let primary = candidate_maximum(&w, b, m.primary);
+                let mut score = 4. * (primary / m.primary[2] - 1.).abs() + 0.02 * drag.ln().powi(2);
+                if ground_roles {
+                    println!(
+                        "{},{:?},{fuel:.9},{drag},{},{},{primary:.6},{score:.8}",
+                        m.source,
+                        m.control_class,
+                        m.control_class.seconds(),
+                        m.primary[2]
+                    );
+                    continue;
                 }
+                let tail = candidate_maximum(&w, b, m.secondary);
+                if tail < floor {
+                    continue;
+                }
+                score += 4. * (tail / m.secondary[2] - 1.).abs();
+                let mut ranges = Vec::new();
+                for alt in [500., 5000., 15000., 35000.] {
+                    for aspect in 0..3 {
+                        ranges.push(if alt == 35000. && aspect == 0 {
+                            primary
+                        } else if alt == 5000. && aspect == 2 {
+                            tail
+                        } else {
+                            candidate_maximum(&w, b, [alt, f64::from(aspect), 0., 250.])
+                        });
+                    }
+                }
+                if ranges.contains(&0.) {
+                    continue;
+                }
+                print!(
+                    "{},{:?},{fuel:.9},{drag},{},{},{},{score:.8},{minimum},{floor}",
+                    m.source,
+                    m.control_class,
+                    m.control_class.seconds(),
+                    m.primary[2],
+                    m.secondary[2]
+                );
+                for value in ranges {
+                    print!(",{value:.6}");
+                }
+                println!();
             }
-            if ranges[5] + 0.002 < floor || ranges.contains(&0.) {
-                continue;
-            }
-            let error = (ranges[9] / m.primary[2] - 1.).abs();
-            let score =
-                4. * error + 0.02 * drag.ln().powi(2) + 0.02 * ((fuel - 0.35) / 0.38).powi(2);
-            print!(
-                "{},{:?},{fuel:.9},{drag},{},{},{score:.8},{minimum},{floor}",
-                m.source,
-                m.control_class,
-                m.control_class.seconds(),
-                m.primary[2]
-            );
-            for r in ranges {
-                print!(",{r:.6}");
-            }
-            println!();
         }
-        eprintln!("class candidates {}", m.source);
+        eprintln!("balance candidates {}", m.source);
     }
     Ok(())
 }
+
+/// Authored game balance, never a reconstruction of a real motor.
+/// Fuel .12..50%, drag .5..3, phase duration .25..16 times nominal and <=100%
+/// of the fixed control budget, impulse scale .25..4, dry-mass axial load <=60 G.
+fn fit_motors<const N: usize>(
+    dir: &Path,
+    filter: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "source,class,fraction,drag,control_s,boost_s,sustain_s,exhaust_mps,boost_n,sustain_n,boost_share,anchor_km,tail_target_km,primary_km,score,min_launch_km,floor_km,r500h,r500b,r500t,r5h,r5b,r5t,r15h,r15b,r15t,r35h,r35b,r35t"
+    );
+    let sources: Vec<_> = tore_formats::missile_motors::MOTORS
+        .iter()
+        .filter(|m| {
+            let eligible = m.control_class.tail_floor_km().is_some()
+                || matches!(
+                    m.source,
+                    "AGM84E.JT" | "AS7.JT" | "AS16.JT" | "AS14.JT" | "AS30.JT" | "AT12.JT"
+                );
+            eligible && filter.is_none_or(|f| f.split(',').any(|n| n == m.source))
+        })
+        .collect();
+    std::thread::scope(|scope| {
+        let mut jobs = Vec::new();
+        for worker in 0..4 {
+            let sources = &sources;
+            jobs.push(scope.spawn(move || -> Result<(), String> {
+                for m in sources.iter().skip(worker).step_by(4) {
+                    let text = fit_motor_store::<N>(dir, m).map_err(|e| e.to_string())?;
+                    std::io::Write::write_all(&mut std::io::stdout().lock(), text.as_bytes())
+                        .map_err(|e| e.to_string())?;
+                    eprintln!("motor fits {}", m.source);
+                }
+                Ok(())
+            }));
+        }
+        for job in jobs {
+            job.join()
+                .map_err(|_| "fit worker panicked".to_string())??;
+        }
+        Ok::<_, String>(())
+    })?;
+    Ok(())
+}
+fn fit_motor_store<const N: usize>(
+    dir: &Path,
+    m: &tore_formats::missile_motors::MotorData,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use missiles::energy::{Body, DT, G};
+    use std::fmt::Write;
+    let mut output = String::new();
+    let air = m.control_class.tail_floor_km().is_some();
+    let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+    let base = missiles::energy_profile::body(&w);
+    let minimum = w
+        .seeker
+        .zones
+        .iter()
+        .map(|z| f64::from(z.minimum_range) * FT / 1000.)
+        .fold(0f64, f64::max);
+    let floor = m
+        .control_class
+        .tail_floor_km()
+        .map_or(0., |f| f.max(1.2 * minimum + 0.02));
+    let max_burn_scale = (f64::from(base.guidance_ticks)
+        / f64::from(base.boost.ticks + base.sustain.ticks))
+    .min(16.);
+    let build = |x: [f64; N]| -> (Body, f64, f64) {
+        let fuel = 0.12 + 0.38 * x[0];
+        let duration = (0.25f64.ln() + x[2] * (max_burn_scale / 0.25).ln()).exp();
+        let impulse = (0.25f64.ln() + x[3] * 16f64.ln()).exp();
+        let mut body = base;
+        body.drag_scale = 0.5 + 2.5 * x[1];
+        for (phase, nominal) in [
+            (&mut body.boost, base.boost),
+            (&mut body.sustain, base.sustain),
+        ] {
+            phase.propellant = nominal.propellant * fuel / m.propellant_fraction;
+            if nominal.ticks > 0 {
+                phase.ticks = (f64::from(nominal.ticks) * duration).round().max(1.) as u32;
+                phase.thrust = nominal.thrust * fuel / m.propellant_fraction
+                    * impulse
+                    * f64::from(nominal.ticks)
+                    / f64::from(phase.ticks);
+            }
+        }
+        if N == 6 {
+            let total = ((f64::from(base.boost.ticks + base.sustain.ticks) * duration).round()
+                as u32)
+                .max(2);
+            let share = 0.05 + 0.9 * x[5];
+            let boost = (f64::from(total) * (0.05 + 0.9 * x[4]))
+                .round()
+                .clamp(1., f64::from(total - 1)) as u32;
+            let total_impulse = (base.boost.thrust * f64::from(base.boost.ticks)
+                + base.sustain.thrust * f64::from(base.sustain.ticks))
+                * DT
+                * fuel
+                / m.propellant_fraction
+                * impulse;
+            body.boost = missiles::energy::Motor {
+                ticks: boost,
+                propellant: base.mass * fuel * share,
+                thrust: total_impulse * share / (f64::from(boost) * DT),
+            };
+            body.sustain = missiles::energy::Motor {
+                ticks: total - boost,
+                propellant: base.mass * fuel * (1. - share),
+                thrust: total_impulse * (1. - share) / (f64::from(total - boost) * DT),
+            };
+        }
+        (body, fuel, impulse)
+    };
+    let mut effective_tail = if air { m.secondary[2].max(floor) } else { 0. };
+    if matches!(m.source, "AIM7.JT" | "AIM7E.JT") {
+        let a = tore_formats::missile_motors::motor("AIM7.JT")
+            .unwrap()
+            .secondary[2];
+        let b = tore_formats::missile_motors::motor("AIM7E.JT")
+            .unwrap()
+            .secondary[2];
+        // Minimum equal-relative-error compromise for contradictory tail targets.
+        effective_tail = 2. * a * b / (a + b) + if m.source == "AIM7.JT" { 0.02 } else { -0.02 };
+    }
+    let goals: &[(f64, f64)] = if air {
+        &[(1., 1.), (0.92, 1.), (1.08, 1.), (1., 0.92), (1., 1.08)]
+    } else {
+        &[(1., 1.)]
+    };
+    let mut outputs: Vec<([f64; N], f64)> = Vec::new();
+    for &(head_factor, tail_factor) in goals {
+        for start in 0..4 {
+            let seed = if start == 0 {
+                [
+                    ((m.propellant_fraction - 0.12) / 0.38).clamp(0., 1.),
+                    ((base.drag_scale - 0.5) / 2.5).clamp(0., 1.),
+                    (4f64.ln() / (max_burn_scale / 0.25).ln()).clamp(0., 1.),
+                    0.5,
+                ]
+            } else if start == 1 {
+                [0.55, 0.8, 0.25, 0.55]
+            } else if start == 2 {
+                [0.55, 1., 0., 0.2]
+            } else {
+                [0.3, 0.3, 0.8, 0.65]
+            };
+            let mut initial = [0.; N];
+            initial[..4].copy_from_slice(&seed);
+            if N == 6 {
+                let (time, share) = match start {
+                    0 => (0.1, 0.5),
+                    1 => (0.05, 0.35),
+                    2 => (0.2, 0.7),
+                    _ => (0.4, 0.8),
+                };
+                initial[4] = (time - 0.05) / 0.9;
+                initial[5] = (share - 0.05) / 0.9;
+            }
+            while initial[3] > 0. {
+                let (body, _, _) = build(initial);
+                if [body.boost, body.sustain]
+                    .iter()
+                    .all(|p| p.thrust <= body.dry_mass() * 60. * G)
+                {
+                    break;
+                }
+                initial[3] = (initial[3] - 0.1).max(0.);
+            }
+            let evaluate = |x: [f64; N]| {
+                let (b, _, _) = build(x);
+                if [b.boost, b.sustain]
+                    .iter()
+                    .any(|p| p.thrust > b.dry_mass() * 60. * G)
+                {
+                    return 1e6;
+                }
+                let head = candidate_maximum_precision(&w, b, m.primary, 12);
+                let head_error = (head / (m.primary[2] * head_factor) - 1.).powi(2);
+                let mut value = 25. * head_error;
+                if !air {
+                    for fraction in [0.75, 0.9] {
+                        if !candidate_hit(&w, b, m.primary, m.primary[2] * 1000. * fraction) {
+                            value += 4.;
+                        }
+                    }
+                }
+                if air {
+                    let tail = candidate_maximum_precision(&w, b, m.secondary, 12);
+                    let tail_error = (tail / (effective_tail * tail_factor) - 1.).powi(2);
+                    value = 30. * head_error.max(tail_error) + 5. * (head_error + tail_error);
+                    value += 100. * (1. - tail / floor).max(0.).powi(2);
+                }
+                value
+                    + 0.001
+                        * (b.drag_scale.ln().powi(2)
+                            + (x[2] - initial[2]).powi(2)
+                            + (x[3] - 0.5).powi(2))
+            };
+            let clamp = |x: [f64; N]| x.map(|v| v.clamp(0., 1.));
+            let mut simplex: Vec<_> = std::iter::once(initial)
+                .chain((0..N).map(|i| {
+                    let mut x = initial;
+                    x[i] = if x[i] > 0.8 { x[i] - 0.18 } else { x[i] + 0.18 };
+                    clamp(x)
+                }))
+                .map(|x| (x, evaluate(x)))
+                .collect();
+            for iteration in 0..120 {
+                simplex.sort_by(|a, b| a.1.total_cmp(&b.1));
+                if iteration > 30 && simplex[0].1 < 0.0003 {
+                    break;
+                }
+                let centroid: [f64; N] = std::array::from_fn(|i| {
+                    simplex[..N].iter().map(|p| p.0[i]).sum::<f64>() / N as f64
+                });
+                let point = |factor: f64| {
+                    clamp(std::array::from_fn(|i| {
+                        centroid[i] + factor * (centroid[i] - simplex[N].0[i])
+                    }))
+                };
+                let reflected = point(1.);
+                let score = evaluate(reflected);
+                if score < simplex[0].1 {
+                    let expanded = point(2.);
+                    let e = evaluate(expanded);
+                    simplex[N] = if e < score {
+                        (expanded, e)
+                    } else {
+                        (reflected, score)
+                    };
+                } else if score < simplex[N - 1].1 {
+                    simplex[N] = (reflected, score);
+                } else {
+                    let contracted = point(if score < simplex[N].1 { 0.5 } else { -0.5 });
+                    let c = evaluate(contracted);
+                    if c < score.min(simplex[N].1) {
+                        simplex[N] = (contracted, c);
+                    } else {
+                        let best = simplex[0].0;
+                        for p in &mut simplex[1..] {
+                            p.0 = clamp(std::array::from_fn(|i| 0.5 * (p.0[i] + best[i])));
+                            p.1 = evaluate(p.0);
+                        }
+                    }
+                }
+            }
+            simplex.sort_by(|a, b| a.1.total_cmp(&b.1));
+            outputs.extend(simplex.into_iter().take(2));
+        }
+    }
+    // Keep bounded low-energy endpoints too, rather than losing a feasible
+    // endpoint when a local search follows a disconnected hit interval.
+    if !air && N == 4 {
+        let nominal_duration = (4f64.ln() / (max_burn_scale / 0.25).ln()).clamp(0., 1.);
+        for seed in [
+            [0., 1., nominal_duration, 0.5],
+            [0., 1., 0., 0.],
+            [1., 1., 0., 0.],
+        ] {
+            let mut x = [0.; N];
+            x[..4].copy_from_slice(&seed);
+            outputs.push((x, 0.));
+        }
+    }
+    for (x, _) in outputs {
+        let (b, fuel, impulse) = build(x);
+        if [b.boost, b.sustain]
+            .iter()
+            .any(|p| p.thrust > b.dry_mass() * 60. * G)
+        {
+            continue;
+        }
+        let primary = candidate_maximum(&w, b, m.primary);
+        let tail = if air {
+            candidate_maximum(&w, b, m.secondary)
+        } else {
+            0.
+        };
+        let score = if air {
+            let head = (primary / m.primary[2] - 1.).abs();
+            let tail = (tail / m.secondary[2] - 1.).abs();
+            8. * head.max(tail) + head + tail
+        } else {
+            4. * (primary / m.primary[2] - 1.).abs()
+                + [0.75, 0.9]
+                    .into_iter()
+                    .filter(|fraction| {
+                        !candidate_hit(&w, b, m.primary, m.primary[2] * 1000. * fraction)
+                    })
+                    .count() as f64
+                    * 4.
+        };
+        let mut ranges = vec![0.; 12];
+        if air {
+            for (i, (alt, aspect)) in [500., 5000., 15000., 35000.]
+                .into_iter()
+                .flat_map(|alt| (0..3).map(move |aspect| (alt, aspect)))
+                .enumerate()
+            {
+                ranges[i] = if i == 9 {
+                    primary
+                } else if i == 5 {
+                    tail
+                } else {
+                    candidate_maximum(&w, b, [alt, f64::from(aspect), 0., 250.])
+                };
+            }
+            if tail < floor || ranges.contains(&0.) {
+                continue;
+            }
+        }
+        write!(&mut output,
+                "{},{:?},{fuel:.9},{:.9},{},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{},{},{primary:.6},{score:.8},{minimum},{floor}",
+                m.source,
+                m.control_class,
+                b.drag_scale,
+                m.control_class.seconds(),
+                f64::from(b.boost.ticks) * DT,
+                f64::from(b.sustain.ticks) * DT,
+                m.exhaust_mps * impulse,
+                b.boost.thrust,
+                b.sustain.thrust,
+                b.boost.propellant / (b.boost.propellant + b.sustain.propellant),
+                m.primary[2],
+                if air { m.secondary[2] } else { 0. }
+            ).unwrap();
+        for r in ranges {
+            write!(&mut output, ",{r:.6}").unwrap();
+        }
+        writeln!(&mut output).unwrap();
+    }
+    Ok(output)
+}
+
 /// Edge and ten-percent-beyond-edge diagnostics, using the same force kernel.
 fn diagnostics(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "source,altitude_ft,aspect,range_km,edge_fraction,hit,seconds,defeated,control_expired,mach,available_g,required_g,g_deficit,closing_mps,max_g_deficit"
+        "source,altitude_ft,aspect,range_km,edge_fraction,hit,seconds,defeated,control_expired,mach,available_g,required_g,g_deficit,closing_mps,max_g_deficit,ground_impact,life_expired"
     );
     for m in tore_formats::missile_motors::MOTORS {
         let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
@@ -479,7 +891,7 @@ fn diagnostics(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 let mut deficit: f64 = 0.;
                 while q.answer.is_none() {
                     let mut sample = q.flight;
-                    last = sample.step(q.body, q.wind, Some(q.target));
+                    last = sample.step_diagnostics(q.body, q.wind, Some(q.target));
                     deficit = deficit.max(last.g_deficit);
                     q.step(&|_, _| 0.);
                 }
@@ -657,6 +1069,37 @@ fn fit_pairs(
     Ok(())
 }
 
+// Named, documented balance residuals. New profiles get no exemption.
+// The normal band is approximately 10%, with 0.5 percentage point numerical
+// allowance. Exceptions are bounded on the side of the actual compromise;
+// a shortfall does not authorize a new overshoot.
+fn accepted_fit_bands(source: &str) -> ([f64; 2], [f64; 2]) {
+    match source {
+        "AA10.JT" => ([0.86, 1.105], [0.895, 1.13]),
+        "AA2.JT" => ([0.82, 1.105], [0.895, 1.18]),
+        "AA8.JT" => ([0.895, 1.3], [0.895, 1.105]),
+        "AIM54C.JT" => ([0.895, 1.105], [0.895, 1.14]),
+        "AIM7.JT" => ([0.82, 1.105], [0.895, 1.21]),
+        "AIM7E.JT" => ([0.895, 1.105], [0.79, 1.105]),
+        // These former overshoots now fit the normal band.
+        "AIM9M.JT" | "AIM9X.JT" => ([0.895, 1.105], [0.895, 1.105]),
+        _ => ([0.895, 1.105], [0.895, 1.105]),
+    }
+}
+fn in_fit_band(actual: f64, target: f64, band: [f64; 2]) -> bool {
+    actual.is_finite() && target > 0. && actual >= target * band[0] && actual <= target * band[1]
+}
+#[cfg(test)]
+mod fit_gate_tests {
+    use super::*;
+    #[test]
+    fn an_unlisted_overshoot_is_rejected_even_when_it_is_finite() {
+        assert!(!in_fit_band(120., 100., accepted_fit_bands("NEW.JT").0));
+        assert!(in_fit_band(100., 100., accepted_fit_bands("NEW.JT").0));
+        assert!(in_fit_band(12.8, 10., accepted_fit_bands("AA8.JT").0));
+        assert!(!in_fit_band(16., 10., accepted_fit_bands("AA8.JT").0));
+    }
+}
 fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!("source,guidance_seconds,drag_scale,tail5_km,tail15_km,tail35_km,smooth_relative");
     let mut failures = Vec::new();
@@ -664,8 +1107,16 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     for m in tore_formats::missile_motors::MOTORS {
         let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
         let body = missiles::energy_profile::body(&w);
-        if !(0.5..=3.).contains(&body.drag_scale) && !matches!(m.source, "SSN9.JT" | "AS16.JT") {
-            failures.push(format!("{}: unapproved drag exception", m.source));
+        if !(0.5..=3.).contains(&body.drag_scale) || !(0.12..=0.5).contains(&m.propellant_fraction)
+        {
+            failures.push(format!("{}: fuel/drag outside approved bounds", m.source));
+        }
+        let primary = candidate_maximum(&w, body, m.primary);
+        if !in_fit_band(primary, m.primary[2], accepted_fit_bands(m.source).0) {
+            failures.push(format!(
+                "{}: unapproved primary residual: {primary:.3} vs {}",
+                m.source, m.primary[2]
+            ));
         }
         if missiles::surface_launched(&w.source) || w.flags & 0x20000 != 0 {
             continue;
@@ -694,7 +1145,12 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
         tails.insert(m.source, reach);
-        let primary = candidate_maximum(&w, body, m.primary);
+        if !in_fit_band(reach[0], m.secondary[2], accepted_fit_bands(m.source).1) {
+            failures.push(format!(
+                "{}: unapproved round-2 tail residual: {:.3} vs {}",
+                m.source, reach[0], m.secondary[2]
+            ));
+        }
         if candidate_hit(&w, body, m.primary, primary * 1500.) {
             failures.push(format!(
                 "{}: 150% measured head-on envelope still hits",
@@ -775,6 +1231,26 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 if a <= b {
                     failures.push(format!(
                         "{new} <= {old} at {altitude} ft aspect {aspect}: {a:.3}/{b:.3}"
+                    ));
+                }
+            }
+        }
+    }
+    // John's Phase 2.6 low-altitude role comparison, separate from the
+    // high-head references and the within-family upgrade checks.
+    for new in ["AIM120.JT", "AA12.JT", "MICA.JT"] {
+        let newer = Weapon::parse(new, &fs::read(dir.join(new))?)?;
+        for old in ["AIM7E.JT", "AIM7.JT", "AA10.JT", "R530.JT"] {
+            let older = Weapon::parse(old, &fs::read(dir.join(old))?)?;
+            for aspect in [0., 2.] {
+                let condition = [5000., aspect, 0., 250.];
+                let a =
+                    candidate_maximum(&newer, missiles::energy_profile::body(&newer), condition);
+                let b =
+                    candidate_maximum(&older, missiles::energy_profile::body(&older), condition);
+                if a < b {
+                    failures.push(format!(
+                        "5k role reversal {new}/{old} aspect {aspect}: {a}/{b}"
                     ));
                 }
             }
@@ -888,8 +1364,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.get(2).is_some_and(|s| s == "--diagnostics") {
         return diagnostics(dir);
     }
+    if args.get(2).is_some_and(|s| s == "--fit-staged") {
+        return fit_motors::<6>(dir, args.get(3).map(String::as_str));
+    }
+    if args.get(2).is_some_and(|s| s == "--fit-motors") {
+        return fit_motors::<4>(dir, args.get(3).map(String::as_str));
+    }
+    if args.get(2).is_some_and(|s| s == "--fit-ground") {
+        return fit_class(dir, args.get(3).map(String::as_str), true);
+    }
     if args.get(2).is_some_and(|s| s == "--fit-class") {
-        return fit_class(dir, args.get(3).map(String::as_str));
+        return fit_class(dir, args.get(3).map(String::as_str), false);
     }
     if args
         .get(2)

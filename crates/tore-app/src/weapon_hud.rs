@@ -754,7 +754,7 @@ pub fn debug(
     for (row, shot) in state
         .projectiles
         .iter()
-        .filter(|p| p.guidance.is_some())
+        .filter(|p| p.guidance.is_some() && p.threatening())
         .rev()
         .take(3)
         .enumerate()

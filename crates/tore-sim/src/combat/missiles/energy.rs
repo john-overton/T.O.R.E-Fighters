@@ -319,6 +319,24 @@ impl Flight {
         target: Option<Observation>,
         ground: &impl Fn(f64, f64) -> f64,
     ) -> Forces {
+        self.step_terrain_mode::<false>(body, wind, target, ground)
+    }
+    /// Explicit offline diagnostics; ordinary prediction does not evaluate them.
+    pub fn step_diagnostics(
+        &mut self,
+        body: Body,
+        wind: Vector,
+        target: Option<Observation>,
+    ) -> Forces {
+        self.step_terrain_mode::<true>(body, wind, target, &|_, _| 0.)
+    }
+    fn step_terrain_mode<const DIAGNOSTICS: bool>(
+        &mut self,
+        body: Body,
+        wind: Vector,
+        target: Option<Observation>,
+        ground: &impl Fn(f64, f64) -> f64,
+    ) -> Forces {
         let samples = std::cell::Cell::new(0usize);
         let measured_ground = |x: f64, z: f64| {
             samples.set(samples.get() + 1);
@@ -352,12 +370,13 @@ impl Flight {
             self.waypoint = None;
             self.path_active = false;
         }
-        let mut forces = self.step_in(body, wind, target, atmosphere(self.position[1]));
+        let mut forces =
+            self.step_in::<DIAGNOSTICS>(body, wind, target, atmosphere(self.position[1]));
         forces.terrain_samples = samples.get();
         forces
     }
 
-    fn step_in(
+    fn step_in<const DIAGNOSTICS: bool>(
         &mut self,
         body: Body,
         wind: Vector,
@@ -402,13 +421,21 @@ impl Flight {
         } else {
             None
         };
-        let required_g = command.map_or(0., norm) / G;
-        let closing_mps = target.map_or(0., |o| {
-            -dot(
-                sub(o.velocity, self.velocity),
-                unit(sub(o.position, self.position)),
-            )
-        });
+        let required_g = if DIAGNOSTICS {
+            command.map_or(0., norm) / G
+        } else {
+            0.
+        };
+        let closing_mps = if DIAGNOSTICS {
+            target.map_or(0., |o| {
+                -dot(
+                    sub(o.velocity, self.velocity),
+                    unit(sub(o.position, self.position)),
+                )
+            })
+        } else {
+            0.
+        };
         if let Some(command) = command {
             let command = limited(command, max_accel);
             for (demand, command) in self.demand.iter_mut().zip(command) {
@@ -461,7 +488,11 @@ impl Flight {
             available_g: max_accel / G,
             applied_g: acceleration / G,
             required_g,
-            g_deficit: (required_g - max_accel / G).max(0.),
+            g_deficit: if DIAGNOSTICS {
+                (required_g - max_accel / G).max(0.)
+            } else {
+                0.
+            },
             closing_mps,
             mach: speed / air.sound,
             terrain_samples: 0,
@@ -524,6 +555,26 @@ pub(super) mod tests {
         }
     }
     #[test]
+    fn diagnostics_are_opt_in_and_do_not_change_motion() {
+        let b = body();
+        let mut normal = Flight::launch([0., 1000., 0.], [0., 0., 500.], [0., 0., 1.]);
+        let mut measured = normal;
+        let target = Some(Observation {
+            position: [200., 1100., 3000.],
+            velocity: [0., 0., -250.],
+        });
+        for _ in 0..120 {
+            let plain = normal.step(b, [0.; 3], target);
+            let diagnostic = measured.step_diagnostics(b, [0.; 3], target);
+            assert_eq!(normal, measured);
+            assert_eq!(
+                (plain.required_g, plain.g_deficit, plain.closing_mps),
+                (0., 0., 0.)
+            );
+            assert!(diagnostic.required_g > 0. && diagnostic.closing_mps > 0.);
+        }
+    }
+    #[test]
     fn defeat_boundary_is_strict_post_burn_persistent_and_checkpointed() {
         let b = Body {
             defeat_mach: 1.,
@@ -541,22 +592,22 @@ pub(super) mod tests {
         for age in 0..b.ignition + b.boost.ticks + b.sustain.ticks {
             f.age = age;
             f.velocity = [0., 0., 10.];
-            f.step_in(b, [0.; 3], None, air);
+            f.step_in::<false>(b, [0.; 3], None, air);
             assert!(!f.defeated && !f.lost);
             assert_eq!(f.subsonic_ticks, 0);
         }
         for _ in 0..29 {
             f.velocity = [0., 0., 299.];
-            f.step_in(b, [0.; 3], None, air);
+            f.step_in::<false>(b, [0.; 3], None, air);
             assert!(!f.defeated);
         }
         // Equality resets the consecutive-sample window.
         f.velocity = [0., 0., 300.];
-        f.step_in(b, [0.; 3], None, air);
+        f.step_in::<false>(b, [0.; 3], None, air);
         assert_eq!(f.subsonic_ticks, 0);
         for _ in 0..15 {
             f.velocity = [0., 0., 299.];
-            f.step_in(b, [0.; 3], None, air);
+            f.step_in::<false>(b, [0.; 3], None, air);
         }
         let models = crate::checkpoint::Models::default();
         let restored_body = crate::checkpoint::round_trip(&b, &models).unwrap();
@@ -566,14 +617,14 @@ pub(super) mod tests {
             f.velocity = [0., 0., 299.];
             copy.velocity = f.velocity;
             assert_eq!(
-                f.step_in(b, [0.; 3], None, air),
-                copy.step_in(restored_body, [0.; 3], None, air)
+                f.step_in::<false>(b, [0.; 3], None, air),
+                copy.step_in::<false>(restored_body, [0.; 3], None, air)
             );
             assert_eq!(f, copy);
             assert_eq!(f.defeated, tick >= 30);
         }
         f.velocity = [0., 0., 1000.];
-        f.step_in(b, [0.; 3], None, air);
+        f.step_in::<false>(b, [0.; 3], None, air);
         assert!(f.lost && f.defeated);
     }
 
@@ -591,7 +642,7 @@ pub(super) mod tests {
         let mut f = Flight::launch([0., 1000., 0.], [0., 0., 60.], [0., 0., 1.]);
         for _ in 0..120 {
             f.velocity = [0., 0., 60.];
-            let forces = f.step(b, [0.; 3], target);
+            let forces = f.step_diagnostics(b, [0.; 3], target);
             assert!(forces.thrust > 0. && forces.mach < 1.);
             assert!(forces.required_g.is_finite() && forces.closing_mps > 0.);
             assert!(!f.lost && !f.defeated);
@@ -683,7 +734,7 @@ pub(super) mod tests {
         }
         let mut vacuum = Flight::launch([0., 10000., 0.], [0., -200., 0.], [0., -1., 0.]);
         vacuum.age = 1000;
-        vacuum.step_in(
+        vacuum.step_in::<false>(
             b,
             [0.; 3],
             None,

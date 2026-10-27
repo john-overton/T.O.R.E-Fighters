@@ -600,6 +600,22 @@ impl Service {
                     .saturating_sub(result.question.flight.age),
             ) * DT)
             .max(0.);
+        // Conservatively withhold a cached hit on/after the earliest defeat
+        // if the present subsonic countdown continues. A fresh flyout may
+        // later establish acceleration above threshold, but stale advice cannot.
+        if current.body.defeat_mach > 0.
+            && current.flight.subsonic_ticks > 0
+            && result.answer.hit
+            && result.answer.seconds
+                >= f64::from(
+                    current
+                        .body
+                        .defeat_ticks
+                        .saturating_sub(current.flight.subsonic_ticks),
+                ) * DT
+        {
+            return None;
+        }
         Some(result)
     }
     pub fn envelope(&self, id: u64, target: u32, current: Trial, tick: u64) -> Option<Envelope> {
@@ -728,7 +744,9 @@ fn compatible(a: Trial, b: Trial, ticks: u64) -> bool {
         && a.body == b.body
         && a.flight.defeated == b.flight.defeated
         && a.flight.lost == b.flight.lost
-        && a.flight.subsonic_ticks == b.flight.subsonic_ticks
+        // Six-tick (50 ms) buckets retain useful in-flight answers while
+        // the exact permanent defeat state above still invalidates at once.
+        && a.flight.subsonic_ticks / 6 == b.flight.subsonic_ticks / 6
         && a.radius == b.radius
         && a.arming_age == b.arming_age
         && a.wind == b.wind
@@ -907,6 +925,42 @@ mod tests {
         changed.flight.defeated = true;
         changed.flight.lost = true;
         assert!(!compatible(q, changed, 0));
+    }
+    #[test]
+    fn countdown_buckets_reuse_answers_but_never_a_hit_on_or_after_defeat() {
+        let mut q = question();
+        q.body.defeat_mach = 1.;
+        q.flight.age = 1200;
+        q.flight.subsonic_ticks = 24;
+        let mut service = Service::default();
+        service.request(7, 2, 0, q, 15);
+        let published = Published {
+            at: 0,
+            question: q,
+            answer: Answer {
+                hit: true,
+                seconds: 0.02,
+                closest: 0.,
+                impact_speed: 300.,
+            },
+        };
+        service.clients[0].result = Some(published);
+        let mut current = q;
+        current.flight.age += 1;
+        current.flight.subsonic_ticks += 1;
+        assert!(compatible(q, current, 1), "same 50 ms bucket");
+        assert!(service.answer(7, 2, current, 1).is_some());
+        service.clients[0].result.as_mut().unwrap().answer.seconds = 0.1;
+        assert!(
+            service.answer(7, 2, current, 1).is_none(),
+            "cached contact falls after the earliest defeat"
+        );
+        current.flight.defeated = true;
+        current.flight.lost = true;
+        assert!(
+            service.answer(7, 2, current, 1).is_none(),
+            "permanent defeat is never bucketed"
+        );
     }
     fn turning_question(rate: f64, tick: u64) -> Trial {
         let mut q = question();

@@ -1193,8 +1193,8 @@ impl Combat {
                 position: p.position,
                 previous: p.previous,
                 direction: p.direction,
-                target: p.target,
-                incoming: p.incoming.is_some(),
+                target: p.target.filter(|_| p.threatening()),
+                incoming: p.incoming.is_some() && p.threatening(),
                 speed_f8: p.speed_f8,
                 powered: self.state.motor_powered_with(weapon, p),
             };
@@ -2312,6 +2312,58 @@ impl Combat {
 mod tests {
     use super::*;
 
+    #[test]
+    fn inert_body_remains_visible_without_incoming_or_target_cues() {
+        let (mut combat, flight) = fixtures::loaded([500, 3]);
+        combat.state.weapon_rules = tore_sim::combat::missiles::Rules::Energy;
+        let own = combat.own_id();
+        combat.state.own_mut().selected = 1;
+        let l = launcher(&flight);
+        combat.state.command(own, live::Command::Incoming, l);
+        let p = &mut combat.state.projectiles[0];
+        // The rendering fixture's named missile starts as a gun record.
+        // Give this capability test an actual synthetic guided weapon.
+        let w = p.weapon.as_mut().unwrap();
+        w.source = "AIM120.JT".into();
+        w.flags = 0x1204f;
+        w.seeker.signature = 3;
+        p.target = Some(own);
+        p.motion = Some(tore_sim::combat::missiles::Motion::launch_rules(
+            p.weapon.as_ref().unwrap(),
+            [0., 0., -1000.],
+            p.position[1],
+            tore_sim::combat::missiles::Rules::Energy,
+        ));
+        assert!(
+            !combat
+                .cockpit_readout(own, l, None, None)
+                .unwrap()
+                .rwr
+                .inbound
+                .is_empty()
+        );
+        let p = &mut combat.state.projectiles[0];
+        p.motion
+            .as_mut()
+            .unwrap()
+            .energy
+            .as_mut()
+            .unwrap()
+            .flight
+            .defeated = true;
+        assert!(
+            combat
+                .cockpit_readout(own, l, None, None)
+                .unwrap()
+                .rwr
+                .inbound
+                .is_empty()
+        );
+        let picture = combat.snapshot(own, &flight, None);
+        assert_eq!(picture.projectiles.len(), 1);
+        assert!(!picture.projectiles[0].incoming);
+        assert_eq!(picture.projectiles[0].target, None);
+    }
     #[test]
     fn an_airborne_start_is_raised_clear_but_an_ai_helicopter_starts_at_its_own_height() {
         // The 5,000 ft floor above sea level and the 1,000 ft above the

@@ -25,18 +25,31 @@ These are regressions for repeated rolls and comparison compatibility, not
 fixed Monte Carlo hit-rate targets. The broad calibration/study results are in the
 [missile energy baseline](../baselines/missile-energy.md).
 
-The new flight-missile-defeat scenario repeats 32 long AIM120/AA8 shots
+The `flight-missile-defeat` scenario repeats 32 long AIM120/AA8 shots
 with four and one workers, requires an observed post-burn defeat and rejects
-any defeated shot that scores. Its additional defeat_s CSV column distinguishes
-kinetic defeat from ordinary control-time expiry. Synthetic Rust tests cover
+any defeated shot that scores. Two additional stationary-target AIM120 shots
+use the `defeat-edge` range band, just beyond the shared kernel's last live
+intercept, and repeat with one and four workers. At least one inert body must
+pass within the target's fuze/contact radius without damage. The CSV columns
+`defeat_s`, `closest_inert_ft`, `inert_radius_ft` and `inert_damage` distinguish
+kinetic defeat from ordinary control-time expiry and expose that near pass.
+Synthetic Rust tests cover
 exact before/at/after contact ordering, direct/proximity/ground damage,
-powered cruise, mid-countdown checkpointing and cached-answer invalidation.
+powered cruise, mid-countdown checkpointing, countdown cache buckets with a
+defeat deadline, and same-tick warning/AI defense removal with the body retained.
 
 The offline missile_energy_ranges example accepts a local JT directory.
---verify checks class floors, decoded minimum margins, family ordering,
-long-low escape and local perturbations. --fit-class exports fixed-budget
-one-anchor candidates; tools/missile_energy_fit.py selects families jointly.
---diagnostics reports G demand/capacity/deficit, closing speed and defeat
+`--verify` checks primary and secondary reference bands, class floors, decoded
+minimum margins, family and radar-role ordering, long-low escape and local
+perturbations. Named residual exceptions have explicit bounds; unlisted stores
+use the ordinary tolerance. `--fit-class` exports fixed-budget fuel/drag
+candidates for the high head and low tail conditions. `--fit-ground` fits ground
+references. `--fit-motors` and `--fit-staged` also explore bounded per-store
+motor durations and thrust, never control time. `tools/missile_energy_fit.py`
+selects families and radar roles jointly; synthetic Python tests cover selection,
+bounds and parsing. These are fitted game coefficients, not engineering data.
+`--diagnostics` opts into G demand/capacity/deficit and closing-speed math,
+which normal motion and prediction skip, and reports defeat
 at the edge and 10% beyond. --measure-pairs is historical comparison only.
 Timer-fitting tools require explicit --legacy-fit-pair/--legacy-fit-sparrow
 names and print a warning. No search edits source or runs during gameplay.

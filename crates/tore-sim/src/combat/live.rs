@@ -1476,6 +1476,14 @@ pub struct ActorSupport {
     pub radar_emitting: bool,
 }
 impl Projectile {
+    /// Physical bodies can remain after their ability to threaten has ended.
+    pub fn threatening(&self) -> bool {
+        !self
+            .motion
+            .and_then(|m| m.energy)
+            .is_some_and(|e| e.flight.defeated || e.decoy.pursuit.is_some_and(|p| p.passed))
+    }
+
     pub fn weapon<'a>(&'a self, config: &'a Configuration) -> &'a Weapon {
         self.weapon
             .as_ref()
@@ -3490,6 +3498,7 @@ impl State {
     ) -> Vec<super::threats::MissileSnapshot> {
         self.projectiles
             .iter()
+            .filter(|p| p.threatening())
             .filter_map(|projectile| {
                 let weapon = projectile_weapon(ships, projectile);
                 let flight = projectile.guidance.as_ref();

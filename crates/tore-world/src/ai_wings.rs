@@ -2532,7 +2532,11 @@ impl AiWings {
         let terrain_clear = |from, to| {
             ceiling.is_some_and(|c| c.clear_above(from, to)) || terrain_visible(from, to, ground)
         };
-        for projectile in state.projectiles.iter().filter(|p| p.age <= 30) {
+        for projectile in state
+            .projectiles
+            .iter()
+            .filter(|p| p.age <= 30 && p.threatening())
+        {
             let weapon = state.weapon(projectile);
             let gun = live::is_gun(weapon);
             if gun && !projectile.tracer {

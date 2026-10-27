@@ -993,16 +993,24 @@ def prediction_launch_regression(d):
     if not packs:
         d.problem("no imported menu pack")
         return
-    for theater, baseline in [("UKR", 11), ("BAL", 12), ("SPA", 12), ("GRE", 12)]:
-        proc = d.run(theater, [executable, packs[-1], "14400", theater, "moving", "AIM120.JT", "1", "--natural"], timeout=180)
-        text = proc.text()
-        match = re.search(r"guided_launches=(\d+) ai=8 .*refused=0 starved=0", text)
-        if not match or not .7 * baseline <= int(match[1]) <= 1.3 * baseline:
-            d.problem(f"{theater}: guided launch count outside 30% of reviewed pre-overhaul {baseline}")
-    big = d.run("big", [executable, packs[-1], "7200", "UKR", "moving", "AIM120.JT", "1", "--natural", "--big"], timeout=240).text()
-    match = re.search(r"guided_launches=(\d+) ai=23 .*refused=0 starved=0", big)
-    if not match or not .7 * 24 <= int(match[1]) <= 1.3 * 24:
-        d.problem("big natural fight launches outside 30% of Spec's 24, or admission failed")
+    # John's Phase 2.6 decision: compare balance changes to the reviewed 2.5
+    # counts, retaining the earlier Spec floor against admission regressions.
+    cases = [(name, 14400, 8, 13, spec, [])
+             for name, spec in [("UKR", 11), ("BAL", 12), ("SPA", 12), ("GRE", 12)]]
+    cases.append(("big", 7200, 23, 26, 24, ["--big"]))
+    for name, ticks, aircraft, phase25, spec, flags in cases:
+        theater = "UKR" if name == "big" else name
+        text = d.run(name, [executable, packs[-1], str(ticks), theater, "moving",
+                            "AIM120.JT", "1", "--natural", *flags], timeout=240).text()
+        match = re.search(rf"guided_launches=(\d+) ai={aircraft} .*refused=0 starved=0", text)
+        if not match:
+            d.problem(f"{name}: missing launch counts or prediction admission failed")
+            continue
+        launches = int(match[1])
+        if not .7 * phase25 <= launches <= 1.3 * phase25:
+            d.problem(f"{name}: guided launch count outside 30% of reviewed Phase 2.5 {phase25}")
+        if launches < .7 * spec:
+            d.problem(f"{name}: guided launch count below 70% of pre-overhaul Spec {spec}")
 
 
 def prediction_player_cue_regression(d):

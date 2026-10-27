@@ -1,5 +1,5 @@
 //! `--missile-study OUT_DIR [--seeds N] [--missiles A,B] [--profiles P,Q]
-//! [--ranges near,close,short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes
+//! [--ranges near,close,short,medium,long,defeat-edge] [--aspects head,quarter,beam,tail] [--altitudes
 //! deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--decoy-model
 //! coast|lure] [--ai [--skill S] [--ai-model standard|hybrid] [--theater T]
 //! [--trace]] [--catalog]`: a headless Monte Carlo of air-to-air missile shots, for studying missile accuracy and
@@ -202,6 +202,8 @@ impl Altitudes {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Band {
+    /// Stationary-target shot just beyond the shared post-burn defeat edge.
+    DefeatEdge,
     Near,
     Close,
     Short,
@@ -211,6 +213,7 @@ pub enum Band {
 impl Band {
     fn name(self) -> &'static str {
         match self {
+            Self::DefeatEdge => "defeat-edge",
             Self::Near => "near",
             Self::Close => "close",
             Self::Short => "short",
@@ -220,6 +223,7 @@ impl Band {
     }
     fn parse(s: &str) -> AppResult<Self> {
         Ok(match s {
+            "defeat-edge" => Self::DefeatEdge,
             "near" => Self::Near,
             "close" => Self::Close,
             "short" => Self::Short,
@@ -239,6 +243,7 @@ impl Band {
         let min = f64::from(zone.minimum_range);
         let infrared = w.seeker.signature == 2;
         match self {
+            Self::DefeatEdge => (1.5 * NMI).max(min * 1.1),
             Self::Near => (0.25 * NMI).max(min * 1.1),
             Self::Close => (0.5 * NMI).max(min * 1.1),
             Self::Short => (1.5 * NMI).max(min * 1.1).min(max * 0.5),
@@ -377,6 +382,9 @@ pub struct Shot {
     pub rolls: u32,
     pub control_loss_s: Option<f64>,
     pub defeat_s: Option<f64>,
+    pub closest_inert_ft: Option<f64>,
+    pub inert_radius_ft: f64,
+    pub inert_damage: i32,
     pub ground_impact: bool,
     pub first_notch_s: Option<f64>,
     pub notched_s: f64,
@@ -540,14 +548,22 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
     };
     state.range_target(0, l);
     // Per-seed geometry.
-    let range = cell.band.feet(weapon) * uniform(seed, 1, 0.93, 1.07);
-    let aspect_jitter = uniform(seed, 2, -10., 10.).to_radians();
+    let mut range = cell.band.feet(weapon) * uniform(seed, 1, 0.93, 1.07);
+    let aspect_jitter = if cell.band == Band::DefeatEdge {
+        0.
+    } else {
+        uniform(seed, 2, -10., 10.).to_radians()
+    };
     let side = if uniform(seed, 3, 0., 1.) < 0.5 {
         1.
     } else {
         -1.
     };
-    let target_speed = 0.8 * sound_fps(target_alt) * uniform(seed, 4, 0.95, 1.05);
+    let target_speed = if cell.band == Band::DefeatEdge {
+        0.
+    } else {
+        0.8 * sound_fps(target_alt) * uniform(seed, 4, 0.95, 1.05)
+    };
     let reaction_s = uniform(seed, 5, 1., 3.);
     let break_at_s = uniform(seed, 6, 3., 5.);
     let mut target = Flyer {
@@ -586,6 +602,57 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
             throttle: heat.0,
             afterburner: heat.1,
         };
+    }
+    if cell.band == Band::DefeatEdge {
+        if base.rules != missiles::Rules::Energy {
+            return Err("defeat-edge requires Energy flight".into());
+        }
+        let trial = |distance: f64| {
+            missiles::prediction::launch_question(
+                weapon,
+                l,
+                missiles::seeker::Observation {
+                    id: target_id,
+                    position: [0., target_alt, distance],
+                    velocity: [0.; 3],
+                    range: distance,
+                    quality: 1.,
+                    off_axis: 0.,
+                },
+                state.targets[0].radius + f64::from(weapon.damage.fuze_radius.max(0)),
+                [0.; 3],
+            )
+        };
+        let hit = |distance| trial(distance).finish(&|_, _| 0.).hit;
+        let mut low = 2000.;
+        let mut high = low;
+        if !hit(low) {
+            return Err("defeat-edge has no short reference intercept".into());
+        }
+        while hit(high) {
+            low = high;
+            high *= 1.5;
+            if high > 3_000_000. {
+                return Err("defeat-edge failed to find an endpoint".into());
+            }
+        }
+        for _ in 0..28 {
+            let mid = (low + high) * 0.5;
+            if hit(mid) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        range = high + 1.;
+        let mut beyond = trial(range);
+        while beyond.answer.is_none() {
+            beyond.step(&|_, _| 0.);
+        }
+        if !beyond.flight.defeated {
+            return Err("the selected edge is expiry/ground, not inert defeat".into());
+        }
+        target.position[2] = range;
     }
     let place = |state: &mut live::State, target: &Flyer| {
         let t = &mut state.targets[0];
@@ -655,6 +722,7 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
     let mut single_done = false;
     let mut maneuvering = false;
     let mut miss = f64::INFINITY;
+    let mut inert_hp: Option<i32> = None;
     let mut last_status = Status::Search;
     let mut last_speed = 0.;
     let mut decoyed = false;
@@ -797,6 +865,7 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         l.position[2] += shooter_speed * DT;
         place(&mut state, &target);
         let previous_missile = missile;
+        let previous_hp = state.targets[0].hp;
         let events = step(&mut state, l, false);
         if base.rules == missiles::Rules::Energy {
             for roll in state
@@ -825,7 +894,11 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
         let b = sub(end, target.position);
         let d = sub(b, a);
         let u = (-dot(a, d) / dot(d, d).max(1e-12)).clamp(0., 1.);
-        miss = miss.min(length(std::array::from_fn(|i| a[i] + d[i] * u)));
+        let nearest = length(std::array::from_fn(|i| a[i] + d[i] * u));
+        miss = miss.min(nearest);
+        if let Some(hp) = inert_hp {
+            shot.inert_damage = (hp - state.targets[0].hp).max(0);
+        }
         if let Some(p) = now {
             if let Some(energy) = p.motion.and_then(|m| m.energy) {
                 if energy.flight.lost {
@@ -833,6 +906,12 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
                 }
                 if energy.flight.defeated {
                     shot.defeat_s.get_or_insert(t);
+                    let hp = *inert_hp.get_or_insert(previous_hp);
+                    shot.inert_damage = (hp - state.targets[0].hp).max(0);
+                    shot.closest_inert_ft =
+                        Some(shot.closest_inert_ft.unwrap_or(f64::MAX).min(nearest));
+                    shot.inert_radius_ft =
+                        state.targets[0].radius + f64::from(weapon.damage.fuze_radius.max(0));
                 }
                 if energy.tracking.notched
                     && !energy.flight.lost
@@ -1070,7 +1149,7 @@ struct Options {
     ai: Option<ai::AiSetup>,
 }
 
-const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,dive,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges near,close,short,medium,long] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
+const USAGE: &str = "--missile-study OUT_DIR [--ai [--skill novice|average|experienced|ace] [--ai-model standard|hybrid] [--theater BAL] [--trace]] [--seeds N] [--missiles AIM9M,AIM120,...] [--profiles straight,break,beam,drag,dive,cm-ai,cm-hammer,cm-at4s,break+cm-ai,...[@off|@idle|@burner]] [--ranges near,close,short,medium,long,defeat-edge] [--aspects head,quarter,beam,tail] [--altitudes deck,low,co,high,up,down] [--shooter ID] [--target ID] [--threads N] [--missile-model energy|spec] [--decoy-model coast|lure] [--catalog]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -1183,6 +1262,9 @@ fn options() -> AppResult<Options> {
             }
             other => return Err(format!("unknown {other}; {USAGE}").into()),
         }
+    }
+    if o.bands.contains(&Band::DefeatEdge) && (use_ai || o.rules != missiles::Rules::Energy) {
+        return Err("defeat-edge requires scripted Energy flight".into());
     }
     if use_ai {
         o.ai = Some(ai::AiSetup {
@@ -1384,13 +1466,13 @@ fn write_results(
     let mut runs = std::io::BufWriter::new(std::fs::File::create(o.out.join("runs.csv"))?);
     writeln!(
         runs,
-        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact,first_notch_s,notched_s,defeat_s"
+        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact,first_notch_s,notched_s,defeat_s,closest_inert_ft,inert_radius_ft,inert_damage"
     )?;
     for (c, seed, s) in results {
         let cell = &cells[*c];
         writeln!(
             runs,
-            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{},{},{:.3},{}",
+            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{},{},{:.3},{},{},{:.3},{}",
             cell.missile,
             cell.altitudes.name(),
             cell.band.name(),
@@ -1425,6 +1507,10 @@ fn write_results(
             s.first_notch_s.map_or(String::new(), |t| format!("{t:.3}")),
             s.notched_s,
             s.defeat_s.map_or(String::new(), |t| format!("{t:.3}")),
+            s.closest_inert_ft
+                .map_or(String::new(), |v| format!("{v:.3}")),
+            s.inert_radius_ft,
+            s.inert_damage,
         )?;
     }
     let mut summary = std::io::BufWriter::new(std::fs::File::create(o.out.join("cells.csv"))?);

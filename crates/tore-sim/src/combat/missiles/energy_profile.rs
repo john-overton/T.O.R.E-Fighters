@@ -198,10 +198,10 @@ crate::checkpoint_struct!(Motion {
 });
 
 // Semantic revisions, updated only when behavior changes. Order: derivation,
-// integration/atmosphere, guidance, seeker, decoy, prediction, fuze/contact.
+// integration/atmosphere, guidance, seeker, decoy, prediction, fuze/contact, inert threat publication.
 // Numeric inputs and drag curves are hashed directly; comments and evidence
 // wording are not model inputs. Changes to rules must increment their revision.
-const RULES: [u64; 7] = [5, 4, 3, 1, 1, 4, 3];
+const RULES: [u64; 8] = [5, 4, 3, 1, 1, 5, 3, 1];
 /// Stable tape identity for numeric inputs, curves and semantic rule revisions.
 pub fn fingerprint() -> u64 {
     fingerprint_model(
@@ -213,7 +213,7 @@ pub fn fingerprint() -> u64 {
 fn fingerprint_model(
     mut hash: u64,
     motors: &[tore_formats::missile_motors::MotorData],
-    rules: [u64; 7],
+    rules: [u64; 8],
 ) -> u64 {
     let mut add = |bytes: &[u8]| {
         for byte in bytes {

@@ -774,10 +774,14 @@ existing taxi/landing checker requires every AI member to park.
 `missile_energy_cost` example. Build it with
 `cargo build --locked --release -p tore-world --example missile_energy_cost`.
 It reads the battery's isolated imported pack. Four F-16C 4v4 worlds run for
-120 seconds, requiring guided launch counts within 30% of the independent
-review's pre-overhaul counts: UKR 11, BAL/SPA/GRE 12. This tolerance is an
-agent-selected regression bound, not an assertion of identical combat outcomes.
-A 60-second 23+ AI free fight must have zero refused prediction requests and
+120 seconds. John's Phase 2.6 decision compares guided launch counts within
+30% of the reviewed Phase 2.5 counts: 13 in each theater and 26 in the 60-second
+23-AI fight. A separate one-sided floor retains at least 70% of the independent
+review's pre-overhaul Spec counts: UKR 11, BAL/SPA/GRE 12 and the large fight 24.
+An increase over Spec is allowed within the Phase 2.5 band. These are regression
+bounds, not assertions of identical combat outcomes. Synthetic driver tests
+cover both bounds, the historical floor and failed admission.
+Every fight must have zero refused prediction requests and
 zero clients waiting over ten simulated seconds for admission. The example
 also prints cost percentiles and maximums; use a sequential release run for
 performance acceptance, since concurrent battery jobs can perturb wall time.
