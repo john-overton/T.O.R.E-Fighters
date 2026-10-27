@@ -925,6 +925,35 @@ mod tests {
         }
     }
     #[test]
+    fn turn_projected_player_advice_never_reaches_the_strict_answer() {
+        // AI launch permission reads `answer`. Under a sustained turn and
+        // competing load, the player's advice must rely on projection on some
+        // ticks, and on exactly those ticks the strict answer stays empty.
+        let mut service = Service::default();
+        let (mut strict, mut projected) = (0, 0);
+        for tick in 0..1200 {
+            for id in 1..=30 {
+                let mut q = question();
+                q.target.position[2] = 100000. + tick as f64 + id as f64 * 100.;
+                service.request(id << 16, 2, tick, q, 30);
+            }
+            let q = turning_question(10f64.to_radians(), tick);
+            service.request_player(0, 2, tick, q);
+            service.advance(tick, &|_, _| 0.);
+            let advice = service.player_answer(0, 2, q, tick);
+            if let Some(answer) = service.answer(0, 2, q, tick) {
+                strict += 1;
+                assert_eq!(advice, Some(answer), "tick {tick}");
+            } else if advice.is_some() {
+                projected += 1;
+            }
+        }
+        assert!(
+            strict > 0 && projected > 0,
+            "{strict} strict, {projected} projected"
+        );
+    }
+    #[test]
     fn player_turn_projection_never_relaxes_ai_permission_or_accepts_a_reversal() {
         let rate = 10f64.to_radians();
         let old = turning_question(rate, 1);
