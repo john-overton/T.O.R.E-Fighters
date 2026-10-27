@@ -522,10 +522,14 @@ def scenarios() -> list[Scenario]:
             lane="menus",
             args=["--validate-creator", "--no-audio"],
             timeout=3600,
-            expect=[r"creator matrix: \d+ setups started", r"removed stores passed"],
+            expect=[
+                r"creator matrix: \d+ setups started",
+                r"removed stores passed",
+                r"station transfer SU35\.PT AAML\.JT: row 5 \(paired=false\) -> row 6 \(paired=true, capacity=2\): \[1, 0\] -> \[1, 0\], moved=0; passed",
+            ],
             forbid=[r"PROBLEM"],
             check=no_ordnance_leak,
-            notes="Loadouts for every aircraft incl. removed stores, then the whole Quick Mission creator matrix.",
+            notes="Loadouts for every aircraft incl. removed stores and exact transfer conservation, including the Su-35 single-to-pair refusal, then the whole Quick Mission creator matrix.",
         )
     )
     out.append(
