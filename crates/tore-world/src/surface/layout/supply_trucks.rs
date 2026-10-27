@@ -130,7 +130,7 @@ pub(super) fn add(
         }
         let pose = chosen.unwrap_or_else(|| {
             notes.push(format!(
-                "support fallback {:#010x} {kind}: no valid spot beside {:#010x}; retained equipment pending placement policy",
+                "support fallback {:#010x} {kind}: no valid spot beside {:#010x}; retained for final footprint placement",
                 id.0, served.0
             ));
             first.expect("a nonempty support search")

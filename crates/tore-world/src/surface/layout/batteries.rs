@@ -212,7 +212,7 @@ pub(super) fn form(
                 next_radar += 1;
                 let (pose, valid) = radar_pose(surface, inputs, &draft, obstacles, &entry, added);
                 if !valid {
-                    notes.push(format!("support fallback {:#010x} {kind}: no valid spot for the {:?} battery of {:#010x}; retained equipment pending placement policy", id.0, draft.system, draft.launchers[0].id.0));
+                    notes.push(format!("support fallback {:#010x} {kind}: no valid spot for the {:?} battery of {:#010x}; retained for final footprint placement", id.0, draft.system, draft.launchers[0].id.0));
                 }
                 let mut unit = added_unit(id, &entry, pose, lead);
                 unit.skill = draft

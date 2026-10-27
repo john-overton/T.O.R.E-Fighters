@@ -519,6 +519,13 @@ fn record_assignment(fp: &mut Fingerprint, assignment: &Assignment) {
     fp.option(assignment.patrol, |fp, patrol| {
         fp.vector(patrol.center_ft);
         fp.f64(patrol.radius_ft);
+        if let Some(bounds) = patrol.clip {
+            for point in bounds {
+                for value in point {
+                    fp.f64(value);
+                }
+            }
+        }
     });
 }
 
@@ -916,6 +923,7 @@ fn decision_functions(probe: &Probe) -> u64 {
         assignment(Role::FreeEngagement, Stance::EngageAssigned),
         Assignment {
             patrol: Some(PatrolRegion {
+                clip: None,
                 center_ft: [0., 20_000., 10_000.],
                 radius_ft: 15_000.,
             }),

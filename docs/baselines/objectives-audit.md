@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Implementation validation, 2026-10-25. Reference placement logic: `cf36587a`,
-protocol 74, with audit-only instrumentation. The fixed run uses this change.
+protocol 74, with audit-only instrumentation. The fixed run uses `7cf324c0`, before the follow-up placement policy.
 The provided isolated import identifies FA.EXE 1.02F, SHA-256
 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`.
 Only imported data was read. Retail comparison remains unavailable.
@@ -74,14 +74,18 @@ Surface checking produced 698,979 rows before and 781,286 after.
 The consolidated files also include the separate aircraft-start findings. The new explicit
 support reports account for the larger after total. The strict contract count
 fell from 30,844 to 25,036; every remaining strict failure is an added support
-unit on a cell exceeding the coarse slope limit. Both full commands return
+unit on a cell exceeding the coarse slope limit. This is only 27.6% of the
+90,596 unresolved-support rows. The remaining rows include runway and object
+clearance failures that the original strict counter did not count separately.
+Do not interpret all unresolved support as steep terrain. Both full commands return
 nonzero because those failures remain.
 
 ## Corrections and limits
 
 - Final target positions now determine starts after airport replacement. In the
   Falklands airfield example, the old objective was 2,633 ft from the final target
-  center. Automatic airfield ranking now uses final runway centers.
+  center. That initial change ranked final runway centers; the follow-up restores integer
+  origin ranking to remove rendering trigonometry from the digest.
 - Jitter reserves neighboring mobile units' fallback and accepted positions.
   Added trucks and radars avoid other units and search up to 128 candidates.
   Exhaustion is explicit; requested equipment is retained pending a fallback

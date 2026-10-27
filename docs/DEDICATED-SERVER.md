@@ -352,9 +352,9 @@ twice.
 | `enemy-start ground RUNWAY` or `enemy-start ground auto` | Enemy Wing 1, the Redfor flight, starts parked on that runway (a Redfor or neutral field's; `--check` marks Redfor fields `enemy: enemy-start ground only`), or on the Red-side field nearest the ground target at least 15 nm from it with `auto` (without a target, the first Red-side runway that holds the wing). The other enemy wings start in the air. Needs `wing enemy 1` with aircraft and a runway other than `start ground`'s. Absent (or `enemy-start airborne`) means airborne, where the layout puts the enemy |
 | `ground-target TEMPLATE` | The creator's friendly ground target (its field 30), by the name of its template mission, for example `QUCOL` (the Ukraine armored column). It must be one of the theater's targets, listed in [the Quick Mission template reference](formats/quick-templates.md#recorded-facts-from-faexe-102f); the "nothing" entry of each theater is no target, so leave the line out. Absent means no ground target |
 | `defenses aaa LEVEL sam LEVEL` | How heavily the target's anti-aircraft guns and SAM sites are manned (the creator's fields 31 and 32): `none`, `light`, `moderate` or `heavy`, which the creator words "not", "lightly", "moderately" and "heavily" and which man 0, 25, 60 and 100 percent of the template's slots. Without a `ground-target` they set the enemy's area defenses instead: SAM sites and guns scattered over Red's side of the front ([area defenses](spec/surface-defenses.md#area-defenses)); absent means none of either |
-| `surface-seed N` | The whole number the target's layout is rolled from (which slots are manned, which units stand there, where). Absent or 0 means none drawn: the host draws one when the flight starts. The creator draws one each time a flight with a target starts and keeps it for restarts |
+| `surface-seed N` | The layout seed. Absent or 0 lets the host draw a seed; `--check` initially previews seed 0. A placement refusal tries further seeds in deterministic order, up to sixteen attempts, before startup or a mission change is refused. The accepted seed and attempt number are logged; all clients receive the accepted seed. A valid explicit seed and a successful restart retain their seed. See [surface placement seeds](#surface-placement-seeds) |
 | `enemy-nationality N` | The enemy's nationality, 0 to 59, an index into the creator's list (its field 20); it picks which equipment the target's units are drawn from. Absent means the theater's own enemy, as the creator gives it |
-| `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 75, 100, 150, 200 or 300, the creator's choices |
+| `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 75, 100, 150, 200 or 300, the creator's choices. The distance must fit the theater, the ground target and its seed, and the wings: if the enemy cannot start the full distance away inside the map, the mission is refused with "Separation N nm does not fit this setup" by `--check`, at startup, for a rotation entry and for a King's mission. It is never shortened. Which distances fit is measured, not fixed per theater: 300 fits some targets in the Kurile and Baltic theaters, and 200 does not fit the Vietnam theater without a target. With a ground target and `start ground`, the template places the enemy and the line has no effect ([keeping the enemy on the map](spec/quick-mission-menu.md#keeping-the-enemy-on-the-map)) |
 | `preset NAME` | The AI's standing orders: `free` (the default), `cap`, `intercept`, `escort`, `self-defense` or `hold` |
 | `guns-only yes/no` | The creator's air combat setting; `no` by default. With the standard load it leaves the guns loaded and unloads the missiles |
 | `wing SIDE N AIRCRAFT COUNT SKILL` | Up to three wings a side; `wing friendly 1` is required. The aircraft is its exact identity, one of `F18.PT` (the F/A-18D), `RAFALE.PT` (the Rafale C), `F14.PT`, `A4E.PT`, `F31.PT` (the X-31), `MIG29.PT`, `SU27.PT`, `MIG21.PT`, `SU25.PT`, `MIG23.PT`, `SU35.PT`, `F22.PT`, `F22N.PT` (the F-22N) or `faxx` (the F/A-XX); skills are `novice`, `average`, `experienced`, `ace` or `dummy`. Friendly wing 1 holds 1 to 5 aircraft, the others 0 to 5. A wing with no line has no aircraft. Fixed wings and Player Choice AI defaults must use a type accepted by the AI-flyable catalog. Human Choice overrides may use any flyable type shared by the session |
@@ -391,7 +391,8 @@ a co-op target/area clearance rule separately from existing airfield cover.
 With rotation it prints these measurements for every entry.
 These are initial positions, not a promise about flight paths or revivals.
 Use a nonzero `surface-seed` to keep the measured layout in live rounds;
-otherwise the host draws a new seed at flight start. A large `separation-nm`
+otherwise the host draws a new seed at flight start, and a drawn layout that
+cannot place every vehicle is refused (at startup the server then does not start). A large `separation-nm`
 alone proves nothing about clearance: Red airborne starts are by the target,
 and airfields can have their own defenses. Player Choice aircraft or loadouts
 that alter ground parking need a fresh check of the actual selected mission.
@@ -411,6 +412,43 @@ same spec. *Agent decisions:* the wind line writes the game's units rather than
 knots so nothing is rounded; the optional altitude on a ground start, the flight
 model, enemy skill, fixture wings and loadout lines are the parser's additions
 for the game's own use of the same text.
+
+## Surface placement seeds
+
+Lead decision, 2026-10-26: a seed that cannot place a vehicle must not make a
+server fail without trying other layouts. Startup, a King's mission change,
+returning to the mission file, restart, rotation and rotation validation use the
+same bounded rule. The first candidate is the requested seed, or the host's
+normal draw for a seed-0 mission. After a vehicle-placement refusal, try the next
+integer seed, wrapping from 4,294,967,295 to 1. There are sixteen attempts total,
+including the first. The bound and consecutive order are agent-chosen defaults
+implementing the lead's policy. Only placement refusals trigger retries; invalid distances,
+missing resources and other errors remain errors immediately.
+
+The complete world must build before its seed is installed or sent to clients.
+Logs name the initial seed, selected seed and attempt number. Failed attempts do
+not change the accepted mission or its resource manifest. Exhaustion reports the
+bounded failure. Clients always use the host's accepted seed and never retry
+independently. A successful seed is retained on restart.
+
+`--check` starts with the file's seed, including 0, and uses the same retry rule.
+A seed-0 mission remains a preview of the later host draw, even if preview
+validation needed a replacement. The check reports the actual preview seed; it
+does not turn a seed-0 file into a fixed-seed mission. Runtime applies the same
+retry rule to its own first draw. A nonzero file starts with that same requested
+seed at both preview and runtime. Rotation reload validates candidates the same
+way before installing them at a boundary.
+
+Vehicle placement uses a fitted 20% grade limit for launchers, guns and added
+radars, matching other vehicles, and 30% for tanks. John requested loosening the
+former 10% rule on 2026-10-26; the exact values remain agent-fitted. The search
+retains equipment and preserves clearance and supply reach as specified under
+[vehicle footing](spec/surface-defenses.md#jitter).
+
+With a target and a player ground start, all distance choices are offered: the
+target determines the enemy position. Airborne starts, and starts without a
+target, still require the requested enemy distance to fit. The sample mission's
+nonzero seed remains useful for reproducing a successful setup.
 
 ## Map rotation
 

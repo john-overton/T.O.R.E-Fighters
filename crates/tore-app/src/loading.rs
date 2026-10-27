@@ -619,6 +619,7 @@ pub(crate) fn prepare_mission(
         resources,
         crate::world::Seating::SinglePlayer,
         &mut crate::world::Hooks {
+            inspect_invalid_placement: false,
             player: Some(player),
             load: Some(&mut load),
             weapon_label: Some(&label),

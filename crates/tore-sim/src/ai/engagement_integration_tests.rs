@@ -746,6 +746,7 @@ fn cap_returns_to_region_and_assigned_distant_target_cannot_launch() {
         engagement::Stance::EngageAssigned,
     );
     cap.patrol = Some(engagement::PatrolRegion {
+        clip: None,
         center_ft: [0., 20_000., 0.],
         radius_ft: 100.,
     });
@@ -777,6 +778,7 @@ fn cap_exact_boundary_does_not_request_a_return() {
         engagement::Stance::EngageAssigned,
     );
     cap.patrol = Some(engagement::PatrolRegion {
+        clip: None,
         center_ft: [0., 20_000., 0.],
         radius_ft: 100.,
     });
@@ -829,6 +831,7 @@ fn cap_patrols_before_contact_and_engages_from_outside_station() {
         actor.set_assignment(engagement::Assignment {
             role: engagement::Role::CombatAirPatrol,
             patrol: Some(engagement::PatrolRegion {
+                clip: None,
                 center_ft: [0., 20_000., 0.],
                 radius_ft: 60760.,
             }),

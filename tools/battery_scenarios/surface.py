@@ -206,17 +206,46 @@ def objective_audit_problems(output: str) -> list[str]:
     if rows(parts[0]) != rows(parts[1]):
         return ["cached and direct objective audit cases/findings/digests differ"]
     findings = [line.split("\t") for line in parts[0].splitlines() if line.startswith("finding\t")]
-    pending = {tuple(row[1:8]) for row in findings if row[-1].startswith("unresolved-support-placement:")}
-    bad = [row for row in findings if row[7].startswith(("0x580", "0x5c0")) and row[-1] in {
-        "land-on-water", "outside-map", "footprint-outside-map", "footprint-terrain-class", "slope-over-256ft-per-cell",
-    }]
-    # These authored neighborhoods have no valid support spot within the
-    # specified ring. Retain equipment pending John's placement-policy choice,
-    # but require every violation to be exposed, never silently accepted.
-    if len(bad) != 242 or any(row[1] != "LFA" or row[3] != "QLFCARG" or row[-1] != "slope-over-256ft-per-cell" for row in bad):
-        return ["unexpected generated-support violations (known LFA slope conflicts changed)"]
-    if any(tuple(row[1:8]) not in pending for row in bad):
-        return ["a generated-support violation was not explicitly reported as unresolved"]
+    # Independent ceilings accept improvements, while new regressions fail.
+    ceilings = {
+        "land-on-water": 0, "outside-map": 0, "footprint-outside-map": 0,
+        "footprint-terrain-class": 0, "vehicle-footprint-slope": 0,
+        "vehicle-runway-clearance": 0, "vehicle-object-clearance": 0,
+    }
+    counted = 0
+    for rule, ceiling in ceilings.items():
+        count = sum(row[7].startswith(("0x580", "0x5c0")) and row[-1] == rule for row in findings)
+        counted += count
+        if count > ceiling:
+            return [f"generated support {rule}: {count} exceeds ceiling {ceiling}"]
+    pattern = r"^objective-audit: cases (\d+) findings \d+ errors (\d+)$"
+    summaries = re.findall(pattern, parts[0], re.M)
+    if len(summaries) != 1 or summaries[0][0] != "264":
+        return ["missing complete 264-case audit summary"]
+    if re.findall(pattern, parts[1], re.M) != summaries:
+        return ["cached and direct audit summaries differ or are incomplete"]
+    # The remaining contracts (determinism, final scene, runway datums and
+    # relocation) all have zero allowance. Slope headroom cannot mask them.
+    if int(summaries[0][1]) != counted:
+        return ["placement contract failures outside the allowed categories"]
+
+    return []
+
+
+def objective_cache_kuril_problems(output: str) -> list[str]:
+    """Final front availability can change while the raw front stays identical."""
+    parts = runs(output)
+    if len(parts) != 3:
+        return ["expected the Kuril matrix and two independent scene builds"]
+    if not re.search(r"^objective-audit: cases 4224 findings \d+ errors 0$", parts[0], re.M):
+        return ["incomplete Kuril audit or new placement contract failures"]
+    for direct, (distance, aaa, sam, seed) in zip(parts[1:], [(5, 0, 2, 2), (50, 3, 0, 3)]):
+        pattern = (rf"^objective-case: KURILE QKSILO separation {distance} aaa {aaa} sam {sam} seed {seed} "
+                   r"units \d+ parked \d+ findings \d+ digest (\S+)$")
+        cached = re.findall(pattern, parts[0], re.M)
+        built = re.findall(r"^surface: digest (\S+)$", direct, re.M)
+        if len(cached) != 1 or built != cached:
+            return [f"Kuril final-front cache differs from direct build at {distance} nm, AAA {aaa}, SAM {sam}, seed {seed}"]
     return []
 
 
@@ -1331,12 +1360,24 @@ def scenarios() -> list[Scenario]:
             name="surface-objectives-audit", lane="ai",
             args=["--surface-dump", "--objectives", "--fast", "--seeds", "1", "LFA", "UKR"],
             timeout=600,
-            expect_exit=1,
-            expect=[r"^objective-audit: cases 264 findings \d+ errors 242$"],
+            expect_exit=None,
+            expect=[r"^objective-audit: cases 264 findings \d+ errors \d+$"],
             forbid=[r"^finding\t.*\t(?:objective-anchor-stale|nondeterministic|duplicate-id|object-count|missing-element|unavailable-grounding-geometry)"],
-            then=[Step(args=("--surface-dump", "--objectives", "--fast", "--seeds", "1", "LFA", "UKR", "--uncached"), timeout=600, expect_exit=1)],
+            then=[Step(args=("--surface-dump", "--objectives", "--fast", "--seeds", "1", "LFA", "UKR", "--uncached"), timeout=600, expect_exit=None)],
             check=objective_audit_problems,
-            notes="All eleven separations, four defense levels, fleet/shore, airport and area layouts. The audit intentionally fails on 242 known LFA support-slope checks; the scenario pins that remaining policy conflict, requires explicit fallback reports, rejects stale objective anchors and compares cached/direct output.",
+            notes="All eleven separations, four defense levels, fleet/shore, airport and area layouts. Independent category ceilings accept improvements, reject placement regressions and compare cached/direct output.",
+        ),
+        Scenario(
+            name="surface-objectives-cache-kuril", lane="ai",
+            args=["--surface-dump", "--objectives", "--seeds", "3", "KURILE"],
+            timeout=900,
+            expect=[r"^objective-audit: cases 4224 findings \d+ errors 0$"],
+            then=[
+                Step(args=("--surface-dump", "KURILE", "QKSILO", "--defenses", "0", "2", "--surface-seed", "2", "--separation", "5")),
+                Step(args=("--surface-dump", "KURILE", "QKSILO", "--defenses", "3", "0", "--surface-seed", "3", "--separation", "50")),
+            ],
+            check=objective_cache_kuril_problems,
+            notes="The final front can appear or move at a new separation despite identical raw geometry. Compare both observed cache regressions with independent full scene builds.",
         ),
         Scenario(
             name="surface-start-placement", lane="ai",

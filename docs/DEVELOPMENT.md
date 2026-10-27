@@ -1897,6 +1897,10 @@ of dome turn apart). Both read `TORE_DATA_DIR`, like `--blast-preview`
 
 ### Quick Mission objective placement audit
 
+Creator snapshots honor `--separation`. With no `--ground-target`, an explicit
+`--defenses AAA SAM` sets the area defenses; each strength is a number from 0 to 3.
+`--surface-seed` fixes the preview's layout. Normal defaults stay unchanged.
+
 Run the complete CPU surface matrix against an isolated imported profile:
 
 ```sh
@@ -1912,11 +1916,25 @@ rule. Use a new output directory to preserve a previous run. Add `--theater UKR`
 (repeatable) to restrict theaters. `--fast --seeds 1` selects the first target, the first airport/strip target when different,
 and no-target area defenses in each theater, with the four matched strengths.
 The battery scenario `surface-objectives-audit` uses that subset in Ukraine and
-the Falklands. It expects the audit's nonzero exit for 242 known support-slope
-violations around the Falklands cargo template, requires each to have an explicit
-unresolved-placement report, and rejects stale objective anchors and new generated
-support violations. Passing this detector scenario does not mean those placements
-are valid. Equipment counts are preserved pending a fallback-policy decision.
+the Falklands. It compares independent ceilings for slope, runway clearance,
+object clearance, terrain class and bounds, so an improvement does not fail the
+scenario. The 264-case regression gate now requires zero generated-support footprint
+slope failures and zero for every other contract category. Zero-error and
+reported-error exits are both inspected. Passing this
+scenario does not certify authored shoreline or assembly overlaps.
+
+The `menus-snap-quick-target-ground-distances` scenario verifies all eleven distance
+choices in a ground-target runway start and launches its 300 nm setup. CPU Quick
+Mission snapshots honor `--ground-start`, including when it selects the creator
+without an explicit `--quick-mission`. Their `quick-snapshot` line records the
+actual start mode and selectable distances. The same regression verifies that
+an explicit airport 9 remains Odesa after choosing a target; the target's added
+Automatic row must not shift it to the preceding airport (L'viv, airport 8).
+
+The `surface-objectives-cache-kuril` scenario exercises all 4,224 Kuril cases
+and independently rebuilds two silo setups where equal raw fronts previously
+hid a different final front at another separation. It compares full scene digests,
+covering both a newly available front and a moved retained front.
 
 The underlying command is `--surface-dump --objectives [--seeds N] [--fast]
 [THEATER ...]`. The full matrix uses every offered non-empty template plus area
@@ -1924,15 +1942,22 @@ defenses without a target, all sixteen AAA/SAM strength pairs, seeds 1 through
 N, and all eleven values from the game's separation list. Every case goes through
 the real surface resolver and placer, including the front line. Checks use the
 completed airport scene and its foundations. Identical object layouts reuse
-geometry checks only after comparing their complete placement inputs; starts
-are calculated for the current separation. `--uncached` rebuilds and checks every
-scene directly. The battery compares both modes' cases, findings and digests.
+geometry checks only after comparing their complete placement inputs and
+repeating the final front pass against its exact integer obstacles at the current
+separation. Starts are recomputed from the repaired target; canonical field ranks
+are retained from the built scene because they do not depend on separation.
+`--uncached` rebuilds and checks every scene directly. The battery compares both modes' cases, findings and digests.
 The first distance repeats the raw placement for every strength pair, and the
 zero-defense scene for every template and seed, to check determinism. The table
 includes authored positions that older sweeps exempt.
 
+A `placement-refused` row also records every setup the normal launch guard would
+refuse for placement, including authored vehicles and retained front groups.
+Distance refusals remain separate.
+
 Checks cover map bounds, terrain class at the center and conservative footprint
-corners, the existing 256 ft cell-corner slope limit, rotated footprint overlap,
+corners, per-vehicle footprint grades, separate runway and object clearance,
+legacy 256 ft cell-corner slope findings, rotated footprint overlap,
 route segments sampled every 250 ft, IDs and resolved template counts, missing
 layout additions, truck reach, the start/objective distances, final target
 centroids, shape-bottom clearance through shared grounding, ship waterlines and
@@ -1945,8 +1970,9 @@ turning, lanes and movement. Surface Y coordinates are authored offsets above
 support, not absolute world heights.
 
 Separation means Blue to Red, within 0.02 nm for integer rounding. Red can be
-5 nm from the target, so the objective-distance check allows 5.02 nm. A shortened
-long-distance start is reported even though the current specification permits it.
+5 nm from the target, so the objective-distance check allows 5.02 nm. A diagnostic shortened
+candidate marks a distance that the creator must not offer; mission launch refuses
+that distance instead of using the candidate.
 Ground starts override separation. The command reports strict findings separately
 from placement-contract errors; it fails on the latter. Thus a zero exit status
 is not a claim that every row is clear.

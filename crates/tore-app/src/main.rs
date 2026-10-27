@@ -3028,7 +3028,15 @@ impl App {
         self.flight_ui.look = look;
         self.flight_ui.zoom = zoom;
         if self.world.setup.mission.is_none() && self.error.is_none() {
-            self.error = Some("Quick Mission could not launch the selected setup".into());
+            self.error = Some(
+                self.quick
+                    .ordnance
+                    .as_ref()
+                    .and_then(|o| o.message.clone())
+                    .or_else(|| self.quick.notice.clone())
+                    .unwrap_or_else(|| "Quick Mission could not launch the selected setup".into())
+                    .into(),
+            );
             event_loop.exit();
         } else if self.error.is_none() {
             let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
@@ -9601,6 +9609,20 @@ fn ai_probe_run(
         &ai_wings::enemy_group_offsets(&wings),
         quick.separation_feet(),
     );
+    if let Some(problem) = tore_world::mission_layout::availability::surface_problem(
+        &world.surface,
+        quick.separation_nm() as u32,
+        parked.is_none(),
+        false,
+    ) {
+        return Err(problem.into());
+    }
+    if layout.enemy.shortened() {
+        return Err(tore_world::mission_layout::availability::distance_problem(
+            quick.separation_nm() as u32,
+        )
+        .into());
+    }
     combat_view.mission_aircraft(&mut combat, &wings, &layout, resources)?;
     let heading = match &parked {
         Some(ground) => {
@@ -12005,6 +12027,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     // creator's ground target for a launched flight or a capture.
     let mut ground_target: Option<String> = None;
     let mut target_defenses = (3_usize, 3_usize);
+    let mut target_defenses_given = false;
     let mut target_seed = 1_u32;
     let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
@@ -12049,6 +12072,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     value.ok_or(usage)?.parse::<usize>().ok().filter(|n| *n <= 3).ok_or_else(|| usage.to_owned())
                 };
                 target_defenses = (level(args.next())?, level(args.next())?);
+                target_defenses_given = true;
             }
             "--surface-seed" => {
                 target_seed = args.next().ok_or("--surface-seed needs a number")?.parse().map_err(|e| bad_number(&arg, &e))?;
@@ -13474,7 +13498,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             return Err("ground start is for flight or the Quick Mission creator".into());
         }
         if initial_screen == Screen::Main {
-            initial_screen = Screen::Flight;
+            initial_screen = if snapshot.is_some() {
+                Screen::Quick
+            } else {
+                Screen::Flight
+            };
         }
     }
     // A window is opened only when no headless mode was selected. The locate
@@ -14821,9 +14849,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
             quick.ai_mission = ai_mission;
             quick.choose_theater_code(&theater_code, &theater_resources);
-            if let Some(object) = ground_start {
-                quick.choose_ground_runway(object)?;
-            }
             if matches!(
                 snapshot_state.as_str(),
                 "ordnance"
@@ -14903,6 +14928,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             // the command line gives (slice CL-R).
             if let Some(stem) = &ground_target {
                 quick.choose_ground_target(stem, target_defenses, target_seed)?;
+            } else if target_defenses_given {
+                quick.choose_area_defenses(target_defenses, target_seed);
+            }
+            if let Some(object) = ground_start {
+                quick.choose_ground_runway(object)?;
             }
             if let Some(id) = enemy_ground_start_airport {
                 let object = world
@@ -14913,12 +14943,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .ok_or("Selected enemy ground-start airport is unavailable")?;
                 quick.choose_enemy_runway(object)?;
             }
-            if snapshot_state.starts_with("map") {
-                quick.set_resources(Arc::new(theater_resources.clone()));
+            if let Some(nm) = separation_nm {
+                quick.draft.values[17] = mission_layout::SEPARATION_NM
+                    .iter()
+                    .position(|choice| *choice == nm)
+                    .unwrap_or(quick.draft.values[17]);
             }
+            quick.set_resources(Arc::new(theater_resources.clone()));
+            quick.wait_placement();
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             quick.preview_selector(&snapshot_state)?;
+            quick.wait_placement();
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
+            println!("quick-snapshot: {}", quick.placement_snapshot_report());
             if snapshot_state.starts_with("map") {
                 if let Some(words) = quick.notice.as_deref().filter(|_| !quick.map_open()) {
                     return Err(format!("the map did not open: {words}").into());
@@ -15157,11 +15194,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         // The Redfor seat's fields are the Red and neutral ones.
         quick.set_player_redfor(true);
     }
-    if let Some(object) = ground_start {
-        quick.choose_ground_runway(object)?;
-    }
     if let Some(stem) = &ground_target {
         quick.choose_ground_target(stem, target_defenses, target_seed)?;
+    } else if target_defenses_given {
+        quick.choose_area_defenses(target_defenses, target_seed);
+    }
+    if let Some(object) = ground_start {
+        quick.choose_ground_runway(object)?;
     }
     if let Some(id) = enemy_ground_start_airport {
         // Enemy Wing 1's ground start at a Redfor field (slice CL-R).
@@ -16095,6 +16134,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && ground_target.is_none()
         && enemy_ground_start_airport.is_none()
         && separation_nm.is_none()
+        && !target_defenses_given
         && probe_script.wing_size.is_none()
         && !probe_script.wing_only
         && !probe_script.redfor;
@@ -16243,6 +16283,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             // (slice CL-R).
             let resources = Arc::new(theater_resources);
             quick.set_resources(Arc::clone(&resources));
+            if launch_creator {
+                // A command-line launch has no menu frames in which to finish
+                // the background check. Complete it before the event loop.
+                quick.wait_placement();
+            }
             resources
         },
         seat_commands: Vec::new(),

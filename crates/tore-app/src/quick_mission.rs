@@ -25,6 +25,7 @@ pub mod allegiance;
 pub mod loadout_memory;
 pub mod map;
 pub mod matrix;
+mod placement;
 pub mod remember;
 /// The aircraft fields of the five wings the AI flies. Field 6 is friendly
 /// wing 1's, which is also the player's own aircraft.
@@ -210,6 +211,7 @@ impl Draft {
     }
 }
 pub struct QuickMission {
+    placement: std::cell::RefCell<placement::Check>,
     /// Results of the mission just flown, shown over the creator until OK.
     pub debrief: Option<crate::debrief::Debrief>,
     /// The debrief is a multiplayer flight's, which has no creator to go
@@ -471,6 +473,7 @@ impl QuickMission {
             surface_seed: 0,
             seed_pending: false,
             resources: None,
+            placement: Default::default(),
             map: None,
             map_build: None,
             map_hold: false,
@@ -483,6 +486,7 @@ impl QuickMission {
     /// Gives the creator the imported game data, which its map builds the
     /// mission from.
     pub fn set_resources(&mut self, resources: Arc<BTreeMap<String, Vec<u8>>>) {
+        self.placement = Default::default();
         self.resources = Some(resources);
     }
     /// The map is open over the creator.
@@ -952,7 +956,17 @@ impl QuickMission {
                 .map(|(label, _)| label)
                 .collect()
         } else {
-            self.values(id).into_owned()
+            let mut values = self.values(id).into_owned();
+            if id == 17
+                && let Some(Ok(check)) = self.placement_check()
+            {
+                for (index, label) in values.iter_mut().enumerate() {
+                    if !check.separations.get(index).copied().unwrap_or(false) {
+                        label.push_str(" (does not fit)");
+                    }
+                }
+            }
+            values
         }
     }
     /// The six wing rows as the AI launch payload: side, aircraft, wing skill
@@ -1094,6 +1108,14 @@ impl QuickMission {
         // A given seed is the next flight's (and the map's).
         self.seed_pending = seed != 0;
         Ok(())
+    }
+    /// Developer launch/capture settings for area defenses with no target.
+    pub fn choose_area_defenses(&mut self, (aaa, sam): (usize, usize), seed: u32) {
+        self.apply(30, 0);
+        self.draft.values[31] = aaa;
+        self.draft.values[32] = sam;
+        self.surface_seed = seed;
+        self.seed_pending = seed != 0;
     }
     /// The flight lays out a surface from the seed: a ground target, or with
     /// none an AAA or SAM strength above none (the area defenses).
@@ -1247,6 +1269,14 @@ impl QuickMission {
         self.draft.values[4].clamp(1, 5)
     }
     pub fn unsupported(&self) -> Option<String> {
+        if let Some(why) = self.separation_problem(self.draft.values[17]) {
+            return Some(why.into());
+        }
+        if let Some(Ok(check)) = self.placement_check()
+            && check.blocked
+        {
+            return Some(check.limitations.join(" "));
+        }
         if self.player().is_none() {
             return Some(
                 "This aircraft is available for setup only. Choose an imported aircraft from the player list to fly."
@@ -1533,6 +1563,8 @@ impl QuickMission {
             .into_iter()
             .map(|(field, (text, _))| (field, text))
             .collect();
+        self.surface_seed = spec.surface_seed;
+        self.seed_pending = spec.surface_seed != 0;
         self.group_objectives = spec.objectives;
         self.group_must_survive = spec.must_survive;
         self.ai_mission = spec.preset;
@@ -1585,8 +1617,8 @@ impl QuickMission {
         });
         over.objectives = spec.objectives;
         over.must_survive = spec.must_survive;
-        // The ground target and its defenses are the creator's; the seed is
-        // the host's to draw when the flight starts.
+        // The creator owns the target, defenses and the seed it audited.
+        over.surface_seed = spec.surface_seed;
         over.ground_target = spec.ground_target;
         over.aaa = spec.aaa;
         over.sam = spec.sam;
@@ -1654,6 +1686,9 @@ impl QuickMission {
     /// host's words, when the creator is the lobby's and the aircraft or
     /// theater is in a gap.
     fn gap_in(&self, field: usize, index: usize) -> Option<&str> {
+        if field == 17 {
+            return self.separation_problem(index);
+        }
         // Ground in a theater with no airfield of the pilot's side is dimmed
         // and refused the same way, with its own words (slice AL1).
         if field == 33 && index == 1 && self.ground_unavailable() {
@@ -1727,9 +1762,8 @@ impl QuickMission {
         if let Some(problem) = self.lobby_problem() {
             return Err(problem);
         }
-        let mut spec = self.mission_spec()?;
-        // The host draws the seed when the flight starts.
-        spec.surface_seed = 0;
+        let spec = self.mission_spec()?;
+        // Keep the seed whose placements and distance choices were checked.
         // The host reads the mission as text: what the text cannot carry
         // would silently change on the way.
         match MissionSpec::from_text(&spec.to_text()) {
@@ -1739,6 +1773,10 @@ impl QuickMission {
         }
     }
     fn apply(&mut self, id: usize, value: usize) {
+        if self.resources.is_some() && matches!(id, 13 | 30) {
+            self.surface_seed = 0;
+            self.seed_pending = false;
+        }
         let had_target = self.has_target();
         self.draft.values[id] = value;
         self.draft.values[4] = self.draft.values[4].max(1);
@@ -2487,6 +2525,9 @@ impl QuickMission {
         sprites: &BTreeMap<String, Sprite>,
         _world: &Terrain,
     ) -> bool {
+        if self.resources.is_some() {
+            self.reserve_placement_seed();
+        }
         let mut animating = self.rocker.advance(std::time::Instant::now());
         // A map built in the background opens the moment it is done.
         self.poll_map();
@@ -2592,7 +2633,20 @@ impl QuickMission {
         // The creator stays live while the map is built: it says so.
         let building = self.map_building().then_some(map::BUILDING_NOTE.to_owned());
         animating |= building.is_some();
-        if let Some(message) = self.notice.as_ref().or(building.as_ref()) {
+        let placement = self.placement_notice();
+        if self.notice.as_deref() == Some(placement::CHECKING)
+            && placement.as_deref() != Some(placement::CHECKING)
+        {
+            self.notice = None;
+        }
+        animating |= placement.as_deref() == Some(placement::CHECKING);
+        let other = self.notice.as_ref().or(building.as_ref());
+        let combined = placement
+            .as_ref()
+            .zip(other)
+            .filter(|(p, n)| p != n)
+            .map(|(p, n)| format!("{p} {n}"));
+        if let Some(message) = combined.as_ref().or(placement.as_ref()).or(other) {
             if self.lobby {
                 lobby_notice(&mut c, &sprites["SMLFONT.PIC"], message);
             } else {
@@ -2899,7 +2953,8 @@ impl QuickMission {
         // A Start locked to Airborne for want of a field of the side is
         // greyed (the read-only page draws the King's choice as it is).
         if self.view.is_none()
-            && ((id == 33 && self.ground_unavailable())
+            && ((id == 17 && self.separation_problem(self.draft.values[17]).is_some())
+                || (id == 33 && self.ground_unavailable())
                 || (id == ENEMY_START && self.enemy_ground_unavailable()))
         {
             return Some(GAP_FIELD_TEXT);
@@ -3824,10 +3879,10 @@ mod tests {
             })
             .collect();
         assert!(seeds.len() > 40 && !seeds.contains(&0), "{seeds:?}");
-        // The host draws its own: the lobby's mission carries none.
+        // The host keeps the seed whose placements and distances were checked.
         q.surface_seed = 99;
         q.lobby = true;
-        assert_eq!(q.lobby_spec().unwrap().surface_seed, 0);
+        assert_eq!(q.lobby_spec().unwrap().surface_seed, 99);
     }
 
     #[test]
@@ -5272,5 +5327,27 @@ mod tests {
         let sent = QuickMission::lay_over(&lobby, edited);
         assert!(sent.cheats.unlimited_fuel && !sent.friendly_fire);
         assert_eq!((sent.separation_nm, sent.guns_only), (50, true));
+    }
+    #[test]
+    fn placement_reserves_one_seed_and_lobby_load_and_accept_keep_it() {
+        let mut q = lobby_creator();
+        q.apply(30, 1);
+        q.surface_seed = 99;
+        q.seed_pending = true;
+        q.reserve_placement_seed();
+        assert_eq!(q.surface_seed, 99);
+        q.roll_surface_seed();
+        assert_eq!(q.surface_seed, 99);
+        q.reserve_placement_seed();
+        assert_ne!(q.surface_seed, 99);
+        let spec = q.mission_spec().unwrap();
+        let seed = spec.surface_seed;
+        q.load_spec(&spec, true).unwrap();
+        assert_eq!(q.surface_seed, seed);
+        assert!(q.seed_pending);
+        assert_eq!(
+            QuickMission::lay_over(&spec, q.lobby_spec().unwrap()).surface_seed,
+            seed
+        );
     }
 }

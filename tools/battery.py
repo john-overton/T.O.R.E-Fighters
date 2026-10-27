@@ -72,7 +72,7 @@ class Scenario:
     allow_generic: list[str] = dataclasses.field(default_factory=list)  # generic labels to tolerate
     check: Optional[Callable[[str], list[str]]] = None  # extra problems from the output
     env: dict[str, str] = dataclasses.field(default_factory=dict)
-    expect_exit: int = 0
+    expect_exit: Optional[int] = 0
     notes: str = ""
     # Files (relative to the scenario's work folder) the run should produce.
     outputs: list[str] = dataclasses.field(default_factory=list)
@@ -489,7 +489,7 @@ def judge(s: Scenario, output: str, code: Optional[int], timed_out: bool, work: 
     problems: list[str] = []
     if timed_out:
         problems.append(f"timed out after {s.timeout:.0f}s")
-    elif code != s.expect_exit:
+    elif s.expect_exit is not None and code != s.expect_exit:
         problems.append(f"exit code {code}, expected {s.expect_exit}")
     for pattern, label in GENERIC_BAD:
         if label in s.allow_generic:

@@ -520,6 +520,11 @@ round 2) but not the layout. Local:
 `Combat::{tape, notes, last_launcher, terrain_tti}` (the last the readout's kept
 fly-out times, cleared on a load). Everything else is coded.
 
+CAP assignment regions also encode an optional map rectangle (`clip`, two X/Z
+corners) before their center and radius. This preserves the intersection with the
+map across restore. The rectangle comes from immutable theater bounds; see
+[Quick Mission placement](../spec/quick-mission-menu.md#keeping-the-enemy-on-the-map).
+
 ## Paired-airport replacement
 
 nr-apmerge adds no checkpoint field or coder change. The immutable airport

@@ -168,7 +168,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "surface": (
-        "surface units: ground target templates resolved, base-layout air defenses and their sides",
+        "surface units: ground target templates resolved, base-layout air defenses and their sides, final-front audit cache",
         ("surface-*", "bridge-audit", "bridge-end-ruins", "a2g-bridge-destruction"),
     ),
     "a2g": (
@@ -451,6 +451,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/frame.rs", ("flight-views", "instruments", "replay-recording", "link-cues"), "the flight frame"),
     _r("crates/tore-world/src/readout.rs", ("instruments", "flight-combat", "replay-live", "link-cues"), "the cockpit readout"),
     _r("crates/tore-world/src/snapshot.rs", ("replay-recording", "ai-fights"), "snapshots"),
+    _r("crates/tore-world/src/mission_layout/*", ("surface", "ai-missions", "menus-creator"), "runtime placement availability"),
     _r("crates/tore-world/src/mission_layout.rs", ("ai-missions", "menus-creator"), "mission layout"),
     _r(
         "crates/tore-world/src/mission.rs", ("ai-missions", "menus-creator", "net-fly", "ai-strike"),

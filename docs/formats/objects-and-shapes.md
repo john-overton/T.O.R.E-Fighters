@@ -477,6 +477,12 @@ bank supports and grade the outward terrain approaches; a painted shadow
 does not make a foundation across the river. The [bridge specification](../spec/bridges.md)
 records the fitted grouping, terrain grading and sampling constants.
 
+Vehicle X/Z placement is checked before grounding, using per-type footprint
+limits and a bounded nearest-valid search after airport replacement. The
+[surface placement policy](../spec/surface-defenses.md#jitter) defines that search
+and how unresolved equipment is retained. The shared grounding below still
+supplies every final vertical pose.
+
 **Objective sites on slopes (nr-objg, 2026-10-14).** The complete shape,
 including line endpoints, supplies the footing. Solid contact bounds use
 filled faces and sprites only; thin lines do not make their enclosing space

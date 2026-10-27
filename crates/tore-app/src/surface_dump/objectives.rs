@@ -87,6 +87,12 @@ fn inspect(
         }
         let info = infos.get(&unit.resource).copied().unwrap_or_default();
         let at = [i64::from(unit.position[0]), i64::from(unit.position[2])];
+        if layout::footing::vehicle(unit) {
+            for rule in layout::footing::violations(ground, unit, info) {
+                add(format!("vehicle-{rule}"));
+            }
+        }
+
         let ship = unit.class & class::SHIP != 0;
         if !ground.inside(at, 0) {
             add("outside-map".into());
@@ -240,8 +246,19 @@ fn inspect(
     if let Some(why) = &surface.unresolved {
         out.push(finding("template", [0; 3], format!("unresolved:{why}")));
     }
+    // Count every normal-flight placement refusal, including retained front
+    // groups and authored units, separately from individual support violations.
+    if let Some(reason) =
+        tore_world::mission_layout::availability::surface_problem(surface, 0, false, false)
+    {
+        out.push(finding(
+            "mission",
+            [0; 3],
+            format!("placement-refused:{reason}"),
+        ));
+    }
     for note in &surface.layout_notes {
-        if note.starts_with("support fallback ") {
+        if note.starts_with("support fallback ") || note.starts_with("placement unresolved ") {
             let unit = note
                 .split_whitespace()
                 .nth(2)
@@ -280,6 +297,52 @@ fn final_geometry(
     };
     let sources = Placements::for_terrain(resources, terrain, theater)?;
     let mut out = Vec::new();
+    for unit in terrain
+        .surface
+        .units
+        .iter()
+        .filter(|u| u.id.range() == tore_world::surface::IdRange::Layout)
+    {
+        if sources
+            .placed()
+            .filter_map(Result::ok)
+            .find(|(id, _)| *id == unit.id.0)
+            .is_none_or(|(_, p)| p.position != unit.position || p.angles != unit.angles)
+        {
+            out.push(finding(
+                format!("{:#010x}:{}", unit.id.0, unit.resource),
+                unit.position,
+                "scene-placement-stale",
+            ));
+        }
+    }
+    for field in &terrain.redrawn {
+        let boxes: Vec<_> = terrain
+            .placement_runways
+            .iter()
+            .filter(|p| p.id == field.strip_id)
+            .collect();
+        for (i, runway) in field.runways.iter().enumerate() {
+            let (sin, cos) = runway.heading.to_radians().sin_cos();
+            let drawn = field.frame.world([
+                runway.from[0] + sin * runway.length / 2.,
+                runway.from[1] + cos * runway.length / 2.,
+            ]);
+            if boxes
+                .get(i)
+                .is_none_or(|p| (p.at[0] as f64 - drawn[0]).hypot(p.at[1] as f64 - drawn[2]) > 2.)
+            {
+                out.push(finding(
+                    format!("runway-{}-{i}", field.strip_id),
+                    drawn.map(|v| v.round() as i32),
+                    format!(
+                        "runway-clearance-datum-error:integer={:?},drawn={drawn:?}",
+                        boxes.get(i).map(|p| p.at)
+                    ),
+                ));
+            }
+        }
+    }
     let height = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
     for (id, p) in &terrain.surface.placements {
         if p.object_type.ends_with(".PT") {
@@ -336,17 +399,38 @@ struct SceneCase {
     input: Surface,
     terrain: Terrain,
     findings: Vec<Finding>,
-    final_starts: bool,
 }
 
-// Post-placement scene construction reads object geometry, not separation or
-// the already-computed starts. Compare complete normalized inputs, not hashes.
+// Reuse requires equal raw geometry and a fresh final-front check at the current
+// separation. Starts are recomputed from the repaired target, not copied from raw
+// placement. Compare full normalized inputs, never just hashes.
 fn geometry_input(mut surface: Surface) -> Surface {
     surface.starts = None;
     if let Some(site) = &mut surface.template {
         site.settings.separation_nm = 0;
     }
     surface
+}
+
+// Coordinates depend on the final target, map and original front. Canonical
+// runway ranks depend on that same fixed target and final airport geometry, not
+// separation, so keep those lists from the independently built cached scene.
+fn cached_starts(
+    surface: &Surface,
+    site: &SurfaceSite,
+    resources: &BTreeMap<String, Vec<u8>>,
+    terrain: &Terrain,
+) -> Option<tore_world::surface::StartPoints> {
+    let mut starts = layout::scene_starts(
+        surface,
+        &site.inspection_ground(resources, &terrain.theater),
+        &terrain.airport_scene,
+    )?;
+    if let Some(finalized) = &terrain.surface.starts {
+        starts.blue_airfields.clone_from(&finalized.blue_airfields);
+        starts.red_airfields.clone_from(&finalized.red_airfields);
+    }
+    Some(starts)
 }
 
 pub(super) fn run(
@@ -365,7 +449,7 @@ pub(super) fn run(
     let mut scene_builds = 0usize;
     let mut cache_hits = 0usize;
     println!(
-        "objective-audit-schema: 2; final scene; coordinates feet; class grid 8192ft; route samples 250ft; separation tolerance 0.02nm; objective tolerance 5.02nm"
+        "objective-audit-schema: 3; final scene; coordinates feet; class grid 8192ft; route samples 250ft; separation tolerance 0.02nm; objective tolerance 5.02nm"
     );
     println!("finding\ttheater\tseparation\ttemplate\taaa\tsam\tseed\tobject\tx\ty\tz\trule");
     for (index, theater, mut stems) in jobs(wanted)? {
@@ -416,7 +500,14 @@ pub(super) fn run(
                             )?;
                             let input = geometry_input(raw.clone());
                             let found = (!uncached)
-                                .then(|| scenes.iter().position(|s| s.input == input))
+                                .then(|| {
+                                    scenes.iter().position(|s| {
+                                        s.input == input
+                                            && site.inspection_front_matches(
+                                                resources, &s.terrain, &raw,
+                                            )
+                                    })
+                                })
                                 .flatten();
                             let at = match found {
                                 Some(at) => {
@@ -455,19 +546,10 @@ pub(super) fn run(
                                     let ground = site.inspection_scene_ground(&terrain);
                                     let mut checked = inspect(&terrain.surface, &ground, &infos);
                                     checked.extend(final_geometry(resources, &terrain, theater)?);
-                                    let coordinates =
-                                        |starts: &Option<tore_world::surface::StartPoints>| {
-                                            starts.as_ref().map(|s| {
-                                                (s.target, s.red, s.blue, s.blue_heading_deg)
-                                            })
-                                        };
-                                    let final_starts = coordinates(&terrain.surface.starts)
-                                        != coordinates(&raw.starts);
                                     scenes.push(SceneCase {
                                         input,
                                         terrain,
                                         findings: checked,
-                                        final_starts,
                                     });
                                     scenes.len() - 1
                                 }
@@ -480,28 +562,7 @@ pub(super) fn run(
                             }
                             // A direct build is the oracle: never rewrite its output.
                             if found.is_some() {
-                                surface.starts = if cached.final_starts {
-                                    layout::scene_starts(
-                                        &surface,
-                                        &terrain.theater,
-                                        &terrain.airport_scene,
-                                        site.front(),
-                                    )
-                                } else {
-                                    raw.starts.clone().map(|mut starts| {
-                                        // Airport merging canonicalizes the ranked IDs even
-                                        // in builds that retain the original start coordinates.
-                                        if let Some(finalized) = &terrain.surface.starts {
-                                            starts
-                                                .blue_airfields
-                                                .clone_from(&finalized.blue_airfields);
-                                            starts
-                                                .red_airfields
-                                                .clone_from(&finalized.red_airfields);
-                                        }
-                                        starts
-                                    })
-                                };
+                                surface.starts = cached_starts(&surface, &site, resources, terrain);
                             }
                             let ground = site.inspection_scene_ground(terrain);
                             let mut broken = cached.findings.clone();
@@ -577,6 +638,14 @@ pub(super) fn run(
                             errors += broken
                                 .iter()
                                 .filter(|f| {
+                                    f.rule.starts_with("runway-clearance-datum-error")
+                                        || f.rule == "scene-placement-stale"
+                                        || f.rule.starts_with("placement-refused:")
+                                })
+                                .count();
+                            errors += broken
+                                .iter()
+                                .filter(|f| {
                                     (f.object.starts_with("0x580") || f.object.starts_with("0x5c0"))
                                         && matches!(
                                             f.rule.as_str(),
@@ -584,7 +653,9 @@ pub(super) fn run(
                                                 | "outside-map"
                                                 | "footprint-outside-map"
                                                 | "footprint-terrain-class"
-                                                | "slope-over-256ft-per-cell"
+                                                | "vehicle-footprint-slope"
+                                                | "vehicle-runway-clearance"
+                                                | "vehicle-object-clearance"
                                         )
                                 })
                                 .count();
@@ -624,7 +695,7 @@ pub(super) fn run(
                             }
                             // The strict table includes authored exceptions. Only existing
                             // relocated-site invariants fail the command's regression gate.
-                            let gate = site.audit(resources, &terrain.theater, &surface);
+                            let gate = site.audit(resources, &terrain.theater, &raw);
                             errors += gate.len();
                             for problem in gate {
                                 broken.push(finding("placement-contract", [0; 3], problem));

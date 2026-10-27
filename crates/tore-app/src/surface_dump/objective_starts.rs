@@ -38,7 +38,20 @@ pub(super) fn run(
                         wing.count = 5;
                         wing.aircraft = AircraftId::F18;
                     }
-                    let mut world = World::new(&spec, resources, Seating::SinglePlayer)?;
+                    let mut world = match World::new(&spec, resources, Seating::SinglePlayer) {
+                        Ok(world) => world,
+                        Err(e)
+                            if e.to_string().starts_with("Separation ")
+                                || e.to_string().starts_with("Vehicle placement unavailable:") =>
+                        {
+                            cases += 1;
+                            println!(
+                                "objective-start-refused: {theater} {stem} separation {separation} seed {seed}: {e}"
+                            );
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
                     let extent = [
                         (world.terrain.theater.cols - 1) as f64 * 8192.,
                         (world.terrain.theater.rows - 1) as f64 * 8192.,
@@ -168,7 +181,7 @@ pub(super) fn run(
                                     } else {
                                         -patrol.radius_ft
                                     };
-                                    !inside(p)
+                                    !inside(p) && patrol.contains(p)
                                 }) {
                                     issue(
                                         format!("{preset}-{}", actor.identity().actor.0),
