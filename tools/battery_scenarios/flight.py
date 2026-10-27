@@ -10,6 +10,7 @@ import os
 import csv
 import re
 import time
+from pathlib import Path
 
 from battery import Scenario, Step
 from battery_scenarios._debrief import kill_hit_problems
@@ -814,6 +815,27 @@ def check_missile_energy(work, _output):
     return problems
 
 
+
+def check_missile_defeat(work: Path) -> list[str]:
+    """Post-burn defeat must be observed and never followed by a scored hit."""
+    import csv
+    try:
+        first = (work / "defeat" / "runs.csv").read_bytes()
+        second = (work / "defeat-serial" / "runs.csv").read_bytes()
+        rows = list(csv.DictReader(first.decode().splitlines()))
+        defeated = [row for row in rows if row["defeat_s"]]
+        problems = []
+        if first != second:
+            problems.append("defeat study differs between serial and parallel workers")
+        if not defeated:
+            problems.append("defeat study never reached the post-burn Mach threshold")
+        if any(row["hit"] != "0" for row in defeated):
+            problems.append("a defeated store scored a hit")
+        return problems
+    except (OSError, KeyError, ValueError) as error:
+        return [f"unreadable defeat study: {error}"]
+
+
 def combat_scenarios() -> list[Scenario]:
     out = [Scenario(name="flight-wreckcontact-f18", lane="flight",
                     args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
@@ -829,6 +851,15 @@ def combat_scenarios() -> list[Scenario]:
                                          "--ranges", "short", "--aspects", "tail", "--altitudes", "co", "--seeds", "8"])],
                         outputs=["energy/runs.csv", "energy-serial/runs.csv", "spec-compat/runs.csv"], check_work=check_missile_energy,
                         timeout=180, notes="Shared energy flight, physical decoy episodes and worker determinism"))
+    defeat = ["--missiles", "AIM120,AA8", "--profiles", "straight,dive", "--ranges", "long",
+              "--aspects", "head,tail", "--altitudes", "low,high", "--seeds", "2",
+              "--missile-model", "energy"]
+    out.append(Scenario(name="flight-missile-defeat", lane="flight",
+                        args=["--missile-study", "{work}/defeat", "--threads", "4"] + defeat,
+                        then=[Step(args=["--missile-study", "{work}/defeat-serial", "--threads", "1"] + defeat)],
+                        outputs=["defeat/runs.csv", "defeat-serial/runs.csv"],
+                        check_work=check_missile_defeat, timeout=180,
+                        notes="Post-burn inert defeat and serial/parallel equality"))
     out.append(Scenario(name="flight-missile-sag", lane="flight",
                         args=["--missile-sag", "--no-audio"],
                         check=check_missile_sag, timeout=120))

@@ -542,11 +542,120 @@ mod tests {
             tracer: false,
         }
     }
+    // Start with 28/29/30 prior low-Mach samples. Contact in the next tick
+    // is respectively before/at/after defeat. Sweep direct and proximity cases.
+    fn defeat_contact(prior: u32, offset: f64, ground_contact: bool) -> (bool, bool, bool) {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        state.energy_predictions_enabled = false;
+        let mut target = super::super::tests::target(
+            100,
+            [
+                offset,
+                if ground_contact { 0. } else { 1000. / FT },
+                1. / FT,
+            ],
+            10000,
+            0x80,
+        );
+        target.radius = 1. / FT;
+        target.side = Side(2);
+        let mut w = weapon("AIM120.JT", 3);
+        w.damage.fuze_radius = 10;
+        let mut p = projectile(&w, &target);
+        p.guidance = None;
+        p.target = None;
+        p.position[1] = if ground_contact {
+            0.01
+        } else {
+            target.position[1]
+        };
+        let e = p.motion.as_mut().unwrap().energy.as_mut().unwrap();
+        e.flight.position = p.position.map(|v| v * FT);
+        e.flight.velocity = [0., if ground_contact { -200. } else { 0. }, 200.];
+        e.flight.age = e.body.ignition + e.body.boost.ticks + e.body.sustain.ticks;
+        e.flight.subsonic_ticks = prior;
+        e.flight.defeated = prior >= e.body.defeat_ticks;
+        e.flight.lost = e.flight.defeated;
+        p.age = u64::from(e.flight.age);
+        let mut trial = Trial::new(
+            e.body,
+            e.flight,
+            missiles::energy::Observation {
+                position: target.position.map(|v| v * FT),
+                velocity: [0.; 3],
+            },
+            (target.radius + f64::from(w.damage.fuze_radius)) * FT,
+            0,
+        );
+        trial.step(&|_, _| 0.);
+        state.targets = vec![target];
+        state.projectiles = vec![p];
+        let events = state.step_surface(&[], |_, _| 0., |_, _| false);
+        let hit = events.iter().any(|e| matches!(e, Event::Hit(100)));
+        if prior >= 29 {
+            assert_eq!(
+                state.targets[0].hp, 10000,
+                "inert body caused direct or collateral damage"
+            );
+            assert!(!hit);
+            if ground_contact {
+                assert!(state.projectiles.is_empty());
+            } else {
+                assert!(
+                    state.projectiles[0]
+                        .motion
+                        .unwrap()
+                        .energy
+                        .unwrap()
+                        .flight
+                        .defeated
+                );
+            }
+        }
+        (
+            hit,
+            trial.answer.is_some_and(|a| a.hit),
+            state.targets[0].hp < 10000,
+        )
+    }
+
+    #[test]
+    fn defeat_contact_order_matches_forecast_and_disables_direct_and_proximity_damage() {
+        for offset in [0., 8.] {
+            for prior in [28, 29, 30] {
+                let (live, forecast, damaged) = defeat_contact(prior, offset, false);
+                assert_eq!(live, prior == 28, "{prior} {offset}");
+                assert_eq!(live, forecast);
+                assert_eq!(live, damaged);
+            }
+        }
+    }
+
+    #[test]
+    fn defeated_ground_contact_cannot_burst_or_damage_collateral() {
+        for prior in [29, 30] {
+            defeat_contact(prior, 20., true);
+        }
+    }
+
+    #[test]
+    fn defeat_contacts_are_identical_in_serial_and_parallel() {
+        let serial: Vec<_> = (28..=30).map(|n| defeat_contact(n, 0., false)).collect();
+        let parallel: Vec<_> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (28..=30)
+                .map(|n| scope.spawn(move || defeat_contact(n, 0., false)))
+                .collect();
+            jobs.into_iter().map(|j| j.join().unwrap()).collect()
+        });
+        assert_eq!(serial, parallel);
+    }
+
     // Golden behaviour, separate from the input/revision identity. Quantize
     // sampled metres and seconds to avoid insignificant platform roundoff.
     // A failing trace requires investigation and a semantic revision bump,
     // then review of the new (identity, trace) pair, never just a new digest.
-    fn behavior_trace(navigation_multiplier: f64) -> u64 {
+    fn behavior_trace(navigation_multiplier: f64, defeat_multiplier: f64) -> u64 {
         let mut hash = 0xcbf29ce484222325u64;
         let mut add = |value: f64| {
             for byte in ((value * 100.).round() as i64).to_le_bytes() {
@@ -593,6 +702,29 @@ mod tests {
                 }
             }
         }
+        // Defeat-policy trace: mid-coast, reset, boundary, and inert contact.
+        let mut b = missiles::energy_profile::body(&weapon("AIM120.JT", 3));
+        b.defeat_mach *= defeat_multiplier;
+        let mut f = missiles::energy::Flight::launch([0., 1500., 0.], [0., 0., 200.], [0., 0., 1.]);
+        f.age = b.ignition + b.boost.ticks + b.sustain.ticks;
+        for tick in 0..65 {
+            if tick == 15 {
+                f.velocity = [0., 0., 500.];
+            }
+            if tick == 16 {
+                f.velocity = [0., 0., 200.];
+            }
+            f.step(b, [0.; 3], None);
+            add(f64::from(f.subsonic_ticks));
+            add(f64::from(f.defeated));
+            add(f64::from(f.lost));
+        }
+        for n in 28..=30 {
+            let (live, forecast, damage) = defeat_contact(n, 0., false);
+            add(f64::from(live));
+            add(f64::from(forecast));
+            add(f64::from(damage));
+        }
         // Exercise live seeker/support, contact and launcher exclusion too.
         for owner in [0, 100] {
             let mut state = super::super::tests::fixture(true);
@@ -616,10 +748,11 @@ mod tests {
     #[test]
     fn behavior_hash_requires_a_model_revision_for_rule_changes() {
         let identity = missiles::energy_profile::fingerprint();
-        let trace = behavior_trace(1.);
+        let trace = behavior_trace(1., 1.);
         // A real PN-law perturbation changes behaviour without changing data
         // or declared revisions. This is the defect this tripwire catches.
-        assert_ne!(trace, behavior_trace(1.1));
+        assert_ne!(trace, behavior_trace(1.1, 1.));
+        assert_ne!(trace, behavior_trace(1., 0.5));
         assert_eq!(identity, missiles::energy_profile::fingerprint());
         let fixture = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),

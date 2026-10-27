@@ -5732,6 +5732,9 @@ impl State {
                             e.flight.position,
                         );
                     }
+                    if e.flight.defeated {
+                        fuze_until = 0.;
+                    }
                 }
             } else if super::ballistics::is_bomb(w) {
                 // A bomb record advances on the shared integration grid. One placed in
@@ -6289,10 +6292,9 @@ impl State {
                     }
                 } else if (super::ballistics::is_bomb(w) && !armed)
                     || (at >= fuze_until
-                        && p.motion
-                            .and_then(|m| m.energy)
-                            .and_then(|e| e.decoy.pursuit)
-                            .is_some_and(|p| p.passed))
+                        && p.motion.and_then(|m| m.energy).is_some_and(|e| {
+                            e.flight.defeated || e.decoy.pursuit.is_some_and(|p| p.passed)
+                        }))
                 {
                     // A bomb that reaches the ground before its fuze arms is a
                     // dud: no burst, no splash, no crater, only a puff of dirt

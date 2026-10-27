@@ -1,6 +1,7 @@
 //! Resolves authored physical metadata and explicit fitted class defaults.
 //! No weapon-name flight branches. Calibration is recorded in the feature baseline.
 use super::energy::{Body, FT, Motor};
+use tore_formats::missile_motors::{ControlClass, DEFEAT_MACH, DEFEAT_TICKS};
 use tore_formats::weapons::{SeekerKind, Weapon};
 
 pub fn body(w: &Weapon) -> Body {
@@ -52,6 +53,25 @@ pub fn body(w: &Weapon) -> Body {
         w.seeker_kind(),
         SeekerKind::ActiveRadar | SeekerKind::SemiActiveRadar
     );
+    // Unlisted synthetic/imported stores use role defaults, never range anchors.
+    let class = tore_formats::missile_motors::motor(&w.source).map_or(
+        if cruise {
+            ControlClass::Cruise
+        } else if super::Guidance::air_to_ground(w) == Some(super::Guidance::Command) {
+            ControlClass::Command
+        } else if strike {
+            ControlClass::FastGround
+        } else if surface && infrared {
+            ControlClass::SurfaceIr
+        } else if surface {
+            ControlClass::SurfaceRadar
+        } else if infrared {
+            ControlClass::ShortIr
+        } else {
+            ControlClass::MediumAir
+        },
+        |m| m.control_class,
+    );
     let mut body = Body {
         launch_elevation: if surface {
             12f64.to_radians()
@@ -84,7 +104,9 @@ pub fn body(w: &Weapon) -> Body {
         } else {
             0
         }),
-        guidance_ticks: (range / 600. * 120.).max(1200.) as u32,
+        guidance_ticks: (class.seconds() * 120.) as u32,
+        defeat_mach: if class.air_target() { DEFEAT_MACH } else { 0. },
+        defeat_ticks: DEFEAT_TICKS,
         structural_g: if strike {
             12.
         } else if mass > 400. {
@@ -124,7 +146,7 @@ pub fn body(w: &Weapon) -> Body {
         }
     }
     if let Some(m) = tore_formats::missile_motors::motor(&w.source) {
-        body.guidance_ticks = (m.guidance_seconds * 120.).round() as u32;
+        body.guidance_ticks = (m.control_class.seconds() * 120.).round() as u32;
         if let Some(seconds) = m.ignition_seconds {
             body.ignition = (seconds * 120.).round() as u32;
         }
@@ -179,7 +201,7 @@ crate::checkpoint_struct!(Motion {
 // integration/atmosphere, guidance, seeker, decoy, prediction, fuze/contact.
 // Numeric inputs and drag curves are hashed directly; comments and evidence
 // wording are not model inputs. Changes to rules must increment their revision.
-const RULES: [u64; 7] = [4, 3, 2, 1, 1, 3, 2];
+const RULES: [u64; 7] = [5, 4, 3, 1, 1, 4, 3];
 /// Stable tape identity for numeric inputs, curves and semantic rule revisions.
 pub fn fingerprint() -> u64 {
     fingerprint_model(
@@ -206,7 +228,10 @@ fn fingerprint_model(
             add(&value.to_le_bytes());
         }
     }
+    add(&DEFEAT_MACH.to_le_bytes());
+    add(&DEFEAT_TICKS.to_le_bytes());
     for m in motors {
+        add(&[m.control_class as u8]);
         add(m.source.as_bytes());
         add(&[0]);
         for value in [
@@ -215,7 +240,7 @@ fn fingerprint_model(
             m.sustain_seconds,
             m.boost_share,
             m.exhaust_mps,
-            m.guidance_seconds,
+            m.control_class.seconds(),
         ] {
             add(&value.to_le_bytes());
         }
@@ -241,7 +266,7 @@ mod fingerprint_tests {
         let a = fingerprint_model(1, &motors, RULES);
         motors[0].motor_evidence = "a corrected citation";
         assert_eq!(a, fingerprint_model(1, &motors, RULES));
-        motors[0].guidance_seconds += 1.;
+        motors[0].control_class = ControlClass::LongAir;
         assert_ne!(a, fingerprint_model(1, &motors, RULES));
         let mut rules = RULES;
         rules[6] += 1;

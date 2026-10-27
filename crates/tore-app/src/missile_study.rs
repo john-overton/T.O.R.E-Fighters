@@ -376,6 +376,7 @@ pub struct Shot {
     pub devices: u32,
     pub rolls: u32,
     pub control_loss_s: Option<f64>,
+    pub defeat_s: Option<f64>,
     pub ground_impact: bool,
     pub first_notch_s: Option<f64>,
     pub notched_s: f64,
@@ -829,6 +830,9 @@ pub fn fly(base: &Base, cell: &Cell, seed: u64) -> AppResult<Shot> {
             if let Some(energy) = p.motion.and_then(|m| m.energy) {
                 if energy.flight.lost {
                     shot.control_loss_s.get_or_insert(t);
+                }
+                if energy.flight.defeated {
+                    shot.defeat_s.get_or_insert(t);
                 }
                 if energy.tracking.notched
                     && !energy.flight.lost
@@ -1380,13 +1384,13 @@ fn write_results(
     let mut runs = std::io::BufWriter::new(std::fs::File::create(o.out.join("runs.csv"))?);
     writeln!(
         runs,
-        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact,first_notch_s,notched_s"
+        "missile,altitudes,range,aspect,profile,seed,range_ft,fired,locked_at_launch,outcome,hit,kill,miss_ft,time_s,devices,rolls,decoyed_at_s,decoyed_tcpa_s,first_device_s,other_devices,defended,target_turn_deg,first_lock_s,tracked_s,speed_at_end_fps,target_speed_fps,status_at_end,control_loss_s,ground_impact,first_notch_s,notched_s,defeat_s"
     )?;
     for (c, seed, s) in results {
         let cell = &cells[*c];
         writeln!(
             runs,
-            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{},{},{:.3}",
+            "{},{},{},{},{},{seed},{:.0},{},{},{},{},{},{:.1},{:.2},{},{},{},{},{},{},{},{:.0},{},{:.2},{:.0},{:.0},{},{},{},{},{:.3},{}",
             cell.missile,
             cell.altitudes.name(),
             cell.band.name(),
@@ -1420,6 +1424,7 @@ fn write_results(
             u8::from(s.ground_impact),
             s.first_notch_s.map_or(String::new(), |t| format!("{t:.3}")),
             s.notched_s,
+            s.defeat_s.map_or(String::new(), |t| format!("{t:.3}")),
         )?;
     }
     let mut summary = std::io::BufWriter::new(std::fs::File::create(o.out.join("cells.csv"))?);

@@ -90,8 +90,8 @@ impl Trial {
         } else {
             super::super::live::terrain_hit(previous, self.flight.position, &sampled)
         };
-        let hit =
-            contact.is_some_and(|contact| ground_hit.is_none_or(|fraction| contact < fraction));
+        let hit = !self.flight.defeated
+            && contact.is_some_and(|contact| ground_hit.is_none_or(|fraction| contact < fraction));
         if hit || ground_hit.is_some() || self.flight.lost || self.flight.age >= self.body.life {
             self.answer = Some(Answer {
                 hit,
@@ -231,6 +231,8 @@ crate::checkpoint_struct!(Body {
     ignition,
     life,
     guidance_ticks,
+    defeat_mach,
+    defeat_ticks,
     structural_g,
     lift_coefficient,
     induced_factor,

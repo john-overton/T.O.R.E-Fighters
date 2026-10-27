@@ -344,6 +344,9 @@ pub fn fly(
                 if energy.flight.lost {
                     shot.control_loss_s.get_or_insert(t);
                 }
+                if energy.flight.defeated {
+                    shot.defeat_s.get_or_insert(t);
+                }
                 if energy.tracking.notched
                     && !energy.flight.lost
                     && p.guidance.as_ref().is_some_and(|f| f.enabled)

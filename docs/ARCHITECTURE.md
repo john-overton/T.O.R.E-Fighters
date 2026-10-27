@@ -405,7 +405,9 @@ than 4 ms on average.
 #### The firing estimate and its exact shortcuts
 
 The following describes the preserved Spec path. Energy-mode flight uses a
-world-owned bounded prediction service, described in the
+world-owned bounded prediction service. Its shared body carries explicit class
+control and post-burn defeat policy; the checkpointed flight carries the
+consecutive low-Mach count and permanent inert state, described in the
 [energy specification](spec/missile-energy.md#estimates-and-acceptance).
 Player point jobs receive reserved admission and a quarter of the unchanged
 work budget first. Turn-projected advice is exposed through the player launcher

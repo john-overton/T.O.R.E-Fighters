@@ -64,6 +64,9 @@ pub struct Body {
     pub ignition: u32,
     pub life: u32,
     pub guidance_ticks: u32,
+    /// Zero disables post-burn defeat for ground-target classes.
+    pub defeat_mach: f64,
+    pub defeat_ticks: u32,
     pub structural_g: f64,
     pub lift_coefficient: f64,
     pub induced_factor: f64,
@@ -111,6 +114,9 @@ impl Body {
             && self.dry_mass() > 0.
             && self.life > 0
             && self.guidance_ticks > 0
+            && self.defeat_mach.is_finite()
+            && self.defeat_mach >= 0.
+            && self.defeat_ticks > 0
             && [self.boost, self.sustain].into_iter().all(|m| {
                 m.thrust.is_finite()
                     && m.thrust >= 0.
@@ -176,7 +182,9 @@ pub struct Flight {
     pub axis: Vector,
     pub demand: Vector,
     pub age: u32,
-    pub slow_ticks: u32,
+    pub subsonic_ticks: u32,
+    /// Permanent post-burn Mach defeat. Unlike control expiry, disables damage.
+    pub defeated: bool,
     pub controlled: bool,
     pub lost: bool,
     pub lofted: bool,
@@ -196,6 +204,9 @@ pub struct Forces {
     pub induced_drag: f64,
     pub available_g: f64,
     pub applied_g: f64,
+    pub required_g: f64,
+    pub g_deficit: f64,
+    pub closing_mps: f64,
     pub mach: f64,
     pub terrain_samples: usize,
 }
@@ -223,7 +234,8 @@ impl Flight {
             axis: unit(axis),
             demand: [0.; 3],
             age: 0,
-            slow_ticks: 0,
+            subsonic_ticks: 0,
+            defeated: false,
             controlled: false,
             lost: false,
             lofted: false,
@@ -368,18 +380,35 @@ impl Flight {
         let max_accel = (qs * body.lift_coefficient / mass).min(body.structural_g * G);
         if speed >= body.minimum_speed {
             self.controlled = true;
-            self.slow_ticks = 0;
-        } else if self.controlled || body.motor(self.age).is_none() && self.age >= body.ignition {
-            self.slow_ticks = self.slow_ticks.saturating_add(1);
-            if self.slow_ticks >= 30 {
-                self.lost = true;
+        }
+        // Sample before motion, so the 30th low-Mach sample disables every
+        // contact in this tick, including a contact at fraction zero.
+        if body.defeat_mach > 0. {
+            let burnout = body.ignition + body.boost.ticks + body.sustain.ticks;
+            if self.age >= burnout && speed / air.sound < body.defeat_mach {
+                self.subsonic_ticks = self.subsonic_ticks.saturating_add(1);
+                if self.subsonic_ticks >= body.defeat_ticks {
+                    self.defeated = true;
+                }
+            } else {
+                self.subsonic_ticks = 0;
             }
+        }
+        if self.defeated {
+            self.lost = true;
         }
         let command = if !self.lost && self.age >= body.ignition {
             target.map(|o| self.command(body, relative, o))
         } else {
             None
         };
+        let required_g = command.map_or(0., norm) / G;
+        let closing_mps = target.map_or(0., |o| {
+            -dot(
+                sub(o.velocity, self.velocity),
+                unit(sub(o.position, self.position)),
+            )
+        });
         if let Some(command) = command {
             let command = limited(command, max_accel);
             for (demand, command) in self.demand.iter_mut().zip(command) {
@@ -431,6 +460,9 @@ impl Flight {
             induced_drag: induced,
             available_g: max_accel / G,
             applied_g: acceleration / G,
+            required_g,
+            g_deficit: (required_g - max_accel / G).max(0.),
+            closing_mps,
             mach: speed / air.sound,
             terrain_samples: 0,
         }
@@ -443,7 +475,8 @@ crate::checkpoint_struct!(Flight {
     axis,
     demand,
     age,
-    slow_ticks,
+    subsonic_ticks,
+    defeated,
     controlled,
     lost,
     lofted,
@@ -474,6 +507,8 @@ pub(super) mod tests {
             },
             ignition: 0,
             life: 24000,
+            defeat_mach: 0.,
+            defeat_ticks: 30,
             guidance_ticks: 120 * 120,
             structural_g: 30.,
             lift_coefficient: 12.,
@@ -488,6 +523,81 @@ pub(super) mod tests {
             launch_elevation: -std::f64::consts::FRAC_PI_2,
         }
     }
+    #[test]
+    fn defeat_boundary_is_strict_post_burn_persistent_and_checkpointed() {
+        let b = Body {
+            defeat_mach: 1.,
+            defeat_ticks: 30,
+            ..body()
+        };
+        let air = Air {
+            density: 0.,
+            sound: 300.,
+        };
+        let mut f = Flight::launch([0., 10000., 0.], [0.; 3], [0., 0., 1.]);
+        // Even a previously controlled store cannot be kinetically defeated
+        // during ignition or either motor phase.
+        f.controlled = true;
+        for age in 0..b.ignition + b.boost.ticks + b.sustain.ticks {
+            f.age = age;
+            f.velocity = [0., 0., 10.];
+            f.step_in(b, [0.; 3], None, air);
+            assert!(!f.defeated && !f.lost);
+            assert_eq!(f.subsonic_ticks, 0);
+        }
+        for _ in 0..29 {
+            f.velocity = [0., 0., 299.];
+            f.step_in(b, [0.; 3], None, air);
+            assert!(!f.defeated);
+        }
+        // Equality resets the consecutive-sample window.
+        f.velocity = [0., 0., 300.];
+        f.step_in(b, [0.; 3], None, air);
+        assert_eq!(f.subsonic_ticks, 0);
+        for _ in 0..15 {
+            f.velocity = [0., 0., 299.];
+            f.step_in(b, [0.; 3], None, air);
+        }
+        let models = crate::checkpoint::Models::default();
+        let restored_body = crate::checkpoint::round_trip(&b, &models).unwrap();
+        assert_eq!(b, restored_body);
+        let mut copy = crate::checkpoint::round_trip(&f, &models).unwrap();
+        for tick in 16..=31 {
+            f.velocity = [0., 0., 299.];
+            copy.velocity = f.velocity;
+            assert_eq!(
+                f.step_in(b, [0.; 3], None, air),
+                copy.step_in(restored_body, [0.; 3], None, air)
+            );
+            assert_eq!(f, copy);
+            assert_eq!(f.defeated, tick >= 30);
+        }
+        f.velocity = [0., 0., 1000.];
+        f.step_in(b, [0.; 3], None, air);
+        assert!(f.lost && f.defeated);
+    }
+
+    #[test]
+    fn subsonic_cruise_keeps_power_and_stationary_target_control() {
+        let b = Body {
+            defeat_mach: 0.,
+            cruise_drag: true,
+            ..body()
+        };
+        let target = Some(Observation {
+            position: [0., 1000., 10000.],
+            velocity: [0.; 3],
+        });
+        let mut f = Flight::launch([0., 1000., 0.], [0., 0., 60.], [0., 0., 1.]);
+        for _ in 0..120 {
+            f.velocity = [0., 0., 60.];
+            let forces = f.step(b, [0.; 3], target);
+            assert!(forces.thrust > 0. && forces.mach < 1.);
+            assert!(forces.required_g.is_finite() && forces.closing_mps > 0.);
+            assert!(!f.lost && !f.defeated);
+        }
+    }
+
     #[test]
     fn battery_expiry_is_irreversible_and_leaves_ballistic_motion() {
         let mut b = body();
@@ -585,7 +695,7 @@ pub(super) mod tests {
         assert!(norm(vacuum.velocity) > 200.);
     }
     #[test]
-    fn low_speed_loss_does_not_prevent_a_powered_launch_and_is_permanent() {
+    fn post_burn_defeat_does_not_prevent_a_powered_launch_and_is_permanent() {
         let b = body();
         let mut f = Flight::launch([0., 1000., 0.], [0.; 3], [0., 0., 1.]);
         for _ in 0..240 {
@@ -594,6 +704,7 @@ pub(super) mod tests {
         assert!(f.controlled && !f.lost);
         f.velocity = [0., 0., 60.];
         let coast = Body {
+            defeat_mach: 1.,
             boost: Motor::default(),
             sustain: Motor::default(),
             ..b

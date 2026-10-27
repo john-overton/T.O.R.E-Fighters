@@ -8,16 +8,16 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-26. Model calibration, not retail
+Implementation mode, 2026-10-27. Model calibration, not retail
 parity or a validated engineering flight envelope. Semantic model identity,
 branch `missile-overhaul`, Linux x86-64. Input came from the isolated imported
 profile for this task; no media bytes are committed. The shared offline probe
 is `cargo run --locked --release -p tore-sim --example missile_energy_ranges
--- LOCAL_JT_DIRECTORY`. `--fit-pair` prints constrained motor/drag/control-time candidates; `--verify`
+-- LOCAL_JT_DIRECTORY`. `--fit-class` exports fixed-budget one-anchor candidates for tools/missile_energy_fit.py; `--verify`
 checks tail reach, altitude, generation ordering, finite shots and local
 parameter sensitivity. Neither changes source or runs during gameplay.
 
-This baseline contains the Phase 2 review corrections. The earlier Phase 3
+This baseline contains Phase 2.5 class budgets and post-burn inert defeat. The earlier Phase 3
 study is invalidated, remains labelled pre-fix in local scratch, and has not
 been resumed. This pass is calibration and regression validation only.
 
@@ -31,7 +31,7 @@ rounded to 0.01 km. The sweep samples ranges by factor 1.5 from 100 m to
 1000 km and adds the shared anchor/loft-transition probes, then bisects the last
 successful interval ten times. It can miss a
 narrow disconnected island of success. It is not a mathematical proof of a
-continuous no-escape envelope. Paired and regression diagnostics
+continuous no-escape envelope. Fitting and regression diagnostics
 use twelve bisections instead of ten, so their last reported decimals can
 differ slightly from the complete sweep without a physics change.
 
@@ -52,7 +52,7 @@ Together with the sampled search, this limits how literally either maximum
 should be read as a continuous launch boundary.
 
 Public facts and the deliberately fitted anchor conditions are separated in
-[the data evidence](../formats/missile-energy-data.md#per-store-motors-and-paired-anchors).
+[the data evidence](../formats/missile-energy-data.md#per-store-motors-and-class-control-budgets).
 All conditional anchors are agent choices unless explicitly sourced. The
 M/X and R73 high-head anchors have been restored to their earlier lower values. Physical head-on reach does not give a rear-only seeker
 a head-on lock. Held records remain unavailable in gameplay.
@@ -63,62 +63,62 @@ Each cell is head / beam / tail, km. All 25 inventory records are included,
 including held records measured diagnostically without enabling them.
 
 | Store | Primary reference km | 500 ft | 5,000 ft | 15,000 ft | 35,000 ft |
-| --- | ---: | --- | --- | --- |
-| AA10.JT | 73 | 26.82 / 8.61 / 5.67 | 30.61 / 9.69 / 6.47 | 55.45 / 12.85 / 8.81 | 73.00 / 24.75 / 17.59 |
-| AA11.JT | 30 | 21.64 / 9.57 / 6.14 | 22.57 / 10.90 / 7.06 | 25.00 / 14.39 / 9.49 | 30.00 / 20.41 / 14.48 |
-| AA11B.JT | 30 | 21.64 / 9.57 / 6.14 | 22.57 / 10.90 / 7.06 | 25.00 / 14.39 / 9.49 | 30.00 / 20.41 / 14.48 |
-| AA12.JT | 50 | 30.85 / 13.36 / 9.52 | 32.56 / 15.00 / 10.77 | 37.09 / 19.62 / 14.27 | 50.00 / 35.96 / 27.02 |
-| AA2.JT | 20 | 16.15 / 2.92 / 1.91 | 16.54 / 3.30 / 2.18 | 17.52 / 4.40 / 2.99 | 20.01 / 8.01 / 5.46 |
-| AA6.JT | 30 | 15.62 / 8.43 / 6.01 | 19.97 / 9.49 / 6.81 | 22.57 / 12.58 / 9.16 | 30.00 / 21.79 / 16.54 |
-| AA8.JT | 10 | 7.76 / 3.52 / 2.07 | 8.07 / 3.95 / 2.38 | 8.80 / 4.95 / 3.11 | 10.01 / 6.31 / 4.32 |
-| AA9.JT | 120 | 12.48 / 6.32 / 2.23 | 62.97 / 12.29 / 6.82 | 91.91 / 16.85 / 9.74 | 120.00 / 33.85 / 20.90 |
-| AAML.JT | 150 | 35.31 / 20.86 / 13.71 | 66.74 / 23.43 / 15.62 | 111.78 / 30.75 / 21.05 | 150.00 / 58.59 / 40.84 |
-| AEMP1.JT | 50 | 30.84 / 13.32 / 9.50 | 32.55 / 14.96 / 10.75 | 37.09 / 19.59 / 14.25 | 50.02 / 35.95 / 27.01 |
-| AIM120.JT | 60 | 36.36 / 14.90 / 10.69 | 38.37 / 16.69 / 12.06 | 43.84 / 21.90 / 16.01 | 60.02 / 42.59 / 31.34 |
-| AIM54C.JT | 150 | 12.34 / 6.40 / 2.38 | 75.26 / 16.93 / 9.81 | 112.50 / 23.23 / 13.96 | 150.00 / 45.05 / 28.51 |
-| AIM7.JT | 70 | 57.71 / 41.21 / 30.92 | 59.59 / 43.39 / 33.04 | 63.48 / 47.79 / 37.47 | 70.00 / 54.70 / 44.53 |
-| AIM7E.JT | 35 | 16.78 / 10.31 / 7.06 | 23.85 / 11.53 / 8.06 | 26.83 / 15.01 / 10.74 | 35.01 / 25.15 / 18.84 |
-| AIM9B.JT | 20 | 13.16 / 4.92 / 3.21 | 13.68 / 5.61 / 3.69 | 15.05 / 7.63 / 5.05 | 18.09 / 11.62 / 8.09 |
-| AIM9M.JT | 18 | 13.56 / 7.94 / 5.31 | 14.19 / 8.77 / 5.94 | 15.57 / 10.41 / 7.33 | 18.02 / 13.04 / 9.77 |
-| AIM9X.JT | 18 | 13.53 / 7.95 / 5.32 | 14.15 / 8.79 / 5.94 | 15.55 / 10.44 / 7.34 | 18.02 / 13.07 / 9.81 |
-| MICA.JT | 60 | 25.14 / 9.57 / 6.64 | 29.71 / 10.70 / 7.53 | 44.90 / 13.99 / 10.07 | 60.01 / 26.05 / 19.07 |
-| PL10.JT | 50 | 31.09 / 6.68 / 3.50 | 32.71 / 12.53 / 8.70 | 36.91 / 16.25 / 11.55 | 50.00 / 31.91 / 22.64 |
-| PL7.JT | 14 | 10.28 / 6.99 / 4.99 | 10.77 / 7.54 / 5.47 | 11.86 / 8.73 / 6.57 | 14.03 / 10.98 / 8.73 |
-| R27ER.JT | 117 | 50.11 / 11.92 / 7.22 | 57.37 / 13.68 / 8.40 | 84.24 / 18.91 / 11.92 | 117.00 / 36.77 / 24.01 |
-| R27ET.JT | 104 | 34.68 / 16.83 / 11.18 | 54.35 / 19.02 / 12.76 | 66.74 / 25.45 / 17.38 | 103.96 / 49.18 / 34.50 |
-| R27T.JT | 63 | 29.38 / 11.62 / 8.21 | 32.54 / 13.04 / 9.31 | 40.91 / 17.02 / 12.35 | 62.99 / 31.74 / 23.61 |
-| R530.JT | 40 | 24.91 / 10.13 / 7.06 | 26.23 / 11.34 / 8.00 | 29.73 / 14.82 / 10.67 | 40.01 / 27.51 / 20.35 |
-| R550.JT | 15 | 10.69 / 6.98 / 4.93 | 11.24 / 7.64 / 5.48 | 12.49 / 9.04 / 6.73 | 15.02 / 11.70 / 9.25 |
+| --- | ---: | --- | --- | --- | --- |
+| AA10.JT | 73 | 24.50 / 15.65 / 11.01 | 28.02 / 17.81 / 12.60 | 40.86 / 24.08 / 17.22 | 73.00 / 49.01 / 34.61 |
+| AA11.JT | 30 | 21.79 / 15.74 / 11.79 | 22.84 / 16.90 / 12.85 | 25.20 / 19.41 / 15.21 | 29.75 / 24.13 / 19.74 |
+| AA11B.JT | 30 | 21.79 / 15.74 / 11.79 | 22.84 / 16.90 / 12.85 | 25.20 / 19.41 / 15.21 | 29.75 / 24.13 / 19.74 |
+| AA12.JT | 50 | 17.16 / 7.91 / 4.75 | 20.02 / 9.18 / 5.56 | 30.39 / 13.05 / 7.98 | 50.00 / 24.70 / 15.84 |
+| AA2.JT | 20 | 12.56 / 7.11 / 4.84 | 14.54 / 8.18 / 5.60 | 17.28 / 10.71 / 7.28 | 19.99 / 13.78 / 9.99 |
+| AA6.JT | 30 | 9.77 / 5.71 / 3.83 | 11.07 / 6.49 / 4.40 | 14.94 / 8.78 / 6.08 | 30.06 / 17.48 / 12.50 |
+| AA8.JT | 10 | 6.10 / 2.11 / 1.35 | 7.03 / 2.45 / 1.60 | 9.93 / 3.54 / 2.34 | 14.04 / 6.53 / 4.04 |
+| AA9.JT | 120 | 11.85 / 6.54 / 2.77 | 34.26 / 20.38 / 13.24 | 44.66 / 26.98 / 18.03 | 120.00 / 54.19 / 35.14 |
+| AAML.JT | 150 | 35.77 / 22.68 / 14.23 | 41.94 / 25.67 / 17.11 | 56.43 / 34.47 / 23.41 | 150.00 / 69.97 / 46.83 |
+| AEMP1.JT | 50 | 17.16 / 7.86 / 4.74 | 20.02 / 9.14 / 5.55 | 30.39 / 13.02 / 7.97 | 50.00 / 24.69 / 15.83 |
+| AIM120.JT | 60 | 26.71 / 14.19 / 9.06 | 31.89 / 16.44 / 10.55 | 51.20 / 23.05 / 14.87 | 60.00 / 36.10 / 25.27 |
+| AIM54C.JT | 150 | 11.74 / 6.60 / 2.89 | 41.60 / 25.91 / 17.43 | 54.52 / 34.19 / 23.49 | 150.00 / 69.59 / 44.86 |
+| AIM7.JT | 70 | 38.09 / 15.89 / 9.63 | 46.49 / 24.23 / 16.25 | 59.38 / 33.93 / 22.43 | 70.00 / 47.22 / 34.81 |
+| AIM7E.JT | 35 | 10.74 / 4.16 / 2.57 | 12.24 / 4.84 / 3.02 | 16.83 / 6.88 / 4.38 | 34.99 / 14.80 / 9.69 |
+| AIM9B.JT | 20 | 13.72 / 7.67 / 5.14 | 15.90 / 8.84 / 5.95 | 17.33 / 10.84 / 7.33 | 19.65 / 13.41 / 9.65 |
+| AIM9M.JT | 18 | 12.93 / 7.68 / 5.24 | 14.75 / 8.75 / 6.03 | 17.97 / 11.54 / 7.97 | 21.36 / 15.31 / 11.36 |
+| AIM9X.JT | 18 | 12.88 / 7.68 / 5.24 | 14.69 / 8.76 / 6.03 | 18.00 / 11.59 / 8.00 | 21.43 / 15.39 / 11.43 |
+| MICA.JT | 60 | 24.19 / 13.14 / 8.39 | 28.57 / 15.21 / 9.77 | 46.16 / 21.25 / 13.76 | 60.00 / 35.92 / 24.88 |
+| PL10.JT | 50 | 12.22 / 6.45 / 2.52 | 21.19 / 9.51 / 5.72 | 31.55 / 13.43 / 8.18 | 50.00 / 25.01 / 16.04 |
+| PL7.JT | 14 | 5.80 / 1.86 / 1.27 | 6.67 / 2.14 / 1.51 | 9.37 / 3.04 / 2.21 | 13.99 / 6.25 / 4.00 |
+| R27ER.JT | 117 | 27.50 / 17.32 / 11.98 | 31.12 / 19.63 / 13.70 | 42.16 / 26.52 / 18.78 | 117.00 / 53.72 / 37.24 |
+| R27ET.JT | 104 | 33.06 / 19.50 / 12.94 | 37.82 / 22.30 / 14.88 | 51.91 / 30.60 / 20.62 | 103.96 / 61.28 / 41.84 |
+| R27T.JT | 63 | 27.16 / 15.45 / 10.08 | 31.26 / 17.76 / 11.66 | 43.46 / 24.63 / 16.28 | 62.99 / 40.84 / 28.02 |
+| R530.JT | 40 | 9.82 / 4.34 / 2.56 | 11.21 / 5.01 / 3.01 | 15.59 / 7.04 / 4.39 | 40.00 / 15.43 / 9.91 |
+| R550.JT | 15 | 11.33 / 4.75 / 2.87 | 13.20 / 5.55 / 3.37 | 14.03 / 6.85 / 4.02 | 15.00 / 7.88 / 5.00 |
 
 ## Complete A2A seeker-valid reach
 
 | Store | 500 ft | 5,000 ft | 15,000 ft | 35,000 ft |
 | --- | --- | --- | --- | --- |
-| AA10.JT | 26.82 / 8.61 / 5.67 | 30.61 / 9.69 / 6.47 | 55.34 / 12.85 / 8.81 | 72.81 / 24.75 / 17.59 |
-| AA11.JT | 11.56 / 9.54 / 6.14 | 11.56 / 10.88 / 7.06 | 11.56 / 14.37 / 9.49 | 11.56 / 15.30 / 14.48 |
-| AA11B.JT | 11.56 / 9.54 / 6.14 | 11.56 / 10.88 / 7.06 | 11.56 / 14.37 / 9.49 | 11.56 / 15.30 / 14.48 |
-| AA12.JT | 30.85 / 13.34 / 9.52 | 32.56 / 14.97 / 10.77 | 37.09 / 19.59 / 14.27 | 50.00 / 35.92 / 27.02 |
-| AA2.JT | 0.00 / 0.00 / 1.91 | 0.00 / 0.00 / 2.18 | 0.00 / 0.00 / 2.99 | 0.00 / 0.00 / 5.46 |
+| AA10.JT | 24.51 / 15.65 / 11.01 | 28.03 / 17.81 / 12.60 | 40.85 / 24.08 / 17.22 | 72.84 / 48.60 / 34.61 |
+| AA11.JT | 11.56 / 15.30 / 11.79 | 11.56 / 15.30 / 12.85 | 11.56 / 15.30 / 15.21 | 11.56 / 15.30 / 18.28 |
+| AA11B.JT | 11.56 / 15.30 / 11.79 | 11.56 / 15.30 / 12.85 | 11.56 / 15.30 / 15.21 | 11.56 / 15.30 / 18.28 |
+| AA12.JT | 17.17 / 7.89 / 4.75 | 20.03 / 9.17 / 5.56 | 30.40 / 12.98 / 7.98 | 50.00 / 24.56 / 15.84 |
+| AA2.JT | 0.00 / 0.00 / 4.85 | 0.00 / 0.00 / 5.61 | 0.00 / 0.00 / 7.28 | 0.00 / 0.00 / 9.14 |
 | AA6.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
-| AA8.JT | 5.78 / 3.48 / 2.07 | 5.78 / 3.92 / 2.38 | 5.78 / 4.92 / 3.11 | 5.78 / 6.29 / 4.32 |
+| AA8.JT | 5.78 / 2.02 / 1.35 | 5.78 / 2.38 / 1.60 | 5.78 / 3.49 / 2.34 | 5.78 / 6.48 / 4.04 |
 | AA9.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
-| AAML.JT | 35.31 / 20.83 / 13.71 | 66.74 / 23.41 / 15.62 | 111.78 / 30.72 / 21.05 | 150.00 / 58.48 / 40.84 |
-| AEMP1.JT | 30.84 / 13.27 / 9.50 | 32.55 / 14.90 / 10.76 | 37.09 / 19.51 / 14.25 | 50.02 / 35.86 / 27.01 |
-| AIM120.JT | 36.36 / 14.88 / 10.70 | 38.37 / 16.66 / 12.06 | 43.84 / 21.86 / 16.01 | 60.02 / 42.53 / 31.34 |
-| AIM54C.JT | 12.34 / 6.40 / 2.38 | 75.26 / 16.93 / 9.81 | 112.50 / 23.19 / 13.96 | 150.00 / 44.99 / 28.52 |
-| AIM7.JT | 57.68 / 41.15 / 30.92 | 59.56 / 43.29 / 33.04 | 63.46 / 47.57 / 37.47 | 70.00 / 54.06 / 44.53 |
-| AIM7E.JT | 16.78 / 10.31 / 7.06 | 23.85 / 11.53 / 8.06 | 26.83 / 15.01 / 10.74 | 34.97 / 25.15 / 18.84 |
-| AIM9B.JT | 0.00 / 0.00 / 3.21 | 0.00 / 0.00 / 3.69 | 0.00 / 0.00 / 5.05 | 0.00 / 0.00 / 8.09 |
-| AIM9M.JT | 9.64 / 7.92 / 5.31 | 9.64 / 8.76 / 5.94 | 9.64 / 10.40 / 7.33 | 9.64 / 12.75 / 9.77 |
-| AIM9X.JT | 9.64 / 7.93 / 5.32 | 9.64 / 8.78 / 5.94 | 9.64 / 10.42 / 7.34 | 9.64 / 12.75 / 9.81 |
-| MICA.JT | 25.14 / 9.56 / 6.64 | 29.72 / 10.69 / 7.53 | 44.89 / 13.97 / 10.07 | 60.01 / 25.99 / 19.07 |
+| AAML.JT | 35.77 / 22.66 / 14.46 | 41.95 / 25.64 / 17.11 | 56.43 / 34.42 / 23.41 | 150.00 / 69.85 / 46.83 |
+| AEMP1.JT | 17.16 / 7.80 / 4.74 | 20.03 / 9.04 / 5.55 | 30.40 / 12.79 / 7.97 | 49.99 / 24.35 / 15.83 |
+| AIM120.JT | 26.71 / 14.15 / 9.06 | 31.89 / 16.39 / 10.55 | 51.20 / 22.96 / 14.87 | 60.00 / 36.00 / 25.27 |
+| AIM54C.JT | 11.74 / 6.60 / 2.89 | 41.60 / 25.89 / 17.43 | 54.54 / 34.17 / 23.50 | 150.00 / 69.50 / 44.88 |
+| AIM7.JT | 38.12 / 15.89 / 9.63 | 46.44 / 24.23 / 16.25 | 59.31 / 33.93 / 22.43 | 69.95 / 46.72 / 34.81 |
+| AIM7E.JT | 10.75 / 4.16 / 2.57 | 12.24 / 4.85 / 3.02 | 16.84 / 6.88 / 4.38 | 34.84 / 14.81 / 9.69 |
+| AIM9B.JT | 0.00 / 0.00 / 5.14 | 0.00 / 0.00 / 5.95 | 0.00 / 0.00 / 7.33 | 0.00 / 0.00 / 9.65 |
+| AIM9M.JT | 9.64 / 7.66 / 5.24 | 9.64 / 8.74 / 6.03 | 9.64 / 11.52 / 7.97 | 9.64 / 12.75 / 11.36 |
+| AIM9X.JT | 9.64 / 7.68 / 5.24 | 9.64 / 8.74 / 6.03 | 9.64 / 11.58 / 8.00 | 9.64 / 12.75 / 11.43 |
+| MICA.JT | 24.19 / 13.10 / 8.39 | 28.59 / 15.16 / 9.77 | 46.17 / 21.17 / 13.76 | 59.98 / 35.83 / 24.88 |
 | PL10.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
 | PL7.JT | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A | N/A / N/A / N/A |
-| R27ER.JT | 50.11 / 11.92 / 7.22 | 57.32 / 13.68 / 8.40 | 83.22 / 18.91 / 11.92 | 116.64 / 36.77 / 24.01 |
-| R27ET.JT | 11.56 / 15.30 / 11.19 | 11.56 / 15.30 / 12.76 | 11.56 / 15.30 / 17.38 | 11.56 / 15.30 / 18.28 |
-| R27T.JT | 11.56 / 11.60 / 8.21 | 11.56 / 13.03 / 9.31 | 11.56 / 15.30 / 12.35 | 11.56 / 15.30 / 18.28 |
-| R530.JT | 24.91 / 10.13 / 7.06 | 26.23 / 11.34 / 8.00 | 29.73 / 14.82 / 10.67 | 40.01 / 27.51 / 20.35 |
-| R550.JT | 9.64 / 6.97 / 4.93 | 9.64 / 7.63 / 5.48 | 9.64 / 9.03 / 6.73 | 9.64 / 11.70 / 9.25 |
+| R27ER.JT | 27.51 / 17.33 / 11.99 | 31.12 / 19.64 / 13.70 | 42.16 / 26.52 / 18.78 | 115.16 / 53.72 / 37.24 |
+| R27ET.JT | 11.56 / 15.30 / 12.94 | 11.56 / 15.30 / 14.89 | 11.56 / 15.30 / 18.28 | 11.56 / 15.30 / 18.28 |
+| R27T.JT | 11.56 / 15.30 / 10.09 | 11.56 / 15.30 / 11.66 | 11.56 / 15.30 / 16.28 | 11.56 / 15.30 / 18.28 |
+| R530.JT | 9.82 / 4.34 / 2.56 | 11.22 / 5.01 / 3.02 | 15.59 / 7.04 / 4.39 | 39.99 / 15.43 / 9.91 |
+| R550.JT | 9.64 / 4.72 / 2.88 | 9.64 / 5.52 / 3.37 | 9.64 / 6.81 / 4.02 | 9.64 / 7.84 / 5.00 |
 
 ## SAM and powered A-G calibration
 
@@ -145,277 +145,233 @@ separately; no seeker-valid claim is made from the physical-only rows.
 
 | Store | Anchor km | Launcher/target m | Physical km | Seeker-valid km |
 | --- | ---: | --- | --- | --- |
-| AGM45.JT | 40 | 1500/10 | 40.00 | 40.00 |
-| AGM65A.JT | 27 | 1500/10 | 27.00 | 15.17 |
-| AGM65G.JT | 32.18688 | 1500/10 | 32.19 | 18.23 |
-| AGM84A.JT | 185 | 1500/10 | 184.95 | 184.95 |
-| AGM84E.JT | 93 | 1500/10 | 93.01 | 91.41 |
-| AGM88.JT | 48.28032 | 1500/10 | 48.28 | 48.28 |
-| AM39.JT | 70 | 1500/10 | 69.98 | 69.98 |
-| AS14.JT | 10 | 1500/10 | 10.01 | N/A |
-| AS15.JT | 18.288 retail | 1500/10 | 18.30 | 18.30 |
-| AS16.JT | 150 | 1500/10 | 149.95 | 149.95 |
-| AS30.JT | 11 | 1500/10 | 11.01 | N/A |
-| AS7.JT | 10 | 1500/10 | 10.01 | 10.01 |
-| AT12.JT | 7.9248 retail | 1500/10 | 7.94 | N/A |
-| AT2.JT | 4 | 100/10 | 4.01 | N/A |
-| FIM92.JT | 4 | 10/800 | 6.40 / 3.02 / 1.56 / 4.01 | 6.40 / 3.02 / 1.56 / 4.01 |
-| MIS.JT | 6.5 | 10/1300 | 10.57 / 4.74 / 2.37 / 6.51 | 10.57 / 4.74 / 2.37 / 6.51 |
-| R440.JT | 10 | 10/2000 | 13.53 / 9.24 / 6.51 / 10.01 | 13.53 / 9.24 / 6.51 / 10.01 |
-| SA13.JT | 5 | 10/1000 | 7.51 / 4.20 / 2.48 / 5.01 | 4.75 / 4.20 / 2.48 / 5.01 |
-| SA14.JT | 4.5 | 10/900 | 7.16 / 3.46 / 1.80 / 4.51 | 3.79 / 3.46 / 1.80 / 4.51 |
-| SA15.JT | 12 | 10/2400 | 19.37 / 8.43 / 4.67 / 12.00 | 19.37 / 8.43 / 4.67 / 12.00 |
-| SA16.JT | 5.2 | 10/1040 | 8.33 / 3.95 / 2.02 / 5.21 | 2.77 / 3.68 / 2.02 / 4.44 |
-| SA19.JT | 8 | 10/1600 | 13.97 / 4.24 / 1.93 / 8.00 | 13.97 / 4.24 / 1.93 / 8.00 |
-| SA2A.JT | 29 | 10/3000 | 49.73 / 15.88 / 9.80 / 29.00 | 49.73 / 15.88 / 9.80 / 29.00 |
-| SA3.JT | 25 | 10/3000 | 42.36 / 13.69 / 7.94 / 25.00 | 42.32 / 13.69 / 7.94 / 25.00 |
-| SA6.JT | 24 | 10/3000 | 41.15 / 12.82 / 7.48 / 24.00 | 41.09 / 12.82 / 7.48 / 24.00 |
-| SA7.JT | 4.2 | 10/840 | 6.78 / 3.14 / 1.59 / 4.21 | 2.82 / 3.14 / 1.59 / 4.21 |
-| SA9.JT | 4.2 | 10/840 | 6.70 / 3.20 / 1.66 / 4.21 | 3.80 / 3.20 / 1.66 / 4.21 |
-| SAN11.JT | 8 | 10/1600 | 13.97 / 4.24 / 1.93 / 8.00 | 13.97 / 4.24 / 1.93 / 8.00 |
-| SAN3.JT | 30 | 10/3000 | 52.06 / 16.53 / 10.55 / 29.99 | 52.13 / 16.53 / 10.55 / 29.99 |
-| SAN4.JT | 10 | 10/2000 | 16.29 / 6.97 / 3.66 / 10.01 | 16.29 / 6.97 / 3.66 / 10.01 |
-| SAN7.JT | 25 | 10/3000 | 43.16 / 13.50 / 8.22 / 25.00 | 43.13 / 13.50 / 8.22 / 25.00 |
-| SAN9.JT | 12 | 10/2400 | 19.37 / 8.43 / 4.67 / 12.00 | 19.37 / 8.43 / 4.67 / 12.00 |
-| SEA_SPAR.JT | 26 | 10/3000 | 43.30 / 15.43 / 8.89 / 26.00 | 43.29 / 15.43 / 8.89 / 26.00 |
-| SSN9.JT | 150 | 10/10 | 149.95 | 149.95 |
+| AGM45.JT | 40 | 1500/10 | 42.73 | 42.73 |
+| AGM65A.JT | 27 | 1500/10 | 27.39 | 15.17 |
+| AGM65G.JT | 32.18688 | 1500/10 | 33.81 | 18.23 |
+| AGM84A.JT | 185 | 1500/10 | 189.79 | 189.79 |
+| AGM84E.JT | 93 | 1500/10 | 173.70 | 91.41 |
+| AGM88.JT | 48.28032 | 1500/10 | 49.20 | 49.20 |
+| AM39.JT | 70 | 1500/10 | 78.77 | 78.77 |
+| AS14.JT | 10 | 1500/10 | 33.73 | N/A |
+| AS15.JT | 18.288 retail | 1500/10 | 39.04 | 39.04 |
+| AS16.JT | 150 | 1500/10 | 76.24 | 76.24 |
+| AS30.JT | 11 | 1500/10 | 34.61 | N/A |
+| AS7.JT | 10 | 1500/10 | 22.70 | 22.70 |
+| AT12.JT | 7.9248 retail | 1500/10 | 53.39 | N/A |
+| AT2.JT | 4 | 100/10 | 9.10 | N/A |
+| FIM92.JT | 4 | 10/800 | 12.40 / 6.08 / 3.39 / 7.90 | 12.41 / 6.08 / 3.39 / 7.90 |
+| MIS.JT | 6.5 | 10/1300 | 11.44 / 4.96 / 2.56 / 7.01 | 11.44 / 4.97 / 2.56 / 7.02 |
+| R440.JT | 10 | 10/2000 | 22.98 / 13.78 / 9.36 / 16.16 | 22.99 / 13.78 / 9.36 / 16.16 |
+| SA13.JT | 5 | 10/1000 | 17.73 / 9.78 / 6.03 / 11.88 | 4.75 / 6.30 / 6.03 / 7.54 |
+| SA14.JT | 4.5 | 10/900 | 11.77 / 5.68 / 3.12 / 7.45 | 3.79 / 5.02 / 3.12 / 6.02 |
+| SA15.JT | 12 | 10/2400 | 15.91 / 7.70 / 4.38 / 10.16 | 15.92 / 7.70 / 4.38 / 10.16 |
+| SA16.JT | 5.2 | 10/1040 | 11.43 / 5.24 / 2.79 / 7.11 | 2.77 / 3.68 / 2.80 / 4.44 |
+| SA19.JT | 8 | 10/1600 | 9.40 / 3.67 / 1.66 / 5.61 | 9.41 / 3.67 / 1.67 / 5.61 |
+| SA2A.JT | 29 | 10/3000 | 27.32 / 14.55 / 9.24 / 18.21 | 27.33 / 14.55 / 9.24 / 18.21 |
+| SA3.JT | 25 | 10/3000 | 25.57 / 11.78 / 7.13 / 16.33 | 25.58 / 11.78 / 7.13 / 16.33 |
+| SA6.JT | 24 | 10/3000 | 23.38 / 11.34 / 6.84 / 15.06 | 23.39 / 11.34 / 6.84 / 15.06 |
+| SA7.JT | 4.2 | 10/840 | 10.72 / 5.04 / 2.70 / 6.71 | 2.82 / 3.73 / 2.70 / 4.48 |
+| SA9.JT | 4.2 | 10/840 | 12.22 / 5.96 / 3.31 / 7.77 | 3.80 / 5.03 / 3.31 / 6.03 |
+| SAN11.JT | 8 | 10/1600 | 9.40 / 3.67 / 1.66 / 5.61 | 9.41 / 3.67 / 1.67 / 5.61 |
+| SAN3.JT | 30 | 10/3000 | 27.34 / 15.45 / 10.09 / 18.64 | 27.34 / 15.46 / 10.09 / 18.64 |
+| SAN4.JT | 10 | 10/2000 | 14.13 / 6.39 / 3.47 / 8.81 | 14.14 / 6.39 / 3.47 / 8.82 |
+| SAN7.JT | 25 | 10/3000 | 23.50 / 12.40 / 7.73 / 15.54 | 23.50 / 12.40 / 7.73 / 15.55 |
+| SAN9.JT | 12 | 10/2400 | 15.91 / 7.70 / 4.38 / 10.16 | 15.92 / 7.70 / 4.38 / 10.16 |
+| SEA_SPAR.JT | 26 | 10/3000 | 28.25 / 13.37 / 8.01 / 18.10 | 28.25 / 13.37 / 8.01 / 18.11 |
+| SSN9.JT | 150 | 10/10 | 153.63 | 153.63 |
 
 AS15 and AT12 retain runtime decoded mass/range and the uniform class diameter
-because their real-world identity is unresolved. Their data-only fallback
-drag fit meets that retail range anchor; this is not real-world calibration.
+because their real-world identity is unresolved. Their historical fallback
+drag fit is retained; class budgets now change reach. This is game calibration.
 The SAM aspect allowance continues the previous game policy where the
 original aspect field has no reviewed interpretation. In particular, this
 is not a claim that every real infrared SAM is all-aspect.
 
-## Paired calibration results
+## One-anchor calibration and class floors
 
-Current physical reach with round-2 drag restored and the round-3 Sparrow
-refit retained. Conditions are altitude ft / aspect / target speed m/s /
-target km. They are fitted conditions unless explicitly sourced. No new
-per-store fit was performed for the geometry rollback.
+All 25 A2A records use fixed class budgets. No timer was fitted. The table
+reports 35k head reach and its residual against the unchanged numerical anchor.
+Fuel/drag are bounded fits; the detailed scoring and explicit class allocations
+are in [the data](../formats/missile-energy-data.md#per-store-motors-and-class-control-budgets).
+The sourced AIM9B motor/fuel pair and 20-second time are retained. M/X share
+the retained thrust/impulse data. Their overshoot is accepted, not removed
+by shortening control time.
 
-The paired perturbation column changes fuel/derived thrust, drag and controlled
-time by plus/minus 2%, measuring the largest change over the primary and
-secondary conditions. The A2A regression table below also perturbs burn duration
-at constant impulse, and samples primary plus 5k/35k tail conditions instead.
-These different parameters and geometries explain the different percentages.
-Neither is an uncertainty bound or a public performance claim.
+Every selected 5k tail clears its class floor and 1.2 times the decoded
+minimum. AA8 needs about 14.05 km high head to keep at least 1.5 km low tail;
+the feasibility study's roughly 13 km candidate had only 0.87 km tail and
+was therefore ineligible. AIM9B's 1.74% shortfall preserves modern IR tail
+ordering without changing its sourced motor or budget.
 
-"Controlled s" is the controlled-flight lifetime, fitted per missile to its
-head-on reference (FITTED-PER-MISSILE-REFERENCE-TIME). Ground and ship
-targets use their stationary or receding reference instead. AIM9B keeps its
-sourced 20 seconds. These times are not class-derived.
+| Store | Class | Fuel | Drag | Control s | Anchor km | H35 km | Residual | T5 km | Class floor km | 1.2 x decoded min km |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| AA10.JT | MediumAir | 0.401382 | 1.5 | 70 | 73 | 73.000 | +0.00% | 12.602 | 3 | 4.389 |
+| AA11.JT | ShortIr | 0.500000 | 1.1 | 20 | 30 | 29.749 | -0.84% | 12.848 | 1.5 | 0.732 |
+| AA11B.JT | ShortIr | 0.500000 | 1.1 | 20 | 30 | 29.749 | -0.84% | 12.848 | 1.5 | 0.549 |
+| AA12.JT | MediumAir | 0.151102 | 1 | 70 | 50 | 50.000 | +0.00% | 5.558 | 3 | 4.389 |
+| AA2.JT | ShortIr | 0.263265 | 2.25 | 20 | 20 | 19.994 | -0.03% | 5.603 | 1.5 | 1.463 |
+| AA6.JT | MediumAir | 0.352050 | 3 | 70 | 30 | 30.062 | +0.21% | 4.398 | 3 | 4.389 |
+| AA8.JT | ShortIr | 0.120000 | 1.75 | 20 | 10 | 14.045 | +40.45% | 1.596 | 1.5 | 1.463 |
+| AA9.JT | LongAir | 0.379835 | 1 | 180 | 120 | 120.000 | +0.00% | 13.244 | 5 | 4.389 |
+| AAML.JT | LongAir | 0.358567 | 0.75 | 180 | 150 | 150.000 | +0.00% | 17.109 | 5 | 10.973 |
+| AEMP1.JT | MediumAir | 0.151195 | 1 | 70 | 50 | 50.000 | +0.00% | 5.547 | 3 | 0.732 |
+| AIM120.JT | MediumAir | 0.220219 | 1 | 70 | 60 | 60.000 | +0.00% | 10.555 | 3 | 4.389 |
+| AIM54C.JT | LongAir | 0.404907 | 0.75 | 180 | 150 | 150.000 | +0.00% | 17.425 | 5 | 10.973 |
+| AIM7.JT | MediumAir | 0.292327 | 1 | 70 | 70 | 70.000 | +0.00% | 16.254 | 3 | 2.926 |
+| AIM7E.JT | MediumAir | 0.156298 | 2 | 70 | 35 | 34.994 | -0.02% | 3.022 | 3 | 1.097 |
+| AIM9B.JT | ShortIr | 0.243786 | 1.75 | 20 | 20 | 19.652 | -1.74% | 5.947 | 1.5 | 1.463 |
+| AIM9M.JT | ShortIr | 0.337835 | 3 | 20 | 18 | 21.363 | +18.68% | 6.028 | 1.5 | 1.463 |
+| AIM9X.JT | ShortIr | 0.341432 | 3 | 20 | 18 | 21.429 | +19.05% | 6.028 | 1.5 | 1.097 |
+| MICA.JT | MediumAir | 0.229913 | 1 | 70 | 60 | 60.000 | +0.00% | 9.765 | 3 | 4.389 |
+| PL10.JT | MediumAir | 0.157434 | 1 | 70 | 50 | 50.000 | +0.00% | 5.723 | 3 | 2.926 |
+| PL7.JT | ShortIr | 0.122969 | 2.25 | 20 | 14 | 13.995 | -0.04% | 1.506 | 1.5 | 1.463 |
+| R27ER.JT | LongAir | 0.394911 | 1.5 | 180 | 117 | 117.000 | +0.00% | 13.700 | 5 | 4.389 |
+| R27ET.JT | LongAir | 0.293510 | 1 | 180 | 104 | 103.962 | -0.04% | 14.882 | 5 | 4.389 |
+| R27T.JT | MediumAir | 0.255217 | 1 | 70 | 63 | 62.990 | -0.02% | 11.657 | 3 | 4.389 |
+| R530.JT | MediumAir | 0.179955 | 2 | 70 | 40 | 40.004 | +0.01% | 3.013 | 3 | 2.926 |
+| R550.JT | ShortIr | 0.122482 | 1 | 20 | 15 | 14.996 | -0.03% | 3.373 | 1.5 | 1.463 |
 
-| Store | Primary condition | Measured km | Secondary condition | Measured km | Drag | Controlled s | Paired perturbation change |
-| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
-| AIM120.JT | 35000 / head / 250 / 60 | 60.017 | 5000 / head / 250 / 27 | 38.369 | 2 | 52.308 | 1.35% |
-| AIM9M.JT | 35000 / head / 250 / 18 | 18.027 | 5000 / tail / 250 / 6 | 5.939 | 3 | 16.492 | 1.88% |
-| AIM9X.JT | 35000 / head / 250 / 18 | 18.024 | 5000 / tail / 250 / 6 | 5.945 | 3 | 16.417 | 1.87% |
-| AIM54C.JT | 35000 / head / 250 / 150 | 150.000 | 5000 / head / 250 / 67.5 | 75.271 | 0.75 | 244.150 | 3.40% |
-| AA10.JT | 35000 / head / 250 / 73 | 73.006 | 5000 / head / 250 / 32.85 | 30.617 | 3 | 107.733 | 2.66% |
-| R27ER.JT | 35000 / head / 250 / 117 | 117.000 | 5000 / head / 250 / 52.65 | 57.365 | 1.5 | 191.217 | 3.03% |
-| R27T.JT | 35000 / head / 250 / 63 | 63.006 | 5000 / head / 250 / 28.35 | 32.543 | 2.5 | 82.158 | 1.62% |
-| R27ET.JT | 35000 / head / 250 / 104 | 103.998 | 5000 / head / 250 / 46.8 | 54.368 | 1.5 | 145.550 | 1.57% |
-| AA11.JT | 35000 / head / 250 / 30 | 30.016 | 5000 / tail / 250 / 7 | 7.057 | 1.5 | 31.058 | 1.98% |
-| AA12.JT | 35000 / head / 250 / 50 | 50.011 | 5000 / head / 250 / 22.5 | 32.558 | 2 | 43.083 | 1.37% |
-| AA9.JT | 35000 / head / 250 / 120 | 120.000 | 5000 / head / 250 / 54 | 62.970 | 1 | 204.483 | 4.12% |
-| AGM65G.JT | 4921 / head / 0 / 32.1869 | 32.190 | 2460.5 / head / 0 / 31.5431 | 32.122 | 0.75 | 80.558 | 1.04% |
-| AGM88.JT | 4921 / head / 0 / 48.2803 | 48.285 | 2460.5 / head / 0 / 47.3147 | 46.671 | 0.75 | 86.275 | 1.06% |
-| AM39.JT | 4921 / head / 0 / 70 | 69.998 | 2460.5 / head / 0 / 68.6 | 70.046 | 0.5 | 179.183 | 1.04% |
-| AIM9B.JT | 35000 / head / 250 / 20 | 18.090 | 5000 / tail / 250 / 1.65 | 3.693 | 3 | 20.000 | 2.07% |
-| AA2.JT | 35000 / head / 250 / 20 | 20.013 | 5000 / tail / 250 / 1.65 | 2.181 | 2.5 | 29.092 | 2.31% |
-| AA8.JT | 35000 / head / 250 / 10 | 10.015 | 5000 / head / 250 / 4.5 | 8.068 | 3 | 11.375 | 1.91% |
-| R550.JT | 35000 / head / 250 / 15 | 15.021 | 5000 / head / 250 / 6.75 | 11.239 | 3 | 11.517 | 1.78% |
-| AA11B.JT | 35000 / head / 250 / 30 | 30.016 | 5000 / tail / 250 / 7 | 7.057 | 1.5 | 31.058 | 1.98% |
-| AIM7E.JT | 35000 / head / 250 / 35 | 35.016 | 5000 / head / 250 / 15.75 | 23.857 | 3 | 32.408 | 1.31% |
-| AIM7.JT | 35000 / head / 250 / 70 | 70.021 | 5000 / head / 250 / 31.5 | 59.597 | 0.5 | 51.550 | 1.95% |
-| R530.JT | 35000 / head / 250 / 40 | 40.012 | 5000 / head / 250 / 18 | 26.234 | 2.5 | 36.975 | 1.31% |
-| AAML.JT | 35000 / head / 250 / 150 | 150.000 | 5000 / head / 250 / 67.5 | 66.746 | 1 | 200.917 | 2.41% |
-| MICA.JT | 35000 / head / 250 / 60 | 60.010 | 5000 / head / 250 / 27 | 29.710 | 3 | 75.725 | 3.57% |
-| PL7.JT | 35000 / head / 250 / 14 | 14.028 | 5000 / head / 250 / 6.3 | 10.772 | 3 | 10.583 | 1.83% |
-| PL10.JT | 35000 / head / 250 / 50 | 50.011 | 5000 / head / 250 / 22.5 | 32.712 | 2.5 | 49.667 | 1.29% |
-| AEMP1.JT | 35000 / head / 250 / 50 | 50.015 | 5000 / head / 250 / 22.5 | 32.554 | 2 | 43.108 | 1.36% |
-| AA6.JT | 35000 / head / 250 / 30 | 30.013 | 5000 / head / 250 / 13.5 | 19.966 | 2.5 | 27.017 | 1.29% |
-| SA7.JT | 2756 / stationary / 0 / 4.2 | 4.210 | 1378 / stationary / 0 / 4.284 | 4.281 | 1 | 10.275 | 2.62% |
-| SA14.JT | 2953 / stationary / 0 / 4.5 | 4.511 | 1476.5 / stationary / 0 / 4.59 | 4.588 | 1 | 10.625 | 2.68% |
-| SA16.JT | 3412 / stationary / 0 / 5.2 | 5.211 | 1706 / stationary / 0 / 5.304 | 5.302 | 1 | 12.508 | 2.32% |
-| SA15.JT | 7874 / stationary / 0 / 12 | 12.005 | 3937 / stationary / 0 / 12.24 | 12.222 | 1 | 29.475 | 2.05% |
-| SA6.JT | 9843 / stationary / 0 / 24 | 24.002 | 4921.5 / stationary / 0 / 24.48 | 24.544 | 1 | 68.783 | 1.90% |
-| SA9.JT | 2756 / stationary / 0 / 4.2 | 4.211 | 1378 / stationary / 0 / 4.284 | 4.284 | 1 | 9.983 | 2.67% |
-| MIS.JT | 4265 / stationary / 0 / 6.5 | 6.508 | 2132.5 / stationary / 0 / 6.63 | 6.627 | 1 | 16.267 | 2.05% |
-| SEA_SPAR.JT | 9843 / stationary / 0 / 26 | 26.005 | 4921.5 / stationary / 0 / 26.52 | 26.518 | 0.75 | 69.242 | 2.07% |
-| FIM92.JT | 2625 / stationary / 0 / 4 | 4.010 | 1312.5 / stationary / 0 / 4.08 | 4.080 | 1 | 9.583 | 2.70% |
-| R440.JT | 6562 / stationary / 0 / 10 | 10.014 | 3281 / stationary / 0 / 10.2 | 10.135 | 1 | 14.050 | 2.08% |
-| SA2A.JT | 9843 / stationary / 0 / 29 | 29.003 | 4921.5 / stationary / 0 / 29.58 | 29.528 | 1 | 83.150 | 1.72% |
-| SA3.JT | 9843 / stationary / 0 / 25 | 25.002 | 4921.5 / stationary / 0 / 25.5 | 25.582 | 1 | 69.533 | 2.02% |
-| SA13.JT | 3281 / stationary / 0 / 5 | 5.015 | 1640.5 / stationary / 0 / 5.1 | 5.099 | 1 | 9.992 | 2.83% |
-| SA19.JT | 5249 / stationary / 0 / 8 | 8.004 | 2624.5 / stationary / 0 / 8.16 | 8.166 | 1 | 23.892 | 1.65% |
-| SAN3.JT | 9843 / stationary / 0 / 30 | 30.002 | 4921.5 / stationary / 0 / 30.6 | 30.511 | 1 | 88.517 | 1.46% |
-| SAN4.JT | 6562 / stationary / 0 / 10 | 10.007 | 3281 / stationary / 0 / 10.2 | 10.202 | 1 | 25.175 | 2.05% |
-| SAN7.JT | 9843 / stationary / 0 / 25 | 25.002 | 4921.5 / stationary / 0 / 25.5 | 25.489 | 1 | 72.933 | 1.73% |
-| SAN9.JT | 7874 / stationary / 0 / 12 | 12.005 | 3937 / stationary / 0 / 12.24 | 12.222 | 1 | 29.475 | 2.05% |
-| SAN11.JT | 5249 / stationary / 0 / 8 | 8.004 | 2624.5 / stationary / 0 / 8.16 | 8.166 | 1 | 23.892 | 1.65% |
-| SSN9.JT | 9843 / head / 0 / 150 | 149.990 | 9843 / tail / 15 / 135 | 142.160 | 0.4 | 528.533 | 0.83% |
-| AGM45.JT | 4921 / head / 0 / 40 | 40.005 | 2460.5 / head / 0 / 39.2 | 38.644 | 0.75 | 77.483 | 1.07% |
-| AGM65A.JT | 4921 / head / 0 / 27 | 27.003 | 2460.5 / head / 0 / 26.46 | 26.850 | 0.75 | 86.950 | 1.09% |
-| AGM84A.JT | 4921 / head / 0 / 185 | 184.989 | 2460.5 / head / 0 / 181.3 | 184.935 | 1 | 584.883 | 2.01% |
-| AGM84E.JT | 4921 / head / 0 / 93 | 93.010 | 2460.5 / head / 0 / 91.14 | 92.946 | 1 | 296.408 | 2.03% |
-| AS7.JT | 4921 / head / 0 / 10 | 10.007 | 2460.5 / head / 0 / 9.8 | 9.999 | 1.5 | 20.650 | 1.44% |
-| AS16.JT | 4921 / head / 0 / 150 | 149.990 | 2460.5 / head / 0 / 147 | 150.658 | 0.25 | 337.792 | 1.27% |
-| AS14.JT | 4921 / head / 0 / 10 | 10.013 | 2460.5 / head / 0 / 9.8 | 10.121 | 1 | 14.183 | 2.09% |
-| AS30.JT | 4921 / head / 0 / 11 | 11.014 | 2460.5 / head / 0 / 10.78 | 11.110 | 1 | 14.383 | 2.08% |
-| AT2.JT | 328 / head / 0 / 4 | 4.008 | 200 / head / 0 / 3.92 | 4.001 | 1 | 10.592 | 2.32% |
-| AS15.JT | 4921 / head / 0 / 18.288 | 18.301 | 2460.5 / head / 0 / 17.9222 | 18.415 | 1 | 23.850 | 1.62% |
-| AT12.JT | 4921 / head / 0 / 7.9248 | 7.945 | 2460.5 / head / 0 / 7.7663 | 7.616 | 0.75 | 11.667 | 5.49% |
+## Family, ratio and altitude checks
 
-## Restored drag comparison
+Family margins are the smallest relative advantage over all twelve
+500/5k/15k/35k head/beam/tail cells for Sparrow and both R-27 pairs.
+IR generation margins cover the three 5k/15k/35k tail cells. These measured
+constraints do not assert universal cross-family generation ordering.
 
-John removed item 3 after reviewing round 3. There is no supplemental
-span/diameter multiplier or altitude fade. The force kernel is identical to
-reviewer commit c42555ed; the newer-Sparrow refit, guidance-time labels, player
-priority/turn extrapolation and behavior tripwire are retained. Span data remain
-[reference only](../formats/missile-energy-data.md#span-reference-data).
+| Newer / older | Minimum advantage |
+| --- | ---: |
+| AIM7.JT/AIM7E.JT | 99.99% |
+| R27ER.JT/AA10.JT | 3.16% |
+| R27ET.JT/R27T.JT | 19.46% |
+| AIM9M.JT/AIM9B.JT | 1.35% |
+| AIM9M.JT/AA2.JT | 7.58% |
+| AIM9M.JT/AA8.JT | 180.74% |
+| AIM9X.JT/AIM9B.JT | 1.38% |
+| AIM9X.JT/AA2.JT | 7.62% |
+| AIM9X.JT/AA8.JT | 182.54% |
+| AA11.JT/AIM9B.JT | 104.59% |
+| AA11.JT/AA2.JT | 97.50% |
+| AA11.JT/AA8.JT | 387.93% |
 
-All 379 non-Sparrow cases reproduce the round-2 physical and seeker-valid
-range outputs exactly at the probe's reported precision. The remaining twelve
-Sparrow cases use the explicitly retained refit. Low-head reference mismatches
-from the fitted model remain visible in the paired table; removing the multiplier
-does not claim to resolve those pre-existing differences.
+Every selected H5/H35 is within 0.20..0.90 and every T5/H35 within 0.05..0.60.
+No altitude reversal exceeds 10%, and no physical sweep cell has zero reach.
+Three 500-foot employment intervals are empty after the decoded minimum is
+applied: AIM54 beam 6.60 km and tail 2.89 km versus minimum 9.144 km, and
+AA9 tail 2.77 km versus 3.6576 km. These are investigated deck cases, not
+a claim that every physical maximum is a permitted launch. The same heavy
+stores already had deck-tail reach below their decoded minimum in the
+previous baseline. Their 5k tails exceed the required minimum margins.
+No launch gate was relaxed. At 10% beyond these deck edges, the diagnostic
+shots strike flat ground after 5.725..6.325 seconds at Mach 1.62..1.79,
+during boost, with neither control expiry nor post-burn defeat. This is the
+retained drop/PN trajectory's ground-contact limitation. Increasing its
+180-second budget would not prevent a ground collision six seconds after
+release. No new A2A ground-avoidance rule was introduced.
 
-| Case | Geometry enabled, round 3 km | Current km |
-| --- | ---: | ---: |
-| AIM120, 5k head | 38.301 | 38.369 |
-| AA2, 5k tail | 2.043 | 2.180 |
-| Newer Sparrow, 5k tail | 32.561 | 33.044 |
-| Harpoon, stationary surface target | 23.282 | 184.953 |
-| SA2A, stationary calibration target | 12.818 | 29.003 |
+The existing 12 km deck-tail escape and modern radar high-head ordering checks
+remain. Perturbation checks change fuel/derived thrust, drag, control budget
+and burn duration by 2% (constant impulse for burn duration), using high-head
+and 5k/35k tail conditions. They are sensitivity diagnostics, not uncertainty
+bounds.
 
-## Range regression outcomes
-
-All 25 A2A profiles exceed 2 km astern at 5,000 ft and increase at 15k/35k.
-Controlled shots at 150% of the primary head reference fail. M/X/R73 outreach
-B/R3S/AA8 astern at all three heights. The 12 km, 500 ft tail drag escapes
-M/X/R73. Newer Sparrow > AIM7E, R27ER > R27R (AA10), and R27ET > R27T each
-require twelve strict wins across 500/5k/15k/35k × head/beam/tail. The former
-geometry-only zero/zero deck-beam exception is removed. AIM120/R77/MICA >
-AIM7E/R40 (AA6)/Super530D is checked at 35k head, where the reference ordering
-is clear. Cross-family age alone does not establish a universal range ordering;
-burn duration, drag and control time differ. Newer Sparrow's 70 km reference
-is not forced below AMRAAM's 60 km reference.
-
-The A2A perturbation check additionally varies burn duration at constant
-impulse; every sampled range change remains below 10%. The paired column
-above uses different conditions and omits that fourth perturbation.
-
-| Store | Astern 5,000 ft km | Astern 15,000 ft km | Astern 35,000 ft km | Largest A2A perturbation change |
+| Store | Tail 5k km | Tail 15k km | Tail 35k km | Largest perturbation change |
 | --- | ---: | ---: | ---: | ---: |
-| AA10.JT | 6.475 | 8.816 | 17.589 | 1.90% |
-| AA11.JT | 7.057 | 9.491 | 14.486 | 1.98% |
-| AA11B.JT | 7.057 | 9.491 | 14.486 | 1.98% |
-| AA12.JT | 10.769 | 14.267 | 27.024 | 1.75% |
-| AA2.JT | 2.181 | 2.993 | 5.466 | 2.31% |
-| AA6.JT | 6.813 | 9.160 | 16.546 | 1.84% |
-| AA8.JT | 2.377 | 3.107 | 4.324 | 2.48% |
-| AA9.JT | 6.816 | 9.745 | 20.897 | 2.55% |
-| AAML.JT | 15.624 | 21.049 | 40.841 | 1.85% |
-| AEMP1.JT | 10.754 | 14.253 | 27.011 | 1.75% |
-| AIM120.JT | 12.058 | 16.011 | 31.346 | 1.75% |
-| AIM54C.JT | 9.814 | 13.966 | 28.516 | 2.48% |
-| AIM7.JT | 33.048 | 37.473 | 44.529 | 2.25% |
-| AIM7E.JT | 8.061 | 10.748 | 18.843 | 1.81% |
-| AIM9B.JT | 3.693 | 5.055 | 8.089 | 2.07% |
-| AIM9M.JT | 5.939 | 7.326 | 9.775 | 1.92% |
-| AIM9X.JT | 5.945 | 7.340 | 9.811 | 1.93% |
-| MICA.JT | 7.528 | 10.073 | 19.068 | 1.82% |
-| PL10.JT | 8.701 | 11.551 | 22.646 | 2.05% |
-| PL7.JT | 5.475 | 6.569 | 8.730 | 1.92% |
-| R27ER.JT | 8.402 | 11.921 | 24.019 | 2.56% |
-| R27ET.JT | 12.758 | 17.384 | 34.496 | 1.91% |
-| R27T.JT | 9.310 | 12.356 | 23.605 | 1.83% |
-| R530.JT | 7.997 | 10.676 | 20.348 | 1.80% |
-| R550.JT | 5.477 | 6.730 | 9.255 | 1.82% |
+| AIM120.JT | 10.555 | 14.871 | 25.268 | 2.53% |
+| AIM9M.JT | 6.028 | 7.975 | 11.359 | 1.96% |
+| AIM9X.JT | 6.030 | 7.997 | 11.432 | 1.95% |
+| AIM54C.JT | 17.426 | 23.498 | 44.875 | 2.07% |
+| AA10.JT | 12.605 | 17.220 | 34.614 | 1.90% |
+| R27ER.JT | 13.701 | 18.779 | 37.244 | 2.16% |
+| R27T.JT | 11.660 | 16.283 | 28.022 | 2.22% |
+| R27ET.JT | 14.885 | 20.621 | 41.847 | 2.05% |
+| AA11.JT | 12.849 | 15.205 | 19.742 | 1.87% |
+| AA12.JT | 5.558 | 7.980 | 15.840 | 2.74% |
+| AA9.JT | 13.244 | 18.035 | 35.147 | 2.37% |
+| AIM9B.JT | 5.948 | 7.333 | 9.650 | 2.15% |
+| AA2.JT | 5.604 | 7.281 | 9.996 | 2.08% |
+| AA8.JT | 1.596 | 2.337 | 4.046 | 2.87% |
+| R550.JT | 3.373 | 4.023 | 4.998 | 2.79% |
+| AA11B.JT | 12.849 | 15.205 | 19.742 | 1.87% |
+| AIM7E.JT | 3.022 | 4.385 | 9.685 | 2.85% |
+| AIM7.JT | 16.255 | 22.427 | 34.817 | 2.09% |
+| R530.JT | 3.014 | 4.395 | 9.912 | 2.75% |
+| AAML.JT | 17.112 | 23.408 | 46.826 | 1.94% |
+| MICA.JT | 9.768 | 13.759 | 24.883 | 2.49% |
+| PL7.JT | 1.506 | 2.207 | 3.996 | 2.88% |
+| PL10.JT | 5.725 | 8.185 | 16.035 | 2.74% |
+| AEMP1.JT | 5.547 | 7.971 | 15.835 | 2.75% |
+| AA6.JT | 4.399 | 6.084 | 12.502 | 1.97% |
+
+## SAM and A-G before/after
+
+Motor/fuel/drag are unchanged for these roles. Class control budgets and the
+post-burn air-target policy change reach. SAM rows below use their stationary
+calibration targets; moving head/beam/tail results are in the full table above.
+Ground seeker/support gates remain separate from these ideal physical values.
+
+| Store | Previous km | Phase 2.5 km | Change |
+| --- | ---: | ---: | ---: |
+| AGM65G.JT | 32.186 | 33.811 | +5.0% |
+| AGM88.JT | 48.280 | 49.199 | +1.9% |
+| AM39.JT | 69.982 | 78.770 | +12.6% |
+| SA7.JT | 4.208 | 6.713 | +59.5% |
+| SA14.JT | 4.511 | 7.445 | +65.0% |
+| SA16.JT | 5.211 | 7.112 | +36.5% |
+| SA15.JT | 12.003 | 10.158 | -15.4% |
+| SA6.JT | 23.995 | 15.065 | -37.2% |
+| SA9.JT | 4.210 | 7.768 | +84.5% |
+| MIS.JT | 6.507 | 7.014 | +7.8% |
+| SEA_SPAR.JT | 26.000 | 18.100 | -30.4% |
+| FIM92.JT | 4.010 | 7.898 | +97.0% |
+| R440.JT | 10.014 | 16.161 | +61.4% |
+| SA2A.JT | 29.003 | 18.214 | -37.2% |
+| SA3.JT | 25.002 | 16.332 | -34.7% |
+| SA13.JT | 5.014 | 11.881 | +137.0% |
+| SA19.JT | 8.002 | 5.607 | -29.9% |
+| SAN3.JT | 29.991 | 18.645 | -37.8% |
+| SAN4.JT | 10.006 | 8.814 | -11.9% |
+| SAN7.JT | 25.002 | 15.540 | -37.8% |
+| SAN9.JT | 12.003 | 10.158 | -15.4% |
+| SAN11.JT | 8.002 | 5.607 | -29.9% |
+| SSN9.JT | 149.954 | 153.634 | +2.5% |
+| AGM45.JT | 39.998 | 42.735 | +6.8% |
+| AGM65A.JT | 26.998 | 27.387 | +1.4% |
+| AGM84A.JT | 184.953 | 189.788 | +2.6% |
+| AGM84E.JT | 93.010 | 173.696 | +86.7% |
+| AS7.JT | 10.006 | 22.702 | +126.9% |
+| AS16.JT | 149.954 | 76.236 | -49.2% |
+| AS14.JT | 10.010 | 33.726 | +236.9% |
+| AS30.JT | 11.011 | 34.610 | +214.3% |
+| AT2.JT | 4.008 | 9.102 | +127.1% |
+| AS15.JT | 18.296 | 39.043 | +113.4% |
+| AT12.JT | 7.943 | 53.390 | +572.2% |
+
+AS16's fast-ground 90-second budget no longer fits its old 150 km proxy anchor.
+AT12 retains the game's cruise-path class and its 600-second budget; its real
+identity remains unknown. These are explicit class consequences, not new
+real-world performance claims. No A-G/SAM motor was refitted to hide them.
+
+## Defeat and force diagnostics
+
+The offline --diagnostics mode records available/required G, positive G
+deficit, closing speed, Mach, control expiry and post-burn defeat at each
+measured edge and 10% beyond it. These values do not create a G-based death
+rule. Raw commanded G near contact can exceed available G; applied steering
+is still limited by the shared kernel. The behaviour tripwire now includes
+the low-Mach countdown, reset, defeat transition and inert contacts.
 
 ## Validation status
 
-Implementation mode, Linux x86-64, Rust 1.91.1. Final workspace tests: 7,205
-passed, zero failed, 106 ignored across 59 suites. Workspace/all-target
-Clippy with warnings denied, formatting, workspace build, Python tests,
-source/both binary asset guards and documentation checks passed. All Cargo
-commands used --locked, four build workers and four test threads at nice 15.
-The memory guard checked free -g and waited below 8 GiB available before each
-heavy command. Heavy runs were serialized.
+Linux x86-64, model identity 11178521366749080852 (9b2215f4eb316d14),
+behaviour trace 14647273043871393956. All 7,212 Rust tests pass, with 106
+intentionally ignored: the complete workspace run had only the expected old
+golden pair failure, then the reviewed new pair passed its targeted rerun.
+Workspace build, clippy with warnings denied, formatting, documentation,
+507 Python tests (five skipped), and source/app/extractor asset checks pass.
+All 25 A2A range regressions pass, including the retained 12 km deck escape,
+class floors, decoded minimum margins, family ordering and 2% perturbations.
+All 391 physical/seeker rows and 668 edge/beyond-edge diagnostics were regenerated.
 
-All 35 battery scenarios passed, including the prior 34 and the retained turning
-player lane. Windows ran through tools/agent-run.sh, at most one at a time,
-with nice 15 restored inside Hyprland; battery concurrency was two jobs.
-The reviewer's c42555ed straight-flight envelope projection and earlier
-0c2209a7 non-vacuous decoy-fuze tests remain intact.
-
-The behavior-hash tripwire records model identity 4023372840491286706 and
-quantized trace 13974829545432589966. It covers synthetic trajectories and
-live contact/launcher exclusion, and detects an injected PN change without
-an identity change. Derivation and force revisions advance for the geometry
-removal; the round-3 prediction revision is retained. Numeric motor and curve inputs enter the
-model identity directly. Reference-only spans and ratios are not inputs. This is finite regression coverage, not proof
-that every possible rule change or platform difference is caught.
-
-The player tests sample the actual launcher-view HUD consumer in the opening
-20 seconds. The straight lanes require answers on 75% of all ticks and 90%
-of observed ticks. Turning lanes prescribe level circles at 3/10 degrees/s
-with normal enemy flying and sensors, at least 31 clients and 600 observed
-ticks, and answers on 90% of observed ticks. A miss is a valid answer, distinct
-from pending or absent observation. No future target pose is supplied to the
-predictor. Tests also reject reversals, changed turn rates, teleports and old
-answers, preserve strict AI permission, and exercise saturated admission.
-
-| Player HUD load | Hit / miss / pending | No observation | Answers / all ticks | Answers / observed ticks |
-| --- | --- | ---: | ---: | ---: |
-| 4v4 | 1920 / 114 / 0 | 366 | 84.75% | 100.00% |
-| 23 AI | 1890 / 74 / 0 | 436 | 81.83% | 100.00% |
-| 23 AI, 3 degrees/s | 1570 / 0 / 0 | 830 | 65.42% | 100.00% |
-| 23 AI, 10 degrees/s | 661 / 0 / 0 | 1739 | 27.54% | 100.00% |
-
-Windows/macOS execution, Apple Silicon fingerprints and retail comparison
-were not run. The model remains fitted, with pre-existing range-reference
-mismatches shown above; the geometry-only R27 exception is gone. Phase 3
-remains stopped and its previous study remains labelled pre-fix. This pass is calibration and regression validation.
-
-## Prediction cost
-
-Sequential release runs on AMD Ryzen 9 7900X, Linux x86-64, nice 15 while John
-used the PC. Cold is the first 240 ticks, later samples follow those ticks.
-Wall and thread CPU times include request work and prediction. Warm reads
-are measured separately and perform no flyout. The shared 16,384 quarter-step
-budget is unchanged; player work uses a portion of it, with the unused part
-returned to the common queue. There is no synchronous fallback.
-
-| Lane | Cold wall p50/p95 ms | Later wall p50/p95 ms | Later CPU p95 ms | Wall max ms | CPU max ms |
-| --- | --- | --- | ---: | ---: | ---: |
-| natural-ukr | 0.661 / 0.730 | 0.031 / 0.704 | 0.701 | 0.999 | 0.993 |
-| natural-bal | 0.647 / 0.730 | 0.030 / 0.690 | 0.687 | 0.911 | 0.907 |
-| natural-spa | 0.647 / 0.716 | 0.030 / 0.710 | 0.706 | 1.002 | 0.999 |
-| natural-gre | 0.673 / 0.744 | 0.032 / 0.715 | 0.713 | 2.804 | 0.904 |
-| natural-big | 0.751 / 0.836 | 0.721 / 0.793 | 0.787 | 1.520 | 1.022 |
-| turning-3 | 0.776 / 0.867 | 0.761 / 0.802 | 0.798 | 1.086 | 0.965 |
-| turning-10 | 0.758 / 0.796 | 0.768 / 0.815 | 0.810 | 1.045 | 1.018 |
-| hold-frozen | 0.807 / 0.914 | 0.810 / 0.931 | 0.928 | 1.107 | 1.104 |
-| hold-moving | 0.842 / 0.911 | 0.847 / 0.963 | 0.962 | 1.217 | 1.214 |
-| hold-cruise | 0.674 / 0.717 | 0.682 / 0.740 | 0.727 | 0.934 | 0.933 |
-
-The conservative sum of independent prediction and frame-reader wall maxima
-is 2.808 ms. Wall maxima include scheduling delays on the shared PC.
-All lanes had zero refused requests and zero admission starvation. CPU maxima
-remain below 1.22 ms. The largest prediction wall outlier was 2.804 ms in the
-Greece lane, with 0.888 ms of thread CPU time on that same tick; this is not a
-strict sub-2-ms wall guarantee on the shared PC. Admission is not proof of a
-usable answer: the synthetic moving-cruise pressure lane had zero qualified
-cached reads in its 20-second window. Its bounded cost is measured, not an
-availability pass. Natural-fight and player availability are reported separately.
-
-| Natural fight | Spec reference launches | Energy launches | AI gate hit / miss / pending | Available gate samples |
-| --- | ---: | ---: | --- | ---: |
-| natural-ukr | 11 | 13 | 100185 / 208500 / 30527 | 91.00% |
-| natural-bal | 12 | 13 | 121206 / 198712 / 34810 | 90.19% |
-| natural-spa | 12 | 13 | 104479 / 198141 / 35084 | 89.61% |
-| natural-gre | 12 | 13 | 117287 / 198302 / 35339 | 89.93% |
-| natural-big | 24 | 28 | 136317 / 135911 / 106196 | 71.94% |
+The 36-scenario battery and cost lanes are pending. Windows/macOS were not
+run on this Linux host. Retail comparison remains unavailable. Phase 3 stays
+stopped; its earlier pre-fix study is still invalid.

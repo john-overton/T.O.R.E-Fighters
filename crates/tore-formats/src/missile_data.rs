@@ -22,7 +22,7 @@ pub struct Reference {
 /// a different missile variant. Physics calibration is a separate fitted layer.
 pub const REFERENCES: &[Reference] = &[
     Reference {
-        drag_scale: 2.00000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -35,7 +35,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "OPEN-AMRAAM-A-50-70",
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 3.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -48,7 +48,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 3.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -61,7 +61,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 0.75000000,
+        drag_scale: 0.750000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -74,7 +74,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "NAVAIR-PHOENIX-C",
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 1.500000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -87,7 +87,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 1.50000000,
+        drag_scale: 1.500000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -100,7 +100,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 2.50000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -113,7 +113,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 1.50000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -126,7 +126,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ODIN-R27-MAXIMUM-ESTIMATE",
     },
     Reference {
-        drag_scale: 1.50000000,
+        drag_scale: 1.100000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -139,7 +139,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 2.00000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -152,7 +152,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "ROE2005-RVVAE-FIGHTER-PROXY",
     },
     Reference {
-        drag_scale: 1.00000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -204,7 +204,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "OPEN-AM39-RANGE",
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 1.750000000,
         structural_g: Some(12.),
         tracking_deg_s: Some(11.),
         fov_half_deg: Some(2.),
@@ -217,7 +217,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.50000000,
+        drag_scale: 2.250000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -230,7 +230,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 1.750000000,
         structural_g: Some(47.),
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -243,7 +243,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -256,7 +256,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 1.50000000,
+        drag_scale: 1.100000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -269,7 +269,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 2.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -282,7 +282,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 0.50000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -295,7 +295,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.50000000,
+        drag_scale: 2.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -308,7 +308,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 1.00000000,
+        drag_scale: 0.750000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -321,7 +321,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -334,7 +334,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 3.00000000,
+        drag_scale: 2.250000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -347,7 +347,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.50000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -360,7 +360,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.00000000,
+        drag_scale: 1.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -373,7 +373,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 2.50000000,
+        drag_scale: 3.000000000,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,

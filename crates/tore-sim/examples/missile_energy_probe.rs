@@ -21,6 +21,8 @@ fn body() -> Body {
         },
         ignition: 0,
         life: 24000,
+        defeat_mach: 0.,
+        defeat_ticks: 30,
         guidance_ticks: 120 * 120,
         structural_g: 30.,
         lift_coefficient: 12.,

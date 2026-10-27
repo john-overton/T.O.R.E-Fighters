@@ -352,6 +352,161 @@ fn candidate_maximum(w: &Weapon, body: missiles::energy::Body, anchor: [f64; 4])
     }
     low / 1000.
 }
+/// Candidate generation for the one-anchor joint family fit. No timers, ignition
+/// delays, secondary references, or class assignments are fitted here.
+/// The complete candidate grid is exported so family selection is reviewable.
+fn fit_class(dir: &Path, filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "source,class,fraction,drag,control_s,anchor_km,score,min_launch_km,floor_km,r500h,r500b,r500t,r5h,r5b,r5t,r15h,r15b,r15t,r35h,r35b,r35t"
+    );
+    for m in tore_formats::missile_motors::MOTORS {
+        if filter.is_some_and(|s| !s.split(',').any(|name| name == m.source)) {
+            continue;
+        }
+        let Some(floor) = m.control_class.tail_floor_km() else {
+            continue;
+        };
+        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+        let original = missiles::energy_profile::body(&w);
+        let minimum = w
+            .seeker
+            .zones
+            .iter()
+            .map(|z| f64::from(z.minimum_range) * FT / 1000.)
+            .fold(0f64, f64::max);
+        let floor = floor.max(1.2 * minimum + 0.01);
+        let scaled = |fuel: f64, drag: f64| {
+            let mut b = original;
+            let ratio = fuel / m.propellant_fraction;
+            b.boost.propellant *= ratio;
+            b.sustain.propellant *= ratio;
+            if m.thrust.is_none() {
+                b.boost.thrust *= ratio;
+                b.sustain.thrust *= ratio;
+            }
+            b.drag_scale = drag;
+            b
+        };
+        let mut drags: Vec<_> = (2..=12).map(|n| f64::from(n) * 0.25).collect();
+        // Refine the R73-family neighborhood where the fixed 20 s budget,
+        // high-head anchor and existing 12 km deck escape meet.
+        if matches!(m.source, "AA11.JT" | "AA11B.JT") {
+            drags.extend([1.05, 1.1, 1.15, 1.2]);
+            drags.sort_by(f64::total_cmp);
+        }
+        for drag in drags {
+            // Keep sourced thrust/impulse pairs intact; their dry-mass fraction
+            // is already in bounds. All other fuel fractions are fitted.
+            let mut fuel = m.propellant_fraction;
+            if m.thrust.is_none() {
+                let satisfies = |fuel| {
+                    let b = scaled(fuel, drag);
+                    candidate_hit(&w, b, m.primary, m.primary[2] * 1000.)
+                        && candidate_hit(&w, b, [5000., 2., 0., 250.], floor * 1000.)
+                };
+                let mut lo = 0.12;
+                let mut hi = 0.5;
+                if satisfies(lo) {
+                    hi = lo;
+                } else if satisfies(hi) {
+                    for _ in 0..14 {
+                        let mid = (lo + hi) * 0.5;
+                        if satisfies(mid) {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                }
+                fuel = hi;
+            }
+            let b = scaled(fuel, drag);
+            let mut ranges = Vec::new();
+            for alt in [500., 5000., 15000., 35000.] {
+                for aspect in 0..3 {
+                    ranges.push(candidate_maximum(&w, b, [alt, f64::from(aspect), 0., 250.]));
+                }
+            }
+            if ranges[5] + 0.002 < floor || ranges.contains(&0.) {
+                continue;
+            }
+            let error = (ranges[9] / m.primary[2] - 1.).abs();
+            let score =
+                4. * error + 0.02 * drag.ln().powi(2) + 0.02 * ((fuel - 0.35) / 0.38).powi(2);
+            print!(
+                "{},{:?},{fuel:.9},{drag},{},{},{score:.8},{minimum},{floor}",
+                m.source,
+                m.control_class,
+                m.control_class.seconds(),
+                m.primary[2]
+            );
+            for r in ranges {
+                print!(",{r:.6}");
+            }
+            println!();
+        }
+        eprintln!("class candidates {}", m.source);
+    }
+    Ok(())
+}
+/// Edge and ten-percent-beyond-edge diagnostics, using the same force kernel.
+fn diagnostics(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "source,altitude_ft,aspect,range_km,edge_fraction,hit,seconds,defeated,control_expired,mach,available_g,required_g,g_deficit,closing_mps,max_g_deficit"
+    );
+    for m in tore_formats::missile_motors::MOTORS {
+        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+        let b = missiles::energy_profile::body(&w);
+        let air = m.control_class.tail_floor_km().is_some();
+        let conditions: Vec<_> = if air {
+            [500., 5000., 15000., 35000.]
+                .into_iter()
+                .flat_map(|alt| (0..3).map(move |aspect| [alt, f64::from(aspect), 0., 250.]))
+                .collect()
+        } else {
+            vec![m.primary]
+        };
+        for condition in conditions {
+            let edge = candidate_maximum(&w, b, condition);
+            for ratio in [1., 1.1] {
+                let mut q = question(
+                    &w,
+                    condition[0] * FT,
+                    condition[1] as usize,
+                    edge * ratio * 1000.,
+                );
+                let mut last = missiles::energy::Forces::default();
+                let mut deficit: f64 = 0.;
+                while q.answer.is_none() {
+                    let mut sample = q.flight;
+                    last = sample.step(q.body, q.wind, Some(q.target));
+                    deficit = deficit.max(last.g_deficit);
+                    q.step(&|_, _| 0.);
+                }
+                let a = q.answer.unwrap();
+                println!(
+                    "{},{},{},{:.6},{ratio},{},{:.6},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{deficit:.6},{},{}",
+                    m.source,
+                    condition[0],
+                    condition[1],
+                    edge * ratio,
+                    a.hit,
+                    a.seconds,
+                    q.flight.defeated,
+                    q.flight.age > q.body.guidance_ticks,
+                    last.mach,
+                    last.available_g,
+                    last.required_g,
+                    last.g_deficit,
+                    last.closing_mps,
+                    q.flight.position[1] <= 0.,
+                    q.flight.age >= q.body.life
+                );
+            }
+        }
+    }
+    Ok(())
+}
 fn fit_pairs(
     dir: &Path,
     filter: Option<&str>,
@@ -521,7 +676,18 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
             [35000., 2., 0., 250.],
         ];
         let reach = anchors.map(|a| candidate_maximum(&w, body, a));
-        if reach[0] <= 2. || reach[0] >= reach[1] || reach[1] >= reach[2] {
+        let minimum = w
+            .seeker
+            .zones
+            .iter()
+            .map(|z| f64::from(z.minimum_range) * FT / 1000.)
+            .fold(0f64, f64::max);
+        let floor = m.control_class.tail_floor_km().expect("explicit A2A class");
+        if reach[0] < floor
+            || reach[0] <= 1.2 * minimum
+            || reach[1] < reach[0] * 0.9
+            || reach[2] < reach[1] * 0.9
+        {
             failures.push(format!(
                 "{}: inadequate or reversed tail reach {reach:?}",
                 m.source
@@ -529,8 +695,11 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         }
         tails.insert(m.source, reach);
         let primary = candidate_maximum(&w, body, m.primary);
-        if candidate_hit(&w, body, m.primary, m.primary[2] * 1500.) {
-            failures.push(format!("{}: 150% head-on anchor still hits", m.source));
+        if candidate_hit(&w, body, m.primary, primary * 1500.) {
+            failures.push(format!(
+                "{}: 150% measured head-on envelope still hits",
+                m.source
+            ));
         }
         let mut smooth: f64 = 0.;
         for ratio in [0.98, 1.02] {
@@ -716,7 +885,22 @@ fn fit_sparrow(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
-    if args.get(2).is_some_and(|s| s == "--fit-sparrow") {
+    if args.get(2).is_some_and(|s| s == "--diagnostics") {
+        return diagnostics(dir);
+    }
+    if args.get(2).is_some_and(|s| s == "--fit-class") {
+        return fit_class(dir, args.get(3).map(String::as_str));
+    }
+    if args
+        .get(2)
+        .is_some_and(|s| s == "--fit-pair" || s == "--fit-sparrow")
+    {
+        return Err("Timer fitting retired. Use --fit-class; historical reproduction only: --legacy-fit-pair or --legacy-fit-sparrow".into());
+    }
+    if args.get(2).is_some_and(|s| s.starts_with("--legacy-")) {
+        eprintln!("LEGACY TIMER-FITTED CALIBRATION, NOT THE CURRENT MODEL");
+    }
+    if args.get(2).is_some_and(|s| s == "--legacy-fit-sparrow") {
         return fit_sparrow(dir);
     }
     if args.get(2).is_some_and(|s| s == "--verify") {
@@ -751,7 +935,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args
         .iter()
-        .any(|s| s == "--fit-pair" || s == "--measure-pairs")
+        .any(|s| s == "--legacy-fit-pair" || s == "--measure-pairs")
     {
         fit_pairs(
             dir,

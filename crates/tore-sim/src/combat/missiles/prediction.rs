@@ -726,6 +726,9 @@ fn compatible(a: Trial, b: Trial, ticks: u64) -> bool {
     let tolerance = 30f64.max(norm(ra) * 0.02);
     (a == b || !launch || ticks <= 600)
         && a.body == b.body
+        && a.flight.defeated == b.flight.defeated
+        && a.flight.lost == b.flight.lost
+        && a.flight.subsonic_ticks == b.flight.subsonic_ticks
         && a.radius == b.radius
         && a.arming_age == b.arming_age
         && a.wind == b.wind
@@ -887,6 +890,23 @@ mod tests {
             30.,
             0,
         )
+    }
+    #[test]
+    fn changed_defeat_policy_or_countdown_invalidates_a_cached_answer() {
+        let mut q = question();
+        q.flight.age = 1200;
+        q.body.defeat_mach = 1.;
+        assert!(compatible(q, q, 0));
+        let mut changed = q;
+        changed.body.defeat_mach = 0.9;
+        assert!(!compatible(q, changed, 0));
+        changed = q;
+        changed.flight.subsonic_ticks = 29;
+        assert!(!compatible(q, changed, 0));
+        changed = q;
+        changed.flight.defeated = true;
+        changed.flight.lost = true;
+        assert!(!compatible(q, changed, 0));
     }
     fn turning_question(rate: f64, tick: u64) -> Trial {
         let mut q = question();

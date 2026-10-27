@@ -25,13 +25,21 @@ These are regressions for repeated rolls and comparison compatibility, not
 fixed Monte Carlo hit-rate targets. The broad calibration/study results are in the
 [missile energy baseline](../baselines/missile-energy.md).
 
-The offline `missile_energy_ranges` example accepts a local JT directory.
-`--verify` checks the documented A2A floors, generation orderings, long-low
-escape and local perturbations. `--measure-pairs` measures existing parameters;
-`--fit-pair` searches candidates but never edits data. `--fit-sparrow` searches
-the constrained newer-Sparrow refit and its complete family ordering grid.
-The geometry-data and geometry-sweep modes were removed with the unused force
-multiplier. Supplementary spans remain reference data in the data document.
+The new flight-missile-defeat scenario repeats 32 long AIM120/AA8 shots
+with four and one workers, requires an observed post-burn defeat and rejects
+any defeated shot that scores. Its additional defeat_s CSV column distinguishes
+kinetic defeat from ordinary control-time expiry. Synthetic Rust tests cover
+exact before/at/after contact ordering, direct/proximity/ground damage,
+powered cruise, mid-countdown checkpointing and cached-answer invalidation.
+
+The offline missile_energy_ranges example accepts a local JT directory.
+--verify checks class floors, decoded minimum margins, family ordering,
+long-low escape and local perturbations. --fit-class exports fixed-budget
+one-anchor candidates; tools/missile_energy_fit.py selects families jointly.
+--diagnostics reports G demand/capacity/deficit, closing speed and defeat
+at the edge and 10% beyond. --measure-pairs is historical comparison only.
+Timer-fitting tools require explicit --legacy-fit-pair/--legacy-fit-sparrow
+names and print a warning. No search edits source or runs during gameplay.
 
 The synthetic `behavior_hash_requires_a_model_revision_for_rule_changes` test
 pairs the model identity with a quantized trajectory/contact trace. A changed

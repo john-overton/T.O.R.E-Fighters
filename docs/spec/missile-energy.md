@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-26. **Energy is selected by new worlds; Linux regression validation passed.**
+Implementation mode, 2026-10-27. **Phase 2.5 validation is in progress.**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
@@ -57,8 +57,7 @@ values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
 John's round-3 decision removes the supplemental geometry-based drag factor.
-Drag uses the round-2 force law and per-profile fits, with the retained newer
-Sparrow refit. Altitude affects density and sound speed through the standard
+Drag uses the round-2 force law with Phase 2.5 one-anchor family fits. Altitude affects density and sound speed through the standard
 atmosphere above; there is no additional altitude fade or span/diameter factor.
 The supplementary [span reference data](../formats/missile-energy-data.md#span-reference-data)
 do not affect simulation. Body diameter still supplies the original frontal
@@ -79,20 +78,35 @@ one numerical step. This first-order force split with midpoint position is a
 fitted integration choice. Coasting total mechanical energy decreases in still
 air; a dive may increase kinetic energy at the expense of altitude.
 
-Rocket classes initially lose control below 120 m/s, slow cruise/command
-classes below 70 m/s, after 30 consecutive ticks. A powered launch may accelerate
-through that threshold before control first becomes available. After losing
-control the body is ballistic and cannot regain guidance by accelerating in a
-dive. Ground/water collision and lifetime remove it. Ordinary seeker memory
-loss remains separate and retains its specified reacquisition policy.
+John's 2026-10-27 policy applies to air-to-air and surface-launched air-target
+stores. After ignition plus both motor durations have elapsed, air-relative
+Mach strictly below 1.0 for 30 consecutive 120 Hz ticks defeats the store.
+Mach at or above 1.0 resets that counter. The threshold is the single global
+data knob `DEFEAT_MACH`; 0.9 and 1.1 are documented tuning alternatives,
+not additional runtime modes. Powered flight and the ignition delay never
+accumulate defeat ticks. There is no automatic defeat for a G deficit.
+Available G, required unclipped G, their positive deficit and closing speed
+are diagnostics only.
 
-Every profile also has an explicit controlled-flight lifetime, in seconds from
-release, independent of motor duration and body removal. At expiry guidance is
-irreversibly lost, including decoy pursuit. The body continues under thrust,
-drag and gravity until collision or removal. The forecast reports controlled
-intercepts only; an unguided body can still collide. This cutoff is John's
-2026-10-26 decision. Sourced times and times fitted per missile to its head-on reference are listed in the
-[data table](../formats/missile-energy-data.md).
+Defeat is permanent: guidance and all direct, proximity, ground and collateral
+damage stop. The body falls ballistically under drag and gravity until ground
+contact or removal age. The policy is evaluated before each motion/contact
+step: contact in the tick of defeat, or any later tick, cannot score, including
+a contact at fraction zero. Contact in an earlier tick can score. Forecast
+and live flight share this policy and its checkpointed state. This is distinct
+from ordinary seeker loss and from control-time expiry.
+
+Control budgets are explicit store classes, never fitted against range:
+short IR 20 seconds, medium air 70, long air 180, cruise 600, fast ground
+90, command 30, surface IR 25, surface radar 70 and long surface radar 120.
+Medium/long air also explicitly contain the corresponding R-27 IR variants.
+AIM9B retains its cited 20 seconds; every other allocation is an opinionated
+game choice using John's approved class budgets. Exact allocations live in
+`missile_motors::MOTORS`. At control expiry guidance is permanently lost,
+but an otherwise undefeated body can still collide. Forecasts count controlled
+intercepts only. Ground-target classes use path, support, terrain and control
+completion, without a Mach or low-speed defeat rule. Cruise drag and powered
+subsonic flight remain intact.
 
 A missile never acquires, guides toward, fuzes on, or damages its firing aircraft,
 including blast damage. This permanent exclusion is John's 2026-10-26 decision;
@@ -285,7 +299,8 @@ Compatibility, 4..8 select Spec. New Energy tapes carry an explicit model
 fingerprint marker and seed after the existing header. An old reader rejects that new
 marker rather than silently using old physics. No version constant is changed
 here; the lead owns the coordinated version bump. The fingerprint includes
-physical data, motor/fuel and controlled-life numeric inputs, drag-curve knots,
+physical data, motor/fuel, explicit class and control-time inputs, the global
+defeat threshold/dwell and drag-curve knots,
 and explicit semantic revisions for derivation, integration/atmosphere,
 guidance, seeker, decoy, prediction and fuze/contact rules. Any behavior change
 must update its rule revision; comments, citation wording in motor data and
