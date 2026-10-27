@@ -1751,12 +1751,15 @@ are behavior fixes, not evidence of retail combat parity. Validation lives in
   shares the combat segment query, which samples eight intervals and refines a
   crossing ten times. Very narrow intervening terrain can remain unresolved by
   that host sampling rule. The score receives pointing error, never angular margin.
-- Device debits occur individually at 30-tick intervals. Each released device
-  rolls independently against matching missiles targeting its owner, using the
-  imported susceptibility and dispenser effectiveness. Fitted visual feedback is
-  a camera-facing glint lasting 45 ticks, growing from 2 ft by 0.15 ft per tick.
-  Fitted decoy consequence: clear guidance and coast for the record's remaining
-  lifetime. Original lifetime shortening remains unknown.
+- Device debits and the defensive dispense schedule are unchanged. Energy
+  rules evaluate physical devices once per missile per two-second episode and
+  pursue a successful decoy, as specified in the
+  [energy countermeasure contract](missile-energy.md#countermeasure-contract).
+  The preserved Spec adapter rolls per device and clears guidance to coast for
+  the record's remaining lifetime. Original lifetime shortening remains unknown.
+  Model timing is available through the additive
+  `State::missile_time_to_impact` interface for already perceived threats;
+  this missile change does not replace the separately owned defensive policy.
 - AI movement follows the [input-only control contract](#input-only-aircraft-control).
   B44 remains a reference for requested limits, not a post-step pose override.
 - Wing-assignment penalties count other live attackers on the same side and in

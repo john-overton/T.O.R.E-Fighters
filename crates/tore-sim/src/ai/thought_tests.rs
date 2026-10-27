@@ -195,6 +195,7 @@ fn missile_station(maximum_range_ft: f64) -> StationView {
         employment_fit: None,
         minimum_range_ft: 1_000.,
         maximum_range_ft: Some(maximum_range_ft),
+        energy_target: None,
         infrared_envelope: None,
         requires_radar: false,
         requires_sensor: false,

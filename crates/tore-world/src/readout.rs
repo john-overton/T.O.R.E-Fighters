@@ -1041,7 +1041,7 @@ pub fn build_with_terrain_kept(
     let mut inbound: Vec<InboundMissile> = state
         .projectiles
         .iter()
-        .filter(|p| p.incoming.is_some() && p.target == Some(plane))
+        .filter(|p| p.incoming.is_some() && p.target == Some(plane) && p.threatening())
         .map(|p| {
             let weapon = state.weapon(p);
             InboundMissile {

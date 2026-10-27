@@ -115,6 +115,8 @@ pub struct StationSpec {
     pub pacing: ProjectilePacing,
     /// Maximum employment range, feet. `None` leaves the bound unrestricted.
     pub maximum_range_ft: Option<f64>,
+    /// Energy-model permission for this target; Some(None) is pending or unreachable.
+    pub energy_target: Option<Option<u32>>,
     pub minimum_range_ft: f64,
     /// All-aspect flag and nominal IR seeker reach, absent for other stores.
     pub infrared_envelope: Option<(bool, f64)>,
@@ -5353,6 +5355,7 @@ impl AiActor {
                         .then_some(pointing),
                     minimum_range_ft: s.minimum_range_ft,
                     maximum_range_ft: s.maximum_range_ft,
+                    energy_target: s.energy_target,
                     infrared_envelope: s.infrared_envelope,
                     requires_radar: s.requires_radar,
                     requires_sensor: s.requires_sensor,
@@ -5945,6 +5948,7 @@ pub fn simple_stations(
             employment_zone: None,
             mount: [0.0; 3],
             maximum_range_ft: Some(40000.0),
+            energy_target: None,
         });
     }
     if gun_rounds > 0 {
@@ -5976,6 +5980,7 @@ pub fn simple_stations(
             employment_zone: None,
             mount: [0.0; 3],
             maximum_range_ft: Some(6000.0),
+            energy_target: None,
         });
     }
     stations

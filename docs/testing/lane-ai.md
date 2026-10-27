@@ -780,3 +780,36 @@ scripted jet leader's straight departure. Spassk's northern map edge is too
 close for that long jet departure. The 264,000-tick run leaves time for the
 last aircraft to taxi back from the far end of a 12,000 ft runway. The
 existing taxi/landing checker requires every AI member to park.
+
+## Missile prediction admission and launch counts
+
+`ai-missile-launch-regression` uses the natural fight mode of the release
+`missile_energy_cost` example. Build it with
+`cargo build --locked --release -p tore-world --example missile_energy_cost`.
+It reads the battery's isolated imported pack. Four F-16C 4v4 worlds run for
+120 seconds. John's Phase 2.6 decision compares guided launch counts within
+30% of the reviewed Phase 2.5 counts: 13 in each theater and 26 in the 60-second
+23-AI fight. A separate one-sided floor retains at least 70% of the independent
+review's pre-overhaul Spec counts: UKR 11, BAL/SPA/GRE 12 and the large fight 24.
+An increase over Spec is allowed within the Phase 2.5 band. These are regression
+bounds, not assertions of identical combat outcomes. Synthetic driver tests
+cover both bounds, the historical floor and failed admission.
+Every fight must have zero refused prediction requests and
+zero clients waiting over ten simulated seconds for admission. The example
+also prints cost percentiles and maximums; use a sequential release run for
+performance acceptance, since concurrent battery jobs can perturb wall time.
+
+`ai-missile-player-cue` measures the actual launcher-view HUD consumer in the
+opening 20 seconds of natural 4v4 and 23-AI fights. It requires answered hit or
+miss forecasts on 75% of all ticks and 90% of ticks with a sensor observation.
+`ai-missile-turning-cue` prescribes level player circles at 3 and 10 degrees/s
+in the same big fight, with at least 31 prediction clients, 600 observed ticks
+and 90% answers on observed ticks. The aircraft pose is scripted; enemy flying
+and sensor observations remain the normal world simulation. Missing tracks
+are reported separately from prediction latency. Use `--player-turn=3` or
+`--player-turn=10` with the example's `--natural --big` flags to repeat it.
+
+`surface-moving-hit-sa2a-*`, `surface-moving-hit-sa3-*` and
+`surface-moving-hit-sa6-*` require hits on straight, vulnerable jets at
+10,000 and 20,000 ft. They complement `surface-battery-sa2`, which checks
+battery coordination with invulnerability enabled.

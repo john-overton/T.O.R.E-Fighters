@@ -405,6 +405,8 @@ def battery_sa2_problems(output: str) -> list[str]:
         problems.append(f"the launcher {unit} showed on the RWR")
     if int(summary(live).get("missiles", "0")) == 0 or summary(live).get("radar-lock-tone") != "true":
         problems.append(f"the battery did not lock and launch: {summary(live)}")
+    if int(summary(live).get("hits", "0")) == 0:
+        problems.append("live SA-2 battery registered no hits")
     s = summary(optical)
     if int(s.get("missiles", "0")) == 0:
         problems.append("no optical launch in daylight")
@@ -1055,8 +1057,25 @@ def grounding_problems(output: str) -> list[str]:
     return problems
 
 
+def moving_sam_hit_problems(output: str) -> list[str]:
+    found = runs(output)
+    if not found:
+        return ["missing moving-jet SAM trace"]
+    return [f"moving jet received no SAM hits: {summary(run)}" for run in found
+            if int(summary(run).get("hits", "0")) < 1]
+
+
 def scenarios() -> list[Scenario]:
-    return [
+    moving_sams = []
+    for weapon, theater, index in [("SA2A", "TVIET", "6"), ("SA3", "SPA", "0"), ("SA6", "CUB", "0")]:
+        for altitude in [10000, 20000]:
+            moving_sams.append(Scenario(
+                name=f"surface-moving-hit-{weapon.lower()}-{altitude}", lane="ai", timeout=300,
+                args=trace(theater, *(["QSPSAM"] if weapon == "SA3" else []), "--over", weapon, "--index", index, "--solo", "--altitude", str(altitude),
+                           "--from", "20", "--seconds", "200", "--quiet-shots"),
+                check=moving_sam_hit_problems,
+                notes="Requires hits on a moving vulnerable jet, not just missile launches."))
+    return moving_sams + [
         Scenario(
             name="bridge-audit", lane="ai",
             args=["--bridge-audit", "{work}/bridges", "UKR", "BAL", "--strict"], timeout=300,
@@ -1165,8 +1184,8 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="surface-battery-sa2", lane="ai", timeout=400,
-            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
-                       "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots"),
+            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--solo", "--altitude", "20000",
+                       "--from", "20", "--seconds", "200", "--quiet-shots"),
             then=[
                 Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
                            "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots",

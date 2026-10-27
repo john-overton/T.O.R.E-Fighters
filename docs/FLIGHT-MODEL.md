@@ -8,6 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+Loaded aircraft weight uses the public/class masses of powered guided stores,
+as requested by John on 2026-10-25. The per-store differences are listed in
+[missile energy data](formats/missile-energy-data.md#loaded-aircraft-mass-changes).
+This changes payload, takeoff weight and weight-dependent flight response;
+it does not change which aircraft flight adapter is selected.
+
 The [F/A-XX concept](spec/fa-xx.md) shares the F-22 flight response in all
 three adapters. Its split flap rudder animation represents the existing yaw
 authority; separate differential drag and fin removal effects are not simulated.

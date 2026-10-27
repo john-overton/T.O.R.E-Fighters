@@ -257,6 +257,7 @@ impl World {
         combat.add_scene_targets(&terrain)?;
         // The King's friendly fire (stage F phase 2): kept across every
         // restart of combat.
+        combat.state.set_energy_seed(u64::from(spec.surface_seed));
         if !spec.friendly_fire {
             combat.state.friendly_fire = tore_sim::combat::live::FriendlyFire::Off;
         }

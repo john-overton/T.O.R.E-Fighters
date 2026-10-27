@@ -16,6 +16,70 @@ file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flig
 runner works is in the [testing overview](README.md). The `render-*` capture scenarios live in
 [`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
+`flight-missile-energy` runs 240 headless imported shots through the Energy
+model twice, with four workers and with one. It checks identical rows, real
+hits and misses, and an upper bound of one roll per two-second hammered
+episode. Eight historical Spec AIM9B shots also cover raw susceptibility above
+100, which that preserved percentage-only API must clamp before evaluating.
+These are regressions for repeated rolls and comparison compatibility, not
+fixed Monte Carlo hit-rate targets. The broad calibration/study results are in the
+[missile energy baseline](../baselines/missile-energy.md).
+
+The `flight-missile-defeat` scenario repeats 32 long AIM120/AA8 shots
+with four and one workers, requires an observed post-burn defeat and rejects
+any defeated shot that scores. Two additional stationary-target AIM120 shots
+use the `defeat-edge` range band, just beyond the shared kernel's last live
+intercept, and repeat with one and four workers. At least one inert body must
+pass within the target's fuze/contact radius without damage. The CSV columns
+`defeat_s`, `closest_inert_ft`, `inert_radius_ft` and `inert_damage` distinguish
+kinetic defeat from ordinary control-time expiry and expose that near pass.
+Synthetic Rust tests cover
+exact before/at/after contact ordering, direct/proximity/ground damage,
+powered cruise, mid-countdown checkpointing, countdown cache buckets with a
+defeat deadline, and same-tick warning/AI defense removal with the body retained.
+
+The offline missile_energy_ranges example accepts a local JT directory.
+`--verify` checks the shared motor-shape and powered cruise-arrival guards,
+primary and secondary reference bands, class floors, decoded
+minimum margins, family and radar-role ordering, long-low escape and local
+perturbations. Named residual exceptions have explicit bounds; unlisted stores
+use the ordinary tolerance. `--fit-class` exports fixed-budget fuel/drag
+candidates for the high head and low tail conditions. `--fit-ground` fits ground
+references. `--fit-motors` and `--fit-staged` also explore bounded per-store
+motor durations and thrust, never control time. `tools/missile_energy_fit.py`
+selects families and radar roles jointly; synthetic Python tests cover selection,
+bounds and parsing. These are fitted game coefficients, not engineering data.
+`--diagnostics` opts into G demand/capacity/deficit and closing-speed math,
+which normal motion and prediction skip, and reports defeat
+at the edge, 0.1% beyond and 10% beyond. The near-edge miss reports whether
+defeat, control expiry, terrain contact or another event stopped the flight;
+a continued hit is reported as a sampled-boundary limitation. --measure-pairs is historical comparison only.
+Timer-fitting tools require explicit --legacy-fit-pair/--legacy-fit-sparrow
+names and print a warning. No search edits source or runs during gameplay.
+
+`--motor-shapes` reports initial thrust/weight, dry-mass load, declared and
+actual impulse coefficient, burn/control ratio, sustain-entry thrust/weight,
+standardized time to Mach 1, powered-hit limit and reference/edge
+arrival speed and powered state. A missed reference is explicitly marked as
+a miss, so its final speed is not an arrival measurement. `--refine-motor`
+and `--measure-motor` accept SOURCE FUEL DRAG BOOST_S SUSTAIN_S COEFFICIENT
+BOOST_SHARE for a bounded refinement or measurement of one candidate.
+Both reapply the guard. The complete offline search retries an empty envelope
+with factor-1.1 probes after the ordinary factor-1.5 sweep, to find narrow
+beam-intercept intervals. Nonempty envelopes keep their original search;
+this is still sampling, not proof that every success island was found.
+Runtime searches are unchanged. Thresholds and class floors have one home in
+[the data document](../formats/missile-energy-data.md#per-store-motors-and-class-control-budgets).
+Run the synthetic guard and exception tests with
+`cargo test --locked -p tore-sim --example missile_energy_ranges -- --test-threads=4`.
+
+The synthetic `behavior_hash_requires_a_model_revision_for_rule_changes` test
+pairs the model identity with a quantized trajectory/contact trace. A changed
+trace requires investigating the behavior, incrementing the relevant semantic
+revision, and reviewing the new pair. An injected PN perturbation verifies that
+behavior changes independently of the declared identity. This finite set of
+traces is a tripwire, not exhaustive proof for every branch or platform.
+
 ## Variety aircraft checks
 
 `flight-variety-*` checks each of the 23 new identities through real application

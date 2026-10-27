@@ -419,6 +419,7 @@ fn guided_of(
         })
         .flatten();
     Some(GuidedSight {
+        energy_intercept: None,
         kind,
         aim,
         buddy: false,

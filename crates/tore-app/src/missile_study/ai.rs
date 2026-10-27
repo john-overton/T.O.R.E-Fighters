@@ -14,7 +14,7 @@ use tore_sim::{
     attitude::{Vector, dot},
     combat::{
         live::{self, Command, DeviceNote, Event, Ownship},
-        missiles::{Guidance, Profile, seeker::Status},
+        missiles::{self, Guidance, Profile, seeker::Status},
     },
 };
 use tore_world::{
@@ -68,6 +68,7 @@ pub fn fly(
     weapon: &Weapon,
     cell: &Cell,
     seed: u64,
+    rules: missiles::Rules,
 ) -> AppResult<Shot> {
     let profile =
         Profile::for_weapon(weapon).ok_or_else(|| format!("{} has no profile", weapon.source))?;
@@ -87,6 +88,16 @@ pub fn fly(
         &mut Hooks::default(),
     )?
     .world;
+    // Group objectives are applied after the build preset. Isolate this trial
+    // from offensive launches using the existing weapons-hold assignment.
+    let player_position = world.cockpits[0].flight.position;
+    world
+        .ai_wings
+        .as_mut()
+        .ok_or("no AI")?
+        .apply_mission_preset(Preset::Hold, player_position);
+    world.combat.state.weapon_rules = rules;
+    world.combat.state.set_energy_seed(seed);
     let owner = world.combat.own_id();
     // The study missile on the shooter's first missile station.
     {
@@ -135,6 +146,7 @@ pub fn fly(
     let target_speed = 0.8 * super::sound_fps(target_alt) * uniform(seed, 4, 0.95, 1.05);
     let target_heading = wrap(
         match cell.aspect {
+            Aspect::Quarter => side * std::f64::consts::FRAC_PI_4,
             Aspect::Head => std::f64::consts::PI,
             Aspect::Beam => side * std::f64::consts::FRAC_PI_2,
             Aspect::Tail => 0.,
@@ -152,7 +164,10 @@ pub fn fly(
             ..SeatInput::default()
         };
         world.step(std::slice::from_ref(&input), &mut out)?;
-        AppResult::Ok(std::mem::take(&mut out.events))
+        AppResult::Ok((
+            std::mem::take(&mut out.events),
+            std::mem::take(&mut out.outcomes),
+        ))
     };
     let hold = |world: &mut World, shooter_at: Vector| {
         place(&mut world.cockpits[0].flight, shooter_at, 0., shooter_speed);
@@ -228,7 +243,11 @@ pub fn fly(
         return Ok(shot);
     };
     shot.fired = true;
-    let limit = u64::from(weapon.movement.remove_t) * 30 + 240;
+    let limit = if rules == missiles::Rules::Energy {
+        u64::from(missiles::energy_profile::body(weapon).life) + 240
+    } else {
+        u64::from(weapon.movement.remove_t) * 30 + 240
+    };
     let mut miss = f64::INFINITY;
     let mut last_status = Status::Search;
     let mut last_speed = 0.;
@@ -240,7 +259,32 @@ pub fn fly(
         let t = tick as f64 * DT;
         shooter_at[2] += shooter_speed * DT;
         place(&mut world.cockpits[0].flight, shooter_at, 0., shooter_speed);
-        let events = step(&mut world, false, Vec::new())?;
+        let (events, outcomes) = step(&mut world, false, Vec::new())?;
+        shot.time_s = t;
+        let rolls: Vec<bool> = if rules == missiles::Rules::Energy {
+            world
+                .combat
+                .state
+                .take_decoy_rolls()
+                .into_iter()
+                .filter(|r| r.projectile == id)
+                .map(|r| r.decoyed)
+                .collect()
+        } else {
+            world.ai_wings.as_ref().map_or_else(Vec::new, |w| {
+                w.decoy_rolls()
+                    .iter()
+                    .filter(|r| r.projectile == id)
+                    .map(|r| r.decoyed)
+                    .collect()
+            })
+        };
+        shot.rolls += rolls.len() as u32;
+        if rolls.contains(&true) && !decoyed {
+            decoyed = true;
+            shot.decoyed_at_s = Some(t);
+        }
+
         for note in world.combat.state.take_device_notes() {
             if let DeviceNote::Released(r) = note
                 && r.owner == enemy
@@ -313,6 +357,21 @@ pub fn fly(
             .map(|t| (t.position, t.hp));
         let missile = world.combat.state.projectiles.iter().find(|p| p.id == id);
         if let (Some(p), Some((position, _))) = (missile, target) {
+            if let Some(energy) = p.motion.and_then(|m| m.energy) {
+                if energy.flight.lost {
+                    shot.control_loss_s.get_or_insert(t);
+                }
+                if energy.flight.defeated {
+                    shot.defeat_s.get_or_insert(t);
+                }
+                if energy.tracking.notched
+                    && !energy.flight.lost
+                    && p.guidance.as_ref().is_some_and(|f| f.enabled)
+                {
+                    shot.first_notch_s.get_or_insert(t);
+                    shot.notched_s += DT;
+                }
+            }
             let now = (p.position, position);
             if let Some((pm, pt)) = previous {
                 let a = sub(pm, pt);
@@ -342,16 +401,26 @@ pub fn fly(
                 }
             }
         }
-        if events
+        if outcomes.iter().any(|o| {
+            o.projectile == id
+                && matches!(o.resolution, tore_sim::combat::ledger::Resolution::Hit(_))
+        }) && events
             .iter()
             .any(|e| matches!(e, Event::Hit(v) if *v == enemy))
         {
             shot.hit = true;
-            shot.kill = target.is_some_and(|(_, hp)| hp <= 0);
+            shot.kill = target.is_some_and(|(_, hp)| hp <= 0)
+                && world
+                    .combat
+                    .state
+                    .ledger
+                    .credit(enemy)
+                    .is_some_and(|k| k.owner == owner);
             break;
         }
         shot.time_s = t;
         if missile.is_none() {
+            shot.ground_impact = events.contains(&Event::Ground);
             break;
         }
         // A decoyed missile flies straight on: once it is past and opening it
@@ -359,7 +428,8 @@ pub fn fly(
         if let (Some(p), Some(row)) = (
             missile,
             world.combat.state.targets.iter().find(|t| t.id == enemy),
-        ) && p.guidance.is_none()
+        ) && rules != missiles::Rules::Energy
+            && p.guidance.is_none()
             && p.motion.is_some_and(|m| {
                 dot(sub(p.position, row.position), sub(m.velocity, row.velocity)) > 0.
             })
@@ -376,6 +446,8 @@ pub fn fly(
         if decoyed { "hit-after-decoy" } else { "hit" }
     } else if decoyed {
         "decoyed"
+    } else if shot.ground_impact {
+        "ground"
     } else if matches!(last_status, Status::Expired) {
         "expired"
     } else if matches!(

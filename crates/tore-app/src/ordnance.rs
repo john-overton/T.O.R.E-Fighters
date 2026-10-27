@@ -1759,7 +1759,13 @@ fn card(
     c.text(font, &name, x, y + 25, None);
     if catalog {
         let font = &sprites["WPNBLUE"];
-        c.text(font, &format!("{} lbs", w.weight), x, y + 37, None);
+        c.text(
+            font,
+            &format!("{:.0} lbs", w.carried_weight_lb()),
+            x,
+            y + 37,
+            None,
+        );
         let guidance = guidance(w);
         c.text(
             font,
@@ -2711,7 +2717,7 @@ fn validate_removed_stores(
                 .iter()
                 .zip(&quantities)
                 .filter(|(s, _)| !s.internal && s.weapon.source != "SUU16.JT")
-                .map(|(s, n)| f64::from(s.weapon.weight.max(0)) * f64::from(*n))
+                .map(|(s, n)| s.weapon.carried_weight_lb() * f64::from(*n))
                 .sum::<f64>()
                 + f64::from(combat.state.own().configuration().external_equipment_lbs);
             if (flight.payload_lbs - external).abs() > 0.5 {

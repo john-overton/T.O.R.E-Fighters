@@ -1464,8 +1464,17 @@ pub fn step(
                     let from = state.place(arms).eye;
                     let d = sub(aircraft.position, from);
                     let distance = length(d);
-                    (launch.contains(distance, d[1])
-                        && scene.line_of_sight(from, aircraft.position))
+                    let band = if live.weapon_rules == missiles::Rules::Energy {
+                        Band {
+                            max_range: f64::INFINITY,
+                            ..launch
+                        }
+                    } else {
+                        launch
+                    };
+                    (band.contains(distance, d[1])
+                        && scene.line_of_sight(from, aircraft.position)
+                        && energy_gate(live, state, arms, weapon, rail, aircraft, scene))
                     .then_some((distance, arms.unit, rail))
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
@@ -1719,9 +1728,18 @@ fn step_weapon(
         (Some(aircraft), Kind::Missile) => {
             let d = sub(aircraft.position, muzzle);
             rail = state.rail_for(arms, weapon, aircraft.position);
+            let band = if live.weapon_rules == missiles::Rules::Energy {
+                Band {
+                    max_range: f64::INFINITY,
+                    ..weapon.launch
+                }
+            } else {
+                weapon.launch
+            };
             rail.is_some()
-                && weapon.launch.contains(length(d), d[1])
+                && band.contains(length(d), d[1])
                 && scene.line_of_sight(muzzle, aircraft.position)
+                && energy_gate(live, state, arms, weapon, rail.unwrap(), aircraft, scene)
         }
         (Some(aircraft), Kind::Gun { .. }) => {
             let d = sub(aircraft.position, muzzle);
@@ -1917,6 +1935,63 @@ fn step_weapon(
 
 /// Launches the rounds of `fire` from `arms`' rail `rail` (a hardpoint
 /// index) and its siblings.
+#[allow(clippy::too_many_arguments)]
+fn energy_gate(
+    live: &mut live::State,
+    state: &SurfaceState,
+    arms: &Arms,
+    weapon: &WeaponArms,
+    rail: usize,
+    target: &Contact,
+    scene: &Scene<'_>,
+) -> bool {
+    if live.weapon_rules != missiles::Rules::Energy {
+        return true;
+    }
+    let place = state.place(arms);
+    let arc = weapon
+        .mounts
+        .iter()
+        .find(|m| m.index == rail)
+        .unwrap_or(&weapon.mounts[0]);
+    let position = place.mount(arc, scene.ground);
+    let (bearing, elevation) = bearing_elevation(sub(target.position, position));
+    let direction = direction_at(bearing, arc.launch_pitch(elevation));
+    let launcher = live::Launcher {
+        radar_power: true,
+        position,
+        basis: tore_sim::combat::guided::nose(direction),
+        speed_fps: length(place.velocity),
+        velocity: place.velocity,
+        bay_ready: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: Default::default(),
+    };
+    // The existing skill fraction is applied by demanding reach to the
+    // correspondingly farther observed bearing, at the same target altitude.
+    let fraction = (weapon.launch.max_range
+        / f64::from(weapon.record.seeker.zones[1].maximum_range.max(1)))
+    .clamp(0.05, 1.);
+    let mut point = target.position;
+    for i in [0, 2] {
+        point[i] = position[i] + (point[i] - position[i]) / fraction;
+    }
+    let observation = seeker::Observation {
+        id: target.id,
+        position: point,
+        velocity: target.velocity,
+        quality: 1.,
+        range: length(sub(point, position)),
+        off_axis: 0.,
+    };
+    live.request_energy_solution(arms.unit.0, rail, &weapon.record, launcher, observation);
+    live.energy_solution(arms.unit.0, rail, &weapon.record, launcher, observation)
+        .is_some()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fire_missiles(
     state: &mut SurfaceState,

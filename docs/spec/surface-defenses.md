@@ -8,6 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+New worlds use [energy flight](missile-energy.md) for supported SAMs and ship
+missiles. Physical reach comes from the shared bounded prediction service;
+sensor, ownership, minimum-range, altitude, mount and skill gates remain.
+The original game guidance classifications are retained independently from
+public physical variant proxies. AAA and surface decision schedules are unchanged.
+
 Specification, 2026-10-10, for the surface-AI round (John's request of the same
 day, with his answers). It was written ahead of the code so each
 implementation slice had numbers to test against, and it now describes what

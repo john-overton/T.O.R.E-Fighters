@@ -652,7 +652,7 @@ impl Loadout {
                 .iter()
                 .zip(&self.quantities)
                 .filter(|(s, _)| !s.internal && s.weapon.source != "SUU16.JT")
-                .map(|(s, n)| f64::from(s.weapon.weight) * f64::from(*n))
+                .map(|(s, n)| s.weapon.carried_weight_lb() * f64::from(*n))
                 .sum::<f64>()
     }
     pub fn validate(&self) -> Result<()> {

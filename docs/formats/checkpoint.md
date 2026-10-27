@@ -8,6 +8,17 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+The missile energy model adds a new Rules tag and an optional physical state
+to each missile: body/motor values, velocity/axis, steering response, loft/cruise
+waypoint, control-loss state, seeker head/notch dwell and physical decoy pursuit.
+Combat also saves physical devices/episodes, the explicit decoy seed, pending
+prediction jobs/cursor/results and cue state. AI stations save their additive
+energy launch permission. Wall-clock profiling counters and rebuilt sights
+are excluded. These change the exact checkpoint layout and resulting checksums;
+the integration lead must coordinate the simulation/protocol version bump.
+No version constant is changed by this branch. See the
+[energy specification](../spec/missile-energy.md#estimates-and-acceptance).
+
 Design of 2026-10-05 for stage H of the [multiplayer plan](../multiplayer-plan.md#stages)
 and its section [host migration: exact checkpoints](../multiplayer-plan.md#host-migration-exact-checkpoints).
 This is T.O.R.E's own format; Fighters Anthology had nothing like it. How the

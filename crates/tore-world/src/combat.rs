@@ -832,11 +832,14 @@ impl Combat {
         ))
     }
     fn with_state(
-        state: live::State,
+        mut state: live::State,
         contrail_offsets: Vec<Vector>,
         range: bool,
         initial_ammo: Option<Vec<u16>>,
     ) -> Self {
+        // New worlds select the approved energy rules. The lower-level State
+        // constructor remains Spec for historical tools and unmarked tapes.
+        state.weapon_rules = tore_sim::combat::missiles::Rules::Energy;
         Self {
             contrail_offsets,
             contrail_sortie: 0,
@@ -1190,8 +1193,8 @@ impl Combat {
                 position: p.position,
                 previous: p.previous,
                 direction: p.direction,
-                target: p.target,
-                incoming: p.incoming.is_some(),
+                target: p.target.filter(|_| p.threatening()),
+                incoming: p.incoming.is_some() && p.threatening(),
                 speed_f8: p.speed_f8,
                 powered: self.state.motor_powered_with(weapon, p),
             };
@@ -1773,6 +1776,7 @@ impl Combat {
         self.last_launcher = Some(l);
         self.terrain_tti.clear();
         let weapon_rules = self.state.weapon_rules;
+        let energy_seed = self.state.energy_seed();
         let friendly_fire = self.state.friendly_fire;
         let host = if self.open {
             self.state = live::State::open_mission();
@@ -1792,6 +1796,7 @@ impl Combat {
             Some(aircraft)
         };
         self.state.weapon_rules = weapon_rules;
+        self.state.set_energy_seed(energy_seed);
         self.state.friendly_fire = friendly_fire;
         if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility {
             self.record_tape("compatibility-weapons", l);
@@ -2055,7 +2060,11 @@ impl Combat {
                 self.last_launcher = Some(l);
                 self.record_tape(if held { "fire" } else { "tick" }, l);
             }
+            let energy = self.state.weapon_rules == tore_sim::combat::missiles::Rules::Energy;
             if let Some(own) = self.state.ownship_mut(aircraft) {
+                if energy {
+                    own.heat = crate::ai_wings::energy_heat(s, own.heat);
+                }
                 own.note_loaded();
             }
             if s.airburst()
@@ -2303,6 +2312,58 @@ impl Combat {
 mod tests {
     use super::*;
 
+    #[test]
+    fn inert_body_remains_visible_without_incoming_or_target_cues() {
+        let (mut combat, flight) = fixtures::loaded([500, 3]);
+        combat.state.weapon_rules = tore_sim::combat::missiles::Rules::Energy;
+        let own = combat.own_id();
+        combat.state.own_mut().selected = 1;
+        let l = launcher(&flight);
+        combat.state.command(own, live::Command::Incoming, l);
+        let p = &mut combat.state.projectiles[0];
+        // The rendering fixture's named missile starts as a gun record.
+        // Give this capability test an actual synthetic guided weapon.
+        let w = p.weapon.as_mut().unwrap();
+        w.source = "AIM120.JT".into();
+        w.flags = 0x1204f;
+        w.seeker.signature = 3;
+        p.target = Some(own);
+        p.motion = Some(tore_sim::combat::missiles::Motion::launch_rules(
+            p.weapon.as_ref().unwrap(),
+            [0., 0., -1000.],
+            p.position[1],
+            tore_sim::combat::missiles::Rules::Energy,
+        ));
+        assert!(
+            !combat
+                .cockpit_readout(own, l, None, None)
+                .unwrap()
+                .rwr
+                .inbound
+                .is_empty()
+        );
+        let p = &mut combat.state.projectiles[0];
+        p.motion
+            .as_mut()
+            .unwrap()
+            .energy
+            .as_mut()
+            .unwrap()
+            .flight
+            .defeated = true;
+        assert!(
+            combat
+                .cockpit_readout(own, l, None, None)
+                .unwrap()
+                .rwr
+                .inbound
+                .is_empty()
+        );
+        let picture = combat.snapshot(own, &flight, None);
+        assert_eq!(picture.projectiles.len(), 1);
+        assert!(!picture.projectiles[0].incoming);
+        assert_eq!(picture.projectiles[0].target, None);
+    }
     #[test]
     fn an_airborne_start_is_raised_clear_but_an_ai_helicopter_starts_at_its_own_height() {
         // The 5,000 ft floor above sea level and the 1,000 ft above the

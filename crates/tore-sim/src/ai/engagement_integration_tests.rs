@@ -887,3 +887,35 @@ fn cap_patrols_before_contact_and_engages_from_outside_station() {
         assert_ne!(mission.actor(1).unwrap().activity(), Activity::Rejoining);
     }
 }
+
+#[test]
+fn removing_an_inert_missile_snapshot_ends_defense_without_a_grace_period() {
+    let mut mission = neutral_wing_mission();
+    mission.set_missiles(vec![MissileSnapshot {
+        id: 90,
+        owner: 3,
+        position: [0., 20_000., -1500.],
+        velocity: [0., 0., 2000.],
+        guidance: crate::combat::missiles::Guidance::Supported,
+        target: Some(2),
+        radar_active: false,
+        radar_acquired: false,
+        supported: true,
+        supporting_radar_position: Some([5000., 20_000., 0.]),
+        alive: true,
+    }]);
+    mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(0))
+        .unwrap();
+    assert!(mission.actor(2).unwrap().defense_decision().is_some());
+    // Combat omits a defeated or passed-decoy body from the same tick's
+    // snapshot list. The preceding live test verifies that production boundary.
+    mission.set_missiles(Vec::new());
+    mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(1))
+        .unwrap();
+    let actor = mission.actor(2).unwrap();
+    assert_eq!(actor.missile_threats().count(), 0);
+    assert!(actor.defense_decision().is_none());
+    assert!(!actor.controller().defending());
+}

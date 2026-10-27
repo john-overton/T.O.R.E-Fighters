@@ -906,7 +906,9 @@ fn gun_pod_row(
     let mut armed = standard.clone();
     armed.select(slot, pod.clone())?;
     let pod_lbs = f64::from(armed.configuration.gun_pods[0].weight_lbs);
-    let swapped_out = f64::from(standard.configuration.stations[slot].weapon.weight)
+    let swapped_out = standard.configuration.stations[slot]
+        .weapon
+        .carried_weight_lb()
         * f64::from(standard.quantities[slot]);
     if armed.quantities[slot] != 1
         || armed.configuration.gun_pod(slot).map(|p| p.quantity) != Some(1)

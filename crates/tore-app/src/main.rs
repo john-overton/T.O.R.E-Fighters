@@ -15555,12 +15555,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     combat.add_airport_targets(&world.airport_scene)?;
     let combat_tape = match record_combat {
         Some(ref path) => {
-            let writer = tape_file::Recorder::new(
+            let mut writer = tape_file::Recorder::new(
                 path,
                 &theater_resources,
                 combat.state.own().configuration(),
                 &theater_code,
             )?;
+            writer.model(&combat.state)?;
             combat.start_tape();
             Some(writer)
         }

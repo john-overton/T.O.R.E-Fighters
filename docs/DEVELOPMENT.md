@@ -1467,11 +1467,26 @@ before impact), `beam` (5 G onto the radar source's beam after 1 to 3
 seconds), `drag` (5 G away from the missile), with devices `cm-ai` (the AI's
 two-device bursts every 2 seconds inside 6 seconds), `cm-hammer` (four a
 second from one second after launch until empty) or `cm-atNs` (one device N
-seconds before closest approach), joined with `+`, and `@idle` or `@burner`
-for engine heat. Flares meet IR seekers and chaff radar seekers; each device
-rolls the decoy rule as an AI release does. `--ranges short,medium,long`,
-`--aspects head,beam,tail` and `--altitudes co,up,down` set the cells,
-`--seeds N` the shots per cell (range, aspect, speed and reaction time are
+seconds before closest approach), joined with `+`. `dive` descends at 25 degrees
+to a 100 ft deck. `@idle` and `@burner` set constant engine heat; `@off` cuts
+heat after the seeded 1 to 3 s reaction delay, allowing an initial hot lock.
+Scripted speed is controlled independently, so this isolates the heat effect.
+Flares meet IR seekers and chaff radar seekers. Energy is the study default;
+`--missile-model spec` selects the historical comparison. Energy releases use
+the live physical-device scene and its actual one-roll-per-episode log.
+Scripted studies skip advisory prediction work, which cannot affect their
+player-triggered release or missile motion; AI studies retain it.
+`--ranges short,medium,long`, `--aspects head,quarter,beam,tail` (quarter is
+45 degrees from the tail heading), and `--altitudes deck,low,co,high,up,down` set the cells.
+Deck/low/co/high are 500/5000/15000/35000 ft for both aircraft; up/down retain
+the earlier unequal-altitude cases. Range bands retain the decoded historical
+values to make old/new study comparisons reproducible. Additional `near` and
+`close` bands use 0.25 and 0.5 nmi, each raised to 1.1 times the decoded launch
+minimum before the same range jitter, for studying physically reachable short
+shots. They are opt-in and do not change the historical bands. These are distinct
+from the public-anchor calibration sweep. `model.txt` records the selected
+rules and the model fingerprint (physical and motor data, derivation rules,
+force/drag curves, seeker and decoy source). `--seeds N` the shots per cell (range, aspect, speed and reaction time are
 jittered per seed, deterministically), `--threads N` the workers.
 `--ai [--skill novice|average|experienced|ace]` flies the same shots against
 the game's own AI on weapons hold in a fresh Quick Mission world instead, so
@@ -1482,12 +1497,18 @@ second, plus every actual device release with its current closest-approach
 estimate, maneuver and passage flag. The AI study currently repeats its fixed countermeasure random stream across
 shots, so seed-to-seed hit counts are not independent survival samples. Use its
 G, heading and release-time traces to assess defensive control until that stream
-is replaced. `--decoy-model lure` is
+is replaced. `--decoy-model lure` is available only with `--missile-model spec` and is
 a what-if, not game behaviour: a decoyed missile steers for the device that
-decoyed it and bursts there instead of flying straight on. `--catalog` writes
-`catalog.csv` (each missile's decoy susceptibility, seeker and turn rates, each
+decoyed it and bursts there instead of flying straight on. `--catalog` writes only
+`catalog.csv` and exits (each missile's decoy susceptibility, seeker and turn rates, each
 aircraft's dispensers). Output is `runs.csv`, one row per shot, and
-`cells.csv`, one row per cell with Wilson 95 percent intervals.
+`cells.csv`, one row per cell with Wilson 95 percent intervals. Runs also
+record the first observed loss of control speed, ground impact and Energy
+seeker notch state while enabled and controlled (first time and total duration)
+separately;
+absence of an earlier control-loss sample does not prove a cause for an impact.
+AI trials explicitly reapply weapons hold after mission group objectives and
+attribute hits through the launched projectile's ledger outcome.
 
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --missile-study .local/study \
@@ -2413,3 +2434,20 @@ directory, first with the previous default-wing policy and then with sharing.
 It asserts the accepted load survives airborne and ground starts and restart.
 The battery scenario is `qmc-wing-loadout`. This probe requires imported media
 but no display; do not point it at a shared profile.
+
+### Missile motor calibration and prediction cost
+
+The offline `missile_energy_ranges LOCAL_JT_DIRECTORY --fit-pair` example
+prints candidate fuel fractions, drag and both anchor residuals; it never
+writes runtime data. An optional comma-separated source list limits the fit.
+The default sweep prints physical and seeker-valid ranges including the
+500-foot deck case. Conditions and data provenance live in the
+[missile energy data](formats/missile-energy-data.md) and
+[baseline](baselines/missile-energy.md).
+
+The release `missile_energy_cost PACK TICKS THEATER moving WEAPON STATIONS`
+example accepts `--natural` for real AI launch clients, `--big` for 23+ AI,
+and `--spec` for the historical missile comparison. Without `--natural` it
+uses Hold, eight AI and sixteen replenished synthetic missiles; jettisoned
+tanks do not count toward those sixteen. The alive guard applies to that
+injected fixture, while natural fights retain real damage and casualties.
