@@ -1043,4 +1043,46 @@ mod tests {
             assert!(m.sustain_seconds > 0. || m.boost_share == 1.);
         }
     }
+    /// John's 2026-10-27 class budgets and fit bounds, pinned so a data edit
+    /// cannot silently move a store outside them.
+    #[test]
+    fn class_budgets_defeat_scope_and_air_fit_bounds_are_johns_decisions() {
+        use ControlClass::*;
+        let expected = [
+            (ShortIr, 20., true),
+            (MediumAir, 70., true),
+            (LongAir, 180., true),
+            (Cruise, 600., false),
+            (FastGround, 90., false),
+            (Command, 30., false),
+            (SurfaceIr, 25., true),
+            (SurfaceRadar, 70., true),
+            (SurfaceRadarLong, 120., true),
+        ];
+        for (class, seconds, air) in expected {
+            assert_eq!(class.seconds(), seconds, "{class:?}");
+            assert_eq!(class.air_target(), air, "{class:?}");
+        }
+        assert_eq!((DEFEAT_MACH, DEFEAT_TICKS), (1., 30));
+        let aim9b = motor("AIM9B.JT").unwrap();
+        assert_eq!(aim9b.control_class.seconds(), 20.);
+        let mut air = 0;
+        for m in MOTORS {
+            if m.control_class.tail_floor_km().is_none() {
+                continue;
+            }
+            air += 1;
+            assert!(
+                (0.12..=0.5).contains(&m.propellant_fraction),
+                "{}: fuel {}",
+                m.source,
+                m.propellant_fraction
+            );
+            let drag = crate::missile_data::reference(m.source).unwrap().drag_scale;
+            assert!((0.5..=3.).contains(&drag), "{}: drag {drag}", m.source);
+            assert_eq!(m.primary[0], 35000., "{}: one high head anchor", m.source);
+            assert_eq!(m.primary[1], 0., "{}: one high head anchor", m.source);
+        }
+        assert_eq!(air, 25, "every A2A record has an explicit air class");
+    }
 }
