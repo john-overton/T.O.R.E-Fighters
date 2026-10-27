@@ -346,7 +346,18 @@ The decoded minimum removes these nominal physical employment intervals:
 - AIM54C.JT 500 ft tail: 1.729 km <= minimum 9.144 km
 
 These are range-policy exclusions, not zero kinetic reach. The floor check
-uses 5k tail, not the 500 ft deck. Altitude reversals above 10%: AA8.JT beam 15000/35000.
+uses 5k tail, not the 500 ft deck. The one altitude reversal above 10% is
+AA8 beam: 4.493 km at 15k versus 3.375 km at 35k. Both boundary trials reach
+the 20-second control deadline. Diagnostic available G at the edge falls
+from 18.49 to 8.37, while maximum requested G deficit rises from 21.30 to
+29.93. This is consistent with a high-altitude turning limitation under the
+fixed deadline. The live-seeker sweep finds no valid AA8 35k beam intercept;
+that zero is retained as a measured limitation, not replaced with physical
+reach. AIM9B/AA2 head and beam zeros are their rear-only seeker restrictions.
+PL7 and R550 H5/H35 ratios are 0.968 and 0.949, above the earlier 0.90 warning
+band. Their long fitted burns consume most of the fixed 20-second budget,
+so these cells show little extra range with height. The target residuals and
+full cells remain visible above; warning ratios are not reference-fit gates.
 
 ## Defeat and force diagnostics
 
@@ -360,7 +371,111 @@ and inert contacts. Dedicated tests cover the separate warning publication rule.
 
 ## Validation status
 
-Phase 2.6 final validation is in progress. Model identity 1976937061122229260,
-behaviour trace 10493902561014387883. The earlier Phase 3 study remains invalid
-and labelled pre-fix. No Phase 3 work or merge is included in this round.
-Windows/macOS and retail comparison were not run on this Linux host.
+Source change `256fd274`, Linux x86-64. Model identity 1976937061122229260, behaviour trace
+10493902561014387883. The final complete workspace run passes 7,219 tests,
+with 106 intentionally ignored. The separate example overshoot-gate test
+also passes. Workspace build, clippy with warnings denied, formatting,
+documentation, 518 Python tests (five skipped), and source/app/extractor asset
+checks pass. Initial new-fixture failures and the old golden pair were corrected
+before this clean final run.
+
+All 59 reference checks pass their declared bands, including the six named
+A2A compromises. Tail floors, decoded-minimum margins, low-altitude radar
+roles, family orderings and 12 km modern-IR deck escape checks pass. The largest
+reach change under a 2% parameter perturbation is 4.265%.
+All 391 physical/seeker rows and 668 edge/beyond diagnostics were regenerated.
+The offline seeker probe now rejects contact on the defeat tick, matching the
+live inert-damage rule; this changed 96 sampled rows. Diagnostic CSV
+headers now include both final ground/life flags.
+
+All 36 scenario checks pass across the full battery and one targeted rerun.
+The full run passed 35/36; UKR's 15 launches exceeded the old symmetric
+pre-overhaul upper limit of 14.3. John then approved using the reviewed Phase
+2.5 baseline and retaining a separate one-sided Spec floor. The revised
+five-fight check passes its targeted rerun; the other 35 passed unchanged.
+This includes SA2A/SA3/SA6 moving-jet hits at both 10k and 20k ft, the extended
+inert near-pass case, the 240-shot Energy/worker comparison and eight historical
+Spec shots. The 32 long defeat shots record
+6 defeats and 10 hits, with no hit after defeat.
+Both added near-pass rows are repeated serially and with four workers; 2
+pass within their target's fuze/contact radius with zero inert damage.
+The near-pass seed 0 reaches 0.240 ft versus radius 128.000 ft, with defeat at 50.058 s.
+The near-pass seed 1 reaches 0.240 ft versus radius 128.000 ft, with defeat at 50.058 s.
+
+The same-tick threat tests establish a live warning first, then clear it on
+kinetic defeat and passed-decoy state while keeping the body. AI defense ends
+without a stale-record grace period; render/readout and RWR-tone tests cover
+cue removal. Historical Spec/Compatibility remain distinct.
+
+Windows/macOS were not run on this Linux host. Retail comparison remains
+unavailable. The six residual exceptions, AA8 high-altitude beam limitation
+and deck minimum exclusions above remain explicit approximations. Phase 3
+stays stopped; its earlier pre-fix study is still invalid.
+
+## Natural launch counts against both baselines
+
+John's Phase 2.6 decision retains a one-sided 70% floor against pre-overhaul
+Spec, plus a symmetric 70%..130% band against the reviewed Phase 2.5 model.
+The earlier symmetric Spec ceiling is no longer an acceptance gate. No AI
+firing policy or runtime admission limit changed to satisfy these counts.
+The table uses the independent sequential cost lanes; the targeted battery
+rerun reports identical counts and zero refused/starved requests in all five.
+
+| Fight | Pre-overhaul Spec | Phase 2.5 | Phase 2.6 | Change vs Spec | Change vs 2.5 | Spec floor | 2.5 band |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| UKR | 11 | 13 | 15 | +36.36% | +15.38% | 7.7 | 9.1..16.9 |
+| BAL | 12 | 13 | 15 | +25.00% | +15.38% | 8.4 | 9.1..16.9 |
+| SPA | 12 | 13 | 15 | +25.00% | +15.38% | 8.4 | 9.1..16.9 |
+| GRE | 12 | 13 | 15 | +25.00% | +15.38% | 8.4 | 9.1..16.9 |
+| 23-AI UKR | 24 | 26 | 30 | +25.00% | +15.38% | 16.8 | 18.2..33.8 |
+
+## Prediction cost
+
+Release examples, imported profile, final model above. Every heavy run checks
+available memory first, uses nice 15 and CARGO_BUILD_JOBS=4, and runs serially
+with other heavy commands. Rust tests use four threads. The battery uses two
+jobs and one isolated window through tools/agent-run.sh; its wrapper also
+renices the application to 15.
+
+Natural UKR/BAL/SPA/GRE fights run 14,400 ticks with eight AI aircraft; the
+large fight runs 7,200 ticks with 23 AI aircraft. Turning-player and hold lanes
+run 2,400 ticks; hold lanes request eight stations per aircraft. Cold is the
+first 240 ticks. Steady is the remaining moving/frozen ticks. Wall timings
+include scheduling delay; CPU timings measure prediction work. These are
+host measurements, not cross-platform guarantees.
+
+| Lane | Cold p50 / p95 ms | Steady p50 / p95 ms | Largest CPU p95 ms | Refused / starved | Guided launches |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| natural-ukr | 0.811 / 0.928 | 0.024 / 0.894 | 0.924 | 0 / 0 | 15 |
+| natural-bal | 0.817 / 0.934 | 0.033 / 0.882 | 0.932 | 0 / 0 | 15 |
+| natural-spa | 0.821 / 0.926 | 0.034 / 0.894 | 0.925 | 0 / 0 | 15 |
+| natural-gre | 0.824 / 0.931 | 0.032 / 0.884 | 0.928 | 0 / 0 | 15 |
+| natural-big | 0.893 / 0.941 | 0.859 / 0.948 | 0.945 | 0 / 0 | 30 |
+| turning-3 | 0.889 / 0.950 | 0.901 / 0.943 | 0.949 | 0 / 0 | 14 |
+| turning-10 | 0.890 / 0.931 | 0.896 / 0.930 | 0.929 | 0 / 0 | 5 |
+| hold-frozen | 1.023 / 1.095 | 0.080 / 1.075 | 1.091 | 0 / 0 | 33 |
+| hold-moving | 1.008 / 1.020 | 0.892 / 1.021 | 1.018 | 0 / 0 | 33 |
+| hold-cruise | 0.778 / 0.835 | 0.798 / 0.870 | 0.867 | 0 / 0 | 16 |
+
+Largest cold/steady p95 is 1.094577 ms wall and 1.091497 ms CPU, below
+the 2 ms gate. Largest single wall sample is 1.266068 ms.
+No lane reports admission refusal or starvation. Maximum admission wait is
+0 ticks. Cached-reader p95 is at most 0.015730 ms.
+
+turning-3: player advice is qualified on 1,570/1,570 eligible-observation ticks (1,262 positive, 308 negative, 0 pending).
+
+turning-10: player advice is qualified on 660/661 eligible-observation ticks (660 positive, 0 negative, 1 pending).
+
+The denominator counts eligible observations, not all simulated ticks. Strict
+AI qualification remains separate from projected player advice.
+
+hold-frozen: 149,360 successful qualified cached reads.
+
+hold-moving: 16,048 successful qualified cached reads.
+
+hold-cruise: 0 successful qualified cached reads.
+
+The 20-second cruise hold demonstrates bounded cost, not completed-answer
+availability. This retained limitation is explicit; no synchronous fallback
+or relaxed support gate was introduced. Ground-target live reach/support is
+covered separately by A-G battery cases and the range tables.
