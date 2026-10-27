@@ -3264,6 +3264,12 @@ again with an observer; the capture format did not change for it.
   20 degrees, after a lay and with wider aim, and the host migration resume keeps
   a late Backlog, asks one checkpoint per resync and counts its drop timeout from
   the first update. The compatibility simulation version is 3.
+  75 (2026-10-27, 0.2.2-rc1): guided ordnance flies on the energy model (new
+  projectile, decoy and prediction checkpoint state; inert stores clear target
+  and incoming flags), two-sided store points load in pairs, the AI missile
+  defense keeps new checkpointed state, bridges and Quick Mission surface
+  placement change world geometry, and hosts may publish a retried surface
+  seed. The compatibility simulation version is 4.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

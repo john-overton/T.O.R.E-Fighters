@@ -260,7 +260,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 72 adds human visual designation and its checkpoint retention state.
 /// 73 adds cumulative flight reports and persistent human/AI score identities.
 /// 74 changes rules only: tanks against aircraft and host migration resume.
-pub const PROTOCOL_VERSION: u16 = 74;
+/// 75 for 0.2.2: the energy model for guided ordnance (new checkpoint state),
+/// paired store loading, AI missile defense state, bridge grounding and
+/// Quick Mission placement rules and seed retry.
+pub const PROTOCOL_VERSION: u16 = 75;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
