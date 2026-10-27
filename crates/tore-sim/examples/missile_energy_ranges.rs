@@ -284,6 +284,20 @@ fn maximum(w: &Weapon, alt: f64, aspect: usize, drag: Option<f64>, seeker: bool)
         }
     }
     if low == 0. {
+        // Minimum turn radius can leave a narrow beam-intercept interval
+        // between the coarse probes. Retry only empty offline envelopes.
+        let mut distance = 100.;
+        while distance < 1_000_000. {
+            if hit(w, alt, aspect, distance, drag) {
+                low = distance;
+                upper = 1_000_000.;
+            } else if distance > low {
+                upper = upper.min(distance);
+            }
+            distance *= 1.1;
+        }
+    }
+    if low == 0. {
         return 0.;
     }
     high = upper;
@@ -386,6 +400,20 @@ fn candidate_maximum_precision(
         }
     }
     if low == 0. {
+        // Match the table writer's empty-envelope retry. A narrow valid
+        // beam interval must not be rejected merely for missing coarse probes.
+        let mut distance = 100.;
+        while distance < 1_000_000. {
+            if candidate_hit(w, body, anchor, distance) {
+                low = distance;
+                high = 1_000_000.;
+            } else if distance > low {
+                high = high.min(distance);
+            }
+            distance *= 1.1;
+        }
+    }
+    if low == 0. {
         return 0.;
     }
     for _ in 0..precision {
@@ -477,6 +505,11 @@ fn fit_class(
             fuels.dedup_by(|a, b| (*a - *b).abs() < 0.00001);
             for fuel in fuels {
                 let b = scaled(fuel, drag);
+                if motor_shape_error(m, b, m.exhaust_mps).is_some()
+                    || cruise_arrival_error(&w, m, b).is_some()
+                {
+                    continue;
+                }
                 let primary = candidate_maximum(&w, b, m.primary);
                 let mut score = 4. * (primary / m.primary[2] - 1.).abs() + 0.02 * drag.ln().powi(2);
                 if ground_roles {
@@ -528,26 +561,21 @@ fn fit_class(
     Ok(())
 }
 
+const MOTOR_FIT_HEADER: &str = "source,class,fraction,drag,control_s,boost_s,sustain_s,exhaust_mps,boost_n,sustain_n,boost_share,anchor_km,tail_target_km,primary_km,score,min_launch_km,floor_km,r500h,r500b,r500t,r5h,r5b,r5t,r15h,r15b,r15t,r35h,r35b,r35t";
+
 /// Authored game balance, never a reconstruction of a real motor.
-/// Fuel .12..50%, drag .5..3, phase duration .25..16 times nominal and <=100%
-/// of the fixed control budget, impulse scale .25..4, dry-mass axial load <=60 G.
+/// Fuel 12..50%, drag .5..3 and the unchanged class control budget bound every fit.
+/// Staged fits allocate total impulse between non-inverted motor phases with
+/// launch acceleration, dry-mass load, coefficient and Mach-one guards below.
+/// The older four-coordinate search only rescales existing phase proportions.
 fn fit_motors<const N: usize>(
     dir: &Path,
     filter: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "source,class,fraction,drag,control_s,boost_s,sustain_s,exhaust_mps,boost_n,sustain_n,boost_share,anchor_km,tail_target_km,primary_km,score,min_launch_km,floor_km,r500h,r500b,r500t,r5h,r5b,r5t,r15h,r15b,r15t,r35h,r35b,r35t"
-    );
+    println!("{MOTOR_FIT_HEADER}");
     let sources: Vec<_> = tore_formats::missile_motors::MOTORS
         .iter()
-        .filter(|m| {
-            let eligible = m.control_class.tail_floor_km().is_some()
-                || matches!(
-                    m.source,
-                    "AGM84E.JT" | "AS7.JT" | "AS16.JT" | "AS14.JT" | "AS30.JT" | "AT12.JT"
-                );
-            eligible && filter.is_none_or(|f| f.split(',').any(|n| n == m.source))
-        })
+        .filter(|m| filter.is_none_or(|f| f.split(',').any(|n| n == m.source)))
         .collect();
     std::thread::scope(|scope| {
         let mut jobs = Vec::new();
@@ -555,7 +583,7 @@ fn fit_motors<const N: usize>(
             let sources = &sources;
             jobs.push(scope.spawn(move || -> Result<(), String> {
                 for m in sources.iter().skip(worker).step_by(4) {
-                    let text = fit_motor_store::<N>(dir, m).map_err(|e| e.to_string())?;
+                    let text = fit_motor_store::<N>(dir, m, None, 8).map_err(|e| e.to_string())?;
                     std::io::Write::write_all(&mut std::io::stdout().lock(), text.as_bytes())
                         .map_err(|e| e.to_string())?;
                     eprintln!("motor fits {}", m.source);
@@ -574,6 +602,8 @@ fn fit_motors<const N: usize>(
 fn fit_motor_store<const N: usize>(
     dir: &Path,
     m: &tore_formats::missile_motors::MotorData,
+    physical_seed: Option<[f64; 6]>,
+    precision: usize,
 ) -> Result<String, Box<dyn std::error::Error>> {
     use missiles::energy::{Body, DT, G};
     use std::fmt::Write;
@@ -614,29 +644,51 @@ fn fit_motor_store<const N: usize>(
             }
         }
         if N == 6 {
-            let total = ((f64::from(base.boost.ticks + base.sustain.ticks) * duration).round()
-                as u32)
-                .max(2);
-            let share = 0.05 + 0.9 * x[5];
-            let boost = (f64::from(total) * (0.05 + 0.9 * x[4]))
-                .round()
-                .clamp(1., f64::from(total - 1)) as u32;
-            let total_impulse = (base.boost.thrust * f64::from(base.boost.ticks)
-                + base.sustain.thrust * f64::from(base.sustain.ticks))
-                * DT
-                * fuel
-                / m.propellant_fraction
-                * impulse;
+            let jet = powered_cruise(m, base) && base.boost.ticks == 0;
+            let exhaust = if jet {
+                5000. + 23000. * x[3]
+            } else {
+                600. + 5400. * x[3]
+            };
+            let impulse_total = base.mass * fuel * exhaust;
+            let dry = base.mass * (1. - fuel);
+            let minimum = (impulse_total / (dry * 53.5 * G)).max(0.5);
+            let maximum = f64::from(base.guidance_ticks - base.ignition) * DT;
+            let duration = minimum * (maximum / minimum).powf(x[2]);
+            let total = ((duration / DT).round().max((minimum / DT).ceil()).max(2.) as u32)
+                .min(base.guidance_ticks - base.ignition);
+            let mut share = if jet { 0. } else { 0.05 + 0.93 * x[5] };
+            let boost = if jet {
+                0
+            } else {
+                let shortest = impulse_total * share / (dry * 53.5 * G);
+                let longest = (impulse_total * share
+                    / (base.mass * (minimum_boost_g(m, base) + 0.01) * G))
+                    .min(f64::from(total) * DT * share);
+                ((shortest + (longest - shortest).max(0.) * x[4]) / DT + 1e-6)
+                    .floor()
+                    .max((shortest / DT).ceil())
+                    .clamp(1., f64::from(total - 1)) as u32
+            };
+            if boost > 0 {
+                share = share.max(f64::from(boost) / f64::from(total) + 1e-7);
+            }
             body.boost = missiles::energy::Motor {
                 ticks: boost,
                 propellant: base.mass * fuel * share,
-                thrust: total_impulse * share / (f64::from(boost) * DT),
+                thrust: if boost == 0 {
+                    0.
+                } else {
+                    impulse_total * share / (f64::from(boost) * DT)
+                },
             };
             body.sustain = missiles::energy::Motor {
                 ticks: total - boost,
                 propellant: base.mass * fuel * (1. - share),
-                thrust: total_impulse * (1. - share) / (f64::from(total - boost) * DT),
+                thrust: impulse_total * (1. - share) / (f64::from(total - boost) * DT),
             };
+            body.life = body.life.max(body.ignition + total + 1200);
+            return (body, fuel, exhaust / m.exhaust_mps);
         }
         (body, fuel, impulse)
     };
@@ -651,14 +703,30 @@ fn fit_motor_store<const N: usize>(
         // Minimum equal-relative-error compromise for contradictory tail targets.
         effective_tail = 2. * a * b / (a + b) + if m.source == "AIM7.JT" { 0.02 } else { -0.02 };
     }
-    let goals: &[(f64, f64)] = if air {
+    let goals: &[(f64, f64)] = if physical_seed.is_some() {
+        &[(1., 1.)]
+    } else if m.source == "AA8.JT" {
+        &[
+            (1.25, 1.),
+            (1.28, 0.95),
+            (1.20, 0.95),
+            (1.28, 1.05),
+            (1., 1.),
+        ]
+    } else if air {
         &[(1., 1.), (0.92, 1.), (1.08, 1.), (1., 0.92), (1., 1.08)]
     } else {
         &[(1., 1.)]
     };
     let mut outputs: Vec<([f64; N], f64)> = Vec::new();
     for &(head_factor, tail_factor) in goals {
-        for start in 0..4 {
+        for start in 0..if physical_seed.is_some() {
+            1
+        } else if N == 6 {
+            8
+        } else {
+            4
+        } {
             let seed = if start == 0 {
                 [
                     ((m.propellant_fraction - 0.12) / 0.38).clamp(0., 1.),
@@ -676,16 +744,67 @@ fn fit_motor_store<const N: usize>(
             let mut initial = [0.; N];
             initial[..4].copy_from_slice(&seed);
             if N == 6 {
-                let (time, share) = match start {
-                    0 => (0.1, 0.5),
-                    1 => (0.05, 0.35),
-                    2 => (0.2, 0.7),
-                    _ => (0.4, 0.8),
-                };
-                initial[4] = (time - 0.05) / 0.9;
-                initial[5] = (share - 0.05) / 0.9;
+                if start < 4 {
+                    initial[2] = [0.55, 0.25, 0.8, 0.4][start];
+                    initial[3] = [0.3, 0.15, 0.6, 0.85][start];
+                    initial[4] = [0.5, 0.7, 0.3, 0.5][start];
+                    initial[5] = [0.6, 0.8, 0.3, 0.1][start];
+                } else if start >= 6 {
+                    let seed = if start == 6 {
+                        [1., 0., 1., 0.1, 0.95, 0.]
+                    } else {
+                        [0.7, 0., 0.98, 0.25, 0.8, 0.02]
+                    };
+                    initial.copy_from_slice(&seed);
+                } else {
+                    let seed = if powered_cruise(m, base) {
+                        if start == 4 {
+                            [1., 1., 0.92, 0.2, 0.9, 0.]
+                        } else {
+                            [0.7, 0.9, 0.9, 0.4, 0.8, 0.02]
+                        }
+                    } else if start == 4 {
+                        [0., 0., 0.98, 0.15, 0.95, 0.8]
+                    } else {
+                        [0.2, 0.3, 0.95, 0.3, 0.8, 0.6]
+                    };
+                    initial.copy_from_slice(&seed);
+                }
             }
-            while initial[3] > 0. {
+            if let Some([fuel, drag, boost, sustain, coefficient, share]) = physical_seed {
+                let jet = powered_cruise(m, base) && base.boost.ticks == 0;
+                let impulse = base.mass * fuel * coefficient;
+                let dry = base.mass * (1. - fuel);
+                let minimum = (impulse / (dry * 53.5 * G)).max(0.5);
+                let maximum = f64::from(base.guidance_ticks - base.ignition) * DT;
+                let total = boost + sustain;
+                let shortest = impulse * share / (dry * 53.5 * G);
+                let longest = (impulse * share
+                    / (base.mass * (minimum_boost_g(m, base) + 0.01) * G))
+                    .min(total * share);
+                let values = [
+                    (fuel - 0.12) / 0.38,
+                    (drag - 0.5) / 2.5,
+                    (total / minimum).ln() / (maximum / minimum).ln(),
+                    if jet {
+                        (coefficient - 5000.) / 23000.
+                    } else {
+                        (coefficient - 600.) / 5400.
+                    },
+                    if jet {
+                        0.
+                    } else {
+                        (boost - shortest) / (longest - shortest).max(DT)
+                    },
+                    if jet { 0. } else { (share - 0.05) / 0.93 },
+                ];
+                initial.copy_from_slice(&values.map(|v| v.clamp(0., 1.)));
+            }
+            if precision == 0 {
+                outputs.push((initial, 0.));
+                continue;
+            }
+            while N == 4 && initial[3] > 0. {
                 let (body, _, _) = build(initial);
                 if [body.boost, body.sustain]
                     .iter()
@@ -696,14 +815,14 @@ fn fit_motor_store<const N: usize>(
                 initial[3] = (initial[3] - 0.1).max(0.);
             }
             let evaluate = |x: [f64; N]| {
-                let (b, _, _) = build(x);
+                let (b, _, impulse) = build(x);
                 if [b.boost, b.sustain]
                     .iter()
                     .any(|p| p.thrust > b.dry_mass() * 60. * G)
                 {
                     return 1e6;
                 }
-                let head = candidate_maximum_precision(&w, b, m.primary, 12);
+                let head = candidate_maximum_precision(&w, b, m.primary, precision);
                 let head_error = (head / (m.primary[2] * head_factor) - 1.).powi(2);
                 let mut value = 25. * head_error;
                 if !air {
@@ -714,27 +833,54 @@ fn fit_motor_store<const N: usize>(
                     }
                 }
                 if air {
-                    let tail = candidate_maximum_precision(&w, b, m.secondary, 12);
+                    let tail = candidate_maximum_precision(&w, b, m.secondary, precision);
                     let tail_error = (tail / (effective_tail * tail_factor) - 1.).powi(2);
                     value = 30. * head_error.max(tail_error) + 5. * (head_error + tail_error);
                     value += 100. * (1. - tail / floor).max(0.).powi(2);
                 }
+                if air {
+                    value += 10. * (mach_one_seconds(b).unwrap_or(20.) - 3.).max(0.).powi(2);
+                }
+                if powered_cruise(m, b) {
+                    let q = arrival_trial(&w, b, m.primary, m.primary[2]);
+                    let a = q.answer.unwrap();
+                    let mach = dot(q.flight.velocity, q.flight.velocity).sqrt()
+                        / missiles::energy::atmosphere(q.flight.position[1]).sound;
+                    let burn = f64::from(b.ignition + b.boost.ticks + b.sustain.ticks) * DT;
+                    value += 100. * (a.seconds / burn - 0.99).max(0.).powi(2)
+                        + 100. * (0.62 - mach).max(0.).powi(2)
+                        + 100. * (mach - 0.93).max(0.).powi(2)
+                        + if a.hit {
+                            0.
+                        } else {
+                            0.02 + 10. * (a.closest / (m.primary[2] * 1000.)).powi(2)
+                        };
+                }
+                if N == 4 && motor_shape_error(m, b, m.exhaust_mps * impulse).is_some() {
+                    value += 100.;
+                }
+                value += 0.002
+                    * (b.boost.thrust.max(b.sustain.thrust) / (b.dry_mass() * G) / 30.).powi(2);
                 value
                     + 0.001
                         * (b.drag_scale.ln().powi(2)
                             + (x[2] - initial[2]).powi(2)
                             + (x[3] - 0.5).powi(2))
             };
+            if physical_seed.is_some() {
+                outputs.push((initial, evaluate(initial)));
+            }
             let clamp = |x: [f64; N]| x.map(|v| v.clamp(0., 1.));
             let mut simplex: Vec<_> = std::iter::once(initial)
                 .chain((0..N).map(|i| {
                     let mut x = initial;
-                    x[i] = if x[i] > 0.8 { x[i] - 0.18 } else { x[i] + 0.18 };
+                    let step = if physical_seed.is_some() { 0.025 } else { 0.18 };
+                    x[i] = if x[i] > 0.8 { x[i] - step } else { x[i] + step };
                     clamp(x)
                 }))
                 .map(|x| (x, evaluate(x)))
                 .collect();
-            for iteration in 0..120 {
+            for iteration in 0..if physical_seed.is_some() { 320 } else { 160 } {
                 simplex.sort_by(|a, b| a.1.total_cmp(&b.1));
                 if iteration > 30 && simplex[0].1 < 0.0003 {
                     break;
@@ -799,6 +945,22 @@ fn fit_motor_store<const N: usize>(
         {
             continue;
         }
+        if let Some(reason) = motor_shape_error(m, b, m.exhaust_mps * impulse)
+            .or_else(|| cruise_arrival_error(&w, m, b))
+        {
+            eprintln!(
+                "rejected {}: {} fuel={fuel:.6} drag={:.6} boost={:.3}/{:.3}s sustain={:.3}/{:.3}s coefficient={:.3}",
+                m.source,
+                reason,
+                b.drag_scale,
+                b.boost.thrust,
+                f64::from(b.boost.ticks) * DT,
+                b.sustain.thrust,
+                f64::from(b.sustain.ticks) * DT,
+                m.exhaust_mps * impulse
+            );
+            continue;
+        }
         let primary = candidate_maximum(&w, b, m.primary);
         let tail = if air {
             candidate_maximum(&w, b, m.secondary)
@@ -835,6 +997,17 @@ fn fit_motor_store<const N: usize>(
                 };
             }
             if tail < floor || ranges.contains(&0.) {
+                eprintln!(
+                    "rejected envelope {}: H={primary} T={tail} cells={ranges:?} fuel={fuel} drag={} boost={}/{} sustain={}/{} coefficient={} share={}",
+                    m.source,
+                    b.drag_scale,
+                    b.boost.thrust,
+                    f64::from(b.boost.ticks) * DT,
+                    b.sustain.thrust,
+                    f64::from(b.sustain.ticks) * DT,
+                    m.exhaust_mps * impulse,
+                    b.boost.propellant / (b.boost.propellant + b.sustain.propellant)
+                );
                 continue;
             }
         }
@@ -1075,6 +1248,8 @@ fn fit_pairs(
 // a shortfall does not authorize a new overshoot.
 fn accepted_fit_bands(source: &str) -> ([f64; 2], [f64; 2]) {
     match source {
+        // John approved this guarded-motor compromise in Phase 2.7.
+        "PL7.JT" => ([0.875, 1.125], [0.875, 1.125]),
         "AA10.JT" => ([0.86, 1.105], [0.895, 1.13]),
         "AA2.JT" => ([0.82, 1.105], [0.895, 1.18]),
         "AA8.JT" => ([0.895, 1.3], [0.895, 1.105]),
@@ -1092,12 +1267,106 @@ fn in_fit_band(actual: f64, target: f64, band: [f64; 2]) -> bool {
 #[cfg(test)]
 mod fit_gate_tests {
     use super::*;
+    fn guarded_body() -> missiles::energy::Body {
+        use missiles::energy::{Body, Motor};
+        Body {
+            mass: 100.,
+            diameter: 0.2,
+            boost: Motor {
+                ticks: 240,
+                thrust: 12000.,
+                propellant: 10.,
+            },
+            sustain: Motor {
+                ticks: 480,
+                thrust: 1000.,
+                propellant: 10.,
+            },
+            ignition: 0,
+            life: 12000,
+            guidance_ticks: 8400,
+            defeat_mach: 1.,
+            defeat_ticks: 30,
+            structural_g: 40.,
+            lift_coefficient: 12.,
+            induced_factor: 0.03,
+            drag_scale: 1.,
+            cruise_drag: false,
+            minimum_speed: 120.,
+            navigation_gain: 3.,
+            loft_height: 0.,
+            loft_range: 0.,
+            cruise_feet: None,
+            launch_elevation: 0.,
+        }
+    }
+    #[test]
+    fn motor_guard_rejects_inversion_slow_launch_and_boundary_coefficients() {
+        let m = tore_formats::missile_motors::motor("AIM120.JT").unwrap();
+        let b = guarded_body();
+        assert_eq!(motor_shape_error(m, b, 2200.), None);
+        let mut bad = b;
+        bad.sustain.thrust = 15000.;
+        assert_eq!(
+            motor_shape_error(m, bad, 2200.),
+            Some("inverted boost/sustain thrust")
+        );
+        bad = b;
+        bad.boost.thrust = 2000.;
+        assert_eq!(
+            motor_shape_error(m, bad, 2200.),
+            Some("insufficient initial thrust/launch weight")
+        );
+        bad = b;
+        bad.boost.thrust = 50000.;
+        assert!(
+            motor_shape_error(m, bad, 2200.)
+                .unwrap()
+                .contains("dry-mass")
+        );
+        assert!(
+            motor_shape_error(m, b, 8800.)
+                .unwrap()
+                .contains("coefficient")
+        );
+        bad = b;
+        bad.ignition = 360;
+        assert!(motor_shape_error(m, bad, 2200.).unwrap().contains("Mach 1"));
+    }
+    #[test]
+    fn sustain_only_cruise_is_a_powered_engine_not_an_inverted_booster() {
+        let m = tore_formats::missile_motors::motor("AGM84A.JT").unwrap();
+        let mut b = guarded_body();
+        b.cruise_drag = true;
+        b.boost = missiles::energy::Motor {
+            ticks: 0,
+            thrust: 0.,
+            propellant: 0.,
+        };
+        b.sustain = missiles::energy::Motor {
+            ticks: 48000,
+            thrust: 500.,
+            propellant: 20.,
+        };
+        assert_eq!(actual_coefficient(b), 10000.);
+        assert_eq!(motor_shape_error(m, b, 10000.), None);
+        b.sustain.thrust = 100.;
+        assert!(
+            motor_shape_error(m, b, 10000.)
+                .unwrap()
+                .contains("initial thrust")
+        );
+    }
     #[test]
     fn an_unlisted_overshoot_is_rejected_even_when_it_is_finite() {
         assert!(!in_fit_band(120., 100., accepted_fit_bands("NEW.JT").0));
         assert!(in_fit_band(100., 100., accepted_fit_bands("NEW.JT").0));
         assert!(in_fit_band(12.8, 10., accepted_fit_bands("AA8.JT").0));
         assert!(!in_fit_band(16., 10., accepted_fit_bands("AA8.JT").0));
+        assert!(in_fit_band(15.695, 14., accepted_fit_bands("PL7.JT").0));
+        assert!(!in_fit_band(16., 14., accepted_fit_bands("PL7.JT").0));
+        assert!(in_fit_band(4.812, 5.474, accepted_fit_bands("PL7.JT").1));
+        assert!(!in_fit_band(4.7, 5.474, accepted_fit_bands("PL7.JT").1));
     }
 }
 fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -1110,6 +1379,11 @@ fn verify(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         if !(0.5..=3.).contains(&body.drag_scale) || !(0.12..=0.5).contains(&m.propellant_fraction)
         {
             failures.push(format!("{}: fuel/drag outside approved bounds", m.source));
+        }
+        if let Some(reason) =
+            motor_shape_error(m, body, m.exhaust_mps).or_else(|| cruise_arrival_error(&w, m, body))
+        {
+            failures.push(format!("{}: motor shape: {reason}", m.source));
         }
         let primary = candidate_maximum(&w, body, m.primary);
         if !in_fit_band(primary, m.primary[2], accepted_fit_bands(m.source).0) {
@@ -1361,6 +1635,44 @@ fn fit_sparrow(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let dir = Path::new(args.get(1).ok_or("JT directory required")?);
+    if args
+        .get(2)
+        .is_some_and(|s| matches!(s.as_str(), "--refine-motor" | "--measure-motor"))
+    {
+        let source = args
+            .get(3)
+            .ok_or("--refine-motor SOURCE FUEL DRAG BOOST_S SUSTAIN_S COEFFICIENT BOOST_SHARE")?;
+        let m = tore_formats::missile_motors::motor(source).ok_or("unknown motor source")?;
+        let mut seed = [0f64; 6];
+        for (i, v) in seed.iter_mut().enumerate() {
+            *v = args.get(i + 4).ok_or("missing refinement value")?.parse()?;
+        }
+        if seed.iter().any(|v| !v.is_finite())
+            || !(0.12..=0.5).contains(&seed[0])
+            || !(0.5..=3.).contains(&seed[1])
+            || seed[2] < 0.
+            || seed[3] < 0.
+            || seed[2] + seed[3] <= 0.
+            || seed[4] <= 0.
+            || !(0. ..=1.).contains(&seed[5])
+        {
+            return Err("invalid motor refinement seed".into());
+        }
+        println!("{MOTOR_FIT_HEADER}");
+        print!(
+            "{}",
+            fit_motor_store::<6>(
+                dir,
+                m,
+                Some(seed),
+                if args[2] == "--measure-motor" { 0 } else { 12 }
+            )?
+        );
+        return Ok(());
+    }
+    if args.get(2).is_some_and(|s| s == "--motor-shapes") {
+        return motor_shapes(dir);
+    }
     if args.get(2).is_some_and(|s| s == "--diagnostics") {
         return diagnostics(dir);
     }
@@ -1517,6 +1829,191 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+    }
+    Ok(())
+}
+
+fn powered_cruise(m: &tore_formats::missile_motors::MotorData, b: missiles::energy::Body) -> bool {
+    m.control_class == tore_formats::missile_motors::ControlClass::Cruise && b.cruise_drag
+}
+fn minimum_boost_g(m: &tore_formats::missile_motors::MotorData, b: missiles::energy::Body) -> f64 {
+    use tore_formats::missile_motors::ControlClass::*;
+    match m.control_class {
+        ShortIr | MediumAir | LongAir | SurfaceIr | SurfaceRadar | SurfaceRadarLong => 8.,
+        FastGround => 4.,
+        ShortGround => 1.,
+        Command => 2.,
+        Cruise => {
+            if b.boost.ticks == 0 {
+                0.25
+            } else {
+                4.
+            }
+        }
+    }
+}
+fn actual_coefficient(b: missiles::energy::Body) -> f64 {
+    use missiles::energy::DT;
+    (b.boost.thrust * f64::from(b.boost.ticks) + b.sustain.thrust * f64::from(b.sustain.ticks)) * DT
+        / (b.boost.propellant + b.sustain.propellant)
+}
+/// Authored interior guard, leaving headroom to the old 8,800 m/s / 60 G extremes.
+/// Sustain-only air-launched cruise engines have no fictitious zero-thrust booster.
+fn motor_shape_error(
+    m: &tore_formats::missile_motors::MotorData,
+    b: missiles::energy::Body,
+    coefficient: f64,
+) -> Option<&'static str> {
+    use missiles::energy::G;
+    if !b.valid() {
+        return Some("invalid physical body");
+    }
+    let first = if b.boost.ticks == 0 {
+        b.sustain.thrust
+    } else {
+        b.boost.thrust
+    };
+    let jet = powered_cruise(m, b) && b.boost.ticks == 0;
+    let bounds = if jet { 4000. ..=32000. } else { 400. ..=6600. };
+    if b.boost.ticks > 0 && b.boost.thrust < b.sustain.thrust {
+        return Some("inverted boost/sustain thrust");
+    }
+    if first / (b.mass * G) < minimum_boost_g(m, b) {
+        return Some("insufficient initial thrust/launch weight");
+    }
+    if b.boost.thrust.max(b.sustain.thrust) / (b.dry_mass() * G) > 54. {
+        return Some("dry-mass axial load lacks 10% headroom to 60 G");
+    }
+    if !bounds.contains(&coefficient) || !bounds.contains(&actual_coefficient(b)) {
+        return Some("impulse coefficient outside interior guard");
+    }
+    if m.control_class.tail_floor_km().is_some() && mach_one_seconds(b).is_none_or(|t| t > 3.) {
+        return Some("Mach 1 takes more than 3 s from 250 m/s at 5k ft");
+    }
+    None
+}
+fn cruise_arrival_error(
+    w: &Weapon,
+    m: &tore_formats::missile_motors::MotorData,
+    b: missiles::energy::Body,
+) -> Option<&'static str> {
+    if !powered_cruise(m, b) {
+        return None;
+    }
+    let q = arrival_trial(w, b, m.primary, m.primary[2]);
+    let mach = dot(q.flight.velocity, q.flight.velocity).sqrt()
+        / missiles::energy::atmosphere(q.flight.position[1]).sound;
+    if !q.answer.unwrap().hit {
+        return Some("cruise misses its reference point");
+    }
+    if q.flight.age >= b.ignition + b.boost.ticks + b.sustain.ticks {
+        return Some("cruise coasts to reference point");
+    }
+    if !(0.6..=0.95).contains(&mach) {
+        return Some("cruise arrival outside Mach 0.60..0.95");
+    }
+    None
+}
+/// Uniform offline acceleration and reference-arrival characterization.
+fn mach_one_seconds(body: missiles::energy::Body) -> Option<f64> {
+    use missiles::energy::{DT, Flight, atmosphere};
+    let mut f = Flight::launch([0., 5000. * FT, 0.], [0., 0., 250.], [0., 0., 1.]);
+    let target = Some(missiles::energy::Observation {
+        position: [0., 5000. * FT, 100_000.],
+        velocity: [0.; 3],
+    });
+    for _ in 0..2400 {
+        f.step(body, [0.; 3], target);
+        let speed = dot(f.velocity, f.velocity).sqrt();
+        if speed >= atmosphere(f.position[1]).sound {
+            return Some(f64::from(f.age) * DT);
+        }
+    }
+    None
+}
+fn arrival_trial(
+    w: &Weapon,
+    body: missiles::energy::Body,
+    condition: [f64; 4],
+    range_km: f64,
+) -> Trial {
+    let mut q = question(
+        w,
+        condition[0] * FT,
+        condition[1] as usize,
+        range_km * 1000.,
+    );
+    q.body = body;
+    q.target.velocity = match condition[1] as usize {
+        0 => [0., 0., -condition[3]],
+        1 => [condition[3], 0., 0.],
+        2 => [0., 0., condition[3]],
+        _ => [0.; 3],
+    };
+    while q.answer.is_none() {
+        q.step(&|_, _| 0.);
+    }
+    q
+}
+fn motor_shapes(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use missiles::energy::{DT, G, atmosphere};
+    println!(
+        "source,class,mass_kg,fuel,drag,boost_n,boost_s,sustain_n,sustain_s,boost_g,dry_g,coefficient,actual_coefficient,mach1_s,reference_hit,reference_s,reference_mach,reference_powered,reach_km,edge_hit,edge_s,edge_mps,edge_mach,edge_powered,peak_mach,cruise_drag"
+    );
+    for m in tore_formats::missile_motors::MOTORS {
+        let w = Weapon::parse(m.source, &fs::read(dir.join(m.source))?)?;
+        let b = missiles::energy_profile::body(&w);
+        let reference = arrival_trial(&w, b, m.primary, m.primary[2]);
+        let ref_mach = dot(reference.flight.velocity, reference.flight.velocity).sqrt()
+            / atmosphere(reference.flight.position[1]).sound;
+        let reach = candidate_maximum(&w, b, m.primary);
+        let mut q = question(&w, m.primary[0] * FT, m.primary[1] as usize, reach * 1000.);
+        q.body = b;
+        q.target.velocity = match m.primary[1] as usize {
+            0 => [0., 0., -m.primary[3]],
+            1 => [m.primary[3], 0., 0.],
+            2 => [0., 0., m.primary[3]],
+            _ => [0.; 3],
+        };
+        let mut peak: f64 = 0.;
+        while q.answer.is_none() {
+            q.step(&|_, _| 0.);
+            peak = peak.max(
+                dot(q.flight.velocity, q.flight.velocity).sqrt()
+                    / atmosphere(q.flight.position[1]).sound,
+            );
+        }
+        let a = q.answer.unwrap();
+        let v = dot(q.flight.velocity, q.flight.velocity).sqrt();
+        let burnout = b.ignition + b.boost.ticks + b.sustain.ticks;
+        println!(
+            "{},{:?},{:.6},{:.9},{:.9},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{:.6},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{},{peak:.6},{}",
+            m.source,
+            m.control_class,
+            b.mass,
+            m.propellant_fraction,
+            b.drag_scale,
+            b.boost.thrust,
+            f64::from(b.boost.ticks) * DT,
+            b.sustain.thrust,
+            f64::from(b.sustain.ticks) * DT,
+            b.boost.thrust / (b.mass * G),
+            b.boost.thrust.max(b.sustain.thrust) / (b.dry_mass() * G),
+            m.exhaust_mps,
+            actual_coefficient(b),
+            mach_one_seconds(b).map_or(String::new(), |s| format!("{s:.6}")),
+            reference.answer.unwrap().hit,
+            reference.answer.unwrap().seconds,
+            ref_mach,
+            reference.flight.age < burnout,
+            reach,
+            a.hit,
+            a.seconds,
+            v,
+            v / atmosphere(q.flight.position[1]).sound,
+            q.flight.age < burnout,
+            b.cruise_drag
+        );
     }
     Ok(())
 }

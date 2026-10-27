@@ -106,7 +106,7 @@ record values. No public number is invented to fill that gap.
 
 ## Per-store motors and class control budgets
 
-Implementation mode, Phase 2.6 of 2026-10-27. John requested class control
+Implementation mode, Phase 2.7 of 2026-10-27. John requested class control
 budgets, post-burn inert defeat, two-condition A2A fits and class tail floors. The per-store table records
 59 profiles. These are game-model fits, not engineering performance claims.
 Thrust is fuel mass times effective exhaust divided by phase duration unless
@@ -115,7 +115,7 @@ where no phase-resolved measurements exist; their fuel and derived thrust are
 refitted. Every profile has controlled-flight seconds from release, independent
 of fuel burn and the later removal lifetime.
 
-Nominal motor references, retained for provenance. Phase 2.6 balance fits
+Nominal motor references, retained for provenance. Phase 2.7 balance fits
 may change these motor values; the actual game parameters are in the table
 below. AIM9B's sourced 20-second control budget remains unchanged:
 
@@ -154,16 +154,46 @@ normal drag curve; AT12 retains its imported cruise curve.
 John's later Phase 2.6 decision explicitly permits fitted per-store fuel,
 burn durations and thrust, even when they differ from the nominal motor
 references. These are game-balance coefficients, not engineering measurements.
-The agent's search bounds were fuel fraction 0.12..0.50, base drag 0.5..3,
-phase-duration scale 0.25..16 from the pre-round data, total fitted burn no
-longer than the control budget, impulse scale 0.25..4, and maximum axial
-thrust of 60 times gravity on dry mass. A staged search additionally varies
-the booster time share and fuel/impulse share over 0.05..0.95. These bounds
-belong to this calibration, not a runtime thrust clamp. Existing retained
-motors outside the expanded tuning scope, such as AGM84A's long sustain,
-keep their nominal phase durations.
+The guarded Phase 2.7 staged search keeps fuel fraction 0.12..0.50 and
+base drag 0.5..3. Total burn ends within the fixed class control budget,
+including ignition delay. Rocket impulse coefficients are searched over
+600..6000 m/s; sustain-only cruise engines use 5000..28000 m/s, an effective
+fuel/impulse coefficient rather than rocket exhaust velocity. Booster fuel
+share is 0.05..0.98. Phase durations are solved within launch-weight and
+53.5 dry-mass g limits, with boost thrust at least sustain thrust.
+The older four-coordinate search rescales existing durations and impulse,
+but its emitted candidates must pass the same guard. These are agent-authored
+calibration bounds, not runtime clamps or measured motor properties.
 
-All 25 A2A stores fit the unchanged 35k head anchor and their measured
+The shared fitter/verification guard requires boost thrust at least sustain
+thrust, at least 8 g initial thrust on launch mass for all A2A and SAM classes,
+and at most 54 g peak thrust on dry mass. Ground-class initial thrust floors
+are FastGround 4 g, ShortGround 1 g, Command 2 g, and Cruise 4 g with a booster
+or 0.25 g for a sustain-only engine. Sustain-only cruise engines do not invent
+a zero-thrust booster. Both declared and actual impulse/fuel coefficients must
+lie in 400..6600 m/s for rockets, or 4000..32000 m/s for sustain-only cruise
+engines. The rocket ceiling leaves 25% headroom to the previous 8800 m/s limit;
+the dry-mass ceiling leaves 10% to 60 g. A2A must reach Mach 1 within 3 seconds
+from 250 m/s at 5,000 ft, including ignition delay. This standardized probe
+uses level launch and an observed stationary point 100 km ahead.
+
+Powered cruise here means the Cruise control class plus the cruise drag curve:
+AGM84A, AGM84E, AM39 and SSN9. At each exact reference range they must hit,
+remain powered and arrive at Mach 0.60..0.95. That band is an agent-authored
+game sanity check. AS16 has the long Cruise control budget but normal drag;
+it is not subjected to a subsonic sea-skimmer check. AT12 retains ShortGround.
+The retained AGM84A sustain can outlast its control budget, as before. Neither
+class times, the defeat rule, guidance nor the runtime force law changed.
+
+Nineteen A2A profiles failed the new shape guard, including the highlighted
+PL7, AA8 and AA2 defects. AS16 also failed the ground-store shape guard. The current round therefore refits
+those 19 A2A profiles and AS16, AGM84E, AM39 and SSN9. AGM84A also receives
+a small sustain-thrust increase to reach its exact reference before control
+expiry. Its existing 962-second sustain and 600-second control budget remain.
+All SAM data and the six already-valid A2A motors remain unchanged. [The baseline](../baselines/missile-energy.md#motor-shape-audit)
+records the before/after motor shapes, acceleration and arrival results.
+
+All 25 A2A stores are checked against the unchanged 35k head anchor and their measured
 round-2 5k tail reach. The latter numbers are explicit secondary data from
 the round-2 baseline, not newly invented real-world conditions. Shared class
 times and the global post-burn Mach 1.0 / 30-tick defeat policy never enter
@@ -201,69 +231,68 @@ references for non-A2A records are comparison data only.
 
 | Store | Control class / s | Fuel fraction | Drag | Boost fuel share | Boost N / s | Sustain N / s | Impulse coefficient m/s | Phase provenance |
 | --- | --- | ---: | ---: | ---: | --- | --- | ---: | --- |
-| AA10.JT | MediumAir / 70 | 0.315684 | 2.823302 | 0.650000 | 10651.962 / 16.000000 | 3823.781 / 24.000000 | 3282.938 | fitted phases |
-| AA11.JT | ShortIr / 20 | 0.494220 | 2.998453 | 1.000000 | 31197.532 / 5.125000 | 0.000 / 0.000000 | 3081.090 | fitted phases |
-| AA11B.JT | ShortIr / 20 | 0.494220 | 2.998453 | 1.000000 | 31197.532 / 5.125000 | 0.000 / 0.000000 | 3081.090 | fitted phases |
-| AA12.JT | MediumAir / 70 | 0.132946 | 0.500605 | 0.650000 | 5146.521 / 6.966667 | 1845.997 / 10.458333 | 2370.894 | fitted phases |
-| AA2.JT | ShortIr / 20 | 0.499948 | 2.998714 | 0.060110 | 9561.909 / 0.208333 | 22931.125 / 1.358333 | 849.837 | fitted phases |
-| AA6.JT | MediumAir / 70 | 0.499652 | 3.000000 | 1.000000 | 138177.975 / 4.075000 | 0.000 / 0.000000 | 2372.496 | fitted phases |
-| AA8.JT | ShortIr / 20 | 0.120053 | 0.503127 | 1.000000 | 501.216 / 15.250000 | 0.000 / 0.000000 | 1447.004 | fitted phases |
-| AA9.JT | LongAir / 180 | 0.310804 | 0.790769 | 0.550000 | 6403.485 / 21.833333 | 1571.465 / 72.791667 | 1669.133 | fitted phases |
-| AAML.JT | LongAir / 180 | 0.354097 | 0.752270 | 0.550000 | 18071.792 / 11.700000 | 4435.804 / 39.000000 | 2171.361 | fitted phases |
-| AEMP1.JT | MediumAir / 70 | 0.121757 | 0.501879 | 0.650000 | 2401.788 / 16.000000 | 862.180 / 24.000000 | 2774.667 | fitted phases |
-| AGM45.JT | FastGround / 90 | 0.312227 | 0.750000 | 0.550000 | 33434.781 / 2.000000 | 9118.577 / 6.000000 | 2200.000 | retained phases |
-| AGM65A.JT | FastGround / 90 | 0.283838 | 0.750000 | 0.550000 | 35889.882 / 2.000000 | 9788.150 / 6.000000 | 2200.000 | retained phases |
-| AGM65G.JT | FastGround / 90 | 0.274004 | 0.750000 | 0.550000 | 50379.382 / 2.000000 | 13739.831 / 6.000000 | 2200.000 | retained phases |
-| AGM84A.JT | Cruise / 600 | 0.500000 | 1.250000 | 0.000000 | 0.000 / 0.000000 | 3000.000 / 962.000000 | 25000.000 | retained phases |
-| AGM84E.JT | Cruise / 600 | 0.151132 | 1.177763 | 0.000000 | 0.000 / 0.000000 | 2413.289 / 253.375000 | 6452.821 | fitted phases |
-| AGM88.JT | FastGround / 90 | 0.360283 | 0.750000 | 0.550000 | 79096.131 / 2.000000 | 21571.672 / 6.000000 | 2200.000 | retained phases |
-| AIM120.JT | MediumAir / 70 | 0.191344 | 0.857398 | 0.650000 | 6642.485 / 7.475000 | 2385.368 / 11.208333 | 2529.112 | fitted phases |
-| AIM54C.JT | LongAir / 180 | 0.193743 | 0.952529 | 0.550000 | 11238.732 / 20.283333 | 2758.371 / 67.616667 | 4620.489 | fitted phases |
-| AIM7.JT | MediumAir / 70 | 0.358961 | 3.000000 | 0.650000 | 33878.756 / 3.500000 | 5107.874 / 12.500000 | 2200.000 | fitted phases |
-| AIM7E.JT | MediumAir / 70 | 0.500000 | 2.971805 | 0.650000 | 50871.862 / 2.383333 | 18304.361 / 3.566667 | 1893.707 | fitted phases |
-| AIM9B.JT | ShortIr / 20 | 0.120000 | 3.000000 | 1.000000 | 17064.996 / 2.200000 | 0.000 / 0.000000 | 2200.000 | fitted phases |
-| AIM9M.JT | ShortIr / 20 | 0.170877 | 1.856193 | 1.000000 | 3659.318 / 14.925000 | 0.000 / 0.000000 | 3708.583 | fitted phases |
-| AIM9X.JT | ShortIr / 20 | 0.252167 | 1.367175 | 1.000000 | 5260.482 / 7.291667 | 0.000 / 0.000000 | 1783.787 | fitted phases |
-| AM39.JT | Cruise / 600 | 0.228545 | 0.500000 | 0.550000 | 92640.684 / 2.000000 | 25265.641 / 6.000000 | 2200.000 | retained phases |
-| AS14.JT | ShortGround / 30 | 0.492658 | 2.240633 | 0.550000 | 78284.424 / 1.833333 | 21317.997 / 5.508333 | 802.536 | fitted phases |
-| AS15.JT | FastGround / 90 | 0.137720 | 2.500000 | 0.550000 | 8314.573 / 2.000000 | 2267.611 / 6.000000 | 2200.000 | retained phases |
-| AS16.JT | Cruise / 600 | 0.218740 | 0.500000 | 0.550000 | 550373.056 / 2.308333 | 150282.588 / 6.916667 | 8800.000 | fitted phases |
-| AS30.JT | ShortGround / 30 | 0.234191 | 1.671592 | 0.550000 | 20783.905 / 5.241667 | 5665.335 / 15.733333 | 1626.526 | fitted phases |
-| AS7.JT | ShortGround / 30 | 0.442787 | 1.521459 | 0.550000 | 31538.037 / 1.533333 | 8616.893 / 4.591667 | 687.094 | fitted phases |
-| AT12.JT | ShortGround / 30 | 0.166970 | 3.000000 | 0.550000 | 832.334 / 3.633333 | 227.174 / 10.891667 | 550.000 | fitted phases |
-| AT2.JT | Command / 30 | 0.120000 | 3.000000 | 0.550000 | 2286.900 / 2.000000 | 623.700 / 6.000000 | 2200.000 | retained phases |
-| FIM92.JT | SurfaceIr / 25 | 0.253408 | 1.250000 | 0.600000 | 1159.596 / 3.000000 | 289.899 / 8.000000 | 2200.000 | retained phases |
-| MICA.JT | MediumAir / 70 | 0.256162 | 1.697849 | 0.799504 | 3645.266 / 17.233333 | 587.643 / 26.808333 | 2738.707 | fitted phases |
-| MIS.JT | SurfaceRadar / 70 | 0.286899 | 1.000000 | 0.600000 | 2360.608 / 3.000000 | 590.152 / 8.000000 | 2200.000 | retained phases |
-| PL10.JT | MediumAir / 70 | 0.127979 | 0.500000 | 0.650000 | 8006.656 / 4.000000 | 2874.184 / 6.000000 | 2200.000 | fitted phases |
-| PL7.JT | ShortIr / 20 | 0.321802 | 0.521851 | 0.050000 | 194.484 / 11.475000 | 34380.380 / 1.233333 | 1558.437 | fitted phases |
-| R27ER.JT | LongAir / 180 | 0.280077 | 0.752646 | 0.650000 | 4820.516 / 17.183333 | 1297.831 / 34.366667 | 1299.996 | fitted phases |
-| R27ET.JT | LongAir / 180 | 0.188579 | 0.755073 | 0.650000 | 47901.661 / 2.050000 | 12896.601 / 4.100000 | 2335.625 | fitted phases |
-| R27T.JT | MediumAir / 70 | 0.272756 | 1.684361 | 0.650000 | 93091.067 / 1.266667 | 33417.306 / 1.900000 | 2714.667 | fitted phases |
-| R440.JT | SurfaceRadar / 70 | 0.500000 | 1.500000 | 0.458689 | 20550.000 / 1.750000 | 17550.000 / 2.300000 | 2200.000 | retained phases |
-| R530.JT | MediumAir / 70 | 0.497868 | 2.961955 | 0.650000 | 68630.166 / 3.075000 | 24614.235 / 4.616667 | 2415.288 | fitted phases |
-| R550.JT | ShortIr / 20 | 0.121465 | 0.504116 | 1.000000 | 2437.226 / 14.733333 | 0.000 / 0.000000 | 3321.656 | fitted phases |
-| SA13.JT | SurfaceIr / 25 | 0.231699 | 1.000000 | 0.600000 | 4077.906 / 3.000000 | 1019.477 / 8.000000 | 2200.000 | retained phases |
-| SA14.JT | SurfaceIr / 25 | 0.251553 | 1.000000 | 0.600000 | 1140.037 / 3.000000 | 285.009 / 8.000000 | 2200.000 | retained phases |
-| SA15.JT | SurfaceRadar / 70 | 0.352769 | 1.000000 | 0.600000 | 25610.997 / 3.000000 | 6402.749 / 8.000000 | 2200.000 | retained phases |
-| SA16.JT | SurfaceIr / 25 | 0.265376 | 1.000000 | 0.600000 | 1261.067 / 3.000000 | 315.267 / 8.000000 | 2200.000 | retained phases |
-| SA19.JT | SurfaceRadar / 70 | 0.380972 | 1.000000 | 0.600000 | 7040.357 / 3.000000 | 1760.089 / 8.000000 | 2200.000 | retained phases |
-| SA2A.JT | SurfaceRadarLong / 120 | 0.383198 | 0.750000 | 0.600000 | 364697.431 / 3.000000 | 91174.358 / 8.000000 | 2200.000 | retained phases |
-| SA3.JT | SurfaceRadarLong / 120 | 0.345532 | 1.000000 | 0.600000 | 144888.573 / 3.000000 | 36222.143 / 8.000000 | 2200.000 | retained phases |
-| SA6.JT | SurfaceRadar / 70 | 0.397300 | 1.000000 | 0.600000 | 104712.337 / 3.000000 | 26178.084 / 8.000000 | 2200.000 | retained phases |
-| SA7.JT | SurfaceIr / 25 | 0.255449 | 1.000000 | 0.600000 | 1028.439 / 3.000000 | 257.110 / 8.000000 | 2200.000 | retained phases |
-| SA9.JT | SurfaceIr / 25 | 0.238286 | 1.000000 | 0.600000 | 3145.377 / 3.000000 | 786.344 / 8.000000 | 2200.000 | retained phases |
-| SAN11.JT | SurfaceRadar / 70 | 0.380972 | 1.000000 | 0.600000 | 7040.357 / 3.000000 | 1760.089 / 8.000000 | 2200.000 | retained phases |
-| SAN3.JT | SurfaceRadarLong / 120 | 0.451758 | 0.750000 | 0.600000 | 366538.219 / 3.000000 | 91634.555 / 8.000000 | 2200.000 | retained phases |
-| SAN4.JT | SurfaceRadar / 70 | 0.322339 | 1.000000 | 0.600000 | 18154.125 / 3.000000 | 4538.531 / 8.000000 | 2200.000 | retained phases |
-| SAN7.JT | SurfaceRadarLong / 120 | 0.386260 | 0.750000 | 0.600000 | 117268.465 / 3.000000 | 29317.116 / 8.000000 | 2200.000 | retained phases |
-| SAN9.JT | SurfaceRadar / 70 | 0.352769 | 1.000000 | 0.600000 | 25610.997 / 3.000000 | 6402.749 / 8.000000 | 2200.000 | retained phases |
-| SEA_SPAR.JT | SurfaceRadarLong / 120 | 0.409082 | 1.000000 | 0.600000 | 41579.098 / 3.000000 | 10394.774 / 8.000000 | 2200.000 | retained phases |
-| SSN9.JT | Cruise / 600 | 0.500000 | 0.500000 | 0.249482 | 303160.000 / 3.000000 | 7600.000 / 360.000000 | 2200.000 | retained phases |
+| AA10.JT | MediumAir / 70 | 0.448374 | 2.990471 | 0.211212 | 21892.429 / 3.116667 | 4743.705 / 53.716667 | 2847.770 | Phase 2.7 fitted |
+| AA11.JT | ShortIr / 20 | 0.413603 | 2.999764 | 0.223592 | 32298.017 / 1.058333 | 32297.999 / 3.675000 | 3520.218 | Phase 2.7 fitted |
+| AA11B.JT | ShortIr / 20 | 0.413603 | 2.999764 | 0.223592 | 32298.017 / 1.058333 | 32297.999 / 3.675000 | 3520.218 | Phase 2.7 fitted |
+| AA12.JT | MediumAir / 70 | 0.130889 | 0.500000 | 0.340748 | 14933.080 / 1.575000 | 665.099 / 68.416667 | 3013.393 | Phase 2.7 fitted |
+| AA2.JT | ShortIr / 20 | 0.499927 | 2.992430 | 0.979898 | 18762.731 / 1.708333 | 13150.760 / 0.050000 | 838.855 | Phase 2.7 fitted |
+| AA6.JT | MediumAir / 70 | 0.499395 | 2.999740 | 0.488583 | 116336.381 / 2.316667 | 116333.301 / 2.425000 | 2325.426 | Phase 2.7 fitted |
+| AA8.JT | ShortIr / 20 | 0.120000 | 0.502669 | 0.779030 | 3599.181 / 1.291667 | 70.611 / 18.675000 | 1130.228 | Phase 2.7 fitted |
+| AA9.JT | LongAir / 180 | 0.248166 | 0.845315 | 0.554568 | 57695.052 / 2.683333 | 903.420 / 137.641667 | 2295.723 | Phase 2.7 fitted |
+| AAML.JT | LongAir / 180 | 0.323345 | 0.647769 | 0.523865 | 40355.857 / 4.450000 | 2903.866 / 56.208333 | 2120.367 | Phase 2.7 fitted |
+| AEMP1.JT | MediumAir / 70 | 0.128474 | 0.500000 | 0.262498 | 14040.972 / 1.158333 | 943.300 / 48.441667 | 2755.832 | Phase 2.7 fitted |
+| AGM45.JT | FastGround / 90 | 0.312227 | 0.750000 | 0.550000 | 33434.781 / 2.000000 | 9118.577 / 6.000000 | 2200.000 | retained Phase 2.6 |
+| AGM65A.JT | FastGround / 90 | 0.283838 | 0.750000 | 0.550000 | 35889.882 / 2.000000 | 9788.150 / 6.000000 | 2200.000 | retained Phase 2.6 |
+| AGM65G.JT | FastGround / 90 | 0.274004 | 0.750000 | 0.550000 | 50379.382 / 2.000000 | 13739.831 / 6.000000 | 2200.000 | retained Phase 2.6 |
+| AGM84A.JT | Cruise / 600 | 0.500000 | 1.250000 | 0.000000 | 0.000 / 0.000000 | 3300.000 / 962.000000 | 25000.000 | Phase 2.7 fitted |
+| AGM84E.JT | Cruise / 600 | 0.120030 | 2.974304 | 0.000000 | 0.000 / 0.000000 | 1860.097 / 461.100000 | 11396.589 | Phase 2.7 fitted |
+| AGM88.JT | FastGround / 90 | 0.360283 | 0.750000 | 0.550000 | 79096.131 / 2.000000 | 21571.672 / 6.000000 | 2200.000 | retained Phase 2.6 |
+| AIM120.JT | MediumAir / 70 | 0.214042 | 0.858874 | 0.662531 | 14443.435 / 3.666667 | 571.817 / 47.175000 | 2365.878 | Phase 2.7 fitted |
+| AIM54C.JT | LongAir / 180 | 0.241893 | 1.281605 | 0.091860 | 68121.591 / 0.775000 | 6838.980 / 76.316667 | 5131.617 | Phase 2.7 fitted |
+| AIM7.JT | MediumAir / 70 | 0.358961 | 3.000000 | 0.650000 | 33878.756 / 3.500000 | 5107.874 / 12.500000 | 2200.000 | retained Phase 2.6 |
+| AIM7E.JT | MediumAir / 70 | 0.500000 | 2.971805 | 0.650000 | 50871.862 / 2.383333 | 18304.361 / 3.566667 | 1893.707 | retained Phase 2.6 |
+| AIM9B.JT | ShortIr / 20 | 0.120000 | 3.000000 | 1.000000 | 17064.996 / 2.200000 | 0.000 / 0.000000 | 2200.000 | retained Phase 2.6 |
+| AIM9M.JT | ShortIr / 20 | 0.120425 | 1.509068 | 0.150205 | 9903.647 / 0.600000 | 6353.052 / 5.291667 | 3811.730 | Phase 2.7 fitted |
+| AIM9X.JT | ShortIr / 20 | 0.213814 | 1.947192 | 0.701759 | 11510.069 / 2.708333 | 1299.911 / 10.191667 | 2436.322 | Phase 2.7 fitted |
+| AM39.JT | Cruise / 600 | 0.491859 | 2.999940 | 0.051836 | 35093.284 / 0.925000 | 1766.058 / 336.208333 | 1900.268 | Phase 2.7 fitted |
+| AS14.JT | ShortGround / 30 | 0.492658 | 2.240633 | 0.550000 | 78284.424 / 1.833333 | 21317.997 / 5.508333 | 802.536 | retained Phase 2.6 |
+| AS15.JT | FastGround / 90 | 0.137720 | 2.500000 | 0.550000 | 8314.573 / 2.000000 | 2267.611 / 6.000000 | 2200.000 | retained Phase 2.6 |
+| AS16.JT | Cruise / 600 | 0.426626 | 0.500000 | 0.618587 | 49427.825 / 23.683333 | 8002.070 / 90.200000 | 3696.453 | Phase 2.7 fitted |
+| AS30.JT | ShortGround / 30 | 0.234191 | 1.671592 | 0.550000 | 20783.905 / 5.241667 | 5665.335 / 15.733333 | 1626.526 | retained Phase 2.6 |
+| AS7.JT | ShortGround / 30 | 0.442787 | 1.521459 | 0.550000 | 31538.037 / 1.533333 | 8616.893 / 4.591667 | 687.094 | retained Phase 2.6 |
+| AT12.JT | ShortGround / 30 | 0.166970 | 3.000000 | 0.550000 | 832.334 / 3.633333 | 227.174 / 10.891667 | 550.000 | retained Phase 2.6 |
+| AT2.JT | Command / 30 | 0.120000 | 3.000000 | 0.550000 | 2286.900 / 2.000000 | 623.700 / 6.000000 | 2200.000 | retained Phase 2.6 |
+| FIM92.JT | SurfaceIr / 25 | 0.253408 | 1.250000 | 0.600000 | 1159.596 / 3.000000 | 289.899 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| MICA.JT | MediumAir / 70 | 0.203046 | 1.193875 | 0.589368 | 9135.549 / 3.883333 | 390.175 / 63.350000 | 2646.913 | Phase 2.7 fitted |
+| MIS.JT | SurfaceRadar / 70 | 0.286899 | 1.000000 | 0.600000 | 2360.608 / 3.000000 | 590.152 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| PL10.JT | MediumAir / 70 | 0.124864 | 0.618913 | 0.722387 | 16335.048 / 2.583333 | 283.143 / 57.275000 | 2673.352 | Phase 2.7 fitted |
+| PL7.JT | ShortIr / 20 | 0.341952 | 0.502357 | 0.108156 | 7259.349 / 0.475000 | 1800.526 / 15.791667 | 1047.571 | Phase 2.7 fitted |
+| R27ER.JT | LongAir / 180 | 0.359367 | 2.843720 | 0.253320 | 53621.579 / 2.225000 | 4364.051 / 80.583333 | 3744.501 | Phase 2.7 fitted |
+| R27ET.JT | LongAir / 180 | 0.188579 | 0.755073 | 0.650000 | 47901.661 / 2.050000 | 12896.601 / 4.100000 | 2335.625 | retained Phase 2.6 |
+| R27T.JT | MediumAir / 70 | 0.272756 | 1.684361 | 0.650000 | 93091.067 / 1.266667 | 33417.306 / 1.900000 | 2714.667 | retained Phase 2.6 |
+| R440.JT | SurfaceRadar / 70 | 0.500000 | 1.500000 | 0.458689 | 20550.000 / 1.750000 | 17550.000 / 2.300000 | 2200.000 | retained Phase 2.6 |
+| R530.JT | MediumAir / 70 | 0.497868 | 2.961955 | 0.650000 | 68630.166 / 3.075000 | 24614.235 / 4.616667 | 2415.288 | retained Phase 2.6 |
+| R550.JT | ShortIr / 20 | 0.132089 | 0.502498 | 0.342552 | 7622.530 / 1.183333 | 5232.778 / 3.308333 | 2239.873 | Phase 2.7 fitted |
+| SA13.JT | SurfaceIr / 25 | 0.231699 | 1.000000 | 0.600000 | 4077.906 / 3.000000 | 1019.477 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA14.JT | SurfaceIr / 25 | 0.251553 | 1.000000 | 0.600000 | 1140.037 / 3.000000 | 285.009 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA15.JT | SurfaceRadar / 70 | 0.352769 | 1.000000 | 0.600000 | 25610.997 / 3.000000 | 6402.749 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA16.JT | SurfaceIr / 25 | 0.265376 | 1.000000 | 0.600000 | 1261.067 / 3.000000 | 315.267 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA19.JT | SurfaceRadar / 70 | 0.380972 | 1.000000 | 0.600000 | 7040.357 / 3.000000 | 1760.089 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA2A.JT | SurfaceRadarLong / 120 | 0.383198 | 0.750000 | 0.600000 | 364697.431 / 3.000000 | 91174.358 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA3.JT | SurfaceRadarLong / 120 | 0.345532 | 1.000000 | 0.600000 | 144888.573 / 3.000000 | 36222.143 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA6.JT | SurfaceRadar / 70 | 0.397300 | 1.000000 | 0.600000 | 104712.337 / 3.000000 | 26178.084 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA7.JT | SurfaceIr / 25 | 0.255449 | 1.000000 | 0.600000 | 1028.439 / 3.000000 | 257.110 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SA9.JT | SurfaceIr / 25 | 0.238286 | 1.000000 | 0.600000 | 3145.377 / 3.000000 | 786.344 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SAN11.JT | SurfaceRadar / 70 | 0.380972 | 1.000000 | 0.600000 | 7040.357 / 3.000000 | 1760.089 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SAN3.JT | SurfaceRadarLong / 120 | 0.451758 | 0.750000 | 0.600000 | 366538.219 / 3.000000 | 91634.555 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SAN4.JT | SurfaceRadar / 70 | 0.322339 | 1.000000 | 0.600000 | 18154.125 / 3.000000 | 4538.531 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SAN7.JT | SurfaceRadarLong / 120 | 0.386260 | 0.750000 | 0.600000 | 117268.465 / 3.000000 | 29317.116 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SAN9.JT | SurfaceRadar / 70 | 0.352769 | 1.000000 | 0.600000 | 25610.997 / 3.000000 | 6402.749 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SEA_SPAR.JT | SurfaceRadarLong / 120 | 0.409082 | 1.000000 | 0.600000 | 41579.098 / 3.000000 | 10394.774 / 8.000000 | 2200.000 | retained Phase 2.6 |
+| SSN9.JT | Cruise / 600 | 0.365585 | 1.717702 | 0.087082 | 426821.333 / 1.266667 | 9466.283 / 598.733333 | 5340.301 | Phase 2.7 fitted |
 
-Fuel and drag are fitted in every row. “Retained phases” keeps the prior phase
-durations and explicit thrust overrides; derived thrust still follows the new
-fuel fraction. The impulse coefficient derives thrust only when no explicit
+Fuel and drag are fitted in every row. Retained Phase 2.6 means all motor and
+drag values in that row are unchanged in Phase 2.7. The impulse coefficient derives thrust only when no explicit
 phase-thrust override is present. It is an effective game coefficient, not
 a measured exhaust velocity. The data's NOMINAL evidence tags identify the
 earlier references, not a claim that the fitted values equal them.

@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.6 Linux validation passed with documented fit residuals.**
+Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.7 Linux validation passed with documented fit residuals.**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
@@ -57,7 +57,7 @@ values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
 John's round-3 decision removes the supplemental geometry-based drag factor.
-Drag uses the round-2 force law with Phase 2.6 conditional balance fits. Altitude affects density and sound speed through the standard
+Drag uses the round-2 force law with Phase 2.7 guarded conditional balance fits. Altitude affects density and sound speed through the standard
 atmosphere above; there is no additional altitude fade or span/diameter factor.
 The supplementary [span reference data](../formats/missile-energy-data.md#span-reference-data)
 do not affect simulation. Body diameter still supplies the original frontal

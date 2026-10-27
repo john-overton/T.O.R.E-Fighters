@@ -39,7 +39,8 @@ powered cruise, mid-countdown checkpointing, countdown cache buckets with a
 defeat deadline, and same-tick warning/AI defense removal with the body retained.
 
 The offline missile_energy_ranges example accepts a local JT directory.
-`--verify` checks primary and secondary reference bands, class floors, decoded
+`--verify` checks the shared motor-shape and powered cruise-arrival guards,
+primary and secondary reference bands, class floors, decoded
 minimum margins, family and radar-role ordering, long-low escape and local
 perturbations. Named residual exceptions have explicit bounds; unlisted stores
 use the ordinary tolerance. `--fit-class` exports fixed-budget fuel/drag
@@ -53,6 +54,21 @@ which normal motion and prediction skip, and reports defeat
 at the edge and 10% beyond. --measure-pairs is historical comparison only.
 Timer-fitting tools require explicit --legacy-fit-pair/--legacy-fit-sparrow
 names and print a warning. No search edits source or runs during gameplay.
+
+`--motor-shapes` reports initial thrust/weight, dry-mass load, declared and
+actual impulse coefficient, standardized time to Mach 1, and reference/edge
+arrival speed and powered state. A missed reference is explicitly marked as
+a miss, so its final speed is not an arrival measurement. `--refine-motor`
+and `--measure-motor` accept SOURCE FUEL DRAG BOOST_S SUSTAIN_S COEFFICIENT
+BOOST_SHARE for a bounded refinement or measurement of one candidate.
+Both reapply the guard. The complete offline search retries an empty envelope
+with factor-1.1 probes after the ordinary factor-1.5 sweep, to find narrow
+beam-intercept intervals. Nonempty envelopes keep their original search;
+this is still sampling, not proof that every success island was found.
+Runtime searches are unchanged. Thresholds and class floors have one home in
+[the data document](../formats/missile-energy-data.md#per-store-motors-and-class-control-budgets).
+Run the synthetic guard and exception tests with
+`cargo test --locked -p tore-sim --example missile_energy_ranges -- --test-threads=4`.
 
 The synthetic `behavior_hash_requires_a_model_revision_for_rule_changes` test
 pairs the model identity with a quantized trajectory/contact trace. A changed
