@@ -372,6 +372,60 @@ All 25 A2A range regressions pass, including the retained 12 km deck escape,
 class floors, decoded minimum margins, family ordering and 2% perturbations.
 All 391 physical/seeker rows and 668 edge/beyond-edge diagnostics were regenerated.
 
-The 36-scenario battery and cost lanes are pending. Windows/macOS were not
-run on this Linux host. Retail comparison remains unavailable. Phase 3 stays
-stopped; its earlier pre-fix study is still invalid.
+All 36 battery scenarios pass: the previous 35 plus the new post-burn defeat
+scenario. SA2A, SA3 and SA6 each hit vulnerable moving jets at 10k and 20k feet.
+The new 32-shot case records 22 inert defeats and six hits, with no hit after
+defeat and byte-identical serial/four-worker rows. The existing 240-shot
+Energy comparison and eight historical Spec shots also pass. The first battery
+attempt stopped on the new checker's callback signature; the checker and its
+runner-interface test were corrected, the 507 Python tests reran successfully,
+and the entire 36-scenario battery was rerun successfully.
+
+Windows/macOS were not run on this Linux host. Retail comparison remains
+unavailable. Phase 3 stays stopped; its earlier pre-fix study is still invalid.
+
+
+## Prediction cost
+
+Linux release examples, imported profile, same final model as the tables above.
+Every heavy command checked available memory first and used nice 15,
+CARGO_BUILD_JOBS=4 and four Rust test threads. Battery concurrency was two jobs
+and one isolated window through tools/agent-run.sh. Heavy runs were serial.
+
+Natural UKR/BAL/SPA/GRE fights run 14,400 ticks with eight AI aircraft.
+The large fight runs 7,200 ticks with 23 AI aircraft. Turning-player and hold
+lanes run 2,400 ticks; hold lanes request eight stations per aircraft.
+Cold means the first 240 ticks. Steady means the remaining moving or frozen
+ticks. Wall timings include scheduling delays; CPU timings measure prediction
+work. These are host measurements, not a cross-platform performance guarantee.
+
+| Lane | Cold p50 / p95 ms | Steady p50 / p95 ms | Largest CPU p95 ms | Refused / starved | Guided launches |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| natural-ukr | 0.655 / 0.722 | 0.030 / 0.714 | 0.719 | 0 / 0 | 13 |
+| natural-bal | 0.655 / 0.721 | 0.030 / 0.685 | 0.720 | 0 / 0 | 13 |
+| natural-spa | 0.665 / 0.726 | 0.028 / 0.692 | 0.725 | 0 / 0 | 13 |
+| natural-gre | 0.667 / 0.726 | 0.028 / 0.697 | 0.724 | 0 / 0 | 13 |
+| natural-big | 0.734 / 0.769 | 0.708 / 0.767 | 0.766 | 0 / 0 | 26 |
+| turning-3 | 0.760 / 0.797 | 0.761 / 0.793 | 0.797 | 0 / 0 | 14 |
+| turning-10 | 0.749 / 0.785 | 0.759 / 0.790 | 0.789 | 0 / 0 | 12 |
+| hold-frozen | 0.815 / 0.877 | 0.191 / 0.873 | 0.876 | 0 / 0 | 36 |
+| hold-moving | 0.809 / 0.832 | 0.737 / 0.838 | 0.836 | 0 / 0 | 36 |
+| hold-cruise | 0.678 / 0.721 | 0.686 / 0.727 | 0.727 | 0 / 0 | 16 |
+
+All cold/steady p95 values are below 2 ms; the largest is 0.877418 ms wall
+and 0.876166 ms CPU. The largest individual wall sample is 1.075107 ms.
+No lane reports admission refusal, starvation or admission waiting ticks.
+Cached-reader p95 is at most 0.014629 ms.
+
+At 3 degrees/s the player has qualified advice on 1,570/1,570 observed ticks
+(1,321 positive and 249 negative). At 10 degrees/s it is 660/661, with one
+pending tick. The denominator is the ticks with an eligible observation,
+not all 2,400 simulated ticks. Strict AI qualification remains separate
+from turn-projected player advice.
+
+Frozen and moving A2A hold lanes record 149,840 and 20,805 successful cached
+reads. The 20-second cruise hold still records zero qualified cached reads.
+It demonstrates bounded cost, not completed-cruise-answer availability.
+This existing limitation is explicit; no synchronous fallback or relaxed
+support gate was introduced. Ground-target live reach and support behaviour
+are covered separately by the A-G battery cases and range tables.

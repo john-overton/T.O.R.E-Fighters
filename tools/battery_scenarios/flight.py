@@ -816,7 +816,7 @@ def check_missile_energy(work, _output):
 
 
 
-def check_missile_defeat(work: Path) -> list[str]:
+def check_missile_defeat(work: Path, _output: str) -> list[str]:
     """Post-burn defeat must be observed and never followed by a scored hit."""
     import csv
     try:

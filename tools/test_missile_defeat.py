@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from battery import Scenario, judge
 from battery_scenarios.flight import check_missile_defeat
 
 
@@ -13,7 +14,8 @@ class DefeatBatteryTests(unittest.TestCase):
             for name, data in [("defeat", rows), ("defeat-serial", rows if serial is None else serial)]:
                 (root / name).mkdir()
                 (root / name / "runs.csv").write_text("hit,defeat_s\n" + data)
-            return check_missile_defeat(root)
+            scenario = Scenario(name="defeat-test", lane="flight", args=[], check_work=check_missile_defeat)
+            return judge(scenario, "", 0, False, root)
 
     def test_requires_an_observed_inert_defeat(self):
         self.assertEqual(self.check_rows("0,12.5\n1,\n"), [])

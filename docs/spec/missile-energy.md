@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-27. **Phase 2.5 validation is in progress.**
+Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.5 Linux validation passed.**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
