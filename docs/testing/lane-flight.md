@@ -51,12 +51,15 @@ selects families and radar roles jointly; synthetic Python tests cover selection
 bounds and parsing. These are fitted game coefficients, not engineering data.
 `--diagnostics` opts into G demand/capacity/deficit and closing-speed math,
 which normal motion and prediction skip, and reports defeat
-at the edge and 10% beyond. --measure-pairs is historical comparison only.
+at the edge, 0.1% beyond and 10% beyond. The near-edge miss reports whether
+defeat, control expiry, terrain contact or another event stopped the flight;
+a continued hit is reported as a sampled-boundary limitation. --measure-pairs is historical comparison only.
 Timer-fitting tools require explicit --legacy-fit-pair/--legacy-fit-sparrow
 names and print a warning. No search edits source or runs during gameplay.
 
 `--motor-shapes` reports initial thrust/weight, dry-mass load, declared and
-actual impulse coefficient, standardized time to Mach 1, and reference/edge
+actual impulse coefficient, burn/control ratio, sustain-entry thrust/weight,
+standardized time to Mach 1, powered-hit limit and reference/edge
 arrival speed and powered state. A missed reference is explicitly marked as
 a miss, so its final speed is not an arrival measurement. `--refine-motor`
 and `--measure-motor` accept SOURCE FUEL DRAG BOOST_S SUSTAIN_S COEFFICIENT
