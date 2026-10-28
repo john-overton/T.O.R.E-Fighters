@@ -121,9 +121,21 @@ pub fn adjust(spec: &mut MissionSpec) -> Option<(u32, u32)> {
 }
 
 /// The server log's line for a distance [`adjust`] moved.
-pub fn adjust_notice(theater: &str, (old, new): (u32, u32)) -> String {
+pub fn adjust_notice(spec: &MissionSpec, (old, new): (u32, u32)) -> String {
+    let target = spec
+        .ground_target
+        .as_deref()
+        .map_or("no ground target".to_owned(), |stem| {
+            format!("ground target {stem}")
+        });
+    let start = if spec.start.on_ground() {
+        "a ground start"
+    } else {
+        "an airborne start"
+    };
     format!(
-        "separation-nm {old} is not offered for {theater} with this ground target and start; using {new} nm, the creator's choice for it."
+        "separation-nm {old} is not offered for {} with {target} and {start}; using {new} nm, the creator's choice there.",
+        spec.theater
     )
 }
 
@@ -210,6 +222,10 @@ mod tests {
             spec.separation_nm = 300;
             assert_eq!(adjust(&mut spec), None);
         }
-        assert!(adjust_notice("KURILE", (300, 200)).contains("using 200 nm"));
+        let kurile = MissionSpec::new("KURILE", AircraftId::F18);
+        assert_eq!(
+            adjust_notice(&kurile, (300, 200)),
+            "separation-nm 300 is not offered for KURILE with no ground target and an airborne start; using 200 nm, the creator's choice there."
+        );
     }
 }

@@ -1053,7 +1053,7 @@ impl Host {
             config,
         };
         if let Some(moved) = distance_moved {
-            host.log_distance(&host.spec.theater.clone(), moved);
+            host.log_distance(&host.spec.clone(), moved);
         }
         host.log_surface_seed(&host.spec.clone(), initial_seed, placement_attempts);
         if host.start_rule() == StartMode::Now {

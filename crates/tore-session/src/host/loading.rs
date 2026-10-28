@@ -98,7 +98,7 @@ impl Host {
         // a rotation's or a mission file's distance the theater, target and
         // start do not offer moves to the nearest offered one, logged.
         if let Some(moved) = tore_world::mission_layout::distance_table::adjust(spec) {
-            self.log_distance(&spec.theater, moved);
+            self.log_distance(spec, moved);
         }
         let initial = spec.surface_seed;
         let (built, attempts) = tore_world::mission_layout::seed_retry::build(spec, |candidate| {
@@ -112,10 +112,10 @@ impl Host {
         Ok(built)
     }
 
-    /// Logs a distance the table moved in `theater`: `moved` is the old and
+    /// Logs a distance the table moved in `spec`: `moved` is the old and
     /// new nm.
-    pub(super) fn log_distance(&mut self, theater: &str, moved: (u32, u32)) {
-        let text = tore_world::mission_layout::distance_table::adjust_notice(theater, moved);
+    pub(super) fn log_distance(&mut self, spec: &MissionSpec, moved: (u32, u32)) {
+        let text = tore_world::mission_layout::distance_table::adjust_notice(spec, moved);
         self.log(HostLog::Note {
             tick: self.world.tick(),
             text,

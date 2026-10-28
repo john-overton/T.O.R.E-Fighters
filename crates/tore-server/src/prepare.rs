@@ -250,10 +250,8 @@ pub fn build_shared(
     let mut spec = tore_session::host::sequence::configured_spec(spec, &settings);
     // The fixed table, checked without loading terrain: a distance the
     // creator would not offer moves as the creator moves it, and says so.
-    let distance_note =
-        tore_world::mission_layout::distance_table::adjust(&mut spec).map(|moved| {
-            tore_world::mission_layout::distance_table::adjust_notice(&spec.theater, moved)
-        });
+    let distance_note = tore_world::mission_layout::distance_table::adjust(&mut spec)
+        .map(|moved| tore_world::mission_layout::distance_table::adjust_notice(&spec, moved));
     let placement_initial_seed = spec.surface_seed;
     let mut preview = spec.clone();
     let ((world, manifest), placement_attempts) =
