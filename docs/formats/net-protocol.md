@@ -3270,6 +3270,12 @@ again with an observer; the capture format did not change for it.
   defense keeps new checkpointed state, bridges and Quick Mission surface
   placement change world geometry, and hosts may publish a retried surface
   seed. The compatibility simulation version is 4.
+  76 (2026-10-27, 0.2.2-rc1): the HUD readout carries an optional range-cue
+  minimum (estimates grow from 12 to 14 values), the prediction checkpoint
+  keeps up to four reachable range regions and advises the one for the present
+  range, the AI spaces countermeasure pairs at least 240 ticks apart, chaff
+  against radar stores is 1.30 times as effective, and three stores have new
+  motor fits. The compatibility simulation version is 5.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

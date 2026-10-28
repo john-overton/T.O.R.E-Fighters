@@ -263,7 +263,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// 75 for 0.2.2: the energy model for guided ordnance (new checkpoint state),
 /// paired store loading, AI missile defense state, bridge grounding and
 /// Quick Mission placement rules and seed retry.
-pub const PROTOCOL_VERSION: u16 = 75;
+/// 76 adds the readout's range-cue minimum, reachable range regions in the
+/// prediction checkpoint, AI countermeasure pair spacing and the chaff buff.
+pub const PROTOCOL_VERSION: u16 = 76;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
