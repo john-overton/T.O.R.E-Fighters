@@ -2200,7 +2200,139 @@ fn bomb_cue_steering_uses_ground_track_and_corrects_impact_error() {
     }
 }
 
-// The committed-to-release window (T.O.R.E, John, 2026-10-28).
+// Early retarget and the committed-to-release window (T.O.R.E, John,
+// 2026-10-28).
+
+const OTHER: u32 = 0x5000_0002;
+const OTHER_AT: Vector = [2_000., 0., 26_000.];
+
+/// A striker briefed on two trucks, `TARGET` nearer, nothing around.
+fn two_target_world() -> World {
+    two_target_world_at(OTHER_AT)
+}
+
+fn two_target_world_at(other_at: Vector) -> World {
+    let subjects = [
+        ground(TARGET, TARGET_AT, 0x200, None),
+        ground(OTHER, other_at, 0x200, None),
+    ];
+    let mut briefed = GroundPicture::new(StrikeRole::Strike);
+    briefed.set_objective(StrikeObjective {
+        targets: vec![TARGET, OTHER],
+        defenses: Vec::new(),
+        point: Some(TARGET_AT),
+    });
+    briefed.rebuild(0, Vec::new(), &Subjects::new(&subjects), Vec::new());
+    World {
+        own: own([0., 5_000., 0.], 700.),
+        picture: briefed,
+        inputs: inputs(vec![bomb(4)], None),
+    }
+}
+
+/// The host's word that `TARGET` has fallen (the picture may not know yet).
+fn target_dead(world: &mut World) {
+    let mut dead = solution(TARGET_AT, [0., 0., 0.], false);
+    dead.target_alive = false;
+    world.inputs.solution = Some(dead);
+}
+
+#[test]
+fn a_target_killed_before_the_release_is_followed_by_the_next_at_once() {
+    let mut world = two_target_world();
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    assert_eq!(
+        (strike.phase(), strike.target()),
+        (Phase::Attack, Some(TARGET))
+    );
+    // A wingman kills it 20,000 ft out, the pass not yet released: the
+    // striker attacks the next truck, 22,000 ft ahead, at once, without
+    // flying the exit (the picture still lists the dead truck standing).
+    world.own.position = [0., 4_000., 4_000.];
+    target_dead(&mut world);
+    let order = strike.step(&world.context(120));
+    assert_eq!(
+        (strike.phase(), strike.target(), strike.pass_number()),
+        (Phase::Attack, Some(OTHER), 1)
+    );
+    assert_eq!(order.activity, Some(Activity::Attacking));
+    assert_eq!(strike.selection().map(|s| s.target), Some(OTHER));
+
+    // Killed when the next truck is too near to set a pass up: the exit on
+    // the heading, turning back at half the exit distance from it, not the
+    // full 30,000 ft.
+    let mut world = two_target_world();
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    world.own.position = [0., 4_000., 18_000.];
+    target_dead(&mut world);
+    strike.step(&world.context(120));
+    assert_eq!(
+        (strike.phase(), strike.target()),
+        (Phase::Exit, Some(OTHER))
+    );
+    world.inputs.solution = None;
+    world.own.position = [0., 6_000., OTHER_AT[2] + 16_000.];
+    strike.step(&world.context(2_000));
+    assert_eq!(strike.phase(), Phase::TurnBack);
+    world.own.heading_deg = 180.;
+    strike.step(&world.context(2_100));
+    assert_eq!(
+        (strike.phase(), strike.target()),
+        (Phase::Attack, Some(OTHER))
+    );
+
+    // Far enough but behind: it turns back toward it at once.
+    let mut world = two_target_world_at([2_000., 0., -26_000.]);
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    assert_eq!(strike.target(), Some(TARGET));
+    world.own.position = [0., 4_000., 4_000.];
+    target_dead(&mut world);
+    strike.step(&world.context(120));
+    assert_eq!(
+        (strike.phase(), strike.target()),
+        (Phase::TurnBack, Some(OTHER))
+    );
+}
+
+#[test]
+fn a_striker_past_its_release_point_or_with_no_target_left_keeps_the_exit() {
+    // The cue already beyond the aim when the target dies: the normal exit,
+    // on to the full exit distance.
+    let mut world = two_target_world();
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    let aim = strike.aim().0;
+    world.own.position = [0., 4_000., 14_000.];
+    world.inputs.solution = Some(solution(
+        TARGET_AT,
+        [aim[0], 0., TARGET_AT[2] + aim[1] + 500.],
+        false,
+    ));
+    strike.step(&world.context(10));
+    assert!(strike.release_in_s().is_some_and(|t| t < 0.));
+    target_dead(&mut world);
+    strike.step(&world.context(20));
+    assert_eq!(
+        (strike.phase(), strike.target()),
+        (Phase::Exit, Some(TARGET))
+    );
+    world.inputs.solution = None;
+    world.own.position = [0., 6_000., TARGET_AT[2] + 20_000.];
+    strike.step(&world.context(2_000));
+    assert_eq!(strike.phase(), Phase::Exit, "the full exit distance");
+
+    // With no other target the striker exits as before
+    // (`a_dead_target_or_no_store_sends_it_home` follows it home).
+    let mut world = quiet_world();
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    target_dead(&mut world);
+    strike.step(&world.context(10));
+    assert_eq!(strike.phase(), Phase::Exit);
+}
 
 /// A straight Mk 82 run whose cue closes on the aim at the ground speed,
 /// 700 ft/s, from `seconds` short: steps every 0.1 s until the cue is

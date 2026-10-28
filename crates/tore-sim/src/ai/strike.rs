@@ -233,6 +233,10 @@ pub const COMMIT_PAST_S: f64 = 0.5;
 /// The time constant over which the cue's measured closing speed is
 /// filtered, ticks (0.5 s; fitted, agent).
 pub const CUE_RATE_TICKS: f64 = 60.;
+/// A striker whose target dies before its pass releases sets up its next
+/// pass at least this share of the exit distance from the new target
+/// (T.O.R.E, John, 2026-10-28; the share fitted, agent).
+pub const RETARGET_SETUP_SHARE: f64 = 0.5;
 /// Class word bits of a SAM and an AAA unit (retail type `+0x0d`).
 pub const CLASS_SAM: u16 = 0x1000;
 pub const CLASS_AAA: u16 = 0x800;
@@ -781,6 +785,9 @@ pub struct Strike {
     release_in_s: Option<f64>,
     /// The tick the committed-to-release window opened on this pass.
     committed: Option<u64>,
+    /// The exit after an early retarget turns back at the set-up distance
+    /// ([`RETARGET_SETUP_SHARE`]), not the full exit distance.
+    short_exit: bool,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -829,6 +836,7 @@ impl Strike {
             release_cue: None,
             release_in_s: None,
             committed: None,
+            short_exit: false,
             inputs: None,
         }
     }
@@ -1070,18 +1078,21 @@ impl Strike {
             return order;
         }
         let solution = self.solution(cx);
-        let target_at = solution
-            .map(|s| s.target_position)
-            .or_else(|| self.focus_position(cx));
         let target_alive = match (self.target, solution) {
             (Some(_), Some(s)) => s.target_alive,
             (Some(id), None) => standing(cx.picture, id),
             (None, _) => false,
         };
-        // A pass in flight ends when its target falls.
-        if self.phase == Phase::Attack && !target_alive {
+        // A pass in flight ends when its target falls: before its release
+        // the striker takes the next target at once (T.O.R.E, John,
+        // 2026-10-28), after it, or with none left, it exits.
+        if self.phase == Phase::Attack && !target_alive && !self.retarget(cx) {
             self.exit(cx);
         }
+        let solution = self.solution(cx);
+        let target_at = solution
+            .map(|s| s.target_position)
+            .or_else(|| self.focus_position(cx));
         match self.phase {
             Phase::Ingress | Phase::Wait => {
                 let point = target_at.or_else(|| objective_point(cx.picture));
@@ -1111,7 +1122,12 @@ impl Strike {
             Phase::Exit => {
                 if let Some(point) = target_at {
                     let away = horizontal(own.position, point);
-                    if away >= self.exit_distance(cx) {
+                    let turn_back = if self.short_exit {
+                        RETARGET_SETUP_SHARE * self.exit_distance(cx)
+                    } else {
+                        self.exit_distance(cx)
+                    };
+                    if away >= turn_back {
                         if !self.withdrawn {
                             self.enter(Phase::TurnBack, cx.tick);
                         } else if self.safe(cx) {
@@ -1238,6 +1254,12 @@ impl Strike {
 
     /// The choice: target, store, pass and aim; or wait, or home.
     fn choose(&mut self, cx: &Context<'_>) {
+        self.choose_without(cx, None);
+    }
+
+    /// [`Self::choose`], never taking `dead` (a target that has just fallen
+    /// and that the picture may not yet know has).
+    fn choose_without(&mut self, cx: &Context<'_>, dead: Option<u32>) {
         // A takeover attacks only when safe (slice ST-K).
         if self.holds_off(cx) {
             return;
@@ -1255,7 +1277,13 @@ impl Strike {
         {
             self.no_laze = None;
         }
-        let Some(target) = self.pick_target(cx) else {
+        let picked = match dead {
+            Some(dead) => self
+                .pick_target_where(cx, &|id| id != dead)
+                .filter(|id| *id != dead),
+            None => self.pick_target(cx),
+        };
+        let Some(target) = picked else {
             // A designator with nothing to strike with waits for its wing's
             // laser carriers: they choose, it lases (slice ST-L).
             if inputs.designator
@@ -1729,7 +1757,68 @@ impl Strike {
     fn exit(&mut self, cx: &Context<'_>) {
         self.exit_heading_deg = cx.own.heading_deg;
         self.holding = None;
+        self.short_exit = false;
         self.enter(Phase::Exit, cx.tick);
+    }
+
+    /// The striker's target fell before its pass released (T.O.R.E, John,
+    /// 2026-10-28): it takes the next target at once, by the same choice and
+    /// attacker allowance as at the exit distance, instead of flying the
+    /// exit first. With that target ahead and at least the set-up distance
+    /// ([`RETARGET_SETUP_SHARE`] of the exit distance) away it chooses and
+    /// attacks; as far but off to the side or behind it turns back toward
+    /// it; nearer, it flies the exit on its heading and turns back at the
+    /// set-up distance. Returns false, changing nothing, for a striker that
+    /// released on its pass or is past its release point, or that has no
+    /// other target: it exits as before.
+    fn retarget(&mut self, cx: &Context<'_>) -> bool {
+        let Some(dead) = self.target else {
+            return false;
+        };
+        if self.released > 0 || self.segment == Segment::Climb || self.past_release(cx, dead) {
+            return false;
+        }
+        let Some(next) = self
+            .pick_target_where(cx, &|id| id != dead)
+            .filter(|id| *id != dead)
+        else {
+            return false;
+        };
+        let Some(at) = known_position(cx.picture, next) else {
+            return false;
+        };
+        let own = cx.own;
+        let distance = horizontal(own.position, at);
+        let off = angle_difference(own.heading_deg, bearing_deg(own.position, at)).abs();
+        let setup = RETARGET_SETUP_SHARE * self.exit_distance(cx);
+        if distance >= setup && off <= 90. {
+            self.choose_without(cx, Some(dead));
+            return true;
+        }
+        self.target = Some(next);
+        self.pass_number = 0;
+        if distance >= setup {
+            self.enter(Phase::TurnBack, cx.tick);
+        } else {
+            self.exit(cx);
+            self.short_exit = true;
+        }
+        true
+    }
+
+    /// The pass is past the point where it would have released: the cue
+    /// beyond the aim at the last attack step, or with no estimate the
+    /// target `id` behind the aircraft.
+    fn past_release(&self, cx: &Context<'_>, id: u32) -> bool {
+        match self.release_in_s {
+            Some(seconds) => seconds < 0.,
+            None => known_position(cx.picture, id)
+                .or_else(|| cx.inputs.solution.map(|s| s.target_position))
+                .is_none_or(|p| {
+                    angle_difference(cx.own.heading_deg, bearing_deg(cx.own.position, p)).abs()
+                        >= 90.
+                }),
+        }
     }
 
     /// Toward `point` at the cruise altitude (at least the release floor),

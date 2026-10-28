@@ -4,8 +4,8 @@
 //! pass, the target and store, the pass count that seeds the next aim, the
 //! drawn aim, the final's line, the release count, the exit's heading, a gun
 //! run's burst state and the height the striker was tasked at, and (T.O.R.E,
-//! John, 2026-10-28) the release estimate and the committed-to-release
-//! window.
+//! John, 2026-10-28) the release estimate, the committed-to-release window
+//! and whether an early retarget's exit is the short one.
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
 //! restored strike starts without it. `Context`, `Order`, `Steer`, `Handling`,
@@ -175,6 +175,7 @@ crate::checkpoint_struct!(Strike {
     release_cue,
     release_in_s,
     committed,
+    short_exit,
 } skip {
     inputs = None,
 });
