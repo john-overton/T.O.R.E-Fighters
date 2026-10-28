@@ -4963,6 +4963,12 @@ impl AiActor {
             self.trace.rotor_break = Some((answer, threat));
             (answer.heading_deg, answer.flight_path_pitch_deg)
         });
+        // A striker inside its committed-to-release window flies its run on
+        // and releases; the defence waits until it has (T.O.R.E, John,
+        // 2026-10-28, docs/spec/ai-strike.md). Countermeasures and the
+        // defence's own state go on.
+        let held = self.strike.as_deref().is_some_and(|s| s.holds_run(tick));
+        let motion = motion.filter(|_| !held);
         self.controller
             .set_defense_motion(motion.map(|(heading_deg, pitch_deg)| {
                 super::controller::DefenseMotion {

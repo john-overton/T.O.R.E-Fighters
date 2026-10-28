@@ -2199,3 +2199,115 @@ fn bomb_cue_steering_uses_ground_track_and_corrects_impact_error() {
         assert!((0.0..1.).contains(&corrected), "{pass:?}: {corrected}");
     }
 }
+
+// The committed-to-release window (T.O.R.E, John, 2026-10-28).
+
+/// A straight Mk 82 run whose cue closes on the aim at the ground speed,
+/// 700 ft/s, from `seconds` short: steps every 0.1 s until the cue is
+/// `until` seconds short, the host saying due only at the aim.
+fn close_cue(
+    strike: &mut Strike,
+    world: &mut World,
+    tick: &mut u64,
+    seconds: f64,
+    until: f64,
+    defending: bool,
+) -> Order {
+    let aim = strike.aim().0;
+    let mut short = seconds;
+    let mut order = None;
+    while short > until - 1e-9 {
+        let along = short * 700.;
+        let impact = [aim[0], 0., TARGET_AT[2] + aim[1] - along];
+        world.inputs.solution = Some(solution(TARGET_AT, impact, along <= 0.));
+        let mut cx = world.context(*tick);
+        cx.defending = defending;
+        order = Some(strike.step(&cx));
+        *tick += 12;
+        short -= 0.1;
+    }
+    order.expect("at least one step")
+}
+
+#[test]
+fn the_last_five_seconds_of_a_run_hold_through_a_defence_and_then_it_defends() {
+    let mut world = quiet_world();
+    world.own.position = [0., 3_000., 8_000.];
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    assert_eq!(strike.pass(), Some(Pass::Straight));
+    let mut tick = 12;
+    // Six seconds out the run is not committed: a defence breaks it.
+    close_cue(&mut strike, &mut world, &mut tick, 8., 6., false);
+    assert!(!strike.holds_run(tick));
+    let mut early = strike.clone();
+    let mut cx = world.context(tick);
+    cx.defending = true;
+    early.step(&cx);
+    assert_eq!(early.phase(), Phase::Defend);
+    // Five seconds out it is.
+    close_cue(&mut strike, &mut world, &mut tick, 5.9, 4.9, false);
+    assert!(strike.holds_run(tick));
+    assert!(
+        strike
+            .release_in_s()
+            .is_some_and(|t| (4.5..=5.).contains(&t))
+    );
+    // A defence trigger now does not break it: it flies on and releases.
+    let order = close_cue(&mut strike, &mut world, &mut tick, 4.8, 0.1, true);
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert!(order.steer.is_some() && order.release.is_none());
+    let order = close_cue(&mut strike, &mut world, &mut tick, 0., 0., true);
+    assert_eq!(
+        order.release,
+        Some(Release {
+            station: StationId(1),
+            target: TARGET
+        })
+    );
+    assert!(!strike.holds_run(tick));
+    // Right after the release it reacts.
+    let mut cx = world.context(tick);
+    cx.defending = true;
+    let order = strike.step(&cx);
+    assert_eq!((strike.phase(), order.steer), (Phase::Defend, None));
+}
+
+#[test]
+fn the_window_holds_no_longer_than_its_limit() {
+    let mut world = quiet_world();
+    world.own.position = [0., 3_000., 8_000.];
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    let mut tick = 12;
+    close_cue(&mut strike, &mut world, &mut tick, 6., 3., false);
+    let opened = strike.committed.expect("the window is open");
+    assert!(strike.holds_run(tick));
+    // The cue stalls 3 s short: the run holds until the limit, then the
+    // defence breaks it.
+    while strike.phase() == Phase::Attack && tick < opened + 2 * COMMIT_HOLD_TICKS {
+        let mut cx = world.context(tick);
+        cx.defending = true;
+        strike.step(&cx);
+        tick += 12;
+    }
+    assert!(tick - 12 > opened + COMMIT_HOLD_TICKS);
+    assert!(tick - 12 <= opened + COMMIT_HOLD_TICKS + 12);
+    assert_eq!(strike.phase(), Phase::Defend);
+}
+
+#[test]
+fn a_committed_run_round_trips_through_a_checkpoint() {
+    let mut world = quiet_world();
+    world.own.position = [0., 3_000., 8_000.];
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    let mut tick = 12;
+    close_cue(&mut strike, &mut world, &mut tick, 6., 4., false);
+    assert!(strike.holds_run(tick));
+    let models = Models::default();
+    let coded = to_bytes(&strike, &models).unwrap();
+    let twin: Strike = from_bytes(&coded, &models).unwrap();
+    assert_eq!(twin, strike);
+    assert!(twin.holds_run(tick));
+}
