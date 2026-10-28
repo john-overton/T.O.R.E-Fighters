@@ -2230,6 +2230,18 @@ fn two_target_world_at(other_at: Vector) -> World {
     }
 }
 
+/// [`two_target_world`] once its picture knows `TARGET` has fallen.
+fn two_target_world_dead() -> World {
+    let mut fallen = ground(TARGET, TARGET_AT, 0x200, None);
+    fallen.object.destroyed = true;
+    let subjects = [fallen, ground(OTHER, OTHER_AT, 0x200, None)];
+    let mut world = two_target_world();
+    world
+        .picture
+        .rebuild(0, Vec::new(), &Subjects::new(&subjects), Vec::new());
+    world
+}
+
 /// The host's word that `TARGET` has fallen (the picture may not know yet).
 fn target_dead(world: &mut World) {
     let mut dead = solution(TARGET_AT, [0., 0., 0.], false);
@@ -2246,10 +2258,11 @@ fn a_target_killed_before_the_release_is_followed_by_the_next_at_once() {
         (strike.phase(), strike.target()),
         (Phase::Attack, Some(TARGET))
     );
-    // A wingman kills it 20,000 ft out, the pass not yet released: the
-    // striker attacks the next truck, 22,000 ft ahead, at once, without
-    // flying the exit (the picture still lists the dead truck standing).
-    world.own.position = [0., 4_000., 4_000.];
+    // A wingman kills it 20,000 ft out, the pass not yet released: at its
+    // cruise height the striker attacks the next truck, 22,000 ft ahead, at
+    // once, without flying the exit (the picture still lists the dead truck
+    // standing).
+    world.own.position = [0., 5_000., 4_000.];
     target_dead(&mut world);
     let order = strike.step(&world.context(120));
     assert_eq!(
@@ -2258,6 +2271,31 @@ fn a_target_killed_before_the_release_is_followed_by_the_next_at_once() {
     );
     assert_eq!(order.activity, Some(Activity::Attacking));
     assert_eq!(strike.selection().map(|s| s.target), Some(OTHER));
+
+    // Down at 3,500 ft from the old run: it turns toward the next truck now,
+    // climbing back to its cruise height, and chooses there.
+    let mut world = two_target_world();
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    world.own.position = [0., 3_500., 4_000.];
+    world.own.agl_ft = 3_500.;
+    target_dead(&mut world);
+    let order = strike.step(&world.context(120));
+    assert_eq!(
+        (strike.phase(), strike.target()),
+        (Phase::TurnBack, Some(OTHER))
+    );
+    assert!(order.steer.is_some_and(|s| s.pitch_deg > 0.), "it climbs");
+    // By then the picture knows the first truck has fallen.
+    world.picture = two_target_world_dead().picture;
+    world.inputs.solution = None;
+    world.own.position = [0., 4_800., 8_000.];
+    world.own.agl_ft = 4_800.;
+    strike.step(&world.context(1_200));
+    assert_eq!(
+        (strike.phase(), strike.target(), strike.pass_number()),
+        (Phase::Attack, Some(OTHER), 1)
+    );
 
     // Killed when the next truck is too near to set a pass up: the exit on
     // the heading, turning back at half the exit distance from it, not the

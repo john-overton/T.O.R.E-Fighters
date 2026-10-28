@@ -237,6 +237,11 @@ pub const CUE_RATE_TICKS: f64 = 60.;
 /// pass at least this share of the exit distance from the new target
 /// (T.O.R.E, John, 2026-10-28; the share fitted, agent).
 pub const RETARGET_SETUP_SHARE: f64 = 0.5;
+/// After an early retarget the striker climbs back to its cruise height
+/// before it chooses the new pass, within this many feet (fitted, agent):
+/// a straight run begun from the old run's low height flew the line to the
+/// target down to where FRAG held its bomb (Vladivostok HQ, A-10).
+pub const RETARGET_HEIGHT_SLACK_FT: f64 = 300.;
 /// Class word bits of a SAM and an AAA unit (retail type `+0x0d`).
 pub const CLASS_SAM: u16 = 0x1000;
 pub const CLASS_AAA: u16 = 0x800;
@@ -785,9 +790,11 @@ pub struct Strike {
     release_in_s: Option<f64>,
     /// The tick the committed-to-release window opened on this pass.
     committed: Option<u64>,
-    /// The exit after an early retarget turns back at the set-up distance
-    /// ([`RETARGET_SETUP_SHARE`]), not the full exit distance.
-    short_exit: bool,
+    /// The exit or turn back follows an early retarget: the exit turns back
+    /// at the set-up distance ([`RETARGET_SETUP_SHARE`]), not the full exit
+    /// distance, and the turn back chooses only once at its height
+    /// ([`RETARGET_HEIGHT_SLACK_FT`]) or inside the set-up distance.
+    retargeted: bool,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -836,7 +843,7 @@ impl Strike {
             release_cue: None,
             release_in_s: None,
             committed: None,
-            short_exit: false,
+            retargeted: false,
             inputs: None,
         }
     }
@@ -994,7 +1001,11 @@ impl Strike {
         self.phase = phase;
         self.segment = Segment::Approach;
         self.since = tick;
-        // The release estimate and its window belong to one pass.
+        // The release estimate and its window belong to one pass, the
+        // retarget's set-up to the exit and turn back that follow it.
+        if !matches!(phase, Phase::Exit | Phase::TurnBack) {
+            self.retargeted = false;
+        }
         self.release_cue = None;
         self.release_in_s = None;
         self.committed = None;
@@ -1112,7 +1123,7 @@ impl Strike {
                 if let Some(point) = target_at {
                     let off =
                         angle_difference(own.heading_deg, bearing_deg(own.position, point)).abs();
-                    if off <= TURN_BACK_DEG {
+                    if off <= TURN_BACK_DEG && (!self.retargeted || self.set_up(cx, point)) {
                         self.choose(cx);
                     }
                 } else {
@@ -1122,7 +1133,7 @@ impl Strike {
             Phase::Exit => {
                 if let Some(point) = target_at {
                     let away = horizontal(own.position, point);
-                    let turn_back = if self.short_exit {
+                    let turn_back = if self.retargeted {
                         RETARGET_SETUP_SHARE * self.exit_distance(cx)
                     } else {
                         self.exit_distance(cx)
@@ -1757,18 +1768,20 @@ impl Strike {
     fn exit(&mut self, cx: &Context<'_>) {
         self.exit_heading_deg = cx.own.heading_deg;
         self.holding = None;
-        self.short_exit = false;
+        self.retargeted = false;
         self.enter(Phase::Exit, cx.tick);
     }
 
     /// The striker's target fell before its pass released (T.O.R.E, John,
     /// 2026-10-28): it takes the next target at once, by the same choice and
     /// attacker allowance as at the exit distance, instead of flying the
-    /// exit first. With that target ahead and at least the set-up distance
-    /// ([`RETARGET_SETUP_SHARE`] of the exit distance) away it chooses and
-    /// attacks; as far but off to the side or behind it turns back toward
-    /// it; nearer, it flies the exit on its heading and turns back at the
-    /// set-up distance. Returns false, changing nothing, for a striker that
+    /// exit first. At least the set-up distance ([`RETARGET_SETUP_SHARE`] of
+    /// the exit distance) away it turns back toward it at once, climbing to
+    /// its cruise height, and chooses its pass once pointing at it (as at
+    /// the end of an exit) and back at that height or inside the set-up
+    /// distance: at once if it already is. Nearer, it flies the exit on its
+    /// heading and turns back at the set-up distance. Returns false,
+    /// changing nothing, for a striker that
     /// released on its pass or is past its release point, or that has no
     /// other target: it exits as before.
     fn retarget(&mut self, cx: &Context<'_>) -> bool {
@@ -1791,7 +1804,7 @@ impl Strike {
         let distance = horizontal(own.position, at);
         let off = angle_difference(own.heading_deg, bearing_deg(own.position, at)).abs();
         let setup = RETARGET_SETUP_SHARE * self.exit_distance(cx);
-        if distance >= setup && off <= 90. {
+        if distance >= setup && off <= TURN_BACK_DEG && self.set_up(cx, at) {
             self.choose_without(cx, Some(dead));
             return true;
         }
@@ -1801,9 +1814,17 @@ impl Strike {
             self.enter(Phase::TurnBack, cx.tick);
         } else {
             self.exit(cx);
-            self.short_exit = true;
         }
+        self.retargeted = true;
         true
+    }
+
+    /// After an early retarget, the striker can choose its pass on the
+    /// target at `point`: back at the height it cruises at (within
+    /// [`RETARGET_HEIGHT_SLACK_FT`]), or already inside the set-up distance.
+    fn set_up(&self, cx: &Context<'_>, point: Vector) -> bool {
+        cx.own.position[1] >= self.cruise_altitude(cx) - RETARGET_HEIGHT_SLACK_FT
+            || horizontal(cx.own.position, point) <= RETARGET_SETUP_SHARE * self.exit_distance(cx)
     }
 
     /// The pass is past the point where it would have released: the cue
@@ -1825,6 +1846,17 @@ impl Strike {
     /// as a heavy, at its floor.
     fn cruise_steer(&self, cx: &Context<'_>, point: Vector, speed: SpeedRequest) -> Steer {
         let own = cx.own;
+        Steer::plain(
+            bearing_deg(own.position, point),
+            hold_pitch_deg(own.position[1], self.cruise_altitude(cx)),
+            speed,
+            false,
+        )
+    }
+
+    /// The height [`Self::cruise_steer`] flies at, feet above sea level.
+    fn cruise_altitude(&self, cx: &Context<'_>) -> f64 {
+        let own = cx.own;
         let floor = self.floor(cx, self.threat);
         let ground = own.position[1] - own.agl_ft;
         let mut altitude = self
@@ -1835,12 +1867,7 @@ impl Strike {
             // Fighters keep what they have above the floor.
             altitude = altitude.max(own.position[1].min(ground + floor + 20_000.));
         }
-        Steer::plain(
-            bearing_deg(own.position, point),
-            hold_pitch_deg(own.position[1], altitude),
-            speed,
-            false,
-        )
+        altitude
     }
 
     fn exit_steer(&self, cx: &Context<'_>, target_at: Option<Vector>) -> Steer {

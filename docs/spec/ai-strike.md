@@ -457,18 +457,21 @@ exit unless marked.
   guided-store wingman, destroys the striker's target before the striker's
   pass reaches it, the striker does not fly the exit. It picks the next target
   at once, with the same target choice and the same attacker allowance as at
-  the exit distance, and sets up a new pass. With that target ahead (within
-  90 degrees of the nose) and at least half the exit distance away (15,000
-  ft, 25,000 ft for a heavy, or the turn radius if larger), it chooses its
-  store and pass and attacks. Farther off the nose but as far away, it turns
-  back toward it at once and chooses when it points at it, as at the end of
-  an exit. Nearer than that, it flies the exit on its heading, but turns back
-  at half the exit distance from the new target instead of the full one.
-  This holds only for a striker that has not released on its pass and is not
+  the exit distance, and sets up a new pass. With that target at least half
+  the exit distance away (15,000 ft, 25,000 ft for a heavy, or the turn
+  radius if larger), it turns toward it at once, climbing back to the height
+  it cruises at, and chooses its store and pass once it points at it (within
+  15 degrees, as at the end of an exit) and is back within 300 ft of that
+  height, or is inside half the exit distance: at once when it already is.
+  Nearer than that, it flies the exit on its heading, but turns back at half
+  the exit distance from the new target instead of the full one. The climb
+  back is there because a straight run begun from the old run's low height
+  flew the line to the target down to about 500 ft, where FRAG held the bomb
+  (Vladivostok HQ, A-10, 2026-10-28). This holds only for a striker that has not released on its pass and is not
   past its release point (the cue beyond the aim, a dive's pull-out, or with
   no estimate the target behind it). A striker that released, or is past the
   point, keeps the normal exit, and with no target left it egresses as before
-  and goes home. The half exit distance is fitted (agent). Retail, and
+  and goes home. The half exit distance and the 300 ft are fitted (agent). Retail, and
   T.O.R.E before this change, flew the full exit straight on and chose again
   at the exit distance: in the Vladivostok HQ Quick Mission (A-10, Mk 82,
   2026-10-28) the striker's bunker was killed by its wingman while the
@@ -513,8 +516,8 @@ stateDiagram-v2
     Guide --> Egress: impact or weapon lost
     Attack --> Egress: pass ends with no release
     Attack --> Retarget: target dies before the release (T.O.R.E)
-    Retarget --> PassChoice: next target ahead with room for a pass
-    Retarget --> ReAttack: next target behind, or too near
+    Retarget --> PassChoice: next target ahead, room for a pass, at height
+    Retarget --> ReAttack: turn and climb to it, or exit if too near
     Retarget --> Egress: no target left
     Egress --> ReAttack: past the exit distance
     ReAttack --> PassChoice: target alive, store left
