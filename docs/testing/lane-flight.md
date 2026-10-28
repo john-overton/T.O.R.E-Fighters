@@ -68,7 +68,7 @@ Both reapply the guard. The complete offline search retries an empty envelope
 with factor-1.1 probes after the ordinary factor-1.5 sweep, to find narrow
 beam-intercept intervals. Nonempty envelopes keep their original search;
 this is still sampling, not proof that every success island was found.
-Runtime advice separately stops at the first sampled gap, as specified in the
+Runtime advice separately keeps each sampled region and advises the one for the present range, as specified in the
 [range contract](../spec/missile-energy.md#estimates-and-acceptance). Thresholds and class floors have one home in
 [the data document](../formats/missile-energy-data.md#per-store-motors-and-class-control-budgets).
 Run the synthetic guard and exception tests with

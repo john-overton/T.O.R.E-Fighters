@@ -814,4 +814,4 @@ are reported separately from prediction latency. Use `--player-turn=3` or
 10,000 and 20,000 ft. They complement `surface-battery-sa2`, which checks
 battery coordination with invulnerability enabled.
 
-`ai-missile-envelope-gaps` runs the release cost example with `--gap-witness` against the isolated imported pack. It verifies R27ER hit/miss/hit points at 25/35/45 km, a first-region maximum between 26 and 27 km, bounded queue work, and completion without starvation. Synthetic combat and employment tests verify that the failed exact point cannot authorize an AI launch.
+`ai-missile-envelope-gaps` runs the release cost example with `--gap-witness` against the isolated imported pack. It verifies R27ER hit/miss/hit points at 25/35/45 km: 25 km is in the first region (maximum between 26 and 27 km) and IN RNG, the 35 km gap advises the first region without IN RNG, and the 45 km hit advises the far region and is IN RNG; it also checks bounded queue work and completion without starvation. Synthetic combat and employment tests verify that the failed exact point cannot authorize an AI launch.

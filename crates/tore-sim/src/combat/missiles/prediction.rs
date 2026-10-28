@@ -147,16 +147,64 @@ fn player_compatible(
     compatible(moved, current, 0)
 }
 
+/// Contiguous hit regions a range search keeps, nearest first. A farther
+/// region beyond the last kept one is not advised (fitted, agent).
+pub const MAX_REGIONS: usize = 4;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Envelope {
-    /// Conservative first sampled hit of the advised contiguous region, meters.
+    /// The advised contiguous region, meters. A stored search result holds
+    /// its first region here; [`Envelope::advised`] picks one for a range.
     pub minimum: f64,
     pub maximum: f64,
+    /// Favorable firing band, inside the first region only.
     pub favorable: Option<(f64, f64)>,
+    /// Every sampled contiguous hit region, ascending, meters.
+    pub regions: [(f64, f64); MAX_REGIONS],
+    pub count: u8,
 }
 impl Envelope {
+    fn from_regions(
+        regions: [(f64, f64); MAX_REGIONS],
+        count: u8,
+        favorable: Option<(f64, f64)>,
+    ) -> Self {
+        let (minimum, maximum) = if count > 0 { regions[0] } else { (0., 0.) };
+        Self {
+            minimum,
+            maximum,
+            favorable,
+            regions,
+            count,
+        }
+    }
+    pub fn regions(&self) -> &[(f64, f64)] {
+        &self.regions[..usize::from(self.count).min(MAX_REGIONS)]
+    }
     pub fn contains(self, range: f64) -> bool {
         self.maximum > self.minimum && (self.minimum..=self.maximum).contains(&range)
+    }
+    /// The one region to advise at `range` (lead decision, 2026-10-27): the
+    /// region containing it; else the nearest region below it, which closing
+    /// flies into; else, below every region, the first. The favorable band
+    /// stays only while its own first region is advised.
+    pub fn advised(self, range: f64) -> Self {
+        let regions = self.regions();
+        let Some(index) = regions
+            .iter()
+            .position(|&(low, high)| (low..=high).contains(&range))
+            .or_else(|| regions.iter().rposition(|&(_, high)| high < range))
+            .or((!regions.is_empty()).then_some(0))
+        else {
+            return self;
+        };
+        let (minimum, maximum) = regions[index];
+        Self {
+            minimum,
+            maximum,
+            favorable: self.favorable.filter(|_| index == 0),
+            ..self
+        }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -165,6 +213,14 @@ pub struct RangeSnapshot {
     pub question: Trial,
     pub envelope: Envelope,
 }
+/// What a boundary refinement in a range search is for.
+const EDGE_RISING: u8 = 0;
+const EDGE_FALLING: u8 = 1;
+const EDGE_SPLIT_FALLING: u8 = 2;
+const EDGE_SPLIT_RISING: u8 = 3;
+/// Interior gaps the favorable-band pass may split out of the first region.
+const MAX_SPLITS: u8 = 4;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RangeSearch {
     pub id: u64,
@@ -178,8 +234,22 @@ pub struct RangeSearch {
     pub distance: f64,
     /// Decoded launch minimum, independent of moving target geometry.
     pub minimum: f64,
-    /// First hit found while scanning outward from the launch minimum.
-    pub first: f64,
+    /// Start of the hit region the outward scan is inside, if any.
+    pub open: Option<f64>,
+    /// The previous scan sample and whether it hit.
+    pub previous_hit: Option<bool>,
+    pub previous_distance: f64,
+    /// The scan sample a refinement interrupted; the scan resumes after it.
+    pub resume: f64,
+    /// Which boundary the current refinement brackets (`EDGE_*`).
+    pub edge: u8,
+    /// Interior-gap split: the missed sample and the region's old far edge.
+    pub split: (f64, f64),
+    pub splits: u8,
+    /// Closed regions found so far, ascending.
+    pub regions: [(f64, f64); MAX_REGIONS],
+    pub count: u8,
+    /// Refinement bracket: the lower and upper distance of a hit/miss pair.
     pub low: f64,
     pub high: f64,
     pub phase: u8,
@@ -228,7 +298,15 @@ impl RangeSearch {
             ]),
             cap,
             minimum,
-            first: 0.,
+            open: None,
+            previous_hit: None,
+            previous_distance: 0.,
+            resume: 0.,
+            edge: EDGE_RISING,
+            split: (0., 0.),
+            splits: 0,
+            regions: [(0., 0.); MAX_REGIONS],
+            count: 0,
             distance: minimum
                 .max(template.radius + 1.)
                 .max((template.target.position[1] - template.flight.position[1]).abs() + 0.01)
@@ -254,95 +332,150 @@ impl RangeSearch {
         trial.target.position[2] = trial.flight.position[2] + self.bearing[2] * horizontal;
         trial
     }
-    fn publish_maximum(&mut self) {
-        self.result = Some(Envelope {
-            minimum: self.first,
-            maximum: self.low,
-            favorable: None,
-        });
+    fn publish(&mut self, favorable: Option<(f64, f64)>) {
+        self.result = Some(Envelope::from_regions(self.regions, self.count, favorable));
+    }
+    fn refine(&mut self, edge: u8, low: f64, high: f64) {
+        self.phase = 1;
+        self.edge = edge;
+        self.iteration = 0;
+        self.low = low;
+        self.high = high;
+        self.distance = (low + high) * 0.5;
+    }
+    fn start_band_pass(&mut self) {
         self.phase = 2;
         self.iteration = 0;
-        self.distance = self.first;
+        self.run = None;
+        self.best = None;
+        self.distance = self.regions[0].0;
+    }
+    /// The next outward sample: a bounded 1.25 ratio grid that keeps the
+    /// shared loft-transition samples and the current shot itself.
+    fn advance_scan(&mut self) {
+        if usize::from(self.count) >= MAX_REGIONS || self.distance >= self.cap {
+            if let Some(start) = self.open.take()
+                && usize::from(self.count) < MAX_REGIONS
+            {
+                self.regions[usize::from(self.count)] = (start, self.distance);
+                self.count += 1;
+            }
+            if self.count == 0 {
+                self.result = Some(Envelope::default());
+                self.done = true;
+            } else {
+                self.publish(None);
+                self.start_band_pass();
+            }
+            return;
+        }
+        let anchor = (self.template.body.loft_range / 0.6).max(1600.);
+        let shot = norm(sub(
+            self.template.target.position,
+            self.template.flight.position,
+        ));
+        let mut next = (self.distance * 1.25).min(self.cap);
+        for distance in envelope_probe_scales(self.template.body)
+            .iter()
+            .map(|scale| anchor * scale)
+            .chain([shot])
+        {
+            if distance > self.distance * (1. + 1e-9) {
+                next = next.min(distance);
+            }
+        }
+        self.distance = next;
+    }
+    fn resume_scan(&mut self, hit: bool) {
+        self.phase = 0;
+        self.previous_hit = Some(hit);
+        self.previous_distance = self.resume;
+        self.distance = self.resume;
+        self.advance_scan();
     }
     fn accept(&mut self, answer: Answer) {
         match self.phase {
             0 => {
-                if answer.hit {
-                    if self.first == 0. {
-                        self.first = self.distance;
+                let here = self.distance;
+                match (self.open, answer.hit) {
+                    (None, true) if self.previous_hit == Some(false) => {
+                        // A region starts between a miss and this hit.
+                        self.resume = here;
+                        self.refine(EDGE_RISING, self.previous_distance, here);
+                        return;
                     }
-                    self.low = self.distance;
-                } else if self.first > 0. {
-                    // The first miss closes this region. A farther hit island
-                    // must never move the displayed maximum across this gap.
-                    self.high = self.distance;
-                    self.phase = 1;
-                    self.iteration = 0;
-                    self.distance = (self.low + self.high) * 0.5;
-                    return;
-                }
-                if self.distance >= self.cap {
-                    if self.first == 0. {
-                        self.result = Some(Envelope::default());
-                        self.done = true;
-                    } else {
-                        self.publish_maximum();
+                    (None, true) => self.open = Some(here),
+                    (Some(_), false) => {
+                        // The first miss after a hit closes this region.
+                        self.resume = here;
+                        self.refine(EDGE_FALLING, self.previous_distance, here);
+                        return;
                     }
-                    return;
+                    _ => {}
                 }
-                // Probe in increasing order. Retain the shared loft-transition
-                // samples and the current shot itself, alongside a bounded grid.
-                let anchor = (self.template.body.loft_range / 0.6).max(1600.);
-                let shot = norm(sub(
-                    self.template.target.position,
-                    self.template.flight.position,
-                ));
-                let mut next = (self.distance * 1.25).min(self.cap);
-                for distance in envelope_probe_scales(self.template.body)
-                    .iter()
-                    .map(|scale| anchor * scale)
-                    .chain([shot])
-                {
-                    if distance > self.distance * (1. + 1e-9) {
-                        next = next.min(distance);
-                    }
-                }
-                self.distance = next;
+                self.previous_hit = Some(answer.hit);
+                self.previous_distance = here;
+                self.advance_scan();
             }
             1 => {
-                if answer.hit {
+                // The hit side of the bracket is low for a falling edge and
+                // high for a rising one.
+                let falling = matches!(self.edge, EDGE_FALLING | EDGE_SPLIT_FALLING);
+                if answer.hit == falling {
                     self.low = self.distance;
                 } else {
                     self.high = self.distance;
                 }
                 self.iteration += 1;
-                if self.iteration >= 10 {
-                    self.publish_maximum();
-                } else {
-                    self.distance = (self.low + self.high) * 0.5;
-                }
-            }
-            _ => {
-                if !answer.hit && self.iteration > 0 {
-                    // The optional interior pass can expose a narrower gap
-                    // missed by coarse samples. Withdraw the farther maximum
-                    // immediately and refine this first discovered boundary.
-                    self.high = self.distance;
-                    self.low =
-                        self.first + (self.low - self.first) * f64::from(self.iteration - 1) / 16.;
-                    self.phase = 1;
-                    self.iteration = 0;
-                    self.run = None;
-                    self.best = None;
-                    self.result = Some(Envelope {
-                        minimum: self.first,
-                        maximum: self.low,
-                        favorable: None,
-                    });
+                if self.iteration < 10 {
                     self.distance = (self.low + self.high) * 0.5;
                     return;
                 }
-                let relative = (self.distance / self.low.max(1.)).clamp(0., 1.);
+                match self.edge {
+                    EDGE_RISING => {
+                        self.open = Some(self.high);
+                        self.resume_scan(true);
+                    }
+                    EDGE_FALLING => {
+                        let start = self.open.take().unwrap_or(self.low);
+                        self.regions[usize::from(self.count)] = (start, self.low);
+                        self.count += 1;
+                        self.publish(None);
+                        self.resume_scan(false);
+                    }
+                    EDGE_SPLIT_FALLING => {
+                        // A gap inside the first region: its near part ends
+                        // here, at once; the far part is refined next.
+                        self.regions[0].1 = self.low;
+                        self.publish(None);
+                        let (gap, end) = self.split;
+                        self.refine(EDGE_SPLIT_RISING, gap, end);
+                    }
+                    _ => {
+                        let tail = (self.high, self.split.1);
+                        let last = usize::from(self.count).min(MAX_REGIONS - 1);
+                        for index in (1..=last).rev() {
+                            self.regions[index] = self.regions[index - 1];
+                        }
+                        self.regions[1] = tail;
+                        self.count = (self.count + 1).min(MAX_REGIONS as u8);
+                        self.publish(None);
+                        self.start_band_pass();
+                    }
+                }
+            }
+            _ => {
+                let (start, end) = self.regions[0];
+                if !answer.hit && self.iteration > 0 && self.splits < MAX_SPLITS {
+                    // The interior pass can expose a gap narrower than the
+                    // scan grid. Split the first region around it.
+                    self.splits += 1;
+                    self.split = (self.distance, end);
+                    let before = start + (end - start) * f64::from(self.iteration - 1) / 16.;
+                    self.refine(EDGE_SPLIT_FALLING, before, self.distance);
+                    return;
+                }
+                let relative = (self.distance / end.max(1.)).clamp(0., 1.);
                 let life = f64::from(self.template.body.life) * DT;
                 let score = 95.
                     * (1. - 0.75 * relative * relative)
@@ -362,14 +495,9 @@ impl RangeSearch {
                 self.iteration += 1;
                 if self.iteration == 17 {
                     self.done = true;
-                    self.result = Some(Envelope {
-                        minimum: self.first,
-                        maximum: self.low,
-                        favorable: self.best,
-                    });
+                    self.publish(self.best);
                 } else {
-                    self.distance =
-                        self.first + (self.low - self.first) * f64::from(self.iteration) / 16.;
+                    self.distance = start + (end - start) * f64::from(self.iteration) / 16.;
                 }
             }
         }
@@ -938,7 +1066,9 @@ crate::checkpoint_struct!(ObservedMotion {
 crate::checkpoint_struct!(Envelope {
     minimum,
     maximum,
-    favorable
+    favorable,
+    regions,
+    count
 });
 crate::checkpoint_struct!(RangeSnapshot {
     at,
@@ -956,7 +1086,15 @@ crate::checkpoint_struct!(RangeSearch {
     cap,
     distance,
     minimum,
-    first,
+    open,
+    previous_hit,
+    previous_distance,
+    resume,
+    edge,
+    split,
+    splits,
+    regions,
+    count,
     low,
     high,
     phase,
@@ -1217,6 +1355,7 @@ mod tests {
             minimum: 100.,
             maximum: 10000.,
             favorable: None,
+            ..Default::default()
         });
         assert!(service.envelope(1, 2, q, 10).is_some());
         current.flight.axis = [0., 0., -1.];
@@ -1225,32 +1364,60 @@ mod tests {
         assert!(service.envelope(1, 2, current, 240).is_none());
         assert!(service.envelope(1, 2, q, 1201).is_none());
     }
+    fn run_search(search: &mut RangeSearch, hit: impl Fn(f64) -> bool) {
+        for _ in 0..400 {
+            if search.done {
+                return;
+            }
+            let h = hit(search.distance);
+            search.accept(Answer {
+                hit: h,
+                seconds: 3.,
+                closest: if h { 0. } else { 100. },
+                impact_speed: 300.,
+            });
+        }
+        panic!("range search did not finish: {search:?}");
+    }
     #[test]
-    fn range_advice_stops_at_the_first_gap_instead_of_a_far_loft_island() {
+    fn range_search_keeps_each_region_and_advises_the_one_for_the_range() {
         let mut q = question();
         q.body.loft_height = 1000.;
         q.body.loft_range = 6000.;
         let mut search = RangeSearch::new(1, 2, 0, q);
-        for _ in 0..100 {
-            if search.done {
-                break;
-            }
-            let hit = (1000. ..=5000.).contains(&search.distance)
-                || (6100. ..=6500.).contains(&search.distance);
-            search.accept(Answer {
-                hit,
-                seconds: 10.,
-                closest: if hit { 0. } else { 100. },
-                impact_speed: 300.,
-            });
-        }
-        assert!(search.done);
-        let maximum = search.result.unwrap().maximum;
-        assert!((4998. ..=5000.).contains(&maximum), "{maximum}");
-        assert!(search.result.unwrap().minimum >= 1000.);
+        run_search(&mut search, |d| {
+            (1000. ..=5000.).contains(&d) || (6100. ..=6500.).contains(&d)
+        });
+        let envelope = search.result.unwrap();
+        let regions = envelope.regions();
+        assert_eq!(regions.len(), 2, "{envelope:?}");
+        assert!(regions[0].0 >= 1000. && (4995. ..=5000.).contains(&regions[0].1));
+        assert!(
+            (6100. ..6105.).contains(&regions[1].0) && (6495. ..=6500.).contains(&regions[1].1)
+        );
+        // The stored result still names the first region.
+        assert_eq!((envelope.minimum, envelope.maximum), regions[0]);
+        // Inside the first region: advised and in range.
+        assert!(envelope.advised(3000.).contains(3000.));
+        // In the gap: the nearest region below, not in range.
+        let gap = envelope.advised(5500.);
+        assert_eq!((gap.minimum, gap.maximum), regions[0]);
+        assert!(!gap.contains(5500.));
+        // In the far region: that region, in range, without the first
+        // region's favorable band.
+        let far = envelope.advised(6300.);
+        assert_eq!((far.minimum, far.maximum), regions[1]);
+        assert!(far.contains(6300.) && far.favorable.is_none());
+        // Beyond every region: the nearest below; below them all: the first.
+        let beyond = envelope.advised(9000.);
+        assert_eq!((beyond.minimum, beyond.maximum), regions[1]);
+        assert!(!beyond.contains(9000.));
+        let near = envelope.advised(500.);
+        assert_eq!((near.minimum, near.maximum), regions[0]);
+        assert!(!near.contains(500.));
     }
     #[test]
-    fn range_advice_includes_the_actual_gap_point_and_respects_decoded_minimum() {
+    fn a_narrow_gap_at_the_shot_splits_regions_and_respects_decoded_minimum() {
         let mut q = question();
         q.target.position = [
             q.flight.position[0],
@@ -1258,11 +1425,13 @@ mod tests {
             q.flight.position[2] + 3500.,
         ];
         let mut search = RangeSearch::new_with_minimum(1, 2, 0, q, 1200.);
-        for _ in 0..160 {
+        let mut sampled = Vec::new();
+        for _ in 0..400 {
             if search.done {
                 break;
             }
             assert!(search.distance >= 1200.);
+            sampled.push(search.distance);
             let hit = !(3490. ..=3510.).contains(&search.distance) && search.distance <= 6000.;
             search.accept(Answer {
                 hit,
@@ -1272,11 +1441,20 @@ mod tests {
             });
         }
         assert!(search.done);
-        let band = search.result.unwrap();
-        assert_eq!(band.minimum, 1200.);
-        assert!(band.maximum < 3490., "{band:?}");
-        assert!(band.contains(2500.));
-        assert!(!band.contains(3500.) && !band.contains(5000.) && !band.contains(1000.));
+        let envelope = search.result.unwrap();
+        let regions = envelope.regions();
+        assert_eq!(regions.len(), 2, "{envelope:?}");
+        assert_eq!(regions[0].0, 1200.);
+        assert!(regions[0].1 < 3490. && regions[1].0 > 3510., "{regions:?}");
+        assert!((5990. ..=6000.).contains(&regions[1].1));
+        assert!(envelope.advised(2500.).contains(2500.));
+        // The gap point itself advises the near region and is not in range.
+        let gap = envelope.advised(3500.);
+        assert_eq!(gap.maximum, regions[0].1);
+        assert!(!gap.contains(3500.));
+        // A far hit beyond the gap is advised and in range.
+        assert!(envelope.advised(5000.).contains(5000.));
+        assert!(!envelope.advised(1000.).contains(1000.));
     }
     #[test]
     fn published_jobs_survive_checkpoint_and_readers_do_not_advance_them() {
@@ -1486,11 +1664,14 @@ mod tests {
     #[test]
     fn range_publishes_maximum_before_the_optional_band_finishes() {
         let mut search = RangeSearch::new(1, 2, 0, question());
-        search.first = 100.;
+        search.open = Some(100.);
+        search.previous_hit = Some(true);
         search.phase = 1;
+        search.edge = EDGE_FALLING;
         search.iteration = 9;
         search.low = 1000.;
         search.high = 2000.;
+        search.resume = 2000.;
         search.distance = 1500.;
         search.accept(Answer {
             hit: true,
@@ -1500,14 +1681,9 @@ mod tests {
         });
         assert_eq!(search.result.unwrap().maximum, 1500.);
         assert!(!search.done);
-        for _ in 0..17 {
-            search.accept(Answer {
-                hit: true,
-                seconds: 3.,
-                closest: 0.,
-                impact_speed: 700.,
-            });
-        }
-        assert!(search.done && search.result.unwrap().favorable.is_some());
+        run_search(&mut search, |d| d <= 1500.);
+        let envelope = search.result.unwrap();
+        assert_eq!(envelope.regions(), &[(100., 1500.)]);
+        assert!(envelope.favorable.is_some());
     }
 }

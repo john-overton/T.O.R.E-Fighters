@@ -660,28 +660,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let distance = args[10].parse()?;
         let q = question(&w, c, distance);
         let mut service = prediction::Service::default();
-        service.request(1, 1, 0, q, 30);
-        service.request_range_with_minimum(
-            1,
-            1,
-            0,
-            q,
-            f64::from(w.seeker.zones[1].minimum_range) * FT,
-        );
         let mut maximum_work = 0;
+        let mut first_published = None;
         for tick in 0..20000 {
+            // A held cue re-requests every tick, as the cockpit does.
+            service.request(1, 1, tick, q, 30);
+            service.request_range_with_minimum(
+                1,
+                1,
+                tick,
+                q,
+                f64::from(w.seeker.zones[1].minimum_range) * FT,
+            );
             maximum_work = maximum_work.max(service.advance(tick, &|_, _| 0.));
+            if service.ranges[0].result.is_some() {
+                first_published.get_or_insert(tick + 1);
+            }
             if service.ranges[0].done {
-                let e = service.ranges[0].result.unwrap();
+                let slant = distance.hypot((c.target_ft - c.launch_ft) * FT);
+                let e = service.ranges[0].result.unwrap().advised(slant);
                 let hit = service.clients[0].result.unwrap().answer.hit;
                 println!(
-                    "{{\"minimum_m\":{},\"maximum_m\":{},\"ticks\":{},\"max_work\":{},\"point_hit\":{},\"in_region\":{}}}",
+                    "{{\"minimum_m\":{},\"maximum_m\":{},\"regions\":{},\"first_ticks\":{},\"ticks\":{},\"max_work\":{},\"point_hit\":{},\"in_region\":{}}}",
                     e.minimum,
                     e.maximum,
+                    e.count,
+                    first_published.unwrap_or(tick + 1),
                     tick + 1,
                     maximum_work,
                     hit,
-                    e.contains(distance.hypot((c.target_ft - c.launch_ft) * FT))
+                    e.contains(slant)
                 );
                 return Ok(());
             }

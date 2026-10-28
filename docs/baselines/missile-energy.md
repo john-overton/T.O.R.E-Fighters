@@ -70,7 +70,7 @@ a head-on lock. Held records remain unavailable in gameplay.
 
 Each cell is head / beam / tail, km. All 25 inventory records are included,
 including held records measured diagnostically without enabling them. These
-are the farthest sampled hits, not the first-region HUD maximum. Gaps must be
+are the farthest sampled hits, not the advised HUD region. Gaps must be
 read from the survey intervals; the range-advice check below covers their display.
 
 | Store | Primary reference km | 500 ft | 5,000 ft | 15,000 ft | 35,000 ft |
@@ -388,7 +388,7 @@ seeker limit remains about 5.78 km under the normalized target signature,
 so the larger physical H35 exception does not create a 15 km IR head-on lock.
 AA12 and AEMP1 have no empty surveyed sector after the fit. They still have
 sampled loft/path gaps in six and nine seeker cells respectively, which the
-first-region HUD policy handles. R27ER's complete before/after survey files
+region-advice HUD policy handles. R27ER's complete before/after survey files
 are byte-identical: its physical gaps were not erased by a guidance change.
 
 | Store / case | Shooter m/s | Aspect deg | Physical / seeker km before | Physical / seeker km after |
@@ -701,8 +701,9 @@ Current ordnance-fix validation, Linux x86-64, from `ba1bf7e4`:
 
 Model identity changes from `2060610122284599500` at the base to
 `3759883531439988201` for countermeasures, `501164167509140080` for range advice,
-`3748787411052948283` after the three motor fits and `8371591701768486536`
-for the unfloored chaff multiplier (decoy rule revision 3). The behavior tripwire
+`3748787411052948283` after the three motor fits, `8371591701768486536`
+for the unfloored chaff multiplier (decoy rule revision 3) and
+`27838009745295643` for per-range region advice (prediction rule revision 7). The behavior tripwire
 trace remains `3894057758776089527`; its sampled stores are unchanged.
 No protocol or replay version is bumped. Checkpoints gain minimum fields in
 Envelope and RangeEstimate, and minimum/first fields in RangeSearch. The wire
@@ -759,6 +760,24 @@ universal cue availability. The player/turning-cue battery checks also pass.
 The following matched table isolates the range-policy cost from motor changes.
 
 ## Contiguous range advice validation
+
+**Current policy (lead decision, 2026-10-27).** The search below first
+published only the first region. It now keeps up to four sampled regions and
+the cue advises the one for the present range: the region containing it,
+else the nearest below, else the first. On the same R27ER witness the search
+finds two regions, 3.658..26.84 km and 43.31..47.99 km. 25 km advises the
+first region and is IN RNG; 35 km (ground strike) advises the first region
+without IN RNG; 45 km advises the far region and is IN RNG. The first region
+publishes after 75 ticks and the complete search, including the far region,
+after 486..498 ticks, at the same 16,315-unit peak work. AIM120 at 15,000 ft
+head-on publishes after 142 ticks and completes after 326. On the A2G side,
+the Mi-24 AT-2 from a 300 ft hover has a near region to about 0.99 km, ground
+strikes, and a far region of 7,909..15,244 ft; `a2g-at2` again advises the
+far region and releases at 8.63 s (8.53 s before this round). Cost on idle
+Linux after the change, worse of cold and moving p95: AIM120 moving with 8
+stations 1.061 ms, 1 station 1.017 ms, frozen 1.020 ms; AA8 moving 8 stations
+1.069 ms; AA12 1.031 ms; zero refused or starved in every lane. The
+historical first-region figures follow.
 
 The ordnance-fixes range policy is the first sampled hit region outward from
 the decoded minimum. The imported R27ER deck witness uses a 200 m/s shooter,

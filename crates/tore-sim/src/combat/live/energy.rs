@@ -193,9 +193,10 @@ impl State {
             prediction_radius(w),
             self.devices.wind,
         );
-        let envelope =
-            self.energy_predictions
-                .envelope(key(owner, station), u32::MAX, question, self.tick);
+        let envelope = self
+            .energy_predictions
+            .envelope(key(owner, station), u32::MAX, question, self.tick)
+            .map(|e| e.advised(observed.range * FT));
         // The AI's strike gate reads its exact-point answer only. AI cockpits
         // request no range search, so requiring envelope membership here
         // would leave every powered guided store permanently not due.
@@ -409,26 +410,23 @@ impl State {
                     1;
             }
             own.energy_hit = answer.filter(|r| r.answer.hit).map(|_| observed.id);
+            // One contiguous region advised for the present range: the one
+            // containing it, else the nearest below, else the first.
+            let advised = self
+                .energy_predictions
+                .envelope(id, observed.id, question, self.tick)
+                .map(|e| e.advised(observed.range * FT));
             if let Some(sight) = &mut own.guided_sight {
                 let hit = own.energy_hit == Some(observed.id)
-                    && self
-                        .energy_predictions
-                        .envelope(id, observed.id, question, self.tick)
-                        .is_some_and(|e| e.contains(observed.range * FT));
+                    && advised.is_some_and(|e| e.contains(observed.range * FT));
                 sight.energy_intercept = Some(hit);
                 sight.in_reach &= hit;
-                sight.reach = self
-                    .energy_predictions
-                    .envelope(id, observed.id, question, self.tick)
-                    .map(|e| super::super::guided::Reach {
-                        minimum_ft: e.minimum / FT,
-                        maximum_ft: e.maximum / FT,
-                    });
+                sight.reach = advised.map(|e| super::super::guided::Reach {
+                    minimum_ft: e.minimum / FT,
+                    maximum_ft: e.maximum / FT,
+                });
             }
-            if let Some(envelope) =
-                self.energy_predictions
-                    .envelope(id, observed.id, question, self.tick)
-            {
+            if let Some(envelope) = advised {
                 own.range_estimate = Some(RangeEstimate {
                     station: own.selected,
                     target: observed.id,
@@ -647,6 +645,7 @@ mod tests {
             minimum: 100.,
             maximum: 50000.,
             favorable: None,
+            ..Default::default()
         });
         state.energy_predictions.ranges.push(range);
         for hit in [false, true, false] {

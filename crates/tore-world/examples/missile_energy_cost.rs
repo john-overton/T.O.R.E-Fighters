@@ -105,27 +105,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 [0.; 3],
             );
             let mut service = prediction::Service::default();
-            service.request(1, 1, 0, q, 30);
-            service.request_range_with_minimum(
-                1,
-                1,
-                0,
-                q,
-                f64::from(weapon.seeker.zones[1].minimum_range) * FT,
-            );
             let mut completed = false;
             for tick in 0..1200 {
+                // A held cue re-requests every tick, as the cockpit does.
+                service.request(1, 1, tick, q, 30);
+                service.request_range_with_minimum(
+                    1,
+                    1,
+                    tick,
+                    q,
+                    f64::from(weapon.seeker.zones[1].minimum_range) * FT,
+                );
                 assert!(service.advance(tick, &|_, _| 0.) <= 16384);
                 if service.ranges[0].done {
-                    let band = service.ranges[0].result.unwrap();
+                    let envelope = service.ranges[0].result.unwrap();
+                    let band = envelope.advised(range);
                     let point = service.clients[0].result.unwrap().answer.hit;
                     assert_eq!(point, expected_hit);
-                    assert!((26000. ..27000.).contains(&band.maximum));
-                    assert_eq!(band.contains(range), range == 25000.);
+                    assert!(envelope.count >= 2, "{envelope:?}");
+                    assert!((26000. ..27000.).contains(&envelope.maximum));
+                    // The 35 km gap advises the first region; the far hit
+                    // advises its own region and is in range.
+                    if range == 45000. {
+                        assert!(band.minimum > 35000.);
+                    } else {
+                        assert_eq!(band.maximum, envelope.maximum);
+                    }
+                    assert_eq!(band.contains(range), expected_hit);
                     println!(
-                        "gap-witness range_m={range} point_hit={point} minimum_m={} maximum_m={} in_region={}",
+                        "gap-witness range_m={range} point_hit={point} minimum_m={} maximum_m={} regions={} in_region={}",
                         band.minimum,
                         band.maximum,
+                        envelope.count,
                         band.contains(range)
                     );
                     completed = true;

@@ -246,23 +246,29 @@ authorize a new-model intercept. Keep observed support/seeker gates separate
 from physical reach. Player range and lock remain advisory at release.
 The AI defensive schedule is specified in [AI defense](ai.md#missile-defense-flown-by-ai).
 
-Range advice publishes the first sampled contiguous hit region found by
-searching outward from the decoded launch minimum. A first successful sample
-sets its lower edge; the first subsequent miss closes the region. A farther
-lofted hit island cannot extend its maximum. The ordered scan uses a 1.25
-range ratio, includes shared loft-transition samples and the current shot
-range, and refines the first upper boundary with ten bisections. The 17-sample
-favorable-band pass stays inside this region; any newly discovered gap shrinks
-the published maximum immediately. This is a fitted sampled approximation,
-not a mathematical guarantee against arbitrarily narrow unsampled holes.
+A range search scans outward from the decoded launch minimum to the reach
+cap and keeps up to four contiguous sampled hit regions, nearest first. The
+first sample, when it hits, is the first region's lower edge; every later
+miss-to-hit and hit-to-miss transition is refined with ten bisections and
+recorded on its hit side. The ordered scan uses a 1.25 range ratio and
+includes shared loft-transition samples and the current shot range. Each
+region is published as soon as it closes, so the first region appears as
+early as before and farther regions follow. The 17-sample favorable-band pass
+covers the first region only; a gap it exposes splits that region in two.
+This is a fitted sampled approximation, not a mathematical guarantee against
+arbitrarily narrow unsampled holes.
 
-HUD minimum, maximum, percentage and scale use this same region. IN RNG also
-requires its exact-point hit answer; outside the region a farther hit island
-has no IN RNG cue. The AI still reads only its exact-point answer, so a range
-maximum never grants launch permission through a gap. Empty or pending advice
-does not invent a maximum. Readouts and replays carry the region's minimum
-as well as maximum. This conservative first-region policy is the agent's
-choice under John's 2026-10-27 request.
+The player cue advises one region for the present range (lead decision,
+2026-10-27), for A2A and A2G stores alike: the region containing the range;
+otherwise the nearest region below it, which closing flies into; otherwise,
+below every region, the first region. HUD minimum, maximum, percentage and
+scale use that region, and the favorable band shows only with the first
+region. IN RNG requires both membership in the advised region and the
+exact-point hit answer, so a range inside a gap is never IN RNG while a hit in
+a farther region is. The AI reads only its exact-point answer, for A2A
+launches and guided A2G releases, so a range maximum never grants launch
+permission through a gap. Empty or pending advice does not invent a maximum.
+Readouts and replays carry the advised region's minimum as well as maximum.
 
 A world-owned resumable queue admits at most 256 active flyouts. Waiting point
 and envelope requests are retained and admitted in round-robin rotation;
