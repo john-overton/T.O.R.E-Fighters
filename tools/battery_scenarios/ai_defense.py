@@ -155,6 +155,8 @@ def scenarios() -> list[Scenario]:
         notes="Committed defensive turns keep positive G and dispense only flares against a visually observed IR missile.",
     ) for model in ("standard", "hybrid")]
 
+    # Two IR seeds retain an actual decoy passage after the two-second cadence
+    # change; the single seed-0 shot now hits and cannot exercise inert cleanup.
     turns.append(Scenario(
         name="ai-regress-missile-inert-end", lane="ai",
         args=["--missile-study", "{work}/study", "--ai", "--trace", "--skill", "ace",
@@ -162,7 +164,7 @@ def scenarios() -> list[Scenario]:
               "--aspects", "tail", "--altitudes", "co", "--seeds", "1", "--threads", "1"],
         then=[Step(args=["--missile-study", "{work}/study-decoy", "--ai", "--trace", "--skill", "ace",
                          "--missile-model", "energy", "--missiles", "AIM9M", "--ranges", "medium",
-                         "--aspects", "head", "--altitudes", "co", "--seeds", "1", "--threads", "1"])],
+                         "--aspects", "head", "--altitudes", "co", "--seeds", "2", "--threads", "1"])],
         timeout=180, outputs=["study/runs.csv", "study/cells.csv", "study-decoy/runs.csv"],
         check_work=inert_defense_problems,
         notes="Explicit combat notices end active AI defense on the tick of post-burn defeat and decoy passage.",

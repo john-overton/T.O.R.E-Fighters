@@ -461,6 +461,7 @@ crate::checkpoint_struct!(RangeEstimate {
     station,
     target,
     mode,
+    minimum,
     maximum,
     favorable,
 });

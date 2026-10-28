@@ -54,7 +54,7 @@ minutes cost about 4 minutes.
 | Long runs | `ai-long-*` | 30 simulated minutes (216,000 ticks) of 1 v 1, 5 v 5, 15 v 15, hold, guns and a ground landing |
 | Recordings | `ai-record-*` | `--record-mission --verify-render` must say PASS |
 | Determinism | `ai-determinism-*` | the same arguments run twice on fresh profile copies give identical output; `ai-determinism-recordings` records a 5 v 5 twice and `--recording-diff` must say they match |
-| Regressions | `ai-regress-*` | one per defect fixed below, checked strictly; `ai-regress-missile-inert-end` requires active defense to end on the exact tick of post-burn defeat and decoy passage |
+| Regressions | `ai-regress-*` | one per defect fixed below, checked strictly; `ai-regress-missile-inert-end` requires active defense to end on the exact tick of post-burn defeat and decoy passage; two deterministic IR seeds retain a decoy-passage event with the two-second burst cadence |
 | Acceptance probes | `ai-roster-probe`, `ai-probe-matrix` | the fixed roster and 1,008-encounter probes |
 | Other theaters | `ai-theater-*` | all 16 base theaters: a 4 v 4 fight, an 8 v 8 without the leader attacking, wing-of-3 takeoffs at airports 1 and 3, and a pair ordered to land at airport 1 |
 | Every aircraft's takeoff | `ai-takeoff-*` | all 14 aircraft as a ground-started pair at Zaporizhzhya (UKR 1), Ras Al Khaimah (PGU 2), Chateaudun (FRA 3) and Nuchon Ni (NSK 5) |
@@ -813,3 +813,5 @@ are reported separately from prediction latency. Use `--player-turn=3` or
 `surface-moving-hit-sa6-*` require hits on straight, vulnerable jets at
 10,000 and 20,000 ft. They complement `surface-battery-sa2`, which checks
 battery coordination with invulnerability enabled.
+
+`ai-missile-envelope-gaps` runs the release cost example with `--gap-witness` against the isolated imported pack. It verifies R27ER hit/miss/hit points at 25/35/45 km: 25 km is in the first region (maximum between 26 and 27 km) and IN RNG, the 35 km gap advises the first region without IN RNG, and the 45 km hit advises the far region and is IN RNG; it also checks bounded queue work and completion without starvation. Synthetic combat and employment tests verify that the failed exact point cannot authorize an AI launch.

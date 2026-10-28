@@ -11936,3 +11936,5 @@ defines durability, error handling and lifecycle behavior. Named feedback
 events travel on the reliable session channel, are stamped with host identity and kept by the client capture's
 observer during conversion. See [the behavior spec](spec/replay-feedback.md)
 and [event layout](formats/replay-feedback.md).
+
+Energy range searches keep each contiguous sampled hit region outward from the decoded minimum; the cue advises the region for the present range (containing it, else the nearest below, else the first), with both edges carried through combat estimates and readouts. Exact-point prediction remains the AI launch gate. Searches stay in the fixed-budget world queue; display readers never perform synchronous flyouts. See the [prediction contract](spec/missile-energy.md#estimates-and-acceptance).

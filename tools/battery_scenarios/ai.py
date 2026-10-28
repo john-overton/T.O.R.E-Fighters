@@ -991,6 +991,17 @@ KNOWN_FAILURES = {
 }
 
 
+def prediction_envelope_gap_regression(d):
+    executable = ROOT / "target" / "release" / "examples" / ("missile_energy_cost.exe" if os.name == "nt" else "missile_energy_cost")
+    packs = sorted(d.data.glob("menu-*.pack"))
+    if not executable.exists() or not packs:
+        d.problem("release cost example and imported menu pack required")
+        return
+    output = d.run("gaps", [executable, packs[-1], "1200", "--gap-witness"], timeout=120).text()
+    if "gap-witness: passed" not in output:
+        d.problem("imported hit/miss/hit fixture did not verify the region advice policy")
+
+
 def prediction_launch_regression(d):
     """Same natural fight fixture as the independent review, no injected shots."""
     executable = ROOT / "target" / "release" / "examples" / ("missile_energy_cost.exe" if os.name == "nt" else "missile_energy_cost")
@@ -1056,6 +1067,8 @@ def scenarios() -> list[Scenario]:
     out: list[Scenario] = [Scenario(name="ai-missile-launch-regression", lane="ai", args=[],
         driver=prediction_launch_regression, timeout=1000,
         notes="Four 120-second natural 4v4 fights within 30% of reviewed Spec counts; 23+ AI admission stress. Build the release missile_energy_cost example first.")]
+    out.append(Scenario(name="ai-missile-envelope-gaps", lane="ai", args=[], driver=prediction_envelope_gap_regression,
+                        timeout=180, notes="R27ER hit/miss/hit points: the gap advises the first region without IN RNG; the far hit advises its own region."))
     out.append(Scenario(name="ai-missile-player-cue", lane="ai", args=[], driver=prediction_player_cue_regression, timeout=600,
         notes="Actual player HUD queries in the opening 20 seconds of 4v4 and 23-AI fights: answers on 75% of all ticks and 90% of observed-cue ticks."))
     out.append(Scenario(name="ai-missile-turning-cue", lane="ai", args=[], driver=prediction_turning_cue_regression, timeout=600,

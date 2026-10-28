@@ -255,6 +255,7 @@ pub(super) fn observe(
                     station: index,
                     target: o.id,
                     mode: own.launch_mode,
+                    minimum: f64::from(w.seeker.zones[1].minimum_range),
                     maximum,
                     favorable: missiles::firing_band(
                         w,

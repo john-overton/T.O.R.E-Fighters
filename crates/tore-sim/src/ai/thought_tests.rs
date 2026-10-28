@@ -1082,3 +1082,20 @@ fn ai_ir_head_on_uses_shared_seeker_but_keeps_minimum_range_discipline() {
     t.heading_deg = 0.;
     assert!(station.employment_error(&own, &t).is_some());
 }
+
+#[test]
+fn an_energy_point_gap_blocks_employment_despite_a_larger_range_limit() {
+    let mut station = missile_station(200_000.);
+    let own = frame(0, &[], &[], wing_view(None)).own;
+    let target = hostile(2, [0., 20_000., 100_000.]);
+    // The world sets Some(None) for a pending or failed exact-point answer.
+    // Only a successful answer for this target may make the station eligible.
+    for (permission, allowed) in [(Some(2), true), (None, false), (Some(3), false)] {
+        station.energy_target = Some(permission);
+        assert_eq!(station.employment_error(&own, &target).is_some(), allowed);
+        assert_eq!(
+            station.employment_check(&own, &target).beyond_maximum_range,
+            !allowed
+        );
+    }
+}

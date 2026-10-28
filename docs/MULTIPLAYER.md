@@ -2113,3 +2113,5 @@ Cancel, Escape cancels, and the controller can type through an on-screen
 keyboard. See [replay flags and export](REPLAYS.md#player-feedback-flags) and
 [server settings](DEDICATED-SERVER.md#recording-and-feedback). Protocol 67
 carries the operator's flag and reliable feedback messages.
+
+The unreleased protocol-75 ordnance readout appends the optional contiguous-region minimum to the estimates field. HUD clients use this minimum with the published maximum for the range scale. The lead owns the eventual protocol bump.

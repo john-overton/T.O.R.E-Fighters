@@ -1695,10 +1695,12 @@ IR flares begin inside 2, 3, 5 or 6 seconds to closest approach.
 All missile defense shares an eight-device request budget per encounter. One
 missile can spend at most six. Keep the final pair of the budget and each
 dispenser for a different missile's last-ditch break. Its first break burst can
-use that reserve immediately despite the previous missile's cooldown, within
-the eight-device total. This six-plus-two allocation is an agent decision
+use that reserve before the ordinary beam cooldown expires, within the
+eight-device total, but never less than two seconds after the preceding pair. This six-plus-two allocation is an agent decision
 implementing the lead's second-missile reserve requirement. Subsequent break
-pairs use the existing 2, 1.5, 1 or 0.75-second skill intervals. Devices in a pair
+pairs start at least 2.0 seconds apart for every skill (John, 2026-10-27),
+including across a threat switch. Earlier skill-dependent reaction times and
+ordinary beam intervals remain. Devices in a pair
 are 0.25 seconds apart. Queued defensive releases survive uncertain passage
 and a brief lost observation; confirmed passage cancels them. Compatibility
 warning releases keep their independent schedule.

@@ -298,8 +298,9 @@ pub fn fly(
                         .and_then(|w| w.mission().actor(enemy))
                         .and_then(|actor| actor.defense_decision());
                     println!(
-                        "missile-study: device {} seed {seed} t={t:.3} kind={:?} defense={:?}",
+                        "missile-study: device {} seed {seed} t={t:.3} release_tick={} kind={:?} defense={:?}",
                         weapon.source,
+                        r.tick,
                         r.kind,
                         defense.map(|d| (
                             d.debug.estimated_threat_time_s,

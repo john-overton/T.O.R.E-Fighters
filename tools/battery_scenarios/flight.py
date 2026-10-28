@@ -847,10 +847,32 @@ def check_missile_defeat(work: Path, _output: str) -> list[str]:
         return [f"unreadable defeat study: {error}"]
 
 
+def check_countermeasure_cadence(output):
+    """One deterministic AI flight, actual fixed-tick cartridge release times."""
+    ticks = [int(t) for t in re.findall(r"missile-study: device AIM9M\.JT seed 0 .*?release_tick=(\d+) kind=Flare", output)]
+    if len(ticks) < 4:
+        return [f"cadence fixture produced fewer than two pairs: {ticks}"]
+    problems = []
+    if any(b - a != 30 for a, b in zip(ticks[::2], ticks[1::2])):
+        problems.append(f"second cartridge is not 30 ticks after its pair start: {ticks}")
+    if any(b - a < 240 for a, b in zip(ticks[::2], ticks[2::2])):
+        problems.append(f"AI pair starts are less than 240 ticks apart: {ticks}")
+    if len(ticks) > 6:
+        problems.append(f"single-threat device budget exceeded: {ticks}")
+    return problems
+
+
 def combat_scenarios() -> list[Scenario]:
     out = [Scenario(name="flight-wreckcontact-f18", lane="flight",
                     args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
                     check=check_wreck_contacts, timeout=300)]
+    out.append(Scenario(name="flight-countermeasures-cadence", lane="flight",
+                        args=["--missile-study", "{work}/cadence", "--missiles", "AIM9M",
+                              "--profiles", "ai", "--ranges", "short", "--aspects", "head",
+                              "--altitudes", "co", "--seeds", "1", "--threads", "1", "--ai",
+                              "--skill", "ace", "--trace", "--missile-model", "energy"],
+                        outputs=["cadence/runs.csv"], check=check_countermeasure_cadence,
+                        timeout=180, notes="AI pairs span decoy episodes and retain the device budget"))
     study = ["--missiles", "AIM9M,AIM120", "--profiles", "straight,break,beam+cm-ai@off,dive,cm-hammer",
              "--ranges", "short,medium,long", "--aspects", "head,tail", "--altitudes", "low,high",
              "--seeds", "2", "--missile-model", "energy"]

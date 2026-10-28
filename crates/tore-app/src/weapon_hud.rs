@@ -228,7 +228,10 @@ pub fn draw(
             }
         }
         let range = missiles::length(missiles::sub(position, s.position));
-        let min = f64::from(w.seeker.zones[1].minimum_range);
+        let min = ro
+            .estimates
+            .min_range
+            .unwrap_or(f64::from(w.seeker.zones[1].minimum_range));
         let max = ro.estimates.max_range.unwrap_or(0.);
         // Retail reference: range scale just inside the altitude tape.
         let text_width = |text: &str| {

@@ -298,16 +298,34 @@ pub fn infrared_probability(
         * ratio.clamp(0., 3.);
     p.clamp(0., if imaging { 0.10 } else { 0.95 })
 }
+/// John's 2026-10-27 game-balance adjustment, applied to every Energy radar store.
+pub const CHAFF_EFFECTIVENESS_MULTIPLIER: f64 = 1.30;
+
+/// Radar draws use basis points; IR retains its existing whole-percent evaluator.
+pub fn chance_units(kind: Kind, probability: f64) -> (u16, u16) {
+    let bound = if kind == Kind::Chaff { 10000 } else { 100 };
+    let scaled = probability.clamp(0., 1.) * f64::from(bound);
+    let threshold = if kind == Kind::Chaff {
+        scaled.round()
+    } else {
+        scaled.floor()
+    } as u16;
+    (threshold, bound)
+}
+
 pub fn radar_probability(
     susceptibility: u8,
     effectiveness: u8,
     notch: f64,
     generation: f64,
 ) -> f64 {
-    (f64::from(susceptibility) * f64::from(effectiveness) / 10000.
+    // John's multiplier acts on the unfloored chance (lead decision,
+    // 2026-10-27); the basis-point draw keeps fractions of a percent, so a
+    // base below 1% is buffed too.
+    let base = f64::from(susceptibility) * f64::from(effectiveness) / 10000.
         * generation
-        * (0.25 + 2.75 * notch.clamp(0., 1.)))
-    .clamp(0., 0.95)
+        * (0.25 + 2.75 * notch.clamp(0., 1.));
+    (base * CHAFF_EFFECTIVENESS_MULTIPLIER).clamp(0., 0.95)
 }
 
 /// Terrain Doppler separation uses target ground velocity, not closing speed.
@@ -348,6 +366,36 @@ crate::checkpoint_struct!(Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chaff_buff_scales_the_unfloored_chance_and_does_not_change_ir_units() {
+        // AA12-like 50 x 35 active seeker at zero notch: 1.53125% before.
+        let base = 50. * 35. / 10000. * 0.35 * 0.25;
+        let buffed = radar_probability(50, 35, 0., 0.35);
+        assert!((buffed - base * 1.30).abs() < 1e-12);
+        assert_eq!(chance_units(Kind::Chaff, buffed), (199, 10000));
+        // AIM120-like 40 x 35: 1.225% becomes about 1.59%.
+        assert_eq!(
+            chance_units(Kind::Chaff, radar_probability(40, 35, 0., 0.35)),
+            (159, 10000)
+        );
+        // A base below 1% is buffed as well: 0.7% becomes 0.91%.
+        assert_eq!(
+            chance_units(Kind::Chaff, radar_probability(40, 20, 0., 0.35)),
+            (91, 10000)
+        );
+        // Flares keep the whole-percent evaluator.
+        assert_eq!(chance_units(Kind::Flare, base), (1, 100));
+        assert_eq!(radar_probability(200, 100, 1., 1.), 0.95);
+        for generation in [0.35, 0.7, 1.] {
+            for notch in [0., 0.25, 0.5, 1.] {
+                let old = 0.10 * generation * (0.25 + 2.75 * notch);
+                assert!(
+                    (radar_probability(50, 20, notch, generation) - (old * 1.30).min(0.95)).abs()
+                        < 1e-12
+                );
+            }
+        }
+    }
     #[test]
     fn physical_flare_matches_the_visible_release_without_sharing_its_pool() {
         use super::super::super::countermeasures::{Devices, Release};

@@ -1299,8 +1299,10 @@ fn accepted_fit_bands(source: &str) -> ([f64; 2], [f64; 2]) {
         "PL7.JT" => ([0.875, 1.125], [0.875, 1.125]),
         "AA10.JT" => ([0.86, 1.105], [0.895, 1.13]),
         "AA2.JT" => ([0.82, 1.105], [0.895, 1.18]),
-        // John approved this head-only Phase 2.8 compromise with the stricter motor guard.
-        "AA8.JT" => ([0.895, 1.325], [0.895, 1.105]),
+        // John prioritized usable envelopes in the 2026-10-27 ordnance fix.
+        // These bounded residuals are the agent-selected minimal guarded fits.
+        "AA8.JT" => ([0.895, 1.56], [0.895, 1.85]),
+        "AA12.JT" | "AEMP1.JT" => ([0.895, 1.25], [0.895, 1.105]),
         "AIM54C.JT" => ([0.895, 1.105], [0.895, 1.14]),
         "AIM7.JT" => ([0.82, 1.105], [0.895, 1.21]),
         "AIM7E.JT" => ([0.895, 1.105], [0.79, 1.105]),
@@ -1440,7 +1442,14 @@ mod fit_gate_tests {
         assert!(in_fit_band(100., 100., accepted_fit_bands("NEW.JT").0));
         assert!(in_fit_band(12.8, 10., accepted_fit_bands("AA8.JT").0));
         assert!(in_fit_band(13.199, 10., accepted_fit_bands("AA8.JT").0));
-        assert!(!in_fit_band(13.26, 10., accepted_fit_bands("AA8.JT").0));
+        assert!(in_fit_band(15.46, 10., accepted_fit_bands("AA8.JT").0));
+        assert!(!in_fit_band(15.61, 10., accepted_fit_bands("AA8.JT").0));
+        assert!(in_fit_band(4.332, 2.377, accepted_fit_bands("AA8.JT").1));
+        assert!(!in_fit_band(4.41, 2.377, accepted_fit_bands("AA8.JT").1));
+        for source in ["AA12.JT", "AEMP1.JT"] {
+            assert!(in_fit_band(62.17, 50., accepted_fit_bands(source).0));
+            assert!(!in_fit_band(62.6, 50., accepted_fit_bands(source).0));
+        }
         assert!(!in_fit_band(16., 10., accepted_fit_bands("AA8.JT").0));
         assert!(in_fit_band(15.695, 14., accepted_fit_bands("PL7.JT").0));
         assert!(!in_fit_band(16., 14., accepted_fit_bands("PL7.JT").0));

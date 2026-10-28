@@ -413,9 +413,11 @@ pub struct DecoyRoll {
     pub susceptibility: u8,
     /// The dispenser's effectiveness, percent.
     pub effectiveness: u8,
-    /// The chance in percent: susceptibility x effectiveness / 100.
-    pub threshold: u8,
-    /// The draw, 0 to 99; below the threshold the missile follows the decoy.
+    /// The chance numerator in `bound` units, not necessarily whole percent.
+    pub threshold: u16,
+    /// Draw resolution: 100 for legacy/IR, 10000 for Energy chaff.
+    pub bound: u16,
+    /// The draw in 0..bound; below threshold the store follows the decoy.
     pub roll: u16,
     pub decoyed: bool,
 }
@@ -1612,6 +1614,7 @@ struct RangeEstimate {
     station: usize,
     target: u32,
     mode: LaunchMode,
+    minimum: f64,
     maximum: f64,
     favorable: Option<missiles::FiringBand>,
 }
@@ -3043,6 +3046,18 @@ impl<'a> LauncherView<'a> {
             .get_or_init(|| self.compute_mounted_solution())
     }
 
+    pub fn estimated_min_range(&self) -> Option<f64> {
+        let observed = self.weapon_observation()?;
+        self.view
+            .own
+            .range_estimate
+            .filter(|e| {
+                e.station == self.view.own.selected
+                    && e.target == observed.id
+                    && e.mode == self.view.own.launch_mode
+            })
+            .map(|e| e.minimum)
+    }
     pub fn estimated_max_range(&self) -> Option<f64> {
         let observed = self.weapon_observation()?;
         self.view
@@ -3093,7 +3108,14 @@ impl<'a> LauncherView<'a> {
             _ => false,
         };
         if self.view.state.weapon_rules == Rules::Energy {
-            return ready && o.range >= min && self.mounted_solution().is_some();
+            return ready
+                && self
+                    .estimated_min_range()
+                    .zip(self.estimated_max_range())
+                    .is_some_and(|(inner, outer)| {
+                        outer > inner && (inner.max(min)..=outer).contains(&o.range)
+                    })
+                && self.mounted_solution().is_some();
         }
         ready
             && self
@@ -3112,6 +3134,12 @@ impl<'a> LauncherView<'a> {
         };
         let mut zone = w.seeker.zones[1];
         zone.maximum_range = self.estimated_max_range().unwrap_or(0.).floor() as _;
+        if self.view.state.weapon_rules == Rules::Energy {
+            zone.minimum_range = self
+                .estimated_min_range()
+                .unwrap_or(f64::from(zone.minimum_range))
+                .ceil() as _;
+        }
         missiles::estimated_hit_percent(
             observation,
             self.mounted_solution(),
@@ -4047,7 +4075,8 @@ impl State {
                 device,
                 susceptibility,
                 effectiveness,
-                threshold,
+                threshold: u16::from(threshold),
+                bound: 100,
                 roll,
                 decoyed,
             });
@@ -11835,13 +11864,14 @@ fn energy_decoy(
             generation,
         )
     };
-    let threshold = (probability * 100.).floor() as u8;
+    let (threshold, bound) = decoys::chance_units(kind, probability);
     let random =
         decoys::mix(seed ^ decoys::mix(u64::from(p.id)) ^ decoys::mix(device.episode)) >> 11;
-    let roll = (random as f64 / ((1u64 << 53) as f64) * 100.).floor() as u16;
-    let decoyed = energy
-        .decoy
-        .evaluate(device, f64::from(threshold) / 100., seed, p.id)?;
+    let roll = (random as f64 / ((1u64 << 53) as f64) * f64::from(bound)).floor() as u16;
+    let decoyed =
+        energy
+            .decoy
+            .evaluate(device, f64::from(threshold) / f64::from(bound), seed, p.id)?;
     if decoyed {
         energy.target = Some(device.observation());
         energy.flight.terminal = true;
@@ -11867,6 +11897,7 @@ fn energy_decoy(
         susceptibility: w.seeker.chaff_flare_chance,
         effectiveness: device.effectiveness,
         threshold,
+        bound,
         roll,
         decoyed,
     })

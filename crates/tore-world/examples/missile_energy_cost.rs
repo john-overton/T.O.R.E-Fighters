@@ -66,6 +66,88 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(1)
         .clamp(1, 8);
     let resources = tore_import::pack::read_pack(Path::new(pack))?;
+    if args.iter().any(|s| s == "--gap-witness") {
+        use missiles::{energy::FT, prediction};
+        use tore_sim::attitude::Basis;
+        let weapon = Weapon::parse(
+            "R27ER.JT",
+            resources
+                .get("R27ER.JT")
+                .ok_or("missing gap fixture store")?,
+        )?;
+        let launcher = Launcher {
+            position: [0., 500., 0.],
+            basis: Basis::new(0., 0., 0.),
+            velocity: [0., 0., 200. / FT],
+            speed_fps: 200. / FT,
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            body_present: true,
+            controls: Default::default(),
+        };
+        for (range, expected_hit) in [(25000., true), (35000., false), (45000., true)] {
+            let observed = Observation {
+                id: 1,
+                position: [0., 500., range / FT],
+                velocity: [0., 0., -250. / FT],
+                quality: 1.,
+                off_axis: 0.,
+                range: range / FT,
+            };
+            let q = prediction::launch_question(
+                &weapon,
+                launcher,
+                observed,
+                f64::from(weapon.damage.fuze_radius.max(0)) + 30.,
+                [0.; 3],
+            );
+            let mut service = prediction::Service::default();
+            let mut completed = false;
+            for tick in 0..1200 {
+                // A held cue re-requests every tick, as the cockpit does.
+                service.request(1, 1, tick, q, 30);
+                service.request_range_with_minimum(
+                    1,
+                    1,
+                    tick,
+                    q,
+                    f64::from(weapon.seeker.zones[1].minimum_range) * FT,
+                );
+                assert!(service.advance(tick, &|_, _| 0.) <= 16384);
+                if service.ranges[0].done {
+                    let envelope = service.ranges[0].result.unwrap();
+                    let band = envelope.advised(range);
+                    let point = service.clients[0].result.unwrap().answer.hit;
+                    assert_eq!(point, expected_hit);
+                    assert!(envelope.count >= 2, "{envelope:?}");
+                    assert!((26000. ..27000.).contains(&envelope.maximum));
+                    // The 35 km gap advises the first region; the far hit
+                    // advises its own region and is in range.
+                    if range == 45000. {
+                        assert!(band.minimum > 35000.);
+                    } else {
+                        assert_eq!(band.maximum, envelope.maximum);
+                    }
+                    assert_eq!(band.contains(range), expected_hit);
+                    println!(
+                        "gap-witness range_m={range} point_hit={point} minimum_m={} maximum_m={} regions={} in_region={}",
+                        band.minimum,
+                        band.maximum,
+                        envelope.count,
+                        band.contains(range)
+                    );
+                    completed = true;
+                    break;
+                }
+            }
+            assert!(completed, "gap fixture prediction starved");
+        }
+        println!("gap-witness: passed");
+        return Ok(());
+    }
     let mut spec = MissionSpec::new(theater, AircraftId::F16C);
     let natural = args.iter().any(|s| s == "--natural");
     let big = args.iter().any(|s| s == "--big");

@@ -308,6 +308,7 @@ fn readout(
             guidance_available: sample.guidance,
             can_lock: matches!(sample.seeker.as_str(), "LOCK" | "ACQUIRING" | "PITBULL"),
             observation,
+            min_range: (sample.min_ft > 0.).then_some(sample.min_ft),
             max_range: (sample.max_ft > 0.).then_some(sample.max_ft),
             band: (sample.band_max > 0.).then_some(FiringBand {
                 minimum: sample.band_min,
@@ -588,6 +589,7 @@ mod tests {
             guidance: true,
             in_range: true,
             hit: 40,
+            min_ft: 1_500.,
             max_ft: 60_000.,
             band_min: 2_000.,
             band_max: 30_000.,

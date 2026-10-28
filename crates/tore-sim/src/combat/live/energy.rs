@@ -119,11 +119,12 @@ impl State {
             prediction_radius(w),
             self.devices.wind,
         );
-        self.energy_predictions.request_range(
+        self.energy_predictions.request_range_with_minimum(
             key(owner, station),
             observed.id,
             self.tick,
             question,
+            f64::from(w.seeker.zones[1].minimum_range) * FT,
         );
         self.prediction_request_finish(measured);
     }
@@ -192,19 +193,23 @@ impl State {
             prediction_radius(w),
             self.devices.wind,
         );
+        let envelope = self
+            .energy_predictions
+            .envelope(key(owner, station), u32::MAX, question, self.tick)
+            .map(|e| e.advised(observed.range * FT));
+        // The AI's strike gate reads its exact-point answer only. AI cockpits
+        // request no range search, so requiring envelope membership here
+        // would leave every powered guided store permanently not due.
         let hit = self
             .energy_predictions
             .answer(key(owner, station), u32::MAX, question, self.tick)
             .is_some_and(|r| r.answer.hit);
         sight.energy_intercept = Some(hit);
         sight.in_reach &= hit;
-        sight.reach = self
-            .energy_predictions
-            .envelope(key(owner, station), u32::MAX, question, self.tick)
-            .map(|e| super::super::guided::Reach {
-                minimum_ft: f64::from(w.seeker.zones[1].minimum_range),
-                maximum_ft: e.maximum / FT,
-            });
+        sight.reach = envelope.map(|e| super::super::guided::Reach {
+            minimum_ft: e.minimum / FT,
+            maximum_ft: e.maximum / FT,
+        });
         sight
     }
     pub fn request_energy_solution(
@@ -324,8 +329,13 @@ impl State {
             let id = key(own.aircraft, own.selected);
             self.energy_predictions
                 .request_player(id, observed.id, self.tick, question);
-            self.energy_predictions
-                .request_range(id, observed.id, self.tick, question);
+            self.energy_predictions.request_range_with_minimum(
+                id,
+                observed.id,
+                self.tick,
+                question,
+                f64::from(w.seeker.zones[1].minimum_range) * FT,
+            );
         }
         for projectile in &self.projectiles {
             let Some(energy) = projectile.motion.and_then(|m| m.energy) else {
@@ -400,26 +410,28 @@ impl State {
                     1;
             }
             own.energy_hit = answer.filter(|r| r.answer.hit).map(|_| observed.id);
+            // One contiguous region advised for the present range: the one
+            // containing it, else the nearest below, else the first.
+            let advised = self
+                .energy_predictions
+                .envelope(id, observed.id, question, self.tick)
+                .map(|e| e.advised(observed.range * FT));
             if let Some(sight) = &mut own.guided_sight {
-                let hit = own.energy_hit == Some(observed.id);
+                let hit = own.energy_hit == Some(observed.id)
+                    && advised.is_some_and(|e| e.contains(observed.range * FT));
                 sight.energy_intercept = Some(hit);
                 sight.in_reach &= hit;
-                sight.reach = self
-                    .energy_predictions
-                    .envelope(id, observed.id, question, self.tick)
-                    .map(|e| super::super::guided::Reach {
-                        minimum_ft: f64::from(w.seeker.zones[1].minimum_range),
-                        maximum_ft: e.maximum / FT,
-                    });
+                sight.reach = advised.map(|e| super::super::guided::Reach {
+                    minimum_ft: e.minimum / FT,
+                    maximum_ft: e.maximum / FT,
+                });
             }
-            if let Some(envelope) =
-                self.energy_predictions
-                    .envelope(id, observed.id, question, self.tick)
-            {
+            if let Some(envelope) = advised {
                 own.range_estimate = Some(RangeEstimate {
                     station: own.selected,
                     target: observed.id,
                     mode: own.launch_mode,
+                    minimum: envelope.minimum / FT,
                     maximum: envelope.maximum / FT,
                     favorable: envelope
                         .favorable
@@ -541,6 +553,197 @@ mod tests {
             gun_round: None,
             tracer: false,
         }
+    }
+    #[test]
+    fn an_ai_guided_sight_is_due_on_its_point_answer_without_a_range_search() {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        let w = weapon("R27ER.JT", 2);
+        let launcher = Launcher {
+            position: [0., 300., 0.],
+            basis: Basis::new(0., 0., 0.),
+            velocity: [0., 0., 30. / FT],
+            speed_fps: 30. / FT,
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            body_present: true,
+            controls: Default::default(),
+        };
+        let point = [0., 0., 3000. / FT];
+        let observed = seeker::Observation {
+            id: u32::MAX,
+            position: point,
+            velocity: [0.; 3],
+            quality: 1.,
+            off_axis: 0.,
+            range: missiles::length(missiles::sub(point, launcher.position)),
+        };
+        state.request_energy_solution(7, 0, &w, launcher, observed);
+        let question = state.energy_predictions.clients[0].question;
+        assert!(state.energy_predictions.ranges.is_empty());
+        let sight = crate::combat::guided::GuidedSight {
+            energy_intercept: None,
+            kind: Guidance::Laser,
+            aim: Some(point),
+            buddy: false,
+            ground_range_ft: Some(3000. / FT),
+            slant_range_ft: Some(observed.range),
+            reach: None,
+            in_reach: true,
+            advisory: None,
+            level: None,
+        };
+        for hit in [false, true] {
+            state.energy_predictions.clients[0].result = Some(prediction::Published {
+                at: 0,
+                question,
+                answer: missiles::energy_estimate::Answer {
+                    hit,
+                    seconds: 20.,
+                    closest: if hit { 0. } else { 1000. },
+                    impact_speed: 200.,
+                },
+            });
+            let out = state.energy_guided_output(7, 0, &w, launcher, sight);
+            assert_eq!(out.energy_intercept, Some(hit));
+            assert_eq!(super::super::guided_due(&out), hit);
+        }
+    }
+    #[test]
+    fn an_ai_point_miss_cannot_be_overruled_by_a_range_envelope() {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        let w = weapon("R27ER.JT", 2);
+        let launcher = Launcher {
+            position: [0., 5000., 0.],
+            basis: Basis::new(0., 0., 0.),
+            velocity: [0., 0., 300. / FT],
+            speed_fps: 300. / FT,
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            body_present: true,
+            controls: Default::default(),
+        };
+        let observed = seeker::Observation {
+            id: 42,
+            position: [0., 5000., 35000. / FT],
+            velocity: [0., 0., -250. / FT],
+            quality: 1.,
+            off_axis: 0.,
+            range: 35000. / FT,
+        };
+        state.request_energy_solution(7, 0, &w, launcher, observed);
+        let question = state.energy_predictions.clients[0].question;
+        let mut range = prediction::RangeSearch::new(key(7, 0), 42, 0, question);
+        range.result = Some(prediction::Envelope {
+            minimum: 100.,
+            maximum: 50000.,
+            favorable: None,
+            ..Default::default()
+        });
+        state.energy_predictions.ranges.push(range);
+        for hit in [false, true, false] {
+            state.energy_predictions.clients[0].result = Some(prediction::Published {
+                at: 0,
+                question,
+                answer: missiles::energy_estimate::Answer {
+                    hit,
+                    seconds: 30.,
+                    closest: if hit { 0. } else { 1000. },
+                    impact_speed: 500.,
+                },
+            });
+            assert_eq!(
+                state
+                    .energy_solution(7, 0, &w, launcher, observed)
+                    .is_some(),
+                hit
+            );
+        }
+    }
+    #[test]
+    fn fitted_short_ir_has_no_empty_slow_shooter_coaltitude_sectors() {
+        let mut body = missiles::energy_profile::body(&weapon("AA8.JT", 2));
+        body.ignition = 0;
+        for altitude in [500., 5000., 15000., 25000., 35000., 45000.] {
+            for angle in [45_f64, 90., 135.] {
+                assert!(
+                    synthetic_sector_has_hit(
+                        body,
+                        altitude,
+                        altitude,
+                        angle,
+                        200.,
+                        &[1000., 2000., 3000., 4000., 5000., 6000.]
+                    ),
+                    "{altitude} ft, {angle} degrees"
+                );
+            }
+        }
+        assert_eq!(body.guidance_ticks, 2400);
+        assert_eq!(body.defeat_mach, 1.);
+    }
+
+    #[test]
+    fn fitted_medium_radar_stores_reach_every_sampled_climbing_sector() {
+        for source in ["AA12.JT", "AEMP1.JT"] {
+            let mut body = missiles::energy_profile::body(&weapon(source, 3));
+            body.ignition = 0;
+            for speed in [200., 300.] {
+                for angle in [0., 45., 90., 135., 180.] {
+                    assert!(
+                        synthetic_sector_has_hit(
+                            body,
+                            5000.,
+                            30000.,
+                            angle,
+                            speed,
+                            &[3000., 5000., 8000., 12000., 18000., 25000.]
+                        ),
+                        "{source}, {speed} m/s, {angle} degrees"
+                    );
+                }
+            }
+            assert_eq!(body.guidance_ticks, 8400);
+            assert_eq!(body.defeat_mach, 1.);
+        }
+    }
+
+    fn synthetic_sector_has_hit(
+        body: missiles::energy::Body,
+        from: f64,
+        to: f64,
+        angle: f64,
+        speed: f64,
+        ranges: &[f64],
+    ) -> bool {
+        ranges.iter().any(|range| {
+            let trial = Trial::new(
+                body,
+                missiles::energy::Flight::launch(
+                    [0., from * FT, 0.],
+                    [0., 0., speed],
+                    [0., 0., 1.],
+                ),
+                missiles::energy::Observation {
+                    position: [0., to * FT, *range],
+                    velocity: [
+                        250. * angle.to_radians().sin(),
+                        0.,
+                        -250. * angle.to_radians().cos(),
+                    ],
+                },
+                40.,
+                60,
+            );
+            trial.finish(&|_, _| 0.).hit
+        })
     }
     #[test]
     fn inert_stores_clear_the_warning_picture_on_the_defeat_tick() {

@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.8 Linux validation passed with documented fit residuals.**
+Implementation mode, 2026-10-27. **Energy is selected by new worlds. Current fit residuals and validation are recorded in the [baseline](../baselines/missile-energy.md).**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
@@ -57,7 +57,7 @@ values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
 John's round-3 decision removes the supplemental geometry-based drag factor.
-Drag uses the round-2 force law with Phase 2.8 guarded conditional balance fits. Altitude affects density and sound speed through the standard
+Drag uses the round-2 force law with the current guarded motor/drag fits. Altitude affects density and sound speed through the standard
 atmosphere above; there is no additional altitude fade or span/diameter factor.
 The supplementary [span reference data](../formats/missile-energy-data.md#span-reference-data)
 do not affect simulation. Body diameter still supplies the original frontal
@@ -187,13 +187,20 @@ Radar uses target radial separation from terrain clutter for both SARH and
 active seekers. Chaff and look-down notch improve seduction; active radar may
 also lose a return in clutter without chaff. Clamp the full probability product,
 preserving raw susceptibility values 150 and 200. The evaluator uses raw susceptibility times dispenser effectiveness,
-then generation and signal factors, flooring the final probability to a whole
-percent. IR factors are 1.0 for rear-aspect seekers, 0.6 for conventional
+then generation and signal factors. IR retains its whole-percent evaluator. IR factors are 1.0 for rear-aspect seekers, 0.6 for conventional
 all-aspect and 0.08 for imaging, with ratio capped at 3 and probability at
 95% (10% for imaging). Radar uses 0.35 for active seekers, 1.0 for records
 whose susceptibility exceeds 100, otherwise 0.7, multiplied by
-0.25 + 2.75*clutter_notch. This susceptibility-based early-SARH grouping is
-fitted and awaits explicit per-profile review.
+0.25 + 2.75*clutter_notch. John requested a global 30% chaff buff on
+2026-10-27. Multiply the unfloored product by the single global
+`CHAFF_EFFECTIVENESS_MULTIPLIER = 1.30`, then cap at 95% (lead decision,
+2026-10-27). Evaluate the result in basis points (0.01 percentage-point
+units), so a zero-notch AA12 at effectiveness 35 rolls 1.99% (1.53% before)
+and AIM120 1.59%, and a base below 1% is buffed too. IR odds, episode eligibility,
+seed streams and notch thresholds do not change. The multiplier applies to
+all Energy radar stores; explicit Spec/Compatibility modes retain their rules.
+Recorded rolls carry their bound (100 or 10000) so thresholds remain readable.
+The susceptibility-based early-SARH grouping is fitted and awaits per-profile review.
 
 Each physical flare pair leaves 15 ft behind and 2 ft below the aircraft,
 with aircraft velocity and 15 ft/s downward ejection. The two seeded lateral
@@ -216,13 +223,52 @@ These are fitted classes; the cited AIM9B 11 deg/s and 2-degree half-angle
 override them. Seeker head movement is clamped to its mechanical gimbal.
 Neither a clipped signal nor a decoy outside instantaneous FOV can roll.
 
+## Usable aspect envelopes
+
+John's 2026-10-27 ordnance-fix decision prioritizes usable envelopes over the
+old two-condition range fits, with the smallest practical overshoot and retained
+role/generation ordering and class floors. The agent fits AA8, AA12 and AEMP1
+through explicit motor and drag data. No control time, defeat threshold, lift
+coefficient, seeker setting or shared guidance law is adjusted to make a shot
+pass. At shooter/target speeds 200/250 and 300/250 m/s, AA8 must have a
+nonempty co-altitude hit band at 0/45/90/135/180-degree horizontal aspects from
+500 through 45,000 ft. A low-speed or large vertical-separation shot can still
+be unreachable. AA12 and AEMP1 must retain nonempty bands in the tested
+5,000-to-30,000-ft climb sectors. These are game balance acceptance conditions,
+not guaranteed hits everywhere inside a maximum; [measured limits and accepted
+range exceptions](../baselines/missile-energy.md) remain explicit.
+
 ## Estimates and acceptance
 
 Flight, range, TTI and AI launch decisions use the same model or a bounded
 cache built from it. No obsolete straight-speed/coast-floor shortcut may
 authorize a new-model intercept. Keep observed support/seeker gates separate
 from physical reach. Player range and lock remain advisory at release.
-The existing AI defensive schedule and flying are owned by a separate task.
+The AI defensive schedule is specified in [AI defense](ai.md#missile-defense-flown-by-ai).
+
+A range search scans outward from the decoded launch minimum to the reach
+cap and keeps up to four contiguous sampled hit regions, nearest first. The
+first sample, when it hits, is the first region's lower edge; every later
+miss-to-hit and hit-to-miss transition is refined with ten bisections and
+recorded on its hit side. The ordered scan uses a 1.25 range ratio and
+includes shared loft-transition samples and the current shot range. Each
+region is published as soon as it closes, so the first region appears as
+early as before and farther regions follow. The 17-sample favorable-band pass
+covers the first region only; a gap it exposes splits that region in two.
+This is a fitted sampled approximation, not a mathematical guarantee against
+arbitrarily narrow unsampled holes.
+
+The player cue advises one region for the present range (lead decision,
+2026-10-27), for A2A and A2G stores alike: the region containing the range;
+otherwise the nearest region below it, which closing flies into; otherwise,
+below every region, the first region. HUD minimum, maximum, percentage and
+scale use that region, and the favorable band shows only with the first
+region. IN RNG requires both membership in the advised region and the
+exact-point hit answer, so a range inside a gap is never IN RNG while a hit in
+a farther region is. The AI reads only its exact-point answer, for A2A
+launches and guided A2G releases, so a range maximum never grants launch
+permission through a gap. Empty or pending advice does not invent a maximum.
+Readouts and replays carry the advised region's minimum as well as maximum.
 
 A world-owned resumable queue admits at most 256 active flyouts. Waiting point
 and envelope requests are retained and admitted in round-robin rotation;
@@ -281,7 +327,7 @@ are agent-fitted display tolerances; they never authorize a shot. A cold search 
 its first maximum before restarting for changed geometry, so continuous turns
 cannot prevent the first publication. Target, body, arming, radius or wind
 changes invalidate it immediately. A reversal removes the old head-on range
-immediately. Only a qualified point forecast can grant IN RNG or an AI launch. These tolerances are agent-fitted cache approximations, not
+immediately. AI launch permission requires a qualified exact-point hit forecast. IN RNG also requires membership in the displayed contiguous range region. These tolerances are agent-fitted cache approximations, not
 exact proofs about the current pose. Turns may leave a cue pending. AI cannot
 fire from a pending/failed point answer, and ordinary sensor/support and
 minimum-range launch gates remain. A surface seeker does not acquire a blind

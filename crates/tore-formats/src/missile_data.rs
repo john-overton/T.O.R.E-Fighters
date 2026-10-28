@@ -139,7 +139,7 @@ pub const REFERENCES: &[Reference] = &[
         range_evidence: "FITTED-TWO-CONDITION-IR",
     },
     Reference {
-        drag_scale: 0.500153961,
+        drag_scale: 1.065022502,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -230,7 +230,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 0.514855217,
+        drag_scale: 0.532528258,
         structural_g: Some(47.),
         tracking_deg_s: None,
         fov_half_deg: None,
@@ -360,7 +360,7 @@ pub const REFERENCES: &[Reference] = &[
         imaging: false,
     },
     Reference {
-        drag_scale: 0.500000000,
+        drag_scale: 1.065022502,
         structural_g: None,
         tracking_deg_s: None,
         fov_half_deg: None,

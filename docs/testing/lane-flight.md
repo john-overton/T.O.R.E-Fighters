@@ -68,10 +68,32 @@ Both reapply the guard. The complete offline search retries an empty envelope
 with factor-1.1 probes after the ordinary factor-1.5 sweep, to find narrow
 beam-intercept intervals. Nonempty envelopes keep their original search;
 this is still sampling, not proof that every success island was found.
-Runtime searches are unchanged. Thresholds and class floors have one home in
+Runtime advice separately keeps each sampled region and advises the one for the present range, as specified in the
+[range contract](../spec/missile-energy.md#estimates-and-acceptance). Thresholds and class floors have one home in
 [the data document](../formats/missile-energy-data.md#per-store-motors-and-class-control-budgets).
 Run the synthetic guard and exception tests with
 `cargo test --locked -p tore-sim --example missile_energy_ranges -- --test-threads=4`.
+
+The `flight-countermeasures-cadence` scenario runs an isolated real-AI Ace
+AIM9M encounter at short range, head-on, co-altitude and seed 0. It requires
+at least two pairs, exactly 30 ticks within each pair, at least 240 ticks
+between pair starts and no more than six releases for the single threat.
+All-skill reaction, reserve and encounter transitions have synthetic tests.
+
+The offline `ordnance_envelopes` example accepts `JT_DIR OUT_DIR [SOURCES]`.
+Its default survey covers eleven altitude cases, five aspects, shooter speeds
+200/300 m/s against 250 m/s, and a 150 m/s target subset at three altitudes.
+It exports physical and live-seeker intervals, with every sampled transition
+refined to 0.5 m. A finite scan can still miss a narrower island or hole.
+Single-case modes use `SOURCE point|cell|trace|advice LAUNCH_FT TARGET_FT
+ASPECT_DEG SHOOTER_MPS TARGET_MPS RANGE_M`; `cell` takes a scan ratio instead
+of range and `trace` additionally takes `physical|seeker`. Range is horizontal;
+the runtime `advice` result reports slant-range edges and fixed-queue work.
+The trace emits Mach, G demand/capacity, motor/drag force and seeker state.
+`--override key=value,...` is diagnostic only: fuel, share, boost_s, sustain_s,
+coefficient, drag, lift, g, induced, navigation, control and defeat are supported.
+Counterfactual control/defeat overrides must never be mistaken for shipping
+policy or an approved calibration. No mode edits game data.
 
 The synthetic `behavior_hash_requires_a_model_revision_for_rule_changes` test
 pairs the model identity with a quantized trajectory/contact trace. A changed

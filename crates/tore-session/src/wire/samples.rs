@@ -1707,6 +1707,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             guidance_available: true,
             can_lock: true,
             observation: Some(observation),
+            min_range: Some(1_700.),
             max_range: Some(48_000.),
             band: Some(FiringBand {
                 minimum: 3_000.,
