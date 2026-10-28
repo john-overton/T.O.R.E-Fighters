@@ -128,11 +128,12 @@ pub(super) fn step(
                 .any(|(_, f)| f.owner == id && f.kind == missiles::Guidance::Laser);
             let gunship =
                 config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship;
-            let (impact, seconds, warning, due, reach_ok) = if sel.kind == StoreKind::Gun && gunship
-            {
+            // `reach`: whether a guided bomb's glide reaches at all, and its
+            // time to the release (the AI's committed-to-release window).
+            let (impact, seconds, warning, due, reach) = if sel.kind == StoreKind::Gun && gunship {
                 // The gunship's guns are trained and fired by their own
                 // bridge (`super::gunship`, slice ST-F).
-                (None, None, false, false, true)
+                (None, None, false, false, (true, None))
             } else if sel.kind == StoreKind::Gun {
                 // The gun's ground cue (slice ST-T2); the striker judges its
                 // own bursts.
@@ -140,7 +141,13 @@ pub(super) fn step(
                 let cue = tore_sim::combat::gunsight::ground_cue(w, &launcher, mount, ground)
                     .ok()
                     .flatten();
-                (cue.map(|c| c.0), cue.map(|c| c.1), false, false, true)
+                (
+                    cue.map(|c| c.0),
+                    cue.map(|c| c.1),
+                    false,
+                    false,
+                    (true, None),
+                )
             } else if sel.kind.seeker() {
                 let due = seeker_due(
                     sel.kind,
@@ -150,7 +157,7 @@ pub(super) fn step(
                     position,
                     emitting,
                 );
-                (None, None, false, due, true)
+                (None, None, false, due, (true, None))
             } else {
                 // A laser bomb the tactics let go by hand is solved on the
                 // bomb equation (slice ST-G).
@@ -191,12 +198,24 @@ pub(super) fn step(
                         true,
                     ),
                 };
+                // A guided bomb's time to its release (T.O.R.E, John,
+                // 2026-10-28): the level T's own, else the distance to the
+                // T's bar over the ground speed.
+                let release_seconds = sight.as_ref().and_then(|sight| {
+                    sight.release_seconds().or_else(|| {
+                        let speed = launcher.velocity[0].hypot(launcher.velocity[2]);
+                        sight
+                            .along_ft()
+                            .filter(|_| speed > 1.)
+                            .map(|along| along / speed)
+                    })
+                });
                 (
                     cue.map(|c| c.position),
                     cue.map(|c| c.seconds),
                     warning,
                     due,
-                    reach_ok,
+                    (reach_ok, release_seconds),
                 )
             };
             Some(Solution {
@@ -210,7 +229,8 @@ pub(super) fn step(
                 due,
                 warning,
                 guided_in_flight,
-                reach_ok,
+                reach_ok: reach.0,
+                release_seconds: reach.1,
             })
         });
         let inputs = Inputs {

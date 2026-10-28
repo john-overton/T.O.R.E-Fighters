@@ -487,6 +487,11 @@ pub struct Solution {
     /// (the sight has a reach); true for every other store. A glide bomb
     /// released from too high or too slow runs out of life before it lands.
     pub reach_ok: bool,
+    /// Seconds to the release where the host's sight times one (a guided
+    /// bomb: its distance to the level T's bar over the ground speed),
+    /// negative once past it; `None` for every other store, whose time the
+    /// strike works out itself (the committed-to-release window).
+    pub release_seconds: Option<f64>,
 }
 
 /// The host's per-step description (see the module notes).

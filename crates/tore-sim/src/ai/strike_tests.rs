@@ -149,6 +149,7 @@ pub(super) fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
         warning: false,
         guided_in_flight: false,
         reach_ok: true,
+        release_seconds: None,
     }
 }
 

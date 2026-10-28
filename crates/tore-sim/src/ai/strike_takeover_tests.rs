@@ -137,6 +137,7 @@ fn solution(station: u8, impact: Option<Vector>, due: bool) -> Solution {
         warning: false,
         guided_in_flight: false,
         reach_ok: true,
+        release_seconds: None,
     }
 }
 
