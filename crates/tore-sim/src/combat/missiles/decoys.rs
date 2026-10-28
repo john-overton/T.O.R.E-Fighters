@@ -298,8 +298,9 @@ pub fn infrared_probability(
         * ratio.clamp(0., 3.);
     p.clamp(0., if imaging { 0.10 } else { 0.95 })
 }
-/// John's 2026-10-27 game-balance adjustment, applied to every Energy radar store.
-pub const CHAFF_EFFECTIVENESS_MULTIPLIER: f64 = 1.30;
+/// John's game-balance adjustment, applied to every Energy radar store: 1.30
+/// on 2026-10-27, doubled to 2.60 on 2026-10-28.
+pub const CHAFF_EFFECTIVENESS_MULTIPLIER: f64 = 2.60;
 
 /// Radar draws use basis points; IR retains its existing whole-percent evaluator.
 pub fn chance_units(kind: Kind, probability: f64) -> (u16, u16) {
@@ -371,17 +372,17 @@ mod tests {
         // AA12-like 50 x 35 active seeker at zero notch: 1.53125% before.
         let base = 50. * 35. / 10000. * 0.35 * 0.25;
         let buffed = radar_probability(50, 35, 0., 0.35);
-        assert!((buffed - base * 1.30).abs() < 1e-12);
-        assert_eq!(chance_units(Kind::Chaff, buffed), (199, 10000));
-        // AIM120-like 40 x 35: 1.225% becomes about 1.59%.
+        assert!((buffed - base * 2.60).abs() < 1e-12);
+        assert_eq!(chance_units(Kind::Chaff, buffed), (398, 10000));
+        // AIM120-like 40 x 35: 1.225% becomes about 3.19%.
         assert_eq!(
             chance_units(Kind::Chaff, radar_probability(40, 35, 0., 0.35)),
-            (159, 10000)
+            (319, 10000)
         );
-        // A base below 1% is buffed as well: 0.7% becomes 0.91%.
+        // A base below 1% is buffed as well: 0.7% becomes 1.82%.
         assert_eq!(
             chance_units(Kind::Chaff, radar_probability(40, 20, 0., 0.35)),
-            (91, 10000)
+            (182, 10000)
         );
         // Flares keep the whole-percent evaluator.
         assert_eq!(chance_units(Kind::Flare, base), (1, 100));
@@ -390,7 +391,7 @@ mod tests {
             for notch in [0., 0.25, 0.5, 1.] {
                 let old = 0.10 * generation * (0.25 + 2.75 * notch);
                 assert!(
-                    (radar_probability(50, 20, notch, generation) - (old * 1.30).min(0.95)).abs()
+                    (radar_probability(50, 20, notch, generation) - (old * 2.60).min(0.95)).abs()
                         < 1e-12
                 );
             }
