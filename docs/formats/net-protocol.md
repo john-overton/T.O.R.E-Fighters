@@ -3276,6 +3276,9 @@ again with an observer; the capture format did not change for it.
   range, the AI spaces countermeasure pairs at least 240 ticks apart, chaff
   against radar stores is 1.30 times as effective, and three stores have new
   motor fits. The compatibility simulation version is 5.
+  77 changes no message layout (2026-10-28, 0.2.2-rc1): chaff against radar
+  stores is 2.60 times as effective instead of 1.30, so decoy rolls differ.
+  The compatibility simulation version is 6.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

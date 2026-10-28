@@ -265,7 +265,8 @@ pub fn path_words(path: Path) -> &'static str {
 /// Quick Mission placement rules and seed retry.
 /// 76 adds the readout's range-cue minimum, reachable range regions in the
 /// prediction checkpoint, AI countermeasure pair spacing and the chaff buff.
-pub const PROTOCOL_VERSION: u16 = 76;
+/// 77 doubles the chaff multiplier to 2.60 (rules only).
+pub const PROTOCOL_VERSION: u16 = 77;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
