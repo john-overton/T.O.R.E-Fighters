@@ -106,7 +106,7 @@ record values. No public number is invented to fill that gap.
 
 ## Per-store motors and class control budgets
 
-Implementation mode, Phase 2.8 of 2026-10-27. John requested class control
+Implementation mode, current ordnance calibration of 2026-10-27. John requested class control
 budgets, post-burn inert defeat, two-condition A2A fits and class tail floors. The per-store table records
 59 profiles. These are game-model fits, not engineering performance claims.
 Thrust is fuel mass times effective exhaust divided by phase duration unless
@@ -115,7 +115,7 @@ where no phase-resolved measurements exist; their fuel and derived thrust are
 refitted. Every profile has controlled-flight seconds from release, independent
 of fuel burn and the later removal lifetime.
 
-Nominal motor references, retained for provenance. Phase 2.8 balance fits
+Nominal motor references, retained for provenance. The current balance fits
 may change these motor values; the actual game parameters are in the table
 below. AIM9B's sourced 20-second control budget remains unchanged:
 
@@ -223,7 +223,7 @@ command reference at 100 m and 30 m/s. Ground targets are stationary at 10 m;
 surface launch is stationary at 10 m.
 
 The offline search exports candidate data and complete altitude/aspect cells.
-It minimizes relative errors with equal priority to head and tail, then
+The original two-condition fitter minimizes relative errors with equal priority to head and tail, then
 tools/missile_energy_fit.py selects compatible candidates jointly. Modern
 AIM120/AA12/MICA must cover AIM7E/AIM7/AA10/R530 at 5k head and tail. Existing
 Sparrow, R-27 and short-IR generation checks remain. The selector keeps a
@@ -237,9 +237,14 @@ is about 6.74 km before other constraints. AIM54C's decoded minimum also
 requires more tail reach than its old reference. Other residuals are bounded
 search compromises, not proofs of physical impossibility or claims about
 real-world variants. [The baseline](../baselines/missile-energy.md) gives
-every before/after value, residual and the exact accepted exceptions. In
-Phase 2.8 John approved AA8's head-only ceiling of 132.5%, retaining its
-existing tail band and all motor guards; PL7's earlier +/-12.5% exception remains.
+every before/after value, residual and the exact accepted exceptions. John prioritized usable envelopes over the old two-condition bands in the
+2026-10-27 ordnance fix, then required minimal overshoot, retained role/family
+ordering and class floors. The agent-selected bounded motor/drag fits for AA8,
+AA12 and AEMP1 keep every control, defeat and motor-shape guard. Their exact
+accepted range bands live in the baseline. Original references remain visible
+for comparison, and all other stores retain their bands.
+These are fitted game values, not revised source claims. The baseline records
+the complete survey and the remaining unreachable vertical shots.
 
 --fit-motors and --fit-staged vary authored motor data with fixed control budgets;
 --fit-class is the smaller fuel/drag-only search. Candidate outputs carry the
@@ -255,13 +260,13 @@ references for non-A2A records are comparison data only.
 | AA10.JT | MediumAir / 70 | 0.307761 | 2.998294 | 0.255453 | 63090.521 / 1.083333 | 5950.970 / 33.475000 | 3436.227 | Phase 2.8 fitted |
 | AA11.JT | ShortIr / 20 | 0.413603 | 2.999764 | 0.223592 | 32298.017 / 1.058333 | 32297.999 / 3.675000 | 3520.218 | retained Phase 2.7 |
 | AA11B.JT | ShortIr / 20 | 0.413603 | 2.999764 | 0.223592 | 32298.017 / 1.058333 | 32297.999 / 3.675000 | 3520.218 | retained Phase 2.7 |
-| AA12.JT | MediumAir / 70 | 0.178209 | 0.500154 | 0.244740 | 13999.387 / 1.008333 | 1713.344 / 25.425000 | 1849.446 | Phase 2.8 fitted |
+| AA12.JT | MediumAir / 70 | 0.293073 | 1.065023 | 0.641198 | 25796.197 / 2.425000 | 3079.616 / 11.366667 | 1902.222 | Ordnance fix fitted |
 | AA2.JT | ShortIr / 20 | 0.499927 | 2.992430 | 0.979898 | 18762.731 / 1.708333 | 13150.760 / 0.050000 | 838.855 | retained Phase 2.7 |
 | AA6.JT | MediumAir / 70 | 0.499395 | 2.999740 | 0.488583 | 116336.381 / 2.316667 | 116333.301 / 2.425000 | 2325.426 | retained Phase 2.7 |
-| AA8.JT | ShortIr / 20 | 0.120000 | 0.514855 | 0.475150 | 3894.492 / 0.766667 | 521.435 / 6.325000 | 1190.124 | Phase 2.8 fitted |
+| AA8.JT | ShortIr / 20 | 0.139097 | 0.532528 | 0.414555 | 3751.381 / 1.316667 | 1463.375 / 4.766667 | 1946.769 | Ordnance fix fitted |
 | AA9.JT | LongAir / 180 | 0.231740 | 1.274468 | 0.182610 | 51244.818 / 1.475000 | 5010.524 / 67.525000 | 3645.201 | Phase 2.8 fitted |
 | AAML.JT | LongAir / 180 | 0.209850 | 1.086920 | 0.050000 | 46019.495 / 0.550000 | 12913.056 / 37.241667 | 4824.546 | Phase 2.8 fitted |
-| AEMP1.JT | MediumAir / 70 | 0.122090 | 0.500000 | 0.185925 | 16134.131 / 0.650000 | 2731.877 / 16.808333 | 2640.000 | Phase 2.8 fitted |
+| AEMP1.JT | MediumAir / 70 | 0.293073 | 1.065023 | 0.641198 | 25796.197 / 2.425000 | 3079.616 / 11.366667 | 1902.222 | Ordnance fix fitted |
 | AGM45.JT | FastGround / 90 | 0.312227 | 0.750000 | 0.550000 | 33434.781 / 2.000000 | 9118.577 / 6.000000 | 2200.000 | retained Phase 2.7 |
 | AGM65A.JT | FastGround / 90 | 0.283838 | 0.750000 | 0.550000 | 35889.882 / 2.000000 | 9788.150 / 6.000000 | 2200.000 | retained Phase 2.7 |
 | AGM65G.JT | FastGround / 90 | 0.274004 | 0.750000 | 0.550000 | 50379.382 / 2.000000 | 13739.831 / 6.000000 | 2200.000 | retained Phase 2.7 |

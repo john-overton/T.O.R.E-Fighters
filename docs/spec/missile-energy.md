@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-27. **Energy is selected by new worlds; Phase 2.8 Linux validation passed with documented fit residuals.**
+Implementation mode, 2026-10-27. **Energy is selected by new worlds. Current fit residuals and validation are recorded in the [baseline](../baselines/missile-energy.md).**
 John requested energy-limited guided weapons, lead guidance, greater drag low
 down, flare response to target heat/aspect, and one uniform model. His Phase 2
 decisions require real-world data where available and physical decoy pursuit.
@@ -57,7 +57,7 @@ values hold outside the curve. Per-profile fitted scale is explicit data.
 [Drag equation and reference-area convention](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/).
 
 John's round-3 decision removes the supplemental geometry-based drag factor.
-Drag uses the round-2 force law with Phase 2.8 guarded conditional balance fits. Altitude affects density and sound speed through the standard
+Drag uses the round-2 force law with the current guarded motor/drag fits. Altitude affects density and sound speed through the standard
 atmosphere above; there is no additional altitude fade or span/diameter factor.
 The supplementary [span reference data](../formats/missile-energy-data.md#span-reference-data)
 do not affect simulation. Body diameter still supplies the original frontal
@@ -223,6 +223,21 @@ at least 0.75 loses the return, and 30 ticks below 0.5 restores eligibility.
 These are fitted classes; the cited AIM9B 11 deg/s and 2-degree half-angle
 override them. Seeker head movement is clamped to its mechanical gimbal.
 Neither a clipped signal nor a decoy outside instantaneous FOV can roll.
+
+## Usable aspect envelopes
+
+John's 2026-10-27 ordnance-fix decision prioritizes usable envelopes over the
+old two-condition range fits, with the smallest practical overshoot and retained
+role/generation ordering and class floors. The agent fits AA8, AA12 and AEMP1
+through explicit motor and drag data. No control time, defeat threshold, lift
+coefficient, seeker setting or shared guidance law is adjusted to make a shot
+pass. At shooter/target speeds 200/250 and 300/250 m/s, AA8 must have a
+nonempty co-altitude hit band at 0/45/90/135/180-degree horizontal aspects from
+500 through 45,000 ft. A low-speed or large vertical-separation shot can still
+be unreachable. AA12 and AEMP1 must retain nonempty bands in the tested
+5,000-to-30,000-ft climb sectors. These are game balance acceptance conditions,
+not guaranteed hits everywhere inside a maximum; [measured limits and accepted
+range exceptions](../baselines/missile-energy.md) remain explicit.
 
 ## Estimates and acceptance
 

@@ -579,6 +579,18 @@ const CASES: [(&str, f64, f64); 11] = [
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).is_some_and(|s| s == "--identity") {
+        println!("{}", missiles::energy_profile::fingerprint());
+        return Ok(());
+    }
+    if args.len() < 3
+        || (args
+            .get(4)
+            .is_some_and(|s| matches!(s.as_str(), "point" | "cell" | "trace" | "advice"))
+            && args.len() < 11)
+    {
+        return Err("usage: ordnance_envelopes JT_DIR OUT_DIR [SOURCE [point|cell|trace|advice LAUNCH_FT TARGET_FT ASPECT_DEG SHOOTER_MPS TARGET_MPS RANGE_M_OR_RATIO]]".into());
+    }
     let mut overrides = std::collections::BTreeMap::new();
     if let Some(i) = args.iter().position(|s| s == "--override") {
         for pair in args
@@ -625,7 +637,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             shooter: args[8].parse()?,
             speed: args[9].parse()?,
         };
-        let factor = args[10].parse()?;
+        let factor: f64 = args[10].parse()?;
+        if !factor.is_finite() || factor <= 1. || factor > 2. {
+            return Err("scan ratio must be greater than 1 and at most 2".into());
+        }
         println!(
             "{{\"physical\":{},\"seeker\":{}}}",
             edge(&w, c, false, factor),
@@ -684,6 +699,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let distance = args[10].parse()?;
         let seeker = args.get(11).is_some_and(|s| s == "seeker");
+        eprintln!(
+            "trace metadata: source={} all_aspect={} seeker={:?} body={:?}",
+            w.source,
+            missiles::energy_seeker::all_aspect(&w),
+            missiles::energy_seeker::Settings::for_weapon(&w),
+            question(&w, c, distance).body
+        );
+
         TRACE.store(true, Ordering::Relaxed);
         println!(
             "seconds,x_m,y_m,z_m,vx_mps,vy_mps,vz_mps,mach,available_g,required_g,g_deficit,thrust_n,drag_n,velocity_los_deg,controlled,lost,defeated,subsonic_ticks,observed,seeker_status"

@@ -609,6 +609,84 @@ mod tests {
         }
     }
     #[test]
+    fn fitted_short_ir_has_no_empty_slow_shooter_coaltitude_sectors() {
+        let mut body = missiles::energy_profile::body(&weapon("AA8.JT", 2));
+        body.ignition = 0;
+        for altitude in [500., 5000., 15000., 25000., 35000., 45000.] {
+            for angle in [45_f64, 90., 135.] {
+                assert!(
+                    synthetic_sector_has_hit(
+                        body,
+                        altitude,
+                        altitude,
+                        angle,
+                        200.,
+                        &[1000., 2000., 3000., 4000., 5000., 6000.]
+                    ),
+                    "{altitude} ft, {angle} degrees"
+                );
+            }
+        }
+        assert_eq!(body.guidance_ticks, 2400);
+        assert_eq!(body.defeat_mach, 1.);
+    }
+
+    #[test]
+    fn fitted_medium_radar_stores_reach_every_sampled_climbing_sector() {
+        for source in ["AA12.JT", "AEMP1.JT"] {
+            let mut body = missiles::energy_profile::body(&weapon(source, 3));
+            body.ignition = 0;
+            for speed in [200., 300.] {
+                for angle in [0., 45., 90., 135., 180.] {
+                    assert!(
+                        synthetic_sector_has_hit(
+                            body,
+                            5000.,
+                            30000.,
+                            angle,
+                            speed,
+                            &[3000., 5000., 8000., 12000., 18000., 25000.]
+                        ),
+                        "{source}, {speed} m/s, {angle} degrees"
+                    );
+                }
+            }
+            assert_eq!(body.guidance_ticks, 8400);
+            assert_eq!(body.defeat_mach, 1.);
+        }
+    }
+
+    fn synthetic_sector_has_hit(
+        body: missiles::energy::Body,
+        from: f64,
+        to: f64,
+        angle: f64,
+        speed: f64,
+        ranges: &[f64],
+    ) -> bool {
+        ranges.iter().any(|range| {
+            let trial = Trial::new(
+                body,
+                missiles::energy::Flight::launch(
+                    [0., from * FT, 0.],
+                    [0., 0., speed],
+                    [0., 0., 1.],
+                ),
+                missiles::energy::Observation {
+                    position: [0., to * FT, *range],
+                    velocity: [
+                        250. * angle.to_radians().sin(),
+                        0.,
+                        -250. * angle.to_radians().cos(),
+                    ],
+                },
+                40.,
+                60,
+            );
+            trial.finish(&|_, _| 0.).hit
+        })
+    }
+    #[test]
     fn inert_stores_clear_the_warning_picture_on_the_defeat_tick() {
         for passed_decoy in [false, true] {
             let mut state = super::super::tests::fixture(true);
