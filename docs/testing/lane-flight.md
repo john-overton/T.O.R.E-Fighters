@@ -230,6 +230,8 @@ Every line starts `ai-strike:` and is `key=value` words (the battery reads them 
 | `TAKEBACK` | A `--take-back`: what the human finds (designation, station, mode, laser hand setting, rounds left on the store) |
 | `ACTIVITY name=...` | What the AI says it is doing, each time that changes |
 | `PHASE name=...` | The striker's strike phase (Ingress, Attack, Lase, Exit, TurnBack, Wait, Defend, Home, HoldOff), each time it changes |
+| `TARGET target=T phase=P` | The striker's strike target, each time it changes, with the phase it changed in: an early retarget (a target killed before the pass released, John, 2026-10-28) changes it inside `Attack` |
+| `COMMIT open=yes\|no release_s=S held_defence=yes\|no` | The committed-to-release window (John, 2026-10-28) opened or closed: the estimated seconds to the release (`none` once the pass has ended or released) and, on closing, whether a missile or gunfire defence was pending while it was open (one the window held back) |
 | `THREAT decision=D target=T ring=R words="..."` | A helicopter's threat decision (slice H4): `threat_hold_off`, `threat_resume`, `threat_retarget`, `threat_home` or `threat_leave`, the target it concerns and the ring that blocked it (a defence's id, `0x0` for an ambush); the replay records each as an `ai.strike` event. Followed by a `RINGS` line |
 | `RINGS n=N rings=id:radius:from_target,...` | The threat rings a helicopter knows (slice H4), with each `THREAT` line and each `PHASE` change of a helicopter: the defence's id, the ring's radius and its distance from the target, feet |
 | `HOLDOFF` | Every ten seconds of a hold-off (slice H4): seconds held, distance from the hold point, height above the ground and range to the target |
