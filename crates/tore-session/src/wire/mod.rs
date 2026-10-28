@@ -268,7 +268,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// 77 doubles the chaff multiplier to 2.60 (rules only).
 /// 78 adds the Quick Mission `situation` line to the mission text and the
 /// fixed distance table with the server's distance adjustment.
-pub const PROTOCOL_VERSION: u16 = 78;
+/// 79 adds the AI strike's early retarget and 5 s release commitment
+/// (new strike checkpoint state).
+pub const PROTOCOL_VERSION: u16 = 79;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

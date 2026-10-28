@@ -3284,6 +3284,11 @@ again with an observer; the capture format did not change for it.
   offered enemy distances come from a fixed table (a server moves an
   unoffered `separation-nm` to the table's choice). A non-neutral situation
   builds a different start. The compatibility simulation version is 7.
+  79 (2026-10-28, 0.2.2-rc1): an AI striker whose target dies before its
+  pass retargets at once, and the last 5 seconds before a release are not
+  broken off by a defense trigger; the strike checkpoint gains the release
+  estimate, commitment and retarget state. The compatibility simulation
+  version is 8.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
