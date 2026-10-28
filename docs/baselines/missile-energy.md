@@ -662,6 +662,42 @@ The cruise hold measures cost, not guaranteed cue availability.
 Worst wall p95 is 1.214 ms and worst CPU p95 is 1.212 ms, below the
 2 ms gate. All ten lanes record zero refused and zero starved requests.
 
+## Contiguous range advice validation
+
+The ordnance-fixes range policy is the first sampled hit region outward from
+the decoded minimum. The imported R27ER deck witness uses a 200 m/s shooter,
+a 250 m/s head-on target and 500 ft altitude. The physical point answers are
+unchanged: 25 km hits, 35 km hits ground, 45 km hits the target. The prior
+maximum extended to the distant island. The new queue publishes a minimum of
+3.658 km and an upper edge of 26.835..26.839 km for all three shot distances.
+Only the 25 km shot belongs to that displayed region. The 35 km point fails
+the AI gate; the valid 45 km point remains eligible for AI use but receives no
+player IN RNG cue under the conservative first-region display policy.
+
+These three searches complete in 111..124 world ticks. Peak work is 16,315
+quarter-step units, within the unchanged 16,384-unit budget. There is no frame
+reader flyout. Synthetic tests cover disconnected bands, a narrow current-shot
+gap, decoded minimum and an exact-point miss under a broad envelope. The
+focused simulation suite passed 2,181 tests with eight existing ignored.
+Workspace all-target compilation and the 78-test Python flight/selection
+subset passed. Network/replay minimum propagation is included in the full
+workspace validation reported below.
+
+Matched UKR cost runs use 2,400 ticks, eight AI aircraft, sixteen replenished
+stores and one/eight candidate stations per actor. Values are the worse of
+cold and subsequent p95, milliseconds per world tick:
+
+| Lane | Before wall p95 | Before CPU p95 | Range fix wall p95 | Range fix CPU p95 |
+| --- | ---: | ---: | ---: | ---: |
+| frozen, 1 station(s) per actor | 1.366 | 1.362 | 1.355 | 1.348 |
+| moving, 1 station(s) per actor | 1.317 | 1.314 | 1.526 | 1.329 |
+| moving, 8 station(s) per actor | 1.619 | 1.380 | 1.561 | 1.362 |
+
+All six runs recorded zero refused and zero starved requests. The new worst
+wall p95 is 1.526 ms, below 2 ms. These measurements isolate the range-policy
+change from the later fitted motor changes. Sampled bands and stale-geometry
+tolerances remain approximations; the exact-point AI gate is unchanged.
+
 ## Countermeasure comparison
 
 Implementation mode, ordnance-fixes from `ba1bf7e4`. The before executable was

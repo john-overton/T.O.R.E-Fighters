@@ -2747,3 +2747,5 @@ Old mission recordings remain readable; replay container and pose layouts did
 not change. Network captures still require their matching protocol build for
 conversion. New sensor checkpoints require the matching protocol. See
 [target selection](spec/radar.md#target-selection-keys).
+
+HUD range samples carry optional `min_ft` for the first contiguous Energy hit region. Older samples without it retain their decoded minimum fallback. `max_ft`, percentage and IN RNG describe the same published region.

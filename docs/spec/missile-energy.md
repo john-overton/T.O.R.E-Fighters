@@ -230,7 +230,25 @@ Flight, range, TTI and AI launch decisions use the same model or a bounded
 cache built from it. No obsolete straight-speed/coast-floor shortcut may
 authorize a new-model intercept. Keep observed support/seeker gates separate
 from physical reach. Player range and lock remain advisory at release.
-The existing AI defensive schedule and flying are owned by a separate task.
+The AI defensive schedule is specified in [AI defense](ai.md#missile-defense-flown-by-ai).
+
+Range advice publishes the first sampled contiguous hit region found by
+searching outward from the decoded launch minimum. A first successful sample
+sets its lower edge; the first subsequent miss closes the region. A farther
+lofted hit island cannot extend its maximum. The ordered scan uses a 1.25
+range ratio, includes shared loft-transition samples and the current shot
+range, and refines the first upper boundary with ten bisections. The 17-sample
+favorable-band pass stays inside this region; any newly discovered gap shrinks
+the published maximum immediately. This is a fitted sampled approximation,
+not a mathematical guarantee against arbitrarily narrow unsampled holes.
+
+HUD minimum, maximum, percentage and scale use this same region. IN RNG also
+requires its exact-point hit answer; outside the region a farther hit island
+has no IN RNG cue. The AI still reads only its exact-point answer, so a range
+maximum never grants launch permission through a gap. Empty or pending advice
+does not invent a maximum. Readouts and replays carry the region's minimum
+as well as maximum. This conservative first-region policy is the agent's
+choice under John's 2026-10-27 request.
 
 A world-owned resumable queue admits at most 256 active flyouts. Waiting point
 and envelope requests are retained and admitted in round-robin rotation;
@@ -289,7 +307,7 @@ are agent-fitted display tolerances; they never authorize a shot. A cold search 
 its first maximum before restarting for changed geometry, so continuous turns
 cannot prevent the first publication. Target, body, arming, radius or wind
 changes invalidate it immediately. A reversal removes the old head-on range
-immediately. Only a qualified point forecast can grant IN RNG or an AI launch. These tolerances are agent-fitted cache approximations, not
+immediately. AI launch permission requires a qualified exact-point hit forecast. IN RNG also requires membership in the displayed contiguous range region. These tolerances are agent-fitted cache approximations, not
 exact proofs about the current pose. Turns may leave a cue pending. AI cannot
 fire from a pending/failed point answer, and ordinary sensor/support and
 minimum-range launch gates remain. A surface seeker does not acquire a blind

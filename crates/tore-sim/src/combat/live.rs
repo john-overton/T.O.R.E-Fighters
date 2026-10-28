@@ -1614,6 +1614,7 @@ struct RangeEstimate {
     station: usize,
     target: u32,
     mode: LaunchMode,
+    minimum: f64,
     maximum: f64,
     favorable: Option<missiles::FiringBand>,
 }
@@ -3045,6 +3046,18 @@ impl<'a> LauncherView<'a> {
             .get_or_init(|| self.compute_mounted_solution())
     }
 
+    pub fn estimated_min_range(&self) -> Option<f64> {
+        let observed = self.weapon_observation()?;
+        self.view
+            .own
+            .range_estimate
+            .filter(|e| {
+                e.station == self.view.own.selected
+                    && e.target == observed.id
+                    && e.mode == self.view.own.launch_mode
+            })
+            .map(|e| e.minimum)
+    }
     pub fn estimated_max_range(&self) -> Option<f64> {
         let observed = self.weapon_observation()?;
         self.view
@@ -3095,7 +3108,14 @@ impl<'a> LauncherView<'a> {
             _ => false,
         };
         if self.view.state.weapon_rules == Rules::Energy {
-            return ready && o.range >= min && self.mounted_solution().is_some();
+            return ready
+                && self
+                    .estimated_min_range()
+                    .zip(self.estimated_max_range())
+                    .is_some_and(|(inner, outer)| {
+                        outer > inner && (inner.max(min)..=outer).contains(&o.range)
+                    })
+                && self.mounted_solution().is_some();
         }
         ready
             && self
@@ -3114,6 +3134,12 @@ impl<'a> LauncherView<'a> {
         };
         let mut zone = w.seeker.zones[1];
         zone.maximum_range = self.estimated_max_range().unwrap_or(0.).floor() as _;
+        if self.view.state.weapon_rules == Rules::Energy {
+            zone.minimum_range = self
+                .estimated_min_range()
+                .unwrap_or(f64::from(zone.minimum_range))
+                .ceil() as _;
+        }
         missiles::estimated_hit_percent(
             observation,
             self.mounted_solution(),

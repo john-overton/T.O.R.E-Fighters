@@ -422,7 +422,8 @@ pub mod kind {
     /// `weapon` (Text: the source name), `rounds`, `launch` (Text: cued or
     /// bore), `seeker` (Text: the status label), `delivery` (Text, empty or
     /// CCIP or LVL), `readiness` (Text), `guidance`, `in_range`, `hit` (Int,
-    /// percent), `max_ft`, `band_min`, `band_max` (`band_max` 0 means no
+    /// percent), `min_ft` (absent older entries use the decoded minimum),
+    /// `max_ft`, `band_min`, `band_max` (`band_max` 0 means no
     /// band), `radar`, and `mount_x`, `mount_y`, `mount_z` when the station
     /// is not at the reference point. A recording made before this event
     /// still plays: the HUD camera keeps the derived picture. Version 4
@@ -670,6 +671,7 @@ pub mod field {
     /// The shot is inside the weapon's range.
     pub const IN_RANGE: &str = "in_range";
     /// Maximum range of the shot, feet. Zero means none was estimated.
+    pub const MIN_FT: &str = "min_ft";
     pub const MAX_FT: &str = "max_ft";
     /// Near edge of the firing band, feet.
     pub const BAND_MIN: &str = "band_min";

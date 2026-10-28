@@ -119,11 +119,12 @@ impl State {
             prediction_radius(w),
             self.devices.wind,
         );
-        self.energy_predictions.request_range(
+        self.energy_predictions.request_range_with_minimum(
             key(owner, station),
             observed.id,
             self.tick,
             question,
+            f64::from(w.seeker.zones[1].minimum_range) * FT,
         );
         self.prediction_request_finish(measured);
     }
@@ -192,19 +193,20 @@ impl State {
             prediction_radius(w),
             self.devices.wind,
         );
+        let envelope =
+            self.energy_predictions
+                .envelope(key(owner, station), u32::MAX, question, self.tick);
         let hit = self
             .energy_predictions
             .answer(key(owner, station), u32::MAX, question, self.tick)
-            .is_some_and(|r| r.answer.hit);
+            .is_some_and(|r| r.answer.hit)
+            && envelope.is_some_and(|e| e.contains(observed.range * FT));
         sight.energy_intercept = Some(hit);
         sight.in_reach &= hit;
-        sight.reach = self
-            .energy_predictions
-            .envelope(key(owner, station), u32::MAX, question, self.tick)
-            .map(|e| super::super::guided::Reach {
-                minimum_ft: f64::from(w.seeker.zones[1].minimum_range),
-                maximum_ft: e.maximum / FT,
-            });
+        sight.reach = envelope.map(|e| super::super::guided::Reach {
+            minimum_ft: e.minimum / FT,
+            maximum_ft: e.maximum / FT,
+        });
         sight
     }
     pub fn request_energy_solution(
@@ -324,8 +326,13 @@ impl State {
             let id = key(own.aircraft, own.selected);
             self.energy_predictions
                 .request_player(id, observed.id, self.tick, question);
-            self.energy_predictions
-                .request_range(id, observed.id, self.tick, question);
+            self.energy_predictions.request_range_with_minimum(
+                id,
+                observed.id,
+                self.tick,
+                question,
+                f64::from(w.seeker.zones[1].minimum_range) * FT,
+            );
         }
         for projectile in &self.projectiles {
             let Some(energy) = projectile.motion.and_then(|m| m.energy) else {
@@ -401,14 +408,18 @@ impl State {
             }
             own.energy_hit = answer.filter(|r| r.answer.hit).map(|_| observed.id);
             if let Some(sight) = &mut own.guided_sight {
-                let hit = own.energy_hit == Some(observed.id);
+                let hit = own.energy_hit == Some(observed.id)
+                    && self
+                        .energy_predictions
+                        .envelope(id, observed.id, question, self.tick)
+                        .is_some_and(|e| e.contains(observed.range * FT));
                 sight.energy_intercept = Some(hit);
                 sight.in_reach &= hit;
                 sight.reach = self
                     .energy_predictions
                     .envelope(id, observed.id, question, self.tick)
                     .map(|e| super::super::guided::Reach {
-                        minimum_ft: f64::from(w.seeker.zones[1].minimum_range),
+                        minimum_ft: e.minimum / FT,
                         maximum_ft: e.maximum / FT,
                     });
             }
@@ -420,6 +431,7 @@ impl State {
                     station: own.selected,
                     target: observed.id,
                     mode: own.launch_mode,
+                    minimum: envelope.minimum / FT,
                     maximum: envelope.maximum / FT,
                     favorable: envelope
                         .favorable
@@ -540,6 +552,60 @@ mod tests {
             fall: FallState::default(),
             gun_round: None,
             tracer: false,
+        }
+    }
+    #[test]
+    fn an_ai_point_miss_cannot_be_overruled_by_a_range_envelope() {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        let w = weapon("R27ER.JT", 2);
+        let launcher = Launcher {
+            position: [0., 5000., 0.],
+            basis: Basis::new(0., 0., 0.),
+            velocity: [0., 0., 300. / FT],
+            speed_fps: 300. / FT,
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            body_present: true,
+            controls: Default::default(),
+        };
+        let observed = seeker::Observation {
+            id: 42,
+            position: [0., 5000., 35000. / FT],
+            velocity: [0., 0., -250. / FT],
+            quality: 1.,
+            off_axis: 0.,
+            range: 35000. / FT,
+        };
+        state.request_energy_solution(7, 0, &w, launcher, observed);
+        let question = state.energy_predictions.clients[0].question;
+        let mut range = prediction::RangeSearch::new(key(7, 0), 42, 0, question);
+        range.result = Some(prediction::Envelope {
+            minimum: 100.,
+            maximum: 50000.,
+            favorable: None,
+        });
+        state.energy_predictions.ranges.push(range);
+        for hit in [false, true, false] {
+            state.energy_predictions.clients[0].result = Some(prediction::Published {
+                at: 0,
+                question,
+                answer: missiles::energy_estimate::Answer {
+                    hit,
+                    seconds: 30.,
+                    closest: if hit { 0. } else { 1000. },
+                    impact_speed: 500.,
+                },
+            });
+            assert_eq!(
+                state
+                    .energy_solution(7, 0, &w, launcher, observed)
+                    .is_some(),
+                hit
+            );
         }
     }
     #[test]
