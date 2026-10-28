@@ -27,6 +27,9 @@ what the simulation reports. Two kinds of scenario use it:
   a player's GBU-10; an AI F-14 with only a GBU-10 and no designator drops on a player's spot; the
   same F-14 with nobody lasing does not choose the bomb). The runs print `PHASE`, `HOLD` and
   `LASER` lines for them.
+* The committed-to-release window (John, 2026-10-28): `ai-strike-commit-aaa`, gunfire inside the
+  last 5 s of a straight Mk 82 pass waits for the release (`COMMIT ... held_defence=yes`), and the
+  same pass with a gun moved out under the run line breaks into Defend before the window opens.
 
 `parse_runs` reads the output; the check functions are tested in
 tools/test_battery_ai_strike.py.
@@ -592,6 +595,102 @@ def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
     return problems
 
 
+# The committed-to-release window (docs/spec/ai-strike.md, John 2026-10-28): it opens 5 s or less
+# from the release (the driver prints the estimate to 0.01 s), and the striker answers a held defence
+# on the tick after the release (1/120 s); half a second is room for the controller's hand-over.
+COMMIT_WINDOW_S = 5.0
+COMMIT_REACT_S = 0.5
+
+
+def _phase_at(run: Run, t: float) -> str | None:
+    """The strike phase the last PHASE line before `t` named."""
+    phase = None
+    for p in run.of("PHASE"):
+        if number(p.get("t")) < t:
+            phase = p.get("name")
+    return phase
+
+
+def commit_held_problems(run: Run, label: str) -> list[str]:
+    """`ai-strike-commit-aaa`, a held run: a COMMIT window opens at most 5 s from the release; gunfire
+    reaches the striker while it is open (`held_defence=yes`, `held_at` inside the window); the run is
+    not broken (no Defend between the opening and the release); the bomb leaves inside the window; and
+    the striker defends right after the release."""
+    problems: list[str] = []
+    commits = run.of("COMMIT")
+    opened = next((c for c in commits if c.get("open") == "yes"), None)
+    if opened is None:
+        return [f"{label}: the committed-to-release window never opened"]
+    t_open = number(opened.get("t"))
+    release_s = number(opened.get("release_s"))
+    if not 0.0 <= release_s <= COMMIT_WINDOW_S:
+        problems.append(f"{label}: the window opened {opened.get('release_s')} s from the release, want 0 to 5")
+    closed = next((c for c in commits if c.get("open") == "no" and number(c.get("t")) >= t_open), None)
+    if closed is None:
+        return problems + [f"{label}: the window opened at t={t_open:.3f} and never closed"]
+    t_close = number(closed.get("t"))
+    held_at = number(closed.get("held_at"))
+    if closed.get("held_defence") != "yes":
+        problems.append(f"{label}: no defence came while the window was open (held_defence={closed.get('held_defence')})")
+    elif not t_open <= held_at <= t_close:
+        problems.append(f"{label}: the held defence at t={closed.get('held_at')} lies outside the window "
+                        f"{t_open:.3f} to {t_close:.3f}")
+    inside = [t for t in run.times("RELEASE") if t_open <= t <= t_close]
+    if not inside:
+        problems.append(f"{label}: no RELEASE inside the window {t_open:.3f} to {t_close:.3f} "
+                        f"(releases at {run.times('RELEASE')})")
+        return problems
+    released = inside[0]
+    if held_at > released:
+        problems.append(f"{label}: the defence at t={held_at:.3f} came after the release at t={released:.3f}")
+    broke = [number(p.get("t")) for p in run.of("PHASE")
+             if p.get("name") == "Defend" and t_open <= number(p.get("t")) < released]
+    if broke:
+        problems.append(f"{label}: the run broke into Defend at t={broke[0]:.3f}, inside the window")
+    defended = [number(p.get("t")) for p in run.of("PHASE")
+                if p.get("name") == "Defend" and released <= number(p.get("t")) <= released + COMMIT_REACT_S]
+    if not defended:
+        problems.append(f"{label}: no Defend within {COMMIT_REACT_S} s after the release at t={released:.3f}")
+    return problems
+
+
+def commit_breaks_problems(run: Run, label: str) -> list[str]:
+    """`ai-strike-commit-aaa`, the control: the same guns reach the striker before the window opens,
+    so the attack breaks into Defend as before, with no window open and nothing released before it."""
+    problems: list[str] = []
+    defends = [number(p.get("t")) for p in run.of("PHASE") if p.get("name") == "Defend"]
+    if not defends:
+        return [f"{label}: the striker never defended"]
+    t_defend = defends[0]
+    if _phase_at(run, t_defend) != "Attack":
+        problems.append(f"{label}: the first Defend at t={t_defend:.3f} came in {_phase_at(run, t_defend)}, "
+                        "want it to break an attack run")
+    early = [number(c.get("t")) for c in run.of("COMMIT") if c.get("open") == "yes" and number(c.get("t")) <= t_defend]
+    if early:
+        problems.append(f"{label}: the window opened at t={early[0]:.3f}, before the Defend at t={t_defend:.3f}; "
+                        "the control must break outside it")
+    if any(t <= t_defend for t in run.times("RELEASE")):
+        problems.append(f"{label}: released before the Defend at t={t_defend:.3f}")
+    return problems
+
+
+def commit_problems(output: str, runs_wanted: list[dict]) -> list[str]:
+    """`ai-strike-commit-aaa`: each wanted run is `held` (gunfire inside the window waits for the
+    release) or `breaks` (gunfire before it breaks the run)."""
+    runs = parse_runs(output)
+    if len(runs) != len(runs_wanted):
+        return [f"{len(runs)} runs finished, want {len(runs_wanted)}"]
+    problems: list[str] = []
+    for run, want in zip(runs, runs_wanted):
+        label = want["label"]
+        problems += consistency_problems(run, label)
+        if want["kind"] == "held":
+            problems += commit_held_problems(run, label)
+        else:
+            problems += commit_breaks_problems(run, label)
+    return problems
+
+
 # The AC-130's orbit from its guns' reach (docs/spec/ai-strike.md#ac-130): the slant range is planned
 # at 80% of the 13,000 ft reach (90% at most when the bank cap grows the radius); a moving target
 # stretches it a little either way. The bank never passes the AC-130's 30 degrees.
@@ -1017,6 +1116,23 @@ def scenarios() -> list[Scenario]:
         (pilot_run("UKR", "QUCOL", *heli_rockets_out, "--skill", "3"),
          dict(label="ah64 rockets skill 3", profile="popup", skill=3, miss=MISS_FT_MAX[3])),
     ]
+    # The committed-to-release window (John, 2026-10-28; docs/spec/ai-strike.md "Committed to the
+    # release, 5 s"): an A-4E's forced straight Mk 82 pass on the column under medium AAA, surface
+    # seed 1. The window opens at t=23.1 to 23.4 and the release follows 4.5 s later; a gun's rounds
+    # reach the striker at t=26.6, about 1.1 s before the release, at every skill. Before the window
+    # that broke the run 0.2 s before its release (Vladivostok HQ). The control moves the column's
+    # nearest ZSU-23 (0x5000000a, 3,660 ft from the target) 14,000 ft south, under the run line: it
+    # fires at t=21.7, 1.5 s before the window would open and 6 s before the release, and the run
+    # breaks into Defend as it did before the change.
+    commit = ["--aircraft", "a4e", "--load", "MK82", "--profile", "straight", "--defenses", "2", "0",
+              "--surface-seed", "1"]
+    commit_runs = [
+        *((pilot_run("UKR", "QUCOL", *commit, "--skill", str(k), "--seconds", "35"),
+           dict(label=f"a4e held skill {k}", kind="held")) for k in (2, 0, 3)),
+        (pilot_run("UKR", "QUCOL", *commit, "--skill", "2", "--seconds", "30",
+                   "--place-site", "0x5000000a,180,14000"),
+         dict(label="a4e breaks before the window", kind="breaks")),
+    ]
     # The helicopter's defence (slice ST-H) and threat awareness (slice H4, John's rule of
     # 2026-10-12): the AI picks its own pass; a known SAM or gun ring it does not fly into (it attacks
     # from outside every ring, or holds off up to 3 minutes for SEAD, then switches targets or goes
@@ -1433,6 +1549,19 @@ def scenarios() -> list[Scenario]:
                   "reach and fires its linked guns in bursts (skills 0, 2 and 3): each burst's walked-in "
                   "aim inside the skill circle, the target inside the guns' 13,000 ft and the bank "
                   "under 30 degrees once settled, the tank killed, the gunship not lost.",
+        ),
+        Scenario(
+            name="ai-strike-commit-aaa", lane="flight",
+            args=commit_runs[0][0], timeout=600,
+            then=[Step(a, timeout=300) for a, _ in commit_runs[1:]],
+            check=lambda out: commit_problems(out, [w for _, w in commit_runs]),
+            notes="The committed-to-release window (John, 2026-10-28): an A-4E's straight Mk 82 pass on "
+                  "the column under its medium AAA (surface seed 1). The window opens 5 s out, a gun "
+                  "reaches the striker about 1 s before the release, and the run holds: the bomb leaves "
+                  "in the window and the striker defends on the next tick (skills 2, 0 and 3). The "
+                  "control moves the column's nearest ZSU-23 14,000 ft out under the run line, so it "
+                  "fires about 6 s before the release: the run breaks into Defend with no window open "
+                  "and nothing released.",
         ),
         Scenario(
             name="ai-strike-defended", lane="flight",

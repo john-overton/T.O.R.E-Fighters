@@ -990,6 +990,78 @@ class NoLazeTests(unittest.TestCase):
         self.assertTrue(any("want rtb" in p for p in s.no_laze_problems(no_laze_output(rtb=wrong))))
 
 
+def commit_run(open_t=23.2, release_s="5.00", held="yes", held_at=26.625, release=27.758, defend=27.767,
+               broke=None, released=True):
+    """A held `ai-strike-commit-aaa` run: the window opens, a defence is held, the bomb leaves, Defend."""
+    extra = ["ai-strike: PHASE t=0.008 name=Attack",
+             f"ai-strike: COMMIT t={open_t:.3f} open=yes release_s={release_s} held_defence=no held_at=none"]
+    if broke is not None:
+        extra += [f"ai-strike: PHASE t={broke:.3f} name=Defend", f"ai-strike: PHASE t={broke + 1:.3f} name=Attack"]
+    extra += [f"ai-strike: PHASE t={release:.3f} name=Exit",
+              f"ai-strike: COMMIT t={release:.3f} open=no release_s=none held_defence={held} "
+              f"held_at={held_at if held == 'yes' else 'none'}"]
+    if defend is not None:
+        extra.append(f"ai-strike: PHASE t={defend:.3f} name=Defend")
+    return run(profile="straight", releases=[release] if released else [], extra=extra)
+
+
+def control_run(defend=21.683, commit_at=None, release=None):
+    extra = ["ai-strike: PHASE t=0.008 name=Attack"]
+    if commit_at is not None:
+        extra.append(f"ai-strike: COMMIT t={commit_at:.3f} open=yes release_s=5.00 held_defence=no held_at=none")
+    extra.append(f"ai-strike: PHASE t={defend:.3f} name=Defend")
+    return run(profile="straight", releases=[release] if release is not None else [], extra=extra)
+
+
+class CommitTests(unittest.TestCase):
+    HELD = [dict(label="held", kind="held")]
+    BREAKS = [dict(label="control", kind="breaks")]
+
+    def test_a_held_run_passes(self):
+        self.assertEqual(s.commit_problems(commit_run(), self.HELD), [])
+
+    def test_the_window_must_open_within_5_s(self):
+        problems = s.commit_problems(commit_run(release_s="6.20"), self.HELD)
+        self.assertTrue(any("want 0 to 5" in p for p in problems), problems)
+
+    def test_no_held_defence_fails(self):
+        problems = s.commit_problems(commit_run(held="no"), self.HELD)
+        self.assertTrue(any("no defence came" in p for p in problems), problems)
+
+    def test_a_defence_outside_the_window_fails(self):
+        problems = s.commit_problems(commit_run(held_at=22.0), self.HELD)
+        self.assertTrue(any("outside the window" in p for p in problems), problems)
+
+    def test_the_release_must_be_inside_the_window(self):
+        problems = s.commit_problems(commit_run(released=False), self.HELD)
+        self.assertTrue(any("no RELEASE inside" in p for p in problems), problems)
+
+    def test_a_break_inside_the_window_fails(self):
+        problems = s.commit_problems(commit_run(broke=25.0), self.HELD)
+        self.assertTrue(any("broke into Defend" in p for p in problems), problems)
+
+    def test_the_striker_must_defend_right_after_the_release(self):
+        problems = s.commit_problems(commit_run(defend=None), self.HELD)
+        self.assertTrue(any("no Defend within" in p for p in problems), problems)
+        problems = s.commit_problems(commit_run(defend=29.0), self.HELD)
+        self.assertTrue(any("no Defend within" in p for p in problems), problems)
+
+    def test_the_control_breaks_outside_the_window(self):
+        self.assertEqual(s.commit_problems(control_run(), self.BREAKS), [])
+
+    def test_a_control_with_the_window_open_or_a_release_first_fails(self):
+        problems = s.commit_problems(control_run(commit_at=20.0), self.BREAKS)
+        self.assertTrue(any("must break outside it" in p for p in problems), problems)
+        problems = s.commit_problems(control_run(release=20.0), self.BREAKS)
+        self.assertTrue(any("released before the Defend" in p for p in problems), problems)
+        self.assertTrue(s.commit_problems(commit_run(), self.BREAKS))
+
+    def test_the_scenario_exists_with_held_runs_and_a_control(self):
+        scenario = next(sc for sc in s.scenarios() if sc.name == "ai-strike-commit-aaa")
+        self.assertEqual(len(scenario.then), 3)
+        self.assertIn("--place-site", scenario.then[-1].args)
+
+
 class SelectionTests(unittest.TestCase):
     def families(self, path):
         return set(bs.rule_for(path).families)
