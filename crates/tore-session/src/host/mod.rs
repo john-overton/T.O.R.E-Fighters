@@ -960,7 +960,9 @@ impl Host {
         // rule) come from the configuration's settings (stage F phase 2).
         let settings = crate::settings::Store::from_config(&config);
         let court = king::Court::new(&config, &spec);
-        let spec = king::with_settings(spec, &settings);
+        let mut spec = king::with_settings(spec, &settings);
+        // A distance the creator would not offer moves as it would there.
+        let distance_moved = tore_world::mission_layout::distance_table::adjust(&mut spec);
         let session_id = session_id(config.entropy);
         let mut spec = with_surface_seed(spec, session_id, 1);
         let initial_seed = spec.surface_seed;
@@ -1050,6 +1052,9 @@ impl Host {
             recording_failed: false,
             config,
         };
+        if let Some(moved) = distance_moved {
+            host.log_distance(&host.spec.clone(), moved);
+        }
         host.log_surface_seed(&host.spec.clone(), initial_seed, placement_attempts);
         if host.start_rule() == StartMode::Now {
             host.start_flying().map_err(HostError::Mission)?;

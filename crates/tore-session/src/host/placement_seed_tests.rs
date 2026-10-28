@@ -97,3 +97,24 @@ fn king_changes_restart_and_rotation_keep_the_successful_seed() {
     assert_chosen(&host, chosen);
     assert!(!host.logs.iter().any(|l| matches!(l, HostLog::Fault { .. })));
 }
+
+#[test]
+fn a_distance_the_table_leaves_out_moves_before_the_host_builds() {
+    use tore_world::mission_layout::distance_table;
+    // The synthetic Ukraine is far smaller than the real one, so the moved
+    // 200 nm cannot fit it either: the build's refusal names the distance
+    // the table moved 300 nm to, which is what the host built.
+    let mut spec = MissionSpec::new("UKR", tore_formats::aircraft::AircraftId::F18);
+    spec.wings[3].count = 1;
+    spec.separation_nm = 300;
+    assert_eq!(distance_table::allowed_for(&spec) & (1 << 10), 0);
+    let error = match Host::new(
+        spec,
+        Arc::new(tore_world::test_support::resources::resources()),
+        config(),
+    ) {
+        Ok(_) => panic!("200 nm cannot fit the synthetic map"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("Separation 200 nm"), "{error}");
+}

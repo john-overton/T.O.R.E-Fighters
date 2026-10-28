@@ -14,6 +14,11 @@ This pass follows the review of `b83937cc`: loosen launcher/gun/radar grades,
 restore ground-target runway-start distance choices, retry refused host seeds,
 and avoid repeating terrain checks for changes such as wing skill.
 
+Since 2026-10-28 the creator no longer runs the placement audit while the
+player edits: it reads a fixed table measured offline with the same solver
+([distance table baseline](qmc-distance-table.md)). The audit results below
+are unchanged evidence.
+
 The current behavior lives in the [creator specification](../spec/quick-mission-menu.md#keeping-the-enemy-on-the-map),
 [vehicle footing policy](../spec/surface-defenses.md#jitter), and
 [server seed policy](../DEDICATED-SERVER.md#surface-placement-seeds).

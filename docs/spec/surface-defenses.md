@@ -395,8 +395,9 @@ All defined (agent): ids are an implementation contract.
 John's decision: template positions vary, they are not fixed (defined, John).
 The rules below are defined (agent) with fitted numbers.
 
-**Seed.** The creator reserves a 32-bit `surface_seed` for its placement check,
-and Fly and the multiplayer lobby retain that checked seed. A restart reuses it, so a
+**Seed.** The creator reserves a 32-bit `surface_seed` for the next flight
+(its map shows that layout), and Fly and the multiplayer lobby retain it; a
+launch whose layout is refused tries the next seed, as a host does. A restart reuses it, so a
 restarted mission has the same defenses and positions (retail restarts re-fly
 the same written `quick.M`). A dedicated server's mission file may name a seed;
 without one the host draws it and the mission text sent to clients carries it.
@@ -450,8 +451,9 @@ many others survive.
   positions. Equal distances sort by X then Z. These search constants are fitted
   agent choices.
   Added trucks stay within the existing 528 ft supply reach. No equipment is removed
-  on exhaustion: the placement audit and creator show the unresolved limitation,
-  and launch is refused instead of flying an invalid placement. Authored vehicles
+  on exhaustion: the offline placement audit lists the unresolved limitation,
+  and launch refuses that layout (trying the next seed) instead of flying an
+  invalid placement. Authored vehicles
   are moved for slope or bounds failures; coarse shoreline and assembly overlaps
   alone are review findings until rendered-water or solid-geometry evidence exists.
   Generated support must also pass object and runway clearance. The latter means

@@ -216,8 +216,9 @@ impl World {
             &terrain,
             &start,
             ground_layout,
-            &ai_wings::enemy_group_offsets(&wings),
+            &wings,
             spec.separation_feet(),
+            spec.situation,
         )
         .with_enemy_ground(enemy_layout);
         if layout.enemy.shortened() {

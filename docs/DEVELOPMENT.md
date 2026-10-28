@@ -1170,7 +1170,9 @@ The Quick Mission ground-target/AAA/SAM sentence is live: the target list is the
 theater's, the strengths read "not", "lightly", "moderately" and "heavily", and
 the mission text carries them (`ground-target`, `defenses`). The enemy-distance
 choices include 100 and 150 nautical miles between 50 and 200. `--separation`
-accepts the same choices. See the
+accepts the same choices; a creator snapshot or launch moves one its theater,
+target and start do not offer as the creator does ([the distance
+table](#quick-mission-distance-table)). See the
 [creator contract](spec/quick-mission-menu.md#ground-target-and-defenses).
 Preview a theater's target line or the distance list without a display:
 
@@ -2008,6 +2010,41 @@ reported; refusals remain explicit in the log. It then runs the existing groundi
 parked-aircraft and merged-airport audits. These supplemental geometry audits
 have their own sampling scopes and logs; they are not the full surface matrix.
 The measured results are in the [objective placement baseline](baselines/objectives-audit.md).
+
+### Quick Mission distance table
+
+The creator's Distance list and the dedicated server read a fixed table of the
+enemy distances each theater, ground target and start offers
+(`crates/tore-world/src/mission_layout/distance_table_data.rs`, read through
+`distance_table.rs`). It is generated, never edited by hand, with the launch
+solver (`mission_layout::availability`) against an imported profile:
+
+```sh
+cargo build --locked -p tore-app
+TORE_DATA_DIR=<imported profile> TORE_WORKERS=0 nice -n 19 target/debug/tore-app \
+  --qmc-distance-table --jobs 4 --write crates/tore-world/src/mission_layout/distance_table_data.rs
+```
+
+The run is headless and takes about six minutes with six jobs on the
+development machine (each target's 64 layouts dominate). It prints one line per
+theater (the airborne row, each situation's, the ground row and every offered
+airfield's) and per target (its row and the largest distance each seed
+reached), marks a row with a hole in it `GAP`, and lists the layout
+limitations with the seeds that had them. A limitation every seed has becomes
+the target's note, which the creator shows while the target is chosen.
+`--write` needs all sixteen theaters. Options: `--jobs N` (1 to 8 worker
+threads, default 4), `--seeds N` (default 64, the table's), theater codes to
+measure only those, `--check` to fail when the checked-in table differs from
+the measurement, and `--measure` to time one creator setting change before the
+table (the placement audit) and after (a lookup). The ignored test
+`qmc_distance_table::tests::the_checked_in_table_matches_a_fresh_measurement`
+checks the Kurile and Ukraine rows:
+`TORE_DATA_DIR=<profile> cargo test -p tore-app qmc_distance -- --ignored`.
+
+Regenerate the table after any change to the start geometry, the map margin,
+the separation list, the creator's airfields or the surface layout of a target,
+and commit the data file with the change. The measured table and its rules are
+in the [distance table baseline](baselines/qmc-distance-table.md).
 No aircraft or surface AI is stepped by the new audit. Retail gameplay comparison
 is unavailable, and these checks do not establish retail parity.
 

@@ -119,9 +119,11 @@ suffix: "Viper" and "Viper_2".
 the background. Tokens are specific to one server and expire after 24 hours.
 
 Vehicle placement and canonical airfield ranking follow the deterministic rules
-in [surface defenses](spec/surface-defenses.md#jitter). The creator retains the
-seed used to audit its distance choices. Invalid distances are refused at mission
-build instead of shortened. CAP checkpoints now include the optional map rectangle
+in [surface defenses](spec/surface-defenses.md#jitter). The creator offers only
+the distances a fixed table gives for the theater, target and start, and a host
+moves a mission's distance that the table leaves out the same way, with a log
+line ([keeping the enemy on the map](spec/quick-mission-menu.md#keeping-the-enemy-on-the-map)).
+A distance that still does not fit is refused at mission build instead of shortened. CAP checkpoints now include the optional map rectangle
 that clips their region. These changes alter surface digests, scene positions and
 checkpoint bytes; the release integration must handle the protocol/replay version
 bump together with the other 0.2.2-rc1 changes.
@@ -129,8 +131,7 @@ bump together with the other 0.2.2-rc1 changes.
 The launcher, gun and added-radar footing limit is now a fitted 20%, matching
 other vehicles; tanks keep 30% (John requested loosening on 2026-10-26). With a
 ground target and a player ground start, the creator offers every distance because
-the target determines the enemy position. Skills and other non-placement edits
-retain the completed placement check.
+the target determines the enemy position.
 
 Hosts try at most sixteen consecutive seeds after a placement refusal, then send
 only the successfully built seed. Startup, King's mission changes, restart and
@@ -620,10 +621,15 @@ also asked for 75 on the **separation**.*
   A trip back from 150 nm takes about 15 to 20 minutes at cruise.
 - **Separation** (the Quick Mission creator's field 17, `separation-nm` in a
   mission file): now 1, 2, 5, 10, 20, 50, **75**, 100, 150, 200 and 300 nm.
-  Where a long separation does not fit a small theater, the enemy is placed as
-  far as the map allows; multiplayer's lobby does not yet say so, as single
-  player does. At 150 nm the sides still meet, about 10 minutes in, so a
+  The creator, the King's included, lists only the distances that fit the
+  theater, ground target and start, from a fixed table; a host moves a
+  distance the table leaves out to the nearest offered one below it and logs
+  it ([keeping the enemy on the map](spec/quick-mission-menu.md#keeping-the-enemy-on-the-map)).
+  At 150 nm the sides still meet, about 10 minutes in, so a
   10-minute time limit can end a game first.
+- **Situation** (the creator's field 16, `situation` in a mission file):
+  advantage, neutral or disadvantage, carried in the mission since 2026-10-28
+  and shown in the read-only creator ([situation](spec/quick-mission-menu.md#situation)).
 
 ### Lead hold
 

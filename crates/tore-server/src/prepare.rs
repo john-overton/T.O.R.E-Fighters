@@ -35,6 +35,10 @@ pub struct Prepared {
     pub placement_initial_seed: u32,
     pub placement_preview_seed: u32,
     pub placement_attempts: usize,
+    /// The log line when the mission's `separation-nm` was not one the
+    /// creator offers for its theater, target and start, and moved
+    /// (`distance_table::adjust`).
+    pub distance_note: Option<String>,
 }
 
 /// The default configuration file in a data folder.
@@ -185,6 +189,7 @@ pub fn prepare(options: &Options, data_dir: &Path) -> Result<Prepared, String> {
                 rotation.entries.len(),
                 prepared.spec.summary()
             ));
+            report.extend(prepared.distance_note.clone());
             report.extend(crate::rotation::effective_settings(&entry.config));
             report.extend(crate::check::defense_report(&prepared.world));
             if i == rotation.current {
@@ -242,7 +247,11 @@ pub fn build_shared(
     settings
         .apply(&config.settings)
         .map_err(|e| e.to_string())?;
-    let spec = tore_session::host::sequence::configured_spec(spec, &settings);
+    let mut spec = tore_session::host::sequence::configured_spec(spec, &settings);
+    // The fixed table, checked without loading terrain: a distance the
+    // creator would not offer moves as the creator moves it, and says so.
+    let distance_note = tore_world::mission_layout::distance_table::adjust(&mut spec)
+        .map(|moved| tore_world::mission_layout::distance_table::adjust_notice(&spec, moved));
     let placement_initial_seed = spec.surface_seed;
     let mut preview = spec.clone();
     let ((world, manifest), placement_attempts) =
@@ -276,6 +285,7 @@ pub fn build_shared(
         placement_initial_seed,
         placement_preview_seed: preview.surface_seed,
         placement_attempts,
+        distance_note,
     })
 }
 
