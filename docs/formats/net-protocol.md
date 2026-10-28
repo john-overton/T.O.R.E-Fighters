@@ -3279,6 +3279,11 @@ again with an observer; the capture format did not change for it.
   77 changes no message layout (2026-10-28, 0.2.2-rc1): chaff against radar
   stores is 2.60 times as effective instead of 1.30, so decoy rolls differ.
   The compatibility simulation version is 6.
+  78 (2026-10-28, 0.2.2-rc1): the mission text can carry a Quick Mission
+  `situation advantage|disadvantage` line that older games reject, and the
+  offered enemy distances come from a fixed table (a server moves an
+  unoffered `separation-nm` to the table's choice). A non-neutral situation
+  builds a different start. The compatibility simulation version is 7.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
