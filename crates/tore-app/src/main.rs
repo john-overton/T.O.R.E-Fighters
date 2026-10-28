@@ -124,6 +124,7 @@ mod powered_hud;
 mod preferences;
 mod probe_invariants;
 mod pylons;
+mod qmc_distance_table;
 mod quick_mission;
 mod rafale_animation;
 mod reel;
@@ -9606,8 +9607,9 @@ fn ai_probe_run(
         world,
         &flight,
         parked.clone(),
-        &ai_wings::enemy_group_offsets(&wings),
+        &wings,
         quick.separation_feet(),
+        quick.situation(),
     );
     if let Some(problem) = tore_world::mission_layout::availability::surface_problem(
         &world.surface,
@@ -11808,6 +11810,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--bridge-audit") {
         bridge_audit::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--qmc-distance-table") {
+        qmc_distance_table::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-dump") {
@@ -14950,10 +14956,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .unwrap_or(quick.draft.values[17]);
             }
             quick.set_resources(Arc::new(theater_resources.clone()));
-            quick.wait_placement();
+            quick.settle_distance();
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             quick.preview_selector(&snapshot_state)?;
-            quick.wait_placement();
+            quick.settle_distance();
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             println!("quick-snapshot: {}", quick.placement_snapshot_report());
             if snapshot_state.starts_with("map") {
@@ -16285,9 +16291,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             let resources = Arc::new(theater_resources);
             quick.set_resources(Arc::clone(&resources));
             if launch_creator {
-                // A command-line launch has no menu frames in which to finish
-                // the background check. Complete it before the event loop.
-                quick.wait_placement();
+                // A command-line launch starts from the draft as the
+                // creator's first frame leaves it.
+                quick.settle_distance();
             }
             resources
         },

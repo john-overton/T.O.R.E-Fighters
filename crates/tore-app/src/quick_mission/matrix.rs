@@ -162,8 +162,9 @@ impl Matrix<'_> {
             world,
             &start,
             ground_layout.clone(),
-            &crate::ai_wings::enemy_group_offsets(&wings),
+            &wings,
             quick.separation_feet(),
+            quick.situation(),
         );
         if let Some(problem) = tore_world::mission_layout::availability::surface_problem(
             &world.surface,

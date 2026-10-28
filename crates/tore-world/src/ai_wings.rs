@@ -70,7 +70,7 @@ use tore_sim::{
     sensors::{self, Observable, Sensors},
 };
 
-use crate::{WorldResult, resources::ResourceSource, terrain::Terrain};
+use crate::{WorldResult, mission::Situation, resources::ResourceSource, terrain::Terrain};
 use tore_sim::flight;
 
 fn terrain_visible(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
@@ -101,7 +101,10 @@ pub const PLAYER_ID: u32 = 0;
 /// 512 ft spacing, level with the player. Friendly wing 1 occupies slots
 /// behind the player. Wings 2 and 3 start 4096 ft behind and respectively
 /// 4096 ft left and right. Enemy leaders start at the selected separation,
-/// with wings 2 and 3 offset 4096 ft left and right, facing the player.
+/// with wings 2 and 3 offset 4096 ft left and right. The creator's situation
+/// ([`Situation`]) decides where and which way: ahead facing the player
+/// (neutral), ahead flying away from it (advantage) or behind it flying the
+/// player's heading (disadvantage).
 /// Original Quick Mission spawn geometry is unknown. These offsets make the
 /// selected allies nearby instead of placing them in the enemy group.
 ///
@@ -113,7 +116,11 @@ pub const PLAYER_ID: u32 = 0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MissionSpawn {
     pub offset: Vector,
+    /// The member flies for the enemy side.
     pub opposing: bool,
+    /// The member starts facing back toward the player's group: its heading
+    /// is the player's turned half a circle (an enemy in a neutral start).
+    pub head_on: bool,
     /// Clockwise rotation about the reference point, radians.
     pub turn: f64,
     /// Departure order when this member starts on the runway.
@@ -136,7 +143,7 @@ impl MissionSpawn {
         });
         let heading = yaw
             + self.turn
-            + if self.opposing {
+            + if self.head_on {
                 std::f64::consts::PI
             } else {
                 0.0
@@ -155,6 +162,10 @@ pub struct SpawnPlan {
     /// Runway slots for the player's wing as [right, forward] offsets from
     /// the player's slot, leader first. `None` is an airborne start.
     pub runway_slots: Option<Vec<[f64; 2]>>,
+    /// Who is on whose tail: where the airborne enemy wings start and which
+    /// way they face. Always neutral when the layout placed the enemy by a
+    /// ground target or the player starts on the ground.
+    pub situation: Situation,
 }
 
 impl SpawnPlan {
@@ -164,6 +175,7 @@ impl SpawnPlan {
             separation_ft,
             enemy_turn: 0.0,
             runway_slots: None,
+            situation: Situation::Neutral,
         }
     }
 }
@@ -198,6 +210,7 @@ pub fn mission_spawns_for(
                     return MissionSpawn {
                         offset: [*right, 0.0, *forward],
                         opposing,
+                        head_on: false,
                         turn: 0.0,
                         runway_order: Some(slot),
                         with_player: true,
@@ -214,17 +227,35 @@ pub fn mission_spawns_for(
                     2 => 4096.0,
                     _ => 0.0,
                 };
-                MissionSpawn {
-                    offset: if opposing {
-                        [lateral - offset[0], 0.0, plan.separation_ft - offset[2]]
-                    } else {
+                // An enemy facing the player mirrors its formation; one
+                // flying the player's heading keeps it, its wingmen trailing
+                // toward the player (advantage) or away (disadvantage).
+                let (offset, head_on) = match (opposing, plan.situation) {
+                    (false, _) => (
                         [
                             lateral + offset[0],
                             0.0,
                             offset[2] - if wing.wing.index == 0 { 0.0 } else { 4096.0 },
-                        ]
-                    },
+                        ],
+                        false,
+                    ),
+                    (true, Situation::Neutral) => (
+                        [lateral - offset[0], 0.0, plan.separation_ft - offset[2]],
+                        true,
+                    ),
+                    (true, Situation::Advantage) => (
+                        [lateral + offset[0], 0.0, plan.separation_ft + offset[2]],
+                        false,
+                    ),
+                    (true, Situation::Disadvantage) => (
+                        [lateral + offset[0], 0.0, offset[2] - plan.separation_ft],
+                        false,
+                    ),
+                };
+                MissionSpawn {
+                    offset,
                     opposing,
+                    head_on,
                     turn: if opposing { plan.enemy_turn } else { 0.0 },
                     runway_order: None,
                     with_player: player_wing,
@@ -235,14 +266,25 @@ pub fn mission_spawns_for(
 }
 
 /// Every enemy aircraft's offset from the enemy group's placement point, as
-/// [right, forward] in the player's frame with the enemy straight ahead. The
-/// placement point itself is always included, so the map check never passes
-/// an empty group.
-pub fn enemy_group_offsets(wings: &[WingLaunch]) -> Vec<[f64; 2]> {
-    let mut offsets: Vec<[f64; 2]> = mission_spawns(wings, &SpawnPlan::airborne(0.0))
+/// [right, forward] in the frame whose forward axis points from the player to
+/// that point: straight ahead of the player, or straight behind it in a
+/// disadvantage. The placement point itself is always included, so the map
+/// check never passes an empty group.
+pub fn enemy_group_offsets(wings: &[WingLaunch], situation: Situation) -> Vec<[f64; 2]> {
+    let plan = SpawnPlan {
+        situation,
+        ..SpawnPlan::airborne(0.0)
+    };
+    // Behind the player the frame is the player's turned half a circle.
+    let sign = if situation == Situation::Disadvantage {
+        -1.0
+    } else {
+        1.0
+    };
+    let mut offsets: Vec<[f64; 2]> = mission_spawns(wings, &plan)
         .into_iter()
         .filter(|spawn| spawn.opposing)
-        .map(|spawn| [spawn.offset[0], spawn.offset[2]])
+        .map(|spawn| [sign * spawn.offset[0], sign * spawn.offset[2]])
         .collect();
     if !offsets.is_empty() && !offsets.contains(&[0.0, 0.0]) {
         offsets.push([0.0, 0.0]);
@@ -3935,6 +3977,7 @@ mod tests {
             separation_ft: 60_000.,
             enemy_turn: std::f64::consts::FRAC_PI_2,
             runway_slots: Some(vec![[0., 0.], [40., -250.], [-40., -500.]]),
+            situation: Situation::Neutral,
         };
         let spawns = mission_spawns(&wings, &plan);
         assert_eq!(spawns.len(), 5);
@@ -3957,9 +4000,74 @@ mod tests {
         assert_eq!(straight[0].runway_order, None);
         // The map check sees every enemy aircraft relative to its placement
         // point.
-        let group = enemy_group_offsets(&wings);
+        let group = enemy_group_offsets(&wings, Situation::Neutral);
         assert_eq!(group, [[0., 0.], [-512., 512.]]);
-        assert!(enemy_group_offsets(&ground_wings()[..2]).is_empty());
+        assert!(enemy_group_offsets(&ground_wings()[..2], Situation::Neutral).is_empty());
+    }
+
+    #[test]
+    fn the_situation_turns_and_places_the_enemy_formation() {
+        use crate::mission::Situation;
+        let wings = ground_wings();
+        let player = [0., 9000., 0.];
+        let north = Basis::new(0., 0., 0.);
+        let separation = 30_000.;
+        for (situation, lead_z, wingman, faces_north) in [
+            // Head-on: ahead, wingman farther away, facing south.
+            (
+                Situation::Neutral,
+                separation,
+                [-512., separation + 512.],
+                false,
+            ),
+            // On the enemy's tail: ahead, its wingman trailing toward us.
+            (
+                Situation::Advantage,
+                separation,
+                [512., separation - 512.],
+                true,
+            ),
+            // The enemy on ours: behind, its wingman trailing farther back.
+            (
+                Situation::Disadvantage,
+                -separation,
+                [512., -separation - 512.],
+                true,
+            ),
+        ] {
+            let plan = SpawnPlan {
+                situation,
+                ..SpawnPlan::airborne(separation)
+            };
+            let spawns = mission_spawns(&wings, &plan);
+            let enemy: Vec<_> = spawns.iter().filter(|s| s.opposing).collect();
+            assert_eq!(enemy.len(), 2);
+            let (lead, basis) = enemy[0].pose(player, north);
+            assert_eq!([lead[0], lead[2]], [0., lead_z], "{situation:?}");
+            assert_eq!(
+                enemy[1].offset,
+                [wingman[0], 0., wingman[1]],
+                "{situation:?}"
+            );
+            assert_eq!(basis.forward[2] > 0.9, faces_north, "{situation:?}");
+            // Friendly spawns never change with the situation.
+            assert!(spawns.iter().filter(|s| !s.opposing).all(|s| !s.head_on));
+            // The map check sees the same group from its placement point,
+            // in the frame that points from the player to it.
+            let group = enemy_group_offsets(&wings, situation);
+            let sign = if situation == Situation::Disadvantage {
+                -1.
+            } else {
+                1.
+            };
+            for spawn in &enemy {
+                let relative = [sign * spawn.offset[0], sign * (spawn.offset[2] - lead_z)];
+                assert!(
+                    group.contains(&relative),
+                    "{situation:?}: {relative:?} in {group:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -4091,6 +4199,7 @@ mod tests {
             separation_ft: 60_000.,
             enemy_turn: 0.,
             runway_slots: Some(runway_slots.clone()),
+            situation: Situation::Neutral,
         };
         let spawns = mission_spawns_for(&wings, &plan, false);
         assert_eq!(spawns.len(), 5);

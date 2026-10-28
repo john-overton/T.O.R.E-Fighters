@@ -18,14 +18,14 @@ use tore_sim::ai::{
     launch::{Side, WingId, WingLaunch, WingSelection, resolve_wings},
 };
 use tore_world::mission::{
-    ALTITUDES_FT, Condition, Defense, EnemyStart, MissionSpec, Skill, Start, WingSpec,
+    ALTITUDES_FT, Condition, Defense, EnemyStart, MissionSpec, Situation, Skill, Start, WingSpec,
     ground_targets,
 };
 pub mod allegiance;
+mod distances;
 pub mod loadout_memory;
 pub mod map;
 pub mod matrix;
-mod placement;
 pub mod remember;
 /// The aircraft fields of the five wings the AI flies. Field 6 is friendly
 /// wing 1's, which is also the player's own aircraft.
@@ -130,10 +130,11 @@ impl Field {
 const GAP_TEXT: [u8; 3] = [104, 110, 112];
 /// The same dimming on a field's grey, where [`GAP_TEXT`] would not show.
 const GAP_FIELD_TEXT: [u8; 3] = [158, 165, 167];
-/// The fields the lobby's mission does not carry (the friendly nationality and
-/// the situation): the read-only creator says they are the King's. The enemy
-/// nationality (field 20) is the mission's, since it picks the target's units.
-const NOT_CARRIED: [usize; 2] = [3, 16];
+/// The fields the lobby's mission does not carry (the friendly nationality):
+/// the read-only creator says they are the King's. The enemy nationality
+/// (field 20) is the mission's, since it picks the target's units, and so is
+/// the situation (field 16), since it places the starts.
+const NOT_CARRIED: [usize; 1] = [3];
 /// What those fields read in the read-only creator.
 const AS_THE_KINGS: &str = "as the King's";
 /// Said when a field of the read-only creator is clicked.
@@ -211,7 +212,6 @@ impl Draft {
     }
 }
 pub struct QuickMission {
-    placement: std::cell::RefCell<placement::Check>,
     /// Results of the mission just flown, shown over the creator until OK.
     pub debrief: Option<crate::debrief::Debrief>,
     /// The debrief is a multiplayer flight's, which has no creator to go
@@ -473,7 +473,6 @@ impl QuickMission {
             surface_seed: 0,
             seed_pending: false,
             resources: None,
-            placement: Default::default(),
             map: None,
             map_build: None,
             map_hold: false,
@@ -486,7 +485,6 @@ impl QuickMission {
     /// Gives the creator the imported game data, which its map builds the
     /// mission from.
     pub fn set_resources(&mut self, resources: Arc<BTreeMap<String, Vec<u8>>>) {
-        self.placement = Default::default();
         self.resources = Some(resources);
     }
     /// The map is open over the creator.
@@ -496,6 +494,17 @@ impl QuickMission {
     /// What the open map shows.
     pub fn map_plan(&self) -> Option<&crate::flight_map::Plan> {
         self.map.as_ref().map(|map| map.plan())
+    }
+    /// The runway objects the creator offers a Blue pilot's ground start in
+    /// theater `code`, in list order: what the distance table generator
+    /// measures a no-target ground start from.
+    pub fn player_ground_runways(code: &str, data: &BTreeMap<String, Vec<u8>>) -> Vec<u32> {
+        let aliases = Self::aliases_in(code, data);
+        let fields: Vec<Field> = Self::airports_in(code, data, &mut BTreeMap::new())
+            .into_iter()
+            .filter(|f| !aliases.contains_key(&f.id))
+            .collect();
+        offered(&fields, false).1
     }
     /// Every airport of one theater layout, in layout order, with whether it
     /// is a short strip and its owner. `fitted`, agent decision 2026-09-30,
@@ -669,6 +678,7 @@ impl QuickMission {
             self.draft.values[ENEMY_START] = 0;
         }
         self.nationalities();
+        self.fit_distance();
     }
     fn nationalities(&mut self) {
         self.draft.values[3] = 0;
@@ -956,17 +966,16 @@ impl QuickMission {
                 .map(|(label, _)| label)
                 .collect()
         } else {
-            let mut values = self.values(id).into_owned();
-            if id == 17
-                && let Some(Ok(check)) = self.placement_check()
-            {
-                for (index, label) in values.iter_mut().enumerate() {
-                    if !check.separations.get(index).copied().unwrap_or(false) {
-                        label.push_str(" (does not fit)");
-                    }
-                }
+            let values = self.values(id);
+            if id == 17 {
+                // Only the distances the table offers here are listed.
+                return self
+                    .offered_distances()
+                    .into_iter()
+                    .filter_map(|index| values.get(index).cloned())
+                    .collect();
             }
-            values
+            values.into_owned()
         }
     }
     /// The six wing rows as the AI launch payload: side, aircraft, wing skill
@@ -1031,6 +1040,7 @@ impl QuickMission {
             None => Start::Airborne { altitude_ft },
         };
         spec.separation_nm = self.separation_nm() as u32;
+        spec.situation = self.situation();
         spec.preset = self.ai_mission;
         spec.guns_only = self.guns_only();
         for (index, field) in [4, 7, 10, 21, 24, 27].into_iter().enumerate() {
@@ -1107,6 +1117,7 @@ impl QuickMission {
         self.surface_seed = seed;
         // A given seed is the next flight's (and the map's).
         self.seed_pending = seed != 0;
+        self.fit_distance();
         Ok(())
     }
     /// Developer launch/capture settings for area defenses with no target.
@@ -1264,19 +1275,16 @@ impl QuickMission {
     pub fn separation_feet(&self) -> f64 {
         self.separation_nm() * FEET_PER_NM
     }
+    /// The creator's situation (field 16); neutral for an index outside
+    /// the list.
+    pub fn situation(&self) -> Situation {
+        Situation::from_index(self.draft.values[16]).unwrap_or_default()
+    }
     /// Aircraft in the player's wing, the player included.
     pub fn player_wing_size(&self) -> usize {
         self.draft.values[4].clamp(1, 5)
     }
     pub fn unsupported(&self) -> Option<String> {
-        if let Some(why) = self.separation_problem(self.draft.values[17]) {
-            return Some(why.into());
-        }
-        if let Some(Ok(check)) = self.placement_check()
-            && check.blocked
-        {
-            return Some(check.limitations.join(" "));
-        }
         if self.player().is_none() {
             return Some(
                 "This aircraft is available for setup only. Choose an imported aircraft from the player list to fly."
@@ -1369,6 +1377,7 @@ impl QuickMission {
         self.ai_mission = saved.ai_mission;
         self.aircraft_selection = self.draft.values[6];
         self.selection = self.theater_index();
+        self.fit_distance();
     }
     /// A spec's draft, and the values its lists cannot hold, by field, in
     /// words (see [`Draft::from_spec`]). The creator's draft is untouched.
@@ -1453,6 +1462,7 @@ impl QuickMission {
             .iter()
             .position(|nm| *nm == f64::from(spec.separation_nm))
             .ok_or_else(|| format!("This creator has no {} mile distance.", spec.separation_nm))?;
+        v[16] = spec.situation.index();
         v[19] = usize::from(!spec.guns_only);
         for (index, field) in [4, 7, 10, 21, 24, 27].into_iter().enumerate() {
             v[CHOICE_BASE + index] = usize::from(spec.player_choice[index]);
@@ -1604,6 +1614,7 @@ impl QuickMission {
         over.start = spec.start;
         over.enemy_start = spec.enemy_start;
         over.separation_nm = spec.separation_nm;
+        over.situation = spec.situation;
         over.preset = spec.preset;
         over.guns_only = spec.guns_only;
         over.wings = spec.wings;
@@ -1686,9 +1697,6 @@ impl QuickMission {
     /// host's words, when the creator is the lobby's and the aircraft or
     /// theater is in a gap.
     fn gap_in(&self, field: usize, index: usize) -> Option<&str> {
-        if field == 17 {
-            return self.separation_problem(index);
-        }
         // Ground in a theater with no airfield of the pilot's side is dimmed
         // and refused the same way, with its own words (slice AL1).
         if field == 33 && index == 1 && self.ground_unavailable() {
@@ -1819,6 +1827,9 @@ impl QuickMission {
             self.draft.values[4] = 1;
             self.notice = Some(format!("{why}, so friendly wing 1 is just you."));
         }
+        // A distance the theater, target and start do not offer moves to
+        // the nearest one they do (John, 2026-10-28).
+        self.fit_distance();
     }
     /// An Airport field (34 or 36) whose Start is Airborne: it is not drawn,
     /// so it cannot be focused or touched.
@@ -1854,6 +1865,11 @@ impl QuickMission {
             Self::objective_choices(group)
                 .iter()
                 .position(|(_, objective)| *objective == self.group_objectives[group])
+                .unwrap_or(0)
+        } else if id == 17 {
+            self.offered_distances()
+                .iter()
+                .position(|index| *index == self.draft.values[17])
                 .unwrap_or(0)
         } else {
             self.draft.values[id]
@@ -2253,6 +2269,12 @@ impl QuickMission {
             self.focus = id;
             return Action::Click;
         }
+        if id == 17 {
+            self.focus = id;
+            let previous = self.next_distance(false);
+            self.apply(17, previous);
+            return Action::Click;
+        }
         let n = self.values(id).len();
         let minimum = usize::from(id == 4);
         if n <= minimum {
@@ -2348,6 +2370,11 @@ impl QuickMission {
                         self.group_objectives[group] =
                             Self::objective_choices(group)[self.cursor].1;
                         self.notice = None;
+                    } else if field == 17 {
+                        // The list holds the offered distances only.
+                        if let Some(index) = self.offered_distances().get(self.cursor) {
+                            self.apply(17, *index);
+                        }
                     } else if self.gap_in(field, self.cursor).is_some() {
                         // Not everyone has it (stage L): the choice stays as
                         // it was and the notice says who lacks it.
@@ -2410,7 +2437,10 @@ impl QuickMission {
                     self.open(id);
                 } else {
                     let n = self.values(id).len();
-                    if n > 0 {
+                    if id == 17 {
+                        let next = self.next_distance(true);
+                        self.apply(17, next);
+                    } else if n > 0 {
                         let next = (self.draft.values[id] + 1) % n;
                         if !self.refuse_gap(id, next) {
                             self.apply(id, next);
@@ -2633,20 +2663,10 @@ impl QuickMission {
         // The creator stays live while the map is built: it says so.
         let building = self.map_building().then_some(map::BUILDING_NOTE.to_owned());
         animating |= building.is_some();
-        let placement = self.placement_notice();
-        if self.notice.as_deref() == Some(placement::CHECKING)
-            && placement.as_deref() != Some(placement::CHECKING)
-        {
-            self.notice = None;
-        }
-        animating |= placement.as_deref() == Some(placement::CHECKING);
-        let other = self.notice.as_ref().or(building.as_ref());
-        let combined = placement
-            .as_ref()
-            .zip(other)
-            .filter(|(p, n)| p != n)
-            .map(|(p, n)| format!("{p} {n}"));
-        if let Some(message) = combined.as_ref().or(placement.as_ref()).or(other) {
+        // The chosen target's fixed note (what its layout always leaves
+        // out), from the distance table, when nothing else is said.
+        let note = self.target_note().map(str::to_owned);
+        if let Some(message) = self.notice.as_ref().or(building.as_ref()).or(note.as_ref()) {
             if self.lobby {
                 lobby_notice(&mut c, &sprites["SMLFONT.PIC"], message);
             } else {
@@ -2953,8 +2973,7 @@ impl QuickMission {
         // A Start locked to Airborne for want of a field of the side is
         // greyed (the read-only page draws the King's choice as it is).
         if self.view.is_none()
-            && ((id == 17 && self.separation_problem(self.draft.values[17]).is_some())
-                || (id == 33 && self.ground_unavailable())
+            && ((id == 33 && self.ground_unavailable())
                 || (id == ENEMY_START && self.enemy_ground_unavailable()))
         {
             return Some(GAP_FIELD_TEXT);
@@ -4811,6 +4830,22 @@ mod tests {
                 "300 miles"
             ]
         );
+        // A theater and target offering every distance (the table's).
+        let open = tore_world::mission_layout::distance_table::TARGETS
+            .iter()
+            .find(|row| row.airborne == tore_world::mission_layout::distance_table::ALL)
+            .expect("a target offering every distance");
+        let theater = q
+            .theater_catalog
+            .iter()
+            .position(|c| c == open.theater)
+            .unwrap();
+        q.theater(theater);
+        let target = ground_targets(open.theater)
+            .iter()
+            .position(|stem| *stem == open.stem)
+            .unwrap();
+        q.apply(30, target + 1);
         for (index, nm) in SEPARATION_NM.into_iter().enumerate() {
             q.apply(17, index);
             assert_eq!(q.separation_nm(), nm);

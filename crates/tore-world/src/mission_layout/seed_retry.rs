@@ -1,13 +1,17 @@
-//! Bounded host policy for layouts that cannot place every resolved vehicle.
+//! Bounded policy for layouts that cannot place every resolved vehicle, or
+//! whose ground target leaves no room for the chosen distance.
 use crate::mission::MissionSpec;
 
 /// Agent-chosen bound for the lead's 2026-10-26 retry policy: sixteen layouts,
 /// including the first.
 pub const ATTEMPTS: usize = 16;
 
-/// Try consecutive seeds after a vehicle-placement refusal. Preserve the caller's
-/// spec on failure, and install only the seed whose complete build succeeded.
-/// Clients never call this: they build the seed the host sends.
+/// Try consecutive seeds after a vehicle-placement refusal, or after an
+/// airborne start's distance refusal with a ground target (the target's
+/// layout, and so Blue's start, moves with the seed; the creator's fixed
+/// table is measured over 64 seeds, so this is its safety net). Preserve the
+/// caller's spec on failure, and install only the seed whose complete build
+/// succeeded. Clients never call this: they build the seed the host sends.
 pub fn build<T>(
     spec: &mut MissionSpec,
     mut build: impl FnMut(&MissionSpec) -> Result<T, String>,
@@ -21,9 +25,7 @@ pub fn build<T>(
                 return Ok((value, attempt));
             }
             Err(error) => {
-                if !candidate.lays_out_surface()
-                    || !error.starts_with("Vehicle placement unavailable:")
-                {
+                if !candidate.lays_out_surface() || !retries(&candidate, &error) {
                     return Err(error);
                 }
                 if attempt == ATTEMPTS {
@@ -36,6 +38,14 @@ pub fn build<T>(
         }
     }
     unreachable!("the last attempt returns")
+}
+
+/// The refusals another seed can cure.
+fn retries(spec: &MissionSpec, error: &str) -> bool {
+    error.starts_with("Vehicle placement unavailable:")
+        || (spec.ground_target.is_some()
+            && !spec.start.on_ground()
+            && error.starts_with("Separation "))
 }
 
 pub fn notice(initial: u32, selected: u32, attempts: usize) -> String {
@@ -106,20 +116,56 @@ mod tests {
             Ok(((), 1))
         );
         assert_eq!(calls, 1);
-        for error in [
-            "Separation 300 nm does not fit this setup.",
-            "Missing aircraft",
-        ] {
-            calls = 0;
-            assert_eq!(
-                build::<()>(&mut spec, |_| {
-                    calls += 1;
-                    Err(error.into())
-                }),
-                Err(error.into())
-            );
-            assert_eq!(calls, 1);
-            assert_eq!(spec.surface_seed, 9);
-        }
+        let mut untargeted = spec.clone();
+        untargeted.ground_target = None;
+        untargeted.aaa = crate::mission::Defense::Heavy;
+        calls = 0;
+        assert!(
+            build::<()>(&mut untargeted, |_| {
+                calls += 1;
+                Err("Separation 300 nm does not fit this setup.".into())
+            })
+            .is_err()
+        );
+        assert_eq!(calls, 1, "no seed moves an untargeted enemy");
+        calls = 0;
+        assert_eq!(
+            build::<()>(&mut spec, |_| {
+                calls += 1;
+                Err("Missing aircraft".into())
+            }),
+            Err("Missing aircraft".into())
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(spec.surface_seed, 9);
+    }
+
+    #[test]
+    fn a_targets_airborne_distance_refusal_tries_the_next_seed() {
+        let mut spec = spec(40);
+        let mut seen = Vec::new();
+        let (_, attempts) = build(&mut spec, |candidate| {
+            seen.push(candidate.surface_seed);
+            if seen.len() < 2 {
+                Err("Separation 300 nm does not fit this setup. Choose a shorter distance.".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert_eq!((seen, attempts, spec.surface_seed), (vec![40, 41], 2, 41));
+        // A ground start with a target never refuses a distance; were it to,
+        // no seed would help.
+        let mut ground = self::spec(40);
+        ground.start = crate::mission::Start::GroundAuto { altitude_ft: 5000 };
+        let mut calls = 0;
+        assert!(
+            build::<()>(&mut ground, |_| {
+                calls += 1;
+                Err("Separation 300 nm does not fit this setup.".into())
+            })
+            .is_err()
+        );
+        assert_eq!(calls, 1);
     }
 }

@@ -1,4 +1,5 @@
-//! Runtime placement audit used by the creator, with the same solver as launch.
+//! Offline placement audit with the same solver as launch: what the distance
+//! table generator measures, and what launch refuses.
 use super::*;
 use crate::{
     WorldResult,
@@ -45,8 +46,11 @@ pub fn distance_problem(separation_nm: u32) -> String {
     format!("Separation {separation_nm} nm does not fit this setup. Choose a shorter distance.")
 }
 
-/// Audit this imported theater, target, seed and wing geometry. No checked-in
-/// theater table and no guessed maximum distance: test all eleven choices.
+/// Audit this imported theater, target, seed and wing geometry: which of
+/// the eleven distances fit, and what the layout leaves out. Offline only:
+/// the creator and the server read the checked-in [`super::distance_table`]
+/// that `examples/qmc_distance_table.rs` generates with it, so no menu or
+/// server change waits for a terrain build (docs/DEVELOPMENT.md).
 pub fn audit(resources: &dyn ResourceSource, spec: &MissionSpec) -> WorldResult<Availability> {
     let target = resolve::GroundTarget::from_spec(spec);
     let area = resolve::AreaDefense::from_spec(spec);
@@ -59,43 +63,8 @@ pub fn audit(resources: &dyn ResourceSource, spec: &MissionSpec) -> WorldResult<
         area.as_ref(),
     )?;
     let site = SurfaceSite::load(resources, &spec.theater)?;
-    let ground = layout::Ground::new(&terrain.theater, vec![], vec![], site.front());
-    let wings = spec.wing_launches().map_err(|e| e.to_string())?;
-    let group = crate::ai_wings::enemy_group_offsets(&wings);
-    let mut surface = terrain.surface.clone();
-    let mut separations = [false; 11];
-    let start = terrain.free_flight_start();
-    let selected = match spec.start {
-        crate::mission::Start::Ground { runway, .. } => Some(runway),
-        crate::mission::Start::GroundAuto { .. } => {
-            auto_runway_for(&terrain, spec.player_wing_size(), false).ok()
-        }
-        _ => None,
-    };
-    let reference = selected
-        .and_then(|id| ground_layout(&terrain, id, spec.player_wing_size()).ok())
-        .map_or([start[0], start[2]], |g| [g.slots[0][0], g.slots[0][2]]);
-    for (i, nm) in SEPARATION_NM.into_iter().enumerate() {
-        separations[i] = if spec.start.on_ground() && target.is_some() {
-            true
-        } else if let Some(template) = &mut surface.template {
-            template.settings.separation_nm = nm as u32;
-            layout::scene_starts(&surface, &ground, &terrain.airport_scene).is_some_and(|s| {
-                let distance =
-                    f64::from(s.blue[0] - s.red[0]).hypot(f64::from(s.blue[1] - s.red[1]));
-                (distance - nm * layout::NM_FT as f64).abs() < 2.
-            })
-        } else {
-            !aim_into_map(
-                reference,
-                0.,
-                nm * FEET_PER_NM,
-                &group,
-                map_bounds(&terrain),
-            )
-            .shortened()
-        };
-    }
+    let separations = separations(&terrain, &site, spec)?;
+    let surface = &terrain.surface;
     let mut limitations = Vec::new();
     if let Some(t) = &surface.template
         && !t.left_out.is_empty()
@@ -123,7 +92,7 @@ pub fn audit(resources: &dyn ResourceSource, spec: &MissionSpec) -> WorldResult<
     if let Some(area) = area.as_ref() {
         let (sam, aaa) = site.area_site_counts(area);
         let requested = (sam + aaa) * layout::AREA_SITE_UNITS;
-        let placed = layout::area::units(&surface).count();
+        let placed = layout::area::units(surface).count();
         if requested != placed {
             limitations.push(format!(
                 "This map holds {placed} of {requested} area-defense units."
@@ -144,5 +113,77 @@ pub fn audit(resources: &dyn ResourceSource, spec: &MissionSpec) -> WorldResult<
         separations,
         limitations,
         blocked: unresolved > 0,
+    })
+}
+
+/// Which of the eleven distances fit `spec` in this already built `terrain`
+/// (with `spec`'s target and seed), by the same rules a launch applies. A
+/// ground start with a ground target fits every distance: the template
+/// places the enemy. With a target the starts follow it; without one the
+/// enemy group, in `spec`'s situation, must fit the map at full distance
+/// along some bearing from the player's start.
+pub fn separations(
+    terrain: &Terrain,
+    site: &SurfaceSite,
+    spec: &MissionSpec,
+) -> WorldResult<[bool; 11]> {
+    if spec.start.on_ground() && spec.ground_target.is_some() {
+        return Ok([true; 11]);
+    }
+    if terrain.surface.template.is_some() {
+        let ground = layout::Ground::new(&terrain.theater, vec![], vec![], site.front());
+        let mut surface = terrain.surface.clone();
+        let mut fits = [false; 11];
+        for (fit, nm) in fits.iter_mut().zip(SEPARATION_NM) {
+            if let Some(template) = &mut surface.template {
+                template.settings.separation_nm = nm as u32;
+            }
+            *fit =
+                layout::scene_starts(&surface, &ground, &terrain.airport_scene).is_some_and(|s| {
+                    let distance =
+                        f64::from(s.blue[0] - s.red[0]).hypot(f64::from(s.blue[1] - s.red[1]));
+                    (distance - nm * layout::NM_FT as f64).abs() < 2.
+                });
+        }
+        return Ok(fits);
+    }
+    let wings = spec.wing_launches().map_err(|e| e.to_string())?;
+    let start = terrain.free_flight_start();
+    let selected = match spec.start {
+        crate::mission::Start::Ground { runway, .. } => Some(runway),
+        crate::mission::Start::GroundAuto { .. } => {
+            auto_runway_for(terrain, spec.player_wing_size(), false).ok()
+        }
+        _ => None,
+    };
+    let reference = selected
+        .and_then(|id| ground_layout(terrain, id, spec.player_wing_size()).ok())
+        .map_or([start[0], start[2]], |g| [g.slots[0][0], g.slots[0][2]]);
+    Ok(separations_from(
+        reference,
+        &wings,
+        effective_situation(spec.situation, spec.start.on_ground(), false),
+        map_bounds(terrain),
+    ))
+}
+
+/// [`separations`] without a ground target: the enemy group of `wings` in
+/// `situation`, placed from `reference`, inside `bounds`.
+pub fn separations_from(
+    reference: [f64; 2],
+    wings: &[tore_sim::ai::launch::WingLaunch],
+    situation: crate::mission::Situation,
+    bounds: MapBounds,
+) -> [bool; 11] {
+    let group = crate::ai_wings::enemy_group_offsets(wings, situation);
+    SEPARATION_NM.map(|nm| {
+        !aim_into_map(
+            reference,
+            situation_bearing(situation),
+            nm * FEET_PER_NM,
+            &group,
+            bounds,
+        )
+        .shortened()
     })
 }
