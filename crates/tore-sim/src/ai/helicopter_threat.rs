@@ -195,13 +195,19 @@ fn segment_distance(c: Vector, a: Vector, b: Vector) -> f64 {
 
 /// Whether the straight line from `a` to `b` stays outside every ring. A
 /// ring `a` already lies in does not count when the line leads out of it
-/// (the helicopter may always leave).
+/// (the helicopter may always leave): it ends outside and never comes
+/// nearer the centre than `a`. A line that runs on deeper in before it
+/// leaves is not clear, as the helicopter leaves a ring by the shortest
+/// way out after a break.
 pub fn clear(rings: &[Ring], a: Vector, b: Vector) -> bool {
     rings.iter().all(|r| {
         let from_inside = horizontal(r.centre, a) < r.radius_ft;
         if from_inside {
-            horizontal(r.centre, b) >= horizontal(r.centre, a)
-                && horizontal(r.centre, b) >= r.radius_ft
+            // The distance from the centre along a line has one minimum: a
+            // line that starts outward keeps going outward.
+            let outward =
+                (b[0] - a[0]) * (a[0] - r.centre[0]) + (b[2] - a[2]) * (a[2] - r.centre[2]) >= 0.;
+            outward && horizontal(r.centre, b) >= r.radius_ft
         } else {
             segment_distance(r.centre, a, b) >= r.radius_ft
         }
@@ -283,6 +289,32 @@ pub fn plan_attack(
         }
     }
     popup.then_some(Plan::PopUp)
+}
+
+/// Whether the pass in hand still stays outside every ring: a ring learned
+/// after the choice may block it ("not pressed through", slice H4). The
+/// pop-up needs the target and the line to it clear; a stand-off its firing
+/// point and the [`STANDOFF_ADVANCE_FT`] beyond it, and flown straight at
+/// the target the line to the firing point.
+pub fn holds(plan: Plan, own: Vector, target: Vector, rings: &[Ring]) -> bool {
+    match plan {
+        Plan::PopUp => inside(rings, target).is_none() && clear(rings, own, target),
+        Plan::StandOff { approach, range_ft } => {
+            let point = approach.unwrap_or_else(|| {
+                let [x, z] = along(target, bearing(target, own), range_ft);
+                [x, own[1], z]
+            });
+            let [ex, ez] = along(
+                target,
+                bearing(target, point),
+                (range_ft - STANDOFF_ADVANCE_FT).max(0.),
+            );
+            let end = [ex, own[1], ez];
+            inside(rings, point).is_none()
+                && clear(rings, point, end)
+                && (approach.is_some() || clear(rings, own, point))
+        }
+    }
 }
 
 /// Where the helicopter holds off: the nearest point to it whose

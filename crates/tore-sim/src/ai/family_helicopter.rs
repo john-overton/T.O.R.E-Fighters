@@ -204,13 +204,16 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         exit(s, cx);
     }
     // A pass not yet fired that a ring now blocks is given up for the
-    // hold-off (slice H4): it does not press an attack through a threat.
+    // hold-off (slice H4): it does not press an attack through a threat. A
+    // ring learned after the choice that blocks the pass in hand (a pop-up
+    // whose target it now covers) blocks it even when another attack would
+    // stand clear: the hold-off chooses that attack at once.
     if s.phase == Phase::Attack
         && s.released == 0
         && s.segment == Segment::Approach
         && s.forced.is_none()
         && let (Some(target), Some(point)) = (s.target, target_at)
-        && plan(s, cx, point).is_none()
+        && (plan(s, cx, point).is_none() || !pass_holds(s, cx, point))
     {
         hold_off(s, cx, target);
     }
@@ -551,6 +554,21 @@ fn plan_with(
         prefer_standoff,
         &rings(s, cx),
     )
+}
+
+/// Whether the pass in hand still stands clear of the rings it knows.
+fn pass_holds(s: &Strike, cx: &Context<'_>, target_at: Vector) -> bool {
+    let plan = match s.pass {
+        Some(Pass::StandOff) => threat::Plan::StandOff {
+            approach: s.heli.approach,
+            range_ft: s.heli.standoff_ft.unwrap_or_else(|| {
+                s.store(cx)
+                    .map_or(POPUP_PULL_AT_FT, |st| STANDOFF_SHARE * st.maximum_range_ft)
+            }),
+        },
+        _ => threat::Plan::PopUp,
+    };
+    threat::holds(plan, cx.own.position, target_at, &rings(s, cx))
 }
 
 /// Holds off `target`: circles masked outside the rings (slice H4).

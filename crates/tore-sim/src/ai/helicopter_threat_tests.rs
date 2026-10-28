@@ -57,6 +57,46 @@ fn a_line_is_clear_outside_every_ring_and_may_always_lead_out_of_one() {
 }
 
 #[test]
+fn a_line_from_inside_a_ring_must_lead_straight_out_not_skirt_deeper_first() {
+    // The Ukraine column's SA-14 of surface seed 16 in miniature: the
+    // helicopter starts inside the ring and the target lies outside it, but
+    // the line to the target passes nearer the site before it leaves.
+    let rings = [ring(1, [0.; 3], 15_500.)];
+    let own = [12_167., 0., 0.];
+    let skirting = [-2_000., 0., 24_000.];
+    assert!(horizontal(rings[0].centre, skirting) > 15_500.);
+    assert!(!clear(&rings, own, skirting));
+    // Away from the site it is clear, and a pop-up across it is not planned.
+    assert!(clear(&rings, own, [30_000., 0., 4_000.]));
+    assert_eq!(plan_attack(own, skirting, None, false, &rings), None);
+}
+
+#[test]
+fn a_ring_learned_after_the_choice_blocks_the_pass_in_hand() {
+    let own = [0., 1_500., 0.];
+    let target = [0., 0., 24_000.];
+    let at2 = Some((18_000., 10_000.));
+    assert!(holds(Plan::PopUp, own, target, &[]));
+    // A gun 2,650 ft beyond the target: its ring covers the target, so the
+    // pop-up in hand no longer holds, though a stand-off from outside the
+    // ring still stands (the old test kept the pop-up for that reason).
+    let gun = [ring(1, [0., 0., 26_650.], 9_500.)];
+    assert!(!holds(Plan::PopUp, own, target, &gun));
+    let plan = plan_attack(own, target, at2, false, &gun);
+    assert!(matches!(plan, Some(Plan::StandOff { .. })), "{plan:?}");
+    // The plan chosen with the ring known holds while it is flown.
+    assert!(holds(plan.unwrap(), own, target, &gun));
+    // A straight stand-off whose carry-on would end in a new ring does not.
+    let straight = Plan::StandOff {
+        approach: None,
+        range_ft: 10_800.,
+    };
+    assert!(holds(straight, own, target, &[]));
+    let near = [ring(2, [0., 0., 16_000.], 3_000.)];
+    assert!(!holds(straight, own, target, &near));
+}
+
+#[test]
 fn the_plan_is_the_pop_up_when_clear_else_a_stand_off_from_outside_the_rings() {
     let own = [0., 1_500., 0.];
     let target = [0., 0., 24_000.];
