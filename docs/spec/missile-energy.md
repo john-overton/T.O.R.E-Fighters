@@ -192,12 +192,11 @@ all-aspect and 0.08 for imaging, with ratio capped at 3 and probability at
 95% (10% for imaging). Radar uses 0.35 for active seekers, 1.0 for records
 whose susceptibility exceeds 100, otherwise 0.7, multiplied by
 0.25 + 2.75*clutter_notch. John requested a global 30% chaff buff on
-2026-10-27. To apply that increase to the chance the game actually used,
-retain the previous whole-percent base, multiply it by the single global
-`CHAFF_EFFECTIVENESS_MULTIPLIER = 1.30`, and cap at 95%. Evaluate the result
-in basis points (0.01 percentage-point units), so a former 1% chance becomes
-1.30%. This interpretation preserves the base calibration rather than also
-restoring fractions it previously discarded. IR odds, episode eligibility,
+2026-10-27. Multiply the unfloored product by the single global
+`CHAFF_EFFECTIVENESS_MULTIPLIER = 1.30`, then cap at 95% (lead decision,
+2026-10-27). Evaluate the result in basis points (0.01 percentage-point
+units), so a zero-notch AA12 at effectiveness 35 rolls 1.99% (1.53% before)
+and AIM120 1.59%, and a base below 1% is buffed too. IR odds, episode eligibility,
 seed streams and notch thresholds do not change. The multiplier applies to
 all Energy radar stores; explicit Spec/Compatibility modes retain their rules.
 Recorded rolls carry their bound (100 or 10000) so thresholds remain readable.

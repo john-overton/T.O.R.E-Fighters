@@ -701,7 +701,8 @@ Current ordnance-fix validation, Linux x86-64, from `ba1bf7e4`:
 
 Model identity changes from `2060610122284599500` at the base to
 `3759883531439988201` for countermeasures, `501164167509140080` for range advice,
-and `3748787411052948283` after the three motor fits. The behavior tripwire
+`3748787411052948283` after the three motor fits and `8371591701768486536`
+for the unfloored chaff multiplier (decoy rule revision 3). The behavior tripwire
 trace remains `3894057758776089527`; its sampled stores are unchanged.
 No protocol or replay version is bumped. Checkpoints gain minimum fields in
 Envelope and RangeEstimate, and minimum/first fields in RangeSearch. The wire
@@ -804,8 +805,11 @@ cells use 64 seeds; AI cells use 32. The same seeds repeat across cells, so
 pooled rates are descriptive, not independent confidence estimates. `hit`
 means the actual ordnance hit event, not later aircraft-collision HP loss.
 
-The global 1.30 multiplier acts on the former effective whole-percent chaff
-chance, then uses a 10,000-unit draw. Thus 1% becomes 1.30%, with a 95% cap.
+The comparison in this section measured the first implementation, where
+the global 1.30 multiplier acted on the former effective whole-percent chaff
+chance (1% became 1.30%). The lead then chose the unfloored chance; see
+[unfloored chaff multiplier](#unfloored-chaff-multiplier) below for the
+current values and a matched sample.
 IR probabilities and scripted non-CM controls are unchanged, and all paired
 scripted IR outcomes and non-CM control rows matched exactly. The AI controller
 now spaces pairs across separate two-second evaluation episodes.
@@ -926,3 +930,69 @@ beam+chaff rises to 95.31%, and look-down beam+chaff to 24.48%. AA8's increased
 reach likewise raises its co-altitude scheduled-flare hit rate to 33.07% from
 11.72%. Its IR probability equation is unchanged. These are intended flight
 balance effects, not evidence of extra chaff or flare probability changes.
+
+
+### Unfloored chaff multiplier
+
+Lead decision, 2026-10-27: `CHAFF_EFFECTIVENESS_MULTIPLIER = 1.30` now acts on
+the unfloored radar chance before the basis-point roll. A zero-notch active
+seeker at effectiveness 35 rolls 1.99% for AA12 (1.53% before) and 1.59% for
+AIM120 (1.23% before), and chances below 1% are buffed as well. Flares and the
+Spec/Compatibility evaluators are unchanged.
+
+The matched sample below uses the scripted schedules (not the real AI), 64
+seeds per cell, short/medium ranges and head/beam/tail aspects pooled, 384
+trials per row. Base is `ba1bf7e4`, built independently; "floored" is the
+first implementation in this branch; "unfloored" is the current rule. AA12
+rows also include its new motor fit, so its base column is not a chaff-only
+comparison; AA12, AIM7 and R27ER were not rerun with the floored rule.
+
+| Store | Geometry/profile | N | Hit % base / floored x1.3 / unfloored x1.3 | Decoy % base / floored / unfloored | Decoyed then hit % base / floored / unfloored |
+| --- | --- | ---: | ---: | ---: | ---: |
+| AA10.JT | co / beam+cm-ai | 384 | 73.18 / 69.27 / 69.27 | 18.23 / 22.92 / 22.92 | 0.00 / 0.00 / 0.00 |
+| AA10.JT | co / cm-ai | 384 | 67.45 / 64.58 / 64.58 | 17.97 / 22.40 / 22.40 | 1.82 / 2.34 / 2.34 |
+| AA10.JT | co / cm-hammer | 384 | 64.58 / 63.02 / 63.02 | 22.66 / 24.74 / 24.74 | 2.08 / 2.08 / 2.08 |
+| AA10.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| AA10.JT | down / cm-ai | 384 | 11.46 / 10.68 / 10.68 | 3.39 / 4.17 / 4.17 | 0.00 / 0.00 / 0.00 |
+| AA10.JT | down / cm-hammer | 384 | 10.94 / 10.68 / 10.68 | 16.15 / 17.19 / 17.19 | 0.00 / 0.00 / 0.00 |
+| AA12.JT | co / beam+cm-ai | 384 | 88.80 / - / 92.45 | 3.12 / - / 8.33 | 0.00 / - / 0.78 |
+| AA12.JT | co / cm-ai | 384 | 97.40 / - / 92.97 | 3.12 / - / 8.07 | 0.52 / - / 1.04 |
+| AA12.JT | co / cm-hammer | 384 | 97.14 / - / 95.57 | 3.12 / - / 4.69 | 0.26 / - / 0.26 |
+| AA12.JT | down / beam+cm-ai | 384 | 6.25 / - / 23.44 | 2.60 / - / 5.47 | 0.00 / - / 0.00 |
+| AA12.JT | down / cm-ai | 384 | 96.61 / - / 88.80 | 3.39 / - / 9.90 | 0.00 / - / 0.26 |
+| AA12.JT | down / cm-hammer | 384 | 95.57 / - / 91.67 | 4.43 / - / 6.25 | 0.00 / - / 0.00 |
+| AIM120.JT | co / beam+cm-ai | 384 | 96.88 / 95.31 / 93.75 | 3.12 / 4.95 / 6.51 | 0.00 / 0.26 / 0.26 |
+| AIM120.JT | co / cm-ai | 384 | 97.40 / 95.57 / 94.53 | 3.12 / 5.21 / 6.77 | 0.52 / 0.78 / 1.30 |
+| AIM120.JT | co / cm-hammer | 384 | 97.14 / 97.14 / 97.14 | 3.12 / 3.12 / 3.12 | 0.26 / 0.26 / 0.26 |
+| AIM120.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| AIM120.JT | down / cm-ai | 384 | 48.44 / 47.40 / 46.61 | 1.56 / 2.60 / 3.39 | 0.00 / 0.00 / 0.00 |
+| AIM120.JT | down / cm-hammer | 384 | 48.44 / 48.44 / 48.18 | 1.56 / 1.56 / 1.82 | 0.00 / 0.00 / 0.00 |
+| AIM7.JT | co / beam+cm-ai | 384 | 81.77 / - / 77.34 | 18.75 / - / 23.44 | 0.52 / - / 0.78 |
+| AIM7.JT | co / cm-ai | 384 | 79.17 / - / 75.26 | 18.75 / - / 23.44 | 2.60 / - / 3.12 |
+| AIM7.JT | co / cm-hammer | 384 | 76.56 / - / 74.22 | 21.35 / - / 23.96 | 1.82 / - / 2.08 |
+| AIM7.JT | down / beam+cm-ai | 384 | 0.00 / - / 0.00 | 1.56 / - / 2.34 | 0.00 / - / 0.00 |
+| AIM7.JT | down / cm-ai | 384 | 5.99 / - / 5.99 | 5.73 / - / 7.03 | 0.00 / - / 0.00 |
+| AIM7.JT | down / cm-hammer | 384 | 3.91 / - / 3.65 | 16.15 / - / 17.19 | 0.00 / - / 0.00 |
+| AIM7E.JT | co / beam+cm-ai | 384 | 72.66 / 59.11 / 58.07 | 30.21 / 43.75 / 44.79 | 2.86 / 2.86 / 2.86 |
+| AIM7E.JT | co / cm-ai | 384 | 63.28 / 52.86 / 52.34 | 26.82 / 39.58 / 40.36 | 3.12 / 3.91 / 4.17 |
+| AIM7E.JT | co / cm-hammer | 384 | 57.81 / 49.74 / 49.74 | 37.24 / 47.66 / 47.66 | 4.43 / 5.21 / 5.21 |
+| AIM7E.JT | down / beam+cm-ai | 384 | 0.26 / 0.00 / 0.00 | 10.68 / 14.84 / 15.10 | 0.00 / 0.00 / 0.00 |
+| AIM7E.JT | down / cm-ai | 384 | 6.51 / 5.21 / 5.21 | 11.72 / 16.15 / 16.41 | 0.00 / 0.00 / 0.00 |
+| AIM7E.JT | down / cm-hammer | 384 | 3.39 / 2.08 / 2.08 | 25.78 / 30.21 / 30.21 | 0.00 / 0.00 / 0.00 |
+| MICA.JT | co / beam+cm-ai | 384 | 96.88 / 95.05 / 91.93 | 3.12 / 4.95 / 8.07 | 0.00 / 0.00 / 0.00 |
+| MICA.JT | co / cm-ai | 384 | 97.40 / 95.57 / 92.97 | 3.12 / 4.95 / 8.07 | 0.52 / 0.52 / 1.04 |
+| MICA.JT | co / cm-hammer | 384 | 97.14 / 97.14 / 95.57 | 3.12 / 3.12 / 4.69 | 0.26 / 0.26 / 0.26 |
+| MICA.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 / 0.00 | 0.26 / 0.52 / 0.52 | 0.00 / 0.00 / 0.00 |
+| MICA.JT | down / cm-ai | 384 | 55.99 / 54.69 / 52.86 | 2.08 / 3.39 / 5.21 | 0.26 / 0.26 / 0.26 |
+| MICA.JT | down / cm-hammer | 384 | 55.73 / 55.73 / 55.47 | 2.08 / 2.08 / 2.34 | 0.00 / 0.00 / 0.00 |
+| R27ER.JT | co / beam+cm-ai | 384 | 66.93 / - / 63.54 | 17.71 / - / 22.40 | 0.00 / - / 0.00 |
+| R27ER.JT | co / cm-ai | 384 | 64.06 / - / 61.20 | 17.45 / - / 21.88 | 2.60 / - / 3.12 |
+| R27ER.JT | co / cm-hammer | 384 | 60.68 / - / 59.11 | 22.66 / - / 24.74 | 2.08 / - / 2.08 |
+| R27ER.JT | down / beam+cm-ai | 384 | 0.00 / - / 0.00 | 0.00 / - / 0.00 | 0.00 / - / 0.00 |
+| R27ER.JT | down / cm-ai | 384 | 13.02 / - / 12.24 | 2.86 / - / 3.65 | 0.00 / - / 0.00 |
+| R27ER.JT | down / cm-hammer | 384 | 11.98 / - / 11.72 | 16.15 / - / 17.19 | 0.00 / - / 0.00 |
+
+Older SARH stores barely move from the floored rule because their chances
+were already several percent. The active-radar stores now show a real
+chaff effect at co-altitude: MICA `cm-ai` decoys rise from 3.12% to 8.07% and
+hits fall from 97.40% to 92.97%. The game-balance value stays 1.30.
