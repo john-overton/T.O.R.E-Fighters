@@ -998,8 +998,12 @@ def scenarios() -> list[Scenario]:
     at2 = ["--aircraft", "mi24", "--load", "AT2", *heli]
     heli_rockets = ["--aircraft", "ah64", "--load", "LAU61", *heli]
     heli_rockets_out = [*heli_rockets, "--seconds", "300", "--follow-egress"]
-    # Light SAMs with the layout of surface seed 16: the Mi-24's pop-up goes through their warnings,
-    # breaks and gets its AT-2 away (slice ST-H; before it, the fighters' defence sank a helicopter).
+    # Light SAMs with the layout of surface seed 16: the Mi-24 starts inside the ring of an SA-14 it
+    # knows and the pop-up's line to the column runs deeper into that ring before it leaves. Until
+    # 0.2.2 it flew that pop-up through the warnings and broke (slice ST-H); with the energy rules'
+    # SA-14 it was hit twice, its controls damaged, and it went home without firing. Since then a
+    # line out of a ring must lead straight out (docs/spec/ai-strike.md, "Helicopter threat
+    # awareness"): it flies the stand-off from outside the ring, unengaged, and hurts the tank.
     # Seed 19, ST-H's layout, holds a SAM that out-ranges the AT-2: since slice H4 the helicopter
     # holds off there (ai-strike-heli-defended).
     sams16 = ["--defenses", "0", "1", "--surface-seed", "16"]
@@ -1008,7 +1012,7 @@ def scenarios() -> list[Scenario]:
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2"),
          dict(label="mi24 at2 popup", profile="popup", skill=2, miss=None, hit=True)),
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams16),
-         dict(label="mi24 at2 popup under SAMs", profile="popup", skill=2, miss=None, hit=True, defends=True)),
+         dict(label="mi24 at2 under SAMs it starts inside", profile="standoff", skill=2, miss=None, hit=True)),
         # The rocket runs follow the helicopter out (slice HF1): it turns away from the column and
         # masks low; before, it flew on over the column and a site it had not seen shot it down 2 s
         # after the old run end.
@@ -1029,8 +1033,12 @@ def scenarios() -> list[Scenario]:
         # a firing point off the straight line, outside the guns' rings.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "1", "--defenses", "3", "0"),
          dict(label="mi24 under heavy AAA", profile="standoff", release=True, hurt=True)),
+        # Light AAA at the factory: it sets out on the pop-up, learns of a ZSU-23 2,650 ft from the
+        # factory 20 s in and, its ring covering the factory, gives the pop-up up for a stand-off from
+        # outside the ring ("not pressed through"). Until 0.2.2 it flew the pop-up on into the guns and
+        # was lost guiding the energy rules' slower AT-2; the faster one had hidden it.
         (pilot_run("UKR", "QUFACT", *at2, "--skill", "1", "--defenses", "1", "0"),
-         dict(label="mi24 under light AAA at the factory", profile="popup", release=True, kill=True)),
+         dict(label="mi24 under light AAA at the factory", profile="standoff", release=True, kill=True)),
         # A SAM that out-ranges the AT-2 (the open ST-H question): hold off, then home.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19, "--seconds", "240"),
          dict(label="mi24 under a SAM that out-ranges the AT-2", decisions=["hold_off", "home"],
@@ -1055,10 +1063,12 @@ def scenarios() -> list[Scenario]:
                    "--follow-threat", "--place-site", "0x50000019,240,5000"),
          dict(label="mi24 ambushed", decisions=["hold_off", "resume", "leave", "resume"], breaks=2,
               release=True, kill=True)),
-        # From 4 nm at 200 ft on seed 1 the AI would choose the stand-off under the SAMs; it holds off.
+        # From 4 nm at 200 ft on seed 1 the AI once chose the stand-off under the SAMs and turned
+        # away at once; since a line out of a ring must lead straight out it holds off from the
+        # start (no pass is named), with the same decisions.
         (pilot_run("UKR", "QUCOL", "--aircraft", "mi24", "--load", "AT2", "--altitude", "200", "--from", "4",
                    "--speed", "120", "--seconds", "200", "--skill", "2", *sams, "--surface-seed", "1"),
-         dict(label="mi24 holds off the SAMs it would stand off under", profile="standoff",
+         dict(label="mi24 holds off the SAMs it would stand off under",
               decisions=["hold_off", "home"], no_release=True)),
     ]
     # The AC-130 (slice ST-F) on the moving armoured column: the TVIET truck park's radar-laid guns
@@ -1387,7 +1397,8 @@ def scenarios() -> list[Scenario]:
             then=[Step(a, timeout=300) for a, _ in heli_runs[1:]],
             check=lambda out: strike_problems(out, [w for _, w in heli_runs]),
             notes="Helicopters strike the Ukraine armored column: a Mi-24's AT-2 from the pop-up, the "
-                  "same pass through light SAMs (it defends and its AT-2 still hurts the tank), an "
+                  "same target under light SAMs whose ring it starts in (it attacks from a stand-off "
+                  "outside the ring and its AT-2 hurts the tank), an "
                   "AH-64's rocket burst from the pop-up at skills 2 and 3, the drawn aim inside the "
                   "circle and every rocket within the circle plus the gate plus 400 ft, followed out "
                   "(--follow-egress) until it egresses, turning away from the column. None is lost. "
@@ -1401,7 +1412,8 @@ def scenarios() -> list[Scenario]:
             check=lambda out: heli_defense_problems(out, [w for _, w in defended_runs]),
             notes="A Mi-24 against defences (slices ST-H and H4, John's threat rule of 2026-10-12): "
                   "heavy AAA on the column (it fires its AT-2 from outside every gun ring and hurts the "
-                  "tank), light AAA at the factory (pop-up, kill), a SAM that out-ranges the AT-2 and an "
+                  "tank), light AAA at the factory (the pop-up given up for a stand-off once the guns are known, "
+                  "kill), a SAM that out-ranges the AT-2 and an "
                   "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
                   "(it resumes and fires), an ambush by a site it had not seen on its way out (it "
                   "breaks, leaves the ring, holds off, resumes and fires again), and the stand-off layout of seed 1 (it holds "

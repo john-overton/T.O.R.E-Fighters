@@ -533,7 +533,7 @@ class HelicopterTests(unittest.TestCase):
         self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
         held = ["threat_hold_off", "threat_home"]
         honest = [heli_run(profile="standoff", breaks=0),
-                  heli_run(breaks=0),
+                  heli_run(profile="standoff", breaks=0),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
