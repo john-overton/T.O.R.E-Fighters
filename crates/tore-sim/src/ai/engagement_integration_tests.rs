@@ -888,11 +888,9 @@ fn cap_patrols_before_contact_and_engages_from_outside_station() {
     }
 }
 
-#[test]
-fn removing_an_inert_missile_snapshot_ends_defense_without_a_grace_period() {
-    let mut mission = neutral_wing_mission();
-    mission.set_missiles(vec![MissileSnapshot {
-        id: 90,
+fn incoming_defense_snapshot(id: u32) -> MissileSnapshot {
+    MissileSnapshot {
+        id,
         owner: 3,
         position: [0., 20_000., -1500.],
         velocity: [0., 0., 2000.],
@@ -903,19 +901,105 @@ fn removing_an_inert_missile_snapshot_ends_defense_without_a_grace_period() {
         supported: true,
         supporting_radar_position: Some([5000., 20_000., 0.]),
         alive: true,
-    }]);
+    }
+}
+
+fn step_defense(mission: &mut AiMission) {
     mission
-        .step(&world_with(&mission, []), &flat, TimeOfDay(0))
+        .step(&world_with(mission, []), &flat, TimeOfDay(0))
         .unwrap();
+}
+
+#[test]
+fn removing_an_inert_missile_snapshot_ends_defense_without_a_grace_period() {
+    let mut mission = neutral_wing_mission();
+    mission.set_missiles(vec![incoming_defense_snapshot(90)]);
+    step_defense(&mut mission);
     assert!(mission.actor(2).unwrap().defense_decision().is_some());
-    // Combat omits a defeated or passed-decoy body from the same tick's
-    // snapshot list. The preceding live test verifies that production boundary.
+    // Combat omits the body and explicitly confirms it is inert. A missing
+    // observation alone must retain the existing tracking-gap grace.
     mission.set_missiles(Vec::new());
-    mission
-        .step(&world_with(&mission, []), &flat, TimeOfDay(1))
-        .unwrap();
+    mission.end_missile_threats(&[90]);
+    step_defense(&mut mission);
     let actor = mission.actor(2).unwrap();
     assert_eq!(actor.missile_threats().count(), 0);
     assert!(actor.defense_decision().is_none());
     assert!(!actor.controller().defending());
+    assert!(actor.device_schedule.iter().all(|entry| !entry.3));
+    for _ in 0..=defense::THREAT_MEMORY_TICKS {
+        step_defense(&mut mission);
+        assert!(mission.actor(2).unwrap().defense_decision().is_none());
+    }
+}
+
+#[test]
+fn live_store_tracking_gap_keeps_defense_for_two_seconds() {
+    let mut mission = neutral_wing_mission();
+    mission.set_missiles(vec![incoming_defense_snapshot(90)]);
+    step_defense(&mut mission);
+    mission.set_missiles(Vec::new());
+    for _ in 0..defense::THREAT_MEMORY_TICKS {
+        step_defense(&mut mission);
+        let actor = mission.actor(2).unwrap();
+        assert_eq!(actor.missile_threats().count(), 0);
+        let decision = actor.defense_decision().expect("bridge the live-store gap");
+        assert_eq!(decision.threat_id, 90);
+        assert!(decision.debug.stale);
+        assert!(decision.burst.is_none());
+    }
+    step_defense(&mut mission);
+    assert!(mission.actor(2).unwrap().defense_decision().is_none());
+}
+
+#[test]
+fn inert_notice_preserves_other_live_threats_and_checkpoint_resume() {
+    use crate::checkpoint::{Models, from_bytes, to_bytes};
+    let mut mission = neutral_wing_mission();
+    mission.set_missiles(vec![incoming_defense_snapshot(90)]);
+    step_defense(&mut mission);
+    // Save while the selected threat has no current observation, then deliver
+    // its end notice after restoring, as the combat host does each tick.
+    mission.set_missiles(Vec::new());
+    step_defense(&mut mission);
+    let mut models = Models::default();
+    for actor in mission.actors() {
+        models
+            .insert(actor.identity().aircraft, actor.flight().import_model())
+            .unwrap();
+    }
+    let saved = to_bytes(&mission, &models).unwrap();
+    let mut twin: AiMission = from_bytes(&saved, &models).unwrap();
+    for current in [&mut mission, &mut twin] {
+        current.set_missiles(vec![incoming_defense_snapshot(91)]);
+        current.end_missile_threats(&[90, 999]);
+        step_defense(current);
+        assert_eq!(
+            current
+                .actor(2)
+                .unwrap()
+                .defense_decision()
+                .unwrap()
+                .threat_id,
+            91
+        );
+        current.end_missile_threats(&[90]); // Repeated notices are harmless.
+        step_defense(current);
+        assert_eq!(
+            current
+                .actor(2)
+                .unwrap()
+                .defense_decision()
+                .unwrap()
+                .threat_id,
+            91
+        );
+        current.set_missiles(Vec::new());
+        current.end_missile_threats(&[91]);
+        step_defense(current);
+        assert!(current.actor(2).unwrap().defense_decision().is_none());
+    }
+    assert_eq!(
+        to_bytes(&mission, &models).unwrap(),
+        to_bytes(&twin, &models).unwrap()
+    );
 }

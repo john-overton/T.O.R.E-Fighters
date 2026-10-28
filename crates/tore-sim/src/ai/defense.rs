@@ -221,6 +221,27 @@ pub struct DefenseState {
 }
 
 impl DefenseState {
+    /// Combat confirmed this store is inert. Absence alone never calls this.
+    pub fn end_threat(&mut self, id: u32) {
+        self.missiles.retain(|missile| missile.id != id);
+        if self
+            .last_contact
+            .is_some_and(|contact| contact.missile_id == id)
+        {
+            self.last_contact = None;
+        }
+        if self.selected_threat == Some(id) {
+            self.selected_threat = None;
+            self.phase = None;
+            self.beam_side = None;
+            self.break_heading_deg = None;
+            self.passed = false;
+            self.clear_threat();
+        }
+        // Encounter budget, reaction progress and release cooldown still apply
+        // to other stores, including the reserved pair for a second threat.
+    }
+
     /// No observation supports motion now. Keep the encounter memory until
     /// its quiet timeout, including class, break heading, reaction and budget.
     pub fn clear_threat(&mut self) {
@@ -1199,6 +1220,38 @@ mod tests {
             let decision = assess(tick, Experience::Novice, own(), contact, &mut state);
             assert_eq!(decision.motion.is_some(), tick == 180);
         }
+    }
+
+    #[test]
+    fn ending_one_store_keeps_reaction_progress_and_encounter_budget() {
+        let first = threat(EvidenceSource::ElectronicActive, Some(GuidanceClass::Radar));
+        let second = ThreatRecord {
+            missile_id: 3,
+            ..first
+        };
+        let mut state = DefenseState::default();
+        assert!(
+            assess(0, Experience::Novice, own(), first, &mut state)
+                .motion
+                .is_none()
+        );
+        state.end_threat(first.missile_id);
+        assert!(decide(1, Experience::Novice, own(), &[], &mut state, |_| 0.).is_none());
+        let decision = assess(180, Experience::Novice, own(), second, &mut state);
+        assert!(
+            decision.motion.is_some(),
+            "ending a store cannot restart the reaction"
+        );
+        assert!(decision.burst.is_some());
+        let spent = state.devices_requested;
+        let cooldown = state.last_burst_tick;
+        state.end_threat(second.missile_id);
+        let restored: DefenseState =
+            crate::checkpoint::round_trip(&state, &crate::checkpoint::Models::default()).unwrap();
+        assert_eq!(restored, state);
+        assert_eq!(state.devices_requested, spent);
+        assert_eq!(state.last_burst_tick, cooldown);
+        assert!(decide(181, Experience::Novice, own(), &[], &mut state, |_| 0.).is_none());
     }
 
     #[test]

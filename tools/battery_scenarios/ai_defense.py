@@ -5,7 +5,7 @@ import csv
 import re
 from pathlib import Path
 
-from battery import Scenario
+from battery import Scenario, Step
 
 TRACE = re.compile(r"^missile-study: trace .*? g=(-?[\d.]+).*?activity=Defending defense=Some\(\(Some\(MotionSuggestion \{ maneuver: (\w+), heading_deg: (-?[\d.e+]+)", re.M)
 
@@ -138,6 +138,12 @@ def radar_memory_problems(work: Path, output: str) -> list[str]:
     return problems
 
 
+def inert_defense_problems(_work: Path, output: str) -> list[str]:
+    ended = set(re.findall(r"^missile-study: inert-defense (\S+) .* active_before=true cleared=true$", output, re.M))
+    return [f"{store}: no active defense ended on its inert tick"
+            for store in ("AIM7.JT", "AIM9M.JT") if store not in ended]
+
+
 def scenarios() -> list[Scenario]:
     turns = [Scenario(
         name=f"ai-regress-missile-positive-g-{model}", lane="ai",
@@ -149,6 +155,18 @@ def scenarios() -> list[Scenario]:
         notes="Committed defensive turns keep positive G and dispense only flares against a visually observed IR missile.",
     ) for model in ("standard", "hybrid")]
 
+    turns.append(Scenario(
+        name="ai-regress-missile-inert-end", lane="ai",
+        args=["--missile-study", "{work}/study", "--ai", "--trace", "--skill", "ace",
+              "--missile-model", "energy", "--missiles", "AIM7", "--ranges", "long",
+              "--aspects", "tail", "--altitudes", "co", "--seeds", "1", "--threads", "1"],
+        then=[Step(args=["--missile-study", "{work}/study-decoy", "--ai", "--trace", "--skill", "ace",
+                         "--missile-model", "energy", "--missiles", "AIM9M", "--ranges", "medium",
+                         "--aspects", "head", "--altitudes", "co", "--seeds", "1", "--threads", "1"])],
+        timeout=180, outputs=["study/runs.csv", "study/cells.csv", "study-decoy/runs.csv"],
+        check_work=inert_defense_problems,
+        notes="Explicit combat notices end active AI defense on the tick of post-burn defeat and decoy passage.",
+    ))
     turns.append(Scenario(
         name="ai-regress-missile-head-on-break", lane="ai",
         args=["--missile-study", "{work}/study", "--ai", "--trace", "--skill", "ace",

@@ -2186,6 +2186,8 @@ impl AiWings {
             } else {
                 Vec::new()
             });
+        self.mission
+            .end_missile_threats(state.ended_missile_threats());
         let ceiling = self
             .ground_ceiling
             .get_or_insert_with(|| std::sync::Arc::new(world.ground_ceiling()));

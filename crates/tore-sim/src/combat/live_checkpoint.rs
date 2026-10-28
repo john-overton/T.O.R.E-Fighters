@@ -583,6 +583,7 @@ impl Checkpoint for State {
             weapon_rules,
             ownships,
             projectiles,
+            ended_missile_threats,
             targets,
             ownship_rows,
             actor_support,
@@ -651,6 +652,7 @@ impl Checkpoint for State {
         weapon_rules.save(s, None)?;
         ownships.save(s, None)?;
         projectiles.save(s, None)?;
+        ended_missile_threats.save(s, None)?;
         targets.save(s, None)?;
         ownship_rows.save(s, None)?;
         actor_support.save(s, None)?;
@@ -716,6 +718,7 @@ impl Checkpoint for State {
             weapon_rules,
             ownships,
             projectiles: Checkpoint::load(l, None)?,
+            ended_missile_threats: Checkpoint::load(l, None)?,
             targets: Checkpoint::load(l, None)?,
             ownship_rows: Checkpoint::load(l, None)?,
             actor_support: Checkpoint::load(l, None)?,

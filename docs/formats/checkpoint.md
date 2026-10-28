@@ -13,7 +13,12 @@ to each missile: body/motor values, velocity/axis, steering response, loft/cruis
 waypoint, control-loss state, seeker head/notch dwell and physical decoy pursuit.
 Combat also saves physical devices/episodes, the explicit decoy seed, pending
 prediction jobs/cursor/results and cue state. AI stations save their additive
-energy launch permission. Wall-clock profiling counters and rebuilt sights
+energy launch permission. Combat also saves the latest tick's explicit inert
+store IDs, including stores removed on that tick. The AI consumes these notices
+before its next defense decision. A surviving inert body repeats its notice;
+applying it again is harmless. The list is replaced on each combat step, and
+its effects on AI memory use the existing checkpointed defense state.
+Wall-clock profiling counters and rebuilt sights
 are excluded. These change the exact checkpoint layout and resulting checksums;
 the integration lead must coordinate the simulation/protocol version bump.
 No version constant is changed by this branch. See the

@@ -1712,7 +1712,12 @@ request no new bursts.
 
 Switches retain reaction progress, cooldown, budget and the completed drag phase.
 A lost observation can support the committed motion and queued pair for two
-seconds. Encounter memory, including class and per-missile break heading,
+seconds (240 simulation ticks). An explicit combat notice that a store is
+inert ends that store's threat and defense immediately, including during this
+grace. It does not clear other threats or reset encounter reaction progress,
+release cooldown or the device budget. This follows John's 2026-10-27
+[inert-store policy](missile-energy.md#motion); a missing observation alone
+is not such a notice. Encounter memory, including class and per-missile break heading,
 lasts until 30 seconds without a fresh observation of a missile aimed at this
 aircraft, a fitted agent choice. The aircraft's own missiles in flight and
 missiles seen going elsewhere do not keep an encounter open. A longer quiet

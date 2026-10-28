@@ -9854,6 +9854,11 @@ ticks. Aircraft are staggered by their place in the mission,
 `(tick + index) % divisor == 0` (`AiMission::observation_due`), so every tick
 carries the same share of the work. The controller, the flight model, the
 missile threat service and the incoming fire service stay at 120 Hz.
+`AiWings::step` also passes combat's explicit inert-store notices to
+`AiMission::end_missile_threats` before that tick's defense assessment. This
+keeps confirmed threat endings separate from observation gaps; see the
+[defense policy](spec/ai.md#missile-defense-flown-by-ai) and
+[checkpoint notice state](formats/checkpoint.md).
 
 | Between two observations the aircraft | |
 | --- | --- |

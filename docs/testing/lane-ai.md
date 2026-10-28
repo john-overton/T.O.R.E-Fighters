@@ -54,7 +54,7 @@ minutes cost about 4 minutes.
 | Long runs | `ai-long-*` | 30 simulated minutes (216,000 ticks) of 1 v 1, 5 v 5, 15 v 15, hold, guns and a ground landing |
 | Recordings | `ai-record-*` | `--record-mission --verify-render` must say PASS |
 | Determinism | `ai-determinism-*` | the same arguments run twice on fresh profile copies give identical output; `ai-determinism-recordings` records a 5 v 5 twice and `--recording-diff` must say they match |
-| Regressions | `ai-regress-*` | one per defect fixed below, checked strictly |
+| Regressions | `ai-regress-*` | one per defect fixed below, checked strictly; `ai-regress-missile-inert-end` requires active defense to end on the exact tick of post-burn defeat and decoy passage |
 | Acceptance probes | `ai-roster-probe`, `ai-probe-matrix` | the fixed roster and 1,008-encounter probes |
 | Other theaters | `ai-theater-*` | all 16 base theaters: a 4 v 4 fight, an 8 v 8 without the leader attacking, wing-of-3 takeoffs at airports 1 and 3, and a pair ordered to land at airport 1 |
 | Every aircraft's takeoff | `ai-takeoff-*` | all 14 aircraft as a ground-started pair at Zaporizhzhya (UKR 1), Ras Al Khaimah (PGU 2), Chateaudun (FRA 3) and Nuchon Ni (NSK 5) |

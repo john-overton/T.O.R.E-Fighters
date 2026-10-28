@@ -2008,6 +2008,17 @@ impl AiMission {
         self.ground_ceiling = ceiling;
     }
 
+    /// Apply combat's explicit inert-store notices before stepping the mission.
+    /// Only existing checkpointed observation and defense state is changed.
+    pub fn end_missile_threats(&mut self, ids: &[u32]) {
+        for actor in &mut self.actors {
+            for &id in ids {
+                actor.missile_threats.end_threat(id);
+                actor.defense_state.end_threat(id);
+            }
+        }
+    }
+
     pub fn set_missiles(&mut self, missiles: Vec<MissileSnapshot>) {
         self.missiles = missiles;
     }

@@ -1721,6 +1721,8 @@ pub struct State {
     /// Human-flown aircraft, in aircraft id order.
     ownships: Vec<Ownship>,
     pub projectiles: Vec<Projectile>,
+    /// Stores confirmed inert in the latest combat tick, even if removed.
+    ended_missile_threats: Vec<u32>,
     pub targets: Vec<Target>,
     /// The targets the other ownships make of their aircraft, as the last step
     /// left them; empty with fewer than two ownships.
@@ -3214,6 +3216,7 @@ impl State {
             next_target_id: 1,
             next_shot: 0,
             projectiles: vec![],
+            ended_missile_threats: vec![],
             targets: vec![],
             ownship_rows: vec![],
             actor_support: BTreeMap::new(),
@@ -3503,6 +3506,11 @@ impl State {
     ) -> Vec<super::threats::MissileSnapshot> {
         self.snapshots(&self.ownships, launchers)
     }
+    /// Explicit lifecycle notices, valid until the next combat step.
+    pub fn ended_missile_threats(&self) -> &[u32] {
+        &self.ended_missile_threats
+    }
+
     fn snapshots(
         &self,
         ships: &[Ownship],
@@ -6371,10 +6379,14 @@ impl State {
             }
             true
         };
+        self.ended_missile_threats.clear();
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.take();
             let kept = pass(p, &owned);
             p.weapon = owned;
+            if !p.threatening() {
+                self.ended_missile_threats.push(p.id);
+            }
             kept
         });
         // A round that is gone takes its rewind, its surface record and its
@@ -9451,11 +9463,12 @@ mod tests {
         load.change(0, 1);
         load.transfer(0, 1).unwrap();
         assert_eq!(load.quantities, [0, 2]);
-        assert_eq!(load.total_lbs(), 10600.);
+        let pair_lbs = 2. * weapon.carried_weight_lb();
+        assert_eq!(load.total_lbs(), load.empty_lbs + load.fuel_lbs + pair_lbs);
         let own = Ownship::new(1, Side(0), load.configuration.clone(), true).unwrap();
         let mut own = own;
         own.ammo = load.ammunition().unwrap();
-        assert_eq!(own.payload_lbs(), 600.);
+        assert_eq!(own.payload_lbs(), pair_lbs);
         load.quantities[0] = 1;
         assert!(load.validate().is_err());
         load.configuration.stations[0].count = 3;

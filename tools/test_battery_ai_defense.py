@@ -5,7 +5,17 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from battery_scenarios.ai_defense import defense_problems, head_break_problems, chaff_timing_problems, skill_pull_problems, radar_memory_problems
+from battery_scenarios.ai_defense import defense_problems, head_break_problems, chaff_timing_problems, skill_pull_problems, radar_memory_problems, inert_defense_problems
+
+
+class InertDefenseChecks(unittest.TestCase):
+    def test_requires_a_previously_observed_threat_and_immediate_end(self):
+        trace = "\n".join(f"missile-study: inert-defense {store} seed 0 t=45.000 active_before=true cleared=true"
+                          for store in ("AIM7.JT", "AIM9M.JT"))
+        self.assertEqual(inert_defense_problems(Path(), trace), [])
+        for invalid in ("", trace.splitlines()[0], trace.replace("active_before=true", "active_before=false"),
+                        trace.replace("cleared=true", "cleared=false")):
+            self.assertTrue(inert_defense_problems(Path(), invalid))
 
 
 class DefenseChecks(unittest.TestCase):

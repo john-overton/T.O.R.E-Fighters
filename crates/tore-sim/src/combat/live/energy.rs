@@ -599,6 +599,7 @@ mod tests {
                     .any(|r| r.targeting_receiver)
             );
             assert!(state.projectiles[0].threatening());
+            assert!(state.ended_missile_threats().is_empty());
             if passed_decoy {
                 let e = state.projectiles[0]
                     .motion
@@ -629,6 +630,14 @@ mod tests {
                 "no grace period for an inert store"
             );
             assert!(state.missile_snapshots(&[(0, l)]).is_empty());
+            assert_eq!(state.ended_missile_threats(), &[7]);
+            let models = crate::checkpoint::Models::default();
+            let saved = crate::checkpoint::to_bytes(&state, &models).unwrap();
+            let mut restored: State = crate::checkpoint::from_bytes(&saved, &models).unwrap();
+            assert_eq!(restored.ended_missile_threats(), &[7]);
+            restored.projectiles.clear();
+            restored.step_surface(&input, |_, _| 0., |_, _| false);
+            assert!(restored.ended_missile_threats().is_empty());
             assert_eq!(state.missile_time_to_impact(7, 0), None);
         }
     }
@@ -690,6 +699,7 @@ mod tests {
                 "inert body caused direct or collateral damage"
             );
             assert!(!hit);
+            assert_eq!(state.ended_missile_threats(), &[7]);
             if ground_contact {
                 assert!(state.projectiles.is_empty());
             } else {

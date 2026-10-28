@@ -253,6 +253,8 @@ pub fn fly(
     let mut last_speed = 0.;
     let mut decoyed = false;
     let mut defended = false;
+    let mut selected_previous_tick = false;
+    let mut inert_reported = false;
     let mut last_yaw: Option<f64> = None;
     let mut previous: Option<(Vector, Vector)> = None;
     for tick in 1..=limit {
@@ -320,6 +322,20 @@ pub fn fly(
         }
         let wings = world.ai_wings.as_ref().ok_or("no AI")?;
         if let Some(actor) = wings.mission().actor(enemy) {
+            let selected = actor.defense_decision().is_some_and(|d| d.threat_id == id);
+            if world.combat.state.ended_missile_threats().contains(&id) {
+                if selected {
+                    return Err("AI kept defending against a confirmed inert store".into());
+                }
+                if setup.trace && !inert_reported {
+                    println!(
+                        "missile-study: inert-defense {} seed {seed} t={t:.3} active_before={selected_previous_tick} cleared=true",
+                        weapon.source,
+                    );
+                }
+                inert_reported = true;
+            }
+            selected_previous_tick = selected;
             let yaw = actor.flight().yaw;
             if setup.trace && tick % 30 == 0 {
                 let f = actor.flight();
