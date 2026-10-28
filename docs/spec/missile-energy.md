@@ -187,13 +187,21 @@ Radar uses target radial separation from terrain clutter for both SARH and
 active seekers. Chaff and look-down notch improve seduction; active radar may
 also lose a return in clutter without chaff. Clamp the full probability product,
 preserving raw susceptibility values 150 and 200. The evaluator uses raw susceptibility times dispenser effectiveness,
-then generation and signal factors, flooring the final probability to a whole
-percent. IR factors are 1.0 for rear-aspect seekers, 0.6 for conventional
+then generation and signal factors. IR retains its whole-percent evaluator. IR factors are 1.0 for rear-aspect seekers, 0.6 for conventional
 all-aspect and 0.08 for imaging, with ratio capped at 3 and probability at
 95% (10% for imaging). Radar uses 0.35 for active seekers, 1.0 for records
 whose susceptibility exceeds 100, otherwise 0.7, multiplied by
-0.25 + 2.75*clutter_notch. This susceptibility-based early-SARH grouping is
-fitted and awaits explicit per-profile review.
+0.25 + 2.75*clutter_notch. John requested a global 30% chaff buff on
+2026-10-27. To apply that increase to the chance the game actually used,
+retain the previous whole-percent base, multiply it by the single global
+`CHAFF_EFFECTIVENESS_MULTIPLIER = 1.30`, and cap at 95%. Evaluate the result
+in basis points (0.01 percentage-point units), so a former 1% chance becomes
+1.30%. This interpretation preserves the base calibration rather than also
+restoring fractions it previously discarded. IR odds, episode eligibility,
+seed streams and notch thresholds do not change. The multiplier applies to
+all Energy radar stores; explicit Spec/Compatibility modes retain their rules.
+Recorded rolls carry their bound (100 or 10000) so thresholds remain readable.
+The susceptibility-based early-SARH grouping is fitted and awaits per-profile review.
 
 Each physical flare pair leaves 15 ft behind and 2 ft below the aircraft,
 with aircraft velocity and 15 ft/s downward ejection. The two seeded lateral

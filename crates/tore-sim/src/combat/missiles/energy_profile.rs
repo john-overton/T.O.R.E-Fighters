@@ -201,7 +201,7 @@ crate::checkpoint_struct!(Motion {
 // integration/atmosphere, guidance, seeker, decoy, prediction, fuze/contact, inert threat publication.
 // Numeric inputs and drag curves are hashed directly; comments and evidence
 // wording are not model inputs. Changes to rules must increment their revision.
-const RULES: [u64; 8] = [5, 4, 3, 1, 1, 5, 3, 1];
+const RULES: [u64; 8] = [5, 4, 3, 1, 2, 5, 3, 1];
 /// Stable tape identity for numeric inputs, curves and semantic rule revisions.
 pub fn fingerprint() -> u64 {
     fingerprint_model(
@@ -220,6 +220,9 @@ fn fingerprint_model(
             hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
         }
     };
+    add(&super::decoys::CHAFF_EFFECTIVENESS_MULTIPLIER
+        .to_bits()
+        .to_le_bytes());
     for rule in rules {
         add(&rule.to_le_bytes());
     }

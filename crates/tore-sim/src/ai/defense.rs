@@ -13,6 +13,8 @@ pub const JINK_LEG_TICKS: u64 = 240;
 pub const DIVE_PITCH_DEG: f64 = -5.0;
 pub const DIVE_LOOKAHEAD_S: u64 = 5;
 pub const DIVE_CLEARANCE_FT: f64 = 1_000.0;
+/// John, 2026-10-27: pair starts must occupy distinct two-second episodes.
+pub const MIN_BURST_INTERVAL_TICKS: u64 = 240;
 /// Fitted policy, specified in docs/spec/ai.md, "Missile defense flown by AI".
 pub fn load_fraction(experience: Experience) -> f64 {
     [0.85, 0.90, 1.0, 1.0][skill_index(experience)]
@@ -434,7 +436,7 @@ where
         !passed && tick.saturating_sub(state.observed_tick) >= [180, 90, 30, 0][skill];
     let last_ditch = preferred == Maneuver::Break;
     let interval = if last_ditch {
-        [240, 180, 120, 90][skill]
+        MIN_BURST_INTERVAL_TICKS
     } else {
         [720, 480, 360, 360][skill]
     };
@@ -443,11 +445,10 @@ where
             .first_device_threat
             .is_some_and(|id| id != selected.missile_id);
     let reserve_now = reserve_allowed && state.missiles[index].devices == 0;
-    let may_burst = (reserve_now
-        || state
-            .last_burst_tick
-            .is_none_or(|last| tick.saturating_sub(last) >= interval))
-        && state.devices_requested < if reserve_allowed { 8 } else { 6 }
+    let may_burst = state.last_burst_tick.is_none_or(|last| {
+        let elapsed = tick.saturating_sub(last);
+        elapsed >= MIN_BURST_INTERVAL_TICKS && (reserve_now || elapsed >= interval)
+    }) && state.devices_requested < if reserve_allowed { 8 } else { 6 }
         && state.missiles[index].devices < 6;
     let release_now = maneuver_now
         && (last_ditch
@@ -889,14 +890,16 @@ mod tests {
         contact.position = Some([0.0, 5000.0, 1000.0]);
         let mut state = DefenseState::default();
         let mut requests = 0;
-        for tick in 0..400 {
+        for tick in 0..600 {
             requests += assess(tick, Experience::Ace, own(), contact, &mut state)
                 .burst
                 .map_or(0, |b| b.chaff);
         }
         assert_eq!(requests, 6);
         contact.missile_id += 1;
-        let second = assess(400, Experience::Ace, own(), contact, &mut state);
+        let waiting = assess(600, Experience::Ace, own(), contact, &mut state);
+        assert!(waiting.reserve_allowed && waiting.burst.is_none());
+        let second = assess(720, Experience::Ace, own(), contact, &mut state);
         assert!(second.reserve_allowed);
         assert_eq!(
             second
@@ -906,7 +909,7 @@ mod tests {
                 .chaff,
             2
         );
-        for tick in 401..800 {
+        for tick in 721..1200 {
             assert!(
                 assess(tick, Experience::Ace, own(), contact, &mut state)
                     .burst
@@ -1173,7 +1176,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(answer.threat_id, radar.missile_id);
-        assert_eq!(answer.burst, Some(BurstRequest::RADAR));
+        assert_eq!(answer.burst, None);
+        let later = assess(240, Experience::Ace, own(), radar, &mut state);
+        assert_eq!(later.burst, Some(BurstRequest::RADAR));
         assert!(!answer.motion.unwrap().reduce_heat);
     }
 
@@ -1307,15 +1312,19 @@ mod tests {
         let last = assess(300, Experience::Ace, own(), contact, &mut state);
         assert_eq!(last.motion.unwrap().maneuver, Maneuver::Break);
         assert_eq!(last.motion.unwrap().heading_deg, 270.0);
-        assert_eq!(last.burst, Some(BurstRequest::RADAR));
+        assert_eq!(last.burst, None);
+        assert_eq!(
+            assess(361, Experience::Ace, own(), contact, &mut state).burst,
+            Some(BurstRequest::RADAR)
+        );
         contact.velocity = Some([0.0, 0.0, 1_000.0]);
-        let opening = assess(301, Experience::Ace, own(), contact, &mut state);
+        let opening = assess(362, Experience::Ace, own(), contact, &mut state);
         assert!(!opening.debug.passed);
         assert_eq!(opening.motion.unwrap().maneuver, Maneuver::Break);
         contact.position = Some([0.0, 5_000.0, 30_000.0]);
         contact.velocity = Some([0.0, 0.0, -1_000.0]);
         let later = assess(
-            302 + ENCOUNTER_MEMORY_TICKS + 1,
+            363 + ENCOUNTER_MEMORY_TICKS + 1,
             Experience::Ace,
             own(),
             contact,
@@ -1508,6 +1517,23 @@ mod tests {
         assert_eq!(safe_jink(own, 90.0, |_| 0.0).flight_path_pitch_deg, 0.0);
     }
 
+    #[test]
+    fn each_skill_keeps_pairs_in_distinct_countermeasure_episodes() {
+        for (skill, first) in Experience::ALL.into_iter().zip([180, 90, 30, 0]) {
+            let mut state = DefenseState::default();
+            let mut contact = threat(EvidenceSource::Visual, Some(GuidanceClass::Infrared));
+            contact.position = Some([0., 5000., 1000.]);
+            let mut starts = Vec::new();
+            for tick in 0..1000 {
+                if let Some(burst) = assess(tick, skill, own(), contact, &mut state).burst {
+                    assert_eq!(burst, BurstRequest::INFRARED);
+                    starts.push(tick);
+                }
+            }
+            assert_eq!(starts, [first, first + 240, first + 480], "{skill:?}");
+            assert_eq!(state.devices_requested, 6);
+        }
+    }
     #[test]
     fn routine_budget_cooldown_and_stale_observations_limit_dispensing() {
         let mut contact = threat(EvidenceSource::ElectronicActive, Some(GuidanceClass::Radar));

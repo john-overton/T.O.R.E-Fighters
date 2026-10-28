@@ -661,3 +661,110 @@ The cruise hold measures cost, not guaranteed cue availability.
 
 Worst wall p95 is 1.214 ms and worst CPU p95 is 1.212 ms, below the
 2 ms gate. All ten lanes record zero refused and zero starved requests.
+
+## Countermeasure comparison
+
+Implementation mode, ordnance-fixes from `ba1bf7e4`. The before executable was
+frozen before edits. The after executable contains only the AI cadence and
+chaff probability changes, with identical flight data and study geometry.
+Each build ran 161,408 primary trials: main radar 59,136, reachable radar
+78,848, long radar 8,064, scripted IR 12,288 and real-AI 3,072. Main scripted
+cells use 64 seeds; AI cells use 32. The same seeds repeat across cells, so
+pooled rates are descriptive, not independent confidence estimates. `hit`
+means the actual ordnance hit event, not later aircraft-collision HP loss.
+
+The global 1.30 multiplier acts on the former effective whole-percent chaff
+chance, then uses a 10,000-unit draw. Thus 1% becomes 1.30%, with a 95% cap.
+IR probabilities and scripted non-CM controls are unchanged, and all paired
+scripted IR outcomes and non-CM control rows matched exactly. The AI controller
+now spaces pairs across separate two-second evaluation episodes.
+
+Each main row below pools head/beam/tail aspects and short/medium ranges,
+384 trials per build. `cm-ai` is the scripted release schedule, not the real
+AI controller. `beam+cm-ai` adds the scripted turn. Down is the look-down
+geometry; its beam rows exercise notch plus chaff.
+
+| Store | Geometry/profile | N each | Hit % before / after | Decoy % before / after | Decoyed then hit % before / after |
+| --- | --- | ---: | ---: | ---: | ---: |
+| AA10.JT | co / beam+cm-ai | 384 | 73.18 / 69.27 | 18.23 / 22.92 | 0.00 / 0.00 |
+| AA10.JT | co / cm-ai | 384 | 67.45 / 64.58 | 17.97 / 22.40 | 1.82 / 2.34 |
+| AA10.JT | co / cm-hammer | 384 | 64.58 / 63.02 | 22.66 / 24.74 | 2.08 / 2.08 |
+| AA10.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| AA10.JT | down / cm-ai | 384 | 11.46 / 10.68 | 3.39 / 4.17 | 0.00 / 0.00 |
+| AA12.JT | co / beam+cm-ai | 384 | 88.80 / 87.24 | 3.12 / 5.21 | 0.00 / 0.00 |
+| AA12.JT | co / cm-ai | 384 | 97.40 / 95.31 | 3.12 / 5.21 | 0.52 / 0.52 |
+| AA12.JT | co / cm-hammer | 384 | 97.14 / 97.14 | 3.12 / 3.12 | 0.26 / 0.26 |
+| AA12.JT | down / beam+cm-ai | 384 | 6.25 / 6.25 | 2.60 / 3.12 | 0.00 / 0.00 |
+| AA12.JT | down / cm-ai | 384 | 96.61 / 94.53 | 3.39 / 5.73 | 0.00 / 0.26 |
+| AIM120.JT | co / beam+cm-ai | 384 | 96.88 / 95.31 | 3.12 / 4.95 | 0.00 / 0.26 |
+| AIM120.JT | co / cm-ai | 384 | 97.40 / 95.57 | 3.12 / 5.21 | 0.52 / 0.78 |
+| AIM120.JT | co / cm-hammer | 384 | 97.14 / 97.14 | 3.12 / 3.12 | 0.26 / 0.26 |
+| AIM120.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| AIM120.JT | down / cm-ai | 384 | 48.44 / 47.40 | 1.56 / 2.60 | 0.00 / 0.00 |
+| AIM7.JT | co / beam+cm-ai | 384 | 81.77 / 77.34 | 18.75 / 23.44 | 0.52 / 0.78 |
+| AIM7.JT | co / cm-ai | 384 | 79.17 / 75.26 | 18.75 / 23.44 | 2.60 / 3.12 |
+| AIM7.JT | co / cm-hammer | 384 | 76.56 / 74.22 | 21.35 / 23.96 | 1.82 / 2.08 |
+| AIM7.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 | 1.56 / 2.34 | 0.00 / 0.00 |
+| AIM7.JT | down / cm-ai | 384 | 5.99 / 5.99 | 5.73 / 7.03 | 0.00 / 0.00 |
+| AIM7E.JT | co / beam+cm-ai | 384 | 72.66 / 59.11 | 30.21 / 43.75 | 2.86 / 2.86 |
+| AIM7E.JT | co / cm-ai | 384 | 63.28 / 52.86 | 26.82 / 39.58 | 3.12 / 3.91 |
+| AIM7E.JT | co / cm-hammer | 384 | 57.81 / 49.74 | 37.24 / 47.66 | 4.43 / 5.21 |
+| AIM7E.JT | down / beam+cm-ai | 384 | 0.26 / 0.00 | 10.68 / 14.84 | 0.00 / 0.00 |
+| AIM7E.JT | down / cm-ai | 384 | 6.51 / 5.21 | 11.72 / 16.15 | 0.00 / 0.00 |
+| MICA.JT | co / beam+cm-ai | 384 | 96.88 / 95.05 | 3.12 / 4.95 | 0.00 / 0.00 |
+| MICA.JT | co / cm-ai | 384 | 97.40 / 95.57 | 3.12 / 4.95 | 0.52 / 0.52 |
+| MICA.JT | co / cm-hammer | 384 | 97.14 / 97.14 | 3.12 / 3.12 | 0.26 / 0.26 |
+| MICA.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 | 0.26 / 0.52 | 0.00 / 0.00 |
+| MICA.JT | down / cm-ai | 384 | 55.99 / 54.69 | 2.08 / 3.39 | 0.26 / 0.26 |
+| R27ER.JT | co / beam+cm-ai | 384 | 66.93 / 63.54 | 17.71 / 22.40 | 0.00 / 0.00 |
+| R27ER.JT | co / cm-ai | 384 | 64.06 / 61.20 | 17.45 / 21.88 | 2.60 / 3.12 |
+| R27ER.JT | co / cm-hammer | 384 | 60.68 / 59.11 | 22.66 / 24.74 | 2.08 / 2.08 |
+| R27ER.JT | down / beam+cm-ai | 384 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| R27ER.JT | down / cm-ai | 384 | 13.02 / 12.24 | 2.86 / 3.65 | 0.00 / 0.00 |
+
+Real-AI controller results, 128 trials per row per build, pooling short/medium
+and head/tail at co-altitude:
+
+| Store | Skill | N each | Hit % before / after | Decoy % before / after | Decoyed then hit % before / after | Mean devices before / after | Mean rolls before / after |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| AA11.JT | novice | 128 | 60.16 / 60.16 | 23.44 / 23.44 | 8.59 / 8.59 | 1.83 / 1.83 | 0.92 / 0.92 |
+| AA12.JT | novice | 128 | 99.22 / 96.09 | 0.00 / 3.12 | 0.00 / 0.00 | 5.50 / 5.45 | 2.75 / 2.73 |
+| AIM120.JT | novice | 128 | 100.00 / 96.88 | 0.00 / 3.12 | 0.00 / 0.00 | 5.50 / 5.45 | 2.75 / 2.73 |
+| AIM7.JT | novice | 128 | 85.94 / 83.59 | 15.62 / 18.75 | 2.34 / 3.12 | 4.64 / 4.62 | 2.36 / 2.34 |
+| AIM9M.JT | novice | 128 | 81.25 / 81.25 | 19.53 / 19.53 | 0.78 / 0.78 | 2.13 / 2.13 | 1.00 / 1.00 |
+| AIM9X.JT | novice | 128 | 96.88 / 96.88 | 3.12 / 3.12 | 0.00 / 0.00 | 2.05 / 2.05 | 1.00 / 1.00 |
+| AA11.JT | average | 128 | 57.81 / 52.34 | 18.75 / 24.22 | 1.56 / 1.56 | 3.57 / 2.56 | 0.96 / 1.01 |
+| AA12.JT | average | 128 | 97.66 / 94.53 | 0.00 / 3.12 | 0.00 / 0.00 | 6.00 / 5.94 | 2.75 / 2.97 |
+| AIM120.JT | average | 128 | 100.00 / 96.88 | 0.00 / 3.12 | 0.00 / 0.00 | 6.00 / 5.90 | 2.75 / 2.97 |
+| AIM7.JT | average | 128 | 86.72 / 81.25 | 13.28 / 18.75 | 0.00 / 0.00 | 5.37 / 5.15 | 2.23 / 2.55 |
+| AIM9M.JT | average | 128 | 80.47 / 68.75 | 19.53 / 41.41 | 0.00 / 10.16 | 4.32 / 3.99 | 1.00 / 1.80 |
+| AIM9X.JT | average | 128 | 96.88 / 96.09 | 3.12 / 5.47 | 0.00 / 1.56 | 4.03 / 4.00 | 1.00 / 1.97 |
+| AA11.JT | experienced | 128 | 56.25 / 46.88 | 28.12 / 39.84 | 3.12 / 5.47 | 5.07 / 4.01 | 1.63 / 1.75 |
+| AA12.JT | experienced | 128 | 96.09 / 92.97 | 0.00 / 3.12 | 0.00 / 0.00 | 6.00 / 5.94 | 2.75 / 2.97 |
+| AIM120.JT | experienced | 128 | 100.00 / 96.88 | 0.00 / 3.12 | 0.00 / 0.00 | 6.00 / 5.94 | 2.75 / 2.97 |
+| AIM7.JT | experienced | 128 | 85.94 / 82.03 | 14.06 / 18.75 | 0.00 / 0.78 | 5.78 / 5.22 | 2.36 / 2.55 |
+| AIM9M.JT | experienced | 128 | 72.66 / 58.59 | 27.34 / 43.75 | 0.00 / 2.34 | 5.94 / 4.73 | 1.80 / 2.02 |
+| AIM9X.JT | experienced | 128 | 96.88 / 94.53 | 3.12 / 5.47 | 0.00 / 0.00 | 6.00 / 5.02 | 1.97 / 2.45 |
+| AA11.JT | ace | 128 | 66.41 / 46.09 | 20.31 / 40.62 | 0.00 / 0.00 | 5.41 / 4.25 | 1.11 / 1.88 |
+| AA12.JT | ace | 128 | 95.31 / 92.19 | 0.00 / 3.12 | 0.00 / 0.00 | 6.00 / 5.94 | 2.41 / 2.97 |
+| AIM120.JT | ace | 128 | 100.00 / 96.88 | 0.00 / 3.12 | 0.00 / 0.00 | 6.00 / 5.94 | 2.70 / 2.97 |
+| AIM7.JT | ace | 128 | 89.06 / 81.25 | 10.94 / 18.75 | 0.00 / 0.00 | 5.78 / 5.34 | 2.12 / 2.59 |
+| AIM9M.JT | ace | 128 | 75.78 / 59.38 | 24.22 / 43.75 | 0.00 / 3.12 | 5.91 / 5.44 | 1.38 / 2.31 |
+| AIM9X.JT | ace | 128 | 96.09 / 95.31 | 3.91 / 4.69 | 0.00 / 0.00 | 6.00 / 5.61 | 1.34 / 2.72 |
+
+The requested 30% buff is retained. Co-altitude scheduled chaff reduces active
+radar hit rates by about two percentage points. Early SARH is more affected:
+AIM7E falls from 63.28% to 52.86%. Active radar hammer results remain 97.14%
+in these matched seeds; extra cartridges in one episode do not add rolls.
+Look-down notch is still the dominant defense. There is no approved target
+hit rate, so these measurements do not establish that any larger multiplier
+would be better. The current increase does not obviously break the tested
+balance. If stronger chaff-only defense is wanted, a separately approved 1.50
+comparison would be a useful next experiment, not a validated recommendation.
+
+For IR, Ace AIM9M hit rate falls from 75.78% to 59.38%, with mean evaluation
+rolls rising from 1.38 to 2.31 while devices fall from 5.91 to 5.44. Ace AA11
+falls from 66.41% to 46.09%. These results support the cadence fix; the small
+AI sample does not establish a strictly monotonic skill curve. Full paired
+CSV data, isolated per-skill traces and analysis remain in the local
+`ordnance-fixes/` task folder. [Cadence evidence](ai-defense.md#current-countermeasure-timing-validation).

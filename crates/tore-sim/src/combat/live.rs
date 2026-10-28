@@ -413,9 +413,11 @@ pub struct DecoyRoll {
     pub susceptibility: u8,
     /// The dispenser's effectiveness, percent.
     pub effectiveness: u8,
-    /// The chance in percent: susceptibility x effectiveness / 100.
-    pub threshold: u8,
-    /// The draw, 0 to 99; below the threshold the missile follows the decoy.
+    /// The chance numerator in `bound` units, not necessarily whole percent.
+    pub threshold: u16,
+    /// Draw resolution: 100 for legacy/IR, 10000 for Energy chaff.
+    pub bound: u16,
+    /// The draw in 0..bound; below threshold the store follows the decoy.
     pub roll: u16,
     pub decoyed: bool,
 }
@@ -4047,7 +4049,8 @@ impl State {
                 device,
                 susceptibility,
                 effectiveness,
-                threshold,
+                threshold: u16::from(threshold),
+                bound: 100,
                 roll,
                 decoyed,
             });
@@ -11835,13 +11838,14 @@ fn energy_decoy(
             generation,
         )
     };
-    let threshold = (probability * 100.).floor() as u8;
+    let (threshold, bound) = decoys::chance_units(kind, probability);
     let random =
         decoys::mix(seed ^ decoys::mix(u64::from(p.id)) ^ decoys::mix(device.episode)) >> 11;
-    let roll = (random as f64 / ((1u64 << 53) as f64) * 100.).floor() as u16;
-    let decoyed = energy
-        .decoy
-        .evaluate(device, f64::from(threshold) / 100., seed, p.id)?;
+    let roll = (random as f64 / ((1u64 << 53) as f64) * f64::from(bound)).floor() as u16;
+    let decoyed =
+        energy
+            .decoy
+            .evaluate(device, f64::from(threshold) / f64::from(bound), seed, p.id)?;
     if decoyed {
         energy.target = Some(device.observation());
         energy.flight.terminal = true;
@@ -11867,6 +11871,7 @@ fn energy_decoy(
         susceptibility: w.seeker.chaff_flare_chance,
         effectiveness: device.effectiveness,
         threshold,
+        bound,
         roll,
         decoyed,
     })
