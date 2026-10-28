@@ -240,7 +240,7 @@ Build the release binaries first, stamping the same version the package will
 carry:
 
 ```sh
-TORE_BUILD_VERSION=0.2.1 cargo build --release --locked -p tore-app -p tore-extract
+TORE_BUILD_VERSION=0.2.2 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
 CI and releases no longer build 32-bit Windows (dropped 2026-10-25). The

@@ -12,7 +12,7 @@
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone 2 multiplayer released, now at v0.2.1, missions and campaigns next" src="https://img.shields.io/badge/milestone-M2%20released%2C%20M3%20next-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 2 multiplayer released, now at v0.2.2, missions and campaigns next" src="https://img.shields.io/badge/milestone-M2%20released%2C%20M3%20next-orange"></a>
 </p>
 
 <p align="center">
@@ -148,12 +148,14 @@ recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
 
 ## What works today
 
-Version 0.2.1 follows the [Milestone 2: Multiplayer](docs/ROADMAP.md#milestone-2-multiplayer)
+Version 0.2.2 follows the [Milestone 2: Multiplayer](docs/ROADMAP.md#milestone-2-multiplayer)
 release, 0.2.0. Build a Quick Mission with friends, fly together or against each
 other, and return to the lobby for the next round. 0.2.0 also brought ground
 attacks, defended surface targets, more aircraft and a fuller world to single
 player; 0.2.1 keeps scores across revivals, matches games by compatibility code
-and fixes the macOS first launch. The release notes for
+and fixes the macOS first launch; 0.2.2 flies guided stores on an energy model
+with physical decoys, reworks AI missile defense and limits Quick Mission
+distances per theater. The release notes for [0.2.2](docs/release/v0.2.2.md),
 [0.2.1](docs/release/v0.2.1.md) and [0.2.0](docs/release/v0.2.0.md) describe
 the changes.
 
