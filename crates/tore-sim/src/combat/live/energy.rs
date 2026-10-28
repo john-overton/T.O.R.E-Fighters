@@ -196,11 +196,13 @@ impl State {
         let envelope =
             self.energy_predictions
                 .envelope(key(owner, station), u32::MAX, question, self.tick);
+        // The AI's strike gate reads its exact-point answer only. AI cockpits
+        // request no range search, so requiring envelope membership here
+        // would leave every powered guided store permanently not due.
         let hit = self
             .energy_predictions
             .answer(key(owner, station), u32::MAX, question, self.tick)
-            .is_some_and(|r| r.answer.hit)
-            && envelope.is_some_and(|e| e.contains(observed.range * FT));
+            .is_some_and(|r| r.answer.hit);
         sight.energy_intercept = Some(hit);
         sight.in_reach &= hit;
         sight.reach = envelope.map(|e| super::super::guided::Reach {
@@ -552,6 +554,64 @@ mod tests {
             fall: FallState::default(),
             gun_round: None,
             tracer: false,
+        }
+    }
+    #[test]
+    fn an_ai_guided_sight_is_due_on_its_point_answer_without_a_range_search() {
+        let mut state = super::super::tests::fixture(true);
+        state.weapon_rules = Rules::Energy;
+        let w = weapon("R27ER.JT", 2);
+        let launcher = Launcher {
+            position: [0., 300., 0.],
+            basis: Basis::new(0., 0., 0.),
+            velocity: [0., 0., 30. / FT],
+            speed_fps: 30. / FT,
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            body_present: true,
+            controls: Default::default(),
+        };
+        let point = [0., 0., 3000. / FT];
+        let observed = seeker::Observation {
+            id: u32::MAX,
+            position: point,
+            velocity: [0.; 3],
+            quality: 1.,
+            off_axis: 0.,
+            range: missiles::length(missiles::sub(point, launcher.position)),
+        };
+        state.request_energy_solution(7, 0, &w, launcher, observed);
+        let question = state.energy_predictions.clients[0].question;
+        assert!(state.energy_predictions.ranges.is_empty());
+        let sight = crate::combat::guided::GuidedSight {
+            energy_intercept: None,
+            kind: Guidance::Laser,
+            aim: Some(point),
+            buddy: false,
+            ground_range_ft: Some(3000. / FT),
+            slant_range_ft: Some(observed.range),
+            reach: None,
+            in_reach: true,
+            advisory: None,
+            level: None,
+        };
+        for hit in [false, true] {
+            state.energy_predictions.clients[0].result = Some(prediction::Published {
+                at: 0,
+                question,
+                answer: missiles::energy_estimate::Answer {
+                    hit,
+                    seconds: 20.,
+                    closest: if hit { 0. } else { 1000. },
+                    impact_speed: 200.,
+                },
+            });
+            let out = state.energy_guided_output(7, 0, &w, launcher, sight);
+            assert_eq!(out.energy_intercept, Some(hit));
+            assert_eq!(super::super::guided_due(&out), hit);
         }
     }
     #[test]
