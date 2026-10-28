@@ -877,6 +877,7 @@ fn report_strike_flow(scene: &Scene, w: &mut Watch, t: f64) {
             if open { "yes" } else { "no" },
             strike
                 .release_in_s()
+                .filter(|s| s.is_finite())
                 .map_or("none".into(), |s| format!("{s:.2}")),
             if w.commit_held { "yes" } else { "no" }
         );
