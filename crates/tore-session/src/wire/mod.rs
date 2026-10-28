@@ -270,7 +270,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// fixed distance table with the server's distance adjustment.
 /// 79 adds the AI strike's early retarget and 5 s release commitment
 /// (new strike checkpoint state).
-pub const PROTOCOL_VERSION: u16 = 79;
+/// 80 keeps AI helicopters out of known threat rings they planned through
+/// (rules only).
+pub const PROTOCOL_VERSION: u16 = 80;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

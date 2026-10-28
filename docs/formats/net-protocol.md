@@ -3289,6 +3289,10 @@ again with an observer; the capture format did not change for it.
   broken off by a defense trigger; the strike checkpoint gains the release
   estimate, commitment and retarget state. The compatibility simulation
   version is 8.
+  80 changes no message layout (2026-10-28, 0.2.2-rc1): an AI helicopter
+  gives up a pass into a known threat ring seen before release and takes a
+  clear stand-off, and a line out of a ring must lead straight out. The
+  compatibility simulation version is 9.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
