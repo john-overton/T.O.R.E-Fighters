@@ -703,7 +703,9 @@ Model identity changes from `2060610122284599500` at the base to
 `3759883531439988201` for countermeasures, `501164167509140080` for range advice,
 `3748787411052948283` after the three motor fits, `8371591701768486536`
 for the unfloored chaff multiplier (decoy rule revision 3) and
-`27838009745295643` for per-range region advice (prediction rule revision 7). The behavior tripwire
+`27838009745295643` for per-range region advice (prediction rule revision 7), then
+`14178415726005986681` for the doubled chaff multiplier, 2.60 (decoy rule
+revision 4, 2026-10-28). The behavior tripwire
 trace remains `3894057758776089527`; its sampled stores are unchanged.
 No protocol or replay version is bumped. Checkpoints gain minimum fields in
 Envelope and RangeEstimate, and minimum/first fields in RangeSearch. The wire
@@ -1014,4 +1016,5 @@ comparison; AA12, AIM7 and R27ER were not rerun with the floored rule.
 Older SARH stores barely move from the floored rule because their chances
 were already several percent. The active-radar stores now show a real
 chaff effect at co-altitude: MICA `cm-ai` decoys rise from 3.12% to 8.07% and
-hits fall from 97.40% to 92.97%. The game-balance value stays 1.30.
+hits fall from 97.40% to 92.97%. On 2026-10-28 John doubled the game-balance
+value to 2.60; its chaff-only comparison is recorded separately.
