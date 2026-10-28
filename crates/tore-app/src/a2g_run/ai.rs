@@ -691,10 +691,11 @@ struct Watch {
     /// The strike phase last reported.
     phase: Option<tore_sim::ai::strike::Phase>,
     /// The strike target last reported, and whether the committed-to-release
-    /// window was open and held a defence back (T.O.R.E, 2026-10-28).
+    /// window was open and when it first held a defence back (T.O.R.E,
+    /// 2026-10-28).
     strike_target: Option<u32>,
     committed: bool,
-    commit_held: bool,
+    commit_held: Option<f64>,
     /// The no-laze decision last reported (slice ST-G).
     no_laze: Option<tore_sim::ai::strike::NoLaze>,
     /// A helicopter's threat decision last reported (slice H4).
@@ -770,7 +771,7 @@ impl Watch {
             phase: None,
             strike_target: None,
             committed: false,
-            commit_held: false,
+            commit_held: None,
             no_laze: None,
             threat_call: None,
             lasers: vec![(plane.0, None)],
@@ -866,23 +867,27 @@ fn report_strike_flow(scene: &Scene, w: &mut Watch, t: f64) {
         }
     }
     let open = strike.holds_run(wings.mission().tick());
-    if open {
-        w.commit_held |= actor.defense_decision().is_some_and(|d| d.motion.is_some())
-            || actor.incoming_fire_cue().is_some();
+    if open
+        && w.commit_held.is_none()
+        && (actor.defense_decision().is_some_and(|d| d.motion.is_some())
+            || actor.incoming_fire_cue().is_some())
+    {
+        w.commit_held = Some(t);
     }
     if open != w.committed {
         w.committed = open;
         println!(
-            "ai-strike: COMMIT t={t:.3} open={} release_s={} held_defence={}",
+            "ai-strike: COMMIT t={t:.3} open={} release_s={} held_defence={} held_at={}",
             if open { "yes" } else { "no" },
             strike
                 .release_in_s()
                 .filter(|s| s.is_finite())
                 .map_or("none".into(), |s| format!("{s:.2}")),
-            if w.commit_held { "yes" } else { "no" }
+            if w.commit_held.is_some() { "yes" } else { "no" },
+            w.commit_held.map_or("none".into(), |at| format!("{at:.3}"))
         );
         if !open {
-            w.commit_held = false;
+            w.commit_held = None;
         }
     }
 }
