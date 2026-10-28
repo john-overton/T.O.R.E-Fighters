@@ -448,9 +448,60 @@ exit unless marked.
 - **Defend.** A missile warning or an attacking fighter hands control to the
   existing B47 reactions. The pass is abandoned, countermeasures and breaks run
   as today, and the striker resumes at ingress when the threat is gone and the
-  picture says safe (below). Damage or low fuel sends it home.
+  picture says safe (below). Damage or low fuel sends it home. Inside the
+  committed-to-release window (below) a new trigger waits for the release.
 - **Safe** (also used by takeover): no warning in the last 10 s, no known SAM
   covering the target, and no hostile fighter inside 15 nm. Fitted.
+- **Target dies early: retarget at once** (T.O.R.E opinionated change
+  requested by John on 2026-10-28). When another aircraft, for example a
+  guided-store wingman, destroys the striker's target before the striker's
+  pass reaches it, the striker does not fly the exit. It picks the next target
+  at once, with the same target choice and the same attacker allowance as at
+  the exit distance, and sets up a new pass. With that target at least half
+  the exit distance away (15,000 ft, 25,000 ft for a heavy, or the turn
+  radius if larger), it turns toward it at once, climbing back to the height
+  it cruises at, and chooses its store and pass once it points at it (within
+  15 degrees, as at the end of an exit) and is back within 300 ft of that
+  height, or is inside half the exit distance: at once when it already is.
+  Nearer than that, it flies the exit on its heading, but turns back at half
+  the exit distance from the new target instead of the full one. The climb
+  back is there because a straight run begun from the old run's low height
+  flew the line to the target down to about 500 ft, where FRAG held the bomb
+  (Vladivostok HQ, A-10, 2026-10-28). This holds only for a striker that has not released on its pass and is not
+  past its release point (the cue beyond the aim, a dive's pull-out, or with
+  no estimate the target behind it). A striker that released, or is past the
+  point, keeps the normal exit, and with no target left it egresses as before
+  and goes home. The half exit distance and the 300 ft are fitted (agent). Retail, and
+  T.O.R.E before this change, flew the full exit straight on and chose again
+  at the exit distance: in the Vladivostok HQ Quick Mission (A-10, Mk 82,
+  2026-10-28) the striker's bunker was killed by its wingman while the
+  striker was about 25,000 ft from it, and the striker flew some 30,000 ft on
+  over the defended site, about 140 s, before it chose the HQ.
+- **Committed to the release, 5 s** (T.O.R.E opinionated change requested by
+  John on 2026-10-28). Once an attack run is 5 s or less from its computed
+  release point, a new defence trigger (a missile or gunfire defence, or a
+  fighter inside 5 nm facing it) does not break the run off: the striker
+  flies on, releases, and then reacts (it defends if the threat is still
+  there, else it egresses as usual). Countermeasures still go as before, and
+  hits still damage or kill the aircraft as before; only the decision to
+  break off waits. The time to release comes from what the pass already
+  flies by: for a bomb or rocket, the cue's distance short of the aim along
+  the track over the cue's measured closing speed (filtered over 0.5 s; at
+  first the ground speed, as the level release T has it); for a guided bomb,
+  the host's sight, its distance to the T's bar over the ground speed; for a
+  seeker missile, its range less its fire range over the closing speed. It
+  covers every pass with a release point: straight, level, fast-high,
+  laydown, dive, pop-up (its pull too), rockets (the window holds through the
+  rocket burst) and guided stores. The window opens only in the pass's final
+  or a pop-up's pull, before anything has left (or during a rocket burst),
+  and closes at the release, when the cue is more than 0.5 s past the aim,
+  when the pass ends, or at the latest 8 s after it opened, whatever the
+  estimate says. The 0.5 s, the filter and the 8 s are fitted (agent). Not
+  applied to a gun run (it has no single release point, only bursts), nor to
+  the helicopters and the AC-130, which fly their own families and their own
+  defence (a helicopter hides, and John's rule for it is to leave always).
+  Before this change an anti-aircraft burst broke a straight Mk 82 run 0.2 s
+  before its release in the same Vladivostok HQ run.
 
 ```mermaid
 stateDiagram-v2
@@ -464,6 +515,10 @@ stateDiagram-v2
     Release --> Egress: weapon away
     Guide --> Egress: impact or weapon lost
     Attack --> Egress: pass ends with no release
+    Attack --> Retarget: target dies before the release (T.O.R.E)
+    Retarget --> PassChoice: next target ahead, room for a pass, at height
+    Retarget --> ReAttack: turn and climb to it, or exit if too near
+    Retarget --> Egress: no target left
     Egress --> ReAttack: past the exit distance
     ReAttack --> PassChoice: target alive, store left
     ReAttack --> NextTarget: target dead
@@ -471,7 +526,8 @@ stateDiagram-v2
     NextTarget --> Ingress: target left
     NextTarget --> Home: none left
     Ingress --> Defend: threatened
-    Attack --> Defend: threatened
+    Attack --> Defend: threatened, more than 5 s from release
+    Release --> Defend: threatened in the last 5 s (T.O.R.E)
     Defend --> Ingress: threat gone, safe
     Defend --> Home: damaged or bingo
     Home --> [*]
@@ -507,8 +563,8 @@ marked.
 | Dive pull-out (ST-T2) | A dive pulls out where its pull-out at the present speed and the AI's G limit (radius V² / (g (G - 1)), plus 1 s of sink) bottoms out 1,000 ft over the ground, never below retail's 2,000 ft; retail's max(2R, 2,000 ft) is replaced, its turn radius being far tighter than the aircraft flies (opinionated, agent). While diving, the terrain floor is that plan instead of the general one (whose glide-slope term held ST-T's dives to about 50 degrees): the planned dive exception John allowed |
 | Laydown height (ST-T2) | The lowest 50 ft step from 500 ft at which a level release at the present speed clears the sight's LOW rule (the fall lasts the fuze's arming time, with 20% margin) and its FRAG rule (the aircraft, flying on level, is beyond the fragments' reach when the bomb bursts, with 10% margin). Fall time and travel use the shared [bomb flight model](air-to-ground.md#bomb-motion) with the store's body and the target's elevation. Skill offsets and release tolerances are unchanged. |
 | Strafe end | Cease fire and break off at 2,000 ft slant to the target, 500 ft above the ground, the target no longer ahead, or the gun empty. A gun run's terrain floor is the planned pull-out with a 200 ft clearance (a bomb dive's is 1,000 ft), so the run can keep the gun on the target down to the break-off height (fitted, agent, ST-G) |
-| Exit | Retail's: a jink of four 3 s legs at maximum speed (12 degrees up, 10 degrees to the side the draw picks) inside 10,000 ft, then 10 degrees up at maximum speed, levelling 2,000 ft over the altitude the strike began at (a dive's exit climbs back to the dive's height), turning back at max(30,000 ft, 2R) (a heavy at 50,000 ft) |
-| Defend | A B47 defence (missile or gunfire) or a fighter inside 5 nm within 45 degrees of its nose hands the flying back. Once no warning has sounded for 10 s it resumes at ingress if [safe](#egress-re-attack-and-going-home) (the safe test as written, confirmed by John on 2026-10-11); if not, it egresses to the exit distance and resumes only if safe by then, else goes home |
+| Exit | Retail's: a jink of four 3 s legs at maximum speed (12 degrees up, 10 degrees to the side the draw picks) inside 10,000 ft, then 10 degrees up at maximum speed, levelling 2,000 ft over the altitude the strike began at (a dive's exit climbs back to the dive's height), turning back at max(30,000 ft, 2R) (a heavy at 50,000 ft). A target that dies before the pass releases is not followed by the exit: the next target is chosen at once ([Egress, re-attack and going home](#egress-re-attack-and-going-home); John, 2026-10-28) |
+| Defend | A B47 defence (missile or gunfire) or a fighter inside 5 nm within 45 degrees of its nose hands the flying back, except inside the 5 s committed-to-release window, where it waits for the release ([Egress, re-attack and going home](#egress-re-attack-and-going-home); John, 2026-10-28). Once no warning has sounded for 10 s it resumes at ingress if [safe](#egress-re-attack-and-going-home) (the safe test as written, confirmed by John on 2026-10-11); if not, it egresses to the exit distance and resumes only if safe by then, else goes home |
 | Home | No target or no usable store left: the mission's own return (a landing order with a runway, else the leader flies home) |
 
 Known limits, each an effect of flying through the input-only adapter rather

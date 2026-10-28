@@ -690,6 +690,11 @@ struct Watch {
     gunship_bursts: usize,
     /// The strike phase last reported.
     phase: Option<tore_sim::ai::strike::Phase>,
+    /// The strike target last reported, and whether the committed-to-release
+    /// window was open and held a defence back (T.O.R.E, 2026-10-28).
+    strike_target: Option<u32>,
+    committed: bool,
+    commit_held: bool,
     /// The no-laze decision last reported (slice ST-G).
     no_laze: Option<tore_sim::ai::strike::NoLaze>,
     /// A helicopter's threat decision last reported (slice H4).
@@ -763,6 +768,9 @@ impl Watch {
             gunship_burst: None,
             gunship_bursts: 0,
             phase: None,
+            strike_target: None,
+            committed: false,
+            commit_held: false,
             no_laze: None,
             threat_call: None,
             lasers: vec![(plane.0, None)],
@@ -832,6 +840,50 @@ impl Scene {
             .find(|c| c.plane == plane)?
             .flight;
         Some((f.position, f.speed))
+    }
+}
+
+/// The strike target whenever it changes (an early retarget picks the next
+/// one inside a pass), and the committed-to-release window as it opens and
+/// closes, with whether it held a defence back (T.O.R.E, John, 2026-10-28).
+fn report_strike_flow(scene: &Scene, w: &mut Watch, t: f64) {
+    let Some(wings) = scene.world.ai_wings.as_ref() else {
+        return;
+    };
+    let Some(actor) = wings.mission().actor(w.plane.0) else {
+        return;
+    };
+    let Some(strike) = actor.strike() else {
+        return;
+    };
+    if strike.target() != w.strike_target {
+        w.strike_target = strike.target();
+        if let Some(target) = strike.target() {
+            println!(
+                "ai-strike: TARGET t={t:.3} target={target:#010x} phase={:?}",
+                strike.phase()
+            );
+        }
+    }
+    let open = strike.holds_run(wings.mission().tick());
+    if open {
+        w.commit_held |= actor.defense_decision().is_some_and(|d| d.motion.is_some())
+            || actor.incoming_fire_cue().is_some();
+    }
+    if open != w.committed {
+        w.committed = open;
+        println!(
+            "ai-strike: COMMIT t={t:.3} open={} release_s={} held_defence={}",
+            if open { "yes" } else { "no" },
+            strike
+                .release_in_s()
+                .filter(|s| s.is_finite())
+                .map_or("none".into(), |s| format!("{s:.2}")),
+            if w.commit_held { "yes" } else { "no" }
+        );
+        if !open {
+            w.commit_held = false;
+        }
     }
 }
 
@@ -994,6 +1046,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             print_rings(scene, w, t, target_at);
         }
     }
+    report_strike_flow(scene, w, t);
     let no_laze = scene
         .actor(w.plane)
         .and_then(|a| a.strike())

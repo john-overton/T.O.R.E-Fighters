@@ -3,7 +3,9 @@
 //! Every field the next step reads is coded: the phase and its start, the
 //! pass, the target and store, the pass count that seeds the next aim, the
 //! drawn aim, the final's line, the release count, the exit's heading, a gun
-//! run's burst state and the height the striker was tasked at.
+//! run's burst state and the height the striker was tasked at, and (T.O.R.E,
+//! John, 2026-10-28) the release estimate, the committed-to-release window
+//! and whether the exit or turn back follows an early retarget.
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
 //! restored strike starts without it. `Context`, `Order`, `Steer`, `Handling`,
@@ -170,6 +172,10 @@ crate::checkpoint_struct!(Strike {
     cue_last,
     tasked_agl_ft,
     heli,
+    release_cue,
+    release_in_s,
+    committed,
+    retargeted,
 } skip {
     inputs = None,
 });
