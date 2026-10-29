@@ -38,6 +38,7 @@ pub use record::DecoyRoll;
 mod release;
 mod reports;
 mod strike;
+mod strike_reach;
 mod takeover;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -809,6 +810,10 @@ pub struct AiWings {
     /// helicopter's stand-off advance), by record and whether the energy
     /// rules fly it: a fixed function of the record, never checkpointed.
     flight_times: BTreeMap<(String, bool), Option<tore_sim::ai::strike::FlightTimes>>,
+    /// The answers on guided shots from farther out a striker plans a
+    /// stand-off release with (John, 2026-10-29), by record, launch band and
+    /// range step: a fixed function of the record, never checkpointed.
+    shot_cache: std::sync::Arc<strike_reach::ShotCache>,
     /// Projectile id to the actor that fired it, for B47 attribution. The
     /// player's shots are absent; the bridge remembers its own launchers.
     ai_shots: BTreeMap<u32, u32>,
@@ -1494,6 +1499,7 @@ impl AiWings {
             seen_projectiles: BTreeSet::new(),
             rotor_reach: Default::default(),
             flight_times: BTreeMap::new(),
+            shot_cache: Default::default(),
             ai_shots: BTreeMap::new(),
             ejection_events: Vec::new(),
             chatter: Vec::new(),

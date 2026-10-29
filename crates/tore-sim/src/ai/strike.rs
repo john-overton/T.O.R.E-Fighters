@@ -53,11 +53,14 @@ use crate::sensors::FEET_PER_NAUTICAL_MILE;
 
 #[path = "strike_lase.rs"]
 mod lase;
+#[path = "strike_reach.rs"]
+pub mod reach;
 pub use lase::{
     LASE_BANK_MARGIN_DEG, LASE_CONE_EXIT_FT, LASE_MAX_TICKS, LASE_MIN_TICKS, LASE_RADIUS_MIN_FT,
     LASE_RADIUS_TURNS, LASE_REACH_SHARE, LASE_WAIT_TICKS, Lase, LaseEnd, LaseInputs, LaseSensor,
     LaseUntil, WingFacts, bank_cap_deg, lase_radius_ft, orbit_speed_fps, turn_rate_deg,
 };
+pub use reach::{ShotLaunch, ShotTable, Shots};
 
 /// Feet in a metre, for John's release circle (given in metres).
 pub const FEET_PER_METRE: f64 = 1. / 0.3048;
@@ -553,6 +556,15 @@ pub struct Solution {
     /// negative once past it; `None` for every other store, whose time the
     /// strike works out itself (the committed-to-release window).
     pub release_seconds: Option<f64>,
+    /// The store would reach the target from here, whatever the AI's own
+    /// release range: a seeker's lock without the fire range, a guided
+    /// weapon's IN RNG with no advisory (under the energy rules, its
+    /// exact-point answer). A stand-off release planned outside known rings
+    /// leaves on it (John, 2026-10-29).
+    pub reaches: bool,
+    /// The ground range of the guided sight's release bar, feet: where a
+    /// guided bomb is due (none for other stores, or with no reach).
+    pub bar_ft: Option<f64>,
 }
 
 /// The host's per-step description (see the module notes).
@@ -569,6 +581,10 @@ pub struct Inputs {
     pub solution: Option<Solution>,
     /// The laser and the spots around it (slice ST-L).
     pub lase: LaseInputs,
+    /// The host's answers on a guided store's shots from farther out (a
+    /// stand-off release outside known rings, John 2026-10-29); none when
+    /// it gave none.
+    pub shots: Shots,
 }
 
 /// Where the striker flies this tick: a heading and a flight-path pitch,

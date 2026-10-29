@@ -206,6 +206,7 @@ impl AiWings {
             // function of the records, worked out again on demand.
             rotor_reach: _,
             flight_times: _,
+            shot_cache: _,
             ai_shots,
             last_hp,
             uncredited_losses,
@@ -304,6 +305,7 @@ impl AiWings {
             // function of the records, worked out again on demand.
             rotor_reach: _,
             flight_times: _,
+            shot_cache: _,
             ai_shots,
             last_hp,
             uncredited_losses,
