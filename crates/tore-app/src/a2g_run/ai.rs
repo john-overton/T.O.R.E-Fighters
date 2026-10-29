@@ -1369,7 +1369,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     }
     observe_guns(scene, w, t, target_at);
     observe_shots(scene, w, t);
-    observe_sites(scene, w, t);
+    observe_sites(scene, w, t, tick);
     trace(scene, w, tick, target_at);
     let state = &scene.world.combat.state;
     // Kills credited to the striker.
@@ -1666,8 +1666,12 @@ fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
 /// striker's ground picture (`SEEN`: the site, the range, and the ring it
 /// gives), and each time the terrain line between the striker and a site
 /// within 30,000 ft opens or closes (`SIGHT`, the sight line the eye uses),
-/// for reading why a site was or was not known when it fired.
-fn observe_sites(scene: &Scene, w: &mut Watch, t: f64) {
+/// for reading why a site was or was not known when it fired. Looked at
+/// every quarter second, the cadence the picture follows its contacts at.
+fn observe_sites(scene: &Scene, w: &mut Watch, t: f64, tick: u64) {
+    if !tick.is_multiple_of(30) {
+        return;
+    }
     let state = &scene.world.combat.state;
     let Some((own, _)) = scene.striker_at(w.plane) else {
         return;
