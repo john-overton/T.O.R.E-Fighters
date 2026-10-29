@@ -1122,21 +1122,15 @@ def scenarios() -> list[Scenario]:
     at2 = ["--aircraft", "mi24", "--load", "AT2", *heli]
     heli_rockets = ["--aircraft", "ah64", "--load", "LAU61", *heli]
     heli_rockets_out = [*heli_rockets, "--seconds", "300", "--follow-egress"]
-    # Light SAMs with the layout of surface seed 16: the Mi-24 starts inside the ring of an SA-14 it
-    # knows and the pop-up's line to the column runs deeper into that ring before it leaves. Until
-    # 0.2.2 it flew that pop-up through the warnings and broke (slice ST-H); with the energy rules'
-    # SA-14 it was hit twice, its controls damaged, and it went home without firing. Since then a
-    # line out of a ring must lead straight out (docs/spec/ai-strike.md, "Helicopter threat
-    # awareness"): it flies the stand-off from outside the ring, unengaged, and hurts the tank.
-    # Seed 19, ST-H's layout, holds a SAM that out-ranges the AT-2: since slice H4 the helicopter
-    # holds off there (ai-strike-heli-defended).
+    # Light SAMs with the layout of surface seed 16 (an SA-14 team 12,100 ft from the Mi-24's start):
+    # ai-strike-heli-defended, "mi24 ambushed by the SA-14 it starts inside". Seed 19, ST-H's layout,
+    # holds a SAM that out-ranges the AT-2: since slice H4 the helicopter holds off there
+    # (ai-strike-heli-defended).
     sams16 = ["--defenses", "0", "1", "--surface-seed", "16"]
     sams19 = ["--defenses", "0", "1", "--surface-seed", "19"]
     heli_runs = [
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2"),
          dict(label="mi24 at2 popup", profile="popup", skill=2, miss=None, hit=True)),
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams16),
-         dict(label="mi24 at2 under SAMs it starts inside", profile="standoff", skill=2, miss=None, hit=True)),
         # The rocket runs follow the helicopter out (slice HF1): it turns away from the column and
         # masks low; before, it flew on over the column and a site it had not seen shot it down 2 s
         # after the old run end.
@@ -1239,6 +1233,17 @@ def scenarios() -> list[Scenario]:
                    "--speed", "120", "--seconds", "200", "--skill", "2", *sams, "--surface-seed", "1"),
          dict(label="mi24 holds off the SAMs it would stand off under",
               decisions=["hold_off", "home"], no_release=True)),
+        # Surface seed 16: the Mi-24 starts 12,100 ft from an SA-14 team, inside its ring. Until 0.2.2 it
+        # flew the pop-up through the warnings and broke (slice ST-H); then, knowing the SA-14 from the
+        # start, it flew the stand-off from outside the ring and hurt the tank (ai-strike-heli, "mi24 at2
+        # under SAMs it starts inside"). Since the game hides shoulder-fired teams (John, 2026-10-29) it
+        # does not know the team: the team launches 20 s in (`SHOT ... known=no`), the helicopter
+        # breaks and leaves (`threat_leave`), the launch gives the team away, its second round 10 s
+        # later is a known site's shot (`known=yes`), both rounds hit and it goes home without firing.
+        # The line out of a ring it knows is the unit tests' (helicopter_threat_tests).
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams16),
+         dict(label="mi24 ambushed by the SA-14 it starts inside", decisions=["leave"], breaks=2,
+              no_release=True, unknown_shooter=True)),
     ]
     # The AC-130 (slice ST-F) on the moving armoured column: the TVIET truck park's radar-laid guns
     # (26,200 and 44,250 ft reach) shoot it down on its way in, so the quiet column it is.
