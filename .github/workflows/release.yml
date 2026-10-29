@@ -12,6 +12,11 @@ on:
     branches:
       - 'release-test/**'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version for a test package (e.g. 0.2.2-rc.1); empty uses git describe'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -101,9 +106,13 @@ jobs:
           fi
       - name: Stamp the build version
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
           else
             version="$(git describe --tags --always)"
           fi

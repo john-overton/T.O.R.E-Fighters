@@ -208,7 +208,10 @@ the five `packages-*` artifacts from that run with `gh run download`
 master server, [operations](MASTER-SERVER.md#downloading-a-release); and the
 four `server-*` artifacts, the dedicated server's archives,
 [downloading it](DEDICATED-SERVER.md#downloading-it)).
-`workflow_dispatch` does the same once the workflow exists on `main`.
+`workflow_dispatch` does the same once the workflow exists on `main`. A
+dispatched run stamps `git describe` as the version, or the `version` input
+when one is given, so a test package can carry the coming release's number
+without a tag: `gh workflow run release.yml --ref BRANCH -f version=0.2.2-rc.1`.
 
 CI (`ci.yml`, Rust baseline, and `network.yml`, Network loopback) no longer runs
 on every push or pull request (John, 2026-10-23): the pre-push hook covers each
