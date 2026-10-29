@@ -570,27 +570,42 @@ class HelicopterTests(unittest.TestCase):
         scenarios = {sc.name: sc for sc in s.scenarios()}
         defended = scenarios["ai-strike-heli-defended"]
         argsets = [defended.args] + [step.args for step in defended.then]
-        self.assertEqual(len(argsets), 7)
+        self.assertEqual(len(argsets), 8)
         self.assertTrue(all("mi24" in a for a in argsets))
         self.assertNotIn("--profile", [x for a in argsets for x in a], "the AI chooses its pass")
         heli = scenarios["ai-strike-heli"]
         self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
         held = ["threat_hold_off", "threat_home"]
         # Heavy AAA holds off since the stand-off's advance follows the AT-2's flight (2026-10-29).
+        # The ambush runs (2026-10-29): a shot from a site it did not know, the leave, the resume.
+        ambushed = dict(decisions=["threat_leave", "threat_resume"], shots=[(29.0, "no")])
         honest = [heli_run(profile="standoff", breaks=0, released=False, killed=False,
                            decisions=["threat_hold_off"]),
                   heli_run(profile="standoff", breaks=0),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
-                  heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume", "threat_leave",
-                                                "threat_hold_off", "threat_resume"]),
+                  heli_run(breaks=8, **ambushed),
+                  heli_run(breaks=8, **ambushed),
                   heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
         self.assertEqual(defended.check("\n".join(honest)), [])
-        # Slice HF1: the ambushed run must leave and resume after it.
+        # Slice HF1: the ambushed runs must leave and resume after it.
         unambushed = list(honest)
         unambushed[5] = heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume"])
         self.assertNotEqual(defended.check("\n".join(unambushed)), [])
+        # 2026-10-29: and the leave must answer a shot from a site it did not know.
+        for known in ("yes", "none"):
+            known_site = list(honest)
+            known_site[6] = heli_run(breaks=8, decisions=["threat_leave", "threat_resume"], shots=[(29.0, known)])
+            self.assertNotEqual(defended.check("\n".join(known_site)), [], known)
+        gunned = list(honest)
+        gunned[5] = heli_run(breaks=8, decisions=["threat_leave", "threat_resume"])
+        self.assertNotEqual(defended.check("\n".join(gunned)), [])
+        # Both ambush runs lay the site out the same way: placed, hidden, destroyed after its shot.
+        for args in argsets[5:7]:
+            for flag in ("--place-site", "--site-sight", "--sead-site", "--sead-after-shot", "--follow-threat"):
+                self.assertIn(flag, args)
+            self.assertNotIn("--sead-at", args, "the SEAD stand-in goes by the shot, not the clock")
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
 

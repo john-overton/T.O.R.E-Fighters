@@ -1169,6 +1169,13 @@ def scenarios() -> list[Scenario]:
     # threat is quiet. Every run lives. The switch to another target outside the rings is the unit
     # tests' (no driver layout has a second target outside every ring).
     sams = ["--defenses", "0", "1"]
+
+    def ambush_site(site: str) -> list[str]:
+        """The ambusher's layout (2026-10-29): `site` 7,000 ft south-south-west of the target (bearing
+        190), which the eye lists only from 3,000 ft, destroyed 4 s after its first launch."""
+        return ["--place-site", f"{site},190,7000", "--site-sight", f"{site},3000",
+                "--sead-site", site, "--sead-after-shot", "4"]
+
     defended_runs = [
         # Heavy AAA on the column (before H4 the Mi-24 flew the pop-up through it and was lost). Until
         # 2026-10-29 it fired from a point off the straight line and guided its AT-2 on into the 9,500 ft
@@ -1200,21 +1207,25 @@ def scenarios() -> list[Scenario]:
          dict(label="mi24 resumes after SEAD", decisions=["hold_off", "resume"], sead=True, release=True,
               hurt=True)),
         # An ambush by a site it had not seen (slice H4's rule; restored in slice HF1, John
-        # 2026-10-13). Seed 15 with its SA-14 moved 5,000 ft south-west of the column
-        # (`--place-site`): it holds off that known ring, resumes once the column has driven out of
-        # it and fires; on its way out (the exit turns away and masks) an SA-7 it had not seen
-        # engages it: it breaks, leaves that ring, holds off, resumes and fires again, killing the
-        # tank. The run follows it (`--follow-threat`) to the shot after the resume. Since the tanks'
-        # air rules (John, 2026-10-24: a 3 s lay, a 20 degree ceiling, wider aim) the column's tanks
-        # fire at it less, so it breaks once (two BREAK lines) where it broke twice (six). KNOWN FAILURE
-        # since 0.2.2's slower AT-2, and a layout to replace: the SA-14's ring is now its real launch
-        # reach at a helicopter (19,500 ft) and the column does not leave it, so it holds off and goes
-        # home; `threat_leave` now means a shot from a site it did not know (John, 2026-10-29), which
-        # needs a site the terrain hides until it unmasks within its reach on the way out.
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420",
-                   "--follow-threat", "--place-site", "0x50000019,240,5000"),
-         dict(label="mi24 ambushed", decisions=["hold_off", "resume", "leave", "resume"], breaks=2,
-              release=True, kill=True)),
+        # 2026-10-13; a new layout for John's rules of 2026-10-29, when `threat_leave` came to mean a
+        # shot from an unknown site). A lone SA-7 of seed 7 (an SA-14 of seed 8, at skill 3, in the
+        # second run) stands 7,000 ft south-south-west of the factory and the helicopter's eye lists
+        # it only from 3,000 ft (`--site-sight`): terrain cannot do that here, because a site needs
+        # about 20 s of clear line before its first launch and the eye lists it within 6 s of the line
+        # opening. The site launches at the helicopter 10,900 ft away on its way in (`SHOT ... known=no`),
+        # it breaks (`threat_leave`), takes the first round's hit, leaves the ambush ring, holds off and
+        # resumes once the ring has been quiet a minute; the factory dies to the shot after the resume.
+        # The SEAD stand-in destroys the site 4 s after its first launch (`--sead-after-shot`): its
+        # second round, 10 s later, would hit too, take the helicopter below half its hit points and
+        # send it home. The margins are in docs/spec/ai-strike.md, "The ambush layout of 2026-10-29".
+        (pilot_run("UKR", "QUFACT", *at2, "--skill", "2", *sams, "--surface-seed", "7", "--seconds", "400",
+                   "--follow-threat", *ambush_site("0x5000000f")),
+         dict(label="mi24 ambushed by an SA-7", decisions=["leave", "resume"], breaks=2, release=True, kill=True,
+              unknown_shooter=True)),
+        (pilot_run("UKR", "QUFACT", *at2, "--skill", "3", *sams, "--surface-seed", "8", "--seconds", "400",
+                   "--follow-threat", *ambush_site("0x5000000e")),
+         dict(label="mi24 ambushed by an SA-14", decisions=["leave", "resume"], breaks=2, release=True, kill=True,
+              unknown_shooter=True)),
         # From 4 nm at 200 ft on seed 1 the AI once chose the stand-off under the SAMs and turned
         # away at once; since a line out of a ring must lead straight out it holds off from the
         # start (no pass is named), with the same decisions.
@@ -1567,8 +1578,10 @@ def scenarios() -> list[Scenario]:
                   "tank), light AAA at the factory (the pop-up given up for a stand-off once the guns are known, "
                   "kill), a SAM that out-ranges the AT-2 and an "
                   "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
-                  "(it resumes and fires), an ambush by a site it had not seen on its way out (it "
-                  "breaks, leaves the ring, holds off, resumes and fires again), and the stand-off layout of seed 1 (it holds "
+                  "(it resumes and fires), two ambushes on the factory by an SA-7 and an SA-14 the "
+                  "helicopter does not list until it is near (a launch with known=no, then it breaks, "
+                  "leaves the ring, holds off, resumes and kills the factory; the site is destroyed after "
+                  "its first launch), and the stand-off layout of seed 1 (it holds "
                   "off). Each break is the retail plus or minus 90 degrees to the threat's bearing (or "
                   "the masking alternatives), kept at speed, within 10 degrees of level and clear of "
                   "the ground; the helicopter is never lost.",
