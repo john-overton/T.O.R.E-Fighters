@@ -135,6 +135,7 @@ pub(super) fn inputs(stores: Vec<Store>, solution: Option<Solution>) -> Inputs {
         mission_height_ft: None,
         solution,
         lase: LaseInputs::default(),
+        shots: Shots::default(),
     }
 }
 
@@ -152,6 +153,8 @@ pub(super) fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
         guided_in_flight: false,
         reach_ok: true,
         release_seconds: None,
+        reaches: false,
+        bar_ft: None,
     }
 }
 

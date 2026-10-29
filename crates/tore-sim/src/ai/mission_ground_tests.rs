@@ -837,6 +837,7 @@ fn strike_inputs() -> crate::ai::strike::Inputs {
         mission_height_ft: None,
         solution: None,
         lase: crate::ai::strike::LaseInputs::default(),
+        shots: Default::default(),
     }
 }
 

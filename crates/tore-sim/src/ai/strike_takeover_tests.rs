@@ -140,6 +140,8 @@ fn solution(station: u8, impact: Option<Vector>, due: bool) -> Solution {
         guided_in_flight: false,
         reach_ok: true,
         release_seconds: None,
+        reaches: false,
+        bar_ft: None,
     }
 }
 
@@ -165,6 +167,7 @@ impl World {
                 mission_height_ft: None,
                 solution: None,
                 lase: LaseInputs::default(),
+                shots: Shots::default(),
             },
         }
     }

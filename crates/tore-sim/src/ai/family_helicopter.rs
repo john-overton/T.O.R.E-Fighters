@@ -478,10 +478,13 @@ fn exit_distance(s: &Strike, cx: &Context<'_>) -> f64 {
     let radius = turn_radius_ft(cx.own.speed.0, cx.own.g_limit);
     let base = EXIT_TURN_MIN_FT.max(2. * radius);
     if s.pass == Some(Pass::StandOff) {
-        let standoff = s
+        // From the planned firing range when the plan set one (a firing
+        // point off the line, or farther out than usual).
+        let usual = s
             .station
             .and_then(|st| cx.inputs.stores.iter().find(|x| x.station == st))
             .map_or(0., |st| STANDOFF_SHARE * st.maximum_range_ft);
+        let standoff = s.heli.standoff_ft.map_or(usual, |ft| ft.max(usual));
         base.max(standoff + STANDOFF_EXIT_FT)
     } else {
         base
@@ -544,7 +547,16 @@ fn plan_with(
     store: Option<Store>,
     prefer_standoff: bool,
 ) -> Option<threat::Plan> {
-    let standoff = standoff_of(cx, store);
+    let standoff = standoff_of(cx, store).map(|st| threat::StandOff {
+        shots: store
+            .filter(|_| cx.inputs.shots.known())
+            .map(|store| threat::StandOffShots {
+                shots: &cx.inputs.shots,
+                station: store.station,
+                launch: shot_launch(cx, target_at),
+            }),
+        ..st
+    });
     threat::plan_attack(
         cx.own.position,
         target_at,
@@ -554,12 +566,27 @@ fn plan_with(
     )
 }
 
+/// The launch a stand-off shot at a target at `target_at` is asked for (the
+/// plan's ranges past the usual ones, John 2026-10-29): from the top of the
+/// unmask over the ground under the helicopter now (the height the unmask
+/// climbs to, [`UNMASK_CLIMB_FT`] over the masked run), level, at its strike
+/// speed.
+fn shot_launch(cx: &Context<'_>, target_at: Vector) -> crate::ai::strike::ShotLaunch {
+    let own = cx.own;
+    let launch_ft = own.position[1] - own.agl_ft + MASK_AGL_FT + UNMASK_CLIMB_FT;
+    crate::ai::strike::ShotLaunch {
+        target_ft: target_at[1],
+        height_ft: launch_ft - target_at[1],
+        speed_fps: crate::ai::helicopter_defense::strike_speed(&own.limits).0,
+    }
+}
+
 /// A guided store's stand-off for the plan (none for rockets): its ranges,
 /// its time of flight and the helicopter's speed while it guides: the
 /// strike speed it asks for, plus the [`ROTOR_SPEED_MARGIN_KT`] the rotor
 /// adapter may stand over a speed (126 kt flown for 120 asked; fitted,
-/// agent).
-fn standoff_of(cx: &Context<'_>, store: Option<Store>) -> Option<threat::StandOff> {
+/// agent). No shots: [`plan_with`] adds the host's.
+fn standoff_of(cx: &Context<'_>, store: Option<Store>) -> Option<threat::StandOff<'static>> {
     let guide_fps = crate::ai::helicopter_defense::strike_speed(&cx.own.limits).0
         + ROTOR_SPEED_MARGIN_KT * crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
     store
@@ -569,6 +596,7 @@ fn standoff_of(cx: &Context<'_>, store: Option<Store>) -> Option<threat::StandOf
             fire_ft: st.fire_range_ft,
             flight: st.flight,
             guide_fps,
+            shots: None,
         })
 }
 
