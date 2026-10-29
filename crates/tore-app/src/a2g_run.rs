@@ -255,6 +255,7 @@ fn options() -> AppResult<Options> {
             }
             "--offset" => o.ai.offset_ft = next()?.parse()?,
             "--sead-at" => o.ai.sead_at = Some(next()?.parse()?),
+            "--sead-after-shot" => o.ai.sead_after_shot = Some(next()?.parse()?),
             "--sead-site" => {
                 let usage = "--sead-site needs a site id (as 0x50000010 or decimal)";
                 let text = next()?;
@@ -286,6 +287,44 @@ fn options() -> AppResult<Options> {
                     return Err(usage.into());
                 }
                 o.ai.place_sites.push((id, bearing, range));
+            }
+            "--site-sight" => {
+                let usage = "--site-sight needs ID,FEET (the id as 0x50000010 or decimal; feet of at least 256)";
+                let text = next()?;
+                let Some((id, feet)) = text.split_once(',') else {
+                    return Err(usage.into());
+                };
+                let id = match id.strip_prefix("0x") {
+                    Some(hex) => u32::from_str_radix(hex, 16).map_err(|_| usage)?,
+                    None => id.parse().map_err(|_| usage)?,
+                };
+                let feet: f64 = feet.parse().map_err(|_| usage)?;
+                if !(feet.is_finite() && feet >= 256.) {
+                    return Err(usage.into());
+                }
+                o.ai.site_sights.push((id, feet));
+            }
+            "--terrain-nodes" => {
+                let radius: f64 = next()?.parse()?;
+                if !(radius.is_finite() && radius > 0.) {
+                    return Err("--terrain-nodes needs RADIUS_FT above zero".into());
+                }
+                o.ai.terrain_nodes = Some(radius);
+            }
+            "--terrain-map" => {
+                let usage = "--terrain-map needs RADIUS_FT,STEP_FT (a step of at least 100 ft)";
+                let text = next()?;
+                let Some((radius, step)) = text.split_once(',') else {
+                    return Err(usage.into());
+                };
+                let (radius, step): (f64, f64) = (
+                    radius.parse().map_err(|_| usage)?,
+                    step.parse().map_err(|_| usage)?,
+                );
+                if !(radius.is_finite() && step.is_finite() && radius > 0. && step >= 100.) {
+                    return Err(usage.into());
+                }
+                o.ai.terrain_map = Some((radius, step));
             }
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),

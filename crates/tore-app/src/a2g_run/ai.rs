@@ -16,9 +16,11 @@
 //!     [--order KIND [--order-at S]] [--quick-wing] [--render OUT.png --render-at S]
 //!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
-//!     [--defenses AAA SAM] [--surface-seed N] [--seconds S] [--sead-at S]
-//!     [--sead-site ID]... [--follow-threat] [--follow-egress]
-//!     [--place-site ID,BEARING,RANGE_FT]...
+//!     [--defenses AAA SAM] [--surface-seed N] [--seconds S]
+//!     [--sead-at S | --sead-after-shot S] [--sead-site ID]...
+//!     [--follow-threat] [--follow-egress]
+//!     [--place-site ID,BEARING,RANGE_FT]... [--site-sight ID,FEET]...
+//!     [--terrain-map RADIUS_FT,STEP_FT] [--terrain-nodes RADIUS_FT]
 //! ```
 //!
 //! - `--aircraft`, `--load`, `--station`, `--count`: the striker and its store,
@@ -99,6 +101,7 @@
 //!   records it as an `ai.strike` event. `HOLDOFF` every ten seconds of a
 //!   hold-off: seconds held, distance from the hold point, height above
 //!   the ground and range to the target. `SEAD t= killed=N`: `--sead-at`
+//!   (or `--sead-after-shot`, a set time after a site first fired)
 //!   destroyed the hostile sites (only the `--sead-site` ones when named).
 //!   `SHOT t= site=ID range_ft=R known=yes|no`: a ground site launched a
 //!   round (not a gun's) at the striker, R feet from it, and whether the
@@ -315,6 +318,13 @@ pub(crate) struct Config {
     /// sites, so a site the helicopter has not met yet stays for an ambush
     /// (2026-10-28).
     pub sead_sites: Vec<u32>,
+    /// `--sead-after-shot S`: the SEAD stand-in goes in off the clock: S
+    /// seconds after the first round one of the `--sead-site` sites (any
+    /// site when none is named) launches at the striker, those sites are
+    /// destroyed. For an ambush by a site whose second round would bring
+    /// the helicopter down: the layout does not hang on when the first
+    /// launch comes (Mi-24 ambush layout, 2026-10-29).
+    pub sead_after_shot: Option<f64>,
     /// `--follow-threat`: after the last impact the run goes on (within
     /// `--seconds`) while a helicopter keeps out of a ring it means to come
     /// back from, to see whether it resumes (slice H2).
@@ -329,6 +339,26 @@ pub(crate) struct Config {
     /// helicopter meets, an ambush among them (slice HF1, John
     /// 2026-10-13). Repeatable: each site moves in the order given.
     pub place_sites: Vec<(u32, f64, f64)>,
+    /// `--terrain-map RADIUS_FT,STEP_FT`: before the first tick, prints the
+    /// ground height on a grid round the target (`TERRAIN` lines, north
+    /// first), for finding the relief a layout can hide a site behind.
+    pub terrain_map: Option<(f64, f64)>,
+    /// `--terrain-nodes RADIUS_FT`: before the first tick, prints the ground
+    /// height at every terrain grid node (the imported grid's 8,192 ft
+    /// lattice, which the ground between nodes is interpolated from) within
+    /// that radius of the target (`TERRAINNODES` and `NODE` lines), so a
+    /// test can work out sight lines exactly.
+    pub terrain_nodes: Option<f64>,
+    /// `--site-sight ID,FEET` (repeatable): the hostile site `ID` can only be
+    /// listed by an eye within FEET of it, in place of the type's 19,968 ft
+    /// (`maxVisDist`, 78 units of 256 ft). A site dug in and hidden well: the
+    /// helicopter does not know it, and so does not keep out of it, until it
+    /// is near; the site shoots as it always does. For laying out an ambush
+    /// by a site the helicopter did not know (Mi-24 ambush layout,
+    /// 2026-10-29): in this simulation the terrain cannot hide a site from
+    /// the eye and leave it a line to the helicopter, and a rebuild every 6 s
+    /// lists it long before its 15 s of preparation are over.
+    pub site_sights: Vec<(u32, f64)>,
 }
 
 impl Config {
@@ -422,6 +452,18 @@ impl Config {
         }
         if records && self.order.is_none() {
             return Err("AI --record currently needs --order and its human lead".into());
+        }
+        if self.sead_at.is_some() && self.sead_after_shot.is_some() {
+            return Err(
+                "--sead-at and --sead-after-shot are two ways to time the SEAD stand-in: pick one"
+                    .into(),
+            );
+        }
+        if self
+            .sead_after_shot
+            .is_some_and(|s| !s.is_finite() || s < 0.)
+        {
+            return Err("--sead-after-shot needs a finite nonnegative number of seconds".into());
         }
         if let Some(skill) = skill
             && !(0..=3).contains(&skill)
@@ -729,6 +771,15 @@ struct Watch {
     /// Rounds a ground site launched at the striker, already reported
     /// (`SHOT` lines).
     shots_seen: BTreeSet<u32>,
+    /// Hostile sites the striker's ground picture has held (`SEEN` lines),
+    /// and the last terrain line to each within 30,000 ft (`SIGHT` lines).
+    sites_seen: BTreeSet<u32>,
+    sight: BTreeMap<u32, bool>,
+    /// How many ground contacts the picture last held (`PICTURE` lines).
+    contacts: Option<usize>,
+    /// When a site first launched at the striker (`SHOT` lines): the time
+    /// and the site. `--sead-after-shot` counts from it.
+    first_shot: Option<(f64, u32)>,
 }
 
 /// One gun burst of a strafing run: its release number, the rounds fired,
@@ -795,6 +846,10 @@ impl Watch {
             break_ticks: 0,
             hp: None,
             shots_seen: BTreeSet::new(),
+            sites_seen: BTreeSet::new(),
+            sight: BTreeMap::new(),
+            contacts: None,
+            first_shot: None,
         }
     }
 
@@ -1314,6 +1369,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     }
     observe_guns(scene, w, t, target_at);
     observe_shots(scene, w, t);
+    observe_sites(scene, w, t);
     trace(scene, w, tick, target_at);
     let state = &scene.world.combat.state;
     // Kills credited to the striker.
@@ -1444,6 +1500,94 @@ fn place_site(
     Ok(())
 }
 
+/// `--site-sight`: limits how far an eye lists the hostile site `id` from
+/// (its `maxVisDist`, in units of 256 ft, at least 1: 0 means no limit).
+/// Prints a `SIGHTLIMIT` line.
+fn site_sight(scene: &mut Scene, id: u32, feet: f64) -> AppResult<()> {
+    let state = &mut scene.world.combat.state;
+    if !state
+        .targets
+        .iter()
+        .any(|row| row.id == id && row.aircraft.is_none() && row.category & 0x1800 != 0)
+    {
+        return Err(format!("--site-sight: {id:#x} is not a SAM or gun site").into());
+    }
+    let listing = state
+        .ground_listing(id)
+        .ok_or_else(|| format!("--site-sight: {id:#x} has no listing"))?;
+    let units = (feet / 256.).round().clamp(1., f64::from(u16::MAX)) as u16;
+    state.set_ground_listing(
+        id,
+        live::GroundListing {
+            max_visible: units,
+            ..listing
+        },
+    );
+    println!(
+        "ai-strike: SIGHTLIMIT id={id:#010x} sight_ft={:.0} was_ft={:.0}",
+        f64::from(units) * 256.,
+        f64::from(listing.max_visible) * 256.
+    );
+    Ok(())
+}
+
+/// `--terrain-map`: the ground height (feet, rounded) on a grid round the
+/// target, one `TERRAIN` line per row from the north down, columns from the
+/// west. The header gives the grid: the target's place and the step.
+fn print_terrain_map(scene: &Scene, target_at: Vector, radius: f64, step: f64) {
+    let n = (radius / step).floor() as i32;
+    println!(
+        "ai-strike: TERRAINMAP radius_ft={radius:.0} step_ft={step:.0} cells={} target_ground_ft={:.0}",
+        2 * n + 1,
+        scene.ground(target_at[0], target_at[2])
+    );
+    for row in (-n..=n).rev() {
+        let heights: Vec<String> = (-n..=n)
+            .map(|col| {
+                let x = target_at[0] + f64::from(col) * step;
+                let z = target_at[2] + f64::from(row) * step;
+                format!("{:.0}", scene.ground(x, z))
+            })
+            .collect();
+        println!(
+            "ai-strike: TERRAIN north_ft={:.0} heights={}",
+            f64::from(row) * step,
+            heights.join(",")
+        );
+    }
+}
+
+/// `--terrain-nodes`: the ground height at each node of the terrain lattice
+/// within `radius` feet of the target. The header gives the lattice spacing,
+/// the node numbers of the first (south-west) node and the grid size; each
+/// `NODE` line is one row of east-going heights from the south.
+fn print_terrain_nodes(scene: &Scene, target_at: Vector, radius: f64) {
+    let cell = f64::from(tore_formats::theater::CELL_FEET);
+    let first = |centre: f64| ((centre - radius) / cell).floor().max(0.) as i32;
+    let last = |centre: f64| ((centre + radius) / cell).ceil() as i32;
+    let (i0, i1) = (first(target_at[0]), last(target_at[0]));
+    let (j0, j1) = (first(target_at[2]), last(target_at[2]));
+    println!(
+        "ai-strike: TERRAINNODES cell_ft={cell:.0} i0={i0} j0={j0} cols={} rows={}",
+        i1 - i0 + 1,
+        j1 - j0 + 1
+    );
+    for j in j0..=j1 {
+        let heights: Vec<String> = (i0..=i1)
+            .map(|i| {
+                format!(
+                    "{:.0}",
+                    scene
+                        .world
+                        .terrain
+                        .raw_height((f64::from(i) * cell) as f32, (f64::from(j) * cell) as f32)
+                )
+            })
+            .collect();
+        println!("ai-strike: NODE j={j} heights={}", heights.join(","));
+    }
+}
+
 /// `RINGS`: the rings a helicopter striker knows now (slice H4): id,
 /// radius and distance from the target, feet.
 fn print_rings(scene: &Scene, w: &Watch, t: f64, target_at: Option<Vector>) {
@@ -1516,6 +1660,62 @@ fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
     );
 }
 
+/// `PICTURE`, `SEEN` and `SIGHT`: how many ground contacts the striker's
+/// picture holds each time that changes (it holds the 50 nearest the eye
+/// sees), when a hostile SAM or gun site first enters the
+/// striker's ground picture (`SEEN`: the site, the range, and the ring it
+/// gives), and each time the terrain line between the striker and a site
+/// within 30,000 ft opens or closes (`SIGHT`, the sight line the eye uses),
+/// for reading why a site was or was not known when it fired.
+fn observe_sites(scene: &Scene, w: &mut Watch, t: f64) {
+    let state = &scene.world.combat.state;
+    let Some((own, _)) = scene.striker_at(w.plane) else {
+        return;
+    };
+    let known: Option<Vec<u32>> = scene.actor(w.plane).and_then(|actor| {
+        let picture = actor.ground_picture()?;
+        let rings = tore_sim::ai::helicopter_threat::known_rings(picture, actor.identity().side);
+        Some(rings.iter().map(|r| r.id).collect())
+    });
+    let held = scene
+        .actor(w.plane)
+        .and_then(|actor| actor.ground_picture())
+        .map(|picture| picture.contacts().len());
+    if held.is_some() && w.contacts != held {
+        w.contacts = held;
+        println!(
+            "ai-strike: PICTURE t={t:.3} contacts={}",
+            held.unwrap_or_default()
+        );
+    }
+    let ground = |x: f64, z: f64| scene.ground(x, z);
+    for site in state
+        .targets
+        .iter()
+        .filter(|row| row.aircraft.is_none() && row.category & 0x1800 != 0 && row.hp > 0)
+    {
+        let range = horizontal(site.position, own);
+        if range <= 30_000. {
+            let eye = [site.position[0], site.position[1] + 10., site.position[2]];
+            let clear = tore_sim::combat::live::terrain_hit(own, eye, &ground).is_none();
+            if w.sight.insert(site.id, clear) != Some(clear) {
+                println!(
+                    "ai-strike: SIGHT t={t:.3} site={:#x} range_ft={range:.0} clear={}",
+                    site.id,
+                    if clear { "yes" } else { "no" }
+                );
+            }
+        }
+        if known.as_ref().is_some_and(|ids| ids.contains(&site.id)) && w.sites_seen.insert(site.id)
+        {
+            println!(
+                "ai-strike: SEEN t={t:.3} site={:#x} range_ft={range:.0}",
+                site.id
+            );
+        }
+    }
+}
+
 /// `SHOT`: a round (not a gun's) a ground site launched at the striker, on
 /// the tick it is first seen: the site, its range to the striker, and
 /// whether the striker knew the site then (it is among the rings of its
@@ -1538,6 +1738,9 @@ fn observe_shots(scene: &Scene, w: &mut Watch, t: f64) {
             continue;
         };
         w.shots_seen.insert(p.id);
+        if w.first_shot.is_none() {
+            w.first_shot = Some((t, site.id));
+        }
         let known = scene.actor(w.plane).and_then(|actor| {
             let picture = actor.ground_picture()?;
             let rings =
@@ -1937,6 +2140,15 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         for &(id, bearing, range) in &cfg.place_sites {
             place_site(&mut scene, id, bearing, range, target_at)?;
         }
+        for &(id, feet) in &cfg.site_sights {
+            site_sight(&mut scene, id, feet)?;
+        }
+        if let Some((radius, step)) = cfg.terrain_map {
+            print_terrain_map(&scene, target_at, radius, step);
+        }
+        if let Some(radius) = cfg.terrain_nodes {
+            print_terrain_nodes(&scene, target_at, radius);
+        }
         // The mission's hostile SAM and gun sites, once (slice ST-H): where
         // they stand against the target and the start, for reading a
         // defended run.
@@ -2318,8 +2530,15 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 }
             }
         }
-        // `--sead-at S`: the stand-in for a SEAD flight (slice H4).
-        if let Some(at) = cfg.sead_at
+        // `--sead-at S`: the stand-in for a SEAD flight (slice H4); or
+        // `--sead-after-shot S`, S seconds after a named site first fires.
+        let after_shot = cfg.sead_after_shot.and_then(|after| {
+            watch
+                .first_shot
+                .filter(|(_, site)| cfg.sead_sites.is_empty() || cfg.sead_sites.contains(site))
+                .map(|(at, _)| at + after)
+        });
+        if let Some(at) = cfg.sead_at.or(after_shot)
             && !sead_done
             && scene.seconds() >= at
         {
@@ -2625,6 +2844,20 @@ mod tests {
         assert!(c.check(Some(3), false).is_ok());
         assert!(c.check(Some(4), false).is_err());
         assert!(c.check(None, true).is_err());
+    }
+
+    #[test]
+    fn the_sead_stand_in_is_timed_one_way() {
+        let mut c = config(&["--pilot", "ai"]).unwrap();
+        c.sead_at = Some(60.);
+        c.sead_after_shot = Some(4.);
+        assert!(c.check(None, false).is_err(), "a clock and a shot together");
+        c.sead_at = None;
+        assert!(c.check(None, false).is_ok());
+        c.sead_after_shot = Some(-1.);
+        assert!(c.check(None, false).is_err(), "before the shot");
+        c.sead_after_shot = Some(f64::NAN);
+        assert!(c.check(None, false).is_err());
     }
 
     #[test]
