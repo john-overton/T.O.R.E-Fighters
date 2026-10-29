@@ -1015,7 +1015,7 @@ fn the_spotting_distance_is_short_and_grows_with_skill() {
     }
     // Every level spots far nearer than the 19,968 ft the eye lists every
     // other site from, and haze shortens it.
-    assert!(TEAM_SPOT_FT[3] < 78. * 256. / 4.);
+    assert!(TEAM_SPOT_FT.iter().all(|ft| *ft <= 78. * 256. / 4.));
     assert_eq!(team_spot_ft(crate::ai::Experience::Average, 100.), 3_000.);
     assert_eq!(team_spot_ft(crate::ai::Experience::Average, 50.), 1_500.);
 }
