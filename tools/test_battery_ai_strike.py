@@ -584,10 +584,15 @@ class HelicopterTests(unittest.TestCase):
         # known gun's reach and hurts the tank, with no hold-off.
         # The ambush runs (2026-10-29): a shot from a site it did not know, the leave, the resume.
         ambushed = dict(decisions=["threat_leave", "threat_resume"], shots=[(29.0, "no")])
+        # The SA-14 team on the target (seed 4, since the hidden teams and the move-ahead of
+        # 2026-10-29): its launch is an ambush, a move-ahead resume, the second team's ambush, home.
+        # The decisions come at t=30 to 35, the leaves at 31 and 34, each after a shot of its own.
+        seed4 = dict(decisions=["threat_hold_off", "threat_leave", "threat_resume", "threat_hold_off",
+                                "threat_leave", "threat_home"], shots=[(29.0, "no"), (33.0, "no")], ahead=True)
         honest = [heli_run(profile="standoff", breaks=0, ahead=True),
                   heli_run(profile="standoff", breaks=0),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
-                  heli_run(breaks=0, released=False, killed=False, decisions=held),
+                  heli_run(profile="standoff", breaks=6, released=False, killed=False, **seed4),
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
                   heli_run(breaks=8, **ambushed),
                   heli_run(breaks=8, **ambushed),
@@ -601,6 +606,15 @@ class HelicopterTests(unittest.TestCase):
             heavy = list(honest)
             heavy[0] = heli_run(**{**dict(profile="standoff", breaks=0, ahead=True), **wrong})
             self.assertNotEqual(defended.check("\n".join(heavy)), [], wrong)
+        # Seed 4 (2026-10-29): each leave answers a launch by a team it did not know; the second leave
+        # after only a known team's shot (the first team again, past its unmasking) is a fault, and so
+        # is the old hold-off and home with no ambush or move-ahead.
+        for wrong in (dict(shots=[(29.0, "no"), (33.0, "yes")]), dict(decisions=held, shots=[]),
+                      dict(ahead=False)):
+            seed4_wrong = list(honest)
+            seed4_wrong[3] = heli_run(profile="standoff", breaks=6, released=False, killed=False,
+                                      **{**seed4, **wrong})
+            self.assertNotEqual(defended.check("\n".join(seed4_wrong)), [], wrong)
         # Slice HF1: the ambushed runs must leave and resume after it.
         unambushed = list(honest)
         unambushed[5] = heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume"])
