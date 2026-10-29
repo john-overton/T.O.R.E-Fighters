@@ -11,15 +11,22 @@
 //!   minutes while SEAD may kill the site; then it takes another target that
 //!   can be attacked from outside every ring, and with none it goes home.
 //! - **Not aware** (a MANPAD, a radar that was off, a radar busy with someone
-//!   else): when it is engaged it breaks (the helicopter defence), then
+//!   else): when it is engaged by a site it did not know ([`known_shooter`]
+//!   finds none; John, 2026-10-29) it breaks (the helicopter defence), then
 //!   leaves the place it was engaged from (an **ambush ring**,
 //!   [`ambush_ring`]) and stays out until the threat has been quiet for a
-//!   minute; then it may resume.
+//!   minute; then it may resume. A shot from a site it knew is no ambush:
+//!   it leaves that site's ring.
+//!
+//! A ring's reach is the site's real launch reach at a helicopter (the
+//! host's bound on its launch gate), and the stand-off's advance the
+//! store's time of flight at the helicopter's speed (John, 2026-10-29).
 //!
 //! Everything is a fixed function of the threats, the positions, the store
 //! and the terrain: no dice (John, decision 13). The numbers are fitted
 //! (agent) unless marked.
 use crate::ai::awareness::ground::{GroundPicture, KnownDefense};
+use crate::ai::strike::FlightTimes;
 use crate::ai::targeting::Side;
 use crate::attitude::Vector;
 use crate::sensors::FEET_PER_NAUTICAL_MILE;
@@ -44,10 +51,16 @@ pub const STANDOFF_SHARE: f64 = 0.6;
 /// (retail's 10,000 ft or half the zone, where the round may leave), so the
 /// shot leaves as soon as it unmasks (fitted, agent).
 pub const FIRE_RANGE_SHARE: f64 = 0.95;
-/// How far the helicopter carries on toward the target after it unmasks:
-/// the unmask and the guided hold (the AT-2's flight) at its speed (fitted,
-/// agent). This stretch must stay outside every ring too.
+/// The least the helicopter is taken to carry on toward the target after
+/// it unmasks (the advance, [`StandOff::advance_ft`]): the fixed advance
+/// before 0.2.2 (fitted, agent). This stretch must stay outside every ring
+/// too.
 pub const STANDOFF_ADVANCE_FT: f64 = 2_500.;
+/// Added to the store's flight in the advance: the unmask's climb before the
+/// shot leaves, about 6 s at its strike speed less the flight it saves
+/// (fitted, agent). Its longest climb, 10 s, carries it up to about 300 ft
+/// farther: inside a ring's margin, never a threat's reach.
+pub const ADVANCE_MARGIN_FT: f64 = 1_000.;
 /// Off the straight line, the helicopter first flies to a point this much
 /// farther out on the firing point's radial, then in along it, so it
 /// arrives nose on (fitted, agent).
@@ -83,14 +96,17 @@ pub struct Ring {
 }
 
 /// The rings of the known hostile defences: the reach of a missile site
-/// that can guide, or of a gun site, plus [`RING_MARGIN_FT`]. A defence
-/// that reaches nothing (a lone search radar, a launcher whose battery
-/// radar is dead) has none.
+/// that can guide, or of a gun site, plus [`RING_MARGIN_FT`]. A missile
+/// site's reach is the farthest it may launch at a helicopter
+/// ([`DefenseFacts::rotor_reach_ft`](crate::ai::awareness::ground::DefenseFacts),
+/// from its real launch gate; John, 2026-10-29), never less than its launch
+/// zone. A defence that reaches nothing (a lone search radar, a launcher
+/// whose battery radar is dead) has none.
 pub fn rings<'a>(defenses: impl Iterator<Item = &'a KnownDefense>) -> Vec<Ring> {
     defenses
         .filter_map(|d| {
             let missiles = if d.facts.working {
-                d.facts.missile_reach_ft
+                d.facts.missile_reach_ft.max(d.facts.rotor_reach_ft)
             } else {
                 0.
             };
@@ -158,6 +174,47 @@ pub fn ambush_ring(own: Vector, bearing_deg: Option<f64>) -> Ring {
     }
 }
 
+/// A threat is a known site's when the site lies within this of the
+/// threat's bearing, degrees (fitted, agent: a round flies a near-constant
+/// bearing from its launcher to the helicopter).
+pub const SHOOTER_BEARING_DEG: f64 = 20.;
+/// Nearer a site than this its bearing says nothing: inside its ring it is
+/// the shooter whatever the bearing (fitted, agent).
+pub const SHOOTER_CLOSE_FT: f64 = 1_000.;
+
+/// The known site a threat engaging the helicopter at `own` came from, by
+/// what the helicopter can tell (T.O.R.E opinionated change, John
+/// 2026-10-29: only a shot from a site it did not know is an ambush): of the
+/// known defences' rings (`rings`, the ambush ring aside), one whose site
+/// lies within [`SHOOTER_BEARING_DEG`] of the threat's compass bearing and
+/// near enough to have fired (the helicopter inside the ring widened by
+/// another [`RING_MARGIN_FT`]), the nearest in bearing; with no bearing, the
+/// ring the helicopter is inside. `None`: an unknown shooter.
+pub fn known_shooter(rings: &[Ring], own: Vector, bearing_deg: Option<f64>) -> Option<&Ring> {
+    let known = rings.iter().filter(|r| r.id != AMBUSH_ID);
+    let Some(threat) = bearing_deg else {
+        return known
+            .into_iter()
+            .find(|r| horizontal(r.centre, own) < r.radius_ft);
+    };
+    known
+        .filter_map(|r| {
+            let distance = horizontal(r.centre, own);
+            if distance >= r.radius_ft + RING_MARGIN_FT {
+                return None;
+            }
+            let off = if distance < SHOOTER_CLOSE_FT {
+                0.
+            } else {
+                let d = (bearing(own, r.centre) - threat).rem_euclid(360.);
+                d.min(360. - d)
+            };
+            (off <= SHOOTER_BEARING_DEG).then_some((off, r))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, r)| r)
+}
+
 fn horizontal(a: Vector, b: Vector) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
@@ -214,6 +271,33 @@ pub fn clear(rings: &[Ring], a: Vector, b: Vector) -> bool {
     })
 }
 
+/// A guided store's stand-off as the plan needs it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StandOff {
+    /// The store's zone-1 range, feet.
+    pub reach_ft: f64,
+    /// The AI's fire range, feet.
+    pub fire_ft: f64,
+    /// The store's time of flight to the target (none: unknown).
+    pub flight: Option<FlightTimes>,
+    /// The helicopter's speed while it guides, ft/s.
+    pub guide_fps: f64,
+}
+
+impl StandOff {
+    /// How far the helicopter carries on toward the target from a firing
+    /// point `range_ft` out (T.O.R.E opinionated change, John 2026-10-29):
+    /// the store's time of flight from there at its guiding speed, plus
+    /// [`ADVANCE_MARGIN_FT`], never under [`STANDOFF_ADVANCE_FT`]. With no
+    /// flight time known, [`STANDOFF_ADVANCE_FT`].
+    pub fn advance_ft(&self, range_ft: f64) -> f64 {
+        self.flight.map_or(STANDOFF_ADVANCE_FT, |flight| {
+            (flight.seconds_to(range_ft) * self.guide_fps + ADVANCE_MARGIN_FT)
+                .max(STANDOFF_ADVANCE_FT)
+        })
+    }
+}
+
 /// How the attack is flown.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Plan {
@@ -228,11 +312,11 @@ pub enum Plan {
 }
 
 /// An attack on `target` from `own` that stays outside every ring, if
-/// there is one. `standoff` is the guided store's zone-1 range and its
-/// AI fire range (none for rockets); `prefer_standoff` is the pass the threat level asks for
-/// (the stand-off under threat Missiles). The pop-up needs the target and
-/// the line to it clear; a stand-off needs its firing point, the line to
-/// it and the [`STANDOFF_ADVANCE_FT`] beyond it clear. The firing point's
+/// there is one. `standoff` is the guided store's (none for rockets);
+/// `prefer_standoff` is the pass the threat level asks for (the stand-off
+/// under threat Missiles). The pop-up needs the target and the line to it
+/// clear; a stand-off needs its firing point, the line to it and the
+/// advance beyond it ([`StandOff::advance_ft`]) clear. The firing point's
 /// bearing from the target is tried from the helicopter's own outward, in
 /// [`APPROACH_STEP_DEG`] steps (the right first at each step), each at the
 /// usual range ([`STANDOFF_SHARE`] of the zone) and then just inside the
@@ -240,7 +324,7 @@ pub enum Plan {
 pub fn plan_attack(
     own: Vector,
     target: Vector,
-    standoff: Option<(f64, f64)>,
+    standoff: Option<StandOff>,
     prefer_standoff: bool,
     rings: &[Ring],
 ) -> Option<Plan> {
@@ -248,8 +332,11 @@ pub fn plan_attack(
     if popup && (!prefer_standoff || standoff.is_none()) {
         return Some(Plan::PopUp);
     }
-    if let Some((reach, fire)) = standoff.filter(|(r, _)| *r > 0.) {
-        let ranges = [STANDOFF_SHARE * reach, FIRE_RANGE_SHARE * fire];
+    if let Some(standoff) = standoff.filter(|st| st.reach_ft > 0.) {
+        let ranges = [
+            STANDOFF_SHARE * standoff.reach_ft,
+            FIRE_RANGE_SHARE * standoff.fire_ft,
+        ];
         let base = bearing(target, own);
         let steps = (180. / APPROACH_STEP_DEG).round() as i32;
         for k in 0..=steps {
@@ -263,7 +350,8 @@ pub fn plan_attack(
                 for (n, range) in ranges.into_iter().enumerate() {
                     let [x, z] = along(target, theta, range);
                     let point = [x, own[1], z];
-                    let [ex, ez] = along(target, theta, (range - STANDOFF_ADVANCE_FT).max(0.));
+                    let [ex, ez] =
+                        along(target, theta, (range - standoff.advance_ft(range)).max(0.));
                     let end = [ex, own[1], ez];
                     let [lx, lz] = along(target, theta, range + LEAD_IN_FT);
                     let lead = [lx, own[1], lz];
@@ -294,9 +382,16 @@ pub fn plan_attack(
 /// Whether the pass in hand still stays outside every ring: a ring learned
 /// after the choice may block it ("not pressed through", slice H4). The
 /// pop-up needs the target and the line to it clear; a stand-off its firing
-/// point and the [`STANDOFF_ADVANCE_FT`] beyond it, and flown straight at
-/// the target the line to the firing point.
-pub fn holds(plan: Plan, own: Vector, target: Vector, rings: &[Ring]) -> bool {
+/// point and the advance beyond it (`standoff`'s, else
+/// [`STANDOFF_ADVANCE_FT`]), and flown straight at the target the line to
+/// the firing point.
+pub fn holds(
+    plan: Plan,
+    own: Vector,
+    target: Vector,
+    standoff: Option<StandOff>,
+    rings: &[Ring],
+) -> bool {
     match plan {
         Plan::PopUp => inside(rings, target).is_none() && clear(rings, own, target),
         Plan::StandOff { approach, range_ft } => {
@@ -304,11 +399,8 @@ pub fn holds(plan: Plan, own: Vector, target: Vector, rings: &[Ring]) -> bool {
                 let [x, z] = along(target, bearing(target, own), range_ft);
                 [x, own[1], z]
             });
-            let [ex, ez] = along(
-                target,
-                bearing(target, point),
-                (range_ft - STANDOFF_ADVANCE_FT).max(0.),
-            );
+            let advance = standoff.map_or(STANDOFF_ADVANCE_FT, |st| st.advance_ft(range_ft));
+            let [ex, ez] = along(target, bearing(target, point), (range_ft - advance).max(0.));
             let end = [ex, own[1], ez];
             inside(rings, point).is_none()
                 && clear(rings, point, end)
@@ -408,8 +500,8 @@ pub enum Decision {
     Retarget,
     /// The wait ran out and nothing is outside the rings: it goes home.
     Home,
-    /// Engaged by a threat it did not know: after the break it leaves the
-    /// ring.
+    /// Engaged by a site it did not know (an ambush): after the break it
+    /// leaves the ambush ring. A shot from a site it knew is not one.
     Leave,
 }
 

@@ -57,7 +57,23 @@ pub(super) fn step(
         let Some(actor) = wings.mission.actor(id) else {
             continue;
         };
-        let stores = strike_stores(config, actor.stations());
+        let mut stores = strike_stores(config, actor.stations());
+        if config.strike_class == tore_sim::models::strike_class::StrikeClass::Helicopter {
+            // A helicopter's stand-off needs its guided store's flight time
+            // (John, 2026-10-29).
+            for store in stores.iter_mut().filter(|st| !st.kind.unguided()) {
+                if let Some(station) = config.stations.get(usize::from(store.station.0)) {
+                    store.flight = wings
+                        .flight_times
+                        .entry((
+                            station.weapon.source.clone(),
+                            state.weapon_rules == missiles::Rules::Energy,
+                        ))
+                        .or_insert_with(|| flight_times(&station.weapon, state.weapon_rules))
+                        .to_owned();
+                }
+            }
+        }
         let launcher = crate::combat::launcher(actor.flight());
         let selection = actor.strike().and_then(strike::Strike::selection);
         if let Some(call) = actor
@@ -465,9 +481,81 @@ pub(super) fn describe(
                 fuze_arm_s: f64::from(w.damage.fuze_arm_t) / 4.,
                 frag_radius_ft: f64::from(w.damage.collateral_radius.max(0)),
                 falls_free: kind == StoreKind::Laser && guided::is_glide_bomb(w),
+                flight: None,
             })
         })
         .collect()
+}
+
+/// The shares of a guided store's zone-1 range its flight time is worked
+/// out at ([`flight_times`]).
+const FLIGHT_SHARES: [f64; 4] = [0.25, 0.5, 0.75, 1.];
+/// The launch a flight time is worked out for: this high over a target on
+/// flat ground at sea level (the stand-off's masked height and its unmask
+/// climb), level, at this speed (about a helicopter's strike speed);
+/// fitted, agent.
+const FLIGHT_LAUNCH_AGL_FT: f64 = 700.;
+const FLIGHT_LAUNCH_FPS: f64 = 120. * tore_sim::runway_wind::FEET_PER_SECOND_PER_KNOT;
+/// The target's centre over the ground, feet (a vehicle's).
+const FLIGHT_TARGET_FT: f64 = 8.;
+
+/// A guided store's time of flight to a ground target at
+/// [`FLIGHT_SHARES`] of its zone-1 range (a helicopter's stand-off
+/// advance, docs/spec/ai-strike.md, "Helicopter threat awareness"; John,
+/// 2026-10-29): under the energy rules the energy model's flight
+/// ([`live::State::energy_trial`], the question the AI's guided sight
+/// asks), a range it does not reach taken at the pace of the last one it
+/// does; else, or with none reached, the range at the record's top speed.
+/// `None` with no zone-1 range or speed.
+pub(super) fn flight_times(
+    w: &tore_formats::weapons::Weapon,
+    rules: missiles::Rules,
+) -> Option<strike::FlightTimes> {
+    let zone = f64::from(w.seeker.zones[1].maximum_range.max(0));
+    let top = f64::from(w.movement.maximum_speed.max(0));
+    if zone <= 0. {
+        return None;
+    }
+    let energy = |range: f64| {
+        let launcher = live::Launcher {
+            radar_power: true,
+            position: [0., FLIGHT_LAUNCH_AGL_FT, 0.],
+            basis: tore_sim::attitude::Basis::new(0., 0., 0.),
+            speed_fps: FLIGHT_LAUNCH_FPS,
+            velocity: [0., 0., FLIGHT_LAUNCH_FPS],
+            bay_ready: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            body_present: true,
+            controls: Default::default(),
+        };
+        let target = [0., FLIGHT_TARGET_FT, range];
+        let observed = seeker::Observation {
+            id: u32::MAX,
+            position: target,
+            velocity: [0.; 3],
+            quality: 1.,
+            range: (range * range + FLIGHT_LAUNCH_AGL_FT * FLIGHT_LAUNCH_AGL_FT).sqrt(),
+            off_axis: 0.,
+        };
+        live::State::energy_trial(w, launcher, observed, [0.; 3], &|_, _| 0.)
+            .filter(|answer| answer.hit)
+            .map(|answer| answer.seconds)
+    };
+    let mut points = [(0., 0.); 4];
+    let mut pace: Option<f64> = None;
+    for (point, share) in points.iter_mut().zip(FLIGHT_SHARES) {
+        let range = share * zone;
+        let seconds = (rules == missiles::Rules::Energy)
+            .then(|| energy(range))
+            .flatten()
+            .or_else(|| pace.map(|p| p * range))
+            .or_else(|| (top > 0.).then(|| range / top))?;
+        pace = Some(seconds / range);
+        *point = (range, seconds);
+    }
+    Some(strike::FlightTimes { points })
 }
 
 /// A store's kind, or `None` for a gun or an air-to-air store.

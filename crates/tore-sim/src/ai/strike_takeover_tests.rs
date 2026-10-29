@@ -79,6 +79,7 @@ fn sam() -> GroundSubject {
         CLASS_SAM,
         Some(DefenseFacts {
             missile_reach_ft: 30_000.,
+            rotor_reach_ft: 30_000.,
             gun_reach_ft: 0.,
             radar: true,
             working: true,
@@ -121,6 +122,7 @@ fn store(station: u8, kind: StoreKind, rounds: u32) -> Store {
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
+        flight: None,
     }
 }
 

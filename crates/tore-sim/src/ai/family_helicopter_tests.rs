@@ -24,6 +24,7 @@ fn at2(rounds: u32) -> Store {
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
+        flight: None,
     }
 }
 
@@ -38,6 +39,7 @@ fn rockets(rounds: u32) -> Store {
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
+        flight: None,
         ..at2(rounds)
     }
 }
@@ -432,6 +434,60 @@ fn ambushed_by_a_threat_it_did_not_know_it_breaks_leaves_the_ring_then_resumes()
     strike.step(&world.context(2 + AMBUSH_QUIET_TICKS));
     assert_eq!(strike.phase(), Phase::Attack);
     assert_eq!(call(&strike), Some(Decision::Resume));
+}
+
+#[test]
+fn a_shot_from_a_site_it_knew_is_no_ambush_and_one_from_a_site_it_did_not_is() {
+    use crate::ai::awareness::ground::RecentWarnings;
+    use crate::ai::helicopter_threat::{AMBUSH_ID, Decision};
+    // A small site it knows 8,000 ft east, its ring (6,000 ft and the
+    // margin) clear of the target and the way in.
+    const KNOWN: u32 = 0x5000_0011;
+    let mut world = heli_world(at2(4));
+    world.own.position = [0., 1_500., 12_000.];
+    world.picture = picture(
+        &[
+            ground(TARGET, TARGET_AT, 0x200, None),
+            ground(KNOWN, [8_000., 0., 12_000.], 0x1000, site(6_000., 0., true)),
+        ],
+        vec![KNOWN],
+    );
+    fn engaged(world: &World, tick: u64, bearing: f64) -> Context<'_> {
+        Context {
+            defending: true,
+            threat_bearing_deg: Some(bearing),
+            warnings: RecentWarnings {
+                air_to_air: false,
+                surface_to_air: true,
+            },
+            ..world.context(tick)
+        }
+    }
+    // Engaged from the known site's bearing, just outside its ring: before
+    // 0.2.2 any engagement outside every ring it knew was an ambush; now it
+    // is that site's, and no ambush.
+    let mut known = Strike::new(3);
+    known.step(&world.context(1));
+    assert_eq!(known.phase(), Phase::Attack);
+    known.step(&engaged(&world, 2, 90.));
+    assert_eq!(known.phase(), Phase::Defend);
+    assert_ne!(call(&known), Some(Decision::Leave));
+    assert!(known.heli.ambush.is_none());
+    // A tick of the break without a bearing is no new evidence.
+    let lost = Context {
+        threat_bearing_deg: None,
+        ..engaged(&world, 3, 90.)
+    };
+    known.step(&lost);
+    assert!(known.heli.ambush.is_none());
+    // Engaged from the west, where it knows no site: an ambush.
+    let mut ambushed = Strike::new(3);
+    ambushed.step(&world.context(1));
+    ambushed.step(&engaged(&world, 2, 270.));
+    assert_eq!(call(&ambushed), Some(Decision::Leave));
+    let (ring, _) = ambushed.heli.ambush.expect("an ambush ring");
+    assert_eq!(ring.id, AMBUSH_ID);
+    assert!(ring.centre[0] < world.own.position[0]);
 }
 
 #[test]

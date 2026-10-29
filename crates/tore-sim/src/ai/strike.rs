@@ -473,6 +473,10 @@ pub struct Store {
     /// no spot (a laser glide bomb, not a laser missile): it can be dropped
     /// by hand as an unguided bomb (slice ST-G).
     pub falls_free: bool,
+    /// A guided store's time of flight to a ground target, from the host's
+    /// estimate (a helicopter's stand-off advance, John 2026-10-29); `None`
+    /// when the host gave none.
+    pub flight: Option<FlightTimes>,
 }
 
 impl Store {
@@ -480,6 +484,41 @@ impl Store {
     pub fn retarded(&self) -> bool {
         self.kind == StoreKind::Bomb && self.release_speed_share < 0.95
     }
+}
+
+/// A guided store's time of flight to a ground target at a few ranges, from
+/// the host's energy-model estimate (or its record's speed under the other
+/// rules): `points` are (range feet, seconds), ranges rising.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlightTimes {
+    pub points: [(f64, f64); 4],
+}
+
+impl FlightTimes {
+    /// The time of flight to `range_ft`, seconds: along the straight lines
+    /// between the points (from no time at no range), and past the last at
+    /// the last stretch's pace.
+    pub fn seconds_to(&self, range_ft: f64) -> f64 {
+        let range = range_ft.max(0.);
+        let mut previous = (0., 0.);
+        for point in self.points {
+            if range <= point.0 {
+                return lerp(previous, point, range);
+            }
+            previous = point;
+        }
+        let [.., before, last] = self.points;
+        lerp(before, last, range)
+    }
+}
+
+/// The straight line through `a` and `b` (range, seconds) at `range`.
+fn lerp(a: (f64, f64), b: (f64, f64), range: f64) -> f64 {
+    let span = b.0 - a.0;
+    if span <= 0. {
+        return b.1;
+    }
+    a.1 + (b.1 - a.1) * (range - a.0) / span
 }
 
 /// What the host worked out for the striker's selection this tick, from its

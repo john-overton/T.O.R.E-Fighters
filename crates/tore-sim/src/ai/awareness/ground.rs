@@ -47,6 +47,12 @@ pub struct DefenseFacts {
     /// The farthest its missiles may be launched (launch zone maximum),
     /// feet; 0 with none.
     pub missile_reach_ft: f64,
+    /// The farthest its missiles may be launched at a helicopter, feet: the
+    /// helicopter's threat ring's reach (docs/spec/ai-strike.md, "Helicopter
+    /// threat awareness"). Under the energy rules a bound on the launch gate
+    /// against a helicopter, which may lie past the launch zone; under the
+    /// other rules the launch zone. 0 with no missiles.
+    pub rotor_reach_ft: f64,
     /// The farthest its guns fire, feet; 0 with none.
     pub gun_reach_ft: f64,
     /// A radar: its own search radar or a battery's.

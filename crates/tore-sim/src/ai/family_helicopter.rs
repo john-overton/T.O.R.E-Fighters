@@ -544,9 +544,7 @@ fn plan_with(
     store: Option<Store>,
     prefer_standoff: bool,
 ) -> Option<threat::Plan> {
-    let standoff = store
-        .filter(|st| !st.kind.unguided())
-        .map(|st| (st.maximum_range_ft, st.fire_range_ft));
+    let standoff = standoff_of(cx, store);
     threat::plan_attack(
         cx.own.position,
         target_at,
@@ -555,6 +553,27 @@ fn plan_with(
         &rings(s, cx),
     )
 }
+
+/// A guided store's stand-off for the plan (none for rockets): its ranges,
+/// its time of flight and the helicopter's speed while it guides: the
+/// strike speed it asks for, plus the [`ROTOR_SPEED_MARGIN_KT`] the rotor
+/// adapter may stand over a speed (126 kt flown for 120 asked; fitted,
+/// agent).
+fn standoff_of(cx: &Context<'_>, store: Option<Store>) -> Option<threat::StandOff> {
+    let guide_fps = crate::ai::helicopter_defense::strike_speed(&cx.own.limits).0
+        + ROTOR_SPEED_MARGIN_KT * crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
+    store
+        .filter(|st| !st.kind.unguided())
+        .map(|st| threat::StandOff {
+            reach_ft: st.maximum_range_ft,
+            fire_ft: st.fire_range_ft,
+            flight: st.flight,
+            guide_fps,
+        })
+}
+
+/// See [`standoff_of`].
+const ROTOR_SPEED_MARGIN_KT: f64 = crate::ai::rotor_adapter::SPEED_HOLD_MARGIN_KT;
 
 /// Whether the pass in hand still stands clear of the rings it knows.
 fn pass_holds(s: &Strike, cx: &Context<'_>, target_at: Vector) -> bool {
@@ -568,7 +587,8 @@ fn pass_holds(s: &Strike, cx: &Context<'_>, target_at: Vector) -> bool {
         },
         _ => threat::Plan::PopUp,
     };
-    threat::holds(plan, cx.own.position, target_at, &rings(s, cx))
+    let standoff = standoff_of(cx, s.store(cx));
+    threat::holds(plan, cx.own.position, target_at, standoff, &rings(s, cx))
 }
 
 /// Holds off `target`: circles masked outside the rings (slice H4).
@@ -742,24 +762,32 @@ fn clear_heading(rings: &[threat::Ring], own: Vector, heading: f64) -> f64 {
 }
 
 /// The ring of a threat it did not know (slice H4, John's rule): engaged
-/// (a defence flown) from outside every ring it knows, it marks an ambush
-/// ring there; each engagement keeps it fresh, and once the threat has
-/// been quiet for [`threat::AMBUSH_QUIET_TICKS`] and the helicopter is out
-/// of it, it is forgotten and the attack may resume.
+/// (a defence flown) by a shooter that is not a site it knows
+/// ([`threat::known_shooter`] by the threat's bearing, as the helicopter
+/// knows the rings when the engagement starts; John, 2026-10-29), it marks
+/// an ambush ring there; each engagement keeps it fresh, and once the threat
+/// has been quiet for [`threat::AMBUSH_QUIET_TICKS`] and the helicopter is
+/// out of it, it is forgotten and the attack may resume. A known site's shot
+/// is no ambush: inside its ring the helicopter leaves it (the mask run),
+/// and its ring keeps it out.
 fn track_ambush(s: &mut Strike, cx: &Context<'_>) {
     let own = cx.own.position;
     if cx.defending {
         match s.heli.ambush.as_mut() {
             Some((_, last)) => *last = cx.tick,
-            None => {
+            // Judged as the defence starts, and again whenever the break
+            // has the threat's bearing: a tick without one (the break lost
+            // the round) is no evidence of a new shooter.
+            None if s.phase != Phase::Defend || cx.threat_bearing_deg.is_some() => {
                 let known = threat::known_rings(cx.picture, cx.side);
-                if threat::inside(&known, own).is_none() {
+                if threat::known_shooter(&known, own, cx.threat_bearing_deg).is_none() {
                     let ring = threat::ambush_ring(own, cx.threat_bearing_deg);
                     s.heli.ambush = Some((ring, cx.tick));
                     s.heli
                         .decide(Decision::Leave, cx.tick, s.target, Some(threat::AMBUSH_ID));
                 }
             }
+            None => {}
         }
         return;
     }
