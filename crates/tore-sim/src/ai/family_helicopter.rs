@@ -807,7 +807,7 @@ fn track_ambush(s: &mut Strike, cx: &Context<'_>) {
             // has the threat's bearing: a tick without one (the break lost
             // the round) is no evidence of a new shooter.
             None if s.phase != Phase::Defend || cx.threat_bearing_deg.is_some() => {
-                let known = threat::known_rings(cx.picture, cx.side);
+                let known = threat::rings_before_shot(cx.picture, cx.side, cx.tick);
                 if threat::known_shooter(&known, own, cx.threat_bearing_deg).is_none() {
                     let ring = threat::ambush_ring(own, cx.threat_bearing_deg);
                     s.heli.ambush = Some((ring, cx.tick));

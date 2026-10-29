@@ -71,6 +71,7 @@ pub(super) fn ground(
         },
         side: Side(2),
         defense,
+        hidden: false,
     }
 }
 

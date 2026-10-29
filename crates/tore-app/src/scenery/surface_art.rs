@@ -2130,6 +2130,7 @@ mod tests {
             battery: None,
             loads: Vec::new(),
             npc: [0; 4],
+            team: false,
         });
         let camera = Camera::new();
         // A jet due east of it.

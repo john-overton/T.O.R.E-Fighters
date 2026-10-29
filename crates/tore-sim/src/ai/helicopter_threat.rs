@@ -135,6 +135,27 @@ pub fn known_rings(picture: &GroundPicture, side: Side) -> Vec<Ring> {
     rings_with(picture, side, true)
 }
 
+/// A hidden site that gave itself away by a launch this recently is still the
+/// unknown shooter of the threat the helicopter defends against: the round
+/// it saw leave is the one coming (fitted, agent, 2026-10-29: a
+/// shoulder-fired round flies for 20 s at most; John's rule that a launch
+/// unmasks a team for every later shot).
+pub const UNMASK_SHOT_TICKS: u64 = 30 * 120;
+
+/// The rings a helicopter of `side` knew before the shot it defends against
+/// at `tick` left: [`known_rings`] without the hidden sites whose own launch
+/// in the last [`UNMASK_SHOT_TICKS`] is what made them known
+/// ([`GroundPicture::unmasked_at`]; T.O.R.E opinionated, John 2026-10-29).
+pub fn rings_before_shot(picture: &GroundPicture, side: Side, tick: u64) -> Vec<Ring> {
+    let mut rings = known_rings(picture, side);
+    rings.retain(|r| {
+        picture
+            .unmasked_at(r.id)
+            .is_none_or(|at| tick.saturating_sub(at) > UNMASK_SHOT_TICKS)
+    });
+    rings
+}
+
 /// The rings a fixed-wing striker of `side` plans a stand-off release round
 /// (docs/spec/ai-strike.md, "Stand-off reach"; John, 2026-10-29): as
 /// [`known_rings`], with a missile site's reach its launch zone

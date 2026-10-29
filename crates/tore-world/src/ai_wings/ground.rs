@@ -9,7 +9,9 @@
 //!   aboard) the objective's air defences;
 //! - describes the ground objects to the mission when a picture is due: what
 //!   the ground lists read of each combat row, its side and, for an armed
-//!   unit or a radar, its reach and whether it can guide.
+//!   unit or a radar, its reach and whether it can guide; whether it is a
+//!   hidden shoulder-fired SAM team, and which of those have a round in the
+//!   air at an aircraft (a launch gives a team away).
 //!
 //! It holds no state. With no striker it costs one scan of the actors and
 //! changes nothing, so air-to-air missions are untouched.
@@ -40,14 +42,36 @@ pub(super) fn step(
     }
     let subjects = subjects(state, &world.surface, &mut wings.rotor_reach);
     let painted = revealed(&wings.painting, &world.surface.arsenal);
+    let launched = launched(state, &world.surface.arsenal);
     wings.mission.observe_ground(
         GroundScene {
             subjects: &subjects,
             weather: state.sensor_weather(),
             painted: &painted,
+            launched: &launched,
         },
         ground,
     );
+}
+
+/// The hidden shoulder-fired teams' rounds in the air, as (aircraft aimed
+/// at, team) pairs, ascending (T.O.R.E opinionated, John 2026-10-29: a
+/// launch gives the team away). A round lives for seconds, so the
+/// quarter-second refresh never misses one.
+fn launched(state: &live::State, arsenal: &fire::Arsenal) -> Vec<(u32, u32)> {
+    if !arsenal.units.iter().any(|arms| arms.team) {
+        return Vec::new();
+    }
+    let mut pairs: Vec<(u32, u32)> = state
+        .projectiles
+        .iter()
+        .filter(|p| p.gun_round.is_none())
+        .filter_map(|p| Some((p.target?, p.owner)))
+        .filter(|(_, owner)| arsenal.arms(UnitId(*owner)).is_some_and(|arms| arms.team))
+        .collect();
+    pairs.sort_unstable();
+    pairs.dedup();
+    pairs
 }
 
 /// What a radar painting an aircraft gives away (slice H4): the radar, and
@@ -95,7 +119,8 @@ fn brief(wings: &mut AiWings, state: &live::State, surface: &Surface) {
 /// The objective a striker of `side` is briefed on: the mission's destroy
 /// targets that belong to another side (none for Redfor in Quick Mission,
 /// whose targets are its own), their centre, and for a SEAD striker the
-/// hostile armed units and radars within 5 nm of that centre.
+/// hostile armed units and radars within 5 nm of that centre, the hidden
+/// shoulder-fired teams aside.
 pub(super) fn objective(
     state: &live::State,
     surface: &Surface,
@@ -124,6 +149,9 @@ pub(super) fn objective(
             .units
             .iter()
             .filter(|arms| !arms.weapons.is_empty() || arms.radar.is_some())
+            // No briefing knows where a shoulder-fired team hides (T.O.R.E
+            // opinionated, John 2026-10-29).
+            .filter(|arms| !arms.team)
             .map(|arms| arms.unit.0)
             .filter(|id| !targets.contains(id) && hostile(*id))
             .filter(|id| {
@@ -154,14 +182,16 @@ pub(super) fn subjects(
         .targets
         .iter()
         .filter(|t| t.role == TargetRole::Surface || !t.airborne || state.airfield_attached(t.id))
-        .map(|t| GroundSubject {
-            object: state.ground_object(t),
-            side: t.side,
-            defense: surface
-                .arsenal
-                .arms(UnitId(t.id))
-                .filter(|arms| !arms.weapons.is_empty() || arms.radar.is_some())
-                .map(|arms| defense(arms, t, state, &surface.arsenal, rotor)),
+        .map(|t| {
+            let arms = surface.arsenal.arms(UnitId(t.id));
+            GroundSubject {
+                object: state.ground_object(t),
+                side: t.side,
+                defense: arms
+                    .filter(|arms| !arms.weapons.is_empty() || arms.radar.is_some())
+                    .map(|arms| defense(arms, t, state, &surface.arsenal, rotor)),
+                hidden: arms.is_some_and(|arms| arms.team),
+            }
         })
         .collect()
 }

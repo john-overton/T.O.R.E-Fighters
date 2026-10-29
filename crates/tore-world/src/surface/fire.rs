@@ -262,6 +262,11 @@ pub struct Arms {
     /// The NT's search, unready, attack and retarget times (quarter
     /// seconds), for a battery's controller.
     pub npc: [i32; 4],
+    /// A shoulder-fired SAM team (MANPADS, the record's
+    /// [`is_shoulder_fired_team`](tore_formats::surface_unit::SurfaceUnit::is_shoulder_fired_team)):
+    /// off the AI's threat picture until an aircraft spots it
+    /// (docs/spec/ai-strike.md, "Hidden shoulder-fired teams").
+    pub team: bool,
 }
 
 impl Arms {
@@ -437,11 +442,13 @@ impl Arsenal {
                 battery,
                 loads: Vec::new(),
                 npc: [0; 4],
+                team: false,
             };
             let in_battery_launcher =
                 battery.is_some_and(|b| surface.batteries[b].radar != unit.id);
             let mut sensor_range = None;
             if let Some(nt) = &record {
+                arms.team = nt.is_shoulder_fired_team();
                 arms.npc = [
                     nt.npc.search_frequency,
                     nt.npc.unready_attack,
