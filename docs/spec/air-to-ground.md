@@ -111,6 +111,18 @@ differs in places and is quoted as a conflict.
 | HARM page | Ground emitters the HARM seeker receives | retail data |
 | Visual | Ground objects in view; only a filter on the channels above (Enter, ') | retail manual p. 112, John's air rule ([radar](radar.md#target-selection-keys)) |
 
+### Hidden shoulder-fired teams
+
+**Since 0.2.2** (T.O.R.E opinionated change requested by John, 2026-10-29: treat the player the same as the AI). A shoulder-fired SAM team (SA-7, SA-14, SA-16, FIM-92, Mistral; [the record rule](../formats/surface-units.md#shoulder-fired-teams)) that is not one of the mission's targets is hidden from every pilot's sensors until that pilot spots it. Until then it is not on the A-G radar page, the FLIR page, the scope or the flight map, and Easy targeting's Ctrl+X passes it by. The world still draws it: the player's own eyes are the eyes.
+
+| Spotted by | Rule | Label |
+| --- | --- | --- |
+| Eye | Within 4,000 ft (slant), the best AI pilot's spotting distance, times the weather's visual effect between them (half in a layer that halves it), inside the visual sensor's volume with a clear terrain line | fitted (agent, 2026-10-29): a human is at least as sharp as the Ace, and the pages need a rule |
+| Its launch | A round in the air from the team aimed at the aircraft, or at a friendly aircraft the pilot's sensors observe now while the team stands within its own 19,968 ft listing distance (the AI's rule, [what the AI knows](ai-strike.md#what-the-ai-knows)) | opinionated (John, 2026-10-29) |
+| The targeting sight | A team the sight's track holds is in view through its optics | fitted (agent) |
+
+Once spotted, a team is listed by the ordinary page rules for the rest of the flight. Each aircraft keeps its own spotted teams (`Ownship::spotted_teams`, checkpointed), so each seat in multiplayer sees what its own pilot spotted, and a replay shows what the live readout showed. A team that is a mission target is never hidden: the briefing names it, and A-G targeting and designation of it are unchanged. The host marks the teams on their ground listing (`GroundListing::team`), which the AI's picture reads too.
+
 ## The air-to-ground radar
 
 **Ctrl+R** toggles the A-G mode on the aircraft's own radar (retail manual
