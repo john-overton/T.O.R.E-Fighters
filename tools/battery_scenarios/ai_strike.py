@@ -470,10 +470,34 @@ BREAK_PITCH_MAX_DEG = 10.0
 HELI_AGL_MIN_FT = 150.0
 
 
+def leave_problems(run: Run, label: str, unknown_shooter: bool) -> list[str]:
+    """The ambush rule (John, 2026-10-29): `threat_leave` is the answer to a shot from a site the
+    helicopter did not know, so each `threat_leave` follows a `SHOT ... known=no` fired since the
+    previous `threat_leave` (or the start). A leave that follows only shots from sites it knew
+    (`known=yes`, or `none` for no picture) is a fault in every run; with `unknown_shooter` wanted,
+    a leave with no shot at all before it is one too (a gun's ambush has no SHOT line, so only the
+    run that lays out a missile ambush asks for this)."""
+    problems: list[str] = []
+    shots = [(float(f["t"]), f.get("known", "none")) for f in run.of("SHOT") if "t" in f]
+    previous = float("-inf")
+    for leave in (f for f in run.of("THREAT") if f.get("decision") == "threat_leave"):
+        at = float(leave.get("t", "nan"))
+        since = [known for t, known in shots if previous < t <= at]
+        if since and "no" not in since:
+            problems.append(f"{label}: threat_leave at t={at:.1f} after only shots from sites it knew ({since})")
+        elif unknown_shooter and not since:
+            problems.append(f"{label}: threat_leave at t={at:.1f} with no SHOT from an unknown site before it")
+        previous = at
+    if unknown_shooter and not any(f.get("known") == "no" for f in run.of("SHOT")):
+        problems.append(f"{label}: no SHOT with known=no, the ambush was not by a site it did not know")
+    return problems
+
+
 def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
     """`ai-strike-heli-defended`: for each run (`label`, `profile` or None for any, `breaks` BREAK
     lines at least, `release` wanted, `no_release`, `hurt`, `kill`, `egress`, `decisions` the THREAT reasons
-    wanted in this order, `sead` the SEAD stand-in fired), the AI named its pass, flew the helicopter
+    wanted in this order, `sead` the SEAD stand-in fired, `unknown_shooter` every `threat_leave` follows a
+    SHOT from a site it did not know), the AI named its pass, flew the helicopter
     break (each BREAK at an offset of 60, 90 or 120 degrees, at 75 knots or more, no steeper than 10
     degrees, never blocked by the ground), made its threat decisions (slice H4: hold off outside a
     known ring, resume, switch targets, go home, leave an ambush's ring), released as wanted, was not
@@ -506,6 +530,7 @@ def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
         rest = iter(made)
         if not all(any(d == m for m in rest) for d in wanted):
             problems.append(f"{label}: threat decisions {made}, want {wanted} in that order")
+        problems += leave_problems(run, label, want.get("unknown_shooter", False))
         if want.get("sead") and not run.of("SEAD"):
             problems.append(f"{label}: the SEAD stand-in never fired")
         if want.get("release") and not (run.of("RELEASE") and run.of("IMPACT")):
