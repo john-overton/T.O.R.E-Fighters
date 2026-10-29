@@ -532,7 +532,9 @@ class HelicopterTests(unittest.TestCase):
         heli = scenarios["ai-strike-heli"]
         self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
         held = ["threat_hold_off", "threat_home"]
-        honest = [heli_run(profile="standoff", breaks=0),
+        # Heavy AAA holds off since the stand-off's advance follows the AT-2's flight (2026-10-29).
+        honest = [heli_run(profile="standoff", breaks=0, released=False, killed=False,
+                           decisions=["threat_hold_off"]),
                   heli_run(profile="standoff", breaks=0),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
