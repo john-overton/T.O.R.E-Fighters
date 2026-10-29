@@ -112,6 +112,9 @@
 //!   2026-10-29): the firing range, the seconds to the planned shot, the
 //!   firing point, how far the target drives to the predicted aim point and
 //!   how far the helicopter is from the firing point; `RINGS` follows.
+//!   The summary's `reach_margin_ft` is the least margin the striker kept,
+//!   sampled every quarter second, to the reach of any defence it knew at
+//!   the time (its ring less the ring's margin); negative inside one.
 //! - `LASER plane=P state=S mask=M`: the laser of the striker, and of the
 //!   buddy when there is one, each time its state or mask changes (slice
 //!   ST-L). The summary counts the seconds a laser weapon of the run was in
@@ -772,6 +775,9 @@ struct Watch {
     /// The lowest height above the ground the striker flew at, feet, and the
     /// seconds a helicopter break was flown (slice ST-H).
     min_agl_ft: f64,
+    /// The least margin the striker kept to the reach of any defence it
+    /// knew then (its ring less the ring's margin), feet; negative inside.
+    reach_margin_ft: f64,
     break_ticks: u64,
     /// The striker's hit points last reported (`HURT` lines, slice ST-H).
     hp: Option<i32>,
@@ -851,6 +857,7 @@ impl Watch {
             bursts: BTreeMap::new(),
             hits_tick: 0,
             min_agl_ft: f64::INFINITY,
+            reach_margin_ft: f64::INFINITY,
             break_ticks: 0,
             hp: None,
             shots_seen: BTreeSet::new(),
@@ -1040,6 +1047,19 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
         w.min_agl_ft = w
             .min_agl_ft
             .min(f.position[1] - scene.ground(f.position[0], f.position[2]));
+        // How near it came to the reach of a defence it knew (the move-ahead
+        // check, John 2026-10-29), a quarter-second sample.
+        if tick.is_multiple_of(30)
+            && let Some(picture) = actor.ground_picture()
+        {
+            for ring in tore_sim::ai::helicopter_threat::known_rings(picture, actor.identity().side)
+            {
+                let reach = ring.radius_ft - tore_sim::ai::helicopter_threat::RING_MARGIN_FT;
+                w.reach_margin_ft = w
+                    .reach_margin_ft
+                    .min(horizontal(f.position, ring.centre) - reach);
+            }
+        }
         if let Some((b, bearing)) = actor.trace().rotor_break {
             w.break_ticks += 1;
             if tick.is_multiple_of(120) {
@@ -2673,7 +2693,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let t = scene.seconds();
     let hp_end = scene.target_row().map(|r| r.hp);
     println!(
-        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={} gun_rounds={} bursts={} fall_s={:.1} blind_s={:.1} min_agl_ft={} break_s={:.1}",
+        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={} gun_rounds={} bursts={} fall_s={:.1} blind_s={:.1} min_agl_ft={} break_s={:.1} reach_margin_ft={}",
         t - started,
         watch.profile.map_or("none", Profile::label),
         watch.releases,
@@ -2704,6 +2724,11 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             "none".to_owned()
         },
         watch.break_ticks as f64 / 120.,
+        if watch.reach_margin_ft.is_finite() {
+            format!("{:.0}", watch.reach_margin_ft)
+        } else {
+            "none".to_owned()
+        },
     );
     if watch.releases == 0 {
         println!("ai-strike: no release");
