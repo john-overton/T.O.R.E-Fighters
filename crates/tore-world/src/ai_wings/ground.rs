@@ -42,7 +42,7 @@ pub(super) fn step(
     }
     let subjects = subjects(state, &world.surface, &mut wings.rotor_reach);
     let painted = revealed(&wings.painting, &world.surface.arsenal);
-    let launched = launched(state, &world.surface.arsenal);
+    let launched = launched(state);
     wings.mission.observe_ground(
         GroundScene {
             subjects: &subjects,
@@ -58,16 +58,13 @@ pub(super) fn step(
 /// at, team) pairs, ascending (T.O.R.E opinionated, John 2026-10-29: a
 /// launch gives the team away). A round lives for seconds, so the
 /// quarter-second refresh never misses one.
-fn launched(state: &live::State, arsenal: &fire::Arsenal) -> Vec<(u32, u32)> {
-    if !arsenal.units.iter().any(|arms| arms.team) {
-        return Vec::new();
-    }
+fn launched(state: &live::State) -> Vec<(u32, u32)> {
     let mut pairs: Vec<(u32, u32)> = state
         .projectiles
         .iter()
         .filter(|p| p.gun_round.is_none())
         .filter_map(|p| Some((p.target?, p.owner)))
-        .filter(|(_, owner)| arsenal.arms(UnitId(*owner)).is_some_and(|arms| arms.team))
+        .filter(|(_, owner)| state.ground_listing(*owner).is_some_and(|l| l.team))
         .collect();
     pairs.sort_unstable();
     pairs.dedup();
@@ -190,7 +187,8 @@ pub(super) fn subjects(
                 defense: arms
                     .filter(|arms| !arms.weapons.is_empty() || arms.radar.is_some())
                     .map(|arms| defense(arms, t, state, &surface.arsenal, rotor)),
-                hidden: arms.is_some_and(|arms| arms.team),
+                // The host marks the teams that are no mission target.
+                hidden: state.ground_listing(t.id).is_some_and(|l| l.team),
             }
         })
         .collect()
