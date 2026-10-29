@@ -106,7 +106,12 @@
 //!   `SHOT t= site=ID range_ft=R known=yes|no`: a ground site launched a
 //!   round (not a gun's) at the striker, R feet from it, and whether the
 //!   striker knew the site then (its ring was in its ground picture). `RINGS` with each `THREAT`: the rings it
-//!   knew (id, radius, distance from the target, feet).
+//!   knew (id, radius, distance from the target, feet). `AHEAD t=
+//!   range_ft=R fire_in_s=S point=X,Z aim_moves_ft=D from_ft=F` each time a
+//!   helicopter plans a move-ahead ambush on a moving target (John,
+//!   2026-10-29): the firing range, the seconds to the planned shot, the
+//!   firing point, how far the target drives to the predicted aim point and
+//!   how far the helicopter is from the firing point; `RINGS` follows.
 //! - `LASER plane=P state=S mask=M`: the laser of the striker, and of the
 //!   buddy when there is one, each time its state or mask changes (slice
 //!   ST-L). The summary counts the seconds a laser weapon of the run was in
@@ -750,6 +755,8 @@ struct Watch {
     no_laze: Option<tore_sim::ai::strike::NoLaze>,
     /// A helicopter's threat decision last reported (slice H4).
     threat_call: Option<(tore_sim::ai::helicopter_threat::Decision, u64)>,
+    /// A helicopter's move-ahead plan last reported (its planning tick).
+    ahead: Option<u64>,
     /// The planes whose lasers are reported, and what each last showed.
     lasers: Vec<(u32, Option<LaserShown>)>,
     /// Ticks a laser weapon of the run flew guiding, and ticks of those its
@@ -836,6 +843,7 @@ impl Watch {
             commit_held: None,
             no_laze: None,
             threat_call: None,
+            ahead: None,
             lasers: vec![(plane.0, None)],
             fall_ticks: 0,
             blind_ticks: 0,
@@ -1169,6 +1177,29 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             call.decision.words(),
         );
         print_rings(scene, w, t, target_at);
+    }
+    // A helicopter's move-ahead ambush, each time it is planned.
+    let ahead = scene
+        .actor(w.plane)
+        .and_then(|a| a.strike())
+        .and_then(|s| s.move_ahead())
+        .copied();
+    if ahead.map(|a| a.planned_tick) != w.ahead {
+        w.ahead = ahead.map(|a| a.planned_tick);
+        if let Some(plan) = ahead {
+            let from = scene
+                .striker_at(w.plane)
+                .map_or(-1., |(p, _)| horizontal(p, plan.point));
+            println!(
+                "ai-strike: AHEAD t={t:.3} range_ft={:.0} fire_in_s={:.1} point={:.0},{:.0} aim_moves_ft={:.0} from_ft={from:.0}",
+                plan.range_ft,
+                plan.fire_tick.saturating_sub(tick) as f64 / 120.,
+                plan.point[0],
+                plan.point[2],
+                target_at.map_or(-1., |tp| horizontal(tp, plan.aim)),
+            );
+            print_rings(scene, w, t, target_at);
+        }
     }
     if w.phase == Some(tore_sim::ai::strike::Phase::HoldOff)
         && tick.is_multiple_of(1200)
