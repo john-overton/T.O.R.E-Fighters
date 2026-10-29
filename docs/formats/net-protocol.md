@@ -3293,6 +3293,13 @@ again with an observer; the capture format did not change for it.
   gives up a pass into a known threat ring seen before release and takes a
   clear stand-off, and a line out of a ring must lead straight out. The
   compatibility simulation version is 9.
+  81 (2026-10-29, 0.2.2-rc1): an AI helicopter's threat rings come from each
+  site's real launch reach at a helicopter, its stand-off advance from the
+  store's flight time, and only a shot from a site it did not know is an
+  ambush; helicopters search farther firing ranges and fixed-wing strikers
+  release stand-off stores outside known rings and turn away. Checkpoints
+  gain the site's helicopter reach and the strike's stand-off plan. The
+  compatibility simulation version is 10.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
