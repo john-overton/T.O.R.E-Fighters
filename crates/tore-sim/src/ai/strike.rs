@@ -63,7 +63,9 @@ pub use lase::{
     LASE_RADIUS_TURNS, LASE_REACH_SHARE, LASE_WAIT_TICKS, Lase, LaseEnd, LaseInputs, LaseSensor,
     LaseUntil, WingFacts, bank_cap_deg, lase_radius_ft, orbit_speed_fps, turn_rate_deg,
 };
-pub use standoff::{ADVANCE_TURNS, PLAN_SLACK_FT, ROUND_MARGIN_S, ReleasePlan, STANDOFF_EXIT_FT};
+pub use standoff::{
+    ADVANCE_TURNS, PLAN_SLACK_FT, ROUND_FALLBACK_FPS, ROUND_MARGIN_S, ReleasePlan, STANDOFF_EXIT_FT,
+};
 
 /// Feet in a metre, for John's release circle (given in metres).
 pub const FEET_PER_METRE: f64 = 1. / 0.3048;

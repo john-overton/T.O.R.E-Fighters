@@ -162,3 +162,32 @@ fn a_planned_stand_off_round_trips_through_a_checkpoint() {
     let twin: Strike = from_bytes(&to_bytes(&strike, &models).unwrap(), &models).unwrap();
     assert_eq!(twin, strike);
 }
+
+#[test]
+fn a_usual_release_outside_the_ring_keeps_its_point_and_turns_away_after_it() {
+    // A short-range site (5,000 ft, a 7,000 ft ring) 2,000 ft beyond the
+    // target covers it, but the usual release (8,660 ft out from 5,000 ft up)
+    // and the turn after it stand outside its ring: the release is where it
+    // was; the exit then turns away instead of flying on over the target
+    // into the ring.
+    let mut world = seeker_world(false);
+    world.picture = picture(
+        &[
+            ground(TARGET, TARGET_AT, 0x200, None),
+            ground(SAM, SAM_AT, 0x1000, site(5_000., 0., true)),
+        ],
+        vec![SAM],
+    );
+    let mut strike = Strike::new(7);
+    strike.step(&world.context(1));
+    let plan = strike
+        .release_plan
+        .expect("the usual point kept as the plan");
+    assert!((plan.range_ft - 75_000_000_f64.sqrt()).abs() < 1e-6);
+    at(&mut world, 9_000.);
+    assert_eq!(strike.step(&world.context(2)).release, None);
+    at(&mut world, 8_600.);
+    assert!(strike.step(&world.context(3)).release.is_some());
+    assert_eq!(strike.phase(), Phase::Exit);
+    assert!((strike.exit_heading_deg - 180.).abs() < 1e-9);
+}

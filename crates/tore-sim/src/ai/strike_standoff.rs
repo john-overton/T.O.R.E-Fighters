@@ -7,12 +7,13 @@
 //! released on its sight's bar: a guided bomb, a laser store on a spot
 //! that is not its own) and a known defence whose reach covers the target,
 //! the striker checks its usual release point: the seeker's fire range, or
-//! the sight's bar. When that point, or the turn away after it, lies inside
-//! a known ring ([`threat::jet_rings`]), it looks farther out along its
-//! line to the target, on the [`reach::SHOT_STEP_FT`] grid, to the store's
-//! reliable reach ([`reach::reliable`], the host's exact-point answers): the
-//! nearest range whose release point and turn stand outside every ring is
-//! its plan ([`ReleasePlan`]). It releases there once the store reaches
+//! the sight's bar. When that point and the turn away after it stand outside
+//! every known ring ([`threat::jet_rings`]), the plan is that point. Else
+//! it looks farther out along its line to the target, on the
+//! [`reach::SHOT_STEP_FT`] grid, to the store's reliable reach
+//! ([`reach::reliable`], the host's exact-point answers): the nearest range
+//! whose release point and turn stand outside every ring is its plan
+//! ([`ReleasePlan`]). It releases there once the store reaches
 //! ([`super::Solution::reaches`]), turns away from the target and opens to
 //! the plan's range plus its turn plus [`STANDOFF_EXIT_FT`] before it turns
 //! back. With no such range, or with no defence covering the target, the
@@ -40,6 +41,10 @@ pub const ROUND_MARGIN_S: f64 = 5.;
 /// half circle reaches one radius ahead; the input-only adapter turns more
 /// gently than the limit).
 pub const ADVANCE_TURNS: f64 = 2.;
+/// A round's time of flight from a usual release the host gives no answer
+/// for is its range at this speed, ft/s (fitted, agent: only the striker's
+/// wait for its round reads it).
+pub const ROUND_FALLBACK_FPS: f64 = 1_000.;
 
 /// A stand-off release planned outside known rings.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,14 +114,25 @@ impl Strike {
             let end = toward(target, own.position, (range - advance).max(0.));
             threat::inside(&rings, point).is_none() && threat::clear(&rings, point, end)
         };
-        if safe(usual) {
-            return None;
-        }
         let launch = ShotLaunch {
             target_ft: target[1],
             height_ft: height,
             speed_fps: own.speed.0,
         };
+        if safe(usual) {
+            // Its usual release already stands outside: it stays where it
+            // was, and the plan keeps the turn away after it.
+            let seconds = cx
+                .inputs
+                .shots
+                .shot(store.station, launch, reach::on_grid(usual))
+                .unwrap_or(usual / ROUND_FALLBACK_FPS);
+            return Some(ReleasePlan {
+                range_ft: usual,
+                seconds,
+                advance_ft: advance,
+            });
+        }
         let cap = reach::ground_reach(store.maximum_range_ft, height);
         reach::ranges_beyond(usual, cap)
             .filter(|range| safe(*range))
