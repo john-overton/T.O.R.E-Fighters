@@ -235,16 +235,16 @@ pub fn known_shooter(rings: &[Ring], own: Vector, bearing_deg: Option<f64>) -> O
         .map(|(_, r)| r)
 }
 
-fn horizontal(a: Vector, b: Vector) -> f64 {
+pub(crate) fn horizontal(a: Vector, b: Vector) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
 
-fn along(from: Vector, bearing_deg: f64, feet: f64) -> [f64; 2] {
+pub(crate) fn along(from: Vector, bearing_deg: f64, feet: f64) -> [f64; 2] {
     let b = bearing_deg.to_radians();
     [from[0] + b.sin() * feet, from[2] + b.cos() * feet]
 }
 
-fn bearing(from: Vector, to: Vector) -> f64 {
+pub(crate) fn bearing(from: Vector, to: Vector) -> f64 {
     (to[0] - from[0])
         .atan2(to[2] - from[2])
         .to_degrees()
@@ -348,6 +348,9 @@ pub enum Plan {
         approach: Option<Vector>,
         range_ft: f64,
     },
+    /// A stand-off shot at a moving target from a point ahead of its path
+    /// ([`crate::ai::helicopter_ahead`]; John, 2026-10-29).
+    Ahead(crate::ai::helicopter_ahead::Ahead),
 }
 
 /// An attack on `target` from `own` that stays outside every ring, if
@@ -452,7 +455,7 @@ pub fn plan_attack(
 /// The firing point's bearings from the target: `base` (the helicopter's
 /// own) and then outward in [`APPROACH_STEP_DEG`] steps, the right first at
 /// each step, all the way round; with the step count `k`.
-fn approach_bearings(base: f64) -> impl Iterator<Item = (i32, f64)> {
+pub(crate) fn approach_bearings(base: f64) -> impl Iterator<Item = (i32, f64)> {
     let steps = (180. / APPROACH_STEP_DEG).round() as i32;
     (0..=steps).flat_map(move |k| {
         let sides: &[f64] = if k == 0 || k == steps {
@@ -481,6 +484,9 @@ pub fn holds(
 ) -> bool {
     match plan {
         Plan::PopUp => inside(rings, target).is_none() && clear(rings, own, target),
+        // Judged on the target's motion and the rings' by
+        // [`crate::ai::helicopter_ahead::holds`].
+        Plan::Ahead(_) => true,
         Plan::StandOff { approach, range_ft } => {
             let point = approach.unwrap_or_else(|| {
                 let [x, z] = along(target, bearing(target, own), range_ft);
@@ -644,6 +650,9 @@ pub struct HeliThreat {
     /// The stand-off's firing point off the straight line, and its range.
     pub approach: Option<Vector>,
     pub standoff_ft: Option<f64>,
+    /// A move-ahead ambush on a moving target, when the stand-off is one
+    /// ([`crate::ai::helicopter_ahead`]; John, 2026-10-29).
+    pub ahead: Option<crate::ai::helicopter_ahead::Ahead>,
     /// The last decision.
     pub call: Option<Call>,
 }

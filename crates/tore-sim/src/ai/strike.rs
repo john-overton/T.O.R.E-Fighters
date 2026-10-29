@@ -992,6 +992,10 @@ impl Strike {
     pub fn hold_off(&self) -> Option<(Vector, u64)> {
         self.heli.hold
     }
+    /// A helicopter's move-ahead ambush in hand (John, 2026-10-29).
+    pub fn move_ahead(&self) -> Option<&super::helicopter_ahead::Ahead> {
+        self.heli.ahead.as_ref()
+    }
     /// Done: the mission sends it home.
     pub fn home(&self) -> bool {
         self.phase == Phase::Home
