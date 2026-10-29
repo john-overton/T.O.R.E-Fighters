@@ -17,7 +17,8 @@
 //!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S] [--sead-at S]
-//!     [--follow-threat] [--follow-egress] [--place-site ID,BEARING,RANGE_FT]
+//!     [--sead-site ID]... [--follow-threat] [--follow-egress]
+//!     [--place-site ID,BEARING,RANGE_FT]...
 //! ```
 //!
 //! - `--aircraft`, `--load`, `--station`, `--count`: the striker and its store,
@@ -98,7 +99,10 @@
 //!   records it as an `ai.strike` event. `HOLDOFF` every ten seconds of a
 //!   hold-off: seconds held, distance from the hold point, height above
 //!   the ground and range to the target. `SEAD t= killed=N`: `--sead-at`
-//!   destroyed the hostile sites. `RINGS` with each `THREAT`: the rings it
+//!   destroyed the hostile sites (only the `--sead-site` ones when named).
+//!   `SHOT t= site=ID range_ft=R known=yes|no`: a ground site launched a
+//!   round (not a gun's) at the striker, R feet from it, and whether the
+//!   striker knew the site then (its ring was in its ground picture). `RINGS` with each `THREAT`: the rings it
 //!   knew (id, radius, distance from the target, feet).
 //! - `LASER plane=P state=S mask=M`: the laser of the striker, and of the
 //!   buddy when there is one, each time its state or mask changes (slice
@@ -307,6 +311,10 @@ pub(crate) struct Config {
     /// destroyed `S` seconds into the run, a stand-in for a SEAD flight
     /// (slice H4: a helicopter holding off resumes once the ring is gone).
     pub sead_at: Option<f64>,
+    /// `--sead-site ID` (repeatable): the SEAD stand-in destroys only these
+    /// sites, so a site the helicopter has not met yet stays for an ambush
+    /// (2026-10-28).
+    pub sead_sites: Vec<u32>,
     /// `--follow-threat`: after the last impact the run goes on (within
     /// `--seconds`) while a helicopter keeps out of a ring it means to come
     /// back from, to see whether it resumes (slice H2).
@@ -319,8 +327,8 @@ pub(crate) struct Config {
     /// `ID` is moved, before the first tick, to that compass bearing and
     /// range from the target, so a test can lay out the threats a
     /// helicopter meets, an ambush among them (slice HF1, John
-    /// 2026-10-13).
-    pub place_site: Option<(u32, f64, f64)>,
+    /// 2026-10-13). Repeatable: each site moves in the order given.
+    pub place_sites: Vec<(u32, f64, f64)>,
 }
 
 impl Config {
@@ -718,6 +726,9 @@ struct Watch {
     break_ticks: u64,
     /// The striker's hit points last reported (`HURT` lines, slice ST-H).
     hp: Option<i32>,
+    /// Rounds a ground site launched at the striker, already reported
+    /// (`SHOT` lines).
+    shots_seen: BTreeSet<u32>,
 }
 
 /// One gun burst of a strafing run: its release number, the rounds fired,
@@ -783,6 +794,7 @@ impl Watch {
             min_agl_ft: f64::INFINITY,
             break_ticks: 0,
             hp: None,
+            shots_seen: BTreeSet::new(),
         }
     }
 
@@ -1301,6 +1313,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
         }
     }
     observe_guns(scene, w, t, target_at);
+    observe_shots(scene, w, t);
     trace(scene, w, tick, target_at);
     let state = &scene.world.combat.state;
     // Kills credited to the striker.
@@ -1501,6 +1514,47 @@ fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
             .rem_euclid(360.),
         f.pitch.to_degrees(),
     );
+}
+
+/// `SHOT`: a round (not a gun's) a ground site launched at the striker, on
+/// the tick it is first seen: the site, its range to the striker, and
+/// whether the striker knew the site then (it is among the rings of its
+/// ground picture; slice H4). An ambush is a shot from a site it did not
+/// know (Mi-24 ambush layout, 2026-10-28).
+fn observe_shots(scene: &Scene, w: &mut Watch, t: f64) {
+    let state = &scene.world.combat.state;
+    let Some((own, _)) = scene.striker_at(w.plane) else {
+        return;
+    };
+    for p in &state.projectiles {
+        if p.gun_round.is_some() || p.target != Some(w.plane.0) || w.shots_seen.contains(&p.id) {
+            continue;
+        }
+        let Some(site) = state
+            .targets
+            .iter()
+            .find(|row| row.id == p.owner && row.aircraft.is_none() && row.category & 0x1800 != 0)
+        else {
+            continue;
+        };
+        w.shots_seen.insert(p.id);
+        let known = scene.actor(w.plane).and_then(|actor| {
+            let picture = actor.ground_picture()?;
+            let rings =
+                tore_sim::ai::helicopter_threat::known_rings(picture, actor.identity().side);
+            Some(rings.iter().any(|r| r.id == site.id))
+        });
+        println!(
+            "ai-strike: SHOT t={t:.3} site={:#x} range_ft={:.0} known={}",
+            site.id,
+            horizontal(site.position, own),
+            match known {
+                Some(true) => "yes",
+                Some(false) => "no",
+                None => "none",
+            }
+        );
+    }
 }
 
 /// A gun run's bursts (slice ST-T2): each burst is one `RELEASE` (its first
@@ -1880,7 +1934,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             cfg.order.map_or("none", |(name, _)| name),
             cfg.mode.map_or("none", DeliveryMode::label),
         );
-        if let Some((id, bearing, range)) = cfg.place_site {
+        for &(id, bearing, range) in &cfg.place_sites {
             place_site(&mut scene, id, bearing, range, target_at)?;
         }
         // The mission's hostile SAM and gun sites, once (slice ST-H): where
@@ -2277,6 +2331,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                     && row.aircraft.is_none()
                     && row.hp > 0
                     && row.id != target
+                    && (cfg.sead_sites.is_empty() || cfg.sead_sites.contains(&row.id))
             }) {
                 row.hp = 0;
                 killed += 1;
