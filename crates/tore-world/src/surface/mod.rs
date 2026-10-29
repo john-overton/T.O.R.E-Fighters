@@ -26,6 +26,7 @@ pub mod movement;
 pub mod muzzle;
 pub mod parked;
 pub mod resolve;
+pub mod rotor_reach;
 pub mod supply;
 pub mod units;
 pub mod wreck;

@@ -241,6 +241,27 @@ impl State {
         }
         self.prediction_request_finish(measured);
     }
+    /// One launch question flown to its answer at once, over `ground` (the
+    /// terrain height at a point, feet), with `wind` (world feet per
+    /// second): the same question, hit radius and
+    /// kernel the prediction service answers for [`Self::energy_solution`],
+    /// without its queue. `None` for a store with no motor, which the
+    /// energy rules never launch. For callers that bound an envelope ahead
+    /// of time (a helicopter's threat rings), not for the per-tick gates.
+    pub fn energy_trial(
+        w: &Weapon,
+        launcher: Launcher,
+        observed: seeker::Observation,
+        wind: Vector,
+        ground: &impl Fn(f64, f64) -> f64,
+    ) -> Option<missiles::energy_estimate::Answer> {
+        if !powered(w) {
+            return None;
+        }
+        let question =
+            prediction::launch_question(w, launcher, observed, prediction_radius(w), wind);
+        Some(question.finish(&|x, z| ground(x / FT, z / FT) * FT))
+    }
     /// Player advisory only. AI employment reads `energy_solution` instead.
     pub(super) fn player_energy_answer(
         &self,
