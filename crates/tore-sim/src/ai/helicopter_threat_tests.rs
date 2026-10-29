@@ -203,11 +203,11 @@ fn the_stand_off_advance_scales_with_the_stores_time_of_flight() {
     assert!((flight.seconds_to(22_500.) - 32.).abs() < 1e-9);
 
     // The firing point leaves room for the advance outside every ring: a
-    // ring 3,500 ft short of the target on the straight line clears the old
+    // ring 4,000 ft short of the target on the straight line clears the old
     // 2,500 ft carry from the 10,800 ft firing point, not the flight's.
     let own = [0., 1_500., 0.];
     let target = [0., 0., 24_000.];
-    let near = [ring(2, [0., 0., 20_500.], 3_000.)];
+    let near = [ring(2, [0., 0., 20_000.], 3_000.)];
     assert_eq!(
         plan_attack(own, target, Some(at2()), true, &near),
         Some(Plan::StandOff {
