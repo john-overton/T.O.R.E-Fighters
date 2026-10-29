@@ -22,6 +22,13 @@
 //!   hover (asked for a low speed it settles nose-down into the ground), so
 //!   the unmask is flown at speed, which also keeps the helicopter's speed
 //!   for its defence (John, 2026-10-11).
+//! - **Move-ahead ambush** ([`crate::ai::helicopter_ahead`]; T.O.R.E
+//!   opinionated change, John 2026-10-29): on a moving target under known
+//!   rings, the stand-off is flown from a firing point ahead of the
+//!   target's path, where it will be in range; the helicopter circles
+//!   masked out of the rings until it is time, then comes in along the
+//!   firing radial, unmasks and fires. A static target, or one with no such
+//!   point, is attacked as before.
 //! - **Rockets** fly the pop-up's final like a fighter's rocket run: the cue
 //!   is flown onto the pass's drawn aim point and up to eight leave at the
 //!   record's cadence while it stays inside the skill circle.
@@ -52,6 +59,7 @@ use super::{
 };
 use crate::ai::awareness::ground::{BriefedKind, ThreatLevel};
 use crate::ai::controller::{Activity, OwnState};
+use crate::ai::helicopter_ahead as ahead;
 use crate::ai::helicopter_threat::{self as threat, Decision};
 use crate::ai::motion::SpeedRequest;
 use crate::attitude::Vector;
@@ -213,9 +221,33 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         && s.segment == Segment::Approach
         && s.forced.is_none()
         && let (Some(target), Some(point)) = (s.target, target_at)
-        && (plan(s, cx, point).is_none() || !pass_holds(s, cx, point))
     {
-        hold_off(s, cx, target);
+        match s.heli.ahead {
+            // A move-ahead ambush (John, 2026-10-29) is planned again when
+            // the target stops or turns off its path, or a ring comes over
+            // the plan: the choice finds the next one, or the stand-off,
+            // or the hold-off.
+            Some(plan) if cx.tick >= plan.planned_tick + ahead::REPLAN_TICKS => {
+                match ahead_holds(s, cx, &plan, target, point) {
+                    // The nose's offset may change with the target's course.
+                    Some(offset_deg) => s.heli.ahead = Some(ahead::Ahead { offset_deg, ..plan }),
+                    None => choose(s, cx),
+                }
+            }
+            Some(_) => {}
+            // A stand-off on a moving target, flown from the choice before
+            // its motion was known, looks for a move-ahead once a second
+            // and takes it.
+            None => {
+                let search = s.pass == Some(Pass::StandOff) && ahead::search_due(cx.tick);
+                match plan(s, cx, target, point, search) {
+                    None => hold_off(s, cx, target),
+                    Some(threat::Plan::Ahead(_)) => choose(s, cx),
+                    Some(_) if !pass_holds(s, cx, point) => hold_off(s, cx, target),
+                    Some(_) => {}
+                }
+            }
+        }
     }
     match s.phase {
         Phase::Ingress | Phase::Wait => {
@@ -357,8 +389,10 @@ fn choose(s: &mut Strike, cx: &Context<'_>) {
     // Once it has waited out a hold-off, a target no attack outside the
     // rings can reach is not taken (slice H4).
     let picked = if s.heli.waited && s.forced.is_none() {
-        let allow =
-            |id: u32| known_position(cx.picture, id).is_some_and(|p| plan(s, cx, p).is_some());
+        let allow = |id: u32| {
+            known_position(cx.picture, id)
+                .is_some_and(|p| plan(s, cx, id, p, ahead::search_due(cx.tick)).is_some())
+        };
         s.pick_target_where(cx, &allow)
     } else {
         s.pick_target(cx)
@@ -420,13 +454,28 @@ fn choose(s: &mut Strike, cx: &Context<'_>) {
     let wanted = choose_pass(store.kind, threat);
     s.heli.approach = None;
     s.heli.standoff_ft = None;
+    s.heli.ahead = None;
     let pass = match s.forced {
         Some(pass @ (Pass::PopUp | Pass::StandOff)) => pass,
-        _ => match plan_with(s, cx, target_at, Some(store), wanted == Pass::StandOff) {
+        _ => match plan_with(
+            s,
+            cx,
+            target,
+            target_at,
+            Some(store),
+            wanted == Pass::StandOff,
+            ahead::search_due(cx.tick),
+        ) {
             Some(threat::Plan::PopUp) => Pass::PopUp,
             Some(threat::Plan::StandOff { approach, range_ft }) => {
                 s.heli.approach = approach;
                 s.heli.standoff_ft = approach.map(|_| range_ft);
+                Pass::StandOff
+            }
+            Some(threat::Plan::Ahead(plan)) => {
+                s.heli.approach = Some(plan.point);
+                s.heli.standoff_ft = Some(plan.range_ft);
+                s.heli.ahead = Some(plan);
                 Pass::StandOff
             }
             None => {
@@ -471,6 +520,7 @@ fn exit(s: &mut Strike, cx: &Context<'_>) {
             bearing_deg(target, cx.own.position)
         });
     s.holding = None;
+    s.heli.ahead = None;
     s.enter(Phase::Exit, cx.tick);
 }
 
@@ -529,25 +579,72 @@ fn rings(s: &Strike, cx: &Context<'_>) -> Vec<threat::Ring> {
     rings
 }
 
-/// The attack on a target at `target_at` with the store it would choose.
-fn plan(s: &Strike, cx: &Context<'_>, target_at: Vector) -> Option<threat::Plan> {
+/// The attack on `target` at `target_at` with the store it
+/// would choose; `search` lets a moving target's move-ahead be looked for
+/// (the costly part, [`ahead::SEARCH_TICKS`]).
+fn plan(
+    s: &Strike,
+    cx: &Context<'_>,
+    target: u32,
+    target_at: Vector,
+    search: bool,
+) -> Option<threat::Plan> {
     let store = choose_store(&cx.inputs.stores, cx.inputs.designator);
     let threat_level = cx
         .picture
         .threats()
         .level(cx.side, &[target_at], cx.warnings);
     let wanted = store.is_some_and(|st| choose_pass(st.kind, threat_level) == Pass::StandOff);
-    plan_with(s, cx, target_at, store, wanted)
+    plan_with(s, cx, target, target_at, store, wanted, search)
 }
 
+/// The attack on `target` at `target_at` (slice H4): the pop-up when it is
+/// clear and wanted; on a moving target under rings, with `search`, the
+/// move-ahead ambush (John, 2026-10-29); else the stand-off from its place
+/// now, as before.
 fn plan_with(
     s: &Strike,
     cx: &Context<'_>,
+    target: u32,
     target_at: Vector,
     store: Option<Store>,
     prefer_standoff: bool,
+    search: bool,
 ) -> Option<threat::Plan> {
-    let standoff = standoff_of(cx, store).map(|st| threat::StandOff {
+    let standoff = standoff_with_shots(cx, store, target_at);
+    let rings = rings(s, cx);
+    let fixed = threat::plan_attack(
+        cx.own.position,
+        target_at,
+        standoff,
+        prefer_standoff,
+        &rings,
+    );
+    if fixed == Some(threat::Plan::PopUp) || rings.is_empty() || !search {
+        return fixed;
+    }
+    let moving = target_track(cx, target, target_at).filter(ahead::Track::moving);
+    if let (Some(track), Some(standoff)) = (moving, standoff)
+        && let Some(plan) = ahead::plan(
+            &flier(cx),
+            cx.tick,
+            track,
+            &standoff,
+            &moving_rings(cx, &rings),
+        )
+    {
+        return Some(threat::Plan::Ahead(plan));
+    }
+    fixed
+}
+
+/// The store's stand-off with the host's answers on its shots.
+fn standoff_with_shots<'a>(
+    cx: &'a Context<'_>,
+    store: Option<Store>,
+    target_at: Vector,
+) -> Option<threat::StandOff<'a>> {
+    standoff_of(cx, store).map(|st| threat::StandOff {
         shots: store
             .filter(|_| cx.inputs.shots.known())
             .map(|store| threat::StandOffShots {
@@ -556,13 +653,64 @@ fn plan_with(
                 launch: shot_launch(cx, target_at),
             }),
         ..st
-    });
-    threat::plan_attack(
-        cx.own.position,
-        target_at,
-        standoff,
-        prefer_standoff,
-        &rings(s, cx),
+    })
+}
+
+/// The helicopter as the move-ahead plans it: where it is, its heading and
+/// its speed on the strike legs.
+fn flier(cx: &Context<'_>) -> ahead::Flier {
+    ahead::Flier {
+        position: cx.own.position,
+        heading_deg: cx.own.heading_deg,
+        speed_fps: crate::ai::helicopter_defense::strike_speed(&cx.own.limits).0,
+    }
+}
+
+/// `target` at `target_at` as the AI perceives it moving: its velocity
+/// from the host's solution on it, else from its listed contact. `None`
+/// when it is not listed or solved (its motion is not known).
+fn target_track(cx: &Context<'_>, target: u32, target_at: Vector) -> Option<ahead::Track> {
+    cx.inputs
+        .solution
+        .filter(|sol| sol.target == target)
+        .map(|sol| ahead::Track::new(sol.target_position, sol.target_velocity))
+        .or_else(|| {
+            cx.picture
+                .contact(target)
+                .filter(|c| !c.destroyed)
+                .map(|c| ahead::Track::new(target_at, c.velocity))
+        })
+}
+
+/// The rings with their sites' motion: a known defence its lists hold
+/// moving (a gun driving with the column) moves its ring along.
+fn moving_rings(cx: &Context<'_>, rings: &[threat::Ring]) -> Vec<ahead::MovingRing> {
+    ahead::moving_rings(rings, &|id| {
+        cx.picture
+            .contact(id)
+            .filter(|c| !c.destroyed)
+            .map(|c| ahead::Track::new(c.position, c.velocity))
+    })
+}
+
+/// Whether the move-ahead in hand still stands, and the nose's offset to
+/// guide with ([`ahead::holds`]).
+fn ahead_holds(
+    s: &Strike,
+    cx: &Context<'_>,
+    plan: &ahead::Ahead,
+    target: u32,
+    target_at: Vector,
+) -> Option<f64> {
+    let track = target_track(cx, target, target_at)?;
+    let standoff = standoff_with_shots(cx, s.store(cx), target_at)?;
+    let rings = rings(s, cx);
+    ahead::holds(
+        plan,
+        &flier(cx),
+        &track,
+        &standoff,
+        &moving_rings(cx, &rings),
     )
 }
 
@@ -635,6 +783,7 @@ fn hold_off(s: &mut Strike, cx: &Context<'_>, target: u32) {
     s.target = Some(target);
     s.heli.approach = None;
     s.heli.standoff_ft = None;
+    s.heli.ahead = None;
     s.released = 0;
     s.holding = None;
     s.enter(Phase::HoldOff, cx.tick);
@@ -687,7 +836,13 @@ fn hold_check(s: &mut Strike, cx: &Context<'_>) {
     }
     let target_at = s.target.and_then(|id| known_position(cx.picture, id));
     let alive = s.target.is_some_and(|id| standing(cx.picture, id));
-    if !alive || target_at.is_some_and(|p| plan(s, cx, p).is_some()) {
+    // A moving target's move-ahead is looked for once a second.
+    let search = ahead::search_due(cx.tick);
+    let planned = |p: Vector| {
+        s.target
+            .is_some_and(|id| plan(s, cx, id, p, search).is_some())
+    };
+    if !alive || target_at.is_some_and(planned) {
         choose(s, cx);
         return;
     }
@@ -758,6 +913,31 @@ fn on_radial(own: Vector, target: Vector, point: Vector) -> Vector {
             target[2] + (point[2] - target[2]) * k,
         ]
     }
+}
+
+/// A move-ahead ambush's shot from here, now ([`ahead::shot_clear`]): the
+/// nose's offset to guide with, the planned one first.
+fn shot_clear(s: &Strike, cx: &Context<'_>, target: Vector, plan: &ahead::Ahead) -> Option<f64> {
+    let id = s.target?;
+    let track = target_track(cx, id, target)?;
+    let standoff = standoff_with_shots(cx, s.store(cx), target)?;
+    let rings = rings(s, cx);
+    ahead::shot_clear(
+        &flier(cx),
+        &track,
+        &standoff,
+        &moving_rings(cx, &rings),
+        plan.offset_deg,
+    )
+}
+
+/// A move-ahead ambush: time to leave the wait circle for the firing point
+/// ([`ahead::go`]), the target as the AI perceives it now (its motion
+/// unknown: now).
+fn going(s: &Strike, cx: &Context<'_>, plan: &ahead::Ahead, target: Vector) -> bool {
+    s.target
+        .and_then(|id| target_track(cx, id, target))
+        .is_none_or(|track| ahead::go(plan, &flier(cx), &track))
 }
 
 /// The heading nearest `heading` whose next [`EXIT_LOOK_FT`] stays out of
@@ -875,11 +1055,25 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
         {
             s.segment_to(Segment::Pull, cx.tick)
         }
+        // A move-ahead ambush (John, 2026-10-29): unmask at the firing
+        // point once it is time to go there, not as the wait circle passes
+        // it.
+        (Pass::StandOff, Segment::Approach)
+            if s.heli.ahead.is_some_and(|plan| {
+                horizontal(own.position, plan.point) <= APPROACH_REACHED_FT
+                    && angle_difference(own.heading_deg, bearing_deg(own.position, target)).abs()
+                        <= ahead::INBOUND_DEG
+                    && going(s, cx, &plan, target)
+            }) =>
+        {
+            s.segment_to(Segment::Pull, cx.tick)
+        }
         // A firing point off the straight line (slice H4): unmask there.
         (Pass::StandOff, Segment::Approach)
-            if s.heli
-                .approach
-                .is_some_and(|p| horizontal(own.position, p) <= APPROACH_REACHED_FT) =>
+            if s.heli.ahead.is_none()
+                && s.heli
+                    .approach
+                    .is_some_and(|p| horizontal(own.position, p) <= APPROACH_REACHED_FT) =>
         {
             s.segment_to(Segment::Pull, cx.tick)
         }
@@ -898,6 +1092,13 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
                 && (distance < POPUP_EXIT_FT || !ahead || own.agl_ft < RUN_FLOOR_AGL_FT))
             || (pass == Pass::StandOff && s.segment == Segment::Pull && since >= UNMASK_TICKS)
             || (pass == Pass::StandOff && distance < STRAIGHT_EXIT_FT)
+            // A move-ahead shot not away by the end of the unmask it was
+            // planned with is given up: farther in, the advance was not
+            // judged clear.
+            || (s.segment == Segment::Pull
+                && s.heli
+                    .ahead
+                    .is_some_and(|plan| ahead::past_ft(&plan, own.position) > threat::ADVANCE_MARGIN_FT))
     };
     if ended {
         exit(s, cx);
@@ -914,7 +1115,22 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
     // proper speed for defense and quick exfil"): asked for corner, the
     // adapter slows a helicopter until it sinks.
     let corner = strike_speed(cx);
-    let steer = match (pass, s.segment) {
+    // A move-ahead ambush: on the wait circle until it is time to go, then
+    // in along the firing radial from the predicted aim point.
+    let ambush = match (pass, s.segment, s.heli.ahead) {
+        (Pass::StandOff, Segment::Approach, Some(plan)) => Some(if going(s, cx, &plan, target) {
+            (
+                bearing_deg(own.position, on_radial(own.position, plan.aim, plan.point)),
+                hold_pitch_deg(own.position[1], own.position[1] - own.agl_ft + MASK_AGL_FT),
+                corner,
+            )
+        } else {
+            let wait = hold_steer(cx, plan.orbit, &rings(s, cx));
+            (wait.heading_deg, wait.pitch_deg, wait.speed)
+        }),
+        _ => None,
+    };
+    let steer = ambush.unwrap_or_else(|| match (pass, s.segment) {
         (Pass::PopUp, Segment::Approach) => {
             let (heading, pitch) = point_at([target[0], target[1] + POPUP_OFFSET_FT, target[2]]);
             (heading, pitch, corner)
@@ -945,9 +1161,12 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
             )
         }
         (_, Segment::Guide) => {
-            // Holding the line: the nose on the target, level.
+            // Holding the line: the nose on the target, level; a move-ahead
+            // may hold it off the nose, inside the launcher's cone.
             (
-                bearing_deg(own.position, target),
+                (bearing_deg(own.position, target)
+                    + s.heli.ahead.map_or(0., |plan| plan.offset_deg))
+                .rem_euclid(360.),
                 hold_pitch_deg(own.position[1], own.position[1]),
                 corner,
             )
@@ -965,7 +1184,7 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
                 (heading, pitch, corner)
             }
         },
-    };
+    });
     order.steer = Some(Steer {
         heading_deg: steer.0,
         pitch_deg: steer.1,
@@ -986,6 +1205,16 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
         && cx.tick >= s.next_release
     {
         let first = s.released == 0;
+        // A move-ahead ambush (John, 2026-10-29) fires once the target has
+        // come to the planned range (within a step of the shot table's
+        // grid), and only when the shot from here, now, hits reliably and
+        // its advance stays outside every ring ([`ahead::shot_clear`]):
+        // the nose's offset to guide with.
+        let ambush_shot = s.heli.ahead.filter(|_| pass == Pass::StandOff).map(|plan| {
+            (distance <= plan.range_ft + crate::ai::strike::reach::SHOT_STEP_FT)
+                .then(|| shot_clear(s, cx, target, &plan))
+                .flatten()
+        });
         let in_zone = !kind.unguided()
             || sol.impact.is_some_and(|i| {
                 let range =
@@ -1015,6 +1244,7 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
                         && angle_difference(own.heading_deg, bearing_deg(own.position, target))
                             .abs()
                             <= STANDOFF_NOSE_DEG
+                        && ambush_shot.is_none_or(|offset| offset.is_some())
                 }
                 _ => first && sol.due && !sol.guided_in_flight,
             };
@@ -1029,6 +1259,9 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
                     .map_or(super::super::QUARTER_SECOND_TICKS, |st| st.cadence_ticks);
             if guided(kind) {
                 s.segment_to(Segment::Guide, cx.tick);
+            }
+            if let (Some(plan), Some(Some(offset_deg))) = (s.heli.ahead.as_mut(), ambush_shot) {
+                plan.offset_deg = offset_deg;
             }
         }
     }

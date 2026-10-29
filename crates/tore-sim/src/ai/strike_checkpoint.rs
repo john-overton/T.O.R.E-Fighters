@@ -7,7 +7,8 @@
 //! John, 2026-10-28) the release estimate, the committed-to-release window
 //! and whether the exit or turn back follows an early retarget; and (T.O.R.E,
 //! John, 2026-10-29) the pass's stand-off release plan, whether it was given
-//! up, and when its last stand-off round lands.
+//! up, and when its last stand-off round lands; and (T.O.R.E, John,
+//! 2026-10-29) a helicopter's move-ahead ambush plan.
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
 //! restored strike starts without it. `Context`, `Order`, `Steer`, `Handling`,
@@ -20,6 +21,7 @@ use super::{
     Lase, LaseEnd, NoLaze, NoLazeCall, Pass, Phase, ReleasePlan, Segment, StoreKind, Strike,
 };
 use crate::ai::awareness::ground::ThreatLevel;
+use crate::ai::helicopter_ahead::Ahead;
 use crate::ai::helicopter_threat::{Call, Decision, HeliThreat, Ring};
 
 crate::checkpoint_enum!(Pass {
@@ -127,7 +129,18 @@ crate::checkpoint_struct!(HeliThreat {
     ambush,
     approach,
     standoff_ft,
+    ahead,
     call,
+});
+
+crate::checkpoint_struct!(Ahead {
+    point,
+    orbit,
+    aim,
+    range_ft,
+    offset_deg,
+    fire_tick,
+    planned_tick,
 });
 
 crate::checkpoint_struct!(ReleasePlan {

@@ -650,3 +650,87 @@ fn under_heavy_aaa_on_the_target_it_fires_from_farther_out_with_the_hosts_answer
     // Its exit opens from that range.
     assert!(exit_distance(&strike, &world.context(2)) >= 13_500. + STANDOFF_EXIT_FT);
 }
+
+/// A tank driving east at 50 ft/s from `TARGET_AT` with a gun of 7,500 ft
+/// reach standing 3,000 ft west of where it is now (T.O.R.E opinionated
+/// change, John 2026-10-29: the move-ahead ambush).
+fn moving_column_world() -> World {
+    let mut store = at2(4);
+    store.flight = Some(crate::ai::strike::FlightTimes {
+        points: [
+            (4_500., 8.2),
+            (9_000., 16.4),
+            (13_500., 24.5),
+            (18_000., 32.7),
+        ],
+    });
+    let mut world = heli_world(store);
+    world.own.limits.maximum = crate::ai::ScalarSpeed(253.);
+    world.own.limits.minimum = crate::ai::ScalarSpeed(60.);
+    world.picture = picture(
+        &[
+            ground(TARGET, TARGET_AT, 0x200, None),
+            ground(SAM, [-3_000., 0., 24_000.], 0x800, site(0., 7_500., true)),
+        ],
+        vec![SAM],
+    );
+    world.inputs.shots = crate::ai::strike::Shots(Some(std::sync::Arc::new(AllHit)));
+    let mut moving = solution(TARGET_AT, TARGET_AT, false);
+    moving.target_velocity = [50., 0., 0.];
+    world.inputs.solution = Some(moving);
+    world
+}
+
+#[test]
+fn a_moving_column_under_a_gun_is_ambushed_from_ahead_of_it() {
+    let world = moving_column_world();
+    let mut strike = Strike::new(3);
+    // The choice on a search tick (once a second) takes the move-ahead.
+    strike.step(&world.context(120));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.pass(), Some(Pass::StandOff));
+    let plan = *strike.move_ahead().expect("a move-ahead");
+    assert_eq!(strike.heli.standoff_ft, Some(plan.range_ft));
+    assert_eq!(strike.heli.approach, Some(plan.point));
+    // Its aim lies east of the tank, where the tank will be.
+    assert!(plan.aim[0] > TARGET_AT[0] + 1_000., "{plan:?}");
+    // The firing point is outside the gun's ring.
+    let gun = [-3_000., 0., 24_000.];
+    assert!(horizontal(plan.point, gun) >= 7_500. + threat::RING_MARGIN_FT);
+    // The same column standing still is attacked as before: no move-ahead.
+    let mut parked = moving_column_world();
+    if let Some(sol) = parked.inputs.solution.as_mut() {
+        sol.target_velocity = [0.; 3];
+    }
+    let mut still = Strike::new(3);
+    still.step(&parked.context(120));
+    assert_eq!(still.move_ahead(), None);
+}
+
+#[test]
+fn a_move_ahead_is_deterministic_and_round_trips_through_a_checkpoint() {
+    let mut world = moving_column_world();
+    let mut a = Strike::new(5);
+    let mut b = Strike::new(5);
+    let step = |world: &mut World, tick: u64| {
+        world.own.position[2] += 1.5;
+        if let Some(sol) = world.inputs.solution.as_mut() {
+            sol.target_position[0] = TARGET_AT[0] + 50. * tick as f64 / 120.;
+        }
+    };
+    for tick in 120..600 {
+        step(&mut world, tick);
+        assert_eq!(a.step(&world.context(tick)), b.step(&world.context(tick)));
+    }
+    assert!(a.move_ahead().is_some());
+    let models = Models::default();
+    let mut twin: Strike = from_bytes(&to_bytes(&a, &models).unwrap(), &models).unwrap();
+    assert_eq!(twin, a);
+    for tick in 600..900 {
+        step(&mut world, tick);
+        assert_eq!(
+            a.step(&world.context(tick)),
+            twin.step(&world.context(tick))
+        );
+    }
+}

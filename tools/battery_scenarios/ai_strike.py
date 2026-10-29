@@ -496,8 +496,10 @@ def leave_problems(run: Run, label: str, unknown_shooter: bool) -> list[str]:
 def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
     """`ai-strike-heli-defended`: for each run (`label`, `profile` or None for any, `breaks` BREAK
     lines at least, `release` wanted, `no_release`, `hurt`, `kill`, `egress`, `decisions` the THREAT reasons
-    wanted in this order, `sead` the SEAD stand-in fired, `unknown_shooter` every `threat_leave` follows a
-    SHOT from a site it did not know), the AI named its pass, flew the helicopter
+    wanted in this order, `no_decisions` none made, `sead` the SEAD stand-in fired, `unknown_shooter` every
+    `threat_leave` follows a SHOT from a site it did not know, `ahead` a move-ahead plan made,
+    `outside_reach` never inside the reach of a defence it knew, the summary's `reach_margin_ft`), the AI
+    named its pass, flew the helicopter
     break (each BREAK at an offset of 60, 90 or 120 degrees, at 75 knots or more, no steeper than 10
     degrees, never blocked by the ground), made its threat decisions (slice H4: hold off outside a
     known ring, resume, switch targets, go home, leave an ambush's ring), released as wanted, was not
@@ -530,6 +532,13 @@ def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
         rest = iter(made)
         if not all(any(d == m for m in rest) for d in wanted):
             problems.append(f"{label}: threat decisions {made}, want {wanted} in that order")
+        if want.get("no_decisions") and made:
+            problems.append(f"{label}: threat decisions {made}, want none")
+        if want.get("ahead") and not run.of("AHEAD"):
+            problems.append(f"{label}: no move-ahead plan (AHEAD line)")
+        if want.get("outside_reach") and not number(run.summary.get("reach_margin_ft")) >= 0:
+            problems.append(f"{label}: came {run.summary.get('reach_margin_ft')} ft inside the reach of a "
+                            "defence it knew")
         problems += leave_problems(run, label, want.get("unknown_shooter", False))
         if want.get("sead") and not run.of("SEAD"):
             problems.append(f"{label}: the SEAD stand-in never fired")
@@ -1173,15 +1182,20 @@ def scenarios() -> list[Scenario]:
     defended_runs = [
         # Heavy AAA on the column (before H4 the Mi-24 flew the pop-up through it and was lost). Until
         # 2026-10-29 it fired from a point off the straight line and guided its AT-2 on into the 9,500 ft
-        # ring of the column's ZSU-23 3,660 ft from the tank (it ended 7,269 ft from the tank). Since
-        # the stand-off's advance is the AT-2's flight at its speed (John, 2026-10-29: about 5,000 ft
-        # from 10,800 ft out), every firing point at its usual ranges carries it into that ring. It
-        # then looks out to the AT-2's reliable reach (John, 2026-10-29: 14,500 ft from its unmask)
-        # and keeps attacking from farther out, from 10,800 ft out to 14,500 ft, while the column
-        # drives on among the guns, which stand still; each plan is spoiled within seconds as the
-        # column moves, and at 113 s no range within reach stands clear: it holds off.
+        # ring of the column's ZSU-23 3,660 ft from the tank. Since the stand-off's advance is the AT-2's
+        # flight at its speed and its range search reaches the AT-2's reliable 14,500 ft (John,
+        # 2026-10-29), every firing point planned on the tank's place was spoiled within seconds as the
+        # column drove on among the guns, which stand still (it does not drive with them: every gun of
+        # `--defenses` stands; the column's nine tanks are its only movers), and it held off at 113 s.
+        # Since the move-ahead ambush (John, 2026-10-29) it plans on where the tank will be: from 1 s it
+        # sets up west of the road; the column turns south-east at about 62 s, which spoils that plan;
+        # it plans again on the new course and fires at about 86 s from 13,900 ft, its advance outside
+        # every gun ring it knows, and the AT-2 hurts the tank (120 of 200). Its exit turn takes it up to
+        # about 960 ft into the 2,000 ft margin of a ZSU-23's ring, never into a gun's reach. No hold-off
+        # is called.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "1", "--defenses", "3", "0"),
-         dict(label="mi24 under heavy AAA", profile="standoff", decisions=["hold_off"], no_release=True)),
+         dict(label="mi24 under heavy AAA", profile="standoff", no_decisions=True, ahead=True, release=True,
+              hurt=True, outside_reach=True)),
         # Light AAA at the factory: it sets out on the pop-up, learns of a ZSU-23 near the factory 20 s
         # in and, its ring covering the factory, gives the pop-up up for a stand-off from outside the
         # ring ("not pressed through"). Until 0.2.2 it flew the pop-up on into the guns and was lost
@@ -1585,8 +1599,9 @@ def scenarios() -> list[Scenario]:
             then=[Step(a, timeout=600) for a, _ in defended_runs[1:]],
             check=lambda out: heli_defense_problems(out, [w for _, w in defended_runs]),
             notes="A Mi-24 against defences (slices ST-H and H4, John's threat rule of 2026-10-12): "
-                  "heavy AAA on the column (it fires its AT-2 from outside every gun ring and hurts the "
-                  "tank), light AAA at the factory (the pop-up given up for a stand-off once the guns are known, "
+                  "heavy AAA on the moving column (the move-ahead ambush of 2026-10-29: it plans on where "
+                  "the tank will be, fires its AT-2 from outside every gun ring it knows, never comes "
+                  "within a known gun's reach and hurts the tank), light AAA at the factory (the pop-up given up for a stand-off once the guns are known, "
                   "kill), a SAM that out-ranges the AT-2 and an "
                   "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
                   "(it resumes and fires), two ambushes on the factory by an SA-7 and an SA-14 team the "
