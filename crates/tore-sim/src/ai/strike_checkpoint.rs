@@ -5,7 +5,9 @@
 //! drawn aim, the final's line, the release count, the exit's heading, a gun
 //! run's burst state and the height the striker was tasked at, and (T.O.R.E,
 //! John, 2026-10-28) the release estimate, the committed-to-release window
-//! and whether the exit or turn back follows an early retarget.
+//! and whether the exit or turn back follows an early retarget; and (T.O.R.E,
+//! John, 2026-10-29) the pass's stand-off release plan, whether it was given
+//! up, and when its last stand-off round lands.
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
 //! restored strike starts without it. `Context`, `Order`, `Steer`, `Handling`,
@@ -14,7 +16,9 @@
 //! values, never held. The lase in progress, and whether the aircraft has a
 //! designator and laser rounds (slice ST-L), are coded.
 
-use super::{Lase, LaseEnd, NoLaze, NoLazeCall, Pass, Phase, Segment, StoreKind, Strike};
+use super::{
+    Lase, LaseEnd, NoLaze, NoLazeCall, Pass, Phase, ReleasePlan, Segment, StoreKind, Strike,
+};
 use crate::ai::awareness::ground::ThreatLevel;
 use crate::ai::helicopter_threat::{Call, Decision, HeliThreat, Ring};
 
@@ -126,6 +130,12 @@ crate::checkpoint_struct!(HeliThreat {
     call,
 });
 
+crate::checkpoint_struct!(ReleasePlan {
+    range_ft,
+    seconds,
+    advance_ft,
+});
+
 crate::checkpoint_enum!(ThreatLevel {
     Clear = 0,
     Air = 1,
@@ -176,6 +186,9 @@ crate::checkpoint_struct!(Strike {
     release_in_s,
     committed,
     retargeted,
+    release_plan,
+    plan_dropped,
+    standoff_until,
 } skip {
     inputs = None,
 });

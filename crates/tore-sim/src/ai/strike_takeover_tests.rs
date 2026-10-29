@@ -79,6 +79,7 @@ fn sam() -> GroundSubject {
         CLASS_SAM,
         Some(DefenseFacts {
             missile_reach_ft: 30_000.,
+            rotor_reach_ft: 30_000.,
             gun_reach_ft: 0.,
             radar: true,
             working: true,
@@ -121,6 +122,7 @@ fn store(station: u8, kind: StoreKind, rounds: u32) -> Store {
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
+        flight: None,
     }
 }
 
@@ -138,6 +140,8 @@ fn solution(station: u8, impact: Option<Vector>, due: bool) -> Solution {
         guided_in_flight: false,
         reach_ok: true,
         release_seconds: None,
+        reaches: false,
+        bar_ft: None,
     }
 }
 
@@ -163,6 +167,7 @@ impl World {
                 mission_height_ft: None,
                 solution: None,
                 lase: LaseInputs::default(),
+                shots: Shots::default(),
             },
         }
     }

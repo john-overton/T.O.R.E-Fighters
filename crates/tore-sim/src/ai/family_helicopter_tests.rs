@@ -24,6 +24,7 @@ fn at2(rounds: u32) -> Store {
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
+        flight: None,
     }
 }
 
@@ -38,6 +39,7 @@ fn rockets(rounds: u32) -> Store {
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
+        flight: None,
         ..at2(rounds)
     }
 }
@@ -435,6 +437,60 @@ fn ambushed_by_a_threat_it_did_not_know_it_breaks_leaves_the_ring_then_resumes()
 }
 
 #[test]
+fn a_shot_from_a_site_it_knew_is_no_ambush_and_one_from_a_site_it_did_not_is() {
+    use crate::ai::awareness::ground::RecentWarnings;
+    use crate::ai::helicopter_threat::{AMBUSH_ID, Decision};
+    // A small site it knows 8,000 ft east, its ring (6,000 ft and the
+    // margin) clear of the target and the way in.
+    const KNOWN: u32 = 0x5000_0011;
+    let mut world = heli_world(at2(4));
+    world.own.position = [0., 1_500., 12_000.];
+    world.picture = picture(
+        &[
+            ground(TARGET, TARGET_AT, 0x200, None),
+            ground(KNOWN, [8_000., 0., 12_000.], 0x1000, site(6_000., 0., true)),
+        ],
+        vec![KNOWN],
+    );
+    fn engaged(world: &World, tick: u64, bearing: f64) -> Context<'_> {
+        Context {
+            defending: true,
+            threat_bearing_deg: Some(bearing),
+            warnings: RecentWarnings {
+                air_to_air: false,
+                surface_to_air: true,
+            },
+            ..world.context(tick)
+        }
+    }
+    // Engaged from the known site's bearing, just outside its ring: before
+    // 0.2.2 any engagement outside every ring it knew was an ambush; now it
+    // is that site's, and no ambush.
+    let mut known = Strike::new(3);
+    known.step(&world.context(1));
+    assert_eq!(known.phase(), Phase::Attack);
+    known.step(&engaged(&world, 2, 90.));
+    assert_eq!(known.phase(), Phase::Defend);
+    assert_ne!(call(&known), Some(Decision::Leave));
+    assert!(known.heli.ambush.is_none());
+    // A tick of the break without a bearing is no new evidence.
+    let lost = Context {
+        threat_bearing_deg: None,
+        ..engaged(&world, 3, 90.)
+    };
+    known.step(&lost);
+    assert!(known.heli.ambush.is_none());
+    // Engaged from the west, where it knows no site: an ambush.
+    let mut ambushed = Strike::new(3);
+    ambushed.step(&world.context(1));
+    ambushed.step(&engaged(&world, 2, 270.));
+    assert_eq!(call(&ambushed), Some(Decision::Leave));
+    let (ring, _) = ambushed.heli.ambush.expect("an ambush ring");
+    assert_eq!(ring.id, AMBUSH_ID);
+    assert!(ring.centre[0] < world.own.position[0]);
+}
+
+#[test]
 fn a_hold_off_is_deterministic_and_round_trips_through_a_checkpoint() {
     let mut world = defended_world();
     let mut a = Strike::new(5);
@@ -495,4 +551,53 @@ fn inside_a_known_ring_after_a_break_it_leaves_by_the_shortest_way_out() {
         ..clear.context(1)
     });
     assert_eq!(steer(&strike.step(&clear.context(2))).heading_deg, 20.);
+}
+
+/// Every shot hits, at 700 ft/s.
+struct AllHit;
+
+impl crate::ai::strike::ShotTable for AllHit {
+    fn shot(&self, _: StationId, _: crate::ai::strike::ShotLaunch, range_ft: f64) -> Option<f64> {
+        Some(range_ft / 700.)
+    }
+}
+
+#[test]
+fn under_heavy_aaa_on_the_target_it_fires_from_farther_out_with_the_hosts_answers() {
+    // A gun 5,000 ft of reach on the target (a 7,000 ft ring), the Mi-24's
+    // strike speed 120 kt: from the usual ranges the AT-2's flight carries
+    // it into the ring, and before 2026-10-29 it held off. With the host's
+    // answers it looks farther out (John, 2026-10-29) and fires from
+    // 13,500 ft, the nearest range whose advance ends outside the ring.
+    let mut store = at2(4);
+    store.flight = Some(crate::ai::strike::FlightTimes {
+        points: [
+            (4_500., 7.7),
+            (9_000., 14.6),
+            (13_500., 24.7),
+            (18_000., 34.8),
+        ],
+    });
+    let mut world = heli_world(store);
+    world.own.limits.maximum = crate::ai::ScalarSpeed(253.);
+    world.own.limits.minimum = crate::ai::ScalarSpeed(60.);
+    world.picture = picture(
+        &[
+            ground(TARGET, TARGET_AT, 0x200, None),
+            ground(SAM, TARGET_AT, 0x800, site(0., 5_000., true)),
+        ],
+        vec![SAM],
+    );
+    let mut blind = Strike::new(3);
+    blind.step(&world.context(1));
+    assert_eq!(blind.phase(), Phase::HoldOff, "no answers: as before");
+    world.inputs.shots = crate::ai::strike::Shots(Some(std::sync::Arc::new(AllHit)));
+    let mut strike = Strike::new(3);
+    let order = strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.pass(), Some(Pass::StandOff));
+    assert_eq!(strike.heli.standoff_ft, Some(13_500.));
+    assert_eq!(order.release, None);
+    // Its exit opens from that range.
+    assert!(exit_distance(&strike, &world.context(2)) >= 13_500. + STANDOFF_EXIT_FT);
 }

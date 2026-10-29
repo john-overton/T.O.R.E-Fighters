@@ -186,15 +186,20 @@ impl MountArc {
     /// The launch pitch of a missile from this rail for a line at
     /// `elevation_deg`.
     fn launch_pitch(&self, elevation_deg: f64) -> f64 {
-        let (low, high) = if self.limit[1] > 0. {
-            (
+        let [low, high] = self.launch_pitches();
+        elevation_deg.clamp(low, high.max(low))
+    }
+    /// The lowest and highest launch pitch of a missile from this rail,
+    /// degrees.
+    pub(crate) fn launch_pitches(&self) -> [f64; 2] {
+        if self.limit[1] > 0. {
+            [
                 (self.rest[1] - self.limit[1]).max(MIN_LAUNCH_PITCH_DEG),
                 (self.rest[1] + self.limit[1]).min(90.),
-            )
+            ]
         } else {
-            (MIN_LAUNCH_PITCH_DEG, 90.)
-        };
-        elevation_deg.clamp(low, high.max(low))
+            [MIN_LAUNCH_PITCH_DEG, 90.]
+        }
     }
 }
 
@@ -1256,7 +1261,7 @@ fn deflect(direction: Vector, right: f64, up: f64) -> Vector {
 }
 
 /// A direction at `heading` (radians) and `pitch` (degrees).
-fn direction_at(heading: f64, pitch_deg: f64) -> Vector {
+pub(crate) fn direction_at(heading: f64, pitch_deg: f64) -> Vector {
     let pitch = pitch_deg.to_radians();
     [
         heading.sin() * pitch.cos(),
@@ -1933,8 +1938,66 @@ fn step_weapon(
     }
 }
 
-/// Launches the rounds of `fire` from `arms`' rail `rail` (a hardpoint
-/// index) and its siblings.
+/// The skill's share of a missile's reach under the energy rules: its
+/// experience-scaled launch range over the record's zone-1 range. The
+/// energy gate demands reach to a point this much nearer than the target
+/// is farther out ([`super::rotor_reach`] bounds the gate with it).
+pub(crate) fn energy_share(weapon: &WeaponArms) -> f64 {
+    (weapon.launch.max_range / f64::from(weapon.record.seeker.zones[1].maximum_range.max(1)))
+        .clamp(0.05, 1.)
+}
+
+/// The question the energy gate asks for a round of `weapon` from `arc` at
+/// `place` against an aircraft `id` at `position` moving at `velocity`: the
+/// launcher on the rail, pitched as it launches, and the aircraft as seen
+/// with its horizontal distance pushed out by the skill's share
+/// ([`energy_share`]), at its own height and velocity. The energy gate and
+/// the helicopter's threat rings ([`super::rotor_reach`]) ask the same.
+pub(crate) fn gate_question(
+    weapon: &WeaponArms,
+    place: &Place,
+    arc: &MountArc,
+    id: u32,
+    position: Vector,
+    velocity: Vector,
+    ground: &dyn Fn(f64, f64) -> f64,
+) -> (live::Launcher, seeker::Observation) {
+    let from = place.mount(arc, ground);
+    let (bearing, elevation) = bearing_elevation(sub(position, from));
+    let direction = direction_at(bearing, arc.launch_pitch(elevation));
+    let launcher = live::Launcher {
+        radar_power: true,
+        position: from,
+        basis: tore_sim::combat::guided::nose(direction),
+        speed_fps: length(place.velocity),
+        velocity: place.velocity,
+        bay_ready: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: Default::default(),
+    };
+    // The existing skill fraction is applied by demanding reach to the
+    // correspondingly farther observed bearing, at the same target altitude.
+    let fraction = energy_share(weapon);
+    let mut point = position;
+    for i in [0, 2] {
+        point[i] = from[i] + (point[i] - from[i]) / fraction;
+    }
+    let observation = seeker::Observation {
+        id,
+        position: point,
+        velocity,
+        quality: 1.,
+        range: length(sub(point, from)),
+        off_axis: 0.,
+    };
+    (launcher, observation)
+}
+
+/// Under the energy rules, whether the energy model says a round from
+/// `rail` reaches `target` (pushed out by the skill's share).
 #[allow(clippy::too_many_arguments)]
 fn energy_gate(
     live: &mut live::State,
@@ -1954,39 +2017,15 @@ fn energy_gate(
         .iter()
         .find(|m| m.index == rail)
         .unwrap_or(&weapon.mounts[0]);
-    let position = place.mount(arc, scene.ground);
-    let (bearing, elevation) = bearing_elevation(sub(target.position, position));
-    let direction = direction_at(bearing, arc.launch_pitch(elevation));
-    let launcher = live::Launcher {
-        radar_power: true,
-        position,
-        basis: tore_sim::combat::guided::nose(direction),
-        speed_fps: length(place.velocity),
-        velocity: place.velocity,
-        bay_ready: true,
-        radar: true,
-        jammer: false,
-        alive: true,
-        body_present: true,
-        controls: Default::default(),
-    };
-    // The existing skill fraction is applied by demanding reach to the
-    // correspondingly farther observed bearing, at the same target altitude.
-    let fraction = (weapon.launch.max_range
-        / f64::from(weapon.record.seeker.zones[1].maximum_range.max(1)))
-    .clamp(0.05, 1.);
-    let mut point = target.position;
-    for i in [0, 2] {
-        point[i] = position[i] + (point[i] - position[i]) / fraction;
-    }
-    let observation = seeker::Observation {
-        id: target.id,
-        position: point,
-        velocity: target.velocity,
-        quality: 1.,
-        range: length(sub(point, position)),
-        off_axis: 0.,
-    };
+    let (launcher, observation) = gate_question(
+        weapon,
+        &place,
+        arc,
+        target.id,
+        target.position,
+        target.velocity,
+        scene.ground,
+    );
     live.request_energy_solution(arms.unit.0, rail, &weapon.record, launcher, observation);
     live.energy_solution(arms.unit.0, rail, &weapon.record, launcher, observation)
         .is_some()

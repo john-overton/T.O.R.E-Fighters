@@ -77,6 +77,7 @@ pub(super) fn ground(
 pub(super) fn site(missile_ft: f64, gun_ft: f64, radar: bool) -> Option<DefenseFacts> {
     Some(DefenseFacts {
         missile_reach_ft: missile_ft,
+        rotor_reach_ft: missile_ft,
         gun_reach_ft: gun_ft,
         radar,
         working: true,
@@ -114,6 +115,7 @@ pub(super) fn bomb(rounds: u32) -> Store {
         fuze_arm_s: 1.,
         frag_radius_ft: 300.,
         falls_free: false,
+        flight: None,
     }
 }
 
@@ -133,6 +135,7 @@ pub(super) fn inputs(stores: Vec<Store>, solution: Option<Solution>) -> Inputs {
         mission_height_ft: None,
         solution,
         lase: LaseInputs::default(),
+        shots: Shots::default(),
     }
 }
 
@@ -150,6 +153,8 @@ pub(super) fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
         guided_in_flight: false,
         reach_ok: true,
         release_seconds: None,
+        reaches: false,
+        bar_ft: None,
     }
 }
 
@@ -1472,6 +1477,7 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
     let big = Store {
         frag_radius_ft: 600.,
         falls_free: false,
+        flight: None,
         ..bomb(4)
     };
     assert_eq!(laydown_height_ft(&big, 700.), 700.);
@@ -1779,6 +1785,7 @@ fn a_gun_burst_walks_in_from_short_of_the_target_and_is_deterministic() {
 fn glide_store() -> Store {
     Store {
         falls_free: true,
+        flight: None,
         ..laser_store()
     }
 }

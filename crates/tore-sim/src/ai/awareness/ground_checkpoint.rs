@@ -13,6 +13,7 @@ use super::{
 
 crate::checkpoint_struct!(DefenseFacts {
     missile_reach_ft,
+    rotor_reach_ft,
     gun_reach_ft,
     radar,
     working,

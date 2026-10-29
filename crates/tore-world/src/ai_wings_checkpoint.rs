@@ -202,6 +202,11 @@ impl AiWings {
             handed_tasking,
             fault_random,
             seen_projectiles,
+            // Derived: the surface missiles' reach at a helicopter, a fixed
+            // function of the records, worked out again on demand.
+            rotor_reach: _,
+            flight_times: _,
+            shot_cache: _,
             ai_shots,
             last_hp,
             uncredited_losses,
@@ -296,6 +301,11 @@ impl AiWings {
             handed_tasking,
             fault_random,
             seen_projectiles,
+            // Derived: the surface missiles' reach at a helicopter, a fixed
+            // function of the records, worked out again on demand.
+            rotor_reach: _,
+            flight_times: _,
+            shot_cache: _,
             ai_shots,
             last_hp,
             uncredited_losses,

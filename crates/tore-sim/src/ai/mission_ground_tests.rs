@@ -116,6 +116,7 @@ fn sam(id: u32, ahead_nmi: f64, reach_ft: f64, working: bool) -> GroundSubject {
     subject.object.emitting = true;
     subject.defense = Some(DefenseFacts {
         missile_reach_ft: reach_ft,
+        rotor_reach_ft: reach_ft,
         gun_reach_ft: 0.,
         radar: true,
         working,
@@ -130,6 +131,7 @@ fn aaa(id: u32, ahead_nmi: f64, reach_ft: f64) -> GroundSubject {
     subject.object.class = 0x800;
     subject.defense = Some(DefenseFacts {
         missile_reach_ft: 0.,
+        rotor_reach_ft: 0.,
         gun_reach_ft: reach_ft,
         radar: false,
         working: true,
@@ -829,11 +831,13 @@ fn strike_inputs() -> crate::ai::strike::Inputs {
             fuze_arm_s: 1.,
             frag_radius_ft: 300.,
             falls_free: false,
+            flight: None,
         }],
         designator: false,
         mission_height_ft: None,
         solution: None,
         lase: crate::ai::strike::LaseInputs::default(),
+        shots: Default::default(),
     }
 }
 

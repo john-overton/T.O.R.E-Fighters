@@ -427,9 +427,11 @@ class GunshipTests(unittest.TestCase):
 
 def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0, released=True, killed=True,
              lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500, decisions=(), sead=False,
-             egress=False):
+             egress=False, shots=()):
     """One helicopter run of the driver: `breaks` BREAK lines (one a second), the THREAT
-    `decisions` (slice H4), a pop-up that may release and kill, and an EGRESS (slice HF1)."""
+    `decisions` (slice H4), a pop-up that may release and kill, and an EGRESS (slice HF1).
+    `shots` are (time, known) pairs for the SHOT lines (a site's launch, `known` yes, no or none);
+    the decisions come at t=30, 31, ... so a shot before a decision has a time under it."""
     out = [
         f"ai-strike: setup aircraft={aircraft} load=AT2.JT station=1 count=4 rounds=4 target=0x50000001 name=T-90 "
         "target_at=999570,7,789571 hp=200 skill=2 profile=none handback=none order=none mode=none",
@@ -443,6 +445,8 @@ def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0,
             f"ai-strike: BREAK t={20 + n}.000 heading=350 track=345 bearing=22 offset={offset} masked_s=0 "
             f"blocked_s={blocked} pitch={pitch} agl_ft=1400 speed_kt={kt} bank=-30"
         )
+    for at, known in shots:
+        out.append(f"ai-strike: SHOT t={at:.3f} site=0x5000000f range_ft=11000 known={known}")
     for n, decision in enumerate(decisions):
         out.append(f"ai-strike: THREAT t={30 + n}.000 decision={decision} target=0x50000001 ring=0x5000000b "
                    'words="threat on target, holding off"')
@@ -510,6 +514,46 @@ class HelicopterTests(unittest.TestCase):
         no_sead = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"])
         self.assertNotEqual(s.heli_defense_problems(no_sead, sead), [])
 
+    def test_a_leave_is_the_answer_to_a_shot_from_a_site_it_did_not_know(self):
+        """John, 2026-10-29: `threat_leave` is the ambush by an unknown shooter. The ambush run needs a
+        SHOT with known=no before the leave; a leave after only shots from sites it knew is a fault in
+        every run."""
+        ambush = [dict(label="ambushed", decisions=["leave", "resume"], breaks=2, release=True, kill=True,
+                       unknown_shooter=True)]
+        plain = [dict(label="ambushed", decisions=["leave", "resume"], breaks=2, release=True, kill=True)]
+        leave_resume = ["threat_leave", "threat_resume"]
+        unseen = heli_run(decisions=leave_resume, shots=[(29.0, "no")])
+        self.assertEqual(s.heli_defense_problems(unseen, ambush), [])
+        self.assertEqual(s.heli_defense_problems(unseen, plain), [])
+        # Shots from a site it knew, or with no picture at all, are no ambush.
+        for known in ("yes", "none"):
+            problems = s.heli_defense_problems(heli_run(decisions=leave_resume, shots=[(29.0, known)]), ambush)
+            self.assertTrue(any("threat_leave" in p and "knew" in p for p in problems), (known, problems))
+            self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=leave_resume, shots=[(29.0, known)]), plain), [])
+        # One known shot among others is not enough to cancel the unknown one before the leave.
+        mixed = heli_run(decisions=leave_resume, shots=[(28.0, "yes"), (29.0, "no")])
+        self.assertEqual(s.heli_defense_problems(mixed, ambush), [])
+        # The unknown shot has to come before the leave, not after it.
+        late = heli_run(decisions=leave_resume, shots=[(40.0, "no")])
+        self.assertNotEqual(s.heli_defense_problems(late, ambush), [])
+        # No shot at all: a gun's ambush has no SHOT line. Only the run that asks for a missile ambush
+        # needs one.
+        gun = heli_run(decisions=leave_resume)
+        self.assertEqual(s.heli_defense_problems(gun, plain), [])
+        self.assertTrue(any("no SHOT" in p for p in s.heli_defense_problems(gun, ambush)))
+        # A second leave counts from the first: it needs a shot of its own from a site it did not know.
+        twice = ["threat_leave", "threat_resume", "threat_leave", "threat_resume"]
+        both = heli_run(decisions=twice, shots=[(29.0, "no"), (31.0, "no")])
+        self.assertEqual(s.heli_defense_problems(both, ambush), [])
+        second_known = heli_run(decisions=twice, shots=[(29.0, "no"), (31.0, "yes")])
+        self.assertTrue(any("t=32.0" in p and "knew" in p for p in s.heli_defense_problems(second_known, ambush)))
+        self.assertNotEqual(s.heli_defense_problems(second_known, plain), [])
+        # Runs with no leave are untouched by shots from sites it knew.
+        held = [dict(label="held", decisions=["hold_off", "home"], no_release=True)]
+        shot_at = heli_run(breaks=0, released=False, killed=False, decisions=["threat_hold_off", "threat_home"],
+                           shots=[(40.0, "yes")])
+        self.assertEqual(s.heli_defense_problems(shot_at, held), [])
+
     def test_the_run_count_must_match(self):
         self.assertNotEqual(s.heli_defense_problems(heli_run(), self.want * 2), [])
 
@@ -526,25 +570,42 @@ class HelicopterTests(unittest.TestCase):
         scenarios = {sc.name: sc for sc in s.scenarios()}
         defended = scenarios["ai-strike-heli-defended"]
         argsets = [defended.args] + [step.args for step in defended.then]
-        self.assertEqual(len(argsets), 7)
+        self.assertEqual(len(argsets), 8)
         self.assertTrue(all("mi24" in a for a in argsets))
         self.assertNotIn("--profile", [x for a in argsets for x in a], "the AI chooses its pass")
         heli = scenarios["ai-strike-heli"]
         self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
         held = ["threat_hold_off", "threat_home"]
-        honest = [heli_run(profile="standoff", breaks=0),
+        # Heavy AAA holds off since the stand-off's advance follows the AT-2's flight (2026-10-29).
+        # The ambush runs (2026-10-29): a shot from a site it did not know, the leave, the resume.
+        ambushed = dict(decisions=["threat_leave", "threat_resume"], shots=[(29.0, "no")])
+        honest = [heli_run(profile="standoff", breaks=0, released=False, killed=False,
+                           decisions=["threat_hold_off"]),
                   heli_run(profile="standoff", breaks=0),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
-                  heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume", "threat_leave",
-                                                "threat_hold_off", "threat_resume"]),
+                  heli_run(breaks=8, **ambushed),
+                  heli_run(breaks=8, **ambushed),
                   heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
         self.assertEqual(defended.check("\n".join(honest)), [])
-        # Slice HF1: the ambushed run must leave and resume after it.
+        # Slice HF1: the ambushed runs must leave and resume after it.
         unambushed = list(honest)
         unambushed[5] = heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume"])
         self.assertNotEqual(defended.check("\n".join(unambushed)), [])
+        # 2026-10-29: and the leave must answer a shot from a site it did not know.
+        for known in ("yes", "none"):
+            known_site = list(honest)
+            known_site[6] = heli_run(breaks=8, decisions=["threat_leave", "threat_resume"], shots=[(29.0, known)])
+            self.assertNotEqual(defended.check("\n".join(known_site)), [], known)
+        gunned = list(honest)
+        gunned[5] = heli_run(breaks=8, decisions=["threat_leave", "threat_resume"])
+        self.assertNotEqual(defended.check("\n".join(gunned)), [])
+        # Both ambush runs lay the site out the same way: placed, hidden, destroyed after its shot.
+        for args in argsets[5:7]:
+            for flag in ("--place-site", "--site-sight", "--sead-site", "--sead-after-shot", "--follow-threat"):
+                self.assertIn(flag, args)
+            self.assertNotIn("--sead-at", args, "the SEAD stand-in goes by the shot, not the clock")
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
 
