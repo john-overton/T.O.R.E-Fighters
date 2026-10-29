@@ -1210,9 +1210,21 @@ def scenarios() -> list[Scenario]:
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19, "--seconds", "240"),
          dict(label="mi24 under a SAM that out-ranges the AT-2", decisions=["hold_off", "home"],
               no_release=True)),
-        # An SA-14 on the target: hold off, nothing outside the ring, home.
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "4", "--seconds", "240"),
-         dict(label="mi24 holds off then goes home", decisions=["hold_off", "home"], no_release=True)),
+        # An SA-14 on the target (0x50000009, 2,935 ft from the tank): hold off, then home, no release.
+        # Since the game hides shoulder-fired teams and the move-ahead ambush (John, 2026-10-29) both
+        # SA-14 teams of the seed are hidden, so the way there is an ambush and an attack: the team on
+        # the target launches at 29 s from 15,900 ft (`SHOT ... known=no`), its launch gives it away, the
+        # helicopter holds off its ring (`threat_hold_off`) and breaks the round (`threat_leave`, the
+        # team known only by that launch) and takes one hit. The column drives out from under that
+        # ring, and at 198 s, 11 s before the three minutes run out, a move-ahead shot from 14,500 ft
+        # stands clear of it (`threat_resume`, an AHEAD line, 8,800 ft or more outside the team's
+        # reach). On the way the seed's other hidden SA-14 team (0x5000000d), 16,500 ft off, launches
+        # at 204 s (`known=no`): it holds off again, leaves that ambush and, with nothing clear of the
+        # two rings when that hold's three minutes run out, goes home at 385 s without firing.
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "4", "--seconds", "400"),
+         dict(label="mi24 holds off then goes home",
+              decisions=["hold_off", "leave", "resume", "hold_off", "leave", "home"], ahead=True,
+              no_release=True, unknown_shooter=True)),
         # The same with SEAD killing the sites a minute in: it resumes and fires.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "4", "--seconds", "240",
                    "--sead-at", "60"),
@@ -1603,7 +1615,9 @@ def scenarios() -> list[Scenario]:
                   "the tank will be, fires its AT-2 from outside every gun ring it knows, never comes "
                   "within a known gun's reach and hurts the tank), light AAA at the factory (the pop-up given up for a stand-off once the guns are known, "
                   "kill), a SAM that out-ranges the AT-2 and an "
-                  "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
+                  "SA-14 team on the target (hidden: its launch is an ambush, it holds off, a move-ahead shot "
+                  "is cut short by the seed's other hidden team's ambush, then it goes home), the SA-14 "
+                  "with SEAD a minute in "
                   "(it resumes and fires), two ambushes on the factory by an SA-7 and an SA-14 team the "
                   "game hides until it is near or launches (a launch with known=no, then it breaks, "
                   "leaves the ring, holds off, resumes and kills the factory; the site is destroyed after "

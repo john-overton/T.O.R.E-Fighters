@@ -824,8 +824,19 @@ plans on where the tank will be and fires at 86 s from outside every gun ring
 it knows, hurting the tank. At the factory, with its ZSU-23 moved from 2,650
 to 4,500 ft from the factory, it gives up the pop-up for a stand-off once it sees
 the gun and kills the factory. Under a SAM that out-ranges the AT-2
-(surface seed 19) and under an SA-14 on the target (seed 4) every attack crosses
-a ring: it holds off for three minutes and goes home untouched. With the seed 4
+(surface seed 19) every attack crosses a ring: it holds off for three minutes and
+goes home untouched. Under an SA-14 team on the target (seed 4) it did the same
+until the game hid shoulder-fired teams and the move-ahead ambush came (John,
+2026-10-29). Since then neither of the seed's two SA-14 teams is known at the
+start. The team 2,935 ft from the tank launches at 29 s from 15,900 ft
+(`SHOT ... known=no`); the launch gives it away, the helicopter holds off its
+ring and breaks the round as an ambush (`threat_leave`), the team being known
+only by that launch. The column drives out from under the ring, and at 198 s,
+11 s before the three minutes run out, a move-ahead shot from 14,500 ft stands
+clear of it (`threat_resume`; the helicopter stays 8,800 ft or more outside the
+team's reach). On the way the other hidden team, 16,500 ft off, launches at
+204 s (`known=no`): it holds off again, leaves that ambush and goes home at
+385 s without firing, nothing clear of the two rings. With the seed 4
 sites destroyed a minute in (the driver's SEAD stand-in) it resumes at once and
 hurts the tank. Under seed 15 an SA-14 it had not seen engaged it at 155 s: it broke, left the ring, held, resumed at 266 s, once the threat had been quiet a minute, and hurt the tank from outside the rings it now knew. Since slice H1 the Mi-24 flew its real 150 kt and fired before that ambush, which then came on its exit straight on over the column. Since slice HF1 it flies about 115 kt and its exit turns away from the target, and that ambush no longer came; the run moved the seed's SA-14 5,000 ft south-west of the column (the driver's `--place-site`, John 2026-10-13) and the Mi-24 held off that ring, resumed once the column had driven out of it and fired, and an SA-7 it had not seen engaged it on its way out; it broke, left that ring, held off, resumed and fired again, killing the tank. With the 0.2.2 slower AT-2 it fired late and drifted into the SA-14's ring after the resume, and that SA-14's long shot (16,438 ft against its 15,500 ft ring) read as an ambush. Under John's rules of 2026-10-29 the SA-14's ring is 19,500 ft, the column does not leave it, and that layout holds off and goes home.
 
