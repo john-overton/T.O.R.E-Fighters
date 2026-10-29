@@ -189,6 +189,7 @@ fn the_subjects_carry_sides_and_defence_facts_and_a_striker_over_the_target_list
             live::GroundListing {
                 flags: 0x20,
                 max_visible: 78,
+                team: false,
             },
         );
         let row = state.targets.iter_mut().find(|t| t.id == id).unwrap();

@@ -570,7 +570,7 @@ class HelicopterTests(unittest.TestCase):
         scenarios = {sc.name: sc for sc in s.scenarios()}
         defended = scenarios["ai-strike-heli-defended"]
         argsets = [defended.args] + [step.args for step in defended.then]
-        self.assertEqual(len(argsets), 8)
+        self.assertEqual(len(argsets), 9)
         self.assertTrue(all("mi24" in a for a in argsets))
         self.assertNotIn("--profile", [x for a in argsets for x in a], "the AI chooses its pass")
         heli = scenarios["ai-strike-heli"]
@@ -587,7 +587,9 @@ class HelicopterTests(unittest.TestCase):
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
                   heli_run(breaks=8, **ambushed),
                   heli_run(breaks=8, **ambushed),
-                  heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
+                  heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held),
+                  heli_run(breaks=8, released=False, killed=False, decisions=["threat_leave"],
+                           shots=[(20.0, "no"), (30.0, "yes")])]
         self.assertEqual(defended.check("\n".join(honest)), [])
         # Slice HF1: the ambushed runs must leave and resume after it.
         unambushed = list(honest)
@@ -601,10 +603,12 @@ class HelicopterTests(unittest.TestCase):
         gunned = list(honest)
         gunned[5] = heli_run(breaks=8, decisions=["threat_leave", "threat_resume"])
         self.assertNotEqual(defended.check("\n".join(gunned)), [])
-        # Both ambush runs lay the site out the same way: placed, hidden, destroyed after its shot.
+        # Both ambush runs lay the site out the same way: placed and destroyed after its shot. The game
+        # hides the shoulder-fired team itself (2026-10-29), so no listing stand-in.
         for args in argsets[5:7]:
-            for flag in ("--place-site", "--site-sight", "--sead-site", "--sead-after-shot", "--follow-threat"):
+            for flag in ("--place-site", "--sead-site", "--sead-after-shot", "--follow-threat"):
                 self.assertIn(flag, args)
+            self.assertNotIn("--site-sight", args, "the game hides the team, not the driver")
             self.assertNotIn("--sead-at", args, "the SEAD stand-in goes by the shot, not the clock")
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)

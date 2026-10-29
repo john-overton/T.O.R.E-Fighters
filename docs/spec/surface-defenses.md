@@ -212,7 +212,7 @@ engagement preparation / later preparation):
 | HAWK | MIM-23 HAWK | 100 | SA19 x4 | 5 / 15 / 10 | Uses the SA-19 record, not MIM23 |
 | ROLAND | Roland SAM | 100 | SA19 x4 | 5 / 15 / 10 | |
 | ASA5 | Crotale SAM | 100 | R440 x2 | 5 / 15 / 10 | |
-| FIM92, MIS, SA7, SA14, SA16 | Stinger, Mistral, SA-7, SA-14, SA-16 teams | 5 | one record x2 | 5 / 15 / 10 | Infantry teams; SA-16 shares the SA-14 shape |
+| FIM92, MIS, SA7, SA14, SA16 | Stinger, Mistral, SA-7, SA-14, SA-16 teams | 5 | one record x2 | 5 / 15 / 10 | Infantry teams; SA-16 shares the SA-14 shape. Since 0.2.2 neither the AI nor the player's sensors know where a team stands until the pilot spots it near or the team launches ([AI](ai-strike.md#what-the-ai-knows), [player](air-to-ground.md#hidden-shoulder-fired-teams); T.O.R.E opinionated, John 2026-10-29) |
 | SCUD | SCUD launcher | 100 | SA9 x4 | 48 / 44 / 44 | Class SAM in retail |
 
 **Ships** carry guns, missiles or nothing. The armed ones (retail):

@@ -327,6 +327,10 @@ pub struct Combat {
     /// The mission's ground targets that have a combat row (the surface's
     /// 0x80 objects), for the target window's objective line. Setup.
     surface_targets: std::collections::BTreeSet<u32>,
+    /// The hidden shoulder-fired SAM teams: the surface's teams that are no
+    /// mission target, marked on their listings whenever the scene's targets
+    /// are registered (T.O.R.E opinionated, John 2026-10-29). Setup.
+    ground_teams: std::collections::BTreeSet<u32>,
     /// The contact volume weapons meet for each scene object whose differs
     /// from its shape's box: a runway's pavement ([`weapon_contact`]). Setup.
     weapon_boxes: BTreeMap<u32, tore_sim::airport::OrientedBox>,
@@ -706,6 +710,15 @@ impl Combat {
             crate::ai_wings::outcome::ground_targets(&terrain.surface, &self.state)
                 .into_iter()
                 .collect();
+        self.ground_teams = terrain
+            .surface
+            .arsenal
+            .units
+            .iter()
+            .filter(|arms| arms.team && !self.surface_targets.contains(&arms.unit.0))
+            .map(|arms| arms.unit.0)
+            .collect();
+        mark_teams(&mut self.state, &self.ground_teams);
         Ok(())
     }
     /// Registers `scene`'s objects as combat targets with the sides the last
@@ -733,6 +746,7 @@ impl Combat {
         for (parked, _) in &self.parked {
             staged.add_parked_aircraft(parked)?;
         }
+        mark_teams(&mut staged, &self.ground_teams);
         self.state = staged;
         self.airport_objects = scene.objects.clone();
         self.weapon_boxes = weapon_boxes;
@@ -772,6 +786,7 @@ impl Combat {
             live::GroundListing {
                 flags: object.type_flags,
                 max_visible: object.max_visible.clamp(0, i32::from(u16::MAX)) as u16,
+                team: false,
             },
         );
         Ok(())
@@ -857,6 +872,7 @@ impl Combat {
             surface: Default::default(),
             parked: Vec::new(),
             surface_targets: Default::default(),
+            ground_teams: Default::default(),
             weapon_boxes: BTreeMap::new(),
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
@@ -1842,6 +1858,7 @@ impl Combat {
             let contact = self.weapon_boxes.get(&object.id).copied();
             Self::register_airport_object(&mut self.state, object, contact, side, look)?;
         }
+        mark_teams(&mut self.state, &self.ground_teams);
         for (parked, _) in &self.parked {
             self.state.add_parked_aircraft(parked)?;
         }
@@ -2694,6 +2711,7 @@ pub mod fixtures {
             surface: Default::default(),
             parked: Vec::new(),
             surface_targets: Default::default(),
+            ground_teams: Default::default(),
             weapon_boxes: BTreeMap::new(),
             tape: None,
             last_launcher: None,
@@ -3285,3 +3303,19 @@ mod checkpoint;
 #[path = "combat_wire.rs"]
 mod wire;
 pub use wire::{WirePicture, WirePilot};
+
+/// Marks the hidden shoulder-fired teams' listings
+/// ([`live::GroundListing::team`]); every other listing is left as it is.
+fn mark_teams(state: &mut live::State, teams: &std::collections::BTreeSet<u32>) {
+    for id in teams {
+        if let Some(listing) = state.ground_listing(*id) {
+            state.set_ground_listing(
+                *id,
+                live::GroundListing {
+                    team: true,
+                    ..listing
+                },
+            );
+        }
+    }
+}

@@ -1122,21 +1122,15 @@ def scenarios() -> list[Scenario]:
     at2 = ["--aircraft", "mi24", "--load", "AT2", *heli]
     heli_rockets = ["--aircraft", "ah64", "--load", "LAU61", *heli]
     heli_rockets_out = [*heli_rockets, "--seconds", "300", "--follow-egress"]
-    # Light SAMs with the layout of surface seed 16: the Mi-24 starts inside the ring of an SA-14 it
-    # knows and the pop-up's line to the column runs deeper into that ring before it leaves. Until
-    # 0.2.2 it flew that pop-up through the warnings and broke (slice ST-H); with the energy rules'
-    # SA-14 it was hit twice, its controls damaged, and it went home without firing. Since then a
-    # line out of a ring must lead straight out (docs/spec/ai-strike.md, "Helicopter threat
-    # awareness"): it flies the stand-off from outside the ring, unengaged, and hurts the tank.
-    # Seed 19, ST-H's layout, holds a SAM that out-ranges the AT-2: since slice H4 the helicopter
-    # holds off there (ai-strike-heli-defended).
+    # Light SAMs with the layout of surface seed 16 (an SA-14 team 12,100 ft from the Mi-24's start):
+    # ai-strike-heli-defended, "mi24 ambushed by the SA-14 it starts inside". Seed 19, ST-H's layout,
+    # holds a SAM that out-ranges the AT-2: since slice H4 the helicopter holds off there
+    # (ai-strike-heli-defended).
     sams16 = ["--defenses", "0", "1", "--surface-seed", "16"]
     sams19 = ["--defenses", "0", "1", "--surface-seed", "19"]
     heli_runs = [
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2"),
          dict(label="mi24 at2 popup", profile="popup", skill=2, miss=None, hit=True)),
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams16),
-         dict(label="mi24 at2 under SAMs it starts inside", profile="standoff", skill=2, miss=None, hit=True)),
         # The rocket runs follow the helicopter out (slice HF1): it turns away from the column and
         # masks low; before, it flew on over the column and a site it had not seen shot it down 2 s
         # after the old run end.
@@ -1171,10 +1165,10 @@ def scenarios() -> list[Scenario]:
     sams = ["--defenses", "0", "1"]
 
     def ambush_site(site: str) -> list[str]:
-        """The ambusher's layout (2026-10-29): `site` 7,000 ft south-south-west of the target (bearing
-        190), which the eye lists only from 3,000 ft, destroyed 4 s after its first launch."""
-        return ["--place-site", f"{site},190,7000", "--site-sight", f"{site},3000",
-                "--sead-site", site, "--sead-after-shot", "4"]
+        """The ambusher's layout (2026-10-29): the shoulder-fired team `site` 7,000 ft south-south-west
+        of the target (bearing 190), destroyed 4 s after its first launch. The game hides the team: the
+        helicopter spots it only within 3,000 to 4,000 ft by its skill, or once it launches."""
+        return ["--place-site", f"{site},190,7000", "--sead-site", site, "--sead-after-shot", "4"]
 
     defended_runs = [
         # Heavy AAA on the column (before H4 the Mi-24 flew the pop-up through it and was lost). Until
@@ -1213,9 +1207,11 @@ def scenarios() -> list[Scenario]:
         # An ambush by a site it had not seen (slice H4's rule; restored in slice HF1, John
         # 2026-10-13; a new layout for John's rules of 2026-10-29, when `threat_leave` came to mean a
         # shot from an unknown site). A lone SA-7 of seed 7 (an SA-14 of seed 8, at skill 3, in the
-        # second run) stands 7,000 ft south-south-west of the factory and the helicopter's eye lists
-        # it only from 3,000 ft (`--site-sight`): terrain cannot do that here, because a site needs
-        # about 20 s of clear line before its first launch and the eye lists it within 6 s of the line
+        # second run) stands 7,000 ft south-south-west of the factory. Since 2026-10-29 the game hides a
+        # shoulder-fired team (John): the helicopter's eye spots it only within 3,500 ft (skill 2;
+        # 4,000 ft at skill 3), not 19,968 ft, and its launch gives it away. Before, the runs needed the
+        # driver's `--site-sight` stand-in: terrain cannot hide a site here, because a site needs about
+        # 20 s of clear line before its first launch and the eye lists it within 6 s of the line
         # opening. The site launches at the helicopter 10,900 ft away on its way in (`SHOT ... known=no`),
         # it breaks (`threat_leave`), takes the first round's hit, leaves the ambush ring, holds off and
         # resumes once the ring has been quiet a minute; the factory dies to the shot after the resume.
@@ -1237,6 +1233,17 @@ def scenarios() -> list[Scenario]:
                    "--speed", "120", "--seconds", "200", "--skill", "2", *sams, "--surface-seed", "1"),
          dict(label="mi24 holds off the SAMs it would stand off under",
               decisions=["hold_off", "home"], no_release=True)),
+        # Surface seed 16: the Mi-24 starts 12,100 ft from an SA-14 team, inside its ring. Until 0.2.2 it
+        # flew the pop-up through the warnings and broke (slice ST-H); then, knowing the SA-14 from the
+        # start, it flew the stand-off from outside the ring and hurt the tank (ai-strike-heli, "mi24 at2
+        # under SAMs it starts inside"). Since the game hides shoulder-fired teams (John, 2026-10-29) it
+        # does not know the team: the team launches 20 s in (`SHOT ... known=no`), the helicopter
+        # breaks and leaves (`threat_leave`), the launch gives the team away, its second round 10 s
+        # later is a known site's shot (`known=yes`), both rounds hit and it goes home without firing.
+        # The line out of a ring it knows is the unit tests' (helicopter_threat_tests).
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams16),
+         dict(label="mi24 ambushed by the SA-14 it starts inside", decisions=["leave"], breaks=2,
+              no_release=True, unknown_shooter=True)),
     ]
     # The AC-130 (slice ST-F) on the moving armoured column: the TVIET truck park's radar-laid guns
     # (26,200 and 44,250 ft reach) shoot it down on its way in, so the quiet column it is.
@@ -1582,8 +1589,8 @@ def scenarios() -> list[Scenario]:
                   "tank), light AAA at the factory (the pop-up given up for a stand-off once the guns are known, "
                   "kill), a SAM that out-ranges the AT-2 and an "
                   "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
-                  "(it resumes and fires), two ambushes on the factory by an SA-7 and an SA-14 the "
-                  "helicopter does not list until it is near (a launch with known=no, then it breaks, "
+                  "(it resumes and fires), two ambushes on the factory by an SA-7 and an SA-14 team the "
+                  "game hides until it is near or launches (a launch with known=no, then it breaks, "
                   "leaves the ring, holds off, resumes and kills the factory; the site is destroyed after "
                   "its first launch), and the stand-off layout of seed 1 (it holds "
                   "off). Each break is the retail plus or minus 90 degrees to the threat's bearing (or "

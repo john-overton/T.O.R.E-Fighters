@@ -24,12 +24,6 @@ pub(super) fn observe_ownship(
     // Shared observations are produced before this tick's firing decision,
     // so the scope, the target view and weapon support all agree.
     own.sensors.controls = launcher.controls;
-    let observables: Vec<Observable> = context
-        .targets
-        .iter()
-        .chain(peers(context.rows, own_index))
-        .map(observable_of)
-        .collect();
     let observer = Observer {
         position: launcher.position,
         basis: launcher.basis,
@@ -43,6 +37,18 @@ pub(super) fn observe_ownship(
         ground: &height,
         obscured: &obscured,
     };
+    // A hidden shoulder-fired team reaches this pilot's sensors, pages and
+    // map only once spotted (T.O.R.E opinionated, John 2026-10-29).
+    super::ground_sensing::spot_teams(own, &observer, context.targets, context.facts, &environment);
+    let unspotted = super::ground_sensing::unspotted_teams(own, context.targets, context.facts);
+    let shown = |t: &&Target| unspotted.binary_search(&t.id).is_err();
+    let observables: Vec<Observable> = context
+        .targets
+        .iter()
+        .filter(shown)
+        .chain(peers(context.rows, own_index))
+        .map(observable_of)
+        .collect();
     let easy_targeting = own.easy_targeting(context.easy_targeting);
     own.sensors.keep_selection = easy_targeting;
     let in_view = own.designated().or(own.sight_hold);
@@ -60,6 +66,7 @@ pub(super) fn observe_ownship(
             context
                 .targets
                 .iter()
+                .filter(shown)
                 .chain(peers(context.rows, own_index))
                 .map(|t| context.facts.ground_object(t))
                 .collect()

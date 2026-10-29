@@ -1723,8 +1723,9 @@ fn observe_sites(scene: &Scene, w: &mut Watch, t: f64, tick: u64) {
 /// `SHOT`: a round (not a gun's) a ground site launched at the striker, on
 /// the tick it is first seen: the site, its range to the striker, and
 /// whether the striker knew the site then (it is among the rings of its
-/// ground picture; slice H4). An ambush is a shot from a site it did not
-/// know (Mi-24 ambush layout, 2026-10-28).
+/// ground picture, and not only because this launch gave a hidden team
+/// away; slice H4). An ambush is a shot from a site it did not know (Mi-24
+/// ambush layout, 2026-10-28).
 fn observe_shots(scene: &Scene, w: &mut Watch, t: f64) {
     let state = &scene.world.combat.state;
     let Some((own, _)) = scene.striker_at(w.plane) else {
@@ -1745,11 +1746,23 @@ fn observe_shots(scene: &Scene, w: &mut Watch, t: f64) {
         if w.first_shot.is_none() {
             w.first_shot = Some((t, site.id));
         }
+        // A hidden team that this very launch gave away (the picture's
+        // unmasked tick is at or after the launch, on the AI's clock) was not
+        // known when it fired.
+        let launch = scene
+            .world
+            .ai_wings
+            .as_ref()
+            .map_or(0, |wings| wings.mission().tick())
+            .saturating_sub(p.age + 1);
         let known = scene.actor(w.plane).and_then(|actor| {
             let picture = actor.ground_picture()?;
             let rings =
                 tore_sim::ai::helicopter_threat::known_rings(picture, actor.identity().side);
-            Some(rings.iter().any(|r| r.id == site.id))
+            Some(
+                rings.iter().any(|r| r.id == site.id)
+                    && picture.unmasked_at(site.id).is_none_or(|at| at < launch),
+            )
         });
         println!(
             "ai-strike: SHOT t={t:.3} site={:#x} range_ft={:.0} known={}",

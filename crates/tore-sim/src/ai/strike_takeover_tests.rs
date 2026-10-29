@@ -68,6 +68,7 @@ fn ground(id: u32, position: Vector, class: u16, defense: Option<DefenseFacts>) 
         },
         side: Side(2),
         defense,
+        hidden: false,
     }
 }
 

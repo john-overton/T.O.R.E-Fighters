@@ -490,6 +490,55 @@ fn a_shot_from_a_site_it_knew_is_no_ambush_and_one_from_a_site_it_did_not_is() {
     assert!(ring.centre[0] < world.own.position[0]);
 }
 
+/// A hidden shoulder-fired team that its own launch gave away (T.O.R.E
+/// opinionated, John 2026-10-29): known at once, so the plans keep out of
+/// its ring, but the shot that gave it away is still from a site the
+/// helicopter did not know, an ambush. Once it has been known for longer
+/// than a round flies, a shot from it is a known site's.
+#[test]
+fn a_team_its_own_launch_gave_away_is_still_an_ambush_and_known_after() {
+    use crate::ai::awareness::ground::{RecentWarnings, Subjects};
+    use crate::ai::helicopter_threat::{Decision, UNMASK_SHOT_TICKS, known_rings};
+    const TEAM: u32 = 0x5000_0012;
+    let mut world = heli_world(at2(4));
+    world.own.position = [0., 1_500., 12_000.];
+    let mut team = ground(TEAM, [8_000., 0., 12_000.], 0x1000, site(6_000., 0., false));
+    team.hidden = true;
+    let subjects = [ground(TARGET, TARGET_AT, 0x200, None), team];
+    world.picture = picture(&subjects, Vec::new());
+    assert!(known_rings(&world.picture, crate::ai::targeting::Side(1)).is_empty());
+    world.picture.unmask(1, &[TEAM], &Subjects::new(&subjects));
+    assert!(
+        known_rings(&world.picture, crate::ai::targeting::Side(1))
+            .iter()
+            .any(|r| r.id == TEAM)
+    );
+    fn engaged(world: &World, tick: u64) -> Context<'_> {
+        Context {
+            defending: true,
+            threat_bearing_deg: Some(90.),
+            warnings: RecentWarnings {
+                air_to_air: false,
+                surface_to_air: true,
+            },
+            ..world.context(tick)
+        }
+    }
+    // The defence starts a second and a half after the launch.
+    let mut first = Strike::new(3);
+    first.step(&world.context(1));
+    first.step(&engaged(&world, 180));
+    assert_eq!(call(&first), Some(Decision::Leave));
+    assert!(first.heli.ambush.is_some());
+    // Long after, a shot from its bearing is the known team's.
+    let late = 2 + UNMASK_SHOT_TICKS;
+    let mut later = Strike::new(3);
+    later.step(&world.context(late - 1));
+    later.step(&engaged(&world, late));
+    assert_ne!(call(&later), Some(Decision::Leave));
+    assert!(later.heli.ambush.is_none());
+}
+
 #[test]
 fn a_hold_off_is_deterministic_and_round_trips_through_a_checkpoint() {
     let mut world = defended_world();

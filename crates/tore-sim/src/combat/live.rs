@@ -1672,6 +1672,10 @@ pub struct Ownship {
     /// The radars painting this aircraft (the RWR's bright squares), set by
     /// the host every tick: the HARM boresight candidate prefers them.
     painted_by: std::collections::BTreeSet<u32>,
+    /// The hidden shoulder-fired SAM teams this pilot has spotted, or seen
+    /// launch ([`GroundListing::team`]): only these reach its sensors' pages
+    /// and map (T.O.R.E opinionated, John 2026-10-29).
+    spotted_teams: std::collections::BTreeSet<u32>,
     /// The HARM boresight cue's emitters, worked out with the observations
     /// each step; for the HUD only, never a designation or a lock.
     harm_cue: Vec<CueEmitter>,
@@ -2090,6 +2094,7 @@ impl Ownship {
             sight_hold: None,
             friendlies: Default::default(),
             painted_by: Default::default(),
+            spotted_teams: Default::default(),
             harm_cue: Vec::new(),
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
@@ -4685,6 +4690,9 @@ impl State {
         };
         for &(k, input) in &active {
             let own = &mut ships[k];
+            // A hidden team's launch gives it away (T.O.R.E opinionated,
+            // John 2026-10-29), before this tick's observations read it.
+            self.spot_team_launches(own, input.launcher.position);
             own.enforce_guns_only(self.cheats.guns_only);
             if std::mem::take(&mut own.pending_damage) && own.hp > 0 {
                 // Explicit no-AI hit fixture uses this aircraft's gun damage. Native

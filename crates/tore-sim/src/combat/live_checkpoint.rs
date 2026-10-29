@@ -231,7 +231,11 @@ crate::checkpoint_struct!(GroundLook {
 
 // The type facts the ground pages read of a ground object.
 type GroundListing = super::GroundListing;
-crate::checkpoint_struct!(GroundListing { flags, max_visible });
+crate::checkpoint_struct!(GroundListing {
+    flags,
+    max_visible,
+    team,
+});
 
 type ParkedSite = super::ParkedSite;
 crate::checkpoint_struct!(ParkedSite {
@@ -550,6 +554,7 @@ crate::checkpoint_struct!(Ownship {
     sight_hold,
     friendlies,
     painted_by,
+    spotted_teams,
     harm_cue,
     emitters,
     missile_threats,
