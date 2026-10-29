@@ -601,10 +601,12 @@ class HelicopterTests(unittest.TestCase):
         gunned = list(honest)
         gunned[5] = heli_run(breaks=8, decisions=["threat_leave", "threat_resume"])
         self.assertNotEqual(defended.check("\n".join(gunned)), [])
-        # Both ambush runs lay the site out the same way: placed, hidden, destroyed after its shot.
+        # Both ambush runs lay the site out the same way: placed and destroyed after its shot. The game
+        # hides the shoulder-fired team itself (2026-10-29), so no listing stand-in.
         for args in argsets[5:7]:
-            for flag in ("--place-site", "--site-sight", "--sead-site", "--sead-after-shot", "--follow-threat"):
+            for flag in ("--place-site", "--sead-site", "--sead-after-shot", "--follow-threat"):
                 self.assertIn(flag, args)
+            self.assertNotIn("--site-sight", args, "the game hides the team, not the driver")
             self.assertNotIn("--sead-at", args, "the SEAD stand-in goes by the shot, not the clock")
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
