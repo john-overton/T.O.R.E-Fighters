@@ -3300,6 +3300,12 @@ again with an observer; the capture format did not change for it.
   release stand-off stores outside known rings and turn away. Checkpoints
   gain the site's helicopter reach and the strike's stand-off plan. The
   compatibility simulation version is 10.
+  82 (2026-10-29, 0.2.2-rc1): shoulder-fired SAM teams stay off the AI's and
+  the player's sensors until spotted close in or given away by a launch, and
+  an AI helicopter ambushes a moving target from ahead of its path.
+  Checkpoints gain each pilot's spotted teams, the listing's team flag, the
+  AI picture's unmasked teams and the helicopter's move-ahead plan. The
+  compatibility simulation version is 11.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

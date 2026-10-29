@@ -275,7 +275,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// 81 sizes helicopter threat rings from each site's real launch reach,
 /// advances by the store's flight time, keeps ambushes to unknown shooters
 /// and releases stand-off stores outside known rings (new checkpoint state).
-pub const PROTOCOL_VERSION: u16 = 81;
+/// 82 hides shoulder-fired SAM teams until spotted and adds the helicopter
+/// move-ahead ambush on moving targets (new checkpoint state).
+pub const PROTOCOL_VERSION: u16 = 82;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
