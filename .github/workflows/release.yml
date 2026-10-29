@@ -185,16 +185,16 @@ jobs:
       # WiX 3.14 install on the windows-2022 image alongside WixUIExtension.
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: tools/package/package-linux.sh
+        run: tools/package/package-linux.sh --version "$TORE_BUILD_VERSION"
       # The script requires a bundle seal and strict signature verification
       # both before packaging and inside the mounted DMG. Any failure stops CI.
       - name: Package and verify ad-hoc signatures (macOS)
         if: runner.os == 'macOS'
-        run: tools/package/package-macos.sh
+        run: tools/package/package-macos.sh --version "$TORE_BUILD_VERSION"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: tools/package/package-windows.ps1
+        run: tools/package/package-windows.ps1 -Version $env:TORE_BUILD_VERSION
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
