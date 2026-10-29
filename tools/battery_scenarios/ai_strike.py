@@ -1145,15 +1145,22 @@ def scenarios() -> list[Scenario]:
     # tests' (no driver layout has a second target outside every ring).
     sams = ["--defenses", "0", "1"]
     defended_runs = [
-        # Heavy AAA on the column (before H4 the Mi-24 flew the pop-up through it and was lost):
-        # a firing point off the straight line, outside the guns' rings.
+        # Heavy AAA on the column (before H4 the Mi-24 flew the pop-up through it and was lost). Until
+        # 2026-10-29 it fired from a point off the straight line and guided its AT-2 on into the 9,500 ft
+        # ring of the column's ZSU-23 3,660 ft from the tank (it ended 7,269 ft from the tank). Since
+        # the stand-off's advance is the AT-2's flight at its speed (John, 2026-10-29: about 5,000 ft
+        # from 10,800 ft out), every firing point carries it into that ring: it holds off.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "1", "--defenses", "3", "0"),
-         dict(label="mi24 under heavy AAA", profile="standoff", release=True, hurt=True)),
-        # Light AAA at the factory: it sets out on the pop-up, learns of a ZSU-23 2,650 ft from the
-        # factory 20 s in and, its ring covering the factory, gives the pop-up up for a stand-off from
-        # outside the ring ("not pressed through"). Until 0.2.2 it flew the pop-up on into the guns and
-        # was lost guiding the energy rules' slower AT-2; the faster one had hidden it.
-        (pilot_run("UKR", "QUFACT", *at2, "--skill", "1", "--defenses", "1", "0"),
+         dict(label="mi24 under heavy AAA", profile="standoff", decisions=["hold_off"], no_release=True)),
+        # Light AAA at the factory: it sets out on the pop-up, learns of a ZSU-23 near the factory 20 s
+        # in and, its ring covering the factory, gives the pop-up up for a stand-off from outside the
+        # ring ("not pressed through"). Until 0.2.2 it flew the pop-up on into the guns and was lost
+        # guiding the energy rules' slower AT-2; the faster one had hidden it. The gun stood 2,650 ft
+        # from the factory; since the stand-off's advance is the AT-2's flight (John, 2026-10-29) no
+        # firing point leaves room for it outside that ring, so the run moves the gun 4,500 ft north of
+        # the factory, where the stand-off still clears it.
+        (pilot_run("UKR", "QUFACT", *at2, "--skill", "1", "--defenses", "1", "0",
+                   "--place-site", "0x5000000c,0,4500"),
          dict(label="mi24 under light AAA at the factory", profile="standoff", release=True, kill=True)),
         # A SAM that out-ranges the AT-2 (the open ST-H question): hold off, then home.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19, "--seconds", "240"),
@@ -1174,7 +1181,11 @@ def scenarios() -> list[Scenario]:
         # engages it: it breaks, leaves that ring, holds off, resumes and fires again, killing the
         # tank. The run follows it (`--follow-threat`) to the shot after the resume. Since the tanks'
         # air rules (John, 2026-10-24: a 3 s lay, a 20 degree ceiling, wider aim) the column's tanks
-        # fire at it less, so it breaks once (two BREAK lines) where it broke twice (six).
+        # fire at it less, so it breaks once (two BREAK lines) where it broke twice (six). KNOWN FAILURE
+        # since 0.2.2's slower AT-2, and a layout to replace: the SA-14's ring is now its real launch
+        # reach at a helicopter (19,500 ft) and the column does not leave it, so it holds off and goes
+        # home; `threat_leave` now means a shot from a site it did not know (John, 2026-10-29), which
+        # needs a site the terrain hides until it unmasks within its reach on the way out.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420",
                    "--follow-threat", "--place-site", "0x50000019,240,5000"),
          dict(label="mi24 ambushed", decisions=["hold_off", "resume", "leave", "resume"], breaks=2,
