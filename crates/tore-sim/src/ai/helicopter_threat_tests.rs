@@ -25,12 +25,13 @@ fn defense(id: u32, at: Vector, missile: f64, gun: f64, working: bool) -> KnownD
 
 /// The AT-2 as the plan sees it, with no flight time known (the fixed
 /// advance).
-fn at2() -> StandOff {
+fn at2() -> StandOff<'static> {
     StandOff {
         reach_ft: 18_000.,
         fire_ft: 10_000.,
         flight: None,
         guide_fps: 200.,
+        shots: None,
     }
 }
 
@@ -334,4 +335,160 @@ fn the_decisions_have_fixed_reasons_and_words() {
         assert_eq!(decision.reason(), reason);
         assert!(!decision.words().is_empty());
     }
+}
+
+// The stand-off's search out to the store's reliable reach (T.O.R.E
+// opinionated change, John 2026-10-29: "If an attack aircraft can hit
+// outside of range safely of known threats AI should do that").
+
+/// The host's answers as a test gives them: a hit, at 700 ft/s, where
+/// `hits` says so.
+struct Table(Box<dyn Fn(f64) -> bool + Send + Sync>);
+
+impl crate::ai::strike::ShotTable for Table {
+    fn shot(&self, _: StationId, _: ShotLaunch, range_ft: f64) -> Option<f64> {
+        (self.0)(range_ft).then_some(range_ft / 700.)
+    }
+}
+
+fn shots(hits: impl Fn(f64) -> bool + Send + Sync + 'static) -> Shots {
+    Shots(Some(std::sync::Arc::new(Table(Box::new(hits)))))
+}
+
+/// The AT-2 with the energy rules' flight times (about 25 s to 13,500 ft)
+/// at a guiding speed of 219 ft/s (120 kt and the adapter's 10), and the
+/// host's answers from a 700 ft unmask.
+fn at2_with(shots: &Shots) -> StandOff<'_> {
+    StandOff {
+        reach_ft: 18_000.,
+        fire_ft: 10_000.,
+        flight: Some(FlightTimes {
+            points: [
+                (4_500., 7.7),
+                (9_000., 14.6),
+                (13_500., 24.7),
+                (18_000., 34.8),
+            ],
+        }),
+        guide_fps: 219.,
+        shots: Some(StandOffShots {
+            shots,
+            station: StationId(1),
+            launch: ShotLaunch {
+                target_ft: 0.,
+                height_ft: 700.,
+                speed_fps: 203.,
+            },
+        }),
+    }
+}
+
+/// 30,000 ft south of a target at the origin, masked at 200 ft.
+const OWN: Vector = [0., 200., -30_000.];
+const TARGET: Vector = [0.; 3];
+
+#[test]
+fn a_safe_far_firing_range_is_chosen_when_the_near_ones_are_not() {
+    // A gun ring of 7,000 ft about the target (the heavy-AAA column's
+    // shape): from the usual 10,800 ft the AT-2's 18.6 s of flight carries
+    // the helicopter to 5,700 ft from the target, inside it, and from the
+    // fire range likewise. The AT-2 flies faster than the helicopter, so the
+    // advance's end moves out as the range grows: 13,500 ft is the nearest
+    // grid range whose advance ends outside the ring (7,091 ft).
+    let table = shots(|_| true);
+    let st = at2_with(&table);
+    let rings = [ring(1, TARGET, 7_000.)];
+    for usual in [STANDOFF_SHARE * 18_000., FIRE_RANGE_SHARE * 10_000.] {
+        assert!(usual - st.advance_ft(usual) < 7_000., "{usual}");
+    }
+    let plan = plan_attack(OWN, TARGET, Some(st), true, &rings);
+    let Some(Plan::StandOff {
+        approach: Some(point),
+        range_ft,
+    }) = plan
+    else {
+        panic!("{plan:?}");
+    };
+    assert_eq!(range_ft, 13_500.);
+    // Straight in from the south, the firing point and the advance's end
+    // both outside the ring.
+    assert!((point[0]).abs() < 1e-6 && (point[2] + 13_500.).abs() < 1e-6);
+    assert!(range_ft - st.advance_ft(range_ft) >= 7_000.);
+    assert!(holds(plan.unwrap(), OWN, TARGET, Some(st), &rings));
+    // The same every time.
+    assert_eq!(plan_attack(OWN, TARGET, Some(st), true, &rings), plan);
+    // Without the host's answers it looks no farther than the usual ranges:
+    // it holds off, as before.
+    let blind = StandOff { shots: None, ..st };
+    assert_eq!(plan_attack(OWN, TARGET, Some(blind), true, &rings), None);
+}
+
+#[test]
+fn it_holds_off_only_when_no_range_within_reach_is_safe() {
+    let rings = [ring(1, TARGET, 7_000.)];
+    // Its shots hit to 13,000 ft only: 13,500 ft would be clear but is not
+    // in reach, and no nearer range is clear. It holds off.
+    let short = shots(|r| r <= 13_000.);
+    assert_eq!(
+        plan_attack(OWN, TARGET, Some(at2_with(&short)), true, &rings),
+        None
+    );
+    // A ring of 9,000 ft: even the farthest reliable range (17,000 ft, one
+    // step inside the 17,986 ft the zone allows from 700 ft) ends its
+    // advance at 8,870 ft. It holds off.
+    let full = shots(|_| true);
+    let wide = [ring(1, TARGET, 9_000.)];
+    assert_eq!(
+        plan_attack(OWN, TARGET, Some(at2_with(&full)), true, &wide),
+        None
+    );
+    // With the reach and the 7,000 ft ring, it attacks.
+    assert!(plan_attack(OWN, TARGET, Some(at2_with(&full)), true, &rings).is_some());
+}
+
+#[test]
+fn a_range_whose_shot_strikes_the_ground_is_never_planned() {
+    // The AT-2 from a low hover strikes the ground over a band of mid
+    // ranges (docs/baselines/missile-energy.md). Here the band covers
+    // 9,000 to 11,500 ft, both usual ranges among them. A small ring well
+    // off the line (rings in play) leaves the usual firing points clear,
+    // but their shots would not hit: the plan takes the nearest reliable
+    // range past the band, 12,500 ft (12,000 and 13,000 ft hit too).
+    let banded = shots(|r| !(9_000. ..=11_500.).contains(&r));
+    let aside = [ring(1, [20_000., 0., 0.], 3_000.)];
+    let plan = plan_attack(OWN, TARGET, Some(at2_with(&banded)), true, &aside);
+    assert!(
+        matches!(
+            plan,
+            Some(Plan::StandOff {
+                approach: Some(_),
+                range_ft: 12_500.
+            })
+        ),
+        "{plan:?}"
+    );
+    // With no ring at all the run is as before (the ST-F stand-off straight
+    // in at the usual range; its release gate waits for a shot that hits).
+    assert_eq!(
+        plan_attack(OWN, TARGET, Some(at2_with(&banded)), true, &[]),
+        Some(Plan::StandOff {
+            approach: None,
+            range_ft: STANDOFF_SHARE * 18_000.
+        })
+    );
+    // A band past the ring: 13,500 to 14,500 ft strike the ground, and
+    // 15,000 ft has the band one step nearer; 15,500 ft is the plan.
+    let far_band = shots(|r| !(13_500. ..=14_500.).contains(&r));
+    let rings = [ring(1, TARGET, 7_000.)];
+    let plan = plan_attack(OWN, TARGET, Some(at2_with(&far_band)), true, &rings);
+    assert!(
+        matches!(
+            plan,
+            Some(Plan::StandOff {
+                approach: Some(_),
+                range_ft: 15_500.
+            })
+        ),
+        "{plan:?}"
+    );
 }

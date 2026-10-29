@@ -19,15 +19,19 @@
 //!   it leaves that site's ring.
 //!
 //! A ring's reach is the site's real launch reach at a helicopter (the
-//! host's bound on its launch gate), and the stand-off's advance the
-//! store's time of flight at the helicopter's speed (John, 2026-10-29).
+//! host's bound on its launch gate), the stand-off's advance the store's
+//! time of flight at the helicopter's speed, and a stand-off blocked at its
+//! usual ranges looks farther out, to the store's reliable reach on the
+//! host's exact-point answers (John, 2026-10-29).
 //!
 //! Everything is a fixed function of the threats, the positions, the store
 //! and the terrain: no dice (John, decision 13). The numbers are fitted
 //! (agent) unless marked.
 use crate::ai::awareness::ground::{GroundPicture, KnownDefense};
 use crate::ai::strike::FlightTimes;
+use crate::ai::strike::reach::{self, ShotLaunch, Shots};
 use crate::ai::targeting::Side;
+use crate::ai::weapon_service::StationId;
 use crate::attitude::Vector;
 use crate::sensors::FEET_PER_NAUTICAL_MILE;
 
@@ -273,7 +277,7 @@ pub fn clear(rings: &[Ring], a: Vector, b: Vector) -> bool {
 
 /// A guided store's stand-off as the plan needs it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct StandOff {
+pub struct StandOff<'a> {
     /// The store's zone-1 range, feet.
     pub reach_ft: f64,
     /// The AI's fire range, feet.
@@ -282,9 +286,28 @@ pub struct StandOff {
     pub flight: Option<FlightTimes>,
     /// The helicopter's speed while it guides, ft/s.
     pub guide_fps: f64,
+    /// The host's answers on its shots, from the launch the stand-off
+    /// unmasks to (none: every firing range is taken to hit, and the plan
+    /// looks no farther out than its usual ranges).
+    pub shots: Option<StandOffShots<'a>>,
 }
 
-impl StandOff {
+/// Where the plan asks whether a stand-off shot hits ([`reach::reliable`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StandOffShots<'a> {
+    pub shots: &'a Shots,
+    pub station: StationId,
+    pub launch: ShotLaunch,
+}
+
+impl StandOffShots<'_> {
+    /// A shot from `range_ft` hits reliably.
+    pub fn reliable(&self, range_ft: f64) -> bool {
+        reach::reliable(self.shots, self.station, self.launch, range_ft).is_some()
+    }
+}
+
+impl StandOff<'_> {
     /// How far the helicopter carries on toward the target from a firing
     /// point `range_ft` out (T.O.R.E opinionated change, John 2026-10-29):
     /// the store's time of flight from there at its guiding speed, plus
@@ -321,10 +344,20 @@ pub enum Plan {
 /// [`APPROACH_STEP_DEG`] steps (the right first at each step), each at the
 /// usual range ([`STANDOFF_SHARE`] of the zone) and then just inside the
 /// fire range ([`FIRE_RANGE_SHARE`]).
+///
+/// With none of those clear, it looks farther out, to the store's reliable
+/// reach (T.O.R.E opinionated change, John 2026-10-29: "If an attack
+/// aircraft can hit outside of range safely of known threats AI should do
+/// that"): the grid ranges past the usual ones, nearest first, each at every
+/// bearing as above; the first clear firing point whose shot the host says
+/// hits reliably ([`StandOffShots::reliable`]) is the plan. Under rings, a
+/// usual range whose shot would not hit is skipped too. The store flies
+/// faster than the helicopter, so the advance's end moves out as the range
+/// grows. Only with no clear range within reach does it hold off.
 pub fn plan_attack(
     own: Vector,
     target: Vector,
-    standoff: Option<StandOff>,
+    standoff: Option<StandOff<'_>>,
     prefer_standoff: bool,
     rings: &[Ring],
 ) -> Option<Plan> {
@@ -333,50 +366,88 @@ pub fn plan_attack(
         return Some(Plan::PopUp);
     }
     if let Some(standoff) = standoff.filter(|st| st.reach_ft > 0.) {
-        let ranges = [
+        let usual = [
             STANDOFF_SHARE * standoff.reach_ft,
             FIRE_RANGE_SHARE * standoff.fire_ft,
         ];
         let base = bearing(target, own);
-        let steps = (180. / APPROACH_STEP_DEG).round() as i32;
-        for k in 0..=steps {
-            let sides: &[f64] = if k == 0 || k == steps {
-                &[1.]
+        // The firing point at `range` on the radial `theta` from the target
+        // (`k` steps off the helicopter's own), when it, the way in and the
+        // advance stand clear of every ring.
+        let fits = |k: i32, theta: f64, range: f64| -> Option<Vector> {
+            let [x, z] = along(target, theta, range);
+            let point = [x, own[1], z];
+            let [ex, ez] = along(target, theta, (range - standoff.advance_ft(range)).max(0.));
+            let end = [ex, own[1], ez];
+            let [lx, lz] = along(target, theta, range + LEAD_IN_FT);
+            let lead = [lx, own[1], lz];
+            // Straight in it flies the radial already; off it, it joins the
+            // radial at the lead-in point first.
+            let way_in = if k == 0 {
+                clear(rings, own, point)
             } else {
-                &[1., -1.]
+                inside(rings, lead).is_none()
+                    && clear(rings, own, lead)
+                    && clear(rings, lead, point)
             };
-            for side in sides {
-                let theta = base + side * f64::from(k) * APPROACH_STEP_DEG;
-                for (n, range) in ranges.into_iter().enumerate() {
-                    let [x, z] = along(target, theta, range);
-                    let point = [x, own[1], z];
-                    let [ex, ez] =
-                        along(target, theta, (range - standoff.advance_ft(range)).max(0.));
-                    let end = [ex, own[1], ez];
-                    let [lx, lz] = along(target, theta, range + LEAD_IN_FT);
-                    let lead = [lx, own[1], lz];
-                    // Straight in it flies the radial already; off it, it
-                    // joins the radial at the lead-in point first.
-                    let way_in = if k == 0 {
-                        clear(rings, own, point)
-                    } else {
-                        inside(rings, lead).is_none()
-                            && clear(rings, own, lead)
-                            && clear(rings, lead, point)
-                    };
-                    if inside(rings, point).is_none() && way_in && clear(rings, point, end) {
-                        // Straight in at the usual share: the ST-F stand-off.
-                        let straight = k == 0 && n == 0;
-                        return Some(Plan::StandOff {
-                            approach: (!straight).then_some(point),
-                            range_ft: range,
-                        });
-                    }
+            (inside(rings, point).is_none() && way_in && clear(rings, point, end)).then_some(point)
+        };
+        // Under rings a usual range whose shot the host says would not hit
+        // is not planned; with no rings the run is as before (the release
+        // gate waits for its shot).
+        let shots = standoff.shots.filter(|_| !rings.is_empty());
+        let mut usual_hits: [Option<bool>; 2] = [None; 2];
+        for (k, theta) in approach_bearings(base) {
+            for (n, range) in usual.into_iter().enumerate() {
+                let Some(point) = fits(k, theta, range) else {
+                    continue;
+                };
+                let hits =
+                    *usual_hits[n].get_or_insert_with(|| shots.is_none_or(|sh| sh.reliable(range)));
+                if hits {
+                    // Straight in at the usual share: the ST-F stand-off.
+                    let straight = k == 0 && n == 0;
+                    return Some(Plan::StandOff {
+                        approach: (!straight).then_some(point),
+                        range_ft: range,
+                    });
+                }
+            }
+        }
+        if let Some(shots) = shots {
+            let cap = reach::ground_reach(standoff.reach_ft, shots.launch.height_ft);
+            let beyond = usual[0].max(usual[1]);
+            for range in reach::ranges_beyond(beyond, cap) {
+                let first = approach_bearings(base).find_map(|(k, theta)| fits(k, theta, range));
+                if let Some(point) = first
+                    && shots.reliable(range)
+                {
+                    return Some(Plan::StandOff {
+                        approach: Some(point),
+                        range_ft: range,
+                    });
                 }
             }
         }
     }
     popup.then_some(Plan::PopUp)
+}
+
+/// The firing point's bearings from the target: `base` (the helicopter's
+/// own) and then outward in [`APPROACH_STEP_DEG`] steps, the right first at
+/// each step, all the way round; with the step count `k`.
+fn approach_bearings(base: f64) -> impl Iterator<Item = (i32, f64)> {
+    let steps = (180. / APPROACH_STEP_DEG).round() as i32;
+    (0..=steps).flat_map(move |k| {
+        let sides: &[f64] = if k == 0 || k == steps {
+            &[1.]
+        } else {
+            &[1., -1.]
+        };
+        sides
+            .iter()
+            .map(move |side| (k, base + side * f64::from(k) * APPROACH_STEP_DEG))
+    })
 }
 
 /// Whether the pass in hand still stays outside every ring: a ring learned
@@ -389,7 +460,7 @@ pub fn holds(
     plan: Plan,
     own: Vector,
     target: Vector,
-    standoff: Option<StandOff>,
+    standoff: Option<StandOff<'_>>,
     rings: &[Ring],
 ) -> bool {
     match plan {

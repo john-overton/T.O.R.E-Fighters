@@ -1149,7 +1149,11 @@ def scenarios() -> list[Scenario]:
         # 2026-10-29 it fired from a point off the straight line and guided its AT-2 on into the 9,500 ft
         # ring of the column's ZSU-23 3,660 ft from the tank (it ended 7,269 ft from the tank). Since
         # the stand-off's advance is the AT-2's flight at its speed (John, 2026-10-29: about 5,000 ft
-        # from 10,800 ft out), every firing point carries it into that ring: it holds off.
+        # from 10,800 ft out), every firing point at its usual ranges carries it into that ring. It
+        # then looks out to the AT-2's reliable reach (John, 2026-10-29: 14,500 ft from its unmask)
+        # and keeps attacking from farther out, from 10,800 ft out to 14,500 ft, while the column
+        # drives on among the guns, which stand still; each plan is spoiled within seconds as the
+        # column moves, and at 113 s no range within reach stands clear: it holds off.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "1", "--defenses", "3", "0"),
          dict(label="mi24 under heavy AAA", profile="standoff", decisions=["hold_off"], no_release=True)),
         # Light AAA at the factory: it sets out on the pop-up, learns of a ZSU-23 near the factory 20 s

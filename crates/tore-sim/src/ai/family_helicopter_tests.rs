@@ -552,3 +552,52 @@ fn inside_a_known_ring_after_a_break_it_leaves_by_the_shortest_way_out() {
     });
     assert_eq!(steer(&strike.step(&clear.context(2))).heading_deg, 20.);
 }
+
+/// Every shot hits, at 700 ft/s.
+struct AllHit;
+
+impl crate::ai::strike::ShotTable for AllHit {
+    fn shot(&self, _: StationId, _: crate::ai::strike::ShotLaunch, range_ft: f64) -> Option<f64> {
+        Some(range_ft / 700.)
+    }
+}
+
+#[test]
+fn under_heavy_aaa_on_the_target_it_fires_from_farther_out_with_the_hosts_answers() {
+    // A gun 5,000 ft of reach on the target (a 7,000 ft ring), the Mi-24's
+    // strike speed 120 kt: from the usual ranges the AT-2's flight carries
+    // it into the ring, and before 2026-10-29 it held off. With the host's
+    // answers it looks farther out (John, 2026-10-29) and fires from
+    // 13,500 ft, the nearest range whose advance ends outside the ring.
+    let mut store = at2(4);
+    store.flight = Some(crate::ai::strike::FlightTimes {
+        points: [
+            (4_500., 7.7),
+            (9_000., 14.6),
+            (13_500., 24.7),
+            (18_000., 34.8),
+        ],
+    });
+    let mut world = heli_world(store);
+    world.own.limits.maximum = crate::ai::ScalarSpeed(253.);
+    world.own.limits.minimum = crate::ai::ScalarSpeed(60.);
+    world.picture = picture(
+        &[
+            ground(TARGET, TARGET_AT, 0x200, None),
+            ground(SAM, TARGET_AT, 0x800, site(0., 5_000., true)),
+        ],
+        vec![SAM],
+    );
+    let mut blind = Strike::new(3);
+    blind.step(&world.context(1));
+    assert_eq!(blind.phase(), Phase::HoldOff, "no answers: as before");
+    world.inputs.shots = crate::ai::strike::Shots(Some(std::sync::Arc::new(AllHit)));
+    let mut strike = Strike::new(3);
+    let order = strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.pass(), Some(Pass::StandOff));
+    assert_eq!(strike.heli.standoff_ft, Some(13_500.));
+    assert_eq!(order.release, None);
+    // Its exit opens from that range.
+    assert!(exit_distance(&strike, &world.context(2)) >= 13_500. + STANDOFF_EXIT_FT);
+}

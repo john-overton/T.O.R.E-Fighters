@@ -416,6 +416,47 @@ missiles only against aircraft; guns against both. Label: retail, spec-derived.
 The delivery modes, solutions and guided flights are the player's, so this
 spec adds none (spec-derived).
 
+## Stand-off reach
+
+**T.O.R.E opinionated change requested by John on 2026-10-29:** "If an attack
+aircraft can hit outside of range safely of known threats AI should do that."
+Retail has no such rule; before 0.2.2 a striker released where its usual rule
+said, inside a known threat's reach or not. Built for the helicopters'
+stand-off ([Helicopter threat awareness](#helicopter-threat-awareness), "Farther
+out, to the store's reach").
+
+How far a guided store can reach is the question the AI's own release gate
+asks, so a plan never counts on a shot the gate would not take or that would
+strike the ground. The host answers it range by range (`tore_world::ai_wings`,
+the strike's shot table), for a static target on flat ground and a level launch
+toward it:
+
+- under the energy rules, a store with a motor: the energy model's exact-point
+  answer, the same launch question, hit radius and kernel the prediction
+  service answers for the gate, flown at once;
+- a guided bomb: its glide reach from that launch (the sight's reach);
+- under the other missile rules, a seeker missile: its zone 1; a guided missile
+  on the sight: its zone out to the sight's release bar, where the gate lets it
+  go. A helicopter gets no answers under these rules (its usual range is
+  already the bar).
+
+A plan takes a range only when the shot hits from there and from one step
+nearer and one step farther: a **reliable** range. That keeps out a band where
+the round strikes the ground (the AT-2 from a low hover strikes the ground from
+about 1 km to 7,900 ft out, [missile energy](../baselines/missile-energy.md#contiguous-range-advice-validation))
+and the last step of the reach. The answers are cached by store, launch band
+and range step, so a plan asked again every step costs a lookup: the target's
+height in 250 ft bands, the launch's height over it in 250 ft bands up to
+2,000 ft and 1,000 ft bands above, the speed in 50 ft/s bands, and ranges on a
+500 ft grid. The cache is a fixed function of the records and is never
+checkpointed.
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Reliable reach | The shot hits from the range and from 500 ft nearer and farther; no farther than the zone-1 maximum (slant) | rule opinionated (John, 2026-10-29); the test fitted (agent) |
+| The answer's launch | Level, toward the target, no wind, no terrain between; target static on flat ground, 8 ft over it | fitted (agent) |
+| Bands | Target height 250 ft; launch height 250 ft to 2,000 ft, then 1,000 ft; speed 50 ft/s; range 500 ft | fitted (agent) |
+
 ## Heavy bombers
 
 | Rule | Label |
@@ -715,6 +756,7 @@ stateDiagram-v2
 | Aware | A defence in its ground picture: briefed, seen by its sensors, or a surface radar that painted it (the radar, and for a battery's radar the launchers it guides for, become known as if seen, from the next quarter-second refresh). A radar busy with another aircraft gives nothing away | opinionated (John, 2026-10-12) |
 | Ring | A threat's reach for that helicopter, plus a 2,000 ft margin, measured on the ground: for its missiles while it can guide, the farthest it may launch at a helicopter; for its guns (a SAM or AAA site or a ship; a tank's gun does not count), their launch zone. **Since 0.2.2 a missile's reach is its real launch gate's** (T.O.R.E opinionated change requested by John, 2026-10-29): under the energy rules a site launches whenever the energy model says the round reaches the aircraft, which against a slow, low helicopter lies past the record's zone (SA-14 launches were seen from 15,600 to 16,600 ft with a 13,500 ft zone, SA-7 launches from 10,500 to 14,300 ft with an 8,100 ft zone, so a known site's shot from outside its ring read as an ambush). The host asks the site's own launch gate the same question, flown at once: the helicopter closing head on at 160 kt (above every AI helicopter's maximum), at 0, 1,000 and 2,500 ft above the launcher, the wind along the line either way, no terrain in the way, the launcher at the top of its 250 ft altitude band, at the site's skill. The farthest distance that still hits (to 100 ft, on the far side) is the reach, never less than the launch zone. It is worked out once per record, skill, mount pitch, altitude band and wind. With the Ukraine column's sites (skill 1, near sea level, a light wind) the rings are SA-7 18,300 ft, SA-14 19,500 ft, SA-9 18,600 ft, SA-15 43,600 ft and SA-6 80,500 ft, against 10,100, 15,500, 18,200, 34,400 and 69,500 ft from the zones. Under the other missile rules the launch zone is the gate, and the ring | rule opinionated (John, 2026-10-12; the real launch reach John, 2026-10-29); the bound's numbers and the margin fitted (agent) |
 | Attack outside the rings | The pop-up needs the target, and the straight line to it, outside every ring. A line that starts inside a ring counts only when it leads straight out: it ends outside and never comes nearer the site than where it starts (since 0.2.2; before, a pop-up that ran on deeper into a known SA-14 ring and left it later counted as leaving). A guided store (the AT-2) may instead fire from a point outside the rings: tried at its usual stand-off range (60% of the zone) and just inside the AI's fire range (95% of 10,000 ft or half the zone), on bearings from the target that start at the helicopter's own and step 15 degrees either way round; the point, the line to it and the stretch it carries on toward the target while it unmasks and guides (the **advance**) must all be outside the rings. Since 0.2.2 the advance is the store's time of flight from the firing point at the helicopter's guiding speed (its strike speed plus the 10 kt the rotor adapter may stand over it) plus 1,000 ft for the unmask's climb, never less than the 2,500 ft it was before (T.O.R.E opinionated change requested by John, 2026-10-29: the energy rules' AT-2 was measured flying 16.5 to 24.3 s from 10,800 to 12,200 ft, and the Mi-24 carried on 3,700 to 5,400 ft into the SA-14 ring it had planned to stay out of). The host flies the time of flight once per record: the energy model's flight from 700 ft over flat ground at 120 kt, level, to a vehicle at 25, 50, 75 and 100% of the zone (a range it does not reach at the last reached one's pace), straight lines between; under the other rules the range at the record's top speed. For the AT-2: 7.7 s at 4,500 ft, 14.6 s at 9,000 ft, 24.7 s at 13,500 ft, so 18.6 s from the usual 10,800 ft and an advance of about 5,100 ft (about 4,500 ft from 9,500 ft). The unmask's longest climb, 10 s, can carry it about 300 ft past the advance: inside a ring's margin, never a threat's reach. Off the straight line, it flies to that point masked, turns its nose onto the target and fires only within 15 degrees of it | fitted (agent) |
+| Farther out, to the store's reach | **Since 0.2.2** (T.O.R.E opinionated change requested by John on 2026-10-29: "If an attack aircraft can hit outside of range safely of known threats AI should do that"). With no firing point clear at the usual ranges, the stand-off looks farther out: the ranges on a 500 ft grid past the usual ones, nearest first, each at every bearing as above, out to the store's reliable reach. The first firing point that stands outside every ring with its way in and its advance is the plan. The AT-2 flies faster than the helicopter, so the advance's end moves out as the range grows: from 10,800 ft its end lies about 5,700 ft from the target, from 13,500 ft about 7,100 ft. A range counts only when the host says the shot hits from there and from 500 ft nearer and farther (the [stand-off reach](#stand-off-reach) answers, asked from the top of the unmask, 700 ft over the ground under the helicopter, at its strike speed). So the AT-2's ground band from a low hover and the last 500 ft of its reach are never planned, and under rings a usual range whose shot would not hit is skipped too. The nearest range is taken (a better chance and a shorter flight); it holds off only when no range within reach stands clear. With no ring at all the run is unchanged. The energy rules' AT-2 from its unmask at 120 kt hits out to 15,000 ft, so it plans to 14,500 ft. Under the other missile rules the AI lets a guided round go no farther out than the sight's bar (60% of the zone), its usual range, so nothing changes there | rule opinionated (John, 2026-10-29); the grid and the reliability test fitted (agent) |
 | This covers SAMs that out-range the weapon | A SAM whose ring covers every firing point blocks the attack: the helicopter holds off instead of flying the stand-off under it (the open ST-H question) | opinionated (John, 2026-10-12) |
 | Not pressed through | A ring that appears (a new site perceived, a radar painting it) before anything has left blocks the pass in hand: the helicopter turns away to hold off. This holds even when another attack stands clear (a pop-up whose target a newly seen gun covers, while a stand-off from outside the gun's ring would do): the hold-off then chooses that attack at once, without a radio call. Before 0.2.2 the pass in hand was given up only when no attack at all stood clear, so the pop-up flew on into the gun. A pass already fired is finished (its AT-2 held to impact) | opinionated (John, 2026-10-12) |
 | Hold off | It circles a point outside every ring (with room for its 3,000 ft circle), at its strike speed, 200 ft over the highest ground under and ahead of it: the nearest such point, or one slid round the nearest site by 30 or 60 degrees where the terrain hides it from the site | rule opinionated (John, 2026-10-12); numbers fitted (agent): the AI's adapter cannot hover a helicopter |
@@ -740,8 +782,13 @@ a firing point off the straight line, outside the guns' rings, fires from
 11,000 ft and hurts the tank without a shot fired at it (before, it flew the
 pop-up through the guns and was lost). It guided on into the ring of the
 column's ZSU-23 3,660 ft from the tank, ending 7,269 ft from the tank; since the
-advance follows the AT-2's flight (2026-10-29) every firing point would carry it
-there, so it holds off instead. At the factory, with its ZSU-23 moved from 2,650
+advance follows the AT-2's flight (2026-10-29) every firing point at its usual
+ranges would carry it there, and it held off 20 s in. Since it also looks out to
+the AT-2's reach (2026-10-29) it keeps attacking from farther out while the
+column drives on among the guns, which stand still: its plan moves out from
+10,800 ft at the start to 14,500 ft at 105 s, each plan spoiled within seconds as
+the column moves, and at 113 s no range within the AT-2's reach stands clear. It
+holds off there, untouched and without firing. At the factory, with its ZSU-23 moved from 2,650
 to 4,500 ft from the factory, it gives up the pop-up for a stand-off once it sees
 the gun and kills the factory. Under a SAM that out-ranges the AT-2
 (surface seed 19) and under an SA-14 on the target (seed 4) every attack crosses
@@ -1155,7 +1202,7 @@ strike order or a takeover of a striking plane.
 | Helicopter start | 1,500 ft over the ground in an AI wing; fuel schedule of its own (slice H3); no airfield sequence yet | opinionated (agent) |
 | Helicopter threat ring | the threat's reach plus 2,000 ft; a missile's reach its launch gate's at a helicopter closing at 160 kt, at 0, 1,000 and 2,500 ft above it, in 250 ft altitude bands, the wind either way, never less than its zone | rule opinionated (John, 2026-10-12 and 2026-10-29), margin and bound fitted |
 | Helicopter hold-off | up to 3 minutes for SEAD, circling 3,000 ft at 200 ft over the ground outside every ring; then another target outside the rings, else home | opinionated (John, 2026-10-12), numbers fitted |
-| Helicopter stand-off points | 60% of the zone or 95% of the fire range, bearings in 15 degree steps, the advance clear (the store's flight time at the strike speed plus 10 kt, plus 1,000 ft, at least 2,500 ft), nose within 15 degrees to fire | fitted; the advance from the flight time opinionated (John, 2026-10-29) |
+| Helicopter stand-off points | 60% of the zone or 95% of the fire range, bearings in 15 degree steps, the advance clear (the store's flight time at the strike speed plus 10 kt, plus 1,000 ft, at least 2,500 ft), nose within 15 degrees to fire; with neither clear, the 500 ft grid out to the store's reliable reach, nearest first (the AT-2: 14,500 ft) | fitted; the advance from the flight time and the search to the reach opinionated (John, 2026-10-29) |
 | Helicopter ambush ring | 3 nm round a point 1 nm toward the threat, only for a site it did not know (none within 20 degrees of the threat's bearing and in reach); forgotten after 60 s quiet and outside it | fitted; unknown shooter only opinionated (John, 2026-10-29) |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
 | Lase orbit | radius max(3 nm, 1.2 turn radii), at most 80% of the laser's reach | fitted |
