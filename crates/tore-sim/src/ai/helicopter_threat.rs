@@ -132,6 +132,19 @@ const CLASS_AIR_DEFENSE: u16 = 0x1000 | 0x800;
 /// and AAA sites and ships (a tank's gun does not ring the sky; fitted,
 /// agent).
 pub fn known_rings(picture: &GroundPicture, side: Side) -> Vec<Ring> {
+    rings_with(picture, side, true)
+}
+
+/// The rings a fixed-wing striker of `side` plans a stand-off release round
+/// (docs/spec/ai-strike.md, "Stand-off reach"; John, 2026-10-29): as
+/// [`known_rings`], with a missile site's reach its launch zone
+/// ([`DefenseFacts::missile_reach_ft`](crate::ai::awareness::ground::DefenseFacts)),
+/// not its reach at a helicopter.
+pub fn jet_rings(picture: &GroundPicture, side: Side) -> Vec<Ring> {
+    rings_with(picture, side, false)
+}
+
+fn rings_with(picture: &GroundPicture, side: Side, rotor: bool) -> Vec<Ring> {
     let class = |id: u32| {
         picture
             .seen()
@@ -154,6 +167,9 @@ pub fn known_rings(picture: &GroundPicture, side: Side) -> Vec<Ring> {
             let mut d = *d;
             if class(d.id) & CLASS_AIR_DEFENSE == 0 && !d.facts.ship {
                 d.facts.gun_reach_ft = 0.;
+            }
+            if !rotor {
+                d.facts.rotor_reach_ft = 0.;
             }
             d
         })

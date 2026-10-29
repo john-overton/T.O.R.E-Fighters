@@ -405,7 +405,7 @@ every skill.
 | Guns | Strafe | Bursts opened by the gun's ground cue near the target, rounds walked in onto it (below) | Each burst opens on a point inside `R` and walks onto the target |
 | Laser bombs, laser missiles | Level or shallow run; then an offset turn holding the target inside the designator's gimbal until impact (fitted) | Target inside the reach and a spot will exist (own designator, or a same-side spot); and not while the sight shows MASK, a spot hidden from the launcher by terrain (agent, 2026-10-12); with none, a laser bomb is [dropped by hand](#no-laze-support) as an unguided bomb and a laser missile goes home | none: spot on the target (by hand: the unguided circle) |
 | JDAM | Level run | Target point stored, inside the reach | none: point on the target |
-| Mavericks, AS-14, AS-30 | Fast-high or straight | Seeker locked on the target inside zone 1 ([lock flow](air-to-ground.md#the-seekers-and-the-lock-flow)) | Lock |
+| Mavericks, AS-14, AS-30 | Fast-high or straight | Seeker locked on the target inside zone 1 ([lock flow](air-to-ground.md#the-seekers-and-the-lock-flow)); under a known ring, from outside it when the store reaches ([stand-off reach](#stand-off-reach)) | Lock |
 | Radar AGMs (AS-7, AS-15, AGM-84A, AM-39, AS-16) | Straight run | Radar track at release, held through the flight (the AI support rule, [B45](ai.md#b45-seeker-visibility-launch-eligibility-and-ammunition)) | Lock |
 | HARM | Fast-high; fire at maximum range, exit | A HARM candidate inside the zone ([HARM cue](air-to-ground.md#missiles-and-the-harm-boresight-cue)) | Lock |
 | AT-2 (Mi-24) | Helicopter pop-up; hold the line until impact | Target inside the launcher's cone with a clear line | Lock |
@@ -423,7 +423,8 @@ aircraft can hit outside of range safely of known threats AI should do that."
 Retail has no such rule; before 0.2.2 a striker released where its usual rule
 said, inside a known threat's reach or not. Built for the helicopters'
 stand-off ([Helicopter threat awareness](#helicopter-threat-awareness), "Farther
-out, to the store's reach").
+out, to the store's reach") and the fixed-wing strikers' stand-off stores
+(below).
 
 How far a guided store can reach is the question the AI's own release gate
 asks, so a plan never counts on a shot the gate would not take or that would
@@ -457,6 +458,29 @@ checkpointed.
 | The answer's launch | Level, toward the target, no wind, no terrain between; target static on flat ground, 8 ft over it | fitted (agent) |
 | Bands | Target height 250 ft; launch height 250 ft to 2,000 ft, then 1,000 ft; speed 50 ft/s; range 500 ft | fitted (agent) |
 
+**Fixed-wing strikers** (`tore_sim::ai::strike`, the stand-off release). Before
+0.2.2 a fighter, attack jet or heavy with a stand-off store released at its
+usual point whatever the known rings: a seeker missile (Mavericks, AS-14,
+AS-30, the radar AGMs, HARM) on its lock inside the AI's fire range (10,000 ft
+or half the zone, whichever is farther), a guided bomb at its sight's bar (40%
+of the reach in from its far edge). Retail's exit then flew straight on, over
+the target. Under a SAM whose reach is longer than that, it pressed into the
+ring every time, even with a store that could have reached from outside it.
+Now, with a stand-off store selected and a known defence whose own reach covers
+the target:
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Rings | Its known hostile defences, as a helicopter's (the missiles of a site that can guide, the guns of a SAM or AAA site or a ship), with a missile site's launch zone as its reach, plus the 2,000 ft margin | rule opinionated (John, 2026-10-29); the margin fitted |
+| When it applies | A seeker missile, a JDAM, or a laser store on a spot that is not its own (on its own spot it holds the spot after the release, slice ST-L), whose usual release point, or the turn away after it, lies inside a ring | opinionated (John, 2026-10-29) |
+| The plan | On its line to the target, the nearest reliable range past the usual point, out to the store's zone, whose release point lies outside every ring and whose turn away stays outside too: two turn radii at its speed and G limit (the input-only adapter turns more gently than the limit). Asked from its height over the target and its speed, and worked out again each step until the release, so a ring learned on the way in moves it | rule opinionated (John, 2026-10-29); the turn fitted (agent) |
+| Release | At or inside the plan's range once the store reaches: a seeker's lock without the fire range, the sight's IN RNG with no advisory. The committed-to-release window times the planned release | opinionated (John, 2026-10-29) |
+| Exit | After that release it turns away from the target, not straight on, and opens to the plan's range plus its turn plus 6,000 ft (at least the usual exit distance) before it turns back | fitted (agent) |
+| A round still flying | Back at its plan on a new pass while its stand-off round still flies (its time of flight plus 5 s), it ends the pass there and turns away again. A pass that closes 2,000 ft inside its plan without releasing otherwise gives the plan up and is flown as before | fitted (agent) |
+| As before | No known defence covering the target; no reliable range within the store's reach that stands clear; unguided bombs, rockets and guns (no stand-off); a takeover (it stands off a covered target already); a guided store with a motor under the energy rules on the sight (its gate is its exact-point answer, with no bar, so it already leaves at its far edge) | opinionated (John, 2026-10-29) |
+
+The pass types, the line flown and the 5 s commitment are unchanged.
+
 ## Heavy bombers
 
 | Rule | Label |
@@ -480,7 +504,9 @@ exit unless marked.
   weave of 10 degrees to one side, repeated while still inside 10,000 ft.
   Beyond 10,000 ft: hold heading, climb 10 degrees at maximum speed. At
   max(30,000 ft, twice the turn radius) away, turn back level at corner speed
-  and choose again. Retail draws the weave's side and heading by random; T.O.R.E
+  and choose again. After a stand-off release outside a known ring (T.O.R.E,
+  John, 2026-10-29) the exit turns away from the target and opens past the
+  release ([stand-off reach](#stand-off-reach)). Retail draws the weave's side and heading by random; T.O.R.E
   uses the existing seeded channel or a fixed side (John, decision 13).
 - **Re-attack.** At the exit distance the aircraft runs the choice again with
   fresh threat and energy. Target alive and a usable store: attack. Target
@@ -530,7 +556,9 @@ exit unless marked.
   the track over the cue's measured closing speed (filtered over 0.5 s; at
   first the ground speed, as the level release T has it); for a guided bomb,
   the host's sight, its distance to the T's bar over the ground speed; for a
-  seeker missile, its range less its fire range over the closing speed. It
+  seeker missile, its range less its fire range over the closing speed; for a
+  stand-off release planned outside a known ring, its ground range less the
+  plan's over the closing speed. It
   covers every pass with a release point: straight, level, fast-high,
   laydown, dive, pop-up (its pull too), rockets (the window holds through the
   rocket burst) and guided stores. The window opens only in the pass's final
@@ -1202,6 +1230,7 @@ strike order or a takeover of a striking plane.
 | Helicopter start | 1,500 ft over the ground in an AI wing; fuel schedule of its own (slice H3); no airfield sequence yet | opinionated (agent) |
 | Helicopter threat ring | the threat's reach plus 2,000 ft; a missile's reach its launch gate's at a helicopter closing at 160 kt, at 0, 1,000 and 2,500 ft above it, in 250 ft altitude bands, the wind either way, never less than its zone | rule opinionated (John, 2026-10-12 and 2026-10-29), margin and bound fitted |
 | Helicopter hold-off | up to 3 minutes for SEAD, circling 3,000 ft at 200 ft over the ground outside every ring; then another target outside the rings, else home | opinionated (John, 2026-10-12), numbers fitted |
+| Fixed-wing stand-off release | under a known ring covering the target, the nearest reliable range on a 500 ft grid past the usual release, out to the zone, whose release point and turn away (two turn radii) lie outside every ring; exit away to the plan plus the turn plus 6,000 ft; a plan given up 2,000 ft inside it; a round taken to fly its time plus 5 s | rule opinionated (John, 2026-10-29); numbers fitted |
 | Helicopter stand-off points | 60% of the zone or 95% of the fire range, bearings in 15 degree steps, the advance clear (the store's flight time at the strike speed plus 10 kt, plus 1,000 ft, at least 2,500 ft), nose within 15 degrees to fire; with neither clear, the 500 ft grid out to the store's reliable reach, nearest first (the AT-2: 14,500 ft) | fitted; the advance from the flight time and the search to the reach opinionated (John, 2026-10-29) |
 | Helicopter ambush ring | 3 nm round a point 1 nm toward the threat, only for a site it did not know (none within 20 degrees of the threat's bearing and in reach); forgotten after 60 s quiet and outside it | fitted; unknown shooter only opinionated (John, 2026-10-29) |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |

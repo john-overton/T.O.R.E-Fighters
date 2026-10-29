@@ -55,12 +55,15 @@ use crate::sensors::FEET_PER_NAUTICAL_MILE;
 mod lase;
 #[path = "strike_reach.rs"]
 pub mod reach;
+pub use reach::{ShotLaunch, ShotTable, Shots};
+#[path = "strike_standoff.rs"]
+mod standoff;
 pub use lase::{
     LASE_BANK_MARGIN_DEG, LASE_CONE_EXIT_FT, LASE_MAX_TICKS, LASE_MIN_TICKS, LASE_RADIUS_MIN_FT,
     LASE_RADIUS_TURNS, LASE_REACH_SHARE, LASE_WAIT_TICKS, Lase, LaseEnd, LaseInputs, LaseSensor,
     LaseUntil, WingFacts, bank_cap_deg, lase_radius_ft, orbit_speed_fps, turn_rate_deg,
 };
-pub use reach::{ShotLaunch, ShotTable, Shots};
+pub use standoff::{ADVANCE_TURNS, PLAN_SLACK_FT, ROUND_MARGIN_S, ReleasePlan, STANDOFF_EXIT_FT};
 
 /// Feet in a metre, for John's release circle (given in metres).
 pub const FEET_PER_METRE: f64 = 1. / 0.3048;
@@ -850,6 +853,14 @@ pub struct Strike {
     /// distance, and the turn back chooses only once at its height
     /// ([`RETARGET_HEIGHT_SLACK_FT`]) or inside the set-up distance.
     retargeted: bool,
+    /// The pass's stand-off release outside known rings (John, 2026-10-29;
+    /// [`standoff`]), kept after the release for the exit.
+    release_plan: Option<ReleasePlan>,
+    /// The pass closed past its plan without releasing: it is flown as
+    /// before.
+    plan_dropped: bool,
+    /// The tick its last stand-off round is taken to land by.
+    standoff_until: Option<u64>,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -899,6 +910,9 @@ impl Strike {
             release_in_s: None,
             committed: None,
             retargeted: false,
+            release_plan: None,
+            plan_dropped: false,
+            standoff_until: None,
             inputs: None,
         }
     }
@@ -1536,6 +1550,8 @@ impl Strike {
         self.burst_open = None;
         self.recovery_until = 0;
         self.burst = 0;
+        self.release_plan = None;
+        self.plan_dropped = false;
         if store.kind == StoreKind::Gun {
             // Each burst has its own draw (John, 2026-10-11, later).
             self.next_burst(cx);
@@ -1792,7 +1808,8 @@ impl Strike {
         } else {
             EXIT_TURN_MIN_FT
         };
-        base.max(2. * radius)
+        let standoff = self.standoff_exit_ft(cx.tick).unwrap_or(0.);
+        base.max(2. * radius).max(standoff)
     }
 
     /// Draws the next gun burst's aim (slice ST-T2): John's circle applies
@@ -1819,9 +1836,13 @@ impl Strike {
         self.inside = draw.inside;
     }
 
-    /// Leave the pass: the exit run.
+    /// Leave the pass: the exit run, straight on; after a stand-off
+    /// release (John, 2026-10-29), away from the target.
     fn exit(&mut self, cx: &Context<'_>) {
-        self.exit_heading_deg = cx.own.heading_deg;
+        self.exit_heading_deg = match self.target.and_then(|id| known_position(cx.picture, id)) {
+            Some(target) if self.standing_off(cx.tick) => bearing_deg(target, cx.own.position),
+            _ => cx.own.heading_deg,
+        };
         self.holding = None;
         self.retargeted = false;
         self.enter(Phase::Exit, cx.tick);
@@ -2057,6 +2078,16 @@ impl Strike {
             order.steer = Some(self.climb_steer(cx));
             return order;
         }
+        // A stand-off release outside known rings (John, 2026-10-29): planned
+        // again each step before the release; a pass at its plan while its
+        // last stand-off round flies ends there.
+        if self.update_release_plan(cx, target, solution) {
+            self.exit(cx);
+            return Order {
+                steer: Some(self.exit_steer(cx, Some(target))),
+                ..order
+            };
+        }
         let pull_out = dive_pull_out_ft(own);
         let ended = match pass {
             _ if kind == StoreKind::Rocket
@@ -2284,6 +2315,9 @@ impl Strike {
             // circle around the (led) target.
             let passing = self.cue_passing(cx, s.impact, aim);
             let due = s.due || passing;
+            // A stand-off release planned outside known rings leaves at its
+            // range once the store reaches (John, 2026-10-29).
+            let planned = self.planned_due(cx, target, &s);
             let fire = in_zone
                 && match kind {
                     StoreKind::Rocket => {
@@ -2294,14 +2328,14 @@ impl Strike {
                                     horizontal(i, aim) <= release_circle_ft(cx.experience)
                                 }))
                     }
-                    k if k.seeker() => first && s.due && !s.guided_in_flight,
+                    k if k.seeker() => first && (s.due || planned) && !s.guided_in_flight,
                     // A takeover drops no second laser weapon while one
                     // guides (slice ST-K).
                     StoreKind::Laser if self.takeover.is_some() => {
                         first && s.due && !s.guided_in_flight
                     }
                     k if k.unguided() => first && due,
-                    _ => first && s.due,
+                    _ => first && (s.due || planned),
                 };
             if fire && floor_ok && !s.warning && self.rounds_left(cx) > 0 {
                 order.release = Some(Release {
@@ -2313,6 +2347,7 @@ impl Strike {
                     + self
                         .store(cx)
                         .map_or(super::QUARTER_SECOND_TICKS, |st| st.cadence_ticks);
+                self.released_on_plan(cx.tick);
                 // A bomb, a guided weapon or a seeker leaves once a pass;
                 // the run then exits (a dive climbs out first).
                 if kind != StoreKind::Rocket && pass != Pass::Dive {
@@ -2403,6 +2438,19 @@ impl Strike {
                 closing,
             ))
         };
+        // A planned stand-off release: the distance to its range over the
+        // closing speed (John, 2026-10-29).
+        if let Some(plan) = self.release_plan.filter(|_| self.released == 0)
+            && (kind.seeker() || kind.level_run())
+        {
+            let to = [target[0] - own.position[0], target[2] - own.position[2]];
+            let length = to[0].hypot(to[1]).max(1.);
+            let closing = (cx.velocity[0] * to[0] + cx.velocity[2] * to[1]) / length;
+            return Some(over(
+                horizontal(own.position, target) - plan.range_ft,
+                closing,
+            ));
+        }
         match kind {
             StoreKind::Bomb | StoreKind::Rocket => {
                 let Some(impact) = solution.and_then(|s| s.impact) else {
