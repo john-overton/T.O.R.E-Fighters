@@ -427,11 +427,12 @@ class GunshipTests(unittest.TestCase):
 
 def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0, released=True, killed=True,
              lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500, decisions=(), sead=False,
-             egress=False, shots=()):
+             egress=False, shots=(), ahead=False, reach_margin=1200):
     """One helicopter run of the driver: `breaks` BREAK lines (one a second), the THREAT
     `decisions` (slice H4), a pop-up that may release and kill, and an EGRESS (slice HF1).
     `shots` are (time, known) pairs for the SHOT lines (a site's launch, `known` yes, no or none);
-    the decisions come at t=30, 31, ... so a shot before a decision has a time under it."""
+    the decisions come at t=30, 31, ... so a shot before a decision has a time under it. `ahead`
+    adds a move-ahead plan's AHEAD line; `reach_margin` is the summary's `reach_margin_ft`."""
     out = [
         f"ai-strike: setup aircraft={aircraft} load=AT2.JT station=1 count=4 rounds=4 target=0x50000001 name=T-90 "
         "target_at=999570,7,789571 hp=200 skill=2 profile=none handback=none order=none mode=none",
@@ -447,6 +448,9 @@ def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0,
         )
     for at, known in shots:
         out.append(f"ai-strike: SHOT t={at:.3f} site=0x5000000f range_ft=11000 known={known}")
+    if ahead:
+        out.append("ai-strike: AHEAD t=1.008 range_ft=14000 fire_in_s=60.0 point=988868,778720 aim_moves_ft=3000 "
+                   "from_ft=12000")
     for n, decision in enumerate(decisions):
         out.append(f"ai-strike: THREAT t={30 + n}.000 decision={decision} target=0x50000001 ring=0x5000000b "
                    'words="threat on target, holding off"')
@@ -467,7 +471,7 @@ def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0,
         f"ai-strike: summary t=100.000 ran_s=100.0 profile={profile} releases={n} impacts={n} "
         f"kills={1 if killed else 0} egress={'yes' if egress else 'no'} lost={'yes' if lost is not None else 'no'} activity=Defending "
         f"target_hp={'0' if killed else '200'}/200 closest_ft=4773 store_rounds_left=3 min_agl_ft={min_agl} "
-        f"break_s={float(breaks)}"
+        f"break_s={float(breaks)} reach_margin_ft={reach_margin}"
     )
     if not released:
         out.append("ai-strike: no release")
@@ -576,11 +580,11 @@ class HelicopterTests(unittest.TestCase):
         heli = scenarios["ai-strike-heli"]
         self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
         held = ["threat_hold_off", "threat_home"]
-        # Heavy AAA holds off since the stand-off's advance follows the AT-2's flight (2026-10-29).
+        # Heavy AAA on the moving column: the move-ahead ambush (2026-10-29) fires from outside every
+        # known gun's reach and hurts the tank, with no hold-off.
         # The ambush runs (2026-10-29): a shot from a site it did not know, the leave, the resume.
         ambushed = dict(decisions=["threat_leave", "threat_resume"], shots=[(29.0, "no")])
-        honest = [heli_run(profile="standoff", breaks=0, released=False, killed=False,
-                           decisions=["threat_hold_off"]),
+        honest = [heli_run(profile="standoff", breaks=0, ahead=True),
                   heli_run(profile="standoff", breaks=0),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
@@ -589,6 +593,12 @@ class HelicopterTests(unittest.TestCase):
                   heli_run(breaks=8, **ambushed),
                   heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
         self.assertEqual(defended.check("\n".join(honest)), [])
+        # The heavy-AAA run must plan a move-ahead, call no hold-off, and stay out of every known reach.
+        for wrong in (dict(ahead=False), dict(decisions=["threat_hold_off"]), dict(reach_margin=-50),
+                      dict(released=False)):
+            heavy = list(honest)
+            heavy[0] = heli_run(**{**dict(profile="standoff", breaks=0, ahead=True), **wrong})
+            self.assertNotEqual(defended.check("\n".join(heavy)), [], wrong)
         # Slice HF1: the ambushed runs must leave and resume after it.
         unambushed = list(honest)
         unambushed[5] = heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume"])
