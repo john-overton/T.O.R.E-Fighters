@@ -117,14 +117,14 @@ checked not to need a newer C library than that release's 2.35, so it runs on
 any current long-term Ubuntu (22.04 and later) without building anything:
 
 ```sh
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-master-0.2.1-linux-x86_64.tar.gz
-curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.1/tore-master-0.2.1-linux-x86_64.tar.gz.sha256
-sha256sum -c tore-master-0.2.1-linux-x86_64.tar.gz.sha256
-tar -xzf tore-master-0.2.1-linux-x86_64.tar.gz
-tore-master-0.2.1-linux-x86_64/tore-master --version
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.2/tore-master-0.2.2-linux-x86_64.tar.gz
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.2/tore-master-0.2.2-linux-x86_64.tar.gz.sha256
+sha256sum -c tore-master-0.2.2-linux-x86_64.tar.gz.sha256
+tar -xzf tore-master-0.2.2-linux-x86_64.tar.gz
+tore-master-0.2.2-linux-x86_64/tore-master --version
 ```
 
-(`v0.2.1` stands for the release you want.) A workflow run that is not a tag
+(`v0.2.2` stands for the release you want.) A workflow run that is not a tag
 (a `release-test/...` branch, or a manual run) builds the same file as the
 `master-ubuntu-22.04` artifact without publishing it. The build is unsigned,
 like the game's. Run `--check-config` ([updating](#updating)) before it takes
