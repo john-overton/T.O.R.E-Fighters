@@ -215,6 +215,45 @@ stored ground point in all weather is an opinionated design.
 | --- | --- | --- |
 | What a player sees when firing an optical weapon with no target (refused or released unguided) | Trace the player's fire path ahead of `PROJFire` and the HUD readiness for signature 0 | Released unguided, as `PROJFire` allows |
 
+## AEMP-1 (EM pulse)
+
+Research mode, 2026-11-06. Read from the user's `FA_2.LIB` record and a census
+of all 135 `.JT` records the helper extracts; no original code ran. `AEMP1.JT`
+is an ordinary guided record with an unusual payload.
+
+| Field | Value |
+| --- | --- |
+| Guidance word `flags` | `0x1204f`, the same as `AIM120.JT`, `MICA.JT`, `AA12.JT` and the other active-radar and infrared records |
+| Signature | 3, no `0x200` support flag (active-radar classification) |
+| Launch envelope `zone1` | 2,000 to 90,000 ft, 45/45 degrees |
+| Seeker `zone0` maximum | 120,000 ft |
+| Motor | ignition 0, fuel 140 (35.0 s), removal 280 (70.0 s) under the fitted 4-units-per-second conversion |
+| Damage by class | 0, 0, 0, 0, 0 |
+| Collateral | radius 4,000 ft, percent 70 (the widest radius, and the only 70 percent share) |
+| Fuze | arm 4 units, radius 50 ft |
+| Object / land / water effect | 18 / 15 / 17, the small gun-class blasts |
+| Shape, sound | `aemp.SH`, `&ltmiss.11k` |
+
+The guidance word has no bit unique to this record. The documented consumers
+(free-fall bomb `0x10`, gun `0x80`, semi-active support `0x200`, burst `0x800`,
+air-to-ground `0x20000`, the armour-piercing `0x40000` set and the cluster
+`0x800000` case in `GRAPHICAddExp` 0x4432d0, see [the weapons
+notes](weapons.md#collateral-damage)) name no electromagnetic behaviour.
+
+Type 38 is the table's electromagnetic pulse effect (`EMPEX`, 250, one second,
+`&EMPEXP`; see [explosions](explosions.md#explosion-table)). The census finds
+no `.JT` that names 38 in any of its three effect fields:
+
+| Field | Values seen (records) |
+| --- | --- |
+| Object `expType` | 15 (2), 18 (45), 21 (8), 27 (2), 30 (69), 35 (9) |
+| `expTypeForLand` | 15 (43), 18 (5), 21 (51), 22 (1), 35 (35) |
+| `expTypeForWater` | 17 (64), 18 (5), 34 (66) |
+
+So no recovered data or consumer gives `AEMP1.JT` an electromagnetic effect.
+What the round does when it detonates is unknown. The gameplay statement and
+the next research step are in the [spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06).
+
 ## Exceptions that must survive classification
 
 - AA10 labels itself AA-10T but has signature 3 and flag 0x200. AA9 also has

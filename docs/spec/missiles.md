@@ -79,9 +79,10 @@ Phoenix's existing always-Fox-three rule, an agent decision. Surface-target
 shots keep generic calls. See [radio](radio-chatter.md#weapon-launch-calls).
 
 The 22 retail A2A records now have three derived R-27 stores. AA6, AA9, PL7
-and PL10 joined the live stores in JT-4 (John, 2026-11-06); AEMP1 remains
-catalog-only. MICA's radar record represents the EM role; no MICA-IR or
-AIM-9L record is added.
+and PL10 joined the live stores in JT-4 (John, 2026-11-06); AEMP1 stays
+catalog-only because its electromagnetic pulse effect is
+[unknown](#aemp-1-electromagnetic-pulse-jt-5-2026-11-06). MICA's radar record
+represents the EM role; no MICA-IR or AIM-9L record is added.
 
 ## Corrected identities and R-27 stores
 
@@ -168,6 +169,51 @@ missile: 30-tick (0.25 s) acquisition dwell, 2-second loss memory, a
 five-degree BORE cap, and 120 Hz timers. The four energy fits in the
 [energy baseline](../baselines/missile-energy.md) were already authored and
 are unchanged.
+
+## AEMP-1 electromagnetic pulse (JT-5, 2026-11-06)
+
+**Research mode. The effect is unknown, so nothing was implemented.** What a
+player experiences when the AEMP-1 goes off is unanswered by the record, and no
+original code path has been recovered for it.
+
+`AEMP1.JT` (`AEMP-1`, `AEMP-1 EM Pulse`) is a normal guided record, shape
+`aemp.SH`, fire sound `&ltmiss.11k`, 191 lb. Its guidance word and seeker are
+ordinary: flags `0x1204f`, the same as `AIM120.JT`, `MICA.JT` and `AA12.JT`,
+with signature 3 and no support flag, so it classifies as active radar. Its
+flight numbers are in the [first-pass inventory
+matrix](#first-pass-inventory-matrix): launch envelope 0.33 to 14.81 nmi,
+seeker maximum 19.75 nmi, 45/45 degree cone, ignition 0, burn 35 s, removal
+70 s. Its fuze arms at 4 timer units with a 50 ft proximity radius.
+
+Only the payload marks it out:
+
+- **Damage is `0, 0, 0, 0, 0` in all five hardness classes.** A direct hit on
+  an aircraft, a vehicle, a building or a ship applies nothing.
+- **Collateral radius 4,000 ft and collateral percent 70**: the widest radius
+  in the catalog, and the only 70 percent share. Collateral damage is that
+  percent of the round's damage for the target's class ([splash
+  damage](#splash-damage)), and every class is zero, so the wide radius still
+  applies nothing.
+- **Object, land and water effects are 18, 15 and 17**, the small gun-class
+  blasts, not the [type 38 electromagnetic
+  pulse](explosions.md#numbers) sheet `EMPEX`.
+
+FA.EXE defines a type 38 electromagnetic pulse explosion (`EMPEX`, size 250,
+one second, `&EMPEXP`), but a census of all 135 extracted `.JT` records finds
+none that names type 38 in any effect field, and the guidance word has no bit
+unique to this record. The documented flag consumers hold no electromagnetic
+behaviour, and the guidance word's size, cluster, air-to-ground, gun and
+support bits are all the ordinary ones. So the data describes an active-radar
+missile that flies and detonates while damaging nothing; whether the original
+also disables radar, electronics or anything else is **unknown**.
+
+Because the effect is unknown, `AEMP1.JT` stays **Catalog**: it is not in
+`SUPPORTED_WEAPONS` and no station loads it. The evidence is recorded in the
+[format notes](../formats/missiles.md#aemp-1-em-pulse), which also names the
+next research step: trace `_PROJProc` (0x4c1f50) and `GRAPHICAddExp` (0x4432d0)
+for a record, resource or spawned-object test that creates type 38, the way the
+cluster case creates type 43, and trace whether any caller reads the collateral
+fields of a zero-damage round to switch electronics off.
 
 ## Smaller guided bomb stores
 
@@ -872,8 +918,12 @@ nothing past 750 ft. A Mk 84 (400 damage) landing 200 ft from a vehicle
 
 Edge cases:
 
-- A record with a radius of 0 or a percent of 0 (guns, the AEMP-1, which has
-  a radius but no damage, and the cheat weapons) does no splash.
+- A record with a radius of 0 or a percent of 0 does no splash, and neither
+  does a record whose damage is zero in the target's class. Guns and the cheat
+  weapons have no radius; the AEMP-1 carries the catalog's largest collateral
+  radius (4,000 ft) and a 70 percent share, but all five damage classes are
+  zero, so its wide splash applies nothing ([AEMP-1 electromagnetic
+  pulse](#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)).
 - A round defeated by a jammer, a round that runs out of life in the air and a
   surface gun round that passes its target do no splash. A flak shell bursts
   at its fuze, its time fuze or the end of its life, with splash.

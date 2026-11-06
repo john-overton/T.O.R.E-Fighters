@@ -59,7 +59,9 @@ first ones to confirm.
   PL7 and PL10 became live on compatible ported stations in JT-4 (John,
   2026-11-06; no decoded default carrier is ported,
   [rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)).
-  Remaining: AEMP1, ASROC, the hidden
+  Remaining: AEMP1 (effect unknown after JT-5, 2026-11-06,
+  [evidence](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)),
+  ASROC, the hidden
   guns and gun pods ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN, whose
   decoded carriers are all unported
   ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)),
@@ -265,7 +267,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 ### Mechanisms
 
-- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23 and AEMP-1; the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). AA-6, AA-9, PL-7 and PL-10 joined the supported list in JT-4 ([rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)). Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
+- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23 and AEMP-1 (its EM pulse effect is unknown after JT-5, 2026-11-06, [spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)); the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). AA-6, AA-9, PL-7 and PL-10 joined the supported list in JT-4 ([rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)). Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
@@ -289,7 +291,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AA8.JT | AA-8 Aphid | Done | Done | Done | Done | Live; MiG-29, Su-25; R-60M role; fit residual exception |
 | AA9.JT | AA-9 Amos | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar, own record envelope and motor; no imported default carrier ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | AAML.JT | AAM-L Anti-AWACS | Done | Done | Done | Done | Live; Su-35; active radar; no special anti-AWACS AI rule found (unverified) |
-| AEMP1.JT | AEMP-1 EM Pulse | Partial | Partial | None | Partial | Hidden; EM pulse effect (radius, no damage) undefined; nothing loads |
+| AEMP1.JT | AEMP-1 EM Pulse | Partial | Partial | None | Partial | Hidden; EM pulse effect unknown after JT-5 (2026-11-06): damage 0 in all five classes, collateral 4,000 ft / 70 percent, effect fields 18/15/17, and no JT names the type 38 EMP burst; nothing loads ([spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06), [record](../formats/missiles.md#aemp-1-em-pulse)) |
 | AIM120.JT | AIM-120 AMRAAM | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; 26 carriers |
 | AIM54C.JT | AIM-54C Phoenix | Done | Done | Done | Done | Live; F-14; 10 nmi pitbull; fit residual exception |
 | AIM7.JT | AIM-7 Sparrow | Done | Done | Done | Done | Live; semi-active radar, support loss modelled; fit residual |
