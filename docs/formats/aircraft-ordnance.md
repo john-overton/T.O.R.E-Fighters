@@ -240,6 +240,75 @@ mounted-gun table, and `crates/tore-import/tests/hidden_guns.rs` (retail, skips
 without media) checks the decoded flags and every imported aircraft's station
 list.
 
+## Air-to-air missiles nothing loads (JT-2, 2026-11-06)
+
+Research and implementation note for the four decoded air-to-air records the
+ordnance catalog still hides: `AA6.JT` (AA-6A Acrid, `fa-weapons.csv:9`),
+`AA9.JT` (AA-9 Amos, `fa-weapons.csv:11`), `PL10.JT` (PL10-R,
+`fa-weapons.csv:97`) and `PL7.JT` (PL-7, `fa-weapons.csv:98`). All four decode
+from `FA_2.LIB` as guided missiles with the normal-store compatibility bit 2
+set, so unlike the JT-1 cannon records a compatible station mask can admit
+them. Their reviewed seeker classification
+(`crates/tore-formats/src/weapons.rs`, `every_inventoried_air_to_air_missile_has_the_right_seeker_and_fox_call`,
+2026-10-15) is semi-active radar for AA6, AA9 and PL10 and infrared for PL7.
+
+Decoded default carriers, from [`fa-aircraft.csv`](fa-aircraft.csv) store
+lists, are all aircraft outside `AircraftId::ALL`
+(`crates/tore-formats/src/aircraft.rs:308`): `AA6.JT` on `M25.PT`
+(`fa-aircraft.csv:97`, MiG-25), `AA9.JT` on `MIG31.PT` (`fa-aircraft.csv:110`,
+MiG-31) and `PL7.JT` on `Q5.PT` (`fa-aircraft.csv:115`, Q-5). No retail record
+lists `PL10.JT` as a default store. So no imported aircraft is **built with**
+one.
+
+The blocker is not the aircraft batches. Ported aircraft are already
+source-compatible with these records on ordinary stations, from the same
+decoded hardpoint data as the live stores: the [per-aircraft audit
+matrix](#per-aircraft-audit-matrix) counts them among each roster aircraft's
+compatibility gaps, and the [even-paired loads
+baseline](../baselines/even-paired-loads.md) records the exact setup-only rows
+below.
+
+| Record | Ported aircraft and source rows that would gain it |
+| --- | --- |
+| `AA6.JT`, `AA9.JT` | AV8 5; F104 6, 7; F14 4; F15 5; F18 5, 6, 7; F31 6, 7; F4 6, 7; F4B 4; F4E 6, 7; F4J 5; MIG23 6, 8; MIG29 5, 6, 7; RAFALE 7; SU25 7, 8; SU27 7; SU35 7 |
+| `AA9.JT` alone | F4 5; F4E 5 |
+| `PL10.JT` | F104 7; F22 7; F22N 7; F4 5; F4B 4; F4E 5; F4J 5; MIG21 5, 6; SU27 6, 7, 8; SU35 7; faxx 7 |
+| `PL7.JT` | MIG23 5 |
+
+Those are the rows the even-paired baseline records as **setup-only** maxima
+changes, which is the same reason all four are absent from `SUPPORTED_WEAPONS`:
+they are not flight-supported, so the loadout editor never offers them, and a
+compatibility match alone does not extend gameplay support (see [omitted
+weapon-capable rows](#omitted-weapon-capable-rows), SUU-16).
+
+They stay hidden because their flight behaviour is not hooked up.
+`Profile::reviewed_activation` (`crates/tore-sim/src/combat/missiles.rs:250`)
+lists the records with a reviewed flight profile and excludes all four, so
+`Profile::for_weapon` returns `None`: a store enabled today would fly with no
+guidance. [The missile spec](../spec/missiles.md#first-pass-inventory-matrix)
+marks all four **Catalog**, and the [catalog availability
+rule](../spec/ordnance-presentation.md#catalog-availability) returns an
+unsupported weapon only after its flight behaviour is implemented and
+validated. The guidance class is reviewed and the energy fits exist, but launch
+limits, support loss, seeker acquisition, motor lifetime and HUD/audio feedback
+are still the open W2 work ([roadmap](../ROADMAP.md#weapon-catalog-update-passes)).
+
+Implementation (slice JT-2, 2026-11-06): nothing is enabled. Adding a record to
+`SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) without also
+reviewing its profile would make it loadable and unguided, which is exactly the
+behaviour the catalog rule hides. Do not alias a record to a same-class live
+store: `AA6.JT` is not `R40`, `AA9.JT` is not `AA10` or `R530`, and `PL10.JT`
+is not `AA12` or `MICA`. Next step: review each profile and connect flight
+support under W2, then add the file to that aircraft's default store or to the
+supported set with tests.
+
+Guards: `the_unloaded_air_to_air_missiles_stay_out_of_the_supported_set`
+(`crates/tore-sim/src/combat/loadout.rs`) keeps the four out of the supported
+set, `the_unloaded_air_to_air_missiles_have_no_reviewed_flight_profile`
+(`crates/tore-sim/src/combat/missile_tests.rs`) pins the empty profile, and
+`crates/tore-import/tests/unloaded_missiles.rs` (retail, skips without media)
+checks the decoded seeker class and that no imported aircraft is built with one.
+
 ## Paired-point counts and physics
 
 Research review, 2026-10-25, using the FA.EXE, FA.SMS and FA_2.LIB identities

@@ -768,6 +768,14 @@ fn quantity_step(capacity: i32) -> i32 {
 /// clear, so only a station's own default can take them, and every decoded
 /// carrier is an aircraft the roster does not import yet. See
 /// docs/formats/aircraft-ordnance.md, "Cannon records nothing mounts".
+///
+/// The air-to-air records AA6, AA9, PL7 and PL10 also stay out (slice JT-2).
+/// Their decoded default carriers are aircraft the roster does not import
+/// (MiG-25, MiG-31, Q-5; PL10 has none), and although ported stations are
+/// source-compatible they have no reviewed flight profile in
+/// `combat::missiles::Profile`, so the catalog availability rule keeps them
+/// hidden. See docs/formats/aircraft-ordnance.md, "Air-to-air missiles nothing
+/// loads".
 pub const SUPPORTED_WEAPONS: &[&str] = &[
     "AA11.JT",
     "AA11B.JT",
@@ -902,6 +910,22 @@ mod tests {
                     id.pt()
                 );
             }
+        }
+    }
+
+    /// The decoded air-to-air missiles nothing loads yet (slice JT-2): AA6,
+    /// AA9, PL7 and PL10. Their default carriers are unported and they have no
+    /// reviewed flight profile, so they stay out of [`SUPPORTED_WEAPONS`].
+    /// docs/formats/aircraft-ordnance.md, "Air-to-air missiles nothing loads".
+    const UNLOADED_AIR_TO_AIR: [&str; 4] = ["AA6.JT", "AA9.JT", "PL7.JT", "PL10.JT"];
+
+    #[test]
+    fn the_unloaded_air_to_air_missiles_stay_out_of_the_supported_set() {
+        for name in UNLOADED_AIR_TO_AIR {
+            assert!(
+                !SUPPORTED_WEAPONS.contains(&name),
+                "{name} must stay hidden until its flight profile is reviewed"
+            );
         }
     }
 }

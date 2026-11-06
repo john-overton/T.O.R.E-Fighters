@@ -56,7 +56,11 @@ first ones to confirm.
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
 - **Ordnance.** The W1 to W5 passes cover most air-launched stores. Remaining:
-  AA6, AA9, PL7, PL10 (profiled, nothing loads them), AEMP1, ASROC, the hidden
+  AA6, AA9, PL7, PL10 (classified and energy-fitted, but no reviewed flight
+  profile and no imported default carrier; ported stations are already
+  source-compatible,
+  [why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)),
+  AEMP1, ASROC, the hidden
   guns and gun pods ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN, whose
   decoded carriers are all unported
   ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)),
@@ -283,9 +287,9 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AA11B.JT | AA-11B Backfire | Done | Done | Done | Done | Live; Su-35; wide-gimbal IR profile |
 | AA12.JT | AA-12 Adder | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; fit residual exception |
 | AA2.JT | AA-2D Atoll | Done | Done | Done | Done | Live; MiG-21; IR profile; fit residual exception |
-| AA6.JT | AA-6 Acrid | Partial | Partial | None | Partial | Hidden catalog-only; profile and energy fit exist, no live path |
+| AA6.JT | AA-6 Acrid | Partial | Partial | None | Partial | Hidden; classified SARH and energy-fitted, no reviewed flight profile; no imported default carrier, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
 | AA8.JT | AA-8 Aphid | Done | Done | Done | Done | Live; MiG-29, Su-25; R-60M role; fit residual exception |
-| AA9.JT | AA-9 Amos | Partial | Partial | None | Partial | Hidden catalog-only; profile and energy fit exist, no live path |
+| AA9.JT | AA-9 Amos | Partial | Partial | None | Partial | Hidden; classified SARH and energy-fitted, no reviewed flight profile; no imported default carrier, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
 | AAML.JT | AAM-L Anti-AWACS | Done | Done | Done | Done | Live; Su-35; active radar; no special anti-AWACS AI rule found (unverified) |
 | AEMP1.JT | AEMP-1 EM Pulse | Partial | Partial | None | Partial | Hidden; EM pulse effect (radius, no damage) undefined; nothing loads |
 | AIM120.JT | AIM-120 AMRAAM | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; 26 carriers |
@@ -296,8 +300,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AIM9M.JT | AIM-9M Sidewinder | Done | Done | Done | Done | Live; IR; most common AAM (27 carriers) |
 | AIM9X.JT | AIM-9X Sidewinder | Done | Done | Done | Done | Live; wide-angle IR; F-22/X-31 |
 | MICA.JT | Mica | Done | Done | Done | Done | Live; Rafale; MICA-EM radar role, no IR variant added |
-| PL10.JT | Chinese PL-10 | Partial | Partial | None | Partial | Hidden catalog-only; radar-concept PL10-R, no live path |
-| PL7.JT | Chinese PL-7 | Partial | Partial | None | Partial | Hidden catalog-only; guarded motor fit exists, no live path |
+| PL10.JT | Chinese PL-10 | Partial | Partial | None | Partial | Hidden; classified SARH (radar-concept PL10-R), no reviewed flight profile; no default carrier anywhere, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
+| PL7.JT | Chinese PL-7 | Partial | Partial | None | Partial | Hidden; classified IR with a guarded motor fit, no reviewed flight profile; no imported default carrier, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
 | R530.JT | Super 530 | Done | Done | Done | Done | Live; Rafale; S530D semi-active |
 | R550.JT | R-550 Magic 2 | Done | Done | Done | Done | Live; Rafale; IR Magic 2 |
 

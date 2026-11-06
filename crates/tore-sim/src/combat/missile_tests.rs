@@ -239,6 +239,21 @@ fn all_nine_activation_thresholds_and_no_false_pitbull() {
         assert!(Profile::reviewed(name));
     }
 }
+/// The decoded air-to-air missiles with no reviewed flight profile (slice
+/// JT-2): AA6, AA9, PL7 and PL10 are classified and energy-fitted, but
+/// `Profile::reviewed_activation` excludes them, so `for_weapon` returns
+/// `None` and they fly with no guidance. docs/formats/aircraft-ordnance.md,
+/// "Air-to-air missiles nothing loads".
+#[test]
+fn the_unloaded_air_to_air_missiles_have_no_reviewed_flight_profile() {
+    for name in ["AA6.JT", "AA9.JT", "PL7.JT", "PL10.JT"] {
+        assert!(
+            Profile::for_weapon(&weapon(name)).is_none(),
+            "{name} must have no profile until its flight behaviour is reviewed"
+        );
+        assert!(!Profile::reviewed(name), "{name} must not be reviewed");
+    }
+}
 #[test]
 fn a_passed_intercept_cannot_make_an_amraam_circle_but_reacquisition_still_works() {
     let sensors = fixture(true).own().sensors.clone();
