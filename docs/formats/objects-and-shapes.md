@@ -1481,13 +1481,47 @@ ground shadows. PIC UV rows count upward, as documented above.
 An archive-wide scan of successfully decoded `.SH` scenery poses found `ea`
 billboards in CATGUY, CLOUDS and SOLDIER, not in these vegetation shapes.
 This does not prove the executable never synthesizes vegetation sprites.
-`TREE1.OT` and `TREE2.OT` refer to absent TREE1/2 shapes in this media selection;
-no original placement path for the pictured tree field has been established.
+
+### TREE1 and TREE2 missing shapes (2026-11-06)
+
+**Evidence.** `TREE1.OT`'s `:shape` block holds `string "tree1.SH"`, and
+`TREE2.OT`'s holds `string "tree2.SH"`, exactly as written here. A `TREE*`
+scan of every archive in the reviewed media selection (FA_1, FA_2, FA_4B,
+FA_4D, swpatch and the disc archives) finds no `TREE1.SH` or `TREE2.SH`. It
+finds only `TREEA.SH` to `TREED.SH` in FA_2.LIB, plus the demo
+`TREE1.PNT`/`TREE2.PNT` pictures in the LHX1 archive. TREEA to TREED are
+different records (11, 11, 7 and 7 faces), and no OT, MM or M resource in the
+selection names them. They are not renamed TREE1/2 shapes. No base layout or
+mission map places TREE1.OT or TREE2.OT.
+
+**What the original does.** In the reviewed FA.EXE 1.02F above, `SetupOT`
+(`0x4a6eb0`) sends the type's shape slots +0x0f, +0x13 and +0x17 through
+`object_shape_resolve` (`0x4a71e0`). That routine calls `RMAccess(name,
+0x8000)` whenever the slot holds a name and stores the result, including null.
+Setup never tests the result and returns normally. A missing shape is therefore
+a null shape pointer on an object that is still created, not a load failure.
+The drawing branch that consumes that null slot is not traced here, so the
+exact visible result beyond "no geometry to draw" is **unknown**.
+
+**Import handling.** `Placements::add_type` tolerates a missing main shape only
+for a short, named list the reviewed media is known to lack: `TREE1.SH` and
+`TREE2.SH` (`SHAPES_ABSENT_FROM_MEDIA`). For those two only, a placed type keeps
+its definition and placement, stores no shape or scale, returns no stance, and
+is listed in `unreadable`; the scene logs it as retained without visual
+geometry. A mission may place TREE1.OT or TREE2.OT without failing the terrain
+build. Every other absent shape still fails the import with the existing
+`missing shape ... re-import media` error, so a damaged or partial import
+cannot turn a runway or building into an invisible object. No alias to TREEA to
+TREED is made. This handling is `fitted` to the null native slot; it is not a
+claim that retail places a tree field or that TREEA to TREED are the missing
+artwork.
+
 The supplied retail screenshots establish appearance only. Original vegetation
 camera rotation, world scale, draw distance and size transitions remain
 **unknown**. Next research step: identify the executable's terrain clutter
-resource references and decode its distance/size tables. Do not infer those
-rules from these filenames or screenshots.
+resource references, or a retail mission placement, and decode its
+distance/size tables. Do not infer those rules from these filenames or
+screenshots.
 
 This artwork is research evidence only. The exploratory vegetation renderer
 uses original text-generated material sprites. Its camera-facing, distance and

@@ -392,6 +392,14 @@ pub const MAP_TIED_TYPES: [&str; 16] = [
     "ROADC.OT",
 ];
 
+/// Main shapes the reviewed retail media selection is known to lack, so a
+/// placement of their type is kept without geometry instead of failing the
+/// import. Only these names may be absent: any other missing shape means an
+/// incomplete or damaged import and still errors. Evidence and the exact
+/// records are in
+/// [TREE1 and TREE2 missing shapes](docs/formats/objects-and-shapes.md#tree1-and-tree2-missing-shapes-2026-11-06).
+const SHAPES_ABSENT_FROM_MEDIA: [&str; 2] = ["TREE1.SH", "TREE2.SH"];
+
 impl PlacedSize {
     /// The size rule of a placed type, from its definition.
     pub fn of(definition: &tore_formats::static_object::Definition) -> Self {
@@ -1098,32 +1106,59 @@ impl Placements {
             )?)?
         };
         if let Some(main_shape) = &definition.main_shape {
-            let shape_bytes = resources.get(main_shape).ok_or_else(|| {
-                format!(
-                    "{source}: missing shape {main_shape} referred by {object_type}; re-import media"
-                )
-            })?;
-            let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
-            match parsed {
-                Ok(shape) => {
-                    if definition.callbacks.iter().any(|name| name == "_STRIPProc")
-                        && let Some(boxes) = tore_formats::shape::contact_boxes(shape_bytes)?
-                        && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
-                    {
-                        self.runway_anchors
-                            .insert(object_type.to_owned(), anchor.midpoint().map(f64::from));
-                        self.strip_boxes
-                            .insert(object_type.to_owned(), boxes.clone());
+            match resources.get(main_shape) {
+                Some(shape_bytes) => {
+                    let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
+                    match parsed {
+                        Ok(shape) => {
+                            if definition.callbacks.iter().any(|name| name == "_STRIPProc")
+                                && let Some(boxes) =
+                                    tore_formats::shape::contact_boxes(shape_bytes)?
+                                && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
+                            {
+                                self.runway_anchors.insert(
+                                    object_type.to_owned(),
+                                    anchor.midpoint().map(f64::from),
+                                );
+                                self.strip_boxes
+                                    .insert(object_type.to_owned(), boxes.clone());
+                            }
+                            self.shape_scales.insert(
+                                object_type.to_owned(),
+                                placed_shape_scale(&definition, shape_bytes)?,
+                            );
+                            self.shapes.insert(object_type.to_owned(), shape);
+                        }
+                        Err(error) => self
+                            .unreadable
+                            .push((main_shape.clone(), error.to_string())),
                     }
-                    self.shape_scales.insert(
-                        object_type.to_owned(),
-                        placed_shape_scale(&definition, shape_bytes)?,
-                    );
-                    self.shapes.insert(object_type.to_owned(), shape);
                 }
-                Err(error) => self
-                    .unreadable
-                    .push((main_shape.clone(), error.to_string())),
+                // A shape the media is known to lack. The original resolves a
+                // type's main shape through RMAccess and never tests the
+                // result: the absent name leaves a null slot and the object is
+                // still created. Keep the definition and its placement, but
+                // give it no geometry (docs/formats/objects-and-shapes.md,
+                // "TREE1 and TREE2 missing shapes").
+                None if SHAPES_ABSENT_FROM_MEDIA
+                    .iter()
+                    .any(|absent| main_shape.eq_ignore_ascii_case(absent)) =>
+                {
+                    self.unreadable.push((
+                        main_shape.clone(),
+                        format!(
+                            "{source}: {object_type} names shape {main_shape}, which retail lacks"
+                        ),
+                    ));
+                }
+                // Any other absent shape is a damaged or partial import, as
+                // before.
+                None => {
+                    return Err(format!(
+                        "{source}: missing shape {main_shape} referred by {object_type}; re-import media"
+                    )
+                    .into());
+                }
             }
         }
         self.definitions.insert(object_type.to_owned(), definition);
@@ -3150,5 +3185,71 @@ mod tests {
         for (x, z) in [(-1e7, -1e7), (1e7, 3e6), (f64::MAX, 0.), (0., -0.)] {
             same(x, z);
         }
+    }
+
+    /// TREE1.OT and TREE2.OT name TREE1.SH and TREE2.SH, which the reviewed
+    /// media selection does not hold. The original resolves a type's shape
+    /// through RMAccess and never tests the result, so a missing name leaves
+    /// a null shape slot. Those two names, and only those, keep the
+    /// definition and placement without geometry; any other absent shape is
+    /// still an incomplete import.
+    #[test]
+    fn a_placed_object_whose_shape_is_absent_is_kept_without_geometry() {
+        use crate::test_support::resources::airport_resources;
+
+        let mut map = airport_resources();
+        let definition = String::from_utf8(map["STRIP.OT"].clone())
+            .unwrap()
+            .replace("_STRIPProc", "_OBJProc")
+            .replace("AIRPORT.SH", "TREE1.SH")
+            .replace("STRIP.OT", "TREE1.OT");
+        map.insert("TREE1.OT".to_owned(), definition.into_bytes());
+        let layout = String::from_utf8(map["UKR.MM"].clone()).unwrap()
+            + "obj\n\ttype TREE1.OT\n\tpos 3000 0 3000\n\tangle 0 0 0\n\t.\n";
+        map.insert("UKR.MM".to_owned(), layout.into_bytes());
+
+        let sources = Placements::load(&map, "UKR").unwrap();
+        assert!(sources.definitions.contains_key("TREE1.OT"));
+        assert!(!sources.shapes.contains_key("TREE1.OT"));
+        let (_, placement) = sources
+            .placed()
+            .filter_map(Result::ok)
+            .find(|(_, p)| p.object_type == "TREE1.OT")
+            .expect("the placement stays in the layout");
+        assert!(sources.stance(placement, 0.).is_none());
+        assert!(
+            sources
+                .unreadable
+                .iter()
+                .any(|(shape, why)| shape == "TREE1.SH" && why.contains("TREE1.OT")),
+            "{:?}",
+            sources.unreadable
+        );
+
+        // With the shape present the same type has geometry and no note.
+        map.insert("TREE1.SH".to_owned(), map["AIRPORT.SH"].clone());
+        let sources = Placements::load(&map, "UKR").unwrap();
+        assert!(sources.shapes.contains_key("TREE1.OT"));
+        assert!(sources.unreadable.is_empty());
+        let (_, placement) = sources
+            .placed()
+            .filter_map(Result::ok)
+            .find(|(_, p)| p.object_type == "TREE1.OT")
+            .unwrap();
+        assert!(sources.stance(placement, 0.).is_some());
+
+        // The same type naming any other absent shape is still an incomplete
+        // import, and the error names the shape and tells the player to
+        // re-import.
+        let definition = String::from_utf8(map["TREE1.OT"].clone())
+            .unwrap()
+            .replace("TREE1.SH", "OTHER.SH");
+        map.insert("TREE1.OT".to_owned(), definition.into_bytes());
+        let error = match Placements::load(&map, "UKR") {
+            Ok(_) => panic!("a missing shape outside the known pair must fail"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("OTHER.SH"), "{error}");
+        assert!(error.contains("re-import media"), "{error}");
     }
 }
