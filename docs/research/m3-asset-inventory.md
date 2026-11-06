@@ -56,10 +56,12 @@ first ones to confirm.
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
 - **Ordnance.** The W1 to W5 passes cover most air-launched stores. Remaining:
-  AA6, AA9, PL7, PL10 (profiled, nothing loads them), AEMP1, ASROC, hidden gun
-  pods (ADEN, BK27, GAU13, GSH6_23) and guns 20MM_4 and ADENIN, twelve
-  decoded-only surface records, and presentation gaps (no bomblet dispense, no
-  visible MK82AIR retarder, no GBU28 penetration).
+  AA6, AA9, PL7, PL10 (profiled, nothing loads them), AEMP1, ASROC, the hidden
+  guns and gun pods ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN, whose
+  decoded carriers are all unported
+  ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)),
+  twelve decoded-only surface records, and presentation gaps (no bomblet
+  dispense, no visible MK82AIR retarder, no GBU28 penetration).
 - **Equipment.** Sensors and ECM are gated to reviewed roster aircraft, so 14
   radars, 12 ECM suites and 3 sensors carried only by unported aircraft are None.
   Designator pods PAVESPK and AAS38 have no drawn body. Tanks use a fitted body.
@@ -261,7 +263,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 ### Mechanisms
 
-- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:765`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:107`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23, AA-6, AA-9, PL-7, PL-10, AEMP-1.
+- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:107`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23, AA-6, AA-9, PL-7, PL-10, AEMP-1; the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)).
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10 items, are built.
@@ -361,21 +363,21 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 | Resource | Name/role | Imported | Animations | AI | Logic | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| 20MM_4.JT | Colt 20mmx4 | Partial | None | None | None | Hidden; not on any roadmap list; no carrier in roster |
-| ADEN.JT | Aden 30mm Cannon Pod | Partial | None | None | None | Hidden; W1 remaining: cannon pods nothing loads |
-| ADENIN.JT | Aden 30mm Cannon | Partial | None | None | None | Hidden; internal Aden gun, no roster carrier |
-| BK27.JT | 27-mm Mauser BK27 Cannon | Partial | None | None | None | Hidden; W1 remaining: cannon pods nothing loads |
+| 20MM_4.JT | Colt 20mmx4 | Partial | None | None | None | Hidden; built-in-gun flags; only decoded carrier F8J not imported (JT-1) |
+| ADEN.JT | Aden 30mm Cannon Pod | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers DRAK, SEAHAR not imported (JT-1) |
+| ADENIN.JT | Aden 30mm Cannon | Partial | None | None | None | Hidden; internal Aden gun; carriers HWK, JAG not imported (JT-1) |
+| BK27.JT | 27-mm Mauser BK27 Cannon | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ALPH, E2000, GRIPEN, TOR, VIG not imported (JT-1) |
 | C_105.JT | 105mm Cannon | Done | Done | Done | Done | AC-130; authored 100 ft splash; muzzle flash, linked fire |
 | C_25.JT | 25mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
 | C_40.JT | 40mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
 | DEFA.JT | DEFA 30mm | Done | Done | Done | Done | Rafale gun; shared physical-round model, tracers; no fighter muzzle flash |
 | GAU12.JT | GAU-12 Vulcan Cannon | Done | Done | Done | Done | AV-8B; physical rounds and tracers; no fighter muzzle flash |
-| GAU13.JT | GAU-13 Pave Claw | Partial | None | None | None | Hidden; W1 remaining: cannon pods nothing loads |
+| GAU13.JT | GAU-13 Pave Claw | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ASTOVL variants not imported (JT-1) |
 | GAU8.JT | GAU-8/A Avenger | Done | Done | Done | Done | A-10; AI gun runs kill 150 HP vehicle; no fighter muzzle flash |
 | GSH23.JT | GSh-23 23mmx2 | Done | Done | Done | Done | MiG-21/MiG-17; green tracers; no fighter muzzle flash |
 | GSH30.JT | GSh-30 30mmx1 | Done | Done | Done | Done | Yak-141/MiG-17; green tracers; no fighter muzzle flash |
 | GSH301.JT | GSh-301 30mmx6 | Done | Done | Done | Done | MiG-29/Su-25/27/35; green tracers; no fighter muzzle flash |
-| GSH6_23.JT | GSh-6-23 23mmx6 | Partial | None | None | None | Hidden; W1 remaining: cannon pods nothing loads |
+| GSH6_23.JT | GSh-6-23 23mmx6 | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; only decoded carrier SU24 not imported; not an alias of GSH6_30 (JT-1) |
 | GSH6_30.JT | GSh-6-30 30mmx6 | Done | Done | Done | Done | MiG-23; green tracers; no fighter muzzle flash |
 | M61.JT | M61 Vulcan Cannon | Done | Done | Done | Done | 37 aircraft; shared gun model; no fighter muzzle flash |
 | MK12.JT | Mk 12 20mmx2 | Done | Done | Done | Done | A-4E; shared gun model; no fighter muzzle flash |

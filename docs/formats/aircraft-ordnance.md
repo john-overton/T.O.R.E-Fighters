@@ -189,6 +189,57 @@ candidate guidance and hold decisions. A name, physical fit or imported JT
 never establishes implemented behavior. The per-aircraft gap counts above
 include only names with a positive normal capacity, not every catalog name.
 
+## Cannon records nothing mounts (JT-1, 2026-11-06)
+
+Research and implementation note for the six decoded cannon records the ordnance
+catalog still hides. `ADEN.JT`, `BK27.JT`, `GAU13.JT` and `GSH6_23.JT` are named
+cannon pods; `20MM_4.JT` (Colt 20mmx4) and `ADENIN.JT` (Aden 30mm Cannon) are
+guns. All six decode from `FA_2.LIB` and their full records are in
+[`fa-weapons.csv`](fa-weapons.csv).
+
+| Record | Weight lb | projsInPod | Decoded default carriers ([`fa-aircraft.csv`](fa-aircraft.csv)) |
+| --- | ---: | ---: | --- |
+| `ADEN.JT` | 500 | 200 | `DRAK.PT`, `SEAHAR.PT` |
+| `ADENIN.JT` | 1 | 1 | `HWK.PT`, `JAG.PT` |
+| `BK27.JT` | 1 | 1 | `ALPH.PT`, `E2000.PT`, `GRIPEN.PT`, `TOR.PT`, `VIG.PT` |
+| `GAU13.JT` | 1 | 1 | `ASTOVL.PT`, `ASTOVLE.PT`, `ASTOVLF.PT`, `ASTOVLV.PT` |
+| `GSH6_23.JT` | 1 | 1 | `SU24.PT` |
+| `20MM_4.JT` | 1 | 1 | `F8J.PT` |
+
+Every decoded carrier is outside `AircraftId::ALL`
+(`crates/tore-formats/src/aircraft.rs:308`), the 36 imported aircraft, so no
+ported or variety aircraft gains any of the six. The carriers are the same rows
+the source catalog already records as their `internal_gun` or default store
+(`tools/catalog_fa.py`).
+
+The records cannot load as pylon stores either. Each carries projectile flags
+`0x0348c4`, with the compatibility bit 2 (value 2) clear. `Station::allowed_count`
+(`crates/tore-sim/src/combat/loading.rs:118`) refuses a projectile with flag 2
+clear on any station that does not name it as its own default, and the SUU-16
+gun pod (`SUU16.JT`, flags `0x0348c6`) sets flag 2 as the reviewed external
+case. A built-in-gun-style record therefore loads only on the aircraft built
+with it, and no imported aircraft is built with any of the six. `is_gun`
+(`crates/tore-sim/src/combat/live.rs:6893`) likewise derives its set from each
+aircraft's `guns()` and the surface gun table, so a Cheat-loaded record would
+not fire as a gun.
+
+Implementation (slice JT-1, 2026-11-06): the six stay out of
+`SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) and
+`NOVELTY_WEAPONS`, so nothing is enabled, because the decoded station data
+permits no carrier. Do not alias a record to a same-family gun on an imported
+aircraft: `GSH6_23.JT` is not `GSH6_30.JT` (Su-24 against MiG-23), and ADEN,
+ADENIN, BK27, GAU13 and 20MM_4 are their own records. Next step: when a carrier
+is ported, or an M3 mission loads one with its own guns, add the record to that
+aircraft's `guns()` or `gun_pods()` and to `SUPPORTED_WEAPONS`.
+
+Guards: `a_built_in_gun_loads_only_as_its_stations_own_default`
+(`crates/tore-sim/src/combat/loading.rs`) checks the flag rule,
+`the_decoded_cannon_records_stay_hidden_and_no_registered_aircraft_mounts_them`
+(`crates/tore-sim/src/combat/loadout.rs`) checks the supported set and the
+mounted-gun table, and `crates/tore-import/tests/hidden_guns.rs` (retail, skips
+without media) checks the decoded flags and every imported aircraft's station
+list.
+
 ## Paired-point counts and physics
 
 Research review, 2026-10-25, using the FA.EXE, FA.SMS and FA_2.LIB identities

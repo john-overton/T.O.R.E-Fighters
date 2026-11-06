@@ -338,6 +338,52 @@ mod tests {
         assert_eq!(bombs_only.cheat_count(missile(0), false, false), 4);
     }
     #[test]
+    fn a_built_in_gun_loads_only_as_its_stations_own_default() {
+        // The decoded cannon records nothing can load (ADEN, BK27, GAU13,
+        // GSH6_23, 20MM_4, ADENIN) carry projectile flag 2 clear (0x0348c4),
+        // like every aircraft's built-in gun; the SUU-16 gun pod sets it
+        // (0x0348c6). docs/formats/aircraft-ordnance.md, "Cannon records
+        // nothing mounts".
+        let gun = Store {
+            kind: StoreKind::Projectile {
+                flags: 0x0348c4,
+                signature: 0,
+                pod_count: 1,
+                phoenix_family: false,
+            },
+            weight: 1,
+        };
+        let station = Station {
+            flags: 0x07e5,
+            capacity: 4,
+            weight_class: 10,
+        };
+        assert_eq!(
+            station.allowed_count(gun, false),
+            0,
+            "a compatible station mask cannot admit a built-in gun"
+        );
+        assert_eq!(
+            station.allowed_count(gun, true),
+            4,
+            "the station's own default still takes it"
+        );
+        let pod = Store {
+            kind: StoreKind::Projectile {
+                flags: 0x0348c6,
+                signature: 0,
+                pod_count: 1,
+                phoenix_family: false,
+            },
+            weight: 100,
+        };
+        assert_eq!(
+            station.allowed_count(pod, false),
+            4,
+            "flag 2 is what lets a pod load on a station"
+        );
+    }
+    #[test]
     fn special_radar_family_and_tanks_keep_distinct_source_rules() {
         let s = Station {
             flags: 0x20,

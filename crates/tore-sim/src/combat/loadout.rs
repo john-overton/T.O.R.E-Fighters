@@ -762,6 +762,12 @@ fn quantity_step(capacity: i32) -> i32 {
 /// Weapons connected to flight, by record name. Shared by launch validation
 /// and the ordnance catalog, including Cheat loading; importing a definition
 /// does not enable it. The ordnance audit requires every one to be imported.
+///
+/// The decoded cannon records ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN
+/// stay out on purpose (slice JT-1): their record flags leave projectile bit 2
+/// clear, so only a station's own default can take them, and every decoded
+/// carrier is an aircraft the roster does not import yet. See
+/// docs/formats/aircraft-ordnance.md, "Cannon records nothing mounts".
 pub const SUPPORTED_WEAPONS: &[&str] = &[
     "AA11.JT",
     "AA11B.JT",
@@ -862,4 +868,40 @@ pub fn novelty(name: &str) -> bool {
 }
 pub fn supported(name: &str) -> bool {
     SUPPORTED_WEAPONS.contains(&name) || novelty(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// The decoded cannon records nothing can load yet (slice JT-1): ADEN,
+    /// BK27, GAU13 and GSH6_23 are named pods and 20MM_4 and ADENIN are guns,
+    /// but all six carry projectile flag 2 clear, so only a station's own
+    /// default admits them, and their decoded carriers are outside
+    /// [`AircraftId::ALL`]. docs/formats/aircraft-ordnance.md, "Cannon records
+    /// nothing mounts".
+    const UNMOUNTED_GUNS: [&str; 6] = [
+        "20MM_4.JT",
+        "ADEN.JT",
+        "ADENIN.JT",
+        "BK27.JT",
+        "GAU13.JT",
+        "GSH6_23.JT",
+    ];
+
+    #[test]
+    fn the_decoded_cannon_records_stay_hidden_and_no_registered_aircraft_mounts_them() {
+        for name in UNMOUNTED_GUNS {
+            assert!(
+                !SUPPORTED_WEAPONS.contains(&name),
+                "{name} must stay hidden until a carrier is ported"
+            );
+            for id in AircraftId::ALL {
+                assert!(
+                    !id.mounts_gun(name),
+                    "{} must not claim to mount {name}",
+                    id.pt()
+                );
+            }
+        }
+    }
 }
