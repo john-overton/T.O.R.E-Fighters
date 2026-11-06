@@ -63,14 +63,21 @@ records and 1,802 weapon placements, measured with `--validate-ordnance` on the
 surface-data import (the tank and recovered-row counts are unchanged). Slice W1 added the laser bombs, the JDAMs and the
 laser missiles (GBU-10E, GBU-10, GBU-10E Paveway, GBU-27, GBU-28, GBU-29,
 GBU-29/P, GBU-30, AS-14, AS 30L, AT-12): with W2's, 58 supported records and
-2,359 weapon placements, measured the same way (2026-10-11). The current audit includes the three derived R-27 stores and the three
+2,359 weapon placements, measured the same way (2026-10-11). That pass's audit included the three derived R-27 stores and the three
 [smaller guided bombs](../spec/missiles.md#smaller-guided-bomb-stores): 78
-supported records and 3,319 weapon placements (pins in `ordnance_audit.rs`).
+supported records and 3,319 weapon placements.
 The smaller bombs add 201 placements to the prior 3,118. Every donor-capable
 station is checked for variant capacity, and every variant uses the existing
 load/save, catalog and mission-validation checks. Tank placements remain 146.
 R-27 family/rail restrictions replace generic compatibility. All four family
 carriers pass saved-load roundtrips; see [missile identities](../spec/missiles.md#corrected-identities-and-r-27-stores).
+
+Slice JT-4 (2026-11-06) added the four decoded air-to-air missiles AA6, AA9,
+PL7 and PL10 on their compatible ported stations. The current audit is 82
+supported records and 3,626 weapon placements (pins in `ordnance_audit.rs`),
+measured with `--validate-ordnance` on the surface-data import; the tank,
+recovered-row and novelty counts are unchanged. The station rows are in
+[aircraft ordnance](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06).
 
 The [derived F-15C and F-16C stations](../spec/stores-on-pylons.md#derived-f-15c-and-f-16c-stations)
 (John, 2026-10-15) add the F-15C centreline and wing tank rows and the F-16C
@@ -119,11 +126,12 @@ placements (Boulder and Moose on that row), with tank placements unchanged. It c
 Sparrow, the Archer, bombs and the Maverick, a save and restore, and an older
 saved load (one or two weapon slots short) restoring with the new rows empty.
 
-The current audit includes [F-22N carriage](../spec/stores-on-pylons.md#f-22-naval-stores):
-14 optional weapon rows, 3,411 weapon placements, 180 tank placements and
-170 Cheat-only novelty placements. The F-22N row adds four AIM-9/AIM-120
+The [F-22N carriage](../spec/stores-on-pylons.md#f-22-naval-stores) pass
+recorded 14 optional weapon rows, 3,411 weapon placements, 180 tank placements
+and 170 Cheat-only novelty placements. The F-22N row adds four AIM-9/AIM-120
 choices, five tank choices and two novelty choices to the previous totals
-of 13, 3,407, 175 and 168. Weapon/tank record totals remain 78 and 9.
+of 13, 3,407, 175 and 168. Weapon/tank record totals were 78 and 9 at that
+pass; see the JT-4 paragraph above for the current 82 and 9.
 Both Raptors report the same normal choices on row 8 and pass tank/weapon
 exclusion, fuel feed, jettison, save/load and old-load restoration. Their
 source default weapons and quantities remain unchanged.

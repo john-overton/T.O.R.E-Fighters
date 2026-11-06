@@ -178,16 +178,18 @@ be described as guaranteed guided operation.
 
 ## Imported but not live-supported compatibility gaps
 
-The 37 distinct source-compatible imported JT names outside the live list are:
-
-`AA6.JT`, `AA9.JT`, `AEMP1.JT`, `AGM45.JT`, `AGM65A.JT`, `AGM84A.JT`, `AGM84E.JT`, `AM39.JT`, `AS14.JT`, `AS15.JT`, `AS16.JT`, `AS30.JT`, `AT12.JT`, `CBU87.JT`, `CBU89.JT`, `FAB1000.JT`, `FAB250.JT`, `FAB500.JT`, `GBU10.JT`, `GBU10A.JT`, `GBU28.JT`, `GBU29.JT`, `GBU29P.JT`, `GBU30.JT`, `LAU10.JT`, `MK20.JT`, `MK82AIR.JT`, `MK82HD.JT`, `MK82P.JT`, `MK82P3.JT`, `MK84.JT`, `PAVEWA3.JT`, `PAVEWAY.JT`, `PL10.JT`, `PL7.JT`, `RBK250.JT`, `RBK500.JT`.
-
-These include additional radar/IR missiles, passive emitter and surface weapons,
-laser/designator-dependent cases, bomb/cluster variants and another rocket pod.
-The [missile inventory](../spec/missiles.md#first-pass-inventory-matrix) owns
-candidate guidance and hold decisions. A name, physical fit or imported JT
-never establishes implemented behavior. The per-aircraft gap counts above
-include only names with a positive normal capacity, not every catalog name.
+At the 2026-10-11 audit, these 37 source-compatible imported JT names were
+outside the live list: AA6, AA9, AEMP1, AGM45, AGM65A, AGM84A, AGM84E, AM39,
+AS14, AS15, AS16, AS30, AT12, CBU87, CBU89, FAB1000, FAB250, FAB500, GBU10,
+GBU10A, GBU28, GBU29, GBU29P, GBU30, LAU10, MK20, MK82AIR, MK82HD, MK82P,
+MK82P3, MK84, PAVEWA3, PAVEWAY, PL10, PL7, RBK250 and RBK500. Later passes
+changed that: the W1 to W4 air-to-ground work enabled every name except
+AEMP1, and JT-4 enabled AA6, AA9, PL10 and PL7 on 2026-11-06. The per-aircraft table
+and gap counts above are that earlier snapshot. The per-record sections below
+and the [missile inventory](../spec/missiles.md#first-pass-inventory-matrix)
+own current status. A name, physical fit or imported JT never establishes
+implemented behavior. The gap counts include only names with a positive normal
+capacity, not every catalog name.
 
 ## Cannon records nothing mounts (JT-1, 2026-11-06)
 
@@ -240,15 +242,15 @@ mounted-gun table, and `crates/tore-import/tests/hidden_guns.rs` (retail, skips
 without media) checks the decoded flags and every imported aircraft's station
 list.
 
-## Air-to-air missiles nothing loads (JT-2, 2026-11-06)
+## AA-6, AA-9, PL-7 and PL-10 (JT-4, 2026-11-06)
 
-Research and implementation note for the four decoded air-to-air records the
-ordnance catalog still hides: `AA6.JT` (AA-6A Acrid, `fa-weapons.csv:9`),
-`AA9.JT` (AA-9 Amos, `fa-weapons.csv:11`), `PL10.JT` (PL10-R,
-`fa-weapons.csv:97`) and `PL7.JT` (PL-7, `fa-weapons.csv:98`). All four decode
-from `FA_2.LIB` as guided missiles with the normal-store compatibility bit 2
-set, so unlike the JT-1 cannon records a compatible station mask can admit
-them. Their reviewed seeker classification
+Research and implementation note for the four decoded air-to-air records JT-2
+found station-compatible but unsupported: `AA6.JT` (AA-6A Acrid,
+`fa-weapons.csv:9`), `AA9.JT` (AA-9 Amos, `fa-weapons.csv:11`), `PL10.JT`
+(PL10-R, `fa-weapons.csv:97`) and `PL7.JT` (PL-7, `fa-weapons.csv:98`). All
+four decode from `FA_2.LIB` as guided missiles with the normal-store
+compatibility bit 2 set, so unlike the JT-1 cannon records a compatible station
+mask can admit them. Their reviewed seeker classification
 (`crates/tore-formats/src/weapons.rs`, `every_inventoried_air_to_air_missile_has_the_right_seeker_and_fox_call`,
 2026-10-15) is semi-active radar for AA6, AA9 and PL10 and infrared for PL7.
 
@@ -258,56 +260,69 @@ lists, are all aircraft outside `AircraftId::ALL`
 (`fa-aircraft.csv:97`, MiG-25), `AA9.JT` on `MIG31.PT` (`fa-aircraft.csv:110`,
 MiG-31) and `PL7.JT` on `Q5.PT` (`fa-aircraft.csv:115`, Q-5). No retail record
 lists `PL10.JT` as a default store. So no imported aircraft is **built with**
-one.
+one. All four are reached through the same decoded hardpoint compatibility as
+the live stores. The rows below are measured with `--validate-ordnance` on the
+installed media; the [even-paired loads
+baseline](../baselines/even-paired-loads.md) records the pairing changes at
+that earlier pass.
 
-The blocker is not the aircraft batches. Ported aircraft are already
-source-compatible with these records on ordinary stations, from the same
-decoded hardpoint data as the live stores: the [per-aircraft audit
-matrix](#per-aircraft-audit-matrix) counts them among each roster aircraft's
-compatibility gaps, and the [even-paired loads
-baseline](../baselines/even-paired-loads.md) records the exact setup-only rows
-below.
+Every row below is checked by `--validate-ordnance`, which loads and restores
+the store on it. Numbers are the 0-based source slot used by the per-aircraft
+matrix and the even-paired baseline, not the Load Ordnance page's station
+order.
 
-| Record | Ported aircraft and source rows that would gain it |
-| --- | --- |
-| `AA6.JT`, `AA9.JT` | AV8 5; F104 6, 7; F14 4; F15 5; F18 5, 6, 7; F31 6, 7; F4 6, 7; F4B 4; F4E 6, 7; F4J 5; MIG23 6, 8; MIG29 5, 6, 7; RAFALE 7; SU25 7, 8; SU27 7; SU35 7 |
-| `AA9.JT` alone | F4 5; F4E 5 |
-| `PL10.JT` | F104 7; F22 7; F22N 7; F4 5; F4B 4; F4E 5; F4J 5; MIG21 5, 6; SU27 6, 7, 8; SU35 7; faxx 7 |
-| `PL7.JT` | MIG23 5 |
+| Aircraft | AA-6 | AA-9 | PL-7 | PL-10 |
+| --- | --- | --- | --- | --- |
+| A10 | - | - | 5, 6, 7, 8 | - |
+| A7 | - | - | 4, 6 | - |
+| AH64 | - | - | 5, 6 | - |
+| AV8 | 5 | 5 | 5, 6, 7 | 5 |
+| F104 | 6, 7 | 6, 7 | 6, 7, 8 | 6, 7 |
+| F14 | 4, 6 | 4, 6 | 6, 7 | 4, 6 |
+| F15 | 4, 5 | 4, 5 | 4, 5 | 4, 5 |
+| F16C | 6, 9 | 6, 9 | 6, 7, 8, 9 | 6, 9 |
+| F18 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7, 8 | 5, 6, 7 |
+| F22 | 5, 6 | 5, 6 | 5, 6, 7 | 5, 6, 7 |
+| F22N | 5, 6 | 5, 6 | 5, 6, 7 | 5, 6, 7 |
+| F31 | 6, 7 | 6, 7 | 5, 6, 7, 8 | 6, 7 |
+| F4 | 5, 6, 7 | 5, 6, 7 | 5 | 5, 6, 7 |
+| F4B | 4 | 4 | 3, 4, 5 | 4 |
+| F4E | 5, 6, 7 | 5, 6, 7 | 5, 7 | 5, 6, 7 |
+| F4J | 5 | 5 | 4, 5, 6 | 5 |
+| MIG21 | - | - | 4, 5, 6 | 4, 5, 6 |
+| MIG23 | 6, 7, 8 | 6, 7, 8 | 5, 6, 7, 8 | 6, 7, 8 |
+| MIG29 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 |
+| RAFALE | 5, 6, 7 | 5, 6, 7 | 5, 6, 7, 8 | 5, 6, 7 |
+| SU25 | 5, 6, 7, 8 | 5, 6, 7, 8 | 5, 6, 7, 8 | 5, 6, 7, 8 |
+| SU27 | 7 | 7 | 5, 6, 7, 8 | 5, 6, 7, 8 |
+| SU35 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 |
+| YAK141 | 4, 5 | 4, 5 | 4, 5 | 4, 5 |
 
-Those are the rows the even-paired baseline records as **setup-only** maxima
-changes, which is the same reason all four are absent from `SUPPORTED_WEAPONS`:
-they are not flight-supported, so the loadout editor never offers them, and a
-compatibility match alone does not extend gameplay support (see [omitted
-weapon-capable rows](#omitted-weapon-capable-rows), SUU-16).
+No decoded default row lists any of the four on a ported aircraft, so these
+are all compatible-station loads.
 
-They stay hidden because their flight behaviour is not hooked up.
-`Profile::reviewed_activation` (`crates/tore-sim/src/combat/missiles.rs:250`)
-lists the records with a reviewed flight profile and excludes all four, so
-`Profile::for_weapon` returns `None`: a store enabled today would fly with no
-guidance. [The missile spec](../spec/missiles.md#first-pass-inventory-matrix)
-marks all four **Catalog**, and the [catalog availability
-rule](../spec/ordnance-presentation.md#catalog-availability) returns an
-unsupported weapon only after its flight behaviour is implemented and
-validated. The guidance class is reviewed and the energy fits exist, but launch
-limits, support loss, seeker acquisition, motor lifetime and HUD/audio feedback
-are still the open W2 work ([roadmap](../ROADMAP.md#weapon-catalog-update-passes)).
+Implementation (slice JT-4, 2026-11-06, requested by John): each record was
+added to the reviewed profile list
+(`Profile::reviewed_activation`, `crates/tore-sim/src/combat/missiles.rs`) and
+to `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs`). They follow
+the same classes as the live stores: AA6, AA9 and PL10 use the semi-active
+radar behaviour of `AA10.JT`/`R530.JT`, and PL7 uses the infrared behaviour of
+`R550.JT`/`AIM9M.JT`. Each keeps its own record numbers for launch envelope,
+seeker range and angles, ignition, burn, removal, mass, damage, splash and
+launch sound. None is active radar, so none takes an activation distance,
+PITBULL state or maddog release. The player-facing contract and the numbers are
+in [the missile spec](../spec/missiles.md#air-to-air-missiles-enabled-jt-4-2026-11-06).
+Do not alias a record to a same-class live store: `AA6.JT` is not `R40`,
+`AA9.JT` is not `AA10` or `R530`, and `PL10.JT` is not `AA12` or `MICA`.
 
-Implementation (slice JT-2, 2026-11-06): nothing is enabled. Adding a record to
-`SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) without also
-reviewing its profile would make it loadable and unguided, which is exactly the
-behaviour the catalog rule hides. Do not alias a record to a same-class live
-store: `AA6.JT` is not `R40`, `AA9.JT` is not `AA10` or `R530`, and `PL10.JT`
-is not `AA12` or `MICA`. Next step: review each profile and connect flight
-support under W2, then add the file to that aircraft's default store or to the
-supported set with tests.
-
-Guards: `the_unloaded_air_to_air_missiles_stay_out_of_the_supported_set`
-(`crates/tore-sim/src/combat/loadout.rs`) keeps the four out of the supported
-set, `the_unloaded_air_to_air_missiles_have_no_reviewed_flight_profile`
-(`crates/tore-sim/src/combat/missile_tests.rs`) pins the empty profile, and
-`crates/tore-import/tests/unloaded_missiles.rs` (retail, skips without media)
-checks the decoded seeker class and that no imported aircraft is built with one.
+Guards: `the_reviewed_air_to_air_missiles_are_supported`
+(`crates/tore-sim/src/combat/loadout.rs`) checks the supported set,
+`the_reviewed_air_to_air_missiles_have_profiles_from_their_seeker_class`
+(`crates/tore-sim/src/combat/missile_tests.rs`) pins each guidance class, the
+absence of an active transition and the record-derived guidance lifetime, and
+`crates/tore-import/tests/reviewed_air_to_air_missiles.rs` (retail, skips
+without media) checks every spec number from the decoded records and that no
+imported aircraft is built with one.
 
 ## Surface records nothing mounts (JT-3, 2026-11-06)
 

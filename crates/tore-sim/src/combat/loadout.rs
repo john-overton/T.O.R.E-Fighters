@@ -769,19 +769,20 @@ fn quantity_step(capacity: i32) -> i32 {
 /// carrier is an aircraft the roster does not import yet. See
 /// docs/formats/aircraft-ordnance.md, "Cannon records nothing mounts".
 ///
-/// The air-to-air records AA6, AA9, PL7 and PL10 also stay out (slice JT-2).
-/// Their decoded default carriers are aircraft the roster does not import
-/// (MiG-25, MiG-31, Q-5; PL10 has none), and although ported stations are
-/// source-compatible they have no reviewed flight profile in
-/// `combat::missiles::Profile`, so the catalog availability rule keeps them
-/// hidden. See docs/formats/aircraft-ordnance.md, "Air-to-air missiles nothing
-/// loads".
+/// AA6, AA9, PL7 and PL10 joined the list in slice JT-4 (John, 2026-11-06).
+/// Their decoded default carriers are still aircraft the roster does not import
+/// (MiG-25, MiG-31, Q-5; PL10 has none), so compatible station loads are the
+/// way a player reaches them. See docs/spec/missiles.md, "Air-to-air missiles
+/// enabled", and docs/formats/aircraft-ordnance.md, "AA-6, AA-9, PL-7 and
+/// PL-10".
 pub const SUPPORTED_WEAPONS: &[&str] = &[
     "AA11.JT",
     "AA11B.JT",
     "AA12.JT",
     "AA2.JT",
+    "AA6.JT",
     "AA8.JT",
+    "AA9.JT",
     "AAML.JT",
     "AS7.JT",
     "B13.JT",
@@ -802,6 +803,8 @@ pub const SUPPORTED_WEAPONS: &[&str] = &[
     "MICA.JT",
     "R530.JT",
     "R550.JT",
+    "PL7.JT",
+    "PL10.JT",
     "AA10.JT",
     "R27ER.JT",
     "R27T.JT",
@@ -913,19 +916,23 @@ mod tests {
         }
     }
 
-    /// The decoded air-to-air missiles nothing loads yet (slice JT-2): AA6,
-    /// AA9, PL7 and PL10. Their default carriers are unported and they have no
-    /// reviewed flight profile, so they stay out of [`SUPPORTED_WEAPONS`].
-    /// docs/formats/aircraft-ordnance.md, "Air-to-air missiles nothing loads".
-    const UNLOADED_AIR_TO_AIR: [&str; 4] = ["AA6.JT", "AA9.JT", "PL7.JT", "PL10.JT"];
+    /// The four decoded air-to-air missiles enabled in slice JT-4. Their
+    /// default carriers are still unported, so a normal load reaches them
+    /// through a source-compatible station, never a decoded default.
+    /// docs/spec/missiles.md, "Air-to-air missiles enabled".
+    const REVIEWED_AIR_TO_AIR: [&str; 4] = ["AA6.JT", "AA9.JT", "PL7.JT", "PL10.JT"];
 
     #[test]
-    fn the_unloaded_air_to_air_missiles_stay_out_of_the_supported_set() {
-        for name in UNLOADED_AIR_TO_AIR {
+    fn the_reviewed_air_to_air_missiles_are_supported() {
+        for name in REVIEWED_AIR_TO_AIR {
             assert!(
-                !SUPPORTED_WEAPONS.contains(&name),
-                "{name} must stay hidden until its flight profile is reviewed"
+                SUPPORTED_WEAPONS.contains(&name),
+                "{name} must be loadable on compatible stations"
             );
+            assert!(supported(name), "{name} must pass the supported gate");
         }
+        // The decoded default carriers remain outside the roster; the retail
+        // import test `reviewed_air_to_air_missiles` checks that no registered
+        // PT record lists one as a default store.
     }
 }

@@ -18,6 +18,9 @@ fn weapon(name: &str) -> Weapon {
             | "AS15.JT"
             | "SA6.JT"
             | "SEA_SPAR.JT"
+            | "AA6.JT"
+            | "AA9.JT"
+            | "PL10.JT"
     ) {
         0x241
     } else {
@@ -26,7 +29,7 @@ fn weapon(name: &str) -> Weapon {
     w.seeker.signature = match name {
         "AGM45.JT" | "AGM88.JT" => 4,
         "R27T.JT" | "R27ET.JT" | "AIM9M.JT" | "AIM9B.JT" | "AIM9X.JT" | "AA11.JT" | "AA11B.JT"
-        | "AA2.JT" | "AA8.JT" | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" => 2,
+        | "AA2.JT" | "AA8.JT" | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" | "PL7.JT" => 2,
         _ => 3,
     };
     w
@@ -239,19 +242,36 @@ fn all_nine_activation_thresholds_and_no_false_pitbull() {
         assert!(Profile::reviewed(name));
     }
 }
-/// The decoded air-to-air missiles with no reviewed flight profile (slice
-/// JT-2): AA6, AA9, PL7 and PL10 are classified and energy-fitted, but
-/// `Profile::reviewed_activation` excludes them, so `for_weapon` returns
-/// `None` and they fly with no guidance. docs/formats/aircraft-ordnance.md,
-/// "Air-to-air missiles nothing loads".
+/// The four decoded air-to-air records enabled in slice JT-4 (John,
+/// 2026-11-06). Each now resolves a reviewed profile from its own seeker
+/// class, modelled on the same-class live stores: AA6, AA9 and PL10 beside
+/// AA10/R530 (semi-active radar) and PL7 beside R550 (infrared). None takes
+/// an active-radar activation distance. docs/spec/missiles.md,
+/// "Air-to-air missiles enabled".
 #[test]
-fn the_unloaded_air_to_air_missiles_have_no_reviewed_flight_profile() {
-    for name in ["AA6.JT", "AA9.JT", "PL7.JT", "PL10.JT"] {
-        assert!(
-            Profile::for_weapon(&weapon(name)).is_none(),
-            "{name} must have no profile until its flight behaviour is reviewed"
+fn the_reviewed_air_to_air_missiles_have_profiles_from_their_seeker_class() {
+    for (name, guidance, independent, boresight) in [
+        ("AA6.JT", Guidance::Supported, false, false),
+        ("AA9.JT", Guidance::Supported, false, false),
+        ("PL10.JT", Guidance::Supported, false, false),
+        ("PL7.JT", Guidance::Infrared, true, true),
+    ] {
+        let w = weapon(name);
+        let profile = Profile::for_weapon(&w)
+            .unwrap_or_else(|| panic!("{name} must have a reviewed flight profile"));
+        assert!(Profile::reviewed(name), "{name} must report reviewed");
+        assert_eq!(profile.guidance, guidance, "{name} guidance");
+        assert_eq!(profile.role, TargetRole::Aircraft, "{name} role");
+        assert_eq!(profile.activation_ft, None, "{name} has no A transition");
+        assert_eq!(profile.independent(), independent, "{name} independence");
+        assert_eq!(profile.supports_boresight(), boresight, "{name} boresight");
+        assert_eq!(
+            profile.guidance_ticks,
+            u64::from(w.movement.remove_t) * 30,
+            "{name} guidance lifetime follows its removal timer"
         );
-        assert!(!Profile::reviewed(name), "{name} must not be reviewed");
+        assert_eq!(profile.memory_ticks, MEMORY, "{name} memory");
+        assert!(!profile.radar_emissions, "{name} is not an emitter seeker");
     }
 }
 #[test]

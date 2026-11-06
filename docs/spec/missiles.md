@@ -78,9 +78,10 @@ the original 50 percent generic-call alternative. Active releases use the
 Phoenix's existing always-Fox-three rule, an agent decision. Surface-target
 shots keep generic calls. See [radio](radio-chatter.md#weapon-launch-calls).
 
-The 22 retail A2A records now have three derived R-27 stores. Five retail
-records remain catalog-only: AA6, AA9, AEMP1, PL7 and PL10. MICA's radar
-record represents the EM role; no MICA-IR or AIM-9L record is added.
+The 22 retail A2A records now have three derived R-27 stores. AA6, AA9, PL7
+and PL10 joined the live stores in JT-4 (John, 2026-11-06); AEMP1 remains
+catalog-only. MICA's radar record represents the EM role; no MICA-IR or
+AIM-9L record is added.
 
 ## Corrected identities and R-27 stores
 
@@ -130,6 +131,43 @@ loading retains its explicit override.
 Real-world family grounding: [Rosoboronexport R-27ER1](https://roe.ru/pdfs/pdf_4712.pdf)
 and [R-27ET1](https://roe.ru/pdfs/pdf_4714.pdf) identify the extended radar
 and IR family. These references do not calibrate this game's motor timers.
+
+## Air-to-air missiles enabled (JT-4, 2026-11-06)
+
+**Implementation requested by John on 2026-11-06** ("add any missing logic for
+the ordnance"). JT-2 found AA6, AA9, PL7 and PL10 decoded, station-compatible
+and energy-fitted, but without a reviewed flight profile. They now use the
+same reviewed machinery as an accepted missile of their own seeker class, not
+a new guidance model.
+
+| Record | HUD | Seeker class | Modelled on | Support and loss | Motor and guidance |
+| --- | --- | --- | --- | --- | --- |
+| `AA6.JT` | AA-6A | Semi-active radar | `AA10.JT`, `R530.JT` | Radar lock and launcher support throughout; loss freezes the last observed intercept and allows same-target reacquisition until guidance expiry | Record ignition 1 s, burn 39 s, removal 80 s; seeker 14.81 nmi, 45/45 degrees |
+| `AA9.JT` | AA-9 | Semi-active radar | `AA10.JT`, `R530.JT` | As AA-6 | Record ignition 2 s, burn 130 s, removal 264 s; seeker 41.15 nmi, 45/45 degrees |
+| `PL10.JT` | PL10-R | Semi-active radar | `AA10.JT`, `R530.JT` | As AA-6 | Record ignition 2 s, burn 18 s, removal 40 s; seeker 24.69 nmi, 45/45 degrees |
+| `PL7.JT` | PL-7 | Infrared | `R550.JT`, `AIM9M.JT` | Own heat seeker, cued or five-degree BORESIGHT; lost signal keeps the last intercept and same-target reacquisition for the fitted 2 seconds before LOST | Record ignition 0 s, burn 4 s, removal 20 s; seeker 8.23 nmi, 45/45 degrees; all-aspect 40 |
+
+The launch envelopes, seeker range, half angles, motor timers, mass, damage,
+splash and launch sound are each record's own values in the
+[first-pass inventory matrix](#first-pass-inventory-matrix); none is copied
+from the donor missile. The donors only establish the reviewed S or I
+behaviour that the shared code already applies. None of the four is active
+radar, so none receives an active-on distance, PITBULL state or maddog
+launch. Their release calls follow the shared classification: Fox one for
+AA-6, AA-9 and PL10-R, Fox two for PL-7. The HUD label and range cone come
+from the same record, so the cockpit shows the imported seeker volume.
+
+Normal loads reach them through source-compatible ported stations, never a
+decoded default: the exact aircraft and station rows are in
+[aircraft ordnance](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06).
+Cheat loading keeps its existing explicit override.
+
+No new fitted number was needed. Every flight number is the record's own, and
+the only shared fitted settings are those already in force for every reviewed
+missile: 30-tick (0.25 s) acquisition dwell, 2-second loss memory, a
+five-degree BORE cap, and 120 Hz timers. The four energy fits in the
+[energy baseline](../baselines/missile-energy.md) were already authored and
+are unchanged.
 
 ## Smaller guided bomb stores
 
@@ -183,8 +221,9 @@ Validation is in the [bomb-flight baseline](../baselines/bomb-flight.md).
 agent.** The reviewed retail `allAspect` field is 100 for AIM-9B and AA2,
 30 for AIM-9M, AA11/B, AA8 and R550, 20 for AIM-9X, and 40 for PL7.
 The correction table explicitly records rear-only B/AA2 and all-aspect
-M/X, AA11/B, AA8 (R-60M role), R550, PL7 and the new R27T/ET. PL7 stays
-catalog-only. The field's exact original numeric formula is unknown.
+M/X, AA11/B, AA8 (R-60M role), R550, PL7 and the new R27T/ET. PL7 shares the
+reviewed live infrared rules. The field's exact original numeric formula is
+unknown.
 
 For the reviewed A2A stores against an airborne target, strength is `max(IR signature, 0) / 100 * engine heat`.
 Engine heat retains 0.1 stopped, 0.5 + 0.5 * throttle running, 1.5 in
@@ -237,9 +276,11 @@ confirmed retail guidance contract or a real-world missile identification.
 Hold rows remain inventoried and outside implementation until their role is
 specified. Do not force laser/designator or command-guided cases into these four.
 
-**Live** means included in the current aircraft default-store allowlists,
-not that all guidance behavior has passed acceptance. **Catalog** means inventory
-only, hidden from Load Ordnance until flight support is connected under the
+**Live** means available to normal Load Ordnance through the supported-store
+list, either as an aircraft default store or on a source-compatible station,
+not that all guidance behavior has passed acceptance. **Catalog** means
+inventory only, hidden from Load Ordnance until flight support is connected
+under the
 [catalog availability rule](ordnance-presentation.md#catalog-availability).
 Missile presence does not authorize SAM, ship, ground-target or AI work.
 John authorized surface air defenses on 2026-10-10: the SAM and ship records
@@ -266,9 +307,9 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AA11B.JT (AA-11B) | I* | Live | 0.25 to 9.87 | 0 | 26 | 52 | 9.87 | wide*/90 | N/A | 5/5 |
 | AA12.JT (AA-12) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 60/60 | 5 | 5/5 |
 | AA2.JT (AA-2A) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
-| AA6.JT (AA-6A) | S* | Catalog | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
+| AA6.JT (AA-6A) | S* | Live | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
 | AA8.JT (AA-8) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
-| AA9.JT (AA-9) | S* | Catalog | 1.97 to 41.15 | 2 | 130 | 264 | 41.15 | 45/45 | N/A | N/A |
+| AA9.JT (AA-9) | S* | Live | 1.97 to 41.15 | 2 | 130 | 264 | 41.15 | 45/45 | N/A | N/A |
 | AAML.JT (AAM-L) | A* | Live | 4.94 to 74.06 | 0 | 130 | 270 | 74.06 | 45/45 | 8 | 5/5 |
 | AEMP1.JT (AEMP-1) | A* | Catalog | 0.33 to 14.81 | 0 | 35 | 70 | 19.75 | 45/45 | 3 | 5/5 |
 | AGM45.JT (AGM-45) | E* | Live | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | 45/45 (HARM cue) |
@@ -299,8 +340,8 @@ separate proposed profile setting, never inferred from these motor numbers.
 | MICA.JT (MICA-EM) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 5/5 |
 | MIM23.JT (MIM-23) | S* | Catalog | 0.16 to 7.41 | 1 | 9 | 20 | 15.43 | wide*/90 | N/A | N/A |
 | MIS.JT (MIS) | S* | Catalog | 1.23 to 7.90 | 2 | 21 | 40 | 10.53 | wide*/90 | N/A | N/A |
-| PL10.JT (PL10-R) | S* | Catalog | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
-| PL7.JT (PL-7) | I* | Catalog | 0.66 to 3.95 | 0 | 4 | 20 | 8.23 | 45/45 | N/A | 5/5 |
+| PL10.JT (PL10-R) | S* | Live | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
+| PL7.JT (PL-7) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | R440.JT (R-440) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | R530.JT (S530D) | S* | Live | 1.32 to 16.46 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
 | R550.JT (R-550) | I* | Live | 0.66 to 3.95 | 0 | 7 | 20 | 8.23 | 45/45 | N/A | 5/5 |

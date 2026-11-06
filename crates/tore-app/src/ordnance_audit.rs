@@ -22,7 +22,7 @@ mod store_pairs;
 const AIRCRAFT: usize = 36;
 const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
-const WEAPON_PLACEMENTS: usize = 3411;
+const WEAPON_PLACEMENTS: usize = 3626;
 const TANK_PLACEMENTS: usize = 180;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
@@ -1246,6 +1246,6 @@ mod tests {
     #[test]
     fn the_pinned_counts_match_the_reviewed_roster() {
         assert_eq!(AircraftId::ALL.len(), AIRCRAFT);
-        assert_eq!(SUPPORTED_WEAPONS.len(), 78);
+        assert_eq!(SUPPORTED_WEAPONS.len(), 82);
     }
 }

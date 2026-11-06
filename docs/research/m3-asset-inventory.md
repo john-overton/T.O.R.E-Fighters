@@ -42,11 +42,11 @@ first ones to confirm.
 | Object type | Records | Imported D/P/N/NA | Animations D/P/N/NA | AI D/P/N/NA | Logic D/P/N/NA |
 |---|---:|---|---|---|---|
 | Aircraft (PT) | 145 | 64 / 0 / 81 / 0 | 31 / 33 / 81 / 0 | 26 / 10 / 109 / 0 | 25 / 39 / 81 / 0 |
-| Ordnance (JT) | 135 | 111 / 12 / 12 / 0 | 105 / 11 / 19 / 0 | 107 / 2 / 22 / 4 | 110 / 6 / 19 / 0 |
+| Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
 | Equipment (SEE/ECM/GAS) | 85 | 53 / 2 / 30 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 51 / 3 / 31 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **467 / 27 / 125 / 0** | **242 / 184 / 118 / 75** | **196 / 31 / 146 / 246** | **397 / 88 / 133 / 1** |
+| **Total** | **619** | **471 / 23 / 125 / 0** | **246 / 180 / 118 / 75** | **200 / 31 / 142 / 246** | **401 / 84 / 133 / 1** |
 
 ## What remains, by object type
 
@@ -55,12 +55,11 @@ first ones to confirm.
   in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and nothing else. Variety
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
-- **Ordnance.** The W1 to W5 passes cover most air-launched stores. Remaining:
-  AA6, AA9, PL7, PL10 (classified and energy-fitted, but no reviewed flight
-  profile and no imported default carrier; ported stations are already
-  source-compatible,
-  [why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)),
-  AEMP1, ASROC, the hidden
+- **Ordnance.** The W1 to W5 passes cover most air-launched stores. AA6, AA9,
+  PL7 and PL10 became live on compatible ported stations in JT-4 (John,
+  2026-11-06; no decoded default carrier is ported,
+  [rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)).
+  Remaining: AEMP1, ASROC, the hidden
   guns and gun pods ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN, whose
   decoded carriers are all unported
   ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)),
@@ -90,8 +89,7 @@ first ones to confirm.
 
 - [ROADMAP.md](../ROADMAP.md) W6 lists SS-N-9 as held, but `SSN9.JT` fires from
   surface units (`combat/missiles.rs`, `SURFACE_TO_SURFACE`).
-- The W2 row lists AIM7, AIM7E, AIM9B and AA10 as remaining, but they are in
-  `SUPPORTED_WEAPONS` (`combat/loadout.rs`).
+
 - [ai-experience.md](../spec/ai-experience.md) "Currently ported aircraft" says
   twelve; `AircraftId::ALL` holds 36 (13 roster including F22N, plus 23 variety).
 
@@ -267,10 +265,10 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 ### Mechanisms
 
-- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23, AA-6, AA-9, PL-7, PL-10, AEMP-1; the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
+- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23 and AEMP-1; the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). AA-6, AA-9, PL-7 and PL-10 joined the supported list in JT-4 ([rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)). Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes; other retarders are drag only.
-- **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10 items, are built.
+- **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
 - **Equipment.** One sensor component serves all 36 roster aircraft plus F/A-XX. It refuses unreviewed radar or ECM records (`crates/tore-sim/src/sensors/profile.rs:106,255,315`), so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape).
 - **Roster basis.** "Roster" means the 36 retail aircraft in `docs/spec/aircraft-variety.md` and `roster-aircraft.md`; carriers were computed from `docs/formats/fa-aircraft.csv` default stores only (stations can allow more).
 - **Grade rules.** Imported: Done = reachable in game; Partial = decoded and profiled or hooked but hidden; None = decoded only. Animations/AI use N/A where nothing applies.
@@ -287,9 +285,9 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AA11B.JT | AA-11B Backfire | Done | Done | Done | Done | Live; Su-35; wide-gimbal IR profile |
 | AA12.JT | AA-12 Adder | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; fit residual exception |
 | AA2.JT | AA-2D Atoll | Done | Done | Done | Done | Live; MiG-21; IR profile; fit residual exception |
-| AA6.JT | AA-6 Acrid | Partial | Partial | None | Partial | Hidden; classified SARH and energy-fitted, no reviewed flight profile; no imported default carrier, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
+| AA6.JT | AA-6 Acrid | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar, own record envelope and motor; no imported default carrier ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | AA8.JT | AA-8 Aphid | Done | Done | Done | Done | Live; MiG-29, Su-25; R-60M role; fit residual exception |
-| AA9.JT | AA-9 Amos | Partial | Partial | None | Partial | Hidden; classified SARH and energy-fitted, no reviewed flight profile; no imported default carrier, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
+| AA9.JT | AA-9 Amos | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar, own record envelope and motor; no imported default carrier ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | AAML.JT | AAM-L Anti-AWACS | Done | Done | Done | Done | Live; Su-35; active radar; no special anti-AWACS AI rule found (unverified) |
 | AEMP1.JT | AEMP-1 EM Pulse | Partial | Partial | None | Partial | Hidden; EM pulse effect (radius, no damage) undefined; nothing loads |
 | AIM120.JT | AIM-120 AMRAAM | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; 26 carriers |
@@ -300,8 +298,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AIM9M.JT | AIM-9M Sidewinder | Done | Done | Done | Done | Live; IR; most common AAM (27 carriers) |
 | AIM9X.JT | AIM-9X Sidewinder | Done | Done | Done | Done | Live; wide-angle IR; F-22/X-31 |
 | MICA.JT | Mica | Done | Done | Done | Done | Live; Rafale; MICA-EM radar role, no IR variant added |
-| PL10.JT | Chinese PL-10 | Partial | Partial | None | Partial | Hidden; classified SARH (radar-concept PL10-R), no reviewed flight profile; no default carrier anywhere, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
-| PL7.JT | Chinese PL-7 | Partial | Partial | None | Partial | Hidden; classified IR with a guarded motor fit, no reviewed flight profile; no imported default carrier, ported stations source-compatible ([why](../formats/aircraft-ordnance.md#air-to-air-missiles-nothing-loads-jt-2-2026-11-06)) |
+| PL10.JT | Chinese PL-10 | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar (radar-concept PL10-R), own record envelope and motor; no default carrier anywhere ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
+| PL7.JT | Chinese PL-7 | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); infrared with a guarded motor fit and own record envelope; no imported default carrier ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | R530.JT | Super 530 | Done | Done | Done | Done | Live; Rafale; S530D semi-active |
 | R550.JT | R-550 Magic 2 | Done | Done | Done | Done | Live; Rafale; IR Magic 2 |
 

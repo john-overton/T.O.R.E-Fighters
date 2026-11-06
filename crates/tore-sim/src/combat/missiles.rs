@@ -266,7 +266,12 @@ impl Profile {
             "R27ER.JT" | "R27T.JT" | "R27ET.JT" | "R530.JT" | "AS7.JT" | "AS15.JT" | "AA10.JT"
             | "AIM7.JT" | "AIM7E.JT" | "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT"
             | "AIM9M.JT" | "AIM9X.JT" | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT"
-            | "AIM9B.JT" | "AGM45.JT" | "AGM88.JT" => None,
+            | "AIM9B.JT" | "AGM45.JT" | "AGM88.JT"
+            // JT-4 (2026-11-06): the four decoded A2A records enabled on John's
+            // request. AA6, AA9 and PL10 are semi-active radar and PL7 is
+            // infrared, so none takes an active-radar activation distance.
+            // docs/spec/missiles.md, "Air-to-air missiles enabled".
+            | "AA6.JT" | "AA9.JT" | "PL7.JT" | "PL10.JT" => None,
             _ => return None,
         })
     }
