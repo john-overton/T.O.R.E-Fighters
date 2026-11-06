@@ -5,7 +5,10 @@
 //! are feet, X east, Y up, Z north.
 use crate::{WorldResult, resources::ResourceSource};
 use std::collections::{BTreeMap, BTreeSet};
-use tore_formats::theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater};
+use tore_formats::{
+    surface_set::SHAPES_ABSENT_FROM_MEDIA,
+    theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater},
+};
 
 pub mod redrawn;
 
@@ -391,14 +394,6 @@ pub const MAP_TIED_TYPES: [&str; 16] = [
     "ROAD4.OT",
     "ROADC.OT",
 ];
-
-/// Main shapes the reviewed retail media selection is known to lack, so a
-/// placement of their type is kept without geometry instead of failing the
-/// import. Only these names may be absent: any other missing shape means an
-/// incomplete or damaged import and still errors. Evidence and the exact
-/// records are in
-/// [TREE1 and TREE2 missing shapes](docs/formats/objects-and-shapes.md#tree1-and-tree2-missing-shapes-2026-11-06).
-const SHAPES_ABSENT_FROM_MEDIA: [&str; 2] = ["TREE1.SH", "TREE2.SH"];
 
 impl PlacedSize {
     /// The size rule of a placed type, from its definition.

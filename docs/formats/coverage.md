@@ -35,7 +35,7 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 | PT / PTS / SH / HUD | Partial | FA F18 PT fields, Hornet static SH/device geometry and cockpit artwork; PTS and complete native HUD/shape VM remain unimplemented |
 | T2 / BIT2 | Partial | All 16 grids parsed; native packed layout, heights and lookup verified; All 16 base theaters render as fixed-triangle previews (Kurile has no tmap textures) |
 | JT / SEE / ECM | Partial | Named schemas, dependency closure and 135 JT definitions extracted; SEE radar/infrared/visual volumes and ECM radar-deception fields drive the shared sensor component; remaining combat execution not complete |
-| OT | Partial | Bounded STRIP/166 metadata and explicit main shape reference; other classes, placement, callbacks and runtime absent |
+| OT | Partial | Bounded STRIP/166 metadata and explicit main shape reference; since slice OT-4 the import keeps every OT definition with its available main shape, damaged look, damaged variant and textures (170 records), so a mission can place any type. The two known-absent TREE shapes are tolerated and are not gaps. Other classes, placement, callbacks and runtime absent |
 | NT | Not started | Directory inventory only |
 | M / MM | Partial | All 75 selected MM layouts plus named mission environment/tmap fields decoded; isolated eight-field STRIP placement inputs decoded separately; missions and object execution absent |
 | MC mission code | Researched, not consumed | All 21 PL modules read statically: imports, host events, per-mission behaviour and classification; never executed and no runtime yet. [Notes](mission-code.md), [spec](../spec/mission-code.md) |

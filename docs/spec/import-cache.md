@@ -96,7 +96,11 @@ worked out from the data, not typed in, by `tore_formats::surface_set::select`
   every placement in the base theater layouts;
 - every `.NT` surface unit record in the library (84), named or not, so the
   pilots, the deck crew and the carriers the lists reach only by placeholder are
-  there; and `DEST.OT`, the wreck a destroyed vehicle leaves.
+  there;
+- every `.OT` static object record in the library (170), named or not, so the
+  mission loader can place any object a campaign mission names, not only those
+  a scanned template or base layout uses (slice OT-4, 2026-11-06); and
+  `DEST.OT`, the wreck a destroyed vehicle leaves.
 
 From each record the walk follows its shape, shadow shape, damaged shape, weapon
 and sensor records (and their shapes and sounds), the AI script and sound the
@@ -115,7 +119,14 @@ Aircraft the creator offers keep all of those through their own selection.
 The import report says "Surface data: 129 templates, N units, ..." and lists any
 required name the library lacked ("Surface data unavailable: NAME (needed by
 WHO)"); a gap does not stop an import and is repeated in the locate screen's
-summary. [`tore_import::surface`](../../crates/tore-import/src/surface.rs) is
+summary. The reviewed media lacks the shapes `TREE1.OT` and `TREE2.OT` name.
+Both are on the shared known-absent list
+(`tore_formats::surface_set::SHAPES_ABSENT_FROM_MEDIA`, the same list the terrain
+build uses), so they are not gaps: a complete retail pack has an empty missing
+list. Both definitions are still kept, and a placed type keeps its placement
+without geometry
+([objects and shapes](../formats/objects-and-shapes.md#tree1-and-tree2-missing-shapes-2026-11-06)).
+[`tore_import::surface`](../../crates/tore-import/src/surface.rs) is
 the lookup on a loaded pack: `present`, `template`, `templates`, `missing` and
 `check` (the completeness check, for tests and tools). Records are stored under
 their retail names, so loaders read them like any other resource. Measured size

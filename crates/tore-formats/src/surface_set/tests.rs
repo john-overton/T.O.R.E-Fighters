@@ -363,6 +363,71 @@ fn every_unit_record_is_kept_whether_a_template_names_it_or_not() {
 }
 
 #[test]
+fn every_object_record_is_kept_whether_a_template_names_it_or_not() {
+    // Slice OT-4: a mission may place an OT that no scanned template or base
+    // layout uses, so every definition is kept with its main shape, its
+    // damaged look, its damaged variant and their textures.
+    let mut pack = library();
+    pack.insert(
+        "OILW.OT".into(),
+        object_text("OILW.OT", Some("RIG1.SH"), &[]),
+    );
+    pack.insert("RIG1.SH".into(), shape_bytes(&["_RIG1.PIC"]));
+    pack.insert("RIG1_A.SH".into(), shape_bytes(&["_RIG1_A.PIC"]));
+    pack.insert(
+        "~OILW.OT".into(),
+        object_text("~OILW.OT", Some("DERIG.SH"), &[]),
+    );
+    pack.insert("DERIG.SH".into(), shape_bytes(&["_DERIG.PIC"]));
+    for texture in ["_RIG1.PIC", "_RIG1_A.PIC", "_DERIG.PIC"] {
+        pack.insert(texture.into(), vec![1]);
+    }
+    let selection = select(&pack).unwrap();
+    assert!(selection.missing.is_empty(), "{:?}", selection.missing);
+    assert!(selection.types[&Family::Object].contains("OILW.OT"));
+    for kept in [
+        "OILW.OT",
+        "RIG1.SH",
+        "RIG1_A.SH",
+        "_RIG1.PIC",
+        "~OILW.OT",
+        "DERIG.SH",
+        "_DERIG.PIC",
+    ] {
+        assert!(selection.resources.contains(kept), "{kept}");
+    }
+}
+
+#[test]
+fn the_known_absent_shapes_are_not_gaps_but_any_other_absent_shape_is() {
+    // Slice OT-4 review fix: the two names in SHAPES_ABSENT_FROM_MEDIA keep a
+    // definition without a gap entry, while any other absent shape is still
+    // reported.
+    let mut pack = library();
+    pack.insert(
+        "TREE1.OT".into(),
+        object_text("TREE1.OT", Some("TREE1.SH"), &[]),
+    );
+    pack.insert(
+        "TREE2.OT".into(),
+        object_text("TREE2.OT", Some("TREE2.SH"), &[]),
+    );
+    pack.insert(
+        "BROKEN.OT".into(),
+        object_text("BROKEN.OT", Some("OTHER.SH"), &[]),
+    );
+    let selection = select(&pack).unwrap();
+    for kept in ["TREE1.OT", "TREE2.OT", "BROKEN.OT"] {
+        assert!(selection.types[&Family::Object].contains(kept), "{kept}");
+        assert!(selection.resources.contains(kept), "{kept}");
+    }
+    assert_eq!(selection.missing.len(), 1, "{:?}", selection.missing);
+    let gap = selection.missing.iter().next().unwrap();
+    assert_eq!(gap.name, "OTHER.SH");
+    assert_eq!(gap.needed_by, "BROKEN.OT");
+}
+
+#[test]
 fn a_template_the_table_does_not_list_is_kept_and_a_bad_record_is_noted() {
     let mut pack = library();
     pack.insert("~QZZZZ.M".into(), template(&["T72.NT"]));

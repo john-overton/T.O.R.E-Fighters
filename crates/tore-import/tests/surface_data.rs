@@ -17,7 +17,8 @@ use std::{
 };
 use tore_formats::{
     quick_template::{ObjectKind, Placeholder, Template, tables},
-    surface_set::Family,
+    static_object::Definition,
+    surface_set::{Family, SHAPES_ABSENT_FROM_MEDIA},
     surface_unit::SurfaceUnit,
 };
 use tore_import::{MediaSource, Resources, check_markers, import_with_progress, surface};
@@ -161,11 +162,30 @@ fn resolves_every_ground_target(resources: &Resources) {
     ] {
         assert!(resources.contains_key(name), "{name}");
     }
-    // The pack as a whole: nothing a template, list or layout can name is
-    // missing, and every texture the shape reader finds is kept.
+    // Every static object definition, whether a template or base layout names
+    // it or not (slice OT-4), with its main shape.
+    let selection = tore_formats::surface_set::select(resources).unwrap();
+    let objects: BTreeSet<String> = resources
+        .keys()
+        .filter(|name| name.ends_with(".OT"))
+        .cloned()
+        .collect();
+    assert_eq!(selection.types[&Family::Object], objects);
+    for name in &objects {
+        let definition =
+            Definition::parse(&resources[name]).unwrap_or_else(|e| panic!("{name}: {e}"));
+        if let Some(shape) = definition.main_shape
+            && !SHAPES_ABSENT_FROM_MEDIA
+                .iter()
+                .any(|absent| shape.eq_ignore_ascii_case(absent))
+        {
+            assert!(resources.contains_key(&shape), "{name}: {shape}");
+        }
+    }
+    // The pack as a whole: only names the media is known to lack are absent,
+    // and every texture the shape reader finds is kept.
     let missing = surface::missing(resources).unwrap();
     assert!(missing.is_empty(), "{missing:#?}");
-    let selection = tore_formats::surface_set::select(resources).unwrap();
     eprintln!(
         "{} templates, {} units, {} objects, {} aircraft, {} surface resources",
         selection.templates.len(),
@@ -175,6 +195,7 @@ fn resolves_every_ground_target(resources: &Resources) {
         selection.resources.len()
     );
     assert_eq!(selection.count(Family::Unit), 84);
+    assert_eq!(selection.count(Family::Object), 170);
     // The aircraft parked in the templates: record and shapes.
     for name in selection.types[&Family::Aircraft].iter() {
         let definition = tore_formats::static_object::Definition::parse(&resources[name]).unwrap();

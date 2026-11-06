@@ -5,7 +5,7 @@
 //! surface units (NT), static objects (OT) and aircraft (PT). The executable's
 //! equipment lists name the units a `<sam>`, `<aaa>` or ship placeholder can turn
 //! into, and the base theater layouts name the units they place. This module
-//! starts from those four sources, reads each record with the readers in this
+//! starts from those sources, reads each record with the readers in this
 //! crate and follows what the record names: shapes, damaged shapes, textures,
 //! weapon and sensor records, sounds and scripts. It reads bounded data only; no
 //! callback, symbol or mission statement is executed.
@@ -37,6 +37,14 @@ const AIRCRAFT_LOOKS: [char; 5] = ['S', 'A', 'B', 'C', 'D'];
 /// A bound on the names one selection may hold (a full library has about
 /// 5,400 resources in the second archive).
 const MAX_RESOURCES: usize = 16_384;
+
+/// Main shapes the reviewed retail media selection is known to lack, so a
+/// placement of their type is kept without geometry instead of failing the
+/// import. Only these names may be absent: any other missing shape means an
+/// incomplete or damaged import and still errors. Evidence and the exact
+/// records are in
+/// [TREE1 and TREE2 missing shapes](docs/formats/objects-and-shapes.md#tree1-and-tree2-missing-shapes-2026-11-06).
+pub const SHAPES_ABSENT_FROM_MEDIA: [&str; 2] = ["TREE1.SH", "TREE2.SH"];
 
 /// Somewhere to look names up: the archives of a source, or the resources of a
 /// pack.
@@ -135,8 +143,8 @@ impl Selection {
 /// Roots, all from data: every `~Q*.M` in the library and every template
 /// [`tables::TEMPLATES`] lists; the named types of each template; every unit
 /// of [`tables::LISTS`] and [`tables::NIGHT_AAA`]; the object type of every
-/// placement in the base theater layouts; every `.NT` record in the library;
-/// and [`DESTROYED_VEHICLE_OBJECT`].
+/// placement in the base theater layouts; every `.NT` and `.OT` record in the
+/// library; and [`DESTROYED_VEHICLE_OBJECT`].
 ///
 /// Followed from a record: an NT's shape, shadow shape, damaged shape, weapon
 /// and sensor records and script; an OT's main shape; the resources a record's
@@ -151,6 +159,10 @@ impl Selection {
 /// whose callback is `_CARRIERProc`) has a tower `<stem>T.SH` with a `~<stem>T.OT`
 /// and a far shape `X<stem>.SH`; an aircraft shape `S` has looks `S_S` and `S_A`
 /// to `S_D`.
+///
+/// [`SHAPES_ABSENT_FROM_MEDIA`] names the only shapes the reviewed media is
+/// known to lack. Those two names are not recorded as gaps: a complete retail
+/// pack has an empty [`Selection::missing`] list.
 pub fn select(library: &dyn Library) -> Result<Selection> {
     let mut walk = Walk::new(library);
     walk.roots()?;
@@ -208,10 +220,17 @@ impl<'a> Walk<'a> {
             self.add(name);
             true
         } else {
-            self.selection.missing.insert(Missing {
-                name: name.to_owned(),
-                needed_by: needed_by.to_owned(),
-            });
+            // The two shapes the reviewed media is known to lack are not gaps:
+            // a complete retail pack must have an empty missing list.
+            if !SHAPES_ABSENT_FROM_MEDIA
+                .iter()
+                .any(|absent| name.eq_ignore_ascii_case(absent))
+            {
+                self.selection.missing.insert(Missing {
+                    name: name.to_owned(),
+                    needed_by: needed_by.to_owned(),
+                });
+            }
             false
         }
     }
@@ -344,11 +363,16 @@ impl<'a> Walk<'a> {
                 }
             }
         }
-        // Every surface unit record, named by a template or not (the pilots and
-        // deck crew, the carriers the lists reach only by placeholder).
+        // Every surface unit and every static object record, named by a
+        // template or not. The units cover the pilots, the deck crew and the
+        // carriers the lists reach only by placeholder. The objects let a
+        // campaign mission place any OT type, not just those that a scanned
+        // template or base layout happens to use (slice OT-4).
         for name in library.names() {
             if name.ends_with(".NT") {
                 self.type_root(&name, "the library's surface unit records");
+            } else if name.ends_with(".OT") {
+                self.type_root(&name, "the library's static object records");
             }
         }
         // The wreck every destroyed vehicle leaves.

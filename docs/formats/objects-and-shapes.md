@@ -1505,7 +1505,8 @@ exact visible result beyond "no geometry to draw" is **unknown**.
 
 **Import handling.** `Placements::add_type` tolerates a missing main shape only
 for a short, named list the reviewed media is known to lack: `TREE1.SH` and
-`TREE2.SH` (`SHAPES_ABSENT_FROM_MEDIA`). For those two only, a placed type keeps
+`TREE2.SH` (`tore_formats::surface_set::SHAPES_ABSENT_FROM_MEDIA`, shared with
+the import selection). For those two only, a placed type keeps
 its definition and placement, stores no shape or scale, returns no stance, and
 is listed in `unreadable`; the scene logs it as retained without visual
 geometry. A mission may place TREE1.OT or TREE2.OT without failing the terrain
