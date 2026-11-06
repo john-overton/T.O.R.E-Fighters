@@ -267,7 +267,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 ### Mechanisms
 
-- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:107`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23, AA-6, AA-9, PL-7, PL-10, AEMP-1; the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)).
+- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23, AA-6, AA-9, PL-7, PL-10, AEMP-1; the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10 items, are built.
@@ -387,8 +387,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | MK12.JT | Mk 12 20mmx2 | Done | Done | Done | Done | A-4E; shared gun model; no fighter muzzle flash |
 | SUU16.JT | SUU-16 Gun Pod | Done | Done | Done | Done | Gun pod hangs on F-4 pylon; 1,200 rounds; no fighter muzzle flash |
 | T12_4.JT | 12.7mmx4 turret | Done | Done | Partial | Done | Mi-24 12.7 mm; AI turret use unverified |
-| T20_1.JT | 20mmx1 turret | None | None | None | None | Decoded only; no roster carrier or unit uses it |
-| T23_1.JT | 23mmx1 turret | None | None | None | None | Decoded only; no roster carrier or unit uses it |
+| T20_1.JT | 20mmx1 turret | None | None | None | None | No NT or PT names it (JT-3 scan); 20 mm turret round, not a surface weapon |
+| T23_1.JT | 23mmx1 turret | None | None | None | None | No NT mounts it; Tu-26/Tu-95 tail turret, both unported (JT-3 scan); not a surface weapon |
 | T30_1.JT | 30mmx1 turret | Done | Done | Partial | Done | V-22/Ka-50-style 30 mm; AI turret use unverified |
 | ~VOMIT.JT | Vomit | None | None | N/A | None | Novelty joke record; nothing loads it |
 
@@ -397,7 +397,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | Resource | Name/role | Imported | Animations | AI | Logic | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2S6.JT | 2S6 Tunguska | Done | Done | Done | Done | Tunguska radar gun; tuned burst, magazines; tracers/flash |
-| AAA20.JT | 20mm radar AAA | None | None | None | None | 20 mm radar AAA; no unit references it |
+| AAA20.JT | 20mm radar AAA | None | None | None | None | No NT mounts it (JT-3 scan); no reviewed gun-table row |
 | AAA30.JT | 30mm radar AAA | Done | Done | Done | Done | AK-630 class ship gun, radar; tracers/flash |
 | AAA30BAD.JT | 30mm visual AAA | Done | Done | Done | Done | AK-230 class ship gun, visual; tracers/flash |
 | ASROC.JT | ASROC | Partial | None | None | None | Ticonderoga carries it; held, no submarine target exists |
@@ -405,20 +405,20 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | BMP2.JT | bmp2 | Done | Done | Done | Done | IFV 30 mm; visual aim; tracers/flash |
 | BTR80.JT | btr80 | Done | Done | Done | Done | IFV 14.5 mm; visual aim; tracers/flash |
 | FIM92.JT | FIM-92 Stinger | Done | Done | Done | Done | Stinger unit; IR, flare decoy |
-| HQ2J.JT | HQ-2J SAM | None | None | None | None | Decoded only; no unit references it |
-| HQ61.JT | HQ-61 | None | None | None | None | Decoded only; no unit references it |
+| HQ2J.JT | HQ-2J SAM | None | None | None | None | No NT or PT mounts it (JT-3 scan); Catalog, no reviewed flight profile |
+| HQ61.JT | HQ-61 | None | None | None | None | No NT or PT mounts it (JT-3 scan); Catalog, no reviewed flight profile |
 | KS12.JT | KS-12 85mm AAA | Done | Done | Done | Done | 85 mm flak; time fuze in 300 m egg, 4,000 ft floor; tracers/flash |
 | KS19.JT | KS-19 100mm AAA | Done | Done | Done | Done | 100 mm flak; time fuze in egg, 4,000 ft floor; tracers/flash |
 | M1.JT | m1 | Done | Done | Done | Done | M1 tank gun; aircraft within 20 degrees only; tracers/flash |
 | M113.JT | m113 | Done | Done | Done | Done | APC .50 cal; visual aim; tracers/flash |
-| M163.JT | M163 | None | None | None | None | Unused retail ZSU23 copy; M163 unit mounts PHALANX |
+| M163.JT | M163 | None | None | None | None | No NT mounts it (JT-3 scan); unused ZSU23 copy, M163 unit mounts PHALANX |
 | M1939.JT | M1939 37mm AAA | Done | Done | Done | Done | 37 mm visual AAA; tracers/flash |
 | M2.JT | m2 | Done | Done | Done | Done | M2 25 mm APC gun; visual aim; tracers/flash |
-| MIM23.JT | MIM-23 HAWK | None | None | None | None | Decoded only; no unit fires it (HAWK/Roland use SA19) |
+| MIM23.JT | MIM-23 HAWK | None | None | None | None | No NT mounts it (JT-3 scan); HAWK uses SA19; Catalog |
 | MIS.JT | Mistral | Done | Done | Done | Done | Mistral unit; SA-3 envelope copy; surface AI fires, chaff decoys |
 | PHALANX.JT | 20mm Phalanx | Done | Done | Done | Done | Ship CIWS and M163 mount; tuned rate; tracers/flash |
 | R440.JT | R-440 Matra | Done | Done | Done | Done | ASA5 unit missile; surface AI fires, chaff decoys |
-| ROLAND.JT | Roland Euromissile | None | None | None | None | Decoded only; no unit fires it (HAWK/Roland use SA19) |
+| ROLAND.JT | Roland Euromissile | None | None | None | None | No NT mounts it (JT-3 scan); Roland uses SA19; Catalog |
 | SA13.JT | SA-13 Gopher | Done | Done | Done | Done | SA-13 and CHAP; IR |
 | SA14.JT | SA-14 Gremlin | Done | Done | Done | Done | SA-14; IR |
 | SA15.JT | SA-15 Gauntlet | Done | Done | Done | Done | SA-15 self-contained launcher; surface AI fires, chaff decoys |
@@ -432,9 +432,9 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | SAN11.JT | SA-N-11 | Done | Done | Done | Done | Kirov; SA-N-11 supported radar (default, pending John); surface AI fires, chaff decoys |
 | SAN3.JT | SA-N-3 Goblet | Done | Done | Done | Done | Kiev ship SAM; surface AI fires, chaff decoys |
 | SAN4.JT | SA-N-4 Gecko | Done | Done | Done | Done | Ship SAM on 7 ships; surface AI fires, chaff decoys |
-| SAN5.JT | SA-N-5 Grail | None | None | None | None | Decoded only; no unit references it |
+| SAN5.JT | SA-N-5 Grail | None | None | None | None | No NT or PT mounts it (JT-3 scan); Catalog, no reviewed flight profile |
 | SAN7.JT | SA-N-7 Gadfly | Done | Done | Done | Done | Sovremennyy ship SAM; surface AI fires, chaff decoys |
-| SAN8.JT | SA-N-8 Gremlin | None | None | None | None | Decoded only; no unit references it |
+| SAN8.JT | SA-N-8 Gremlin | None | None | None | None | No NT or PT mounts it (JT-3 scan); Catalog, no reviewed flight profile |
 | SAN9.JT | SA-N-9 Klinok | Done | Done | Done | Done | Kiev ship SAM; surface AI fires, chaff decoys |
 | SEA_SPAR.JT | AIM-7 Sea Sparrow | Done | Done | Done | Done | Carrier/Iowa Sea Sparrow; 4 carriers; surface AI fires, chaff decoys |
 | SMLARMS.JT | Small Arms fire | Done | Done | Done | Done | Squad small arms; rarely hit jets; tracers/flash |

@@ -309,6 +309,76 @@ set, `the_unloaded_air_to_air_missiles_have_no_reviewed_flight_profile`
 `crates/tore-import/tests/unloaded_missiles.rs` (retail, skips without media)
 checks the decoded seeker class and that no imported aircraft is built with one.
 
+## Surface records nothing mounts (JT-3, 2026-11-06)
+
+Research and implementation note for the ten decoded records the surface weapon
+lists leave out: six surface missiles (`HQ2J.JT`, `HQ61.JT`, `MIM23.JT`,
+`ROLAND.JT`, `SAN5.JT`, `SAN8.JT`) and four gun-round records (`AAA20.JT`,
+`M163.JT`, `T20_1.JT`, `T23_1.JT`). All ten decode from `FA_2.LIB` and their
+full records are in [`fa-weapons.csv`](fa-weapons.csv).
+
+A decoded scan of every NT hardpoint in `FA_1.LIB` and `FA_2.LIB` finds no
+`defaultTypeName` naming any of the ten (`SurfaceUnit::parse`,
+`crates/tore-formats/src/surface_unit.rs:411`). The scan is
+`no_nt_unit_mounts_a_decoded_only_surface_record`
+(`crates/tore-import/tests/unloaded_surface_weapons.rs`, retail, skips without
+media); it reads all 84 NT records and every PT record. Only `T23_1.JT` appears
+in a PT: the turret record of the Tu-26 and Tu-95 (`fa-aircraft.csv:138`,
+`fa-aircraft.csv:139`), both outside `AircraftId::ALL`
+(`crates/tore-formats/src/aircraft.rs:308`). `T20_1.JT` is named by no record.
+
+| Record | Decoded class | NT units carrying it | Why it stays out |
+| --- | --- | --- | --- |
+| `HQ2J.JT` (`fa-weapons.csv:71`) | radar SAM, seeker 3, support flag 0x200 | none | no carrier; Catalog, no reviewed flight profile |
+| `HQ61.JT` (`fa-weapons.csv:72`) | radar SAM, seeker 3, support flag 0x200 | none | no carrier; Catalog, no reviewed flight profile |
+| `MIM23.JT` (`fa-weapons.csv:84`) | radar SAM, seeker 3, support flag 0x200 | none | no carrier; HAWK uses SA19; Catalog |
+| `ROLAND.JT` (`fa-weapons.csv:104`) | radar SAM, seeker 3, support flag 0x200 | none | no carrier; Roland uses SA19; Catalog |
+| `SAN5.JT` (`fa-weapons.csv:118`) | infrared SAM, seeker 2 | none | no carrier; Catalog, no reviewed flight profile |
+| `SAN8.JT` (`fa-weapons.csv:120`) | infrared SAM, seeker 2 | none | no carrier; Catalog, no reviewed flight profile |
+| `AAA20.JT` (`fa-weapons.csv:12`) | 20 mm radar AAA round, seeker 3 | none | no carrier; no gun-table row |
+| `M163.JT` (`fa-weapons.csv:79`) | 20 mm round, seeker 3, ZSU23 copy | none; `M163.NT` mounts `PHALANX.JT` (`surface-units.md:212`) | no carrier; the M163 row is PHALANX with replaced zones ([AAA tuning](../spec/surface-defenses.md#aaa-tuning)) |
+| `T20_1.JT` (`fa-weapons.csv:127`) | 20 mm turret round, seeker 0 | none | aircraft turret record, no carrier; not a surface weapon |
+| `T23_1.JT` (`fa-weapons.csv:128`) | 23 mm turret round, seeker 0 | none | Tu-26/Tu-95 turret record, both unported; not a surface weapon |
+
+The six missiles stay out for two independent reasons. First, no surface unit
+carries one, so a surface list entry would enable a record nothing can fire.
+Second, none has a reviewed flight profile: `Profile::reviewed_activation`
+(`crates/tore-sim/src/combat/missiles.rs:253`) excludes all six, so
+`Profile::for_weapon` returns `None` and a shot would be refused as unreviewed.
+[The missile spec](../spec/missiles.md#first-pass-inventory-matrix) marks all
+six **Catalog** (`missiles.md:297`, `:298`, `:300`, `:307`, `:321`, `:323`).
+Do not alias a record to a live same-class store: `HQ2J.JT` and `HQ61.JT` are
+not `SA2A.JT` or `SA3.JT`, `MIM23.JT` and `ROLAND.JT` are not `SA19.JT`, and
+`SAN5.JT` and `SAN8.JT` are not `SA7.JT` or `SA14.JT`.
+
+`AAA20.JT` and `M163.JT` decode as gun rounds but have no row in the AAA
+tuning table (`crates/tore-sim/src/combat/surface_guns.rs`, `TABLE`), so
+`is_surface_gun` is false and no unit could fire either as a surface gun.
+Adding a row would also need the reviewed rate, magazine and reload the table
+carries. `M163.JT` is the unused ZSU23 copy the M163 record does not mount;
+switching the M163 to it was already rejected because it keeps the 60,000 ft
+sight ([AAA tuning](../spec/surface-defenses.md#aaa-tuning)).
+
+`T20_1.JT` and `T23_1.JT` are aircraft turret gun rounds, not surface weapons.
+`T23_1.JT` is the turret record named by the Tu-26 and Tu-95, neither imported;
+`T20_1.JT` is referenced by no record. They wait for aircraft turret work, not
+for the surface lists.
+
+Implementation (slice JT-3, 2026-11-06): nothing is enabled. The six missiles
+stay out of `SURFACE_SUPPORTED` and `SURFACE_INFRARED`
+(`crates/tore-sim/src/combat/missiles.rs:110` and `:127`), and the four gun
+records have no `TABLE` row. Next step: if an M3 mission or a later NT record
+mounts one, review its flight profile, or add a reviewed gun-table row, before
+adding the record to the surface list. Until then it stays catalog-only.
+
+Guards: `the_decoded_only_surface_records_are_not_wired`
+(`crates/tore-sim/src/combat/live/surface_tests.rs`) keeps all ten out of the
+surface missile lists and the gun table, and checks the six have no reviewed
+profile. `crates/tore-import/tests/unloaded_surface_weapons.rs` (retail, skips
+without media) checks that no NT mounts any of the ten, that only the Tu-26 and
+Tu-95 PT records name `T23_1.JT`, and that no imported aircraft is built with
+one.
+
 ## Paired-point counts and physics
 
 Research review, 2026-10-25, using the FA.EXE, FA.SMS and FA_2.LIB identities

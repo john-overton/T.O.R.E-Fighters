@@ -223,6 +223,9 @@ const fn retail(
 /// are fitted after the real weapons named in `gun`; the retail pause and
 /// opening barrage are kept wherever they fit. Order is the order of the spec
 /// table: self-propelled AA guns, ship guns, towed guns and flak, vehicles.
+/// The decoded 20 mm records AAA20 and M163 have no row, and neither do the
+/// aircraft turret rounds T20_1 and T23_1: no NT unit mounts any of them
+/// (docs/formats/aircraft-ordnance.md, "Surface records nothing mounts").
 pub const TABLE: &[GunTuning] = &[
     GunTuning {
         record: "ZSU23.JT",

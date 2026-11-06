@@ -103,7 +103,10 @@ pub enum TargetRole {
 /// proposes, plus SA-19 and SA-N-11, which lack the flag but arm the HAWK,
 /// Roland, 2S6 and Kirov (default, pending John). Target role aircraft.
 /// ASROC stays held (no submarine is ever a target); the SS-N-9 is
-/// [`SURFACE_TO_SURFACE`].
+/// [`SURFACE_TO_SURFACE`]. The decoded-only records HQ2J, HQ61, MIM23, ROLAND,
+/// SAN5 and SAN8 stay out: no NT unit carries them and they have no reviewed
+/// flight profile (docs/formats/aircraft-ordnance.md, "Surface records nothing
+/// mounts").
 pub const SURFACE_SUPPORTED: [&str; 13] = [
     "SA2A.JT",
     "SA3.JT",

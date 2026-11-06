@@ -264,6 +264,49 @@ fn surface_missiles_have_reviewed_profiles_and_asroc_none() {
     assert!(missiles::ANTI_SHIP.contains(&"SSN9.JT"));
 }
 
+/// The decoded-only surface records (slice JT-3): no NT unit carries them, the
+/// six missiles have no reviewed flight profile and the four gun-round records
+/// have no gun-table row, so none is in a surface weapon list.
+/// docs/formats/aircraft-ordnance.md, "Surface records nothing mounts".
+#[test]
+fn the_decoded_only_surface_records_are_not_wired() {
+    const DECODED_ONLY: [&str; 10] = [
+        "HQ2J.JT",
+        "HQ61.JT",
+        "MIM23.JT",
+        "ROLAND.JT",
+        "SAN5.JT",
+        "SAN8.JT",
+        "AAA20.JT",
+        "M163.JT",
+        "T20_1.JT",
+        "T23_1.JT",
+    ];
+    for name in DECODED_ONLY {
+        assert!(!missiles::SURFACE_SUPPORTED.contains(&name), "{name}");
+        assert!(!missiles::SURFACE_INFRARED.contains(&name), "{name}");
+        assert!(!missiles::SURFACE_TO_SURFACE.contains(&name), "{name}");
+        assert!(!surface_guns::is_surface_gun(name), "{name}");
+    }
+    for name in [
+        "HQ2J.JT",
+        "HQ61.JT",
+        "MIM23.JT",
+        "ROLAND.JT",
+        "SAN5.JT",
+        "SAN8.JT",
+    ] {
+        assert!(
+            missiles::Profile::for_weapon(&record(name)).is_none(),
+            "{name} must have no profile until its flight behaviour is reviewed"
+        );
+        assert!(
+            !missiles::Profile::reviewed(name),
+            "{name} must not be reviewed"
+        );
+    }
+}
+
 #[test]
 fn a_surface_gun_round_carries_its_record_its_share_and_its_tracer() {
     let mut s = scene();
