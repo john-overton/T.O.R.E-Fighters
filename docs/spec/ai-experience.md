@@ -141,6 +141,12 @@ been established from experience. Do not invent one under a retail label.
 
 ## Currently ported aircraft
 
+Update 2026-11-06: `AircraftId::ALL` now holds 36 aircraft: the 13-aircraft
+roster (the twelve below plus the F-22N) and 23 variety aircraft (transports,
+helicopters, VTOL, F-4 and other variants). The table and the twelve-aircraft
+statements below record the 2026-09-17 scope and have not been widened;
+AI coverage of the later aircraft is not claimed here.
+
 The initial AI implementation and acceptance scope includes all twelve aircraft
 in `tore-formats::aircraft::AircraftId::ALL`, checked on 2026-09-17. Each exact
 FA PT record below names `f.BI` through `ctName`. The common fighter/strike
