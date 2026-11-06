@@ -858,7 +858,11 @@ impl Shape {
                         }
                     }
                     let mut next = None;
-                    for r in start..(start + 128).min(c.len().saturating_sub(10)) {
+                    // Reviewed CRATER.SH hands control to the main program and
+                    // comes back 0xb5 bytes after the f0 marker, longer than the
+                    // old 128-byte bound. The first push target is still the
+                    // resume point; the bound only has to cover a native prelude.
+                    for r in start..(start + 512).min(c.len().saturating_sub(10)) {
                         if c[r] == 0x68 && c[r + 5] == 0x68 && c[r + 10] == 0xc3 {
                             let t = u32_at(c, r + 1)?
                                 .checked_sub(base)
@@ -1040,6 +1044,54 @@ impl Shape {
                             address: base + addr,
                         });
                     }
+                }
+                0xdc => {
+                    // Reviewed decal face (CRATER.SH; WAVE1/WAVE2.SH use the
+                    // same record): a u16 slot count at +2, then that many u16
+                    // byte-slot offsets. It draws with the current texture and
+                    // the corners the preceding e4 record set. This is a data
+                    // record, not an x86 envelope.
+                    let addr = p;
+                    if slice(c, p + 1, 1)?[0] != 0 {
+                        return Err(invalid("unreviewed shape decal face"));
+                    }
+                    let count = u16_at(c, p + 2)? as usize;
+                    if !(3..=64).contains(&count) {
+                        return Err(invalid("invalid decal face count"));
+                    }
+                    let mut positions = Vec::new();
+                    for i in 0..count {
+                        let slot = u16_at(c, p + 4 + i * 2)?;
+                        if slot % 8 != 0 {
+                            return Err(invalid("unaligned decal face slot"));
+                        }
+                        positions.push(
+                            *slots
+                                .get(&(slot / 8))
+                                .ok_or_else(|| invalid("unresolved decal face vertex"))?,
+                        );
+                    }
+                    if seen.insert((
+                        addr,
+                        transform.map(f32::to_bits),
+                        fog as u8,
+                        heading.to_bits(),
+                    )) {
+                        faces.push(Face {
+                            positions,
+                            colors: vec![0; count],
+                            fog,
+                            uv: sprite_uv
+                                .filter(|uv| uv.len() == count)
+                                .map(Vec::from)
+                                .unwrap_or_default(),
+                            texture: texture.clone(),
+                            subtype: 0,
+                            normal: None,
+                            address: base + addr,
+                        });
+                    }
+                    p += 4 + 2 * count;
                 }
                 0x42 => {
                     let rest = slice(c, p + 2, c.len().saturating_sub(p + 2))?;
@@ -1333,6 +1385,48 @@ mod tests {
         assert!(Shape::with_export_state(&module::fixture(&loop_code), &BTreeMap::new()).is_err());
         let outside = [0x48, 0, 0xff, 0x7f];
         assert!(Shape::with_export_state(&module::fixture(&outside), &BTreeMap::new()).is_err());
+    }
+
+    /// CRATER.SH (OT-1): its f0 prelude hands control to the main program and
+    /// resumes 0xb5 bytes later, beyond the old 128-byte search bound. After the
+    /// resume it draws one four-corner decal from the preceding e4 corners.
+    #[test]
+    fn long_native_prelude_resumes_and_projects_a_decal_face() {
+        let mut code = vec![0xf0, 0];
+        code.extend(std::iter::repeat_n(0x90, 140));
+        let records = code.len() + 11;
+        push_trampoline(&mut code, records);
+        for (slot, (x, y)) in [
+            (0u16, (-250i16, -250i16)),
+            (8, (-250, 250)),
+            (16, (250, 250)),
+            (24, (250, -250)),
+        ] {
+            code.extend([0x7a, 0]);
+            for word in [x, y, 0, slot as i16] {
+                code.extend(word.to_le_bytes());
+            }
+        }
+        code.extend([0xe2, 0]);
+        code.extend(b"TEST.PIC\0\0\0\0\0\0");
+        code.extend([0xe4, 0, 4, 0]);
+        for (u, v) in [(1u16, 0u16), (1, 63), (79, 63), (79, 0)] {
+            code.extend(u.to_le_bytes());
+            code.extend(v.to_le_bytes());
+        }
+        code.extend([0xdc, 0, 4, 0]);
+        for slot in [0u16, 8, 16, 24] {
+            code.extend(slot.to_le_bytes());
+        }
+        code.extend([0xca, 0, 1, 0, 0xda, 0, 0xff, 0xff, 0]);
+        let shape = Shape::scenery(&module::fixture(&code)).unwrap();
+        assert_eq!(shape.faces.len(), 1);
+        let face = &shape.faces[0];
+        assert_eq!(face.positions.len(), 4);
+        assert_eq!(face.texture, "TEST.PIC");
+        assert_eq!(face.uv, vec![[1., 0.], [1., 63.], [79., 63.], [79., 0.]]);
+        assert_eq!(face.positions[0], [-250., -250., 0.]);
+        assert_eq!(face.positions[2], [250., 250., 0.]);
     }
 
     #[test]

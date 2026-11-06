@@ -69,10 +69,10 @@ first ones to confirm.
   wake motion, and only five Quick Mission templates move units. Carrier deck
   operations and the deck tractors are open (M3 scope).
 - **Static objects.** Nearly all load and buildings, bridges and runways have
-  damage and services. Gaps: TREE1/TREE2 have no shape in the media, CRATER.SH
-  fails to parse, about 69 types use a fitted ruin, tower and HAWK antenna spin is
-  not built, and hit points for pavement, rocks, flags and carrier islands are
-  unverified. Ten types are never placed by the layouts scanned.
+  damage and services. Gaps: TREE1/TREE2 have no shape in the media, about 69
+  types use a fitted ruin, tower and HAWK antenna spin is not built, and hit
+  points for pavement, rocks, flags and carrier islands are unverified. Ten types
+  are never placed by the layouts scanned.
 - **Mission side.** Campaign `.M` scripting, `.MC` code modules, campaign `.MT`
   sections, `.SEQ`, `.CAM`, campaign `.TXT`, pilot records and saves are not
   started; see [the last section](#mission-side-and-other-formats).
@@ -775,7 +775,7 @@ Research mode, read-only; retail OT/MM files extracted outside the repo only. Gr
 ### Mechanisms
 
 - **What an OT is.** An OT is the OBJECT block alone: name, flags, class, hit points, explosion/crater words, one explicit main SH. NT/PT add NPC blocks, hardpoints and (PT) plane data; JT is a weapon. 83 structures, 74 other objects and 13 runways (`_STRIPProc`) in the archive. Evidence: docs/formats/objects-and-shapes.md ("NT surface-unit layout"), docs/formats/surface-units.md:82.
-- **Import.** All 170 definitions parse; 163 shapes project; CRATER.SH fails its re-entry pattern, TREE1/TREE2 shapes are absent (docs/baselines/retail-terrain-review.md "Object findings"). 75 of 75 retail layouts build (docs/formats/airport-placements.md). The city fill kit also uses OT shapes (crates/tore-world/src/city/kit.rs).
+- **Import.** All 170 definitions parse; 164 shapes project; TREE1/TREE2 shapes are absent (docs/baselines/retail-terrain-review.md "Object findings"). CRATER.SH reads since OT-1 (2026-11-06): its long native prelude resumes on the decal program and its `dc` face projects. 75 of 75 retail layouts build (docs/formats/airport-placements.md). The city fill kit also uses OT shapes (crates/tore-world/src/city/kit.rs).
 - **Scale and footing.** One rule for all (`terrain::placed_shape_scale`, `tore_world::grounding`): a third of retail scale, runways/bridges/roads at 1, stand on lowest point, broad foundations (docs/spec/surface-defenses.md "Grounded objective assemblies", docs/spec/bridges.md).
 - **Damage and destruction.** Placed objects are live targets with OT hit points. At 0 HP: `~` variant (`~BNK5/6/8`, `~COLTWR`, carrier islands), else the shape's own damage branch (57 types), else a fitted generated ruin; fire and smoke persist (docs/spec/surface-defenses.md "Destroyed looks", "Wreck fires"). Pavement, roads, lots, crops, rocks and flags stay as they stood. Runways keep craters.
 - **Runways/airports.** Landing, tower, ILS, STOL labels, redrawn merged fields (docs/spec/airports.md, docs/formats/redrawn-airports.md). Retail has no airfield lights or windsocks (redrawn-airports.md "Lights"); the lights present are an added redrawn-field feature.
@@ -938,7 +938,7 @@ Research mode, read-only; retail OT/MM files extracted outside the repo only. Gr
 | MOOSEB.OT | Moose / mooseb.SH | Done | None | N/A | Done | Static prop; motion unverified |
 | WTRBUF.OT | Water Buffalo / wtrbuf.SH | Done | None | N/A | Done | Static prop; motion unverified; No retail MM places it |
 | **other** | | | | | | |
-| CRATER.OT | Crater / crater.SH | Partial | N/A | N/A | Partial | Shape unreadable; craters drawn by effect sheet; burns hard |
+| CRATER.OT | Crater / crater.SH | Done | N/A | N/A | Partial | Shape reads and projects (OT-1); retail draws live craters from the effect sheet; burns hard |
 | CROPA.OT | Crops / cropa.SH | Done | N/A | N/A | Partial | Contact box; stays as stood; HP unverified |
 | CROPB.OT | Crops / cropb.SH | Done | N/A | N/A | Partial | Contact box; stays as stood; HP unverified |
 | DEST.OT | Destroyed / dest.SH | Done | Done | N/A | Done | Wreck for destroyed vehicles; fire/smoke |

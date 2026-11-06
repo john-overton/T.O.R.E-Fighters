@@ -136,9 +136,12 @@ unsupported opcodes noted there. Restoring their appearance does not authorize
 ground-defense AI. No-body controllers are not missing visible buildings.
 
 The two gameplay archives contain 170 OT entries. All 170 definition records
-parsed. Of their referenced shapes, 163 projected, CRATER.SH failed its bounded
-re-entry pattern, four carrier-tower shapes produced no accepted geometry,
-and TREE1.SH/TREE2.SH were absent. Those last two definitions also have empty
+parsed. Of their referenced shapes, 163 projected at this pass, CRATER.SH failed
+its bounded re-entry pattern, four carrier-tower shapes produced no accepted
+geometry, and TREE1.SH/TREE2.SH were absent. OT-1 (2026-11-06) later taught the
+reader CRATER.SH's long native prelude and its `dc` face, so it now projects as
+well ([decoded records](../formats/objects-and-shapes.md#what-the-bounded-reader-accepts)).
+Those last two definitions also have empty
 display/class names and no base-layout placements. This does not establish a
 usable retail forest system or exclude some separate resource path.
 

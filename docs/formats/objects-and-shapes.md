@@ -702,8 +702,10 @@ No branch: the bridge ends (BR1END, BR2END, BR3END, BRDEND), the runways
 (STRIP*, DTSTRP), roads, lots, crops, rocks, flags, trees, the apartment and
 city blocks (APT*, CTYBK*, TWNBK*, CITY1-3), the city groups (CGRP, HGRP,
 SGRP), houses, slums, IND1-2, RES1-2, FCTYB, KING, CASTLE, the HAWK and SA-3
-sites, tents, crates and containers. `CRATER.SH` does not read (native
-re-entry). The generic damaged unit shapes `AAA_A`, `SAM_A`, `TANK_A` and
+sites, tents, crates and containers. `CRATER.SH` reads since OT-1 (2026-11-06):
+its long native prelude resumes on the decal program and projects one face
+([decoded records](#what-the-bounded-reader-accepts)). The generic damaged unit
+shapes `AAA_A`, `SAM_A`, `TANK_A` and
 `VEHI_A` and `DEBRIS.SH` exist but no record names them; units keep the
 `DEST.OT` wreck.
 
@@ -780,8 +782,9 @@ the reviewed byte patterns named here; no imported code runs.
 | `ea` | centre slot, width, height | sprite facing the viewer (`Shape::billboards`) |
 | `12`, `c4`, `38`, `1e`, `00` | relative links | call, transformed call, scope, scope end, return |
 | `48` | relative link | jump, followed by the export and scenery paths only |
+| `dc` | u16 slot count, that many u16 byte slots | positioned face using the current texture and the preceding `e4` corners (CRATER, WAVE) |
 | `bc`, `ca`, `f6`, `42`, `40`, `44`, `ff ff` | | lines, fog, vertex colour, source name, skipped tables |
-| `f0` | x86 envelope | only the reviewed forms below; otherwise the first trampoline is the resume |
+| `f0` | x86 envelope | only the reviewed forms below; otherwise the first trampoline within 512 bytes is the resume |
 
 Texture coordinates count PIC rows up from the bottom row: a face's `v` of 0
 is the last row of the PIC. Reading them top-down puts the Krivak's deck on
@@ -789,6 +792,16 @@ the wrong strip of `_KRIV.PIC` and leaves holes; bottom-up covers every deck
 face. Sprite corners follow the same rule, in the order bottom left, top
 left, top right, bottom right. The game renderer's static path already flips
 `v` this way.
+
+`CRATER.SH` (OT-1, 2026-11-06) is why the fallback bound is 512 bytes. Its `f0`
+prelude computes the crater's picture and corner size from the object record,
+hands control to the main program and resumes 0xb5 bytes after the marker, past
+the old 128-byte bound. The SH program then names `CRATERS.PIC`, writes four `e4`
+corners and closes the square with one `dc` record. The import does not run the
+prelude, so its static pose keeps the file's placeholder 500-unit corners and
+`0xffff` corner columns. Retail draws live craters from the effect sheet
+([explosions](explosions.md#cratersh)); the shape is catalog data for an
+`CRATER.OT` placement.
 
 ### Reviewed f0 envelopes
 

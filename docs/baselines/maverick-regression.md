@@ -48,9 +48,11 @@ scene contact. Archive identities (SHA-256):
 - FA_2.LIB: `fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`.
 
 **250 decoded surface types; nine changed types, eight unique
-shapes.** CRATER.SH reports the existing unsupported-native-reentry error
-and has no projected contact box to change. No other unreadable shape was
-reported. No line-only contact body appeared in this inventory. A post-fix probe
+shapes.** CRATER.SH reported the existing unsupported-native-reentry error at
+this pass and had no projected contact box to change; OT-1 (2026-11-06) later
+taught the reader its long prelude and `dc` face, so it projects now. No other
+unreadable shape was reported. No line-only contact body appeared in this
+inventory. A post-fix probe
 asserted actual `Placements::stance` min/max against the independently
 computed face/sprite bounds for every decoded type: all 250 pass. This audit
 covers the normal projected main shapes used by current collision, not
