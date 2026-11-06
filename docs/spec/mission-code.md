@@ -99,7 +99,8 @@ aircraft is on the ground and alive wins the mission, for good. The script was
 written to require touching down within 3,000 ft of the carrier, but as shipped
 it measures the player against itself, so any live touchdown anywhere counts,
 including a touch-and-go. Crashing first is not a touchdown. The ordinary
-objectives no longer matter.
+objectives no longer matter. TORE plays the intended rule instead (see
+[TORE decisions](#tore-decisions)).
 
 **Catapult failure.** On launch the catapult fails: after the stroke, while the
 F-14 is still on the deck, its speed is held at 73 ft/s (about 43 knots), far
@@ -114,7 +115,8 @@ nothing else wins it. In any other carrier mission the same failure is a
 - **Mop Up chain.** The scheduled sinkings happen in order and stop at the first
   ship that is already dead. If the player sinks the first Krivak before 180 s,
   the other two ships are never sunk by the script; if the Sovremennyy is dead
-  by 300 s, the last Krivak is not sunk by the script.
+  by 300 s, the last Krivak is not sunk by the script. TORE sinks each ship on
+  its own schedule instead (see [TORE decisions](#tore-decisions)).
 - **HAVCAP.** If the E-3 is shot down, neither call is made after that. In the
   single mission `UKR18` the E-3 has no route, so the "go on home" call is not
   expected to play.
@@ -127,6 +129,24 @@ nothing else wins it. In any other carrier mission the same failure is a
   mission, despite the "land on the first pass" wording in Running on Empty.
 - **Multiplayer.** Scripts are not installed in a networked game, so these
   events do not happen there.
+
+## TORE decisions
+
+Recorded 2026-11-06. Each is [opinionated](../behavior-provenance.md); the
+requester is named.
+
+- **Radio text from the player's own media** (requested by John). The
+  scripted calls' text and voice names are read from the player's own module
+  files at import time, so TORE ships none of the retail lines.
+- **Landing rule fixed** (requested by John). The training landing rule requires
+  the live touchdown to be within 3,000 ft of the carrier, as the script was
+  written, rather than anywhere. A touch-and-go within that distance still wins.
+- **Mop Up sinkings fixed** (agent decision, applying John's rule of the same
+  day: shipped bugs are fixed, intended mission features are kept). The early
+  stop comes from the script returning at the first dead ship, not from the
+  mission design: the three ships are not targets and each has its own time and
+  message. TORE sinks each ship still afloat at its scheduled time, whatever has
+  happened to the others.
 
 ## Unknown
 
