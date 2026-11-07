@@ -1113,3 +1113,43 @@ external-store radar signature; wing stores and tanks do. The open-bay radar
 term remains unchanged. Network clients and replays carry the same store
 counts and magazine layout. Protocol 64 rejects incompatible live peers;
 existing replay records retain their recorded layouts and still load.
+
+## Designator, FLIR and jammer pod bodies (EQ-2, 2026-11-06)
+
+The import keeps the designator, FLIR and jammer pods as fixed equipment
+records: `PAVESPK.SEE` (fixed on the A-10 and F-16C, loadable on pod stations),
+`AAS38.SEE` (the Rafale's centreline FLIR), `ALQ167.ECM` (the AV-8B's jammer)
+and the others listed in the
+[ordnance format](../formats/aircraft-ordnance.md#external-equipment-pods-name-no-shape-eq-2-2026-11-06).
+These records name no shape, so retail has no pod body to draw.
+
+A fixed pod and a designator pod loaded through Load Ordnance now draw as a
+fitted body on their station, like a rocket pod or tank: an eight-sided tube
+(`crates/tore-app/src/pylons.rs` `body`), hanging from the station's place
+through the shared pylon rule. The size is fitted public pod dimensions
+(`crates/tore-sim/src/combat/store_sizes.rs` `equipment_pod_body`): 12.3 by
+1.1 ft for the Pave Spike, 13.2 by 1.2 ft for the AAS-38, 12.0 by 1.4 ft for
+the ALQ-167, and `POD_BODY` otherwise. **Fitted**, agent-authored: the records
+carry no geometry.
+
+A fixed pod's source row is a placeholder position, not a real pylon: the
+F-16C's Pave Spike is recorded at the reference height, inside the fuselage.
+So a fixed pod hangs under the model's lowest underside across its own length,
+which clears a rising belly, rather than at the record's height
+(`Configuration::from_source`, `Underside::lowest`). The A-10's Pave Spike, the
+Rafale's AAS-38 and the AV-8B's ALQ-167 already sit on or below their bellies,
+so their place is unchanged; the F-16C's moves down to the belly.
+
+A fixed pod is not a station. It is never loaded or jettisoned, its mass stays
+in the aircraft's `fixed_external_equipment_lbs`, and it adds nothing to the
+external-store radar signature. A designator pod loaded through the page keeps
+its existing rules: one to an aircraft, in place of the station's weapon and a
+tank on the same mount, jettisoned with the selected store. Every client draws
+the same bodies, because both come from the configuration the aircraft is built
+with, not from a per-client choice.
+
+Guards: `a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not`
+(`crates/tore-world/src/content_tests.rs`),
+`a_loaded_designator_pod_draws_a_fitted_body_on_its_station`
+(`crates/tore-world/src/snapshot.rs`) and the retail
+`crates/tore-world/src/pod_equipment_tests.rs`.

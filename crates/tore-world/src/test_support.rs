@@ -396,6 +396,7 @@ pub fn combat_fixture(guided: bool) -> live::State {
             },
             sight: None,
             designator_pods: vec![],
+            fixed_pods: vec![],
         },
         true,
     )

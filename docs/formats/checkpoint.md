@@ -568,6 +568,15 @@ not reviewed loads as a profile that never joins a flying channel, so `radar`
 and `jammer` stay absent for it (docs/radar.md). Same-build checkpoints only, as
 before; the container version is unchanged.
 
+## Fixed external pods (EQ-2, 2026-11-06)
+
+`Configuration` codes `fixed_pods`, a list of `FixedPod { hardpoint, record,
+mount, rack }`, after `designator_pods`. Each is a designator, FLIR or jammer
+equipment record with weight and equipment flag bit 1 on a fixed hardpoint
+(docs/formats/aircraft-ordnance.md). It is drawn, never loaded or jettisoned,
+and its mass stays in `fixed_external_equipment_lbs`. Same-build checkpoints
+only, as before; the container version is unchanged.
+
 ## Missile and IR correction (2026-10-15)
 
 The radio cooldown key table appends radio-bore-active, radio-bore-ir and

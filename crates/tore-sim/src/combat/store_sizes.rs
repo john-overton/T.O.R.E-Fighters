@@ -132,6 +132,26 @@ pub fn pod_body(source: &str) -> [f64; 2] {
     }
 }
 
+/// A fitted external pod body, feet: length and diameter, by equipment
+/// record. A designator, FLIR or jammer record with weight is a pod the
+/// import keeps as fixed hardware (EQ-2, 2026-11-06). The records name no
+/// shape, so the body is the host's, from public pod dimensions; fitted.
+pub fn equipment_pod_body(record: &str) -> [f64; 2] {
+    match record.to_ascii_uppercase().as_str() {
+        // AN/ASQ-153 Pave Spike and its retired twin.
+        "PAVESPK.SEE" | "PAVEKNF.SEE" => [12.3, 1.1],
+        // AN/AAS-38 Nite Hawk FLIR.
+        "AAS38.SEE" => [13.2, 1.2],
+        // AN/ALQ-167 Bullwinkle jammer.
+        "ALQ167.ECM" => [12.0, 1.4],
+        // AN/ALQ-72 jammer.
+        "ALQ72.ECM" => [10.0, 1.4],
+        // AN/ALE-40 chaff/flare dispenser.
+        "ALE40.ECM" => [4.0, 0.7],
+        _ => POD_BODY,
+    }
+}
+
 /// A fitted fuel tank's length and diameter, feet, from the fuel it holds:
 /// 13 by 2 ft for 2,000 lb (300 US gallons), scaled by the cube root of the
 /// fuel (retail has no tank shape).

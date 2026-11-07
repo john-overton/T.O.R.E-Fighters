@@ -11,7 +11,8 @@ use crate::{
     mission::{Condition, LoadoutSpec, MissionSpec, Skill, Start},
     resources::{ResourceReads, ResourceSource},
     test_support::resources::{
-        AIRPORT_RUNWAY, THEATER, airport_resources, laser_pod, loadable_missile, resources,
+        AIRPORT_RUNWAY, THEATER, airport_resources, equipment_pod, laser_pod, loadable_missile,
+        resources,
     },
     world::{Seating, World},
 };
@@ -151,6 +152,48 @@ fn the_designator_pods_and_the_novelty_stores_are_weapon_items() {
     map.insert("PAVESPK.SEE".into(), map["F18R.SEE"].clone());
     let content = Content::of(&map);
     assert!(content.get(Kind::Weapon, "PAVESPK.SEE").is_none());
+}
+
+/// EQ-2: a fixed external pod record (a weight and the equipment flag bit 1)
+/// becomes a drawn fitted body on its hardpoint; an internal sensor (no
+/// weight, no flag) does not.
+#[test]
+fn a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not() {
+    use crate::snapshot::{StoreLook, station_stores, store_poses_of};
+    use tore_formats::aircraft::{Aircraft, Hardpoint};
+    use tore_sim::combat::live::Configuration;
+
+    let mut map = resources();
+    map.insert("PAVESPK.SEE".into(), equipment_pod("PAVESPK.SEE", 1));
+    let mut profile = Aircraft::parse(&map["F18.PT"]).expect("the synthetic profile");
+    profile.hardpoints.push(Hardpoint {
+        location: 1,
+        flags: 8,
+        position: [0, 0, 50],
+        store: Some("PAVESPK.SEE".into()),
+        count: 1,
+        weight_class: 0,
+    });
+    let config = Configuration::from_source(&profile, |name| {
+        map.get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    })
+    .expect("the fixed pod record is in the import");
+    assert_eq!(
+        config.fixed_pods.len(),
+        1,
+        "the pod, not the internal sensor"
+    );
+    assert_eq!(config.fixed_pods[0].record, "PAVESPK.SEE");
+    let loads = station_stores(&config, |_| 0, |_| false);
+    let poses = store_poses_of(&config, &loads);
+    let pods: Vec<_> = poses.iter().filter(|p| p.look == StoreLook::Pod).collect();
+    assert_eq!(pods.len(), 1, "one fixed pod body");
+    assert_eq!(
+        pods[0].body,
+        tore_sim::combat::store_sizes::equipment_pod_body("PAVESPK.SEE")
+    );
 }
 
 #[test]

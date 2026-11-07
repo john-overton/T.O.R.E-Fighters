@@ -353,6 +353,38 @@ pub fn store_poses_of(
             body: tank_body(f64::from(store.tank.fuel_weight)),
         })
     }));
+    // Loaded designator pods (decision 7) and fixed external pod equipment
+    // (EQ-2) draw as fitted bodies on their stations. The records name no
+    // shape, so the body is the host's, not retail geometry.
+    for pod in &config.designator_pods {
+        let Some(station) = config.stations.get(pod.station) else {
+            continue;
+        };
+        stores.push(StorePose {
+            hardpoint: hardpoint(pod.station)
+                .and_then(|index| u8::try_from(index).ok())
+                .unwrap_or(u8::MAX),
+            mount: station.mount,
+            rack: station.rack,
+            shape: None,
+            look: StoreLook::Pod,
+            body: tore_sim::combat::store_sizes::equipment_pod_body(&pod.store.source),
+            items: 1,
+            loaded: 1,
+        });
+    }
+    for pod in &config.fixed_pods {
+        stores.push(StorePose {
+            hardpoint: u8::try_from(pod.hardpoint).unwrap_or(u8::MAX),
+            mount: pod.mount,
+            rack: pod.rack,
+            shape: None,
+            look: StoreLook::Pod,
+            body: tore_sim::combat::store_sizes::equipment_pod_body(&pod.record),
+            items: 1,
+            loaded: 1,
+        });
+    }
     stores
 }
 
@@ -843,6 +875,41 @@ mod tests {
         // A gun that is not a pod is still not drawn.
         config.stations[0].weapon.source = "M61.JT".into();
         assert!(station_stores(&config, |_| 9, |_| true).is_empty());
+    }
+
+    /// EQ-2: a designator pod loaded on a station (its weapon unloaded)
+    /// draws a fitted body there, like a rocket pod.
+    #[test]
+    fn a_loaded_designator_pod_draws_a_fitted_body_on_its_station() {
+        use tore_sim::combat::sight::{DesignatorPod, DesignatorStore, Gimbal, SightSensor};
+        let mut config = crate::test_support::combat_fixture(false)
+            .own()
+            .configuration()
+            .clone();
+        config.designator_pods = vec![DesignatorPod {
+            station: 0,
+            store: DesignatorStore {
+                source: "PAVESPK.SEE".into(),
+                name: "Pave Spike".into(),
+                sensor: SightSensor {
+                    laser: true,
+                    range_ft: 60_760.,
+                    gimbal: Gimbal::Hemisphere,
+                    eye: [0.; 3],
+                    default_look: [0.; 2],
+                },
+                weight_lbs: 425,
+                flags: 1,
+            },
+        }];
+        let poses = store_poses_of(&config, &[]);
+        assert_eq!(poses.len(), 1, "the pod body, not the empty weapon station");
+        assert_eq!(poses[0].look, StoreLook::Pod);
+        assert_eq!(
+            poses[0].body,
+            tore_sim::combat::store_sizes::equipment_pod_body("PAVESPK.SEE")
+        );
+        assert_eq!(poses[0].mount, config.stations[0].mount);
     }
 
     #[test]

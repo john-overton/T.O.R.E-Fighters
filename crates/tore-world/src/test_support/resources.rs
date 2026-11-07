@@ -41,9 +41,15 @@ const HEADER: &str = "[brent's_relocatable_format]\n";
 /// A sensor record: a seeker's signature channel (3 radar, 2 infrared, 0
 /// visual) with generous zones.
 fn sensor(resource: &str, signature: i64) -> Vec<u8> {
+    sensor_with(resource, signature, 100, 0)
+}
+
+/// A sensor record with an explicit weight and equipment flags byte.
+fn sensor_with(resource: &str, signature: i64, weight: i64, flags: i64) -> Vec<u8> {
     let value = |name: &str| match name {
         "structType" => 10,
-        "weight" => 100,
+        "weight" => weight,
+        "flags" => flags,
         "sig" => signature,
         "zone0.h" | "zone1.h" => 4000,
         "zone0.p" | "zone1.p" => 4000,
@@ -57,6 +63,13 @@ fn sensor(resource: &str, signature: i64) -> Vec<u8> {
     text += &fields(schema::SENSOR, &["si_names"], "", &value);
     text += &names("Sensor", "Synthetic sensor", resource);
     text.into_bytes()
+}
+
+/// A fixed external pod record (EQ-2): a sensor with a weight and the
+/// equipment flag bit 1, as the retail designator, FLIR and jammer pods
+/// carry. The weight-zero sensors ([`sensor`]) are internal and are not pods.
+pub fn equipment_pod(resource: &str, signature: i64) -> Vec<u8> {
+    sensor_with(resource, signature, 425, 1)
 }
 
 fn countermeasures(resource: &str) -> Vec<u8> {

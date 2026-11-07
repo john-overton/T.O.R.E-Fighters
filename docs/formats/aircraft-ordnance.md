@@ -704,3 +704,50 @@ layout and availability pass preserves that existing mass rule. Next review
 flight initialization and ammunition mass debit together before changing the
 shared loadout/flight weight behavior; a display-only correction would make the
 page disagree with launch validation and flight mass.
+
+## External equipment pods name no shape (EQ-2, 2026-11-06)
+
+The designator, FLIR and jammer pods the import keeps are equipment records
+(SEE/ECM), not weapons, so a store's shape pointer never names them. A decoded
+read of the installed 1.02F `FA_2.LIB` confirms it: the `SENSOR` and `ECM`
+schemas (`crates/tore-formats/src/aircraft_schema.rs`) carry no shape field, and
+neither `PAVESPK.SEE`, `AAS38.SEE` nor `ALQ167.ECM` has one in its bytes. The
+media holds only their thumbnails (`$PAVESPK.PIC`, `$AAS38.PIC`, `$ALQ167.PIC`
+in `FA_1.LIB`) and the unrelated Paveway bomb shape `PAVE.SH`; there is no
+`PAVESPK.SH`, `AAS38.SH` or `ALQ167.SH`.
+
+The six external pods are exactly the SEE/ECM records that carry a weight and
+the equipment flag bit 1:
+
+| Record | Weight lb | flags | Decoded carriers ([fa-aircraft.csv](fa-aircraft.csv)) |
+| --- | ---: | ---: | --- |
+| `PAVESPK.SEE` | 425 | `0x1` | A-10, F-16C, B-1, B-2, F-111, F-117, F-15E, Jaguar, Kfir, Tornado |
+| `PAVEKNF.SEE` | 425 | `0x1` | retired (a loadout naming it loads the Pave Spike) |
+| `AAS38.SEE` | 350 | `0x1` | Rafale, Gripen |
+| `ALQ167.ECM` | 310 | `0x1` | A-6, AV-8B, Kfir, Mirage F1 |
+| `ALQ72.ECM` | 224 | `0x1` | M5 |
+| `ALE40.ECM` | 100 | `0x1` | none (a dispenser) |
+
+Every other SEE/ECM record has weight 0 and flags `0x0`; those are the internal
+radars, FLIRs, visual sensors and ECM suites. So the import treats a hardpoint
+record as an external pod when it ends `.SEE` or `.ECM`, has weight, and sets
+flag bit 1 (`crates/tore-sim/src/combat/live.rs`, `Configuration::fixed_pods`).
+The carriers are the same auxiliary rows the source catalog already records.
+
+Implementation (EQ-2, 2026-11-06): a fixed pod is drawn as a fitted body on its
+hardpoint, and a designator pod loaded through Load Ordnance is drawn the same
+way on its station (`crates/tore-world/src/snapshot.rs` `store_poses_of`). The
+body sizes are fitted public pod dimensions
+(`crates/tore-sim/src/combat/store_sizes.rs` `equipment_pod_body`), because the
+records name no shape. A fixed pod's source row is a placeholder position, not
+a real pylon (the F-16C's Pave Spike is recorded at the reference height,
+inside the fuselage), so it hangs under the model's lowest underside across its
+own length (`Configuration::from_source`). Nothing is loaded, jettisoned or
+counted twice: a fixed pod's mass stays in `fixed_external_equipment_lbs` and
+it is not an external store in the radar signature.
+
+Guards: `a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not`
+(`crates/tore-world/src/content_tests.rs`),
+`a_loaded_designator_pod_draws_a_fitted_body_on_its_station`
+(`crates/tore-world/src/snapshot.rs`) and the retail
+`crates/tore-world/src/pod_equipment_tests.rs` (skips without media).

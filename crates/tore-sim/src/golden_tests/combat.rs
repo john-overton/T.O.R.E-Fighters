@@ -648,6 +648,7 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         sensors: sensor_profiles(),
         sight: None,
         designator_pods: vec![],
+        fixed_pods: vec![],
     }
 }
 

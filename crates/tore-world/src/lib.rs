@@ -42,6 +42,9 @@ pub mod test_support;
 mod content_tests;
 
 #[cfg(test)]
+mod pod_equipment_tests;
+
+#[cfg(test)]
 mod sensor_equipment_tests;
 
 /// A result whose error is any boxed error, as the mission code reports them.

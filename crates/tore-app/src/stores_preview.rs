@@ -525,11 +525,22 @@ pub fn run() -> AppResult<()> {
             .filter(|(on, _)| *on >= 2)
             .max_by_key(|(on, _)| *on)
             .map(|(_, s)| s.release_point(0));
+        // A fitted equipment pod body (a fixed designator/FLIR/jammer pod or a
+        // loaded designator pod, EQ-2): close on its drawn centre so the
+        // fitted body is reviewed like any other store.
+        let pod = loads[1]
+            .1
+            .iter()
+            .filter(|s| s.look == crate::snapshot::StoreLook::Pod)
+            .flat_map(crate::pylons::hung)
+            .find(|h| h.held)
+            .map(|h| h.centre);
         let close = [
             ("tip", tip),
             ("wing", wing),
             ("fuselage", fuselage),
             ("rack", rack),
+            ("pod", pod),
         ];
         for (name, target) in close {
             let Some(t) = target else { continue };

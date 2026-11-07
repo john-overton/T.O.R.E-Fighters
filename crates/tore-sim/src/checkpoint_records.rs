@@ -11,7 +11,7 @@
 //! profile set, which the aircraft's `Sensors` carries a second copy of.
 
 use crate::combat::hardpoints::Rack;
-use crate::combat::live::{Configuration, GunPod, Station, TankStation, TankStore};
+use crate::combat::live::{Configuration, FixedPod, GunPod, Station, TankStation, TankStore};
 use tore_formats::weapons::{
     Burst, Countermeasures, Damage as WeaponDamage, Effects, Guidance as WeaponGuidance, Movement,
     Seeker, Tank, Weapon, Zone,
@@ -174,6 +174,13 @@ crate::checkpoint_struct!(GunPod {
 // handoff can copy it into state the fresh world does not hold, so callers
 // code it as a shared record. Its sensor profile set is shared inside it, so
 // the `Sensors` copy of the same profiles costs only an index.
+crate::checkpoint_struct!(FixedPod {
+    hardpoint,
+    record,
+    mount,
+    rack
+});
+
 crate::checkpoint_struct!(Configuration {
     ecm,
     system_damage,
@@ -200,6 +207,7 @@ crate::checkpoint_struct!(Configuration {
     wreck_power,
     sight,
     designator_pods,
+    fixed_pods,
 } shared { sensors });
 
 #[cfg(test)]
@@ -433,6 +441,17 @@ mod tests {
             sensors: profiles(),
             sight: None,
             designator_pods: vec![],
+            fixed_pods: vec![FixedPod {
+                hardpoint: 3,
+                record: "PAVESPK.SEE".into(),
+                mount: [0., -2.5, 50.],
+                rack: Rack {
+                    location: 1,
+                    paired: false,
+                    over: [Some(0.5), None, Some(-1.5), None, Some(2.)],
+                    tip: None,
+                },
+            }],
         }
     }
 

@@ -588,6 +588,24 @@ impl GunPod {
         })
     }
 }
+/// A fixed external pod the import keeps as retained hardware: an equipment
+/// record with weight (a laser designator, FLIR or jammer pod) on a hardpoint.
+/// The drawing host turns it into a fitted body on its station; it is never
+/// loaded or jettisoned, and its mass is already in
+/// `Configuration::fixed_external_equipment_lbs`. The records name no shape
+/// (EQ-2, 2026-11-06), so the body is the host's, not retail geometry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FixedPod {
+    /// The source hardpoint index it hangs on.
+    pub hardpoint: usize,
+    /// The record's resource name (`PAVESPK.SEE`, `ALQ167.ECM`).
+    pub record: String,
+    /// Where it hangs, feet right, up and forward of the reference point.
+    pub mount: Vector,
+    /// Its station's rack: the source location and the model's underside
+    /// over it.
+    pub rack: super::hardpoints::Rack,
+}
 #[derive(Clone, Debug)]
 pub struct Configuration {
     pub ecm: tore_formats::weapons::Countermeasures,
@@ -624,6 +642,9 @@ pub struct Configuration {
     pub sight: Option<super::sight::SightSensor>,
     /// Laser designator pods loaded on weapon stations (decision 7).
     pub designator_pods: Vec<super::sight::DesignatorPod>,
+    /// Fixed external pod equipment on hardpoints (EQ-2): drawn, never
+    /// loaded or jettisoned.
+    pub fixed_pods: Vec<FixedPod>,
 }
 impl Configuration {
     /// The gun pod on weapon station `station`, when that station's weapon
@@ -823,6 +844,54 @@ impl Configuration {
         let place = |index: usize, h: &tore_formats::aircraft::Hardpoint| {
             super::hardpoints::placed_on(a.id, index, h, model.as_ref())
         };
+        // Fixed external pod equipment (EQ-2): a designator, FLIR or jammer
+        // record is retained hardware on its hardpoint, not a station. The
+        // retail pods carry a weight and the equipment flag bit 1; the
+        // internal sensors carry neither. The records name no shape, so the
+        // drawing host makes the body.
+        let mut fixed_pods = Vec::new();
+        for (index, h) in hardpoints.iter().enumerate() {
+            let Some(name) = h
+                .store
+                .as_deref()
+                .filter(|name| name.ends_with(".SEE") || name.ends_with(".ECM"))
+            else {
+                continue;
+            };
+            let equipment = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
+            let pod_flag = equipment
+                .fields
+                .get("flags")
+                .and_then(|f| f.number().ok())
+                .unwrap_or(0);
+            if equipment.number("weight") <= 0. || pod_flag & 1 == 0 {
+                continue;
+            }
+            let (mut mount, mut rack) = place(index, h);
+            // A fixed pod's source row is a placeholder position, not a real
+            // pylon: the F-16C's Pave Spike is recorded at the reference
+            // height, inside the fuselage. Hang it under the model's lowest
+            // underside across the body's length instead (fitted), so its
+            // ends clear a rising belly.
+            if let Some(model) = model.as_ref() {
+                let half =
+                    super::store_sizes::equipment_pod_body(&name.to_ascii_uppercase())[0] * 0.3;
+                if let Some(belly) = [mount[2] - half, mount[2], mount[2] + half]
+                    .into_iter()
+                    .filter_map(|forward| model.lowest(mount[0], forward, mount[1] - 12.))
+                    .reduce(f64::min)
+                {
+                    mount[1] = belly;
+                    rack.over = [Some(belly as f32); 5];
+                }
+            }
+            fixed_pods.push(FixedPod {
+                hardpoint: index,
+                record: name.to_ascii_uppercase(),
+                mount,
+                rack,
+            });
+        }
         let mut tanks = Vec::new();
         for (index, h) in hardpoints.iter().enumerate() {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
@@ -1143,6 +1212,7 @@ impl Configuration {
             sensors: profiles,
             sight,
             designator_pods: vec![],
+            fixed_pods,
             fixed_external_equipment_lbs,
             tanks,
             gun_pods,
@@ -8102,6 +8172,7 @@ mod tests {
                 sensors: sensor_profiles(),
                 sight: None,
                 designator_pods: vec![],
+                fixed_pods: vec![],
             },
             true,
         )

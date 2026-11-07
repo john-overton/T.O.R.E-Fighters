@@ -79,8 +79,10 @@ first ones to confirm.
   aircraft decode and load as unreviewed profiles that never enable a flying
   channel, so they are Partial rather than None; GCIR and REDCR are surface
   sensors outside the aircraft component, and four further SEE records with no
-  carrier stay decoded only. Designator pods PAVESPK and AAS38 have no drawn
-  body. Tanks use a fitted body.
+  carrier stay decoded only. The designator, FLIR and jammer pods (the six
+  SEE/ECM records with weight and equipment flag bit 1: PAVESPK, PAVEKNF,
+  AAS38, ALQ167, ALQ72, ALE40) name no shape and draw as fitted bodies
+  (EQ-2, 2026-11-06). Tanks use a fitted body.
 - **Surface units.** All load and the 2026-10-10 surface AI covers detection,
   firing, batteries and emitters. Animation is the gap: only KRIVAK and SOVR
   turrets and four antennas are retail parts, nothing elevates, no wheel, track or
@@ -282,7 +284,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes and a fitted dispenser opening and bomblet flight; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
-- **Equipment.** One sensor component serves all 36 roster aircraft plus F/A-XX. Radar and ECM records with no reviewed preset or generation assignment now decode and load into an unreviewed profile (EQ-1, 2026-11-06, `crates/tore-sim/src/sensors/profile.rs`), but the profile never joins a flying channel, so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape).
+- **Equipment.** One sensor component serves all 36 roster aircraft plus F/A-XX. Radar and ECM records with no reviewed preset or generation assignment now decode and load into an unreviewed profile (EQ-1, 2026-11-06, `crates/tore-sim/src/sensors/profile.rs`), but the profile never joins a flying channel, so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape); external designator/FLIR/jammer pods: fitted pod bodies, no retail shape (EQ-2, 2026-11-06, [why](../formats/aircraft-ordnance.md#external-equipment-pods-name-no-shape-eq-2-2026-11-06)).
 - **Roster basis.** "Roster" means the 36 retail aircraft in `docs/spec/aircraft-variety.md` and `roster-aircraft.md`; carriers were computed from `docs/formats/fa-aircraft.csv` default stores only (stations can allow more).
 - **Grade rules.** Imported: Done = reachable in game; Partial = decoded and profiled or hooked but hidden; None = decoded only. Animations/AI use N/A where nothing applies.
 
@@ -565,7 +567,7 @@ Per category:
 | TU160R.SEE | Tu-160 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | TU26R.SEE | Tu-26 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | TU95R.SEE | Tu-95 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
-| AAS38.SEE | AAS-38 FLIR pod | Done | None | N/A | Done | Rafale fixed row; FLIR sight 91,140 ft; pod body drawing unverified |
+| AAS38.SEE | AAS-38 FLIR pod | Done | None | N/A | Done | Rafale fixed row; FLIR sight 91,140 ft; no shape named, drawn as a fitted pod body (EQ-2, 2026-11-06) |
 | AV8IR.SEE | AV-8B internal FLIR | Done | N/A | N/A | Done | X-31, F-22, F-22N, AV-8B, AH-64; 60 degree cone sight |
 | AC130I.SEE | AC-130 FLIR | Done | N/A | N/A | Done | AC-130 console, / range 54,684 ft |
 | MIG29I.SEE | MiG-29 IRST | Done | N/A | N/A | Partial | IR 9/10 nmi kept; initial vs retained track review open |
@@ -575,7 +577,7 @@ Per category:
 | SU24L.SEE | Su-24 laser | Done | N/A | Done | Done | Su-25 built-in laser; AI lases own bombs |
 | KA50L.SEE | Ka-50 laser | Done | N/A | Done | Done | V-22 built-in laser; AI lases |
 | SU37L.SEE | Su-37 laser | None | N/A | N/A | None | Carriers Su-34, Tu-160/26/95 not in roster |
-| PAVESPK.SEE | Pave Spike laser pod | Done | None | Done | Done | Fixed on A-10/F-16C and loadable on pod stations; body drawing unverified |
+| PAVESPK.SEE | Pave Spike laser pod | Done | None | Done | Done | Fixed on A-10/F-16C and loadable on pod stations; no shape named, drawn as a fitted pod body (EQ-2, 2026-11-06) |
 | PAVEKNF.SEE | Pave Knife laser pod | Partial | N/A | N/A | Partial | Retired 2026-10-16; old loads become Pave Spike |
 | VIS180.SEE | Visual sensor 180 | None | N/A | N/A | None | No carrier at all |
 | VIS240.SEE | Visual sensor 240 | Done | N/A | N/A | Done | MiG-17/21/23, Su-25; 10/5 nmi, 120x90 deg |
@@ -605,7 +607,7 @@ Per category:
 | SU24.ECM | SU24 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; Su-25 |
 | SU27.ECM | SU27 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; Su-27, Su-35 |
 | YAK141.ECM | YAK141 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; Yak-141 |
-| ALQ167.ECM | ALQ-167 jammer pod | Partial | None | N/A | None | AV-8B locked row; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| ALQ167.ECM | ALQ-167 jammer pod | Partial | None | N/A | None | AV-8B locked row; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden; no shape named, drawn as a fitted pod body (EQ-2, 2026-11-06) |
 | A6.ECM | A-6 ECM | Partial | None | None | None | A-6/F-111 only; non-roster, generation unreviewed |
 | ALE40.ECM | ALE-40 dispenser | Partial | None | None | None | no carrier at all; non-roster, generation unreviewed |
 | ALQ72.ECM | ALQ-72 jammer | Partial | None | None | None | M5 only; non-roster, generation unreviewed |
