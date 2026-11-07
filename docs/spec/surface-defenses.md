@@ -1000,10 +1000,21 @@ TORE rules (defined and fitted):
   line to the lead point clamped between 10 degrees and the mount's pitch limit
   (SA-2 15 degrees). Fitted.
 - **SA-19 and SA-N-11** are treated as supported radar, because HAWK, Roland and
-  the 2S6 carry SA-19 and would otherwise be unarmed; ASROC stays held
-  (Ticonderoga keeps its Phalanx). Default, pending John. The Tunguska and
-  Kashtan carry their own radars; only the battery systems need component
-  radars (answered for John's question).
+  the 2S6 carry SA-19 and would otherwise be unarmed. Default, pending John. The
+  Tunguska and Kashtan carry their own radars; only the battery systems need
+  component radars (answered for John's question).
+- **ASROC stays held** (John, 2026-11-06). Its guidance word `0x12341` is
+  exactly the SA-6's (the air-target flag with the support flag `0x200`), but it
+  is an anti-submarine weapon, there is no submarine target, and the SA-6 copy
+  looks like a placeholder, so it is never fired. The Ticonderoga's two ASROC
+  rails carry the fitted derived **SM-2** instead (opinionated: John,
+  2026-11-06, "take an AMRAAM model and give it SA-6 stats as an SM-2"; the
+  agent chose the numbers and the model). The SM-2 is a virtual `SM2.JT` record
+  with every flight, seeker, guidance, damage and motor number the SA-6's,
+  unchanged, drawing a private alias of the AMRAAM shape (`AMRAM.SH`) sized to
+  the real RIM-66 (fitted). It fires as supported radar at aircraft like the
+  SA-6, through the same surface firing path. Provenance: the SM-2 is
+  **fitted**; every other surface record is retail or already specified.
 - **SS-N-9** fires at ships of the other side (since 2026-10-11): it is the
   only missile record a surface unit carries with the surface target flag
   0x20000 and not the air one, supported radar by its support flag 0x200
@@ -1502,7 +1513,9 @@ Ships use the same controllers per mount, with arcs `slewLimitH` (60 to 150
 degrees each side) and `slewLimitP` relative to the hull heading, and mount
 positions from the hardpoints (retail). Carriers (Eisenhower, Kitty Hawk,
 Clemenceau, Wasp, Kiev) fight with their Phalanx and Sea Sparrow, or SA-N-3,
-SA-N-9 and AAA30 for the Kiev, and are otherwise static targets. Ships are
+SA-N-9 and AAA30 for the Kiev, the Ticonderoga with its Phalanx and the fitted
+SM-2 on its two ASROC rails (John, 2026-11-06; ASROC held), and are otherwise
+static targets. Ships are
 never resupplied; their SAM rails are finite as in retail and their guns have an
 unlimited reserve. The one template with sailing ships is `~QTCARGO`, see
 [Movement](#movement).
@@ -1712,7 +1725,7 @@ surface flag, and the aircraft guns and the ground units' own guns both.
 | ZSU-23, ZSU-57, 2S6 gun, AAA30, AAA30BAD on land | air only (`0x140c0`, `0x100c0`, `0x5140c0`) | aircraft first, then, by John's ruling, ground units and ships in reach |
 | Phalanx and every other ship gun | air only | aircraft only |
 | M1939 barrage zone, KS-12 and KS-19 flak | air only (`0x2940c0` for the flak) | aircraft only |
-| Every SAM, ship SAM, Sea Sparrow and ASROC | air only (`0x12041` to `0x12345`) | aircraft only; ASROC stays held |
+| Every SAM, ship SAM, Sea Sparrow and ASROC | air only (`0x12041` to `0x12345`) | aircraft only; ASROC stays held, the fitted SM-2 included as the Ticonderoga's |
 
 **Gun AAA fires at the ground.** The records of the land anti-aircraft guns
 carry only the air flag, so a first reading kept them at aircraft. John,
@@ -2783,7 +2796,7 @@ so). Each row has a fitted stand-in above.
 | Formation geometry for surface groups | Routes carry `w_wng 1 0 2048 0` (the aircraft wing format) | Each unit follows its own route | Trace the wing format's surface use |
 | Route flag bit 0x04 | Routed objects have it set (inference) | Not used | Trace the mission flag reader |
 | `damage[0..4]` = 255 on every NT | Mapping unresolved | Hit points only | Trace the damage-class table |
-| SA-19, SA-N-11 and ASROC roles | No support flag, or an unclear role | SA-19 and SA-N-11 supported radar, ASROC held | Trace the seeker role |
+| SA-19 and SA-N-11 roles | No support flag, or an unclear role | SA-19 and SA-N-11 supported radar | Trace the seeker role |
 | Whether retail surface units fight each other | The `react` DEFEND mask on tanks and armoured cars (`$3fff`) says they answer fire from surface classes; no shipped template stands opposing units in reach | John's rule: units in range shoot; target flags decide the weapons | Trace `Reaction` (0x464040) for the DEFEND word and the surface actors' ranking terms |
 | Flak time fuze | Not in the data; the 250 ft proximity radius is | Time fuze at the flight time to the burst point; the proximity radius is unused for flak since 2026-10-13 ([flak](#flak)) | None planned |
 | Hardpoint `flags`, NPC `flags` | NT flags seen: 0x4000000 (SA2A), 0x2000000 (M1939, KS-12, KS-19), 0x801 (Mule), carrier values 0xc8331, 0x108331, 0x1c8131 | Not used | Trace the flag consumers |
@@ -2797,7 +2810,7 @@ ones follow in their own table.
 | Decision | Default | Why |
 | --- | --- | --- |
 | Relocation and start numbers | John found the target variance fine (2026-10-10); the numbers stay fitted: unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
-| SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
+| SA-19 and SA-N-11 as supported radar | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and for Enemy Wing 1's ground start (slice CL-R) | A ground start across the map from a relocated target would mean a long flight |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (confirmed by John, 2026-10-10; the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
@@ -2816,6 +2829,7 @@ Settled during the round:
 | Surface units fighting each other | Built (John, 2026-10-11: "If units are in range of opposing sides they should shoot at each other"): by the weapon records' target flags; the agent's choices (preference, sides struck, the SS-N-9 at ships only, the column's halt, the surface aim error) are listed in [surface against surface](#surface-against-surface) | |
 | M163 ranges | Settled, option (b) (John, 2026-10-13): fires to 7,500 ft and sees 18,000 ft (about 3 nm), no longer painting from 8 nm; the retail record (sees 50,000 ft, fires to 20,000 ft) is replaced in the AAA tuning row, opinionated | The real M168 Vulcan reaches about 1.2 nm; retail mounted the ship record |
 | Redfor ground start | Built (John, 2026-10-11: "add redfor ground starts, match the quick mission creator styles"; "have that override the distance"): Enemy Wing 1 may start at a Redfor field in single player and online, chosen as Blue's start is | See [start placement](#start-placement) |
+| Ticonderoga armament | Settled, John 2026-11-06: the two ASROC rails carry a fitted SM-2 (the SA-6's numbers, the AMRAAM model under a private alias, a real-size refit), because the data has no SM-2 record; ASROC stays held as an anti-submarine weapon. John rejected a Sea Sparrow fit and asked for "an SM-2" | The agent authored the stand-in; a derived store is the project's existing way to add a store the data lacks (the R-27 variants, the smaller guided bombs) |
 
 ## Provenance summary
 

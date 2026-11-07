@@ -10,9 +10,22 @@ pub const SMALL_BOMBS: [(&str, &str, i32, i16, &str); 3] = [
     ("GBU38.JT", "GBU29.JT", 500, 4, "GB38.SH"),
 ];
 
+/// The derived surface store: the SM-2 the Ticonderoga carries on its former
+/// ASROC rails. John, 2026-11-06: "take an AMRAAM model and give it SA-6 stats
+/// as an SM-2". The data has no SM-2 record, so this is a fitted stand-in:
+/// every flight, seeker, guidance, damage and motor number is `SA6.JT`'s,
+/// unchanged, and the model is the AMRAAM shape copied to a private alias so
+/// its fitted real size does not resize the AIM-120 that shares `AMRAM.SH`.
+/// `(virtual, donor, private shape alias, model shape)`.
+pub const SURFACE_DERIVED: [(&str, &str, &str, &str); 1] =
+    [("SM2.JT", "SA6.JT", "SM2.SH", "AMRAM.SH")];
+
 pub fn donor(source: &str) -> Option<&'static str> {
     if R27_DERIVED.contains(&source) {
         return Some("AA10.JT");
+    }
+    if let Some((_, donor, ..)) = SURFACE_DERIVED.iter().find(|v| v.0 == source) {
+        return Some(donor);
     }
     SMALL_BOMBS.iter().find(|v| v.0 == source).map(|v| v.1)
 }
@@ -24,6 +37,9 @@ pub fn resource_donor(
 ) -> Option<String> {
     if let Some(name) = donor(source) {
         return Some(name.into());
+    }
+    if let Some((_, _, _, model)) = SURFACE_DERIVED.iter().find(|v| v.2 == source) {
+        return Some((*model).into());
     }
     let variant = SMALL_BOMBS.iter().find(|v| v.4 == source)?;
     Weapon::parse(variant.1, resources.get(variant.1)?)
@@ -37,6 +53,7 @@ pub const R27_DERIVED: [&str; 3] = ["R27ER.JT", "R27T.JT", "R27ET.JT"];
 /// are described honestly instead of assigning a modern missile's identity.
 pub fn identity(source: &str) -> Option<(&'static str, &'static str)> {
     Some(match source {
+        "SM2.JT" => ("SM-2", "SM-2 Standard Missile"),
         "GBU12.JT" => ("GBU-12", "GBU-12 Paveway II (500 lb)"),
         "GBU16.JT" => ("GBU-16", "GBU-16 Paveway II (1000 lb)"),
         "GBU38.JT" => ("GBU-38", "GBU-38 JDAM (500 lb)"),
@@ -76,6 +93,12 @@ pub(super) fn apply(w: &mut Weapon) {
     if let Some((short, long)) = identity(&w.source) {
         w.hud_name = short.into();
         w.name = long.into();
+    }
+    // The derived SM-2 keeps every SA-6 number and takes the AMRAAM model
+    // through its private alias (see [`SURFACE_DERIVED`]).
+    if let Some((_, _, alias, _)) = SURFACE_DERIVED.iter().find(|v| v.0 == w.source) {
+        w.shape = Some((*alias).into());
+        return;
     }
     if let Some((_, _, weight, divisor, shape)) = SMALL_BOMBS.iter().find(|v| v.0 == w.source) {
         w.weight = *weight;
@@ -132,6 +155,14 @@ pub fn extend_resources(resources: &mut std::collections::BTreeMap<String, Vec<u
             resources
                 .entry(name.into())
                 .or_insert_with(|| donor.clone());
+        }
+    }
+    for (name, donor, alias, model) in SURFACE_DERIVED {
+        if let Some(bytes) = resources.get(donor).cloned() {
+            resources.entry(name.into()).or_insert(bytes);
+        }
+        if let Some(shape) = resources.get(model).cloned() {
+            resources.entry(alias.into()).or_insert(shape);
         }
     }
 }

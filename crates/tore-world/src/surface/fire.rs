@@ -745,7 +745,7 @@ impl WeaponArms {
     /// A missile weapon fired from `arc` (more rails join with
     /// [`Self::mounts`]): salvo, spacing and zones from the record, the
     /// launch range scaled by `skill`. `None` for a record without a reviewed
-    /// guidance profile (ASROC), which never fires.
+    /// guidance profile (ASROC, held), which never fires.
     pub fn missile(
         record: Weapon,
         arc: MountArc,
@@ -795,9 +795,23 @@ pub fn mount_arc(index: usize, mount: &tore_formats::surface_unit::Mount) -> Mou
     }
 }
 
+/// The fitted weapon a surface unit really carries, where a reviewed fit
+/// overrides the record's default store. The Ticonderoga's two ASROC rails
+/// (hardpoints 2 and 3) carry the derived SM-2 instead (opinionated: John,
+/// 2026-11-06, "take an AMRAAM model and give it SA-6 stats as an SM-2"; the
+/// SM-2 is `crates/tore-formats/src/weapon_corrections.rs`'s `SM2.JT`). ASROC
+/// stays held, and every other unit's fit is its record's own.
+fn fitted_store<'a>(unit_name: &str, store: &'a str) -> &'a str {
+    if unit_name.eq_ignore_ascii_case("TICON") && store.eq_ignore_ascii_case("ASROC.JT") {
+        "SM2.JT"
+    } else {
+        store
+    }
+}
+
 /// The controllers of one NT: a controller per gun mount and one per missile
-/// record, each with its record read and tuned. Unreviewed missiles (ASROC)
-/// are left out: they never fire.
+/// record, each with its record read and tuned. Unreviewed missiles (ASROC,
+/// held by John's decision of 2026-11-06) are left out: they never fire.
 #[allow(clippy::too_many_arguments)]
 fn weapons_of(
     nt: &SurfaceUnit,
@@ -822,7 +836,15 @@ fn weapons_of(
         if mount.kind != MountKind::Weapon {
             continue;
         }
-        let Some(name) = &mount.store else { continue };
+        let Some(store) = &mount.store else { continue };
+        let fitted = fitted_store(unit_name, store);
+        // Fall back to the record's own store when the pack lacks the fitted
+        // one, so an incomplete import leaves the rail empty, not an error.
+        let name = if resources.get(fitted).is_some() {
+            fitted
+        } else {
+            store.as_str()
+        };
         let record = match resources.get(name).map(|bytes| Weapon::parse(name, bytes)) {
             Some(Ok(record)) => record,
             Some(Err(error)) => {

@@ -276,6 +276,7 @@ weapons share takes the size of the store it depicts. Unlisted shapes
 | `SIDEB.SH` | AIM-9B | 9.3 | 0.42 | 1.83 | AIM-9B 2.83 m, 127 mm, 0.56 m |
 | `AM9X.SH` | AIM-9X | 9.9 | 0.42 | 1.47 | Raytheon; 3.02 m, 127 mm, 0.45 m |
 | `AMRAM.SH` | AIM-120 | 12.0 | 0.58 | 1.75 | US Air Force fact sheet; 3.66 m, 178 mm, AIM-120A/B 0.53 m |
+| `SM2.SH` | the fitted derived SM-2 (private alias of the AMRAAM shape) | 15.5 | 1.125 | 3.5 | Fitted, John 2026-11-06: RIM-66 Standard MR 4.72 m, 13.5 in, 1.08 m fin span; the AMRAAM shape keeps its own AIM-120 size |
 | `SPAR.SH` | AIM-7, AIM-7E (and the SS-N-9 and Sea Sparrow records) | 12.0 | 0.67 | 3.3 | US Navy; 3.66 m, 203 mm, 1.0 m |
 | `PHENX.SH` | AIM-54 | 13.0 | 1.25 | 3.0 | US Navy; 3.96 m, 380 mm, 0.91 m |
 | `MICA.SH` | MICA | 10.2 | 0.53 | 1.83 | MBDA; 3.1 m, 160 mm, 0.56 m |

@@ -672,6 +672,203 @@ fn an_sa6_site_engages_at_the_record_times_and_paints_and_locks() {
     assert!(f.state.locks_on(JET).is_empty());
 }
 
+/// The fitted derived SM-2 (JT-6 rework, 2026-11-06): every number is the
+/// SA-6 record's, unchanged, and the model is the AMRAAM shape through its
+/// private alias. John: "take an AMRAAM model and give it SA-6 stats as an
+/// SM-2".
+fn sm2() -> Weapon {
+    let mut w = sa6();
+    w.source = "SM2.JT".into();
+    w.shape = Some("SM2.SH".into());
+    w
+}
+
+/// A synthetic NT unit with `stores` as its weapon mounts (arcs as the
+/// Ticonderoga's ASROC rails), for the fit tests.
+fn unit_with(resource: &str, stores: &[&str]) -> tore_formats::surface_unit::SurfaceUnit {
+    use tore_formats::surface_unit as unit;
+    let mounts = stores
+        .iter()
+        .map(|store| unit::Mount {
+            location: 0,
+            flags: 10,
+            position: [0, 0, 0],
+            slew: [0, 0],
+            slew_limit: [21_840, 16_380],
+            kind: unit::MountKind::Weapon,
+            store: Some((*store).to_owned()),
+            count: 2,
+            weight_class: 0,
+        })
+        .collect();
+    unit::SurfaceUnit {
+        resource: resource.to_owned(),
+        short_name: resource.to_owned(),
+        name: resource.to_owned(),
+        class: 0x2000,
+        object_flags: 0,
+        callback: "_GVProc".to_owned(),
+        shape: None,
+        shadow_shape: None,
+        damaged_shape: None,
+        hit_points: 100,
+        damage: [0; 5],
+        signatures: [0; 5],
+        max_visible: 0,
+        year: 0,
+        explosion: 0,
+        crater: 0,
+        damage_type: 0,
+        debris_damaged: [0; 3],
+        debris_destroyed: [0; 3],
+        movement: unit::Movement {
+            turn_rate: 0,
+            min_speed: 0,
+            corner_speed: 0,
+            max_speed: 0,
+            acceleration: unit::Quantity {
+                raw: 0,
+                scaled: false,
+            },
+            deceleration: unit::Quantity {
+                raw: 0,
+                scaled: false,
+            },
+        },
+        npc: unit::Npc {
+            flags: 0,
+            script: None,
+            search_frequency: 40,
+            unready_attack: 144,
+            attack: 60,
+            retarget: 32_767,
+            zone_dist: 0,
+        },
+        mounts,
+        sensor: None,
+    }
+}
+
+/// The fit override: the Ticonderoga's two ASROC rails carry the derived
+/// SM-2, and only the Ticonderoga changes. ASROC stays held.
+#[test]
+fn the_ticonderoga_fit_carries_sm2_and_no_other_unit_changes() {
+    use std::collections::BTreeMap;
+    let mut resources: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    resources.insert(
+        "SA6.JT".into(),
+        crate::test_support::resources::surface_sam("SA6.JT", 0x12341, 3),
+    );
+    resources.insert(
+        "ASROC.JT".into(),
+        crate::test_support::resources::surface_sam("ASROC.JT", 0x12341, 3),
+    );
+    resources.insert(
+        "SEA_SPAR.JT".into(),
+        crate::test_support::resources::surface_sam("SEA_SPAR.JT", 0x12341, 3),
+    );
+    resources.insert("AMRAM.SH".into(), vec![1, 2, 3]);
+    tore_formats::weapons::corrections::extend_resources(&mut resources);
+    assert!(resources.contains_key("SM2.JT") && resources.contains_key("SM2.SH"));
+
+    assert_eq!(super::fitted_store("TICON", "ASROC.JT"), "SM2.JT");
+    assert_eq!(super::fitted_store("TICON", "PHALANX.JT"), "PHALANX.JT");
+    assert_eq!(super::fitted_store("KRIVAK", "ASROC.JT"), "ASROC.JT");
+
+    // The Ticonderoga's two ASROC rails become one SM-2 controller with both
+    // mounts. Never ASROC (held) and never Sea Sparrow.
+    let ticon = unit_with("TICON.NT", &["ASROC.JT", "ASROC.JT"]);
+    let mut loads = vec![MountStock::default(); 2];
+    let weapons = super::weapons_of(
+        &ticon,
+        "TICON.NT",
+        None,
+        &resources,
+        1,
+        true,
+        false,
+        &mut loads,
+        &mut |why| panic!("{why}"),
+    );
+    let sources: Vec<&str> = weapons.iter().map(|w| w.record.source.as_str()).collect();
+    assert_eq!(sources, vec!["SM2.JT"]);
+    assert_eq!(weapons[0].mounts.len(), 2, "both former ASROC rails");
+    assert_eq!(weapons[0].record.shape.as_deref(), Some("SM2.SH"));
+    // The SM-2's numbers are the SA-6's, unchanged.
+    let sa6_record = Weapon::parse("SA6.JT", &resources["SA6.JT"]).unwrap();
+    assert_eq!(
+        weapons[0].record.seeker.zones[1], sa6_record.seeker.zones[1],
+        "SA-6 launch envelope"
+    );
+    assert_eq!(
+        weapons[0].record.damage.by_class, sa6_record.damage.by_class,
+        "SA-6 damage"
+    );
+    assert_eq!(
+        weapons[0].record.movement, sa6_record.movement,
+        "SA-6 motor"
+    );
+
+    // No other unit's fit changes: off the Ticonderoga, ASROC is still held
+    // and loads nothing.
+    let other = unit_with("KRIVAK.NT", &["ASROC.JT"]);
+    let mut loads = vec![MountStock::default(); 1];
+    let weapons = super::weapons_of(
+        &other,
+        "KRIVAK.NT",
+        None,
+        &resources,
+        1,
+        true,
+        false,
+        &mut loads,
+        &mut |_| {},
+    );
+    assert!(weapons.is_empty(), "ASROC stays held off the Ticonderoga");
+}
+
+const TICON_ID: u32 = 0x4000_0004;
+
+#[test]
+fn a_ticonderoga_fires_sm2_at_aircraft_on_its_own_radar() {
+    let ticon = placed(TICON_ID, "TICON.NT", 0x2000, 0., 0., 1)
+        .with_missile(sm2(), &[(arc(2, FREE, [0., 45.]), 2)])
+        .radar(false, None);
+    assert_eq!(
+        ticon.arms.radar,
+        Some(emitters::RadarRule::Detection {
+            range: 80_000.,
+            surface: 0.
+        }),
+        "the air search reaches the SM-2 seeker's 80,000 ft"
+    );
+    let mut f = Fixture::new(vec![ticon], Vec::new());
+    f.run(TPS);
+    assert!(
+        f.emitting(TICON_ID),
+        "a hostile inside 80,000 ft turns the radar on"
+    );
+    // Search at once, 36 s unready preparation, 5 s lock: the launch at 41 s.
+    f.run(41 * TPS);
+    assert_eq!(f.rounds(), 1);
+    assert_eq!(f.fired[0].0, 41 * TPS);
+    // The ship's own radar supports the missile.
+    let support = f.supports.iter().find(|s| s.owner == TICON_ID).unwrap();
+    assert!(support.supported && support.radar_emitting);
+    assert_eq!(support.observation.unwrap().id, JET);
+    // It is the SM-2 that fired, not ASROC or Sea Sparrow.
+    let fired = f
+        .surface
+        .arsenal
+        .arms(super::UnitId(TICON_ID))
+        .unwrap()
+        .weapons
+        .iter()
+        .map(|w| w.record.source.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(fired, vec!["SM2.JT"]);
+}
+
 #[test]
 fn altitude_floors_keep_a_low_jet_from_launches() {
     let sa2 = placed(SA6_ID, "SA2A.NT", 0x1000, 0., 0., 1)

@@ -18,6 +18,7 @@ fn weapon(name: &str) -> Weapon {
             | "AS15.JT"
             | "SA6.JT"
             | "SEA_SPAR.JT"
+            | "SM2.JT"
             | "AA6.JT"
             | "AA9.JT"
             | "PL10.JT"
@@ -241,6 +242,23 @@ fn all_nine_activation_thresholds_and_no_false_pitbull() {
         assert!(Profile::for_weapon(&weapon(name)).is_some());
         assert!(Profile::reviewed(name));
     }
+}
+/// The fitted derived SM-2 (JT-6 rework, 2026-11-06): a surface record whose
+/// numbers are the SA-6's, so its reviewed profile is identical. It is not
+/// ASROC (held) and not Sea Sparrow.
+#[test]
+fn the_fitted_sm2_has_the_sa6_profile() {
+    let sm2 = Profile::for_weapon(&weapon("SM2.JT")).expect("SM-2 profile");
+    let sa6 = Profile::for_weapon(&weapon("SA6.JT")).expect("SA-6 profile");
+    assert_eq!(sm2, sa6, "the SM-2 is the SA-6's profile");
+    assert_eq!(sm2.guidance, Guidance::Supported);
+    assert_eq!(sm2.role, TargetRole::Aircraft);
+    assert!(Profile::reviewed("SM2.JT"));
+    assert!(!Profile::reviewed("ASROC.JT"));
+    assert!(
+        Profile::reviewed("SEA_SPAR.JT"),
+        "Sea Sparrow is its own record"
+    );
 }
 /// The four decoded air-to-air records enabled in slice JT-4 (John,
 /// 2026-11-06). Each now resolves a reviewed profile from its own seeker

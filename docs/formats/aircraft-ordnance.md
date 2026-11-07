@@ -394,6 +394,46 @@ without media) checks that no NT mounts any of the ten, that only the Tu-26 and
 Tu-95 PT records name `T23_1.JT`, and that no imported aircraft is built with
 one.
 
+## ASROC and the Ticonderoga's SM-2 (JT-6, 2026-11-06)
+
+ASROC is not one of the ten: it has a carrier. The Ticonderoga's NT is the only
+record that mounts it, on two rails (`ASROC.JT` hardpoints 2 and 3) beside two
+Phalanx, and no PT or other NT names it. Its guidance word is `0x12341`, the
+same as the SA-6's: the air-target flag `0x10000` with the support flag `0x200`,
+no surface flag, and seeker signature 3. The store-choice rule gives an
+aircraft target the stores flagged `0x10000` and a surface target only those
+flagged `0x20000` ([AI release](weapons.md#ai-release-against-ground-targets)),
+so the data alone would let the Ticonderoga fire ASROC at aircraft, and never at
+a ship or the surfaced OSCAR. Retail has no submarine target class. The record
+zone 1 is 500 to 75,000 ft at 1,000 to 30,000 ft, its seeker reaches 100,000 ft,
+and its motor is 2 s ignition, 20 s burn, 40 s removal.
+
+The Ticonderoga is placed widely: 181 distinct `.M` missions name it, all in
+`FA_2.LIB`. The first reading's four names were a small sample; the exact count
+and the breakdown by series are in
+[the missile format page](missiles.md#asroc).
+
+**Resolution (reworked):** John kept ASROC **held** on 2026-11-06. It is an
+anti-submarine weapon, there is no submarine target, and the SA-6 copy looks
+like a placeholder. The Ticonderoga instead carries a fitted derived **SM-2**
+on its two ASROC rails: a virtual `SM2.JT` whose every number is the SA-6's,
+unchanged, drawing a private alias of the AMRAAM shape (`AMRAM.SH`, so the
+AIM-120 keeps its own size) refitted to the real RIM-66's 15.5 ft by 13.5 in
+(fitted). It fires as supported radar at aircraft through the same surface
+firing path. The fit lives in `crates/tore-world/src/surface/fire.rs`
+(`fitted_store`, Ticonderoga-only), the derived record in
+`crates/tore-formats/src/weapon_corrections.rs` (`SURFACE_DERIVED`), and the
+size in `crates/tore-sim/src/combat/store_sizes.rs`. It is still **Catalog**
+for Load Ordnance, because no aircraft carries it. Evidence and the exact
+decode are in [the missile format page](missiles.md#asroc); the gameplay
+statement is in
+[the missile spec](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06).
+The retail guard `crates/tore-import/tests/asroc.rs` (skips without media) pins
+the flags, the zones, the motor, the Ticonderoga-only carrier and the 181-mission
+count, and the world tests `the_ticonderoga_fit_carries_sm2_and_no_other_unit_changes`
+and `a_ticonderoga_fires_sm2_at_aircraft_on_its_own_radar`
+(`crates/tore-world/src/surface/fire_tests.rs`) cover the fit and the launch.
+
 ## Paired-point counts and physics
 
 Research review, 2026-10-25, using the FA.EXE, FA.SMS and FA_2.LIB identities

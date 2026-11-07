@@ -102,12 +102,17 @@ pub enum TargetRole {
 /// records (seeker 3) with the support flag 0x200, as the missile inventory
 /// proposes, plus SA-19 and SA-N-11, which lack the flag but arm the HAWK,
 /// Roland, 2S6 and Kirov (default, pending John). Target role aircraft.
-/// ASROC stays held (no submarine is ever a target); the SS-N-9 is
+/// ASROC stays held (John, 2026-11-06): its record is an SA-6 copy
+/// (guidance word 0x12341), but it is an anti-submarine weapon, there is no
+/// submarine target, and the copy looks like a placeholder. The Ticonderoga
+/// carries the derived SM-2 on its two ASROC rails instead
+/// (docs/spec/surface-defenses.md, "SAM missiles"; the SM-2 is `SM2.JT`, an
+/// SA-6-numbered stand-in, in [`SURFACE_SUPPORTED`] below). The SS-N-9 is
 /// [`SURFACE_TO_SURFACE`]. The decoded-only records HQ2J, HQ61, MIM23, ROLAND,
 /// SAN5 and SAN8 stay out: no NT unit carries them and they have no reviewed
 /// flight profile (docs/formats/aircraft-ordnance.md, "Surface records nothing
 /// mounts").
-pub const SURFACE_SUPPORTED: [&str; 13] = [
+pub const SURFACE_SUPPORTED: [&str; 14] = [
     "SA2A.JT",
     "SA3.JT",
     "SA6.JT",
@@ -121,6 +126,7 @@ pub const SURFACE_SUPPORTED: [&str; 13] = [
     "SAN9.JT",
     "SAN11.JT",
     "SEA_SPAR.JT",
+    "SM2.JT",
 ];
 /// The surface-to-air records with infrared seekers (seeker 2), which home on
 /// their own: shoulder-launched and vehicle SAMs.

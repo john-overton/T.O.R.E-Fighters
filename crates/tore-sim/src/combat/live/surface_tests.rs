@@ -244,8 +244,13 @@ fn surface_missiles_have_reviewed_profiles_and_asroc_none() {
         assert_eq!(profile.guidance, Guidance::Infrared, "{name}");
         assert_eq!(profile.role, TargetRole::Aircraft, "{name}");
     }
-    // ASROC stays held: there is never a submarine to aim it at.
+    // ASROC stays held (John, 2026-11-06): its guidance word is the air-target
+    // flag with the support flag 0x200 (an SA-6 copy), but it is an
+    // anti-submarine weapon with no submarine target and the copy looks like a
+    // placeholder, so it has no reviewed profile and never fires.
+    assert!(!missiles::SURFACE_SUPPORTED.contains(&"ASROC.JT"));
     assert!(missiles::Profile::for_weapon(&record("ASROC.JT")).is_none());
+    assert!(!missiles::Profile::reviewed("ASROC.JT"));
     let mut s = scene();
     unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
     let refused = s.fire_surface(shot(
@@ -1186,6 +1191,15 @@ fn real_data_surface_sam_records_match_their_guidance() {
         at = start + size;
     }
     for name in missiles::SURFACE_SUPPORTED {
+        // A derived store is not in the pack file: the loader adds it at read
+        // time (SM2.JT, the fitted SM-2 the Ticonderoga carries).
+        if !records.contains_key(name) {
+            assert!(
+                tore_formats::weapons::corrections::donor(name).is_some(),
+                "{name} is neither in the pack nor a derived store"
+            );
+            continue;
+        }
         let w = &records[name];
         assert_eq!(w.seeker.signature, 3, "{name}");
         assert_eq!(

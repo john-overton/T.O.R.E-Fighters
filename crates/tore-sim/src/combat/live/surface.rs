@@ -171,8 +171,9 @@ pub enum Refused {
     /// Firing would leave fewer than [`SURFACE_PROJECTILE_RESERVE`] free
     /// projectile slots.
     Capacity,
-    /// A missile record without a reviewed guidance profile (SS-N-9, ASROC):
-    /// it is not fired.
+    /// A missile record without a reviewed guidance profile (ASROC, held by
+    /// John's decision of 2026-11-06, and the decoded-only HQ2J): it is not
+    /// fired.
     Unreviewed,
     /// A position or direction that is not finite, or a zero direction.
     Invalid,

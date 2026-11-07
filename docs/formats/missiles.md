@@ -254,6 +254,43 @@ So no recovered data or consumer gives `AEMP1.JT` an electromagnetic effect.
 What the round does when it detonates is unknown. The gameplay statement and
 the next research step are in the [spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06).
 
+## ASROC
+
+Research mode, 2026-11-06 (slice JT-6). Read from the 1.02F media's `FA_2.LIB`
+through `tore_formats::weapons::Weapon`; the same check is
+`crates/tore-import/tests/asroc.rs`. The gameplay statement is in the
+[spec](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06).
+
+| Field | Value |
+| --- | --- |
+| Guidance word `flags` | `0x12341`, the same as `SA6.JT`: guided `0x1`, speed command `0x40`, launcher `0x100`, support `0x200`, `0x2000`, air target `0x10000`; not the surface flag `0x20000` |
+| Seeker signature | 3, so [`SeekerKind::from_fields`](../../crates/tore-formats/src/weapons.rs) with the support flag gives semi-active radar |
+| Zone 0 (acquisition) | horizontal `0x7fff` (wide), vertical 16380, range 0 to 100,000 ft, altitude floor 500 ft |
+| Zone 1 (launch) | 8190/8190 (45/45 degrees), 500 to 75,000 ft, 1,000 to 30,000 ft |
+| Motor | `ignite_t` 8 (2 s), `fuel_t` 88 (burn 20 s), `remove_t` 160 (40 s total) |
+| Damage by class | 150, 15, 45, 30, 150; fuze arm 4; proximity fuze 100 ft; collateral 750 ft at 35 percent |
+| Shape and sound | `sa3m.SH`, `&ltmiss.11k` |
+
+**Carriers.** `TICON.NT` is the only NT and no PT names `ASROC.JT`: two rails
+named `ASROC.JT` beside two `PHALANX.JT` (hardpoints 2 and 3, arcs 120/90
+degrees). The Ticonderoga is placed widely: 181 distinct `.M` missions name it,
+all in `FA_2.LIB` (50 `~U`, 50 `UKR`, 34 `~K`, 15 `~B`, 15 `~A`, 6 `~F*NOTH`,
+4 `~V`, 2 `KURIL`, 2 `MULTI`, 2 `~E` and `~INFO.M`). The first reading's four
+names (`MULTI04.M`, `MULTI08.M`, `UKR02.M`, `UKR03.M`) were a small sample.
+
+**Why it would fire, and why it does not.** Retail's store choice matches a
+target's class against a weapon's flags: a target without class bits `0xc000`
+takes only stores flagged `0x20000`; an aircraft takes stores flagged `0x10000`
+([AI release](weapons.md#ai-release-against-ground-targets)). ASROC has the air
+flag and not the surface flag, so a reading from the data alone would make it a
+candidate against aircraft and never against a ship, and the surfaced OSCAR is
+an ordinary `0x20000` ship target with no submarine class in the record set.
+**John kept it held anyway** (2026-11-06): it is an anti-submarine weapon, there
+is no submarine target, and this SA-6 copy looks like a placeholder. The
+Ticonderoga carries a fitted derived SM-2 on its ASROC rails instead, whose
+donor (`SA6.JT`), model (`AMRAM.SH`) and real-size refit are in the
+[spec](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06).
+
 ## Exceptions that must survive classification
 
 - AA10 labels itself AA-10T but has signature 3 and flag 0x200. AA9 also has
@@ -266,10 +303,12 @@ the next research step are in the [spec](../spec/missiles.md#aemp-1-electromagne
   candidates, rather than calling them IR or passive radar emitters.
 - AT2 has signature 0. Guidance is unresolved; do not classify it as an IR weapon
   merely because it is a missile-shaped powered record.
-- ASROC's special role, and SA19/SAN11's radar-control requirements, need consumer
-  review. Their draft rows are on hold. In particular SA19 lacks 0x200 while
-  carrying 0x100, so absence of the illumination flag is insufficient to promote
-  it to an active seeker.
+- SA19 and SAN11's radar-control requirements need consumer review. Their draft
+  rows are on hold. In particular SA19 lacks 0x200 while carrying 0x100, so
+  absence of the illumination flag is insufficient to promote it to an active
+  seeker. ASROC decodes as supported radar aimed at aircraft (its word `0x12341`
+  is the SA-6's), but John kept it held on 2026-11-06 as an anti-submarine
+  weapon ([ASROC](#asroc)).
 - SA14 has fuel/remove 88/80; SA6 has 92/80. Cleanup precedes motor cutoff under
   the existing host timing. Do not normalize those records silently.
 

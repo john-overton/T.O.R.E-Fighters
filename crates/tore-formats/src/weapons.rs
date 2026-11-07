@@ -685,6 +685,47 @@ end
     }
 
     #[test]
+    fn the_sm2_derivative_keeps_sa6_numbers_and_takes_the_amraam_model() {
+        let bytes = fixture();
+        let donor = Weapon::parse("SA6.JT", bytes.as_bytes()).unwrap();
+        let mut map = BTreeMap::from([
+            ("SA6.JT".into(), bytes.clone().into_bytes()),
+            ("AMRAM.SH".into(), vec![7, 8, 9]),
+        ]);
+        corrections::extend_resources(&mut map);
+        assert_eq!(map["SM2.JT"], map["SA6.JT"], "the donor's own bytes");
+        assert_eq!(map["SM2.SH"], map["AMRAM.SH"], "the AMRAAM model");
+        assert_eq!(corrections::donor("SM2.JT"), Some("SA6.JT"));
+        assert_eq!(
+            corrections::resource_donor("SM2.JT", &map).as_deref(),
+            Some("SA6.JT")
+        );
+        assert_eq!(
+            corrections::resource_donor("SM2.SH", &map).as_deref(),
+            Some("AMRAM.SH")
+        );
+        assert_eq!(
+            corrections::identity("SM2.JT"),
+            Some(("SM-2", "SM-2 Standard Missile"))
+        );
+        let sm2 = Weapon::parse("SM2.JT", &map["SM2.JT"]).unwrap();
+        assert_eq!(sm2.shape.as_deref(), Some("SM2.SH"));
+        assert_eq!(sm2.hud_name, "SM-2");
+        assert_eq!(sm2.name, "SM-2 Standard Missile");
+        // Every other field is the SA-6's, unchanged.
+        let mut expected = donor.clone();
+        expected.source = sm2.source.clone();
+        expected.shape = sm2.shape.clone();
+        expected.hud_name = sm2.hud_name.clone();
+        expected.name = sm2.name.clone();
+        assert_eq!(sm2, expected);
+        // Extending twice adds nothing.
+        let once = map.clone();
+        corrections::extend_resources(&mut map);
+        assert_eq!(map, once);
+    }
+
+    #[test]
     fn gunship_damage_correction_preserves_direct_damage_and_effects() {
         let bytes = fixture_damage("150");
         let original = Weapon::parse("C_25.JT", bytes.as_bytes()).unwrap();

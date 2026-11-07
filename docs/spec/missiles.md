@@ -170,6 +170,37 @@ five-degree BORE cap, and 120 Hz timers. The four energy fits in the
 [energy baseline](../baselines/missile-energy.md) were already authored and
 are unchanged.
 
+## ASROC and the Ticonderoga's SM-2 (JT-6, 2026-11-06)
+
+**Research first, then John held ASROC and asked for an SM-2.** The decoded
+ASROC record is an SA-6 copy: its guidance word `0x12341` is exactly the
+SA-6's, the air-target flag `0x10000` with the support flag `0x200`, no surface
+flag `0x20000`, and seeker signature 3 ([record fields](../formats/missiles.md#asroc)).
+So ASROC's data alone would let a surface unit aim it at aircraft. **John kept
+it held anyway** (2026-11-06): it is an anti-submarine weapon, there is no
+submarine target, and the SA-6 copy looks like a placeholder. It never fires,
+and its availability row stays **Catalog** with the hold noted.
+
+The Ticonderoga's two ASROC rails instead carry a fitted derived **SM-2**
+("SM-2 Standard Missile"), which John asked for the same day: "take an AMRAAM
+model and give it SA-6 stats as an SM-2". It is a virtual `SM2.JT` record made
+by the project's existing derived-store machinery (the R-27 variants and the
+smaller guided bombs):
+
+| What the player sees | Derived data |
+| --- | --- |
+| The Ticonderoga, the ASROC record's only carrier, fires the SM-2 at hostile aircraft on the ship's own radar | the ship's two ASROC hardpoints (2 and 3, arcs kept) carry `SM2.JT` through a Ticonderoga-only fit override |
+| Every number is the SA-6's: launch 9,000 to 75,000 ft at 2,000 to 30,000 ft altitude, seeker 80,000 ft, ignition 2 s, burn 21 s, removal 20 s, supported radar, 75 damage | `SM2.JT` is `SA6.JT`'s bytes; only its name, HUD label and model change |
+| The model is an AMRAAM shaped and sized to the real SM-2 | the AMRAAM shape `AMRAM.SH`, copied to the private alias `SM2.SH` so the AIM-120 keeps its own size, refitted to the RIM-66's 15.5 ft by 13.5 in (fitted) |
+
+**Fitted.** The SM-2 is an authored stand-in, requested by John on 2026-11-06.
+The data has no SM-2 record; the agent chose the SA-6 donor numbers and the
+AMRAAM model, and the real-size entry is fitted public data (RIM-66 Standard
+MR). It is the project's first derived surface store. Its availability row is
+**Catalog** too: no aircraft carries it, and it appears only on the
+Ticonderoga. Evidence: [the record and carrier
+check](../formats/aircraft-ordnance.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06).
+
 ## AEMP-1 electromagnetic pulse (JT-5, 2026-11-06)
 
 **Research mode. The effect is unknown, so nothing was implemented.** What a
@@ -332,7 +363,10 @@ Missile presence does not authorize SAM, ship, ground-target or AI work.
 John authorized surface air defenses on 2026-10-10: the SAM and ship records
 that surface units fire have reviewed profiles, supported radar or infrared, as
 listed in [surface defenses](surface-defenses.md#sam-missiles) (the S and I
-rows above; ASROC and the anti-ship SS-N-9 stay without one). They stay
+rows above). ASROC stays held (John, 2026-11-06: an anti-submarine weapon with
+no submarine target, and its SA-6-copy record looks like a placeholder). The
+Ticonderoga carries the fitted derived SM-2 instead, a `SM2.JT` stand-in with
+the SA-6's numbers. The anti-ship SS-N-9 is surface-to-surface. They stay
 Catalog: no aircraft carries them.
 
 Ranges are the source launch envelope converted using **6,076 feet per nmi**,
@@ -377,7 +411,7 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AS16.JT (AS-16) | A* | Live | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | N/A |
 | AS30.JT (AS 30L) | Hold: designator | Catalog | 0.08 to 9.87 | 1 | 12 | 26 | 9.87 | 45/45 | TBD | TBD |
 | AS7.JT (AS-7) | S* | Live | 0.08 to 4.94 | 1 | 9 | 30 | 8.23 | 45/45 | N/A | N/A |
-| ASROC.JT (ASROC) | Hold: radar role | Catalog | 0.08 to 12.34 | 2 | 20 | 40 | 16.46 | wide*/90 | TBD | TBD |
+| ASROC.JT (ASROC) | Hold: John's decision | Catalog | 0.08 to 12.34 | 2 | 20 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | AT12.JT (AT-12) | Hold: designator | Catalog | 0.16 to 4.28 | 3 | 97 | 180 | 4.28 | 45/45 | TBD | TBD |
 | AT2.JT (AT-2) | Unguided fitted host adapter | Live | 0.08 to 2.96 | 1 | 9 | 30 | 3.29 | 45/45 | TBD | TBD |
 | FIM92.JT (FIM-92) | I* | Catalog | 1.23 to 8.89 | 0 | 4 | 20 | 16.46 | wide*/90 | N/A | 5/5 |

@@ -88,6 +88,21 @@ pub fn loadable_missile(resource: &str) -> Vec<u8> {
 }
 
 fn weapon_with(resource: &str, gun: bool, extra_flags: i64) -> Vec<u8> {
+    weapon_record(
+        resource,
+        (if gun { 0x844 } else { 0x241 }) | extra_flags,
+        if gun { 0 } else { 2 },
+    )
+}
+
+/// A synthetic surface missile record with the given weapon `flags` and seeker
+/// `signature`, its zones generous: for the surface fit tests. No retail data.
+pub fn surface_sam(resource: &str, flags: i64, signature: i64) -> Vec<u8> {
+    weapon_record(resource, flags, signature)
+}
+
+/// A weapon record with the given weapon `flags` and seeker `signature`.
+fn weapon_record(resource: &str, flags: i64, signature: i64) -> Vec<u8> {
     let value = |name: &str| match name {
         "structType" => {
             // The object block's and the projectile block's first fields are
@@ -95,14 +110,8 @@ fn weapon_with(resource: &str, gun: bool, extra_flags: i64) -> Vec<u8> {
             0
         }
         "weight" => 20,
-        "flags" => (if gun { 0x844 } else { 0x241 }) | extra_flags,
-        "sig" => {
-            if gun {
-                0
-            } else {
-                2
-            }
-        }
+        "flags" => flags,
+        "sig" => signature,
         "_minSpeed" => 10,
         "_cornerSpeed" => 1000,
         "_maxSpeed" => 2000,

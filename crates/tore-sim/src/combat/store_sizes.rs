@@ -39,6 +39,10 @@ pub const SIZES: &[(&str, Real)] = &[
     ("SIDEB.SH", real(9.3, 0.42, 1.83)),
     ("AM9X.SH", real(9.9, 0.42, 1.47)),
     ("AMRAM.SH", real(12.0, 0.58, 1.75)),
+    // The derived SM-2 draws its private alias of the AMRAAM shape, sized to
+    // the real RIM-66 Standard MR: 15.5 ft by 13.5 in, fin span 1.08 m
+    // (fitted; John, 2026-11-06).
+    ("SM2.SH", real(15.5, 1.125, 3.5)),
     ("SPAR.SH", real(12.0, 0.67, 3.3)),
     ("PHENX.SH", real(13.0, 1.25, 3.0)),
     ("MICA.SH", real(10.2, 0.53, 1.83)),
@@ -193,5 +197,15 @@ mod tests {
         assert_eq!(sparrow.width, 3.3);
         assert_eq!(StoreSize::of_shape(None), StoreSize::body(PLAIN));
         assert_eq!(tank_body(2_000.), [13., 2.]);
+    }
+
+    #[test]
+    fn the_derived_sm2_has_its_fitted_real_size() {
+        let real = real_size("SM2.SH").expect("the SM-2 alias size");
+        assert_eq!(real.length, 15.5, "RIM-66 4.72 m");
+        assert_eq!(real.diameter, 1.125, "13.5 in");
+        assert_eq!(real.span, 3.5, "1.08 m fins");
+        // The SM-2 does not steal the AIM-120's size.
+        assert_eq!(real_size("AMRAM.SH").unwrap().length, 12.0);
     }
 }

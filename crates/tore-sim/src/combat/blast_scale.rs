@@ -194,6 +194,8 @@ pub fn warhead_lb(record: &str) -> Option<f64> {
         "SA2A" => 430.,
         "SA3" => 132.,
         "SA6" => 125.,
+        // The derived SM-2 carries the SA-6's blast numbers.
+        "SM2" => 125.,
         "SA7" | "SAN5" => 3.,
         "SA9" | "SA13" => 7.,
         "SA14" | "SA16" | "SAN8" => 4.,

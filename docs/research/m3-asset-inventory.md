@@ -61,12 +61,17 @@ first ones to confirm.
   [rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)).
   Remaining: AEMP1 (effect unknown after JT-5, 2026-11-06,
   [evidence](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)),
-  ASROC, the hidden
+  ASROC (held by John's decision of 2026-11-06 as an anti-submarine weapon with
+  no submarine target, though its record is an SA-6 copy,
+  [why](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06)),
+  the hidden
   guns and gun pods ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN, whose
   decoded carriers are all unported
   ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)),
   twelve decoded-only surface records, and presentation gaps (no bomblet
-  dispense, no visible MK82AIR retarder, no GBU28 penetration).
+  dispense, no visible MK82AIR retarder, no GBU28 penetration). The Ticonderoga
+  carries a fitted derived SM-2 on its ASROC rails (JT-6 rework, 2026-11-06;
+  [why](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06)).
 - **Equipment.** Sensors and ECM are gated to reviewed roster aircraft, so 14
   radars, 12 ECM suites and 3 sensors carried only by unported aircraft are None.
   Designator pods PAVESPK and AAS38 have no drawn body. Tanks use a fitted body.
@@ -267,7 +272,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 ### Mechanisms
 
-- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23 and AEMP-1 (its EM pulse effect is unknown after JT-5, 2026-11-06, [spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)); the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). AA-6, AA-9, PL-7 and PL-10 joined the supported list in JT-4 ([rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)). Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
+- **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23 and AEMP-1 (its EM pulse effect is unknown after JT-5, 2026-11-06, [spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)); the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). AA-6, AA-9, PL-7 and PL-10 joined the supported list in JT-4 ([rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)). ASROC stays held by John's decision (2026-11-06, [why](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06)); the Ticonderoga carries the fitted derived SM-2 on its former ASROC rails, which is a surface record and stays out of Load Ordnance. Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
@@ -400,7 +405,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AAA20.JT | 20mm radar AAA | None | None | None | None | No NT mounts it (JT-3 scan); no reviewed gun-table row |
 | AAA30.JT | 30mm radar AAA | Done | Done | Done | Done | AK-630 class ship gun, radar; tracers/flash |
 | AAA30BAD.JT | 30mm visual AAA | Done | Done | Done | Done | AK-230 class ship gun, visual; tracers/flash |
-| ASROC.JT | ASROC | Partial | None | None | None | Ticonderoga carries it; held, no submarine target exists |
+| ASROC.JT | ASROC | Partial | None | None | None | Held by John (2026-11-06): an anti-submarine weapon with no submarine target, and its SA-6-copy record looks like a placeholder; the Ticonderoga carries a fitted derived SM-2 instead |
 | A_M1939.JT | M1939 37mm AAA Zone | Done | Done | Done | Done | Barrage zone, 33 percent random fire; tracers/flash |
 | BMP2.JT | bmp2 | Done | Done | Done | Done | IFV 30 mm; visual aim; tracers/flash |
 | BTR80.JT | btr80 | Done | Done | Done | Done | IFV 14.5 mm; visual aim; tracers/flash |
@@ -666,7 +671,7 @@ Research mode, read-only, 2026-11-06. 84 records from `FA_2.LIB`.
 
 An NT is a PT minus its PLANE block: OBJECT and NPC blocks plus hardpoint rows naming JT weapons or SEE sensors; each record names one main shape (`docs/formats/surface-units.md`, reader `tore_formats::surface_unit`). `tore_formats::surface_set::select` imports all 84 plus every OT definition (170, since slice OT-4) including `DEST.OT`, with shadow, damaged (`_A`), weapon, sensor and sound resources (`docs/spec/import-cache.md`). Placement comes from the 129 `~Q*.M` templates, the executable's equipment lists (`quick_template/tables.rs` `LISTS`) and the base layouts; I confirmed placements by grepping the extracted `.M` files (only OILR is placed nowhere; MULE_A and CATGUY arrive via the carrier part table, EJECT via ejection). Runtime behaviour: `tore_sim::ai::surface` (one controller per mount group or battery radar: detect, prepare, track, fire, magazines, HARM shutdown), `tore_world::surface` (resolve, movement, aim, supply, emitters, muzzle, batteries), spec `docs/spec/surface-defenses.md`, acceptance `docs/baselines/surface-defenses.md`. Surface AI was authorized 2026-10-10 (ROADMAP surface round, W6 built).
 
-Animation is limited by the retail shapes: only KRIV/SOVR turrets, KRIV/SOVR/REDCR/RLD antennas have parts; every other armed land unit turns its whole body (CL-AIM, fitted rates) and shows rail rounds; nothing elevates; no wheel/track/wake animation exists. Destroyed looks: ships swap to `_A` and burn, land units to `DEST.SH`, men removed or lie down. Movement exists only for the five routed templates (tank column ~QUCOL, 3 CARGO2 ships ~QTCARGO, TRUCK in ~QUFACT/~QUBUNK); all other ships are static targets, hydrofoil and carrier programs are open (ROADMAP line 716), ASROC is held, ROADMAP M3 lists "Carrier operations: launch, recovery, deck". Online clients see only gun aim after bursts (protocol 25).
+Animation is limited by the retail shapes: only KRIV/SOVR turrets, KRIV/SOVR/REDCR/RLD antennas have parts; every other armed land unit turns its whole body (CL-AIM, fitted rates) and shows rail rounds; nothing elevates; no wheel/track/wake animation exists. Destroyed looks: ships swap to `_A` and burn, land units to `DEST.SH`, men removed or lie down. Movement exists only for the five routed templates (tank column ~QUCOL, 3 CARGO2 ships ~QTCARGO, TRUCK in ~QUFACT/~QUBUNK); all other ships are static targets, hydrofoil and carrier programs are open (ROADMAP line 716), ASROC is held and the Ticonderoga carries a fitted derived SM-2 instead, ROADMAP M3 lists "Carrier operations: launch, recovery, deck". Online clients see only gun aim after bursts (protocol 25).
 
 Grading convention: Done = every behaviour applicable to that record that retail evidence or the docs call for is built (including wreck state); Partial = some built, a named gap remains; None = applicable but absent; N/A = not applicable (e.g. AI for an unarmed static target). AI and Logic grades for fitted rules (target ranking, hit chance, movement) are Done where the spec marks them built, with the "fitted" caveat in Notes only when notable. Evidence is from docs and census, not an in-game run; items marked "unverified" were not traced to code.
 
@@ -763,7 +768,7 @@ Grades: Done / Partial / None / N/A. Category is the first column group heading.
 | SESHDW.NT | Sea Shadow | Done | Partial | N/A | Done | Static passive target; _A wreck; no wake |
 | SL100.NT | SL-100 hovercraft | Done | Partial | N/A | Done | Static passive target; _A wreck; no wake |
 | SOVR.NT | Sovremennyy destroyer | Done | Partial | Partial | Done | Turrets+antenna turn; no ship movement |
-| TICON.NT | Ticonderoga cruiser | Done | Partial | Partial | Partial | Phalanx fires; ASROC held; static |
+| TICON.NT | Ticonderoga cruiser | Done | Partial | Partial | Done | Phalanx and the fitted derived SM-2 (JT-6 rework, 2026-11-06) fire at aircraft; ASROC held; static |
 | TYPE69.NT | Type 69 frigate | Done | Partial | Partial | Done | AAA30BAD+SA-N-4; static; wreck _A only |
 | WASP.NT | Wasp carrier | Done | Partial | Partial | Partial | Phalanx only; static; no deck ops; _A hull, island |
 
