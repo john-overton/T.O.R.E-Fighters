@@ -506,3 +506,41 @@ source-section sweeps in the ignored audit directory. Original continuous
 mechanisms/timing and the forward-strip consumers remain unknown. No original
 module is executed; additional drawing/state-consumer research is the next
 step for those strips.
+
+## MiG-25 source additions
+
+MIG25.SH SHA-256 is
+`d76f8f7384305426b58543334b629aff757bedddfe2a78e6be6ccdd2393814bb`,
+with 26,154 CODE bytes, 320 runtime neutral faces and five state words
+`0x7600`, `0x7606`, `0x760c`, `0x7618`, `0x761e`. It names only one gear branch
+(`0x760c`, twelve cards). No signed pitch, roll, yaw or flap branch exists, so
+the control roles below are fitted geometric assignments; the panels and hinge
+lines are exact source geometry. Coordinates use one-third foot per unit.
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right stabilator | `3daa`, `3e4a` | Flat double-sided plate at Z=-1, root chord X=18 from Y=-45 to -69, tip X=48 at Y=-83..-91 |
+| Left stabilator | `434c`, `43a2` | Mirror of the right at X=-18..-48 |
+| Right rudder | `320f`, `3237` | Rear fin panel behind the split line (16,-40,7) to (23,-63,38) |
+| Right fixed fin | `325f`, `327d` | Forward fin panel ahead of that split, root X=16 from Y=-19 to -40 |
+| Left rudder | `2c1f`, `2cb2` | Mirror behind the split line (-16,-40,8) to (-23,-63,38) |
+| Left fixed fin | `2c01`, `2c48` | Forward fin panel ahead of the split |
+| Right flap | `5020`, `5047` | Inboard trailing pair, hinge edge (18,-25,8) to (39,-29,5), trailing edge (18,-36,6) to (38,-39,4) |
+| Left flap | `5127`, `514e` | Mirror at X=-18..-39 |
+| Right aileron | `3c96`, `3ea3`, `3cb9`, `3ce2` | Outboard trailing panel, hinge edge (39,-29,5) to (70,-22,2); a forward triangle and an aft quad per skin |
+| Left aileron | `41d1`, `43fb`, `421d`, `42b1` | Mirror at X=-39..-70 |
+
+The all-moving stabilator is a zero-thickness plate, so no root corner is a
+fixed hinge; it turns about its root chord midpoint. Every other surface turns
+about the exact edge the fixed panel shares, so those corners do not move. The
+aileron is split on a triangle diagonal: the forward triangle and the aft quad
+of each skin must stay in one group, or one half would be left behind the
+hinge. The two flap faces per side are exactly the pair the source words
+`0x7618` (left) and `0x761e` (right) remove; those words stay unmapped until
+M25-4.
+
+`0x760c` adds twelve gear cards (four per main, four nose, low point Z=-28).
+`0x7600` adds eight aft quads at X=±10 and Z=±8 from Y=-129 to -70, and
+`0x7606` adds two raised quads near Y=3..-13, Z=9..23. Both remain unmapped
+and belong to M25-4. The moving roles, continuous angles and the interim gear
+law are recorded in the [MiG-25 fit](../spec/variety-animation.md#mig-25-control-fit).

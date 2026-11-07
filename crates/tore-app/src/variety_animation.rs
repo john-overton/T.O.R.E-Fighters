@@ -196,11 +196,11 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x6160, Part::Gear, 14), (0x6178, Part::Rudder, 2)],
                 2. / 3.,
             ),
-            // MIG25.SH: five state words. The gear word 0x760c adds 12 faces
-            // (docs/formats/aircraft-variety.md, "MiG-25 source review"). The
-            // other four words (0x7600, 0x7606, 0x7618, 0x761e) are unmapped
-            // in M25-1 and only 0x760c is grouped here, so the aircraft loads
-            // with the shared fitted gear law until its own rig (M25-3, M25-4).
+            // MIG25.SH: five state words. M25-3 loads it through its own
+            // `mig25_animation` rig (control surfaces and the interim gear law),
+            // so only the shape scale and words are still read here. The four
+            // state words 0x7600, 0x7606, 0x7618 and 0x761e stay unmapped for
+            // M25-4 (docs/formats/aircraft-variety.md, "MiG-25 source review").
             Id::Mig25 => (
                 26154,
                 320,
@@ -274,6 +274,7 @@ enum SpecificRig {
     F104(crate::f104_animation::Rig),
     Mig17(crate::mig17_animation::Rig),
     Mi24(crate::mi24_animation::Rig),
+    Mig25(crate::mig25_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -524,6 +525,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Mig25 => {
+                let (rig, shape) = crate::mig25_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Mig25(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -646,6 +656,7 @@ impl Rig {
                 SpecificRig::F16(_) => crate::f16_animation::flame(address),
                 SpecificRig::F104(_) => crate::f104_animation::flame(address),
                 SpecificRig::Mig17(_) => crate::mig17_animation::flame(address),
+                SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
             };
         }
         self.groups
@@ -703,6 +714,7 @@ impl Rig {
                 SpecificRig::F104(rig) => rig.animate(source, state),
                 SpecificRig::Mig17(rig) => rig.animate(source, state),
                 SpecificRig::Mi24(rig) => rig.animate(source, state),
+                SpecificRig::Mig25(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

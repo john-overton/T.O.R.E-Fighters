@@ -25,6 +25,7 @@ mod mi24;
 mod mig17;
 mod mig21;
 mod mig23;
+mod mig25;
 mod mig29;
 mod rafale;
 mod rotorcraft;
@@ -584,6 +585,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::F16C
             | AircraftId::F104
             | AircraftId::Mig17
+            | AircraftId::Mig25
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1010,6 +1012,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::Mig25 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                mig25::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
             rotorcraft::check(id, control, *value, reference, pose, scale, metric);
         }
@@ -1151,6 +1164,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::F104 {
         failures.extend(f104::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Mig25 {
+        failures.extend(mig25::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

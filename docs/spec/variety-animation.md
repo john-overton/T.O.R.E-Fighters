@@ -41,6 +41,7 @@ never executed. Offsets describe data provenance, not a gameplay requirement.
 | A10.SH | 19854 | 303 | gear 20 |
 | B747.SH | 31108 | 373 | gear 36, rudder 2 |
 | A310.SH | 20868 | 248 | gear 14, rudder 2 |
+| MIG25.SH | 26154 | 320 | gear 12; controls fitted, no signed branch |
 
 F-4B and F-4J share F4J.SH. The same shape exponent supplies the existing host
 scale rule: one-third foot per coordinate at exponent 8 and two-thirds at
@@ -558,3 +559,40 @@ All 36 gear faces form five rigid assemblies. Main bogies close outward
 Nose gear closes aft 165 degrees around [0,100.5,-16], on its painted upper
 shaft. All source deployment positions remain exact; hide only at zero.
 Complete deployed gear retains the existing 20-foot ground clearance.
+
+## MiG-25 control fit
+
+Agent-authored whole-panel motion, 2026-11-07, over `MIG25.SH` at one-third
+foot per unit. The shape names only its five state words and no signed pitch,
+roll, yaw or flap branch, so every control role is a fitted geometric assignment
+over exact reviewed source panels. The source groups are recorded in
+[control-surface geometry](../formats/aircraft-control-surfaces.md#mig-25-source-additions).
+Each moving surface is one group: upper and lower skins and both triangles of
+any diagonal split stay together, and the panel turns about one hinge line.
+
+| Control | Source panel and fitted motion |
+| --- | --- |
+| Pitch | The all-moving stabilators `3daa/3e4a` and `434c/43a2` turn as one flat plate per side, `-0.30*elevator` radians about a lateral axis through the root chord midpoint `[±18,-57,-1]`. A positive elevator raises both trailing edges. |
+| Yaw | The rear fin panels `320f/3237` and `2c1f/2cb2` turn `0.35*rudder` radians about the source split line from `[±16,-40,7]` to `[±23,-63,38]`. A positive rudder swings both trailing edges right. The forward fin panels stay fixed. |
+| Flaps | The inboard trailing panels `5020/5047` and `5127/514e` turn `0.40*flaps` radians about their source upper hinge edge, from `[18,-25,8]` to `[39,-29,5]` (left mirrored), lowering the trailing edge. These are the two faces the source words `0x7618` and `0x761e` remove. |
+| Roll | The outboard trailing panels `3c96/3ea3/3cb9/3ce2` and `41d1/43fb/421d/42b1` turn `-0.20*aileron` radians about their source hinge edge, from `[39,-29,5]` to `[70,-22,2]` (left mirrored). A positive aileron raises the right trailing edge and lowers the left. The forward triangle and aft quad of each skin share the group, so the diagonal seam never moves alone. |
+| Gear | Interim: the twelve `0x760c` cards rise by their source vertical extent times the remaining travel, hiding at zero. This is the existing shared fitted law kept so the aircraft loads; M25-4 replaces it with rigid wheels. |
+
+The stabilator is all-moving, so no single root corner stays put: the invariant
+is its root chord midpoint, and the small gap to the tail boom at the root is a
+reviewed moving/fixed boundary. Every other hinge line is the exact source edge
+the fixed panel shares, so those corners do not move. `0x7600`, `0x7606`,
+`0x7618` and `0x761e` remain unmapped and belong to M25-4.
+
+Acceptance: the probe reports `reviewed-controls-and-attachments` with
+`anchor_missing=false`, `anchor_gap_ft=0`, `skin_gap_ft=0` and no direction
+failures for pitch, roll, yaw and flaps, plus the 25 flap/roll combinations.
+A moving, finite panel alone does not pass; the whole-surface gate requires all
+25 combinations to keep every shared skin and diagonal triangle joined.
+
+John reviewed the probe sheets on 2026-11-07 and accepted both diagonal
+cases: the twin rudders are each fin's whole rear source panel, hinged on the
+source split from mid-root to the tip, and the ailerons are each wing's whole
+outboard source section (forward triangle and aft quad), so the outer wing
+tilts as one piece. Both stay whole source panels; neither animates part of a
+panel.
