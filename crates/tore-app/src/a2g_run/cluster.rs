@@ -120,6 +120,27 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
             f.position[0], f.position[1], f.position[2], f.start, f.width
         );
     }
+    // The fitted dispenser and falling bomblets the renderer draws as small
+    // bodies (docs/spec/ordnance-presentation.md, "Cluster bomb dispense").
+    let dispense = cluster_flash::pieces(&pose);
+    let again = cluster_flash::pieces(&pose);
+    let height = |p: &cluster_flash::Piece| p.position[1] - burst.position[1];
+    println!(
+        "a2g-run: cluster dispense bodies {} dispenser {} deterministic {} dispense-ft {:.0} top {:.0} bottom {:.0} reach {:.0}",
+        dispense.len(),
+        dispense
+            .iter()
+            .filter(|p| p.part == cluster_flash::Part::Dispenser)
+            .count(),
+        if dispense == again { "yes" } else { "no" },
+        cluster_flash::DISPENSE_FT,
+        dispense.iter().map(height).fold(f64::MIN, f64::max),
+        dispense.iter().map(height).fold(f64::MAX, f64::min),
+        dispense
+            .iter()
+            .map(|p| horizontal(p.position, burst.position))
+            .fold(0., f64::max),
+    );
     Ok(())
 }
 

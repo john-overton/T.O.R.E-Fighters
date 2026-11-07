@@ -460,10 +460,47 @@ pub fn combat_geometry(
         );
     }
     // Explosions, fires and craters are drawn by effect_renderer.
+    cluster_dispense(&mut v, &snapshot.effects, local);
     CombatGeometry {
         vertices: v,
         contacts,
     }
+}
+
+/// Draws the fitted cluster dispense bodies of every effect in `effects`
+/// (docs/spec/ordnance-presentation.md, "Cluster bomb dispense"): the
+/// dispenser opens above a cluster burst and its bomblets fall to the
+/// flashes. Returns how many bodies it drew. Presentation only, derived from
+/// the burst's own place, so every client draws the same bodies.
+fn cluster_dispense(
+    out: &mut Vec<f32>,
+    effects: &[crate::snapshot::EffectPose],
+    local: impl Fn(Vector) -> Vector,
+) -> usize {
+    let mut drawn = 0;
+    for piece in effects
+        .iter()
+        .flat_map(crate::effect_renderer::cluster::pieces)
+    {
+        let forward = unit(piece.direction);
+        let right = if forward[0].hypot(forward[2]) < 1e-9 {
+            [1., 0., 0.]
+        } else {
+            unit([forward[2], 0., -forward[0]])
+        };
+        let basis = Basis {
+            right,
+            up: cross(forward, right),
+            forward,
+        };
+        let shade = match piece.part {
+            crate::effect_renderer::cluster::Part::Dispenser => 0.5,
+            crate::effect_renderer::cluster::Part::Bomblet => 0.34,
+        };
+        crate::pylons::body(out, &basis, local(piece.position), piece.body, [shade; 3]);
+        drawn += 1;
+    }
+    drawn
 }
 
 /// Combat effect and weapon art: the explosion, fire and crater sheets, the
@@ -1228,6 +1265,33 @@ mod tests {
                 .is_empty()
             );
         }
+    }
+
+    #[test]
+    fn the_fitted_dispense_draws_a_body_per_piece_and_none_for_a_plain_burst() {
+        use crate::effect_renderer::cluster;
+        use crate::snapshot::EffectPose;
+        use tore_sim::combat::{blast_scale, live::EffectKind};
+        let pose = |blast, ticks| EffectPose {
+            kind: EffectKind::Ground,
+            position: [10., 0., 20.],
+            ticks,
+            blast: Some(blast),
+            scale: blast_scale::FULL,
+        };
+        // A cluster burst draws one small body per derived piece, each a
+        // closed 8-sided body of 192 vertices of 10 numbers.
+        let burst = pose(18, cluster::LIFE_TICKS);
+        let pieces = cluster::pieces(&burst).len();
+        assert!(pieces >= 2, "the dispenser opens as two halves");
+        let local = |p: Vector| p;
+        let mut out = Vec::new();
+        assert_eq!(cluster_dispense(&mut out, &[burst], local), pieces);
+        assert_eq!(out.len() / 10, pieces * 192);
+        // A plain ground explosion of the same family's place draws none.
+        let mut plain = Vec::new();
+        assert_eq!(cluster_dispense(&mut plain, &[pose(21, 120)], local), 0);
+        assert!(plain.is_empty());
     }
 
     #[test]

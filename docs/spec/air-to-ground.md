@@ -1199,9 +1199,12 @@ damage for CBU-87, CBU-97, Mk 20, RBK-250 and RBK-500 (retail data; compare
 [explosions](explosions.md)). The remake keeps the retail wide splash and
 adds a **presentation-only scatter of small flashes** over the radius, so a
 cluster bomb looks like one (opinionated, agent, decision 13): the flashes do
-no damage and the damage is the same as the original's. The pattern, its
-constants and the scenario that checks them are in
-[ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes).
+no damage and the damage is the same as the original's. It also draws a
+**fitted dispenser opening and bomblet flight** over the same burst: the
+records and shapes carry no such data, so all of it is fitted (agent). The
+pattern, the dispense constants and the scenario that checks them are in
+[ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes) and
+[cluster bomb dispense](ordnance-presentation.md#cluster-bomb-dispense).
 
 ### Release modes and packs
 
@@ -1572,7 +1575,7 @@ filled in with something plausible.
 | Which objects carry night flag 0x1000000 | No night rule | Scan the object type flags |
 | What a player sees firing an optical weapon (JDAM, AT-2) with no target | Release refused with NO TARGET (opinionated, agent, the warnings table; slice W1) | Trace the fire path before the release routine and the HUD readiness |
 | Whether the release-point ground height differs from the ground directly below (a cache detail) | Ground directly below the release point | Trace the height cache writers |
-| What object type 43 draws, so what a cluster burst looks like in single player | Presentation-only flashes (opinionated, agent) | Trace type 43 in the draw code |
+| What object type 43 draws, so what a cluster burst looks like in single player | Presentation-only flashes and the fitted dispense (opinionated, agent) | Trace type 43 in the draw code |
 | World axis of the pack stagger | The store's own lateral axis | Read the theater axis convention |
 | Pixel rhythm of the fall line pattern; which symbol font serves each resolution | One pixel on, one off; the HUDSYM11 font matching the HUD font in use | Read the line core and the HUD font loader |
 | Meaning of flags 0x2, 0x8, 0x8000 on air-to-ground records; launcher type bit 0x2 | Ignored (no imported aircraft sets the type bit) | Where touched |

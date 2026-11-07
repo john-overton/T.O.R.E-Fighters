@@ -527,6 +527,24 @@ Known and left alone:
   old ground effect kind and is rarely written now that a ground burst is a
   blast. Fixing it would change the guard recordings.
 
+## Cluster dispense (JT-7, 2026-11-06)
+
+The fitted dispenser opening and bomblet flight added to a cluster burst
+([ordnance presentation](../spec/ordnance-presentation.md#cluster-bomb-dispense))
+is presentation only, so no simulation or recorded value moved. Validated on the
+installed 1.02F media and the `scratch/ordnance` profile:
+
+- `python3 tools/battery.py --scenario a2g-cluster --lane flight --no-unit-tests
+  --profile .local/m3-imports/scratch/ordnance` passed (14.4 s, 1 of 1). The
+  scenario now also checks the dispense line: two dispenser halves, repeatable
+  from the burst's place, inside the record's 1,200 ft pattern.
+- `cargo test -p tore-app --locked` 2,403 passed, 50 ignored, the five new
+  cluster-dispense tests included.
+- `--blast-preview` rendered the cluster bursts through their second, with the
+  dispenser opening and bomblet fall visible in the new `cluster-dispenser`
+  close frames; the images stayed under `.local/m3-imports/scratch`.
+- The full battery and a windowed run were not done.
+
 ## Checks
 
 The change is documentation only, so no simulation or recorded value moved. Run

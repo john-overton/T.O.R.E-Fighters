@@ -207,10 +207,46 @@ explosion effect alone.
 - **Not shown.** Over water the flashes are the same orange flashes, not
   splashes. A missing sheet skips its flashes only.
 
+### Cluster bomb dispense
+
+The flash scatter above is what a cluster burst leaves on the ground. The
+remake also shows the dispenser opening and bomblets falling, drawn as small
+solid bodies over the same burst. **This whole sequence is fitted**: the five
+cluster records and their shapes carry no dispenser part, submunition shape,
+count or dispersion field ([cluster flag](../formats/weapons.md#cluster-flag-0x800000)),
+so the retail data supports no dispenser-opening or bomblet-flight visual at
+all. The original's one second burst object is created invisible, so it draws
+none either. Retail comparison is unavailable; these are the numbers a player
+would notice, chosen by an agent (decision 13's presentation round) and
+labelled fitted.
+
+- **What is drawn.** A dispenser casing stands `DISPENSE_FT` = 140 ft
+  above the burst and splits into two halves that are shed sideways 9 ft and
+  fall, over the burst's first 16 ticks (0.13 s). Each of the 28 bomblets then
+  falls nose down from the dispenser to the exact place its flash plays,
+  arriving as that flash starts; a bomblet whose flash starts sooner than the
+  fitted 30 tick (0.25 s) flight falls for its own shorter time. Both are
+  drawn as the same closed bodies the pylons draw, the casing lighter than a
+  bomblet. The constants are in
+  `crates/tore-app/src/effect_renderer/cluster.rs`.
+- **Repeatable and shared.** The place, size, split direction and timing all
+  come from the burst's own position alone, the same way the flashes do
+  (the model is `cluster::pieces` in
+  `crates/tore-app/src/effect_renderer/cluster.rs`), so the
+  same burst draws the same bodies on every client and in a replay. Like the
+  flashes, the bodies do no damage, add nothing to the simulation, a
+  checkpoint, the wire or a replay, and are drawn only while the burst's own
+  second is playing.
+- **Not shown.** A burst on an object is a `Hit`, not a ground burst, and
+  draws the single retail flash with no bodies, exactly as the flashes are
+  skipped.
+
 The scenario `a2g-cluster` flies a CBU-87, a Mk 20 and an RBK-500 onto an armored
-column and checks the splash rule and the flash pattern; `a2g-catalog` runs the
-ordnance audit in both catalog modes. `--blast-preview OUT_DIR` renders the
-burst from three heights and close up through its second (`cluster-*` files).
+column and checks the splash rule, the flash pattern and the dispense bodies;
+`a2g-catalog` runs the ordnance audit in both catalog modes.
+`--blast-preview OUT_DIR` renders the burst from three heights and close up
+through its second, plus a close look at the dispenser opening and bomblet
+fall (`cluster-*` files).
 
 ## Source stations and availability
 

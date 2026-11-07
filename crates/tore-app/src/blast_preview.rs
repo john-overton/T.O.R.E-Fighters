@@ -3,7 +3,8 @@
 //! from a strike aircraft's height and from low beside it, by day and at
 //! dusk; the white spray ring of a large water explosion; and, by day, a
 //! cluster bomb's burst (type 18 on the ground) with its bomblet flashes
-//! through the burst's second (`cluster-*` files). A development
+//! through the burst's second and a close look at the fitted dispenser
+//! opening and bomblet fall (`cluster-*` files). A development
 //! aid for docs/spec/explosions.md#shockwave: no window opens, nothing is
 //! simulated, the effects are placed by hand.
 use crate::{
@@ -103,6 +104,18 @@ pub fn run() -> AppResult<()> {
                 crater: false,
             });
         }
+    }
+    // A close look at the fitted dispenser opening and the bomblet fall
+    // (docs/spec/ordnance-presentation.md, "Cluster bomb dispense").
+    for seconds in [0.02, 0.06, 0.12, 0.25, 0.45] {
+        shots.push(Shot {
+            name: "cluster-dispenser",
+            kind: 18,
+            seconds,
+            eye: [500., 60., -750.],
+            fov: 30.,
+            crater: false,
+        });
     }
     for (light, condition, time) in [("day", None, Some([13, 0])), ("dusk", Some(4), None)] {
         let overrides = Overrides {
@@ -205,17 +218,15 @@ pub fn run() -> AppResult<()> {
                 .effects(device, queue, &art.effects, &effects, &marks);
             gpu.sim
                 .emitters(queue, &devices, &[], &crate::gun_flash::Drawn::default());
+            let snapshot = RenderSnapshot {
+                effects: effects.to_vec(),
+                ..Default::default()
+            };
             gpu.sim.combat(
                 device,
                 queue,
                 &crate::render_snapshot::combat_geometry(
-                    &RenderSnapshot::default(),
-                    &art,
-                    &ownship,
-                    &start,
-                    &camera,
-                    &world,
-                    &scenery,
+                    &snapshot, &art, &ownship, &start, &camera, &world, &scenery,
                 ),
             );
             gpu.sim.aircraft(device, queue, &ownship, &[]);

@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from battery_scenarios import a2g_catalog, a2g_cluster, a2g_sights  # noqa: E402
 
 
-def cluster_run(source="CBU87.JT", radius=2200, damage=200, flashes=28, lost_outside=0, farthest=1182, lost_scale=1.0):
+def cluster_run(source="CBU87.JT", radius=2200, damage=200, flashes=28, lost_outside=0, farthest=1182, lost_scale=1.0,
+                halves=2, bodies=16, reach=0, determinst="yes"):
     """One `--a2g-run ... --attack cluster` output, built to the splash rule."""
     lines = [
         f"a2g-run: record {source} flags 0x82a052 land-explosion 18 object-explosion 18 water-explosion 18 "
@@ -28,6 +29,10 @@ def cluster_run(source="CBU87.JT", radius=2200, damage=200, flashes=28, lost_out
         f"spread 1200 splash {radius}"
     )
     lines += [f"a2g-run: cluster flash n={n} at 1.0 0.0 2.0 start {n} width 50" for n in range(flashes)]
+    lines.append(
+        f"a2g-run: cluster dispense bodies {bodies} dispenser {halves} deterministic {determinst} "
+        f"dispense-ft 140 top 140 bottom 140 reach {reach}"
+    )
     lines.append("a2g-run: done")
     return "\n".join(lines)
 
@@ -60,6 +65,15 @@ class ClusterTests(unittest.TestCase):
 
     def test_flashes_beyond_their_spread_fail(self):
         self.assertTrue(any("flashes reach" in p for p in a2g_cluster.cluster_problems(three(farthest=1300))))
+
+    def test_a_dispenser_that_is_not_two_halves_fails(self):
+        self.assertTrue(any("dispenser halves" in p for p in a2g_cluster.cluster_problems(three(halves=1))))
+
+    def test_a_dispense_body_beyond_the_pattern_fails(self):
+        self.assertTrue(any("dispense body reaches" in p for p in a2g_cluster.cluster_problems(three(reach=1300))))
+
+    def test_a_dispense_that_is_not_repeatable_fails(self):
+        self.assertTrue(any("the dispense differs" in p for p in a2g_cluster.cluster_problems(three(determinst="no"))))
 
     def test_missing_runs_fail(self):
         self.assertEqual(a2g_cluster.cluster_problems(cluster_run()), ["1 runs finished, want 3"])

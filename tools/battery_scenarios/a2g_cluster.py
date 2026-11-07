@@ -16,7 +16,11 @@ and checks:
 * the presentation-only bomblet flashes the renderer derives from the burst:
   28, the same on every derivation, inside 1,200 ft of the burst (inside the
   smallest cluster splash, 1,500 ft), starting within the burst's first half
-  second so the last ends with its second.
+  second so the last ends with its second;
+* the fitted dispenser opening and bomblet flight the renderer draws over
+  the same burst (docs/spec/ordnance-presentation.md, "Cluster bomb
+  dispense"): two dispenser halves at the burst, repeatable from the burst's
+  place, standing inside the record's own pattern.
 """
 import re
 
@@ -35,6 +39,11 @@ TARGET = re.compile(
 FLASHES = re.compile(
     r"^a2g-run: cluster flashes (\d+) deterministic (\w+) first-at-tick (\d+) last-at-tick (\d+) farthest (\d+) "
     r"spread (\d+) splash (\d+)$",
+    re.M,
+)
+DISPENSE = re.compile(
+    r"^a2g-run: cluster dispense bodies (\d+) dispenser (\d+) deterministic (\w+) dispense-ft (\d+) "
+    r"top (-?\d+) bottom (-?\d+) reach (\d+)$",
     re.M,
 )
 FLASH = re.compile(r"^a2g-run: cluster flash n=(\d+) at (\S+) (\S+) (\S+) start (\d+) width (\d+)$", re.M)
@@ -102,6 +111,26 @@ def _run_problems(run: str, label: str, want: str) -> list[str]:
         problems.append(f"{label}: flashes reach {farthest} ft of a {spread} ft spread; smallest splash is {SMALLEST_SPLASH}")
     if len(FLASH.findall(run)) != 28:
         problems.append(f"{label}: {len(FLASH.findall(run))} flash lines, want 28")
+    # The fitted dispenser opening and bomblet flight
+    # (docs/spec/ordnance-presentation.md, "Cluster bomb dispense").
+    dispense = DISPENSE.search(run)
+    if dispense is None:
+        return problems + [f"{label}: no dispense"]
+    bodies, halves, determinist, dispense_ft, top, bottom, reach = (
+        int(g) if g.lstrip("-").isdigit() else g for g in dispense.groups()
+    )
+    if halves != 2:
+        problems.append(f"{label}: {halves} dispenser halves, want 2")
+    if determinist != "yes":
+        problems.append(f"{label}: the dispense differs between two derivations of one burst")
+    if not 0 <= bottom <= top <= dispense_ft:
+        problems.append(
+            f"{label}: the dispense bodies stand {bottom} to {top} ft up, want 0 to {dispense_ft}"
+        )
+    if reach > spread:
+        problems.append(f"{label}: a dispense body reaches {reach} ft, beyond the {spread} ft pattern")
+    if bodies < 2:
+        problems.append(f"{label}: only {bodies} dispense bodies, want the dispenser at least")
     return problems
 
 

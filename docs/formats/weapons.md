@@ -482,6 +482,15 @@ unless the burst's y position in 1/256 ft is a multiple of 11 (`0x4434e6` to
 `0x44350d`, `0x4435d4` to `0x4435e9`). The explosion sound request is made
 either way (`0x44354d` onward). Damage and splash are unaffected.
 
+The type is created **invisible**, and the five records name nothing else: a
+decoded read of the 1.02F records finds `projsInPod` 1 and no submunition,
+dispersion or dispenser field, and their shapes are single dispenser bodies
+(`cb87.SH`, `cb89.SH`, `mk20.SH`, `rbk2.SH`, `rbk5.SH`) with no separable
+dispenser part, bomblet shape or second body. So the retail data supports no
+dispenser-opening or bomblet-flight visual. The remake's fitted substitute, and
+the numbers it chose, are in
+[cluster bomb dispense](../spec/ordnance-presentation.md#cluster-bomb-dispense).
+
 ### Facts for B1 (plan section 7.1)
 
 | Fact | Retail | Status |
@@ -499,7 +508,7 @@ either way (`0x44354d` onward). Damage and splash are unaffected.
 | Question | Next step | Fallback |
 | --- | --- | --- |
 | Whether `T_Info`'s per-object cached height (object `+0x27`, `+0x2f`) makes the release-point ground differ from the ground exactly below the station | Trace `0x4abab0`'s cache writers | Ground directly below the release point (fitted) |
-| What object type 43 draws, so what a cluster burst looks like in single player | Trace type 43 in the shape and effect draw code | Decision 13's presentation-only flashes (opinionated, agent) |
+| What object type 43 draws, so what a cluster burst looks like in single player | Trace type 43 in the shape and effect draw code | Decision 13's presentation-only flashes and fitted dispense (opinionated, agent) |
 | Meaning of launcher type bit 0x2 (`+0xa6`) | Read the NPC flag consumers | None needed: no imported aircraft sets it |
 | World axis of the pack stagger relative to north | Read the theater axis convention | Use the store's own lateral axis (fitted) |
 | How a guided bomb falls | Closed 2026-10-11: [AI release against ground targets](#ai-release-against-ground-targets), guided bombs without guidance | The 20 degree glide below 293 ft/s (retail) |

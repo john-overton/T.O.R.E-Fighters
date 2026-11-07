@@ -28,6 +28,28 @@ pub const FLASH_TICKS: u16 = 60;
 pub const FLASH_TYPES: [u8; 3] = [18, 19, 20];
 /// A flash is this share of its explosion type's rolled width (fitted).
 pub const FLASH_SCALE: f64 = 1.5;
+/// The burst's own life, in 120 Hz ticks. Every type in the small-air family
+/// the burst can be (18 to 20, 24 to 26, 28, 29) plays one second
+/// ([`blast::explosion`]), so the fitted dispense belongs to the same second.
+pub const LIFE_TICKS: u16 = 120;
+/// Ticks the fitted dispenser takes to open and shed its two halves, from the
+/// burst (fitted).
+pub const DISPENSER_TICKS: u16 = 16;
+/// How high the fitted dispenser stands above the burst when it opens, feet
+/// (fitted): inside the 1,200 ft flash pattern and above the type 18 fuze.
+pub const DISPENSE_FT: f64 = 140.;
+/// The fitted dispenser casing drawn splitting open, length and diameter in
+/// feet (fitted).
+pub const DISPENSER_FT: [f64; 2] = [6.5, 1.4];
+/// The fitted bomblet drawn falling, length and diameter in feet (fitted).
+pub const BOMBLET_FT: [f64; 2] = [1.1, 0.4];
+/// How long the fitted bomblet is drawn falling before its flash, in ticks
+/// (fitted): a bomblet whose flash starts sooner falls for its own shorter
+/// time instead.
+pub const BOMBLET_TICKS: u16 = 30;
+/// How far the dispenser's two halves are shed sideways as it opens, feet
+/// (fitted).
+pub const SHED_FT: f64 = 9.;
 
 /// One bomblet flash.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,6 +61,29 @@ pub struct Flash {
     pub kind: u8,
     /// Drawn width in feet.
     pub width: f64,
+}
+
+/// One body of the fitted dispense presentation at one instant: a dispenser
+/// half opening above the burst, or a bomblet falling to its flash. The
+/// renderer draws it as a small solid body
+/// (docs/spec/ordnance-presentation.md, "Cluster bomb dispense").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Piece {
+    pub position: [f64; 3],
+    /// Unit direction the body points, nose first: it falls nose down.
+    pub direction: [f64; 3],
+    /// Body length and diameter, feet.
+    pub body: [f64; 2],
+    /// Which fitted body it is.
+    pub part: Part,
+}
+
+/// Which fitted body a [`Piece`] is: the dispenser casing or a falling
+/// bomblet. The renderer draws the casing lighter than a bomblet (fitted).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Dispenser,
+    Bomblet,
 }
 
 /// The explosion types a cluster burst can show: type 18, which every
@@ -89,6 +134,77 @@ pub fn derive(effect: &EffectPose) -> Vec<Flash> {
             }
         })
         .collect()
+}
+
+/// A unit direction, or straight down where the vector is too short to name
+/// one.
+fn down(v: [f64; 3]) -> [f64; 3] {
+    let n = v[0].hypot(v[1]).hypot(v[2]);
+    if n < 1e-9 {
+        [0., -1., 0.]
+    } else {
+        [v[0] / n, v[1] / n, v[2] / n]
+    }
+}
+
+/// The fitted dispenser halves and falling bomblets of `effect` right now.
+/// No geometry unless it is a cluster burst. The retail cluster records
+/// and shapes carry no dispenser part, submunition shape, count or timing
+/// (docs/formats/weapons.md, "Cluster flag 0x800000"), so this whole
+/// presentation is fitted; it is derived from the burst's own place alone, so
+/// the same burst always shows the same bodies on every client. Presentation
+/// only: no damage, simulation, checkpoint, wire or replay state changes.
+pub fn pieces(effect: &EffectPose) -> Vec<Piece> {
+    if !is_burst(effect) {
+        return Vec::new();
+    }
+    let at = effect.position;
+    let elapsed = LIFE_TICKS.saturating_sub(effect.ticks);
+    let mut out = Vec::new();
+    // The dispenser stands above the burst and splits: its two halves are
+    // shed evenly, falling and tumbling apart. Its orientation is repeatable
+    // from the burst's place, like the pattern.
+    let yaw = f64::from(blast::pick(at, 900, 3600)).to_radians();
+    let right = [yaw.sin(), 0., yaw.cos()];
+    if elapsed < DISPENSER_TICKS {
+        let u = f64::from(elapsed) / f64::from(DISPENSER_TICKS);
+        for side in [-1., 1.] {
+            let shed = side * SHED_FT * u;
+            out.push(Piece {
+                position: [
+                    at[0] + right[0] * shed,
+                    at[1] + DISPENSE_FT * (1. - u * u),
+                    at[2] + right[2] * shed,
+                ],
+                direction: down([right[0] * shed, -SHED_FT, right[2] * shed]),
+                body: DISPENSER_FT,
+                part: Part::Dispenser,
+            });
+        }
+    }
+    // Each bomblet falls from the dispenser to the exact place its flash
+    // will play, arriving as the flash starts. It is drawn nose down: the
+    // fan is wide and the drop short, so the true velocity would read
+    // sideways (fitted).
+    for flash in derive(effect) {
+        let flight = BOMBLET_TICKS.min(flash.start);
+        let start = flash.start - flight;
+        if flash.start == 0 || elapsed < start || elapsed >= flash.start {
+            continue;
+        }
+        let u = f64::from(elapsed - start) / f64::from(flight);
+        out.push(Piece {
+            position: [
+                at[0] + (flash.position[0] - at[0]) * u,
+                at[1] + DISPENSE_FT * (1. - u * u),
+                at[2] + (flash.position[2] - at[2]) * u,
+            ],
+            direction: [0., -1., 0.],
+            body: BOMBLET_FT,
+            part: Part::Bomblet,
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -176,6 +292,112 @@ mod tests {
         assert!(flashes.iter().any(|f| f.start > 45));
         for kind in FLASH_TYPES {
             assert!(flashes.iter().any(|f| f.kind == kind), "{kind}");
+        }
+    }
+
+    /// The effect `elapsed` ticks into its life (the burst's ticks count
+    /// down).
+    fn at(effect: EffectPose, elapsed: u16) -> EffectPose {
+        EffectPose {
+            ticks: LIFE_TICKS - elapsed,
+            ..effect
+        }
+    }
+
+    #[test]
+    fn only_a_cluster_burst_shows_a_dispenser_and_bomblets() {
+        let burst = effect(EffectKind::Ground, Some(18));
+        let halves = pieces(&burst)
+            .into_iter()
+            .filter(|p| p.part == Part::Dispenser)
+            .count();
+        assert_eq!(halves, 2, "the dispenser opens as two halves");
+        // A gun burst on an aircraft, a ground hit and a plain ground
+        // explosion show none.
+        assert!(pieces(&effect(EffectKind::Hit, Some(18))).is_empty());
+        assert!(pieces(&effect(EffectKind::Destroyed, Some(18))).is_empty());
+        assert!(pieces(&effect(EffectKind::Ground, Some(15))).is_empty());
+        assert!(pieces(&effect(EffectKind::Ground, None)).is_empty());
+    }
+
+    #[test]
+    fn the_dispenser_stands_above_the_burst_and_is_gone_after_a_beat() {
+        let burst = effect(EffectKind::Ground, Some(18));
+        // When it opens, the casing is whole at the dispense height.
+        let closed: Vec<Piece> = pieces(&burst)
+            .into_iter()
+            .filter(|p| p.part == Part::Dispenser)
+            .collect();
+        for half in &closed {
+            assert!((half.position[1] - (burst.position[1] + DISPENSE_FT)).abs() < 1e-9);
+            assert_eq!(half.body, DISPENSER_FT);
+            assert!(half.direction[1] < 0., "the casing falls");
+        }
+        // A beat later its two halves have split apart and dropped.
+        let opening: Vec<Piece> = pieces(&at(burst, DISPENSER_TICKS - 1))
+            .into_iter()
+            .filter(|p| p.part == Part::Dispenser)
+            .collect();
+        assert_eq!(opening.len(), 2);
+        assert_ne!(opening[0].position, opening[1].position, "the halves split");
+        for half in &opening {
+            assert!(half.position[1] < burst.position[1] + DISPENSE_FT);
+        }
+        // By the end of the opening the casing is shed and no longer drawn.
+        for elapsed in DISPENSER_TICKS..LIFE_TICKS {
+            assert!(
+                pieces(&at(burst, elapsed))
+                    .iter()
+                    .all(|p| p.part != Part::Dispenser),
+                "{elapsed}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bomblets_fall_from_the_dispenser_inside_the_pattern() {
+        let burst = effect(EffectKind::Ground, Some(20));
+        // The pattern is repeatable, so the same burst draws the same bodies.
+        assert_eq!(pieces(&burst), pieces(&burst));
+        let mut seen = 0;
+        for elapsed in 0..LIFE_TICKS {
+            let pose = at(burst, elapsed);
+            for piece in pieces(&pose)
+                .into_iter()
+                .filter(|p| p.part == Part::Bomblet)
+            {
+                seen += 1;
+                assert_eq!(piece.body, BOMBLET_FT);
+                assert!(piece.direction[1] < 0., "a bomblet falls");
+                // It hangs between the dispense height and the ground.
+                assert!(piece.position[1] <= burst.position[1] + DISPENSE_FT + 1e-9);
+                assert!(piece.position[1] >= burst.position[1] - 1e-9);
+                let gap = (piece.position[0] - burst.position[0])
+                    .hypot(piece.position[2] - burst.position[2]);
+                assert!(gap <= SPREAD_FT + 1e-9, "reach {gap}");
+            }
+        }
+        assert!(seen > 0, "the bomblets are drawn in flight");
+    }
+
+    #[test]
+    fn a_bomblet_lands_on_the_place_of_its_flash() {
+        let burst = effect(EffectKind::Ground, Some(18));
+        // A flash that gives the bomblet its full flight: by the last tick
+        // before it plays, the bomblet is at the flash's own place.
+        for flash in derive(&burst)
+            .into_iter()
+            .filter(|f| f.start >= BOMBLET_TICKS)
+        {
+            let near = pieces(&at(burst, flash.start - 1))
+                .into_iter()
+                .filter(|p| p.part == Part::Bomblet)
+                .filter(|p| {
+                    (p.position[0] - flash.position[0]).hypot(p.position[2] - flash.position[2])
+                        < DISPENSE_FT
+                })
+                .count();
+            assert!(near >= 1, "no bomblet reaches the flash at {}", flash.start);
         }
     }
 

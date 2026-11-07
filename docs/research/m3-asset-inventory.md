@@ -68,8 +68,10 @@ first ones to confirm.
   guns and gun pods ADEN, BK27, GAU13, GSH6_23, 20MM_4 and ADENIN, whose
   decoded carriers are all unported
   ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)),
-  twelve decoded-only surface records, and presentation gaps (no bomblet
-  dispense, no visible MK82AIR retarder, no GBU28 penetration). The Ticonderoga
+  twelve decoded-only surface records, and presentation gaps (no visible
+  MK82AIR retarder, no GBU28 penetration). The cluster bombs' dispenser
+  opening and bomblet flight are fitted and drawn (JT-7, 2026-11-06;
+  [why](../spec/ordnance-presentation.md#cluster-bomb-dispense)). The Ticonderoga
   carries a fitted derived SM-2 on its ASROC rails (JT-6 rework, 2026-11-06;
   [why](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06)).
 - **Equipment.** Sensors and ECM are gated to reviewed roster aircraft, so 14
@@ -274,7 +276,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 - **Exposure gate.** A weapon is selectable and flyable only if listed in `SUPPORTED_WEAPONS` (`crates/tore-sim/src/combat/loadout.rs:771`) or the Cheat-only novelty list (Boulder, Moose). Surface-fired records live in `SURFACE_SUPPORTED`, `SURFACE_INFRARED`, `SURFACE_TO_SURFACE` (`crates/tore-sim/src/combat/missiles.rs:110`) plus the AAA tuning table (`combat/surface_guns.rs`, `docs/spec/surface-defenses.md`). Hidden records stay decoded in `docs/formats/fa-weapons.csv` (135) and `docs/features.md` lists them: ADEN, BK27, GAU-13, GSh-6-23 and AEMP-1 (its EM pulse effect is unknown after JT-5, 2026-11-06, [spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06)); the six cannon records have no imported carrier ([why](../formats/aircraft-ordnance.md#cannon-records-nothing-mounts-jt-1-2026-11-06)). AA-6, AA-9, PL-7 and PL-10 joined the supported list in JT-4 ([rows](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)). ASROC stays held by John's decision (2026-11-06, [why](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06)); the Ticonderoga carries the fitted derived SM-2 on its former ASROC rails, which is a surface record and stays out of Load Ordnance. Ten decoded surface records also stay out because no NT unit mounts them ([why](../formats/aircraft-ordnance.md#surface-records-nothing-mounts-jt-3-2026-11-06)): HQ2J, HQ61, MIM23, ROLAND, SAN5, SAN8, AAA20, M163, T20_1 and T23_1.
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
-- **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes; other retarders are drag only.
+- **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes and a fitted dispenser opening and bomblet flight; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
 - **Equipment.** One sensor component serves all 36 roster aircraft plus F/A-XX. It refuses unreviewed radar or ECM records (`crates/tore-sim/src/sensors/profile.rs:106,255,315`), so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape).
 - **Roster basis.** "Roster" means the 36 retail aircraft in `docs/spec/aircraft-variety.md` and `roster-aircraft.md`; carriers were computed from `docs/formats/fa-aircraft.csv` default stores only (stations can allow more).
@@ -333,8 +335,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 
 | Resource | Name/role | Imported | Animations | AI | Logic | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| CBU87.JT | CBU-87/B Cluster | Done | Partial | Done | Done | Retail wide splash 2,200 ft; 28 burst flashes only, no dispenser/bomblet flight |
-| CBU89.JT | CBU-97/B Cluster | Done | Partial | Done | Done | Retail wide splash 2,500 ft; 28 burst flashes only, no dispenser/bomblet flight |
+| CBU87.JT | CBU-87/B Cluster | Done | Done | Done | Done | Retail wide splash 2,200 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
+| CBU89.JT | CBU-97/B Cluster | Done | Done | Done | Done | Retail wide splash 2,500 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
 | FAB1000.JT | FAB-1000 M62 | Done | Done | Done | Done | Free-fall; flown Su-25/F-4E |
 | FAB250.JT | FAB-250 M62 | Done | Done | Done | Done | Free-fall; flown Su-25/MiG-23/MiG-21 |
 | FAB500.JT | FAB-500 M62 | Done | Done | Done | Done | Free-fall; flown Su-25/A-10 |
@@ -344,7 +346,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | GBU29.JT | GBU-29 JDAM | Done | Done | Done | Done | JDAM flies to stored release point; misses movers; level-T bar built |
 | GBU29P.JT | GBU-29/P JDAM | Done | Done | Done | Done | JDAM flies to stored release point; misses movers; level-T bar built |
 | GBU30.JT | GBU-30 JDAM | Done | Done | Done | Done | JDAM flies to stored release point; misses movers; level-T bar built |
-| MK20.JT | Mk 20 Rockeye II | Done | Partial | Done | Done | Rockeye; splash 1,600 ft; 28 burst flashes only, no dispenser/bomblet flight |
+| MK20.JT | Mk 20 Rockeye II | Done | Done | Done | Done | Rockeye; splash 1,600 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
 | MK82.JT | MK-82 Slick | Done | Done | Done | Done | Free-fall, fitted bomb model; CCIP/LVL sights; 14 default carriers |
 | MK82AIR.JT | MK-82 AIR 7-Pack | Done | Partial | Done | Done | 7-pack retarder is drag only; no visible retarder deploy (unverified) |
 | MK82HD.JT | MK-82 Snakeye | Done | Done | Done | Done | Snakeye; fins closed on pylon, open in flight; retarder drag |
@@ -353,8 +355,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | MK84.JT | MK-84 Slick | Done | Done | Done | Done | Free-fall; flown F-15/A-10 |
 | PAVEWA3.JT | GBU-27 Paveway III | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers |
 | PAVEWAY.JT | GBU-10E Paveway | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers |
-| RBK250.JT | RBK-250 Cluster | Done | Partial | Done | Done | Splash 1,500 ft; 28 burst flashes only, no dispenser/bomblet flight |
-| RBK500.JT | RBK-500 Cluster | Done | Partial | Done | Done | Splash 2,500 ft; 28 burst flashes only, no dispenser/bomblet flight |
+| RBK250.JT | RBK-250 Cluster | Done | Done | Done | Done | Splash 1,500 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
+| RBK500.JT | RBK-500 Cluster | Done | Done | Done | Done | Splash 2,500 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
 | ~BLDR.JT | Boulder | Done | Done | N/A | Done | Cheat-loading only; falls as free-fall bomb |
 | ~MOOSE.JT | Moose | Done | Done | N/A | Done | Cheat-loading only; falls as free-fall bomb |
 
