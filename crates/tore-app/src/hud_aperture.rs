@@ -188,7 +188,8 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::F4J
         | AircraftId::F4E
         | AircraftId::F4G
-        | AircraftId::F15 => unreachable!("resolved cockpit alias"),
+        | AircraftId::F15
+        | AircraftId::Mig25 => unreachable!("resolved cockpit alias"),
     };
     if (source.width, source.height) != expected {
         return out;

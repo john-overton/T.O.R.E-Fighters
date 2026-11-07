@@ -199,3 +199,12 @@ outside this pass. The supplied F-14 reference also exposes an existing
 [675 lb internal-ammunition mass gap](../formats/aircraft-ordnance.md#internal-ammunition-weight-follow-up);
 this layout change preserves the shared host mass rule pending a consistent
 loadout/flight correction. No Windows or macOS interactive run is claimed.
+
+## Roster change (2026-11-07, slice M25-1)
+
+The MiG-25 (`M25.PT`) joined `AircraftId::ALL` in slice M25-1 on branch
+`m3-aircraft`, so the pinned aircraft count in `crates/tore-app/src/ordnance_audit.rs`
+is now 37. The MiG-25's default stores, tank and the resulting weapon and tank
+placement counts are wired and re-measured in slice M25-6 with
+`--validate-ordnance`; the placement counts above still describe the last
+measured 36-aircraft pass.

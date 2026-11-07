@@ -273,6 +273,7 @@ mod tests {
             (AircraftId::A10, Attack),
             (AircraftId::B747, Heavy),
             (AircraftId::A310, Heavy),
+            (AircraftId::Mig25, Fighter),
         ];
         assert_eq!(expected.len(), AircraftId::SELECTABLE.len());
         for (id, class) in expected {

@@ -196,6 +196,18 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x6160, Part::Gear, 14), (0x6178, Part::Rudder, 2)],
                 2. / 3.,
             ),
+            // MIG25.SH: five state words. The gear word 0x760c adds 12 faces
+            // (docs/formats/aircraft-variety.md, "MiG-25 source review"). The
+            // other four words (0x7600, 0x7606, 0x7618, 0x761e) are unmapped
+            // in M25-1 and only 0x760c is grouped here, so the aircraft loads
+            // with the shared fitted gear law until its own rig (M25-3, M25-4).
+            Id::Mig25 => (
+                26154,
+                320,
+                &[0x7600, 0x7606, 0x760c, 0x7618, 0x761e],
+                &[(0x760c, Part::Gear, 12)],
+                1. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {

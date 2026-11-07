@@ -19,7 +19,7 @@ mod store_pairs;
 /// partial import cannot pass with fewer checks. Raise these on purpose, and
 /// record why in `docs/baselines/ordnance-availability.md`, when the supported
 /// weapon list, the tank records or the aircraft change.
-const AIRCRAFT: usize = 36;
+const AIRCRAFT: usize = 37;
 const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
 const WEAPON_PLACEMENTS: usize = 3626;

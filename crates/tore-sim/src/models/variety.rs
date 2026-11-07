@@ -51,6 +51,7 @@ impl VarietyFlightModel {
             A10 => ("A-10", "A10.SH"),
             B747 => ("B747", "B747.SH"),
             A310 => ("A310", "A310.SH"),
+            Mig25 => ("MiG-25", "MIG25.SH"),
             _ => return None,
         })
     }
@@ -94,6 +95,9 @@ impl VarietyFlightModel {
             A10 => 22. / 3.,
             B747 => 20.,
             A310 => 14.,
+            // MIG25.SH deployed gear low point Z=-28 at 1/3 ft a unit, the
+            // source scale (docs/formats/aircraft-variety.md, MiG-25 review).
+            Mig25 => 28. / 3.,
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {

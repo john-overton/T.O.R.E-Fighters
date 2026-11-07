@@ -181,10 +181,12 @@ fn decoded_air_to_air_records_match_the_reviewed_spec_rows() {
         );
     }
 
-    // No registered aircraft is built with one as a decoded default store. The
-    // decoded default carriers (MiG-25, MiG-31, Q-5; none for PL10) are
-    // outside `AircraftId::ALL`, so a player reaches these records only
-    // through a source-compatible station.
+    // AA9, PL10 and PL7 have no registered decoded default carrier: the
+    // MiG-31 and the Q-5 stay outside `AircraftId::ALL` (none for PL10), so a
+    // player reaches those three records only through a source-compatible
+    // station. AA6's decoded carrier, the MiG-25 (`M25.PT`), joined the roster
+    // in slice M25-1, so it is the one registered record whose decoded default
+    // station list names a reviewed record.
     for id in AircraftId::ALL {
         let library = libraries
             .iter()
@@ -194,11 +196,13 @@ fn decoded_air_to_air_records_match_the_reviewed_spec_rows() {
         let aircraft =
             Aircraft::parse(&bytes).unwrap_or_else(|error| panic!("{}: {error}", id.pt()));
         for spec in &SPECS {
-            assert!(
-                !aircraft
+            let registered_carrier = spec.name == "AA6.JT" && id == AircraftId::Mig25;
+            assert_eq!(
+                aircraft
                     .hardpoints
                     .iter()
                     .any(|h| h.store.as_deref() == Some(spec.name)),
+                registered_carrier,
                 "{} decoded default store list names {}",
                 id.pt(),
                 spec.name

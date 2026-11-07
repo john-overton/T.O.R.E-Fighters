@@ -84,6 +84,7 @@ crate::checkpoint_enum!(tore_formats::aircraft::AircraftId {
     A10 = 34,
     B747 = 35,
     A310 = 36,
+    Mig25 = 37,
 });
 
 crate::checkpoint_tuple!(Side(side));
