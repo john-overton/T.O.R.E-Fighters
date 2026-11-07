@@ -24,12 +24,14 @@ crate::checkpoint_enum!(Preset {
     Basic = 0,
     Transitional = 1,
     Advanced = 2,
+    Unreviewed = 3,
 });
 
 crate::checkpoint_enum!(Generation {
     Early = 0,
     Transitional = 1,
     LateColdWar = 2,
+    Unreviewed = 3,
 });
 
 crate::checkpoint_struct!(Notch {
@@ -79,6 +81,8 @@ crate::checkpoint_struct!(SensorProfiles {
     infrared,
     visual,
     jammer,
+    unreviewed_radar,
+    unreviewed_jammer,
     signature,
 });
 
@@ -132,6 +136,8 @@ mod tests {
                 band: 1,
                 radio_frequency: true,
             }),
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: SignatureProfile {
                 radar: 12.5,
                 infrared: 80.,
@@ -166,13 +172,19 @@ mod tests {
     #[test]
     fn every_preset_and_generation_codes_and_a_changed_field_changes_the_bytes() {
         let models = Models::default();
-        for preset in [Preset::Basic, Preset::Transitional, Preset::Advanced] {
+        for preset in [
+            Preset::Basic,
+            Preset::Transitional,
+            Preset::Advanced,
+            Preset::Unreviewed,
+        ] {
             assert_eq!(round_trip(&preset, &models).unwrap(), preset);
         }
         for generation in [
             Generation::Early,
             Generation::Transitional,
             Generation::LateColdWar,
+            Generation::Unreviewed,
         ] {
             assert_eq!(round_trip(&generation, &models).unwrap(), generation);
         }

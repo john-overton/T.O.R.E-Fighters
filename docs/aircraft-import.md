@@ -182,7 +182,8 @@ restart checks. Original cockpit art does not imply complete instrument parity.
   effects; extracted definitions do not enable unsupported weapons.
 - [ ] Review `--sensor-summary` for this aircraft: its radar, infrared, visual and
   ECM records, volumes, look-down coefficient and assigned preset and jammer
-  generation. An unreviewed radar or ECM record fails the import on purpose;
+  generation. A radar or ECM record with no reviewed assignment loads as an
+  unreviewed profile that never enables a flying channel (EQ-1, 2026-11-06);
   assign it explicitly in the [component guide](radar.md) rather than borrowing
   another aircraft's. Do not write aircraft-specific sensor code.
 - [ ] Keep ordinary free flight externally clean. Validate deliberate range and

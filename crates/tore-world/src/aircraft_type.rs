@@ -123,6 +123,8 @@ impl AircraftType {
             infrared: None,
             visual: None,
             jammer: None,
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: Default::default(),
         };
         Self::new(profile, model, sensors, contrail_offsets)

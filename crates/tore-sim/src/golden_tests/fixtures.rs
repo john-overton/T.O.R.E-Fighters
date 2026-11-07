@@ -288,6 +288,8 @@ pub(super) fn sensor_profiles(aircraft: AircraftId) -> sensors::SensorProfiles {
             track: volume(3.),
         }),
         jammer: None,
+        unreviewed_radar: None,
+        unreviewed_jammer: None,
         signature: sensors::SignatureProfile::default(),
     }
 }

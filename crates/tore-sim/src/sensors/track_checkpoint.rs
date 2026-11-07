@@ -188,6 +188,8 @@ mod tests {
                 band: 0,
                 radio_frequency: true,
             }),
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: SignatureProfile::default(),
         }
     }

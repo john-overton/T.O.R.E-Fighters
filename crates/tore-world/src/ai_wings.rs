@@ -7511,6 +7511,8 @@ mod tests {
             infrared: None,
             visual: None,
             jammer: None,
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: sensors::SignatureProfile::default(),
         };
         let mut bridge = AiWings::build_with(&selections, &spawned(), 0, |_| {

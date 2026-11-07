@@ -805,8 +805,9 @@ ECM records into typed capability profiles resolved by parsed signature channel,
 the authored range model, `track` holds the live state (current observations, one
 selected target, at most one acquired fire-control track across radar and
 infrared, bounded history and received interference), and `passive` collects
-received emitters for the exposure instrument. An unreviewed radar or ECM record
-is an import error rather than a silent substitution.
+received emitters for the exposure instrument. A radar or ECM record with no
+reviewed assignment loads as an unreviewed profile that never enables a flying
+channel (EQ-1, 2026-11-06), rather than a silent substitution.
 
 The component decides what is observable and whether a specific target is
 supported for a radar weapon. `tore-app::scope` only reprojects those shared

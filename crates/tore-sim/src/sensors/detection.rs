@@ -368,6 +368,7 @@ mod tests {
                 Preset::Basic => Generation::Early,
                 Preset::Transitional => Generation::Transitional,
                 Preset::Advanced => Generation::LateColdWar,
+                Preset::Unreviewed => Generation::Unreviewed,
             };
             let j = jammer(generation, 0.30);
             let b = r.resistance.burn_through_nmi;

@@ -66,6 +66,8 @@ fn sensors() -> Sensors {
             track: volume(6. * NMI, 90.),
         }),
         jammer: None,
+        unreviewed_radar: None,
+        unreviewed_jammer: None,
         signature: Default::default(),
     })
 }

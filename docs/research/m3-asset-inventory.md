@@ -43,10 +43,10 @@ first ones to confirm.
 |---|---:|---|---|---|---|
 | Aircraft (PT) | 145 | 64 / 0 / 81 / 0 | 31 / 33 / 81 / 0 | 26 / 10 / 109 / 0 | 25 / 39 / 81 / 0 |
 | Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
-| Equipment (SEE/ECM/GAS) | 85 | 53 / 2 / 30 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 51 / 3 / 31 / 0 |
+| Equipment (SEE/ECM/GAS) | 85 | 53 / 28 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 51 / 3 / 31 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **471 / 23 / 125 / 0** | **246 / 180 / 118 / 75** | **200 / 31 / 142 / 246** | **401 / 84 / 133 / 1** |
+| **Total** | **619** | **471 / 49 / 99 / 0** | **246 / 180 / 118 / 75** | **200 / 31 / 142 / 246** | **401 / 84 / 133 / 1** |
 
 ## What remains, by object type
 
@@ -74,9 +74,13 @@ first ones to confirm.
   [why](../spec/ordnance-presentation.md#cluster-bomb-dispense)). The Ticonderoga
   carries a fitted derived SM-2 on its ASROC rails (JT-6 rework, 2026-11-06;
   [why](../spec/missiles.md#asroc-and-the-ticonderogas-sm-2-jt-6-2026-11-06)).
-- **Equipment.** Sensors and ECM are gated to reviewed roster aircraft, so 14
-  radars, 12 ECM suites and 3 sensors carried only by unported aircraft are None.
-  Designator pods PAVESPK and AAS38 have no drawn body. Tanks use a fitted body.
+- **Equipment.** Sensors and ECM are gated to reviewed roster aircraft. Since
+  EQ-1 (2026-11-06) the 14 radars and 12 ECM suites carried only by unported
+  aircraft decode and load as unreviewed profiles that never enable a flying
+  channel, so they are Partial rather than None; GCIR and REDCR are surface
+  sensors outside the aircraft component, and four further SEE records with no
+  carrier stay decoded only. Designator pods PAVESPK and AAS38 have no drawn
+  body. Tanks use a fitted body.
 - **Surface units.** All load and the 2026-10-10 surface AI covers detection,
   firing, batteries and emitters. Animation is the gap: only KRIVAK and SOVR
   turrets and four antennas are retail parts, nothing elevates, no wheel, track or
@@ -278,7 +282,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes and a fitted dispenser opening and bomblet flight; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
-- **Equipment.** One sensor component serves all 36 roster aircraft plus F/A-XX. It refuses unreviewed radar or ECM records (`crates/tore-sim/src/sensors/profile.rs:106,255,315`), so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape).
+- **Equipment.** One sensor component serves all 36 roster aircraft plus F/A-XX. Radar and ECM records with no reviewed preset or generation assignment now decode and load into an unreviewed profile (EQ-1, 2026-11-06, `crates/tore-sim/src/sensors/profile.rs`), but the profile never joins a flying channel, so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape).
 - **Roster basis.** "Roster" means the 36 retail aircraft in `docs/spec/aircraft-variety.md` and `roster-aircraft.md`; carriers were computed from `docs/formats/fa-aircraft.csv` default stores only (stations can allow more).
 - **Grade rules.** Imported: Done = reachable in game; Partial = decoded and profiled or hooked but hidden; None = decoded only. Animations/AI use N/A where nothing applies.
 
@@ -547,20 +551,20 @@ Per category:
 | SU24R.SEE | Su-24 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; Su-25 |
 | SU27R.SEE | Su-27 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; Su-27, Su-35 |
 | YAK141R.SEE | Yak-141 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; Yak-141 |
-| A6R.SEE | A-6 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| B52R.SEE | B-52/AF1 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| E6R.SEE | E-6 radar | None | N/A | N/A | None | No carrier at all; no reviewed preset |
-| E8R.SEE | E-8 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| EA6R.SEE | EA-6 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| F4R.SEE | F-4 radar | None | N/A | N/A | None | No carrier at all; no reviewed preset |
-| F8R.SEE | F-8 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| MIG31R.SEE | MiG-31 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| SEAHARR.SEE | Sea Harrier radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| SU35R.SEE | Su-35 radar | None | N/A | N/A | None | No carrier at all; no reviewed preset |
-| SU37R.SEE | Su-37 radar | None | N/A | N/A | None | No carrier at all; no reviewed preset |
-| TU160R.SEE | Tu-160 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| TU26R.SEE | Tu-26 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
-| TU95R.SEE | Tu-95 radar | None | N/A | N/A | None | No roster carrier; no reviewed preset, import errors if used |
+| A6R.SEE | A-6 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| B52R.SEE | B-52/AF1 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| E6R.SEE | E-6 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| E8R.SEE | E-8 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| EA6R.SEE | EA-6 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| F4R.SEE | F-4 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| F8R.SEE | F-8 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| MIG31R.SEE | MiG-31 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| SEAHARR.SEE | Sea Harrier radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| SU35R.SEE | Su-35 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| SU37R.SEE | Su-37 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| TU160R.SEE | Tu-160 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| TU26R.SEE | Tu-26 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| TU95R.SEE | Tu-95 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | AAS38.SEE | AAS-38 FLIR pod | Done | None | N/A | Done | Rafale fixed row; FLIR sight 91,140 ft; pod body drawing unverified |
 | AV8IR.SEE | AV-8B internal FLIR | Done | N/A | N/A | Done | X-31, F-22, F-22N, AV-8B, AH-64; 60 degree cone sight |
 | AC130I.SEE | AC-130 FLIR | Done | N/A | N/A | Done | AC-130 console, / range 54,684 ft |
@@ -601,19 +605,19 @@ Per category:
 | SU24.ECM | SU24 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; Su-25 |
 | SU27.ECM | SU27 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; Su-27, Su-35 |
 | YAK141.ECM | YAK141 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; Yak-141 |
-| ALQ167.ECM | ALQ-167 jammer pod | Partial | None | N/A | None | AV-8B locked row; generation unreviewed, so jammer unverified |
-| A6.ECM | A-6 ECM | None | None | None | None | A-6/F-111 only; non-roster, generation unreviewed |
-| ALE40.ECM | ALE-40 dispenser | None | None | None | None | no carrier at all; non-roster, generation unreviewed |
-| ALQ72.ECM | ALQ-72 jammer | None | None | None | None | M5 only; non-roster, generation unreviewed |
-| EA6.ECM | EA-6 ECM | None | None | None | None | EA-6 only; non-roster, generation unreviewed |
-| F8.ECM | F-8 ECM | None | None | None | None | F-8J only; non-roster, generation unreviewed |
-| MIG27.ECM | MiG-27 ECM | None | None | None | None | MiG-27 only; non-roster, generation unreviewed |
-| MIG31.ECM | MiG-31 ECM | None | None | None | None | MiG-31/Jaguar/Tornado only; non-roster, generation unreviewed |
-| SEAHAR.ECM | Sea Harrier ECM | None | None | None | None | Sea Harrier only; non-roster, generation unreviewed |
-| SU37.ECM | Su-37 ECM | None | None | None | None | no carrier at all; non-roster, generation unreviewed |
-| TU160.ECM | Tu-160 ECM | None | None | None | None | Tu-160 only; non-roster, generation unreviewed |
-| TU26.ECM | Tu-26 ECM | None | None | None | None | Tu-26 only; non-roster, generation unreviewed |
-| TU95.ECM | Tu-95 ECM | None | None | None | None | Tu-95 only; non-roster, generation unreviewed |
+| ALQ167.ECM | ALQ-167 jammer pod | Partial | None | N/A | None | AV-8B locked row; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| A6.ECM | A-6 ECM | Partial | None | None | None | A-6/F-111 only; non-roster, generation unreviewed |
+| ALE40.ECM | ALE-40 dispenser | Partial | None | None | None | no carrier at all; non-roster, generation unreviewed |
+| ALQ72.ECM | ALQ-72 jammer | Partial | None | None | None | M5 only; non-roster, generation unreviewed |
+| EA6.ECM | EA-6 ECM | Partial | None | None | None | EA-6 only; non-roster, generation unreviewed |
+| F8.ECM | F-8 ECM | Partial | None | None | None | F-8J only; non-roster, generation unreviewed |
+| MIG27.ECM | MiG-27 ECM | Partial | None | None | None | MiG-27 only; non-roster, generation unreviewed |
+| MIG31.ECM | MiG-31 ECM | Partial | None | None | None | MiG-31/Jaguar/Tornado only; non-roster, generation unreviewed |
+| SEAHAR.ECM | Sea Harrier ECM | Partial | None | None | None | Sea Harrier only; non-roster, generation unreviewed |
+| SU37.ECM | Su-37 ECM | Partial | None | None | None | no carrier at all; non-roster, generation unreviewed |
+| TU160.ECM | Tu-160 ECM | Partial | None | None | None | Tu-160 only; non-roster, generation unreviewed |
+| TU26.ECM | Tu-26 ECM | Partial | None | None | None | Tu-26 only; non-roster, generation unreviewed |
+| TU95.ECM | Tu-95 ECM | Partial | None | None | None | Tu-95 only; non-roster, generation unreviewed |
 
 #### Fuel tank (GAS) (4)
 

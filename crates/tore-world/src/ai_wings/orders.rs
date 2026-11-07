@@ -2069,6 +2069,8 @@ mod landing_tests {
             infrared: None,
             visual: None,
             jammer: None,
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: sensors::SignatureProfile::default(),
         };
         let mut wings =
@@ -2110,6 +2112,8 @@ mod landing_tests {
             infrared: None,
             visual: None,
             jammer: None,
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: sensors::SignatureProfile::default(),
         };
         AiWings::build_with(&selections, &super::super::tests::spawned(), 0, |_| {

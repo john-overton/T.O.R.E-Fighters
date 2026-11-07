@@ -390,6 +390,8 @@ pub fn combat_fixture(guided: bool) -> live::State {
                 infrared: None,
                 visual: None,
                 jammer: None,
+                unreviewed_radar: None,
+                unreviewed_jammer: None,
                 signature: sensors::SignatureProfile::default(),
             },
             sight: None,

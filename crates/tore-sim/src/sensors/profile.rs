@@ -101,10 +101,15 @@ pub enum Preset {
     Basic,
     Transitional,
     Advanced,
+    /// A decoded radar record with no reviewed preset assignment yet (EQ-1,
+    /// 2026-11-06). Its profile is loaded so an aircraft batch can review and
+    /// switch it on, but it is never enabled in flight.
+    Unreviewed,
 }
 impl Preset {
-    /// Assignment by installed radar record, from docs/radar.md. An unreviewed
-    /// record fails the import rather than borrowing another aircraft's radar.
+    /// Assignment by installed radar record, from docs/radar.md. A record with
+    /// no assignment decodes as [`Preset::Unreviewed`] rather than borrowing
+    /// another aircraft's radar: the profile loads, but nothing enables it.
     pub fn for_record(record: &str) -> Option<Self> {
         match record.to_ascii_uppercase().as_str() {
             "F4BR.SEE" | "MIG21R.SEE" | "MIG27R.SEE" | "F104R.SEE" => Some(Self::Basic),
@@ -120,6 +125,7 @@ impl Preset {
             Self::Basic => "BASIC",
             Self::Transitional => "TRANSITIONAL",
             Self::Advanced => "ADVANCED",
+            Self::Unreviewed => "UNREVIEWED",
         }
     }
     pub fn notch(self) -> Notch {
@@ -140,6 +146,12 @@ impl Preset {
                 half_width_fps: 60.,
                 centre_factor: 0.45,
             },
+            // Inert: an unreviewed preset is never in a flying radar channel.
+            Self::Unreviewed => Notch {
+                enabled: false,
+                half_width_fps: 0.,
+                centre_factor: 1.,
+            },
         }
     }
     pub fn resistance(self) -> Resistance {
@@ -159,6 +171,12 @@ impl Preset {
                 burn_through_nmi: 10.,
                 coupling_rad: degrees(1.),
                 sidelobe_floor: 0.005,
+            },
+            // Inert: an unreviewed preset is never in a flying radar channel.
+            Self::Unreviewed => Resistance {
+                burn_through_nmi: 0.,
+                coupling_rad: std::f64::consts::PI,
+                sidelobe_floor: 1.,
             },
         }
     }
@@ -188,11 +206,17 @@ pub enum Generation {
     Early,
     Transitional,
     LateColdWar,
+    /// A decoded ECM record with no reviewed generation assignment yet (EQ-1,
+    /// 2026-11-06). Its profile is loaded so an aircraft batch can review and
+    /// switch it on, but it is never enabled in flight.
+    Unreviewed,
 }
 impl Generation {
     /// Explicit reviewable assignment for every ECM record installed on the
     /// reviewed imported aircraft, from docs/radar.md. Never derived from the
-    /// associated radar preset or the airframe year.
+    /// associated radar preset or the airframe year. A record with no
+    /// assignment decodes as [`Generation::Unreviewed`]: the profile loads, but
+    /// nothing enables it.
     pub fn for_record(record: &str) -> Option<Self> {
         match record.to_ascii_uppercase().as_str() {
             "F4.ECM" | "MIG21.ECM" | "AV8.ECM" | "YAK141.ECM" | "KA50.ECM" | "A7.ECM"
@@ -209,12 +233,15 @@ impl Generation {
             Self::Early => "EARLY",
             Self::Transitional => "TRANSITIONAL",
             Self::LateColdWar => "LATE",
+            Self::Unreviewed => "UNREVIEWED",
         }
     }
     /// Agent-proposed effectiveness of this jammer generation against a radar
-    /// preset. No matchup guarantees immunity or a lost lock.
+    /// preset. No matchup guarantees immunity or a lost lock. An unreviewed
+    /// generation has no effect here; it is never in a flying channel.
     pub fn matchup(self, radar: Preset) -> f64 {
         match (self, radar) {
+            (Self::Unreviewed, _) | (_, Preset::Unreviewed) => 0.,
             (Self::Early, Preset::Basic) => 1.00,
             (Self::Early, Preset::Transitional) => 0.60,
             (Self::Early, Preset::Advanced) => 0.30,
@@ -251,9 +278,7 @@ impl RadarProfile {
         if seeker.signature != 3 {
             return Err(invalid("sensor record is not a radar channel"));
         }
-        let preset = Preset::for_record(record).ok_or_else(|| {
-            invalid("unreviewed radar record: add an explicit preset assignment first")
-        })?;
+        let preset = Preset::for_record(record).unwrap_or(Preset::Unreviewed);
         Ok(Self {
             record: record.to_ascii_uppercase(),
             search: Volume::from_zone(&seeker.zones[0])?,
@@ -270,6 +295,12 @@ impl RadarProfile {
                 seeker.doppler_minimum_range,
             ],
         })
+    }
+    /// Whether this radar's gameplay preset has been reviewed. A decoded
+    /// record with no preset assignment is loaded (EQ-1, 2026-11-06) but never
+    /// enabled in flight, so it does not join the flying radar channel.
+    pub fn reviewed(&self) -> bool {
+        self.preset != Preset::Unreviewed
     }
 }
 
@@ -311,9 +342,7 @@ pub struct JammerProfile {
 }
 impl JammerProfile {
     pub fn from_countermeasures(record: &str, ecm: &Countermeasures) -> Result<Self> {
-        let generation = Generation::for_record(record).ok_or_else(|| {
-            invalid("unreviewed ECM record: add an explicit generation assignment first")
-        })?;
+        let generation = Generation::for_record(record).unwrap_or(Generation::Unreviewed);
         Ok(Self {
             record: record.to_ascii_uppercase(),
             generation,
@@ -321,6 +350,12 @@ impl JammerProfile {
             band: 0,
             radio_frequency: ecm.mode_flags & 0x10 != 0,
         })
+    }
+    /// Whether this jammer's generation has been reviewed. A decoded record
+    /// with no generation assignment is loaded (EQ-1, 2026-11-06) but never
+    /// enabled in flight, so it does not join the flying jammer channel.
+    pub fn reviewed(&self) -> bool {
+        self.generation != Generation::Unreviewed
     }
     /// Device-pair band compatibility K, 0 or 1 in this first component.
     pub fn compatible(&self, radar: &RadarProfile) -> f64 {
@@ -340,11 +375,20 @@ pub struct SensorProfiles {
     pub infrared: Option<InfraredProfile>,
     pub visual: Option<VisualProfile>,
     pub jammer: Option<JammerProfile>,
+    /// A decoded radar whose preset is not reviewed yet (EQ-1, 2026-11-06).
+    /// The profile is loaded so an aircraft batch can review and switch it on,
+    /// but it is never placed in [`Self::radar`], so nothing flies with it.
+    pub unreviewed_radar: Option<RadarProfile>,
+    /// The ECM counterpart of [`Self::unreviewed_radar`].
+    pub unreviewed_jammer: Option<JammerProfile>,
     pub signature: SignatureProfile,
 }
 impl SensorProfiles {
     /// Resolve sensors by the parsed record channel, never by aircraft name.
-    /// A missing optional channel is valid; an invalid record is an error.
+    /// A missing optional channel is valid; an invalid record is an error. A
+    /// radar or ECM record whose tuning is unreviewed still decodes and loads,
+    /// into the `unreviewed_*` fields, and never enables a flying channel
+    /// (EQ-1, 2026-11-06).
     pub fn from_source(
         a: &Aircraft,
         mut read: impl FnMut(&str) -> Result<Vec<u8>>,
@@ -352,6 +396,7 @@ impl SensorProfiles {
         let mut radar = None;
         let mut infrared = None;
         let mut visual = None;
+        let mut unreviewed_radar = None;
         for name in a
             .hardpoints
             .iter()
@@ -360,7 +405,14 @@ impl SensorProfiles {
         {
             let seeker = Seeker::parse(name, &read(name)?)?;
             match seeker.signature {
-                3 if radar.is_none() => radar = Some(RadarProfile::from_seeker(name, &seeker)?),
+                3 if radar.is_none() && unreviewed_radar.is_none() => {
+                    let profile = RadarProfile::from_seeker(name, &seeker)?;
+                    if profile.reviewed() {
+                        radar = Some(profile);
+                    } else {
+                        unreviewed_radar = Some(profile);
+                    }
+                }
                 2 if infrared.is_none() => {
                     infrared = Some(InfraredProfile::from_seeker(name, &seeker, 2)?)
                 }
@@ -372,17 +424,24 @@ impl SensorProfiles {
                 _ => {}
             }
         }
-        let jammer = match a
+        let (jammer, unreviewed_jammer) = match a
             .hardpoints
             .iter()
             .filter_map(|h| h.store.as_deref())
             .find(|n| n.to_ascii_uppercase().ends_with(".ECM"))
         {
-            Some(name) => Some(JammerProfile::from_countermeasures(
-                name,
-                &Countermeasures::parse(name, &read(name)?)?,
-            )?),
-            None => None,
+            Some(name) => {
+                let profile = JammerProfile::from_countermeasures(
+                    name,
+                    &Countermeasures::parse(name, &read(name)?)?,
+                )?;
+                if profile.reviewed() {
+                    (Some(profile), None)
+                } else {
+                    (None, Some(profile))
+                }
+            }
+            None => (None, None),
         };
         Ok(Self {
             aircraft: a.id,
@@ -390,6 +449,8 @@ impl SensorProfiles {
             infrared,
             visual,
             jammer,
+            unreviewed_radar,
+            unreviewed_jammer,
             signature: SignatureProfile::from_source(a)?,
         })
     }
@@ -409,16 +470,18 @@ impl SensorProfiles {
                 v.elevation_rad.to_degrees()
             )
         };
-        let radar = self.radar.as_ref().map_or("none".into(), |r| {
-            format!(
+        let radar = match (&self.radar, &self.unreviewed_radar) {
+            (Some(r), _) => format!(
                 "{} search {} track {} look-down {:.0} {}",
                 r.record,
                 volume(&r.search),
                 volume(&r.track),
                 r.look_down,
                 r.preset.label()
-            )
-        });
+            ),
+            (None, Some(r)) => format!("{} UNREVIEWED (not enabled)", r.record),
+            (None, None) => "none".into(),
+        };
         let passive = |p: &Option<PassiveProfile>| {
             p.as_ref().map_or("none".into(), |i| {
                 format!(
@@ -431,8 +494,8 @@ impl SensorProfiles {
         };
         let infrared = passive(&self.infrared);
         let visual = passive(&self.visual);
-        let jammer = self.jammer.as_ref().map_or("none".into(), |j| {
-            format!(
+        let jammer = match (&self.jammer, &self.unreviewed_jammer) {
+            (Some(j), _) => format!(
                 "{} {} strength {:.2}{}",
                 j.record,
                 j.generation.label(),
@@ -442,8 +505,10 @@ impl SensorProfiles {
                 } else {
                     " (no RF mode)"
                 }
-            )
-        });
+            ),
+            (None, Some(j)) => format!("{} UNREVIEWED (not enabled)", j.record),
+            (None, None) => "none".into(),
+        };
         format!(
             "{:?}: radar {radar}; infrared {infrared}; visual {visual}; jammer {jammer}; signature radar {:.0} infrared {:.0}",
             self.aircraft, self.signature.radar, self.signature.infrared
@@ -454,3 +519,255 @@ impl SensorProfiles {
 // Exact checkpoints (docs/formats/checkpoint.md).
 #[path = "profile_checkpoint.rs"]
 mod checkpoint;
+
+#[cfg(test)]
+mod tests {
+    //! EQ-1 (2026-11-06): every decoded SEE or ECM record builds a profile,
+    //! and a record whose tuning is unreviewed loads without enabling a flying
+    //! channel. The records are the roster ones from docs/radar.md plus the
+    //! unported aircraft's, `docs/research/m3-asset-inventory.md`.
+    use super::*;
+    use tore_formats::aircraft::{Aircraft, Hardpoint, Token};
+    use tore_formats::weapons::{Countermeasures, Seeker, Zone};
+
+    /// The `SENSOR` review field order (crates/tore-formats/src/aircraft_schema.rs).
+    const SENSOR: &[(&str, &str)] = &[
+        ("byte", "structType"),
+        ("ptr", "si_names"),
+        ("word", "weight"),
+        ("byte", "flags"),
+        ("byte", "sig"),
+        ("byte", "flags[1]"),
+        ("byte", "lookDown"),
+        ("byte", "dopplerSpeedAbove"),
+        ("byte", "dopplerSpeedBelow"),
+        ("byte", "dopplerMinRange"),
+        ("byte", "allAspect"),
+        ("word", "zone0.h"),
+        ("word", "zone0.p"),
+        ("dword", "zone0.minRange"),
+        ("dword", "zone0.maxRange"),
+        ("dword", "zone0.minAlt"),
+        ("dword", "zone0.maxAlt"),
+        ("word", "zone1.h"),
+        ("word", "zone1.p"),
+        ("dword", "zone1.minRange"),
+        ("dword", "zone1.maxRange"),
+        ("dword", "zone1.minAlt"),
+        ("dword", "zone1.maxAlt"),
+        ("byte", "chaffFlareChance"),
+        ("byte", "deceptionChance"),
+    ];
+
+    /// The `ECM` review field order.
+    const ECM: &[(&str, &str)] = &[
+        ("byte", "structType"),
+        ("ptr", "si_names"),
+        ("word", "weight"),
+        ("byte", "flags"),
+        ("word", "flags[1]"),
+        ("byte", "chaffLoaded"),
+        ("byte", "chaffChance"),
+        ("byte", "chaffH"),
+        ("byte", "chaffP"),
+        ("byte", "flaresLoaded"),
+        ("byte", "flareChance"),
+        ("byte", "flareH"),
+        ("byte", "flareP"),
+        ("byte", "rdChance"),
+        ("word", "rdSigAdd"),
+        ("byte", "rNoiseMaxDist"),
+        ("byte", "rNoiseMinDist"),
+        ("byte", "irdChance"),
+        ("word", "irdSigAdd"),
+        ("byte", "irdLoseLockTime"),
+    ];
+
+    fn seeker(signature: u8) -> Seeker {
+        let zone = Zone {
+            heading: 4000,
+            pitch: 4000,
+            minimum_range: 0,
+            maximum_range: 60_000,
+            minimum_altitude: i32::MIN,
+            maximum_altitude: i32::MAX,
+        };
+        Seeker {
+            flags: [0; 2],
+            signature,
+            look_down: 50,
+            doppler_above: 0,
+            doppler_below: 0,
+            doppler_minimum_range: 0,
+            all_aspect: 0,
+            zones: [zone; 2],
+            chaff_flare_chance: 0,
+            deception_chance: 0,
+        }
+    }
+
+    /// A synthetic SEE record in the reader's own field order.
+    fn sensor_bytes(record: &str, signature: i64) -> Vec<u8> {
+        let mut text = String::from("[brent's_relocatable_format]\n");
+        for (kind, name) in SENSOR {
+            if *name == "si_names" {
+                text.push_str("ptr si_names\n");
+                continue;
+            }
+            let value: i64 = match *name {
+                "structType" => 10,
+                "weight" => 100,
+                "sig" => signature,
+                "lookDown" => 50,
+                "zone0.h" | "zone1.h" => 4000,
+                "zone0.p" | "zone1.p" => 4000,
+                "zone0.maxRange" | "zone1.maxRange" => 60_000,
+                "zone0.minAlt" | "zone1.minAlt" => -2_000_000_000,
+                "zone0.maxAlt" | "zone1.maxAlt" => 2_000_000_000,
+                _ => 0,
+            };
+            text.push_str(&format!("{kind} {value}\n"));
+        }
+        text.push_str(&format!(
+            ":si_names\nstring \"Synthetic\"\nstring \"Synthetic sensor\"\nstring \"{record}\"\nend\n"
+        ));
+        text.into_bytes()
+    }
+
+    /// A synthetic ECM record in the reader's own field order.
+    fn ecm_bytes(record: &str) -> Vec<u8> {
+        let mut text = String::from("[brent's_relocatable_format]\n");
+        for (kind, name) in ECM {
+            if *name == "si_names" {
+                text.push_str("ptr si_names\n");
+                continue;
+            }
+            let value: i64 = match *name {
+                "structType" => 9,
+                "weight" => 50,
+                "flags[1]" => 0x10,
+                "rdChance" => 30,
+                _ => 0,
+            };
+            text.push_str(&format!("{kind} {value}\n"));
+        }
+        text.push_str(&format!(
+            ":si_names\nstring \"Synthetic\"\nstring \"Synthetic ECM\"\nstring \"{record}\"\nend\n"
+        ));
+        text.into_bytes()
+    }
+
+    fn aircraft_with(stores: &[&str]) -> Aircraft {
+        let mut a = crate::flight::integration_tests::profile();
+        for (key, value) in [("sigs[3]", "100"), ("sigs[2]", "100")] {
+            a.object.insert(
+                key.into(),
+                Token {
+                    kind: "word".into(),
+                    value: value.into(),
+                    scaled: false,
+                },
+            );
+        }
+        a.hardpoints = stores
+            .iter()
+            .map(|store| Hardpoint {
+                location: 0,
+                flags: 0,
+                position: [0; 3],
+                store: Some((*store).into()),
+                count: 1,
+                weight_class: 0,
+            })
+            .collect();
+        a
+    }
+
+    #[test]
+    fn an_unreviewed_radar_or_ecm_still_decodes_into_a_profile() {
+        // A record with no reviewed assignment decodes, with an inert tuning.
+        let radar = RadarProfile::from_seeker("A6R.SEE", &seeker(3)).unwrap();
+        assert_eq!(radar.preset, Preset::Unreviewed);
+        assert!(!radar.reviewed());
+        assert_eq!(radar.search.maximum_ft, 60_000.);
+        assert_eq!(radar.track.maximum_ft, 60_000.);
+        assert!(!radar.notch.enabled);
+
+        let ecm = JammerProfile::from_countermeasures("A6.ECM", &Countermeasures::NONE).unwrap();
+        assert_eq!(ecm.generation, Generation::Unreviewed);
+        assert!(!ecm.reviewed());
+
+        // A reviewed record keeps its assignment, and the wrong channel fails.
+        let reviewed = RadarProfile::from_seeker("F18R.SEE", &seeker(3)).unwrap();
+        assert_eq!(reviewed.preset, Preset::Advanced);
+        assert!(reviewed.reviewed());
+        let reviewed = JammerProfile::from_countermeasures("F18.ECM", &Countermeasures::NONE);
+        assert_eq!(reviewed.unwrap().generation, Generation::LateColdWar);
+        assert!(RadarProfile::from_seeker("AAS38.SEE", &seeker(2)).is_err());
+        // An unreviewed generation has no jamming effect if it is ever read.
+        assert_eq!(Generation::Unreviewed.matchup(Preset::Basic), 0.);
+        assert_eq!(Generation::Early.matchup(Preset::Unreviewed), 0.);
+    }
+
+    #[test]
+    fn an_unreviewed_record_loads_without_enabling_a_flying_channel() {
+        let a = aircraft_with(&["A6R.SEE", "A6.ECM"]);
+        let profiles = SensorProfiles::from_source(&a, |name| {
+            Ok(if name.ends_with(".SEE") {
+                sensor_bytes(name, 3)
+            } else {
+                ecm_bytes(name)
+            })
+        })
+        .unwrap();
+        // The flying channels stay absent, so the radar and jammer never fly.
+        assert!(profiles.radar.is_none());
+        assert!(profiles.jammer.is_none());
+        // The decoded profiles are loaded and named, with no reviewed tuning.
+        assert!(
+            profiles
+                .unreviewed_radar
+                .as_ref()
+                .is_some_and(|r| !r.reviewed() && r.record == "A6R.SEE")
+        );
+        assert!(
+            profiles
+                .unreviewed_jammer
+                .as_ref()
+                .is_some_and(|j| !j.reviewed() && j.record == "A6.ECM")
+        );
+        let summary = profiles.summary();
+        assert!(
+            summary.contains("A6R.SEE UNREVIEWED (not enabled)"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("A6.ECM UNREVIEWED (not enabled)"),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn a_reviewed_record_still_enables_its_flying_channel() {
+        let a = aircraft_with(&["F18R.SEE", "F18.ECM"]);
+        let profiles = SensorProfiles::from_source(&a, |name| {
+            Ok(if name.ends_with(".SEE") {
+                sensor_bytes(name, 3)
+            } else {
+                ecm_bytes(name)
+            })
+        })
+        .unwrap();
+        assert_eq!(
+            profiles.radar.as_ref().map(|r| r.preset),
+            Some(Preset::Advanced)
+        );
+        assert_eq!(
+            profiles.jammer.as_ref().map(|j| j.generation),
+            Some(Generation::LateColdWar)
+        );
+        assert!(profiles.unreviewed_radar.is_none());
+        assert!(profiles.unreviewed_jammer.is_none());
+        assert!(profiles.summary().contains("F18R.SEE"));
+    }
+}

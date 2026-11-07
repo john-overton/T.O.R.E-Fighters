@@ -102,6 +102,8 @@ fn sensor_actor(id: u32, side: u32, member: u8, position: [f64; 3], yaw: f64) ->
         infrared: None,
         visual: None,
         jammer: None,
+        unreviewed_radar: None,
+        unreviewed_jammer: None,
         signature: sensors::SignatureProfile::default(),
     }));
     AiActor::new(setup).unwrap()

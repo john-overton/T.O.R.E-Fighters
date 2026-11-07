@@ -560,6 +560,14 @@ checkpoint's already-queued release retains its old boolean; recorded speech
 stems play as recorded. Fresh releases use the shared missile classification.
 No network protocol number or wire layout changed.
 
+## Unreviewed sensor equipment (EQ-1, 2026-11-06)
+
+`SensorProfiles` codes `unreviewed_radar` and `unreviewed_jammer` after
+`jammer` and before `signature`. A decoded radar or ECM record whose tuning is
+not reviewed loads as a profile that never joins a flying channel, so `radar`
+and `jammer` stay absent for it (docs/radar.md). Same-build checkpoints only, as
+before; the container version is unchanged.
+
 ## Missile and IR correction (2026-10-15)
 
 The radio cooldown key table appends radio-bore-active, radio-bore-ir and

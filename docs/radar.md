@@ -76,8 +76,9 @@ The boundary is one typed profile set and one live sensor state per aircraft, in
 in tore-formats and normalizes once when the aircraft equipment suite is
 imported, never during rendering. There are no aircraft-name branches: every
 sensor hardpoint resolves by its parsed signature channel, a missing optional
-channel is an explicit valid equipment state, and an unreviewed radar or ECM
-record fails the import rather than defaulting to F18R.
+channel is an explicit valid equipment state, and a radar or ECM record with no
+reviewed assignment loads as an unreviewed profile that never enables a flying
+channel (EQ-1, 2026-11-06), rather than defaulting to F18R.
 
 | Part | Owns | Does not decide |
 | --- | --- | --- |
@@ -153,7 +154,8 @@ The following agent-authored presets cover additional notch/ECCM differences.
 They are gameplay groupings, not recovered historical classifications. They are
 assigned by installed radar record, with per-field overrides available when
 porting another device. A preset is never selected from aircraft year alone, and
-an unreviewed radar record fails the import instead of borrowing a preset.
+an unreviewed radar record loads as `Preset::Unreviewed` and never enables a
+flying channel, instead of borrowing a preset.
 
 | Preset | Radar records | Notch half-width, ft/s | Range factor at notch centre | Reference burn-through B, nmi | Angular coupling half-width / sidelobe floor |
 | --- | --- | ---: | ---: | ---: | --- |
@@ -209,7 +211,8 @@ agent-authored gameplay coefficients, not retail or real-world measurements.
 Eight distinct ECM records are installed across the twelve aircraft. Every one
 carries an explicit reviewable generation assignment, recorded in code and never
 derived from the associated radar preset or the PT year. An unreviewed ECM record
-fails the import instead of borrowing a generation.
+loads as `Generation::Unreviewed` and never enables a flying channel, instead of
+borrowing a generation.
 
 | Generation | ECM records | Aircraft carrying them |
 | --- | --- | --- |
@@ -725,7 +728,7 @@ ended with a reviewable result.
 
 | Stage | Work | Reviewable exit | Status |
 | --- | --- | --- | --- |
-| 1. Profiles | Expose PT radar/IR signatures, installed radar/IR channels and ECM inputs; review radar and jammer tuning | All twelve aircraft produce the expected capability summary; no missing sensor silently becomes F18R | **Done.** `--sensor-summary` reports all twelve; an unreviewed radar or ECM record is an import error |
+| 1. Profiles | Expose PT radar/IR signatures, installed radar/IR channels and ECM inputs; review radar and jammer tuning | All twelve aircraft produce the expected capability summary; no missing sensor silently becomes F18R | **Done.** `--sensor-summary` reports all twelve; an unreviewed radar or ECM record loads as an unreviewed profile that never enables a flying channel (EQ-1, 2026-11-06) |
 | 2. Shared simulation | Add radar/IR detection, aspect factors, passive emitters, bounded history and persistent selection; separate death from physical contact lifetime | Numeric boundary tests and deterministic headless contact traces pass; no renderer or frame rate affects results | **Done.** The component and its acceptance tests live in `crates/tore-sim/src/sensors/` |
 | 3. Player scope | Use shared contacts/interference; correct range modes; add IR air-to-air, Y history, directional noise, persistent selection, RCS contour and clear track status | Mouse picks the intended target in both layouts and after resize; RWS selection cannot supply weapon lock; history cannot be clicked; target-view IFF stays unchanged | **Done** |
 | 4. Weapon integration | Replace duplicated radar checks with shared support status; preserve weapon-specific launch envelopes and active/semi-active distinctions | Correct target receives launch; each support-loss case passes; recording/replay reproduces selected target and engagement | **Done.** Radar weapons consult the shared support result; version-3 tapes carry the controls and the designated identity |

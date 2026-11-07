@@ -9716,6 +9716,8 @@ mod tests {
                 track: volume(5.),
             }),
             jammer: None,
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: sensors::SignatureProfile::default(),
         }
     }

@@ -103,6 +103,8 @@ fn profiles(radar: Option<RadarProfile>, infrared: Option<InfraredProfile>) -> S
         infrared,
         visual: None,
         jammer: None,
+        unreviewed_radar: None,
+        unreviewed_jammer: None,
         signature: SignatureProfile::default(),
     }
 }

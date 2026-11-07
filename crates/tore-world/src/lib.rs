@@ -41,5 +41,8 @@ pub mod test_support;
 #[cfg(test)]
 mod content_tests;
 
+#[cfg(test)]
+mod sensor_equipment_tests;
+
 /// A result whose error is any boxed error, as the mission code reports them.
 pub type WorldResult<T> = Result<T, Box<dyn std::error::Error>>;

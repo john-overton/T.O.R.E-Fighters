@@ -6173,6 +6173,8 @@ mod tests {
             infrared: None,
             visual: None,
             jammer: None,
+            unreviewed_radar: None,
+            unreviewed_jammer: None,
             signature: sensors::SignatureProfile::default(),
         }));
         AiActor::new(setup).unwrap()

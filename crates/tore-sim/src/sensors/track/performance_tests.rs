@@ -168,6 +168,8 @@ fn fixture() -> (Sensors, Observer, Observable) {
         infrared: Some(passive()),
         visual: Some(passive()),
         jammer: None,
+        unreviewed_radar: None,
+        unreviewed_jammer: None,
         signature: SignatureProfile::default(),
     });
     let observer = Observer {
