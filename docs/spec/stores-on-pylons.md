@@ -1153,3 +1153,87 @@ Guards: `a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not`
 `a_loaded_designator_pod_draws_a_fitted_body_on_its_station`
 (`crates/tore-world/src/snapshot.rs`) and the retail
 `crates/tore-world/src/pod_equipment_tests.rs`.
+
+### Authored pod models (2026-11-07)
+
+John asked on 2026-11-07 for three low-poly models in place of the fitted
+eight-sided body: the Pave Spike (`PAVESPK.SEE`), the AAS-38 NITE Hawk
+(`AAS38.SEE`) and the ALQ-167 (`ALQ167.ECM`). They match Fighters Anthology's
+flat-shaded look: each stays under 100 triangles, with six or eight sided
+cylinders.
+
+| Record | Triangles | Look |
+| --- | ---: | --- |
+| `PAVESPK.SEE` | 92 | White, six sides: a straight tube of one diameter end to end, a blunt faceted head of the same diameter with a dark flat window on its face, a raised collar band under the pylon, a blunt tail |
+| `AAS38.SEE` | 94 | Navy gray, eight sides: a rounded head with a dark window low on its front, a dark band joint behind it, a blunt tail |
+| `ALQ167.ECM` | 88 | Navy gray, eight sides: blunt conical caps, a raised dark fairing strip along the top, dark antenna stubs under both ends, two dark L-shaped prongs at the front (out from the body, then forward), four small dark fins in an X near the tail |
+
+The colours are sRGB white (1.0, 1.0, 1.0), Navy tactical light gray
+(0.50, 0.53, 0.55, about FS 36375, between it and FS 36320) and near black
+(0.13, 0.14, 0.15) for the details. Like the fitted bodies, every vertex takes
+the nearest palette entry, so the models are lit as the airframe is. The
+imported palettes hold pure white (255): an off-white 0.92 took a 235 grey
+entry, pure white takes the 255 one. Under the belly the lighting still shades
+the white pod light grey, as it shades a white airframe there. A model
+fills the pod's size: its length runs along the station, its width and height
+scale with the diameter, and its top meets the pylon as the fitted body's does.
+
+The AAS-38's size is corrected to 6.0 by 1.08 ft, the AAS-38A/B's public
+figures (Wikipedia, "AN/AAS-38": 6 ft by 13 in, read 2026-11-07). The 13.2 by
+1.2 ft above was about twice its real length. The Pave Spike and ALQ-167 keep
+their sizes.
+
+Every other equipment pod (`PAVEKNF.SEE` loads as the Pave Spike, `ALQ72.ECM`,
+`ALE40.ECM`), every rocket pod and every tank keeps the fitted body. A pod's
+`StorePose::shape` carries `TORE-POD:` and its record, so the drawing can find
+its model; the replay viewer never loads it as a shape.
+
+**Opinionated** (John's request); the models are agent-authored, not retail
+geometry, and are a **fitted** presentation: the records carry no shape. The
+source is the Blender build script `assets/pods/build_pods.py`, which exports
+the triangles into `crates/tore-app/src/pylons/pod_models.rs`
+([how to rebuild](../../assets/pods/README.md)).
+
+Guards: `authored_pod_models_stay_low_poly_and_inside_their_size`,
+`only_the_three_authored_records_draw_their_model` and
+`authored_pods_take_their_specified_colours` (`crates/tore-app/src/pylons.rs`).
+
+### Fixed pods draw only on a real station (2026-11-07)
+
+John's decision, 2026-11-07: a built-in (fixed) equipment pod is drawn only
+when its decoded hardpoint row is a real station. A row whose point is a
+placeholder draws nothing; no station is invented for it. This replaces the
+2026-11-06 rule above that hung such a pod under the model's lowest underside,
+which put the F-16C's Pave Spike far below the belly on a tall pylon block.
+
+The rule: a row is a placeholder when its point lies inside the airframe, that
+is, a face of the aircraft's own model lies straight under it within 12 ft
+(`crates/tore-sim/src/combat/live.rs` `inside_airframe`). A station's point
+hangs below the belly, with no face under it.
+
+Evidence, from the decoded rows of every roster aircraft that carries an
+external pod record (`PAVESPK.SEE`, `PAVEKNF.SEE`, `AAS38.SEE`, `ALQ167.ECM`,
+`ALQ72.ECM`, `ALE40.ECM`): four aircraft, positions in source units.
+
+| Aircraft | Pod row | Drawn | Why |
+| --- | --- | --- | --- |
+| A-10 | `PAVESPK.SEE`, location 1, flags `0x8`, [0, 0, 0], count 32767 | No | At the reference point, inside the fuselage; flagged like the internal sensors |
+| F-16C | `PAVESPK.SEE`, location 1, flags `0x8`, [0, 0, 50] | No | Inside the fuselage, flagged like the internal sensors and ECM rows beside it |
+| AV-8B | `ALQ167.ECM`, location 0, flags `0x601`, [0, 0, 0] | No | At the reference point, inside the fuselage, although its flags are those of a station |
+| Rafale | `AAS38.SEE`, location 0, flags `0x601`, [0, -20, 0] | Yes | 20 units under the reference point, below the belly, flagged like the F-16C's centreline tank station; drawn exactly where it was |
+
+The flags agree with the positions for three of the four rows: `0x8` marks the
+internal sensor, ECM and gun rows, and `0x601` the F-16C's centreline tank
+station. The AV-8B's row is the exception: station flags, but a reference-point
+position. The position decides, so it draws nothing.
+
+Only drawing changes. A pod not drawn keeps its mass accounting and its
+sensor behaviour exactly as before: neither reads the list of drawn pods.
+A designator pod loaded on a real station through Load Ordnance still draws,
+with its authored model. With no model to test against, a row is drawn at its
+record's point, as before.
+
+Guards: `a_fixed_pod_row_inside_the_airframe_is_a_placeholder`
+(`crates/tore-sim/src/combat/live.rs`) and the retail
+`crates/tore-world/src/pod_equipment_tests.rs`, which checks each of the four
+aircraft and that the Rafale's pod keeps its place.

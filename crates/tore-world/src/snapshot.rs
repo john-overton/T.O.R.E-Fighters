@@ -115,7 +115,10 @@ pub struct StorePose {
     /// reference point: the right-hand pylon of a paired record.
     pub mount: Vector,
     pub rack: tore_sim::combat::hardpoints::Rack,
-    /// The store's own shape, when its record names one.
+    /// The store's own shape, when its record names one. An external
+    /// equipment pod (EQ-2), whose record names none, carries its record's
+    /// name after [`EQUIPMENT_POD`] instead, which picks its authored model
+    /// where it has one ([`StorePose::equipment_pod`]).
     pub shape: Option<String>,
     pub look: StoreLook,
     /// Whole stores still on the station (pods, tanks and single stores).
@@ -154,7 +157,18 @@ impl Clone for StorePose {
     }
 }
 
+/// What an external equipment pod's [`StorePose::shape`] starts with,
+/// before its record's name (`TORE-POD:PAVESPK.SEE`): not a retail shape.
+pub const EQUIPMENT_POD: &str = "TORE-POD:";
+
 impl StorePose {
+    /// The equipment record of an external equipment pod (EQ-2), such as
+    /// `PAVESPK.SEE`; `None` for a rocket pod, a tank or a weapon.
+    pub fn equipment_pod(&self) -> Option<&str> {
+        (self.look == StoreLook::Pod)
+            .then(|| self.shape.as_deref()?.strip_prefix(EQUIPMENT_POD))
+            .flatten()
+    }
     /// The size it hangs by: the size its station's release uses
     /// ([`tore_sim::combat::live::Station::size`]), so a drawn store and a
     /// released one start at one point.
@@ -355,7 +369,9 @@ pub fn store_poses_of(
     }));
     // Loaded designator pods (decision 7) and fixed external pod equipment
     // (EQ-2) draw as fitted bodies on their stations. The records name no
-    // shape, so the body is the host's, not retail geometry.
+    // shape, so the body is the host's, not retail geometry; the record's
+    // name rides in `shape` so the drawing can pick an authored model
+    // (John 2026-11-07).
     for pod in &config.designator_pods {
         let Some(station) = config.stations.get(pod.station) else {
             continue;
@@ -366,7 +382,7 @@ pub fn store_poses_of(
                 .unwrap_or(u8::MAX),
             mount: station.mount,
             rack: station.rack,
-            shape: None,
+            shape: Some(format!("{EQUIPMENT_POD}{}", pod.store.source)),
             look: StoreLook::Pod,
             body: tore_sim::combat::store_sizes::equipment_pod_body(&pod.store.source),
             items: 1,
@@ -378,7 +394,7 @@ pub fn store_poses_of(
             hardpoint: u8::try_from(pod.hardpoint).unwrap_or(u8::MAX),
             mount: pod.mount,
             rack: pod.rack,
-            shape: None,
+            shape: Some(format!("{EQUIPMENT_POD}{}", pod.record)),
             look: StoreLook::Pod,
             body: tore_sim::combat::store_sizes::equipment_pod_body(&pod.record),
             items: 1,
@@ -910,6 +926,7 @@ mod tests {
             tore_sim::combat::store_sizes::equipment_pod_body("PAVESPK.SEE")
         );
         assert_eq!(poses[0].mount, config.stations[0].mount);
+        assert_eq!(poses[0].equipment_pod(), Some("PAVESPK.SEE"));
     }
 
     #[test]

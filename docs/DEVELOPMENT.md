@@ -191,6 +191,14 @@ Snapshots default to CHOOSEV for repeatability; `--background` overrides it. On 
 
 For the general extractor, use `python3 tools/extract_assets.py --dry-run` followed by `python3 tools/extract_assets.py`. It runs the standalone Rust tool in release mode without the app's window/audio dependencies. See [EXTRACTION.md](EXTRACTION.md) for filters, alternate source directories, and reports.
 
+### Authored models
+
+The equipment pod models (Pave Spike, AAS-38, ALQ-167; John, 2026-11-07) are
+the only authored 3D models in the repository. Their source is a Blender build
+script, `assets/pods/build_pods.py`, whose export is the compiled table
+`crates/tore-app/src/pylons/pod_models.rs`; Blender is needed only to change
+them. See [the pod models' README](../assets/pods/README.md).
+
 ## Data guard
 
 `tools/check_assets.py` scans tracked and non-ignored untracked files. It rejects Git-visible local media/reference directories, retail asset/cache extensions, plausible embedded EALIB archives, and recognizable standalone or embedded PIC headers. A format-name constant in the decoder is allowed; a plausible archive directory/sentinel is rejected. Pass explicit files/directories to inspect artifacts, including ignored outputs.

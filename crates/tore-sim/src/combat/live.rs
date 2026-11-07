@@ -588,9 +588,20 @@ impl GunPod {
         })
     }
 }
+/// Whether `point` (feet right, up and forward) is inside the model: a face
+/// of it lies straight under the point (within 12 ft). A fixed pod's row
+/// there is a placeholder, not a station (John 2026-11-07).
+fn inside_airframe(model: &super::hardpoints::Underside, [right, up, forward]: Vector) -> bool {
+    model
+        .height(right, forward, up - 12., 0)
+        .is_some_and(|face| face < up - 0.1)
+}
+
 /// A fixed external pod the import keeps as retained hardware: an equipment
 /// record with weight (a laser designator, FLIR or jammer pod) on a hardpoint.
-/// The drawing host turns it into a fitted body on its station; it is never
+/// Only a pod on a real station is listed: a row whose point is inside the
+/// airframe is a placeholder and is not drawn (John 2026-11-07). The drawing
+/// host turns it into a body on its station; it is never
 /// loaded or jettisoned, and its mass is already in
 /// `Configuration::fixed_external_equipment_lbs`. The records name no shape
 /// (EQ-2, 2026-11-06), so the body is the host's, not retail geometry.
@@ -867,23 +878,18 @@ impl Configuration {
             if equipment.number("weight") <= 0. || pod_flag & 1 == 0 {
                 continue;
             }
-            let (mut mount, mut rack) = place(index, h);
-            // A fixed pod's source row is a placeholder position, not a real
-            // pylon: the F-16C's Pave Spike is recorded at the reference
-            // height, inside the fuselage. Hang it under the model's lowest
-            // underside across the body's length instead (fitted), so its
-            // ends clear a rising belly.
-            if let Some(model) = model.as_ref() {
-                let half =
-                    super::store_sizes::equipment_pod_body(&name.to_ascii_uppercase())[0] * 0.3;
-                if let Some(belly) = [mount[2] - half, mount[2], mount[2] + half]
-                    .into_iter()
-                    .filter_map(|forward| model.lowest(mount[0], forward, mount[1] - 12.))
-                    .reduce(f64::min)
-                {
-                    mount[1] = belly;
-                    rack.over = [Some(belly as f32); 5];
-                }
+            let (mount, rack) = place(index, h);
+            // John 2026-11-07: a fixed pod is drawn only on a real station.
+            // A row whose point lies inside the airframe (a face of the
+            // model straight under it, the F-16C's Pave Spike at [0, 0, 50]
+            // or a row at the reference point) is a placeholder, and draws
+            // nothing. Its mass and its sensor are unchanged: neither reads
+            // this list.
+            if model
+                .as_ref()
+                .is_some_and(|model| inside_airframe(model, mount))
+            {
+                continue;
             }
             fixed_pods.push(FixedPod {
                 hardpoint: index,
@@ -7200,6 +7206,44 @@ pub fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// John 2026-11-07: a fixed pod row inside the airframe (a face under
+    /// it) is a placeholder and is not drawn; one below the belly is a
+    /// station. A synthetic body 3 ft deep under the reference point.
+    #[test]
+    fn a_fixed_pod_row_inside_the_airframe_is_a_placeholder() {
+        let quad = |z: f32| tore_formats::shape::Face {
+            positions: vec![
+                [-12., -60., z * 3.],
+                [12., -60., z * 3.],
+                [12., 60., z * 3.],
+                [-12., 60., z * 3.],
+            ],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let model = super::super::hardpoints::Underside::of(
+            &tore_formats::shape::Shape {
+                lines: Vec::new(),
+                faces: vec![quad(-3.), quad(2.)],
+                billboards: Vec::new(),
+                state_words: Default::default(),
+            },
+            1. / 3.,
+        );
+        // The F-16C's Pave Spike row and a reference-point row: inside.
+        assert!(inside_airframe(&model, [0., 0., 50. / 3.]));
+        assert!(inside_airframe(&model, [0., 0., 0.]));
+        // The Rafale's AAS-38 row, 20 units under the reference point.
+        assert!(!inside_airframe(&model, [0., -20. / 3., 0.]));
+        // Beside the body, nothing is under it.
+        assert!(!inside_airframe(&model, [8., 0., 0.]));
+    }
     const OWN: u32 = 0;
     use tore_formats::weapons::*;
     use tore_formats::weapons::{Guidance, Seeker};

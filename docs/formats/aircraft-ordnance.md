@@ -746,6 +746,18 @@ own length (`Configuration::from_source`). Nothing is loaded, jettisoned or
 counted twice: a fixed pod's mass stays in `fixed_external_equipment_lbs` and
 it is not an external store in the radar signature.
 
+Addition (2026-11-07): the Pave Spike, AAS-38 and ALQ-167 now draw authored
+low-poly models in place of the fitted body, at John's request. The records
+still name no shape; the models are ours, and the AAS-38's size is corrected to
+6.0 by 1.08 ft
+([authored pod models](../spec/stores-on-pylons.md#authored-pod-models-2026-11-07)).
+
+Addition (2026-11-07, John's decision): a fixed pod draws only when its row is a
+real station. The A-10's and AV-8B's pod rows sit at the reference point and the
+F-16C's at [0, 0, 50], inside the airframe, so they draw nothing; the Rafale's
+AAS-38 row is under its belly and draws
+([rule and evidence](../spec/stores-on-pylons.md#fixed-pods-draw-only-on-a-real-station-2026-11-07)).
+
 Guards: `a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not`
 (`crates/tore-world/src/content_tests.rs`),
 `a_loaded_designator_pod_draws_a_fitted_body_on_its_station`

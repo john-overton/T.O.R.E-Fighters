@@ -563,7 +563,10 @@ impl CombatArt {
         data: &BTreeMap<String, Vec<u8>>,
     ) {
         for name in names {
-            if procedural_store_body(name).is_some() {
+            // Procedural bodies and equipment pods are not retail shapes.
+            if procedural_store_body(name).is_some()
+                || name.starts_with(crate::snapshot::EQUIPMENT_POD)
+            {
                 continue;
             }
             let shape = data

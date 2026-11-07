@@ -140,8 +140,10 @@ pub fn equipment_pod_body(record: &str) -> [f64; 2] {
     match record.to_ascii_uppercase().as_str() {
         // AN/ASQ-153 Pave Spike and its retired twin.
         "PAVESPK.SEE" | "PAVEKNF.SEE" => [12.3, 1.1],
-        // AN/AAS-38 Nite Hawk FLIR.
-        "AAS38.SEE" => [13.2, 1.2],
+        // AN/AAS-38 Nite Hawk FLIR: 6.0 ft by 13 in, the AAS-38A/B's
+        // public figures (Wikipedia, "AN/AAS-38", read 2026-11-07); it was
+        // 13.2 by 1.2 ft before the authored model (EQ-2 models).
+        "AAS38.SEE" => [6.0, 1.08],
         // AN/ALQ-167 Bullwinkle jammer.
         "ALQ167.ECM" => [12.0, 1.4],
         // AN/ALQ-72 jammer.

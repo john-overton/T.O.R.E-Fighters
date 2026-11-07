@@ -194,6 +194,7 @@ fn a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not() {
         pods[0].body,
         tore_sim::combat::store_sizes::equipment_pod_body("PAVESPK.SEE")
     );
+    assert_eq!(pods[0].equipment_pod(), Some("PAVESPK.SEE"));
 }
 
 #[test]

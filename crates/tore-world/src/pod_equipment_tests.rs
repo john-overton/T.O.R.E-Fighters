@@ -36,25 +36,56 @@ fn a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body() {
             .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
     };
 
-    // The pod carriers among the imported roster. Each draws one fitted body.
+    // The pod carriers among the imported roster. John 2026-11-07: only a
+    // pod on a real station draws. The A-10's and AV-8B's rows sit at the
+    // reference point and the F-16C's at [0, 0, 50], inside the airframe:
+    // placeholders, drawn as nothing. The Rafale's AAS-38 row is 20 units
+    // under the belly, on the centreline station, and draws where it did.
     let cases = [
-        (AircraftId::A10, "PAVESPK.SEE"),
-        (AircraftId::F16C, "PAVESPK.SEE"),
-        (AircraftId::Rafale, "AAS38.SEE"),
-        (AircraftId::Av8, "ALQ167.ECM"),
+        (AircraftId::A10, "PAVESPK.SEE", None),
+        (AircraftId::F16C, "PAVESPK.SEE", None),
+        (AircraftId::Rafale, "AAS38.SEE", Some([0., -20. / 3., 0.])),
+        (AircraftId::Av8, "ALQ167.ECM", None),
     ];
     let mut seen = Vec::new();
-    for (id, record) in cases {
+    for (id, record, drawn_at) in cases {
         let bytes = read(id.pt()).unwrap_or_else(|error| panic!("{}: {error}", id.pt()));
         let aircraft =
             Aircraft::parse(&bytes).unwrap_or_else(|error| panic!("{}: {error}", id.pt()));
         let config = Configuration::from_source(&aircraft, &read)
             .unwrap_or_else(|error| panic!("{}: {error}", id.pt()));
+        // The record stays on its hardpoint, drawn or not.
         assert!(
-            config.fixed_pods.iter().any(|pod| pod.record == record),
-            "{} carries {record} as a fixed pod",
+            aircraft
+                .hardpoints
+                .iter()
+                .any(|h| h.store.as_deref() == Some(record)),
+            "{} carries {record}",
             id.pt()
         );
+        let drawn: Vec<_> = config
+            .fixed_pods
+            .iter()
+            .filter(|pod| pod.record == record)
+            .collect();
+        match drawn_at {
+            Some(mount) => {
+                assert_eq!(drawn.len(), 1, "{} draws {record}", id.pt());
+                for (got, want) in drawn[0].mount.iter().zip(mount) {
+                    assert!(
+                        (got - want).abs() < 1e-9,
+                        "{}: {:?}",
+                        id.pt(),
+                        drawn[0].mount
+                    );
+                }
+                assert_eq!(
+                    drawn[0].rack.location(),
+                    tore_sim::combat::hardpoints::Location::Centerline
+                );
+            }
+            None => assert!(drawn.is_empty(), "{}: {record} is a placeholder", id.pt()),
+        }
         // The retail pods carry a weight and the equipment flag bit 1; every
         // fixed pod the rule keeps must too, so a weight-zero sensor never
         // becomes a drawn body.
@@ -88,10 +119,12 @@ fn a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body() {
             "{} draws one pod body a fixed pod",
             id.pt()
         );
-        assert!(pods.iter().all(|pose| pose.shape.is_none()));
+        // No retail shape: the pose carries only the record's name, which
+        // picks an authored model (John 2026-11-07).
+        for (pose, pod) in pods.iter().zip(&config.fixed_pods) {
+            assert_eq!(pose.equipment_pod(), Some(pod.record.as_str()));
+        }
     }
-    for record in ["PAVESPK.SEE", "AAS38.SEE", "ALQ167.ECM"] {
-        assert!(seen.iter().any(|name| name == record), "drew {record}");
-    }
+    assert_eq!(seen, ["AAS38.SEE"], "only the Rafale's pod is on a station");
     println!("fixed pods drawn: {seen:?}");
 }
