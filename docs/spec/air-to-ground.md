@@ -1436,6 +1436,14 @@ retard 90; altitude limits unbounded. Splash: slick bombs 500 to 1,200 ft; 1,000
 GBU-10, GBU-27 and GBU-30; 300 ft for the GBU-29; 100 ft at 35 percent for the
 GBU-28 and GBU-29/P.
 
+The GBU-28's record carries flags `0x2a543`, which omit the armour-piercing bit
+`0x40000`. FA.EXE's handling of that bit for hardened targets, damage class, a
+delayed fuze or burying before detonation is unknown, and TORE does not honour
+it. The next research step is to trace `GRAPHICAddExp` at `0x4432d0` and the
+consumers of flag `0x40000` for a penetration case ([the flag census](../formats/missiles.md#aemp-1-em-pulse)
+names the armour-piercing set; [the tested flags](../formats/weapons.md#cluster-flag-0x800000)
+cover the projectile-record tests).
+
 ~MOTHB and ~VOMIT exist in the data but nothing loads them. Absent from the
 data and so not provided: GBU-15, AGM-130, Walleye, JSOW, GBU-31 and 32, Sea
 Eagle, Penguin, Kormoran, ALARM, AGM-86, Tomahawk, AGM-142, AS-4, AS-6, AS-11,

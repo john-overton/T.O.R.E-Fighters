@@ -415,7 +415,7 @@ pub fn combat_geometry(
             && let Some(shape) = p.shape.as_ref().and_then(|name| art.shapes.get(name))
         {
             let right = unit([p.direction[2], 0., -p.direction[0]]);
-            mesh(
+            mesh_projectile(
                 &mut v,
                 shape,
                 local(p.position),
@@ -423,6 +423,7 @@ pub fn combat_geometry(
                 cross(p.direction, right),
                 p.direction,
                 &ownship.palette,
+                &p.weapon,
             );
         }
         if p.gun && p.tracer {
@@ -605,7 +606,12 @@ impl CombatArt {
     }
 }
 
-fn mesh(
+/// Draws a released store's mesh with the fitted presentation for the MK-82
+/// AIR's retarder fins (docs/spec/ordnance-presentation.md, "Retarder fins").
+/// Presentation only: the fins come from the projectile's own retail shape,
+/// so nothing in the simulation, a checkpoint, the wire or a replay changes.
+#[allow(clippy::too_many_arguments)]
+fn mesh_projectile(
     out: &mut Vec<f32>,
     shape: &Shape,
     position: Vector,
@@ -613,12 +619,17 @@ fn mesh(
     up: Vector,
     forward: Vector,
     palette: &[[u8; 3]; 256],
+    weapon: &str,
 ) {
+    // The MK-82 AIR's retail shape carries its four rear retarder fins as
+    // texture-only faces; draw them solid in flight as the fitted visual. The
+    // retail mesh omits texture-only faces as exhaust sheets. This path skips
+    // texture-only faces rather than drawing their own texture, so the fins
+    // keep the fitted solid colour instead of their retail texture.
+    let air = weapon == "MK82AIR.JT";
     for face in &shape.faces {
-        // These are texture-only SH faces (including the missile exhaust
-        // sheets). Palette index zero is not an opaque substitute for them.
-        // Keep them omitted until the weapon texture/animation path is decoded.
-        if matches!(face.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
+        let texture_only = matches!(face.subtype, 0x4c | 0x5c | 0x6c | 0x7c);
+        if texture_only && !air {
             continue;
         }
         for i in 1..face.positions.len() - 1 {
@@ -631,16 +642,17 @@ fn mesh(
                             + forward[k] * f64::from(q[1]))
                             / 3.
                 });
-                vertex(
-                    out,
-                    pos,
-                    palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
-                );
+                let color = if texture_only {
+                    [0.8, 0.8, 0.8]
+                } else {
+                    palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.)
+                };
+                vertex(out, pos, color);
                 let layer = out.len() - 5;
                 out[layer] = -1.;
-                // The face's own palette entry and fog mode, as an
-                // airframe's faces and the stores on its pylons carry them,
-                // so a weapon is lit by the weather as they are (PY2).
+                // The face's own palette entry and fog mode, as an airframe's
+                // faces and the stores on its pylons carry them, so a weapon
+                // is lit by the weather as they are (PY2).
                 let last = out.len() - 1;
                 out[last] = f32::from(face.colors[j]) + 256. * f32::from(face.fog as u8);
             }
@@ -1677,7 +1689,7 @@ mod tests {
             state_words: Default::default(),
         };
         let mut out = vec![];
-        mesh(
+        mesh_projectile(
             &mut out,
             &shape,
             [0.; 3],
@@ -1685,8 +1697,59 @@ mod tests {
             [0., 1., 0.],
             [0., 0., 1.],
             &[[255; 3]; 256],
+            "",
         );
         // One triangle of ten-float vertices; the exhaust face is omitted.
         assert_eq!(out.len(), 30);
+    }
+
+    #[test]
+    fn fitted_retarder_fins_are_drawn_only_for_the_air_store() {
+        let ordinary = tore_formats::shape::Face {
+            fog: tore_formats::shape::FogMode::Enabled,
+            positions: vec![[0., 0., 0.], [3., 0., 0.], [0., 3., 0.]],
+            colors: vec![1; 3],
+            uv: vec![],
+            texture: "SYNTHETIC.PIC".into(),
+            subtype: 0x61,
+            normal: None,
+            address: 0,
+        };
+        let mut fin = ordinary.clone();
+        fin.subtype = 0x4c;
+        fin.positions = vec![[0., -12., 0.], [5., -12., 0.], [0., -12., 5.]];
+        let shape = Shape {
+            billboards: Vec::new(),
+            lines: vec![],
+            faces: vec![ordinary, fin],
+            state_words: Default::default(),
+        };
+        let palette = [[255; 3]; 256];
+        let draw = |weapon: &str| {
+            let mut out = Vec::new();
+            mesh_projectile(
+                &mut out,
+                &shape,
+                [0.; 3],
+                [1., 0., 0.],
+                [0., 1., 0.],
+                [0., 0., 1.],
+                &palette,
+                weapon,
+            );
+            out
+        };
+        // The ordinary store omits texture-only fins: one ordinary face, three
+        // vertices, 30 floats.
+        let plain = draw("MK82.JT");
+        assert_eq!(plain.len(), 30);
+        // The MK-82 AIR draws its texture-only fins as solid light grey: one
+        // more face, three more vertices.
+        let air = draw("MK82AIR.JT");
+        assert_eq!(air.len(), 60);
+        assert!(
+            air.chunks_exact(10)
+                .any(|v| v[6] == 0.8 && v[7] == 0.8 && v[8] == 0.8)
+        );
     }
 }

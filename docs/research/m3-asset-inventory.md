@@ -342,13 +342,13 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | FAB500.JT | FAB-500 M62 | Done | Done | Done | Done | Free-fall; flown Su-25/A-10 |
 | GBU10.JT | GBU-10E Paveway II | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers |
 | GBU10A.JT | GBU-10 Paveway I | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers |
-| GBU28.JT | GBU-28/B | Done | Done | Done | Partial | Laser guidance flown; no penetration effect found (unverified) |
+| GBU28.JT | GBU-28/B | Done | Done | Done | Partial | Laser guidance flown; no penetration effect found. The record's flags (0x2a543) omit the armour-piercing bit 0x40000, and FA.EXE's handling of that bit for hardened targets or delayed fuzes is unknown; TORE does not honour it. Next: trace `GRAPHICAddExp` 0x4432d0 (JT-8 rework) |
 | GBU29.JT | GBU-29 JDAM | Done | Done | Done | Done | JDAM flies to stored release point; misses movers; level-T bar built |
 | GBU29P.JT | GBU-29/P JDAM | Done | Done | Done | Done | JDAM flies to stored release point; misses movers; level-T bar built |
 | GBU30.JT | GBU-30 JDAM | Done | Done | Done | Done | JDAM flies to stored release point; misses movers; level-T bar built |
 | MK20.JT | Mk 20 Rockeye II | Done | Done | Done | Done | Rockeye; splash 1,600 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
 | MK82.JT | MK-82 Slick | Done | Done | Done | Done | Free-fall, fitted bomb model; CCIP/LVL sights; 14 default carriers |
-| MK82AIR.JT | MK-82 AIR 7-Pack | Done | Partial | Done | Done | 7-pack retarder is drag only; no visible retarder deploy (unverified) |
+| MK82AIR.JT | MK-82 AIR 7-Pack | Done | Partial | Done | Done | 7-pack retarder is drag only; no visible retarder deploy (unverified); the fitted visual draws its four rear retarder fins solid in flight, because the render path skips texture-only faces rather than drawing their retail texture (JT-8 rework, [why](../spec/ordnance-presentation.md#retarder-fins)) |
 | MK82HD.JT | MK-82 Snakeye | Done | Done | Done | Done | Snakeye; fins closed on pylon, open in flight; retarder drag |
 | MK82P.JT | MK-82HD 6-Pack | Done | Done | Done | Done | 6-pack Snakeye variant (shape snake.SH); retarder drag; one-tick release |
 | MK82P3.JT | MK-82 3-Pack | Done | Done | Done | Done | 3-pack leaves in one tick; flown A-7/F-16C |

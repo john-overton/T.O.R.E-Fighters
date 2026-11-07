@@ -248,6 +248,28 @@ column and checks the splash rule, the flash pattern and the dispense bodies;
 through its second, plus a close look at the dispenser opening and bomblet
 fall (`cluster-*` files).
 
+### Retarder fins
+
+The MK-82 AIR's retarder fins are drawn as fitted presentation, derived from the
+projectile's own retail shape. **This sequence is fitted**: the retail record
+names the shape and the shape carries the geometry, but the record names no
+deployed fin state ([ordnance inventory](../research/m3-asset-inventory.md)), so
+the retail data supports no such visual. Retail comparison is unavailable; these
+are the numbers a player would notice, chosen by an agent (decision 13's
+presentation round) and labelled fitted.
+
+- **Retarder fins.** The MK-82 AIR's retail shape (`mk82a.SH`) carries its four
+  rear retarder fins as texture-only faces. The fitted visual draws those faces
+  solid in flight, as the closed bodies the pylons draw. The render path skips
+  texture-only faces rather than drawing their own texture, so the fins keep the
+  fitted solid colour instead of their retail texture. The constants are in
+  `crates/tore-app/src/render_snapshot.rs`.
+- **Repeatable and shared.** The place, size and orientation all come from the
+  projectile's own position and direction alone, so the same projectile draws
+  the same bodies on every client and in a replay. Like the flashes, the bodies
+  do no damage, add nothing to the simulation, a checkpoint, the wire or a
+  replay, and are drawn only while the projectile is in flight.
+
 ## Source stations and availability
 
 John requested an aircraft-wide ordnance and weapon-availability pass on
