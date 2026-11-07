@@ -1420,6 +1420,39 @@ this identity in smooth mode too, following the existing
 [panel contract](../spec/aircraft-animation.md#double-sided-panels). No mesh
 bytes or exported geometry are committed.
 
+## MiG-25 skin review
+
+On 2026-11-07, slice M25-2 checked the flyable `M25.PT` import's skin (media
+identity in [the MiG-25 source review](aircraft-variety.md#mig-25-source-review-m3-2026-11-07)).
+The flyable path draws the reviewed `MIG25.SH`, 320 faces on the runtime state
+path, and the four damage shapes `MIG25_A.SH` to `MIG25_D.SH` with their
+textures `_MIG25_A.PIC` to `_MIG25_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs). No damage variant
+is registered for this identity, so a destroyed MiG-25 draws the intact skin
+with regional cuts rather than an A/C body substitution, as the F-104 and the
+other reviewed variety aircraft do; the A/B and C/D shapes stay available to the
+shared debris pieces.
+
+The MiG-25 does **not** need the [MiG-21 stored-normal
+exception](#mig-21-skin-review). Its two coincident up and down plates are exact
+vertex twins with opposite stored normals (`3daa`/`3e4a` and `434c`/`43a2`, the
+outboard wing panels at source Z -1), and the other double-sided panels pair the
+same way (`320f`/`3237`, `325f`/`327d`, `4cd3`/`4cfa`). Smooth mode therefore
+pairs every one of them through the shared
+[panel contract](../spec/aircraft-animation.md#double-sided-panels) and hides
+the rear member, so the wing top skin does not flicker and the underside does
+not show through. A top capture in smooth mode (`TORE_WEATHER_SMOOTH` unset)
+shows the same upper skin pattern as the stepped capture, with only the shared
+lighting difference; no per-face mapping correction was needed.
+
+The shape carries two `E0` runtime decal slots, slot 3 at address `4420` on the
+left wing and slot 4 at address `3e19` on the right (the guide's left and right
+wing markings). The runtime projector omits both, and neither is filled with a
+piece of the main skin, following [texture state and
+decals](#texture-state-and-decals). No mesh bytes, exported geometry or retail
+art are committed; the review frames live under
+`.local/m3-imports/scratch/m25-2/` and `.local/m3-aircraft/frames/M25-2/`.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards

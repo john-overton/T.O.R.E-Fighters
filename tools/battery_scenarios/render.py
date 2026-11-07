@@ -50,6 +50,17 @@ def stub_wing_problems(output: str) -> list[str]:
     return problems
 
 
+def mig25_skin_problems(output: str) -> list[str]:
+    """Every MiG-25 skin capture drew a non-blank frame."""
+    captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
+    if not captures:
+        return ["no Scene capture line"]
+    problems = []
+    for line in captures:
+        problems.extend(frame_problems(line))
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     """Windowed art inspections and exact repeated-capture checks."""
     stable = []
@@ -261,6 +272,21 @@ def scenarios() -> list[Scenario]:
             check=frame_problems,
             timeout=180,
             notes="Look at the upper wing: the differently divided underside skin must not show through it. Uses the MiG-21 identity.",
+        ),
+        Scenario(
+            name="render-mig25-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "mig25", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/mig25-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["mig25-top.ppm", "mig25-under.ppm"],
+            expect=["Scene capture:"],
+            check=mig25_skin_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "mig25", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/mig25-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="MiG-25 skin from above and below with the gear down: the double-sided wing panels must not z-fight and the underside must not show through the top. The two E0 wing-marking decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, MiG-25 skin review).",
         ),
         Scenario(
             name="render-runway-paint-calm",
