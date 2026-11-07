@@ -1,10 +1,14 @@
-//! MiG25 own-source control surfaces: all-moving stabilators, twin rudders,
-//! inboard flaps and outboard ailerons, plus the interim shared gear law.
+//! MiG25 own-source control surfaces (all-moving stabilators, twin rudders,
+//! inboard flaps and outboard ailerons), gear, airbrake and afterburner flame.
 //! See docs/spec/variety-animation.md "MiG-25 control fit".
 //! MIG25.SH ships no signed pitch, roll, yaw or flap branch, so every control
 //! role is a fitted geometric assignment over exact reviewed source panels.
+//! The five state words follow the shared base order flame, brake, gear, flap,
+//! flap: 0x7600 adds the flame, 0x7606 the airbrake, 0x760c the gear, and
+//! 0x7618/0x761e remove the left and right flap pairs (the M25-3 surfaces).
 use crate::{AppResult, additional_animation::turn, flight::State};
 use std::collections::BTreeSet;
+use std::f64::consts::FRAC_PI_2;
 use tore_formats::shape::{Face, Shape};
 const WORDS: [usize; 5] = [0x7600, 0x7606, 0x760c, 0x7618, 0x761e];
 /// All-moving horizontal stabilators, opposite skins of one flat plate per side.
@@ -20,11 +24,35 @@ const FLAP_L: [usize; 2] = [0x5127, 0x514e];
 /// Rear fin panel behind the source split line, both sides.
 const RUDDER_R: [usize; 2] = [0x320f, 0x3237];
 const RUDDER_L: [usize; 2] = [0x2c1f, 0x2cb2];
-/// Gear word 0x760c cards. M25-4 owns the reviewed retraction; M25-3 keeps the
-/// shared fitted rise so the whole aircraft still loads and draws.
+/// Gear word 0x760c. One rigid strut plate and one rigid painted wheel card per
+/// main side, and a centre strut with its cross plate at the nose. Each main
+/// assembly turns as a whole about the aft-top lateral hinge; the nose assembly
+/// also steers about its vertical strut axis.
+const GEAR_MAIN_R: [usize; 4] = [0x4d69, 0x4d88, 0x4da7, 0x4dc6];
+const GEAR_MAIN_L: [usize; 4] = [0x4e2a, 0x4e49, 0x4e68, 0x4e87];
+const GEAR_NOSE: [usize; 4] = [0x4eeb, 0x4f0a, 0x4f29, 0x4f48];
 const GEAR: [usize; 12] = [
     0x4d69, 0x4d88, 0x4da7, 0x4dc6, 0x4e2a, 0x4e49, 0x4e68, 0x4e87, 0x4eeb, 0x4f0a, 0x4f29, 0x4f48,
 ];
+/// Main hinge line: the lateral (X) axis through the strut's aft-top root at
+/// Y=-19, Z=-10. The whole assembly swings aft-to-up and stows at the belly.
+const MAIN_HINGE: [f32; 3] = [0., -19., -10.];
+/// Nose hinge line through the strut's aft-top root at Y=45, Z=-9.
+const NOSE_HINGE: [f32; 3] = [0., 45., -9.];
+/// Vertical nose strut axis for steering, at the deployed strut centre.
+const NOSE_STEER: [f32; 3] = [0., 50., -9.];
+/// Afterburner word 0x7600: a crossed double-sided plate per engine, trailing
+/// from the nozzle exit at Y=-70 to Y=-129.
+const FLAME: [usize; 8] = [
+    0x51dc, 0x5203, 0x522a, 0x5251, 0x5278, 0x529f, 0x52c6, 0x52ed,
+];
+const FLAME_ROOT: f32 = -70.;
+/// Airbrake word 0x7606: one double-sided dorsal panel hinged at the spine
+/// front edge (0,3,9), rising to (0,-13,23).
+const BRAKE: [usize; 2] = [0x5367, 0x5386];
+const BRAKE_HINGE: [f32; 3] = [0., 3., 9.];
+/// Fitted closed angle: rotates the source raised panel flat along the spine.
+const BRAKE_CLOSED: f64 = 0.72;
 fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
     let mut found = shape.faces.iter().filter(|f| f.address == address);
     let result = found
@@ -111,6 +139,20 @@ fn is_flap(a: usize) -> bool {
 fn is_rudder(a: usize) -> bool {
     RUDDER_R.contains(&a) || RUDDER_L.contains(&a)
 }
+/// Whole-card gear motion. The two cards of each assembly share one lateral
+/// hinge, so they stay rigid and attached as the wheel swings up into the body.
+pub fn gear_positions(f: &mut Face, gear: f64, steering: f64) {
+    let closing = 1. - gear.clamp(0., 1.);
+    let angle = FRAC_PI_2 * closing;
+    if GEAR_NOSE.contains(&f.address) {
+        if steering != 0. {
+            turn(f, NOSE_STEER, [0., 0., 1.], -steering);
+        }
+        turn(f, NOSE_HINGE, [1., 0., 0.], angle);
+    } else {
+        turn(f, MAIN_HINGE, [1., 0., 0.], angle);
+    }
+}
 pub struct Rig;
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
@@ -137,15 +179,65 @@ impl Rig {
         roots(&shape, &RUDDER_R, &[[16., -40., 7.], [23., -63., 38.]])?;
         roots(&shape, &RUDDER_L, &[[-16., -40., 8.], [-23., -63., 38.]])?;
         let original: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
-        // The gear word is the only device branch M25-3 needs to keep loading.
+        // The flap words remove exactly the M25-3 flap pairs: 0x7618 the left,
+        // 0x761e the right. This pins the word-to-surface mapping.
+        branch(bytes, &original, 0x7618, 1, &[], &FLAP_L)?;
+        branch(bytes, &original, 0x761e, 1, &[], &FLAP_R)?;
         let gear = branch(bytes, &original, 0x760c, 1, &GEAR, &[])?;
-        for source in gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)) {
-            shape.faces.push(source);
-        }
-        for &address in GEAR.iter() {
-            if one(&shape, address)?.positions.len() != 4 {
+        roots(&gear, &GEAR_MAIN_R, &[[12., -19., -10.]])?;
+        roots(&gear, &GEAR_MAIN_L, &[[-12., -19., -10.]])?;
+        roots(&gear, &GEAR_NOSE, &[[0., 45., -9.]])?;
+        for source in gear.faces.iter().filter(|f| GEAR.contains(&f.address)) {
+            if source.positions.len() != 4 {
                 return Err("unreviewed MIG25.SH gear card topology".into());
             }
+        }
+        // The brake word adds one raised double-sided dorsal panel hinged on the
+        // spine front edge (0,3,9); the flame word adds eight aft quads rooted
+        // at the Y=-70 nozzle exit.
+        let brake = branch(bytes, &original, 0x7606, 1, &BRAKE, &[])?;
+        for &address in &BRAKE {
+            let face = one(&brake, address)?;
+            // The hinge is the spine front edge; both corners carry it.
+            if face.positions.len() != 4
+                || !face.positions.contains(&[5., 3., 9.])
+                || !face.positions.contains(&[-5., 3., 9.])
+            {
+                return Err("unreviewed MIG25.SH brake panel".into());
+            }
+        }
+        let flame = branch(bytes, &original, 0x7600, 1, &FLAME, &[])?;
+        for &address in &FLAME {
+            let face = one(&flame, address)?;
+            if face.positions.len() != 4
+                || face
+                    .positions
+                    .iter()
+                    .map(|p| p[1])
+                    .fold(f32::NEG_INFINITY, f32::max)
+                    != FLAME_ROOT
+            {
+                return Err("unreviewed MIG25.SH flame root".into());
+            }
+        }
+        for source in gear
+            .faces
+            .into_iter()
+            .filter(|f| GEAR.contains(&f.address))
+            .chain(
+                brake
+                    .faces
+                    .into_iter()
+                    .filter(|f| BRAKE.contains(&f.address)),
+            )
+            .chain(
+                flame
+                    .faces
+                    .into_iter()
+                    .filter(|f| FLAME.contains(&f.address)),
+            )
+        {
+            shape.faces.push(source);
         }
         Ok((Self, shape))
     }
@@ -182,19 +274,33 @@ impl Rig {
             if state.gear <= 0. {
                 return None;
             }
-            // Interim shared fitted gear law: rise by the source vertical extent
-            // times the remaining travel. M25-4 replaces this with rigid wheels.
-            let rise = 19. * (1. - state.gear.clamp(0., 1.)) as f32;
+            gear_positions(&mut result, state.gear, state.nosewheel_angle());
+            update_normal(source, &mut result);
+        } else if BRAKE.contains(&a) {
+            if state.brake <= 0. {
+                return None;
+            }
+            turn(
+                &mut result,
+                BRAKE_HINGE,
+                [1., 0., 0.],
+                BRAKE_CLOSED * (1. - state.brake.clamp(0., 1.)),
+            );
+            update_normal(source, &mut result);
+        } else if FLAME.contains(&a) {
+            if state.exhaust <= 0. {
+                return None;
+            }
             for p in &mut result.positions {
-                p[2] += rise;
+                p[1] = FLAME_ROOT + (p[1] - FLAME_ROOT) * state.exhaust.clamp(0., 1.) as f32;
             }
             update_normal(source, &mut result);
         }
         Some(result)
     }
 }
-pub(crate) fn flame(_address: usize) -> bool {
-    false
+pub(crate) fn flame(address: usize) -> bool {
+    FLAME.contains(&address)
 }
 fn polygon_normal(points: &[[f32; 3]]) -> Option<[f32; 3]> {
     let mut n = [0f64; 3];
@@ -369,6 +475,112 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+    /// Every gear card is a rigid quad, its own hinge corner does not move, and
+    /// at near-stow the whole card tucks to the belly plane.
+    #[test]
+    fn gear_cards_stay_rigid_on_their_hinge_and_stow_at_the_belly() {
+        let rig = Rig;
+        let mut s = state();
+        let cards: [(&[usize], [f32; 3], [f32; 3]); 3] = [
+            (&GEAR_MAIN_R, [12., -19., -10.], [18., -19., -28.]),
+            (&GEAR_MAIN_L, [-12., -19., -10.], [-18., -19., -28.]),
+            (&GEAR_NOSE, [0., 45., -9.], [0., 45., -27.]),
+        ];
+        for (addresses, root, tip) in cards {
+            for &address in addresses {
+                let source = face(address, vec![root, tip, [root[0], root[1], tip[2]]]);
+                for step in 1..=400 {
+                    s.gear = f64::from(step) / 400.;
+                    let out = rig.animate(&source, &s).unwrap();
+                    let original = [root, tip, [root[0], root[1], tip[2]]];
+                    for i in 0..3 {
+                        for j in i + 1..3 {
+                            let a = original[i];
+                            let b = original[j];
+                            let keep = (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt();
+                            let now = (0..3)
+                                .map(|k| (out.positions[i][k] - out.positions[j][k]).powi(2))
+                                .sum::<f32>()
+                                .sqrt();
+                            assert!((keep - now).abs() < 1e-3, "face {address:x} not rigid");
+                        }
+                    }
+                    assert!(
+                        (out.positions[0][1] - root[1]).abs() < 1e-4
+                            && (out.positions[0][2] - root[2]).abs() < 1e-4,
+                        "face {address:x} hinge root moved"
+                    );
+                }
+                s.gear = 1e-6;
+                let stowed = rig.animate(&source, &s).unwrap();
+                assert!(
+                    stowed.positions.iter().all(|p| p[2] >= -10.5),
+                    "face {address:x} hangs below the belly at near-stow"
+                );
+            }
+        }
+        s.gear = 0.;
+        assert!(
+            rig.animate(&face(GEAR_MAIN_R[0], vec![[12., -19., -10.]]), &s)
+                .is_none()
+        );
+    }
+    #[test]
+    fn brake_rises_from_its_spine_hinge_and_flame_extends_from_the_nozzle() {
+        let rig = Rig;
+        let mut s = state();
+        let brake = face(
+            0x5367,
+            vec![
+                [5., 3., 9.],
+                [-5., 3., 9.],
+                [-2., -13., 23.],
+                [2., -13., 23.],
+            ],
+        );
+        for fraction in [0., 0.25, 0.5, 0.75, 1.] {
+            s.brake = fraction;
+            if fraction == 0. {
+                assert!(rig.animate(&brake, &s).is_none());
+                continue;
+            }
+            let out = rig.animate(&brake, &s).unwrap();
+            assert_eq!(out.positions[0], brake.positions[0]);
+            assert_eq!(out.positions[1], brake.positions[1]);
+            if fraction == 1. {
+                assert_eq!(out.positions, brake.positions);
+            } else {
+                assert!(out.positions[3][2] < 23., "brake tip did not close down");
+            }
+        }
+        let flame = face(
+            0x51dc,
+            vec![
+                [10., -129., -8.],
+                [10., -70., -8.],
+                [10., -70., 8.],
+                [10., -129., 8.],
+            ],
+        );
+        for fraction in [0., 0.5, 1.] {
+            s.exhaust = fraction;
+            if fraction == 0. {
+                assert!(rig.animate(&flame, &s).is_none());
+                continue;
+            }
+            let out = rig.animate(&flame, &s).unwrap();
+            assert!(
+                (out.positions[1][1] - FLAME_ROOT).abs() < 1e-4
+                    && (out.positions[2][1] - FLAME_ROOT).abs() < 1e-4,
+                "flame root moved off the nozzle"
+            );
+            if fraction == 1. {
+                assert_eq!(out.positions, flame.positions);
+            } else {
+                assert!(out.positions[0][1] > -129., "flame tip did not shorten");
             }
         }
     }

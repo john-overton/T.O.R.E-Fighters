@@ -442,11 +442,19 @@ against the neighbouring row and the gear.
 
 | Word | Faces | Low point | Geometry | Reading | Status |
 | --- | ---: | ---: | --- | --- | --- |
-| `0x7600` | +8 | -8 | Two vertical quads at x +/-10 and two horizontal quads at z 0, all from y -129 to -70, aft of the neutral shape's -91 bound | Afterburner nozzle or tail extension | Unknown, M25-4 |
-| `0x7606` | +2 | +9 | Raised quads at x +/-5, y 3 to -13, z 9 to 23; one has a texture and one has an empty UV list | Canopy or raised panel, likely the canopy | Unknown, M25-4 |
+| `0x7600` | +8 | -8 | Two vertical quads at x +/-10 and two horizontal quads at z 0, all from y -129 to -70, aft of the neutral shape's -91 bound | Afterburner flame: two crossed double-sided plates, one per engine, rooted at the nozzle exit y=-70 | Confirmed; mapped to exhaust in M25-4 |
+| `0x7606` | +2 | +9 | Raised quads at x +/-5, y 3 to -13, z 9 to 23; one has a texture and one has an empty UV list | Dorsal airbrake, hinged on the spine front edge (0,3,9) | Confirmed; mapped to brake in M25-4 |
 | `0x760c` | +12 | -28 | Three wheel and strut groups at x +/-18 to +/-8, y -19 to -7, z -28 to -10, plus two centreline nose-wheel quads at y 45 to 54 | Landing gear down | Confirmed; this is the parked gear word |
-| `0x7618` | -2 | -16 | Removes one left trailing-edge pair at x -39 to -18, y -25 to -39, z 4 to 8 | Left control surface or damage branch | Unknown, M25-2 and M25-4 |
-| `0x761e` | -2 | -16 | Removes the mirrored right pair | Right control surface or damage branch | Unknown, M25-2 and M25-4 |
+| `0x7618` | -2 | -16 | Removes one left trailing-edge pair at x -39 to -18, y -25 to -39, z 4 to 8 | Left flap pair, the M25-3 surface | Confirmed; mapped to flaps in M25-4 |
+| `0x761e` | -2 | -16 | Removes the mirrored right pair | Right flap pair, the M25-3 surface | Confirmed; mapped to flaps in M25-4 |
+
+The word order is the shared base order flame, brake, gear, flap, flap: the
+flame, brake and gear words sit at base, base+6 and base+0xc, exactly as the
+F-18, Rafale and F-104 families, and the two trailing words are the left and
+right flap pairs the M25-3 rig already turns. No hook word exists because the
+PLANE flag 0x02 is clear. M25-4 maps `0x7600` to the exhaust, `0x7606` to the
+airbrake and `0x7618`/`0x761e` to the flaps, and records the gear as the parked
+word it always was.
 
 The gear-down low point is -28 shape units, 9.33 ft below the origin. The F2
 contact offset is -27 units, 9.0 ft, the value the parked table already uses.
@@ -474,9 +482,11 @@ damage contract. There is no separate hulk file. M25-2 must confirm which body
 is the destroyed hulk and that the pieces come from the correct source.
 
 Animation handoff: `0x760c` is the gear word and is already used by the parked
-path. The other four words are not used there. M25-4 must identify `0x7600`,
-`0x7606`, `0x7618` and `0x761e` before mapping them, and M25-3 owns the
-stabilators, ailerons, flaps and twin rudders on the neutral shape.
+path. The other four words are not used there. M25-4 identified them from the
+shared base order and their geometry: `0x7600` is the afterburner flame,
+`0x7606` the dorsal airbrake, and `0x7618`/`0x761e` the left and right flaps
+that M25-3 turns. M25-3 owns the stabilators, ailerons, flaps and twin rudders
+on the neutral shape; M25-4 owns the gear, brake and burner.
 
 ### Sensors and stores
 
@@ -497,9 +507,9 @@ F250 tank is a centreline row with `maxItems` 1.
 | Unknown | Why it matters | Next step |
 | --- | --- | --- |
 | PLANE flag `0x01` | The base flag is set but has no reviewed meaning; it must not be mistaken for a device | Trace the PLANE flag consumers in the reviewed executable and compare with the F-22's `0x91` base; M25-1 can proceed without it |
-| `0x7600` geometry | It may be an afterburner nozzle or a tail extension a player sees | Render the branch in M25-4 and compare with the exhaust art; if still ambiguous, ask John |
-| `0x7606` geometry | It may be the canopy, one face of which is transparent | Render the branch in M25-4 and compare with the cockpit view; confirm open or closed |
-| `0x7618` and `0x761e` geometry | They remove a left and right trailing-edge pair, which could be a control surface or a damage look | Review damage looks in M25-2 and the rig in M25-4 |
+| `0x7600` geometry | It may be an afterburner nozzle or a tail extension a player sees | Resolved in M25-4: the two crossed double-sided plates per engine are the afterburner flame, rooted at the y=-70 nozzle exit and mapped to the exhaust fraction |
+| `0x7606` geometry | It may be the canopy, one face of which is transparent | Resolved in M25-4: the word sits at the base+6 brake slot and the raised dorsal panel hinges on the spine front edge, so it is the airbrake, mapped to the brake fraction |
+| `0x7618` and `0x761e` geometry | They remove a left and right trailing-edge pair, which could be a control surface or a damage look | Resolved in M25-4: the removed pairs are exactly the M25-3 left and right flaps, so the words are the per-side flap words and map to the flaps |
 | Export wingtip faces | Two wingtip quads appear only on the export path and could be rails, lights or export-only art | Identify in M25-2 and check against store placement in M25-5 |
 | `~SU33_W.PIC` | The HUD names it but no archive entry exists; the existing shared cockpit may treat it as optional | Check the MiG-29, Su-25 and MiG-23 cockpit resolution in M25-7 and record the absence if it is optional |
 | Default A2A quantity | `maxItems` is capacity, not a proven default load | Review the source-default normalization in M25-6 |

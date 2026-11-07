@@ -536,11 +536,19 @@ about the exact edge the fixed panel shares, so those corners do not move. The
 aileron is split on a triangle diagonal: the forward triangle and the aft quad
 of each skin must stay in one group, or one half would be left behind the
 hinge. The two flap faces per side are exactly the pair the source words
-`0x7618` (left) and `0x761e` (right) remove; those words stay unmapped until
-M25-4.
+`0x7618` (left) and `0x761e` (right) remove; M25-3 turns them.
 
-`0x760c` adds twelve gear cards (four per main, four nose, low point Z=-28).
-`0x7600` adds eight aft quads at X=±10 and Z=±8 from Y=-129 to -70, and
-`0x7606` adds two raised quads near Y=3..-13, Z=9..23. Both remain unmapped
-and belong to M25-4. The moving roles, continuous angles and the interim gear
-law are recorded in the [MiG-25 fit](../spec/variety-animation.md#mig-25-control-fit).
+`0x760c` adds twelve gear cards (four per main, four nose, low point Z=-28):
+one strut plate and one painted wheel card per main side, and a centre strut
+with its cross plate at the nose. M25-4 turns each main pair as one rigid
+assembly about the aft-top lateral hinge (Y=-19, Z=-10) and the nose about
+(Y=45, Z=-9), tucking it to the fuselage belly plane at stow; the nose also
+steers about its vertical strut axis. `0x7600` adds eight aft quads at X=±10
+and Z=±8 from Y=-129 to -70: two crossed double-sided plates, one per engine,
+rooted at the Y=-70 nozzle exit. M25-4 maps it to the afterburner exhaust,
+scaling the plume forward from that root as the demand falls. `0x7606` adds two
+raised quads near Y=3..-13, Z=9..23: one double-sided dorsal panel hinged on the
+spine front edge (0,3,9). The shared base order places it at the brake slot, so
+M25-4 maps it to the airbrake fraction, closing the panel flat along the spine.
+The moving roles, the fitted angles and the gear stow are recorded in the
+[MiG-25 fit](../spec/variety-animation.md#mig-25-control-fit).

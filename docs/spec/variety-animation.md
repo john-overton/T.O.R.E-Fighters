@@ -576,19 +576,30 @@ any diagonal split stay together, and the panel turns about one hinge line.
 | Yaw | The rear fin panels `320f/3237` and `2c1f/2cb2` turn `0.35*rudder` radians about the source split line from `[±16,-40,7]` to `[±23,-63,38]`. A positive rudder swings both trailing edges right. The forward fin panels stay fixed. |
 | Flaps | The inboard trailing panels `5020/5047` and `5127/514e` turn `0.40*flaps` radians about their source upper hinge edge, from `[18,-25,8]` to `[39,-29,5]` (left mirrored), lowering the trailing edge. These are the two faces the source words `0x7618` and `0x761e` remove. |
 | Roll | The outboard trailing panels `3c96/3ea3/3cb9/3ce2` and `41d1/43fb/421d/42b1` turn `-0.20*aileron` radians about their source hinge edge, from `[39,-29,5]` to `[70,-22,2]` (left mirrored). A positive aileron raises the right trailing edge and lowers the left. The forward triangle and aft quad of each skin share the group, so the diagonal seam never moves alone. |
-| Gear | Interim: the twelve `0x760c` cards rise by their source vertical extent times the remaining travel, hiding at zero. This is the existing shared fitted law kept so the aircraft loads; M25-4 replaces it with rigid wheels. |
+| Gear | The twelve `0x760c` cards form three rigid assemblies: right main `4d69/4d88/4da7/4dc6`, left main `4e2a/4e49/4e68/4e87`, nose `4eeb/4f0a/4f29/4f48`. Each main assembly turns as one body about the aft-top lateral hinge `[0,-19,-10]` by `+90°*(1-gear)`, and the nose about `[0,45,-9]`; the wheel cards never bend, the painted hinge root corners stay fixed, and near-stow tucks the group to the belly plane `Z=-10`. The nose also steers `-nosewheel_angle()` about its vertical strut axis `[0,50,-9]`. |
+| Brake | The dorsal panel `5367/5386` hinges on the spine front edge `[0,3,9]`; the source-raised pose is the open endpoint and `0.72*(1-brake)` radians lays it flat along the spine. Hidden at zero. |
+| Exhaust | The afterburner flame, two crossed double-sided plates per engine `51dc/5203/522a/5251` and `5278/529f/52c6/52ed`, scales aft from the `Y=-70` nozzle exit by the exhaust fraction, tracing the source plume at the open endpoint. Hidden at zero. |
 
 The stabilator is all-moving, so no single root corner stays put: the invariant
 is its root chord midpoint, and the small gap to the tail boom at the root is a
 reviewed moving/fixed boundary. Every other hinge line is the exact source edge
-the fixed panel shares, so those corners do not move. `0x7600`, `0x7606`,
-`0x7618` and `0x761e` remain unmapped and belong to M25-4.
+the fixed panel shares, so those corners do not move. The five state words are
+the shared base order flame, brake, gear, flap, flap: `0x7600` the plume,
+`0x7606` the airbrake, `0x760c` the gear, and `0x7618`/`0x761e` the left and
+right flap pairs M25-3 turns. There is no hook word because the PLANE flag 0x02
+is clear. M25-3 fitted the four control surfaces (John accepted the probe sheets
+on 2026-11-07); M25-4 added the gear, brake and burner mapping, also 2026-11-07.
+The gear retraction and steering, the brake closing angle and the plume scaling
+are fitted presentation over exact source panels; the word roles are decoded.
 
 Acceptance: the probe reports `reviewed-controls-and-attachments` with
 `anchor_missing=false`, `anchor_gap_ft=0`, `skin_gap_ft=0` and no direction
-failures for pitch, roll, yaw and flaps, plus the 25 flap/roll combinations.
-A moving, finite panel alone does not pass; the whole-surface gate requires all
-25 combinations to keep every shared skin and diagonal triangle joined.
+failures for pitch, roll, yaw, flaps, gear, brake and exhaust, plus the 25
+flap/roll combinations and the 202-step dense gear sweep with a near-stow
+sample. A moving, finite panel alone does not pass; the whole-surface gate
+requires all 25 combinations to keep every shared skin and diagonal triangle
+joined, the gear assemblies to stay rigid and attached, and the brake and plume
+to move as one panel.
 
 John reviewed the probe sheets on 2026-11-07 and accepted both diagonal
 cases: the twin rudders are each fin's whole rear source panel, hinged on the

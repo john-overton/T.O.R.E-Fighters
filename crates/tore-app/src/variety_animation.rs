@@ -196,11 +196,11 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x6160, Part::Gear, 14), (0x6178, Part::Rudder, 2)],
                 2. / 3.,
             ),
-            // MIG25.SH: five state words. M25-3 loads it through its own
-            // `mig25_animation` rig (control surfaces and the interim gear law),
-            // so only the shape scale and words are still read here. The four
-            // state words 0x7600, 0x7606, 0x7618 and 0x761e stay unmapped for
-            // M25-4 (docs/formats/aircraft-variety.md, "MiG-25 source review").
+            // MIG25.SH: five state words. M25-4 loads it through its own
+            // `mig25_animation` rig, which owns the control surfaces, the rigid
+            // gear, the dorsal airbrake and the afterburner plume. Only the shape
+            // scale and words are still read here (docs/formats/aircraft-variety.md,
+            // "MiG-25 source review"; docs/spec/variety-animation.md).
             Id::Mig25 => (
                 26154,
                 320,

@@ -475,6 +475,41 @@ airliners; VTOL/tiltrotor/helicopters; then the earlier fighter rigs. Shared sha
 families may share source analysis, while each exact aircraft keeps its own
 capability and result. The completed per-aircraft coverage is recorded below.
 
+## MiG-25 results
+
+Exact `mig25` (M25.PT) passes the source probe added in slice M25-4, together
+with the M25-3 control fit, in `.local/m3-imports/scratch/m25-4/probe`. The
+probe reports `reviewed-controls-and-attachments`, 320 neutral faces and zero
+required or check failures. Every required control reads `moved`: pitch, roll,
+yaw and flaps from M25-3, and gear, brake and exhaust from M25-4.
+
+The five state words follow the shared base order flame, brake, gear, flap,
+flap. `0x7600` is the afterburner flame (two crossed double-sided plates per
+engine, rooted at the Y=-70 nozzle exit), `0x7606` the dorsal airbrake (one
+double-sided panel hinged on the spine front edge), `0x760c` the gear, and
+`0x7618`/`0x761e` the left and right flaps the M25-3 rig already turns. There
+is no hook word.
+
+The gear is three rigid assemblies: one strut plate and one painted wheel card
+per main side, and a centre nose strut with its cross plate. Each main pair
+turns as one body about its aft-top lateral hinge and the nose about its own,
+tucking the wheel cards to the fuselage belly plane at stow; the nose also
+steers about its vertical strut axis. The dense gear sweep covers 202 values
+including a near-stow sample; maximum measured assembly rigidity error is
+0.000001 ft, every hinge root stays fixed, the two main sides keep a 5.33 ft
+minimum wheel gap, and no new planar crossings appear. The brake moves as one
+panel about its spine hinge, and the plume shortens from its nozzle root. The
+source shapes name no separate gear-door faces, so the closed belly skin is the
+door; no door is animated. The fitted retraction law, the brake closing angle
+and the plume scaling are presentation choices, not recovered original timing.
+
+Frames were reviewed in `.local/m3-imports/scratch/m25-4/frames`: gear at 1.00,
+0.75, 0.50, 0.25 and 0.05 from the side and below, the brake at 0 and 1 from
+the side and rear, and the burner off and on from the rear. The gear stages up
+to the belly, the airbrake rises from the spine, and both afterburner plumes
+appear. The free-flight aircraft banks during the settle, so the flight frames
+are inspection views; the probe contact sheets are the clear evidence.
+
 ## Per-aircraft progress
 
 This table records bounded geometry acceptance and its limits. It is not a
@@ -519,3 +554,4 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `f22` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
 | `f22n` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
 | `faxx` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
+| `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
