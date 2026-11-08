@@ -976,3 +976,436 @@ band at 40,000 ft, the same figure the F-16C flies. No `fitted_envelopes` entry
 is added for F16A. The hybrid researched default is the validated path; the
 legacy `--legacy-flight` adapter and the restricted `--native-flight-tables`
 path stay distinct and unchanged.
+
+## MiG-31 source review (M3, 2026-11-08)
+
+Research mode, slice M31-0. This reviews `MIG31.PT` and its dependency closure
+before `AircraftId::Mig31` exists. `MIG31.PT` is the 39th retail identity, to be
+appended in M31-1 (checkpoint code 39, the 40th `SELECTABLE` entry). The
+[fixed-wing record audit](aircraft.md#fixed-wing-record-audit) predates this
+identity; this section is its MiG-31 row. No original module was executed. PT,
+SEE, ECM, JT and GAS are read as bounded BRF data with the shared field order in
+`aircraft_schema.rs`; SH and HUD are inspected as data. The one exception to
+"data only" is the static disassembly of `FA.EXE` (read with LLVM `objdump`,
+never run) behind the HUD finding below. Retail media stays local and no
+extracted bytes are committed. Slice done by Claude Sonnet (sonnet-medium).
+
+Two questions are open for John and are **not decided here**: the missing
+`y141.HUD` ([HUD](#the-missing-hud-for-john)) and the unreviewed `MIG31R.SEE`
+and `MIG31.ECM` ([sensors](#the-unreviewed-radar-and-jammer-for-john)).
+
+### Build and extraction
+
+`FA_1.LIB` SHA-256 is
+`657254c5bb3bcf3609b3e84ee6499bf80395a2daffc60c12363e534cf408245f` and
+`FA_2.LIB` is
+`fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`, the same
+pair as the MiG-25 and F-16A reviews. `FA.EXE` is 1,319,424 bytes with SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`, the build
+the [instrument bezel spec](../spec/instrument-bezel.md) uses. The closure was
+extracted locally to `.local/m3-imports/scratch/mig31` with
+`cargo run --locked -p tore-extract -- --source gameassets/fighters-anthology
+--out .local/m3-imports/scratch/mig31` and `--include` globs for `MIG31*`,
+`Y141*`, `VIS240.SEE`, `GSH6_30.JT`, `AA9.JT`, `AA8.JT`, `F250.GAS` and `*.HUD`.
+The `SETUP.ESA` installer copy of `FA_2.LIB` was extracted too. Its PT, SH, SEE,
+ECM, JT and GAS bytes are identical to the root copy; only the HUD files differ
+by build (`YAK141.HUD` differs in 4 bytes, `SU33_C.HUD` carries its own hash).
+No `MIG31.PTS` exists in any archive (an explicit exception, as for the MiG-25).
+
+### Identity and presentation
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `MIG31.PT`, 1,680 stored and 9,723 decoded bytes, SHA-256 `fea8d9cf5c645ee9bf800d24cf10f3bf143c171369c7b4c110a622e1b2325320` |
+| Displayed names | `MiG-31`, `MiG-31 Foxhound`, `MIG31.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 tokens; `structType` 5; `typeSize` 588; `instanceSize` 575 |
+| Object class | `0x8000` (fighter); the PLANE no-lift bit is clear |
+| Year / hit points | 1983 / 167; `expType` 30, `craterSize` 0 |
+| Shape | `MIG31.SH`, exponent 8 (scale 1), so 1 shape unit is 1/3 ft in the aircraft renderer |
+| Shadow | `MIG31_S.SH`, 10 faces, no texture |
+| HUD | `y141.HUD` in the PT, **absent from every archive** (see below) |
+| Cockpit | none of its own: no `~MIG31*` picture exists in any archive |
+| Damage looks | `MIG31_A.SH` 229 faces, `MIG31_B.SH` 38, `MIG31_C.SH` 240, `MIG31_D.SH` 29 |
+| PTS | absent, an explicit exception |
+| Checkpoint code | 39 reserved for M31-1 (F-16A is 38), not yet in `checkpoint_shared.rs` |
+| CLI key | `mig31` and `mig31.pt` reserved for M31-1 |
+| AI script | `f.BI`, present (6,081 stored bytes) |
+| Radio callout | `^ACMIG31.5K` exists (4,097 stored bytes). The PT does not name it; the original builds `^AC` plus the PT stem ([radio](radio.md)) |
+| Encyclopedia | `MIG31.INF` (Jane's-style text) and `MIG31_0/1/C/E.PIC` in `disc2/FA_3.LIB`; reference media, not flight data |
+
+All fixed names in the plan are confirmed in the media except the HUD:
+`MIG31.PT`, `MIG31.SH`, `VIS240.SEE`, `MIG31R.SEE`, `MIG31.ECM`, `GSH6_30.JT`,
+`AA9.JT`, `AA8.JT`. The displayed names are exactly "MiG-31" and "MiG-31
+Foxhound". `typeSize` is 588, not the parser's default 660: M31-1 must add
+`Mig31 => 588`. The PLANE flags are `0x15`: seat `0x10`, multi-crew `0x04` and
+the base bit `0x01` (no reviewed meaning) set; hook `0x02`, no-lift `0x08` and
+carrier `0x40` clear. So the MiG-31 has no hook, and the multi-crew bit is set
+(the real aircraft has a pilot and a weapons operator). OBJECT `flags` is
+`0x2bf3`, as the MiG-25.
+
+### Resources
+
+| Resource | Role | Decoded bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| `MIG31.SH` | Shape | 25,088 | `6dc4ed9cb6c99675cf7076dd38c90146e2e6300acd3c11bc565a5269f8a46a89` |
+| `MIG31_S.SH` | Shadow shape | 4,608 | `063b9f28070af4acd9953c716c93264ad0c9adc843a678e64ef2a60befb289d2` |
+| `MIG31_A.SH` | Damage body A | 16,896 | `374e24798d954b0cda67a54269b68495dc480d4f4150c9fadc3815ae126631ce` |
+| `MIG31_B.SH` | Damage piece B | 4,608 | `6aff8fdab918c6fbfffb53e203c1f94423787fc53352efe2b0cad75057a384f0` |
+| `MIG31_C.SH` | Damage body C | 16,896 | `4199aa5ed4ab3fc02de433937bab64790cdd69212579abe71a32c1e41ef4f710` |
+| `MIG31_D.SH` | Damage piece D | 4,608 | `9ab111e2920423ea579c2cf82adc5a5ffca6afa74e2907322ac04a6913116c53` |
+| `MIG31R.SEE` | Radar, **unreviewed** | 494 | `e7aa12bd307d1b24b0b8fd9594cdadece542e27b6343656ae0eff5cb3a0ca669` |
+| `MIG31.ECM` | Jammer, **unreviewed**, chaff 60 and flare 60 | 354 | `874f7b364ce6068341d6a17e10c4b73b37efcf86ec0d528a62f93e9c0296e56e` |
+| `VIS240.SEE` | Visual sensor, signature 0 | 471 | `a3224581abef75e0fe4e6dbb37d2d47d5ab4704bb1043e09dd6aa2e5a4510ee1` |
+| `GSH6_30.JT` | Internal gun | 2,717 | `4fc94198cbd0e40de6fc314dc73502dc662d106ffa9d14291939f4f779120cf4` |
+| `AA9.JT` | Default A2A store | 2,755 | `38adf9f9cfc00aee15ed729553c98597c7a92ccfb6323b12a6c26a8016192f4c` |
+| `AA8.JT` | Default A2A store | 2,751 | `c656407564e307f9eba70b853ef7cf226ea4a91a4d3cabae88062e6128cf7008` |
+| `F250.GAS` | Not named by this PT (see hardpoints) | 205 | `974e49de6eb22237bf7a1bd24b3ed9308300bbb95270a9c0fe7104892514f0de` |
+
+The shape and damage looks name `_MIG31.PIC` (9,657 stored bytes),
+`_MIG31_A.PIC` (14,967), `_MIG31_B.PIC` (7,969), `_MIG31_C.PIC` (17,162) and
+`_MIG31_D.PIC` (6,158), all in `FA_2.LIB`. The four sounds are present in
+`FA_2.LIB`: `&JET1N.11K` (loop, 29,861 stored bytes), `&JET1A.11K` (second sound,
+23,585), `&powerup.5k` (34,262) and `&powerdn.5k` (23,177). The MiG-25 used a
+different loop pair (`&jet19.11k`). `doDoppler` is 1, `maxSndDist` 15,000, the
+Doppler pitch limits 320 and 160 and the speed window 20 to 1,600, as the
+MiG-25.
+
+### The record against the MiG-25 template
+
+The MiG-31 record is built on the same template as `M25.PT`: 178 of 219 fields
+are identical (turn rates, stall and spin rows, drag words, crash speeds, damage
+table, structure limits 2,560 and 5,120). The 41 that differ are the identity
+and resource names, the year, the weights, thrust, fuel and flow, the envelope
+rows, the hit points and structure, the signatures, the view offset, the
+sounds, the PLANE flags, the rudder yaw rate, `_gpullDrag` (58 against 23),
+`throttleAcc` (30 against 50), the loaded control words (36 against 38) and the
+debris positions. All five mass and thrust fields differ from the MiG-25's, and
+no other PT in `fa-aircraft.csv` shares even one of them, so this is not a copied
+record under the [record rule](../spec/aircraft-records.md#rule). Selected
+values:
+
+| Field | Value |
+| --- | --- |
+| Empty weight / internal fuel / maximum takeoff | 48,115 / 30,865 / 91,725 lb |
+| Military / afterburner thrust (both engines) | 33,510 / 48,500 lbf |
+| Fuel flow, military / afterburner (both engines) | 6 / 36 lb/s |
+| Altitude | `minAlt` 300 ft, `maxAlt` 68,000 ft |
+| G envelope | `envMin` -2, `envMax` +4 (the MiG-25 is +5) |
+| Hit points / structure | 167 / 1,375 and 2,742, warn 2,560, limit 5,120 |
+| Signatures | 130, 130, 100, 100, 0; `maxVisDist` 321 |
+| Rudder yaw | min -1, max 1, acc 1, dacc 3 (the MiG-25: 3, 3, 3, 9) |
+| View offset | x 0, y 20, z 60 source units (0 / 6.7 / 20 ft); the MiG-25 is 0 / 11 / 71 |
+| Debris | `dmgDebrisPos` -60, 0, 0; `dstDebrisPos` 0, 20, -90 (source units) |
+| Crash | forward 330, side 51, vertical 95; pitch 25, roll 10 |
+
+### G envelope rows
+
+Points are speed in ft/s at altitude in ft. Seven consecutive rows, `envMin` -2
+to `envMax` +4.
+
+| G | Points |
+| ---: | --- |
+| -2 | 460@0, 565@16,500, 792@29,750, 1,020@35,000, 1,517@34,750, 1,680@26,000, 1,495@16,000, 1,180@0 |
+| -1 | 310@0, 510@36,500, 700@57,250, 970@61,000, 1,435@60,500, 1,890@56,250, 2,265@48,125, 2,440@36,000, 1,925@24,000, 1,310@0 |
+| 0 | 190@0, 260@19,500, 330@38,250, 515@66,125, 970@71,062, 1,490@70,500, 2,055@66,250, 2,592@54,625, 2,796@40,812, 2,806@36,000, 2,163@24,000, 1,450@0 |
+| 1 | 240@0, 395@38,000, 577@64,000, 960@68,000, 1,465@68,000, 2,012@64,000, 2,526@53,500, 2,733@40,750, 2,743@36,000, 2,056@24,000, 1,370@0 |
+| 2 | 310@0, 510@36,500, 700@57,250, 970@61,000, 1,435@60,500, 1,890@56,250, 2,265@48,125, 2,440@36,000, 1,925@24,000, 1,310@0 |
+| 3 | 390@0, 505@20,500, 672@35,750, 950@47,000, 1,490@47,000, 1,845@42,000, 2,010@32,000, 1,790@24,500, 1,250@0 |
+| 4 | 460@0, 565@16,500, 792@29,750, 1,020@35,000, 1,517@34,750, 1,680@26,000, 1,495@16,000, 1,180@0 |
+
+The -2 and +4 rows are the same polygon, and the -1 and +2 rows are the same
+polygon. This is source data, not a decoding overlap. The 1 G row peaks at
+2,743 ft/s (1,625 kt) at 36,000 ft and 1,370 ft/s (812 kt) at sea level; the 0 G
+row has a point at 71,062 ft, above `maxAlt`, and the host caps altitude at the
+record field.
+
+### Published audit
+
+The comparison column is the game's own encyclopedia text (`MIG31.INF`, retail
+media, quoted as numbers only) and, for thrust, public figures: Wikipedia's
+Soloviev D-30 page and MILAVIA's MiG-31 specifications (both accessed
+2026-11-08) give the Aviadvigatel D-30F6 as about 93 kN (20,900 lbf) dry and
+151.9 kN (34,170 lbf) with afterburner per engine. These are real-aircraft
+figures and do not establish original game behaviour.
+
+| Field | Record | Published | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 48,115 | 48,115 (21,825 kg, encyclopedia) | 0.0% | Agrees exactly |
+| Internal fuel, lb | 30,865 | 36,045 (16,350 kg, encyclopedia) | -14.4% | Left as retail, listed for John |
+| Maximum takeoff, lb | 91,725 | 90,390 (41,000 kg, encyclopedia) | +1.5% | Agrees |
+| Military thrust, lbf | 33,510 | 41,800 (2 x 20,900) | -19.8% | Left, within a third |
+| Afterburner thrust, lbf | 48,500 | 68,340 (2 x 34,170) | -29.0% | Left, within a third (near the edge) |
+| Ceiling, ft | 68,000 | 67,600 (20,600 m, encyclopedia) | +0.6% | Agrees |
+| 1 G top speed, kt | 1,625 | 1,620 (3,000 km/h at 17,500 m, encyclopedia) | +0.3% | Agrees |
+| Sea-level top speed, kt | 812 | 810 (encyclopedia) | +0.2% | Agrees |
+| G limit | +4 / -2 | +5 supersonic (encyclopedia) | -1 G positive | Keep retail (M31-8) |
+| Year | 1983 | Delivery began by early 1983 (encyclopedia) | 0 | No change |
+
+Agent audit decision, 2026-11-08: leave the values as retail and list them for
+John, the same rule as the MiG-25. The afterburner thrust is 29.0% under the
+real engines, close to the one-third line; M31-8 should watch the afterburner
+climb and acceleration against the envelope rows. Fuel flow of 6 and 36 lb/s
+totals gives, as plain arithmetic, about 85.7 minutes of military power or 14.3
+minutes of full afterburner from the internal tank. These are host reading
+numbers, not a claim about real endurance; the flow is for M31-8.
+
+The record's own budget: empty plus internal fuel is 78,980 lb, leaving 12,745
+lb below its 91,725 lb maximum. Four `AA9.JT` at 1,080 lb and two `AA8.JT` at 145
+lb are 4,610 lb of source stores. The default quantities are a host rule for
+M31-6.
+
+Shape size, from the runtime state path at scale 1: x -81 to 81, y -68 to 154
+and z -21 to 38 shape units, so 54.0 ft across, 74.0 ft long and 19.7 ft high.
+The length (74.4 ft real) and height (20.2 ft real) agree; the **span is 22%
+wide of the real 13.46 m (44.2 ft)**. The outer wing pieces reach x +/-81 (the
+two outer wing quads at the tip) and the 6138 and 613e panels start at x +/-17
+to +/-45. This is a model fact for M31-2 to record, not a defect to fix
+here.
+
+### Hardpoints
+
+All six source rows, in original order. Positions are source units; feet divide
+by three; x right, y up, z forward ([aircraft
+ordnance](aircraft-ordnance.md#hardpoint-positions)). Location byte: 0
+Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip.
+
+| Row | Location | Flags | Position x/y/z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS240.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `MIG31R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `MIG31.ECM` | Fixed jammer |
+| 3 | Internal Gun | `0x0008` | 5 / -5 / -5 | 1.7 / -1.7 / -1.7 | 260 | 0 | `GSH6_30.JT` | Internal gun, 260 rounds |
+| 4 | Wing | `0x07e5` | 25 / -10 / 0 | 8.3 / -3.3 / 0 | 4 | 0 | `AA9.JT` | A2A row, fuselage-side wing row |
+| 5 | Wingtip | `0x0085` | 50 / -10 / 0 | 16.7 / -3.3 / 0 | 2 | 8 | `AA8.JT` | A2A row, outer wing |
+
+Differences from the MiG-25 table that M31-5 and M31-6 must handle:
+
+- There is **no tank row and no centreline row**. `F250.GAS` is not named by
+  this PT; the MiG-31 has no external tank in the record. (The encyclopedia text
+  mentions provision for two underwing tanks; the record does not.)
+- The gun is a fixed internal row (Internal Gun location, 260 rounds at
+  1.7 ft starboard of the reference point), unlike the MiG-25's none. The
+  encyclopedia says the real gun is a starboard fairing on the lower fuselage.
+  It is `GSH6_30.JT` (the MiG-23's gun record), not `GSH6_23.JT`; the in-game
+  text calls the real gun a GSh-6-23, which this record's name does not follow.
+  The record decides the weapon, not the text.
+- The AA-9 row is a Wing row with weight class 0, so its capacity is its
+  `maxItems` of 4 (the weight formula applies only to a nonzero class). The
+  AA-8 row has class 8 and `maxItems` 2. There is **no AA-6 row** even though the
+  encyclopedia lists two AA-6 on the inner pylons; adding one is outside this
+  slice (the record decides the roster of stores).
+- The Wing row sits 8.3 ft out and the Wingtip row 16.7 ft out, but the model's
+  wing reaches 27 ft. The Wingtip row is therefore mid-wing on this shape. The
+  standard pylon rules and clipping stop-and-report rule apply in M31-5.
+- The jammer row has a z of -50 (-16.7 ft), the only non-origin fixed row. It
+  has no known meaning (nothing draws an ECM); it is recorded, not used.
+- `AA9.JT` is a semi-active radar missile (AA-9, 41.15 nmi; see
+  [aircraft ordnance](aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)).
+  This is its **first imported default carrier**; it is live on compatible
+  stations since JT-4. `AA8.JT` is live and is the MiG-29's default.
+
+### Shape, damage and animation handoff
+
+`MIG31.SH` has 214 runtime faces (216 on the export path), 0 lines and 0
+billboards, one texture atlas. The shape has six state words, listed below with
+the counts from `Shape::with_state` (the export branch adds two faces to every
+count). The streamer definition has a zero pivot, hinge scale 40 and two
+identical points. Damage bodies A (229 faces) and C (240) and pieces B (38) and D
+(29) follow the existing aircraft damage contract; there is no separate hulk
+file. The shadow is 10 faces with no texture. The parked path knows this
+aircraft already: `parked_aircraft.rs` lists `MIG31.PT` with gear word `0x612c`,
+and the parked inspector reports contact offset -30, exactly the gear-down low
+point of -30 shape units (-10.0 ft). The MiG-25's two differed by one unit; here
+they agree.
+
+| Word | Faces | Low point | Geometry (shape units) | Reading | Status |
+| --- | ---: | ---: | --- | --- | --- |
+| `0x6120` | +12 | -9 | Twelve plates behind the tail at x -14 to 14, y -129 to -68, z -9 to 5 | Afterburner flame, aft of the nozzles | Candidate; confirm in M31-4 |
+| `0x6126` | +2 | +8 | Raised quads at x +/-5, y 32 to 50, z 8 to 24 | Dorsal airbrake by slot order | Candidate. The encyclopedia puts the real brakes under the intake trunks, so the geometry and the text disagree; resolve in M31-4 |
+| `0x612c` | +12 | -30 | Wheel and strut groups at x +/-17, y 7 to 95, z -30 to -10 | Landing gear down | Confirmed; the parked gear word |
+| `0x6138` | -2 | -21 | Removes the left trailing-edge pair at x -17 to -45, y -5 to -23, z 2 to 4 | Left flap pair | Candidate; the M31-3 surface |
+| `0x613e` | -2 | -21 | Removes the mirrored right pair | Right flap pair | Candidate; the M31-3 surface |
+| `0x6144` | 0 net | -21 | Swaps four fin faces (two a side) at x +/-13 to +/-17, y -55 to -42, z 8 to 31 for four whose lower edge sits 4 units outboard on both sides | A rudder-sense deflection of the twin fins (the same sign on both sides) | Candidate; the MiG-25 had no sixth word. Unknown whether signed; M31-3 or M31-4 |
+
+The first five words follow the shared base order (flame, brake, gear, flap,
+flap) used by the MiG-25, F-18, Rafale and F-104 families, with the sixth word
+after them. No hook word exists because the PLANE hook flag is clear. The state-path and export-path counts differ by two faces in every row, as on
+the MiG-25. The two export-only faces are quads with indexed textures
+(`@indexed:3` and `@indexed:4`, the decal slots) on the upper wing surface, one
+at x -58 to -37 and one at x 54 to 75, z about 0 to 3: wing markings. Decal slots
+are unimplemented in the host and must never be filled with skin (see
+[texture state and decals](objects-and-shapes.md#texture-state-and-decals));
+M31-2 handles them.
+
+### Sensors and stores
+
+`VIS240.SEE` is the reviewed signature-0 visual sensor. `MIG31R.SEE` and
+`MIG31.ECM` are decoded in full in [the sensors section
+below](#the-unreviewed-radar-and-jammer-for-john). `GSH6_30.JT` is the live
+MiG-23 gun. `AA9.JT` and `AA8.JT` are live stores. The default quantities,
+pairing on the Wing and Wingtip rows, and the 260-round gun count are M31-5 and
+M31-6 questions.
+
+### The missing HUD (for John)
+
+**Fact.** `MIG31.PT` names `y141.HUD` (`hudName`, OBJECT offset 162). No
+`Y141.HUD` exists in any archive of the installed media (`FA_1.LIB`,
+`FA_2.LIB`, `disc2/FA_3.LIB`, the `SETUP.ESA` copies, `FA_4B.LIB`, `FA_4D.LIB`);
+an extraction with `--include '*.HUD'` finds 46 HUD files, all in `FA_2.LIB`
+(and its `SETUP.ESA` copy), and `y141` is not among them. `Y141.SH`, its damage looks and the `~Y141*` cockpit
+pictures exist, because they belong to the Yak-141. `YAK141.PT` itself has a
+**null** `hudName`, and the host maps it to `YAK141.HUD` by convention. So
+`y141` in the MiG-31's PT reads as a Yak-141 stem left in the record, but that is
+an inference from naming; naming does not establish behaviour.
+
+**What the original does (static reading of `FA.EXE`, not run, build above).**
+The routine that copies the HUD root to `0x521360` (`0x406193`, the one the
+[bezel spec](../spec/instrument-bezel.md) cites) first builds a file name, and
+then loads it with the resource-manager wrapper at `0x4a6ae0`:
+
+1. If the PT's `hudName` pointer (`0x50d30a`, which is the PT root plus 162, with
+   the names pointer at `0x50d26d` being root plus 5) is non-null, the string is
+   copied as the name (`0x406126` to `0x406152`).
+2. If it is null, the name is the third `ot_names` string (the PT name), with its
+   extension replaced by the `.HUD` string at `0x4ebe7c` (`0x406154` to
+   `0x40616f`, using the extension-replacing copy at `0x4a6870`). This is the
+   "same-stem HUD" rule the bezel spec already records for null pointers.
+3. It calls `0x4a6ae0(name, 0)` (`0x40617b`). With flags 0, the finder
+   (`0x4a6b30`) returns null **silently** when the resource is not found: the
+   missing-resource error branch only runs when bit `0x80` of the high flag byte
+   is set (`0x4a6bcc`), and otherwise it returns 0 (`0x4a6cae`).
+4. If the result is null, it calls `0x4a6ae0` again with the string at `0x4ebe74`,
+   which is **`f18.HUD`**, and flags `0x8000` (`0x406184` to `0x40618e`). With
+   that flag a miss reports "RMFindAndLoad: can't load %s" through the fatal
+   error routine `0x44a120`.
+5. The 0x2b2-byte root of whichever module loaded is copied to `0x521360`.
+
+So for `y141.HUD` missing, the original appears to fall back to **`F18.HUD`**,
+with no error. That module names `~f18`, `~f18h`, `~f18s`, `~f18_l`, `~f18_c`,
+`~f18_r`, the overlays and the panel `~f18_p`, so the cockpit pictures and the
+bezel would be the F/A-18's. Not established, and recorded as unknowns: what the
+finder at `0x4ad3c0` searches and whether it is case sensitive; whether the
+retail game lets the player fly the MiG-31 at all (the encyclopedia and the PT
+exist; no flight check was possible); and what the caller does after loading
+with the root fields (the F/A-18 panel name sits at root +0x275).
+
+**Evidenced options for John** (none chosen; each is a presentation choice, to be
+recorded as opinionated with John's date, as the Su-35, F-14 and A-4E choices
+are):
+
+| Option | Evidence for it | Cost or catch |
+| --- | --- | --- |
+| `F18.HUD` | The original's static fallback when the named HUD is missing (above). `F18.HUD` is present (4,608 bytes). The F-18 cockpit family and glass aperture are reviewed. | The player sees an F/A-18 cockpit and bezel in a Soviet interceptor. Only the static fallback evidences it; the load-and-use path was not run |
+| `YAK141.HUD` | The PT's `y141` stem; the only HUD with that stem; the Yak-141 cockpit family (`~Y141H.PIC`, `~Y141_P.PIC` and the overlays) is complete and reviewed. | Shows another aircraft's cockpit, and the stem is only a naming match. The two builds of `YAK141.HUD` differ by 4 bytes. The glass aperture and the overlay set are the Yak's |
+| `SU33CC.HUD` (or `SU33_C.HUD`, byte-identical in a build) | What the MiG-29, Su-25 and MiG-23 use (`SU33CC.HUD`) and the MiG-25 (`SU33_C.HUD`); the MiG-31 record is built on the MiG-25 template (178 of 219 fields equal). Reviewed glass (`SU33` maps to the MiG-29 aperture), side overlays and bezel; no new art | No evidence that the original used it. It also repeats `~SU33_W.PIC`'s missing optional picture, as the other four do |
+| Another Soviet HUD (`AV8.HUD` as the Su-27, `SU35.HUD`, `MIG21.HUD`, `MIG17.HUD`) | Same family of bezel art; all present and reviewed | No evidence either; the Su-27 uses `AV8.HUD`, a Harrier module, so a shared cockpit need not match the aircraft |
+
+Whatever is chosen, two things hold. The viewpoint is the record's own
+(`viewOffset` 0 / 20 / 60), so any borrowed cockpit art must be checked for eye
+point and glass in M31-7. And the host must return the exact PT name only when
+that file exists; a substitute is an explicit, labelled presentation mapping, not
+an alias of the record. M31-7 cannot start the cockpit until John picks. M31-1
+can import the aircraft with the choice recorded in `aircraft.rs` once made; if
+John wants `F18.HUD`, no new resource work is needed beyond naming it.
+
+### The unreviewed radar and jammer (for John)
+
+Both records are loaded by EQ-1 as unreviewed profiles and never fly
+(`sensors/profile.rs`; [radar](../radar.md#profile-live-state-and-presentation)).
+The rest of this section decodes them. Nothing here enables either.
+
+**`MIG31R.SEE`** (494 bytes, SHA-256 in the resource table), decoded with the
+shared sensor schema:
+
+| Field | Value |
+| --- | --- |
+| Type / names | 10 / "Flash Dance", "Flash Dance", `MIG31R.SEE` (NATO's name for the Zaslon radar) |
+| Signature | 3 (radar channel); `flags` 0, `flags[1]` 1 |
+| Look-down | 30; Doppler above, below and minimum range 0; all-aspect 0 |
+| Search volume | half-angles 10,920 / 8,190 source units, which is 60.0 degrees azimuth and 45.0 degrees elevation; range 0 to 753,424 ft (124.0 nmi); altitude unbounded |
+| Track volume | the same angles; range 0 to 607,600 ft (100.0 nmi); altitude unbounded |
+| Chaff/flare chance, deception chance | 100, 100 |
+
+It is byte-for-byte `F15R.SEE` apart from the name strings and the search range
+(753,424 ft against `F15R.SEE`'s 911,400 ft; the track range, the angles and
+the look-down 30 are equal). The nearest decoded siblings:
+
+| Record | Look-down | `flags[1]` | Search / track, nmi | Preset in code |
+| --- | ---: | ---: | --- | --- |
+| `MIG31R.SEE` | 30 | 1 | 124.0 / 100.0 | none (unreviewed) |
+| `F15R.SEE` | 30 | 1 | 150.0 / 100.0 | Advanced |
+| `F14R.SEE` | 30 | 1 | 190.0 / 150.0 | Transitional |
+| `SU27R.SEE` | 0 | 1 | 150.0 / 115.0 | Advanced |
+| `MIG29R.SEE` | 0 | 1 | 62.0 / 43.0 | Advanced |
+| `F18R.SEE` | 0 | 1 | 90.0 / 50.0 | Advanced |
+| `MIG27R.SEE` | 50 | 0 | 55.0 / 40.0 | Basic |
+
+The in-game encyclopedia gives the real radar as a 108 nm search and 65 nm track,
+unlike the record's 124 and 100; the retail numbers are game numbers, and the
+authored detection model uses the record's.
+
+**`MIG31.ECM`** (354 bytes): type 9; weight 0; `flags` 0; mode flags `0x1f0`
+(the `0x10` bit is set, so a reviewed jammer would emit radio-frequency noise);
+chaff loaded 60, chance 35, heading 95, pitch 24; flares loaded 60, chance 35,
+heading 159, pitch 31; radar deception chance 30 with signature add 100;
+noise ranges 0 and 0; infrared deception chance 40 with signature add 100; lose
+lock time 0. It is byte-for-byte `SU24.ECM` **and** `SU27.ECM` apart from the name
+string. In code `SU24.ECM` is `Transitional` and `SU27.ECM` is `LateColdWar`, so
+the record alone does not say which generation it is. `MIG29.ECM` has the same
+fields with chaff and flares of 30 and is `Transitional`. The Jaguar and the
+Tornado also carry `MIG31.ECM` (non-roster; they are not imported).
+
+**What reviewing them would need** (research and a John decision, none done):
+
+1. **Radar.** John picks a `Preset` (Basic, Transitional or Advanced) for
+   `MIG31R.SEE`, the same decision EQ-1 took for each reviewed radar by
+   installed record. The evidence points at Advanced (`F15R.SEE` is the same
+   data) or Transitional (`F14R.SEE` shares the look-down 30); it does not decide
+   it. The change is one match arm in `Preset::for_record`, the new row in the
+   [preset table](../radar.md) and its provenance line, then the sensor tests
+   (`sensors/profile.rs`, `sensor_equipment_tests.rs`) and `--sensor-summary`.
+2. **Jammer.** John picks a `Generation` (Early, Transitional or LateColdWar) for
+   `MIG31.ECM`: one match arm in `Generation::for_record`, plus the same docs and
+   test lines. It would also apply to the Jaguar and Tornado if they are ever
+   ported. The chaff and flare counts (60 and 60) are read from the record and
+   do not depend on the generation: `ecm.chaff[0]` feeds the live countermeasure
+   devices directly (`combat/live.rs`), so M31-6 can use them either way.
+3. **Effect on the loadout.** `AA9.JT` is a semi-active radar missile whose
+   guidance needs the aircraft's radar lock throughout flight
+   ([missiles](../spec/missiles.md)). With no reviewed radar the MiG-31 has no
+   flying radar channel, so its radar missiles have no support source and it has
+   no radar scope. Whether the live code refuses to fire, or fires an unsupported
+   missile, was not run here; M31-7 must check. `AA8.JT` (infrared), the gun and
+   `VIS240.SEE` do not depend on the radar.
+4. **Fly without** keeps both profiles unreviewed (the current behaviour). The
+   aircraft would then show no radar and no radio-frequency jamming, the AA-9
+   would be carried without guidance, and the audit would list the aircraft as
+   "radar unreviewed". That is a valid state, but the MiG-31 is an interceptor
+   whose main weapon is the radar missile, so it leaves the identity close to a
+   static model.
+5. **Docs.** `docs/radar.md` (preset and jammer tables and the plan list),
+   `docs/research/m3-asset-inventory.md` rows 565 and 619, and the sensor row of
+   `docs/aircraft-import.md`.
+
+Neither record is enabled by this slice, and no new preset is proposed without
+John.
+
+### Unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| The HUD | `y141.HUD` is missing; the cockpit cannot start | John picks (above); M31-7 |
+| Radar preset and jammer generation | Both unreviewed, so no flying radar | John picks (above); M31-7 |
+| What `0x4ad3c0` searches | Whether the fallback to `F18.HUD` also covers other mounts or case | Read the finder, if John wants the original's behaviour as the choice |
+| Whether the MiG-31 is player-flyable in retail | It is not on the reviewed player roster, so the fallback may be unreachable | Roster and menu research; not needed to proceed |
+| State-word roles | `6120`, `6126`, `6138`, `613e`, `6144` are inferred from slot order and geometry | M31-3 and M31-4 confirm each against the shape |
+| Airbrake position | The geometry is dorsal; the encyclopedia puts the brakes under the intake trunks | M31-4 |
+| Export-only faces | Two indexed-texture wing quads exist only on the export path (decal slots) | M31-2: leave unfilled, per the decal rule |
+| Wing span 22% wide | The shape is wider than the real span | Record in M31-2; no change planned |
+| No tank row | The record has no `F250.GAS` row | Keep; M31-5 and M31-6 follow the record |
+| No AA-6 row | The encyclopedia shows AA-6 on the inner pylons | Keep; follow the record |
+| Fuel (-14.4%), thrust (-19.8% and -29.0%) and flow | Range, climb and endurance | List for John; M31-8 |
+| Default quantities, pairing, 260-round gun count | Stores load | M31-5 and M31-6 |
+| Debris scale and hulk identity | A and C are both damaged bodies | M31-2 |
+| Shadow shape | 10 faces, no texture | M31-2 |
+| `~SU33_W.PIC` and other `~xx_w` names | Only if a Soviet HUD is chosen | Already resolved in M25-7 (never requested) |
