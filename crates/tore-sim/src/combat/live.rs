@@ -998,6 +998,9 @@ impl Configuration {
                 AircraftId::F16C => {
                     ["AGM65G.JT", "AIM120.JT", "AIM9M.JT", "M61.JT"].contains(&name)
                 }
+                AircraftId::F16A => {
+                    ["AGM65G.JT", "AIM120.JT", "AIM9M.JT", "M61.JT"].contains(&name)
+                }
                 AircraftId::F104 => ["AIM7.JT", "AIM9M.JT", "M61.JT"].contains(&name),
                 AircraftId::A10 => ["AGM65G.JT", "GAU8.JT"].contains(&name),
                 AircraftId::B747 => false,

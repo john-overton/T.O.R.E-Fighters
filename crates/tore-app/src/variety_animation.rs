@@ -150,7 +150,7 @@ fn specification(id: Id) -> Option<Spec> {
                 ],
                 1. / 3.,
             ),
-            Id::F16C => (
+            Id::F16A | Id::F16C => (
                 31488,
                 356,
                 &[0x8ad0, 0x8ad6, 0x8adc, 0x8ae8, 0x8aee, 0x8af4],
@@ -489,7 +489,7 @@ impl Rig {
                     shape,
                 ));
             }
-            Id::F16C => {
+            Id::F16A | Id::F16C => {
                 let (rig, shape) = crate::f16_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
                     id,

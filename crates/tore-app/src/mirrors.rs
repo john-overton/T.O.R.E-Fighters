@@ -302,8 +302,8 @@ mod tests {
         // The F-16, F-22, X-31, MiG-17, MiG-21 and AC-130 pictures have no
         // flat mirror fill.
         for id in [
-            F16C, F22, F22n, Faxx, X31, Mig17, Mig21, C130, Ac130, E3, Il76, E2, V22, Ah64, Ch47,
-            B747, A310,
+            F16C, F16A, F22, F22n, Faxx, X31, Mig17, Mig21, C130, Ac130, E3, Il76, E2, V22, Ah64,
+            Ch47, B747, A310,
         ] {
             assert!(seeds(id).is_none(), "{id:?}");
         }

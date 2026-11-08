@@ -231,3 +231,15 @@ catalog 29 normal, 83 Cheat`. The stations, the 29 normal records and the defaul
 load are in [aircraft ordnance](../formats/aircraft-ordnance.md#the-mig-25-m3-2026-11-07).
 No record, mask or station position was added for the aircraft; the counts move
 only because an already reviewed identity is now measured.
+
+## Roster change (2026-11-08, slice F16A-1)
+
+The F-16A (`F16.PT`) joined `AircraftId::ALL` in slice F16A-1 on branch
+`m3-aircraft`, so the pinned aircraft count in `crates/tore-app/src/ordnance_audit.rs`
+is now 38. The F-16A has its own nine source rows (the fixed visual sensor, radar
+and jammer in rows 0 to 2, the internal gun in row 3, the centreline tank in row
+4, the inner wing AGM-65G in row 5, the wing AIM-120 in row 6, the outer wing
+AIM-9M in row 7 and the tip AIM-9M in row 8), and no Pave Spike row. Its default
+stores, tank and the resulting weapon and tank placement counts are wired and
+re-measured in slice F16A-4 with `--validate-ordnance`; the placement counts
+above still describe the last measured 37-aircraft pass.

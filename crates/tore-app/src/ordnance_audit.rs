@@ -19,7 +19,9 @@ mod store_pairs;
 /// partial import cannot pass with fewer checks. Raise these on purpose, and
 /// record why in `docs/baselines/ordnance-availability.md`, when the supported
 /// weapon list, the tank records or the aircraft change.
-const AIRCRAFT: usize = 37;
+// F16A-1 raised the roster pin to 38. The F-16A's placement counts are not
+// re-measured here; F16A-4 owns them.
+const AIRCRAFT: usize = 38;
 const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
 /// 3,684 from 3,626: the MiG-25's two wing rows join the roster (slice M25-6,

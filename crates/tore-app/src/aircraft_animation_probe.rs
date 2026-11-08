@@ -207,6 +207,7 @@ impl Control {
                         | Id::F4G
                         | Id::F15
                         | Id::F16C
+                        | Id::F16A
                         | Id::Mig17
                         | Id::F104
                         | Id::Mig25
@@ -249,6 +250,7 @@ impl Control {
                         | Id::F4G
                         | Id::F15
                         | Id::F16C
+                        | Id::F16A
                         | Id::F104
                         | Id::Mig17
                         | Id::Mig25
@@ -585,6 +587,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::F4G
             | AircraftId::F15
             | AircraftId::F16C
+            | AircraftId::F16A
             | AircraftId::F104
             | AircraftId::Mig17
             | AircraftId::Mig25
@@ -980,7 +983,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
-        if id == AircraftId::F16C {
+        if id == AircraftId::F16C || id == AircraftId::F16A {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 f16::check(
                     control,
@@ -1161,7 +1164,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if id == AircraftId::Av8 {
         failures.extend(av8::combinations(&airframe, &neutral, out)?);
     }
-    if id == AircraftId::F16C {
+    if id == AircraftId::F16C || id == AircraftId::F16A {
         failures.extend(f16::combinations(&airframe, &neutral, out)?);
     }
     if id == AircraftId::F104 {

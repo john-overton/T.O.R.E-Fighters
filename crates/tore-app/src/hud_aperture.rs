@@ -135,7 +135,7 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
                 (501, 210),
             ],
         ),
-        AircraftId::F16C => (
+        AircraftId::F16C | AircraftId::F16A => (
             (1280, 490),
             &[
                 (472, 99),

@@ -1252,6 +1252,12 @@ mod tests {
         list.text("16");
         assert_eq!(
             list.key("Enter").map(|i| expected[i]),
+            Some(AircraftId::F16A)
+        );
+        list.clear();
+        list.text("16c");
+        assert_eq!(
+            list.key("Enter").map(|i| expected[i]),
             Some(AircraftId::F16C)
         );
         list.clear();
