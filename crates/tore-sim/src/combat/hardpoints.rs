@@ -766,6 +766,15 @@ pub enum Hang {
     /// As recorded, on tunnel pallets ([`Location::Tunnel`]): pairs one
     /// behind another close up to [`PALLET_GAP`].
     Pallets,
+    /// [`Self::Pallets`] with the underside read from `up` feet, for a
+    /// record whose own point lies above the belly (the MiG-31's AA-9 row),
+    /// and its stores hung `drop` feet lower than the standard rail so a
+    /// wide store's upper fins stay close to the belly (fitted).
+    PalletsFromBelow { up: f64, drop: f64 },
+    /// Under the wing surface above, on a standard wing pylon: a Wingtip
+    /// record that sits mid-wing on the model rather than at a tip (the
+    /// MiG-31's AA-8 row).
+    Wing,
     /// On separate pylons along a swept wing, one store each
     /// ([`Location::Separate`]).
     Separate,
@@ -899,6 +908,19 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         // rotor disk. Put the twin rails near the outer stub-wing ends,
         // behind the leading edge and clear of the baked-in pods.
         (AircraftId::Mi24, 2) => at(Location::Wing, 12., -5., Hang::AsRecorded),
+        // MiG-31, John 2026-11-08: the four AA-9s hang in two tandem pairs
+        // under the fuselage, side by side either side of the centreline,
+        // front pair ahead, close under the belly like the real aircraft's
+        // semi-recessed R-33s; the AA-8s hang on standard wing pylons under
+        // the drawn wing, outboard of the AA-9s. The record rows, masks and
+        // capacities are unchanged; only the drawn positions move.
+        (AircraftId::Mig31, 4) => at(
+            Location::Wing,
+            MIG31_R33[0],
+            MIG31_R33[1],
+            Hang::PalletsFromBelow { up: -8., drop: 0.1 },
+        ),
+        (AircraftId::Mig31, 5) => at(Location::Wingtip, MIG31_AA8[0], MIG31_AA8[1], Hang::Wing),
         // F-16C source rows represent middle (3/7), outer (2/8) and tip
         // (1/9) stations. The wet inner pair (4/6) has no source row.
         // Origins include each mesh's forward bias: the AMRAAM body's
@@ -977,6 +999,25 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
 /// single Maverick 14.75 ft out; row 8 stays 18.33 ft out and row 5 inboard
 /// of the pod.
 const A10_WING: [f64; 2] = [10.75, 14.75];
+
+/// The MiG-31's four AA-9 row, [feet right of the centreline, feet forward]:
+/// two stores a side on tunnel pallets, the front pair first, under the
+/// fuselage about 2 ft either side of the centreline (John 2026-11-08,
+/// opinionated; the position is fitted from the model). The belly is about
+/// 3.7 ft below the reference there; the 2 inch rail is dropped 0.1 ft so
+/// the wide upper fins enter the belly only to 0.48 ft, still close under it
+/// like the real aircraft's semi-recessed R-33s. Retail records the row as
+/// one Wing row 8.33 ft out at 0 ft forward with four stores; the record's
+/// location, mask and capacity are unchanged.
+const MIG31_R33: [f64; 2] = [2.0, 1.5];
+
+/// The MiG-31's AA-8 row, [feet right of the centreline, feet forward]: the
+/// record's 16.67 ft out and 0 ft forward, on a standard 1 ft wing pylon
+/// under the drawn wing (John 2026-11-08, opinionated). The 22% wide shape
+/// reaches 27 ft, so the record's Wingtip position is mid-wing; the pylon,
+/// not a tip edge, carries the store. The value is the record's own lateral
+/// position, not a fitted move.
+const MIG31_AA8: [f64; 2] = [50. / 3., 0.];
 
 /// Where the Flankers' tunnel stations (between the engines, on the
 /// centreline) are centred, feet forward: two stores hang one behind the
@@ -1073,8 +1114,12 @@ pub fn placed_on(
             rack.location = SHOULDER_BYTE;
             (moved.right - SHOULDER_OUT, pylon_forward)
         }
-        Hang::Pallets => {
+        Hang::Pallets | Hang::PalletsFromBelow { .. } => {
             rack.location = TUNNEL_BYTE;
+            (moved.right, mount[2])
+        }
+        Hang::Wing => {
+            rack.location = Location::Wing.byte();
             (moved.right, mount[2])
         }
         Hang::Separate => {
@@ -1085,11 +1130,16 @@ pub fn placed_on(
     };
     if let Some(model) = model {
         let from = match moved.hang {
-            Hang::FromBelow { up } => up,
+            Hang::FromBelow { up } | Hang::PalletsFromBelow { up, .. } => up,
             _ => mount[1],
         };
         rack.over = sample_points(pylon, forward)
             .map(|(r, f)| model.height(r, f, from, 6).map(|h| h as f32));
+        if let Hang::PalletsFromBelow { drop, .. } = moved.hang {
+            for over in &mut rack.over {
+                *over = over.map(|h| h - drop as f32);
+            }
+        }
         if moved.hang == Hang::Separate {
             // Each pylon's own surface, where it stands.
             for (index, sign) in [(sample::INBOARD, -1.), (sample::OUTBOARD, 1.)] {
@@ -1926,6 +1976,83 @@ mod tests {
                 assert!(pair[0][0] < right && pair[1][0] > right);
             }
         }
+    }
+
+    #[test]
+    fn the_mig31_hangs_its_aa9s_in_tunnel_pairs_and_aa8s_on_wing_pylons() {
+        let face = |x0, x1, z0, z1, up| tore_formats::shape::Face {
+            positions: vec![[x0, z0, up], [x1, z0, up], [x1, z1, up], [x0, z1, up]],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            faces: vec![
+                face(-18., 18., -60., 60., -11.1),
+                face(24., 60., -30., 30., 1.35),
+            ],
+            lines: Vec::new(),
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&shape, 1. / 3.);
+        let row = |location, position| Hardpoint {
+            location,
+            position,
+            flags: 0x07e5,
+            count: 4,
+            store: Some("AA9.JT".into()),
+            weight_class: 0,
+        };
+        let (mount, rack) = placed_on(AircraftId::Mig31, 4, &row(4, [25, -10, 0]), Some(&model));
+        assert_eq!(
+            [mount[0], mount[1], mount[2]],
+            [MIG31_R33[0], -10. / 3., MIG31_R33[1]]
+        );
+        assert_eq!(rack.location(), Location::Tunnel);
+        assert_eq!(rack.sides(mount, 4), [2, 2]);
+        assert_eq!(rack.pylons(2), 2);
+        let size = StoreSize::of_shape(Some("AMOS.SH"));
+        let pair = |side| [0, 1].map(|slot| rack.store_point(mount, 4, side, slot, size));
+        let right = pair(0);
+        let left = pair(1);
+        for (side, points) in [right, left].into_iter().enumerate() {
+            let sign = if side == 0 { 1. } else { -1. };
+            assert!((points[0][0] - sign * MIG31_R33[0]).abs() < 1e-9);
+            assert!((points[1][0] - sign * MIG31_R33[0]).abs() < 1e-9);
+            // The front pair is pylon 1 and leaves first.
+            assert!(points[1][2] > points[0][2]);
+            assert!((points[1][2] - points[0][2] - size.length - PALLET_GAP).abs() < 1e-9);
+            assert!(
+                points
+                    .iter()
+                    .all(|p| (p[1] + size.top + 3.8 + RAIL_DEPTH).abs() < 1e-5)
+            );
+        }
+        let aa8 = Hardpoint {
+            location: 5,
+            position: [50, -10, 0],
+            flags: 0x0085,
+            count: 2,
+            store: Some("AA8.JT".into()),
+            weight_class: 8,
+        };
+        let (mount, rack) = placed_on(AircraftId::Mig31, 5, &aa8, Some(&model));
+        assert_eq!([mount[0], mount[2]], [50. / 3., 0.]);
+        assert_eq!(rack.location(), Location::Wing);
+        assert_eq!(rack.depth(), PYLON_DEPTH);
+        assert_eq!(rack.sides(mount, 2), [1, 1]);
+        let size = StoreSize::of_shape(Some("APHID.SH"));
+        for side in 0..2 {
+            let point = rack.store_point(mount, 2, side, 0, size);
+            assert!((point[0].abs() - 50. / 3.).abs() < 1e-9);
+            assert!((point[1] + size.top + PYLON_DEPTH - 0.45).abs() < 1e-5);
+        }
+        assert_eq!(station_move(AircraftId::Mig31, 3), None);
     }
 
     #[test]

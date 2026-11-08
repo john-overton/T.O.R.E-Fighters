@@ -739,6 +739,61 @@ AIM-120 pylon, but a nose ahead of the wing is not a clip; the record's position
 is kept. The wingtip AIM-9M's 0.42 ft fin entry into the tip is the same value
 the F-16C already ships and John reviewed on 2026-10-16.
 
+## The MiG-31
+
+Opinionated station table, John 2026-11-08. `MIG31.PT` has two editable carrier
+rows and no tank or centreline row. Rows 0 to 3 are the fixed visual sensor,
+radar, jammer and internal gun, so they carry no drawn store and no fixed sensor
+or designator pod is added to the wing rows. The source rows, masks, capacities
+and default quantities stay as decoded; only the drawn positions move.
+
+| Record (MIG31.PT row) | Location | Decoded position, ft right / up / fwd | Count | Default | T.O.R.E station |
+| --- | --- | --- | ---: | --- | --- |
+| 4 | Wing | 8.33 / -3.33 / 0 | 4 | `AA9.JT` x4 | Two tandem pairs under the fuselage, 2.0 ft either side of the centreline, centred 1.5 ft forward; front pair ahead, 0.27 ft rails |
+| 5 | Wingtip | 16.67 / -3.33 / 0 | 2 | `AA8.JT` x2 | 16.67 ft out on a standard 1 ft wing pylon under the drawn wing, outboard of the AA-9s |
+
+Measured with `tore-app --stores-preview` (CPU, `TORE_STORES_PREVIEW_AUDIT=1`,
+`TORE_STORES_PREVIEW_FULL=1`, `TORE_STORES_PREVIEW_CATALOG=1`,
+`TORE_STORES_PREVIEW_AIRCRAFT=mig31`), default load:
+
+- Row 4, the four `AA9.JT`: the rear pair at -5.42 ft forward and the front pair
+  at 8.43 ft, each pair 2.0 ft either side of the centreline. The rear stores
+  hang at -4.49 ft and the front at -4.75 ft, on 0.27 ft rails. The front pair
+  is 13.85 ft ahead of the rear pair (the 13.6 ft store plus a 0.25 ft gap).
+- Row 5, the two `AA8.JT`: 16.67 ft out at -0.74 ft, on a standard 1.00 ft wing
+  pylon. The pylon height and proportions are the other reviewed fighters'.
+- The audit's `clip` line reads `0.48 ft at [3.37 -3.12 -11.00]` for row 4: the
+  rear pair's outer upper fin enters the belly skin under the fuselage. It does
+  not reach the fuselage side or either intake duct. Row 5 reads 0.00 ft.
+- The outermost fin at 3.37 ft is 2.3 ft inboard of the main gear at 5.67 ft,
+  and the front store's nose at 16.45 ft is 9.2 ft behind the nose gear at
+  25.67 ft, so no store touches the gear with it down.
+
+**Why the record moves.** The shape is 22% wide of the real span (M31-2): its
+wing reaches 27 ft, so the record's 16.67 ft Wingtip position is mid-wing, not a
+tip. The four-store Wing row at 8.33 ft out also puts its inboard store's fin
+2.76 ft inboard of a twin-rail pylon, inside the fuselage. The real aircraft
+carries its R-33s in two tandem pairs under the fuselage and its R-60s on
+underwing pylons, which is the layout adopted here.
+
+For comparison, the reviewed default loads read: MiG-25 0.27 ft (AA-6, John
+accepted 2026-11-07), F-16A and F-16C 0.42 ft, F-14 0.27, F-15 0.29, Su-27 0.72.
+The MiG-31's 0.48 ft is under the 0.5 ft target and below the Su-27's 0.72;
+before the table the same row read 3.63 ft and the AA-8 hung 3.59 ft below the
+wing in space.
+
+No fixed sensor, designator or jammer pod is placed on either row; rows 0 to 3
+stay the fixed equipment the record has, and no pod row or fixed pod is added.
+The row 4 decoded mask carries the pod bit, so the shared Load Ordnance rules
+offer a Pave Spike on that real station, as they do on the F-16A; the
+68-placement pod pin includes it. The decoded positions and counts are
+spec-derived from `MIG31.PT`; the 1 ft wing pylon, the 2 inch body rail and the
+fin roll are the existing opinionated rules of 2026-10-13, applied to the new
+stations. The AA-9 rail is 0.27 ft rather than 0.17 ft, a fitted 0.1 ft drop so
+the wide upper fins enter the belly only to 0.48 ft; the pylon still meets the
+belly. The station table and the fitted drop are opinionated (John, 2026-11-08)
+and fitted (agent decision, 2026-11-08) respectively.
+
 ## The F-16C and fleet rail audit
 
 
