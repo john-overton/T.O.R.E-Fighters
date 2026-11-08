@@ -942,3 +942,37 @@ switched on.
   targeting sight of its own (Target Cam is the shared plain window), and no
   Pave Spike designator row (the record has none). The two `disc2/FA_3.LIB`
   `F16C_*.PIC` cockpit art sets are unused by every code path.
+
+### F16A-6 flight review (2026-11-08)
+
+Slice F16A-6 flies the F-16A's own record on the hybrid researched default and
+found the flight numbers equal the F-16C's, field for field, exactly as F16A-0
+predicted. The configuration is built from `F16.PT`, not shared with the
+`F16C` identity: `AircraftModel::for_aircraft` reads the record the importer
+loaded for `AircraftId::F16a`, and the `variety` identity is `("F-16",
+"F16.SH")`. Nothing is aliased and no record value was corrected.
+
+- The record and the model agree: empty 14,567 lb, internal fuel 6,972 lb,
+  maximum takeoff 33,000 lb, 17,687 lbf military and 32,000 lbf afterburner
+  thrust, 14 G rows from -4 to +9 and a 60,000 ft ceiling, byte-for-byte the
+  `F16C.PT` values F16A-0 decoded.
+- `tore-sim`'s `envelope_probe` over `F16.PT` and `F16C.PT` in one run printed
+  identical envelope, level-speed and pull lines: the same 1 G edge (794 kt at
+  sea level, 1,145 kt at 36,000 ft), the same settled level speeds (749 / 809 /
+  885 / 1,001 / 1,040 / 716 kt) and the same pull G at every band.
+- The battery's air maneuvers (`level`, `pull`, `loop`, `sprint`, `climb`,
+  `dive`, `overspeed`, `rudder`, `devices`, `stall-recover`, `spin-recover`)
+  are identical for the two identities apart from the `Aircraft:` name line.
+- The seven ground maneuvers differ only in the default ordnance load, which
+  F16A-4 set on the station record: the F-16A carries 3,894 lb (25,433 lb
+  gross) against the F-16C's 4,854 lb (26,393 lb gross). With `--loadout none`
+  the takeoff, gear-airborne, land, gear-up, hard, off-runway and nosewheel
+  probes are identical apart from the name line, so the difference is stores,
+  not a flight field.
+
+The 1 G edge at 36,000 ft, 1,145 kt, sits 2 percent over the published
+2,074 km/h (1,120 kt) at 36,000 ft and inside the published 1,147 to 1,176 kt
+band at 40,000 ft, the same figure the F-16C flies. No `fitted_envelopes` entry
+is added for F16A. The hybrid researched default is the validated path; the
+legacy `--legacy-flight` adapter and the restricted `--native-flight-tables`
+path stay distinct and unchanged.

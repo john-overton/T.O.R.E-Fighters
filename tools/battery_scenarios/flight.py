@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -244,6 +244,8 @@ INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
     "mig21": 4534, "su25": 6614, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
     "mig25": 37320,
+    # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
+    "f16a": 6972,
 }
 
 
@@ -325,9 +327,11 @@ def check_retail_liftoff(output: str) -> list[str]:
     return problems
 
 
-# The original roster plus the MiG-25, whose own figures are in LIFTOFF_TARGET,
-# APPROACH_TARGET and INTERNAL_FUEL_LB (M25-8).
-LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25"]
+# The original roster plus the MiG-25 and the F-16A, whose own figures are in
+# LIFTOFF_TARGET, APPROACH_TARGET and INTERNAL_FUEL_LB where they differ (M25-8,
+# F16A-6). The F-16A carries no speed target of its own: its record equals the
+# F-16C's, which is in AIRCRAFT and has none, so the two are checked alike.
+LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

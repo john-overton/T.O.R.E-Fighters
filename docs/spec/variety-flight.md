@@ -511,6 +511,42 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## F-16A (F16A-6, 2026-11-08)
+
+The F-16A is the batch's nineteenth conventional aircraft. It flies the hybrid
+adapter's own `variety` configuration, built from its own `F16.PT` (`F16.SH`)
+record, not from the F-16C identity. `F16.PT` and `F16C.PT` are identical in
+every flight field, so the F-16A's numbers equal the F-16C's: empty 14,567 lb,
+internal fuel 6,972 lb, maximum takeoff 33,000 lb, 17,687 lbf military and
+32,000 lbf afterburner thrust, 14 envelope rows from -4 to +9 G and a 60,000 ft
+ceiling. The shared conventional flight, ground contact, actuator and
+loaded-mass rules apply unchanged, and no new fit was needed.
+
+The 1 G row's fast edge is 1,933 ft/s at 36,000 ft, 1,145 kt, against the
+published 2,074 km/h (1,120 kt) at 36,000 ft (Aeropedia and Aero Web, in the
+[F-16A published audit](../formats/aircraft-variety.md#published-audit)) and
+inside the published 1,147 to 1,176 kt band at 40,000 ft the F-16C already
+flies against. The 2 percent difference is inside the decoded envelope, so no
+`fitted_envelopes` entry is added: this is the source's top speed, not a fit.
+The sea-level 1 G edge is 794 kt, the same as the F-16C's and 0.1 percent under
+the published 795 kt. The shared loaded-drag rule makes full internal fuel
+settle at 93.5 percent of the edge at 1,000, 10,000, 20,000 and 40,000 ft and
+92.1 percent at the 60,000 ft ceiling, inside the fighters' 87 to 96 percent
+band. The G limits are the source's -4 to +9 rows, and the shared
+loaded-elevator divisor reduces the usable limit with weight: at the default
+gross weight the envelope limit at 1,000 ft is 7.55 G.
+
+The only aircraft-to-aircraft difference on the ground is the default ordnance
+load (the F-16A station record, [F16A-4](../formats/aircraft-ordnance.md)):
+the F-16A carries 3,894 lb of stores (25,433 lb gross) against the F-16C's
+4,854 lb (26,393 lb gross). Both are under the record's 33,000 lb maximum. With
+an identical loadout the two identities fly identical ground probes, so the
+difference is stores, not a flight field.
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

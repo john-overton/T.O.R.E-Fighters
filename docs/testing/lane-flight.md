@@ -104,9 +104,9 @@ traces is a tripwire, not exhaustive proof for every branch or platform.
 
 ## Variety aircraft checks
 
-`flight-variety-*` checks each of the 23 new identities through real application
-asset loading and 1,200 hybrid flight ticks, with finite motion, no crash and
-bounded fuel/energy output. It is separate from the original roster's fighter
+`flight-variety-*` checks each of the 25 variety identities through real
+application asset loading and 1,200 hybrid flight ticks, with finite motion, no
+crash and bounded fuel/energy output. It is separate from the original roster's fighter
 maneuver and AI acceptance cases. Source-backed powered-lift checks use
 `tore-sim`'s `variety_flight` example; synthetic tests cover hover limits,
 conversion, control release and exact-state continuation. See

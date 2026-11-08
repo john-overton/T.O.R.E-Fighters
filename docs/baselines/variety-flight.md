@@ -252,3 +252,116 @@ Not run: `--native-flight-tables` needs the extracted sine and atan tables and
 the path is not present locally; it remains a separate restricted research
 path. The windowed scenarios ran through `tools/agent-run.sh` inside the
 battery; no frame was captured for this slice because the plan asks for none.
+
+## F-16A validation, 2026-11-08
+
+Implementation mode, slice F16A-6. The `F16.PT` and `F16C.PT` records were read
+from the ignored local FA_2.LIB catalog and the app profile is
+`.local/m3-aircraft/profile`. The F-16A flies its own record on the default
+hybrid `--researched-flight` path; `--legacy-flight` keeps the previous
+compatibility model and `--native-flight-tables` stays a separate restricted
+path. The record is identical to `F16C.PT` in every flight field, so the F-16A
+has no `fitted_envelopes` entry and its numbers match the F-16C's.
+
+`cargo run --locked -p tore-sim --example variety_flight -- F16.PT F16C.PT`
+printed `aircraft=F-16 conventional=pass deterministic=pass landing=pass
+ticks=1200` and the same line for `F-16C`.
+
+`PROBE_LEVEL=1 PROBE_PULLS=1 PROBE_ALTS=1000,10000,20000,30000,40000,60000
+cargo run --locked -p tore-sim --example envelope_probe -- F16.PT F16C.PT`
+printed identical envelope, level-speed and pull lines for the two records:
+`empty=14567 fuel=6972 mil=17687 ab=32000 loadedDrag=30 loadedElev=40
+pullDrag=33 ceiling=60000`, the same 14 G rows and the same 1 G edge. Every
+line below the `==` header is byte-identical between the two, so the table is
+one aircraft's, shown once.
+
+| Level top speed, full internal fuel | 1 G edge, kt | Simulated, kt | Ratio |
+| --- | ---: | ---: | ---: |
+| 1,000 ft | 801 | 749 | 0.935 |
+| 10,000 ft | 865 | 809 | 0.935 |
+| 20,000 ft | 947 | 885 | 0.935 |
+| 30,000 ft | 1,071 | 1,001 | 0.935 |
+| 40,000 ft | 1,113 | 1,040 | 0.935 |
+| 60,000 ft | 777 | 716 | 0.921 |
+
+The sea-level 1 G edge is 794 kt, 0.1 percent under the published 795 kt. The
+1 G edge at 36,000 ft is 1,145 kt against the published 1,120 kt at 36,000 ft
+(Aeropedia, Aero Web; the F-16A-0 published audit) and inside the 1,147 to
+1,176 kt band at 40,000 ft: within 2 percent, so no fit is added.
+
+| Full-stick pull | 1,000 ft | 10,000 ft | 20,000 ft |
+| --- | --- | --- | --- |
+| 0.50 of the edge | 7.66 G, limit 7.55 | 6.80 G, limit 6.71 | 5.09 G, limit 5.04 |
+| 0.70 | 7.68 G, limit 7.55 | 6.81 G, limit 6.71 | 5.09 G, limit 5.04 |
+| 0.85 | 3.41 G, limit 3.36 | 2.55 G, limit 2.52 | 2.54 G, limit 2.52 |
+| 0.90 | 1.70 G, limit 1.68 | 1.70 G, limit 1.68 | 1.69 G, limit 1.68 |
+| 0.95 | 1.70 G, limit 1.68 | 1.70 G, limit 1.68 | 1.69 G, limit 1.68 |
+
+The peak G exceeds the limit printed at the start speed in the first two bands
+because the pull decelerates the aircraft and the envelope's fast side gives
+the higher row more pull, the same effect the MiG-25 shows.
+
+Headless probes, all `--aircraft f16a --no-audio`, run against `--aircraft
+f16c` on the same commands. Every air maneuver is identical for the two
+identities apart from the `Aircraft:` name line, so the table is one
+aircraft's.
+
+| Probe | Ticks | Max speed, kt | Max G | Fraction of the edge | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| level | 7,200 | 539.1 | 1.02 | 0.650 | no crash |
+| pull | 7,200 | 539.1 | 7.67 | 0.650 | no crash |
+| loop | 2,533 | 560.1 | 7.74 | 0.678 | completed, no crash |
+| sprint | 36,000 | 810.1 | 1.01 | 0.976 | no crash |
+| climb | 115,370 | 839.5 | 7.63 | 1.099 | topped 69,706 ft (1.162 of ceiling), no crash |
+| dive | 9,000 | 993.7 | 1.01 | 1.120 | overspeed loss |
+| overspeed | 1,200 | 1,041.3 | 1.01 | 1.100 | overspeed loss |
+| rudder | 360 | 539.1 | 1.01 | 0.650 | no crash |
+| devices | 3,600 | 539.1 | 1.17 | 0.650 | no crash |
+| stall-recover | 2,428 | 200.8 | 1.68 | 0.223 | recovered, no crash |
+| spin-recover | 959 | 201.2 | 0.99 | 0.225 | recovered, no crash |
+
+The stall recovery raised the alert at tick 1,465 and recovered at 2,187 with
+0 ft of altitude lost and a minimum 102.3 kt. The spin recovery entered at
+tick 3, recovered at 718 after 2.11 total revolutions (0.39 during recovery),
+losing 902 ft. The overspeed and dive runs both end in the overspeed loss, the
+intended end of those maneuvers, at 1.10 and 1.12 times the 20,000 ft edge.
+
+Ground probes at `--theater UKR --ground-start 1` with the default load. The
+seven lines differ from the F-16C's by the default ordnance weight only: the
+F-16A carries 3,894 lb (25,433 lb gross) against 4,854 lb (26,393 lb gross).
+With `--loadout none` the seven probes are byte-identical apart from the
+`Aircraft:` line, so the difference is the F16A-4 station record, not a flight
+field.
+
+| Probe | Ticks | Result |
+| --- | ---: | --- |
+| takeoff | 982 | 100 ft reached; liftoff tick 500 at 96.2 kt over 343 ft, rotation 89.8 kt |
+| takeoff-gear-airborne | 981 | 100 ft reached; same liftoff; gear raised after the wheels are clear |
+| land | 18,150 | touchdown at 97.7 kt, 3.1 ft/s sink, stopped tick 17,909, 2,832 ft left, score 100 |
+| land-gear-up | 14,534 | crashed for the gear; no touchdown |
+| land-hard | 17,520 | touchdown at 109.7 kt, 33.3 ft/s sink, stopped, 3,741 ft left |
+| land-off-runway | 16,449 | crashed for the not-landable ground |
+| nosewheel | 9,000 | no crash |
+
+The battery: `python3 tools/battery.py --scenario '*-f16a*' --lane flight
+--profile .local/m3-aircraft/profile` passed 15 of 15 scenarios, run
+`20261108-092857`: `flight-animation-f16a`, the five live-fire slots, the two
+liftoff runs, the approach, `flight-variety-f16a`, the four jettison slots and
+`render-f16a-skin`. The variety, liftoff, liftoff-retail and approach scenarios
+are new in this slice; the F-16A has no per-aircraft speed target because its
+record equals the F-16C's, which has none.
+
+**Paths stay distinct.** The default prints `flight_model=hybrid`; the same
+`--maneuver pull` under `--legacy-flight` prints `flight_model=legacy` and a
+different flight (final 271.2 kt against the hybrid's 260.7 kt at 7,200 ticks,
+energy rate 0.097 against 0.147). The `stall-recover` maneuver is a larger
+difference: legacy recovered in 3,062 ticks with a 22.9 deg/s peak pitch rate,
+hybrid in 2,428 ticks with 7.9 deg/s. `--native-flight-tables` needs the
+extracted `sine-q15.bin` and `atan-pa.bin`, which are not present locally, so it
+was not run; it stays a separate restricted research path.
+
+Not run: `--native-flight-tables` (tables not present locally); no windowed
+frame capture, because the plan asks for none and the render scenario ran
+through the battery's own `tools/agent-run.sh` wrapper. No other AGENTS.md
+check is part of this slice; F16A-8 runs the full list. No network, replay or
+golden fixture changed.
