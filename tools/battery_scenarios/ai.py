@@ -1728,6 +1728,21 @@ def scenarios() -> list[Scenario]:
                            "M25.PT identity (MIG27R.SEE radar, AA-6 and AA-2 default load) in a "
                            "2 v 2 fight."))
 
+    # 13d. The F-16A in a mission (slice F16A-7): every wing the F-16A, the
+    # player's own included, 2 v 2 with the fight script, so the new F16.PT
+    # identity flies a mission with its own F18R.SEE radar, F18.ECM jammer and
+    # its five-station default load (M61, F150 tank, two AGM-65G, two AIM-120,
+    # four AIM-9M). The roster probe flies it against itself at every skill;
+    # this one has it shoot and be shot at. It shares F16.SH, F16C.HUD and the
+    # F18R.SEE radar with the F-16C but is never aliased to it.
+    out.append(probe("f16a-quick-mission-2v2", fight(2, 2, "--aircraft", "f16a",
+                                                       "--probe-friendly-aircraft", "f16a",
+                                                       "--probe-enemy-aircraft", "f16a",
+                                                       "--separation", "5", *attack), ticks=7200,
+                     notes="All F-16A: the player's wing and the enemy wing fly the new "
+                           "F16.PT identity (F18R.SEE radar, M61, F150 tank, AGM-65G, AIM-120 "
+                           "and AIM-9M default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

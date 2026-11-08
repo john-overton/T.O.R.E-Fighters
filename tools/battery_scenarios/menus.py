@@ -779,6 +779,8 @@ def scenarios() -> list[Scenario]:
     # the F/A-18 (pod stations, no sensor), the Su-25 (built-in laser) and the F-16C (fixed Pave Spike).
     # Slice M25-9 adds the MiG-25: its decoded wing mask admits a laser-guided store but it has no
     # designator, so the lobby's Load Ordnance page warns and shows no sensor helper.
+    # Slice F16A-7 adds the F-16A: its decoded wing mask admits a laser-guided store and a Pave Spike
+    # pod, but its record has no Pave Spike row, so the lobby page warns and offers the pod helper.
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
         ("f18", "ordnance-laser", True, True, False),
@@ -787,6 +789,7 @@ def scenarios() -> list[Scenario]:
         ("f16c", "ordnance-laser", False, True, False),
         ("mig29", "ordnance", False, True, False),
         ("mig25", "lobby-ordnance-laser", True, False, True),
+        ("f16a", "lobby-ordnance-laser", True, True, True),
     ):
         out.append(
             Scenario(
