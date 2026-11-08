@@ -1410,6 +1410,55 @@ launcher illumination, so the AA-9 guides (checked in M31-7; it killed the
 range fixture in a 3,600-tick live-fire probe). The chaff and flare counts (60 and 60) come from the
 record and never depended on the review.
 
+### M31-8 flight review (2026-11-08)
+
+The MiG-31 flies the hybrid adapter's own `variety` configuration, built from
+its `MIG31.PT` (`MIG31.SH`) record, and the model reads the record's own values:
+empty 48,115 lb, internal fuel 30,865 lb, maximum takeoff 91,725 lb, 33,510 lbf
+military and 48,500 lbf afterburner thrust, environment rows -2 to +4 G and a
+68,000 ft ceiling. No envelope, G or flow fit was added and no record value was
+changed.
+
+- The 1 G row's fast edge decodes to 2,743 ft/s at 36,000 ft, 1,625 kt, against
+  the published 3,000 km/h (1,620 kt) at 17,500 m, plus 0.3 percent. The
+  sea-level 1 G edge is 1,370 ft/s, 812 kt, against the published 810 kt, plus
+  0.2 percent. Both are inside the decoded envelope, so `fitted_envelopes` leaves
+  the record untouched: this is the source's top speed, not a fit.
+- The shared loaded-drag rule makes full internal fuel settle at 0.915 or 0.916
+  of the edge at 1,000, 10,000, 20,000, 30,000 and 36,000 ft, inside the
+  fighters' 87 to 96 percent band.
+- The G limits are the source's +4/-2 rows, so the loaded 4 G row gives 3.25 G
+  at the default gross weight (36 percent loaded elevator, 0.735 loading). The
+  positive limit is one G under the real aircraft's published +5 supersonic
+  limit; it stays retail (M31-0, no record change).
+- The record's fuel flows are 6 lb/s at military power and 36 lb/s at full
+  afterburner. That is, as plain arithmetic, about 85.7 minutes of military power
+  or 14.3 minutes of afterburner from the 30,865 lb tank, far longer than the
+  real D-30F6's specific fuel consumption allows; the record rule keeps the flows
+  with the tank, which is left as retail, so the flow is a gap for John, not a
+  correction.
+- The afterburner thrust is 29 percent under the real engines (M31-0). It still
+  fills the envelope: the full-afterburner climb probe tops 77,009 ft (1.132 of
+  the 68,000 ft ceiling) before the tank runs dry, and the 300-second sprint
+  reaches 842.3 kt at 5,000 ft, 0.940 of the 1 G edge there, so the reduced
+  thrust does not leave the aircraft short of its decoded top speed in level
+  flight.
+- The seven ground probes take off, land and stop as the shared rules expect:
+  liftoff tick 1,949 at 165.8 kt over 2,309 ft, approach 166.2 kt, touchdown
+  167.9 kt at 12.0 ft/s sink and a 100 score; gear-up and off-runway crash by
+  design and the nosewheel does not crash.
+
+The liftoff range is the heavy-interceptor plausibility band (160 to 190 kt) and
+the approach range is fitted from the published 280 km/h landing speed
+(airbase.ru, read 2026-11-08), a plus or minus 5 percent window; both are agent
+decisions, and the measured 165.8 kt and 166.2 kt are recorded as regression
+values
+([variety flight baseline](../baselines/variety-flight.md#mig-31-validation-2026-11-08)).
+
+The hybrid researched default is the validated path. The legacy `--legacy-flight`
+adapter and the restricted `--native-flight-tables` path stay separate and are
+not changed.
+
 ### Unknowns and next steps
 
 | Unknown | Why it matters | Next step |
@@ -1424,7 +1473,7 @@ record and never depended on the review.
 | Wing span 22% wide | The shape is wider than the real span | Record in M31-2; no change planned |
 | No tank row | The record has no `F250.GAS` row | Keep; M31-5 and M31-6 follow the record |
 | No AA-6 row | The encyclopedia shows AA-6 on the inner pylons | Keep; follow the record |
-| Fuel (-14.4%), thrust (-19.8% and -29.0%) and flow | Range, climb and endurance | List for John; M31-8 |
+| Fuel (-14.4%), thrust (-19.8% and -29.0%) and flow | Range, climb and endurance | Resolved in M31-8: kept as retail and listed for John; the flows stay with the tank |
 | Default quantities, pairing, 260-round gun count | Stores load | M31-5 and M31-6 |
 | Debris scale and hulk identity | A and C are both damaged bodies | M31-2 |
 | Shadow shape | 10 faces, no texture | M31-2 |

@@ -547,6 +547,46 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## MiG-31 (M31-8, 2026-11-08)
+
+The MiG-31 is the batch's twentieth conventional aircraft. It flies the hybrid
+adapter's own `variety` configuration, built from its own `MIG31.PT`
+(`MIG31.SH`) record. Its values: empty 48,115 lb, internal fuel 30,865 lb,
+maximum takeoff 91,725 lb, 33,510 lbf military and 48,500 lbf afterburner
+thrust, environment rows -2 to +4 G and a 68,000 ft ceiling. The shared
+conventional flight, ground contact, actuator and loaded-mass rules apply
+unchanged, and no new fit was needed.
+
+The 1 G row's fast edge is 2,743 ft/s at 36,000 ft, 1,625 kt, against the
+published 3,000 km/h (1,620 kt) at 17,500 m, 0.3 percent over. The sea-level
+1 G edge is 1,370 ft/s, 812 kt, against the published 810 kt, 0.2 percent over.
+Both are inside the decoded envelope, so `fitted_envelopes` leaves the record
+untouched: this is the source's top speed, not a fit. The shared loaded-drag
+rule makes full internal fuel settle at 0.915 to 0.916 of the edge at 1,000,
+10,000, 20,000, 30,000 and 36,000 ft, inside the fighters' 87 to 96 percent
+band. The G limits are the source's +4/-2 rows, so the loaded 4 G row gives
+3.25 G at the default gross weight, through the shared loaded-elevator divisor
+(36 percent loaded elevator, 0.735 loading). The positive limit is one G under
+the real aircraft's published +5 supersonic limit; it stays retail.
+
+The record's fuel flows are 6 lb/s at military power and 36 lb/s at full
+afterburner. That is, as plain arithmetic, about 85.7 minutes of military power
+or 14.3 minutes of afterburner from the internal tank, far longer than the real
+D-30F6's specific fuel consumption allows. The record rule keeps the flow with
+the tank, which is left as retail: this is a gap for John, not a correction.
+The afterburner thrust is 29 percent under the real engines, and the aircraft
+still reaches its decoded envelope: the full-afterburner climb tops 77,009 ft
+before the tank runs dry, and the sprint reaches 842.3 kt at 5,000 ft, 0.940 of
+the edge there.
+
+The MiG-31 also carries a default ordnance load of four AA-9s and two AA-8s, so
+its gross weight is above the clean record weight; the flight model reads the
+loaded mass from the shared rules and no flight field changes with the stores.
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

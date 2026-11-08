@@ -365,3 +365,115 @@ frame capture, because the plan asks for none and the render scenario ran
 through the battery's own `tools/agent-run.sh` wrapper. No other AGENTS.md
 check is part of this slice; F16A-8 runs the full list. No network, replay or
 golden fixture changed.
+
+## MiG-31 validation, 2026-11-08
+
+Implementation mode, slice M31-8. The `MIG31.PT` record was read from the
+ignored local FA_2.LIB catalog under `.local/m3-imports/scratch/mig31` and the
+app profile is `.local/m3-aircraft/profile`. The MiG-31 flies its own record on
+the default hybrid `--researched-flight` path; `--legacy-flight` keeps the
+previous compatibility model and `--native-flight-tables` stays a separate
+restricted path. The record's 1 G top speed is kept as decoded (no
+`fitted_envelopes` entry), the G limits stay +4/-2 and no flight value is
+changed. The default load is the record's own four AA-9s and two AA-8s.
+
+`cargo run --locked -p tore-sim --example variety_flight --
+.../MIG31.PT` printed `aircraft=MiG-31 conventional=pass deterministic=pass
+landing=pass ticks=1200`. `PROBE_LEVEL=1 PROBE_PULLS=1
+PROBE_ALTS=1000,10000,20000,30000,36000 cargo run --locked -p tore-sim --example
+envelope_probe -- .../MIG31.PT` printed
+`empty=48115 fuel=30865 mil=33510 ab=48500 loadedDrag=30 loadedElev=36
+pullDrag=58 ceiling=68000`, the record's own 1 G row of 1,625 kt at 36,000 ft,
+and the level speeds and full-stick pulls below.
+
+| Level top speed, full internal fuel | 1 G edge, kt | Simulated, kt | Ratio |
+| --- | ---: | ---: | ---: |
+| 1,000 ft | 829 | 759 | 0.916 |
+| 10,000 ft | 981 | 898 | 0.915 |
+| 20,000 ft | 1,150 | 1,053 | 0.915 |
+| 30,000 ft | 1,422 | 1,301 | 0.915 |
+| 36,000 ft | 1,625 | 1,488 | 0.915 |
+
+| Full-stick pull | 1,000 ft | 10,000 ft | 20,000 ft |
+| --- | --- | --- | --- |
+| 0.50 of the edge | 3.30 G, 6.3 deg/s, limit 3.25 | 3.29 G, 5.2 deg/s, limit 3.25 | 3.28 G, 4.4 deg/s, limit 3.25 |
+| 0.70 | 3.29 G, 4.4 deg/s, limit 3.25 | 3.27 G, 3.7 deg/s, limit 3.25 | 3.27 G, 3.1 deg/s, limit 3.25 |
+| 0.85 | 3.28 G, 3.6 deg/s, limit 3.25 | 2.45 G, 1.9 deg/s, limit 2.44 | 2.45 G, 1.6 deg/s, limit 2.44 |
+| 0.90 | 2.46 G, 2.2 deg/s, limit 2.44 | 1.63 G, 0.8 deg/s, limit 1.62 | 1.63 G, 0.7 deg/s, limit 1.62 |
+| 0.95 | 1.64 G, 0.9 deg/s, limit 1.62 | 1.63 G, 0.7 deg/s, limit 1.62 | 1.63 G, 0.6 deg/s, limit 1.62 |
+
+The peak G exceeds the limit printed at the start speed in the first three bands
+because the pull decelerates the aircraft and the envelope's fast side gives the
+higher row more pull, the same effect the MiG-25 and F-16A show. The G limits
+are the source's +4/-2; the loaded 4 G row gives 3.25 G at the default gross
+weight.
+
+The record's fuel flows are 6 lb/s at military power and 36 lb/s at full
+afterburner. The climb burned the 30,865 lb tank dry over 167,963 ticks
+(`fuel_end: internal_lb=0.0`) and the 36,000-tick sprint burned 10,800 lb in
+300 s, 36 lb/s. They are far above what the real D-30F6's specific fuel
+consumption allows, but the record rule keeps them with the tank, which is left
+as retail; the M31-0 audit lists them for John and no record value changed.
+
+Headless probes, all `--aircraft mig31 --no-audio`:
+
+| Probe | Ticks | Max speed, kt | Max G | Fraction of the edge | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| level | 7,200 | 582.6 | 1.01 | 0.650 | no crash |
+| pull | 7,200 | 582.6 | 3.31 | 0.650 | no crash |
+| loop | 5,419 | 583.1 | 3.32 | 0.650 | completed, no crash |
+| sprint | 36,000 | 842.3 | 1.00 | 0.940 | no crash |
+| climb | 167,963 | 889.2 | 3.29 | 1.171 | topped 77,009 ft (1.132 of ceiling) on a dry tank, no crash |
+| dive | 4,610 | 1,089.3 | 1.01 | 1.204 | overspeed loss |
+| overspeed | 1,200 | 1,265.4 | 1.00 | 1.100 | overspeed loss |
+| rudder | 360 | 582.6 | 1.01 | 0.650 | no crash |
+| devices | 3,600 | 582.6 | 1.10 | 0.650 | no crash |
+| stall-recover | 3,486 | 263.4 | 1.22 | 0.247 | recovered, no crash |
+| spin-recover | 1,664 | 321.6 | 0.97 | 0.318 | recovered, no crash |
+
+The stall recovery raised the alert at tick 2,765 and recovered at 3,245 with
+0 ft of altitude lost and a minimum 231.2 kt. The spin recovery entered at tick
+3, recovered at 1,423 after 0.73 revolutions during recovery (1.89 total),
+losing 3,146 ft. The dive and overspeed runs both end in the overspeed loss, the
+intended end of those maneuvers, at 1.20 and 1.10 times the 20,000 ft edge.
+
+Ground probes at `--theater UKR --ground-start 1` with the default load:
+
+| Probe | Ticks | Result |
+| --- | ---: | --- |
+| takeoff | 2,781 | 100 ft reached; liftoff tick 1,949 at 165.8 kt over 2,309 ft, rotation 146.3 kt |
+| takeoff-gear-airborne | 2,778 | 100 ft reached; same liftoff; gear raised after the wheels are clear |
+| land | 12,365 | touchdown at 167.9 kt, 12.0 ft/s sink, stopped tick 12,124, 1,709 ft of runway left, score 100 |
+| land-gear-up | 10,356 | crashed for the gear; no touchdown |
+| land-hard | 12,163 | touchdown at 174.6 kt, 34.1 ft/s sink, stopped, 2,182 ft left |
+| land-off-runway | 10,061 | crashed for the not-landable ground |
+| nosewheel | 9,000 | no crash, 11.2 kt maximum |
+
+The battery: `python3 tools/battery.py --scenario '*-mig31*' --lane flight
+--profile .local/m3-aircraft/profile` passed 11 of 11 scenarios, run
+`20261108-160050`: `flight-animation-mig31`, `flight-liftoff-mig31`,
+`flight-liftoff-retail-mig31`, `flight-approach-mig31`, `flight-variety-mig31`,
+the three live-fire slots, the two jettison slots and `render-mig31-skin`. The
+liftoff, liftoff-retail, approach and variety scenarios are new in this slice.
+
+The liftoff range is the heavy-interceptor plausibility band (160 to 190 kt) and
+the approach range is fitted from the published 280 km/h landing speed
+(airbase.ru, MiG-31, read 2026-11-08), a plus or minus 5 percent window (265 to
+296 km/h). The model lifts off at 165.8 kt and approaches at 166.2 kt, both
+inside their ranges' windows, and the values are recorded as regression checks,
+not retail figures.
+
+**Paths stay distinct.** The default prints `flight_model=hybrid`; the same
+`--maneuver pull` under `--legacy-flight` prints `flight_model=legacy` and a
+different flight (final 140.6 kt against the hybrid's 246.6 kt at 7,200 ticks).
+The `stall-recover` maneuver is a larger difference: the hybrid raised the alert
+at tick 2,765 and recovered at 3,245, while legacy never raised one (0 alerts,
+332 ft lost). `--native-flight-tables` needs the extracted `sine-q15.bin` and
+`atan-pa.bin`, which are not present locally, so it was not run; it stays a
+separate restricted research path.
+
+Not run: `--native-flight-tables` (tables not present locally); no windowed
+frame capture, because the plan asks for none and the render scenario ran
+through the battery's own `tools/agent-run.sh` wrapper. No other AGENTS.md check
+is part of this slice; M31-10 runs the full list. No network, replay or golden
+fixture changed.

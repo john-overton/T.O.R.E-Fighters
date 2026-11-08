@@ -76,10 +76,10 @@ class TakeoffAndLandingTests(unittest.TestCase):
         self.assertIsNone(flight._in_target(97, (125, 140), 97.0))
         self.assertTrue(flight._in_target(97, (125, 140), None))
         self.assertTrue(flight._in_target(110, (125, 140), 97.0))
-        # The original roster, plus the X-31's approach and the MiG-25's
-        # liftoff and approach figures (M25-8). The F-16A has no per-aircraft
-        # speed target: its record equals the F-16C's (F16A-6).
-        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25"})
+        # The original roster, plus the X-31's approach and the MiG-25's and
+        # MiG-31's liftoff and approach figures (M25-8, M31-8). The F-16A has no
+        # per-aircraft speed target: its record equals the F-16C's (F16A-6).
+        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31"})
         self.assertIn("mig25", flight.VARIETY_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_TARGET)
@@ -87,6 +87,11 @@ class TakeoffAndLandingTests(unittest.TestCase):
         self.assertIn("f16a", flight.VARIETY_AIRCRAFT)
         self.assertIn("f16a", flight.LIFTOFF_AIRCRAFT)
         self.assertIn("f16a", flight.INTERNAL_FUEL_LB)
+        self.assertIn("mig31", flight.VARIETY_AIRCRAFT)
+        self.assertIn("mig31", flight.LIFTOFF_AIRCRAFT)
+        self.assertIn("mig31", flight.LIFTOFF_TARGET)
+        self.assertIn("mig31", flight.APPROACH_TARGET)
+        self.assertIn("mig31", flight.INTERNAL_FUEL_LB)
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")
