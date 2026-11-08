@@ -63,6 +63,7 @@ the daytime palette stored in `~XXH.PIC`.
 | su25 | SU25.PT | SU33CC.HUD | `~SU33_P.PIC` | as mig29 | 0 (0,0,0) | 1 | 1 | 1 |
 | mig23 | MIG23.PT | SU33CC.HUD | `~SU33_P.PIC` | as mig29 | 0 (0,0,0) | 1 | 1 | 1 |
 | mig25 | M25.PT | SU33_C.HUD | `~SU33_P.PIC` | as mig29 (M25-7) | 0 (0,0,0) | 1 | 1 | 1 |
+| f16a | F16.PT | F16C.HUD | `~F16_P.PIC` | grey frame, bevelled top corners, pale buttons | 0 (0,0,0) | 1 | 0 | 0 |
 | su35 | SU35.PT | SU35.HUD (null pointer) | `~SU35_P.PIC` | flat grey frame, cut top corners, no screws, pale lilac buttons | 0 (0,0,0) | 1 (170,170,170) | 0 (0,0,0) | 0 (0,0,0) |
 | f22 | F22.PT | F22.HUD | `~F22_P.PIC` | dark olive grey frame, corner bolts, pale buttons | 0 (0,0,0) | 39 (234,234,234) | 0 (0,0,0) | 0 (0,0,0) |
 | f22n | F22N.PT | F22N.HUD | `~F22_P.PIC` | as f22 | 0 (0,0,0) | 39 | 0 | 0 |
@@ -70,7 +71,10 @@ the daytime palette stored in `~XXH.PIC`.
 
 F14.HUD and F14CC.HUD carry identical panel names and colours, so TORE's
 existing F14.HUD choice gives the same bezel. The MiG-21 teal highlight colour
-(index 4) is the only non-grey text colour among the flyable set.
+(index 4) is the only non-grey text colour among the flyable set. The f16a row
+is the F-16 family: `F16.PT` and `F16C.PT` both name `F16C.HUD`, so the F-16A
+draws the same `~F16_P.PIC` bezel as the F-16C (F16A-5). The screen inset of
+`~F16_P.PIC` is index 0, sampled inside the recess.
 
 ## Geometry (640x480, four windows)
 
@@ -202,7 +206,10 @@ stored palette was 0.96 to 1.02.
   requests `~XX_w`. Confirmed for the MiG-25 in slice M25-7: `SU33_C.HUD` names
   `~su33_w`, no archive entry exists, and the aircraft imports and draws with
   the same shared cockpit the MiG-29, Su-25 and MiG-23 use (their archives also
-  lack it). The original's use of the field is still not established.
+  lack it). The original's use of the field is still not established. The F-16
+  family (F16A-5) is the same case but the field does not match the stem: both
+  `F16C.HUD` builds name `~raf_w`, a Rafale-named field inside an F-16 module
+  (the root also carries `~f16`, `~f16h` and `~f16s`). No code path requests it.
 - **Other pages' button letters.** Only Envelope (`U A C`) and the `- +`,
   `M Y` sets were confirmed from call sites; the letters for every page are
   outside this spec.

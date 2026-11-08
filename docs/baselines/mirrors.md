@@ -158,3 +158,17 @@ frame`. So the MiG-25 joins the MiG-29, Su-25, MiG-23 and Mi-24 on the reviewed
 and no per-aircraft eye was added. Offscreen capture, no window: the
 `--cockpit-sheet` tile and the `--capture-flight` cockpit frames are under
 `.local/m3-aircraft/frames/M25-7/`.
+
+## 2026-11-08 F-16A cockpit confirmation
+
+Slice F16A-5 confirmed the new F-16A import (`F16.PT`) on the shared `F16`
+cockpit: `--cockpit-sheet OUT_DIR f16a` reported `stem F16 cockpit ~F16H.PIC art
+1280x490 NO MIRRORS FITTED`, and the windowed captures printed `Cockpit mirrors:
+0 reviewed regions, 768x384 rear feed, every other visible frame`. The F-16
+picture has no flat mirror fill (2026-10-12 review above), so the F-16A stays
+without one and no mask was fitted and no per-aircraft eye was added. The
+F-16A's cockpit render and art-mask tile are pixel-identical to the F-16C's
+(RMSE 0 over the render, the only difference being the label strip), which is
+the visible proof that both identities draw the one reviewed `~F16H.PIC`. The
+`--cockpit-sheet` tiles and the `--capture-flight` cockpit frames are under
+`.local/m3-aircraft/frames/F16A-5/`.

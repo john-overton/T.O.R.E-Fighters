@@ -877,12 +877,12 @@ is corrected in F16A-0.
 | Unknown | Why it matters | Next step |
 | --- | --- | --- |
 | OBJECT flag `0x2bf3` and the F16C's extra `0x800000` / `0x4000` | Uninterpreted; must not be mistaken for equipment | Trace the OBJECT flag consumers in the reviewed executable; F16A-1 can proceed without it |
-| `viewOffset.z` 110 against the F16C's 60 | It sets the cockpit eye position a player sees | Confirm in F16A-5 cockpit frames; no change unless a frame shows it wrong |
+| `viewOffset.z` 110 against the F16C's 60 | It sets the cockpit eye position a player sees | Resolved (F16A-5): decoded into the schema but no host code reads it. The cockpit camera uses the model origin and a shared fitted pilot eye (`mirrors::pilot_eye`), so the 110/60 difference is not player-visible and no frame differs |
 | Source-default A2A quantity | `maxItems` is capacity, not a proven default load, and F16A has four carrier rows where the F16C has three | Review the source-default normalization in F16A-4 |
 | The tank and carrier masks (`0x0605`, `0x07e5`, `0x07e5`, `0x0085`, `0x0085`) | They set which stores fit each row and differ from the F16C's | Decode and pin in F16A-4 with `--validate-ordnance` |
 | High thrust against the F100-PW-200 | It sets acceleration and climb | List for John now; validate flight in F16A-6. No record change |
 | Destroyed hulk identity | A and C are both damaged bodies and there is no separate hulk file | Confirm in F16A-2 which body draws as the hulk and that B and D are the pieces |
-| `F16C_0.PIC` to `F16C_8.PIC`, `F16C_P.PIC` in `disc2/FA_3.LIB` | A second F-16C cockpit art set not in the identity closure | Confirm they are unused by the current cockpit path in F16A-5 |
+| `F16C_0.PIC` to `F16C_8.PIC`, `F16C_P.PIC` in `disc2/FA_3.LIB` | A second F-16C cockpit art set not in the identity closure | Resolved (F16A-5): the import closure selects `~F16*` from `FA_1.LIB`, which are `~F16.PIC`, `~F16H.PIC`, `~F16S.PIC` and `~F16_P.PIC`; no code path requests the `F16C_*.PIC` set |
 | Streamer definition | The two points and zero pivot are unreviewed | Check the contrail or effect origin in F16A-2 or F16A-5 |
 
 ### F16A-1 hand-off
@@ -905,3 +905,40 @@ strike class is Fighter. The `variety` identity is `("F-16", "F16.SH")` with
 clearance 7.0 ft, and it shares the F-16C layout spec (`31488`, 356 faces, the
 six words) and the `SpecificRig::F16` rig. No other record is substituted for
 any of these names, and `F16C` stays its own identity.
+
+### F16A-5 cockpit and HUD confirmation
+
+Slice F16A-5 confirmed the imported F-16A on the shared `F16` cockpit and the
+shared `F16C.HUD`. `Airframe::load` rejects any aircraft whose HUD panel field
+is not its instrument panel, so the clean loads and captures below are the
+proof. No new art, sensor or preset was authored, and nothing unreviewed was
+switched on.
+
+- The HUD is `F16C.HUD`, byte-identical in parsed content in both archive
+  builds (`FA_2.LIB` and `disc1/SETUP.ESA/FA_2.LIB`). Decoded root fields:
+  panel `~f16_p` (+0x275), primary ink 40 (+0x72), title 1 (+0x2a8), button 0
+  (+0x2a9), press 0 (+0x2aa). `panel_resource()` is `~F16_P.PIC`, present in
+  `FA_1.LIB`, and `instrument_panel()` for the `F16` stem.
+- The cockpit stem is `F16`: forward `~F16H.PIC`, panel `~F16_P.PIC`, base
+  `~F16.PIC`, surround `~F16S.PIC`, and no left, centre or right overlay
+  (`cockpit_overlays()` returns three `None`s). `--cockpit-sheet OUT_DIR f16a`
+  reported `stem F16 cockpit ~F16H.PIC art 1280x490 NO MIRRORS FITTED`, and the
+  F-16A render and art-mask tile are pixel-identical to the F-16C's.
+- The glass aperture is the reviewed `F16C`/`F16A` polygon in `hud_aperture.rs`.
+  The F-16 picture has no flat mirror fill, so the captures printed `Cockpit
+  mirrors: 0 reviewed regions, 768x384 rear feed, every other visible frame`.
+- All ten instrument pages draw: RCS, Envelope (5000 FT, 539 KTS), Front View
+  and Other View (CAMERA LOADING), Target Cam (NO TARGET), RWR (scale 10), Nav
+  Info (NO WAYPOINTS, 1 MISSION), Systems (THR 70%, TEMP 0%, OIL 100%, HYD
+  100%, FUEL 6972 LBS, + EXT 990 LBS), Weapons (NO WEAPONS standalone; the live
+  capture lists the default load) and Radar (NO SENSOR DATA standalone; the live
+  capture shows TWS at 10 miles). The fuel reads the record's internal 6,972 lb
+  plus the 990 lb `F150.GAS`, and the live Weapons page lists `313 M61`,
+  `2 AGM-65`, `2 AIM-120`, `4 AIM-9M`, `30 CHAFF`, `30 FLARE`.
+- The sensors are the reviewed F-16C presets, reached by the same record names:
+  radar `F18R.SEE`, jammer `F18.ECM`, visual `VIS340.SEE`. `--sensor-summary`
+  prints an F16A line byte-for-byte equal to the F16C's bar the identity.
+- Absent systems stay absent: no gun reticle beyond the M61 gun row, no
+  targeting sight of its own (Target Cam is the shared plain window), and no
+  Pave Spike designator row (the record has none). The two `disc2/FA_3.LIB`
+  `F16C_*.PIC` cockpit art sets are unused by every code path.
