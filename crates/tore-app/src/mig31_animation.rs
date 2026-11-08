@@ -1,14 +1,16 @@
 //! MiG31 own-source control surfaces (all-moving stabilators, outboard
-//! ailerons, inboard flaps and twin rudders) plus the interim fitted gear rise.
-//! See docs/spec/variety-animation.md "MiG-31 control fit".
-//! MIG31.SH ships one rudder branch (0x6144) and two flap-removal branches
-//! (0x6138, 0x613e) but no signed pitch or roll branch, so every control role is
+//! ailerons, inboard flaps and twin rudders), rigid gear, dorsal airbrake and
+//! afterburner plume. See docs/spec/variety-animation.md "MiG-31 control fit".
+//! MIG31.SH ships one rudder branch (0x6144), two flap-removal branches
+//! (0x6138, 0x613e) and three device branches (0x612c gear, 0x6126 brake,
+//! 0x6120 plume), but no signed pitch or roll branch, so every control role is
 //! a fitted geometric assignment over exact reviewed source panels. The six
 //! state words follow the shared base order flame, brake, gear, flap, flap, then
 //! the rudder: 0x6120 the plume, 0x6126 the brake, 0x612c the gear, 0x6138 and
 //! 0x613e the left and right flap pairs, and 0x6144 the twin rudders.
 use crate::{AppResult, additional_animation::turn, flight::State};
 use std::collections::BTreeSet;
+use std::f64::consts::FRAC_PI_2;
 use tore_formats::shape::{Face, Shape};
 const WORDS: [usize; 6] = [0x6120, 0x6126, 0x612c, 0x6138, 0x613e, 0x6144];
 /// All-moving horizontal stabilators: both windings of one flat plate per side.
@@ -26,15 +28,38 @@ const RUDDER_L: [usize; 2] = [0x44eb, 0x450a];
 /// The source's own deflected rudder pose (word 0x6144 set): the same two panels
 /// per fin, trailing edge swung outboard on both sides.
 const RUDDER_DEFLECTED: [usize; 4] = [0x431a, 0x4339, 0x4377, 0x4396];
-/// Gear word 0x612c: a strut plate and a painted wheel card per main side, and a
-/// centre strut with its cross plate at the nose.
+/// Gear word 0x612c. One strut plate and one painted wheel card per main side,
+/// and a nose strut plate with its wheel card. The strut plate and wheel card of
+/// each assembly are separate source quads; both windings of each quad are one
+/// whole part. No separate gear-door faces exist in the source.
+const GEAR_MAIN_R: [usize; 4] = [0x3eda, 0x3ef1, 0x3f35, 0x3f5c];
+const GEAR_MAIN_L: [usize; 4] = [0x3fe4, 0x3ffb, 0x403f, 0x4066];
+const GEAR_NOSE: [usize; 4] = [0x40ee, 0x4105, 0x4149, 0x4168];
 const GEAR: [usize; 12] = [
     0x3eda, 0x3ef1, 0x3f35, 0x3f5c, 0x3fe4, 0x3ffb, 0x403f, 0x4066, 0x40ee, 0x4105, 0x4149, 0x4168,
 ];
-/// Fitted interim rise law. M31-4 owns the rigid gear assemblies; until then the
-/// whole gear group rises through its source vertical extent as it stows, the
-/// shared fitted device law the other variety aircraft use.
-const GEAR_RISE: f32 = 20.;
+/// Main hinge line: the lateral X axis through each strut's aft-top root at
+/// Y=7, Z=-10. The whole assembly swings up and forward and stows at the belly.
+const MAIN_HINGE: [f32; 3] = [0., 7., -10.];
+/// Nose hinge line through the nose strut's aft-top root at Y=77, Z=-10.
+const NOSE_HINGE: [f32; 3] = [0., 77., -10.];
+/// Fitted vertical nose steering axis at the wheel card's centre. The source
+/// nose strut plate sits three units inboard of its wheel card.
+const NOSE_STEER: [f32; 3] = [0., 87.5, -10.];
+/// Afterburner word 0x6120: three double-sided plates per engine, crossed and
+/// trailing from the nozzle exit at Y=-68 to Y=-129.
+const FLAME: [usize; 12] = [
+    0x45c0, 0x45f3, 0x4626, 0x4659, 0x468c, 0x46b3, 0x46da, 0x4701, 0x4728, 0x4747, 0x4766, 0x4785,
+];
+const FLAME_ROOT: f32 = -68.;
+/// Airbrake word 0x6126: one double-sided dorsal panel hinged on the spine edge
+/// at Y=50, Z=8 and raised to Y=32, Z=24.
+const BRAKE: [usize; 2] = [0x3e4b, 0x3e62];
+const BRAKE_HINGE: [f32; 3] = [0., 50., 8.];
+/// Fitted closed angle: rotates the source raised panel flat along the spine.
+const BRAKE_CLOSED: f64 = 0.72;
+/// Source vertical extent of the gear group, used to pin the reviewed cards.
+const GEAR_EXTENT: f32 = 20.;
 fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
     let mut found = shape.faces.iter().filter(|f| f.address == address);
     let result = found
@@ -118,13 +143,21 @@ fn is_flap(a: usize) -> bool {
 fn is_rudder(a: usize) -> bool {
     RUDDER_R.contains(&a) || RUDDER_L.contains(&a)
 }
-/// The interim fitted gear rise: the whole source group translates up by its own
-/// vertical extent as the gear stows, and is hidden at zero. M31-4 replaces it
-/// with reviewed rigid assemblies and doors.
-fn gear_positions(f: &mut Face, gear: f64) {
-    let rise = GEAR_RISE * (1. - gear.clamp(0., 1.)) as f32;
-    for p in &mut f.positions {
-        p[2] += rise;
+/// Whole-assembly gear motion. Each main pair and the nose pair are rigid groups
+/// that share one lateral hinge, so the strut plate and its wheel card stay
+/// attached as the wheel swings forward and up into the body. The source adds no
+/// separate gear-door faces. The nose group also steers about its vertical strut
+/// axis before it retracts.
+pub fn gear_positions(f: &mut Face, gear: f64, steering: f64) {
+    let closing = 1. - gear.clamp(0., 1.);
+    let angle = FRAC_PI_2 * closing;
+    if GEAR_NOSE.contains(&f.address) {
+        if steering != 0. {
+            turn(f, NOSE_STEER, [0., 0., 1.], -steering);
+        }
+        turn(f, NOSE_HINGE, [1., 0., 0.], angle);
+    } else {
+        turn(f, MAIN_HINGE, [1., 0., 0.], angle);
     }
 }
 pub struct Rig;
@@ -215,19 +248,74 @@ impl Rig {
                 }
             }
         }
-        // The gear word adds exactly the twelve reviewed cards.
+        // The gear word adds exactly the twelve reviewed cards: two whole source
+        // plates per assembly, each double-sided. The source has no separate
+        // gear-door faces. The strut plate and its wheel card share one lateral
+        // hinge per assembly and stay rigid.
         let gear = branch(bytes, &original, 0x612c, 1, &GEAR, &[])?;
+        roots(&gear, &GEAR_MAIN_R, &[[15., 7., -10.], [15., 28., -10.]])?;
+        roots(&gear, &GEAR_MAIN_L, &[[-15., 7., -10.], [-15., 28., -10.]])?;
+        roots(&gear, &GEAR_NOSE, &[[-3., 77., -10.], [-3., 95., -10.]])?;
         let (mut low, mut high) = (f32::INFINITY, f32::NEG_INFINITY);
         for face in gear.faces.iter().filter(|f| GEAR.contains(&f.address)) {
+            if face.positions.len() != 4 {
+                return Err("unreviewed MIG31.SH gear card topology".into());
+            }
             for p in &face.positions {
                 low = low.min(p[2]);
                 high = high.max(p[2]);
             }
         }
-        if high - low != GEAR_RISE {
+        if high - low != GEAR_EXTENT {
             return Err("unreviewed MIG31.SH gear extent".into());
         }
-        for source in gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)) {
+        // The brake word adds one raised double-sided dorsal panel hinged on the
+        // spine front edge at (0,50,8); the plume word adds six double-sided
+        // plates behind the Y=-68 nozzle exit.
+        let brake = branch(bytes, &original, 0x6126, 1, &BRAKE, &[])?;
+        for &address in &BRAKE {
+            let face = one(&brake, address)?;
+            if face.positions.len() != 4
+                || !face.positions.contains(&[5., 50., 8.])
+                || !face.positions.contains(&[-5., 50., 8.])
+            {
+                return Err("unreviewed MIG31.SH brake panel".into());
+            }
+        }
+        let flame = branch(bytes, &original, 0x6120, 1, &FLAME, &[])?;
+        let mut root = f32::NEG_INFINITY;
+        for &address in &FLAME {
+            let face = one(&flame, address)?;
+            if face.positions.len() != 4 && face.positions.len() != 6 {
+                return Err("unreviewed MIG31.SH flame topology".into());
+            }
+            for p in &face.positions {
+                if p[1] < -129. || p[1] > FLAME_ROOT {
+                    return Err("unreviewed MIG31.SH flame extent".into());
+                }
+                root = root.max(p[1]);
+            }
+        }
+        if root != FLAME_ROOT {
+            return Err("unreviewed MIG31.SH flame root".into());
+        }
+        for source in gear
+            .faces
+            .into_iter()
+            .filter(|f| GEAR.contains(&f.address))
+            .chain(
+                brake
+                    .faces
+                    .into_iter()
+                    .filter(|f| BRAKE.contains(&f.address)),
+            )
+            .chain(
+                flame
+                    .faces
+                    .into_iter()
+                    .filter(|f| FLAME.contains(&f.address)),
+            )
+        {
             shape.faces.push(source);
         }
         Ok((Self, shape))
@@ -261,14 +349,30 @@ impl Rig {
             if state.gear <= 0. {
                 return None;
             }
-            gear_positions(&mut result, state.gear);
+            gear_positions(&mut result, state.gear, state.nosewheel_angle());
+        } else if BRAKE.contains(&a) {
+            if state.brake <= 0. {
+                return None;
+            }
+            turn(
+                &mut result,
+                BRAKE_HINGE,
+                [1., 0., 0.],
+                BRAKE_CLOSED * (1. - state.brake.clamp(0., 1.)),
+            );
+        } else if FLAME.contains(&a) {
+            if state.exhaust <= 0. {
+                return None;
+            }
+            for p in &mut result.positions {
+                p[1] = FLAME_ROOT + (p[1] - FLAME_ROOT) * state.exhaust.clamp(0., 1.) as f32;
+            }
         }
         Some(result)
     }
 }
-/// M31-4 owns the afterburner plume (word 0x6120) and the airbrake (0x6126).
-pub(crate) fn flame(_address: usize) -> bool {
-    false
+pub(crate) fn flame(address: usize) -> bool {
+    FLAME.contains(&address)
 }
 
 #[cfg(test)]
@@ -441,37 +545,112 @@ mod tests {
         );
         assert!(ra.positions[0][2] > 2. && la.positions[0][2] < 2.);
     }
-    /// The interim gear rise is a rigid translation of the whole source group,
-    /// hidden at zero, and it reaches the fuselage belly plane at near-stow.
+    /// Every gear card is a rigid quad, the strut plate's own hinge corner does
+    /// not move, and at near-stow the whole card tucks to the belly plane. The
+    /// source has no separate gear-door faces, so no half-door can be left behind.
     #[test]
-    fn gear_rises_rigidly_and_hides_at_zero() {
+    fn gear_cards_stay_rigid_on_their_hinge_and_stow_at_the_belly() {
         let rig = Rig;
         let mut s = state();
-        let source = face(
-            GEAR[0],
-            vec![[17., 7., -19.], [15., 7., -10.], [15., 28., -10.]],
-        );
-        s.gear = 0.;
-        assert!(rig.animate(&source, &s).is_none());
-        for step in 1..=20 {
-            s.gear = f64::from(step) / 20.;
-            let out = rig.animate(&source, &s).unwrap();
-            for i in 0..source.positions.len() {
-                for j in i + 1..source.positions.len() {
-                    let before = (0..3)
-                        .map(|k| (source.positions[i][k] - source.positions[j][k]).powi(2))
-                        .sum::<f32>()
-                        .sqrt();
-                    let now = (0..3)
-                        .map(|k| (out.positions[i][k] - out.positions[j][k]).powi(2))
-                        .sum::<f32>()
-                        .sqrt();
-                    assert!((before - now).abs() < 1e-4, "gear card changed shape");
+        let cards: [(&[usize], [f32; 3], [f32; 3]); 3] = [
+            (&GEAR_MAIN_R, [15., 7., -10.], [15., 27., -30.]),
+            (&GEAR_MAIN_L, [-15., 7., -10.], [-15., 27., -30.]),
+            (&GEAR_NOSE, [-3., 77., -10.], [0., 87.5, -30.]),
+        ];
+        for (addresses, root, tip) in cards {
+            for &address in addresses {
+                let source = face(address, vec![root, tip, [root[0], root[1], tip[2]]]);
+                for step in 1..=400 {
+                    s.gear = f64::from(step) / 400.;
+                    let out = rig.animate(&source, &s).unwrap();
+                    for i in 0..3 {
+                        for j in i + 1..3 {
+                            let a = source.positions[i];
+                            let b = source.positions[j];
+                            let keep = (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt();
+                            let now = (0..3)
+                                .map(|k| (out.positions[i][k] - out.positions[j][k]).powi(2))
+                                .sum::<f32>()
+                                .sqrt();
+                            assert!((keep - now).abs() < 1e-3, "face {address:x} not rigid");
+                        }
+                    }
+                    assert!(
+                        (out.positions[0][1] - root[1]).abs() < 1e-4
+                            && (out.positions[0][2] - root[2]).abs() < 1e-4,
+                        "face {address:x} hinge root moved"
+                    );
                 }
+                s.gear = 1e-6;
+                let stowed = rig.animate(&source, &s).unwrap();
+                assert!(
+                    stowed.positions.iter().all(|p| p[2] >= -10.5),
+                    "face {address:x} hangs below the belly at near-stow"
+                );
             }
         }
-        s.gear = 1e-6;
-        let stowed = rig.animate(&source, &s).unwrap();
-        assert!(stowed.positions.iter().all(|p| p[2] >= -10.5));
+        s.gear = 0.;
+        assert!(
+            rig.animate(&face(GEAR_MAIN_R[0], vec![[15., 7., -10.]]), &s)
+                .is_none()
+        );
+    }
+    #[test]
+    fn brake_rises_from_its_spine_hinge_and_flame_extends_from_the_nozzle() {
+        let rig = Rig;
+        let mut s = state();
+        let brake = face(
+            0x3e4b,
+            vec![
+                [4., 32., 24.],
+                [-4., 32., 24.],
+                [-5., 50., 8.],
+                [5., 50., 8.],
+            ],
+        );
+        for fraction in [0., 0.25, 0.5, 0.75, 1.] {
+            s.brake = fraction;
+            if fraction == 0. {
+                assert!(rig.animate(&brake, &s).is_none());
+                continue;
+            }
+            let out = rig.animate(&brake, &s).unwrap();
+            assert_eq!(out.positions[2], brake.positions[2]);
+            assert_eq!(out.positions[3], brake.positions[3]);
+            if fraction == 1. {
+                assert_eq!(out.positions, brake.positions);
+            } else {
+                assert!(out.positions[0][2] < 24., "brake tip did not close down");
+            }
+        }
+        let plume = face(
+            0x45c0,
+            vec![
+                [10., -129., -2.],
+                [10., -68., -2.],
+                [3., -68., -2.],
+                [3., -129., -2.],
+            ],
+        );
+        for fraction in [0., 0.5, 1.] {
+            s.exhaust = fraction;
+            if fraction == 0. {
+                assert!(rig.animate(&plume, &s).is_none());
+                continue;
+            }
+            let out = rig.animate(&plume, &s).unwrap();
+            assert!(
+                (out.positions[1][1] - FLAME_ROOT).abs() < 1e-4
+                    && (out.positions[2][1] - FLAME_ROOT).abs() < 1e-4,
+                "flame root moved off the nozzle"
+            );
+            if fraction == 1. {
+                assert_eq!(out.positions, plume.positions);
+            } else {
+                assert!(out.positions[0][1] > -129., "flame tip did not shorten");
+            }
+        }
+        assert!(flame(FLAME[0]));
+        assert!(!flame(GEAR[0]));
     }
 }

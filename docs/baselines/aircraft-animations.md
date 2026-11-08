@@ -510,6 +510,41 @@ to the belly, the airbrake rises from the spine, and both afterburner plumes
 appear. The free-flight aircraft banks during the settle, so the flight frames
 are inspection views; the probe contact sheets are the clear evidence.
 
+## MiG-31 results
+
+Exact `mig31` (MIG31.PT) passes the source probe added in M31-4, with the M31-3
+control fit, in `.local/m3-imports/scratch/mig31/probe`. The probe reports
+`reviewed-controls-and-attachments`, 214 neutral faces and zero required or
+check failures. Every required control reads `moved`: pitch, roll, yaw and flaps
+from M31-3, and gear, brake and exhaust from M31-4.
+
+The six state words follow the shared base order flame, brake, gear, flap, flap,
+then the rudder. `0x6120` is the afterburner plume (six crossed double-sided
+plates, three per engine, rooted at the Y=-68 nozzle exit), `0x6126` the dorsal
+airbrake (one double-sided panel hinged on the spine front edge), `0x612c` the
+gear, `0x6138`/`0x613e` the left and right flaps the M31-3 rig already turns, and
+`0x6144` the twin rudders. There is no hook word.
+
+The gear is three rigid assemblies: one strut plate and one painted wheel card
+per main side, and a centre nose strut with its cross plate. Each main pair turns
+as one body about its aft-top lateral hinge and the nose about its own, tucking
+the wheel cards to the fuselage belly plane at stow; the nose also steers about
+its vertical strut axis. The dense gear sweep covers 202 values including a
+near-stow sample; maximum measured assembly rigidity error is 0.0000032 ft, every
+hinge root stays fixed, the two main sides keep an 8 ft minimum wheel gap, and
+no new planar crossings appear. The brake moves as one panel about its spine
+hinge, and the plume shortens from its nozzle root. The source shapes name no
+separate gear-door faces, so the closed belly skin is the door; no door is
+animated. The fitted retraction law, the brake closing angle and the plume
+scaling are presentation choices, not recovered original timing.
+
+Frames were reviewed in `.local/m3-imports/scratch/mig31/frames`: gear at 1.00,
+0.75, 0.50, 0.25 and 0.05 from the side and below, the brake at 0 and 1 from the
+side and rear, and the burner off and on from the rear. The gear stages up to
+the belly, the airbrake rises from the spine, and both afterburner plumes appear.
+The free-flight aircraft banks during the settle, so the flight frames are
+inspection views; the probe contact sheets are the clear evidence.
+
 ## F-16A results (2026-11-08)
 
 Exact `f16a` (`F16.PT`) shares `F16.SH`, the six state words and the whole F-16C
@@ -577,3 +612,4 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `f22n` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
 | `faxx` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
+| `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |

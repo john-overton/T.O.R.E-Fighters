@@ -1220,12 +1220,12 @@ they agree.
 
 | Word | Faces | Low point | Geometry (shape units) | Reading | Status |
 | --- | ---: | ---: | --- | --- | --- |
-| `0x6120` | +12 | -9 | Twelve plates behind the tail at x -14 to 14, y -129 to -68, z -9 to 5 | Afterburner flame, aft of the nozzles | Candidate; confirm in M31-4 |
-| `0x6126` | +2 | +8 | Raised quads at x +/-5, y 32 to 50, z 8 to 24 | Dorsal airbrake by slot order | Candidate. The encyclopedia puts the real brakes under the intake trunks, so the geometry and the text disagree; resolve in M31-4 |
-| `0x612c` | +12 | -30 | Wheel and strut groups at x +/-17, y 7 to 95, z -30 to -10 | Landing gear down | Confirmed; the parked gear word |
-| `0x6138` | -2 | -21 | Removes the left trailing-edge pair at x -17 to -45, y -5 to -23, z 2 to 4 | Left flap pair | Candidate; the M31-3 surface |
-| `0x613e` | -2 | -21 | Removes the mirrored right pair | Right flap pair | Candidate; the M31-3 surface |
-| `0x6144` | 0 net | -21 | Swaps four fin faces (two a side) at x +/-13 to +/-17, y -55 to -42, z 8 to 31 for four whose lower edge sits 4 units outboard on both sides | A rudder-sense deflection of the twin fins (the same sign on both sides) | Candidate; the MiG-25 had no sixth word. Unknown whether signed; M31-3 or M31-4 |
+| `0x6120` | +12 | -9 | Twelve plates behind the tail at x -14 to 14, y -129 to -68, z -9 to 5 | Afterburner flame, aft of the nozzles | Confirmed; mapped to exhaust in M31-4 |
+| `0x6126` | +2 | +8 | Raised quads at x +/-5, y 32 to 50, z 8 to 24 | Dorsal airbrake by slot order | Confirmed as the source's brake word; mapped to brake in M31-4. The source geometry is the raised dorsal panel; the encyclopedia's under-intake text is not used for the rig |
+| `0x612c` | +12 | -30 | Wheel and strut groups at x +/-17, y 7 to 95, z -30 to -10 | Landing gear down | Confirmed; the parked gear word, mapped to rigid gear in M31-4 |
+| `0x6138` | -2 | -21 | Removes the left trailing-edge pair at x -17 to -45, y -5 to -23, z 2 to 4 | Left flap pair | Confirmed; the M31-3 flap word |
+| `0x613e` | -2 | -21 | Removes the mirrored right pair | Right flap pair | Confirmed; the M31-3 flap word |
+| `0x6144` | 0 net | -21 | Swaps four fin faces (two a side) at x +/-13 to +/-17, y -55 to -42, z 8 to 31 for four whose lower edge sits 4 units outboard on both sides | A rudder-sense deflection of the twin fins (the same sign on both sides) | Confirmed; the M31-3 rudder word |
 
 The first five words follow the shared base order (flame, brake, gear, flap,
 flap) used by the MiG-25, F-18, Rafale and F-104 families, with the sixth word
@@ -1398,8 +1398,8 @@ John.
 | Radar preset and jammer generation | Both unreviewed, so no flying radar | John picks (above); M31-7 |
 | What `0x4ad3c0` searches | Whether the fallback to `F18.HUD` also covers other mounts or case | Read the finder, if John wants the original's behaviour as the choice |
 | Whether the MiG-31 is player-flyable in retail | It is not on the reviewed player roster, so the fallback may be unreachable | Roster and menu research; not needed to proceed |
-| State-word roles | `6120`, `6126`, `6138`, `613e`, `6144` are inferred from slot order and geometry | M31-3 and M31-4 confirm each against the shape |
-| Airbrake position | The geometry is dorsal; the encyclopedia puts the brakes under the intake trunks | M31-4 |
+| State-word roles | `6120`, `6126`, `6138`, `613e`, `6144` are inferred from slot order and geometry | M31-3 confirmed the flap and rudder words; M31-4 confirmed the gear, brake and plume words against the branch geometry |
+| Airbrake position | The geometry is dorsal; the encyclopedia puts the brakes under the intake trunks | Resolved in M31-4: the source's brake word is the raised dorsal panel; the encyclopedia text is not used for the rig |
 | Export-only faces | Two indexed-texture wing quads exist only on the export path (decal slots) | M31-2: leave unfilled, per the decal rule |
 | Wing span 22% wide | The shape is wider than the real span | Record in M31-2; no change planned |
 | No tank row | The record has no `F250.GAS` row | Keep; M31-5 and M31-6 follow the record |

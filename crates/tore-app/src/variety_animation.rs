@@ -210,11 +210,11 @@ fn specification(id: Id) -> Option<Spec> {
             ),
             // MIG31.SH: six state words. M31-3 loads it through its own
             // `mig31_animation` rig, which owns the control surfaces and the
-            // interim fitted gear rise. The gear word 0x612c adds its faces and
-            // the rudder word 0x6144 swaps the fin rear quads
+            // device words. The gear word 0x612c adds its faces and the rudder
+            // word 0x6144 swaps the fin rear quads
             // (docs/formats/aircraft-variety.md, "MiG-31 source review").
-            // M31-4 adds the afterburner plume (0x6120) and the airbrake
-            // (0x6126), which stay unmapped here.
+            // M31-4 maps the afterburner plume (0x6120) and the airbrake
+            // (0x6126) in that rig; the generic branch list only needs the gear.
             Id::Mig31 => (
                 20816,
                 214,

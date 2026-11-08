@@ -592,8 +592,8 @@ fixed, as in the source.
 
 `0x612c` adds twelve gear cards (four per main, four nose, low point Z=-30): one
 strut plate and one painted wheel card per main side, and a centre strut with its
-cross plate at the nose. M31-3 keeps the shared interim rise law; M31-4 turns the
-assemblies. `0x6120` adds twelve aft plates behind the tail at X -14 to 14, Y=-129
+cross plate at the nose. M31-4 turns each assembly as one rigid body about its
+lateral hinge. `0x6120` adds twelve aft plates behind the tail at X -14 to 14, Y=-129
 to -68, Z=-9 to 5 (the afterburner plume) and `0x6126` adds two raised dorsal
 quads at X=±5, Y=32 to 50, Z=8 to 24 (the airbrake); M31-4 maps both. The moving
 roles and fitted angles are recorded in the

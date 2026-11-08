@@ -848,7 +848,10 @@ each for gear, hook and brake, plus coupled flap/roll and pitch/roll checks.
 The original stowed A-4E hook stays visible at zero. Exact selection keys
 keep F/A-XX separate from the F22N source donor, and the F-16A from the F-16C,
 in reports and scenario matching. `flight-animation-f16a` expects the `F16.PT`
-key and runs the shared F-16 witness set on its own identity.
+key and runs the shared F-16 witness set on its own identity. MiG-31 adds a
+202-value dense gear sweep, a 25-combination flap/roll grid, and brake and
+exhaust endpoints; the gear, brake and plume each carry their own rigid, hinge
+and direction checks.
 
 Run one repaired aircraft before expanding the audit:
 

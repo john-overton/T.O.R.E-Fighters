@@ -42,7 +42,7 @@ never executed. Offsets describe data provenance, not a gameplay requirement.
 | B747.SH | 31108 | 373 | gear 36, rudder 2 |
 | A310.SH | 20868 | 248 | gear 14, rudder 2 |
 | MIG25.SH | 26154 | 320 | gear 12; controls fitted, no signed branch |
-| MIG31.SH | 20816 | 214 | gear 12, rudder 4 swapped; two flap branches; controls fitted |
+| MIG31.SH | 20816 | 214 | gear 12 rigid, brake 2, plume 12; rudder 4 swapped; two flap branches; controls fitted |
 
 F-4B and F-4J share F4J.SH. The same shape exponent supplies the existing host
 scale rule: one-third foot per coordinate at exponent 8 and two-thirds at
@@ -635,7 +635,9 @@ No strip had to stay fixed as a mapping gap.
 | Yaw | The rear-lower fin quads `448e/44ad` and `44eb/450a` turn `0.35*rudder` radians about the source hinge edge from `[±13,-42,8]` to `[±16,-51,31]` (left mirrored). A positive rudder swings both trailing edges in +X. These are the faces the source word `0x6144` replaces, and 0.35 radians reproduces the source deflection to within about half a source unit. The fin leading quad and tip quad stay fixed. |
 | Flaps | The inboard trailing quads `41a6/41c5` and `4260/427f` turn `0.40*flaps` radians about their source hinge edge, from `[17,-5,4]` to `[45,-16,2]` (left mirrored), lowering the trailing edge. These are the pairs the source words `0x613e` (right) and `0x6138` (left) remove. |
 | Roll | The outboard trailing quads `3ae3/3c64` and `3893/3925` turn `-0.20*aileron` radians about their source hinge edge, from `[45,-16,2]` to `[81,-9,-1]` (left mirrored). A positive aileron raises the right trailing edge and lowers the left. |
-| Gear | The twelve `0x612c` cards are held under the shared interim fitted rise law until M31-4: the whole group translates up by its own source vertical extent (20 units) as the gear stows and is hidden at zero. M31-4 replaces it with reviewed rigid assemblies and doors. |
+| Gear | The twelve `0x612c` cards are three rigid assemblies: one strut plate and its painted wheel card per main side, and the nose strut plate with its cross plate. Right main `3eda/3ef1/3f35/3f5c`, left main `3fe4/3ffb/403f/4066`, nose `40ee/4105/4149/4168`. Each main assembly turns `+90*(1-gear)` degrees about its aft-top lateral hinge `[0,7,-10]`; the nose turns about `[0,77,-10]` and steers `-nosewheel_angle()` about its vertical strut axis `[0,87.5,-10]`. The whole card stays rigid and the wheel tucks to the belly plane at stow. The source names no separate gear-door faces, so the closed belly skin is the door. |
+| Brake | The two `0x6126` faces are the opposite skins of one raised dorsal quad. It turns `0.72*(1-brake)` radians about the spine hinge edge `(0,50,8)`; at `brake=1` the source raised pose is open, and at `brake=0` the panel is flat and hidden. The source geometry is the brake word; the encyclopedia's under-intake text is not used for the rig. |
+| Afterburner | The twelve `0x6120` faces are six double-sided plates, three per engine (one horizontal at x=3..14 and x=-14..-3, and two vertical at x=±9 split at y=-90), trailing from the Y=-68 nozzle exit to Y=-129. They scale from that root with `exhaust`, so the tip pulls forward as the demand falls and the nozzle edge stays put; at `exhaust=0` the plume is hidden. |
 
 The stabilator is all-moving, so no single root corner stays put: the invariant
 is its root chord midpoint, and the small gap to the tail boom at the root is a
@@ -644,11 +646,15 @@ the fixed panel shares, so those corners do not move. The six state words are th
 shared base order flame, brake, gear, flap, flap, then the rudder: `0x6120` the
 plume, `0x6126` the airbrake, `0x612c` the gear, `0x6138`/`0x613e` the left and
 right flap pairs and `0x6144` the twin rudders. There is no hook word because the
-PLANE flag 0x02 is clear. M31-3 fitted the four control surfaces and kept the
-interim gear rise; M31-4 owns the gear, airbrake and burner mapping.
+PLANE flag 0x02 is clear. M31-3 fitted the four control surfaces; M31-4 replaced
+the interim gear rise with the rigid assemblies and mapped the airbrake and
+burner.
 
 Acceptance: the probe reports `reviewed-controls-and-attachments` with
 `anchor_missing=false`, `anchor_gap_ft=0`, `skin_gap_ft=0` and no direction
-failures for pitch, roll, yaw and flaps, plus the 25 flap/roll combinations. A
-moving, finite panel alone does not pass; the whole-surface gate requires all 25
-combinations to keep every panel's shared vertices joined.
+failures for pitch, roll, yaw and flaps, plus the 25 flap/roll combinations and
+the 202-value dense gear sweep with a near-stow sample. A moving, finite panel
+alone does not pass; the whole-surface gate requires all 25 combinations to keep
+every panel's shared vertices joined. The gear, brake and burner each pass their
+own checks: rigid assembly, fixed hinge root, near-stow belly, brake hinge and
+closing direction, and the plume root and tip direction.
