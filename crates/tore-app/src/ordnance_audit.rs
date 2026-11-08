@@ -24,18 +24,21 @@ mod store_pairs;
 const AIRCRAFT: usize = 38;
 const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
-/// 3,684 from 3,626: the MiG-25's two wing rows join the roster (slice M25-6,
-/// 58 compatible supported-weapon placements, each row taking the same decoded
-/// mask 0x00c5 pair). See docs/baselines/ordnance-availability.md.
-const WEAPON_PLACEMENTS: usize = 3684;
-/// 182 from 180: the MiG-25's centreline tank row (F150.GAS or F250.GAS).
-const TANK_PLACEMENTS: usize = 182;
+/// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
+/// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
+/// and two 0x0085 rows). See docs/baselines/ordnance-availability.md.
+const WEAPON_PLACEMENTS: usize = 3817;
+/// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
+/// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
+const TANK_PLACEMENTS: usize = 188;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
-/// loading refuses (A2G decision 16). 174 from 170: Boulder and Moose on the
-/// MiG-25's two wing rows (slice M25-6).
-const NOVELTY_PLACEMENTS: usize = 174;
+/// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
+/// F-16A's four wing and wingtip rows (slice F16A-4).
+const NOVELTY_PLACEMENTS: usize = 182;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
-const POD_PLACEMENTS: usize = 65;
+/// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
+/// bit 0x400, one pod each (slice F16A-4).
+const POD_PLACEMENTS: usize = 67;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {

@@ -687,7 +687,60 @@ still hangs the same store 1 ft under the same wing. John accepted it, the same
 clipping"), and it is one of the smallest values the preview reports across the
 fleet. **Opinionated** (John's decision), for his review.
 
+## The F-16A
+
+John's standing rule (2026-11-07, carried into the F-16A in the M3 aircraft
+plan) is the record's **decoded** hardpoint positions under the standard pylon
+rules, with a stop and a frame report only if the stores preview shows clipping
+beyond what the F-16C already flies. F16A-4 measured it: the F-16A hangs its
+decoded positions, no real-station table was authored, and no `station_move`
+entry was added. The registration and the decoded positions are spec-derived;
+the 1 ft wing pylon, the 2 inch fuselage rail, the fin roll and the move-aside
+behaviour are the existing opinionated rules (2026-10-13), applied unchanged.
+
+The five carrier rows, from the [hardpoint
+table](../formats/aircraft-ordnance.md#hardpoint-positions):
+
+| Record (F16.PT row) | Location | Decoded position, ft right / up / fwd | Count | T.O.R.E station |
+| --- | --- | --- | ---: | --- |
+| 4 | Centerline | 0 / -6.67 / 0 | 1 | The record's position, on a 2 inch rail under the belly |
+| 5 | Wing | 7.0 / -3.33 / -1.33 | 2 (one a wing) | The record's position, 1 ft under the wing |
+| 6 | Wing | 10.67 / -3.33 / -2.33 | 2 (one a wing) | The record's position, 1 ft under the wing |
+| 7 | Wing | 14.33 / -3.33 / -3.67 | 2 (one a wing) | The record's position, 1 ft under the wing |
+| 8 | Wingtip | 18.0 / 0.67 / -4.67 | 2 (one a tip) | On the model's tip edge, fitted to 17 ft out |
+
+Rows 0 to 3 are the fixed visual sensor, radar, jammer and built-in gun, so they
+carry no drawn store. The four spans (7.0, 10.67, 14.33 and 17.0 ft) are the
+same four stations the F-16C already flies (its rows 9, 6, 7 and 8), so the
+F-16A's load sits where the shipped F-16C's does; the decoded fore/aft
+positions are the record's own, not the F-16C's fitted aft shift.
+
+Measured with `tore-app --stores-preview TORE_STORES_PREVIEW_CPU=1
+TORE_STORES_PREVIEW_AUDIT=1 TORE_STORES_PREVIEW_FULL=1`, default load:
+
+- the centreline `F150.GAS` tank hangs at 0 / -6.67 / 0 on its rail, clip 0.00;
+- row 5 `AGM65G.JT` at 7.0 / -1.50 / -1.33, depth 1.00 ft, nose 1.89 ft behind
+  the local leading edge, clip 0.00;
+- row 6 `AIM120.JT` at 10.67 / -1.29 / -2.33, depth 1.00 ft, nose 4.75 ft ahead
+  of the leading edge, clip 0.00;
+- row 7 `AIM9M.JT` at 14.33 / -1.21 / -3.67, depth 1.00 ft, nose 2.97 ft ahead
+  of the leading edge, clip 0.00;
+- row 8 `AIM9M.JT` at 17.0 / 0.29 / -4.67 on the tip edge, clip 0.42 ft at
+  [-16.56 0.73 -6.74].
+
+**No clipping beyond the F-16C.** The F-16C's own stores preview reports 0.00 ft
+on its wing rows and 0.42 ft at its wingtip AIM-9M, at the same place, because
+the two records name the same tip row (flags `0x0085`, position 54 / 2 / -14)
+and the same shape. A full load of the longest store on the inner rows (`AIM120`
+on rows 5 and 6) still reads 0.00 ft on both. So the decoded positions ship and
+the slice does not stop. The F-16A's row 6 AIM-120 nose overhangs 4.75 ft ahead
+of the local leading edge against 3.08 ft for the F-16C's aft-shifted outer
+AIM-120 pylon, but a nose ahead of the wing is not a clip; the record's position
+is kept. The wingtip AIM-9M's 0.42 ft fin entry into the tip is the same value
+the F-16C already ships and John reviewed on 2026-10-16.
+
 ## The F-16C and fleet rail audit
+
 
 John, 2026-10-15: put the F-16 underwing pylons under the wing, farther
 aft, and review every aircraft's rails for obvious overhang. The F-16

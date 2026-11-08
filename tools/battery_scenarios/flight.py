@@ -63,6 +63,10 @@ STATIONS = {
     # weapon row: row 3 AA6.JT x2 and row 4 AA2.JT x2. Its centreline
     # F250.GAS tank is a tank station, not a weapon slot.
     "mig25": [2, 2],
+    # The F-16A carries the M61 gun (row 3, 500) and four default weapon rows:
+    # row 5 AGM65G.JT x2, row 6 AIM120.JT x2, row 7 AIM9M.JT x2 (outer wing)
+    # and row 8 AIM9M.JT x2 (wingtip). Its F150.GAS tank is a tank station.
+    "f16a": [500, 2, 2, 2, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -967,7 +971,7 @@ def combat_scenarios() -> list[Scenario]:
 # fixture, so the trigger must not spend a round (docs/spec/missiles.md).
 REFUSED_SLOTS = {
     ("f18", 3), ("f18", 4), ("f22", 3), ("f22n", 3), ("faxx", 3), ("mig23", 3), ("mig23", 4),
-    ("rafale", 2), ("su25", 3), ("x31", 3),
+    ("rafale", 2), ("su25", 3), ("x31", 3), ("f16a", 2),
 }
 
 

@@ -12,7 +12,7 @@ bombs:
 * each laser designator pod loads on every station that takes it, one to an aircraft,
   and survives the saved mission;
 * the normal catalog offers exactly what some station of the aircraft accepts,
-  for every one of the 36 aircraft, and never Boulder or Moose;
+  for every one of the 38 aircraft, and never Boulder or Moose;
 * Cheat loading lists every supported record and both novelty bombs, and no
   station gives the novelty bombs capacity or accepts them without Cheat
   loading, nor keeps them when Cheat loading goes off.
@@ -26,11 +26,11 @@ AIRCRAFT = re.compile(
     r"\d+ tank placements; defaults and restart passed; catalog (\d+) normal, (\d+) Cheat$",
     re.M,
 )
-AUDIT = re.compile(r"^ordnance audit: 36 aircraft, 13 recovered weapon stations, \d+ weapon placements, "
-                   r"175 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
+AUDIT = re.compile(r"^ordnance audit: 38 aircraft, 14 recovered weapon stations, \d+ weapon placements, "
+                   r"188 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
 # radar aircraft carry nothing.
-LOADED = ("F18.PT", "A4E.PT", "F4B.PT", "SU25.PT", "A10.PT", "F16C.PT", "F15.PT")
+LOADED = ("F18.PT", "A4E.PT", "F4B.PT", "SU25.PT", "A10.PT", "F16C.PT", "F15.PT", "F16.PT")
 EMPTY = ("C130.PT", "E3.PT", "IL76.PT", "E2.PT", "CH47.PT", "B747.PT", "A310.PT")
 A2G_RECORDS = 14  # the records X1 added to the 40 before it
 
@@ -41,8 +41,8 @@ def catalog_problems(output: str) -> list[str]:
     audit = AUDIT.search(output)
     if audit is None or int(audit.group(1)) < 40 + A2G_RECORDS:
         problems.append(f"the audit read {audit and audit.group(1)} supported records, want at least {40 + A2G_RECORDS}")
-    if len(rows) != 36:
-        problems.append(f"{len(rows)} aircraft listed a catalog, want 36")
+    if len(rows) != 38:
+        problems.append(f"{len(rows)} aircraft listed a catalog, want 38")
     # Cheat loading lists every supported record and both novelty bombs (and
     # the SUU-16 gun pod only where the aircraft has one: the F-4J), so every
     # aircraft lists the same number but for one.
@@ -66,9 +66,9 @@ def scenarios() -> list[Scenario]:
             args=["--validate-ordnance", "--no-audio"],
             timeout=600,
             expect=[
-                r"ordnance audit: 36 aircraft, 13 recovered weapon stations, \d+ weapon placements, 175 tank placements, \d+ weapon and 9 tank records; passed",
+                r"ordnance audit: 38 aircraft, 14 recovered weapon stations, \d+ weapon placements, 188 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 168 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 182 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

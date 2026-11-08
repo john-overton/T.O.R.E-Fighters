@@ -243,3 +243,40 @@ AIM-9M in row 7 and the tip AIM-9M in row 8), and no Pave Spike row. Its default
 stores, tank and the resulting weapon and tank placement counts are wired and
 re-measured in slice F16A-4 with `--validate-ordnance`; the placement counts
 above still describe the last measured 37-aircraft pass.
+
+## F-16A ordnance (2026-11-08, slice F16A-4)
+
+The F-16A's five carrier rows are pinned and measured on the branch. The audit
+now reports:
+
+```
+ordnance audit: 38 aircraft, 14 recovered weapon stations, 3817 weapon placements, 188 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 67 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 182 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The pins in `ordnance_audit.rs` moved from 3,684 to 3,817 weapon placements (the
+F-16A's two `0x07e5` wing rows, 56 compatible records each, and two `0x0085`
+wing/wingtip rows, 10 each, 132 placements, plus the built-in `M61.JT` on its
+own row), from 182 to 188 tank placements (its centreline row and the two wing
+rows, each taking `F150.GAS` or `F250.GAS`) and from 174 to 182 Cheat-only
+novelty placements (Boulder and Moose on the four wing and wingtip rows). The
+designator-pod count moved from 65 to 67: the F-16A's two `0x07e5` rows carry
+the decoded pod bit `0x400`, so a `PAVESPK.SEE` pod loads on each, even though
+the record has no designator row, and the Load Ordnance page warns there is no
+built-in designator. The recovered-station, tank-record and weapon-record counts
+are unchanged. The per-aircraft line is `ordnance F16.PT: 6 source rows, 0
+optional weapon rows, 133 compatible weapon placements, 6 tank placements;
+defaults and restart passed; catalog 57 normal, 83 Cheat`. The stations, the
+compatibility masks, the default load and the clipping comparison are in
+[aircraft ordnance](../formats/aircraft-ordnance.md#the-f-16a-m3-2026-11-08) and
+[stores on pylons](../spec/stores-on-pylons.md#the-f-16a). No record, mask or
+station position was added for the aircraft; the counts move only because an
+already reviewed identity is now measured.
+
+The battery `menus-ordnance-availability` expected line was stale at 37 aircraft
+/ 3,684 / 182 from slice F16A-1; it now reads the 38-aircraft line above. The
+`a2g-catalog` scenario was staler still, at 36 aircraft / 13 recovered stations
+/ 175 tank placements / 168 novelty placements (from before the MiG-25); its
+audit and catalog counts now read the current 38-aircraft values.
+

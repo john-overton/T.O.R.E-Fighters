@@ -87,7 +87,7 @@ def catalog_output(cheat=55, normal=38, empty_normal=0, records=54):
             f"0 tank placements; defaults and restart passed; catalog {n} normal, {cheat} Cheat"
         )
     rows.append(
-        "ordnance audit: 36 aircraft, 13 recovered weapon stations, 3407 weapon placements, 175 tank placements, "
+        "ordnance audit: 38 aircraft, 14 recovered weapon stations, 3407 weapon placements, 188 tank placements, "
         f"{records} weapon and 9 tank records; passed"
     )
     return "\n".join(rows)
@@ -126,7 +126,7 @@ class RocketShallowTests(unittest.TestCase):
 
 class CatalogTests(unittest.TestCase):
     def problems(self, text):
-        # The scenario checks 36 aircraft; the sample lists three.
+        # The scenario checks 38 aircraft; the sample lists three.
         return [p for p in a2g_catalog.catalog_problems(text) if "aircraft listed a catalog" not in p]
 
     def test_a_healthy_audit_passes(self):

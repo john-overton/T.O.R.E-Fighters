@@ -283,6 +283,7 @@ order.
 | F14 | 4, 6 | 4, 6 | 6, 7 | 4, 6 |
 | F15 | 4, 5 | 4, 5 | 4, 5 | 4, 5 |
 | F16C | 6, 9 | 6, 9 | 6, 7, 8, 9 | 6, 9 |
+| F16 | 5, 6 | 5, 6 | 5, 6, 7, 8 | 5, 6 |
 | F18 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7, 8 | 5, 6, 7 |
 | F22 | 5, 6 | 5, 6 | 5, 6, 7 | 5, 6, 7 |
 | F22N | 5, 6 | 5, 6 | 5, 6, 7 | 5, 6, 7 |
@@ -571,7 +572,7 @@ What the table shows, by inspection:
   middle and outer underwing pylons (opinionated, John 2026-10-14;
   [the Su-27 and Su-35](../spec/stores-on-pylons.md#the-su-27-and-su-35)).
 
-Weapon and tank rows of the 37 registered identities (sensor, ECM and gun rows
+Weapon and tank rows of the 38 registered identities (sensor, ECM and gun rows
 omitted; Count is the default quantity):
 
 | PT | Row | Location | Flags | x / y / z | Feet right / up / fwd | Pair (0x4) | Default | Count |
@@ -660,6 +661,11 @@ omitted; Count is the default quantity):
 | `F16C.PT` | 6 | Wing | `0x07e5` | 32 / -10 / -7 | 10.7 / -3.3 / -2.3 | yes | AGM65G.JT | 4 |
 | `F16C.PT` | 7 | Wing | `0x0185` | 43 / -10 / -11 | 14.3 / -3.3 / -3.7 | yes | AIM120.JT | 2 |
 | `F16C.PT` | 8 | Wingtip | `0x0085` | 54 / 2 / -14 | 18.0 / 0.7 / -4.7 | yes | AIM9M.JT | 2 |
+| `F16.PT` | 4 | Centerline | `0x0605` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | yes | F150.GAS | 1 |
+| `F16.PT` | 5 | Wing | `0x07e5` | 21 / -10 / -4 | 7.0 / -3.3 / -1.3 | yes | AGM65G.JT | 2 |
+| `F16.PT` | 6 | Wing | `0x07e5` | 32 / -10 / -7 | 10.7 / -3.3 / -2.3 | yes | AIM120.JT | 2 |
+| `F16.PT` | 7 | Wing | `0x0085` | 43 / -10 / -11 | 14.3 / -3.3 / -3.7 | yes | AIM9M.JT | 2 |
+| `F16.PT` | 8 | Wingtip | `0x0085` | 54 / 2 / -14 | 18.0 / 0.7 / -4.7 | yes | AIM9M.JT | 2 |
 | `F104.PT` | 4 | Centerline | `0x0605` | 0 / -15 / -7 | 0.0 / -5.0 / -2.3 | yes | F250.GAS | 1 |
 | `F104.PT` | 5 | Wingtip | `0x0605` | 37 / -5 / -10 | 12.3 / -1.7 / -3.3 | yes | F250.GAS | 2 |
 | `F104.PT` | 6 | Fuselage | `0x07e5` | 10 / -15 / -7 | 3.3 / -5.0 / -2.3 | yes | AIM7.JT | 2 |
@@ -746,7 +752,90 @@ once and its counts are the aircraft's capacity. Confirmed with
 `--combat-command flare` and `--combat-command chaff` and
 `--countermeasure-preview` (carried 20 and capacity 20 for both).
 
+## The F-16A (M3, 2026-11-08)
+
+Implementation note for slice F16A-4, the F-16A's ordnance and default load.
+`F16.PT` has nine source rows: three fixed-equipment rows (a visual sensor, a
+radar and a jammer, flags bit 8), a built-in `M61.JT` gun, and five editable
+rows (a centreline tank and four wing and wingtip carriers). The four
+fixed/equipment rows and the gun are not editable ordnance; the five carriers
+use the decoded masks through the shared loading rules ([source
+identity](#source-identity-is-a-row-not-a-pylon-count)). No row, mask, capacity
+or station position was authored for the import, and no `station_move` entry
+was added. The F-16A is its own record over the F-16C's systems: it names the
+same `F16.SH`, `F16C.HUD`, `F18R.SEE` and `F18.ECM`, but has its own nine-row
+station block and no `PAVESPK.SEE` designator row where the F-16C has one
+([source review](aircraft-variety.md#f-16a-source-review-m3-2026-11-08)).
+
+| Row | Location | Mask | Accepts | Default |
+| ---: | --- | --- | --- | --- |
+| 4 | Centerline | `0x0605` | `F150.GAS` and `F250.GAS`, 1 a row | `F150.GAS` x1 |
+| 5 | Wing (paired) | `0x07e5` | the 56 supported records below, 2 a row | `AGM65G.JT` x2 |
+| 6 | Wing (paired) | `0x07e5` | the same 56, 2 a row | `AIM120.JT` x2 |
+| 7 | Wing (paired) | `0x0085` | the 10 infrared records below, 2 a row | `AIM9M.JT` x2 |
+| 8 | Wingtip (paired) | `0x0085` | the same 10, 2 a row | `AIM9M.JT` x2 |
+
+The two wing masks differ. `0x07e5` is base `0x01`, pair `0x04`, pod `0x400`,
+tank `0x200`, bomb `0x100` and the three seeker-signature bits `0x80` / `0x40` /
+`0x20`, so rows 5 and 6 admit the 56 records below (the same union the F-16C's
+`0x07e5` row takes, bar the count), and also the two 250 gallon tanks. `0x0085`
+is base `0x01`, pair `0x04` and infrared `0x80`, so rows 7 and 8 admit only the
+infrared records: `AA11.JT`, `AA11B.JT`, `AA2.JT`, `AA8.JT`, `AIM9X.JT`,
+`AIM9M.JT`, `R550.JT`, `PL7.JT`, `AIM9B.JT`, `AT12.JT`. The 56 records on rows
+5 and 6, measured by `--validate-ordnance` (both rows together):
+
+`AA11.JT`, `AA11B.JT`, `AA12.JT`, `AA2.JT`, `AA6.JT`, `AA8.JT`, `AA9.JT`,
+`AS7.JT`, `B13.JT`, `B8.JT`, `MK82.JT`, `LAU61.JT`, `AIM9X.JT`, `AIM120.JT`,
+`AIM9M.JT`, `AGM65G.JT`, `MICA.JT`, `R530.JT`, `R550.JT`, `PL7.JT`, `PL10.JT`,
+`AGM88.JT`, `AIM7.JT`, `AIM7E.JT`, `AIM9B.JT`, `AT2.JT`, `MK84.JT`,
+`FAB250.JT`, `FAB500.JT`, `MK82P3.JT`, `MK82HD.JT`, `CBU87.JT`, `CBU89.JT`,
+`MK20.JT`, `RBK250.JT`, `RBK500.JT`, `LAU10.JT`, `GBU12.JT`, `GBU16.JT`,
+`GBU38.JT`, `GBU10.JT`, `GBU10A.JT`, `PAVEWAY.JT`, `PAVEWA3.JT`, `GBU29.JT`,
+`GBU29P.JT`, `GBU30.JT`, `AS14.JT`, `AS30.JT`, `AT12.JT`, `AGM65A.JT`,
+`AGM84E.JT`, `AGM45.JT`, `AGM84A.JT`, `AM39.JT`, `AS15.JT`.
+
+That is the decoded source compatibility, not an F-16A load list; the guided
+bombs and air-to-ground missiles fit the same signature bits. The tank row
+`0x0605` reports the record's pair bit `0x4`, but a centreline rack is single,
+so its capacity is one; it also carries the pod bit `0x400`, but a tank row is
+not a weapon station, so it takes no pod. It takes `F150.GAS` (108 lb shell, 990
+lb fuel) and
+`F250.GAS`, and the F-16A may also hang either tank on rows 5 or 6 (6 tank
+placements across the three rows). The two `0x07e5` rows carry the decoded pod
+bit `0x400`, so a `PAVESPK.SEE` designator pod loads on rows 5 and 6 (one a
+row, one to an aircraft, 2 pod placements) even though the record has no
+designator row; the Load Ordnance page warns "No built-in designator: hang a
+Pave Spike pod to lase." The two novelty bombs (`~BLDR.JT`, `~MOOSE.JT`) load
+under Cheat loading only, on the four wing and wingtip rows (8 placements), and
+never appear in the normal catalog. The normal catalog lists 57 records (the
+56 above plus the `M61.JT` gun row).
+
+The default load is the source default: one full `F150.GAS` on row 4, two
+`AGM65G.JT` on row 5, two `AIM120.JT` on row 6, two `AIM9M.JT` on row 7 and two
+`AIM9M.JT` on row 8. It is the same for the human and the AI
+(`live::Configuration::with_default_load`), so no separate AI default is
+authored, and no carrier row is empty, so no retained-selection seed is needed.
+Rows 5 to 8 are paired, so their maxima and edits move in twos, 2 a row.
+`--validate-ordnance` reports the F-16A as 6 source rows, 0 optional weapon
+rows, 133 compatible weapon placements and 6 tank placements, and 57 normal
+catalog records.
+
+Countermeasures come from the row 2 `F18.ECM` record, the same record the
+F/A-18D, Rafale C and X-31 carry: chaff loaded 30 and flares loaded 30. Nothing
+about the counts is per-aircraft in the host; the ECM record is read once and
+its counts are the aircraft's capacity. Confirmed with `--combat-command flare`
+and `--combat-command chaff` and `--countermeasure-preview` (carried 30 and
+capacity 30 for both).
+
+The decoded positions ship under the standard pylon rules, with no clipping
+beyond what the F-16C already flies: the stores preview's `clip` lines read
+0.00 ft on rows 5, 6 and 7 and 0.42 ft on the wingtip row 8, the exact value
+the F-16C's own wingtip AIM-9M reports (the two records name the same tip
+position and the same shape). The measured positions, depths and clips are in
+[stores on pylons](../spec/stores-on-pylons.md#the-f-16a).
+
 ## Original icons and geometry candidates
+
 
 The four original tank thumbnails `$F150.PIC`, `$F250.PIC`, `$F350.PIC` and
 `$F500.PIC` are present in FA_1.LIB and decode to 105 by 19 pixels with identical
