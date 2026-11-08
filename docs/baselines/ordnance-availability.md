@@ -208,3 +208,26 @@ is now 37. The MiG-25's default stores, tank and the resulting weapon and tank
 placement counts are wired and re-measured in slice M25-6 with
 `--validate-ordnance`; the placement counts above still describe the last
 measured 36-aircraft pass.
+
+## MiG-25 ordnance (2026-11-07, slice M25-6)
+
+The MiG-25's three carrier rows are pinned and measured on the branch. The audit
+now reports:
+
+```
+ordnance audit: 37 aircraft, 14 recovered weapon stations, 3684 weapon placements, 182 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 65 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 174 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The pins in `ordnance_audit.rs` moved from 3,626 to 3,684 weapon placements (the
+MiG-25's two wing rows, 58 compatible placements together), from 180 to 182 tank
+placements (its centreline row, `F150.GAS` or `F250.GAS`) and from 170 to 174
+Cheat-only novelty placements (Boulder and Moose on both wing rows). The
+recovered-station, tank-record, pod and weapon-record counts are unchanged. The
+per-aircraft line is `ordnance M25.PT: 3 source rows, 0 optional weapon rows, 58
+compatible weapon placements, 2 tank placements; defaults and restart passed;
+catalog 29 normal, 83 Cheat`. The stations, the 29 normal records and the default
+load are in [aircraft ordnance](../formats/aircraft-ordnance.md#the-mig-25-m3-2026-11-07).
+No record, mask or station position was added for the aircraft; the counts move
+only because an already reviewed identity is now measured.

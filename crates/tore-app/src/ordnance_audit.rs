@@ -22,11 +22,16 @@ mod store_pairs;
 const AIRCRAFT: usize = 37;
 const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
-const WEAPON_PLACEMENTS: usize = 3626;
-const TANK_PLACEMENTS: usize = 180;
+/// 3,684 from 3,626: the MiG-25's two wing rows join the roster (slice M25-6,
+/// 58 compatible supported-weapon placements, each row taking the same decoded
+/// mask 0x00c5 pair). See docs/baselines/ordnance-availability.md.
+const WEAPON_PLACEMENTS: usize = 3684;
+/// 182 from 180: the MiG-25's centreline tank row (F150.GAS or F250.GAS).
+const TANK_PLACEMENTS: usize = 182;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
-/// loading refuses (A2G decision 16).
-const NOVELTY_PLACEMENTS: usize = 170;
+/// loading refuses (A2G decision 16). 174 from 170: Boulder and Moose on the
+/// MiG-25's two wing rows (slice M25-6).
+const NOVELTY_PLACEMENTS: usize = 174;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 const POD_PLACEMENTS: usize = 65;
 

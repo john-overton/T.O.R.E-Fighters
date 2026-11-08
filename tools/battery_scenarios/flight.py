@@ -59,6 +59,10 @@ STATIONS = {
     "mig23": [200, 38, 2, 2, 0],
     "su35": [150, 1, 2, 4, 2],
     "f22": [750, 2, 2, 4, 0],
+    # The MiG-25 carries no built-in gun, so its list starts on its first
+    # weapon row: row 3 AA6.JT x2 and row 4 AA2.JT x2. Its centreline
+    # F250.GAS tank is a tank station, not a weapon slot.
+    "mig25": [2, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]

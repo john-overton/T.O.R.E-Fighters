@@ -255,14 +255,16 @@ mask can admit them. Their reviewed seeker classification
 2026-10-15) is semi-active radar for AA6, AA9 and PL10 and infrared for PL7.
 
 Decoded default carriers, from [`fa-aircraft.csv`](fa-aircraft.csv) store
-lists, are all aircraft outside `AircraftId::ALL`
+lists, were all aircraft outside `AircraftId::ALL`
 (`crates/tore-formats/src/aircraft.rs:308`): `AA6.JT` on `M25.PT`
 (`fa-aircraft.csv:97`, MiG-25), `AA9.JT` on `MIG31.PT` (`fa-aircraft.csv:110`,
 MiG-31) and `PL7.JT` on `Q5.PT` (`fa-aircraft.csv:115`, Q-5). No retail record
-lists `PL10.JT` as a default store. So no imported aircraft is **built with**
-one. All four are reached through the same decoded hardpoint compatibility as
-the live stores. The rows below are measured with `--validate-ordnance` on the
-installed media; the [even-paired loads
+lists `PL10.JT` as a default store. Slice M25-1 registered the MiG-25, so
+`AA6.JT` is now a decoded default on a ported aircraft (its own record in the
+[hardpoint table](#hardpoint-positions)); the AA-9 and PL-7 carriers remain
+outside the roster. The other three are reached through the same decoded
+hardpoint compatibility as the live stores. The rows below are measured with
+`--validate-ordnance` on the installed media; the [even-paired loads
 baseline](../baselines/even-paired-loads.md) records the pairing changes at
 that earlier pass.
 
@@ -291,6 +293,7 @@ order.
 | F4J | 5 | 5 | 4, 5, 6 | 5 |
 | MIG21 | - | - | 4, 5, 6 | 4, 5, 6 |
 | MIG23 | 6, 7, 8 | 6, 7, 8 | 5, 6, 7, 8 | 6, 7, 8 |
+| MIG25 | 3, 4 | 3, 4 | 3, 4 | 3, 4 |
 | MIG29 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 |
 | RAFALE | 5, 6, 7 | 5, 6, 7 | 5, 6, 7, 8 | 5, 6, 7 |
 | SU25 | 5, 6, 7, 8 | 5, 6, 7, 8 | 5, 6, 7, 8 | 5, 6, 7, 8 |
@@ -298,8 +301,12 @@ order.
 | SU35 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 | 5, 6, 7 |
 | YAK141 | 4, 5 | 4, 5 | 4, 5 | 4, 5 |
 
-No decoded default row lists any of the four on a ported aircraft, so these
-are all compatible-station loads.
+Until the MiG-25 joined the roster in slice M25-1, no decoded default row listed
+any of the four on a ported aircraft. `M25.PT` row 3 now ships `AA6.JT` as its
+source default and row 4 ships `AA2.JT`, so the AA-6 is a built-in default on a
+ported aircraft and the [reviewed air-to-air
+test](../../crates/tore-import/tests/reviewed_air_to_air_missiles.rs) allows
+exactly that one carrier. The rest are all compatible-station loads.
 
 Implementation (slice JT-4, 2026-11-06, requested by John): each record was
 added to the reviewed profile list
@@ -675,6 +682,69 @@ The MiG-25's three carrier rows (3, 4 and 5) hang at their decoded positions
 under the standard rules, with the measured depths and John's accepted AA-6 fin
 entry recorded in [the MiG-25](../spec/stores-on-pylons.md#the-mig-25).
 No source rows or station capacities were added.
+
+## The MiG-25 (M3, 2026-11-07)
+
+Implementation note for slice M25-6, the MiG-25's ordnance and default load.
+`M25.PT` has six source rows: a fixed visual sensor, radar and jammer (flags bit
+8), two wing weapon rows and one centreline tank row (the [source
+review](aircraft-variety.md#mig-25-source-review-m3-2026-11-07)). The three fixed
+rows are not editable ordnance. The other three use the decoded masks through the
+shared loading rules ([source
+identity](#source-identity-is-a-row-not-a-pylon-count)); no row, mask, capacity or
+station position was authored for the import, and no `station_move` entry was
+added.
+
+| Row | Location | Mask | Accepts | Default |
+| ---: | --- | --- | --- | --- |
+| 3 | Wing (paired) | `0x00c5` | the 29 supported records below, 2 a row | `AA6.JT` x2 |
+| 4 | Wing (paired) | `0x00c5` | the same 29, 2 a row | `AA2.JT` x2 |
+| 5 | Centerline | `0x0601` | `F150.GAS` and `F250.GAS`, 1 | `F250.GAS` x1 |
+
+The wing mask `0x00c5` is base `0x01`, pair `0x04`, infrared `0x80` and
+semi-active radar `0x40`. A store reaches it through the seeker signature bit:
+signature 1 and 2 stores (the infrared missiles, and the guided bombs and AS/AT
+missiles whose records also carry signature 1) use `0x80`, and signature 3 stores
+with the radar-support bit use `0x40`. The bomb (`0x100`), tank (`0x200`),
+active-radar (`0x20`) and pod (`0x400`) bits are clear, so a bomb-bit store, a
+tank, an active-radar missile or a designator pod does not fit either wing row.
+The 29 supported records the mask admits, each measured on both rows with
+`--validate-ordnance` (58 compatible placements, both rows together), are:
+
+`AA11.JT`, `AA11B.JT`, `AA2.JT`, `AA6.JT`, `AA8.JT`, `AA9.JT`, `AS7.JT`,
+`AIM9X.JT`, `AIM9M.JT`, `AGM65G.JT`, `R530.JT`, `R550.JT`, `PL7.JT`, `PL10.JT`,
+`AIM7.JT`, `AIM7E.JT`, `AIM9B.JT`, `GBU12.JT`, `GBU16.JT`, `GBU10.JT`,
+`GBU10A.JT`, `PAVEWAY.JT`, `PAVEWA3.JT`, `AS14.JT`, `AS30.JT`, `AT12.JT`,
+`AGM65A.JT`, `AGM84E.JT`, `AS15.JT`.
+
+That is the decoded source compatibility, not a MiG-25 load list. The guided
+bombs and air-to-ground missiles fit the same signature bits every other decoded
+carrier leaves open; they are not asserted as a real Foxbat load.
+
+The centreline mask `0x0601` is base `0x01`, tank `0x200` and pod `0x400`. Its
+tank branch takes the two source-compatible 250 gallon records, `F150.GAS` and
+`F250.GAS`, one a row. The default is `F250.GAS` (198 lb shell and 1,650 lb
+fuel), the same record the F-14 review covers. The `0x400` bit does not make the
+MiG-25 a designator carrier: row 5 is its tank row, not a weapon station, and no
+wing row has the pod bit, so the audit still pins 65 pod placements. The two
+novelty bombs load under Cheat loading only, on both wing rows (4 placements),
+and never appear in the normal catalog.
+
+The default load is the source default, unchanged: two `AA6.JT` on row 3, two
+`AA2.JT` on row 4 and one full `F250.GAS` on row 5. It is the same for the human
+and the AI (`live::Configuration::with_default_load`), so no separate AI default
+is authored. No carrier row is empty, so no retained-selection seed is needed.
+The two wing rows are paired, so their maxima and edits move in twos, 2 a row.
+`--validate-ordnance` reports the MiG-25 as 3 source rows, 0 optional weapon
+rows, 58 compatible weapon placements and 2 tank placements, and 29 normal
+catalog records.
+
+Countermeasures come from the row 2 `MIG21.ECM` record, the same record the
+MiG-21 and MiG-23 carry: chaff loaded 20 and flares loaded 20, both at chance
+35. Nothing about the counts is per-aircraft in the host; the ECM record is read
+once and its counts are the aircraft's capacity. Confirmed with
+`--combat-command flare` and `--combat-command chaff` and
+`--countermeasure-preview` (carried 20 and capacity 20 for both).
 
 ## Original icons and geometry candidates
 
