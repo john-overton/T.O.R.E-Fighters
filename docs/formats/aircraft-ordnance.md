@@ -841,6 +841,82 @@ the F-16C's own wingtip AIM-9M reports (the two records name the same tip
 position and the same shape). The measured positions, depths and clips are in
 [stores on pylons](../spec/stores-on-pylons.md#the-f-16a).
 
+## The MiG-31 (M3, 2026-11-08)
+
+Implementation note for slice M31-6, the MiG-31's ordnance and default load.
+`MIG31.PT` has six source rows: a fixed visual sensor, radar and jammer (flags
+bit 8), a built-in internal gun, and two editable carrier rows (the [source
+review](aircraft-variety.md#mig-31-source-review-m3-2026-11-08)). The three fixed
+rows are not editable ordnance and carry no drawn store. The gun is the fixed
+internal `GSH6_30.JT` row. The two carriers use the decoded masks through the
+shared loading rules ([source
+identity](#source-identity-is-a-row-not-a-pylon-count)); the drawn positions were
+moved in M31-5 under John's 2026-11-08 opinionated table, but no row, mask or
+capacity was authored for the import.
+
+| Row | Location | Mask | Accepts | Default |
+| ---: | --- | --- | --- | --- |
+| 3 | Internal Gun | `0x0008` | its own `GSH6_30.JT`, 260 rounds | `GSH6_30.JT` x260 |
+| 4 | Wing (paired) | `0x07e5` | the 61 supported records below, the four tanks `F150.GAS`, `F250.GAS`, `F350.GAS` and `F500.GAS`, and the `PAVESPK.SEE` pod, 4 a row | `AA9.JT` x4 |
+| 5 | Wingtip (paired) | `0x0085` | the 13 records below, 2 a row | `AA8.JT` x2 |
+
+Row 3 is the internal gun row (`flags` bit 8). It accepts only its own record at
+the record's 260 rounds, in the 1.7 ft starboard mount the source places, and no
+other weapon fits it. The row 4 mask `0x07e5` is base `0x01`,
+pair `0x04`, active-radar `0x20`, semi-active radar `0x40`, infrared `0x80`,
+bomb `0x100`, tank `0x200` and pod `0x400`. Its 61 admitted records, each
+measured on the row with `--validate-ordnance`, are:
+
+`AA11.JT`, `AA11B.JT`, `AA12.JT`, `AA2.JT`, `AA6.JT`, `AA8.JT`, `AA9.JT`,
+`AS7.JT`, `B13.JT`, `B8.JT`, `MK82.JT`, `LAU61.JT`, `AIM9X.JT`, `AIM120.JT`,
+`AIM9M.JT`, `AGM65G.JT`, `MICA.JT`, `R530.JT`, `R550.JT`, `PL7.JT`, `PL10.JT`,
+`AGM88.JT`, `AIM7.JT`, `AIM7E.JT`, `AIM9B.JT`, `AT2.JT`, `MK84.JT`,
+`FAB250.JT`, `FAB500.JT`, `FAB1000.JT`, `MK82P3.JT`, `MK82HD.JT`, `MK82P.JT`,
+`MK82AIR.JT`, `CBU87.JT`, `CBU89.JT`, `MK20.JT`, `RBK250.JT`, `RBK500.JT`,
+`LAU10.JT`, `GBU12.JT`, `GBU16.JT`, `GBU38.JT`, `GBU10.JT`, `GBU10A.JT`,
+`PAVEWAY.JT`, `PAVEWA3.JT`, `GBU28.JT`, `GBU29.JT`, `GBU29P.JT`, `GBU30.JT`,
+`AS14.JT`, `AS30.JT`, `AT12.JT`, `AGM65A.JT`, `AGM84E.JT`, `AGM45.JT`,
+`AGM84A.JT`, `AM39.JT`, `AS16.JT`, `AS15.JT`.
+
+Row 5's mask `0x0085` is base `0x01`, pair `0x04` and infrared `0x80`, so it
+admits only the infrared records (and the signature-1 guided bombs and AS/AT
+missiles that share the `0x80` bit). Its 13 records, measured on the row, are:
+
+`AA11.JT`, `AA11B.JT`, `AA2.JT`, `AA8.JT`, `AIM9X.JT`, `AIM9M.JT`,
+`AGM65G.JT`, `R550.JT`, `PL7.JT`, `AIM9B.JT`, `GBU12.JT`, `AT12.JT`,
+`AGM65A.JT`.
+
+That is the decoded source compatibility, not a MiG-31 load list; the guided
+bombs and air-to-ground missiles fit the same signature bits every decoded
+carrier leaves open, and they are not asserted as a real Foxhound load. The tank
+bit on row 4 also admits the four 150 to 500 gallon records above (the record
+names no tank and carries no tank store, so the row starts empty of tanks), and
+the pod bit admits a `PAVESPK.SEE` designator pod (one on the row) even though
+the record has no designator row, so the Load Ordnance page shows "No built-in
+designator: hang a Pave Spike pod to lase." The two novelty bombs (`~BLDR.JT`,
+`~MOOSE.JT`) load under Cheat loading only, on both carrier rows (4 placements),
+and never appear in the normal catalog. The normal catalog lists 62 records (row
+4's 61 plus the `GSH6_30.JT` gun).
+
+The default load is the source default: 260 `GSH6_30.JT` rounds on row 3, four
+`AA9.JT` on row 4 and two `AA8.JT` on row 5. It is the same for the human and
+the AI (`live::Configuration::with_default_load`), so no separate AI default is
+authored, and no carrier row is empty, so no retained-selection seed is needed.
+Both carrier rows are paired, so their maxima and edits move in twos. The AA-9
+row's four stores leave as two tandem pairs (the front pair first), the layout
+M31-5 records in [the MiG-31](../spec/stores-on-pylons.md#the-mig-31).
+`--validate-ordnance` reports the MiG-31 as 3 source rows, 0 optional weapon
+rows, 75 compatible weapon placements (61 + 13 + the gun) and 4 tank placements,
+and 62 normal catalog records.
+
+Countermeasures come from the row 2 `MIG31.ECM` record (byte-equal to
+`SU24.ECM` and `SU27.ECM` apart from its name): chaff loaded 60 and flares
+loaded 60. Nothing about the counts is per-aircraft in the host; the ECM record
+is read once and its counts are the aircraft's capacity. Confirmed with
+`--combat-command flare` and `--combat-command chaff` and
+`--countermeasure-preview` (carried 60 and capacity 60 for both). The jammer
+record's own preset review stays M31-7.
+
 ## Original icons and geometry candidates
 
 

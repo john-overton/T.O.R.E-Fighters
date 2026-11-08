@@ -67,6 +67,11 @@ STATIONS = {
     # row 5 AGM65G.JT x2, row 6 AIM120.JT x2, row 7 AIM9M.JT x2 (outer wing)
     # and row 8 AIM9M.JT x2 (wingtip). Its F150.GAS tank is a tank station.
     "f16a": [500, 2, 2, 2, 2],
+    # The MiG-31 carries the GSh-6-30 gun on its internal row 3 (260 rounds)
+    # and two default weapon rows: row 4 AA9.JT x4 (the four AA-9s, hung in
+    # two tandem pairs) and row 5 AA8.JT x2 (the two AA-8s, on wing pylons).
+    # It has no tank or centreline row.
+    "mig31": [260, 4, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]

@@ -301,3 +301,29 @@ ordnance audit: 39 aircraft, 14 recovered weapon stations, 3892 weapon placement
 ordnance audit: 1 designator pods, 68 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
 ordnance audit: 2 novelty records, 186 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
 ```
+
+## MiG-31 ordnance (2026-11-08, slice M31-6)
+
+The MiG-31's three stations (the internal gun and the two carrier rows) are
+reviewed and measured on the branch. M31-5 moved only the drawn positions of the
+two carrier rows, so no pin moved here: the audit still reports the same 39
+aircraft, 3,892 weapon placements, 192 tank placements, 186 Cheat-only novelty
+placements and 68 designator-pod placements as the M31-1 measurement above. The
+per-aircraft line is unchanged: `ordnance MIG31.PT: 3 source rows, 0 optional
+weapon rows, 75 compatible weapon placements, 4 tank placements; defaults and
+restart passed; catalog 62 normal, 83 Cheat`. The 75 weapon placements are 61 on
+the row 4 `0x07e5` mask, 13 on the row 5 `0x0085` mask and the gun's own
+`GSH6_30.JT` on row 3; the 4 tank placements are the four 150 to 500 gallon
+records the row 4 tank bit admits. The stations, the two compatibility masks, the
+default load and the countermeasures (chaff 60, flare 60 from `MIG31.ECM`) are in
+[aircraft ordnance](../formats/aircraft-ordnance.md#the-mig-31-m3-2026-11-08).
+No record, mask or station position was added or changed by this review.
+
+The branch's `flight` battery now registers `mig31` in `STATIONS`
+(`[260, 4, 2]`): the three `flight-livefire-mig31-slot1` to `slot3` scenarios
+fire the gun, the `AA9.JT` row and the `AA8.JT` row, and the two
+`flight-jettison-mig31-slot2` and `slot3` scenarios empty each carrier row, all
+passing. The gun's live release is 260 rounds, the `AA9.JT` row four stores and
+the `AA8.JT` row two, matching the source defaults. `--validate-tanks --aircraft
+mig31` is refused by design (the F-14 contract only); the MiG-31's tank row is
+the empty row 4 tank station and is covered by `--validate-ordnance`.
