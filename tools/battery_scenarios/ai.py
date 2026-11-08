@@ -1715,6 +1715,19 @@ def scenarios() -> list[Scenario]:
                          check=fuzz_checker(seed, args, ticks),
                          notes=f"fuzz seed {seed}: {info}"))
 
+    # 13c. The MiG-25 in a mission (slice M25-9): every wing the MiG-25, the
+    # player's own included, 2 v 2 with the fight script, so the new M25.PT
+    # identity flies a mission with its own MIG27R.SEE radar, AA-6 and AA-2
+    # default load and its six stations. The roster probe flies it against
+    # itself at every skill; this one has it shoot and be shot at.
+    out.append(probe("mig25-quick-mission-2v2", fight(2, 2, "--aircraft", "mig25",
+                                                       "--probe-friendly-aircraft", "mig25",
+                                                       "--probe-enemy-aircraft", "mig25",
+                                                       "--separation", "5", *attack), ticks=7200,
+                     notes="All MiG-25: the player's wing and the enemy wing fly the new "
+                           "M25.PT identity (MIG27R.SEE radar, AA-6 and AA-2 default load) in a "
+                           "2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

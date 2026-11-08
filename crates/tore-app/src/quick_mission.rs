@@ -3376,6 +3376,34 @@ mod tests {
         assert_eq!(spec.wings[2].aircraft, AircraftId::Mig17);
         assert_eq!(spec.wings[5].aircraft, AircraftId::Mig17);
     }
+    /// Slice M25-9: the MiG-25 is offered as the player's aircraft and, because
+    /// the AI can fly it, in every AI wing field. The same test shape as the
+    /// MiG-17 one above, but the identity the mission flies is named exactly.
+    #[test]
+    fn the_mig25_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        // The player's own list offers it by its selection key, M25.PT.
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Mig25.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Mig25));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Mig25).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Mig25));
+        }
+        // The mission the draft flies carries the MiG-25 as the player and in
+        // every wing.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Mig25);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Mig25);
+        }
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI
