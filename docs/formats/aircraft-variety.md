@@ -577,3 +577,331 @@ John, not a correction. The flight validation measured liftoff 153.9 kt over
 2,161 ft, approach 165.6 kt and touchdown 164.0 kt, inside the published 300
 to 350 km/h and 270 to 290 km/h ranges' plus or minus 10 percent window
 ([variety flight baseline](../baselines/variety-flight.md#mig-25-validation-2026-11-07)).
+
+## F-16A source review (M3, 2026-11-08)
+
+Research mode, slice F16A-0. This reviews `F16.PT` and its selected dependency
+closure before `AircraftId::F16a` exists. `F16.PT` is the 38th retail identity,
+to be appended in F16A-1. The [fixed-wing record
+audit](aircraft.md#fixed-wing-record-audit) predates this identity; this section
+is its F-16A row and the field-by-field diff against `F16C.PT`. No original
+module was executed. PT, SEE, ECM, JT and GAS are read as bounded BRF data with
+the shared field order in `aircraft_schema.rs`; SH and HUD are inspected as
+data. Retail media stays local and no extracted bytes are committed.
+
+### Build and extraction
+
+`FA_1.LIB` SHA-256 is
+`657254c5bb3bcf3609b3e84ee6499bf80395a2daffc60c12363e534cf408245f` and
+`FA_2.LIB` is
+`fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`, the same
+pair as the 2026-10-05 and MiG-25 reviews. The selected closure was extracted
+locally to `.local/m3-imports/scratch/f16a` with `tore-extract` and the patterns
+`F16.PT F16C.PT F16E.PT F16F.PT F16* F16C.HUD F18R.SEE F18.ECM VIS340.SEE
+PAVESPK.SEE M61.JT F150.GAS AGM65G.JT AIM120.JT AIM9M.JT ~F16* _F16* F16_*
+F16*.11K F16*.CB8 &JET1N.11K &JET1A.11K &POWERUP.5K &POWERDN.5K`. The installer
+copy under `disc1/SETUP.ESA/FA_2.LIB` holds the same resources; the PT, SH, SEE,
+ECM, JT and GAS bytes are identical, and `F16C.HUD` differs between the two
+builds by four header bytes only (below). No `F16.PTS` companion exists in any
+archive, unlike `F16C.PTS`.
+
+### Headline: the plan's record-diff assumption is false
+
+The plan says F16A "differs from `F16C.PT` in its record (mass, thrust, envelope,
+fuel, year, stations)". The decode shows that is only half true. `F16.PT` and
+`F16C.PT` are **identical in every mass, thrust, fuel, engine and envelope
+field**, so F16A does not have its own flight record: it flies the F-16C record.
+They differ only in the identity names, the OBJECT flags, the year, the cockpit
+view offset and the station block. The repo already knew this from the other
+direction: the fixed-wing audit records that "F16C.PT mass is F16.PT's (F-16A)".
+This is the one plan assumption that is false; F16A-1 can still proceed, but
+F16A-6 must say "the F-16C configuration" rather than "its own configuration",
+and the plan's parenthetical should be corrected to "(year, object flags, view
+offset, stations, and the missing Pave Spike row)".
+
+### Identity and presentation
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `F16.PT`, 14,732 stored bytes, SHA-256 `46018763b5e823df1d29c37c78d1cb9fdb7e7075b5235e23001bcc001b55b010` |
+| Displayed names | `F-16`, `F- 16A Falcon`, `F16.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 tokens; `structType` 5; `typeSize` 660; `instanceSize` 626 |
+| Object class | `0x8000` (fighter); the PLANE no-lift bit is clear |
+| Year / hit points | 1979 / 92; `expType` 30, `craterSize` 0 |
+| Shape | `F16.SH`, exponent 8, so scale `2^(8-8) = 1` and 1 shape unit is 1/3 ft in the aircraft renderer |
+| Shadow | `F16_S.SH`, 12 faces, no texture |
+| HUD | `F16C.HUD`, identical content to the F-16C's, naming panel `~f16_p` |
+| Cockpit | stem `F16`; forward `~F16H.PIC`; panel `~F16_P.PIC`; no left, centre or right overlay |
+| Damage looks | `F16_A.SH` 352 faces, `F16_B.SH` 224, `F16_C.SH` 410, `F16_D.SH` 73 |
+| PTS | absent, an explicit exception (F16C has `F16C.PTS`) |
+| Checkpoint code | 38 reserved for F16A-1, not yet in `checkpoint_shared.rs` |
+| CLI key | `f16a` (agent choice) reserved for F16A-1, not yet in the CLI |
+| AI script | `f.BI`, present |
+
+The media-backed identity matches the plan's fixed names: the exact PT is
+`F16.PT`, the shape is `F16.SH`, the HUD is `F16C.HUD`, and the cockpit stem is
+the F-16C's `F16`. `AircraftId::F16a` is not present yet. The parser's default
+size is 660 and this record is 660, so `Aircraft::parse` would accept the size on
+the default arm; F16A-1 should still list it explicitly beside `F16C`.
+
+### Field-by-field diff against `F16C.PT`
+
+Two decodes of the raw records agree in every field except these. There is no
+difference anywhere in the NPC block and no difference anywhere in the PLANE
+block (weight, thrust, fuel, engine count, all drag, stall, spin, rudder and
+crash coefficients, and every envelope row).
+
+| Field | `F16.PT` (F-16A) | `F16C.PT` (F-16C) | Note |
+| --- | --- | --- | --- |
+| `ot_names` | `F-16`, `F- 16A Falcon`, `F16.PT` | `F-16C`, `F- 16C Falcon`, `F16C.PT` | identity |
+| OBJECT `flags` | `0x2bf3` | `0x806bf3` | F16C adds bits `0x800000` and `0x4000`; uninterpreted |
+| `year` | 1979 | 1984 | display and roster year |
+| `viewOffset.z` | 110 | 60 | cockpit eye forward offset |
+| `hards` | nine rows, no designator (below) | nine rows with a Pave Spike row (below) | stations, masks and capacities |
+
+Everything else matches word for word: `typeSize` 660, `instanceSize` 626,
+`shape` `f16.SH`, `shadowShape` `f16_s.SH`, `hitPoints` 92, `sigs` 88 / 88 / 100
+/ 100 / 0, `weight` 14,567 lb, `minAlt` 300 and `maxAlt` 60,000, `envMin` -4 and
+`envMax` +9, `engines` 1, `thrust` 17,687 lbf and `aftThrust` 32,000 lbf,
+`fuelConsumption` 2 and `aftFuelConsumption` 16, `internalFuel` 6,972 lb,
+`maxTakeoffWeight` 33,000 lb, `structure[0]` 1,342 and `structure[1]` 1,934,
+`crashSpeedForward` 330, `crashSpeedSide` 51 and `crashSpeedVertical` 95,
+`crashPitch` 25 and `crashRoll` 10, the NPC block (`ctName` `f.BI`, `numHards`
+9, `searchFrequencyT` 12, `unreadyAttackT` 32, `attackT` 20, `retargetT` 32767,
+`zoneDist` 0), the four sounds and `hudName` `f16c.HUD`. `dmgDebrisPos` is
+`[0, 0, 30]` and `dstDebrisPos` `[30, 0, 0]`, the same as F16C.
+
+### Hardpoints
+
+All nine source rows, in original order. Positions are source units and divide
+by three for host feet; x is right, y is up and z is forward of the reference
+point, the hardpoint convention in
+[aircraft ordnance](aircraft-ordnance.md#hardpoint-positions), not the shape
+mesh convention. The location byte maps 0 to Centerline, 1 to Fuselage, 2 to the
+internal gun, 3 to an internal bay, 4 to Wing and 5 to Wingtip. `maxWeight` is
+the weight class used by `min(maxItems, maxWeight * 100 / store weight)`, not a
+pound value.
+
+| Row | Location | Flags | Position x/y/z | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 1 | 0 | `F18.ECM` | Fixed jammer and countermeasures |
+| 3 | Internal gun | `0x0008` | -11 / 3 / 31 | 500 | 0 | `M61.JT` | Built-in gun |
+| 4 | Centerline | `0x0605` | 0 / -20 / 0 | 1 | 20 | `F150.GAS` | External tank |
+| 5 | Wing | `0x07e5` | 21 / -10 / -4 | 2 | 20 | `AGM65G.JT` | Inner wing |
+| 6 | Wing | `0x07e5` | 32 / -10 / -7 | 2 | 20 | `AIM120.JT` | Mid wing |
+| 7 | Wing | `0x0085` | 43 / -10 / -11 | 2 | 4 | `AIM9M.JT` | Outer wing |
+| 8 | Wingtip | `0x0085` | 54 / 2 / -14 | 2 | 4 | `AIM9M.JT` | Wingtip |
+
+In host feet the four weapon carriers are at 7.0 / -3.33 / -1.33, 10.67 / -3.33
+/ -2.33, 14.33 / -3.33 / -3.67 and 18.0 / 0.67 / -4.67, and the tank at 0 /
+-6.67 / 0. Rows 0 to 3 carry bit 8, the fixed-equipment bit the original weapon
+loader skips, so they are not editable ordnance: rows 0 to 2 are the fixed
+sensors and row 3 is the built-in gun. The five editable rows are the tank and
+the four wing and wingtip carriers.
+
+The station block is the main record difference from the F16C. The F16C has a
+fourth fixed row (a Pave Spike designator `PAVESPK.SEE` at z +50) that F16A does
+not, and its rows 6, 7 and 8 are three carriers; F16A has four. The positions
+and capacities differ too: F16A's AGM-65G row is inboard at x 21 with `maxItems`
+2 and weight class 20 where the F16C's AGM-65G row is at x 32 with `maxItems` 4
+and class 27; F16A's AIM-120 row is at x 32 with mask `0x07e5` and class 20 where
+the F16C's AIM-120 row is at x 43 with mask `0x0185` and class 13; and F16A adds
+an outer-wing AIM-9M row at x 43 that the F16C does not have. The plan's "no Pave
+Spike" and "two AIM-9M" hold: F16A has no designator row and two AIM-9M rows
+(outer wing and wingtip). F16A-4 owns the compatibility masks, the even pairs,
+the source-default quantity and the clipping check.
+
+### Envelope rows
+
+Points are speed in ft/s at altitude in ft. The fourteen rows are consecutive
+from `envMin` -4 to `envMax` +9, and they are byte-for-byte the F16C's, because
+the whole PLANE block is shared.
+
+| G | Points |
+| ---: | --- |
+| -4 | 540@0, 660@8000, 870@15000, 950@14500, 1030@13000, 1040@0 |
+| -3 | 465@0, 627@15000, 830@27000, 990@27000, 1120@24500, 1170@20000, 1100@0 |
+| -2 | 335@0, 537@21000, 820@42000, 1105@42000, 1297@37500, 1380@28000, 1230@14000, 1170@0 |
+| -1 | 180@0, 295@19500, 437@35250, 608@47125, 820@55000, 1262@54250, 1585@48500, 1740@35000, 1410@17500, 1270@0 |
+| 0 | 90@0, 120@13000, 175@27000, 263@39000, 471@54000, 820@65000, 1337@65500, 1850@54750, 2084@36000, 1697@18000, 1450@0 |
+| 1 | 120@0, 165@13000, 237@26000, 363@39000, 551@52000, 800@60000, 1312@60000, 1712@52000, 1933@36000, 1556@18000, 1340@0 |
+| 2 | 180@0, 295@19500, 437@35250, 608@47125, 820@55000, 1262@54250, 1585@48500, 1740@35000, 1410@17500, 1270@0 |
+| 3 | 255@0, 391@18500, 587@39000, 820@50000, 1245@49000, 1468@43500, 1552@32000, 1306@16000, 1210@0 |
+| 4 | 335@0, 537@21000, 820@42000, 1105@42000, 1297@37500, 1380@28000, 1230@14000, 1170@0 |
+| 5 | 407@0, 603@18500, 820@34000, 1005@34000, 1197@30000, 1250@24000, 1130@0 |
+| 6 | 465@0, 627@15000, 830@27000, 990@27000, 1120@24500, 1170@20000, 1100@0 |
+| 7 | 510@0, 635@11500, 850@21000, 955@21000, 1072@19000, 1100@17000, 1070@0 |
+| 8 | 540@0, 660@8000, 870@15000, 950@14500, 1030@13000, 1040@0 |
+| 9 | 585@0, 677@5500, 890@10000, 990@9000, 1010@0 |
+
+The rows pair exactly: -4 with +8, -3 with +6, -2 with +4 and -1 with +2 are the
+same polygon. This is source data, not a decoding overlap. The 1 G row's fast
+edge is 1,933 ft/s at 36,000 ft, 1,145 kt, the value in the fixed-wing audit for
+F16C.
+
+### Engines, fuel and sound
+
+| Field | Value |
+| --- | --- |
+| Engines | 1 |
+| Empty weight | 14,567 lb |
+| Internal fuel | 6,972 lb |
+| Maximum takeoff | 33,000 lb |
+| Military thrust | 17,687 lbf |
+| Afterburner thrust | 32,000 lbf |
+| Military fuel flow | 2 lb/s |
+| Afterburner fuel flow | 16 lb/s |
+
+At the record's flows the internal tank lasts about 58 minutes at military power
+or 7.3 minutes at full afterburner. These are host reading arithmetic, not a
+claim about real endurance. The PT names four audio resources, all present in
+`FA_2.LIB`: `loopSound` `&JET1N.11K`, `secondSound` `&JET1A.11K`, `engineOnSound`
+`&POWERUP.5K` and `engineOffSound` `&POWERDN.5K`. `doDoppler` is 1, `maxSndDist`
+15,000, the Doppler pitch limits are 320 and 160, and the Doppler speed window is
+20 to 1,600. The `f.BI` AI script is present.
+
+### Resources
+
+All PT-named resources exist in `FA_2.LIB` except the cockpit art, which is in
+`FA_1.LIB`. Hashes are the root `FA_2.LIB` copies unless stated.
+
+| Resource | Role | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| `F16.SH` | Shape | 37,376 | `7d570f1f705cfaa6b1288653e47e4c502d7606109044f306972bd6c63161f315` |
+| `F16_S.SH` | Shadow shape | 4,608 | `ad87c11f0897eb9bc1e451f539795843d08e501fc69c3fd8c0c195aa3f050e17` |
+| `F16_A.SH` | Damage body A | 25,088 | `0bf3a39736fe6a89dd53170a0fcc8b30298a812f534b72befb32ddf1779c9108` |
+| `F16_B.SH` | Damage piece B | 16,896 | `8b03394f3bb7408c34eb0354a50453c9ee1af2ee95df0a8845af48f002688a1c` |
+| `F16_C.SH` | Damage body C | 29,184 | `237a61d3d8417dc1bdccb270aed6614970d4b70e73783ebfeea3a88b990f89c2` |
+| `F16_D.SH` | Damage piece D | 8,704 | `2b0be00c5f6c76e87f76867f0152fa67d4b40c7933bb9947ea3480856c3363f2` |
+| `F16C.HUD` | HUD and cockpit pointers | 4,608 | `f18d6b5cb8c16116cc012429fb2efb074a1bb1c25b07b1718238b00379564cd5` |
+| `F18R.SEE` | Radar | 481 | `b00861010ec23c39a082cd2b313a4a5223daf8ff6e7769f95353f77bbae01682` |
+| `F18.ECM` | Jammer, chaff and flare counts | 366 | `0fb851d57d7f88f51a017d9663101b52c681c6a6d5ac55823588f25a942d31a9` |
+| `VIS340.SEE` | Visual sensor | 471 | `445c35d1cc778513b0d38b73d36e10b47b7a4f210ffef87f54a53b17e6cd9efe` |
+| `M61.JT` | Built-in gun | 2,703 | `0b79689a728911d1097569f6e6612050e414ba9703c9f131a51fe1ce9a7eb33d` |
+| `F150.GAS` | Centreline tank | 204 | `ca9054921aa93eb890801a5a1f64deb55c8bcc6d03854ff03f1b42833a9f4c95` |
+| `AGM65G.JT` | Default store | 2,777 | `b94ee0dae96dd2b7fc70a21e430444a1d72b565eec9611ecb749965ece2e5cca` |
+| `AIM120.JT` | Default store | 2,778 | `702d559376e544b49d2d118e1a8911227b0abe6560ff84340a7fd592c709d7a8` |
+| `AIM9M.JT` | Default store | 2,775 | `fdac769d40e374ed691a2758c80f4deddf44ecb136d8973374ea053ca03723cf` |
+| `~F16H.PIC` | Forward cockpit (`FA_1.LIB`) | 124,274 | `5162b8a467e54d546f3a066f34befecdaabd82a154d3482e88521a055386d851` |
+| `~F16_P.PIC` | Instrument panel (`FA_1.LIB`) | 6,864 | `223cf78dfab87fb5f9d1eaf3e4ba055525d7b8f546663b2cc146e07fa358b841` |
+| `~F16.PIC` | Cockpit base (`FA_1.LIB`) | 23,832 | `52d195301a936092af8cbabf8e6ab02d629f94c362ea4faed74793b6365de49a` |
+| `~F16S.PIC` | Cockpit surround (`FA_1.LIB`) | 190,852 | `b045ab827c47beef571afc990356bc3e5bb25682dc8fdb4f9a94035bc84f0768` |
+
+The shape's faces name `_F16.PIC`, present in `FA_2.LIB` (111,864 bytes,
+`d7822eded62964011b552a80aca1c8fbfe1faf34a0323c865fc572b4248d031b`), and the
+damage looks name `_F16_A.PIC` to `_F16_D.PIC`, all present (`cc181f7e...`,
+`09eaae19...`, `bfb2d8bd...`, `4b3602e2...`). `PAVESPK.SEE` exists in the media
+(505 bytes) and is named only by `F16C.PT`. The two `F16C.HUD` builds have
+identical parsed content but differ by four bytes near the module header
+(`f18d6b5c...` in the root `FA_2.LIB`, `324012a1...` under `SETUP.ESA`); the
+import report keeps whichever build the user supplied, and neither is aliased to
+the other.
+
+### Sensors, HUD and cockpit reuse
+
+`F16C.HUD` is the exact PT name and the host must return `F16C.HUD`. Its panel
+field at root +0x275 is `~f16_p`, so `panel_resource()` returns `~F16_P.PIC`,
+which is the identity's `instrument_panel()` for the `F16` cockpit stem and is
+present in `FA_1.LIB`. The title, button and press colour indices are 1, 0 and 0
+and the primary ink index is 40. The HUD also names `~f16`, `~f16h` and `~f16s`,
+and a `~raf_w` field at +0x282 that no reviewed code path reads; the host reads
+only the panel field at +0x275.
+
+The cockpit stem is `F16`, the same as the F-16C: forward `~F16H.PIC`, panel
+`~F16_P.PIC`, and no left, centre or right overlay (`cockpit_overlays()` returns
+three `None`s for the `F16` stem). The glass aperture and mirrors therefore come
+from the reviewed F-16C rig. No new art or sensor is authored for F16A.
+
+`F18R.SEE` is an assigned radar preset and `F18.ECM` a jammer generation in
+`tore-sim::sensors::profile`, both already reviewed on the F-16C, so no new
+preset is needed and no unreviewed record flies. `VIS340.SEE` is the signature-0
+visual sensor. `F18.ECM` carries the chaff and flare counts F16A-4 reads.
+
+### Reuse confirmation
+
+- Shape, shadow, damage looks, cockpit art, HUD, radar and jammer are the same
+  resources the approved F-16C names, reached through the same stems, so the
+  existing F-16C rig, cockpit and sensors apply.
+- The six state words are identical to the F-16C's: `0x8ad0` (+6 faces,
+  afterburner flame), `0x8ad6` (+8, airbrake), `0x8adc` (+25, gear, raising the
+  low point from -13 to -21 units, 7.0 ft), `0x8ae8` and `0x8aee` (0 new, the two
+  flap words) and `0x8af4` (+2, rudder). PLANE flag `0x02` is clear, so there is
+  no hook word. The reviewed F-16C whole-surface rig (`f16_animation.rs`) already
+  drives these words on `F16.SH`, so F16A inherits the reviewed control motion,
+  with no new fit.
+- The default stores are the F-16C's live set. `M61.JT`, `F150.GAS`,
+  `AGM65G.JT`, `AIM120.JT` and `AIM9M.JT` all already fly, and the
+  `combat/live.rs` permitted list for `F16C` is `AGM65G.JT`, `AIM120.JT`,
+  `AIM9M.JT` and `M61.JT`, which covers every F16A store. F16A-1 must add the
+  same permitted list for the new identity, or the default load fails with
+  "unreviewed live-fire station".
+- The shape draws 356 neutral faces, 0 lines and 0 billboards, bounding box x
+  -51 to 51, y -59 to 88 and z -13 to 39 shape units, about 34 ft span, 49 ft
+  length and 17.3 ft height. The length matches the published 15.0 m exactly in
+  the source's coarse units; the span and height run about 7 percent high against
+  the published 31 to 33 ft and 16.5 ft.
+
+### Published audit
+
+Published columns are F-16A reference figures, not retail behaviour. Sources:
+Aeropedia's F-16A page and Aero Web's F-16A page give empty 14,567 lb (6,607 kg),
+maximum loaded weight with external stores 33,000 lb, and a 2,074 km/h (1,120 kt)
+top speed at 36,000 ft; Aerospaceweb gives the F-16A internal fuel as 6,970 lb
+and the empty weight as 15,585 lb; the F100-PW-200 is 14,870 lbf dry and 23,830
+lbf with afterburner; the published maximum takeoff weight is commonly 37,500 lb
+(FAS and the US Navy fact file). All sources accessed 2026-11-08.
+
+| Field | Record | Published | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 14,567 | 14,567 (early F-16A) to 15,585 | exact to 7% low | Agrees with the early F-16A |
+| Internal fuel, lb | 6,972 | 6,970 | +0.03% | Agrees |
+| Maximum takeoff, lb | 33,000 | 33,000 loaded to 37,500 maximum takeoff | exact to 12% low | A published loaded weight; the higher figure is the maximum takeoff |
+| Military thrust, lbf | 17,687 | 14,870 (F100-PW-200) | +19% | Left as retail, listed for John |
+| Afterburner thrust, lbf | 32,000 | 23,830 (F100-PW-200) | +34% | Left as retail, listed for John |
+| 1 G top speed, kt | 1,145 | 1,120 to 1,174 | within 2% | Agrees |
+| Ceiling, ft | 60,000 | 50,000 to 60,000 | at the top of the range | Agrees |
+| G limits | +9 / -4 | +9 design | matches positive | Keep retail |
+
+The thrust pair is the fleet template shared word for word with `F16C.PT` (and
+`F18.PT`, `M2000.PT`, `F29.PT`, `CMCHE.PT`), about a third above the F-16A's
+F100-PW-200; under the [record rule](../spec/aircraft-records.md#rule) it is
+"only roughly off" and stays retail and listed for John, exactly as the audit
+already lists it for the F-16C. The mass and fuel, by contrast, are an exact
+early F-16A fit, so nothing here is a copy far from the real aircraft. No value
+is corrected in F16A-0.
+
+### Unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| OBJECT flag `0x2bf3` and the F16C's extra `0x800000` / `0x4000` | Uninterpreted; must not be mistaken for equipment | Trace the OBJECT flag consumers in the reviewed executable; F16A-1 can proceed without it |
+| `viewOffset.z` 110 against the F16C's 60 | It sets the cockpit eye position a player sees | Confirm in F16A-5 cockpit frames; no change unless a frame shows it wrong |
+| Source-default A2A quantity | `maxItems` is capacity, not a proven default load, and F16A has four carrier rows where the F16C has three | Review the source-default normalization in F16A-4 |
+| The tank and carrier masks (`0x0605`, `0x07e5`, `0x07e5`, `0x0085`, `0x0085`) | They set which stores fit each row and differ from the F16C's | Decode and pin in F16A-4 with `--validate-ordnance` |
+| High thrust against the F100-PW-200 | It sets acceleration and climb | List for John now; validate flight in F16A-6. No record change |
+| Destroyed hulk identity | A and C are both damaged bodies and there is no separate hulk file | Confirm in F16A-2 which body draws as the hulk and that B and D are the pieces |
+| `F16C_0.PIC` to `F16C_8.PIC`, `F16C_P.PIC` in `disc2/FA_3.LIB` | A second F-16C cockpit art set not in the identity closure | Confirm they are unused by the current cockpit path in F16A-5 |
+| Streamer definition | The two points and zero pivot are unreviewed | Check the contrail or effect origin in F16A-2 or F16A-5 |
+
+### F16A-1 hand-off
+
+The record is ready for identity registration, with one plan correction: F16A
+and F16C share mass, thrust, fuel and envelope, so F16A-6 must not expect an
+F16C-different flight model.
+
+F16A-1 should append `F16a` after `Mig25` (`ALL` 38, `SELECTABLE` 39), use
+`typeSize` 660, return `F16.PT`, `F16.SH`, `F16C.HUD`, `~F16H.PIC`,
+`~F16_P.PIC`, `F18R.SEE` and `VIS340.SEE`, keep `guns()` as `M61.JT`, and use
+checkpoint code 38. It must set `has_pts()` false for `F16a`, because `F16.PTS`
+does not exist and the importer would otherwise demand it. The reviewed names
+are `F-16` and `F- 16A Falcon`, so `Aircraft::parse` accepts the record with no
+name change. The deployed gear low point is -21 shape units (7.0 ft) and the F2
+contact offset is -21; the debris scale is 1/3, the exponent-8 host factor
+`combat/debris.rs` uses for every aircraft without a special case. The live
+permitted list is `AGM65G.JT`, `AIM120.JT`, `AIM9M.JT` and `M61.JT`, and the
+strike class is Fighter. The `variety` identity is `("F-16", "F16.SH")` with
+clearance 7.0 ft, and it shares the F-16C layout spec (`31488`, 356 faces, the
+six words) and the `SpecificRig::F16` rig. No other record is substituted for
+any of these names, and `F16C` stays its own identity.
