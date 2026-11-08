@@ -172,3 +172,15 @@ F-16A's cockpit render and art-mask tile are pixel-identical to the F-16C's
 the visible proof that both identities draw the one reviewed `~F16H.PIC`. The
 `--cockpit-sheet` tiles and the `--capture-flight` cockpit frames are under
 `.local/m3-aircraft/frames/F16A-5/`.
+
+## 2026-11-08 MiG-31 cockpit confirmation
+
+Slice M31-7 confirmed the new MiG-31 import (`MIG31.PT`) on the Yak-141 cockpit
+by John's decision of 2026-11-08 (opinionated): `--cockpit-sheet OUT_DIR mig31`
+reported `stem MIG31 cockpit ~Y141H.PIC art 1280x490 FITTED LR`, with the left
+mask at x 244 y 9 w 272 h 182 and the right mask at x 763 y 9 w 272 h 182, and
+the windowed capture printed `Cockpit mirrors: 2 reviewed regions, 768x384 rear
+feed, every other visible frame`. So the MiG-31 joins the Yak-141 on the
+reviewed `Y141H` left/right seeds of the 2026-10-12 review above; no new mask
+was fitted and no per-aircraft eye was added. The `--cockpit-sheet` tile and the
+`--capture-flight` cockpit frames are under `.local/m3-aircraft/frames/M31-7/`.

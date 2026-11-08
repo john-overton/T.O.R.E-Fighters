@@ -992,7 +992,9 @@ extracted bytes are committed. Slice done by Claude Sonnet (sonnet-medium).
 
 Two questions are open for John and are **not decided here**: the missing
 `y141.HUD` ([HUD](#the-missing-hud-for-john)) and the unreviewed `MIG31R.SEE`
-and `MIG31.ECM` ([sensors](#the-unreviewed-radar-and-jammer-for-john)).
+and `MIG31.ECM` ([sensors](#the-unreviewed-radar-and-jammer-for-john)). Both
+were decided by John on 2026-11-08 and implemented in M31-7; the review and its
+result are recorded in that sensors section.
 
 ### Build and extraction
 
@@ -1390,12 +1392,30 @@ Tornado also carry `MIG31.ECM` (non-roster; they are not imported).
 Neither record is enabled by this slice, and no new preset is proposed without
 John.
 
+M31-7 then reviewed both by John's decision of 2026-11-08 (below), so
+`MIG31R.SEE` and `MIG31.ECM` now fly.
+
+**Reviewed (M31-7, 2026-11-08).** John chose, and M31-7 implemented, one match
+arm each in `crates/tore-sim/src/sensors/profile.rs`:
+
+| Record | Review | Basis (opinionated, John 2026-11-08) |
+| --- | --- | --- |
+| `MIG31R.SEE` | `Preset::Advanced` | The `F15R.SEE` class of the record it copies; its own decoded 124 nmi search range is kept, not replaced |
+| `MIG31.ECM` | `Generation::LateColdWar` | The generation of the byte-identical `SU27.ECM`; the other sibling, `SU24.ECM`, is Transitional and does not decide it |
+
+The MiG-31 now reads, from `--sensor-summary`: `radar MIG31R.SEE search 124 nmi
+60x60 deg track 100 nmi 45x45 deg look-down 30 ADVANCED; ... jammer MIG31.ECM
+LATE strength 0.30`. The radar gives the semi-active `AA9.JT` its required
+launcher illumination, so the AA-9 guides (checked in M31-7; it killed the
+range fixture in a 3,600-tick live-fire probe). The chaff and flare counts (60 and 60) come from the
+record and never depended on the review.
+
 ### Unknowns and next steps
 
 | Unknown | Why it matters | Next step |
 | --- | --- | --- |
-| The HUD | `y141.HUD` is missing; the cockpit cannot start | John picks (above); M31-7 |
-| Radar preset and jammer generation | Both unreviewed, so no flying radar | John picks (above); M31-7 |
+| The HUD | `y141.HUD` is missing; the cockpit cannot start | Resolved in M31-7: John chose `YAK141.HUD` with the Y141 cockpit and `~Y141H.PIC` (opinionated, 2026-11-08); it draws |
+| Radar preset and jammer generation | Both unreviewed, so no flying radar | Resolved in M31-7: `MIG31R.SEE` Advanced and `MIG31.ECM` Late-Cold-War (opinionated, John, 2026-11-08) |
 | What `0x4ad3c0` searches | Whether the fallback to `F18.HUD` also covers other mounts or case | Read the finder, if John wants the original's behaviour as the choice |
 | Whether the MiG-31 is player-flyable in retail | It is not on the reviewed player roster, so the fallback may be unreachable | Roster and menu research; not needed to proceed |
 | State-word roles | `6120`, `6126`, `6138`, `613e`, `6144` are inferred from slot order and geometry | M31-3 confirmed the flap and rudder words; M31-4 confirmed the gear, brake and plume words against the branch geometry |

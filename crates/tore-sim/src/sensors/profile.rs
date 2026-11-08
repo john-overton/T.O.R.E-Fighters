@@ -116,7 +116,7 @@ impl Preset {
             "F14R.SEE" | "F4JR.SEE" | "AC130R.SEE" | "AV8R.SEE" | "YAK141R.SEE" | "A7R.SEE"
             | "A10R.SEE" => Some(Self::Transitional),
             "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
-            | "E3R.SEE" | "E2R.SEE" => Some(Self::Advanced),
+            | "E3R.SEE" | "E2R.SEE" | "MIG31R.SEE" => Some(Self::Advanced),
             _ => None,
         }
     }
@@ -224,7 +224,7 @@ impl Generation {
             "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM" => {
                 Some(Self::Transitional)
             }
-            "F18.ECM" | "SU27.ECM" | "F22.ECM" | "F15.ECM" => Some(Self::LateColdWar),
+            "F18.ECM" | "SU27.ECM" | "F22.ECM" | "F15.ECM" | "MIG31.ECM" => Some(Self::LateColdWar),
             _ => None,
         }
     }
@@ -707,6 +707,31 @@ mod tests {
         // An unreviewed generation has no jamming effect if it is ever read.
         assert_eq!(Generation::Unreviewed.matchup(Preset::Basic), 0.);
         assert_eq!(Generation::Early.matchup(Preset::Unreviewed), 0.);
+    }
+
+    #[test]
+    fn the_mig31_records_are_reviewed_by_johns_2026_11_08_decision() {
+        // M31-7 (John, 2026-11-08): MIG31R.SEE is reviewed as Advanced, the
+        // F-15 class of the F15R.SEE record it copies, keeping its own record
+        // search range; MIG31.ECM is reviewed as Late-Cold-War, as the
+        // byte-identical SU27.ECM. The range itself is the retail record's,
+        // read by `Volume::from_zone`, and is confirmed by `--sensor-summary`.
+        let radar = RadarProfile::from_seeker("MIG31R.SEE", &seeker(3)).unwrap();
+        assert_eq!(radar.preset, Preset::Advanced);
+        assert!(radar.reviewed());
+        assert_eq!(radar.notch, Preset::Advanced.notch());
+        assert_eq!(radar.resistance, Preset::Advanced.resistance());
+        // The decoded record's own search maximum is preserved, not replaced by
+        // the preset's reference.
+        assert_eq!(radar.search.maximum_ft, 60_000.);
+
+        let jammer =
+            JammerProfile::from_countermeasures("MIG31.ECM", &Countermeasures::NONE).unwrap();
+        assert_eq!(jammer.generation, Generation::LateColdWar);
+        assert!(jammer.reviewed());
+        // MIG31.ECM is byte-equal to SU27.ECM, so both review the same way.
+        let su27 = JammerProfile::from_countermeasures("SU27.ECM", &Countermeasures::NONE).unwrap();
+        assert_eq!(jammer.generation, su27.generation);
     }
 
     #[test]

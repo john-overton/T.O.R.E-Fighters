@@ -28,7 +28,7 @@ they are gameplay tuning rather than retail measurements. The
 
 Status: **implemented**, 2026-09-16. Stages 1 to 4 of the delivery table below
 shipped; stage 5's tuning pass is partly done, with no side-by-side review yet.
-One common radar implementation serves all twelve imported aircraft, with
+One common radar implementation serves every imported aircraft, with
 data-driven profiles and an authored detection model. It covers air targets,
 ownship radar and installed IR air-to-air sensors, contact history,
 self-protection RF jamming, persistent mouse selection and radar-guided missile
@@ -161,13 +161,15 @@ flying channel, instead of borrowing a preset.
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
 | Transitional | F14R | 100 | 0.20 | 8 | 2 degrees / 0.02 |
-| Advanced | F18R, MIG29R, SU24R, SU27R, F22R | 60 | 0.45 | 10 | 1 degree / 0.005 |
+| Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
 rather than taking a second old-aircraft punishment. The advanced set resists
 jamming and has a narrower notch but is not immune. SU24R's assignment follows
 the zero look-down source grouping, not a historical claim, and remains a
-deliberate tuning candidate. Device parameters are named profile fields, so
+deliberate tuning candidate. MIG31R's Advanced assignment is John's decision of
+2026-11-08: it is the `F15R.SEE` record class, kept at its own decoded 124 nmi
+search range (opinionated). Device parameters are named profile fields, so
 future adjustments never require changing the common component.
 
 ### Notching
@@ -208,7 +210,7 @@ agent-authored gameplay coefficients, not retail or real-world measurements.
 
 ### Installed ECM inventory and generation assignment
 
-Eight distinct ECM records are installed across the twelve aircraft. Every one
+Nine distinct ECM records are installed across the imported fleet. Every one
 carries an explicit reviewable generation assignment, recorded in code and never
 derived from the associated radar preset or the PT year. An unreviewed ECM record
 loads as `Generation::Unreviewed` and never enables a flying channel, instead of
@@ -218,14 +220,16 @@ borrowing a generation.
 | --- | --- | --- |
 | Early | F4.ECM, MIG21.ECM | A-4E; MiG-21, MiG-23 |
 | Transitional | F14.ECM, MIG29.ECM, SU24.ECM | F-14D; MiG-29; Su-25 |
-| Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM | F/A-18D, Rafale C, X-31; Su-27, Su-35; F-22A |
+| Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM, MIG31.ECM | F/A-18D, Rafale C, X-31; Su-27, Su-35; F-22A; MiG-31 |
 
 F4.ECM and MIG21.ECM carry no radar-deception mode flag and a zero deception
 chance, so the A-4E, MiG-21 and MiG-23 emit no RF noise at all and never reach
 the matchup table above. That falls out of their own records, not from a tuning
-decision. F22.ECM has deception chance 50; every other RF record has 30, the
-reference strength below. The [retail record values](spec/radar.md#installed-ecm-records)
-are in the spec.
+decision. MIG31.ECM is byte-equal to SU24.ECM and SU27.ECM apart from its name;
+John assigned it Late-Cold-War on 2026-11-08 (opinionated), the generation of
+the identical SU27.ECM. F22.ECM has deception chance 50; every other RF record
+has 30, the reference strength below. The [retail record
+values](spec/radar.md#installed-ecm-records) are in the spec.
 
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored
@@ -728,11 +732,11 @@ ended with a reviewable result.
 
 | Stage | Work | Reviewable exit | Status |
 | --- | --- | --- | --- |
-| 1. Profiles | Expose PT radar/IR signatures, installed radar/IR channels and ECM inputs; review radar and jammer tuning | All twelve aircraft produce the expected capability summary; no missing sensor silently becomes F18R | **Done.** `--sensor-summary` reports all twelve; an unreviewed radar or ECM record loads as an unreviewed profile that never enables a flying channel (EQ-1, 2026-11-06) |
+| 1. Profiles | Expose PT radar/IR signatures, installed radar/IR channels and ECM inputs; review radar and jammer tuning | Every imported aircraft produces the expected capability summary; no missing sensor silently becomes F18R | **Done.** `--sensor-summary` reports every imported aircraft; an unreviewed radar or ECM record loads as an unreviewed profile that never enables a flying channel (EQ-1, 2026-11-06) |
 | 2. Shared simulation | Add radar/IR detection, aspect factors, passive emitters, bounded history and persistent selection; separate death from physical contact lifetime | Numeric boundary tests and deterministic headless contact traces pass; no renderer or frame rate affects results | **Done.** The component and its acceptance tests live in `crates/tore-sim/src/sensors/` |
 | 3. Player scope | Use shared contacts/interference; correct range modes; add IR air-to-air, Y history, directional noise, persistent selection, RCS contour and clear track status | Mouse picks the intended target in both layouts and after resize; RWS selection cannot supply weapon lock; history cannot be clicked; target-view IFF stays unchanged | **Done** |
 | 4. Weapon integration | Replace duplicated radar checks with shared support status; preserve weapon-specific launch envelopes and active/semi-active distinctions | Correct target receives launch; each support-loss case passes; recording/replay reproduces selected target and engagement | **Done.** Radar weapons consult the shared support result; version-3 tapes carry the controls and the designated identity |
-| 5. Aircraft tuning pass | Exercise synthetic same-target scenarios for each radar preset and local imported profile; run workspace and rendered checks | Side-by-side capability results and captures reviewed, known approximations recorded, guides updated | **Partly done.** All twelve produce the capability summary and pass their combat smokes, and the approximations and guides are recorded here. No side-by-side tuning review has happened |
+| 5. Aircraft tuning pass | Exercise synthetic same-target scenarios for each radar preset and local imported profile; run workspace and rendered checks | Side-by-side capability results and captures reviewed, known approximations recorded, guides updated | **Partly done.** Every imported aircraft produces the capability summary and passes its combat smoke, and the approximations and guides are recorded here. No side-by-side tuning review has happened |
 
 Stage 3 migrated saved scope ranges by their old nautical-mile value to the
 nearest new range, with equal-distance ties choosing the lower setting; an old

@@ -43,10 +43,10 @@ first ones to confirm.
 |---|---:|---|---|---|---|
 | Aircraft (PT) | 145 | 65 / 0 / 80 / 0 | 33 / 32 / 80 / 0 | 28 / 10 / 107 / 0 | 27 / 38 / 80 / 0 |
 | Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
-| Equipment (SEE/ECM/GAS) | 85 | 53 / 28 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 51 / 3 / 31 / 0 |
+| Equipment (SEE/ECM/GAS) | 85 | 55 / 26 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 53 / 3 / 29 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **472 / 49 / 98 / 0** | **248 / 179 / 117 / 75** | **202 / 31 / 140 / 246** | **403 / 83 / 132 / 1** |
+| **Total** | **619** | **474 / 47 / 98 / 0** | **248 / 179 / 117 / 75** | **202 / 31 / 140 / 246** | **405 / 83 / 130 / 1** |
 
 ## What remains, by object type
 
@@ -562,7 +562,7 @@ Per category:
 | EA6R.SEE | EA-6 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | F4R.SEE | F-4 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | F8R.SEE | F-8 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
-| MIG31R.SEE | MiG-31 radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
+| MIG31R.SEE | MiG-31 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; MiG-31 (M31-7, John 2026-11-08) |
 | SEAHARR.SEE | Sea Harrier radar | Partial | N/A | N/A | None | No roster carrier; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | SU35R.SEE | Su-35 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
 | SU37R.SEE | Su-37 radar | Partial | N/A | N/A | None | No carrier at all; decoded and profiled as unreviewed (EQ-1, 2026-11-06), so hidden |
@@ -616,7 +616,7 @@ Per category:
 | EA6.ECM | EA-6 ECM | Partial | None | None | None | EA-6 only; non-roster, generation unreviewed |
 | F8.ECM | F-8 ECM | Partial | None | None | None | F-8J only; non-roster, generation unreviewed |
 | MIG27.ECM | MiG-27 ECM | Partial | None | None | None | MiG-27 only; non-roster, generation unreviewed |
-| MIG31.ECM | MiG-31 ECM | Partial | None | None | None | MiG-31/Jaguar/Tornado only; non-roster, generation unreviewed |
+| MIG31.ECM | MiG-31 ECM | Done | None | None | Done | Chaff/flare 60/60 and jammer generation reviewed; MiG-31 (M31-7, John 2026-11-08); also Jaguar/Tornado (not imported) |
 | SEAHAR.ECM | Sea Harrier ECM | Partial | None | None | None | Sea Harrier only; non-roster, generation unreviewed |
 | SU37.ECM | Su-37 ECM | Partial | None | None | None | no carrier at all; non-roster, generation unreviewed |
 | TU160.ECM | Tu-160 ECM | Partial | None | None | None | Tu-160 only; non-roster, generation unreviewed |
@@ -646,9 +646,9 @@ Per category:
 
 | Status | Imported | Animations | AI | Logic |
 | --- | --- | --- | --- | --- |
-| Done | 32 | 0 | 3 | 30 |
-| Partial | 1 | 0 | 0 | 3 |
-| None | 18 | 2 | 0 | 18 |
+| Done | 33 | 0 | 3 | 31 |
+| Partial | 0 | 0 | 0 | 2 |
+| None | 17 | 2 | 0 | 17 |
 | N/A | 0 | 49 | 48 | 0 |
 | Total | 51 | 51 | 51 | 51 |
 
@@ -656,9 +656,9 @@ Per category:
 
 | Status | Imported | Animations | AI | Logic |
 | --- | --- | --- | --- | --- |
-| Done | 17 | 17 | 17 | 17 |
-| Partial | 1 | 0 | 0 | 0 |
-| None | 12 | 13 | 12 | 13 |
+| Done | 18 | 17 | 17 | 18 |
+| Partial | 0 | 0 | 0 | 0 |
+| None | 12 | 13 | 12 | 12 |
 | N/A | 0 | 0 | 1 | 0 |
 | Total | 30 | 30 | 30 | 30 |
 

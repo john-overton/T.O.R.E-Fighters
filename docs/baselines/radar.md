@@ -217,3 +217,28 @@ Headless captures can set the scope with `--sensor-channel radar|ir`,
 - The remaining departures from the plan and from retail data behaviour are
   listed in the component guide's
   [deliberate departures](../radar.md#deliberate-departures-and-known-approximations).
+
+## MiG-31 radar and jammer review, 2026-11-08 (M31-7)
+
+John's decision of 2026-11-08 reviewed `MIG31R.SEE` as `Preset::Advanced` and
+`MIG31.ECM` as `Generation::LateColdWar`, one match arm each in
+`crates/tore-sim/src/sensors/profile.rs` (opinionated, John). This replaced the
+unreviewed profiles EQ-1 loaded for that aircraft.
+
+- `--sensor-summary` reads: `Mig31: radar MIG31R.SEE search 124 nmi 60x60 deg
+  track 100 nmi 45x45 deg look-down 30 ADVANCED; infrared none; visual VIS240.SEE
+  search 10 nmi 120x90 deg track 5 nmi 120x90 deg; jammer MIG31.ECM LATE
+  strength 0.30; signature radar 100 infrared 100`. The 124 nmi search range is
+  the record's own decoded value, kept, not the preset's reference.
+- The radar now supplies the semi-active `AA9.JT` its required illumination.
+  `--live-fire --aircraft mig31 --weapon-slot 2 --combat-probe-ticks 3600` reads
+  `shots=1 hits=1 kills=1 active=0`; before the review (M31-6, no flying radar)
+  the same shot showed `RADAR OFF` and did not hit. At 1200 ticks the cockpit
+  RADAR window reads `TWS 10NM 1 CONTACTS TRACK` with the missile still in
+  flight, where M31-6 read `RADAR OFF`.
+- The chaff and flare capacity read from `MIG31.ECM` is 60 and 60, the reviewed
+  record's own counts, unchanged by the generation review.
+
+Validated: the new synthetic record test and the whole `tore-sim` sensor suite
+pass, and the windowed runs above. Not run: no full workspace check list (M31-10)
+and no side-by-side tuning against the other aircraft.

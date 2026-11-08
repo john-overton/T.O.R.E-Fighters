@@ -76,6 +76,13 @@ is the F-16 family: `F16.PT` and `F16C.PT` both name `F16C.HUD`, so the F-16A
 draws the same `~F16_P.PIC` bezel as the F-16C (F16A-5). The screen inset of
 `~F16_P.PIC` is index 0, sampled inside the recess.
 
+The MiG-31 flies the Yak-141 cockpit by John's decision of 2026-11-08
+(opinionated). `MIG31.PT` names the missing `y141.HUD`, and TORE maps that stem
+to `YAK141.HUD`; a direct parse of that HUD gives panel `~y141_p`, primary ink
+index 40 and title, button and press indices 1, 1 and 1, identical to the
+MiG-25's `SU33_C.HUD`. The MiG-31 therefore draws the Yak-141 `~Y141_P.PIC`
+bezel over the `~Y141H.PIC` cockpit (M31-7).
+
 ## Geometry (640x480, four windows)
 
 All numbers are window-relative pixels unless stated. The original computes
@@ -206,7 +213,9 @@ stored palette was 0.96 to 1.02.
   requests `~XX_w`. Confirmed for the MiG-25 in slice M25-7: `SU33_C.HUD` names
   `~su33_w`, no archive entry exists, and the aircraft imports and draws with
   the same shared cockpit the MiG-29, Su-25 and MiG-23 use (their archives also
-  lack it). The original's use of the field is still not established. The F-16
+  lack it). Confirmed for the MiG-31 in slice M31-7: `YAK141.HUD` names
+  `~y141_w`, no archive entry exists, and the aircraft draws the Yak-141
+  cockpit. The original's use of the field is still not established. The F-16
   family (F16A-5) is the same case but the field does not match the stem: both
   `F16C.HUD` builds name `~raf_w`, a Rafale-named field inside an F-16 module
   (the root also carries `~f16`, `~f16h` and `~f16s`). No code path requests it.
