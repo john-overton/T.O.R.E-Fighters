@@ -1006,6 +1006,7 @@ impl Configuration {
                 AircraftId::B747 => false,
                 AircraftId::A310 => false,
                 AircraftId::Mig25 => ["AA6.JT", "AA2.JT"].contains(&name),
+                AircraftId::Mig31 => ["AA9.JT", "AA8.JT", "GSH6_30.JT"].contains(&name),
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256

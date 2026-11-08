@@ -208,6 +208,18 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x760c, Part::Gear, 12)],
                 1. / 3.,
             ),
+            // MIG31.SH: six state words. The gear word 0x612c adds its faces
+            // (docs/formats/aircraft-variety.md, "MiG-31 source review"). The
+            // other five words (0x6120, 0x6126, 0x6138, 0x613e, 0x6144) are
+            // unmapped in M31-1, so the aircraft loads with the shared fitted
+            // gear law until its own rig (M31-3, M31-4).
+            Id::Mig31 => (
+                20816,
+                214,
+                &[0x6120, 0x6126, 0x612c, 0x6138, 0x613e, 0x6144],
+                &[(0x612c, Part::Gear, 12)],
+                1. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {

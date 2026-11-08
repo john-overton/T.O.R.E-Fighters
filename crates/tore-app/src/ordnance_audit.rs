@@ -21,24 +21,27 @@ mod store_pairs;
 /// weapon list, the tank records or the aircraft change.
 // F16A-1 raised the roster pin to 38. The F-16A's placement counts are not
 // re-measured here; F16A-4 owns them.
-const AIRCRAFT: usize = 38;
+// M31-1 raised it to 39 for the MiG-31; its placements belong to M31-5/M31-6.
+const AIRCRAFT: usize = 39;
 const RECOVERED_STATIONS: usize = 14;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
 /// and two 0x0085 rows). See docs/baselines/ordnance-availability.md.
-const WEAPON_PLACEMENTS: usize = 3817;
+/// 3,892 from 3,817: the MiG-31 joins with its unreviewed record (M31-1).
+const WEAPON_PLACEMENTS: usize = 3892;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
-const TANK_PLACEMENTS: usize = 188;
+/// 192 from 188: the MiG-31 (M31-1).
+const TANK_PLACEMENTS: usize = 192;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
-/// F-16A's four wing and wingtip rows (slice F16A-4).
-const NOVELTY_PLACEMENTS: usize = 182;
+/// F-16A's four wing and wingtip rows (slice F16A-4). 186: the MiG-31 (M31-1).
+const NOVELTY_PLACEMENTS: usize = 186;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
-/// bit 0x400, one pod each (slice F16A-4).
-const POD_PLACEMENTS: usize = 67;
+/// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1).
+const POD_PLACEMENTS: usize = 68;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {

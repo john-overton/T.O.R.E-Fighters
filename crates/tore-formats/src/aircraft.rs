@@ -228,6 +228,7 @@ pub enum AircraftId {
     A310,
     Mig25,
     F16A,
+    Mig31,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
@@ -241,7 +242,7 @@ impl AircraftId {
             self.pt()
         }
     }
-    pub const SELECTABLE: [Self; 39] = [
+    pub const SELECTABLE: [Self; 40] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -281,6 +282,7 @@ impl AircraftId {
         Self::A310,
         Self::Mig25,
         Self::F16A,
+        Self::Mig31,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
     /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
@@ -309,7 +311,7 @@ impl AircraftId {
         matches!(self, Self::Ah64 | Self::Mi24 | Self::Ch47)
     }
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -348,6 +350,7 @@ impl AircraftId {
         Self::A310,
         Self::Mig25,
         Self::F16A,
+        Self::Mig31,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -390,8 +393,9 @@ impl AircraftId {
             "a310" | "a310.pt" => Ok(Self::A310),
             "mig25" | "m25.pt" => Ok(Self::Mig25),
             "f16a" | "f16.pt" => Ok(Self::F16A),
+            "mig31" | "mig31.pt" => Ok(Self::Mig31),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31",
             )),
         }
     }
@@ -435,6 +439,7 @@ impl AircraftId {
             Self::A310 => "A310.PT",
             Self::Mig25 => "M25.PT",
             Self::F16A => "F16.PT",
+            Self::Mig31 => "MIG31.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -477,6 +482,7 @@ impl AircraftId {
             Self::A310 => "AC130.HUD",
             Self::Mig25 => "SU33_C.HUD",
             Self::F16A => "F16C.HUD",
+            Self::Mig31 => "YAK141.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -519,6 +525,7 @@ impl AircraftId {
             Self::A310 => "A310",
             Self::Mig25 => "MIG25",
             Self::F16A => "F16",
+            Self::Mig31 => "MIG31",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -557,6 +564,7 @@ impl AircraftId {
             Self::A310 => "AC130",
             Self::Mig25 => "SU33",
             Self::F16A => "F16",
+            Self::Mig31 => "Y141",
             _ => self.stem(),
         }
     }
@@ -604,6 +612,7 @@ impl AircraftId {
             Self::A310 => "~AC130H.PIC",
             Self::Mig25 => "~SU33H.PIC",
             Self::F16A => "~F16H.PIC",
+            Self::Mig31 => "~Y141H.PIC",
         }
     }
     /// Compact identity for lobby columns and server seat logs.
@@ -662,6 +671,7 @@ impl AircraftId {
             Self::A310 => "Airbus 310",
             Self::Mig25 => "MiG-25 Foxbat",
             Self::F16A => "F- 16A Falcon",
+            Self::Mig31 => "MiG-31 Foxhound",
         }
     }
     /// Exact reviewed short/long retail names, absent for the original loose fixtures.
@@ -704,6 +714,7 @@ impl AircraftId {
             Self::A310 => Some(("A310", "Airbus 310")),
             Self::Mig25 => Some(("MiG-25", "MiG-25 Foxbat")),
             Self::F16A => Some(("F-16", "F- 16A Falcon")),
+            Self::Mig31 => Some(("MiG-31", "MiG-31 Foxhound")),
             _ => None,
         }
     }
@@ -749,6 +760,7 @@ impl AircraftId {
             Self::A310 => None,
             Self::Mig25 => Some("MIG27R.SEE"),
             Self::F16A => Some("F18R.SEE"),
+            Self::Mig31 => Some("MIG31R.SEE"),
         }
     }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
@@ -813,6 +825,7 @@ impl AircraftId {
             Self::A310 => &[],
             Self::Mig25 => &[],
             Self::F16A => &["M61.JT"],
+            Self::Mig31 => &["GSH6_30.JT"],
         }
     }
     /// Reviewed optional left, centre and right cockpit overlays.
@@ -850,6 +863,7 @@ impl AircraftId {
                 | Self::A310
                 | Self::Mig25
                 | Self::F16A
+                | Self::Mig31
         )
     }
 }
@@ -911,6 +925,7 @@ impl Aircraft {
             AircraftId::A310 => 468,
             AircraftId::Mig25 => 588,
             AircraftId::F16A => 660,
+            AircraftId::Mig31 => 588,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -1718,6 +1733,7 @@ mod profile_tests {
             (AircraftId::A310, "A310", "Airbus 310", 468),
             (AircraftId::Mig25, "MiG-25", "MiG-25 Foxbat", 588),
             (AircraftId::F16A, "F-16", "F- 16A Falcon", 660),
+            (AircraftId::Mig31, "MiG-31", "MiG-31 Foxhound", 588),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
