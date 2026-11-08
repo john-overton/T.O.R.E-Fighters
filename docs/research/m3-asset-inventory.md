@@ -41,18 +41,18 @@ first ones to confirm.
 
 | Object type | Records | Imported D/P/N/NA | Animations D/P/N/NA | AI D/P/N/NA | Logic D/P/N/NA |
 |---|---:|---|---|---|---|
-| Aircraft (PT) | 145 | 65 / 0 / 80 / 0 | 33 / 32 / 80 / 0 | 28 / 10 / 107 / 0 | 27 / 38 / 80 / 0 |
+| Aircraft (PT) | 145 | 66 / 0 / 79 / 0 | 34 / 32 / 79 / 0 | 29 / 10 / 106 / 0 | 28 / 38 / 79 / 0 |
 | Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
 | Equipment (SEE/ECM/GAS) | 85 | 55 / 26 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 53 / 3 / 29 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **474 / 47 / 98 / 0** | **248 / 179 / 117 / 75** | **202 / 31 / 140 / 246** | **405 / 83 / 130 / 1** |
+| **Total** | **619** | **475 / 47 / 97 / 0** | **249 / 179 / 116 / 75** | **203 / 31 / 139 / 246** | **406 / 83 / 129 / 1** |
 
 ## What remains, by object type
 
-- **Aircraft.** 38 of 145 are flyable by players and AI (13 original roster, 23
-  variety, and the MiG-25 and F-16A M3 additions). 27 more are parked scenery
-  only (no AI, static pose). 80 are decoded
+- **Aircraft.** 39 of 145 are flyable by players and AI (13 original roster, 23
+  variety, and the MiG-25, F-16A and MiG-31 M3 additions). 27 more are parked
+  scenery only (no AI, static pose). 79 are decoded
   in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and nothing else. Variety
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
@@ -107,8 +107,8 @@ first ones to confirm.
   surface units (`combat/missiles.rs`, `SURFACE_TO_SURFACE`).
 
 - [ai-experience.md](../spec/ai-experience.md) "Currently ported aircraft" says
-  twelve; `AircraftId::ALL` holds 38 (13 roster including F22N, plus 23 variety
-  and the MiG-25 and F-16A M3 additions).
+  twelve; `AircraftId::ALL` holds 39 (13 roster including F22N, plus 23 variety
+  and the MiG-25, F-16A and MiG-31 M3 additions).
 
 
 ## Aircraft (PT)
@@ -116,7 +116,7 @@ first ones to confirm.
 
 ### Mechanisms found
 
-Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F14, A4E, F31, MIG29, SU27, MIG21, SU25, MIG23, SU35, F22, F22N) with exact PT identity, own rig, cockpit, sensors, stores and hybrid flight (docs/spec/additional-aircraft.md, roster-aircraft.md, aircraft-animation.md). "Variety" is the 23-aircraft batch (docs/spec/aircraft-variety.md): same `AircraftId::ALL` (38 entries, `ai_flyable()` is true for all), all human-playable and AI-flyable, rigs reviewed on CPU (docs/baselines/aircraft-animations.md), rotorcraft/VTOL on the fitted powered-lift physics (powered-lift-flight.md, rotor-presentation.md). The M3 aircraft round adds the MiG-25 Foxbat (`M25.PT`) and the F-16A Falcon (`F16.PT`), each an `AircraftId` entry with its own rig, cockpit, sensors, stores and hybrid flight; the MiG-25 is also parkable. AI for all 38 is exercised by `--ai-roster-probe-ticks` (crates/tore-app/src/ai_roster_probe.rs) and binds to the generic fighter/strike family plus `strike_class.rs` (Heavy/Attack/Helicopter/Gunship); overall AI is documented as partial (no campaign routes). "Dummy" (docs/spec/dummy-aircraft.md) is not a record type: it is an opinionated Quick Mission skill option (400 kt constant heading) applied to whatever aircraft the wing already uses, so it adds nothing for unported records. Separately, 27 more PTs are **parked-only**: Quick Mission ground-target templates place them as simulated aircraft on the ground, read through `crates/tore-formats/src/parked_aircraft.rs` (OBJECT block only, no flight/NPC/hardpoints), drawn gear-down, hit points/damage and burnt hulk, no AI actor (docs/spec/surface-defenses.md "Parked aircraft", docs/formats/objects-and-shapes.md "Parked aircraft gear"). The other 80 records (drones, ASTOVL/F-111/B-52 and similar, variants) are only decoded in docs/formats/fa-aircraft.csv; nothing loads them. Grading: Done/Partial reflects docs and code; no retail comparison exists, all animation/flight fits are fitted not original. Logic Partial for rotorcraft/VTOL/AWACS/AC-130 reflects stated open items (human tuning, contact sharing, gunner view).
+Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F14, A4E, F31, MIG29, SU27, MIG21, SU25, MIG23, SU35, F22, F22N) with exact PT identity, own rig, cockpit, sensors, stores and hybrid flight (docs/spec/additional-aircraft.md, roster-aircraft.md, aircraft-animation.md). "Variety" is the 23-aircraft batch (docs/spec/aircraft-variety.md): same `AircraftId::ALL` (39 entries, `ai_flyable()` is true for all), all human-playable and AI-flyable, rigs reviewed on CPU (docs/baselines/aircraft-animations.md), rotorcraft/VTOL on the fitted powered-lift physics (powered-lift-flight.md, rotor-presentation.md). The M3 aircraft round adds the MiG-25 Foxbat (`M25.PT`), the F-16A Falcon (`F16.PT`) and the MiG-31 Foxhound (`MIG31.PT`), each an `AircraftId` entry with its own rig, cockpit, sensors, stores and hybrid flight; the MiG-25 is also parkable. AI for all 39 is exercised by `--ai-roster-probe-ticks` (crates/tore-app/src/ai_roster_probe.rs) and binds to the generic fighter/strike family plus `strike_class.rs` (Heavy/Attack/Helicopter/Gunship); overall AI is documented as partial (no campaign routes). "Dummy" (docs/spec/dummy-aircraft.md) is not a record type: it is an opinionated Quick Mission skill option (400 kt constant heading) applied to whatever aircraft the wing already uses, so it adds nothing for unported records. Separately, 27 more PTs are **parked-only**: Quick Mission ground-target templates place them as simulated aircraft on the ground, read through `crates/tore-formats/src/parked_aircraft.rs` (OBJECT block only, no flight/NPC/hardpoints), drawn gear-down, hit points/damage and burnt hulk, no AI actor (docs/spec/surface-defenses.md "Parked aircraft", docs/formats/objects-and-shapes.md "Parked aircraft gear"). The other 79 records (drones, ASTOVL/F-111/B-52 and similar, variants) are only decoded in docs/formats/fa-aircraft.csv; nothing loads them. Grading: Done/Partial reflects docs and code; no retail comparison exists, all animation/flight fits are fitted not original. Logic Partial for rotorcraft/VTOL/AWACS/AC-130 reflects stated open items (human tuning, contact sharing, gunner view).
 
 | Resource | Name | Imported | Animations | AI | Logic | Notes |
 |---|---|---|---|---|---|---|
@@ -156,6 +156,7 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | MIG17F.PT | MiG-17F Fresco | Done | Done | Done | Partial | variety import (AircraftId); rig reviewed; fitted fuel; drop-tank climb fails (retail too) |
 | M25.PT | MiG-25 Foxbat | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; AA-6, AA-2 and 250 gal tank; also parkable |
 | F16.PT | F- 16A Falcon | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; F16C shared rig, M61, AIM-9M, AIM-120, AGM-65G, 150 gal tank; AI flyable |
+| MIG31.PT | MiG-31 Foxhound | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; GSh-6-30, AA-9 x4 and AA-8 x2; opinionated tunnel and wing-pylon station table; also parkable |
 | V22.PT | V-22 Osprey | Done | Done | Partial | Partial | variety import (AircraftId); nacelles tilt 0-97.5deg, props; fitted physics, AI conversion |
 | YAK141.PT | Yak-141 Freestyle-A | Done | Done | Partial | Partial | variety import (AircraftId); nozzle animates; AI VTOL fitted; Kiev parking unresolved |
 | A37.PT | A-37 Dragonfly | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
@@ -174,7 +175,6 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | MIG27.PT | MiG-27 Flogger-J | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | MIG29M.PT | MiG-29M | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | MIG29V.PT | MiG-29 (Snow) Fulcrum-C | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
-| MIG31.PT | MiG-31 Foxhound | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | MR3.PT | Mirage III | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | MR3E.PT | Mirage (Desert) III | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | Q5.PT | Q-5 Fantan | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
@@ -286,8 +286,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 - **Missiles.** Typed guidance profiles (`crates/tore-formats/src/missile_data.rs`, 59 profiles), finite-energy flight, seekers and decoys (`docs/spec/missiles.md`, `missile-energy.md`, `docs/baselines/missiles.md`). Motor smoke and flame, fin roll and pylon drawing are shared (`docs/features.md`, `docs/spec/stores-on-pylons.md`).
 - **Air-to-ground.** The A-G records (40 in twelve classes, the two Cheat-only novelty bombs included) were flown headless on two or more carriers (`docs/baselines/air-to-ground.md`, `docs/spec/air-to-ground.md`). Retarded bombs open their fins in flight (`store_sizes.rs`); cluster bombs give retail splash plus 28 presentation-only flashes and a fitted dispenser opening and bomblet flight; other retarders are drag only.
 - **AI.** Strike AI covers bombs, rockets, JDAM, laser stores, Mavericks, radar AGMs, HARM and AT-2 (`docs/spec/ai-strike.md`); guns use the shared burst policy (`docs/spec/ai-gun-employment.md`); surface AI fires SAMs, AAA and SS-N-9 (`surface-defenses.md`). `docs/ROADMAP.md` W1-W6 rows are partly stale: SS-N-9, and the W2 AIM-7, AIM-7E, AIM-9B, AA-10, AA-6, AA-9, PL-7 and PL-10 items, are built.
-- **Equipment.** One sensor component serves all 38 roster aircraft plus F/A-XX. Radar and ECM records with no reviewed preset or generation assignment now decode and load into an unreviewed profile (EQ-1, 2026-11-06, `crates/tore-sim/src/sensors/profile.rs`), but the profile never joins a flying channel, so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape); external designator/FLIR/jammer pods: fitted pod bodies, no retail shape (EQ-2, 2026-11-06, [why](../formats/aircraft-ordnance.md#external-equipment-pods-name-no-shape-eq-2-2026-11-06)).
-- **Roster basis.** "Roster" means the 38 retail aircraft in `docs/spec/aircraft-variety.md` and `roster-aircraft.md`; carriers were computed from `docs/formats/fa-aircraft.csv` default stores only (stations can allow more).
+- **Equipment.** One sensor component serves all 39 roster aircraft plus F/A-XX. Radar and ECM records with no reviewed preset or generation assignment now decode and load into an unreviewed profile (EQ-1, 2026-11-06, `crates/tore-sim/src/sensors/profile.rs`), but the profile never joins a flying channel, so only records carried by roster aircraft are graded Done. Laser/FLIR sights: `combat/sight.rs`; chaff/flare release, visuals, decoy odds: `docs/spec/countermeasures.md`; tanks: `external-fuel-tanks.md`, `jettison.md` (fitted tank body, no retail shape); external designator/FLIR/jammer pods: fitted pod bodies, no retail shape (EQ-2, 2026-11-06, [why](../formats/aircraft-ordnance.md#external-equipment-pods-name-no-shape-eq-2-2026-11-06)).
+- **Roster basis.** "Roster" means the 39 retail aircraft in `docs/spec/aircraft-variety.md` and `roster-aircraft.md`; carriers were computed from `docs/formats/fa-aircraft.csv` default stores only (stations can allow more).
 - **Grade rules.** Imported: Done = reachable in game; Partial = decoded and profiled or hooked but hidden; None = decoded only. Animations/AI use N/A where nothing applies.
 
 
@@ -303,8 +303,8 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AA12.JT | AA-12 Adder | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; fit residual exception |
 | AA2.JT | AA-2D Atoll | Done | Done | Done | Done | Live; MiG-21 and MiG-25 (M3); IR profile; fit residual exception |
 | AA6.JT | AA-6 Acrid | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar, own record envelope and motor; the MiG-25 is its default carrier (M3, 2026-11-07) ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
-| AA8.JT | AA-8 Aphid | Done | Done | Done | Done | Live; MiG-29, Su-25; R-60M role; fit residual exception |
-| AA9.JT | AA-9 Amos | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar, own record envelope and motor; no imported default carrier ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
+| AA8.JT | AA-8 Aphid | Done | Done | Done | Done | Live; MiG-29, Su-25, MiG-31 (M3); R-60M role; fit residual exception |
+| AA9.JT | AA-9 Amos | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar, own record envelope and motor; the MiG-31 is its default carrier (M3, 2026-11-08) ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | AAML.JT | AAM-L Anti-AWACS | Done | Done | Done | Done | Live; Su-35; active radar; no special anti-AWACS AI rule found (unverified) |
 | AEMP1.JT | AEMP-1 EM Pulse | Partial | Partial | None | Partial | Hidden; EM pulse effect unknown after JT-5 (2026-11-06): damage 0 in all five classes, collateral 4,000 ft / 70 percent, effect fields 18/15/17, and no JT names the type 38 EMP burst; nothing loads ([spec](../spec/missiles.md#aemp-1-electromagnetic-pulse-jt-5-2026-11-06), [record](../formats/missiles.md#aemp-1-em-pulse)) |
 | AIM120.JT | AIM-120 AMRAAM | Done | Done | Done | Done | Live; active radar, 5 nmi pitbull; 26 carriers |
@@ -397,7 +397,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | GSH30.JT | GSh-30 30mmx1 | Done | Done | Done | Done | Yak-141/MiG-17; green tracers; no fighter muzzle flash |
 | GSH301.JT | GSh-301 30mmx6 | Done | Done | Done | Done | MiG-29/Su-25/27/35; green tracers; no fighter muzzle flash |
 | GSH6_23.JT | GSh-6-23 23mmx6 | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; only decoded carrier SU24 not imported; not an alias of GSH6_30 (JT-1) |
-| GSH6_30.JT | GSh-6-30 30mmx6 | Done | Done | Done | Done | MiG-23; green tracers; no fighter muzzle flash |
+| GSH6_30.JT | GSh-6-30 30mmx6 | Done | Done | Done | Done | MiG-23 and MiG-31 (M3); green tracers; no fighter muzzle flash |
 | M61.JT | M61 Vulcan Cannon | Done | Done | Done | Done | 37 aircraft; shared gun model; no fighter muzzle flash |
 | MK12.JT | Mk 12 20mmx2 | Done | Done | Done | Done | A-4E; shared gun model; no fighter muzzle flash |
 | SUU16.JT | SUU-16 Gun Pod | Done | Done | Done | Done | Gun pod hangs on F-4 pylon; 1,200 rounds; no fighter muzzle flash |

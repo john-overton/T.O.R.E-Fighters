@@ -788,7 +788,7 @@ same source station rows as air-to-air. The name is retained as a snapshot alias
 For a source-backed F-14 tank selection, mass and accepted-restart check without
 a display, run `cargo run --locked -p tore-app -- --validate-tanks --aircraft f14
 --no-audio` with an imported development profile.
-For all 38 retail aircraft, `--validate-ordnance --no-audio` checks supported
+For all 39 retail aircraft, `--validate-ordnance --no-audio` checks supported
 weapon and tank compatibility, source station coverage, old loadouts and
 accepted-load restoration. The battery scenario is `menus-ordnance-availability`.
 Keep captures, logs and imported media under ignored directories. When using
@@ -1685,7 +1685,7 @@ TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
 ```
 
 `--probe-matrix NEW_DIR` runs and records one encounter per case with one imported
-world: F-22A/F-22N/F/A-XX by every opponent the AI can fly (33 of the 39 selectable
+world: F-22A/F-22N/F/A-XX by every opponent the AI can fly (34 of the 40 selectable
 aircraft, see [AI wingmen](spec/variety-flight.md#ai-wingmen)), four skills, three initial headings
 and both flight adapters. Use `--ai-probe-ticks 360 --separation 1 --verify-render`
 for close-contact acquisition, or a larger tick budget and the attack options
