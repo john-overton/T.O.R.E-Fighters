@@ -304,6 +304,21 @@ def scenarios() -> list[Scenario]:
             notes="F-16A skin from above and below with the gear down: it draws the shared F16.SH, so the double-sided wing panels must not z-fight and the underside must not show through the top. All five E0 decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, F-16A skin review).",
         ),
         Scenario(
+            name="render-mig31-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "mig31", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/mig31-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["mig31-top.ppm", "mig31-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "mig31", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/mig31-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="MiG-31 skin from above and below with the gear down: its 25 double-sided panels are exact-vertex twins with opposite stored normals, so they must not z-fight and the underside must not show through the top. The two E0 wing-marking decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, MiG-31 skin review).",
+        ),
+        Scenario(
             name="render-runway-paint-calm",
             lane="flight",
             args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],

@@ -1493,6 +1493,44 @@ art are committed; the review frames live under
 `.local/m3-imports/scratch/f16a/frames/` and
 `.local/m3-aircraft/frames/F16A-2/`.
 
+## MiG-31 skin review
+
+On 2026-11-08, slice M31-2 checked the flyable `MIG31.PT` import's skin (media
+identity in [the MiG-31 source review](aircraft-variety.md#mig-31-source-review-m3-2026-11-08)).
+The flyable path draws the reviewed `MIG31.SH`, 214 faces on the runtime state
+path (216 on the export path, the two extra being the decals below), one texture
+`_MIG31.PIC`. The four damage shapes `MIG31_A.SH` to `MIG31_D.SH` and their
+textures `_MIG31_A.PIC` to `_MIG31_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs) (the import report
+lists all ten resources). No damage variant is registered for this identity, so
+a destroyed MiG-31 draws the intact skin with regional cuts rather than an A/C
+body substitution, as the MiG-25, F-16A, F-104 and the other reviewed variety
+aircraft do; the A/B and C/D shapes stay available to the shared debris pieces.
+
+The MiG-31 does **not** need the [MiG-21 stored-normal
+exception](#mig-21-skin-review); the only identity that carries it is the MiG-21.
+`MIG31.SH` has 25 exact-vertex twin groups, every one an opposed pair inside
+1/64 source unit with opposite stored normals, so smooth mode pairs each
+double-sided panel through the shared
+[panel contract](../spec/aircraft-animation.md#double-sided-panels) and hides
+the rear member. Unlike the MiG-21 it has no near-coincident opposed up and down
+plate pair: the six nearly-coincident face pairs in its dump are coplanar
+adjacent fuselage spine strips that face the same way, not a differently divided
+upper and lower skin. A top capture in smooth mode (`TORE_WEATHER_SMOOTH`
+unset) shows the same upper skin pattern as the stepped capture, with only the
+shared lighting difference, and no grey underside shape shows through the top;
+the under capture shows the belly, engines and gear with no flicker. No per-face
+mapping correction was needed.
+
+The shape carries two `E0` runtime decal slots on the upper wing: slot 3 at
+address `38f4` at x -58 to -37 and slot 4 at `3d2d` at x 54 to 75, z about 0 to 3
+(the guide's left and right wing markings). The runtime projector omits both,
+and neither is filled with a piece of the main skin, following [texture state and
+decals](#texture-state-and-decals). The source model span is 54.0 ft against the
+real 44.2 ft (22% wide), recorded here as a model fact, not corrected. No mesh
+bytes, exported geometry or retail art are committed; the review frames live
+under `.local/m3-aircraft/frames/M31-2/`.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards
