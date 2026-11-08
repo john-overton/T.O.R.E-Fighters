@@ -564,7 +564,7 @@ What the table shows, by inspection:
   middle and outer underwing pylons (opinionated, John 2026-10-14;
   [the Su-27 and Su-35](../spec/stores-on-pylons.md#the-su-27-and-su-35)).
 
-Weapon and tank rows of the 36 registered identities (sensor, ECM and gun rows
+Weapon and tank rows of the 37 registered identities (sensor, ECM and gun rows
 omitted; Count is the default quantity):
 
 | PT | Row | Location | Flags | x / y / z | Feet right / up / fwd | Pair (0x4) | Default | Count |
@@ -662,12 +662,18 @@ omitted; Count is the default quantity):
 | `A10.PT` | 6 | Wing | `0x0585` | 25 / -10 / 0 | 8.3 / -3.3 / 0.0 | yes | AGM65G.JT | 4 |
 | `A10.PT` | 7 | Wing | `0x0585` | 40 / -10 / 0 | 13.3 / -3.3 / 0.0 | yes | AGM65G.JT | 2 |
 | `A10.PT` | 8 | Wing | `0x0185` | 55 / -10 / 0 | 18.3 / -3.3 / 0.0 | yes | AGM65G.JT | 2 |
+| `M25.PT` | 3 | Wing | `0x00c5` | 38 / -11 / -15 | 12.7 / -3.7 / -5.0 | yes | AA6.JT | 2 |
+| `M25.PT` | 4 | Wing | `0x00c5` | 51 / -11 / -21 | 17.0 / -3.7 / -7.0 | yes | AA2.JT | 2 |
+| `M25.PT` | 5 | Centerline | `0x0601` | 0 / -25 / -4 | 0.0 / -8.3 / -1.3 | no | F250.GAS | 1 |
 
 The F-15C and F-16C rows above are source coordinates. Their current
 fitted placement is documented in [F-15C stores](../spec/stores-on-pylons.md#the-f-15c)
 and [F-16C stores](../spec/stores-on-pylons.md#the-f-16c-and-fleet-rail-audit).
 The Mi-24 row 2 also reads its attachment from below the stub wing
 ([placement](../spec/stores-on-pylons.md#mi-24-lower-wing-attachment)).
+The MiG-25's three carrier rows (3, 4 and 5) hang at their decoded positions
+under the standard rules, with the measured depths and John's accepted AA-6 fin
+entry recorded in [the MiG-25](../spec/stores-on-pylons.md#the-mig-25).
 No source rows or station capacities were added.
 
 ## Original icons and geometry candidates

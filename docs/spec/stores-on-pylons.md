@@ -647,6 +647,46 @@ forward than before (fitted). Both wings are symmetric.
 Store release points move with it (stores leave from where they are
 drawn); recorded replays keep the poses they recorded.
 
+## The MiG-25
+
+John, 2026-11-07: the MiG-25 (`M25.PT`) hangs its **decoded** hardpoint
+positions under the standard pylon rules, not a real-aircraft station table, and
+he accepted the AA-6's small upper-fin entry into the wing that the stores
+preview reports, as for the F-14's Phoenix. The registration and the decoded
+positions are spec-derived; the pylon rules are the existing opinionated ones
+(2026-10-13). No other aircraft changed and no `station_move` entry was added.
+
+The three carrier rows, from the [hardpoint table](../formats/aircraft-ordnance.md#hardpoint-positions):
+
+| Record (M25.PT row) | Location | Decoded position, ft right / up / fwd | Count | T.O.R.E station |
+| --- | --- | --- | ---: | --- |
+| 3 | Wing | 12.67 / -3.67 / -5.00 | 2 (one a wing) | The record's position, 1 ft under the wing |
+| 4 | Wing | 17.00 / -3.67 / -7.00 | 2 (one a wing) | The record's position, 1 ft under the wing |
+| 5 | Centerline | 0 / -8.33 / -1.33 | 1 | The record's position, on a 2 inch rail under the belly |
+
+Rows 0 to 2 are the fixed visual sensor, radar and jammer rows, so they carry no
+drawn store.
+
+No move-aside was needed. The preview measures a wing chord above both wing rows,
+nothing hangs in space, the fins clear the neighbouring row (about 2.0 ft between
+the AA-6's outer tip and the AA-2's inner tip in the default load; about 0.97 ft
+between two AA-6s in a full AA-6 load), and the innermost store stands about 5 ft
+outboard of the gear. The measured depths match [the pylon-depth
+table](#pylon-depth): 1.00 ft on the wings and 0.17 ft (a rail) for the
+centreline tank. The fin roll turns the AA-6's fins to an X like every store.
+
+**Accepted clipping (John, 2026-11-07).** The AA-6 (`ACRID.SH`, 20 ft, 4.76 ft
+fins) puts its upper fin tips inside the wing underside by 0.27 ft on row 3 and
+0.30 ft on row 4 in a full AA-6 load, from `--stores-preview`'s `clip` lines. The
+cause is the standard 1 ft wing pylon against the AA-6's wide fins, not the
+decoded position: the fin half span at 45 degrees is 1.68 ft against a 0.51 ft
+body radius, so the upper tips stand above the wing underside even straight under
+the pylon. A real-station table would not remove it, because a real position
+still hangs the same store 1 ft under the same wing. John accepted it, the same
+0.27 ft the F-14's Phoenix shows ([the F-14](#the-f-14), "John accepts a little
+clipping"), and it is one of the smallest values the preview reports across the
+fleet. **Opinionated** (John's decision), for his review.
+
 ## The F-16C and fleet rail audit
 
 John, 2026-10-15: put the F-16 underwing pylons under the wing, farther
