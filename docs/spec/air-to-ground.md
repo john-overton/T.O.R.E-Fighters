@@ -1358,6 +1358,13 @@ the signature-1 mask as well as its air-to-air stores, so it is a 28th
 air-to-ground carrier; the per-record carrier ranges above were measured
 before it and were not re-measured ([MiG-25 ordnance](../formats/aircraft-ordnance.md)).
 
+Since the F-16A import (F16A, 2026-11-08) the roster holds 38 retail aircraft
+(39 selectable). Its two `0x07e5` wing rows admit the guided bombs, AS missiles
+and pods of the same signature-1 mask as the F-16C's, so it is a 29th
+air-to-ground carrier; the per-record carrier ranges above were measured
+before it and were not re-measured
+([F-16A ordnance](../formats/aircraft-ordnance.md#the-f-16a-m3-2026-11-08)).
+
 ### Default air-to-ground loads
 
 Retail data (PT defaults, hardpoint in brackets).

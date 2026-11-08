@@ -881,7 +881,7 @@ does not relabel those weapons or add cosmetic missiles. Real Apache launcher
 support remains separate work; these are fitted pylons for the game's
 available stores, not a claim of exact real-aircraft carriage or retail parity.
 
-The CPU stores preview checks all 38 selectable aircraft with default and
+The CPU stores preview checks all 39 selectable aircraft with default and
 maximum current-candidate weapon loads, retaining installed tanks. This
 includes the Mi-24, CH-47, V-22, AV-8, Yak-141, A-10, Su-25, A-7, C-130,
 AC-130, Il-76, E-2 and E-3. Aircraft with no external weapon load stay clean;

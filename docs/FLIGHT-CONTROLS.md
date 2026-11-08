@@ -348,7 +348,7 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 
 ## Exterior animations
 
-All 38 playable profiles have bounded headless checks for their applicable
+All 39 playable profiles have bounded headless checks for their applicable
 control surfaces and devices. Gear wheels, braces and doors use separate
 reviewed attachments; retractable hooks, vector nozzles, nacelles and rotor
 cyclic motion have aircraft-specific fits. Remaining source gaps include the
