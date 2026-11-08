@@ -50,8 +50,8 @@ def stub_wing_problems(output: str) -> list[str]:
     return problems
 
 
-def mig25_skin_problems(output: str) -> list[str]:
-    """Every MiG-25 skin capture drew a non-blank frame."""
+def skin_capture_problems(output: str) -> list[str]:
+    """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
     if not captures:
         return ["no Scene capture line"]
@@ -281,12 +281,27 @@ def scenarios() -> list[Scenario]:
             window=True,
             outputs=["mig25-top.ppm", "mig25-under.ppm"],
             expect=["Scene capture:"],
-            check=mig25_skin_problems,
+            check=skin_capture_problems,
             then=[
                 Step(["--free-flight", "--aircraft", "mig25", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/mig25-under.ppm", "--no-audio"], window=True, timeout=180),
             ],
             timeout=180,
             notes="MiG-25 skin from above and below with the gear down: the double-sided wing panels must not z-fight and the underside must not show through the top. The two E0 wing-marking decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, MiG-25 skin review).",
+        ),
+        Scenario(
+            name="render-f16a-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "f16a", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f16a-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["f16a-top.ppm", "f16a-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "f16a", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f16a-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="F-16A skin from above and below with the gear down: it draws the shared F16.SH, so the double-sided wing panels must not z-fight and the underside must not show through the top. All five E0 decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, F-16A skin review).",
         ),
         Scenario(
             name="render-runway-paint-calm",

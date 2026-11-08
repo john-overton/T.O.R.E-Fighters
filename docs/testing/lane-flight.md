@@ -820,6 +820,7 @@ The art inspection cases below check for blank frames; look at their PPMs:
 | `render-nosewheel-hud-inactive` | F/A-18 takeoff roll past the steering cutoff | NSW authority disappears from the HUD. |
 | `render-mig21-upper-skin` | The MiG-21 in free flight, flight view 2, look `0,-12`, `TORE_WEATHER_TIME=11:00` | The upper wing is plain camouflage: no grey underside shape shows through it. |
 | `render-mig25-skin` | The MiG-25 in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | No underside shape shows through the top and the double-sided wing panels do not z-fight; the two omitted E0 wing-marking decal slots leave no blank or skin-filled patch. |
+| `render-f16a-skin` | The F-16A in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shared `F16.SH` draws whole: no underside shape shows through the top and the double-sided wing panels do not z-fight; the five omitted E0 decal slots leave no blank or skin-filled patch. |
 | `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |
 
 The synthetic GPU checks run separately with

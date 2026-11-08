@@ -1453,6 +1453,46 @@ decals](#texture-state-and-decals). No mesh bytes, exported geometry or retail
 art are committed; the review frames live under
 `.local/m3-imports/scratch/m25-2/` and `.local/m3-aircraft/frames/M25-2/`.
 
+## F-16A skin review
+
+On 2026-11-08, slice F16A-2 checked the flyable `F16.PT` import's skin (media
+identity in [the F-16A source review](aircraft-variety.md#f-16a-source-review-m3-2026-11-08)).
+The identity's stem is `F16`, so the flyable path draws the same reviewed
+`F16.SH` the F-16C does: 356 faces on the runtime state path, 361 on the export
+path (the five extra are the decals below), one texture `_F16.PIC`. The F-16A
+reports 356 exterior faces and the F-16C reports 356 from the same source, and a
+top and an under capture of each draw the same skin up to the store load.
+
+The four damage shapes `F16_A.SH` to `F16_D.SH` and their textures
+`_F16_A.PIC` to `_F16_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs) (the import report
+lists all nine resources). No damage variant is registered for this identity, so
+a destroyed F-16A draws the intact skin with regional cuts rather than an A/C
+body substitution, as the MiG-25, F-104 and the other reviewed variety aircraft
+do; the A/B and C/D shapes stay available to the shared debris pieces.
+
+The F-16A does **not** need the [MiG-21 stored-normal
+exception](#mig-21-skin-review); the only identity that carries it is the MiG-21.
+`F16.SH` has 23 coincident position twin groups (the same 23 in the runtime and
+export face sets), so smooth mode pairs every double-sided panel through the
+shared [panel contract](../spec/aircraft-animation.md#double-sided-panels) and
+hides the rear member. A top capture in smooth mode (`TORE_WEATHER_SMOOTH`
+unset) shows the same upper skin as the stepped capture, with only the shared
+lighting difference, and no grey underside pattern shows through it; the under
+capture shows the belly, gear and stores with no flicker. No per-face mapping
+correction was needed.
+
+The shape carries five `E0` runtime decal slots, the whole set the guide names,
+all on the visible airframe: slot 0 at address `4a26` and slot 1 at `4b72` on the
+two sides of the vertical fin (left and right tail art), slot 2 at `3d9a` on the
+nose (nose art), slot 3 at `5560` on the left wing and slot 4 at `51a7` on the
+right (the wing markings). The runtime projector omits all five, and none is
+filled with a piece of the main skin, following [texture state and
+decals](#texture-state-and-decals). No mesh bytes, exported geometry or retail
+art are committed; the review frames live under
+`.local/m3-imports/scratch/f16a/frames/` and
+`.local/m3-aircraft/frames/F16A-2/`.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards
