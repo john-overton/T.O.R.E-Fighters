@@ -1743,6 +1743,21 @@ def scenarios() -> list[Scenario]:
                            "F16.PT identity (F18R.SEE radar, M61, F150 tank, AGM-65G, AIM-120 "
                            "and AIM-9M default load) in a 2 v 2 fight."))
 
+    # 13e. The MiG-31 in a mission (slice M31-9): every wing the MiG-31, the
+    # player's own included, 2 v 2 with the fight script, so the new MIG31.PT
+    # identity flies a mission with its own reviewed MIG31R.SEE radar, reviewed
+    # MIG31.ECM jammer, the Yak-141 HUD and cockpit, and its AA-9 and AA-8
+    # default load on the opinionated tunnel/wing station table. It is never
+    # aliased to another MiG. The roster probe flies it against itself at every
+    # skill; this one has it shoot and be shot at.
+    out.append(probe("mig31-quick-mission-2v2", fight(2, 2, "--aircraft", "mig31",
+                                                       "--probe-friendly-aircraft", "mig31",
+                                                       "--probe-enemy-aircraft", "mig31",
+                                                       "--separation", "5", *attack), ticks=7200,
+                     notes="All MiG-31: the player's wing and the enemy wing fly the new "
+                           "MIG31.PT identity (MIG31R.SEE radar, MIG31.ECM jammer, AA-9 and "
+                           "AA-8 default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

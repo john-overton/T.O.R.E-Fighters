@@ -112,7 +112,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI against AI, one against one up to fifteen against fifteen, guns, skills, threats",
         (
             "ai-fight-*", "ai-pair-*", "ai-big-*", "ai-guns-*", "ai-separation-*", "ai-skill-*",
-            "ai-mig25-*", "ai-f16a-*", "ai-threat-*", "ai-missile-launch-regression", "ai-missile-envelope-gaps", "ai-missile-player-cue", "ai-missile-turning-cue", "ai-long-1v1", "ai-long-5v5", "ai-long-15v15*", "ai-long-guns-*", "ai-long-hold-*",
+            "ai-mig25-*", "ai-f16a-*", "ai-mig31-*", "ai-threat-*", "ai-missile-launch-regression", "ai-missile-envelope-gaps", "ai-missile-player-cue", "ai-missile-turning-cue", "ai-long-1v1", "ai-long-5v5", "ai-long-15v15*", "ai-long-guns-*", "ai-long-hold-*",
         ),
     ),
     "ai-damage": ("AI with faults and damage", ("ai-damaged-*", "ai-fault-*", "ai-record-fault")),
