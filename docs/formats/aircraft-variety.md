@@ -511,7 +511,7 @@ F250 tank is a centreline row with `maxItems` 1.
 | `0x7606` geometry | It may be the canopy, one face of which is transparent | Resolved in M25-4: the word sits at the base+6 brake slot and the raised dorsal panel hinges on the spine front edge, so it is the airbrake, mapped to the brake fraction |
 | `0x7618` and `0x761e` geometry | They remove a left and right trailing-edge pair, which could be a control surface or a damage look | Resolved in M25-4: the removed pairs are exactly the M25-3 left and right flaps, so the words are the per-side flap words and map to the flaps |
 | Export wingtip faces | Two wingtip quads appear only on the export path and could be rails, lights or export-only art | Identify in M25-2 and check against store placement in M25-5 |
-| `~SU33_W.PIC` | The HUD names it but no archive entry exists; the existing shared cockpit may treat it as optional | Check the MiG-29, Su-25 and MiG-23 cockpit resolution in M25-7 and record the absence if it is optional |
+| `~SU33_W.PIC` | The HUD names it but no archive entry exists; the existing shared cockpit may treat it as optional | Resolved in M25-7: the host reads only the panel name at HUD root +0x275 (`~su33_p`) and never the `~xx_w` field at +0x282, so the missing entry is an optional reference with no code path, and the MiG-29, Su-25 and MiG-23 already ship without it. The original's use of +0x282 stays unknown (`docs/spec/instrument-bezel.md`) |
 | Default A2A quantity | `maxItems` is capacity, not a proven default load | Review the source-default normalization in M25-6 |
 | MTOW and internal fuel above published figures | They are within a third but affect range, takeoff and loading | List for John now; validate flight and takeoff in M25-8. No record change in M25-0 |
 | Fuel flow far below the real engine's SFC | It sets endurance and the fuel gauge | Review in M25-8 with the envelope probe; no record change in M25-0 |
@@ -532,3 +532,33 @@ debris scale is 1/3, the exponent-8 host factor that `combat/debris.rs` uses
 for every aircraft without a special case. The live permitted list is
 `AA6.JT` and `AA2.JT`. The strike class is Fighter. No other record is
 substituted for any of these names.
+
+### M25-7 cockpit and HUD confirmation (2026-11-07)
+
+Confirmation work; no code changed. Full frames and command output are in the
+local slice record, and the acceptance baseline joins M25-10.
+
+- `SU33_C.HUD` loads. `Airframe::load` requires the HUD panel field to equal the
+  identity's instrument panel, and the MiG-25's is `~SU33_P.PIC`. The panel
+  colours are title, button and press index 1 and the primary ink index is 40,
+  the same as `SU33CC.HUD` in the same build (`docs/spec/instrument-bezel.md`
+  now lists the mig25 bezel row).
+- Cockpit stem `SU33`: forward `~SU33H.PIC`, bezel `~SU33_P.PIC`, left and
+  right overlays `~SU33_LH.PIC` and `~SU33_RH.PIC` and no centre overlay. The
+  glass aperture is the reviewed `SU33` polygon (`hud_aperture.rs` maps the
+  `SU33` stem to the MiG-29 group) and the mirrors are the reviewed `SU33H`
+  left and right masks at (176,195) and (1103,195)
+  ([mirrors baseline](../baselines/mirrors.md#2026-11-07-mig-25-cockpit-confirmation)).
+- The forward HUD draws the airspeed, altitude, heading, pitch ladder and
+  flight-path markers and no gun reticle, because `guns()` is empty and no gun
+  group is set.
+- Every instrument page draws: RCS (0), Envelope (1), Front View (2), Other
+  View (3), Target Cam (4), RWR (5), Nav Info (6), Systems (7, internal fuel
+  plus the external tank), Weapons (8, the default stores and the chaff and
+  flare counts, no gun row) and Radar (9). The MiG-25 has no targeting sight or
+  gunsight, so Target Cam shows the shared plain target window; absent systems
+  stay absent.
+- Sensors are unchanged from M25-0: `MIG27R.SEE` BASIC radar, `MIG21.ECM` EARLY
+  jammer with chaff 20 and flare 20, and `VIS240.SEE`. No unreviewed sensor is
+  enabled. The `--sensor-summary` line matches the MiG-23's on the shared
+  records.

@@ -62,6 +62,7 @@ the daytime palette stored in `~XXH.PIC`.
 | mig21 | MIG21.PT | MIG21.HUD | `~M21_P.PIC` | speckled grey frame, teal corner blocks, black buttons | 0 (0,0,0) | 7 (16,48,48) | 19 (174,186,194) | 4 (48,121,129) |
 | su25 | SU25.PT | SU33CC.HUD | `~SU33_P.PIC` | as mig29 | 0 (0,0,0) | 1 | 1 | 1 |
 | mig23 | MIG23.PT | SU33CC.HUD | `~SU33_P.PIC` | as mig29 | 0 (0,0,0) | 1 | 1 | 1 |
+| mig25 | M25.PT | SU33_C.HUD | `~SU33_P.PIC` | as mig29 (M25-7) | 0 (0,0,0) | 1 | 1 | 1 |
 | su35 | SU35.PT | SU35.HUD (null pointer) | `~SU35_P.PIC` | flat grey frame, cut top corners, no screws, pale lilac buttons | 0 (0,0,0) | 1 (170,170,170) | 0 (0,0,0) | 0 (0,0,0) |
 | f22 | F22.PT | F22.HUD | `~F22_P.PIC` | dark olive grey frame, corner bolts, pale buttons | 0 (0,0,0) | 39 (234,234,234) | 0 (0,0,0) | 0 (0,0,0) |
 | f22n | F22N.PT | F22N.HUD | `~F22_P.PIC` | as f22 | 0 (0,0,0) | 39 | 0 | 0 |
@@ -196,7 +197,12 @@ stored palette was 0.96 to 1.02.
 - **Scale 1 by 2 mode.** 0x438b70 selects horizontal scale 1 and vertical scale
   2 when the word at 0x55c066 exceeds 350. The player-facing mode is unknown.
 - **`~XX_w` names.** Each HUD also names `~XX_w` (root +0x282); no such
-  resource exists in the reviewed archives and its use is unknown.
+  resource exists in the reviewed archives and its use is unknown. TORE reads
+  only the panel field at +0x275 (`tore_formats::hud::Hud`), so it never
+  requests `~XX_w`. Confirmed for the MiG-25 in slice M25-7: `SU33_C.HUD` names
+  `~su33_w`, no archive entry exists, and the aircraft imports and draws with
+  the same shared cockpit the MiG-29, Su-25 and MiG-23 use (their archives also
+  lack it). The original's use of the field is still not established.
 - **Other pages' button letters.** Only Envelope (`U A C`) and the `- +`,
   `M Y` sets were confirmed from call sites; the letters for every page are
   outside this spec.

@@ -146,3 +146,15 @@ fitted rear panorama as the F/A-18's. All masks, the shared rear camera (eye
 no per-aircraft eye was added. Evidence: renders before and after in
 `.local/next-round/renders/nr-bc/mirrors-before` and `mirrors-after`.
 
+## 2026-11-07 MiG-25 cockpit confirmation
+
+Slice M25-7 confirmed the new MiG-25 import (`M25.PT`) on the shared `SU33`
+cockpit: `--cockpit-sheet OUT_DIR mig25` reported `stem MIG25 cockpit
+~SU33H.PIC art 1280x490 FITTED LR`, with the left mask at x 75 y 94 w 214 h 216
+and the right mask at x 992 y 94 w 214 h 216, and the windowed capture printed
+`Cockpit mirrors: 2 reviewed regions, 768x384 rear feed, every other visible
+frame`. So the MiG-25 joins the MiG-29, Su-25, MiG-23 and Mi-24 on the reviewed
+`SU33H` left/right seeds of the 2026-10-12 review above; no new mask was fitted
+and no per-aircraft eye was added. Offscreen capture, no window: the
+`--cockpit-sheet` tile and the `--capture-flight` cockpit frames are under
+`.local/m3-aircraft/frames/M25-7/`.
