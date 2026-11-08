@@ -26,12 +26,23 @@ fn roots(control: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
             (&[0x5fb4], &[[14., -12., 0.], [11., -12., 0.]]),
         ],
         Control::Gear => vec![
-            (&[0x5a30, 0x5a5d], &[[-9., -6., -5.]]),
-            (&[0x5c30, 0x5c5d], &[[9., -6., -5.]]),
-            (&[0x5a8a, 0x5ab1], &[[-6., -9., -8.], [-6., 0., -8.]]),
-            (&[0x5c8a, 0x5cb1], &[[6., -9., -8.], [6., 0., -8.]]),
-            (&[0x5e92, 0x5eb1], &[[0., 30., -8.], [0., 36., -8.]]),
-            (&[0x5ed0, 0x5eef], &[[-2., 33., -8.], [2., 33., -8.]]),
+            (
+                &LEFT_WHEELS,
+                &[[-9., -6., -5.], [-6., -9., -8.], [-6., 0., -8.]],
+            ),
+            (
+                &RIGHT_WHEELS,
+                &[[9., -6., -5.], [6., -9., -8.], [6., 0., -8.]],
+            ),
+            (
+                &NOSE_WHEELS,
+                &[
+                    [0., 30., -8.],
+                    [0., 36., -8.],
+                    [-2., 33., -8.],
+                    [2., 33., -8.],
+                ],
+            ),
             (&[0x5e1f, 0x5e36], &[[0., 20., -7.], [0., 21., -7.]]),
             (&[0x5989, 0x59a0], &[[-8., -10., -4.], [-8., 7., -4.]]),
             (&[0x5b89, 0x5ba0], &[[9., -11., -4.], [9., 6., -4.]]),
@@ -337,6 +348,20 @@ mod tests {
         }
         faces
     }
+    #[test]
+    fn gear_witness_groups_cover_every_face_of_each_wheel_sheet() {
+        let gear = roots(Control::Gear);
+        for wheels in [&LEFT_WHEELS, &RIGHT_WHEELS, &NOSE_WHEELS] {
+            assert!(
+                gear.iter()
+                    .any(|(addresses, _)| *addresses == wheels.as_slice())
+            );
+        }
+        let brake = roots(Control::Brake);
+        assert_eq!(brake.len(), 2);
+        assert!(brake.iter().all(|(addresses, _)| addresses.len() == 4));
+    }
+
     #[test]
     fn near_stow_requires_its_envelope_even_when_rigid_sheets_are_separated() {
         let source = fixtures();

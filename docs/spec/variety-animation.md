@@ -257,6 +257,14 @@ down endpoint. Check all 25 combinations of five flap and five roll positions;
 require coherent shared skins, fixed forward edges and signed differential
 movement. Flame geometry does not grant an afterburner capability.
 
+The F-16A (`F16.PT`) names the same `F16.SH` and the same six state words, so it
+uses this whole fit unchanged. Its record differs from `F16C.PT` only in the
+identity names, two OBJECT flag bits, the year, `viewOffset.z` and its station
+rows, and none of those drives a rig transform. The F-16A probe therefore
+produces byte-identical control, gear, brake, exhaust and flap/roll geometry to
+the F-16C (agent verification, 2026-11-08); `flight-animation-f16a` requires the
+same reviewed scope and 25-pose sweep under the `F16.PT` selection key.
+
 F-16 main wheels split at Z=-14. Rigid lower pieces rise 10 units during the
 first half of closing and another 8 during the second half; then X shifts +2.5
 on the left and -2.7 on the right. Upper roots stay fixed. Main stow bounds are

@@ -510,6 +510,28 @@ to the belly, the airbrake rises from the spine, and both afterburner plumes
 appear. The free-flight aircraft banks during the settle, so the flight frames
 are inspection views; the probe contact sheets are the clear evidence.
 
+## F-16A results (2026-11-08)
+
+Exact `f16a` (`F16.PT`) shares `F16.SH`, the six state words and the whole F-16C
+rig, so it passes the same source probe without a new transform. The F16A-3
+probe reports `reviewed-controls-and-attachments`, 356 neutral faces and zero
+required or check failures; pitch, roll, yaw, flaps, gear, brake and exhaust all
+read `moved`. Every measured anchor gap, skin gap, rigidity error and direction
+failure is zero across the control values and the 25 flap/roll combinations. The
+gear witnesses now group all four source faces of each main and nose wheel sheet
+in one `shared_vertex_gaps` set, so a half-moved wheel would report a skin gap.
+
+The F-16A and F-16C probe directories are byte-identical for every `.obj`,
+contact sheet and sweep CSV, which is the evidence that the rig is driven by the
+shared shape rather than by the identity. The only record differences are the
+names, two OBJECT flag bits, the year, `viewOffset.z` and the station rows, and
+none of them enters `f16_animation`. The separate `F16.PT` selection key keeps
+the report and the battery scenario from matching the F-16C by accident. Frames
+were captured at each control and device extreme from above and below and are
+indexed with the probe sheets under `.local/m3-aircraft/frames/F16A-3/`. The
+per-aircraft table row and the fleet roster counts remain slice F16A-8's; this
+section records the animation result only.
+
 ## Per-aircraft progress
 
 This table records bounded geometry acceptance and its limits. It is not a

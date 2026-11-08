@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from battery_scenarios.animation import check_report, scenarios
+from battery_scenarios.animation import check_report, scenarios, selection_key
 
 
 class AnimationReportTests(unittest.TestCase):
@@ -105,3 +105,11 @@ class AnimationReportTests(unittest.TestCase):
         self.assertRegex("animation probe A7.PT: 261 neutral faces, 0 required/check failures; poses", pattern)
         self.assertNotRegex("animation probe A7.PT: 261 neutral faces, 10 required/check failures; poses", pattern)
         self.assertNotRegex("animation probe F18.PT: 261 neutral faces, 0 required/check failures; poses", pattern)
+
+    def test_f16a_reports_its_own_retail_key_and_shared_sweep(self):
+        self.assertEqual(selection_key("f16a"), "F16.PT")
+        self.assertNotEqual(selection_key("f16a"), selection_key("f16c"))
+        names = {scenario.name: scenario.expect[0] for scenario in scenarios()}
+        pattern = names["flight-animation-f16a"]
+        self.assertRegex("animation probe F16.PT: 356 neutral faces, 0 required/check failures; poses", pattern)
+        self.assertNotRegex("animation probe F16C.PT: 356 neutral faces, 0 required/check failures; poses", pattern)

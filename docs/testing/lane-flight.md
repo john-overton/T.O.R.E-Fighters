@@ -845,7 +845,9 @@ coupled sweep/flap/roll and pitch/roll grids cover its operational interactions.
 Its hook also samples positive near-stow before hiding. A-4E adds 202 samples
 each for gear, hook and brake, plus coupled flap/roll and pitch/roll checks.
 The original stowed A-4E hook stays visible at zero. Exact selection keys
-keep F/A-XX separate from the F22N source donor in reports and scenario matching.
+keep F/A-XX separate from the F22N source donor, and the F-16A from the F-16C,
+in reports and scenario matching. `flight-animation-f16a` expects the `F16.PT`
+key and runs the shared F-16 witness set on its own identity.
 
 Run one repaired aircraft before expanding the audit:
 
