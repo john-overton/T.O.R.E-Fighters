@@ -108,6 +108,7 @@ mod mig21_animation;
 mod mig23_animation;
 mod mig25_animation;
 mod mig29_animation;
+mod mig31_animation;
 mod mirrors;
 mod missile_acceptance;
 mod missile_sag;

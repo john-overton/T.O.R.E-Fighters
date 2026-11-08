@@ -552,3 +552,49 @@ spine front edge (0,3,9). The shared base order places it at the brake slot, so
 M25-4 maps it to the airbrake fraction, closing the panel flat along the spine.
 The moving roles, the fitted angles and the gear stow are recorded in the
 [MiG-25 fit](../spec/variety-animation.md#mig-25-control-fit).
+
+## MiG-31 source additions
+
+MIG31.SH SHA-256 is
+`6dc4ed9cb6c99675cf7076dd38c90146e2e6300acd3c11bc565a5269f8a46a89`, with
+20,816 CODE bytes, 214 runtime neutral faces and six state words `0x6120`,
+`0x6126`, `0x612c`, `0x6138`, `0x613e`, `0x6144`. It names one gear branch
+(`0x612c`, twelve cards), two flap-removal branches (`0x6138` the left pair,
+`0x613e` the right) and one rudder branch (`0x6144`). No signed pitch or roll
+branch exists, so those roles are fitted geometric assignments; the panels and
+hinge lines below are exact source geometry. Coordinates use one-third foot per
+unit.
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right stabilator | `3d69`, `3db1` | Flat double-sided plate at Z=-3, root chord X=17 from Y=-24 to -56, tip X=35..43 at Y=-59..-68 |
+| Left stabilator | `39f6`, `3a3e` | Mirror of the right at X=-17..-43 |
+| Right rudder | `448e`, `44ad` | Rear-lower fin quad behind the hinge edge (13,-42,8) to (16,-51,31); the pair the rudder word `0x6144` replaces |
+| Left rudder | `44eb`, `450a` | Mirror behind (-13,-42,8) to (-16,-51,31) |
+| Right flap | `41a6`, `41c5` | Inboard trailing pair, hinge edge (17,-5,4) to (45,-16,2), trailing edge (17,-16,4) to (45,-23,2); removed by `0x613e` |
+| Left flap | `4260`, `427f` | Mirror at X=-17..-45; removed by `0x6138` |
+| Right aileron | `3ae3`, `3c64` | Outboard trailing quad, hinge edge (45,-16,2) to (81,-9,-1) |
+| Left aileron | `3893`, `3925` | Mirror at X=-45..-81 |
+
+Every control surface is one whole source panel: a flat zero-thickness quad whose
+two faces are its opposite windings, so no surface is split on a diagonal and
+there is no half-panel to leave behind. The wing skin outboard of the flap and
+inboard of the aileron is a separate fixed quad with a leading triangle, and the
+fin's inboard root plate and tip quad are separate fixed surfaces; none of them
+moves. The all-moving stabilator is a zero-thickness plate, so no root corner is
+a fixed hinge; it turns about its root chord midpoint. The flap pairs are exactly
+the pairs the source words `0x6138` (left) and `0x613e` (right) remove. The
+rudder word `0x6144` swaps the two rear-lower fin quads `448e/44ad` and
+`44eb/450a` for deflected copies `431a/4339` and `4377/4396` whose lower trailing
+corner moves 4 units in +X on both sides and whose hinge corners do not move: a
+yaw, the same sign on both fins. The fin's tip quad and hidden root plate stay
+fixed, as in the source.
+
+`0x612c` adds twelve gear cards (four per main, four nose, low point Z=-30): one
+strut plate and one painted wheel card per main side, and a centre strut with its
+cross plate at the nose. M31-3 keeps the shared interim rise law; M31-4 turns the
+assemblies. `0x6120` adds twelve aft plates behind the tail at X -14 to 14, Y=-129
+to -68, Z=-9 to 5 (the afterburner plume) and `0x6126` adds two raised dorsal
+quads at X=±5, Y=32 to 50, Z=8 to 24 (the airbrake); M31-4 maps both. The moving
+roles and fitted angles are recorded in the
+[MiG-31 fit](../spec/variety-animation.md#mig-31-control-fit).

@@ -42,6 +42,7 @@ never executed. Offsets describe data provenance, not a gameplay requirement.
 | B747.SH | 31108 | 373 | gear 36, rudder 2 |
 | A310.SH | 20868 | 248 | gear 14, rudder 2 |
 | MIG25.SH | 26154 | 320 | gear 12; controls fitted, no signed branch |
+| MIG31.SH | 20816 | 214 | gear 12, rudder 4 swapped; two flap branches; controls fitted |
 
 F-4B and F-4J share F4J.SH. The same shape exponent supplies the existing host
 scale rule: one-third foot per coordinate at exponent 8 and two-thirds at
@@ -615,3 +616,39 @@ source split from mid-root to the tip, and the ailerons are each wing's whole
 outboard source section (forward triangle and aft quad), so the outer wing
 tilts as one piece. Both stay whole source panels; neither animates part of a
 panel.
+
+## MiG-31 control fit
+
+Agent-authored whole-panel motion, 2026-11-08, over `MIG31.SH` at one-third foot
+per unit. The shape names a rudder branch (`0x6144`) and the two flap pairs but
+no signed pitch or flap-travel branch, so pitch and roll are fitted geometric
+assignments over exact reviewed source panels, while yaw and the flap pairs are
+pinned by the source words. The source groups are recorded in
+[control-surface geometry](../formats/aircraft-control-surfaces.md#mig-31-source-additions).
+Every moving surface is one whole source panel, a flat double-sided quad, so no
+surface is split on a diagonal and no half-panel can be left behind its hinge.
+No strip had to stay fixed as a mapping gap.
+
+| Control | Source panel and fitted motion |
+| --- | --- |
+| Pitch | The all-moving stabilators `3d69/3db1` and `39f6/3a3e` turn as one flat plate per side, `-0.30*elevator` radians about a lateral axis through the root chord midpoint `[±17,-40,-3]`. A positive elevator raises both trailing edges. |
+| Yaw | The rear-lower fin quads `448e/44ad` and `44eb/450a` turn `0.35*rudder` radians about the source hinge edge from `[±13,-42,8]` to `[±16,-51,31]` (left mirrored). A positive rudder swings both trailing edges in +X. These are the faces the source word `0x6144` replaces, and 0.35 radians reproduces the source deflection to within about half a source unit. The fin leading quad and tip quad stay fixed. |
+| Flaps | The inboard trailing quads `41a6/41c5` and `4260/427f` turn `0.40*flaps` radians about their source hinge edge, from `[17,-5,4]` to `[45,-16,2]` (left mirrored), lowering the trailing edge. These are the pairs the source words `0x613e` (right) and `0x6138` (left) remove. |
+| Roll | The outboard trailing quads `3ae3/3c64` and `3893/3925` turn `-0.20*aileron` radians about their source hinge edge, from `[45,-16,2]` to `[81,-9,-1]` (left mirrored). A positive aileron raises the right trailing edge and lowers the left. |
+| Gear | The twelve `0x612c` cards are held under the shared interim fitted rise law until M31-4: the whole group translates up by its own source vertical extent (20 units) as the gear stows and is hidden at zero. M31-4 replaces it with reviewed rigid assemblies and doors. |
+
+The stabilator is all-moving, so no single root corner stays put: the invariant
+is its root chord midpoint, and the small gap to the tail boom at the root is a
+reviewed moving/fixed boundary. Every other hinge line is the exact source edge
+the fixed panel shares, so those corners do not move. The six state words are the
+shared base order flame, brake, gear, flap, flap, then the rudder: `0x6120` the
+plume, `0x6126` the airbrake, `0x612c` the gear, `0x6138`/`0x613e` the left and
+right flap pairs and `0x6144` the twin rudders. There is no hook word because the
+PLANE flag 0x02 is clear. M31-3 fitted the four control surfaces and kept the
+interim gear rise; M31-4 owns the gear, airbrake and burner mapping.
+
+Acceptance: the probe reports `reviewed-controls-and-attachments` with
+`anchor_missing=false`, `anchor_gap_ft=0`, `skin_gap_ft=0` and no direction
+failures for pitch, roll, yaw and flaps, plus the 25 flap/roll combinations. A
+moving, finite panel alone does not pass; the whole-surface gate requires all 25
+combinations to keep every panel's shared vertices joined.
