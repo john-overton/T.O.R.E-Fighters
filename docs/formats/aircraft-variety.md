@@ -562,3 +562,18 @@ local slice record, and the acceptance baseline joins M25-10.
   jammer with chaff 20 and flare 20, and `VIS240.SEE`. No unreviewed sensor is
   enabled. The `--sensor-summary` line matches the MiG-23's on the shared
   records.
+
+### M25-8 flight review (2026-11-07)
+
+The flight model reads the record's own values, so no envelope, G or flow fit
+was needed. The 1 G row's fast edge decodes to 2,740 ft/s at 36,000 ft, 1,623
+kt, against the published 3,000 km/h (1,620 kt) at 13,000 m, so the record's
+envelope stays as decoded. The G limits stay +5/-2. The default load's 89,827
+lb gross is 1,003 lb below the record's 90,830 lb maximum. The fuel flows are
+2 and 12 lb/s, 6 and 2.8 times below the real R-15B-300's specific fuel
+consumption (1.12 and 2.45 lb/(h lbf)); the record rule keeps them with the
+tank, which is left as retail, so the real engine's endurance is a gap for
+John, not a correction. The flight validation measured liftoff 153.9 kt over
+2,161 ft, approach 165.6 kt and touchdown 164.0 kt, inside the published 300
+to 350 km/h and 270 to 290 km/h ranges' plus or minus 10 percent window
+([variety flight baseline](../baselines/variety-flight.md#mig-25-validation-2026-11-07)).

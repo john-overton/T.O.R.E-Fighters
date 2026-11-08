@@ -477,6 +477,40 @@ the keys held at 85 percent lever from a 1,000 ft hover: on the downstops in
 airplane-mode top speed 273 kt at sea level; slowest wingborne level flight
 117 kt; stall warning at 110 KCAS.
 
+## MiG-25 (M25-8, 2026-11-07)
+
+The MiG-25 is the batch's eighteenth conventional aircraft. It flies the
+hybrid adapter's own `variety` configuration, not a shared fighter's, and its
+`M25.PT` (`MIG25.SH`) record supplies every value: empty 48,221 lb, internal
+fuel 37,320 lb, maximum takeoff 90,830 lb, 38,800 lbf military and 49,382 lbf
+afterburner thrust, G limits +5/-2 and a 68,000 ft ceiling. The shared
+conventional flight, ground contact, actuator and loaded-mass rules apply
+unchanged. No new fit was needed, and `fitted_envelopes` leaves the record
+untouched.
+
+The 1 G row's fast edge is 2,740 ft/s at 36,000 ft, 1,623 kt, against the
+published 3,000 km/h (1,620 kt) at 13,000 m. The 0.2 percent difference is
+inside the decoded envelope, so no `fitted_envelopes` entry is added: this is
+the source's top speed, not a fit. The sea-level 1 G edge is 1,100 ft/s,
+652 kt, and the shared loaded-drag rule makes full internal fuel settle at
+90.1 percent of the edge at 1,000, 10,000, 20,000 and 30,000 ft and 90.0
+percent at 36,000 ft, inside the fighters' 87 to 96 percent band. The G
+limits are the source's +5/-2 rows, so the loaded 5 G row gives 3.86 G at the
+default gross weight, through the shared loaded-elevator divisor (38 percent
+loaded elevator, 0.863 loading).
+
+The record's fuel flows are 2 lb/s at military power and 12 lb/s at full
+afterburner. That is 6 and 2.8 times below the real R-15B-300's specific fuel
+consumption (1.12 and 2.45 lb/(h lbf)), so the tank's endurance is far longer
+than the real aircraft's. The M25-0 audit lists the flows for John; the tank
+is left as retail, so the flow stays with the record rather than a fitted
+value. Changing it would be a record correction, and the flight model only
+consumes the record's flow.
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

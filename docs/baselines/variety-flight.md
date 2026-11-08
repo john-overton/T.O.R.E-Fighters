@@ -152,3 +152,103 @@ before or after: no row above 1 G reaches 25,500 ft or more, so it has no pull
 margin there and sinks into overspeed once disturbed. It holds level to
 29,000 ft. Every other aircraft held its altitude and stayed under its fitted
 top speed in level flight.
+
+## MiG-25 validation, 2026-11-07
+
+Implementation mode. The `M25.PT` record was read from the ignored local
+FA_2.LIB catalog and the app profile is `.local/m3-aircraft/profile`. The
+model is the default hybrid `--researched-flight` path; `--legacy-flight` keeps
+the previous compatibility model and `--native-flight-tables` stays a separate
+restricted path. The 1 G top speed is kept as decoded (no `fitted_envelopes`
+entry), the G limits stay +5/-2, and the flight model uses the record's own
+configuration.
+
+`cargo run --locked -p tore-sim --example variety_flight -- .../M25.PT` printed
+`aircraft=MiG-25 conventional=pass deterministic=pass landing=pass ticks=1200`.
+
+`PROBE_LEVEL=1 PROBE_PULLS=1 PROBE_ALTS=1000,10000,20000,30000,36000
+cargo run --locked -p tore-sim --example envelope_probe -- .../M25.PT` printed
+the record's 1 G row (2,740 ft/s at 36,000 ft, 1,623 kt) and the following
+level speeds. The full-stick pulls are at 0.50, 0.70, 0.85, 0.90 and 0.95 of
+the 1 G edge, three seconds from level flight.
+
+| Level top speed, full internal fuel | 1 G edge, kt | Simulated, kt | Ratio |
+| --- | ---: | ---: | ---: |
+| 1,000 ft | 679 | 611 | 0.901 |
+| 10,000 ft | 922 | 830 | 0.901 |
+| 20,000 ft | 1,192 | 1,073 | 0.901 |
+| 30,000 ft | 1,461 | 1,316 | 0.901 |
+| 36,000 ft | 1,623 | 1,462 | 0.900 |
+
+| Full-stick pull | 1,000 ft | 10,000 ft | 20,000 ft |
+| --- | --- | --- | --- |
+| 0.50 of the edge | 3.89 G, 9.8 deg/s, limit 3.86 | 3.88 G, 7.0 deg/s, limit 3.86 | 3.10 G, 3.9 deg/s, limit 3.09 |
+| 0.70 | 3.90 G, 6.9 deg/s, limit 3.86 | 3.88 G, 5.0 deg/s, limit 3.86 | 2.32 G, 1.7 deg/s, limit 2.32 |
+| 0.85 | 3.90 G, 5.6 deg/s, limit 3.09 | 2.33 G, 1.9 deg/s, limit 2.32 | 2.32 G, 1.4 deg/s, limit 2.32 |
+| 0.90 | 2.34 G, 2.4 deg/s, limit 2.32 | 1.55 G, 0.7 deg/s, limit 1.55 | 1.55 G, 0.6 deg/s, limit 1.55 |
+| 0.95 | 1.56 G, 0.9 deg/s, limit 1.55 | 1.55 G, 0.7 deg/s, limit 1.55 | 1.55 G, 0.5 deg/s, limit 1.55 |
+
+The peak G exceeds the limit printed at the start speed in the first two
+bands because the pull decelerates the aircraft and the envelope's fast side
+gives the higher row more pull. The G limits are the source's +5/-2; the
+loaded 5 G row gives 3.86 G at the default gross weight.
+
+The record's fuel flows are 2 lb/s at military power and 12 lb/s at full
+afterburner. The 36,000-tick sprint run burned 3,600 lb in 300 s, which is
+12 lb/s, and the 7,200-tick level run burned 84 lb in 60 s, 1.4 lb/s. The
+flows are 6 and 2.8 times below the real R-15B-300's specific fuel
+consumption (1.12 and 2.45 lb/(h lbf)); the record rule keeps them with the
+tank, which is left as retail, so the tank's endurance is far longer than the
+real aircraft's. The M25-0 audit lists the flows for John; no record value
+changed.
+
+Headless probes, all `--aircraft mig25 --no-audio`:
+
+| Probe | Ticks | Max speed, kt | Max G | Fraction of the edge | Crashed |
+| --- | ---: | ---: | ---: | ---: | --- |
+| level | 7,200 | 517.4 | 1.01 | 0.654 | no |
+| pull | 7,200 | 511.3 | 3.89 | 0.650 | no |
+| loop | 4,635 | 597.1 | 3.91 | 0.824 | no |
+| sprint | 36,000 | 714.6 | 1.00 | 0.908 | no |
+| climb | 77,387 | 1,078.1 | 3.89 | 1.042 | overspeed loss |
+| dive | 6,440 | 1,047.7 | 1.01 | 1.295 | overspeed loss |
+| overspeed | 1,200 | 1,310.7 | 1.00 | 1.100 | overspeed loss |
+| rudder | 360 | 511.3 | 1.01 | 0.650 | no |
+| devices | 3,600 | 511.7 | 1.10 | 0.650 | no |
+| stall-recover | 3,245 | 223.6 | 1.21 | 0.211 | no |
+| spin-recover | 1,533 | 275.8 | 0.97 | 0.278 | no |
+
+The stall recovery raised the alert at tick 2,524 and recovered at 3,004 with
+0 ft of altitude lost. The spin recovery entered at tick 3, recovered at 1,292
+after 0.66 revolutions, losing 2,328 ft. The overspeed probe is the expected
+dive: it reached 1,310.7 kt, 1.10 times the 20,000 ft edge, and the overspeed
+rule ended it.
+
+Ground probes at `--theater UKR --ground-start 1`:
+
+| Probe | Ticks | Result |
+| --- | ---: | --- |
+| takeoff | 2,776 | 100 ft reached; liftoff tick 1,952 at 153.9 kt over 2,161 ft, rotation 136.1 kt |
+| takeoff-gear-airborne | 2,773 | 100 ft reached; same liftoff; gear raised after the wheels are clear |
+| land | 12,458 | touchdown at 164.0 kt, 8.5 ft/s sink, 1,689 ft of runway left, stopped, score 100 |
+| land-gear-up | 10,494 | crashed for the gear; no touchdown |
+| land-hard | 12,197 | touchdown at 172.4 kt, 33.9 ft/s sink, stopped, 2,295 ft left |
+| land-off-runway | 10,235 | crashed for the not-landable ground |
+| nosewheel | 9,000 | no crash, 11.2 kt maximum |
+
+The battery: `python3 tools/battery.py --scenario '*-mig25*' --lane flight
+--profile .local/m3-aircraft/profile` passed 9 of 9 scenarios. It covers the
+animation, the two live-fire slots, the slot-2 jettison, the two liftoff runs,
+the approach, the variety flight and the skin render.
+
+The liftoff and approach targets are fitted plausibility ranges from the
+MiG-25PD manual quoted in the AviaSimHD MSFS manual: V1 300 km/h and V2 350
+km/h at maximum takeoff weight (160 to 190 kt) and a 270 to 290 km/h landing
+speed (146 to 157 kt). The model lifts off at 153.9 kt and approaches at
+165.6 kt, both inside the ranges' plus or minus 10 percent window. The targets
+are recorded as a regression check, not a retail figure.
+
+Not run: `--native-flight-tables` needs the extracted sine and atan tables and
+the path is not present locally; it remains a separate restricted research
+path. The windowed scenarios ran through `tools/agent-run.sh` inside the
+battery; no frame was captured for this slice because the plan asks for none.

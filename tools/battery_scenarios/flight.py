@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -219,23 +219,27 @@ def liftoff_problems(output: str) -> list[str]:
 # What John asked for on 2026-09-29 (unsourced real-world figures, a plausibility
 # range only), in knots: liftoff at the default gross weight and approach at a
 # landing weight of 65 percent internal fuel. `None` where there is no figure.
-LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150)}
+LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190)}
+# The MiG-25PD's own figures are fitted from the flight manual quoted in the
+# AviaSimHD MSFS manual: V1 300 km/h, V2 350 km/h at maximum takeoff weight and
+# a 270-290 km/h landing speed (agent decision, 2026-11-07, M25-8).
 APPROACH_TARGET = {
     "f18": (135, 135), "rafale": (130, 140), "f14": (130, 140), "a4e": (130, 140), "mig29": (135, 145),
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
-    "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145),
+    "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157),
 }
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
-KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
     "mig21": 4534, "su25": 6614, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
+    "mig25": 37320,
 }
 
 
@@ -317,9 +321,14 @@ def check_retail_liftoff(output: str) -> list[str]:
     return problems
 
 
+# The original roster plus the MiG-25, whose own figures are in LIFTOFF_TARGET,
+# APPROACH_TARGET and INTERNAL_FUEL_LB (M25-8).
+LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25"]
+
+
 def liftoff_scenarios() -> list[Scenario]:
     out = []
-    for ac in AIRCRAFT:
+    for ac in LIFTOFF_AIRCRAFT:
         out.append(
             Scenario(
                 name=f"flight-liftoff-{ac}",
