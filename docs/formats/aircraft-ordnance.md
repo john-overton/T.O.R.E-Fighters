@@ -209,7 +209,7 @@ guns. All six decode from `FA_2.LIB` and their full records are in
 | `20MM_4.JT` | 1 | 1 | `F8J.PT` |
 
 Every decoded carrier is outside `AircraftId::ALL`
-(`crates/tore-formats/src/aircraft.rs:308`), the 36 imported aircraft, so no
+(`crates/tore-formats/src/aircraft.rs:308`), the 37 imported aircraft, so no
 ported or variety aircraft gains any of the six. The carriers are the same rows
 the source catalog already records as their `internal_gun` or default store
 (`tools/catalog_fa.py`).

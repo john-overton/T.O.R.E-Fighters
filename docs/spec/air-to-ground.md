@@ -1352,6 +1352,12 @@ GBU-28 (4,500 lb) fits only the Rafale, F-4B, F-4J, A-7 and F-15. AS-16 fits 13
 aircraft. Pod stations (flag 0x400) exist on every imported jet except the
 MiG-17F and the AH-64. All retail data (PT stations and weights).
 
+Since the MiG-25 import (M25, 2026-11-07) the roster holds 37 retail aircraft
+(38 selectable). Its two wing rows admit the guided bombs and AS missiles of
+the signature-1 mask as well as its air-to-air stores, so it is a 28th
+air-to-ground carrier; the per-record carrier ranges above were measured
+before it and were not re-measured ([MiG-25 ordnance](../formats/aircraft-ordnance.md)).
+
 ### Default air-to-ground loads
 
 Retail data (PT defaults, hardpoint in brackets).

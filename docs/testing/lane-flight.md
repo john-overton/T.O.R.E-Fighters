@@ -151,7 +151,7 @@ weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run
 `a2g-catalog` (menus lane, [`a2g_catalog.py`](../../tools/battery_scenarios/a2g_catalog.py))
 runs `--validate-ordnance`, whose audit covers the air-to-ground records on the Load
 Ordnance page and the Cheat-only novelty bombs: the normal and Cheat catalogs are checked
-against the station rules on all 36 aircraft, and Boulder and Moose must have no capacity,
+against the station rules on all 37 aircraft, and Boulder and Moose must have no capacity,
 be refused and fail validation without Cheat loading ([novelty
 rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 | `a2g-laser-self` | `--attack laser` over `~QUCOL`: an F-16C designates a T-80 from the A-G page (T), its Pave Spike lases automatically with the GBU-10 selected, and the bomb is released from 15,000 ft at 480 kt on the HUD's IN RNG cue; again with Ctrl+L turning the laser off 20 s after the release | The bomb leaves at 90 percent of the speed, guiding on aircraft 0's spot from inside its reach, its time to impact counts down, and it destroys the tank; with the laser off it goes from guiding to blind, falls and misses, and the tank is unhurt ([the laser](../spec/air-to-ground.md#the-laser)) |

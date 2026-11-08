@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in 37 selectable profiles (36 retail identities and the F/A-XX concept) (see the [roster guide](aircraft-import.md)) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
+The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in 38 selectable profiles (37 retail identities and the F/A-XX concept) (see the [roster guide](aircraft-import.md)) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
 
 | Component | Choice | Purpose |
 | --- | --- | --- |

@@ -1210,7 +1210,7 @@ each kind's count as a varint and its records in id order.
 | Body against a baseline | 1 bit "moved"; if set, the position residuals after the prediction, the velocity, angle and speed differences, each bucketed (position and velocity 3, 6, 10, 14 or 20 bits; angles 3, 6, 9, 12 or 17; speed 3, 6, 10 or 16); then for each group of slow fields a changed bit, and in a changed group a bit per field and each new value |
 
 The identity fields (full records only): an aircraft's type as 1 bit and its
-place among the 37 selectable aircraft (6 bits); a projectile's owner
+place among the 38 selectable aircraft (6 bits); a projectile's owner
 (varint), weapon (12-bit name index), shape (1 and 12), target (1 and a
 varint) and whether it is aimed at this player; a debris piece's owner, the
 aircraft whose model draws it (1 and 6) and its damage variant (1 and 3); a
