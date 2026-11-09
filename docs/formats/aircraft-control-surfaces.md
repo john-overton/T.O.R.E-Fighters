@@ -418,6 +418,19 @@ plate lies at a constant `Z=0`, so the spindle stays lateral. No root corner is
 pinned, so the small root gap is accepted. See the
 [Su-35 attachment corrections](../spec/aircraft-animation.md#su-35-attachment-corrections).
 
+Whole-panel differential roll, 2026-11-09 (slice TR-6). The F-15 tail rig turned
+only the vertices forward of a swept span axis and held the root edge, so part of
+each five-corner stabilator stayed put while the rest turned (rule 10's fold
+check: every tail face has one moved, two seam and two pinned vertices). The
+whole flat panel per side, both windings (`55df`/`560c` left, `51a4`/`51d1`
+right), now turns rigidly about a lateral spindle through the root chord midpoint
+(`[-22,-53.5,-1]` left, `[21,-53.5,-1]` right) and takes a fitted `0.10*aileron`
+differential roll, raising the right trailing edge and lowering the left, the
+aileron sense, with the pitch and roll terms summed and clamped to 0.40 rad. The
+panel lies at a constant `Z=-1`, so it has no anhedral to tilt the spindle by,
+and no root corner is pinned. See the
+[F-15C control and device fit](../spec/variety-animation.md#f-15c-control-and-device-fit).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and

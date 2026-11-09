@@ -59,17 +59,6 @@ fn split(face: &Face, distance: impl Fn([f32; 3]) -> f32) -> Vec<Face> {
 fn fin_distance(p: [f32; 3]) -> f32 {
     p[1] + 57. - (p[2] - 5.) * 5. / 38.
 }
-fn tail_geometry(left: bool) -> ([f32; 3], [f32; 3]) {
-    if left {
-        ([-22., -68., -1.], [25., -3., 0.])
-    } else {
-        ([21., -68., -1.], [26., 3., 0.])
-    }
-}
-fn tail_distance(p: [f32; 3]) -> f32 {
-    let (pivot, axis) = tail_geometry(p[0] < 0.);
-    p[1] - pivot[1] - (p[0] - pivot[0]) * axis[1] / axis[0]
-}
 fn roll_leading(p: [f32; 3]) -> bool {
     (p[1] + 21. + (p[0].abs() - 39.) * 4. / 20.).abs() < EPSILON
 }
@@ -257,8 +246,6 @@ impl Rig {
             .flat_map(|f| {
                 if FIN.contains(&f.address) {
                     split(&f, fin_distance)
-                } else if TAIL_LEFT.contains(&f.address) || TAIL_RIGHT.contains(&f.address) {
-                    split(&f, tail_distance)
                 } else if ROLL.contains(&f.address) {
                     split(&f, |p| p[0].abs() - 42.)
                         .into_iter()
@@ -298,19 +285,23 @@ impl Rig {
                 [0., 5., 38.],
                 state.rudder.clamp(-1., 1.) * 0.35,
             );
-        } else if (TAIL_LEFT.contains(&address) || TAIL_RIGHT.contains(&address))
-            && source
-                .positions
-                .iter()
-                .all(|p| tail_distance(*p) <= EPSILON)
-        {
-            let (pivot, axis) = tail_geometry(TAIL_LEFT.contains(&address));
-            turn(
-                &mut result,
-                pivot,
-                axis,
-                -state.elevator.clamp(-1., 1.) * 0.30,
-            );
+        } else if TAIL_LEFT.contains(&address) || TAIL_RIGHT.contains(&address) {
+            // All-moving stabilator: the whole five-corner panel, both windings,
+            // turns rigidly about a lateral spindle through its root chord
+            // midpoint. The panel lies at a constant Z=-1, so its anhedral is
+            // zero and the spindle stays square to the fuselage; the old swept
+            // span axis left the tip almost still. The fitted differential roll
+            // raises the right trailing edge and lowers the left for a positive
+            // aileron, the aileron sense; the total is clamped to the pitch plus
+            // roll maximum. No root corner is pinned, so the root chord midpoint
+            // stays put and a small root gap to the fuselage is accepted.
+            let left = TAIL_LEFT.contains(&address);
+            let root_x = if left { -22. } else { 21. };
+            let side: f64 = if left { -1. } else { 1. };
+            let angle = (-0.30 * state.elevator.clamp(-1., 1.)
+                - side * 0.10 * state.aileron.clamp(-1., 1.))
+            .clamp(-0.40, 0.40);
+            turn(&mut result, [root_x, -53.5, -1.], [1., 0., 0.], angle);
         } else if ROLL.contains(&address) && roll_panel(source) {
             let side = if source.positions[0][0] < 0. { -1. } else { 1. };
             turn(
@@ -599,14 +590,14 @@ mod tests {
         }
     }
     #[test]
-    fn rudder_and_tail_hinges_hold_and_signed_controls_use_both_sides() {
+    fn rudder_signed_control_uses_both_sides() {
         let rig = Rig {
             flaps: BTreeMap::new(),
         };
         let mut s = state();
         for value in [-1., -0.5, 0., 0.5, 1.] {
             s.rudder = value;
-            s.elevator = value;
+            s.elevator = 0.;
             for (address, x) in [(FIN[0], -22.), (FIN[4], 21.)] {
                 // The third point is invented, not a copied source polygon.
                 let f = synthetic(address, vec![[x, -57., 5.], [x, -52., 43.], [x, -63., 17.]]);
@@ -619,25 +610,60 @@ mod tests {
                     assert!((moved.positions[2][0] - x) * value as f32 > 0.);
                 }
             }
+        }
+    }
+    #[test]
+    fn stabilators_move_as_whole_panels_on_pitch_and_roll() {
+        let rig = Rig {
+            flaps: BTreeMap::new(),
+        };
+        let mut s = state();
+        // The all-moving stabilator has no fixed root corner: the whole panel
+        // turns rigidly, its root chord midpoint stays put, and its trailing
+        // edge moves in the signed direction for both elevator and differential
+        // roll (opposite per side). No part stays pinned while the rest turns.
+        for control in [-1., -0.5, 0., 0.5, 1.] {
             for (address, left) in [(TAIL_LEFT[0], true), (TAIL_RIGHT[0], false)] {
-                let (pivot, axis) = tail_geometry(left);
-                let end = if left {
-                    [-47., -65., -1.]
-                } else {
-                    [47., -65., -1.]
-                };
-                let f = synthetic(
+                let root: f32 = if left { -22. } else { 21. };
+                let side: f32 = if left { -1. } else { 1. };
+                let original = synthetic(
                     address,
-                    vec![pivot, end, [if left { -32. } else { 32. }, -74., -1.]],
+                    vec![
+                        [root, -39., -1.],
+                        [root, -68., -1.],
+                        [root + side * 9., -48., -1.],
+                        [root + side * 25., -65., -1.],
+                        [root + side * 20., -71., -1.],
+                    ],
                 );
-                let moved = rig.animate(&f, &s).unwrap();
-                close(pivot, moved.positions[0]);
-                close(end, moved.positions[1]);
-                assert!(axis[0] > 0.);
-                if value == 0. {
-                    assert_eq!(moved.positions, f.positions);
-                } else {
-                    assert!((moved.positions[2][2] + 1.) * value as f32 > 0.);
+                for (elevator, aileron) in [(control, 0.), (0., control)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    s.rudder = 0.;
+                    let moved = rig.animate(&original, &s).unwrap();
+                    for i in 0..3 {
+                        let chord = (moved.positions[0][i] + moved.positions[1][i]) * 0.5;
+                        assert!((chord - [root, -53.5, -1.][i]).abs() < 1e-4);
+                    }
+                    for i in 0..5 {
+                        for j in i + 1..5 {
+                            assert!(
+                                (distance_squared(original.positions[i], original.positions[j])
+                                    - distance_squared(moved.positions[i], moved.positions[j]))
+                                .abs()
+                                    < 1e-3
+                            );
+                        }
+                    }
+                    let dz = moved.positions[4][2] - original.positions[4][2];
+                    if elevator != 0. {
+                        assert!(dz * elevator as f32 > 0.);
+                    } else if aileron != 0. {
+                        assert!(dz * aileron as f32 * side > 0.);
+                    } else {
+                        assert_eq!(moved.positions, original.positions);
+                    }
+                    assert_eq!(moved.uv, original.uv);
                 }
             }
         }

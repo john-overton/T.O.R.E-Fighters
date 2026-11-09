@@ -235,6 +235,23 @@ crossings throughout the sampled poses. A prior weighted connector was rejected
 because it collapsed or crossed during retraction. Mechanical timing and
 texture/GPU comparison remain unvalidated.
 
+Whole-panel stabilators with differential roll, 2026-11-09 (slice TR-6, John's
+request). The 2026-10-05 Pitch line above is superseded. That rig rotated only
+the vertices forward of a swept span axis and held the root edge, so part of each
+five-corner stabilator stayed while the rest turned; rule 10's fold check finds
+one moved, two seam and two pinned vertices on every tail face. The whole flat
+panel per side, both windings (`55df`/`560c` left, `51a4`/`51d1` right), now
+turns rigidly about a lateral spindle through its root chord midpoint
+(`[-22,-53.5,-1]` left, `[21,-53.5,-1]` right, root chord `Y=-39..-68` at
+`X=±22/21`) and takes a fitted `0.10*aileron` differential roll (agent decision
+under John's 2026-11-08 request). A positive aileron raises the right trailing
+edge and lowers the left, the aileron sense; the pitch term `-0.30*elevator` and
+the roll term are summed and clamped to 0.40 rad. The panel lies at a constant
+`Z=-1`, so it has no anhedral and the spindle stays lateral. No root corner is
+pinned, so the root chord midpoint is the invariant and a small root gap to the
+fuselage is accepted. See the
+[control-surface source notes](../formats/aircraft-control-surfaces.md).
+
 
 ## F-16C and F-104N control fits
 

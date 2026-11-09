@@ -11,6 +11,8 @@ const GEAR: [usize; 22] = [
     0x59a9, 0x59c8, 0x59e7, 0x5a06, 0x5a82, 0x5aa1, 0x5ac0, 0x5ad7, 0x5aee, 0x5b0d,
 ];
 const BRAKE: [usize; 4] = [0x5d73, 0x5d8a, 0x5da1, 0x5db8];
+/// Both windings of each all-moving stabilator panel.
+const TAILS: [usize; 4] = [0x55df, 0x560c, 0x51a4, 0x51d1];
 #[cfg(test)]
 const FLAPS: [usize; 4] = [0x5c3e, 0x5c5d, 0x5b57, 0x5b76];
 const CLOSURES: [usize; 2] = [0x5ce5, 0x5bfe];
@@ -127,13 +129,13 @@ fn panels(control: Control) -> Vec<Panel> {
         Control::Elevator => vec![
             panel!(
                 &[0x55df, 0x560c],
-                &[[-22., -68., -1.], [-47., -65., -1.]],
+                &[[-22., -39., -1.], [-22., -68., -1.]],
                 &[[-42., -71., -1.]],
                 1.
             ),
             panel!(
                 &[0x51a4, 0x51d1],
-                &[[21., -68., -1.], [47., -65., -1.]],
+                &[[21., -39., -1.], [21., -68., -1.]],
                 &[[41., -71., -1.]],
                 1.
             ),
@@ -163,6 +165,20 @@ fn panels(control: Control) -> Vec<Panel> {
                 sign: 1.,
                 central_roll_only: true,
             },
+            // The all-moving stabilators take differential roll: a positive
+            // aileron raises the right trailing edge and lowers the left.
+            panel!(
+                &[0x55df, 0x560c],
+                &[[-22., -39., -1.], [-22., -68., -1.]],
+                &[[-42., -71., -1.]],
+                -1.
+            ),
+            panel!(
+                &[0x51a4, 0x51d1],
+                &[[21., -39., -1.], [21., -68., -1.]],
+                &[[41., -71., -1.]],
+                1.
+            ),
         ],
         Control::Flaps => vec![
             panel!(
@@ -249,6 +265,34 @@ fn witnesses(
         })
         .collect()
 }
+/// The midpoint of every occurrence of the given source corners, followed from
+/// reference to pose. The all-moving stabilator has no fixed source corner, so
+/// its root chord midpoint is the invariant instead.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
+}
 pub(super) fn check(
     control: Control,
     value: f64,
@@ -283,13 +327,25 @@ pub(super) fn check(
                     .get(key)
                     .is_none_or(|g| g.positions.len() != f.positions.len())
             });
-        for point in panel.roots {
-            let actual = witnesses(&before, &after, *point);
-            metric.reviewed_anchor_missing |= actual.is_empty();
-            for p in actual {
-                metric.max_reviewed_anchor_gap = metric
-                    .max_reviewed_anchor_gap
-                    .max(distance(*point, p) * scale);
+        if panel.faces.iter().any(|address| TAILS.contains(address)) {
+            // The all-moving stabilator has no fixed root corner: the invariant
+            // is the root chord midpoint, so the reviewed root corners are
+            // averaged rather than each held fixed.
+            match midpoint_gap(&before, &after, panel.roots, scale) {
+                Some(gap) => {
+                    metric.max_reviewed_anchor_gap = metric.max_reviewed_anchor_gap.max(gap)
+                }
+                None => metric.reviewed_anchor_missing = true,
+            }
+        } else {
+            for point in panel.roots {
+                let actual = witnesses(&before, &after, *point);
+                metric.reviewed_anchor_missing |= actual.is_empty();
+                for p in actual {
+                    metric.max_reviewed_anchor_gap = metric
+                        .max_reviewed_anchor_gap
+                        .max(distance(*point, p) * scale);
+                }
             }
         }
         let before: BTreeMap<_, _> = before
