@@ -399,6 +399,22 @@ canopy treatment and all control/weapon timing. F-22 gains no hook. Full source
 gear deployment still sets the existing 7 2/3-foot ground plane. GPU appearance
 and recovered original mechanical timing require separate evidence.
 
+Whole-panel stabilators, 2026-11-09 (slice TR-8). The 2026-10-05 F-22 family tail
+fit above is superseded. That rig turned only the vertices past `|x| = 19` and
+held every source root point, so every stabilator face straddled the threshold
+and folded (rule 10's fold check; the same diagonal fault as the F-16). Each
+side's whole flat panel now turns rigidly about the lateral spindle through its
+root chord midpoint: right `32ba`/`32cc`/`35ad`/`35c1` and left `3987`/`3ba9` on
+F22.SH, right `31eb`/`31fd`/`36d3`/`36e7` and left `3ada`/`3cff` on F22N.SH
+(F/A-XX shares the F22N donor). The existing `-0.30*elevator` pitch and opposed
+`0.10*aileron` roll are kept, so a positive aileron raises the right trailing
+edge and lowers the left. The right root chord runs `[17,-33,1]..[19,-72,1]`
+(midpoint `[18,-52.5,1]`), the left `[-18,-33,1]..[-19,-72,1]` (midpoint
+`[-18.5,-52.5,1]`). The panels lie at a constant Z=1, so they have no anhedral
+and the spindle stays lateral. No root corner is pinned, so the root chord
+midpoint is the invariant and the small root gap is accepted. See the
+[control-surface source notes](../formats/aircraft-control-surfaces.md).
+
 ## X-31 attachment corrections
 
 Agent fits, 2026-10-05, exact F31.PT. Inner trailing panels and their closures

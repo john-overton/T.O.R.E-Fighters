@@ -256,12 +256,9 @@ impl Rig {
             let sign = side(source);
             let angle = -0.3 * s.elevator - f64::from(sign) * 0.1 * s.aileron;
             if angle != 0. {
-                turn(&mut f, [sign * 18., -48., 1.], [1., 0., 0.], angle);
-                for (p, q) in f.positions.iter_mut().zip(&source.positions) {
-                    if q[0].abs() <= 19. {
-                        *p = *q;
-                    }
-                }
+                // Whole panel about the lateral spindle through the root chord
+                // midpoint: no source root corner stays pinned while the rest turns.
+                turn(&mut f, [sign * 18., -52.5, 1.], [1., 0., 0.], angle);
                 normal(source, &mut f);
             }
         }
@@ -471,6 +468,65 @@ mod tests {
         for leaf in leaves {
             assert_eq!(leaf.positions[2], f.positions[2]);
             assert_eq!(leaf.positions[3], f.positions[3]);
+        }
+    }
+    #[test]
+    fn stabilators_move_as_whole_panels_on_pitch_and_roll() {
+        let rig = Rig {
+            id: Id::F22,
+            parts: BTreeMap::new(),
+        };
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        // Every F-22 family tail face straddled the old |x| <= 19 pin, so the
+        // whole panel turns about its root chord midpoint instead: no corner is
+        // held while the rest turns, and the trailing edge keeps its signed law.
+        for (address, middle, side) in [
+            (0x32ba, [18., -52.5, 1.], 1f32),
+            (0x3987, [-18.5, -52.5, 1.], -1f32),
+        ] {
+            let original = if side > 0. {
+                face(
+                    address,
+                    vec![[17., -33., 1.], [19., -72., 1.], [47., -63., 1.]],
+                )
+            } else {
+                face(
+                    address,
+                    vec![[-18., -33., 1.], [-19., -72., 1.], [-47., -62., 1.]],
+                )
+            };
+            for control in [-1., -0.5, 0., 0.5, 1.] {
+                for (elevator, aileron) in [(control, 0.), (0., control)] {
+                    state.elevator = elevator;
+                    state.aileron = aileron;
+                    let moved = rig.animate(&original, &state).unwrap();
+                    for (i, m) in middle.iter().enumerate() {
+                        let chord = (moved.positions[0][i] + moved.positions[1][i]) * 0.5;
+                        assert!((chord - m).abs() < 1e-4);
+                    }
+                    for i in 0..3 {
+                        for j in i + 1..3 {
+                            let dist = |a: [f32; 3], b: [f32; 3]| {
+                                (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>()
+                            };
+                            assert!(
+                                (dist(original.positions[i], original.positions[j])
+                                    - dist(moved.positions[i], moved.positions[j]))
+                                .abs()
+                                    < 1e-3
+                            );
+                        }
+                    }
+                    let dz = moved.positions[2][2] - original.positions[2][2];
+                    if elevator != 0. {
+                        assert!(dz * elevator as f32 > 0.);
+                    } else if aileron != 0. {
+                        assert!(dz * aileron as f32 * side > 0.);
+                    } else {
+                        assert_eq!(moved.positions, original.positions);
+                    }
+                }
+            }
         }
     }
     #[test]

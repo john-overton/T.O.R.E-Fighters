@@ -2,6 +2,21 @@
 use super::*;
 use std::collections::BTreeSet;
 use tore_formats::{aircraft::AircraftId as Id, shape::Shape};
+
+/// Both windings of each all-moving stabilator panel.
+const TAILS: [usize; 6] = [0x32ba, 0x32cc, 0x35ad, 0x35c1, 0x3987, 0x3ba9];
+const TAILS_NAVAL: [usize; 6] = [0x31eb, 0x31fd, 0x36d3, 0x36e7, 0x3ada, 0x3cff];
+const TAIL_ROOTS_LEFT: [[f32; 3]; 2] = [[-18., -33., 1.], [-19., -72., 1.]];
+const TAIL_ROOTS_RIGHT: [[f32; 3]; 2] = [[17., -33., 1.], [19., -72., 1.]];
+const TAIL_TRAILING_LEFT: [f32; 3] = [-47., -62., 1.];
+const TAIL_TRAILING_RIGHT: [f32; 3] = [47., -63., 1.];
+fn tails(id: Id) -> &'static [usize; 6] {
+    if id.source() == Id::F22n {
+        &TAILS_NAVAL
+    } else {
+        &TAILS
+    }
+}
 pub(super) struct Sources {
     id: Id,
     neutral: Vec<Face>,
@@ -43,6 +58,13 @@ fn base(a: usize, id: Id) -> usize {
         a
     }
 }
+fn side(f: &Face) -> f32 {
+    if f.positions.iter().map(|p| p[0]).sum::<f32>() < 0. {
+        -1.
+    } else {
+        1.
+    }
+}
 fn inner(a: usize, id: Id) -> bool {
     matches!(
         base(a, id),
@@ -79,7 +101,7 @@ fn anchor(p: [f32; 3], a: usize, id: Id, c: Control) -> bool {
     match c {
         Control::Flaps => p[1] == -28. || p[1] == -22.,
         Control::Aileron if outer(a, id) => p[1] == -22. || p[1] == -26.,
-        Control::Elevator | Control::Aileron => p[0].abs() <= 19.,
+        Control::Elevator | Control::Aileron => false,
         Control::Rudder => p[2] <= 6. + EPSILON || (p[1] + 35. - 0.25 * p[2]).abs() <= EPSILON,
         _ => false,
     }
@@ -95,6 +117,49 @@ fn endpoint(originals: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
                     .any(|(p, q)| distance(*p, *q) * scale > EPSILON)
         });
     }
+}
+/// The all-moving stabilator has no fixed source corner, so its root chord
+/// midpoint is the invariant instead of each root point.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
+}
+fn witnesses(
+    before: &BTreeMap<FaceKey, &Face>,
+    after: &BTreeMap<FaceKey, &Face>,
+    point: [f32; 3],
+) -> Vec<[f32; 3]> {
+    before
+        .iter()
+        .flat_map(|(key, source)| {
+            source.positions.iter().enumerate().filter_map(|(i, p)| {
+                (distance(*p, point) <= EPSILON)
+                    .then(|| after.get(key).and_then(|f| f.positions.get(i)).copied())
+                    .flatten()
+            })
+        })
+        .collect()
 }
 pub(super) fn check(
     c: Control,
@@ -153,6 +218,49 @@ pub(super) fn check(
     if let Some(gap) = shared_vertex_gaps(&before, &after, scale).first() {
         m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(gap.gap);
     }
+    if matches!(c, Control::Elevator | Control::Aileron) {
+        let addresses = tails(id);
+        for (roots, sign) in [(&TAIL_ROOTS_LEFT, -1f32), (&TAIL_ROOTS_RIGHT, 1f32)] {
+            let side_before: BTreeMap<_, _> = before
+                .iter()
+                .filter(|(k, f)| addresses.contains(&k.0) && side(f) == sign)
+                .map(|(k, f)| (*k, *f))
+                .collect();
+            let side_after: BTreeMap<_, _> = after
+                .iter()
+                .filter(|(k, f)| addresses.contains(&k.0) && side(f) == sign)
+                .map(|(k, f)| (*k, *f))
+                .collect();
+            if side_before.is_empty() {
+                continue;
+            }
+            match midpoint_gap(&side_before, &side_after, roots, scale) {
+                Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                None => m.reviewed_anchor_missing = true,
+            }
+        }
+        for (point, sign) in [(TAIL_TRAILING_LEFT, -1f32), (TAIL_TRAILING_RIGHT, 1f32)] {
+            let actual = witnesses(&before, &after, point);
+            m.reviewed_anchor_missing |= actual.is_empty();
+            if value == 0. {
+                m.reviewed_direction_failures += actual
+                    .iter()
+                    .filter(|q| distance(point, **q) * scale > EPSILON)
+                    .count();
+            } else {
+                let expected = if matches!(c, Control::Aileron) {
+                    sign
+                } else {
+                    1.
+                };
+                for q in actual {
+                    let delta = (q[2] - point[2]) * scale;
+                    m.reviewed_direction_failures +=
+                        usize::from(delta * expected * value.signum() as f32 <= EPSILON);
+                }
+            }
+        }
+    }
     for (k, f) in &before {
         let Some(g) = after.get(k) else {
             m.reviewed_anchor_missing = true;
@@ -160,6 +268,12 @@ pub(super) fn check(
         };
         if f.positions.len() != g.positions.len() {
             m.reviewed_anchor_missing = true;
+            continue;
+        }
+        // The whole stabilator panel turns, so its leading root vertices move
+        // opposite the trailing edge. Only the trailing witnesses carry the
+        // signed direction; the root chord midpoint is checked above.
+        if tail(k.0, id) {
             continue;
         }
         for (p, q) in f.positions.iter().zip(&g.positions) {
@@ -451,6 +565,26 @@ pub(super) fn combinations(
             if let Some(gap) = shared_vertex_gaps(&tail_before, &tail_after, scale).first() {
                 m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(gap.gap);
             }
+            for (roots, sign) in [(&TAIL_ROOTS_LEFT, -1f32), (&TAIL_ROOTS_RIGHT, 1f32)] {
+                let before_side: BTreeMap<_, _> = tail_before
+                    .iter()
+                    .filter(|(_, f)| side(f) == sign)
+                    .map(|(k, f)| (*k, *f))
+                    .collect();
+                let after_side: BTreeMap<_, _> = tail_after
+                    .iter()
+                    .filter(|(_, f)| side(f) == sign)
+                    .map(|(k, f)| (*k, *f))
+                    .collect();
+                if before_side.is_empty() {
+                    m.reviewed_anchor_missing = true;
+                    continue;
+                }
+                match midpoint_gap(&before_side, &after_side, roots, scale) {
+                    Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                    None => m.reviewed_anchor_missing = true,
+                }
+            }
             for (key, f) in &tail_before {
                 let Some(g) = tail_after.get(key) else {
                     m.reviewed_anchor_missing = true;
@@ -458,19 +592,20 @@ pub(super) fn combinations(
                 };
                 if f.positions.len() != g.positions.len() {
                     m.reviewed_anchor_missing = true;
-                    continue;
                 }
-                for (p, q) in f.positions.iter().zip(&g.positions) {
-                    let effective = 0.3 * pitch + 0.1 * f64::from(p[0].signum()) * roll;
-                    if p[0].abs() <= 19. {
-                        m.max_reviewed_anchor_gap =
-                            m.max_reviewed_anchor_gap.max(distance(*p, *q) * scale);
-                    } else if effective.abs() < 1e-8 {
+            }
+            for (point, sign) in [(TAIL_TRAILING_LEFT, -1f32), (TAIL_TRAILING_RIGHT, 1f32)] {
+                let actual = witnesses(&tail_before, &tail_after, point);
+                m.reviewed_anchor_missing |= actual.is_empty();
+                let effective = 0.3 * pitch + 0.1 * f64::from(sign) * roll;
+                for q in actual {
+                    if effective.abs() < 1e-8 {
                         m.reviewed_direction_failures +=
-                            usize::from(distance(*p, *q) * scale > EPSILON);
+                            usize::from(distance(point, q) * scale > EPSILON);
                     } else {
-                        m.reviewed_direction_failures +=
-                            usize::from(f64::from(q[2] - p[2]) * effective <= f64::from(EPSILON));
+                        m.reviewed_direction_failures += usize::from(
+                            f64::from(q[2] - point[2]) * effective <= f64::from(EPSILON),
+                        );
                     }
                 }
             }

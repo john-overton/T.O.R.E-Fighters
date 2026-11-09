@@ -431,6 +431,18 @@ panel lies at a constant `Z=-1`, so it has no anhedral to tilt the spindle by,
 and no root corner is pinned. See the
 [F-15C control and device fit](../spec/variety-animation.md#f-15c-control-and-device-fit).
 
+Whole-panel stabilators, 2026-11-09 (slice TR-8). The F-22 family tail rig turned
+only the vertices past `|x|=19` and held every source root point, so every tail
+face (right `32ba`/`32cc`/`35ad`/`35c1`, left `3987`/`3ba9` on F22.SH; F22N and
+F/A-XX use the F22N addresses) straddled that threshold and folded (rule 10's
+fold check). Each side's whole flat panel now turns rigidly about the lateral
+spindle through its root chord midpoint (`[18,-52.5,1]` right,
+`[-18.5,-52.5,1]` left), keeping the existing `-0.30*elevator` pitch and opposed
+`0.10*aileron` roll, so a positive aileron raises the right trailing edge and
+lowers the left. The panels lie at a constant Z=1, so they have no anhedral to
+tilt the spindle by, and no root corner is pinned. See the
+[F-22 family attachment corrections](../spec/aircraft-animation.md#f-22-family-attachment-corrections).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and
