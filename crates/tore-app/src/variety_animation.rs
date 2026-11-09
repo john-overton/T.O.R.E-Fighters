@@ -223,15 +223,17 @@ fn specification(id: Id) -> Option<Spec> {
                 1. / 3.,
             ),
             // M20.SH: six state words, 18,624 CODE bytes, 206 runtime faces.
-            // The gear word 0x589c adds 6 faces (three plates). The other
-            // five words (0x5890 flame, 0x5896 airbrake, 0x58a8 and 0x58ae
-            // flaps, 0x58b4 sixth) are unmapped in M2K-1, so the aircraft
-            // loads with the shared fitted gear law until its own rig
-            // (M2K-3, M2K-4); docs/formats/aircraft-variety.md, "Mirage 2000
-            // source review (2026-11-09)".
+            // M2K-3 loads it through its own `m2000_animation` rig, which owns
+            // the elevons and the rudder and keeps the interim fitted gear
+            // rise (gear word 0x589c adds 6 faces). The flap words (0x58a8,
+            // 0x58ae) and the rudder word (0x58b4) are pinned but never set;
+            // the plume (0x5890) and airbrake (0x5896) stay unmapped until
+            // M2K-4; docs/formats/aircraft-variety.md, "Mirage 2000 source
+            // review (2026-11-09)" and docs/spec/variety-animation.md,
+            // "Mirage 2000 control fit".
             // The shape is scaled per axis at load (M2K-2, `axis_scale`): the
-            // M2000's own rig must parse with `.scaled(axis_scale(id))` and
-            // scale any shape-unit hinge point with
+            // rig parses with `.scaled(axis_scale(id))` and scales any
+            // shape-unit hinge point with
             // `tore_formats::aircraft::scale::scale_point`.
             Id::M2000 => (
                 18624,
@@ -314,6 +316,7 @@ enum SpecificRig {
     Mi24(crate::mi24_animation::Rig),
     Mig25(crate::mig25_animation::Rig),
     Mig31(crate::mig31_animation::Rig),
+    M2000(crate::m2000_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -589,6 +592,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::M2000 => {
+                let (rig, shape) = crate::m2000_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::M2000(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -713,6 +725,7 @@ impl Rig {
                 SpecificRig::Mig17(_) => crate::mig17_animation::flame(address),
                 SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
                 SpecificRig::Mig31(_) => crate::mig31_animation::flame(address),
+                SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
             };
         }
         self.groups
@@ -772,6 +785,7 @@ impl Rig {
                 SpecificRig::Mi24(rig) => rig.animate(source, state),
                 SpecificRig::Mig25(rig) => rig.animate(source, state),
                 SpecificRig::Mig31(rig) => rig.animate(source, state),
+                SpecificRig::M2000(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

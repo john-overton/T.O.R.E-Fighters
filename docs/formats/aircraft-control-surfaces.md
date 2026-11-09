@@ -756,3 +756,112 @@ to -68, Z=-9 to 5 (the afterburner plume) and `0x6126` adds two raised dorsal
 quads at X=±5, Y=32 to 50, Z=8 to 24 (the airbrake); M31-4 maps both. The moving
 roles and fitted angles are recorded in the
 [MiG-31 fit](../spec/variety-animation.md#mig-31-control-fit).
+
+## Mirage 2000 control surfaces (M2K-3, 2026-11-09)
+
+`M20.SH` (18,624 CODE bytes, 206 runtime faces, six state words `0x5890`,
+`0x5896`, `0x589c`, `0x58a8`, `0x58ae`, `0x58b4`; review in
+[aircraft variety](aircraft-variety.md#mirage-2000-source-review-2026-11-09))
+names no signed pitch, roll or flap-travel branch, so the elevons and the rudder
+are **fitted** whole-panel assignments over exact reviewed source faces. Source
+coordinates below are shape units (x right, y forward, z up, one third foot
+before the per-axis scale of [M2K-2](objects-and-shapes.md#aircraft-shape-scale-2026-11-09));
+the rig scales every hinge point with the same factors as the shape, so a turned
+panel stays rigid.
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right elevon, inboard strip | `3969` (top), `394a` (bottom) | Quads, x 3 to 17; hinge edge y -29 at z -2 (top) and z -4 (bottom), trailing edge y -32, z -3 |
+| Right elevon, outboard strip | `2176`, `2391` (top), `2190`, `2233` (bottom) | Four triangles, x 17 to 33; the tip hinge vertex (33,-29,-3) is on the mid axis |
+| Left elevon, inboard strip | `3a31`, `3a50` | Mirror, x -18 to -3 (the seam is at x -18, so the left inboard strip is 15 units against the right's 14) |
+| Left elevon, outboard strip | `1e87`, `23c3`, `1ea1`, `1f1b` | Mirror, x -33 to -18 |
+| Rudder | `3bc6`, `3be5` (quad, both windings), `2b64`, `2b7c` (tip triangles, one per winding) | Hinge edge (0,-35,4) to (0,-40,19); trailing edge (0,-39,5) to (0,-42,19); triangles (0,-40,19), (0,-42,19), (0,-42,21) |
+
+**Hinge axes.** Elevons: the straight line y = -29, z = -3 along X, through the
+whole span of both strips; the wedge turns about this mid axis (it is not a
+vertex line: the hinge-edge vertices sit 1 unit above and below it, and the
+outboard tip vertex is on it). Rudder: the fin trailing edge from (0,-35,4)
+toward (0,-40,19), direction (0,-5,15), so a positive angle swings the trailing
+edge toward +X (right), the sense of the fleet's rudders.
+
+**Rule 11 fold table (rig definitions).** Every elevon face turns whole about the
+mid axis; the only vertex that stays put is the outboard tip vertex, which is on
+the axis. The rudder's two hinge vertices are on the hinge edge and stay put.
+
+| Surface | Face | Vertices | Turn about the axis | On the hinge axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right inboard | `3969` | 4 | 4 | 0 | 0 |
+| Right inboard | `394a` | 4 | 4 | 0 | 0 |
+| Right outboard | `2176` | 3 | 3 | 0 | 0 |
+| Right outboard | `2391` | 3 | 2 | 1 (33,-29,-3) | 0 |
+| Right outboard | `2190` | 3 | 2 | 1 (33,-29,-3) | 0 |
+| Right outboard | `2233` | 3 | 2 | 1 (33,-29,-3) | 0 |
+| Left inboard | `3a31`, `3a50` | 4 each | 4 each | 0 | 0 |
+| Left outboard | `1e87` | 3 | 3 | 0 | 0 |
+| Left outboard | `23c3`, `1ea1`, `1f1b` | 3 each | 2 each | 1 (-33,-29,-3) | 0 |
+| Rudder quad | `3bc6`, `3be5` | 4 each | 2 each | 2 each: (0,-35,4), (0,-40,19) | 0 |
+| Rudder tip triangle | `2b64`, `2b7c` | 3 each | 2 each | 1 each: (0,-40,19) | 0 |
+
+No face has a fixed vertex off its hinge axis and no vertex was chosen by a
+coordinate threshold: each side's six faces and the rudder's four faces are
+listed by address, and the rig refuses the shape if any of them is missing,
+duplicated, or holds a vertex off the reviewed wedge or fin points. Verdict:
+**no face folds**; the probe reports the largest inter-vertex distance change in
+each group as about 1e-6 ft.
+
+**Both strips take one angle.** The inboard and outboard strip of a side share
+the seam vertices (17,-29,-2), (17,-29,-4) and (17,-32,-3) (left: x -18), so
+both turn by the same angle about the same axis; a different angle would show a
+seam. The probe's per-side skin gap between the strips is 0 on every sample.
+
+**Flap words `0x58a8` and `0x58ae` (agent decision, 2026-11-09).** Each word
+deletes one inboard strip (`0x58a8` the left `3a31`/`3a50`, `0x58ae` the right
+`394a`/`3969`) and adds nothing, so a rig that set them would make the inboard
+elevon vanish in flight. The rig pins both words at load (a mismatch refuses the
+shape) but never sets them: the inboard strips stay drawn at every flap
+setting. The flap lever instead **droops** both elevons (below), as the Rafale
+and MiG-31 flaps lower their trailing surfaces.
+
+**Rudder word `0x58b4`** swaps the quad for a copy offset 1 to 2 units in +X (a
+fixed, positive-only pose, roughly 0.55 to 0.6 rad before its rounding to whole
+units). The rig pins it at load and never sets it; the quad turns about its hinge
+edge instead, in both directions.
+
+**The rudder's shared trailing vertex (agent decision).** The quad's top
+trailing vertex (0,-42,19) is shared with the two small triangles `2b64` and
+`2b7c`, whose third vertex (0,-42,21) is in turn shared with the fixed fin cap
+`2b16`/`2b31` (the cap's aft edge runs from (0,-40,19) to (0,-42,21)). The source's
+own rudder word leaves the triangles fixed and cracks that corner. Neither
+alternative is exact: leaving the triangles fixed would pin the quad's trailing
+vertex off the hinge axis (a fixed vertex off the axis folds or shears the
+face); turning them with the quad keeps all four faces one rigid panel and moves
+only the triangles' apex (0,-42,21) away from the cap corner. The rig does the
+latter. The apex is 1.26 units from the hinge axis, so at the 0.35 rad travel
+the corner opens by about 0.18 ft (measured, `seam-opening.csv`), on the top
+edge of the rudder only, where a real rudder also opens a wedge to the fin cap.
+
+**Elevon seam opening (measured).** The hinge-edge vertices are 1 unit (1.5
+scaled units vertically) off the mid axis and are shared with the fixed wing
+skin, so a turn opens a small wedge: 0.15 ft at 0.30 rad (full pitch), 0.20 ft
+at 0.40 rad (full flap droop), 0.25 ft at 0.50 rad (full pitch plus full roll).
+This is the same wedge issue as every thin trailing-edge strip and is reported,
+not a failure; the probe's skin gap (0) measures the seam between the two strips
+of one side, and the strip pair midpoints on the mid axis stay put (anchor gap 0).
+
+**Fitted magnitudes (agent decisions, 2026-11-09, matching the fleet).** Angle
+positive lowers the trailing edge. Per side: `-0.30*elevator` (pull raises both
+trailing edges), `-/+0.20*aileron` (a positive aileron raises the right
+trailing edge and lowers the left, the sense of every fleet aileron); the sum of
+pitch and roll is clamped to 0.50 rad (rule 12: the sum of the two maxima), then
+`+0.40*flaps` droops both. Rudder `0.35*rudder`. The Rafale's elevons use the
+same four numbers (`rafale_animation.rs`: `flaps*0.40 - elevator*0.30 +/-
+aileron*0.20`, rudder 0.35), as does the MiG-31's rudder and flap; nothing here is
+a source value. The shape has no flap surface of its own (the flap words only
+delete the inboard strips), so the droop is a TORE choice made so the flap lever
+shows on the elevons.
+
+The gear keeps the shared interim rise until M2K-4: the six `0x589c` plates
+(`380b`, `382a`, `3876`, `3895`, `38e1`, `3900`) lift by their own scaled
+vertical extent as the gear stows and are hidden at zero. The plume (`0x5890`)
+and the airbrake (`0x5896`) stay unmapped (M2K-4). See the
+[Mirage 2000 fit](../spec/variety-animation.md#mirage-2000-control-fit).

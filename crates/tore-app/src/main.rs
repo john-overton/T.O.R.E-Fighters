@@ -101,6 +101,7 @@ mod loading;
 mod lobby_screen;
 mod locate;
 mod look;
+mod m2000_animation;
 mod menu;
 mod mi24_animation;
 mod mig17_animation;

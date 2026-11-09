@@ -43,6 +43,7 @@ never executed. Offsets describe data provenance, not a gameplay requirement.
 | A310.SH | 20868 | 248 | gear 14, rudder 2 |
 | MIG25.SH | 26154 | 320 | gear 12; controls fitted, no signed branch |
 | MIG31.SH | 20816 | 214 | gear 12 rigid, brake 2, plume 12; rudder 4 swapped; two flap branches; controls fitted |
+| M20.SH | 18624 | 206 | gear 6 interim rise; flap words 2 (never set); rudder 2 swapped (never set); elevons and rudder fitted (M2K-3) |
 
 F-4B and F-4J share F4J.SH. The same shape exponent supplies the existing host
 scale rule: one-third foot per coordinate at exponent 8 and two-thirds at
@@ -749,3 +750,31 @@ midpoint `[±17,-40,-3]`, not a swept span axis. No root corner is pinned, so th
 small root gap to the tail boom stays the reviewed moving/fixed boundary. The
 probe now checks the stabilators as Aileron direction witnesses, opposite per
 side, with the root chord midpoint still their anchor on pitch and roll alike.
+
+## Mirage 2000 control fit
+
+Agent-authored whole-panel motion, 2026-11-09 (slice M2K-3), over `M20.SH` after
+the per-axis shape scale of M2K-2 (hinge points are scaled with
+`aircraft::scale::scale_point`). The shape names a rudder word (`0x58b4`), two
+flap words (`0x58a8`, `0x58ae`) and no signed pitch or roll branch, so the
+elevons and the rudder are fitted assignments over exact reviewed source faces.
+Every moving surface is whole: each side's six elevon faces turn as one rigid
+wedge, the rudder's four faces as one rigid panel. The source groups, the rule
+11 fold table, the seam measurements and the flap-word and shared-vertex
+decisions are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#mirage-2000-control-surfaces-m2k-3-2026-11-09).
+
+| Control | Fitted motion |
+| --- | --- |
+| Pitch | Both elevons on both sides, inboard and outboard strip together, `-0.30*elevator` radians about the mid axis y -29, z -3 along X (positive elevator raises the trailing edges). |
+| Roll | The same wedge, `-0.20*aileron` on the right and `+0.20*aileron` on the left (positive aileron raises the right trailing edge and lowers the left). Pitch plus roll is clamped to 0.50 rad, the sum of the two maxima. |
+| Flaps | `+0.40*flaps` lowers all four strips together after the clamp. The source flap words delete the inboard strips and are never set, so the inboard elevon never vanishes. |
+| Yaw | The rudder quad and its two tip triangles turn `0.35*rudder` radians about the fin trailing edge from (0,-35,4) toward (0,-40,19); positive swings the trailing edge to +X. The fin cap and root plates stay fixed. |
+| Gear | The six `0x589c` plates keep the interim rise until M2K-4. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments` with
+`anchor_missing=false`, `anchor_gap_ft=0`, `skin_gap_ft=0`, no direction
+failures and a largest inter-vertex distance change of about 1e-6 ft for pitch,
+roll, yaw and flap sweeps, plus the 25-pose pitch/roll grid
+(`pitch-roll-combinations.csv`). The measured moving/fixed seam openings
+(`seam-opening.csv`) are reported, not gated.
