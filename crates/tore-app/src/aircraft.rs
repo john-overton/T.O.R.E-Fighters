@@ -1002,4 +1002,60 @@ mod tests {
             [8., 6., -20.]
         );
     }
+    /// The Mirage 2000 has one engine and one nozzle disc (face 0x3794, the
+    /// hexagon at y -44): one trail on the centreline, at the scaled disc
+    /// centre, 2 ft behind its exit plane (M2K-4).
+    #[test]
+    fn the_mirage_2000_draws_one_contrail_on_the_centreline_behind_its_one_nozzle() {
+        use tore_formats::aircraft::{AircraftId, scale::scale_point};
+        let id = AircraftId::M2000;
+        assert_eq!(crate::engine_material::outlet_count(id), 1);
+        let hexagon = [
+            [0., -44., 2.],
+            [2., -44., 0.],
+            [2., -44., -3.],
+            [0., -44., -4.],
+            [-2., -44., -3.],
+            [-2., -44., 0.],
+        ];
+        let face = |address: usize, points: &[[f32; 3]]| tore_formats::shape::Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![],
+            positions: points.iter().map(|&p| scale_point(id, p)).collect(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0x64,
+            normal: None,
+            fog: tore_formats::shape::FogMode::Enabled,
+        };
+        let neutral = Shape {
+            lines: vec![],
+            faces: vec![
+                face(0x3794, &hexagon),
+                // Another face farther forward, to show only the nozzle disc
+                // places the trail.
+                face(0x1c64, &[[-3., 26., -6.], [0., 14., -6.], [2., 26., -6.]]),
+            ],
+            billboards: vec![],
+            state_words: Default::default(),
+        };
+        let offsets = contrail_offsets(id, &neutral, None, 1);
+        assert_eq!(offsets.len(), 1);
+        let centre = scale_point(id, [0., -44., -1.]);
+        let want = [
+            0.,
+            f64::from(centre[2]) / 3.,
+            f64::from(centre[1]) / 3. - 2.,
+        ];
+        assert_eq!(offsets[0][0], 0.);
+        for k in 0..3 {
+            assert!((offsets[0][k] - want[k]).abs() < 1e-6, "axis {k}");
+        }
+        // The bounds the engine material spans are the disc's own x and z.
+        let bounds = nozzle_bounds(id, &neutral);
+        assert_eq!(
+            bounds[0],
+            [-2. * 1.3616, 2. * 1.3616, -4. * 1.5053, 2. * 1.5053]
+        );
+    }
 }

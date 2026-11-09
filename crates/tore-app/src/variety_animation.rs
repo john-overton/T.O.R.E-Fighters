@@ -223,12 +223,12 @@ fn specification(id: Id) -> Option<Spec> {
                 1. / 3.,
             ),
             // M20.SH: six state words, 18,624 CODE bytes, 206 runtime faces.
-            // M2K-3 loads it through its own `m2000_animation` rig, which owns
-            // the elevons and the rudder and keeps the interim fitted gear
-            // rise (gear word 0x589c adds 6 faces). The flap words (0x58a8,
-            // 0x58ae) and the rudder word (0x58b4) are pinned but never set;
-            // the plume (0x5890) and airbrake (0x5896) stay unmapped until
-            // M2K-4; docs/formats/aircraft-variety.md, "Mirage 2000 source
+            // M2K-3 and M2K-4 load it through its own `m2000_animation` rig,
+            // which owns the elevons, the rudder, the three rigid gear plates
+            // (word 0x589c adds 6 faces), the dorsal airbrake plate (0x5896)
+            // and the plume (0x5890). The flap words (0x58a8, 0x58ae) and the
+            // rudder word (0x58b4) are pinned but never set;
+            // docs/formats/aircraft-variety.md, "Mirage 2000 source
             // review (2026-11-09)" and docs/spec/variety-animation.md,
             // "Mirage 2000 control fit".
             // The shape is scaled per axis at load (M2K-2, `axis_scale`): the

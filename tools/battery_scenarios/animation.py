@@ -13,7 +13,7 @@ from battery import Scenario
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
                      "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e", "mig25",
-                     "f16a", "mig31")
+                     "f16a", "mig31", "m2000")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -67,6 +67,7 @@ def check_report(work: Path, _output: str) -> list[str]:
         "SU25.PT": {"flap-roll-combinations.csv": 26, "rudder-material-correspondence.csv": 6},
         "M25.PT": {"dense-gear.csv": 203, "flap-roll-combinations.csv": 26},
         "MIG31.PT": {"dense-gear.csv": 203, "flap-roll-combinations.csv": 26},
+        "M2000.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26},
     }.get(aircraft, {})
     for csv_name, row_count in sweeps.items():
         try:

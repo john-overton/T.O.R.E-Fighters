@@ -545,6 +545,32 @@ the belly, the airbrake rises from the spine, and both afterburner plumes appear
 The free-flight aircraft banks during the settle, so the flight frames are
 inspection views; the probe contact sheets are the clear evidence.
 
+## Mirage 2000 gear, airbrake and plume results (2026-11-09)
+
+Exact `m2000` (`M2000.PT`) passes the probe with the M2K-3 control fit and the
+M2K-4 devices (`TORE_DATA_DIR=.local/m3-aircraft/profile target/debug/tore-app
+--aircraft m2000 --animation-probe .local/m3-aircraft/checks/M2K-4-probe`): scope
+`reviewed-controls-and-attachments`, 206 neutral faces, zero required or check
+failures; gear, brake and exhaust each read `required moved`. The 202-value
+dense gear sweep has every row passing (anchor gap 0, skin gap 0, rigidity at
+most 8e-7 ft, no new planar crossings); the seven-value airbrake sweep lays the
+closed plate on the spine within 3e-6 ft; the 25 pitch/roll poses still pass.
+`flight-animation-m2000` and `flight-variety-m2000` both pass in the battery.
+
+Mains swing inward and the nose swings rearward (public text, fitted law); the
+source has one flat plate per wheel and no doors, so the closed wing root and
+belly skin are the doors. The one dorsal airbrake plate is all the source has;
+the real aircraft's paired wing-root airbrakes are not drawn. One plume and one
+nozzle glow draw on the centreline. Frames: `.local/m3-aircraft/frames/M2K-4/`
+(gear down, half, near-stow and up from the side, below and behind with 3x
+crops of each gear, the airbrake open, half, closed and off, the burner on and
+off from behind, and the aircraft parked on a runway). The free-flight
+attitude is fixed by the capture, so the views are oblique; the mains are
+largely hidden under the stores from below. A contrail frame was not captured:
+trails form only above the aircraft's onset altitude and the capture starts low,
+so the single trail is pinned by a unit test and the offsets in the geometry
+note.
+
 ## F-16A results (2026-11-08)
 
 Exact `f16a` (`F16.PT`) shares `F16.SH`, the six state words and the whole F-16C
@@ -613,3 +639,4 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `faxx` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
+| `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |

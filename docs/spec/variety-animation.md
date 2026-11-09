@@ -778,3 +778,23 @@ failures and a largest inter-vertex distance change of about 1e-6 ft for pitch,
 roll, yaw and flap sweeps, plus the 25-pose pitch/roll grid
 (`pitch-roll-combinations.csv`). The measured moving/fixed seam openings
 (`seam-opening.csv`) are reported, not gated.
+
+## Mirage 2000 gear, airbrake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-09 (slice M2K-4), over `M20.SH` after
+the per-axis shape scale (hinge points scaled with `scale_point`). It replaces
+the interim gear rise of the [control fit](#mirage-2000-control-fit). The source
+faces, the fold table and the provenance are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#mirage-2000-gear-airbrake-and-plume-m2k-4-2026-11-09).
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | Each main plate turns whole about its own top edge (a line along Y at z -3) by `90 degrees * (1 - gear)`, swinging inward into the wing root; the nose plate turns whole about a lateral axis through its forward top corner, swinging rearward, and steers about a vertical axis. Hidden at 0, the source pose at 1. The real aircraft's mains retract inward and its nose rearward (public text, cited in the geometry note); the law is fitted. No gear doors: the source has none. |
+| Airbrake | The one source dorsal plate turns whole about its forward edge (y 24, z 5) by `0.766 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie on the spine, 0 hides it. The real aircraft's paired airbrakes above and below each wing root are not in the source and are not drawn. |
+| Afterburner | The eight plume plates scale along Y from the nozzle exit plane (y -44) by the afterburner fraction, hidden at 0. One nozzle glow on the single disc and one contrail at x 0, from the engine count of 1. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at
+the scaled low point at gear 1), and the closed airbrake within 3e-6 ft of the
+spine line. Not a claim of original retraction timing.

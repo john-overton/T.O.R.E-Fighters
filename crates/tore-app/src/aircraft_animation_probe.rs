@@ -214,6 +214,7 @@ impl Control {
                         | Id::F104
                         | Id::Mig25
                         | Id::Mig31
+                        | Id::M2000
                 ) =>
             {
                 Expectation::Required
@@ -258,6 +259,7 @@ impl Control {
                         | Id::Mig17
                         | Id::Mig25
                         | Id::Mig31
+                        | Id::M2000
                 ) =>
             {
                 Expectation::Required

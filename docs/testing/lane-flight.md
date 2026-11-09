@@ -852,7 +852,10 @@ in reports and scenario matching. `flight-animation-f16a` expects the `F16.PT`
 key and runs the shared F-16 witness set on its own identity. MiG-31 adds a
 202-value dense gear sweep, a 25-combination flap/roll grid, and brake and
 exhaust endpoints; the gear, brake and plume each carry their own rigid, hinge
-and direction checks.
+and direction checks. The Mirage 2000 adds the same 202-value dense gear sweep (grounded at gear 1,
+mains inward, nose rearward), a seven-value airbrake sweep that checks the
+closed plate on the spine, and the 25-combination pitch/roll grid; its
+`flight-variety-m2000` scenario flies 1,200 headless ticks.
 
 Run one repaired aircraft before expanding the audit:
 

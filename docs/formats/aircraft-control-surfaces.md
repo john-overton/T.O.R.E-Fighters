@@ -865,3 +865,112 @@ The gear keeps the shared interim rise until M2K-4: the six `0x589c` plates
 vertical extent as the gear stows and are hidden at zero. The plume (`0x5890`)
 and the airbrake (`0x5896`) stay unmapped (M2K-4). See the
 [Mirage 2000 fit](../spec/variety-animation.md#mirage-2000-control-fit).
+
+## Mirage 2000 gear, airbrake and plume (M2K-4, 2026-11-09)
+
+Slice M2K-4, Claude Sonnet (sonnet-high), implementation mode. This maps the
+three device words of `M20.SH` that [M2K-3](#mirage-2000-control-surfaces-m2k-3-2026-11-09)
+left unmapped. Source coordinates are shape units (x right, y forward, z up, a
+third of a foot before the per-axis scale of
+[M2K-2](objects-and-shapes.md#aircraft-shape-scale-2026-11-09)); every hinge
+point is scaled with `scale_point` so a turned piece stays rigid. Motion and
+angles are **fitted** (agent decisions, 2026-11-09); the faces and the word
+roles are spec-derived from the retail shape.
+
+**Word roles.** `0x5890` is the afterburner plume (eight faces), `0x5896` the
+airbrake (two faces), `0x589c` the gear (six faces, the parked gear word of
+`parked_aircraft.rs`, unchanged). The three trailing words are as M2K-3: the
+flap words `0x58a8`, `0x58ae` and the rudder word `0x58b4` are pinned and never
+set. The shape has **no slat, canopy, nozzle, hook or gear-door word** and none
+is invented. Each of the three device words adds its faces and removes none
+(checked against the branch at load; a mismatch refuses the shape).
+
+| Piece | Faces | Source geometry |
+| --- | --- | --- |
+| Right main plate | `3876`, `3895` (two windings) | Flat plate in the plane x = 7, y -18 to -12, z -12 to -3 |
+| Left main plate | `380b`, `382a` | The mirror, x = -7 |
+| Nose plate | `38e1`, `3900` | Flat plate in the plane x = 0, y 32 to 37, z -12 to -5 |
+| Airbrake | `3c73`, `3c92` | One quad, x -1 to 1, from (y 24, z 5) up to (y 17, z 10) |
+| Plume, inner pair | `3d74`, `3d93` (plane x = 0), `3db2`, `3dd1` (plane z = 0) | y -57 to -44 |
+| Plume, outer pair | `3cf8`, `3d17` (plane x = 0), `3d36`, `3d55` (plane z = 0) | y -80 to -57 |
+
+**Gear motion (fitted).** Each plate is one whole rigid piece, no vertex held
+back. The three assemblies are the right main, the left main and the nose; the
+source has no door faces, so the wing root and belly skin close the bay and no
+door is animated (a recorded mapping gap, as the MiG-31).
+
+- Each main turns about its own top edge, the line along Y at z = -3 on its own
+  x, by `90 degrees * (1 - gear)`, swinging **inward**: the foot comes up and
+  across under the wing root and at near-stow the plate lies flat at z = -3,
+  1 unit below the wing's upper skin (z -2) and 1 above its lower skin (z -4),
+  hidden inside the wing and fuselage. The two stowed plates overlap in x
+  (right x 7 to -2, left x -7 to 2) at the same height, inside the body where
+  neither is visible. Hidden (not drawn) at gear 0, as the shared devices.
+- The nose plate turns about a lateral axis (along X) through its forward top
+  corner (0,37,-5) by `90 degrees * (1 - gear)`, swinging **rearward**: the foot
+  (0,37,-12) swings aft and up and the plate stows in the nose-bay volume at
+  y 30 to 37, z -5 to 0, inside the fuselage. It also steers about a vertical
+  axis through its centre (0,34.5): `-nosewheel_angle()`, as the MiG-31 nose.
+- Gear down (gear 1) is the source pose exactly, so the parked path
+  `("M2000.PT", Some(0x589c))`, the ground contact and the stand-on-the-shape
+  grounding are unchanged: the lowest gear vertex is the scaled 12 unit low
+  point (12 units at a third of a foot times the z factor 1.5053, 6.021 ft) the
+  flight model stands the aircraft on, which the probe measures.
+
+Provenance of the direction: the real Mirage 2000's single-wheel main legs
+retract **inward** and the twin-wheel nose leg **rearward** (Wikipedia, *Dassault
+Mirage 2000*, landing gear paragraph; aatlse.org Mirage 2000 descriptions,
+accessed 2026-11-09). Public text only; the hinge lines, the 90 degree stow and
+the law are fitted. The source plates are one flat card per wheel, so the real
+forward-and-inward rotation of the main strut is not reproduced.
+
+**Airbrake (fitted).** The source is **one** double-sided centreline plate 2
+units wide, hinged on its **forward** edge (y 24, z 5, on the spine) and raised
+aft to (y 17, z 10). (The M2K-0 review text called y 24 the aft edge; y is
+forward, so the hinge is the forward edge. The vertices and the face table are
+unchanged.) The whole plate turns about that edge along X: brake 1 is the
+source raised pose, brake 0 hides it, and in between it turns by
+`closed_angle * (1 - brake)`. The closed angle (0.766 rad, 43.9 degrees,
+computed on the scaled shape at run time) lays the plate on the spine line from
+(0,25,5) to (0,-1,4), which the probe measures at 3e-6 ft. The real Mirage 2000
+has small airbrakes above and below each wing root; the source has one dorsal
+plate, so the rig turns what the source has and invents no surface.
+
+**Plume (fitted).** The plume plates scale along Y from the nozzle exit plane
+(y -44, the one nozzle disc `3794`) by the afterburner fraction, so the exit
+corners stay put and the plume grows to the source length (y -80) at 1. Every
+plate scales by the same function of y, so the seam at y -57 and the crossed
+planes stay joined. Hidden at 0.
+
+**Nozzle glow and contrail (engine count 1).** The nozzle disc is the single
+hexagon `3794` (subtype `0x64`, six vertices at y -44, x -2 to 2, z -4 to 2).
+`engine_material::nozzle` names it and `outlet_count` is 1 for the Mirage (the
+M2K-1 override of the record's 2 engines), so there is one nozzle glow and
+`contrail_offsets` makes **one** trail at the disc centre: x 0, 0.50 ft below
+the shape origin, 20.03 ft behind it (the exit plane at y -44 scaled to 18.03
+ft, 2 ft behind). The plume reaches 32.8 ft behind the origin, so the trail
+starts inside the burner. A unit test pins the offset on a synthetic hexagon.
+
+**Rule 11 fold table (rig definitions).** Every face turns whole; the vertices
+that stay are on the hinge axis. No vertex was chosen by a coordinate threshold:
+every face is named by address and the rig refuses a shape whose corners differ
+from the reviewed values.
+
+| Surface | Face | Vertices | Turn | On the hinge axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right main | `3876`, `3895` | 4 each | 2 each | 2 each: (7,-12,-3), (7,-18,-3) | 0 |
+| Left main | `380b`, `382a` | 4 each | 2 each | 2 each: (-7,-12,-3), (-7,-18,-3) | 0 |
+| Nose | `38e1`, `3900` | 4 each | 3 each | 1 each: (0,37,-5) | 0 |
+| Airbrake | `3c73`, `3c92` | 4 each | 2 each | 2 each: (-1,24,5), (1,24,5) | 0 |
+| Plume (eight faces) | `3cf8` ... `3dd1` | 4 each | scaled from y -44 | the exit-plane vertices | 0 |
+
+Verdict: **no face folds** and no face keeps a fixed vertex off its axis. The
+probe reports the largest inter-vertex distance change as 1e-6 ft for each gear
+assembly and the airbrake, and the skin gap between the two windings of every
+plate and between plume plates as 0.
+
+The probe adds a 202-value dense gear sweep (`dense-gear.csv`, 203 lines, every
+row passing: rigid, hinges fixed, feet inward or aft, nothing below the hinge
+height near stow, ground contact at 1), a seven-value airbrake sweep
+(`brake-sweep.csv`) and the gear, brake and exhaust witnesses. See the
+[Mirage 2000 gear, airbrake and plume fit](../spec/variety-animation.md#mirage-2000-gear-airbrake-and-plume-fit).
