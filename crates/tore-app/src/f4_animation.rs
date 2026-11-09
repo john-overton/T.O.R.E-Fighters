@@ -28,6 +28,10 @@ struct Spec {
     rudder_edge: [[f32; 3]; 2],
     tails: [[usize; 2]; 2],
     tail_edges: [[[f32; 3]; 2]; 2],
+    /// Tangent of the stabilator panel's anhedral, so the lateral spindle can
+    /// be tilted to lie in the panel. Derived from each panel's own vertices
+    /// (TR-10): the in-plane lateral direction of the best-fit plane.
+    tail_anhedral: f32,
     roll: &'static [usize],
     flap_words: [usize; 2],
     flap_faces: [[usize; 2]; 2],
@@ -57,6 +61,7 @@ fn specification(id: Id) -> AppResult<Spec> {
                 [[-4., -66., 7.], [-1., -90., 7.]],
                 [[4., -65., 7.], [1., -90., 7.]],
             ],
+            tail_anhedral: 0.48,
             roll: &[0x1eeb, 0x1f10, 0x1f94, 0x216c, 0x2199],
             flap_words: [0x726e, 0x7274],
             flap_faces: [[0x52af, 0x52d6], [0x519f, 0x51c6]],
@@ -79,6 +84,7 @@ fn specification(id: Id) -> AppResult<Spec> {
                 [[-4., -45., 6.], [-1., -65., 6.]],
                 [[4., -45., 6.], [1., -65., 6.]],
             ],
+            tail_anhedral: 0.46,
             roll: &[0x2d6a, 0x2d88, 0x3104, 0x31c7],
             flap_words: [0x5e08, 0x5e0e],
             flap_faces: [[0x404a, 0x4069], [0x3f53, 0x3f72]],
@@ -101,6 +107,7 @@ fn specification(id: Id) -> AppResult<Spec> {
                 [[-4., -54., 7.], [-1., -74., 7.]],
                 [[4., -54., 7.], [1., -74., 7.]],
             ],
+            tail_anhedral: 0.45,
             roll: &[0x2a40, 0x2adb, 0x2d81, 0x2de9],
             flap_words: [0x63b8, 0x63be],
             flap_faces: [[0x3f73, 0x3f92], [0x3e9c, 0x3ebb]],
@@ -376,16 +383,25 @@ impl Rig {
                 state.rudder.clamp(-1., 1.) * 0.35,
             );
         } else if let Some(side) = self.spec.tails.iter().position(|group| group.contains(&a)) {
+            // All-moving stabilator (TR-10). The whole panel, both windings,
+            // turns rigidly about the lateral spindle through its root chord
+            // midpoint. The old split pinned the two root chord points, which
+            // do not lie on the spindle, so every face folded along the root
+            // (rule 10's fold check). The spindle is tilted by the panel's own
+            // anhedral so it lies in the surface, and no corner is pinned, so
+            // the root chord midpoint is the invariant and the small root gap
+            // is accepted. Pitch only: these stabilators take no differential
+            // roll, so no aileron term is added.
             let roots = self.spec.tail_edges[side];
             let pivot = std::array::from_fn(|i| (roots[0][i] + roots[1][i]) * 0.5);
-            constrained_turn(
-                source,
+            let sign = if side == 0 { -1. } else { 1. };
+            turn(
                 &mut result,
                 pivot,
-                [1., 0., 0.],
+                [1., 0., -sign * self.spec.tail_anhedral],
                 -state.elevator.clamp(-1., 1.) * 0.30,
-                |p| roots.contains(&p),
             );
+            update_normal(source, &mut result);
         } else if self.spec.roll.contains(&a) {
             let side = if source.positions.iter().map(|p| p[0]).sum::<f32>() < 0. {
                 -1.
@@ -684,25 +700,46 @@ mod tests {
         }
     }
     #[test]
-    fn pitch_raises_both_sides_without_detaching_either_tail_root() {
-        for id in [Id::F4J, Id::F4E, Id::F4G] {
+    fn whole_stabilator_panels_keep_their_root_midpoints_on_pitch() {
+        // The F-4 all-moving stabilators have no fixed root corner: both
+        // windings turn rigidly about the lateral spindle through the root
+        // chord midpoint, tilted by the panel's anhedral. No part stays pinned
+        // while the rest turns.
+        let distance_squared =
+            |a: [f32; 3], b: [f32; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f32>();
+        for id in [Id::F4B, Id::F4J, Id::F4E, Id::F4G] {
             let r = rig(id);
             let mut s = state();
             for input in [-1., -0.5, 0., 0.5, 1.] {
                 s.elevator = input;
                 for side in 0..2 {
                     let [a, b] = r.spec.tail_edges[side];
+                    let middle: [f32; 3] = std::array::from_fn(|i| (a[i] + b[i]) * 0.5);
                     let witness = [if side == 0 { -20. } else { 20. }, b[1] - 5., a[2] - 4.];
                     let f = synthetic(r.spec.tails[side][0], vec![a, b, witness]);
                     let twin = synthetic(r.spec.tails[side][1], vec![witness, b, a]);
                     let moved = r.animate(&f, &s).unwrap();
                     let other = r.animate(&twin, &s).unwrap();
-                    close(moved.positions[0], a);
-                    close(moved.positions[1], b);
+                    for (i, m) in middle.iter().enumerate() {
+                        let chord = (moved.positions[0][i] + moved.positions[1][i]) * 0.5;
+                        assert!((chord - m).abs() < 1e-4);
+                    }
+                    for i in 0..3 {
+                        for j in i + 1..3 {
+                            assert!(
+                                (distance_squared(f.positions[i], f.positions[j])
+                                    - distance_squared(moved.positions[i], moved.positions[j]))
+                                .abs()
+                                    < 1e-3
+                            );
+                        }
+                    }
                     for (p, q) in moved.positions.iter().zip(other.positions.iter().rev()) {
                         close(*p, *q);
                     }
-                    if input != 0. {
+                    if input == 0. {
+                        assert_eq!(moved.positions, f.positions);
+                    } else {
                         assert_eq!(
                             (moved.positions[2][2] - witness[2]).signum(),
                             input.signum() as f32

@@ -83,6 +83,25 @@ Detailed local evidence is retained in `.local/animation-audit/a7-geometry.json`
 and stay ignored. Pose acceptance and remaining aircraft are recorded in the
 [animation audit](../baselines/aircraft-animations.md).
 
+Whole-panel stabilators, 2026-11-09 (slice TR-10). The F-4 family rig pinned both
+root chord points of each all-moving stabilator (F-4B/J `346e`/`3489` and
+`3613`/`362e`, F-4E `2b15`/`2b30` and `2405`/`2420`, F-4G `281c`/`282f` and
+`233f`/`2352`), so every quad straddled the pin and folded (rule 10's fold check:
+two moved and two pinned vertices per face; a geometry check changed an
+inter-vertex distance by 1.08 to 1.45 source units on pitch). Each whole quad,
+both windings, now turns rigidly about the lateral spindle through its root
+chord midpoint, tilted by that panel's own anhedral (`0.48` J, `0.46` E, `0.45`
+G) so the spindle lies in the surface. The panels are pitch only, so no aileron
+term is added, and no root corner is pinned, so the root chord midpoint is the
+invariant and the small root gap is accepted. See the
+[F-4 family fit](../spec/variety-animation.md#f-4-family-surface-repair).
+
+The A-7 tail needed no code change. Its `2be6`/`2c59` and `1f3a`/`3506`
+triangles already turn whole about the root chord line (3 of 3 vertices move, 0
+pinned), and a geometry check found 0 source-unit change on pitch, so rule 10
+passes. See the
+[A-7 fit](../spec/variety-animation.md#a-7-surface-repair-and-acceptance).
+
 
 ## F-15C source additions
 
@@ -170,6 +189,16 @@ provides closure 0x5920 on the left only. Main wheel skins are separate from
 larger leg/bridge sheets and retain different longitudinal extents on each
 side. Hook 0x6134/0x6154 has near edge [0,-32,-6] to [0,-35,-6]. Neither a
 mirrored missing closure nor symmetric replacement wheel geometry is supported.
+
+Whole-panel stabilator, 2026-11-09 (slice TR-10). The high-tail rig pinned the
+X=0 center chord and turned only the outboard vertices, so each stabilator half
+(`2f9e`/`2fbb` left, `1f4d`/`1f6b` right) straddled that pin and folded (rule
+10's fold check: two moved and two pinned vertices per face; a geometry check
+changed an inter-vertex distance by 0.09 source units on pitch). Both halves now
+turn rigidly about the lateral spindle through the root chord midpoint
+`[0,-61,21]`, the same `-0.30*elevator` law and sign. The panel lies at a
+constant Z=21, so it has no anhedral to tilt the spindle by, and no center chord
+is pinned. The horizontal tail is pitch only, so no aileron term is added.
 
 Local source inspection and original atlas crops are under
 `.local/animation-audit/`. Continuous laws and limitations are in the

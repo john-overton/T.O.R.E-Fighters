@@ -123,6 +123,12 @@ and rear contact sheets, including intermediate gear poses. Finite/reversible ge
 [animation audit](../baselines/aircraft-animations.md) records per-aircraft
 results and remaining gaps.
 
+Whole-surface fold check, 2026-11-09 (slice TR-10). The Pitch row above already
+turns each whole trailing tail triangle about its root chord line, so no face
+has vertices on both sides of a pin: 3 of 3 vertices move on both sides, and a
+geometry check found 0 source-unit change on pitch. Rule 10 passes and the A-7
+rig is unchanged. The surfaces are pitch only, so no aileron term is added.
+
 ## F-4 family surface repair
 
 F-4B/J share F4J.SH; F-4E and F-4G keep their own shapes, source asymmetries and
@@ -149,6 +155,17 @@ and roll, fixed roots, same-surface twin coherence, 21 intermediate gear samples
 and per-aircraft contact sheets. Ordinary clearance between distinct controls
 is separate from a broken hinge. The audit records geometry acceptance only;
 texture/GPU and original-runtime comparison are not implied.
+
+Whole-panel stabilators, 2026-11-09 (slice TR-10). The Pitch row above pinned
+both root chord points of each F-4 stabilator, so every panel folded along its
+root when the outboard end turned (rule 10's fold check: two moved and two
+pinned vertices per face; a geometry check changed an inter-vertex distance by
+1.08 to 1.45 source units on pitch). Each whole panel, both windings, now turns
+rigidly about the lateral spindle through its root chord midpoint, tilted by
+that panel's own anhedral (`0.48` J, `0.46` E, `0.45` G) so the spindle lies in
+the surface. The stabilators are pitch only, so no aileron term is added, unlike
+the whole-panel roll fits. No root corner is pinned, so the root chord midpoint
+is the invariant and the small root gap to the fuselage is accepted.
 
 ## AC-130 mounts
 
@@ -296,6 +313,16 @@ for a positive aileron, the flaperon sense; the pitch and roll terms are summed
 and clamped to 0.40 rad. The probe's Elevator anchor is now the root chord
 midpoint, and the stabilators join the Aileron direction witnesses, opposite per
 side. The F-16C and F-16A share this unchanged.
+
+Whole-panel high tail, 2026-11-09 (slice TR-10). The F-104 Pitch cell above
+pinned the centerline root chord, so each stabilator half folded along X=0 when
+the outboard end turned (rule 10's fold check: two moved and two pinned vertices
+per face; a geometry check changed an inter-vertex distance by 0.09 source units
+on pitch). Both halves now turn rigidly about the lateral spindle through the
+root chord midpoint `[0,-61,21]`, keeping the same `-0.30*elevator` law and sign.
+The high tail lies at a constant Z=21, so it has no anhedral to tilt the spindle
+by, and no center chord is pinned. It is a stabilator, so no aileron term is
+added.
 
 F-16 main wheels split at Z=-14. Rigid lower pieces rise 10 units during the
 first half of closing and another 8 during the second half; then X shifts +2.5

@@ -295,18 +295,19 @@ impl Rig {
             }
             update_normal(source, &mut result);
         } else if TAIL.contains(&address) {
-            let mut pitched = source.clone();
+            // All-moving stabilator on the T-tail (TR-10): both halves turn
+            // rigidly about the lateral spindle through the root chord
+            // midpoint. The old split pinned the X=0 centre chord, which is not
+            // on the spindle, so each face folded along the root (rule 10's
+            // fold check). The high tail is flat at Z=21, so it has no anhedral
+            // to tilt the spindle by, and no corner is pinned. Pitch only: no
+            // roll.
             turn(
-                &mut pitched,
+                &mut result,
                 [0., -61., 21.],
                 [1., 0., 0.],
                 -0.30 * state.elevator.clamp(-1., 1.),
             );
-            for (p, q) in result.positions.iter_mut().zip(pitched.positions) {
-                if p[0] != 0. {
-                    *p = q;
-                }
-            }
             update_normal(source, &mut result);
         } else if HOOK.contains(&address) {
             if state.hook <= 0. {
@@ -571,12 +572,15 @@ mod tests {
         }
     }
     #[test]
-    fn signed_t_tail_and_rudder_keep_their_own_fixed_edges() {
+    fn whole_t_tail_stabilator_keeps_its_root_midpoint_on_pitch() {
+        // The F-104 all-moving stabilator has no fixed centre chord: both
+        // halves turn rigidly about the lateral spindle through the root chord
+        // midpoint, so no part stays pinned while the rest turns.
         let rig = rig();
         let mut s = state();
         for command in [-1., -0.5, 0., 0.5, 1.] {
             s.elevator = command;
-            s.rudder = command;
+            s.rudder = 0.;
             for (address, side) in [(0x2f9e, -1.), (0x1f4d, 1.)] {
                 let original = face(
                     address,
@@ -588,7 +592,20 @@ mod tests {
                     ],
                 );
                 let result = rig.animate(&original, &s).unwrap();
-                assert_eq!(result.positions[..2], original.positions[..2]);
+                for i in 0..3 {
+                    let chord = (result.positions[0][i] + result.positions[1][i]) * 0.5;
+                    assert!((chord - [0., -61., 21.][i]).abs() < 1e-4);
+                }
+                for i in 0..4 {
+                    for j in i + 1..4 {
+                        assert!(
+                            (distance_squared(original.positions[i], original.positions[j])
+                                - distance_squared(result.positions[i], result.positions[j]))
+                            .abs()
+                                < 1e-3
+                        );
+                    }
+                }
                 if command == 0. {
                     assert_eq!(result.positions, original.positions);
                 } else {
@@ -596,6 +613,16 @@ mod tests {
                     assert!((result.positions[3][2] - 21.) * (command as f32) < 0.);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn rudder_keeps_its_own_fixed_edge() {
+        let rig = rig();
+        let mut s = state();
+        for command in [-1., -0.5, 0., 0.5, 1.] {
+            s.elevator = 0.;
+            s.rudder = command;
             let original = face(
                 0x5646,
                 vec![[0., -53., 9.], [0., -55., 21.], [0., -64., 15.]],

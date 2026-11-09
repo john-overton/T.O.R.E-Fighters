@@ -302,15 +302,26 @@ pub(super) fn check(
             new.get(key)
                 .is_none_or(|actual| actual.positions.len() != face.positions.len())
         });
-        for point in panel.roots {
-            let matches = witness_positions(&old, &new, *point);
-            if matches.is_empty() {
-                metric.reviewed_anchor_missing = true;
+        if matches!(control, Control::Elevator) {
+            // Whole-panel all-moving stabilator: the root chord midpoint, not
+            // each root point, is the invariant (rule 10, TR-10).
+            match midpoint_gap(&old, &new, panel.roots, scale) {
+                Some(gap) => {
+                    metric.max_reviewed_anchor_gap = metric.max_reviewed_anchor_gap.max(gap);
+                }
+                None => metric.reviewed_anchor_missing = true,
             }
-            for moved in matches {
-                metric.max_reviewed_anchor_gap = metric
-                    .max_reviewed_anchor_gap
-                    .max(distance(*point, moved) * scale);
+        } else {
+            for point in panel.roots {
+                let matches = witness_positions(&old, &new, *point);
+                if matches.is_empty() {
+                    metric.reviewed_anchor_missing = true;
+                }
+                for moved in matches {
+                    metric.max_reviewed_anchor_gap = metric
+                        .max_reviewed_anchor_gap
+                        .max(distance(*point, moved) * scale);
+                }
             }
         }
         let gaps = shared_vertex_gaps(&old, &new, scale);
@@ -346,6 +357,34 @@ pub(super) fn check(
             }
         }
     }
+}
+
+/// The all-moving stabilator has no fixed source corner, so its root chord
+/// midpoint, not each root point, is the invariant (rule 10, TR-10).
+pub(super) fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
 }
 
 pub(super) fn witness_positions(

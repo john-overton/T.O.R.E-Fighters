@@ -81,12 +81,23 @@ pub(super) fn check(
             new.get(key)
                 .is_none_or(|g| g.positions.len() != f.positions.len())
         });
-        for p in points {
-            let moved = f4::witness_positions(&old, &new, *p);
-            metric.reviewed_anchor_missing |= moved.is_empty();
-            for q in moved {
-                metric.max_reviewed_anchor_gap =
-                    metric.max_reviewed_anchor_gap.max(distance(*p, q) * scale);
+        if matches!(control, Control::Elevator) {
+            // Whole-panel all-moving stabilator: the root chord midpoint, not
+            // each centre-chord point, is the invariant (rule 10, TR-10).
+            match f4::midpoint_gap(&old, &new, points, scale) {
+                Some(gap) => {
+                    metric.max_reviewed_anchor_gap = metric.max_reviewed_anchor_gap.max(gap);
+                }
+                None => metric.reviewed_anchor_missing = true,
+            }
+        } else {
+            for p in points {
+                let moved = f4::witness_positions(&old, &new, *p);
+                metric.reviewed_anchor_missing |= moved.is_empty();
+                for q in moved {
+                    metric.max_reviewed_anchor_gap =
+                        metric.max_reviewed_anchor_gap.max(distance(*p, q) * scale);
+                }
             }
         }
         if let Some(gap) = shared_vertex_gaps(&old, &new, scale).first() {
