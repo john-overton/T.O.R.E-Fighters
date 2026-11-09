@@ -378,6 +378,19 @@ summed and clamped to 0.40 rad. The plate lies at a constant Z=0, so it has no
 anhedral to tilt the spindle by, and no root corner is pinned. See the
 [MiG-29 attachment corrections](../spec/aircraft-animation.md#mig-29-attachment-corrections).
 
+Whole-panel differential roll, 2026-11-09 (slice TR-4). The Su-27 tail rig turned
+only the vertices past `|x|=21` and held the two vertices on the root chord line
+`X=±21`, so part of each flat tail quad stayed put while the outboard end turned
+(rule 10's fold check). The whole tail quad per side, both windings
+(`16d5`/`170f` left, `1928`/`19be` right), now turns rigidly about a lateral
+spindle through the root chord midpoint `[±21,-41,-6]` (root chord `Y=-26..-56`
+at `X=±21`) and takes a fitted `0.10*aileron` differential roll, raising the
+right trailing edge and lowering the left, the flaperon sense, with the pitch
+and roll terms summed and clamped to 0.40 rad. The plate lies at a constant
+`Z=-6`, so it has no anhedral to tilt the spindle by, and no root corner is
+pinned. See the
+[Su-27 attachment corrections](../spec/aircraft-animation.md#su-27-attachment-corrections).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and

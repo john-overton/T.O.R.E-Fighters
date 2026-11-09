@@ -198,19 +198,24 @@ impl Rig {
         let a = source.address;
         let mut result = source.clone();
         if TAIL_L.contains(&a) || TAIL_R.contains(&a) {
-            let left = TAIL_L.contains(&a);
-            let mut moved = source.clone();
-            turn(
-                &mut moved,
-                [if left { -21. } else { 21. }, -41., -6.],
-                [1., 0., 0.],
-                -0.30 * state.elevator.clamp(-1., 1.),
-            );
-            for (p, q) in result.positions.iter_mut().zip(moved.positions) {
-                if p[0].abs() > 21. {
-                    *p = q;
-                }
-            }
+            // All-moving stabilator: the whole flat quad per side, both windings,
+            // turns as one rigid panel about the lateral spindle through its root
+            // chord midpoint [±21,-41,-6]. The old rig turned only the vertices
+            // past |x|=21 and held the root edge, so part of the panel stayed
+            // while the rest turned; the fold check (rule 10) turns the whole
+            // panel instead. The plate lies at a constant Z=-6, so it has no
+            // anhedral to tilt the spindle by. No root corner is pinned, so a
+            // small root gap to the tail boom is accepted, as on the MiG-25,
+            // MiG-31 and MiG-29. The fitted pitch term keeps its -0.30 sign; the
+            // fitted differential roll raises the right trailing edge and lowers
+            // the left for a positive aileron, the flaperon sense, so the same
+            // angle moves the two panels oppositely. The two terms are summed
+            // and clamped to the pitch plus roll maximum.
+            let side = if TAIL_L.contains(&a) { -1. } else { 1. };
+            let angle = (-0.30 * state.elevator.clamp(-1., 1.)
+                - f64::from(side) * 0.10 * state.aileron.clamp(-1., 1.))
+            .clamp(-0.40, 0.40);
+            turn(&mut result, [side * 21., -41., -6.], [1., 0., 0.], angle);
             update_normal(source, &mut result);
         } else if FIN_L.contains(&a) || FIN_R.contains(&a) {
             if source.positions.iter().all(|p| fin_distance(*p) <= 1e-4) {
@@ -354,28 +359,68 @@ mod tests {
         (0..3).map(|i| (a[i] - b[i]).powi(2)).sum()
     }
     #[test]
-    fn asymmetric_tail_roots_stay_fixed_and_both_distal_controls_have_signed_pitch() {
+    fn whole_stabilator_panel_keeps_its_root_midpoint_on_pitch_and_roll() {
         let mut s = state();
-        for (a, side) in [(0x16d5, -1.), (0x1928, 1.)] {
-            let source = face(
-                a,
-                vec![
-                    [side * 49., -51., -6.],
-                    [side * 44., -59., -6.],
-                    [side * 21., -56., -6.],
-                    [side * 21., -26., -6.],
-                ],
-            );
-            for v in [-1., 0., 1.] {
-                s.elevator = v;
-                let out = Rig.animate(&source, &s).unwrap();
-                assert_eq!(out.positions[2], source.positions[2]);
-                assert_eq!(out.positions[3], source.positions[3]);
-                for i in 0..2 {
-                    if v != 0. {
-                        assert!((out.positions[i][2] - source.positions[i][2]) * v as f32 > 0.);
+        // The all-moving stabilator has no fixed root corner: the whole flat
+        // quad, both windings, turns rigidly about the lateral spindle through
+        // its root chord midpoint [±21,-41,-6]. A positive elevator raises both
+        // trailing edges; a positive aileron raises the right trailing edge and
+        // lowers the left, opposite per side.
+        let corners_r = [[21., -26., -6.], [21., -56., -6.]];
+        let corners_l = [[-21., -26., -6.], [-21., -56., -6.]];
+        for (addresses, corners, witness, side) in [
+            (&TAIL_R[..], corners_r, [44., -59., -6.], 1f32),
+            (&TAIL_L[..], corners_l, [-44., -59., -6.], -1f32),
+        ] {
+            let midpoint: [f32; 3] = std::array::from_fn(|i| (corners[0][i] + corners[1][i]) * 0.5);
+            for &address in addresses {
+                let source = face(
+                    address,
+                    vec![
+                        corners[0],
+                        corners[1],
+                        witness,
+                        [witness[0], witness[1] + 8., -6.],
+                    ],
+                );
+                for (elevator, aileron) in [(0., 0.), (1., 0.), (-1., 0.), (0., 1.), (0., -1.)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    let out = Rig.animate(&source, &s).unwrap();
+                    if elevator == 0. && aileron == 0. {
+                        assert_eq!(out.positions, source.positions, "face {address:x} at zero");
+                        continue;
+                    }
+                    // The root chord midpoint stays put, not any single corner.
+                    let moved_mid: [f32; 3] =
+                        std::array::from_fn(|i| (out.positions[0][i] + out.positions[1][i]) * 0.5);
+                    for i in 0..3 {
+                        assert!(
+                            (moved_mid[i] - midpoint[i]).abs() < 1e-3,
+                            "face {address:x} root midpoint moved"
+                        );
+                    }
+                    // The whole panel is rigid: no part stays pinned while the
+                    // rest turns.
+                    for i in 0..4 {
+                        for j in i + 1..4 {
+                            assert!(
+                                (d2(source.positions[i], source.positions[j])
+                                    - d2(out.positions[i], out.positions[j]))
+                                .abs()
+                                    < 1e-3,
+                                "face {address:x} panel not rigid"
+                            );
+                        }
+                    }
+                    let dz = out.positions[2][2] - witness[2];
+                    if elevator != 0. {
+                        assert!(dz * elevator as f32 > 0., "face {address:x} pitch sign");
                     } else {
-                        assert_eq!(out.positions[i], source.positions[i]);
+                        assert!(
+                            dz * aileron as f32 * side > 0.,
+                            "face {address:x} roll sign"
+                        );
                     }
                 }
             }

@@ -262,6 +262,21 @@ edge follows the nose rigidly. No wheel card deforms. All eight gear faces
 hide at zero and reproduce source deployment at one. Brake retains [0,40,11]
 and atan(14/22); flame root remains Y=-60. The exact profile disables hooks.
 
+Whole-panel stabilators with differential roll, 2026-11-09 (slice TR-4, John's
+request). The 2026-10-05 tail fit above is superseded. That rig turned only the
+vertices past `|x|=21` and held the root chord line `X=±21`, so part of each
+flat tail quad stayed while the outboard end turned; the fold check turns the
+whole panel instead. The one flat quad per side, both windings (`16d5`/`170f`
+left, `1928`/`19be` right), now turns rigidly about the lateral spindle through
+its root chord midpoint `[±21,-41,-6]` and takes a fitted `0.10*aileron`
+differential roll (agent decision under John's 2026-11-08 request). A positive
+aileron raises the right trailing edge and lowers the left, the flaperon sense;
+the pitch term `-0.30*elevator` and the roll term are summed and clamped to
+0.40 rad. The plate lies at a constant Z=-6, so it has no anhedral and the
+spindle stays lateral. No root corner is pinned, so the small root gap to the
+tail boom is the reviewed moving/fixed boundary. See the
+[control-surface source notes](../formats/aircraft-control-surfaces.md).
+
 ## Su-35 attachment corrections
 
 Agent fits, 2026-10-05. Retain the safe inward 90-degree main fold at

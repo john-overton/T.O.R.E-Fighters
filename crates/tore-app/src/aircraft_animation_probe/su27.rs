@@ -1,6 +1,7 @@
 //! Independent Su27 own roots, signed endpoints, slats and separated rigid wheels.
 use super::*;
-const TAIL: [usize; 4] = [0x16d5, 0x170f, 0x1928, 0x19be];
+const STAB_L: [usize; 2] = [0x16d5, 0x170f];
+const STAB_R: [usize; 2] = [0x1928, 0x19be];
 const FIN: [usize; 4] = [0x17f8, 0x1831, 0x1ae5, 0x1af9];
 const GEAR: [usize; 8] = [
     0x2b74, 0x2b8f, 0x2bd7, 0x2bf2, 0x2c2c, 0x2c47, 0x2c8f, 0x2caa,
@@ -8,10 +9,6 @@ const GEAR: [usize; 8] = [
 const SLATS: [usize; 4] = [0x2d29, 0x2d3c, 0x2ce4, 0x2cf7];
 fn groups(c: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
     match c {
-        Control::Elevator => vec![
-            (&[0x16d5, 0x170f], &[[-21., -26., -6.], [-21., -56., -6.]]),
-            (&[0x1928, 0x19be], &[[21., -26., -6.], [21., -56., -6.]]),
-        ],
         Control::Flaps | Control::Aileron => vec![
             (&[0x2e82, 0x2e95], &[[-21., -10., -1.], [-78., -26., -1.]]),
             (&[0x2db3, 0x2dc6], &[[21., -10., -1.], [79., -26., -1.]]),
@@ -20,6 +17,34 @@ fn groups(c: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
         Control::Brake => vec![(&[0x2f69, 0x2f7c], &[[-6., 40., 11.], [7., 40., 11.]])],
         _ => Vec::new(),
     }
+}
+/// The midpoint of every occurrence of the given source corners, followed from
+/// reference to pose. The all-moving stabilator has no fixed source corner, so
+/// its root chord midpoint is the invariant instead.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
 }
 fn anchors(c: Control, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
     for (ids, points) in groups(c) {
@@ -100,12 +125,65 @@ pub(super) fn check(
             }
         }
     }
-    if matches!(c, Control::Rudder | Control::Elevator) {
-        let ids = if matches!(c, Control::Rudder) {
-            &FIN[..]
-        } else {
-            &TAIL[..]
-        };
+    if matches!(c, Control::Elevator | Control::Aileron) {
+        // The all-moving stabilator is one whole panel per side: both windings
+        // of the flat quad turn rigidly about the lateral spindle through the
+        // root chord midpoint [±21,-41,-6], on pitch and on differential roll
+        // alike. No single root corner stays put, so the anchor is the midpoint
+        // of the root chord pair, not either corner.
+        for (ids, corners, witness, sign) in [
+            (
+                &STAB_R[..],
+                &[[21., -26., -6.], [21., -56., -6.]][..],
+                [44., -59., -6.],
+                1f32,
+            ),
+            (
+                &STAB_L[..],
+                &[[-21., -26., -6.], [-21., -56., -6.]][..],
+                [-44., -59., -6.],
+                -1f32,
+            ),
+        ] {
+            let old: BTreeMap<_, _> = keyed(reference)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            let new: BTreeMap<_, _> = keyed(pose)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
+                m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(g.gap);
+            }
+            if value == 0. {
+                for (key, face) in &old {
+                    match new.get(key) {
+                        Some(after) if face.positions == after.positions => {}
+                        _ => m.reviewed_neutral_mismatch = true,
+                    }
+                }
+            } else {
+                match midpoint_gap(&old, &new, corners, scale) {
+                    Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                    None => m.reviewed_anchor_missing = true,
+                }
+                if matches!(c, Control::Aileron) {
+                    // Differential roll: a positive aileron raises the right
+                    // trailing edge and lowers the left, opposite per side.
+                    let qs = f4::witness_positions(&old, &new, witness);
+                    m.reviewed_direction_failures += usize::from(qs.is_empty());
+                    for q in qs {
+                        let delta = (q[2] - witness[2]) * scale;
+                        m.reviewed_direction_failures +=
+                            usize::from(delta * sign * value.signum() as f32 <= EPSILON);
+                    }
+                }
+            }
+        }
+    }
+    if matches!(c, Control::Rudder) {
+        let ids = &FIN[..];
         let old: BTreeMap<_, _> = keyed(source)
             .into_iter()
             .filter(|(k, _)| ids.contains(&k.0))
@@ -114,16 +192,14 @@ pub(super) fn check(
             .into_iter()
             .filter(|(k, _)| ids.contains(&k.0))
             .collect();
-        if matches!(c, Control::Rudder) {
-            for (key, f) in &old {
-                for (i, p) in f.positions.iter().enumerate() {
-                    if (p[1] + 43. + 0.25 * (p[2] + 5.)).abs() < 1e-4 {
-                        if let Some(q) = new.get(key).and_then(|f| f.positions.get(i)) {
-                            m.max_reviewed_anchor_gap =
-                                m.max_reviewed_anchor_gap.max(distance(*p, *q) * scale);
-                        } else {
-                            m.reviewed_anchor_missing = true;
-                        }
+        for (key, f) in &old {
+            for (i, p) in f.positions.iter().enumerate() {
+                if (p[1] + 43. + 0.25 * (p[2] + 5.)).abs() < 1e-4 {
+                    if let Some(q) = new.get(key).and_then(|f| f.positions.get(i)) {
+                        m.max_reviewed_anchor_gap =
+                            m.max_reviewed_anchor_gap.max(distance(*p, *q) * scale);
+                    } else {
+                        m.reviewed_anchor_missing = true;
                     }
                 }
             }
