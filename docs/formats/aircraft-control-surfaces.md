@@ -391,6 +391,20 @@ and roll terms summed and clamped to 0.40 rad. The plate lies at a constant
 pinned. See the
 [Su-27 attachment corrections](../spec/aircraft-animation.md#su-27-attachment-corrections).
 
+Whole-panel differential roll, 2026-11-09 (slice TR-5). The Su-35 tail rig turned
+only the vertices past `|x|=24` and held the root edge, so part of each tail face
+stayed put while the outboard end turned (rule 10's fold check: every tail face
+straddled the threshold). The whole tail pentagon per side, both windings
+(`5312`/`535e` left, `25f2`/`2639` right), now turns rigidly about a lateral
+spindle through the root chord midpoint and takes a fitted `0.10*aileron`
+differential roll, raising the right trailing edge and lowering the left, the
+outboard-aileron sense, with the pitch and roll terms summed and clamped to
+0.40 rad. The right root chord runs `[20,-25,-5]..[17,-46,-5]` (midpoint
+`[18.5,-35.5,-5]`), the left `[-20,-25,-5]..[-20,-46,-5]` (midpoint
+`[-20,-35.5,-5]`). The plate lies at a constant `Z=-5`, so it has no anhedral to
+tilt the spindle by, and no root corner is pinned. See the
+[Su-35 attachment corrections](../spec/aircraft-animation.md#su-35-attachment-corrections).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and

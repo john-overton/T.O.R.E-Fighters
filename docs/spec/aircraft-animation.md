@@ -292,6 +292,23 @@ isolate its flap. Preserve left X=-50 and other source asymmetries. Only outer
 control skins carry -0.20-radian differential roll, retaining both thick
 slanted forward edges. Broad forward wing skins stay fixed.
 
+Whole-panel stabilators with differential roll, 2026-11-09 (slice TR-5, John's
+request). The 2026-10-05 tail fit above is superseded. That rig turned only the
+vertices past `|x|=24` and held the root edge, so part of each tail face stayed
+while the outboard end turned; the fold check turns the whole panel instead. The
+whole flat pentagon per side, both windings (`5312`/`535e` left, `25f2`/`2639`
+right), now turns rigidly about the lateral spindle through its root chord
+midpoint and takes a fitted `0.10*aileron` differential roll (agent decision
+under John's 2026-11-08 request). The right root chord runs
+`[20,-25,-5]..[17,-46,-5]` (midpoint `[18.5,-35.5,-5]`), the left
+`[-20,-25,-5]..[-20,-46,-5]` (midpoint `[-20,-35.5,-5]`). A positive aileron
+raises the right trailing edge and lowers the left, the outboard-aileron sense;
+the pitch term `-0.30*elevator` and the roll term are summed and clamped to
+0.40 rad. The plate lies at a constant Z=-5, so it has no anhedral and the
+spindle stays lateral. No root corner is pinned, so the small root gap to the
+tail boom is the reviewed moving/fixed boundary. The canards are unchanged. See
+the [control-surface source notes](../formats/aircraft-control-surfaces.md).
+
 ## MiG-21 attachment corrections
 
 Agent fits, 2026-10-05. Retain rudder cut Y=-52 and 0.35-radian yaw, plus

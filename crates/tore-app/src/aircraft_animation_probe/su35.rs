@@ -1,5 +1,7 @@
 //! Independent Su35 own-source witnesses, including every split24c0 piece.
 use super::*;
+const STAB_L: [usize; 2] = [0x5312, 0x535e];
+const STAB_R: [usize; 2] = [0x25f2, 0x2639];
 const GEAR: [usize; 18] = [
     0x5432, 0x5451, 0x5470, 0x548f, 0x54ae, 0x54cd, 0x5680, 0x5697, 0x56f3, 0x5712, 0x5731, 0x5750,
     0x5549, 0x5568, 0x5587, 0x55a6, 0x55c5, 0x55e4,
@@ -26,14 +28,6 @@ fn selected(c: Control, faces: &[Face], left: bool) -> Vec<Face> {
 fn anchor_groups(c: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
     match c {
         Control::Elevator => vec![
-            (
-                &[0x25f2, 0x2639],
-                &[[20., -25., -5.], [17., -46., -5.], [24., -58., -5.]],
-            ),
-            (
-                &[0x5312, 0x535e],
-                &[[-20., -25., -5.], [-20., -46., -5.], [-24., -58., -5.]],
-            ),
             (&[0x256d, 0x2580], &[[19., 38., 0.], [20., 53., 0.]]),
             (&[0x52b0, 0x52d7], &[[-20., 38., 0.], [-20., 53., 0.]]),
         ],
@@ -44,6 +38,34 @@ fn anchor_groups(c: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
         Control::Brake => vec![(&[0x5944, 0x596b], &[[-5., 23., 8.], [7., 23., 8.]])],
         _ => Vec::new(),
     }
+}
+/// The midpoint of every occurrence of the given source corners, followed from
+/// reference to pose. The all-moving stabilator has no fixed source corner, so
+/// its root chord midpoint is the invariant instead.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
 }
 pub(super) fn check(
     c: Control,
@@ -143,6 +165,65 @@ pub(super) fn check(
                     m.reviewed_anchor_missing |= qs.is_empty();
                     m.reviewed_neutral_mismatch |=
                         qs.into_iter().any(|p| distance(p, q) * scale > EPSILON);
+                }
+            }
+        }
+    }
+    if matches!(c, Control::Elevator | Control::Aileron) {
+        // The all-moving stabilator is one whole panel per side: both windings
+        // of the flat pentagon turn rigidly about the lateral spindle through
+        // the root chord midpoint ([18.5,-35.5,-5] right, [-20,-35.5,-5] left),
+        // on pitch and on differential roll alike. No single root corner stays
+        // put, so the anchor is the midpoint of the root chord pair, not either
+        // corner. The right root chord is [20,-25,-5]..[17,-46,-5]; the left is
+        // [-20,-25,-5]..[-20,-46,-5]; the plate lies at a constant Z=-5.
+        for (ids, corners, witness, sign) in [
+            (
+                &STAB_R[..],
+                &[[20., -25., -5.], [17., -46., -5.]][..],
+                [43., -59., -5.],
+                1f32,
+            ),
+            (
+                &STAB_L[..],
+                &[[-20., -25., -5.], [-20., -46., -5.]][..],
+                [-43., -59., -5.],
+                -1f32,
+            ),
+        ] {
+            let old: BTreeMap<_, _> = keyed(reference)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            let new: BTreeMap<_, _> = keyed(pose)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
+                m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(g.gap);
+            }
+            if value == 0. {
+                for (key, face) in &old {
+                    match new.get(key) {
+                        Some(after) if face.positions == after.positions => {}
+                        _ => m.reviewed_neutral_mismatch = true,
+                    }
+                }
+            } else {
+                match midpoint_gap(&old, &new, corners, scale) {
+                    Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                    None => m.reviewed_anchor_missing = true,
+                }
+                if matches!(c, Control::Aileron) {
+                    // Differential roll: a positive aileron raises the right
+                    // trailing edge and lowers the left, opposite per side.
+                    let qs = f4::witness_positions(&old, &new, witness);
+                    m.reviewed_direction_failures += usize::from(qs.is_empty());
+                    for q in qs {
+                        let delta = (q[2] - witness[2]) * scale;
+                        m.reviewed_direction_failures +=
+                            usize::from(delta * sign * value.signum() as f32 <= EPSILON);
+                    }
                 }
             }
         }
