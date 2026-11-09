@@ -1,4 +1,5 @@
-//! MiG29 source-specific repair: fixed control attachments and rigid separated gear.
+//! MiG29 source-specific repair: whole-panel all-moving stabilators (pitch plus a
+//! fitted differential roll), fixed control attachments and rigid separated gear.
 use crate::{AppResult, additional_animation::turn, flight::State};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -6,9 +7,13 @@ use std::{
 };
 use tore_formats::shape::{Face, Shape};
 const WORDS: [usize; 5] = [0x8240, 0x8246, 0x824c, 0x8258, 0x825e];
-const TAIL: [usize; 8] = [
-    0x474f, 0x4776, 0x479e, 0x47c5, 0x4cf6, 0x4dbc, 0x4d1d, 0x4de3,
+/// The whole all-moving stabilator, both windings per side: the four outboard
+/// quads plus the inboard leading-edge triangles, one flat plate at Z=0 per
+/// side. The rig turns the whole plate about its root chord midpoint.
+const STAB_R: [usize; 8] = [
+    0x474f, 0x4776, 0x479e, 0x47c5, 0x296b, 0x2989, 0x4179, 0x41a1,
 ];
+const STAB_L: [usize; 6] = [0x4cf6, 0x4dbc, 0x4d1d, 0x4de3, 0x4d44, 0x4e0a];
 const FIN_R: [usize; 2] = [0x334e, 0x3371];
 const FIN_L: [usize; 2] = [0x4d6c, 0x4d93];
 const ROLL_R: [usize; 2] = [0x445c, 0x44fc];
@@ -100,6 +105,17 @@ fn roll_spec(a: usize) -> Option<([f32; 3], [f32; 3])> {
 }
 fn roll_trailing(p: [f32; 3]) -> bool {
     p[1] < -8. - (p[0].abs() - 36.) * 3. / 21. - 1e-4
+}
+/// The whole all-moving stabilator, both windings and the inboard
+/// leading-edge triangles: +1 right, -1 left, `None` for any other face.
+fn stabilator_side(a: usize) -> Option<f32> {
+    if STAB_R.contains(&a) {
+        Some(1.)
+    } else if STAB_L.contains(&a) {
+        Some(-1.)
+    } else {
+        None
+    }
 }
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
@@ -221,15 +237,7 @@ impl Rig {
         shape.faces.extend(caps);
         let mut faces = Vec::new();
         for f in shape.faces {
-            if TAIL.contains(&f.address) {
-                faces.extend(crate::aircraft_animation::split_surface(
-                    &f,
-                    [0., -41., 0.],
-                    [1., 0., 0.],
-                    0.,
-                    |p| p[1] + 41.,
-                ));
-            } else if FIN_L.contains(&f.address) || FIN_R.contains(&f.address) {
+            if FIN_L.contains(&f.address) || FIN_R.contains(&f.address) {
                 let (pivot, axis) = fin_hinge(FIN_L.contains(&f.address));
                 faces.extend(crate::aircraft_animation::split_surface(
                     &f,
@@ -260,18 +268,22 @@ impl Rig {
                 .map(|(p, q)| std::array::from_fn(|i| p[i] + (q[i] - p[i]) * t))
                 .collect();
             update_normal(source, &mut result);
-        } else if TAIL.contains(&a) && source.positions.iter().all(|p| p[1] <= -41. + 1e-4) {
-            turn(
-                &mut result,
-                [0., -41., 0.],
-                [1., 0., 0.],
-                -0.30 * state.elevator.clamp(-1., 1.),
-            );
-            for (p, old) in result.positions.iter_mut().zip(&source.positions) {
-                if (old[1] + 41.).abs() < 1e-4 {
-                    *p = *old;
-                }
-            }
+        } else if let Some(side) = stabilator_side(a) {
+            // All-moving stabilator: the whole flat plate per side, both
+            // windings and the inboard leading-edge triangles, turns as one
+            // rigid panel about the lateral spindle through its root chord
+            // midpoint [±16.5,-35,0]. The plate lies at a constant Z=0, so it has
+            // no anhedral to tilt the spindle by. No root corner is pinned, so
+            // a small root gap to the tail boom is accepted, as on the MiG-25
+            // and MiG-31. The fitted pitch term keeps its -0.30 sign; the
+            // fitted differential roll raises the right trailing edge and
+            // lowers the left for a positive aileron, the outboard-aileron
+            // sense, so the same angle moves the two panels oppositely. The two
+            // terms are summed and clamped to the pitch plus roll maximum.
+            let angle = (-0.30 * state.elevator.clamp(-1., 1.)
+                - f64::from(side) * 0.10 * state.aileron.clamp(-1., 1.))
+            .clamp(-0.40, 0.40);
+            turn(&mut result, [side * 16.5, -35., 0.], [1., 0., 0.], angle);
             update_normal(source, &mut result);
         } else if FIN_L.contains(&a) || FIN_R.contains(&a) {
             if source.positions.iter().all(|p| fin_distance(*p) <= 1e-4) {
@@ -447,34 +459,69 @@ mod tests {
         }
     }
     #[test]
-    fn forward_tail_region_and_exact_cut_stay_fixed_with_signed_aft_pitch() {
+    fn whole_stabilator_panel_keeps_its_root_midpoint_on_pitch_and_roll() {
         let rig = rig();
         let mut s = state();
-        let source = face(
-            0x4cf6,
-            vec![
-                [-30., -54., 0.],
-                [-38., -45., 0.],
-                [-25., -30., 0.],
-                [-17., -41., 0.],
-            ],
-        );
-        let parts = crate::aircraft_animation::split_surface(
-            &source,
-            [0., -41., 0.],
-            [1., 0., 0.],
-            0.,
-            |p| p[1] + 41.,
-        );
-        for value in [-1., 0., 1.] {
-            s.elevator = value;
-            for piece in &parts {
-                let out = rig.animate(piece, &s).unwrap();
-                for (p, q) in piece.positions.iter().zip(out.positions) {
-                    if p[1] >= -41. - 1e-4 {
-                        assert_eq!(*p, q);
-                    } else if value != 0. {
-                        assert!((q[2] - p[2]) * value as f32 > 0.);
+        // The all-moving stabilator has no fixed root corner: the whole flat
+        // plate, the inboard leading-edge triangles included, turns rigidly
+        // about the lateral spindle through its root chord midpoint. A positive
+        // elevator raises both trailing edges; a positive aileron raises the
+        // right trailing edge and lowers the left, opposite per side.
+        let corners_r = [[17., -21., 0.], [16., -49., 0.]];
+        let corners_l = [[-17., -21., 0.], [-16., -49., 0.]];
+        for (addresses, corners, witness, side) in [
+            (&STAB_R[..], corners_r, [35., -54., 0.], 1f32),
+            (&STAB_L[..], corners_l, [-36., -54., 0.], -1f32),
+        ] {
+            let midpoint: [f32; 3] = std::array::from_fn(|i| (corners[0][i] + corners[1][i]) * 0.5);
+            for &address in addresses {
+                let source = face(
+                    address,
+                    vec![
+                        corners[0],
+                        corners[1],
+                        witness,
+                        [witness[0], witness[1] + 8., 0.],
+                    ],
+                );
+                for (elevator, aileron) in [(0., 0.), (1., 0.), (-1., 0.), (0., 1.), (0., -1.)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    let out = rig.animate(&source, &s).unwrap();
+                    if elevator == 0. && aileron == 0. {
+                        assert_eq!(out.positions, source.positions, "face {address:x} at zero");
+                        continue;
+                    }
+                    // The root chord midpoint stays put, not any single corner.
+                    let moved_mid: [f32; 3] =
+                        std::array::from_fn(|i| (out.positions[0][i] + out.positions[1][i]) * 0.5);
+                    for i in 0..3 {
+                        assert!(
+                            (moved_mid[i] - midpoint[i]).abs() < 1e-3,
+                            "face {address:x} root midpoint moved"
+                        );
+                    }
+                    // The whole panel is rigid: no part stays pinned while the
+                    // rest turns.
+                    for i in 0..4 {
+                        for j in i + 1..4 {
+                            assert!(
+                                (distance2(source.positions[i], source.positions[j])
+                                    - distance2(out.positions[i], out.positions[j]))
+                                .abs()
+                                    < 1e-3,
+                                "face {address:x} panel not rigid"
+                            );
+                        }
+                    }
+                    let dz = out.positions[2][2] - witness[2];
+                    if elevator != 0. {
+                        assert!(dz * elevator as f32 > 0., "face {address:x} pitch sign");
+                    } else {
+                        assert!(
+                            dz * aileron as f32 * side > 0.,
+                            "face {address:x} roll sign"
+                        );
                     }
                 }
             }

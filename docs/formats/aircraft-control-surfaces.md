@@ -364,6 +364,20 @@ copying the left X=-50 boundary. MIG21 has no signed flap/rudder aliases;
 those control roles remain geometric fits. Its actual main shaft coordinates
 are X=+21/-20 and its nose upper edge is sloped.
 
+Whole-panel differential roll, 2026-11-09 (slice TR-3). The MiG-29 stabilators
+were previously split at Y=-41, so the inboard leading-edge triangles stayed
+fixed while the outboard quads turned. Two left faces, `4cf6` and `4dbc`,
+straddle that line, so rule 10's fold check fails and the split folded them.
+The whole flat plate per side, the four outboard quads plus the inboard
+leading-edge triangles (`474f`/`4776`/`479e`/`47c5`/`296b`/`2989`/`4179`/`41a1`
+right, `4cf6`/`4dbc`/`4d1d`/`4de3`/`4d44`/`4e0a` left), now turns rigidly about
+a lateral spindle through the root chord midpoint `[±16.5,-35,0]` and takes a
+fitted `0.10*aileron` differential roll, raising the right trailing edge and
+lowering the left, the outboard-aileron sense, with the pitch and roll terms
+summed and clamped to 0.40 rad. The plate lies at a constant Z=0, so it has no
+anhedral to tilt the spindle by, and no root corner is pinned. See the
+[MiG-29 attachment corrections](../spec/aircraft-animation.md#mig-29-attachment-corrections).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and

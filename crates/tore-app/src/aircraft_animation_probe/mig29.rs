@@ -1,8 +1,12 @@
-//! Independent MiG29 source endpoints, fitted cut attachments and rigid gear bounds.
+//! Independent MiG29 whole-panel stabilator witnesses, fitted cut attachments
+//! and rigid gear bounds.
 use super::*;
-const TAIL: [usize; 8] = [
-    0x474f, 0x4776, 0x479e, 0x47c5, 0x4cf6, 0x4dbc, 0x4d1d, 0x4de3,
+/// The whole all-moving stabilator, both windings and the inboard leading-edge
+/// triangles, one flat plate at Z=0 per side.
+const STAB_R: [usize; 8] = [
+    0x474f, 0x4776, 0x479e, 0x47c5, 0x296b, 0x2989, 0x4179, 0x41a1,
 ];
+const STAB_L: [usize; 6] = [0x4cf6, 0x4dbc, 0x4d1d, 0x4de3, 0x4d44, 0x4e0a];
 const FIN: [usize; 4] = [0x334e, 0x3371, 0x4d6c, 0x4d93];
 const GEAR: [usize; 16] = [
     0x50e2, 0x5101, 0x5120, 0x513f, 0x4ecc, 0x4eeb, 0x4f0a, 0x4f29, 0x4f48, 0x4f67, 0x4fe3, 0x5002,
@@ -58,6 +62,34 @@ fn anchor_groups(c: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
         _ => Vec::new(),
     }
 }
+/// The midpoint of every occurrence of the given source corners, followed from
+/// reference to pose. The all-moving stabilator has no fixed source corner, so
+/// its root chord midpoint is the invariant instead.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
+}
 pub(super) fn check(
     control: Control,
     value: f64,
@@ -104,8 +136,8 @@ pub(super) fn check(
     }
     let signed: Vec<(&[usize], [f32; 3], f32)> = match control {
         Control::Elevator => vec![
-            (&[0x474f, 0x4776, 0x479e, 0x47c5], [35., -54., 0.], 1.),
-            (&[0x4cf6, 0x4dbc, 0x4d1d, 0x4de3], [-36., -54., 0.], 1.),
+            (&STAB_R[..], [35., -54., 0.], 1.),
+            (&STAB_L[..], [-36., -54., 0.], 1.),
         ],
         Control::Aileron => vec![
             (&[0x445c, 0x44fc], [57., -15., 0.], 1.),
@@ -137,12 +169,65 @@ pub(super) fn check(
             }
         }
     }
-    if matches!(control, Control::Elevator | Control::Rudder) {
-        let ids = if matches!(control, Control::Elevator) {
-            &TAIL[..]
-        } else {
-            &FIN[..]
-        };
+    if matches!(control, Control::Elevator | Control::Aileron) {
+        // The all-moving stabilator is one whole panel per side: both windings
+        // and the inboard leading-edge triangles turn rigidly about the lateral
+        // spindle through the root chord midpoint, on pitch and on differential
+        // roll alike. No single root corner stays put, so the anchor is the
+        // midpoint of the root chord pair, not either corner.
+        for (ids, corners, witness, sign) in [
+            (
+                &STAB_R[..],
+                &[[17., -21., 0.], [16., -49., 0.]][..],
+                [35., -54., 0.],
+                1f32,
+            ),
+            (
+                &STAB_L[..],
+                &[[-17., -21., 0.], [-16., -49., 0.]][..],
+                [-36., -54., 0.],
+                -1f32,
+            ),
+        ] {
+            let old: BTreeMap<_, _> = keyed(reference)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            let new: BTreeMap<_, _> = keyed(pose)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
+                m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(g.gap);
+            }
+            if value == 0. {
+                for (key, face) in &old {
+                    match new.get(key) {
+                        Some(after) if face.positions == after.positions => {}
+                        _ => m.reviewed_neutral_mismatch = true,
+                    }
+                }
+            } else {
+                match midpoint_gap(&old, &new, corners, scale) {
+                    Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                    None => m.reviewed_anchor_missing = true,
+                }
+                if matches!(control, Control::Aileron) {
+                    // Differential roll: a positive aileron raises the right
+                    // trailing edge and lowers the left, opposite per side.
+                    let qs = f4::witness_positions(&old, &new, witness);
+                    m.reviewed_direction_failures += usize::from(qs.is_empty());
+                    for q in qs {
+                        let delta = (q[2] - witness[2]) * scale;
+                        m.reviewed_direction_failures +=
+                            usize::from(delta * sign * value.signum() as f32 <= EPSILON);
+                    }
+                }
+            }
+        }
+    }
+    if matches!(control, Control::Rudder) {
+        let ids = &FIN[..];
         let old: BTreeMap<_, _> = keyed(source)
             .into_iter()
             .filter(|(k, _)| ids.contains(&k.0))
@@ -153,11 +238,7 @@ pub(super) fn check(
             .collect();
         for (key, f) in &old {
             for (i, p) in f.positions.iter().enumerate() {
-                let d = if matches!(control, Control::Elevator) {
-                    p[1] + 41.
-                } else {
-                    p[1] + 32. + 0.20 * (p[2] - 1.)
-                };
+                let d = p[1] + 32. + 0.20 * (p[2] - 1.);
                 if d.abs() < 1e-4 {
                     if let Some(q) = new.get(key).and_then(|f| f.positions.get(i)) {
                         m.max_reviewed_anchor_gap =

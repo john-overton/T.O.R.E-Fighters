@@ -231,6 +231,20 @@ exact deployed geometry and hide all sixteen cards at zero. The established
 upper/lower brake roots and angles remain unchanged: [0,-7,7], atan(9/7),
 and [0,-8,-1], -atan(8/6), respectively. Flame scaling retains root Y=-41.
 
+Whole-panel stabilators with differential roll, 2026-11-09 (slice TR-3, John's
+request). The 2026-10-05 tail fit above is superseded. The aft-only split at
+Y=-41 folded the left leading-edge faces `4cf6`/`4dbc`, which straddle that
+line, so the whole flat stabilator plate per side, the outboard quads plus the
+inboard leading-edge triangles, now turns rigidly about the lateral spindle
+through its root chord midpoint `[±16.5,-35,0]` and takes a fitted
+`0.10*aileron` differential roll (agent decision under John's 2026-11-08
+request). A positive aileron raises the right trailing edge and lowers the left,
+the outboard-aileron sense; the pitch term `-0.30*elevator` and the roll term are
+summed and clamped to 0.40 rad. The plate lies at a constant Z=0, so it has no
+anhedral and the spindle stays lateral. No root corner is pinned, so the small
+root gap to the tail boom is the reviewed moving/fixed boundary. See the
+[control-surface source notes](../formats/aircraft-control-surfaces.md).
+
 ## Su-27 attachment corrections
 
 Agent fits, 2026-10-05. Keep both tail inboard roots fixed; only distal points
