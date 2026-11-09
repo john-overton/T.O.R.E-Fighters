@@ -1478,3 +1478,389 @@ not changed.
 | Debris scale and hulk identity | A and C are both damaged bodies | M31-2 |
 | Shadow shape | 10 faces, no texture | M31-2 |
 | `~SU33_W.PIC` and other `~xx_w` names | Only if a Soviet HUD is chosen | Already resolved in M25-7 (never requested) |
+
+## Mirage 2000 source review (2026-11-09)
+
+Research mode, slice M2K-0. This reviews `M2000.PT` and its dependency closure
+before `AircraftId::M2000` exists. `M2000.PT` is the 40th retail identity, to be
+appended in M2K-1 (checkpoint code 40, the 41st `SELECTABLE` entry). The Mirage
+2000 is a parked target today (`parked_aircraft.rs` lists `M2000.PT` with gear
+word `0x589c`); that path stays as it is. `M2000E.PT` (desert) is a separate
+record with its own shape `m20e.SH` and is out of scope: no alias and no shared
+identity. No original module was executed. PT, SEE, ECM, JT and GAS are read as
+bounded BRF data with the shared field order in `aircraft_schema.rs`; SH and HUD
+are inspected as data. Slice done by Claude Sonnet (sonnet-medium). Nothing here
+changes code or behaviour.
+
+Three questions are open for John and are **not decided here**: the HUD and
+cockpit ([below](#mirage-hud-and-cockpit-for-john)), the engine count
+([below](#mirage-engine-count-for-john)) and the delta control layout
+([below](#mirage-delta-control-layout-for-john)).
+
+### Mirage build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (SHA-256
+`657254c5...` and `fb8b3021...`, see the [MiG-31 build
+section](#build-and-extraction)). The closure was extracted locally to
+`.local/m3-imports/scratch/m2000` with `cargo run --locked -p tore-extract --
+--source gameassets/fighters-anthology --out .local/m3-imports/scratch/m2000
+--include 'M2000*' --include 'M20*' --include 'RAFALE*' ...` and a name sweep
+(`*M20*`, `*MIR*`, `*2000*`, `~RAF*`) to `.../names`. The `SETUP.ESA` installer
+copy of `FA_2.LIB` was extracted too. Its `M2000.PT`, `M20*.SH`, `VIS340.SEE`,
+`F18R.SEE`, `F18.ECM`, `DEFA.JT`, `F150.GAS`, `AS15.JT`, `R530.JT`, `R550.JT`
+and `F.BI` bytes are identical to the root copy; only `RAFALE.HUD` (4 bytes)
+and the `_M20*.PIC` skins differ by build. The usual five unrelated archive
+errors appear (`LHX*.LIB` compression flags and `_SETUP.LIB`).
+
+### Mirage identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `M2000.PT`, 14,316 bytes, SHA-256 `939c96b72012eeb090c73f4d371644b3649033095a5506f24a42689822c1bea9` |
+| Displayed names | `M2000`, `Mirage 2000`, `M2000.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 660; `instanceSize` 626 (the parser default, so M2K-1 adds no size entry) |
+| Object class / year / hit points | `0x8000` (fighter) / 1984 / 100; `expType` 30 |
+| PLANE flags | `0x11`: seat `0x10` and the base bit `0x01`; hook `0x02`, no-lift `0x08`, carrier `0x40` and multi-crew `0x04` all clear |
+| Shape | `m20.SH` (25,088 bytes), shadow `m20_s.SH` (4 faces) |
+| Damage looks | `M20_A.SH` 169 faces, `M20_B.SH` 24, `M20_C.SH` 182, `M20_D.SH` 34 |
+| Skins | `_M20.PIC` (59,084 bytes), `_M20_A.PIC` 68,184, `_M20_B.PIC` 31,264, `_M20_C.PIC` 59,344, `_M20_D.PIC` 41,404 (all in `FA_2.LIB`) |
+| Sounds | `&JET1N.11K` loop, `&JET1A.11K` second, `&powerup.5k`, `&powerdn.5k` (present) |
+| HUD | `rafale.HUD` (resolves to the existing `RAFALE.HUD`) |
+| AI script | `f.BI` (12,800 bytes, present; the Rafale's too) |
+| Sensors / jammer / gun | `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `DEFA.JT` (all reviewed and live) |
+| PTS | none: no `M2000.PTS` exists (the Rafale has `RAFALE.PTS`) |
+| Radio callout | `^ACM2000.5K` exists (6,929 bytes) |
+| Encyclopedia | `M2000.INF` and `M2000_0/1/2/3/E.PIC` in `disc2/FA_3.LIB`; reference media, not flight data |
+| Checkpoint code / CLI key | 40 and `m2000`/`m2000.pt`, reserved for M2K-1 |
+
+The decoded record equals the catalog row in
+[`fa-aircraft.csv`](fa-aircraft.csv) field for field (year 1984, class
+`0x8000`, 2 engines, 17,100 / 6,346 / 37,480 lb, 17,687 / 32,000 lbf, 1,262 kt
+top, 59,000 ft, G -4/+8, hit points 100, 9 hardpoints, the default-store list
+and `rafale.HUD`). Resource hashes of the files M2K-1 onward depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `M2000.PT` | 14,316 | `939c96b72012eeb090c73f4d371644b3649033095a5506f24a42689822c1bea9` |
+| `M20.SH` | 25,088 | `78e2a93143c7bb5aeb80729a3c56613589e923aaf9080ec9012efdeb32b0f65f` |
+| `M20_S.SH` | 4,608 | `bab9ef07b37be6236168fbbac1b53a9b0643b25af3f5f0e04a8f3f406e97e656` |
+| `M20_A.SH` | 16,896 | `b9b91f55c8bb2ca8b148c045b46013780a70d6d9437b50285b6f92ba23ca7829` |
+| `M20_B.SH` | 4,608 | `fcd58e3cb8188e9b799bc3fb113039c7c94f4ee784a86bdf6b61e28ba7a6b842` |
+| `M20_C.SH` | 16,896 | `26f38ee4be850c22809ba89184e07b5cd82faad602138becad9ae1f5e2d758ca` |
+| `M20_D.SH` | 4,608 | `bb0740e2cc9f612777fd0dc1d4a9b78ea2b5b88d2b30e3cccca885731ba1e83e` |
+| `RAFALE.HUD` | 4,608 | `b555f9febf6041297393c8d92e9e70343b1c5c9439316b1c0c1ec0721fe39228` |
+| `_M20.PIC` | 59,084 | `0f298bf02366c417865a33a0dc1e857c7a56f910ee75efb2a52e1ec600b3c1b2` |
+
+### The record against the Rafale record
+
+The Mirage 2000 record is the `RAFALE.PT` template with its own mass, thrust,
+fuel and envelope: **27 of 219 statements differ** (plus the resource names, the
+G envelope table and four default-store names), and 192 are identical. Both
+`typeSize`/`instanceSize` words, the PLANE flags, hit points (100), empty weight
+(17,100 lb), afterburner thrust (32,000 lbf), engines (2), the gun, sensors,
+jammer, AI script, loop sound and every station slot are shared. Differences:
+
+| Field | `M2000.PT` | `RAFALE.PT` |
+| --- | ---: | ---: |
+| `year` | 1984 | 2005 |
+| `hudName` | `rafale.HUD` | null (TORE maps `RAFALE.HUD` by convention) |
+| Military thrust, lbf | 17,687 | 24,000 |
+| Internal fuel / max takeoff, lb | 6,346 / 37,480 | 9,900 / 40,100 |
+| `maxAlt`, ft | 59,000 | 65,000 |
+| `envMax` | +8 | +9 |
+| Fuel flow (`fuelConsumption`) | 2 | 3 |
+| Structure `[0]` / `[1]` | 1,161 / 2,129 | 1,278 / 1,946 |
+| Signatures 0..3 | 91, 91, 100, 100 | 95, 95, 70, 50 |
+| `maxVisDist` / view offset z | 157 / 60 | 172 / 80 |
+| Debris (`dmg` x, `dst` x/y/z) | -40; 20, 10, 0 | -60; 0, 20, -40 |
+| `_gpullDrag` / `wheelBrakesDrag` | 40 / 102 | 30 / 40 |
+| `spinEntry` / `turbulencePercent` | 0 / 122 | 1 / 130 |
+| Yaw `acc` / `dacc` | 8 / 8 | 9 / 9 |
+| OBJECT `flags` | `0x2bf3` | `0x806bf3` |
+| Second sound | `&JET1A.11K` | `&JET6A.11K` |
+| Default stores 4..7 | `F150.GAS`, `AS15.JT`, `R530.JT`, `R550.JT` | `AAS38.SEE`, `AGM65G.JT`, `MICA.JT`, `R530.JT` |
+
+Because 17,100 lb and 32,000 lbf match the Rafale's, the empty weight and
+afterburner thrust are inherited template values. This is a retail fact, not a
+defect to fix; the [record rule](../spec/aircraft-records.md#rule) is met by the
+27 differing statements and the Mirage's own shape, sounds, stations and
+envelope. The published audit follows. The comparison column is the game's own
+encyclopedia text (`M2000.INF`, retail media, numbers only) and Jane's-style
+public figures (cited below); they do not establish original game behaviour.
+
+| Field | Record | Published | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 17,100 | 16,534 (7,500 kg, encyclopedia) | +3.4% | Agrees |
+| Maximum takeoff, lb | 37,480 | 37,480 (17,000 kg, encyclopedia) | 0.0% | Agrees exactly |
+| Military thrust, lbf (all engines) | 17,687 | 14,462 (one M53-P2, 64.3 kN) | +22.3% | Left as retail |
+| Afterburner thrust, lbf | 32,000 | 21,385 (95.1 kN) | +49.6% | Left as retail, **over a third** |
+| Ceiling, ft | 59,000 | 54,003 (16,460 m service, encyclopedia) | +9.3% | Left |
+| Sea-level top speed, kt | 693 | 688 (encyclopedia) | +0.7% | Agrees |
+| Internal fuel, lb | 6,346 | about 7,000 (3,978 L, at an assumed 0.8 kg/L) | about -9% | Left, listed |
+| Span / length | 22.0 ft / 38.3 ft (shape) | 29.9 ft (9.13 m) / 47.1 ft (14.36 m) | -26% / -19% | Model fact, see shape |
+
+The encyclopedia and MILAVIA / aerospaceweb agree on one SNECMA M53-P2 at 64.3
+kN dry and 95.1 kN with afterburner, 9.13 m span and 14.36 m length (MILAVIA
+Mirage 2000 specifications, aerospaceweb.org Mirage 2000 data, both accessed
+2026-11-09). The afterburner thrust is 49.6% over a single real engine, which
+is well over the one-third line the MiG-25 and MiG-31 audits used. Agent audit
+decision, 2026-11-09: leave every value as retail and list them for John, the
+same rule as the MiG-25 and MiG-31; M2K-8 watches the afterburner climb and
+acceleration against the envelope rows. The thrust rows are one more reason the
+engine count below is a John decision: the record's thrust is the total for
+"2 engines", but the real aircraft has one engine with lower thrust.
+
+### Mirage resources
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `M20.SH` | Shape | 206 runtime faces (208 export), 0 lines, 0 billboards, six state words |
+| `M20_S.SH` | Shadow | 4 faces |
+| `M20_A.SH` / `M20_C.SH` | Damage bodies | 169 / 182 faces |
+| `M20_B.SH` / `M20_D.SH` | Damage pieces | 24 / 34 faces |
+| `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `DEFA.JT` | Sensors, jammer, gun | 471, 481, 366, 2,689 bytes; already reviewed |
+| `F150.GAS`, `AS15.JT`, `R530.JT`, `R550.JT` | Default stores | 204, 2,748, 2,758, 2,760 bytes; all live in TORE today |
+
+`M20E.SH` and the `M20E_*` looks belong to `M2000E.PT` and are not part of this
+identity. The shape streamer has pivot 0 and hinge scale 0 (no streamer).
+
+### Mirage HUD and cockpit (for John)
+
+**Fact.** `M2000.PT` names `rafale.HUD`. The file resolves (case-insensitive) to
+the existing `RAFALE.HUD` in `FA_2.LIB`, the same file TORE's Rafale flies. That
+HUD carries the panel names `~raf`, `~rafh`, `~rafs`, `~raf_l`, `~raf_c`,
+`~raf_r`, `~raf_lh`, `~raf_ch`, `~raf_rh`, `~raf_ls`, `~raf_cs`, `~raf_rs` (the
+Rafale cockpit family `~RAF*.PIC` in `FA_1.LIB`, 13 pictures). The Rafale
+record itself has a **null** `hudName`, and TORE maps it to `RAFALE.HUD` by
+convention (stem `RAF`, cockpit `~RAFH.PIC`). **No Mirage 2000 cockpit art
+exists anywhere in the media**: the sweeps `~M20*`, `~M2000*`, `*M20*`, `*MIR*`
+and `*2000*` over every archive find only the `M20*` shapes and skins, the
+`^ACM2000.5K` callout, the `M2000_*` encyclopedia pictures, the unrelated
+`E2000.*` Eurofighter files and one stray `IFMIRA.PIC` (256 x 256, 64 colours,
+named by no resource of this aircraft; not examined further). So the retail
+Mirage 2000 flies the Rafale cockpit.
+
+Options (none chosen):
+
+1. **Follow the record: `RAFALE.HUD`, cockpit stem `RAF`, `~RAFH.PIC`.** What
+   retail does; costs nothing and needs no new art. The identity stays
+   `M2000.PT`; sharing a panel is not aliasing (the HUD and cockpit are the
+   panel, not the record). The player sees a Rafale cockpit in a Mirage.
+2. **Substitute another reviewed HUD family** (for example `F18.HUD` or
+   another existing panel). Opinionated, no retail evidence, extra wiring in
+   `hud_aperture.rs` and the cockpit stem table.
+3. **Author a Mirage panel.** Not in the media; would be invented art, so only
+   as a later, separate decision.
+
+Agent note: option 1 is the evidenced one. Each option needs M2K-7 to add one
+exhaustive stem arm.
+
+### Mirage engine count (for John)
+
+**Fact.** The record says `engines` = 2 (PLANE field, byte), the same as the
+Rafale record and the catalog row. The real Mirage 2000C has **one** SNECMA
+M53-P2, and the game's own encyclopedia text says so ("One SNECMA M53-P2
+turbofan"). The shape agrees with one engine: a single six-sided nozzle ring
+at x 0, y -44 (face `0x3794`), a single centreline flame group (word `0x5890`,
+x -3 to 4); there is no second outlet. So the retail
+record disagrees with the retail shape and text.
+
+**What the field drives in TORE** (code read, no run):
+
+- **Thrust:** nothing. The flight model reads `thrust` and `aftThrust` as
+  totals; the count neither multiplies nor divides them.
+- **Wreck and crash:** `tore-sim` `wreck::Power::symmetric` splits the thrust
+  over the count and applies a yaw torque from the uneven split (none with one
+  engine).
+- **Engine damage:** `aircraft_systems::Engine::new(count)`; the two engine-out
+  damage codes (9 and 10) each shut one engine and remove `1/count` of the
+  power. With 2, each code halves the power; with 1, the first code kills it
+  and the second hits the same engine.
+- **Contrails and exhaust:** `contrail_offsets` makes one trail per engine; with
+  no reviewed nozzle faces for the Mirage, 2 puts the two trails at +/-15% of
+  the half span (about 1.65 ft either side of the centreline) while the one
+  real nozzle is at x 0. `engine_material::outlet_count` has no Mirage arm yet.
+- **AI:** `ai_wings` builds its `Systems::new(config.engines, ...)` from the
+  record, and `ordnance.rs` checks the AI default load against the same count.
+- **Sound:** nothing; the loop and second sound are named by the PT, not by
+  the count.
+
+Options (none chosen):
+
+1. **Keep 2, the retail record.** Matches the catalog, the Rafale precedent and
+   the audit rule that record facts stay retail. Visible cost: two contrails
+   about 3.3 ft apart from a single nozzle, and half-power engine-out damage.
+2. **Treat it as 1 for TORE only** (an opinionated override, John or agent).
+   One centreline trail, no wreck yaw, engine-out kills power. Costs a new
+   per-identity override: the live path reads the record field directly and I
+   found no existing override for a real record (the 1-engine table in
+   `aircraft.rs` is the synthetic test path).
+3. **Keep the field at 2 for damage and wreck but draw one trail** (visual
+   only). Smallest change; leaves a half-power engine-out on a one-engine
+   aircraft.
+
+### Mirage delta control layout (for John)
+
+**Fact.** The shape has six state words, listed below with the counts from
+`Shape::with_state` (the export path adds two faces to every count, 208 total).
+Gear word `0x589c` matches the parked path; the parked inspector reports
+contact offset -13 against a gear-down low point of -12 (one unit apart, as the
+MiG-25). Shape size at scale 1 (1 unit is 1/3 ft): x -33 to 33, y -44 to 71, z
+-6 to 22 (gear down -12), so 22.0 ft across, 38.3 ft long, 9.3 ft high. The
+Rafale shape is true size (36 ft by 50 ft) but this one is **26% narrow, 19%
+short and about 45% low** against the real aircraft. This is a model fact for
+M2K-2 to record, not a defect to fix here.
+
+| Word | Faces | Low point | Geometry (shape units, x right, y forward, z up) | Reading | Status |
+| --- | ---: | ---: | --- | --- | --- |
+| `0x5890` | +8 | -4 | Four flat plates behind the nozzle, y -44 to -80, crossed planes (x 0 and z 0) | Afterburner flame | Confirmed by slot order and position |
+| `0x5896` | +2 | +5 | One quad at x +/-1, from y 17, z 10 down to y 24, z 5 (two windings) | Dorsal airbrake: a single 2-unit-wide centreline plate | Confirmed as the source's brake word; geometry unusual (see below) |
+| `0x589c` | +6 | -12 | Three flat plates: mains at x -7 and x 7 (y -18 to -12, z -12 to -3), nose at x 0 (y 32 to 37, z -12 to -5) | Landing gear down | Confirmed; the parked gear word |
+| `0x58a8` | -2 | none | Removes the left inboard trailing-edge strip (x -18 to -3, y -32 to -29) | Left flap word | Slot order only |
+| `0x58ae` | -2 | none | Removes the right inboard strip (x 3 to 17) | Right flap word | Slot order only |
+| `0x58b4` | 0 net | +4 | Swaps the rudder quad for a copy offset 1 to 2 units in x | Rudder deflection (positive direction only) | Confirmed by geometry |
+
+The slot order (flame, brake, gear, flap, flap, sixth) is the shared base order
+of the MiG-25, MiG-31, F-18 and Rafale families, with the rudder as the sixth
+word as on the MiG-31. No hook word exists (the hook flag is clear). **There is
+no slat word, no canopy word and no separate slat or canopy geometry**, and no
+nozzle word: the source has none to rig, and I recommend none be invented.
+
+**State map for the rig** (elevons, rudder, airbrake, gear, burner, slats,
+canopy):
+
+| Moving part | Source panel | State word | Rig note |
+| --- | --- | --- | --- |
+| Elevon, inboard, each side | 1-ft-chord trailing strip, 2 quads (both layers) | `58a8`/`58ae` remove it, nothing replaces it | The rig keeps the strip drawn and turns it |
+| Elevon, outboard, each side | Same strip further out, 4 triangles (2 per layer) | none | Same hinge as inboard, same angle |
+| Rudder | 2-face quad on the single fin | `58b4` | Hinge on the fin trailing edge |
+| Airbrake | 2-face quad on the spine | `5896` | Appears only when open |
+| Gear | 3 plates (6 faces), no doors, no wheels | `589c` | Rigid plates, hinge at top edge |
+| Burner | 4 plates (8 faces) | `5890` | Additive plume, no hinge |
+| Slats, canopy | none | none | Not in the source |
+
+**Rule 11 face table (from the `state_neutral` source dump).** The wing trailing
+edge is the straight line y = -29 from the root (x +/-3) to the tip (x +/-33).
+Each elevon is a thin wedge: its hinge vertices sit at y = -29 on the top layer
+(z = -2) and the bottom layer (z = -4), and its trailing edge at y = -32, z =
+-3. The mid axis y = -29, z = -3 therefore runs through the whole span and is
+the single straight line each wedge can turn about; the hinge vertices are
+1 unit above or below it.
+
+| Surface | Face | Vertices | Moved | On hinge line (y = -29) | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right inboard (x 3 to 17) | `3969` | 4 | 2 | 2 | 0 |
+| Right inboard | `394a` | 4 | 2 | 2 | 0 |
+| Right outboard (x 17 to 33) | `2176` | 3 | 2 | 1 | 0 |
+| Right outboard | `2391` | 3 | 1 | 2 | 0 |
+| Right outboard | `2190` | 3 | 2 | 1 | 0 |
+| Right outboard | `2233` | 3 | 1 | 2 | 0 |
+| Left inboard (x -18 to -3) | `3a31` | 4 | 2 | 2 | 0 |
+| Left inboard | `3a50` | 4 | 2 | 2 | 0 |
+| Left outboard (x -33 to -18) | `1e87` | 3 | 2 | 1 | 0 |
+| Left outboard | `23c3` | 3 | 1 | 2 | 0 |
+| Left outboard | `1ea1` | 3 | 2 | 1 | 0 |
+| Left outboard | `1f1b` | 3 | 1 | 2 | 0 |
+| Rudder | `3bc6` | 4 | 2 | 2 | 0 |
+| Rudder | `3be5` | 4 | 2 | 2 | 0 |
+| Gear (each of 6 faces) | `380b` ... `3900` | 4 | 2 | 2 | 0 |
+| Airbrake (each of 2 faces) | `3c73`, `3c92` | 4 | 2 | 2 | 0 |
+
+Verdicts:
+
+- **Every elevon is a whole panel in the source.** No elevon is split across a
+  diagonal or a threshold, and no face has a fixed vertex off the hinge line. The
+  inboard strip is two quads (top and bottom layer); the outboard strip is the
+  quad on each layer cut into two triangles (the top layer on the diagonal from
+  the inboard hinge corner to the outboard trailing corner, the bottom layer on
+  the other diagonal). Every neighbouring wing face shares only hinge-line
+  vertices with the strips, apart from the inboard/outboard seam at x = 17 (left
+  -18), where both strips share their trailing vertex.
+- **No diagonal or partial surface was found**, so no probe sheet is needed.
+  The things for John or M2K-3 to know (none decided): (a) the chord is only 3
+  units (1 ft), so even a 25 degree turn moves the trailing edge about 1.3 units
+  (0.4 ft); the elevons will read as thin; (b) the hinge vertices are 1 unit off
+  the mid axis, so a turn about the mid axis opens or closes a gap of up to
+  `sin(angle)` units against the wing faces (0.17 units at 10 degrees), the
+  same wedge issue as the other thin trailing-edge strips; (c) the inboard
+  strip is 14 units on the right and 15 on the left (the seam is x 17 against
+  x -18), so the two sides are not exact mirrors; (d) inboard and outboard share
+  the seam vertex, so they must take the same angle (rule 12 says both take
+  pitch and roll) or the seam shows; (e) the flap words delete the inboard
+  strip with no replacement, so the rig must not hide it.
+- **Rudder:** one hinged quad (two windings). Two vertices lie on the leading
+  edge from (0, -35, 4) to (0, -40, 19) shared with the fixed fin faces `2682`
+  and `275b`; the other two move. The trailing vertex (0, -42, 19) is also
+  shared with the fixed triangles `2b64` and `2b7c` above it, which would
+  leave a one-unit crack as the retail swap itself does. The retail swap
+  corresponds to roughly 40 degrees, rounded to whole units, so it is not an
+  exact rotation.
+- **Airbrake:** the source panel is a single plate 2 units wide, not a pair of
+  side panels; the real aircraft has paired airbrakes. It is recorded as the
+  source's brake, hinged on its aft edge (y 24, z 5).
+- **Gear:** three flat plates, mains 6 units fore-aft, no doors or wheels.
+  The wheelbase is 50 units (16.7 ft) and the track 14 units (4.7 ft).
+
+The whole-surface gate (John, 2026-11-07 and 2026-11-08) is met by every
+elevon, the rudder, the brake and the gear. The delta has no horizontal tail,
+so M2K-3 will drive each elevon with a pitch term plus a differential roll term
+per rule 12 and the face table above.
+
+### Mirage hardpoints
+
+All nine source rows, in original order. Positions are source units; feet divide
+by three; x right, y up, z forward ([aircraft
+ordnance](aircraft-ordnance.md#hardpoint-positions)). Location byte: 0
+Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip.
+
+| Row | Location | Flags | Position x/y/z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `F18.ECM` | Fixed jammer |
+| 3 | Internal Gun | `0x000c` | 3 / -5 / 45 | 1 / -1.7 / 15 | 250 | 0 | `DEFA.JT` | Internal gun, 250 rounds |
+| 4 | Centerline | `0x0605` | 0 / -15 / 0 | 0 / -5 / 0 | 1 | 13 | `F150.GAS` | 150 gal tank |
+| 5 | Fuselage | `0x07e5` | 4 / -20 / 0 | 1.3 / -6.7 / 0 | 4 | 46 | `AS15.JT` | A2G, belly pair |
+| 6 | Wing | `0x07e5` | 11 / -20 / -10 | 3.7 / -6.7 / -3.3 | 2 | 20 | `R530.JT` | A2A, inner wing pair |
+| 7 | Wing | `0x07e5` | 20 / -20 / -20 | 6.7 / -6.7 / -6.7 | 2 | 20 | `R550.JT` | A2A, outer wing pair |
+| 8 | Wingtip | `0x0085` | 33 / -4 / -29 | 11 / -1.3 / -9.7 | 2 | 4 | `R550.JT` | A2A, wingtip pair |
+
+Default stores in the catalog (`F150.GAS`, `AS15.JT`, `R530.JT`, `R550.JT` x2)
+count one default per row; the per-row quantities are a host rule for M2K-6.
+The rows are the Rafale's rows with a different pylon layout (the Rafale has
+`AAS38.SEE`, `AGM65G.JT`, `MICA.JT`, `R530.JT`, `R550.JT`, its wingtip row at
+x 59 and its fuselage row at x 10). Things M2K-5 must handle:
+
+- The Wingtip row (x 33, z -29) sits **on the shape's wing tip trailing
+  corner**: the shape tip is x 33, y -29, so this row matches the geometry.
+- The Centerline tank (row 4) hangs 5 ft below the centreline between two
+  Fuselage rows at x +/-4 (+/-1.3 ft, 2.7 ft apart, flag `0x4` set so they
+  mirror). A 150 gal tank and two AS-15 on the standard pylon rules are likely
+  to overlap; this is the delta analogue of the MiG-31 fin clipping and the
+  expected stop-and-report case with frames.
+- The Wing rows at x 11 and 20 and the Wingtip at 33 lie within the 33-unit
+  semi-span; M2K-5 measures them against the wing under the standard pylon rules.
+- The gun is a fixed internal row (250 rounds, 1 ft starboard, 15 ft forward).
+- There is no sensor or designator pod row: never hang one (John, 2026-11-07).
+
+### Mirage roster note
+
+`M2000.PT` appends last: checkpoint code 40 (`Mig31` is 39), `ALL` becomes 40
+and `SELECTABLE` the 41st entry. With codes 0 to 40 in use, **23 of the 6-bit
+(64) wire identity slots remain**; the identity-protocol decision stays
+John's. `M2000E.PT` is not added.
+
+### Mirage unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| HUD and cockpit choice | M2K-7 cannot start without it | John, three options above |
+| Engine count 2 or 1 | Wreck, damage, contrails, AI | John, three options above |
+| Elevon thinness and the hinge gap | Visual size of a 1 ft chord | M2K-3 measures with the 25-pose grid |
+| What the original does with `58a8`/`58ae` | They delete the inboard strip | Unknown; the rig keeps the strip drawn |
+| Airbrake as one plate | Real aircraft has paired brakes | M2K-4 rigs the source panel only |
+| Shape 26% narrow, 19% short | Scale of stores and pylons | M2K-2 records; no change planned |
+| Afterburner thrust 49.6% over real | Climb and acceleration | M2K-8 against the envelope rows |
+| Centerline tank under two belly rows | Clipping | M2K-5 stop-and-report with frames |
+| Per-row default quantities | Stores load | M2K-6 |
+| Radar and jammer | `F18R.SEE` and `F18.ECM` | Already reviewed; no choice needed |
