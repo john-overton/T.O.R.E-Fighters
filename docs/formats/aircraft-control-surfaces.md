@@ -361,6 +361,20 @@ faces contain complete shaft/wheel views, not guessed independent doors. The
 vtAngle alias produces no changed bounded draw branch; original tilt timing
 remains unknown.
 
+Whole-panel stabilators, 2026-11-09 (slice TR-7). The Yak-141 tail rig turned
+only the vertices past `|x|>13` (left) or `|x|>14` (right) and held the root
+edge, so every tail face straddled that threshold and folded (rule 10's fold
+check: left `4b07` two moved, one seam and one pinned; `4b4f` one moved and two
+held; `4b64` two moved and one pinned; right `484c`/`4894` two moved and two
+held seam vertices). Each side's whole panel now turns rigidly about the lateral
+spindle through its root chord midpoint (`[14,-69.5,-1]` right,
+`[-12.5,-69.5,-1]` left) with the unchanged `-0.30*elevator` law. The panels lie
+at Z=-1, so they have no anhedral to tilt the spindle by, and no root corner is
+pinned. These tails are pitch-only: no available source states that the real
+Yak-141 deflects them differentially for roll, so no aileron term is added and
+the roll-mixing question stays open for John. See the
+[Yak-141 controls note](../spec/variety-animation.md#yak-141-controls-and-nozzle).
+
 IL76 has twenty cards forming five crossed strut/wheel assemblies. Its inner
 flap down endpoint separates from the neighboring outer trailing triangle by
 1.4907 feet, an original control clearance. No rudder alias was found. E2C has

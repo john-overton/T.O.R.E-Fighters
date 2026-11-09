@@ -6,11 +6,6 @@ const NOZZLES: [usize; 9] = [
 const GEAR: [usize; 6] = [0x4ba9, 0x4bc8, 0x4c14, 0x4c33, 0x4c80, 0x4c9f];
 fn attachments(control: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
     match control {
-        Control::Elevator => vec![
-            (&[0x4b07, 0x4b4f], &[[-12., -57., -1.], [-13., -82., -1.]]),
-            (&[0x4b64], &[[-12., -57., -1.]]),
-            (&[0x484c, 0x4894], &[[14., -57., -1.], [14., -82., -1.]]),
-        ],
         Control::Flaps => vec![
             (&[0x4dfe, 0x4e25], &[[-13., -26., 3.], [-29., -26., 3.]]),
             (&[0x4d3b, 0x4d62], &[[14., -26., 3.], [30., -26., 3.]]),
@@ -32,6 +27,48 @@ fn attachments(control: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])>
         ],
         _ => Vec::new(),
     }
+}
+fn tail_panels() -> [(&'static [usize], &'static [[f32; 3]]); 2] {
+    [
+        (
+            &[0x4b07, 0x4b4f, 0x4b64],
+            &[[-12., -57., -1.], [-13., -82., -1.]],
+        ),
+        (&[0x484c, 0x4894], &[[14., -57., -1.], [14., -82., -1.]]),
+    ]
+}
+/// Root chord midpoint of a whole-panel surface. Each corner is averaged over
+/// its own windings first, so a corner shared by more faces (the Yak-141 left
+/// root appears in three) cannot bias the midpoint.
+fn panel_midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut total = [0f64; 3];
+    for corner in corners {
+        let mut found = Vec::new();
+        for (key, face) in old {
+            for (i, p) in face.positions.iter().enumerate() {
+                if p == corner
+                    && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+                {
+                    found.push(*q);
+                }
+            }
+        }
+        if found.is_empty() {
+            return None;
+        }
+        for k in 0..3 {
+            total[k] += found.iter().map(|p| f64::from(p[k])).sum::<f64>() / found.len() as f64;
+        }
+    }
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    let average: [f32; 3] = std::array::from_fn(|k| (total[k] / corners.len() as f64) as f32);
+    Some(distance(average, middle) * scale)
 }
 pub(super) fn check(
     control: Control,
@@ -76,7 +113,9 @@ pub(super) fn check(
         }
     }
     if matches!(control, Control::Elevator) {
-        for ids in [&[0x4b07, 0x4b4f, 0x4b64][..], &[0x484c, 0x4894][..]] {
+        // Whole-panel all-moving stabilator: the root chord midpoint, not each
+        // root point, is the invariant (rule 10, TR-7).
+        for (ids, roots) in tail_panels() {
             let a: Vec<_> = source
                 .iter()
                 .filter(|f| ids.contains(&f.address))
@@ -87,7 +126,15 @@ pub(super) fn check(
                 .filter(|f| ids.contains(&f.address))
                 .cloned()
                 .collect();
-            if let Some(g) = shared_vertex_gaps(&keyed(&a), &keyed(&b), scale).first() {
+            let old = keyed(&a);
+            let new = keyed(&b);
+            match panel_midpoint_gap(&old, &new, roots, scale) {
+                Some(gap) => {
+                    metric.max_reviewed_anchor_gap = metric.max_reviewed_anchor_gap.max(gap);
+                }
+                None => metric.reviewed_anchor_missing = true,
+            }
+            if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
                 metric.max_reviewed_skin_gap = metric.max_reviewed_skin_gap.max(g.gap);
             }
         }

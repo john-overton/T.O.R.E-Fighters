@@ -538,6 +538,15 @@ with outward axes [-25,-6,0]/[25,-6,0] at Y=-28.5,Z=3; rotate -0.20 radians
 times aileron while retaining the cut. Inboard flaps morph to their own exact
 down endpoints independently of roll.
 
+Whole-panel stabilators, 2026-11-09 (slice TR-7). The 2026-10-05 fit held each
+tail face's root edge while the outboard end turned, which folded all five tail
+faces (rule 10's fold check). Each whole panel now turns rigidly about the
+lateral spindle through its root chord midpoint (`[14,-69.5,-1]` right,
+`[-12.5,-69.5,-1]` left) by the same -0.30 radians times elevator. The panels
+lie at Z=-1, so they have no anhedral and the spindle stays lateral. These tails
+are pitch-only: no available source states that the real Yak-141 deflects them
+differentially for roll, so no aileron term is added.
+
 The nozzle's front ring at Y=-47 remains fixed. Its eight-point outlet moves
 rigidly around [0.5,-47,-3], pitching around X by the simulated nozzle angle
 in degrees: 0 aft, 90 vertical, 100 at the braking stop (VTOL overhaul slice

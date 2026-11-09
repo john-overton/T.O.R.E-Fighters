@@ -262,18 +262,20 @@ impl Rig {
             update_normal(source, &mut result);
         } else if TAIL_L.contains(&a) || TAIL_R.contains(&a) {
             let left = TAIL_L.contains(&a);
-            let mut moved = source.clone();
+            // Whole panel about the lateral spindle through the root chord
+            // midpoint (TR-7). The old rig copied back only vertices past
+            // |x|>13 (left) or |x|>14 (right) and held the root edge, so every
+            // tail face straddled the threshold and folded (rule 10). The panel
+            // is flat at Z=-1, so it has no anhedral and the spindle stays
+            // lateral. Pitch only: no available source states that the real
+            // Yak-141 deflects these tails differentially for roll, so no
+            // aileron term is added.
             turn(
-                &mut moved,
+                &mut result,
                 [if left { -12.5 } else { 14. }, -69.5, -1.],
                 [1., 0., 0.],
                 -0.30 * state.elevator.clamp(-1., 1.),
             );
-            for (p, q) in result.positions.iter_mut().zip(moved.positions) {
-                if p[0].abs() > if left { 13. } else { 14. } {
-                    *p = q;
-                }
-            }
             update_normal(source, &mut result);
         } else if let Some((inner, pivot, axis)) = roll_spec(a) {
             if source
@@ -508,10 +510,15 @@ mod tests {
         }
     }
     #[test]
-    fn asymmetric_tail_roots_are_fixed_and_signed_pitch_is_coherent() {
+    fn whole_stabilator_panel_keeps_its_root_midpoint_on_pitch() {
+        // Every Yak-141 tail face had vertices on both sides of the old
+        // |x|>13/14 pin, so each face folded. The whole panel now turns
+        // rigidly about the lateral spindle through its root chord midpoint:
+        // no root corner is held while the outboard end turns. The tails are
+        // pitch-only in this rig; no source supports differential roll here.
         let rig = rig();
         let mut s = state();
-        for (address, points, roots) in [
+        for (address, points, root) in [
             (
                 0x484c,
                 vec![
@@ -520,7 +527,7 @@ mod tests {
                     [14., -82., -1.],
                     [14., -57., -1.],
                 ],
-                vec![[14., -82., -1.], [14., -57., -1.]],
+                (2usize, 3usize),
             ),
             (
                 0x4b07,
@@ -530,21 +537,35 @@ mod tests {
                     [-32., -75., -1.],
                     [-12., -57., -1.],
                 ],
-                vec![[-13., -82., -1.], [-12., -57., -1.]],
+                (0usize, 3usize),
             ),
         ] {
             let source = face(address, points);
+            let middle: [f32; 3] = std::array::from_fn(|i| {
+                (source.positions[root.0][i] + source.positions[root.1][i]) * 0.5
+            });
             for value in [-1., -0.5, 0., 0.5, 1.] {
                 s.elevator = value;
                 let out = rig.animate(&source, &s).unwrap();
-                for (p, q) in source.positions.iter().zip(&out.positions) {
-                    if roots.contains(p) {
-                        assert_eq!(p, q);
-                    } else if value != 0. {
-                        assert!((q[2] - p[2]) * value as f32 > 0.);
-                    } else {
-                        assert_eq!(p, q);
+                // The root chord midpoint is the invariant.
+                for (i, m) in middle.iter().enumerate() {
+                    let chord = (out.positions[root.0][i] + out.positions[root.1][i]) * 0.5;
+                    assert!((chord - m).abs() < 1e-4);
+                }
+                for i in 0..4 {
+                    for j in i + 1..4 {
+                        assert!(
+                            (distance2(source.positions[i], source.positions[j])
+                                - distance2(out.positions[i], out.positions[j]))
+                            .abs()
+                                < 1e-3
+                        );
                     }
+                }
+                if value == 0. {
+                    assert_eq!(out.positions, source.positions);
+                } else {
+                    assert!((out.positions[1][2] - source.positions[1][2]) * value as f32 > 0.);
                 }
             }
         }
