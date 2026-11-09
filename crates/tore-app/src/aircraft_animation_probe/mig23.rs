@@ -28,6 +28,33 @@ fn face(faces: &[Face], a: usize) -> Option<&Face> {
     let f = fs.next()?;
     fs.next().is_none().then_some(f)
 }
+/// The all-moving stabilator has no fixed source corner, so its root chord
+/// midpoint is the invariant instead of each inboard point.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
+}
 fn wing_point(s: &Sources, pose: &[Face], left: bool, p: [f32; 3]) -> Option<[f32; 3]> {
     let a = if left { 0x3fae } else { 0x3cc6 };
     virtual_point(face(&s.neutral.faces, a)?, face(pose, a)?, p)
@@ -156,17 +183,13 @@ pub(super) fn check(
                 .into_iter()
                 .filter(|(k, _)| ids.contains(&k.0))
                 .collect();
-            for p in [
-                [side * 3., -30., 1.],
-                [side * 3., -26., 1.],
-                [side * 4., -16., 1.],
-            ] {
-                let qs = f4::witness_positions(&old, &new, p);
-                m.reviewed_anchor_missing |= qs.is_empty();
-                for q in qs {
-                    m.max_reviewed_anchor_gap =
-                        m.max_reviewed_anchor_gap.max(distance(p, q) * scale);
-                }
+            // The whole panel turns about the root chord midpoint
+            // [side*3.5,-23,1], so that midpoint, not the individual inboard
+            // points, is the invariant.
+            let roots = [[side * 3., -30., 1.], [side * 4., -16., 1.]];
+            match midpoint_gap(&old, &new, &roots, scale) {
+                Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                None => m.reviewed_anchor_missing = true,
             }
             if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
                 m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(g.gap);

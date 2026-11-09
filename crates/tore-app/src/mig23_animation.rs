@@ -256,19 +256,18 @@ impl Rig {
             update_normal(source, &mut result);
         } else if TAIL.contains(&a) {
             let side = if a >= 0x3730 { -1. } else { 1. };
-            let mut moved = source.clone();
+            // Whole panel about the lateral spindle through the root chord
+            // midpoint [side*3.5,-23,1]: every tail face had inboard vertices
+            // pinned and outboard vertices turning, so the old |x|>4 split
+            // folded each face. The panel is flat (all vertices at Z=1), so it
+            // has no anhedral and the spindle stays lateral.
             turn(
-                &mut moved,
-                [side * 3.5, -26., 1.],
+                &mut result,
+                [side * 3.5, -23., 1.],
                 [1., 0., 0.],
                 -0.30 * state.elevator.clamp(-1., 1.)
                     - side as f64 * 0.10 * state.aileron.clamp(-1., 1.),
             );
-            for (p, q) in result.positions.iter_mut().zip(moved.positions) {
-                if p[0].abs() > 4. {
-                    *p = q;
-                }
-            }
             update_normal(source, &mut result);
         } else if brake_band(source) {
             let left = BRAKE_L.contains(&a);
@@ -451,10 +450,17 @@ mod tests {
         }
     }
     #[test]
-    fn differential_tail_keeps_inner_roots_and_has_consistent_pitch_roll_sign() {
+    fn whole_stabilator_panel_keeps_its_root_midpoint_on_pitch_and_roll() {
         let rig = rig();
         let mut s = state();
-        for (a, side) in [(0x3543, 1.), (0x3730, -1.)] {
+        // Every MiG-23 tail face straddled the old |x| <= 4 pin, so the whole
+        // panel turns about its root chord midpoint instead: no inboard corner
+        // is held while the outboard end turns, and the trailing edge keeps its
+        // signed law. The root chord is [side*3,-30,1] to [side*4,-16,1].
+        for (a, middle, side) in [
+            (0x3543, [3.5, -23., 1.], 1f32),
+            (0x3730, [-3.5, -23., 1.], -1f32),
+        ] {
             let source = face(
                 a,
                 vec![
@@ -465,21 +471,33 @@ mod tests {
                     [side * 3., -26., 1.],
                 ],
             );
-            for v in [-1., 0., 1.] {
-                s.elevator = v;
-                s.aileron = 0.;
-                let out = rig.animate(&source, &s).unwrap();
-                for i in [0, 3, 4] {
-                    assert_eq!(out.positions[i], source.positions[i]);
-                }
-                if v != 0. {
-                    assert!((out.positions[1][2] - 1.) * v as f32 > 0.);
-                }
-                s.elevator = 0.;
-                s.aileron = v;
-                let out = rig.animate(&source, &s).unwrap();
-                if v != 0. {
-                    assert!((out.positions[1][2] - 1.) * v as f32 * side > 0.);
+            for control in [-1., -0.5, 0., 0.5, 1.] {
+                for (elevator, aileron) in [(control, 0.), (0., control)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    let out = rig.animate(&source, &s).unwrap();
+                    for (i, m) in middle.iter().enumerate() {
+                        let chord = (out.positions[0][i] + out.positions[3][i]) * 0.5;
+                        assert!((chord - m).abs() < 1e-4);
+                    }
+                    for i in 0..5 {
+                        for j in i + 1..5 {
+                            assert!(
+                                (d2(source.positions[i], source.positions[j])
+                                    - d2(out.positions[i], out.positions[j]))
+                                .abs()
+                                    < 1e-3
+                            );
+                        }
+                    }
+                    let dz = out.positions[1][2] - source.positions[1][2];
+                    if elevator != 0. {
+                        assert!(dz * elevator as f32 > 0.);
+                    } else if aileron != 0. {
+                        assert!(dz * aileron as f32 * side > 0.);
+                    } else {
+                        assert_eq!(out.positions, source.positions);
+                    }
                 }
             }
         }

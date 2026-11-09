@@ -443,6 +443,18 @@ lowers the left. The panels lie at a constant Z=1, so they have no anhedral to
 tilt the spindle by, and no root corner is pinned. See the
 [F-22 family attachment corrections](../spec/aircraft-animation.md#f-22-family-attachment-corrections).
 
+Whole-panel stabilator, 2026-11-09 (slice TR-9). The MiG-23 tail rig turned only
+the vertices past `|x|=4` and held the inboard points, so every tail face (right
+`3543`/`356b`, left `3730`/`3758`) straddled that threshold and folded (rule 10's
+fold check: each face has two moved, one seam and two pinned vertices). Each
+side's whole flat five-corner panel now turns rigidly about the lateral spindle
+through its root chord midpoint (`[3.5,-23,1]` right, `[-3.5,-23,1]` left),
+keeping the existing `-0.30*elevator` pitch and opposed `0.10*aileron` roll, so a
+positive aileron raises the right trailing edge and lowers the left. The panel
+lies at a constant Z=1, so it has no anhedral to tilt the spindle by, and no root
+corner is pinned. See the
+[MiG-23 attachment and material corrections](../spec/aircraft-animation.md#mig-23-attachment-and-material-corrections).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and

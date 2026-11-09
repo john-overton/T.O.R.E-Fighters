@@ -480,6 +480,20 @@ pinning every actual beveled forecut. Distal motion uses left midpoint
 opposed signs. Source surrounding skins remain fixed. Flame demand retains
 root Y=-29 and the aircraft's existing afterburner capability.
 
+Whole-panel stabilator, 2026-11-09 (slice TR-9). The 2026-10-05 MiG-23 tail fit
+above is superseded. That rig held every inboard vertex (abs(X)<=4) fixed about
+lateral pivots [±3.5,-26,1], so every tail face (right `3543`/`356b`, left
+`3730`/`3758`) carried both pinned and moved vertices and folded (rule 10's fold
+check; the same diagonal fault as the F-16). Each side's whole flat five-corner
+panel now turns rigidly about the lateral spindle through its root chord midpoint
+(`[3.5,-23,1]` right, `[-3.5,-23,1]` left; the right root chord runs
+`[3,-30,1]..[4,-16,1]`). The existing `-0.30*elevator` pitch and opposed
+`0.10*aileron` roll are kept, so a positive aileron raises the right trailing
+edge and lowers the left. The panel lies at a constant Z=1, so it has no
+anhedral and the spindle stays lateral. No root corner is pinned, so the root
+chord midpoint is the invariant and the small root gap is accepted. See the
+[control-surface source notes](../formats/aircraft-control-surfaces.md).
+
 ## F-14D attachment corrections
 
 Agent fits, 2026-10-05, exact F14.PT at four-thirds foot per source unit.
