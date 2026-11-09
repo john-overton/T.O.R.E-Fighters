@@ -1864,3 +1864,45 @@ John's. `M2000E.PT` is not added.
 | Centerline tank under two belly rows | Clipping | M2K-5 stop-and-report with frames |
 | Per-row default quantities | Stores load | M2K-6 |
 | Radar and jammer | `F18R.SEE` and `F18.ECM` | Already reviewed; no choice needed |
+
+## Mirage 2000 identity and record import (M2K-1, 2026-11-09)
+
+Implementation, slice M2K-1, Claude Sonnet (sonnet-medium). `AircraftId::M2000`
+joins the end of `AircraftId`, `ALL` (40 retail identities) and `SELECTABLE`
+(41 entries) with checkpoint code 40 and the parse keys `m2000` and `m2000.pt`.
+It is a TORE addition on this branch: the parked path
+`("M2000.PT", Some(0x589c))` in `parked_aircraft.rs` is unchanged, and
+`M2000E.PT` and the Rafale are not aliased.
+
+| Item | Value | Provenance |
+| --- | --- | --- |
+| Record | `M2000.PT`, `typeSize` 660, no PTS | spec-derived (retail record, M2K-0 review) |
+| Shape stem | `M20` (`m20.SH`, `_M20.PIC`, `M20_A..D.SH`) | spec-derived |
+| Display | short `M2000`, long `Mirage 2000` | spec-derived |
+| Radar / gun | `F18R.SEE`, `DEFA.JT` | spec-derived; both already reviewed |
+| HUD and cockpit | `RAFALE.HUD`, stem `RAF`, `~RAFH.PIC`, bound by name | opinionated (John, 2026-11-09, decision 1); no Rafale alias |
+| Live-fire list | `DEFA.JT`, `R530.JT`, `R550.JT`, `AS15.JT` | spec-derived from the default stores |
+| Strike class | Fighter | agent decision, 2026-11-09 |
+| Interim rig | CODE 18,624 bytes, 206 faces, words `5890 5896 589c 58a8 58ae 58b4`, gear word `589c` adds 6 faces | spec-derived; other words unmapped until M2K-3/M2K-4 |
+| Gear low point | 12 shape units at 1/3 ft | spec-derived (M2K-0 gear table) |
+| Engines and thrust | 1 engine, 14,455 / 21,380 lbf | **opinionated (John, 2026-11-09, decision 2)**, see below |
+
+**Engine override.** The retail record reads 2 engines with 17,687 / 32,000
+lbf, which the [M2K-0 audit](#mirage-engine-count-for-john) found to be the
+Rafale template's numbers (afterburner 49.6% over one real M53-P2). On John's
+decision of 2026-11-09 TORE runs the Mirage 2000 with one engine and the thrust
+of one SNECMA M53-P2: 64.3 kN dry = 14,455 lbf and 95.1 kN with afterburner =
+21,380 lbf (MILAVIA and aerospaceweb.org Mirage 2000 data, both accessed
+2026-11-09, cited in the review above). It is applied in one place, the record
+corrections table (`aircraft_corrections.rs`, run by `Aircraft::parse`), so the
+sim, the app, the AI and the checkpoint all see one engine; the catalog row and
+the decoder keep the retail values, which stay documented as retail in the
+review above. See [the player-facing note](../spec/aircraft-records.md#mirage-2000-one-engine-one-m53-p2-2026-11-09).
+Empty weight (17,100 lb) and internal fuel (6,346 lb) stay retail. M2K-4 draws
+one trail and one nozzle glow from the count; M2K-8 validates climb and
+acceleration with the lower thrust.
+
+The ordnance audit pins moved to 40 aircraft as a first measurement of a record
+not yet reviewed station by station; see the [ordnance availability
+baseline](../baselines/ordnance-availability.md#the-mirage-2000-joins-the-roster-m2k-1-2026-11-09).
+Wire identity slots: codes 0 to 40 are in use, 23 of the 64 remain.

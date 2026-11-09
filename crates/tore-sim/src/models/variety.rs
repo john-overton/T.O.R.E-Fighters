@@ -54,6 +54,7 @@ impl VarietyFlightModel {
             Mig25 => ("MiG-25", "MIG25.SH"),
             F16A => ("F-16", "F16.SH"),
             Mig31 => ("MiG-31", "MIG31.SH"),
+            M2000 => ("M2000", "M20.SH"),
             _ => return None,
         })
     }
@@ -104,6 +105,9 @@ impl VarietyFlightModel {
             // MIG31.SH deployed gear low point Z=-30 at 1/3 ft a unit, the
             // source scale (docs/formats/aircraft-variety.md, MiG-31 review).
             Mig31 => 30. / 3.,
+            // M20.SH deployed gear low point Z=-12 at 1/3 ft a unit (gear
+            // contact -13 against low -12 in the M2K-0 review).
+            M2000 => 12. / 3.,
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {

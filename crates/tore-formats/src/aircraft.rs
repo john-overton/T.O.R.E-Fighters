@@ -229,6 +229,7 @@ pub enum AircraftId {
     Mig25,
     F16A,
     Mig31,
+    M2000,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
@@ -242,7 +243,7 @@ impl AircraftId {
             self.pt()
         }
     }
-    pub const SELECTABLE: [Self; 40] = [
+    pub const SELECTABLE: [Self; 41] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -283,6 +284,7 @@ impl AircraftId {
         Self::Mig25,
         Self::F16A,
         Self::Mig31,
+        Self::M2000,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
     /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
@@ -311,7 +313,7 @@ impl AircraftId {
         matches!(self, Self::Ah64 | Self::Mi24 | Self::Ch47)
     }
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -351,6 +353,7 @@ impl AircraftId {
         Self::Mig25,
         Self::F16A,
         Self::Mig31,
+        Self::M2000,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -394,8 +397,9 @@ impl AircraftId {
             "mig25" | "m25.pt" => Ok(Self::Mig25),
             "f16a" | "f16.pt" => Ok(Self::F16A),
             "mig31" | "mig31.pt" => Ok(Self::Mig31),
+            "m2000" | "m2000.pt" => Ok(Self::M2000),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000",
             )),
         }
     }
@@ -440,6 +444,7 @@ impl AircraftId {
             Self::Mig25 => "M25.PT",
             Self::F16A => "F16.PT",
             Self::Mig31 => "MIG31.PT",
+            Self::M2000 => "M2000.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -483,6 +488,9 @@ impl AircraftId {
             Self::Mig25 => "SU33_C.HUD",
             Self::F16A => "F16C.HUD",
             Self::Mig31 => "YAK141.HUD",
+            // M2000.PT names rafale.HUD; the game follows the record, so it
+            // flies the Rafale HUD and cockpit by name (John, 2026-11-09).
+            Self::M2000 => "RAFALE.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -526,6 +534,8 @@ impl AircraftId {
             Self::Mig25 => "MIG25",
             Self::F16A => "F16",
             Self::Mig31 => "MIG31",
+            // M2000.PT names m20.SH, _M20.PIC and M20_A..D.SH.
+            Self::M2000 => "M20",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -565,6 +575,7 @@ impl AircraftId {
             Self::Mig25 => "SU33",
             Self::F16A => "F16",
             Self::Mig31 => "Y141",
+            Self::M2000 => "RAF",
             _ => self.stem(),
         }
     }
@@ -613,6 +624,7 @@ impl AircraftId {
             Self::Mig25 => "~SU33H.PIC",
             Self::F16A => "~F16H.PIC",
             Self::Mig31 => "~Y141H.PIC",
+            Self::M2000 => "~RAFH.PIC",
         }
     }
     /// Compact identity for lobby columns and server seat logs.
@@ -672,6 +684,7 @@ impl AircraftId {
             Self::Mig25 => "MiG-25 Foxbat",
             Self::F16A => "F- 16A Falcon",
             Self::Mig31 => "MiG-31 Foxhound",
+            Self::M2000 => "Mirage 2000",
         }
     }
     /// Exact reviewed short/long retail names, absent for the original loose fixtures.
@@ -715,6 +728,7 @@ impl AircraftId {
             Self::Mig25 => Some(("MiG-25", "MiG-25 Foxbat")),
             Self::F16A => Some(("F-16", "F- 16A Falcon")),
             Self::Mig31 => Some(("MiG-31", "MiG-31 Foxhound")),
+            Self::M2000 => Some(("M2000", "Mirage 2000")),
             _ => None,
         }
     }
@@ -761,6 +775,7 @@ impl AircraftId {
             Self::Mig25 => Some("MIG27R.SEE"),
             Self::F16A => Some("F18R.SEE"),
             Self::Mig31 => Some("MIG31R.SEE"),
+            Self::M2000 => Some("F18R.SEE"),
         }
     }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
@@ -826,6 +841,7 @@ impl AircraftId {
             Self::Mig25 => &[],
             Self::F16A => &["M61.JT"],
             Self::Mig31 => &["GSH6_30.JT"],
+            Self::M2000 => &["DEFA.JT"],
         }
     }
     /// Reviewed optional left, centre and right cockpit overlays.
@@ -864,6 +880,7 @@ impl AircraftId {
                 | Self::Mig25
                 | Self::F16A
                 | Self::Mig31
+                | Self::M2000
         )
     }
 }
@@ -926,6 +943,7 @@ impl Aircraft {
             AircraftId::Mig25 => 588,
             AircraftId::F16A => 660,
             AircraftId::Mig31 => 588,
+            AircraftId::M2000 => 660,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -1641,7 +1659,10 @@ mod profile_tests {
                     ("p", "envMin") => 0,
                     ("p", "envMax") => 1,
                     ("p", "internalFuel") => 100,
-                    ("p", "thrust") => 200,
+                    // The retail Mirage 2000 / Rafale-template engine numbers.
+                    ("p", "engines") => 2,
+                    ("p", "thrust") => 17687,
+                    ("p", "aftThrust") => 32000,
                     ("p", "maxTakeoffWeight") => 2000,
                     _ => 0,
                 };
@@ -1734,6 +1755,7 @@ mod profile_tests {
             (AircraftId::Mig25, "MiG-25", "MiG-25 Foxbat", 588),
             (AircraftId::F16A, "F-16", "F- 16A Falcon", 660),
             (AircraftId::Mig31, "MiG-31", "MiG-31 Foxhound", 588),
+            (AircraftId::M2000, "M2000", "Mirage 2000", 660),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -1752,6 +1774,25 @@ mod profile_tests {
         }
         assert!(AircraftId::parse("F31E.PT").is_err());
         assert!(AircraftId::parse("F14B.PT").is_err());
+    }
+    #[test]
+    fn the_mirage_2000_reads_one_engine_and_one_m53_p2s_thrust_everyone_else_retail() {
+        // Opinionated (John, 2026-11-09): the override applies where the
+        // record is read, so every consumer sees 1 engine, 14,455 / 21,380
+        // lbf. The same retail numbers on the Rafale record stay retail.
+        let text = fixture()
+            .replace("F18.PT", "M2000.PT")
+            .replace("\"Synthetic\"", "\"M2000\"")
+            .replace("Synthetic plane", "Mirage 2000");
+        let m = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(m.id, AircraftId::M2000);
+        assert_eq!(m.number("engines"), 1.);
+        assert_eq!(m.number("thrust"), 14_455.);
+        assert_eq!(m.number("aftThrust"), 21_380.);
+        let r = Aircraft::parse(fixture().replace("F18.PT", "RAFALE.PT").as_bytes()).unwrap();
+        assert_eq!(r.number("engines"), 2.);
+        assert_eq!(r.number("thrust"), 17_687.);
+        assert_eq!(r.number("aftThrust"), 32_000.);
     }
     #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {

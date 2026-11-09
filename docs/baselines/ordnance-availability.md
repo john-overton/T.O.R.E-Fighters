@@ -327,3 +327,26 @@ passing. The gun's live release is 260 rounds, the `AA9.JT` row four stores and
 the `AA8.JT` row two, matching the source defaults. `--validate-tanks --aircraft
 mig31` is refused by design (the F-14 contract only); the MiG-31's tank row is
 the empty row 4 tank station and is covered by `--validate-ordnance`.
+
+## The Mirage 2000 joins the roster (M2K-1, 2026-11-09)
+
+`M2000.PT` joined `AircraftId` at the end (checkpoint code 40), so the audit now
+checks 40 aircraft. The pins in `ordnance_audit.rs` moved on purpose, with no
+record, mask or station position added: from 3,892 to 4,076 weapon placements,
+from 192 to 201 tank placements, from 186 to 194 Cheat-only novelty placements
+and from 68 to 71 designator-pod placements. The recovered-station, tank-record
+and weapon-record counts are unchanged. The per-aircraft line measured with the
+decoded record and the interim live-fire list (`DEFA.JT`, `R530.JT`, `R550.JT`,
+`AS15.JT`) is `ordnance M2000.PT: 6 source rows, 0 optional weapon rows, 184
+compatible weapon placements, 9 tank placements; defaults and restart passed;
+catalog 62 normal, 83 Cheat`. These are first measurements of a record that is
+not yet reviewed station by station; slices M2K-5 and M2K-6 own the station,
+pylon and ordnance review and may move them again. The
+`menus-ordnance-availability` and `a2g-catalog` battery expected lines now read
+40 aircraft, 4,076 / 201 / 194.
+
+```text
+ordnance audit: 40 aircraft, 14 recovered weapon stations, 4076 weapon placements, 201 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 71 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 194 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```

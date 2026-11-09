@@ -16,6 +16,9 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         "SU33" => AircraftId::Mig29,
         // The MiG-31 flies the Yak-141 cockpit (John, 2026-11-08).
         "Y141" => AircraftId::Yak141,
+        // The Mirage 2000 flies the Rafale cockpit, as its record names
+        // rafale.HUD (John, 2026-11-09).
+        "RAF" => AircraftId::Rafale,
         _ => id,
     };
     let (expected, polygon): ((usize, usize), &[Point]) = match id {
@@ -192,7 +195,8 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::F4G
         | AircraftId::F15
         | AircraftId::Mig25
-        | AircraftId::Mig31 => unreachable!("resolved cockpit alias"),
+        | AircraftId::Mig31
+        | AircraftId::M2000 => unreachable!("resolved cockpit alias"),
     };
     if (source.width, source.height) != expected {
         return out;

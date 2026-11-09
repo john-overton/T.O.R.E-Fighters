@@ -96,6 +96,20 @@ pub const MIG17_AB_FUEL_LB_PER_S: i32 = 4;
 /// thrust-to-weight near 0.9). The AC-130U record's value is used (`fitted`).
 pub const C130_THRUST_LBF: i32 = 40_000;
 
+/// Mirage 2000 (M2K-1, **opinionated**, John, 2026-11-09, decision 2 in the
+/// M2000 plan): TORE runs the Mirage 2000 with one engine and the thrust of
+/// one real SNECMA M53-P2 instead of the retail record's 2 engines and
+/// 17,687 / 32,000 lbf. 64.3 kN dry = 14,455 lbf and 95.1 kN with afterburner
+/// = 21,380 lbf (MILAVIA Mirage 2000 specifications and aerospaceweb.org
+/// Mirage 2000 data, both accessed 2026-11-09, as cited in the "Mirage 2000
+/// source review" in docs/formats/aircraft-variety.md). The retail record
+/// stays documented as retail; this override is the only place TORE reads
+/// different numbers, so every consumer (flight model, damage, sound, trails,
+/// AI) sees one engine.
+pub const M2000_ENGINES: i32 = 1;
+pub const M2000_THRUST_LBF: i32 = 14_455;
+pub const M2000_AFT_THRUST_LBF: i32 = 21_380;
+
 const _: () = assert!(SU25_EMPTY_LB + SU25_INTERNAL_FUEL_LB < SU25_MAX_TAKEOFF_LB);
 
 /// Every correction, by aircraft.
@@ -213,6 +227,30 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "thrust",
         retail: 108_192,
         corrected: C130_THRUST_LBF,
+    },
+    // Mirage 2000: one M53-P2 (opinionated, John, 2026-11-09). Not a copy
+    // fix: the retail values are the Rafale template's engine count and
+    // afterburner thrust.
+    Correction {
+        id: AircraftId::M2000,
+        block: Block::Plane,
+        key: "engines",
+        retail: 2,
+        corrected: M2000_ENGINES,
+    },
+    Correction {
+        id: AircraftId::M2000,
+        block: Block::Plane,
+        key: "thrust",
+        retail: 17_687,
+        corrected: M2000_THRUST_LBF,
+    },
+    Correction {
+        id: AircraftId::M2000,
+        block: Block::Plane,
+        key: "aftThrust",
+        retail: 32_000,
+        corrected: M2000_AFT_THRUST_LBF,
     },
 ];
 
@@ -348,6 +386,39 @@ mod tests {
         p.get_mut("thrust").unwrap().value = "35271".into();
         assert!(!apply(AircraftId::Su25, &mut o, &mut p));
         assert_eq!(n(&o, "weight"), 41_885);
+    }
+
+    #[test]
+    fn the_mirage_2000_runs_one_m53_p2_and_the_retail_values_still_decode_as_retail() {
+        // Opinionated (John, 2026-11-09): 1 engine, 14,455 / 21,380 lbf.
+        let n = |map: &BTreeMap<String, Token>, key: &str| map[key].number().unwrap();
+        let retail = || {
+            BTreeMap::from([
+                ("engines".to_string(), token(2)),
+                ("thrust".to_string(), token(17_687)),
+                ("aftThrust".to_string(), token(32_000)),
+            ])
+        };
+        let mut o = BTreeMap::new();
+        let mut p = retail();
+        assert!(apply(AircraftId::M2000, &mut o, &mut p));
+        assert_eq!(n(&p, "engines"), 1);
+        assert_eq!(n(&p, "thrust"), 14_455);
+        assert_eq!(n(&p, "aftThrust"), 21_380);
+        // The same retail numbers on any other identity (the Rafale, the
+        // desert record) stay retail: no aliasing.
+        for other in [AircraftId::Rafale, AircraftId::F16A, AircraftId::Mig31] {
+            let mut p = retail();
+            assert!(!apply(other, &mut o, &mut p));
+            assert_eq!(n(&p, "engines"), 2);
+            assert_eq!(n(&p, "thrust"), 17_687);
+            assert_eq!(n(&p, "aftThrust"), 32_000);
+        }
+        // A record that is not the retail one is read as it is.
+        let mut p = retail();
+        p.get_mut("aftThrust").unwrap().value = "31999".into();
+        assert!(!apply(AircraftId::M2000, &mut o, &mut p));
+        assert_eq!(n(&p, "engines"), 2);
     }
 
     #[test]

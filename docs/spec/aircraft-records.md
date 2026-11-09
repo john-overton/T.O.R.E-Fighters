@@ -97,3 +97,37 @@ unchanged, but a mixed-version session would disagree on these aircraft.
   the F-22's pre-production weights, the IL-76's E-3 numbers, the AV-8's thrust,
   and the envelope ceilings of the A-10 (22,812 ft), F-15 (100,000 ft) and
   F-4 family (42,000 ft).
+
+## Mirage 2000: one engine, one M53-P2 (2026-11-09)
+
+**Opinionated (John, 2026-11-09), implemented by slice M2K-1.** The retail
+`M2000.PT` record says 2 engines with 17,687 lbf military and 32,000 lbf
+afterburner thrust, which are the Rafale template's numbers. The real Mirage 2000
+has one SNECMA M53-P2 at 64.3 kN dry and 95.1 kN with afterburner (MILAVIA
+Mirage 2000 specifications and aerospaceweb.org Mirage 2000 data, both accessed
+2026-11-09, as cited in the [Mirage 2000 source
+review](../formats/aircraft-variety.md#mirage-2000-source-review-2026-11-09)).
+TORE flies the Mirage 2000 with the real engine. This is a TORE override over the
+record, not retail behaviour, and the retail numbers stay documented as retail.
+
+| Field | Retail | Game |
+| --- | ---: | ---: |
+| Engines | 2 | 1 |
+| Military thrust, lbf | 17,687 | 14,455 |
+| Afterburner thrust, lbf | 32,000 | 21,380 |
+
+What a player notices: a lighter pull. At the retail 17,100 lb empty weight and
+6,346 lb internal fuel the afterburner thrust-to-weight is 0.91 instead of 1.36
+at the empty-plus-fuel weight, so the climb and the acceleration are slower than
+the record's. Empty weight and internal fuel stay retail. Slice M2K-8 measures
+climb and acceleration with the lower thrust and reports the envelope against the
+real aircraft. Anything that follows the engine count (damage, sound, the trail
+and nozzle glow of slice M2K-4, the AI) sees one engine, because the override
+lives in the same place as the other record corrections
+(`aircraft_corrections.rs`, applied where `Aircraft::parse` reads the record), so
+the flight model, the app, the AI and the saved mission all read one set of
+numbers. It applies only to `M2000.PT` and only while all three values still hold
+their retail numbers. The Rafale record, which carries the same 32,000 lbf and
+2 engines, is not touched, and `M2000E.PT` is not part of this identity. The
+catalog row in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and the decoder
+keep the retail values.

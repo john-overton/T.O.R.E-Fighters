@@ -222,6 +222,20 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x612c, Part::Gear, 12)],
                 1. / 3.,
             ),
+            // M20.SH: six state words, 18,624 CODE bytes, 206 runtime faces.
+            // The gear word 0x589c adds 6 faces (three plates). The other
+            // five words (0x5890 flame, 0x5896 airbrake, 0x58a8 and 0x58ae
+            // flaps, 0x58b4 sixth) are unmapped in M2K-1, so the aircraft
+            // loads with the shared fitted gear law until its own rig
+            // (M2K-3, M2K-4); docs/formats/aircraft-variety.md, "Mirage 2000
+            // source review (2026-11-09)".
+            Id::M2000 => (
+                18624,
+                206,
+                &[0x5890, 0x5896, 0x589c, 0x58a8, 0x58ae, 0x58b4],
+                &[(0x589c, Part::Gear, 6)],
+                1. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {
