@@ -271,19 +271,25 @@ impl Rig {
             turn(&mut result, [pivot_x, -35.5, -5.], [1., 0., 0.], angle);
             update_normal(source, &mut result);
         } else if CANARD_L.contains(&a) || CANARD_R.contains(&a) {
+            // The canard is a whole flat panel per side: both windings, left
+            // and right, turn rigidly about its own lateral spindle through
+            // its root chord midpoint. The old rig turned only the vertices
+            // past |x|>20, so the right pair's root vertex at x=19 was held
+            // while the outboard end turned (rule 10's fold check). The
+            // canard pitch law stays 0.25*elevator and no roll is added. The
+            // right root chord runs [19,38,0]..[20,53,0] (midpoint
+            // [19.5,45.5,0]); the left [-20,38,0]..[-20,53,0] (midpoint
+            // [-20,45.5,0]). The plate lies at a constant Z=0, so the
+            // spindle stays lateral. No root corner is pinned, so the root
+            // chord midpoint is the invariant and the small root gap is
+            // accepted.
             let left = CANARD_L.contains(&a);
-            let mut moved = source.clone();
             turn(
-                &mut moved,
+                &mut result,
                 [if left { -20. } else { 19.5 }, 45.5, 0.],
                 [1., 0., 0.],
                 0.25 * state.elevator.clamp(-1., 1.),
             );
-            for (p, q) in result.positions.iter_mut().zip(moved.positions) {
-                if p[0].abs() > 20. {
-                    *p = q;
-                }
-            }
             update_normal(source, &mut result);
         } else if FIN.contains(&a) {
             if source.positions.iter().all(|p| p[1] <= -30. + 1e-4) {
@@ -411,10 +417,16 @@ mod tests {
         (0..3).map(|i| (a[i] - b[i]).powi(2)).sum()
     }
     #[test]
-    fn canard_distal_controls_move_with_their_authored_sign_and_keep_own_roots() {
+    fn whole_canard_panel_keeps_its_root_midpoint_on_pitch() {
         let mut s = state();
         let rig = rig();
-        for (a, points, sign) in [
+        // The canard is a whole flat panel per side: both windings, left and
+        // right, turn rigidly about its own lateral spindle through the root
+        // chord midpoint. The old rig turned only the vertices past |x|>20,
+        // so the right pair's root vertex at x=19 was held while the outboard
+        // end turned (rule 10). The canard pitch law stays 0.25*elevator and
+        // no roll is added.
+        for (address, points, corners, witness, sign) in [
             (
                 0x256d,
                 vec![
@@ -423,7 +435,9 @@ mod tests {
                     [33., 32., 0.],
                     [33., 36., 0.],
                 ],
-                -1.,
+                [0, 1],
+                [33., 32., 0.],
+                -1f32,
             ),
             (
                 0x52b0,
@@ -433,22 +447,48 @@ mod tests {
                     [-32., 36., 0.],
                     [-20., 53., 0.],
                 ],
-                -1.,
+                [0, 3],
+                [-32., 32., 0.],
+                -1f32,
             ),
         ] {
-            let source = face(a, points);
+            let source = face(address, points);
+            let midpoint: [f32; 3] = std::array::from_fn(|i| {
+                (source.positions[corners[0]][i] + source.positions[corners[1]][i]) * 0.5
+            });
+            let wi = source.positions.iter().position(|p| *p == witness).unwrap();
             for v in [-1., 0., 1.] {
                 s.elevator = v;
                 let out = rig.animate(&source, &s).unwrap();
-                for (p, q) in source.positions.iter().zip(out.positions) {
-                    if p[0].abs() <= 20. {
-                        assert_eq!(*p, q);
-                    } else if v != 0. {
-                        assert!((q[2] - p[2]) * sign * v as f32 > 0.);
-                    } else {
-                        assert_eq!(*p, q);
+                if v == 0. {
+                    assert_eq!(out.positions, source.positions, "face {address:x} at zero");
+                    continue;
+                }
+                // The root chord midpoint stays put, not any single corner.
+                let moved_mid: [f32; 3] = std::array::from_fn(|i| {
+                    (out.positions[corners[0]][i] + out.positions[corners[1]][i]) * 0.5
+                });
+                for i in 0..3 {
+                    assert!(
+                        (moved_mid[i] - midpoint[i]).abs() < 1e-3,
+                        "face {address:x} root midpoint moved"
+                    );
+                }
+                // The whole panel is rigid: no part stays pinned while the
+                // rest turns.
+                for i in 0..4 {
+                    for j in i + 1..4 {
+                        assert!(
+                            (d2(source.positions[i], source.positions[j])
+                                - d2(out.positions[i], out.positions[j]))
+                            .abs()
+                                < 1e-3,
+                            "face {address:x} panel not rigid"
+                        );
                     }
                 }
+                let dz = out.positions[wi][2] - witness[2];
+                assert!(dz * sign * v as f32 > 0., "face {address:x} pitch sign");
             }
         }
     }

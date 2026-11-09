@@ -405,6 +405,19 @@ outboard-aileron sense, with the pitch and roll terms summed and clamped to
 tilt the spindle by, and no root corner is pinned. See the
 [Su-35 attachment corrections](../spec/aircraft-animation.md#su-35-attachment-corrections).
 
+Whole-panel canards, 2026-11-09 (slice TR-5b). The TR-5 line "The canards are
+unchanged" is superseded. The Su-35 canard rig turned only the vertices past
+`|x|=20`, so the right pair's root vertex at `x=19` and the left pair's root
+vertices at `x=-20` stayed put while the outboard ends turned (rule 10's fold
+check; the right pair straddles, and the left pair's held seam vertices make it
+non-rigid too). The whole canard quad per side, both windings (`52b0`/`52d7`
+left, `256d`/`2580` right), now turns rigidly about its own lateral spindle
+through its root chord midpoint (`[19.5,45.5,0]` right, `[-20,45.5,0]` left),
+keeping the existing `0.25*elevator` pitch law and sign and adding no roll. The
+plate lies at a constant `Z=0`, so the spindle stays lateral. No root corner is
+pinned, so the small root gap is accepted. See the
+[Su-35 attachment corrections](../spec/aircraft-animation.md#su-35-attachment-corrections).
+
 Branch snapshots, source atlases and source-section reviews remain local under
 `.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
 are separately documented [variety fits](../spec/variety-animation.md) and

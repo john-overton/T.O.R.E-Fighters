@@ -27,10 +27,6 @@ fn selected(c: Control, faces: &[Face], left: bool) -> Vec<Face> {
 }
 fn anchor_groups(c: Control) -> Vec<(&'static [usize], &'static [[f32; 3]])> {
     match c {
-        Control::Elevator => vec![
-            (&[0x256d, 0x2580], &[[19., 38., 0.], [20., 53., 0.]]),
-            (&[0x52b0, 0x52d7], &[[-20., 38., 0.], [-20., 53., 0.]]),
-        ],
         Control::Gear => vec![
             (&[0x5680, 0x5697], &[[-1., 73., -3.], [-1., 73., -7.]]),
             (&[0x5731, 0x5750], &[[-3., 57., -1.], [3., 57., -1.]]),
@@ -224,6 +220,46 @@ pub(super) fn check(
                         m.reviewed_direction_failures +=
                             usize::from(delta * sign * value.signum() as f32 <= EPSILON);
                     }
+                }
+            }
+        }
+    }
+    if matches!(c, Control::Elevator) {
+        // The canard is a whole flat panel too: both windings, left and right,
+        // turn rigidly about its own lateral spindle through the root chord
+        // midpoint. The old rig turned only the vertices past |x|>20, so the
+        // right pair's root vertex at x=19 was held while the outboard end
+        // turned (rule 10). No single root corner stays put, so the anchor is
+        // the midpoint of the root chord pair, not either corner.
+        for (ids, corners) in [
+            (&[0x256d, 0x2580][..], &[[20., 53., 0.], [19., 38., 0.]][..]),
+            (
+                &[0x52b0, 0x52d7][..],
+                &[[-20., 53., 0.], [-20., 38., 0.]][..],
+            ),
+        ] {
+            let old: BTreeMap<_, _> = keyed(reference)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            let new: BTreeMap<_, _> = keyed(pose)
+                .into_iter()
+                .filter(|(k, _)| ids.contains(&k.0))
+                .collect();
+            if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
+                m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(g.gap);
+            }
+            if value == 0. {
+                for (key, face) in &old {
+                    match new.get(key) {
+                        Some(after) if face.positions == after.positions => {}
+                        _ => m.reviewed_neutral_mismatch = true,
+                    }
+                }
+            } else {
+                match midpoint_gap(&old, &new, corners, scale) {
+                    Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                    None => m.reviewed_anchor_missing = true,
                 }
             }
         }
