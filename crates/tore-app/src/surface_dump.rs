@@ -479,7 +479,13 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
         let Some(down) = resources
             .get(&pose.shape)
             .and_then(|bytes| tore_formats::parked_aircraft::gear(bytes).ok())
-            .map(|gear| gear.down)
+            // At the size it is drawn (the Mirage 2000's per-axis scale, M2K-2).
+            .map(|gear| match pose.aircraft {
+                Some(id) => gear
+                    .down
+                    .scaled(tore_formats::aircraft::scale::shape_axis_scale_f32(id)),
+                None => gear.down,
+            })
         else {
             continue;
         };

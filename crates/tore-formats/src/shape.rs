@@ -655,7 +655,55 @@ fn target(p: usize, d: i32, c: &[u8]) -> Result<usize> {
     }
     Ok(t as usize)
 }
+impl Face {
+    /// The face with its vertices scaled per axis (`[x, y, z]` in shape
+    /// units: right, forward, up). A stored facing normal is a CE vector
+    /// (right, up, forward) and turns with the inverse scale so it stays
+    /// perpendicular to the scaled face, keeping its length. Texture
+    /// coordinates, colours and the address are unchanged.
+    pub fn scaled(&self, scale: [f32; 3]) -> Self {
+        let mut face = self.clone();
+        for p in &mut face.positions {
+            for (v, s) in p.iter_mut().zip(scale) {
+                *v *= s;
+            }
+        }
+        face.normal = face.normal.map(|n| {
+            let turned = [n[0] / scale[0], n[1] / scale[2], n[2] / scale[1]];
+            let was = n.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let now = turned.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if now > 0. {
+                turned.map(|v| v * was / now)
+            } else {
+                n
+            }
+        });
+        face
+    }
+}
 impl Shape {
+    /// The shape with every face's and line's vertices scaled per axis
+    /// (`[x, y, z]` in shape units: right, forward, up) and its sprites'
+    /// centres moved with them. Scale a shape once, where it is loaded and
+    /// before any animation turns it, so a turned panel stays rigid. The
+    /// identity scale returns the shape unchanged.
+    pub fn scaled(&self, scale: [f32; 3]) -> Self {
+        let up = |p: &mut [f32; 3]| {
+            for (v, s) in p.iter_mut().zip(scale) {
+                *v *= s;
+            }
+        };
+        let mut lines = self.lines.clone();
+        lines.iter_mut().flat_map(|l| &mut l.positions).for_each(up);
+        let mut billboards = self.billboards.clone();
+        billboards.iter_mut().for_each(|b| up(&mut b.center));
+        Self {
+            lines,
+            faces: self.faces.iter().map(|f| f.scaled(scale)).collect(),
+            billboards,
+            state_words: self.state_words.clone(),
+        }
+    }
     pub fn parse(data: &[u8]) -> Result<Self> {
         Self::with_state(data, &BTreeMap::new())
     }
@@ -1166,6 +1214,63 @@ impl Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn tilted_face() -> Face {
+        // A sloped panel: right, forward, up positions and a CE normal
+        // (right, up, forward) perpendicular to it.
+        let positions = vec![[0., 0., 0.], [10., 0., 0.], [10., 10., 5.], [0., 10., 5.]];
+        // Edges (10, 0, 0) and (0, 10, 5): normal = (0, -5, 10) in (x, y, z).
+        let normal = [0., 10., -5.];
+        Face {
+            positions,
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: vec![[0., 0.]; 4],
+            texture: "T.PIC".into(),
+            subtype: 0x63,
+            normal: Some(normal),
+            address: 7,
+        }
+    }
+    #[test]
+    fn scaled_faces_keep_their_normal_perpendicular_and_their_length() {
+        let face = tilted_face();
+        let scale = [1.3616, 1.2290, 1.5053];
+        let scaled = face.scaled(scale);
+        let n = scaled.normal.unwrap();
+        // CE (right, up, forward) back to position order (x, y, z).
+        let n = [n[0], n[2], n[1]];
+        for i in 1..4 {
+            let edge: Vec<f32> = (0..3)
+                .map(|k| scaled.positions[i][k] - scaled.positions[0][k])
+                .collect();
+            let dot: f32 = (0..3).map(|k| n[k] * edge[k]).sum();
+            assert!(dot.abs() < 1e-3, "edge {i}: {dot}");
+        }
+        let was: f32 = face
+            .normal
+            .unwrap()
+            .iter()
+            .map(|v| v * v)
+            .sum::<f32>()
+            .sqrt();
+        let now: f32 = n.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!((was - now).abs() < 1e-4);
+        assert_eq!(scaled.uv, face.uv);
+        assert_eq!(scaled.address, 7);
+        assert_eq!(scaled.positions[2], [13.616, 12.290, 7.5265]);
+    }
+    #[test]
+    fn the_identity_scale_leaves_every_vertex_bit_for_bit() {
+        let shape = Shape {
+            lines: Vec::new(),
+            faces: vec![tilted_face()],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let same = shape.scaled([1.; 3]);
+        assert_eq!(same.faces[0].positions, shape.faces[0].positions);
+        assert_eq!(same.faces[0].normal, shape.faces[0].normal);
+    }
     #[test]
     fn contact_offset_link_is_unsigned_relative_and_bounded() {
         assert!(contact_offset_code(&[0; 15]).is_err());

@@ -357,7 +357,12 @@ impl Airframe {
                 })
             }));
         }
-        streamer_world_points(def, s.position, [s.yaw, s.pitch, s.bank])
+        streamer_world_points(
+            def,
+            s.position,
+            [s.yaw, s.pitch, s.bank],
+            tore_formats::aircraft::scale::right_up_forward(self.profile.id),
+        )
     }
 
     /// Shared fitted instrument camera pose for fixed-tick weather and rendering.
@@ -432,7 +437,9 @@ impl Airframe {
     /// 12 ft above it (a wingtip rail beside the wing).
     pub fn pylon_top(&self, hardpoint: usize) -> Option<f64> {
         let h = self.profile.hardpoints.get(hardpoint)?;
-        let [right, up, forward] = h.position.map(|v| f64::from(v) / 3.);
+        // The record's shape units, scaled with the aircraft's shape (M2K-2).
+        let axes = tore_formats::aircraft::scale::right_up_forward(self.profile.id);
+        let [right, up, forward] = std::array::from_fn(|i| f64::from(h.position[i]) / 3. * axes[i]);
         Some(self.underside(right, forward, up, 6)? - up)
     }
     /// The height (feet up of the reference point) of the clean model's
@@ -919,13 +926,20 @@ fn streamer_world_points(
     def: &tore_formats::shape::StreamerDef,
     position: [f64; 3],
     attitude: [f64; 3],
+    axes: [f64; 3],
 ) -> Option<[[f64; 3]; 2]> {
     let basis = tore_sim::attitude::Basis::new(attitude[0], attitude[1], attitude[2]);
     let mut points = [[0.; 3]; 2];
     for (side, out) in points.iter_mut().enumerate() {
         // Non-swing-wing aircraft use the source CE neutral hinge.
         let p = def.attachment(side, 0).ok()?;
-        let (x, up, forward) = (p[0] / 3., p[1] / 3., p[2] / 3.);
+        // `axes` is the aircraft's per-axis shape scale in right, up,
+        // forward order (all 1 but the Mirage 2000's).
+        let (x, up, forward) = (
+            p[0] / 3. * axes[0],
+            p[1] / 3. * axes[1],
+            p[2] / 3. * axes[2],
+        );
         *out = std::array::from_fn(|k| {
             position[k] + basis.right[k] * x + basis.up[k] * up + basis.forward[k] * forward
         });
@@ -973,14 +987,19 @@ mod tests {
             ([0., q, 0.], [4., -5., -2.]),
             ([0., 0., q], [2., -4., -5.]),
         ] {
-            let actual = streamer_world_points(&def, [100.; 3], attitude).unwrap()[1];
+            let actual = streamer_world_points(&def, [100.; 3], attitude, [1.; 3]).unwrap()[1];
             for i in 0..3 {
                 assert!((actual[i] - 100. - expected[i]).abs() < 1e-10);
             }
         }
         assert_eq!(
-            streamer_world_points(&def, [0.; 3], [0.; 3]).unwrap()[0],
+            streamer_world_points(&def, [0.; 3], [0.; 3], [1.; 3]).unwrap()[0],
             [-4., 2., -5.]
+        );
+        // The Mirage 2000's per-axis scale moves the attachment with its wing.
+        assert_eq!(
+            streamer_world_points(&def, [0.; 3], [0.; 3], [2., 3., 4.]).unwrap()[1],
+            [8., 6., -20.]
         );
     }
 }

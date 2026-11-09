@@ -227,8 +227,17 @@ pub fn place(
             let shape_bytes = get(&record.shape)?;
             let gear = gear(shape_bytes).map_err(|e| format!("{}: {e}", record.shape))?;
             let scale = aircraft_shape_scale(shape_bytes).map_err(|e| e.to_string())?;
-            // It stands on its wheels, the bottom of its gear-down shape.
-            let Some(low) = crate::grounding::bottom(&gear.down) else {
+            let aircraft = flown(&record.resource);
+            // It stands on its wheels, the bottom of its gear-down shape, at
+            // the size it is drawn: a type with a per-axis shape scale (the
+            // Mirage 2000, M2K-2) stands on its scaled gear.
+            let down = match aircraft {
+                Some(id) => gear
+                    .down
+                    .scaled(tore_formats::aircraft::scale::shape_axis_scale_f32(id)),
+                None => gear.down,
+            };
+            let Some(low) = crate::grounding::bottom(&down) else {
                 return Err(format!("{}: no geometry", record.shape));
             };
             let x = f64::from(parked.position[0]);
@@ -267,7 +276,6 @@ pub fn place(
             let heading = f64::from(parked.angles[0]).to_radians();
             let basis = Basis::new(heading, 0., 0.);
             let origin = std::array::from_fn(|i| ground[i] - basis.up[i] * low * scale);
-            let aircraft = flown(&record.resource);
             let fragment_offsets = match aircraft {
                 Some(id) => {
                     let read = |name: &str| {

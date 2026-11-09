@@ -849,7 +849,12 @@ impl Configuration {
         let model = read(&a.shape)
             .ok()
             .and_then(|bytes| tore_formats::shape::Shape::parse(&bytes).ok())
-            .map(|shape| super::hardpoints::Underside::of(&shape, super::debris::scale(a.id)));
+            .map(|shape| {
+                // The aircraft's per-axis shape scale (M2K-2) is part of the
+                // surface the stores hang from, as it is of the drawn model.
+                let shape = shape.scaled(tore_formats::aircraft::scale::shape_axis_scale_f32(a.id));
+                super::hardpoints::Underside::of(&shape, super::debris::scale(a.id))
+            });
         // Source record `index`'s station: where the stores hang, at the
         // real aircraft's station where T.O.R.E moves it (the F-14's).
         let place = |index: usize, h: &tore_formats::aircraft::Hardpoint| {

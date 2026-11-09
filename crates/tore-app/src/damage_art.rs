@@ -25,7 +25,11 @@ impl DamageArt {
             data.get(name)
                 .ok_or_else(|| format!("missing damage resource {name}; re-import media"))
         };
-        let intact = Shape::parse(get(&format!("{}.SH", id.stem()))?)?;
+        // Every shape of the aircraft is scaled alike (M2K-2), so the damage
+        // looks and the breakup pieces fit the scaled body and the regional
+        // damage sections are cut on the size that is drawn.
+        let axis = crate::variety_animation::axis_scale(id);
+        let intact = Shape::parse(get(&format!("{}.SH", id.stem()))?)?.scaled(axis);
         let mut extents = [1f32; 3];
         for p in intact.faces.iter().flat_map(|f| &f.positions) {
             for i in 0..3 {
@@ -33,12 +37,12 @@ impl DamageArt {
             }
         }
         let mut bodies = [
-            Shape::parse(get(&format!("{}_A.SH", id.stem()))?)?,
-            Shape::parse(get(&format!("{}_C.SH", id.stem()))?)?,
+            Shape::parse(get(&format!("{}_A.SH", id.stem()))?)?.scaled(axis),
+            Shape::parse(get(&format!("{}_C.SH", id.stem()))?)?.scaled(axis),
         ];
         let fragments = [
-            Shape::parse(get(&format!("{}_B.SH", id.stem()))?)?,
-            Shape::parse(get(&format!("{}_D.SH", id.stem()))?)?,
+            Shape::parse(get(&format!("{}_B.SH", id.stem()))?)?.scaled(axis),
+            Shape::parse(get(&format!("{}_D.SH", id.stem()))?)?.scaled(axis),
         ];
         if id == AircraftId::Faxx {
             for (body, fins) in bodies

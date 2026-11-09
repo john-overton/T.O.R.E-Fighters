@@ -651,7 +651,15 @@ pub fn slot_offset(k: u16, on: u16, size: StoreSize) -> Vector {
 /// record on the centreline holding two or more (the F-4E's and F-4G's
 /// Sparrows) hangs [`FUSELAGE_WELL`] either side, in its wells.
 pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
-    let mut mount = h.position.map(|v| f64::from(v) / 3.);
+    placed_scaled(h, model, [1.; 3])
+}
+
+/// [`placed`] for an aircraft whose shape carries a per-axis scale
+/// (`tore_formats::aircraft::scale`): the record's row is in shape units, so
+/// it scales with the shape, `axes` in right, up, forward order. `[1, 1, 1]`
+/// is [`placed`] exactly.
+pub fn placed_scaled(h: &Hardpoint, model: Option<&Underside>, axes: [f64; 3]) -> (Vector, Rack) {
+    let mut mount: Vector = std::array::from_fn(|i| f64::from(h.position[i]) / 3. * axes[i]);
     let mut rack = Rack::from_source(h);
     match rack.location() {
         Location::Wing if h.flags & PAIRED_FLAG == 0 && mount[0].abs() < 3. => {
@@ -1095,12 +1103,13 @@ pub fn placed_on(
             },
         );
     }
+    let axes = tore_formats::aircraft::scale::right_up_forward(id);
     let Some(moved) =
         station_move(id, hardpoint).filter(|m| m.location == Location::from_byte(h.location))
     else {
-        return placed(h, model);
+        return placed_scaled(h, model, axes);
     };
-    let mut mount = h.position.map(|v| f64::from(v) / 3.);
+    let mut mount: Vector = std::array::from_fn(|i| f64::from(h.position[i]) / 3. * axes[i]);
     mount[0] = moved.right;
     mount[2] = moved.forward;
     let mut rack = Rack::from_source(h);
@@ -1375,6 +1384,20 @@ mod tests {
             count: 2,
             weight_class: 0,
         }
+    }
+
+    #[test]
+    fn a_per_axis_shape_scale_moves_the_record_row_with_the_shape_and_identity_changes_nothing() {
+        let h = hardpoint(Location::Wing.byte(), 0);
+        let (plain, _) = placed(&h, None);
+        assert_eq!(plain, [10., -2., -1.]);
+        let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::M2000);
+        let (scaled, _) = placed_scaled(&h, None, axes);
+        assert_eq!(scaled, [10. * axes[0], -2. * axes[1], -axes[2]]);
+        // The exact aircraft decides: the Mirage 2000 scales, no other does.
+        assert_eq!(placed_on(AircraftId::M2000, 0, &h, None).0, scaled);
+        assert_eq!(placed_on(AircraftId::F16C, 0, &h, None).0, plain);
+        assert_eq!(placed_scaled(&h, None, [1.; 3]).0, plain);
     }
 
     fn rack(location: u8) -> Rack {

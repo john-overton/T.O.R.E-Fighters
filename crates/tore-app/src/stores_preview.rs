@@ -135,7 +135,8 @@ pub fn run() -> AppResult<()> {
         }
         let airframe = crate::aircraft::Airframe::load(resources, id)?;
         if std::env::var_os("TORE_STORES_PREVIEW_GEOMETRY").is_some() {
-            let shape = tore_formats::shape::Shape::parse(&resources[&airframe.profile.shape])?;
+            let shape = tore_formats::shape::Shape::parse(&resources[&airframe.profile.shape])?
+                .scaled(tore_formats::aircraft::scale::shape_axis_scale_f32(id));
             for face in &shape.faces {
                 println!(
                     "Preview face: {short} {:x} {:?} {:?}",
@@ -260,13 +261,18 @@ pub fn run() -> AppResult<()> {
         {
             let shape = tore_formats::shape::Shape::parse(
                 resources.get(&profile.shape).ok_or("missing shape")?,
-            )?;
+            )?
+            .scaled(tore_formats::aircraft::scale::shape_axis_scale_f32(
+                profile.id,
+            ));
             let model = tore_sim::combat::hardpoints::Underside::of(
                 &shape,
                 tore_sim::combat::debris::scale(profile.id),
             );
+            let axes = tore_formats::aircraft::scale::right_up_forward(profile.id);
             for (row, h) in profile.hardpoints.iter().enumerate() {
-                let (mount, rack) = tore_sim::combat::hardpoints::placed(h, Some(&model));
+                let (mount, rack) =
+                    tore_sim::combat::hardpoints::placed_scaled(h, Some(&model), axes);
                 if let Some(slot) = config.hardpoint_slots[row] {
                     config.stations[slot].mount = mount;
                     config.stations[slot].rack = rack;

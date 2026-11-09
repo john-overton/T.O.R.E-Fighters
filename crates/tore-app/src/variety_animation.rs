@@ -229,6 +229,10 @@ fn specification(id: Id) -> Option<Spec> {
             // loads with the shared fitted gear law until its own rig
             // (M2K-3, M2K-4); docs/formats/aircraft-variety.md, "Mirage 2000
             // source review (2026-11-09)".
+            // The shape is scaled per axis at load (M2K-2, `axis_scale`): the
+            // M2000's own rig must parse with `.scaled(axis_scale(id))` and
+            // scale any shape-unit hinge point with
+            // `tore_formats::aircraft::scale::scale_point`.
             Id::M2000 => (
                 18624,
                 206,
@@ -245,6 +249,12 @@ fn specification(id: Id) -> Option<Spec> {
         branches,
         scale,
     })
+}
+
+/// `id`'s per-axis shape scale (x right, y forward, z up) as the `f32` the
+/// shape vertices use ([`tore_formats::aircraft::scale`]).
+pub fn axis_scale(id: Id) -> [f32; 3] {
+    tore_formats::aircraft::scale::shape_axis_scale_f32(id)
 }
 
 pub fn supported(id: Id) -> bool {
@@ -313,7 +323,14 @@ pub struct Rig {
 }
 impl Rig {
     pub fn load(id: Id, bytes: &[u8]) -> AppResult<(Self, Shape)> {
-        let mut shape = Shape::parse(bytes)?;
+        // The aircraft's per-axis shape scale (M2K-2) is applied here, to the
+        // parsed vertices, before any device turns them: a panel turned about
+        // a hinge in scaled space stays rigid. Every aircraft but the Mirage
+        // 2000 has the identity scale and gets its shape back unchanged. A
+        // reviewed rig that parses the bytes itself scales what it parses
+        // the same way ([`axis_scale`]).
+        let axis = axis_scale(id);
+        let mut shape = Shape::parse(bytes)?.scaled(axis);
         // Individually reviewed older profiles share the specific-rig registry,
         // while retaining their established source scale and simulation adapter.
         let scale = tore_sim::combat::debris::scale(id) as f32;
@@ -589,7 +606,7 @@ impl Rig {
         let mut added = Vec::new();
         let mut groups = BTreeMap::new();
         for &(word, part, count) in spec.branches {
-            let pose = Shape::with_state(bytes, &[(word, 1)].into())?;
+            let pose = Shape::with_state(bytes, &[(word, 1)].into())?.scaled(axis);
             let active: BTreeSet<_> = pose.faces.iter().map(|f| f.address).collect();
             let faces: Vec<_> = pose
                 .faces
@@ -867,6 +884,65 @@ fn animate_gun(face: &mut Face, state: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
+        let d =
+            |p: [f32; 3], q: [f32; 3]| (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f32>().sqrt();
+        let mut worst = 0f32;
+        for i in 0..a.len() {
+            for j in i + 1..a.len() {
+                worst = worst.max((d(a[i], a[j]) - d(b[i], b[j])).abs());
+            }
+        }
+        worst
+    }
+    #[test]
+    fn a_panel_turned_in_the_scaled_shape_stays_rigid_and_scaling_after_the_turn_would_not() {
+        // An elevon-like strip hinged along a line leaning away from every
+        // axis, turned about its hinge (shape units x, y, z).
+        let panel = Face {
+            positions: vec![
+                [10., -29., -3.],
+                [24., -29., -3.],
+                [24., -30., -3.5],
+                [10., -30., -3.5],
+            ],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: vec![],
+            texture: String::new(),
+            subtype: 0,
+            normal: Some([0.2, 0.9, -0.3]),
+            address: 1,
+        };
+        let hinge = ([10., -29., -3.], [14., -0.5, -0.2]);
+        // The shape is scaled first; the hinge point is scaled with the same
+        // function, and the axis direction keeps its meaning by scaling too.
+        let scale = tore_formats::aircraft::scale::shape_axis_scale_f32(Id::M2000);
+        let scaled = panel.scaled(scale);
+        let point = tore_formats::aircraft::scale::scale_point(Id::M2000, hinge.0);
+        let axis = tore_formats::aircraft::scale::scale_point(Id::M2000, hinge.1);
+        for angle in [-0.6, -0.2, 0.3, 0.9] {
+            let mut turned = scaled.clone();
+            crate::additional_animation::turn(&mut turned, point, axis, angle);
+            let change = spread(&scaled.positions, &turned.positions);
+            assert!(change < 1e-4, "angle {angle}: {change}");
+            // A vertex on the hinge does not move.
+            let mut hinged = scaled.clone();
+            hinged.positions[0] = point;
+            crate::additional_animation::turn(&mut hinged, point, axis, angle);
+            assert_eq!(hinged.positions[0], point);
+        }
+        // The wrong order: turn in shape units, then scale the result.
+        let mut late = panel.clone();
+        crate::additional_animation::turn(&mut late, hinge.0, hinge.1, 0.9);
+        let late = late.scaled(scale);
+        let mut early = scaled.clone();
+        crate::additional_animation::turn(&mut early, point, axis, 0.9);
+        let shear = spread(&late.positions, &early.positions);
+        assert!(shear > 0.05, "{shear}");
+        let shear = spread(&scaled.positions, &late.positions);
+        assert!(shear > 0.05, "late scaling shears the panel: {shear}");
+    }
     #[test]
     fn closed_airbrake_skin_returns_when_the_open_panel_stows() {
         let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();

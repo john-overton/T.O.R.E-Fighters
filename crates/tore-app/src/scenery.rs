@@ -279,6 +279,14 @@ fn parked_shapes<'a>(
                 .ok_or_else(|| format!("missing {}", pose.shape))
                 .and_then(|bytes| {
                     tore_formats::shape::Shape::with_state(bytes, &state).map_err(|e| e.to_string())
+                })
+                // The type's per-axis shape scale (M2K-2), so a parked
+                // Mirage 2000 draws at the size the flown one does.
+                .map(|shape| match pose.aircraft {
+                    Some(id) => {
+                        shape.scaled(tore_formats::aircraft::scale::shape_axis_scale_f32(id))
+                    }
+                    None => shape,
                 });
             match shape {
                 Ok(shape) => Some((pose, shape)),

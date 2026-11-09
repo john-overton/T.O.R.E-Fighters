@@ -3,6 +3,8 @@ use crate::{Archive, Result, invalid};
 use std::collections::{BTreeMap, BTreeSet};
 #[path = "aircraft_corrections.rs"]
 pub mod corrections;
+#[path = "aircraft_scale.rs"]
+pub mod scale;
 #[path = "aircraft_schema.rs"]
 pub(crate) mod schema;
 #[path = "aircraft_stations.rs"]

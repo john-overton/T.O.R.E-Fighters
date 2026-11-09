@@ -1531,6 +1531,106 @@ real 44.2 ft (22% wide), recorded here as a model fact, not corrected. No mesh
 bytes, exported geometry or retail art are committed; the review frames live
 under `.local/m3-aircraft/frames/M31-2/`.
 
+## Aircraft shape scale (2026-11-09)
+
+Implementation, slice M2K-2 of the Mirage 2000 port. Every aircraft shape draws
+at the aircraft convention: one shape unit is one third of a foot (times the
+SH header factor, `tore_sim::combat::debris::scale`). On top of that scalar,
+each aircraft now has a per-axis multiplier, `[x, y, z]` in shape units (x
+right, y forward, z up), held in one table:
+`tore_formats::aircraft::scale::shape_axis_scale`. It is `[1, 1, 1]` for every
+aircraft but the Mirage 2000, pinned by a test that walks every `AircraftId`.
+The factors are exact constants (four decimals, rounded once to `f32` where the
+vertices are multiplied), never read from a device, so every multiplayer peer
+draws and measures the same aircraft.
+
+| Aircraft | `[x, y, z]` | Provenance |
+| --- | --- | --- |
+| Every aircraft but the Mirage 2000 | `[1, 1, 1]` | spec-derived (no change) |
+| Mirage 2000 (`M2000.PT`, `m20.SH`) | `[1.3616, 1.2290, 1.5053]` | **opinionated** (John, 2026-11-09, "Per axis to real", over uniform scaling); the factors are **fitted** (agent derivation, below) |
+
+**Fit.** `m20.SH` with the gear down measures x -33 to 33 (66 units, 22.0 ft),
+y -44 to 71 (115 units, 38.3 ft) and z -12 to 22 (34 units, 11.3 ft), checked
+against the shape on 2026-11-09. The real Mirage 2000 is 9.13 m (29.95 ft) in
+span, 14.36 m (47.11 ft) long and 5.20 m (17.06 ft) high from the ground to the
+fin tip with the gear down (MILAVIA Mirage 2000 specifications, mirror page;
+Deagel gives 5.2 m height too; Dassault Aviation's data sheet gives 29.9 ft span
+and 47 ft length; accessed 2026-11-09. Other pages round the length and height
+differently, 14.55 m and 5.15 m on MILAVIA's main page and 5.30 m at FAS, under
+3%). Each factor is `real feet * 3 / extent in units`: 1.36155 (span), 1.22903
+(length) and 1.50529 (height), rounded to four places. The scaled shape lands
+within 0.05% of the three real dimensions, pinned by a test over the retail
+shape (skipped without media). The sweep angle changes a little because x and y
+scale differently (John accepted this). The tall factor stretches the fin and
+fuselage height more than the span; the frames in
+`.local/m3-aircraft/frames/M2K-2/` show it.
+
+**Where the scale applies, and the order with animation.** A non-uniform scale
+applied after a panel turns shears it (a turned strip stops being rigid), so
+the scale is applied first, to the shape's vertices as they are loaded
+(`Shape::scaled`; the face's stored normal turns with the inverse scale and
+keeps its length). Rigs then work on scaled geometry and every panel stays
+rigid. A rig that names a hinge or an axis in shape units scales those points
+with `scale::scale_point` (an axis is the line between two scaled points), or
+reads them off the scaled geometry as the generic gear, brake and flame groups
+do. A distance a record gives in shape units follows the matching axis
+(`scale::right_up_forward` gives the factors in the order a hardpoint row, a CE
+vector or a world offset uses).
+
+| Consumer | Status |
+| --- | --- |
+| Drawn aircraft (external views, the stores preview) | scaled at load: `variety_animation::Rig::load` scales the shape and every branch pose |
+| Damage looks and regional damage sections | `DamageArt::load` scales the intact, body and fragment shapes; sections are cut on the drawn size |
+| Rig hinges and device groups | generic groups measured on scaled geometry; the M2000's own rig (M2K-3, M2K-4) must scale any shape-unit point it names |
+| Wingtip vapor attachments | `Airframe::streamer_points` scales the CE point |
+| Station rows as drawn and as fired | `hardpoints::placed_on` scales the record row, and the underside the stores hang from is built on the scaled shape; M2K-5 measures and sets the real stations |
+| Breakup piece offsets | `debris::attachment` scales per axis |
+| Gear low point | `models/variety.rs`: 12 units become 18.06 units, 6.02 ft |
+| Parked placement and size | the parked path's identity is unchanged; a parked Mirage 2000 stands on and draws the scaled gear-down shape |
+| Contrail and nozzle positions | come from the scaled shape; M2K-4 maps the nozzle faces |
+| Hit size | not shape-derived: every aircraft uses one 28 ft contact sphere (`AIRCRAFT_RADIUS_FT`), unchanged |
+| Cockpit eye point | one fixed seat offset for every aircraft (`mirrors::pilot_eye`), unchanged; M2K-7 owns the cockpit |
+
+Tests: the walk over every `AircraftId` in `aircraft_scale.rs`, the
+real-size and normal checks (`crates/tore-import/tests/m2000_shape_scale.rs`),
+the rigid-panel check (`variety_animation::tests`), the station and gear low
+point checks in `tore-sim`. No mesh bytes, exported geometry or retail art are
+committed.
+
+## Mirage 2000 skin review
+
+On 2026-11-09, slice M2K-2 checked the flyable `M2000.PT` import's skin (media
+identity in [the Mirage 2000 source review](aircraft-variety.md#mirage-2000-source-review-2026-11-09)),
+drawn at its [per-axis real size](#aircraft-shape-scale-2026-11-09). The
+flyable path draws the reviewed `M20.SH`: 206 faces on the runtime state path
+(208 on the export path, the two extra being the decals below), one texture
+`_M20.PIC`. The four damage shapes `M20_A.SH` to `M20_D.SH` and their textures
+`_M20_A.PIC` to `_M20_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs), scaled alike. No
+damage variant is registered for this identity, so a destroyed Mirage 2000
+draws the intact skin with regional cuts rather than an A/C body substitution,
+as the MiG-25, MiG-31 and F-16A do; the damage sections are cut on the scaled
+body.
+
+The Mirage 2000 does **not** need the [MiG-21 stored-normal
+exception](#mig-21-skin-review). `M20.SH` has 25 exact-vertex twin groups, every
+one a pair with opposite stored normals (pinned by a retail-reading test), so
+smooth mode pairs each double-sided panel through the shared [panel
+contract](../spec/aircraft-animation.md#double-sided-panels) and hides the rear
+member. A top and an under capture in smooth mode, gear down, show no grey
+underside through the top, no flicker and no clipped marking (the tail serial
+and fin art and the fuselage code are textured faces and draw whole).
+
+The shape carries two `E0` runtime decal slots on the wing underside: slot 4 at
+address `2289` (x 8 to 17, y -29 to -20, z -4) and slot 3 at `23e1` (x -17 to
+-8, y -25 to -16, z -2). The runtime projector omits both, and neither is
+filled with a piece of the main skin, following [texture state and
+decals](#texture-state-and-decals). The per-axis scale stretches the fin and
+fuselage height by half (z 1.5053): the fin and canopy read tall against the
+span, as the real aircraft's fin does; the review frames live under
+`.local/m3-aircraft/frames/M2K-2/`. No mesh bytes, exported geometry or retail
+art are committed.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards

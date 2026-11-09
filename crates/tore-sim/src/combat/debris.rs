@@ -69,8 +69,12 @@ pub fn attachment(
             }
         }
     }
-    let offset: Vector =
-        std::array::from_fn(|i| (center[i] - (piece_lo[i] + piece_hi[i]) * 0.5) * scale(id));
+    // The shape axes (right, forward, up) carry the aircraft's per-axis shape
+    // scale (M2K-2; all 1 but the Mirage 2000's).
+    let axes = tore_formats::aircraft::scale::shape_axis_scale(id);
+    let offset: Vector = std::array::from_fn(|i| {
+        (center[i] - (piece_lo[i] + piece_hi[i]) * 0.5) * scale(id) * axes[i]
+    });
     Ok([offset[0], offset[2], offset[1]])
 }
 fn bounds(shape: &Shape) -> Result<(Vector, Vector)> {

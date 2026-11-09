@@ -1906,3 +1906,19 @@ The ordnance audit pins moved to 40 aircraft as a first measurement of a record
 not yet reviewed station by station; see the [ordnance availability
 baseline](../baselines/ordnance-availability.md#the-mirage-2000-joins-the-roster-m2k-1-2026-11-09).
 Wire identity slots: codes 0 to 40 are in use, 23 of the 64 remain.
+
+## Mirage 2000 shape, real size and skin (M2K-2, 2026-11-09)
+
+Implementation, slice M2K-2, John's decision 3 of 2026-11-09 ("Per axis to
+real"). `m20.SH` is scaled per axis to the real Mirage 2000: factors
+`[1.3616, 1.2290, 1.5053]` (x right, y forward, z up), fitted from the measured
+shape extents to 9.13 m span, 14.36 m length and 5.20 m height. The table, the
+fit, the order with animation and the list of consumers are in [aircraft shape
+scale](objects-and-shapes.md#aircraft-shape-scale-2026-11-09). The [skin
+review](objects-and-shapes.md#mirage-2000-skin-review) (double-sided panels,
+damage looks, the decal slots) is in the objects and shapes guide; the
+`render-m2000-skin` battery scenario captures the top and under views with the
+gear down. Provenance: choice opinionated
+(John, 2026-11-09), factors fitted. Later slices use the scaled geometry: M2K-3
+and M2K-4 scale any shape-unit hinge point their rigs name, M2K-5 measures the
+stations on it.

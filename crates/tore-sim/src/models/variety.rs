@@ -106,8 +106,9 @@ impl VarietyFlightModel {
             // source scale (docs/formats/aircraft-variety.md, MiG-31 review).
             Mig31 => 30. / 3.,
             // M20.SH deployed gear low point Z=-12 at 1/3 ft a unit (gear
-            // contact -13 against low -12 in the M2K-0 review).
-            M2000 => 12. / 3.,
+            // contact -13 against low -12 in the M2K-0 review), scaled by the
+            // shape's height factor (M2K-2: 12 units become 18.06, 6.02 ft).
+            M2000 => 12. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {
@@ -386,6 +387,19 @@ pub(crate) mod tests {
             wrong.shape = "F18.SH".into();
             assert!(AircraftModel::for_aircraft(&wrong).is_err());
         }
+    }
+    #[test]
+    fn the_mirage_2000_gear_low_point_scales_with_its_shape_height_and_no_other_does() {
+        let clearance = |id| {
+            let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
+            model.configuration().equipment.ground_clearance_ft
+        };
+        // 12 shape units at a third of a foot, times the z factor 1.5053.
+        let expected = 12. / 3. * tore_formats::aircraft::scale::M2000_SHAPE_SCALE[2];
+        assert!((clearance(AircraftId::M2000) - expected).abs() < 1e-12);
+        assert!((clearance(AircraftId::M2000) - 6.0212).abs() < 1e-9);
+        // The MiG-31 keeps its 30 unit low point at a third of a foot.
+        assert_eq!(clearance(AircraftId::Mig31), 30. / 3.);
     }
     #[test]
     fn fitted_top_speeds_move_only_the_fast_side_and_stay_valid() {
