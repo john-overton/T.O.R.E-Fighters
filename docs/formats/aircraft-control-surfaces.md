@@ -606,6 +606,14 @@ corner moves 4 units in +X on both sides and whose hinge corners do not move: a
 yaw, the same sign on both fins. The fin's tip quad and hidden root plate stay
 fixed, as in the source.
 
+Whole-panel differential roll, 2026-11-08 (slice TR-2). Each stabilator plate was
+already one group turned about the lateral spindle through its root chord
+midpoint; it now also takes a fitted `0.10*aileron` differential roll, raising
+the right trailing edge and lowering the left, the outboard-aileron sense, with
+the pitch and roll terms summed and clamped to 0.40 rad. The plate lies at a
+constant Z=-3, so it has no anhedral to tilt the spindle by, and no root corner
+is pinned. See the [MiG-31 fit](../spec/variety-animation.md#mig-31-control-fit).
+
 `0x612c` adds twelve gear cards (four per main, four nose, low point Z=-30): one
 strut plate and one painted wheel card per main side, and a centre strut with its
 cross plate at the nose. M31-4 turns each assembly as one rigid body about its

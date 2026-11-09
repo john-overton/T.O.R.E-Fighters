@@ -91,9 +91,32 @@ fn panels(c: Control) -> &'static [Panel] {
                 2,
                 -1.,
             ),
+            // The all-moving stabilators take differential roll too: a positive
+            // aileron raises the right trailing edge and lowers the left, the
+            // same sense as the outboard ailerons. The root chord midpoint stays
+            // the anchor.
+            (
+                &STABILATOR_R,
+                &[[17., -24., -3.], [17., -56., -3.]],
+                [35., -68., -3.],
+                2,
+                1.,
+            ),
+            (
+                &STABILATOR_L,
+                &[[-17., -24., -3.], [-17., -56., -3.]],
+                [-35., -68., -3.],
+                2,
+                -1.,
+            ),
         ],
         _ => &[],
     }
+}
+/// True when the group is one all-moving stabilator plate, whose invariant is
+/// its root chord midpoint rather than any single corner.
+fn stabilator_panel(ids: &[usize]) -> bool {
+    ids == STABILATOR_R.as_slice() || ids == STABILATOR_L.as_slice()
 }
 /// The midpoint of every occurrence of the given source corners, followed from
 /// reference to pose. The all-moving stabilator has no fixed source corner, so
@@ -373,9 +396,10 @@ pub(super) fn check(
             }
             continue;
         }
-        if matches!(c, Control::Elevator) {
+        if matches!(c, Control::Elevator) || stabilator_panel(ids) {
             // The all-moving stabilator keeps its root chord midpoint, not a
-            // single corner, so the anchor pair is averaged.
+            // single corner, so the anchor pair is averaged. It does this on
+            // pitch and on differential roll alike.
             match midpoint_gap(&old, &new, anchor, scale) {
                 Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
                 None => m.reviewed_anchor_missing = true,
