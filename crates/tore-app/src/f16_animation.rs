@@ -304,18 +304,27 @@ impl Rig {
             } else {
                 1.
             };
-            let mut moved = source.clone();
+            // All-moving stabilator: the whole five-corner panel, both windings,
+            // turns rigidly about its pivot spindle through the root chord
+            // midpoint. The spindle is lateral, square to the fuselage like the
+            // real F-16's, tilted only by the panel's anhedral, so the whole
+            // trailing edge moves evenly from root to tip; a swept span axis
+            // would leave the tip almost still (agent review, 2026-11-08, of
+            // John's whole-surface request). The axis points outboard on both
+            // sides in x, so the same turn raises both trailing edges.
+            // The fitted differential roll raises the right trailing edge and
+            // lowers the left for a positive aileron, the flaperon sense; the
+            // total is clamped to the pitch plus roll maximum. No root corner is
+            // pinned, so a small root gap to the fuselage is accepted.
+            let angle = (-0.30 * state.elevator.clamp(-1., 1.)
+                - side as f64 * 0.10 * state.aileron.clamp(-1., 1.))
+            .clamp(-0.40, 0.40);
             turn(
-                &mut moved,
+                &mut result,
                 [side * 10., -45.5, 1.],
-                [1., 0., 0.],
-                -0.30 * state.elevator.clamp(-1., 1.),
+                [17.5, 0., -side * 4.],
+                angle,
             );
-            for (p, q) in result.positions.iter_mut().zip(moved.positions) {
-                if p[0].abs() != 10. {
-                    *p = q;
-                }
-            }
             update_normal(source, &mut result);
         } else if BRAKE_CLOSED.contains(&address) {
             if state.brake > 0. {
@@ -598,12 +607,14 @@ mod tests {
         }
     }
     #[test]
-    fn signed_tail_and_rudder_controls_keep_their_own_exact_roots() {
+    fn signed_tail_and_rudder_controls_move_whole_panels() {
         let rig = rig();
         let mut s = state();
+        // The all-moving stabilator has no fixed root corner: the whole panel
+        // turns rigidly, its root chord midpoint stays put, and its trailing
+        // edge moves in the signed direction for both elevator and differential
+        // roll (opposite per side). No part stays pinned while the rest turns.
         for control in [-1., -0.5, 0., 0.5, 1.] {
-            s.elevator = control;
-            s.rudder = control;
             for (address, side) in [(0x5606, -1.), (0x52cd, 1.)] {
                 let original = face(
                     address,
@@ -613,17 +624,41 @@ mod tests {
                         [side * 22., -55., 0.],
                     ],
                 );
-                let moved = rig.animate(&original, &s).unwrap();
-                assert_eq!(moved.positions[..2], original.positions[..2]);
-                if control == 0. {
-                    assert_eq!(moved.positions, original.positions);
-                } else {
-                    assert!(
-                        (moved.positions[2][2] - original.positions[2][2]) * control as f32 > 0.
-                    );
+                for (elevator, aileron) in [(control, 0.), (0., control)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    s.rudder = 0.;
+                    let moved = rig.animate(&original, &s).unwrap();
+                    for i in 0..3 {
+                        let chord = (moved.positions[0][i] + moved.positions[1][i]) * 0.5;
+                        assert!((chord - [side * 10., -45.5, 1.][i]).abs() < 1e-4);
+                    }
+                    for i in 0..3 {
+                        for j in i + 1..3 {
+                            assert!(
+                                (distance_squared(original.positions[i], original.positions[j])
+                                    - distance_squared(moved.positions[i], moved.positions[j]))
+                                .abs()
+                                    < 1e-3
+                            );
+                        }
+                    }
+                    let dz = moved.positions[2][2] - original.positions[2][2];
+                    if elevator != 0. {
+                        assert!(dz * elevator as f32 > 0.);
+                    } else if aileron != 0. {
+                        assert!(dz * aileron as f32 * side > 0.);
+                    } else {
+                        assert_eq!(moved.positions, original.positions);
+                    }
+                    assert_eq!(moved.uv, original.uv);
                 }
-                assert_eq!(moved.uv, original.uv);
             }
+        }
+        for control in [-1., -0.5, 0., 0.5, 1.] {
+            s.elevator = 0.;
+            s.aileron = 0.;
+            s.rudder = control;
             let original = face(
                 0x6323,
                 vec![[0., -40., 11.], [0., -54., 37.], [0., -51., 17.]],
@@ -635,6 +670,7 @@ mod tests {
             } else {
                 assert!(moved.positions[2][0] * control as f32 > 0.);
             }
+            assert_eq!(moved.uv, original.uv);
         }
     }
     #[test]

@@ -246,7 +246,7 @@ Coordinates use one-third foot per unit.
 | Component | F-16C | F-104N |
 | --- | --- | --- |
 | Rudder | Neutral skins around the diagonal source hinge, `0.35*rudder` radians | Same angle about its own source hinge |
-| Pitch | Pin tail root chords; rotate distal vertices `-0.30*elevator` around lateral pivots [+/-10,-45.5,1] | Pin the centerline root chord; rotate distal high-tail vertices by the same angle around [0,-61,21] |
+| Pitch | The all-moving stabilators `5606/564b` and `52cd/52e6` turn as one whole five-corner panel per side about a lateral pivot spindle (tilted by the anhedral) through the root chord midpoint [+/-10,-45.5,1]; `-0.30*elevator` raises both trailing edges, plus a fitted `0.10*aileron` differential (right trailing edge up, left down), total clamped to 0.40 rad | Pin the centerline root chord; rotate distal high-tail vertices by the same angle around [0,-61,21] |
 | Flaps | Morph all eight original skins to exact source down poses | Morph exact source down poses; retain the original left-only closure |
 | Fitted flaperons | After flap morph, rotate shared trailing points `-0.20*aileron` around outward axes [+/-26,-3,0] through [+/-14,-12,1]; pin forward edges | Same angle, outward axes [+/-21,0,-2] through [+/-9,-15,-1.5]; pin forward edges |
 | Brakes | Original eight closed faces at zero, eight open faces at one; interpolate the source footprint. Retain the source's one-unit root quantization | Keep Y=24 roots fixed; close distal open skins about [0,24,7] through `atan(2/3)` radians; hide at zero |
@@ -265,6 +265,20 @@ rows, and none of those drives a rig transform. The F-16A probe therefore
 produces byte-identical control, gear, brake, exhaust and flap/roll geometry to
 the F-16C (agent verification, 2026-11-08); `flight-animation-f16a` requires the
 same reviewed scope and 25-pose sweep under the `F16.PT` selection key.
+
+Whole-panel stabilators and differential roll, 2026-11-08 (slice F16A-9, John's
+request). Before this the F-16 rig pinned the two root corners of each
+stabilator and turned only the distal vertices about a lateral axis, so the
+panel folded along a diagonal and moved on pitch alone. Now the whole
+five-corner panel, both windings, turns rigidly about a lateral pivot spindle through the
+root chord midpoint. No root corner is pinned, so a small root gap to the
+fuselage is accepted and recorded, as on the MiG-25 and MiG-31. The stabilator
+also takes a fitted differential roll, 0.10 rad (agent decision under John's
+2026-11-08 request), which raises the right trailing edge and lowers the left
+for a positive aileron, the flaperon sense; the pitch and roll terms are summed
+and clamped to 0.40 rad. The probe's Elevator anchor is now the root chord
+midpoint, and the stabilators join the Aileron direction witnesses, opposite per
+side. The F-16C and F-16A share this unchanged.
 
 F-16 main wheels split at Z=-14. Rigid lower pieces rise 10 units during the
 first half of closing and another 8 during the second half; then X shifts +2.5

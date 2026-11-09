@@ -156,6 +156,14 @@ flaps have four skins/closures on each side. Right lower inboard triangle
 blanket order shared with neighboring skins. Nose brace 0x5e1f/0x5e36 has a
 one-unit distal pin edge, which must stay intact under the fitted motion.
 
+Each stabilator is one five-corner double-sided panel: `0x5606`/`0x564b` on the
+left and `0x52cd`/`0x52e6` on the right, root chord X=+/-10 from Y=-32 to -59 at
+Z=1, tip corners at X=26..29 and Z=-3 (anhedral), and no fixed root corner. Its
+fitted motion became whole-panel and roll active on 2026-11-08 (slice F16A-9):
+the whole panel turns about a lateral pivot spindle through the root chord midpoint and
+takes a differential roll, so no part stays pinned while the rest turns. See the
+[F-16/F-104 fit](../spec/variety-animation.md#f-16c-and-f-104n-control-fits).
+
 F104 neutral rudder 0x5646/0x566e has edge [0,-53,9] to [0,-55,21]. Its high
 tail shares a centerline root chord at Y=-49..-73,Z=21. The flap down branch
 provides closure 0x5920 on the left only. Main wheel skins are separate from

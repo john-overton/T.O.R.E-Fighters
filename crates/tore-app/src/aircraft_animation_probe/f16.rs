@@ -4,6 +4,8 @@ use super::*;
 const FLAPS: [usize; 8] = [
     0x60d3, 0x60fa, 0x6121, 0x6142, 0x5f45, 0x5f6c, 0x5f93, 0x5fb4,
 ];
+/// Both windings of each all-moving stabilator panel.
+const TAILS: [usize; 4] = [0x5606, 0x564b, 0x52cd, 0x52e6];
 const LEFT_WHEELS: [usize; 4] = [0x5a30, 0x5a5d, 0x5a8a, 0x5ab1];
 const RIGHT_WHEELS: [usize; 4] = [0x5c30, 0x5c5d, 0x5c8a, 0x5cb1];
 const NOSE_WHEELS: [usize; 4] = [0x5e92, 0x5eb1, 0x5ed0, 0x5eef];
@@ -91,25 +93,32 @@ pub(super) fn check(
                 .get(key)
                 .is_none_or(|g| g.positions.len() != f.positions.len())
         });
-        for point in points {
-            let moved = f4::witness_positions(&before, &after, *point);
-            metric.reviewed_anchor_missing |= moved.is_empty();
-            for p in moved {
-                metric.max_reviewed_anchor_gap = metric
-                    .max_reviewed_anchor_gap
-                    .max(distance(*point, p) * scale);
+        if matches!(control, Control::Elevator) {
+            // The all-moving stabilator has no fixed root corner: the invariant
+            // is the root chord midpoint, so the reviewed root corners are
+            // averaged rather than each held fixed.
+            match midpoint_gap(&before, &after, points, scale) {
+                Some(gap) => {
+                    metric.max_reviewed_anchor_gap = metric.max_reviewed_anchor_gap.max(gap)
+                }
+                None => metric.reviewed_anchor_missing = true,
+            }
+        } else {
+            for point in points {
+                let moved = f4::witness_positions(&before, &after, *point);
+                metric.reviewed_anchor_missing |= moved.is_empty();
+                for p in moved {
+                    metric.max_reviewed_anchor_gap = metric
+                        .max_reviewed_anchor_gap
+                        .max(distance(*point, p) * scale);
+                }
             }
         }
         if let Some(gap) = shared_vertex_gaps(&before, &after, scale).first() {
             metric.max_reviewed_skin_gap = metric.max_reviewed_skin_gap.max(gap.gap);
         }
     }
-    let paired: Vec<_> = match control {
-        Control::Flaps | Control::Aileron => FLAPS.to_vec(),
-        Control::Elevator => vec![0x5606, 0x564b, 0x52cd, 0x52e6],
-        Control::Rudder => vec![0x6323, 0x634a],
-        _ => Vec::new(),
-    };
+    let paired = paired(control);
     let old: Vec<_> = source
         .iter()
         .filter(|f| paired.contains(&f.address))
@@ -138,6 +147,10 @@ pub(super) fn check(
             Control::Aileron => vec![
                 (&FLAPS, [-40., -21., 1.], 2, -1.),
                 (&FLAPS, [40., -21., 1.], 2, 1.),
+                // The all-moving stabilators take differential roll: a positive
+                // aileron raises the right trailing edge and lowers the left.
+                (&[0x5606, 0x564b], [-26., -59., -3.], 2, -1.),
+                (&[0x52cd, 0x52e6], [26., -59., -3.], 2, 1.),
             ],
             Control::Flaps => vec![
                 (&FLAPS, [-40., -21., 1.], 2, -1.),
@@ -170,6 +183,46 @@ pub(super) fn check(
     }
     if matches!(control, Control::Gear) {
         wheels(reference, pose, value, scale, metric);
+    }
+}
+/// The midpoint of every occurrence of the given source corners, followed from
+/// reference to pose. The all-moving stabilator has no fixed source corner, so
+/// its root chord midpoint is the invariant instead.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: &[[f32; 3]],
+    scale: f32,
+) -> Option<f32> {
+    let mut moved = Vec::new();
+    for (key, face) in old {
+        for (i, p) in face.positions.iter().enumerate() {
+            if corners.contains(p)
+                && let Some(q) = new.get(key).and_then(|f| f.positions.get(i))
+            {
+                moved.push(*q);
+            }
+        }
+    }
+    if moved.is_empty() {
+        return None;
+    }
+    let average: [f32; 3] =
+        std::array::from_fn(|k| moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32);
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| corners.iter().map(|p| p[k]).sum::<f32>() / corners.len() as f32);
+    Some(distance(average, middle) * scale)
+}
+/// Every face of one moving group, for the whole-panel shared-vertex witness.
+fn paired(control: Control) -> Vec<usize> {
+    match control {
+        Control::Flaps => FLAPS.to_vec(),
+        // The stabilators now take differential roll too, so their whole-panel
+        // skin group joins the flaperon group for the roll witness.
+        Control::Aileron => FLAPS.iter().copied().chain(TAILS).collect(),
+        Control::Elevator => TAILS.to_vec(),
+        Control::Rudder => vec![0x6323, 0x634a],
+        _ => Vec::new(),
     }
 }
 fn wheels(reference: &[Face], pose: &[Face], travel: f64, scale: f32, metric: &mut Metrics) {
@@ -360,6 +413,44 @@ mod tests {
         let brake = roots(Control::Brake);
         assert_eq!(brake.len(), 2);
         assert!(brake.iter().all(|(addresses, _)| addresses.len() == 4));
+    }
+
+    #[test]
+    fn stabilator_midpoint_is_the_anchor_and_the_panel_is_one_skin_group() {
+        // The roll witness groups both windings of each stabilator with the
+        // flaperons, so a half-moved stabilator would show as a seam.
+        let roll = paired(Control::Aileron);
+        assert!(TAILS.iter().all(|address| roll.contains(address)));
+        assert!(FLAPS.iter().all(|address| roll.contains(address)));
+        assert_eq!(paired(Control::Elevator), TAILS);
+        // The root chord midpoint is the invariant, not either root corner.
+        let corners = &[[-10., -32., 1.], [-10., -59., 1.]];
+        let midpoint = [-10., -45.5, 1.];
+        let before = vec![super::super::tests::face(0x5606, corners.to_vec())];
+        // A rigid pitch about the midpoint holds it exactly.
+        let rotate = |p: [f32; 3], angle: f64| {
+            let offset = std::array::from_fn::<f64, 3, _>(|i| f64::from(p[i] - midpoint[i]));
+            let (sin, cos) = angle.sin_cos();
+            std::array::from_fn::<f32, 3, _>(|i| {
+                let turned = if i == 0 {
+                    offset[0] * cos - offset[1] * sin
+                } else if i == 1 {
+                    offset[0] * sin + offset[1] * cos
+                } else {
+                    offset[2]
+                };
+                midpoint[i] + turned as f32
+            })
+        };
+        let mut pitched = before.clone();
+        pitched[0].positions = corners.iter().map(|p| rotate(*p, 0.3)).collect();
+        let gap = midpoint_gap(&keyed(&before), &keyed(&pitched), corners, 1.);
+        assert!(gap.is_some_and(|gap| gap < 1e-4));
+        // A corner left behind moves the average off the midpoint.
+        let mut torn = pitched.clone();
+        torn[0].positions[0][0] += 0.5;
+        let gap = midpoint_gap(&keyed(&before), &keyed(&torn), corners, 1.);
+        assert!(gap.is_some_and(|gap| gap > 0.1));
     }
 
     #[test]
