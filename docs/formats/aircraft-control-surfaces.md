@@ -546,6 +546,14 @@ of each skin must stay in one group, or one half would be left behind the
 hinge. The two flap faces per side are exactly the pair the source words
 `0x7618` (left) and `0x761e` (right) remove; M25-3 turns them.
 
+Whole-panel differential roll, 2026-11-08 (slice TR-1). Each stabilator plate
+was already one group turned about the lateral spindle through its root chord
+midpoint; it now also takes a fitted `0.10*aileron` differential roll, raising
+the right trailing edge and lowering the left, the outboard-aileron sense, with
+the pitch and roll terms summed and clamped to 0.40 rad. The plate lies at a
+constant Z, so it has no anhedral to tilt the spindle by, and no root corner is
+pinned. See the [MiG-25 fit](../spec/variety-animation.md#mig-25-control-fit).
+
 `0x760c` adds twelve gear cards (four per main, four nose, low point Z=-28):
 one strut plate and one painted wheel card per main side, and a centre strut
 with its cross plate at the nose. M25-4 turns each main pair as one rigid

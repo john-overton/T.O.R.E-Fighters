@@ -595,7 +595,7 @@ any diagonal split stay together, and the panel turns about one hinge line.
 
 | Control | Source panel and fitted motion |
 | --- | --- |
-| Pitch | The all-moving stabilators `3daa/3e4a` and `434c/43a2` turn as one flat plate per side, `-0.30*elevator` radians about a lateral axis through the root chord midpoint `[±18,-57,-1]`. A positive elevator raises both trailing edges. |
+| Pitch | The all-moving stabilators `3daa/3e4a` and `434c/43a2` turn as one flat plate per side about a lateral spindle through the root chord midpoint `[±18,-57,-1]`. The plate lies at a constant Z, so it has no anhedral to tilt the spindle by. `-0.30*elevator` raises both trailing edges, plus a fitted `0.10*aileron` differential (right trailing edge up, left down), total clamped to 0.40 rad. |
 | Yaw | The rear fin panels `320f/3237` and `2c1f/2cb2` turn `0.35*rudder` radians about the source split line from `[±16,-40,7]` to `[±23,-63,38]`. A positive rudder swings both trailing edges right. The forward fin panels stay fixed. |
 | Flaps | The inboard trailing panels `5020/5047` and `5127/514e` turn `0.40*flaps` radians about their source upper hinge edge, from `[18,-25,8]` to `[39,-29,5]` (left mirrored), lowering the trailing edge. These are the two faces the source words `0x7618` and `0x761e` remove. |
 | Roll | The outboard trailing panels `3c96/3ea3/3cb9/3ce2` and `41d1/43fb/421d/42b1` turn `-0.20*aileron` radians about their source hinge edge, from `[39,-29,5]` to `[70,-22,2]` (left mirrored). A positive aileron raises the right trailing edge and lowers the left. The forward triangle and aft quad of each skin share the group, so the diagonal seam never moves alone. |
@@ -630,6 +630,18 @@ source split from mid-root to the tip, and the ailerons are each wing's whole
 outboard source section (forward triangle and aft quad), so the outer wing
 tilts as one piece. Both stay whole source panels; neither animates part of a
 panel.
+
+Whole-panel stabilators with differential roll, 2026-11-08 (slice TR-1, John's
+request). The all-moving stabilators now also take a fitted differential roll,
+0.10 rad (agent decision under John's 2026-11-08 request), which raises the right
+trailing edge and lowers the left for a positive aileron, the outboard-aileron
+sense. The pitch term (`-0.30*elevator`) and the roll term are summed and
+clamped to 0.40 rad. The plate lies at a constant Z, so it has no anhedral and
+the spindle stays the lateral `[1,0,0]` axis through the unchanged root chord
+midpoint `[±18,-57,-1]`, not a swept span axis. No root corner is pinned, so the
+small root gap to the tail boom stays the reviewed moving/fixed boundary. The
+probe now checks the stabilators as Aileron direction witnesses, opposite per
+side, with the root chord midpoint still their anchor on pitch and roll alike.
 
 ## MiG-31 control fit
 

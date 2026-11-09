@@ -1,5 +1,6 @@
-//! MiG25 own-source control surfaces (all-moving stabilators, twin rudders,
-//! inboard flaps and outboard ailerons), gear, airbrake and afterburner flame.
+//! MiG25 own-source control surfaces (all-moving stabilators taking pitch and a
+//! fitted differential roll, twin rudders, inboard flaps and outboard ailerons),
+//! gear, airbrake and afterburner flame.
 //! See docs/spec/variety-animation.md "MiG-25 control fit".
 //! MIG25.SH ships no signed pitch, roll, yaw or flap branch, so every control
 //! role is a fitted geometric assignment over exact reviewed source panels.
@@ -104,7 +105,9 @@ fn branch(
 /// side. The aileron, flap and rudder lines pass through the reviewed source
 /// corners the fixed panel shares, so those corners do not move and the skins
 /// stay coincident. The all-moving stabilator has no fixed source corner, so its
-/// line passes through the root chord midpoint instead.
+/// line passes through the root chord midpoint instead. Its spindle is lateral
+/// and square to the fuselage: the flat stabilator plate lies at a constant Z,
+/// so it has no anhedral to tilt the spindle by.
 fn hinge(address: usize) -> ([f32; 3], [f32; 3], f64) {
     if STABILATOR_R.contains(&address) || STABILATOR_L.contains(&address) {
         let side = if STABILATOR_R.contains(&address) {
@@ -246,12 +249,20 @@ impl Rig {
         let mut result = source.clone();
         if is_stabilator(a) {
             let (pivot, axis, base) = hinge(a);
-            turn(
-                &mut result,
-                pivot,
-                axis,
-                base * state.elevator.clamp(-1., 1.),
-            );
+            let side = if STABILATOR_R.contains(&a) { 1. } else { -1. };
+            // All-moving stabilator: the whole flat five-corner plate, both
+            // windings, turns as one rigid panel about the lateral spindle
+            // through its root chord midpoint. No root corner is pinned, so a
+            // small root gap to the tail boom is accepted, as on the MiG-31.
+            // The pitch term keeps its fitted -0.30 sign; the fitted
+            // differential roll raises the right trailing edge and lowers the
+            // left for a positive aileron, the outboard-aileron sense, so the
+            // same angle moves the two panels oppositely. The two terms are
+            // summed and clamped to the pitch plus roll maximum.
+            let angle = (base * state.elevator.clamp(-1., 1.)
+                - side * 0.10 * state.aileron.clamp(-1., 1.))
+            .clamp(-0.40, 0.40);
+            turn(&mut result, pivot, axis, angle);
             update_normal(source, &mut result);
         } else if is_rudder(a) {
             let (pivot, axis, base) = hinge(a);
@@ -387,7 +398,10 @@ mod tests {
         let rig = Rig;
         let mut s = state();
         // address, a point the hinge holds, a trailing witness, measured axis,
-        // sign of a positive command, and the field that drives it.
+        // sign of a positive command, and the field that drives it. The
+        // all-moving stabilator keeps its root chord midpoint and moves whole on
+        // pitch; it also takes a differential roll, so a positive aileron raises
+        // the right trailing edge and lowers the left, opposite per side.
         type Case = (
             &'static [usize],
             [f32; 3],
@@ -396,7 +410,7 @@ mod tests {
             f32,
             &'static str,
         );
-        let panels: [Case; 7] = [
+        let panels: [Case; 9] = [
             (
                 &STABILATOR_R,
                 [18., -57., -1.],
@@ -412,6 +426,22 @@ mod tests {
                 2,
                 1.,
                 "elevator",
+            ),
+            (
+                &STABILATOR_R,
+                [18., -57., -1.],
+                [18., -69., -1.],
+                2,
+                1.,
+                "aileron",
+            ),
+            (
+                &STABILATOR_L,
+                [-18., -57., -1.],
+                [-18., -69., -1.],
+                2,
+                -1.,
+                "aileron",
             ),
             (
                 &RUDDER_R,
