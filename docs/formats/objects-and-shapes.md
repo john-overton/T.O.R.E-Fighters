@@ -1597,6 +1597,13 @@ the rigid-panel check (`variety_animation::tests`), the station and gear low
 point checks in `tore-sim`. No mesh bytes, exported geometry or retail art are
 committed.
 
+Cockpit eye point, 2026-11-10 (M2K-7, agent decision, unchanged): the table row
+above stays true. The Mirage 2000's canopy top on the scaled shape is 3.5 ft above
+the model origin and 9.8 to 18.0 ft ahead of it, against the fixed pilot's eye 7
+ft up and 10 ft ahead, the same relation the Rafale's own canopy has to the same
+eye (top 3.0 ft, 8 to 16 ft ahead). No per-aircraft eye was added; see [the
+Mirage sensors, HUD and cockpit section](aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
+
 ## Mirage 2000 skin review
 
 On 2026-11-09, slice M2K-2 checked the flyable `M2000.PT` import's skin (media

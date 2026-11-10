@@ -83,6 +83,12 @@ index 40 and title, button and press indices 1, 1 and 1, identical to the
 MiG-25's `SU33_C.HUD`. The MiG-31 therefore draws the Yak-141 `~Y141_P.PIC`
 bezel over the `~Y141H.PIC` cockpit (M31-7).
 
+The Mirage 2000 flies the Rafale cockpit by John's decision of 2026-11-09
+(opinionated): `M2000.PT` names `rafale.HUD`, which resolves to `RAFALE.HUD`,
+whose panel is `~raf_p`. The Mirage therefore draws the Rafale `~RAF_P.PIC` bezel
+over `~RAFH.PIC` (M2K-7). Its Systems window shows one engine readout, as every
+aircraft's does, and its own fuel.
+
 ## Geometry (640x480, four windows)
 
 All numbers are window-relative pixels unless stated. The original computes

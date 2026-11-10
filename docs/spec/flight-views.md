@@ -267,3 +267,13 @@ the aircraft from outside, then recovers when the subject returns, instead of
 refusing the key or returning to F1. Playing backwards, the fly-by point is
 placed ahead of the reversed motion (an agent choice). The replay also has an
 object view from any object to any other, described there.
+
+## Pilot's eye on the Mirage 2000 (2026-11-10, M2K-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept
+for the Mirage 2000 at its real-size scale (agent decision, no per-aircraft eye
+exists). Measured against the scaled shape it sits 3.5 feet above the canopy top
+and at its aft end, the same place relative to its canopy as the Rafale's, so
+Back shows the Mirage's spine and fin the way it shows the Rafale's. Evidence in
+[the Mirage section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
+

@@ -1964,3 +1964,96 @@ ordnance](aircraft-ordnance.md#the-mirage-2000-m2k-6-2026-11-10) and the
 The earlier "per-row quantities are a host rule for M2K-6" sentence above is
 answered there: the rows' own capacities (250 rounds, 1 tank, 4, 2 and 2) are the
 default quantities.
+
+## Mirage 2000 sensors, HUD and cockpit (M2K-7, 2026-11-10)
+
+Slice M2K-7 confirmed the Mirage 2000 on the shared sensor records and the
+Rafale HUD and cockpit family. No game code changed: the bindings were wired in
+M2K-1 and every record was already reviewed. Added: a retail-reading test and
+documentation.
+
+**Sensors (spec-derived, retail records, already reviewed).** `--sensor-summary`
+reads: `M2000: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg
+look-down 0 ADVANCED; infrared none; visual VIS340.SEE search 10 nmi 170x140 deg
+track 5 nmi 170x140 deg; jammer F18.ECM LATE strength 0.30; signature radar 100
+infrared 100`. That is the F/A-18D's line, record for record: `F18R.SEE` is
+`Preset::Advanced`, `F18.ECM` is `Generation::LateColdWar`, and no
+`sensors/profile.rs` arm was needed (the MiG-31 needed two because its records
+were unreviewed). The infrared channel is absent because the record carries no
+`.SEE` infrared row (the Rafale's `AAS38.SEE` is a Rafale-only row). The
+signature numbers (radar 100, infrared 100) are the Mirage record's own fields
+and differ from the Rafale record's 50 and 70; they are read, not changed.
+Radar, the RWR and the jammer have no per-aircraft code: nothing under
+`crates/tore-sim/src/sensors` branches on the aircraft identity. In a live-fire
+run with the radar window open (`--live-fire --aircraft m2000 --weapon-slot 3`)
+the RADAR window reads `TWS 10NM 1 CONTACTS TRACK`, the Super 530D locks, flies,
+hits and kills, and the jammer key lights `JAM` in the RWR window.
+
+**HUD and cockpit (opinionated, John, 2026-11-09, decision 1).** Follow the
+record: `AircraftId::M2000.hud()` is `RAFALE.HUD`, the cockpit stem is `RAF`,
+the forward art is `~RAFH.PIC` and the instrument window frame is `~RAF_P.PIC`
+(`Hud::parse` of `RAFALE.HUD` names `~raf_p`, which `Airframe::load` requires of
+every flyable identity). The Rafale record is not aliased: `M2000.PT` stays the
+identity (test pinned in
+`crates/tore-import/tests/m2000_cockpit.rs`, retail-reading, skips without
+media). Overlays `~RAF_LH`, `~RAF_CH`, `~RAF_RH` exist. No `~M20*` cockpit
+resource exists in either archive.
+
+`--cockpit-sheet OUT_DIR M2000,RAFALE,F18` reported `m2000: stem M20 cockpit
+~RAFH.PIC art 1280x490 FITTED CLR`, centre mirror x 461 y 24 w 360 h 79, left x
+140 y 242 w 118 h 248, right x 1024 y 242 w 118 h 248, identical to the Rafale
+line. The HUD aperture mask arm `RAF` (M2K-1, `hud_aperture.rs`) draws the HUD
+behind the Rafale combiner glass; the forward capture shows the HUD inside the
+glass with no clipping.
+
+**Views (windowed, `--flight-view`, `--flight-look`).** Forward cockpit,
+look left and right at 45 degrees (the cockpit art turns away with the look, the
+HUD glass and canopy bow at the edge of frame), 90 degrees left and right and 60
+degrees up (no cockpit art, open sky, the same as the Rafale at 90 degrees), F3 Up and F2 Back all draw as for the Rafale. F2 Back shows the
+Mirage's spine, fin and wing roots from the pilot's eye. The four instrument
+windows or six (small layout) keep their positions. The standalone pages 0 to 9
+(RCS, Envelope, Front View, Other View, Target Cam, RWR, Nav Info, Systems,
+Weapons, Radar) render with the Rafale bezel.
+
+**Instruments and the single engine (decision 2).** The Systems window shows
+`THR`, `TEMP`, `OIL`, `HYD` and `FUEL` / `(+ EXT)`; it has one engine readout
+for every aircraft and never one per engine, so a one-engine Mirage on the
+twin-engine Rafale panel shows no second engine needle or readout (the panel
+art draws none; the live readouts are generated text). The fleet's twin-engine
+aircraft share the same single readout (it reads the engine system's
+temperature and the throttle). Fuel reads the Mirage's own record: `FUEL 6346
+LBS` (the Rafale reads 9,900), and `(+ EXT 990 LBS)` with the `F150.GAS`
+centreline tank, 989 LBS after the live-fire run's first seconds. The Weapons
+window lists `250 DEFA`, `4 AS 15`, `2 S530D`, `2 R-550` and `30 CHAFF` /
+`30 FLARE`. Throttle shows 70 percent at the free-flight start, as for the
+other aircraft. HUD airspeed and altitude boxes read the Mirage's own state
+(493 kt and 5,000 ft at the live-fire start).
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye`
+is one fixed offset for every aircraft: 7 ft above and 10 ft ahead of the model
+origin, used only by the F2 Back view, the rear-view mirrors and the replay's
+back and cockpit views. The forward cockpit view looks from the model origin
+and draws the 2D cockpit picture, so it does not depend on the eye point. There
+is no per-aircraft eye mechanism: `pilot_eye(position, body)` has no aircraft
+parameter and is called from the flight views, the mirror camera, the aircraft
+camera and four replay viewer sites, most of which do not hold an aircraft
+identity. Measured on the scaled shape (neutral dump, the topmost faces within
+4 units of the centreline): the Mirage's canopy top is 7 units, 3.5 ft above
+the origin, between 9.8 and 18.0 ft ahead of it, so the fixed eye sits 3.5 ft
+above the canopy and at its aft end. The Rafale's unscaled canopy top is 9
+units, 3.0 ft, between 8 and 16 ft ahead, so the Mirage eye stands in the same
+place relative to its canopy as the Rafale's. The F2 frames match. Not changed.
+If John wants a true seated eye (inside the canopy) it would be a fleet change:
+one eye table keyed by aircraft, threaded through those call sites.
+
+Evidence and frames: `.local/m3-aircraft/frames/M2K-7/`. Not run: an RWR with an
+emitter or missile plotted (see below).
+
+**RWR with a threat.** The live-fire fixture's target emits no radar and the
+diagnostic incoming round plots at the centre, so no scripted windowed run puts
+an emitter on the Mirage's RWR (the existing note that the RWR reaction has no
+headless or scripted path stands, [lane-flight](../testing/lane-flight.md)). The
+RWR window is aircraft-agnostic code (`rwr_readout`), covered by the shared unit
+tests. The frames show the window with the jammer lit and with the incoming
+round at the centre.
+

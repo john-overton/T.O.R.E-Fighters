@@ -184,3 +184,19 @@ feed, every other visible frame`. So the MiG-31 joins the Yak-141 on the
 reviewed `Y141H` left/right seeds of the 2026-10-12 review above; no new mask
 was fitted and no per-aircraft eye was added. The `--cockpit-sheet` tile and the
 `--capture-flight` cockpit frames are under `.local/m3-aircraft/frames/M31-7/`.
+
+## 2026-11-10 Mirage 2000 cockpit confirmation
+
+Slice M2K-7 confirmed the Mirage 2000 (`M2000.PT`) on the Rafale cockpit by
+John's decision of 2026-11-09 (opinionated). `--cockpit-sheet OUT_DIR
+M2000,RAFALE,F18` reported `m2000: stem M20 cockpit ~RAFH.PIC art 1280x490
+FITTED CLR` with the centre mask at x 461 y 24 w 360 h 79, the left mask at x 140
+y 242 w 118 h 248 and the right mask at x 1024 y 242 w 118 h 248, identical to the
+Rafale's three regions, and `Cockpit mirrors: 3 reviewed regions, 768x384 rear
+feed, every other visible frame`. The Mirage therefore joins the Rafale on the
+reviewed `RAF` seeds; no mask was fitted. The one shared pilot's eye
+(`mirrors::pilot_eye`) feeds the rear feed unchanged for the Mirage; its
+position against the scaled canopy is measured in [the Mirage sensors, HUD and
+cockpit section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
+Frames are under `.local/m3-aircraft/frames/M2K-7/`.
+
