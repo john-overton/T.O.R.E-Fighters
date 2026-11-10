@@ -3411,3 +3411,493 @@ not a constraint. `F5EE.PT` and `F5EV.PT` are not added.
 | Speed brake as one dorsal plate | Real brakes are paired and ventral | F5E-4 rigs the source panel only |
 | What the original does with `63d8`/`63de` | They delete the flap strip | Unknown; the rig keeps the strip drawn |
 | Leading-edge flaps | Real, not in the source | None drawn |
+||||||| 25a8c5b0
+
+## Tornado source review (2026-11-10)
+
+Research mode, slice TOR-0. This reviews `TOR.PT` (Tornado IDS) and its
+dependency closure before `AircraftId::Tornado` exists. `TOR.PT` is the 44th
+retail identity of the batch-5 plan (checkpoint code 44, appended by slice
+B5-1). It is not a parked target (no `parked_aircraft.rs` entry). No original
+module was executed. PT, SEE, ECM, JT and GAS are read as bounded BRF data with
+the shared field order in `aircraft_schema.rs`; SH and HUD are inspected as
+data. Slice done by Claude Sonnet (sonnet-medium). Nothing here changes code or
+behaviour. Real-aircraft figures are cited and never establish game behaviour.
+
+Questions open for John, **not decided here**: the record template values
+([below](#tornado-the-template-copy-list-for-john)), the real-size scale
+([below](#tornado-real-size-for-john)), the variable sweep
+([below](#tornado-variable-sweep-for-john)), the surfaces that fail or strain the
+whole-surface gate ([below](#tornado-surfaces-for-john)), the HUD and cockpit
+([below](#tornado-hud-and-cockpit-for-john)), the sensor, jammer and pod rows
+([below](#tornado-sensors-jammer-and-pod-for-john)) and the stations
+([below](#tornado-hardpoints)).
+
+### Tornado build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the
+[MiG-31 build section](#build-and-extraction)). The closure was extracted
+locally to `.local/m3-imports/scratch/tornado` with `tore-extract --include
+'TOR*' --include 'E2000.HUD' --include 'SU24.PT' ...` and name sweeps (`~TOR*`,
+`*TORN*`, `_TOR*`, `^*TOR*`, `*GR1*`, `*GR4*`, `*E2000*`, `~EF2*`, `*IDS*`).
+The `SETUP.ESA` installer copy of `FA_2.LIB` holds byte-identical `TOR.PT`,
+`TOR*.SH`, `_TOR*.PIC`, `F.BI` and ordnance; only `E2000.HUD` differs (71 bytes,
+a build difference). `swpatch.lib` (the toolkit patch archive, excluded from
+base-FA research) holds a different `TOR.SH` (33,280 bytes, CODE 28,198 against
+28,150, state words `7df0` to `7e14`, same 287 faces) and a larger `_TOR.PIC`;
+this review reads the base `FA_2.LIB` shape only. The usual five unrelated
+archive errors appear.
+
+### Tornado identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `TOR.PT`, 12,201 bytes, SHA-256 `39f9c677de59267bfcb87634a944433f7d659d47c1a850e9e699c1eb2d3f99fe` |
+| Displayed names | `Tornado`, `Tornado IDS`, `TOR.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 660; `instanceSize` 626 (parser default) |
+| Object class / year / hit points | `0x4000` (attack) / 1990 / 156; `expType` 30 |
+| PLANE flags | `0x15`: base `0x01`, multi-crew `0x04` (two seats), seat `0x10`; hook, no-lift and carrier clear |
+| Shape | `tor.SH` (33,280 bytes, scale exponent giving header scale 2), shadow `tor_s.SH` (14 faces) |
+| Damage looks | `TOR_A.SH` 290 faces, `TOR_B.SH` 36, `TOR_C.SH` 314, `TOR_D.SH` 37 |
+| Skins | `_TOR.PIC` 150,604 bytes, `_TOR_A/B/C/D.PIC` 141,764 / 42,704 / 132,664 / 91,584 |
+| Sounds | `&jet09.11k` loop and second sound, `&powerup.5k`, `&powerdn.5k` (all present) |
+| HUD | `e2000.HUD` (the Eurofighter 2000 HUD) |
+| AI script | `f.BI` (12,800 bytes, present) |
+| Sensors / jammer / gun | `VIS240.SEE`, `F18R.SEE` (APG-65), `MIG31.ECM`, `BK27.JT`; `PAVESPK.SEE` as a fixed row |
+| PTS | none: no `TOR.PTS` exists (`E2000.PTS` exists) |
+| Radio callout | `^ACTOR.5K` exists (4,328 bytes) |
+| Encyclopedia | `TOR.INF`, `TOR_0.PIC`, `TOR_1.PIC` in `disc2/FA_3.LIB` (Jane's text, numbers cited below as reference media) |
+| Checkpoint code / CLI key | 44 and `tornado`/`tor.pt`, reserved for B5-1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field (1990, `0x4000`, 2 engines, 41,885 / 11,221 / 90,390 lb, 35,270
+/ 50,700 lbf, 1,369 kt top, 806 kt sea-level maximum, 60,000 ft, G -3/+6, 156
+hit points, 9 hardpoints, the default-store list and `e2000.HUD`). Hashes of
+the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TOR.PT` | 12,201 | `39f9c677de59267bfcb87634a944433f7d659d47c1a850e9e699c1eb2d3f99fe` |
+| `TOR.SH` | 33,280 | `1fc8b434696f88fa8bb28da0c7350aeb3ea9ce2e48c345f54081d1a03824afdb` |
+| `TOR_S.SH` | 4,608 | `03a831378eeeb2841eda0240255deb629b50f1995341f28309afcc235aefa40d` |
+| `TOR_A.SH` | 25,088 | `98bb65ae64beb19414903ff8add7b8c8a223906d2e2f67ac4d9f97dd3c004769` |
+| `TOR_B.SH` | 4,608 | `e570a281aed5a322b7ad78f6376165ac80460bad8be7968f45e9eaef53d9ded1` |
+| `TOR_C.SH` | 25,088 | `39b5a1f9a3360ecfc9e920aff6913dd157fefb1c640d15524e4ab3424ea287fa` |
+| `TOR_D.SH` | 4,608 | `35756f4049894393eaadf53f6aebdea18dace1e85995dfb667f035ef5776a2f6` |
+| `E2000.HUD` | 4,608 | `4ac570f7df6e65c7a00d372ba95ca7ccc8ddedf9361a3ee5051910e5e6738b5d` |
+| `_TOR.PIC` | 150,604 | `5d6f20e9debca91487c99d0d7d1eca5d5c0a94ac69f8543071a5bd8116bc7599` |
+| `MIG31.ECM` | 354 | `874f7b364ce6068341d6a17e10c4b73b37efcf86ec0d528a62f93e9c0296e56e` |
+| `PAVESPK.SEE` | 505 | `7fd9c6d3e909015e8715056e5c0f13ce472cdb7fb70ac10bdcd4a54cb6e53b91` |
+
+### Tornado record against the Su-24 record
+
+`TOR.PT` is the **`SU24.PT` record with eight numeric statements changed**: of
+219 statements, **211 are identical to the Su-24's**. The 41,885 lb empty weight
+is the Su-24's (the Su-25 shares it, and also 90,390 lb, 35,270 lbf and G
+-3/+6; only the Su-24 also shares the 50,700 lbf afterburner thrust and the 156
+hit points). Everything beyond the eight numbers is the Tornado's own: names,
+shape, HUD, ordnance, hardpoint rows and the ten G envelope rows (the sound
+names are the Su-24's too).
+
+| Field | `TOR.PT` | `SU24.PT` |
+| --- | ---: | ---: |
+| `year` | 1990 | 1983 |
+| `maxAlt`, ft | 60,000 | 58,000 |
+| `internalFuel`, lb | 11,221 | 22,664 |
+| Structure `[0]` / `[1]` | 1,375 / 2,326 | 1,210 / 1,362 |
+| Debris `dmg` y | 10 | 0 |
+| Debris `dst` x / z | 40 / -20 | 60 / 0 |
+| HUD | `e2000.HUD` | `ac130.HUD` |
+| Default stores 1..8 | `F18R.SEE`, `MIG31.ECM`, `PAVESPK.SEE`, `BK27.JT`, `F250.GAS`, `PAVEWAY.JT`, `MK82P3.JT`, `AIM9M.JT` | `SU24R.SEE`, `SU24.ECM`, `SU24L.SEE`, `GSH6_23.JT`, `AS14.JT` x4 |
+
+`MIG31.ECM` is the Su-24's jammer (`SU24.ECM`) with a different name: 17 bytes
+differ, all in the record tail and its name strings (the MiG-31 review says
+the same: byte-equal to `SU24.ECM` and `SU27.ECM` apart from its name).
+
+### Tornado: the template copy list (for John)
+
+Every value that is the Su-24's rather than a Tornado's, against cited real
+Tornado IDS figures (Jane's text in `TOR.INF`, the game's own encyclopedia;
+aerospaceweb.org Tornado IDS data and MILAVIA Tornado specifications, both
+accessed 2026-11-10; Wikipedia Tornado GR4 specifications, accessed
+2026-11-10):
+
+| Field | Record | Real | Difference | Source / verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 41,885 | 30,620 basic, 31,065 equipped | +34.8% (vs 31,065) | Su-24 copy |
+| Max takeoff, lb | 90,390 | 61,620 (27,950 kg encyclopedia) | +46.7% | Su-24 copy |
+| Military thrust, lbf (both) | 35,270 | 17,300 to 18,200 (2 x 8,650 RAF to 9,100) | +94% to +104% | Su-24 copy |
+| Afterburner thrust, lbf (both) | 50,700 | 32,150 (2 x 16,075 Mk 103) | +58% | Su-24 copy |
+| Hit points | 156 | none | | Su-24 copy |
+| G limit | -3 / +6 | +7.5 (encyclopedia) | +25% | Su-24 (and Su-25) copy |
+| Internal fuel, lb | 11,221 | 10,280 (encyclopedia); 14,000 (aerospaceweb) | +9.2% / -19.9% | Tornado's own, sources disagree |
+| Ceiling, ft | 60,000 | more than 50,000 | +20% | Tornado's own (Su-24 is 58,000) |
+| Top speed, kt | 1,369 | Mach 2.2 = 1,262 at 36,090 ft | +8.5% | Tornado envelope, not a copy |
+| Sea-level max, kt | 806 | Mach 1.2 = 795 (915 mph) | +1.4% | Agrees |
+| Year | 1990 | in service 1979 to 1980 | | Tornado's own value (not examined) |
+| Engines | 2 | 2 | | Correct; the shape has two nozzles and two flame groups |
+
+**Copied from the Su-24:** empty weight, max takeoff weight, both thrust
+figures, hit points and the G limits, plus the structure-warning words, the
+whole flight tuning block and every other PLANE statement (stall, spin, drag,
+turn rates, fuel flow; 211 statements). Only the ten G-envelope rows,
+fuel, ceiling and year are re-authored. **Not a copy:** the stations, ordnance,
+HUD and the G envelope speeds. The record rule is met (the Tornado has its own
+shape, stations and envelope), as with the Mirage 2000.
+
+Options for John (none chosen, same precedent as the Mirage 2000: real
+thrust, real size, +G corrections are John's call):
+
+1. Keep every value as retail (documented, audit only).
+2. Correct thrust to the real two-engine figures (about 17,300 dry / 32,150
+   afterburner total, MILAVIA/Jane's Mk 103) and leave weights.
+3. Also correct empty weight (31,065) and max takeoff (61,620), plus G +7.5.
+   The G envelope rows reach +6 only; a +7.5 row is fitted from the +6 row as
+   M2K-11 did for +9.
+
+Agent note: the 41,885 / 90,390 weights make the Tornado fly like a Fencer. A
+default load is far below 90,390 (see stations), so the max weight is never the
+binding number.
+
+### Tornado G envelope rows
+
+Points are speed in ft/s at altitude in ft. Ten rows, `envMin` -3 to `envMax`
++6; **every row differs from the Su-24's**, so the envelope is authored for the
+Tornado (it is not a copy). Row 6 equals row -3 and row 4 equals row -2 and
+row 2 equals row -1 (the same mirroring as other records).
+
+| G | Points |
+| ---: | --- |
+| -3 | 575@0, 667@7,000, 880@14,000, 1,120@14,000, 1,140@0 |
+| -2 | 425@0, 507@12,000, 643@23,000, 870@34,000, 1,235@34,000, 1,450@26,000, 1,210@0 |
+| -1 | 270@0, 320@14,750, 430@29,500, 600@44,250, 870@52,000, 1,375@52,000, 1,787@45,000, 2,007@39,500, 2,027@34,000, 1,290@0 |
+| 0 | 140@0, 170@16,000, 285@35,000, 513@54,000, 820@64,000, 1,514@64,000, 2,067@53,500, 2,420@40,750, 2,430@36,000, 1,420@0 |
+| 1 | 200@0, 235@13,000, 307@26,000, 433@39,000, 621@52,000, 870@60,000, 1,484@60,000, 2,007@50,500, 2,300@40,250, 2,310@36,000, 1,360@0 |
+| 2 | same as -1 |
+| 3 | 345@0, 441@18,500, 617@34,000, 870@44,000, 1,305@44,000, 1,577@40,000, 1,730@31,000, 1,250@0 |
+| 4 | same as -2 |
+| 5 | 497@0, 593@11,000, 701@16,500, 870@24,000, 1,155@24,000, 1,220@20,000, 1,180@0 |
+| 6 | same as -3 |
+
+The 1 G row tops out at 2,310 ft/s (1,369 kt) at 36,000 ft and 1,360 ft/s (806
+kt) at sea level; those two numbers are the catalog's top and sea-level speeds.
+Rows 0 to 1 reach 60,000 ft (the record ceiling) and the 0 G row 64,000 ft.
+
+### Tornado resources
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `TOR.SH` | Shape | 287 runtime faces (single texture `_TOR.PIC`), 0 lines, 0 billboards, six state words (`7dc0`, `7dc6`, `7dcc`, `7dd8`, `7dde`, `7de4`); streamer record present (pivot 20, 2, 16 and wing-tip points 48, 0, -34 in CE units, hinge scale 40) |
+| `TOR_S.SH` | Shadow | 14 faces |
+| `TOR_A.SH` / `TOR_C.SH` | Damage bodies | 290 / 314 faces |
+| `TOR_B.SH` / `TOR_D.SH` | Damage pieces | 36 / 37 faces |
+| `VIS240.SEE`, `F18R.SEE`, `MIG31.ECM`, `PAVESPK.SEE`, `BK27.JT` | Sensors, jammer, pod, gun | 21,840 / 546,840 range-class sensors; see below |
+| `F250.GAS`, `PAVEWAY.JT`, `MK82P3.JT`, `AIM9M.JT` | Default stores | all in the TORE roster (2,000 lb, 1,500 lb, 190 lb, 1,650 lb) |
+
+`BK27.JT` weight field is 1 (a pod-gun record) and the research inventory notes
+the carriers ALPH, E2000, GRIPEN, TOR and VIG were not yet imported (JT-1). The
+header scale of `tor.SH` is **2** (as `MIG23.SH`, `SU24.SH`; `F14.SH` is 4,
+most aircraft 1).
+
+### Tornado HUD and cockpit (for John)
+
+**Fact.** `TOR.PT` names `e2000.HUD`. That file is the **Eurofighter 2000
+HUD**: `E2000.PT` names it too, and its panel names are `~ef2`, `~ef2h`,
+`~ef2s`, `~ef2_l/c/r`, `~ef2_lh/ch/rh`, `~ef2_ls/cs/rs`, `~ef2_p` (13 pictures
+`~EF2*.PIC` in `FA_1.LIB`, `~EF2H.PIC` 54,656 bytes) plus a stray `~raf_w`. It
+is the `RAFALE.HUD` template with the Rafale panel names replaced (71 of 4,608
+bytes differ). **No Tornado cockpit art exists**: the sweeps `~TOR*`, `*TORN*`,
+`*GR1*`, `*GR4*`, `*IDS*` find only `TOR*` shapes and skins, the `^ACTOR.5K`
+callout, `TOR_0/1.PIC`, `TOR.INF`, two unrelated `~Q*STOR.M` mission files,
+a flag shape `FGR1.SH` and `AR_VIDS.PIC` (unrelated). So retail flies the
+Tornado with the Eurofighter panel family. TORE has no Eurofighter cockpit
+today (`E2000.PT` is catalog-decoded only; no `EF2` stem arm).
+
+Options (none chosen):
+
+1. **Follow the record: `E2000.HUD`, cockpit stem `EF2`, `~EF2H.PIC`.** What
+   retail does; needs the HUD panel and one new stem family (13 pictures
+   already in `FA_1.LIB`). The player sees a Eurofighter cockpit in a Tornado,
+   as the Mirage 2000 sees a Rafale one. Not an alias of `E2000.PT`.
+2. **Substitute an existing reviewed HUD/cockpit family** (for example the
+   Su-24-era `ac130.HUD` is the template's, `F18.HUD` or `RAFALE.HUD`).
+   Opinionated, no retail evidence.
+3. **Author a Tornado panel.** Not in the media; invented art, later decision.
+
+### Tornado engine count and thrust
+
+The record says 2 engines, correct for the Tornado (two RB199). The shape
+agrees: two six-or-eight-sided nozzle rings at x about +/-3.5 (faces `3eb7`
+and its mirror, centre 3 to 4 units either side) and two flame groups at
+x -5 to -2 and 2 to 5 (word `7dc0`, 8 plates, y -43 to -25). The two-engine
+behaviour (contrails, engine-out halving) is therefore right, no engine-count
+question. Thrust is the Su-24 total (above): the total is 58% over the real
+afterburner and about double the dry figure. Options are the three above. The
+RB199 has bucket thrust reversers (`TOR.INF`); no shape word, panel or record
+field represents them, so there is nothing in the source to rig (see surfaces).
+
+### Tornado real size (for John)
+
+Measured on the neutral state of `tor.SH` (clean, gear up) and the gear word:
+x -34 to 33, y -36 to 45, z -6 to 19; gear down low -11 (the shape's contact
+offset in raw units is -11, the parked inspector prints -22 after the header
+scale). The flame plates reach y -43. One unit is 1/3 ft at the aircraft
+convention (`debris::scale` default). The shape header scale is **2** (like
+the MiG-23, which `debris::scale` already lists at 2/3 ft per unit), so the
+aircraft is authored at 2/3 ft per unit.
+
+| Axis | Units | At 1/3 ft (current default) | At 2/3 ft (header scale 2) | Real | Verdict at 2/3 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Span (wing fully spread) | 67 | 22.3 ft | 44.7 ft | 45.6 ft spread / 28.2 ft swept | -2.0% vs spread |
+| Length (nose to tail, no flame) | 81 | 27.0 ft | 54.0 ft | 54.8 ft | -1.5% |
+| Height (fin tip z 19 to gear low -11) | 30 | 10.0 ft | 20.0 ft | 19.5 ft | +2.6% |
+
+**Verdict.** The shape is modelled with the wing **fully spread** and is true
+size when drawn at the header scale of 2/3 ft per unit (within 3% on all
+three axes). If TORE draws it at the default 1/3 ft per unit it is **half
+size**. That is a scale-table question for B5-1/TOR-2 rather than a per-axis
+real-size fit: no per-axis factor is needed, only the entry `Tornado => 2/3` in
+`tore_sim::combat::debris::scale` beside `Mig23` (and the matching
+aircraft_scale default of `[1, 1, 1]`). The spread leading edge sweeps
+`atan(10/21)` = 25.5 degrees on the planform (real 25 degrees minimum), a
+check that this is the spread pose. Options (none chosen):
+
+1. **Draw at 2/3 ft per unit** (the header scale; MiG-23 precedent). Real size
+   within 3%. Record positions in feet (`/3`) then land on the aircraft: the
+   outer wing row at x 16 is 5.3 ft out, and 8 units at 2/3 ft per unit is the
+   same 5.3 ft.
+2. **Draw at 1/3 ft per unit** (the default). Half-size Tornado, store rows
+   half as far out; not recommended, but it is what the code does if no entry
+   is added.
+3. **Draw at 2/3 and add a per-axis fit** (the Mirage 2000 mechanism) only if
+   John wants the residual 1.5 to 2.6% removed; the factors would be about
+   x 1.02, y 1.015, z 0.975.
+
+### Tornado variable sweep (for John)
+
+**Fact: the shape has no sweep.** `tor.SH` has six state words and no sweep
+word, no sweep branch and no swept-wing geometry. The streamer record names a
+pivot (20, 2, 16) and tip points (48, 0, -34) in CE units (the F-14 and
+MiG-23 shapes carry the same kind of record: F-14 pivot 32, 4, 16; MiG-23 pivot
+18, 6, 8); how those relate to the mesh is **unknown**. The wing mesh is one
+fixed spread pose, 13 faces per side (right: `4cf1 4d2b 4d54 4dea 4eba 4edd
+4f00 4f23 4f46 4f7f 4fa8 4ff5 501c`; left: `52c3 52e6 5309 5332 535b 537e
+53a1 542b 5454 5483 54a6 5549 5570`), flat plates at z 0 and 1, joined to the
+fuselage glove at x 9 to 10 (left -10 to -11). The glove fillets (`4d14`,
+`4d83`, `4da4`, `4dc7`, `4e13`, `4f67`) and the fuselage side (x 7, y -6 to 13)
+stay fixed. There is no sweep state word to read, so any sweep is a **fitted
+rig**, like the MiG-23's (`mig23_animation.rs`: explicit wing face list,
+vertical axis through (+/-9, 4, 3), 0 to 40 degrees over 400 to 700 kt, flaps
+hold the wings out) and the F-14's.
+
+**Whole-panel sweep (rule 11).** The wing panel is built from separate faces
+(13 per side), not one quad; each face moves whole when the panel is turned
+about a vertical axis through the glove joint. Shared vertices between the
+panel and the fixed fillets lie on the glove line: right (9, 1, 0), (9, 1, 1),
+(10, -4, 0), (10, -1, 0), (10, -1, 1); left (-10, 1, 0), (-10, 1, 1), (-11,
+-4, 0), (-11, -1, 0), (-11, -1, 1). A pivot at (9.5, 0.5, 0.5) (right, mirror
+left at -10.5) puts every shared vertex within about 1.5 units of the axis;
+a point exactly on the axis stays fixed. The glove vertices at (9, 1) and (10,
+-1) are 2.2 units apart, so **no single pivot point sits exactly on all of
+them**, and a turn of 42 degrees (25 to 67) opens or overlaps the fillets by
+up to 1.5 units (1 ft at 2/3 ft per unit). The real pivot is also inboard of
+the wing/glove joint: Jane's states 60 degrees on the fixed inboard portions
+and 25 to 67 degrees on the movable portions ("63 degrees when 2,250 litre
+drop tanks are carried", `TOR.INF`), so the joint at 9 to 10 units (6.0 to
+6.7 ft out) is the movable-wing root.
+
+| Panel (per side) | Faces | Vertices moving in a whole-panel sweep | On the pivot line | Fixed off the line |
+| --- | ---: | ---: | ---: | ---: |
+| Wing panel | 13 | 13 distinct vertices (5 shared with the fillets) | the 5 shared | 0 if the axis passes within 1.5 units of the shared vertices |
+| Flap strip (`4ff5`, `501c` / `5549`, `5570`) | 2 | all 4 vertices each | 0 | 0, moves with the wing |
+
+Fold check: **no face folds**, because the panel is moved whole; the cost is
+the fillet seam. Options (none chosen):
+
+1. **No sweep, fixed spread wing** (what the source has). Honest to the data;
+   the Tornado always shows 25 degrees.
+2. **Fitted visual sweep like the MiG-23** (additional 0 to 42 degrees over a
+   speed band, flaps hold out), whole wing panel about (+/-9.5, 0.5, 0.5),
+   with a seam note. Agent-fitted; John chooses the speed band and the angle
+   (67 degrees real maximum; the wing to 63 degrees with 2,250 L tanks).
+3. As option 2, but restricted to the rig (no change to flight tables, as the
+   MiG-23 spec says "no sweep-dependent flight law"), with the wing-mounted
+   store rows swivelling to stay aligned with the fuselage (real
+   swivelling pylons).
+
+The wingtip vapor streamer should follow whichever the swept tip is
+(Mig23 precedent in the spec).
+
+### Tornado surfaces (for John)
+
+State words (neutral 287 faces; counts from `Shape::with_state`):
+
+| Word | Faces | Low point | Geometry (raw units, x right, y forward, z up) | Reading | Status |
+| --- | ---: | ---: | --- | --- | --- |
+| `7dc0` | +8 | -3 | Two groups of 4 plates behind the nozzles, x -5 to -2 and 2 to 5, y -43 to -25 | Afterburner flames (twin) | Confirmed by position |
+| `7dc6` | +4 | +2 | Two plates each side on the rear spine: x 2 to 5 and -2 to -6, y -10 to -7, z 2 to 4 | Airbrake, one per side | Confirmed as the brake slot |
+| `7dcc` | +26 | -11 | Nose plates (3 groups of 2 faces, x -1 to 1, y 25 to 29, z -11 to -5) and two mains of 10 faces (x +/-3 to +/-7, y -2 to 3, z -11 to -4) | Landing gear down | Confirmed (slot order) |
+| `7dd8` | -2 | none | Removes the left trailing strip x -31 to -11, y -9 to -1 (`5549`, `5570`) | Left flap word | Slot order |
+| `7dde` | -2 | none | Removes the right trailing strip x 10 to 30, y -9 to -1 (`4ff5`, `501c`) | Right flap word | Slot order |
+| `7de4` | +2 / -2 | +3 | Swaps the lower fin block (`5723`, `5750`) for a skewed copy (`5625`, `5652`): vertices move 1 to 3 units in x | Rudder (positive direction only) | Confirmed by geometry |
+
+The slot order (flame, brake, gear, flap, flap, rudder) is the shared order of
+the MiG-25/31, Mirage 2000 and Su-24 families. There is **no hook word (hook
+flag clear), no slat word, no spoiler word, no canopy word, no sweep word and no
+thrust-reverser word** and no separate geometry for any of them.
+
+Moving-surface map for the rig:
+
+| Surface | Source panel | Rig note |
+| --- | --- | --- |
+| Tailerons (all-moving, roll) | One 5-vertex polygon per side at z -2 (`446a`/`45e9` right, `4176`/`42f8` left; two windings each) | Only the polygon; no word. Turn whole about a lateral spindle through the root-chord midpoint (y -22.5, z -2). Roll: real tailerons are differential |
+| Wing trailing strips ("flaps") | Full strip x 10 to 30 per side, 2 faces (two layers) | Source deletes them with the flap words; the rig keeps them drawn and turns them |
+| Slats | none | Not in the source (the 2-unit leading strip `4dea`/`4d2b` is skin) |
+| Spoilers | none | Not in the source (real: two per wing) |
+| Rudder | The lower fin block, 5 vertices, 2 windings | The word skews it; the upper fin is fixed |
+| Airbrakes | 2 plates per side, hinge at y -7 | Appear only when open; see face table |
+| Thrust reversers | none | Not in the source |
+| Gear | nose 6 faces, mains 10 faces each side | Rigid plates, hinge at top edge |
+
+**Rule 11 face table.** Counted from the `state_neutral`/word dumps.
+
+| Surface | Face | Vertices | Moved | On hinge/spindle | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Taileron right | `446a` | 5 | 5 | 0 | 0 |
+| Taileron right | `45e9` | 5 | 5 | 0 | 0 |
+| Taileron left | `4176`, `42f8` | 5 each | 5 | 0 | 0 |
+| Flap strip right (outer x 30, inner x 10) | `4ff5`, `501c` | 4 each | 2 | 2 (the fixed neighbour edge) | 0 |
+| Flap strip left | `5549`, `5570` | 4 each | 2 | 2 | 0 |
+| Rudder block | `5723`, `5750` | 5 each | 4 | 1 `(0,-21,4)` | 0 |
+| Airbrake plates (4) | `5889`, `58a0`, `57ec`, `5803` | 4 each | 2 | 2 (y -7) | 0 |
+| Nose gear (6) | `4a97 ... 4b2a` | 4 each | 2 | 2 (top, z -5) | 0 |
+| Main gear (10 per side) | `4908 ... 49ff`, `4705 ... 47fc` | 4 each | 2 (4 on the two top plates) | 2 (top z -4/-5) | 0 |
+
+Verdicts:
+
+- **Tailerons.** The polygon touches the fuselage at one vertex only
+  ((6, -20, -2) on the right, (-6, -20, -2) on the left, shared with four fixed
+  fuselage faces). No other vertex is shared, so a whole-panel turn folds
+  nothing and opens only that one-vertex seam. **Strain, not failure:** the
+  polygon has a forward corner at (7, -8, -2), 14.5 units ahead of the
+  spindle; at 25 degrees it swings 6 units (4 ft) up or down along the
+  fuselage flank (the same flank corner issue as the Mirage). Options (none
+  chosen): (a) whole-panel turn about the lateral spindle (rule 11); (b) turn the
+  panel about the spindle through the root-chord midpoint with a small
+  fitted limit (for example 15 degrees) so the forward corner stays inside the
+  fuselage flank; (c) leave the tailerons fixed. Roll: real tailerons are
+  differential (plus wing spoilers), so rule 12 plus the taileron standard
+  applies; pitch and roll both on the same whole panels.
+- **Wing trailing strips ("flaps").** Whole-strip faces; two vertices lie on
+  the shared edge with fixed neighbours (the glove-side corner pair at x 10,
+  and the outer corner pair at x 30), so a turn about the hinge edge keeps the
+  edges stitched. They span x 10 to 30 of the semi-span 33, not the whole
+  span, and are deleted by the flap words with no replacement. Real: full
+  span flaps and slats ("full-span flaps and leading-edge slats", Wikipedia)
+  plus spoilers; the source has none of the slat and spoiler panels. Options:
+  rig the strips only, or leave slats and spoilers un-rigged (none are in the
+  source; inventing them would be fitted geometry for John).
+- **Rudder.** The source swaps the lower fin block for a copy skewed 1 to 3
+  units; the upper fin is fixed. The leading vertex (0, -21, 4) is shared with
+  fixed faces; the other four move. The retail swap is not an exact rotation
+  (as the Mirage 2000), and covers the lower block only.
+- **Airbrakes.** Four plates (two per side), each hinged on its forward edge
+  (y -7, z 2) with the rear edge raised to y -10, z 4. The source has paired
+  brakes (unlike the Mirage 2000's single plate), matching the real
+  Tornado's airbrakes. They exist only when open.
+- **Gear.** Flat plates, no wheels or doors; nose gear at y 25 to 29 and mains
+  at x +/-3 to +/-7, y -2 to 3. At 2/3 ft per unit: wheelbase about 17 ft,
+  track about 8 ft (real gear dimensions were not found; unverified).
+- **Thrust reversers, spoilers, slats** do not exist in the source and are not
+  invented here. The real aircraft has bucket-type reversers (`TOR.INF`) and
+  roll spoilers.
+
+The whole-surface gate (John, 2026-11-07/08) is met by every face above except
+the taileron's forward-corner strain and the missing-surface gaps; no
+diagonal or partial surface is in the source, so no probe sheet is needed.
+
+### Tornado sensors, jammer and pod (for John)
+
+Nine rows. Rows 0 to 3 are fixed internal rows (flag `0x8`); `F18R.SEE` is the
+**F/A-18's APG-65** (a 546,840-range air-to-air class radar), not the Tornado's
+Texas Instruments terrain-following ground-mapping radar ("European built Texas
+Instruments multimode ... terrain-following ground-mapping radar",
+`TOR.INF`). `MIG31.ECM` is the Su-24 jammer renamed (60 chaff / 35 flare class
+rows in the shared MiG-31 review) at (0, -15, -60). `PAVESPK.SEE` (AN/ASQ-153
+Pave Spike, 425 lb) is a **fixed internal row at (0, 0, 0) with flag `0x8`**,
+the same arrangement as the F-16C and A-10 rows.
+
+- **Pave Spike.** The real Tornado GR1 did not carry Pave Spike: a Buccaneer
+  detachment carried the Pave Spike laser designator so GR1s could drop
+  guided weapons; the TIALD pod arrived in 1991 (Wikipedia Tornado, accessed
+  2026-11-10). There is no pod station in the record. Options: (1) keep the
+  row as the retail fixed sensor (no pod drawn, nothing on a station,
+  B7: never hang a pod on a station the real aircraft lacks); (2) drop the row
+  for TORE; (3) keep it but present it as the targeting sensor.
+- **Jammer.** The real jammer is the Sky Shadow pod or internal Marconi gear
+  (not verified in this review); `MIG31.ECM` is a Soviet-named record with the
+  Su-24's values. Options: keep as retail, or rename the label only.
+- **Radar.** `F18R.SEE` gives the Tornado an air-to-air radar it does not have
+  in reality; keep as retail or substitute a ground-mapping record (none
+  exists in the media).
+
+### Tornado hardpoints
+
+All nine rows, in original order, decoded with the standard field order.
+Location byte: 0 Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4
+Wing, 5 Wingtip. Feet divide the record units by three. The wing/fuselage rows
+at the header scale 2/3 ft per unit land on the mesh (see size); at the default
+1/3 they would sit inside a half-size model.
+
+| Row | Location | Flags | x / y / z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS240.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar (APG-65) |
+| 2 | Fuselage | `0x0008` | 0 / -15 / -60 | 0 / -5 / -20 | 1 | 0 | `MIG31.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `PAVESPK.SEE` | Fixed pod row |
+| 4 | Fuselage | `0x000c` | 7 / -5 / 55 | 2.3 / -1.7 / 18.3 | 360 | 0 | `BK27.JT` | Internal gun, 360 rounds, mirrored (two guns of 180) |
+| 5 | Wing | `0x0205` | 0 / -25 / 17 | 0 / -8.3 / 5.7 | 2 | 40 | `F250.GAS` | Tank pair at x 0 (centreline pylon in reality) |
+| 6 | Fuselage | `0x07e5` | 6 / -25 / 14 | 2 / -8.3 / 4.7 | 4 | 80 | `PAVEWAY.JT` | Shoulder pylon pairs, 4 bombs |
+| 7 | Wing | `0x0505` | 11 / -25 / 9 | 3.7 / -8.3 / 3 | 2 | 30 | `MK82P3.JT` | Inner wing pair |
+| 8 | Wing | `0x0085` | 16 / -22 / 4 | 5.3 / -7.3 / 1.3 | 2 | 5 | `AIM9M.JT` | Outer wing pair |
+
+Default stores in the catalog (`BK27.JT`, `F250.GAS`, `PAVEWAY.JT`,
+`MK82P3.JT`, `AIM9M.JT`, one per row) count one default per row; per-row
+quantities are a host rule for TOR-6. Weights: Paveway 2,000, Mk 82 triple
+1,500, AIM-9M 190, 250 gal tank 1,650 lb each.
+
+Against the real Tornado ("seven fuselage and wing hardpoints: one centreline
+pylon, two fuselage shoulder pylons each with three ejector release units,
+and under each wing one inboard and one outboard pylon", swivelling wing
+pylons, `TOR.INF`; Wikipedia: 3 fuselage and 4 wing stations): row 5 is the
+centreline (x 0), row 6 the shoulder pylons (2 ft out, four bombs, three
+ERUs a side in reality), rows 7 and 8 the inner and outer wing pylons. The
+record has no pod station; **a Tornado has no pod station in this record**, so
+no pod is ever placed (B7). Open items for TOR-5: row 5 is a Wing-location row
+at x 0 with the pair flag (the F-4 and A-4E cases show how TORE treats such
+rows: a centreline rack); rows 7 and 8 sit 3.7 and 5.3 ft out, about on the
+glove, and the real pylons swivel with the wing; the mesh has no pylons. The
+real outer pylon position is not cited here; the real stations need a
+dimensioned drawing before TOR-5 moves any row.
+
+### Tornado roster note
+
+`TOR.PT` is the 4th aircraft of batch 5 and the 44th retail identity (after
+`M2000` 40, F15E 41, Gripen 42, F-5E 43), appended by B5-1. The wire identity
+is 9 bits (NET-ID9), so there is no capacity constraint.
+
+### Tornado unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| Record template (weights, thrust, G, hit points) | Fly like a Fencer | John, options above |
+| Draw scale (1/3 against header 2/3 ft per unit) | Half size if no table entry | John; B5-1/TOR-2 adds the entry |
+| Sweep | Not in the shape; fitted only | John, options above |
+| Streamer pivot (20, 2, 16) relation to the mesh | Possible real pivot data | Unknown; fit and compare to the F-14 and MiG-23 |
+| HUD and cockpit | Needs `EF2` family or substitute | John, three options |
+| Taileron forward corner (7, -8, -2) | Swings 4 ft at 25 degrees | TOR-3 probe, small limit or fixed |
+| No slats, spoilers, reversers in the source | Real aircraft has them | Not rigged unless John asks |
+| `F18R.SEE` (APG-65) and `MIG31.ECM` on a Tornado | Wrong radar and jammer | John, options above |
+| Pave Spike fixed row | Not on a Tornado | John, options above |
+| Real station positions | Rows 5 to 8 vs the real pylons | Needs a cited drawing (TOR-5) |
+| Gear dimensions | Wheelbase and track unverified | TOR-4 with a cited source |
