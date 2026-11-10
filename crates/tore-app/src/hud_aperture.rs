@@ -19,6 +19,9 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // The Mirage 2000 flies the Rafale cockpit, as its record names
         // rafale.HUD (John, 2026-11-09).
         "RAF" => AircraftId::Rafale,
+        // Batch 5 (B5-1): the Mirage F1 names rafale.HUD like the Mirage 2000
+        // and flies the Rafale glass. The F-15E names av8.HUD like the F-15C,
+        // and "AV8" above already resolves to the same glass.
         _ => id,
     };
     let (expected, polygon): ((usize, usize), &[Point]) = match id {
@@ -186,6 +189,12 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::Ch47
         | AircraftId::B747
         | AircraftId::A310 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        // Interim, agent decision 2026-11-10, pending John (batch decision
+        // round): the Gripen (~GRIH.PIC), F-5E (~F29H.PIC, the X-29's art) and
+        // Tornado (~EF2H.PIC) name their own cockpit pictures, whose glass has
+        // not been measured. No expected size, so the aperture fails closed
+        // (an empty mask) until their cockpit slices measure a polygon.
+        AircraftId::Gripen | AircraftId::F5E | AircraftId::Tornado => ((0, 0), &[]),
         // The cockpit aliases above exhaust these identities.
         AircraftId::Av8
         | AircraftId::Mi24
@@ -196,7 +205,9 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::F15
         | AircraftId::Mig25
         | AircraftId::Mig31
-        | AircraftId::M2000 => unreachable!("resolved cockpit alias"),
+        | AircraftId::M2000
+        | AircraftId::F15E
+        | AircraftId::Mf1 => unreachable!("resolved cockpit alias"),
     };
     if (source.width, source.height) != expected {
         return out;

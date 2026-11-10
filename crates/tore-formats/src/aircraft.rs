@@ -232,6 +232,11 @@ pub enum AircraftId {
     F16A,
     Mig31,
     M2000,
+    F15E,
+    Gripen,
+    F5E,
+    Tornado,
+    Mf1,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
@@ -245,7 +250,7 @@ impl AircraftId {
             self.pt()
         }
     }
-    pub const SELECTABLE: [Self; 41] = [
+    pub const SELECTABLE: [Self; 46] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -287,6 +292,11 @@ impl AircraftId {
         Self::F16A,
         Self::Mig31,
         Self::M2000,
+        Self::F15E,
+        Self::Gripen,
+        Self::F5E,
+        Self::Tornado,
+        Self::Mf1,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
     /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
@@ -315,7 +325,7 @@ impl AircraftId {
         matches!(self, Self::Ah64 | Self::Mi24 | Self::Ch47)
     }
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 45] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -356,6 +366,11 @@ impl AircraftId {
         Self::F16A,
         Self::Mig31,
         Self::M2000,
+        Self::F15E,
+        Self::Gripen,
+        Self::F5E,
+        Self::Tornado,
+        Self::Mf1,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -400,6 +415,11 @@ impl AircraftId {
             "f16a" | "f16.pt" => Ok(Self::F16A),
             "mig31" | "mig31.pt" => Ok(Self::Mig31),
             "m2000" | "m2000.pt" => Ok(Self::M2000),
+            "f15e" | "f15e.pt" => Ok(Self::F15E),
+            "gripen" | "gripen.pt" => Ok(Self::Gripen),
+            "f5e" | "f5e.pt" => Ok(Self::F5E),
+            "tornado" | "tor" | "tor.pt" => Ok(Self::Tornado),
+            "mf1" | "mf1.pt" => Ok(Self::Mf1),
             _ => Err(invalid(
                 "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000",
             )),
@@ -447,6 +467,11 @@ impl AircraftId {
             Self::F16A => "F16.PT",
             Self::Mig31 => "MIG31.PT",
             Self::M2000 => "M2000.PT",
+            Self::F15E => "F15E.PT",
+            Self::Gripen => "GRIPEN.PT",
+            Self::F5E => "F5E.PT",
+            Self::Tornado => "TOR.PT",
+            Self::Mf1 => "MF1.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -493,6 +518,15 @@ impl AircraftId {
             // M2000.PT names rafale.HUD; the game follows the record, so it
             // flies the Rafale HUD and cockpit by name (John, 2026-11-09).
             Self::M2000 => "RAFALE.HUD",
+            // The batch-5 aircraft follow their records by name (B5-1). The
+            // F-15E record names av8.HUD (the F-15C's too); the Gripen has its
+            // own gripen.HUD; F5E.PT names f29.HUD, TOR.PT e2000.HUD and
+            // MF1.PT rafale.HUD.
+            Self::F15E => "AV8.HUD",
+            Self::Gripen => "GRIPEN.HUD",
+            Self::F5E => "F29.HUD",
+            Self::Tornado => "E2000.HUD",
+            Self::Mf1 => "RAFALE.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -538,6 +572,13 @@ impl AircraftId {
             Self::Mig31 => "MIG31",
             // M2000.PT names m20.SH, _M20.PIC and M20_A..D.SH.
             Self::M2000 => "M20",
+            // F15E.PT names f15e.SH, gripen: gri.SH, F5E.PT f5e.SH, TOR.PT
+            // tor.SH and MF1.PT mf1.SH, each with its own _A..D damage looks.
+            Self::F15E => "F15E",
+            Self::Gripen => "GRI",
+            Self::F5E => "F5E",
+            Self::Tornado => "TOR",
+            Self::Mf1 => "MF1",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -578,6 +619,16 @@ impl AircraftId {
             Self::F16A => "F16",
             Self::Mig31 => "Y141",
             Self::M2000 => "RAF",
+            // Cockpit families follow each record's HUD name (interim, agent
+            // decision 2026-11-10, pending John, batch decision round): the
+            // F-15E flies the AV8 family as the F-15C does, the Gripen its own
+            // ~GRI*.PIC, the F-5E the X-29's ~F29*.PIC, the Tornado the
+            // Eurofighter 2000's ~EF2*.PIC and the Mirage F1 the Rafale's.
+            Self::F15E => "AV8",
+            Self::Gripen => "GRI",
+            Self::F5E => "F29",
+            Self::Tornado => "EF2",
+            Self::Mf1 => "RAF",
             _ => self.stem(),
         }
     }
@@ -627,6 +678,11 @@ impl AircraftId {
             Self::F16A => "~F16H.PIC",
             Self::Mig31 => "~Y141H.PIC",
             Self::M2000 => "~RAFH.PIC",
+            Self::F15E => "~AV8H.PIC",
+            Self::Gripen => "~GRIH.PIC",
+            Self::F5E => "~F29H.PIC",
+            Self::Tornado => "~EF2H.PIC",
+            Self::Mf1 => "~RAFH.PIC",
         }
     }
     /// Compact identity for lobby columns and server seat logs.
@@ -687,6 +743,11 @@ impl AircraftId {
             Self::F16A => "F- 16A Falcon",
             Self::Mig31 => "MiG-31 Foxhound",
             Self::M2000 => "Mirage 2000",
+            Self::F15E => "F- 15E Strike Eagle",
+            Self::Gripen => "Saab Gripen",
+            Self::F5E => "F-  5E Tiger",
+            Self::Tornado => "Tornado IDS",
+            Self::Mf1 => "Mirage F1",
         }
     }
     /// Exact reviewed short/long retail names, absent for the original loose fixtures.
@@ -731,6 +792,11 @@ impl AircraftId {
             Self::F16A => Some(("F-16", "F- 16A Falcon")),
             Self::Mig31 => Some(("MiG-31", "MiG-31 Foxhound")),
             Self::M2000 => Some(("M2000", "Mirage 2000")),
+            Self::F15E => Some(("F-15E", "F- 15E Strike Eagle")),
+            Self::Gripen => Some(("Gripen", "Saab Gripen")),
+            Self::F5E => Some(("F-5", "F-  5E Tiger")),
+            Self::Tornado => Some(("Tornado", "Tornado IDS")),
+            Self::Mf1 => Some(("MF1", "Mirage F1")),
             _ => None,
         }
     }
@@ -778,6 +844,11 @@ impl AircraftId {
             Self::F16A => Some("F18R.SEE"),
             Self::Mig31 => Some("MIG31R.SEE"),
             Self::M2000 => Some("F18R.SEE"),
+            Self::F15E => Some("F15R.SEE"),
+            Self::Gripen => Some("F18R.SEE"),
+            Self::F5E => Some("F18R.SEE"),
+            Self::Tornado => Some("F18R.SEE"),
+            Self::Mf1 => Some("F18R.SEE"),
         }
     }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
@@ -844,6 +915,12 @@ impl AircraftId {
             Self::F16A => &["M61.JT"],
             Self::Mig31 => &["GSH6_30.JT"],
             Self::M2000 => &["DEFA.JT"],
+            Self::F15E => &["M61.JT"],
+            // BK27.JT is not a live weapon yet (the ordnance slices own it).
+            Self::Gripen => &["BK27.JT"],
+            Self::F5E => &["M61.JT"],
+            Self::Tornado => &["BK27.JT"],
+            Self::Mf1 => &["DEFA.JT"],
         }
     }
     /// Reviewed optional left, centre and right cockpit overlays.
@@ -883,6 +960,10 @@ impl AircraftId {
                 | Self::F16A
                 | Self::Mig31
                 | Self::M2000
+                | Self::F15E
+                | Self::F5E
+                | Self::Tornado
+                | Self::Mf1
         )
     }
 }
@@ -946,6 +1027,10 @@ impl Aircraft {
             AircraftId::F16A => 660,
             AircraftId::Mig31 => 588,
             AircraftId::M2000 => 660,
+            // Record sizes read in the batch-5 source reviews (2026-11-10).
+            AircraftId::F15E | AircraftId::Gripen | AircraftId::Tornado => 660,
+            AircraftId::F5E => 612,
+            AircraftId::Mf1 => 636,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -1763,6 +1848,11 @@ mod profile_tests {
             (AircraftId::F16A, "F-16", "F- 16A Falcon", 660),
             (AircraftId::Mig31, "MiG-31", "MiG-31 Foxhound", 588),
             (AircraftId::M2000, "M2000", "Mirage 2000", 660),
+            (AircraftId::F15E, "F-15E", "F- 15E Strike Eagle", 660),
+            (AircraftId::Gripen, "Gripen", "Saab Gripen", 660),
+            (AircraftId::F5E, "F-5", "F-  5E Tiger", 612),
+            (AircraftId::Tornado, "Tornado", "Tornado IDS", 660),
+            (AircraftId::Mf1, "MF1", "Mirage F1", 636),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -1781,6 +1871,46 @@ mod profile_tests {
         }
         assert!(AircraftId::parse("F31E.PT").is_err());
         assert!(AircraftId::parse("F14B.PT").is_err());
+    }
+    #[test]
+    fn the_batch_five_aircraft_parse_by_key_and_keep_their_neighbours_apart() {
+        // B5-1 (2026-11-10): checkpoint codes 41 to 45, in batch order.
+        for (key, id) in [
+            ("f15e", AircraftId::F15E),
+            ("F15E.PT", AircraftId::F15E),
+            ("gripen", AircraftId::Gripen),
+            ("GRIPEN.PT", AircraftId::Gripen),
+            ("f5e", AircraftId::F5E),
+            ("F5E.PT", AircraftId::F5E),
+            ("tornado", AircraftId::Tornado),
+            ("tor", AircraftId::Tornado),
+            ("TOR.PT", AircraftId::Tornado),
+            ("mf1", AircraftId::Mf1),
+            ("MF1.PT", AircraftId::Mf1),
+        ] {
+            assert_eq!(AircraftId::parse(key).unwrap(), id, "{key}");
+        }
+        // Separate records, never aliases.
+        assert_eq!(AircraftId::parse("f15").unwrap(), AircraftId::F15);
+        for key in ["F5EE.PT", "F5EV.PT", "SU24.PT", "MR3.PT", "RAFALE.PT"] {
+            assert!(
+                AircraftId::parse(key).is_err()
+                    || AircraftId::parse(key).unwrap() == AircraftId::Rafale,
+                "{key}"
+            );
+        }
+        assert_eq!(AircraftId::ALL.len(), 45);
+        assert_eq!(AircraftId::SELECTABLE.len(), 46);
+        assert_eq!(
+            AircraftId::ALL[40..],
+            [
+                AircraftId::F15E,
+                AircraftId::Gripen,
+                AircraftId::F5E,
+                AircraftId::Tornado,
+                AircraftId::Mf1,
+            ]
+        );
     }
     #[test]
     fn the_mirage_2000_reads_one_engine_and_one_m53_p2s_thrust_everyone_else_retail() {

@@ -23,8 +23,12 @@ mod store_pairs;
 // re-measured here; F16A-4 owns them.
 // M31-1 raised it to 39 for the MiG-31; its placements belong to M31-5/M31-6.
 // M2K-1 raised it to 40 for the Mirage 2000; its placements belong to M2K-5/M2K-6.
-const AIRCRAFT: usize = 40;
-const RECOVERED_STATIONS: usize = 14;
+// B5-1 raised it to 45 for the F-15E, Gripen, F-5E, Tornado IDS and Mirage F1
+// (2026-11-10); their placements belong to each aircraft's station slice.
+const AIRCRAFT: usize = 45;
+/// 17 from 14: the Gripen's one and the Mirage F1's two optional weapon rows
+/// (B5-1, 2026-11-10; the batch-5 records carry rows with no default weapon).
+const RECOVERED_STATIONS: usize = 17;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
@@ -33,22 +37,29 @@ const TANK_RECORDS: usize = 9;
 /// 4,076 from 3,892: the Mirage 2000 joins the same way (M2K-1, 2026-11-09).
 /// 4,066 from 4,076: the Mirage 2000 carries no wingtip row, so its ten
 /// compatible weapon placements there go (M2K-5, John 2026-11-10).
-const WEAPON_PLACEMENTS: usize = 4066;
+/// 4,663 from 4,066: the five batch-5 records join the same way (B5-1,
+/// 2026-11-10): F-15E 65, Gripen 190, F-5E 71, Tornado 96, Mirage F1 175. First
+/// measurements; each aircraft's station slice owns its count.
+const WEAPON_PLACEMENTS: usize = 4663;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
 /// 199 from 201: the Mirage 2000's belly pairs (row 5) take no 350 or 500
 /// gallon tank, two placements fewer (M2K-5, John 2026-11-10).
-const TANK_PLACEMENTS: usize = 199;
+/// 231 from 199: the batch-5 records (B5-1, 2026-11-10): F-15E 3, Gripen 12,
+/// F-5E 5, Tornado 8, Mirage F1 4.
+const TANK_PLACEMENTS: usize = 231;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
 /// F-16A's four wing and wingtip rows (slice F16A-4). 186: the MiG-31 (M31-1). 194: the Mirage 2000 (M2K-1).
 /// 192 from 194: the Mirage 2000's wingtip row is gone, two fewer (M2K-5, John 2026-11-10).
-const NOVELTY_PLACEMENTS: usize = 192;
+/// 222 from 192: the batch-5 records (B5-1, 2026-11-10).
+const NOVELTY_PLACEMENTS: usize = 222;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).
-const POD_PLACEMENTS: usize = 71;
+/// 80 from 71: the batch-5 records (B5-1, 2026-11-10).
+const POD_PLACEMENTS: usize = 80;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {

@@ -4367,3 +4367,76 @@ stays a separate identity.
 | Real size | Pylon and gear scale | John, three options above |
 | `typeSize` 636 | Refusal if missing | B5-1 adds the entry |
 | Per-row default quantities | Stores load | MF1-6 |
+
+## Batch 5 identities: F-15E, Gripen, F-5E, Tornado IDS, Mirage F1 (B5-1, 2026-11-10)
+
+Implementation, batch slice B5-1, Claude Sonnet. The five source
+reviews above (all 2026-11-10) are now identities. `AircraftId` gains `F15E`,
+`Gripen`, `F5E`, `Tornado` and `Mf1`, appended in that order after `M2000`:
+checkpoint codes 41 to 45, `ALL` 45 retail identities, `SELECTABLE` 46 entries.
+**No record correction and no John decision is applied.** Every record value is
+the retail value; every choice John has not made is the minimal interim that
+follows the record by name, labelled **interim, agent decision 2026-11-10,
+pending John (batch decision round)**. The wire identity is 9 bits since
+protocol 83 (NET-ID9), so codes 0 to 45 use 46 of 512 slots and the
+compile-time assertion still passes. No other record is aliased: `F15.PT` (the
+F-15C), `F5EE.PT`, `F5EV.PT`, `SU24.PT`, the Mirage III and the Rafale keep their
+own identities, and the parked path `("MF1.PT", Some(0x5adc))` in
+`parked_aircraft.rs` is unchanged.
+
+| | F-15E | Gripen | F-5E | Tornado IDS | Mirage F1 |
+| --- | --- | --- | --- | --- | --- |
+| Record | `F15E.PT` | `GRIPEN.PT` | `F5E.PT` | `TOR.PT` | `MF1.PT` |
+| Parse keys | `f15e`, `f15e.pt` | `gripen`, `gripen.pt` | `f5e`, `f5e.pt` | `tornado`, `tor`, `tor.pt` | `mf1`, `mf1.pt` |
+| Checkpoint code | 41 | 42 | 43 | 44 | 45 |
+| `typeSize` | 660 (parser default, now an explicit arm) | 660 (explicit arm) | **612 (new arm)** | 660 (explicit arm) | **636 (new arm)** |
+| Short / long name | `F-15E` / `F- 15E Strike Eagle` | `Gripen` / `Saab Gripen` | `F-5` / `F-  5E Tiger` | `Tornado` / `Tornado IDS` | `MF1` / `Mirage F1` |
+| Shape stem | `F15E` | `GRI` | `F5E` | `TOR` | `MF1` |
+| HUD (record) | `AV8.HUD` | `GRIPEN.HUD` | `F29.HUD` | `E2000.HUD` | `RAFALE.HUD` |
+| Cockpit stem / picture | `AV8` / `~AV8H.PIC` | `GRI` / `~GRIH.PIC` | `F29` / `~F29H.PIC` | `EF2` / `~EF2H.PIC` | `RAF` / `~RAFH.PIC` |
+| PTS companion | none | `GRIPEN.PTS` | none | none | none |
+| Radar / gun | `F15R.SEE` / `M61.JT` | `F18R.SEE` / `BK27.JT` | `F18R.SEE` / `M61.JT` | `F18R.SEE` / `BK27.JT` | `F18R.SEE` / `DEFA.JT` |
+| Live-fire default stores | `M61`, `MK82`, `AIM120` | `BK27`*, `AGM65G`, `AIM120`, `AIM9M` | `M61`, `AIM7`, `AIM9B` | `BK27`*, `PAVEWAY`, `MK82P3`, `AIM9M` | `DEFA`, `R550` |
+| Strike class | Fighter | Fighter | Fighter | Fighter | Fighter |
+| Interim rig: CODE bytes / runtime faces | 28,906 / 350 | 28,848 / 383 | 21,488 / 253 | 28,150 / 287 | 19,200 / 236 |
+| State words | `80c0 80c6 80cc 80d8 80de` | `8080 8086 808c 8098 809e 80a4` | `63c0 63c6 63cc 63d8 63de 63e4` | `7dc0 7dc6 7dcc 7dd8 7dde 7de4` | `5ad0 5ad6 5adc 5ae8 5aee 5af4` |
+| Gear word / faces added | `80cc` +18 | `808c` +22 | `63cc` +6 | `7dcc` +26 | `5adc` +6 |
+| Gear low point (shape units) | 27 at 1/3 ft | 16 at 1/3 ft | 18 at 1/3 ft | 11 at 2/3 ft | 17 at 1/3 ft |
+| Draw scale | 1/3 ft a unit | 1/3 ft a unit | 1/3 ft a unit | **2/3 ft a unit (header scale 2)** | 1/3 ft a unit |
+
+\* `BK27.JT` is not a supported weapon. It is admitted only as the station's own
+default (the Gripen's and the Tornado's internal gun row, flag 8); it stays out
+of `SUPPORTED_WEAPONS`, the ordnance catalog and the Cheat catalog, and gets no
+weapon work here. The ordnance slices (GRI-6, TOR-6) own the gun's ballistics,
+sight and loading. The two guard tests that said no roster aircraft mounts the
+decoded cannon records (`loadout.rs` and the retail `hidden_guns.rs` check) now
+name `BK27.JT` as mounted by exactly the Gripen and the Tornado.
+
+**Interim choices pending John (all agent decisions, 2026-11-10).**
+
+| Choice | Interim | Why this one |
+| --- | --- | --- |
+| HUD and cockpit bindings | Each record's own `hudName` and cockpit family (table above) | The original game follows the record. The F-15E and Mirage F1 resolve to glass TORE already measures (`AV8` to the Su-27 mask, `RAF` to the Rafale). |
+| Gripen, F-5E and Tornado HUD glass | `hud_aperture.rs` fails closed (empty mask) | Their pictures (`~GRIH`, `~F29H`, `~EF2H`) have no measured polygon. Cockpit slices (GRI-7, F5E-7, TOR-7) measure them. |
+| Strike class | Fighter for all five | The rule (top speed over 700 kt, takeoff weight under 150,000 lb) gives Fighter; it is the fleet's class for the F-15C and the Su-24. |
+| Tornado draw scale | 2/3 ft a unit | See below. |
+| Rig and gear | Gear word only; the other words pinned, unmapped | As the Mirage 2000 interim: the shared fitted gear law until X-3 and X-4. |
+
+**Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
+header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
+identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
+Tornado would have drawn at half size (the Tornado review measured 22.3 ft span
+at 1/3 against 45.6 ft real). B5-1 adds `Tornado` beside `Mig23` in that
+function (2/3 ft a unit) and gives the interim rig spec the same scale, so the
+shape, the stores preview, the underside probe and the damage pieces all use
+2/3; `aircraft_scale.rs` stays `[1, 1, 1]` (no per-axis fit; that is John's
+call). The gear low point is 11 units at 2/3 ft, 7.33 ft. Store rows are
+measured in TOR-5 on the drawn shape.
+
+**Not done here, by design.** No cockpit measurement, no rig mapping beyond the
+gear word, no station, pylon or ordnance review, no flight-model change, no
+record correction (thrust, weights, G limits and engine counts stay retail for
+John's decision round), no battery list extension. The ordnance audit pins moved
+to 45 aircraft as first measurements of five records not yet reviewed station by
+station; see the [ordnance availability
+baseline](../baselines/ordnance-availability.md#batch-5-identities-join-the-roster-b5-1-2026-11-10).

@@ -77,17 +77,24 @@ fn decoded_cannon_records_are_internal_gun_style_and_mounted_by_no_roster_aircra
         let aircraft =
             Aircraft::parse(&bytes).unwrap_or_else(|error| panic!("{}: {error}", id.pt()));
         for name in HIDDEN {
-            assert!(
-                !id.mounts_gun(name),
-                "{} must not claim to mount {name}",
+            // B5-1 (2026-11-10): the Gripen and the Tornado IDS are the
+            // decoded carriers of BK27.JT and name it as their own gun row.
+            // It stays out of `SUPPORTED_WEAPONS`.
+            let carrier =
+                name == "BK27.JT" && matches!(id, AircraftId::Gripen | AircraftId::Tornado);
+            assert_eq!(
+                id.mounts_gun(name),
+                carrier,
+                "{} gun claim for {name}",
                 id.pt()
             );
-            assert!(
-                !aircraft
+            assert_eq!(
+                aircraft
                     .hardpoints
                     .iter()
                     .any(|h| h.store.as_deref() == Some(name)),
-                "{} decoded station list names {name}",
+                carrier,
+                "{} decoded station list and {name}",
                 id.pt()
             );
         }

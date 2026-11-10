@@ -55,6 +55,11 @@ impl VarietyFlightModel {
             F16A => ("F-16", "F16.SH"),
             Mig31 => ("MiG-31", "MIG31.SH"),
             M2000 => ("M2000", "M20.SH"),
+            F15E => ("F-15E", "F15E.SH"),
+            Gripen => ("Gripen", "GRI.SH"),
+            F5E => ("F-5", "F5E.SH"),
+            Tornado => ("Tornado", "TOR.SH"),
+            Mf1 => ("MF1", "MF1.SH"),
             _ => return None,
         })
     }
@@ -109,6 +114,17 @@ impl VarietyFlightModel {
             // contact -13 against low -12 in the M2K-0 review), scaled by the
             // shape's height factor (M2K-2: 12 units become 18.06, 6.02 ft).
             M2000 => 12. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
+            // Batch 5 (B5-1): deployed gear low points from the source
+            // reviews, in shape units at the shape's own scale, not yet
+            // scaled by any real-size fit. F15E.SH -27 and GRI.SH -16 and
+            // F5E.SH -18 and MF1.SH -17 at 1/3 ft a unit; TOR.SH -11 at its
+            // header scale of 2/3 ft a unit (interim, agent decision
+            // 2026-11-10, pending John).
+            F15E => 27. / 3.,
+            Gripen => 16. / 3.,
+            F5E => 18. / 3.,
+            Tornado => 11. * 2. / 3.,
+            Mf1 => 17. / 3.,
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {

@@ -425,3 +425,37 @@ page (`--quick-mission --snapshot-state ordnance --aircraft m2000`) reads `Inter
 Gun DEFA 30mm 250 (max 250)`, `Centerline 150 gallon tank 1 loaded (max 1)`,
 `Fuselage AS 15 4 loaded (max 4)`, `Wing Super 530D 2 loaded (max 2)` and `Wing
 R-550 Magic 2 2 loaded (max 2)`, with no wingtip row.
+
+## Batch 5 identities join the roster (B5-1, 2026-11-10)
+
+`F15E.PT`, `GRIPEN.PT`, `F5E.PT`, `TOR.PT` and `MF1.PT` joined `AircraftId` at
+the end (checkpoint codes 41 to 45), so the audit now checks 45 aircraft. The
+pins in `ordnance_audit.rs` moved on purpose, with no record, mask or station
+position added: the roster from 40 to 45, recovered (optional) weapon stations
+from 14 to 17 (the Gripen has one and the Mirage F1 two rows with no default
+weapon), weapon placements from 4,066 to 4,663, tank placements from 199 to 231,
+Cheat-only novelty placements from 192 to 222 and designator-pod placements from
+71 to 80. The weapon-record (82) and tank-record (9) counts are unchanged:
+`BK27.JT`, the Gripen's and the Tornado's gun, is not a supported weapon. It is
+admitted only as the station's own internal gun default (`loadout.rs`, the
+`own_gun` case in `validate_for_editing`, and the live-fire list), and stays out
+of the catalog and the Cheat catalog; the ordnance slices own it. These are first
+measurements of records not yet reviewed station by station. Per-aircraft lines,
+measured with the decoded records and the interim live-fire lists:
+
+```text
+ordnance F15E.PT: 4 source rows, 0 optional weapon rows, 65 compatible weapon placements, 3 tank placements; defaults and restart passed; catalog 51 normal, 83 Cheat
+ordnance GRIPEN.PT: 5 source rows, 1 optional weapon rows, 190 compatible weapon placements, 12 tank placements; defaults and restart passed; catalog 60 normal, 83 Cheat
+ordnance F5E.PT: 4 source rows, 0 optional weapon rows, 71 compatible weapon placements, 5 tank placements; defaults and restart passed; catalog 61 normal, 83 Cheat
+ordnance TOR.PT: 5 source rows, 0 optional weapon rows, 96 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 61 normal, 83 Cheat
+ordnance MF1.PT: 5 source rows, 2 optional weapon rows, 175 compatible weapon placements, 4 tank placements; defaults and restart passed; catalog 62 normal, 83 Cheat
+```
+
+The `menus-ordnance-availability` and `a2g-catalog` battery expected lines now
+read 45 aircraft, 17 recovered stations, 4,663 / 231 / 222.
+
+```text
+ordnance audit: 45 aircraft, 17 recovered weapon stations, 4663 weapon placements, 231 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 222 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```

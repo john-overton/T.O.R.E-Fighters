@@ -1013,6 +1013,20 @@ impl Configuration {
                 AircraftId::Mig25 => ["AA6.JT", "AA2.JT"].contains(&name),
                 AircraftId::Mig31 => ["AA9.JT", "AA8.JT", "GSH6_30.JT"].contains(&name),
                 AircraftId::M2000 => ["DEFA.JT", "R530.JT", "R550.JT", "AS15.JT"].contains(&name),
+                // Batch 5 (B5-1): the default stores of each record that are
+                // already live. BK27.JT (the Gripen's and the Tornado's gun) is
+                // only the station's own default here: it stays out of
+                // SUPPORTED_WEAPONS and gets no other weapon work (ordnance
+                // slices own it).
+                AircraftId::F15E => ["M61.JT", "MK82.JT", "AIM120.JT"].contains(&name),
+                AircraftId::Gripen => {
+                    ["BK27.JT", "AGM65G.JT", "AIM120.JT", "AIM9M.JT"].contains(&name)
+                }
+                AircraftId::F5E => ["M61.JT", "AIM7.JT", "AIM9B.JT"].contains(&name),
+                AircraftId::Tornado => {
+                    ["BK27.JT", "PAVEWAY.JT", "MK82P3.JT", "AIM9M.JT"].contains(&name)
+                }
+                AircraftId::Mf1 => ["DEFA.JT", "R550.JT"].contains(&name),
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256

@@ -277,6 +277,15 @@ mod tests {
             (AircraftId::F16A, Fighter),
             (AircraftId::Mig31, Fighter),
             (AircraftId::M2000, Fighter),
+            // Batch 5 (B5-1, interim, agent decision 2026-11-10, pending John,
+            // batch decision round): the rule sorts all five as Fighter, the
+            // class the fleet gives the F-15C and the Su-24 (the F-15E and the
+            // Tornado top 1,300 kt with a takeoff weight under 150,000 lb).
+            (AircraftId::F15E, Fighter),
+            (AircraftId::Gripen, Fighter),
+            (AircraftId::F5E, Fighter),
+            (AircraftId::Tornado, Fighter),
+            (AircraftId::Mf1, Fighter),
         ];
         assert_eq!(expected.len(), AircraftId::SELECTABLE.len());
         for (id, class) in expected {

@@ -242,6 +242,55 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x589c, Part::Gear, 6)],
                 1. / 3.,
             ),
+            // Batch 5 interim rig specs (B5-1, 2026-11-10): each shape's exact
+            // CODE size, runtime face count and state words from the source
+            // reviews (docs/formats/aircraft-variety.md, the five 2026-11-10
+            // reviews). Only the gear word is mapped; the other words are
+            // pinned and unmapped, so each aircraft loads with the shared
+            // fitted gear law until its own rig slice (X-3, X-4).
+            // F15E.SH: five words, gear 0x80cc adds 18 faces.
+            Id::F15E => (
+                28906,
+                350,
+                &[0x80c0, 0x80c6, 0x80cc, 0x80d8, 0x80de],
+                &[(0x80cc, Part::Gear, 18)],
+                1. / 3.,
+            ),
+            // GRI.SH: six words, gear 0x808c adds 22 faces.
+            Id::Gripen => (
+                28848,
+                383,
+                &[0x8080, 0x8086, 0x808c, 0x8098, 0x809e, 0x80a4],
+                &[(0x808c, Part::Gear, 22)],
+                1. / 3.,
+            ),
+            // F5E.SH: six words, gear 0x63cc adds 6 faces (three plates).
+            Id::F5E => (
+                21488,
+                253,
+                &[0x63c0, 0x63c6, 0x63cc, 0x63d8, 0x63de, 0x63e4],
+                &[(0x63cc, Part::Gear, 6)],
+                1. / 3.,
+            ),
+            // TOR.SH: six words, gear 0x7dcc adds 26 faces. The shape header
+            // scale is 2, so the shape draws at 2/3 ft a unit (interim, agent
+            // decision 2026-11-10, pending John, batch decision round; the
+            // Tornado review measures it true size within 3 percent at 2/3).
+            Id::Tornado => (
+                28150,
+                287,
+                &[0x7dc0, 0x7dc6, 0x7dcc, 0x7dd8, 0x7dde, 0x7de4],
+                &[(0x7dcc, Part::Gear, 26)],
+                2. / 3.,
+            ),
+            // MF1.SH: six words, gear 0x5adc adds 6 faces (the parked word).
+            Id::Mf1 => (
+                19200,
+                236,
+                &[0x5ad0, 0x5ad6, 0x5adc, 0x5ae8, 0x5aee, 0x5af4],
+                &[(0x5adc, Part::Gear, 6)],
+                1. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {

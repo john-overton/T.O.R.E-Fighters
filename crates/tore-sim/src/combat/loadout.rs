@@ -692,7 +692,11 @@ impl Loadout {
             if i32::from(*n) > self.capacity(i, &s.weapon) {
                 return Err(super::invalid("Station quantity exceeds capacity."));
             }
-            if *n > 0 && !supported(&s.weapon.source) {
+            // B5-1 (2026-11-10): BK27.JT stays out of SUPPORTED_WEAPONS (the
+            // ordnance slices own it) but is the Gripen's and the Tornado's
+            // own internal gun, so the station's default load is admitted.
+            let own_gun = s.internal && self.aircraft.mounts_gun(&s.weapon.source);
+            if *n > 0 && !supported(&s.weapon.source) && !own_gun {
                 return Err(super::invalid(
                     "This store is available for setup only; its flight behavior is not implemented yet.",
                 ));
@@ -907,9 +911,15 @@ mod tests {
                 "{name} must stay hidden until a carrier is ported"
             );
             for id in AircraftId::ALL {
-                assert!(
-                    !id.mounts_gun(name),
-                    "{} must not claim to mount {name}",
+                // B5-1 (2026-11-10): the Gripen and the Tornado IDS are the
+                // decoded carriers of BK27.JT and mount it as their own
+                // internal gun. It stays out of SUPPORTED_WEAPONS.
+                let carrier =
+                    name == "BK27.JT" && matches!(id, AircraftId::Gripen | AircraftId::Tornado);
+                assert_eq!(
+                    id.mounts_gun(name),
+                    carrier,
+                    "{} gun claim for {name}",
                     id.pt()
                 );
             }
