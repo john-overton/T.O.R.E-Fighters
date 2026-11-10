@@ -3058,3 +3058,356 @@ is not aliased to any other record.
 | Wingtip row 1 ft outboard of the tip | Stations | GRI-5 measures |
 | Gun side and 570 rounds | Gun row | GRI-5/GRI-6 |
 | Radio callout absent | Chatter | None (no `^ACMGRI*`); GRI-9 notes |
+||||||| 25a8c5b0
+
+
+## F-5E source review (2026-11-10)
+
+Research mode, slice F5E-0. This reviews `F5E.PT` and its dependency closure
+before `AircraftId::F5E` exists. `F5E.PT` is the 43rd retail identity to be
+appended in the aircraft batch (checkpoint code 43, after `M2000`, the
+F-15E and the Gripen; the batch identity slice B5-1 adds it). `F5EE.PT`
+(desert) and `F5EV.PT` (snow) are separate records with their own shapes
+(`f5ee.SH`, `f5ev.SH`) and are out of scope: no alias and no shared identity.
+Both of those are parked targets today (`parked_aircraft.rs`: `F5EE.PT` gear
+word `0x639c`, `F5EV.PT` `0x614c`); `F5E.PT` is not parked, and none of that
+changes. No original module was executed. PT, SEE, ECM, JT and GAS are read as
+bounded BRF data with the shared field order in `aircraft_schema.rs`; SH, HUD
+and PIC are inspected as data. Slice done by Claude Sonnet (sonnet-medium).
+Nothing here changes code or behaviour.
+
+Open for John, **not decided here**: the HUD and cockpit
+([F-5E HUD](#f-5e-hud-and-cockpit-for-john)), the control surfaces
+([F-5E surfaces](#f-5e-control-surfaces-for-john)), the record
+([F-5E record](#f-5e-record-against-the-real-aircraft-for-john)), the
+stations and default load ([F-5E hardpoints](#f-5e-hardpoints)) and the size
+([F-5E size](#f-5e-size-against-the-real-aircraft-for-john)).
+
+### F-5E build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the
+[build section](#build-and-extraction)). The closure was extracted locally to
+`.local/m3-imports/scratch/f5e` with `cargo run --locked -p tore-extract --
+--source gameassets/fighters-anthology --out .local/m3-imports/scratch/f5e
+--include 'F5E*' --include 'F29*' --include '~F5*' --include '*F5*' ...`. A name
+sweep (`*TIGER*`, `*NORTH*`, `~F5*`, `*F5E*`, `*F-5*`, `*F20*`, `*F29*`,
+`*ACF5*`, `*BARF5*`) went to `.../names`, and every `*.PT` of `FA_2.LIB` to
+`.../allpt` for the template comparison. The `SETUP.ESA` installer copies are
+present for all of these. The usual five unrelated archive errors appear
+(`LHX*.LIB` compression flags and `_SETUP.LIB`).
+
+### F-5E identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `F5E.PT`, 13,489 bytes, SHA-256 `7f0026d5059b1cc037be856d784dcbc7d9d4cca6c5f634994c1731ce105fbae2` |
+| Displayed names | `F-5`, `F-  5E Tiger`, `F5E.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; **`typeSize` 612, `instanceSize` 592** (not the parser default 660/626: F5E-1 needs a `612` arm next to `A4E`, `Mig21`, `Ac130`, `F4B`, `A7` in `aircraft.rs`) |
+| Object class / year / hit points | `0x8000` (fighter) / 1973 / 75; `expType` 30 |
+| PLANE flags | `0x11`: seat and base bit; hook, no-lift, carrier and multi-crew clear |
+| Shape | `f5e.SH` (25,088 bytes), shadow `f5e_s.SH` (12 faces) |
+| Damage looks | `F5E_A.SH` 228 faces, `F5E_B.SH` 128, `F5E_C.SH` 234, `F5E_D.SH` 24 |
+| Skins | `_F5E.PIC` (81,704 bytes), `_F5E_A.PIC` 81,964, `_F5E_B.PIC` 68,184, `_F5E_C.PIC` 96,524, `_F5E_D.PIC` 42,184 |
+| Sounds | `&JET1N.11K` loop, `&JET1A.11K` second, `&powerup.5k`, `&powerdn.5k` |
+| HUD | `f29.HUD` (resolves to the existing `F29.HUD`, the X-29's) |
+| AI script | `f.BI` |
+| Sensors / jammer / gun | `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `M61.JT` (all reviewed) |
+| PTS | none: no `F5E.PTS` exists (`F29.PTS` does) |
+| Radio callouts | `^ACF5E.5K` (2,865 bytes), `^TIGER.5K` (2,329), `^BARF5.5K` (8,865) |
+| Encyclopedia | `F5E.INF` and `F5E_0/1/2/C.PIC` in `disc2/FA_3.LIB`; reference media, not flight data |
+| Parked / CLI | not parked; checkpoint code 43 and key `f5e`/`f5e.pt` reserved for B5-1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes of the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `F5E.PT` | 13,489 | `7f0026d5059b1cc037be856d784dcbc7d9d4cca6c5f634994c1731ce105fbae2` |
+| `F5E.SH` | 25,088 | `3c7cbd3e403d95e4dd52a7669caed2999509377a75b4077b9cad0e115bd0845f` |
+| `F5E_S.SH` | 4,608 | `4c73623088802890f0655229984d463a1c85023fa2476d05cabcac30507da412` |
+| `F5E_A.SH` | 16,896 | `4bf3099db775b99e19e210aaa889eb4ac20e36291c4952f6145e916f42c75b1c` |
+| `F5E_B.SH` | 8,704 | `660312074e9281b5c5749aa21069952abaaa3eab8ec4136bd3f9fa788613c15f` |
+| `F5E_C.SH` | 20,992 | `6839fa53462ebabfe64091b0fae46f0e1c21ed657de41071b15638e7406f71b1` |
+| `F5E_D.SH` | 4,608 | `36ee7a9871313c6ce063521b68993a8a1e779228a427746f23bcc881b8db41df` |
+| `F29.HUD` | 4,608 | `1b6591c70dc7b166b7515f7014bd10c2a614184399a7003431bb99b9b900ef3c` |
+| `_F5E.PIC` | 81,704 | `62e8ee3a779683533996d19a337c5c491109573de86fce70ad154f14f2c2f44f` |
+
+Identity facts for the desert and snow records (for B6, no alias): against
+`F5E.PT`, `F5EE.PT` and `F5EV.PT` differ in exactly 3 statements (`year`
+1974, `gearDrag` 38 against 23, `OBJECT.flags` `0x8002bf3` against `0x2bf3`)
+plus names and shapes; the envelope table and the station rows are identical.
+`_F5EE.PIC` and all four `_F5EE_A..D.PIC` damage skins are **byte-identical**
+to the F-5E's; the snow skins differ. The F-5E, desert and snow shapes have
+the same 253 faces and six words at different addresses (F-5E `63c0 63c6 63cc
+63d8 63de 63e4`, desert `6390 .. 63b4`, snow `6140 .. 6164`).
+
+### F-5E record against other records (template copies)
+
+No single record is the template. The closest by shared statements are
+`F5EE`/`F5EV` (216 of 219), then `M2000` (191), `MTF1` (187) and `E2000`
+(186): those overlaps are the generic fighter defaults (sounds, Doppler, crash
+speeds, spin tables, AI timers). What the F-5E record has of its own, shared
+with no other record in `FA_2.LIB`: year, empty weight, thrust (7,000 / 10,000),
+internal fuel, maximum takeoff weight, `structure[1]` and `turbulencePercent`,
+the whole 13-row G envelope table and the hardpoint block. Values that look
+copied, with cited real F-5E figures (the game's own `F5E.INF`, Jane's-style,
+numbers only, and Wikipedia "Northrop F-5", Specifications (F-5E Tiger II),
+accessed 2026-11-10):
+
+| Value in the record | Where else it appears | Real F-5E | Verdict |
+| --- | --- | --- | --- |
+| Ceiling 42,000 ft (`maxAlt`) | 13 records, all of the F-4 family and the A-6, A-7, F-105, F-117 | 51,800 ft (15,800 m) service ceiling; `F5E.INF` 15,790 m | **Copy; 19% low** |
+| Sea-level 142 / 723 kt | `F4`, `F4B`, `F4E`, `F4J`, `BUC` (the F-4 family) | not published | **Copy of the F-4 family** |
+| `structure[0]` 1,218 | `F4`, `F4B`, `F4E`, `F4J`, `BUC` | n/a | Copy of the F-4 family |
+| Envelope rows 8, 6, 4, 2 | rows -4, -3, -2, -1 of the same record | n/a | Mirror copies inside the record (the +8 row equals the -4 row) |
+| G -4 / +8 | `envMax` +8 on 17 records | about +7.33 G (commonly cited limit; not fetched this pass) | Probably template; +8 is 9% over |
+| Internal fuel 6,240 lb | no other record | 677 US gal = about 4,500 lb (2,563 L, `F5E.INF`); `F5E.INF` also prints 4,400 lb and 5,324 lb | **38% over**, origin unknown |
+| Radar `F18R.SEE`, jammer `F18.ECM` | 40 records carry the pair | AN/APQ-159 (20 nm, `F5E.INF`); no internal jammer | Generic fighter pair, not F-5E equipment |
+| Default `AIM7.JT` on the wing row | F-4 family, F-104 | Sparrow is not on the F-5E weapon list (Wikipedia: AIM-9 wingtips; AIM-120 only on upgraded F-5S) | **Not real** |
+| Gun `M61.JT`, 560 rounds | many fighters | two M39A2 20 mm, 280 rounds per gun (`F5E.INF`): 560 rounds matches exactly; M61 is the Vulcan | Count real, gun type generic |
+| `f29.HUD` | `F29.PT` (the X-29) by convention | no F-5E panel | The X-29's panel, see below |
+| Sounds `&JET1N.11K` / `&JET1A.11K` | many | n/a | Generic |
+
+Real-aircraft comparison for the rest of the record:
+
+| Field | Record | Published | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Engines | 2 | 2 (J85-GE-21B) | 0 | **Agrees** (shape: two nozzles at x +/-3, flame word with two lateral plates) |
+| Military thrust, lbf (both) | 7,000 | 7,000 (2 x 3,500, Wikipedia; later text gives 3,600) | 0.0% | **Agrees, not a template** |
+| Afterburner thrust, lbf (both) | 10,000 | 10,000 (2 x 5,000, `F5E.INF` and Wikipedia) | 0.0% | **Agrees, not a template** |
+| Empty weight, lb | 9,558 | 9,583 (Wikipedia); 9,723 (`F5E.INF`) | -0.3% / -1.7% | Agrees |
+| Maximum takeoff, lb | 24,664 | 24,675 (Wikipedia); 24,722 (`F5E.INF`) | -0.04% / -0.2% | Agrees |
+| Top speed, kt | 1,090 | 1,092 (`F5E.INF`) | -0.2% | Agrees |
+| Ceiling, ft | 42,000 | 51,800 | -19% | Copy, see above |
+| Internal fuel, lb | 6,240 | about 4,500 | +38% | Origin unknown |
+| Hit points | 75 | n/a | | Shared with `HWK.PT`, `STRK.PT` only |
+
+Agent audit decision, 2026-11-10: unlike the Mirage 2000, the thrust, engine
+count, empty weight and takeoff weight are the real F-5E's, so nothing here is
+a John thrust or engine question. The record facts that look copied are the
+ceiling, the sea-level speeds, the G ceiling, the fuel, the radar and jammer
+pair and the Sparrow default; all stay retail until John decides, and F5E-8
+reports the envelope against the real aircraft.
+
+### F-5E resources
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `F5E.SH` | Shape | 253 runtime faces, 0 lines, 0 billboards, six state words |
+| `F5E_S.SH` | Shadow | 12 faces |
+| `F5E_A.SH` / `F5E_C.SH` | Damage bodies | 228 / 234 faces |
+| `F5E_B.SH` / `F5E_D.SH` | Damage pieces | 128 / 24 faces |
+| `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `M61.JT` | Sensors, jammer, gun | already reviewed; live |
+| `F150.GAS`, `AIM7.JT`, `AIM9B.JT` | Default stores | reviewed; live in TORE for other carriers (F-4 family, F-4B) |
+
+The shape streamer has pivot 0 and hinge scale 0 (no streamer). The damage
+looks carry no state words.
+
+### F-5E HUD and cockpit (for John)
+
+**Fact.** `F5E.PT` names `f29.HUD`. That resolves to the existing `F29.HUD` in
+`FA_2.LIB`, the **X-29's** HUD (`F29.PT`, "X-29 FSW", has a null `hudName` and
+TORE maps by convention; only `F5E`, `F5EE` and `F5EV` name `f29.HUD`
+explicitly). It carries the panel names `~f29`, `~f29h`, `~f29s`, `~f29_l`,
+`~f29_c`, `~f29_r`, `~f29_lh`, `~f29_ch`, `~f29_rh`, `~f29_ls`, `~f29_cs`,
+`~f29_rs`, `~f29_p`, `~f29_w` and the GEAR, FLAP, BRAKE, HOOK lamps. The cockpit
+family is `~F29*.PIC` in `FA_1.LIB` (13 pictures: `~F29` 640 x 205, `~F29H`
+1280 x 490, `~F29S` 1635 x 613, the L/C/R panels and `~F29_P`). The game's own
+encyclopedia says the X-29s were built from "two F-5E fuselages"
+(`F5E.INF`), a plausible reason the X-29 cockpit was reused. **No F-5E
+cockpit art exists anywhere in the media**: the sweeps `~F5*`, `*F5E*`, `*F-5*`,
+`*TIGER*` and `*NORTH*` over every archive find only the `F5E*` shapes and
+skins, the `^ACF5E`, `^TIGER`, `^NORTH`, `^TONORTH` and `^BARF5` callouts and
+the `F5E_*` encyclopedia pictures. TORE has no X-29 aircraft, so no existing
+stem table entry covers `F29`.
+
+Options (none chosen):
+
+1. **Follow the record: `F29.HUD`, cockpit stem `F29`, `~F29H.PIC`.** What
+   retail does; no new art. Needs one exhaustive stem arm and aperture
+   measurement (F5E-7), like the Mirage's Rafale panel. The player sees the
+   X-29 cockpit in an F-5E. Sharing a panel is not aliasing the record.
+2. **Substitute another reviewed HUD family** (for example the F-4 or F-16
+   panel). Opinionated, no retail evidence, extra wiring.
+3. **Author an F-5E panel.** Invented art; only as a later, separate decision.
+
+Agent note: option 1 is the evidenced one.
+
+### F-5E control surfaces (for John)
+
+**Fact.** Six state words, counts from `Shape::with_state` (gear down extends
+the low point). All six are in the base slot order of the Mirage and MiG-31
+families. Neutral extents: x -44 to 44, y -48 to 87, z -5 to 24.
+
+| Word | Faces | Geometry (shape units, x right, y forward, z up) | Reading |
+| --- | ---: | --- | --- |
+| `63c0` | +8 | Four vertical plates (x +/-3, 6 units tall) and four horizontal plates (x -6 to 5, z 0), y -49 to -79 | Afterburner flame, two lateral plumes |
+| `63c6` | +2 | One quad x +/-2, front edge y 29 z 10, rear edge y 22 z 16, two windings | Speed brake: one dorsal centreline plate |
+| `63cc` | +6 | Three flat plates: mains at x +14 and x -15 (y -2 to 6, z -18 to -4), nose at x 0 (y 53 to 60, z -17 to -5) | Landing gear down |
+| `63d8` | -2 | Removes the left trailing-edge strip (x -7 to -31, y -4 to -11) | Left flap |
+| `63de` | -2 | Removes the right strip (x 7 to 31) | Right flap |
+| `63e4` | 0 net | Swaps the rudder quad for a copy 2 to 3 units to starboard | Rudder (one direction) |
+
+There is **no slat word, no canopy word, no hook word and no nozzle word**.
+The real F-5E has full-span automatic leading-edge flaps and an
+upward-opening canopy (`F5E.INF`); the source draws neither and none should be
+invented. The gear is three flat plates with no doors,
+wheels or struts: wheelbase about 54 units (18.2 ft), main track 29 units
+(9.7 ft).
+
+**State map for the rig:**
+
+| Moving part | Source panel | State word | Rig note |
+| --- | --- | --- | --- |
+| Stabilator, each side | Flat plate z -4: root x 5 (y -23 to -37), tip x 20 (y -30 to -35), 2 faces (both windings); shares no vertex with any other face | none | Whole panel about a lateral spindle |
+| Aileron, each side | Strip x 31 to 43, hinge y -5, trailing y -8 to -7, 2 faces | none | Hinge on the wing trailing edge |
+| Trailing-edge flap, each side | Strip x 7 to 31, hinge y -4 to -5, trailing y -11 to -8, 2 faces | `63d8`, `63de` remove it | The rig keeps the strip drawn and turns it |
+| Rudder | Quad on the single fin, hinge (0,-31,4) to (0,-29,22) | `63e4` | Hinge on the fin trailing edge |
+| Speed brake | Dorsal plate, 2 faces | `63c6` | Appears only when open |
+| Gear | 3 plates, 6 faces | `63cc` | Rigid plates, hinge at top edge |
+| Burner | 8 plates | `63c0` | Additive plume, no hinge |
+| Leading-edge flaps, canopy | none | none | Not in the source |
+
+**Rule 11 face table (from the neutral dump, `fold5.py`).** Wing hinge line
+(top layer z -3, bottom layer z -4): flap from (7,-4) to (31,-5), aileron from
+(31,-5) to (43,-5). Hinge vertices sit on the line; trailing vertices move.
+
+| Surface | Face | Vertices | Moved | On hinge line | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right stabilator | `3a9d` | 4 | 4 (turned whole) | 0 | 0 |
+| Right stabilator | `3b8c` | 4 | 4 | 0 | 0 |
+| Left stabilator | `3f2c`, `40eb` | 4 each | 4 | 0 | 0 |
+| Right flap (x 7 to 31) | `44d9`, `44f8` | 4 each | 2 | 2 | 0 |
+| Left flap (x -7 to -31) | `45c0`, `45df` | 4 each | 2 | 2 | 0 |
+| Right aileron (x 31 to 43) | `3b45`, `3b9f` | 4 each | 2 | 2 | 0 |
+| Left aileron (x -31 to -43) | `4067`, `41ce` | 4 each | 2 | 2 | 0 |
+| Rudder | `4755`, `4774` (neutral); `469b`, `46ba` (word) | 4 each | 2 | 2 | 0 |
+| Speed brake | `4802`, `4819` | 4 each | 2 | 2 | 0 |
+| Gear (each of 6 faces) | `49cc` ... `4ac1` | 4 | 2 | 2 | 0 |
+
+Verdicts:
+
+- **Every moving surface is a whole panel in the source.** No diagonal or
+  partial surface was found, so no probe sheet is needed, and no face has a
+  fixed vertex off its hinge line. The whole-surface gate (John, 2026-11-07 and
+  2026-11-08) is met by all of them.
+- **Stabilators.** Each is a flat 4-vertex plate (two coincident faces, zero
+  thickness) that shares no vertex with the fuselage, so turning it whole about
+  a lateral spindle through the root-chord midpoint, (+/-5, -30, -4), folds
+  nothing and opens no crack beyond the root gap the retail geometry already
+  has (the root is a free edge at x +/-5, the fuselage side). Span 40 units =
+  13.3 ft against the real tailplane span 14.1 ft (4.31 m, `F5E.INF`).
+  Pitch only: the encyclopedia says tailplane incidence is "varied by hydraulic
+  actuators ... for control of rudder and tailplane" and gives the F-5E ailerons
+  as the roll surface; I found no source that the real F-5E tail rolls
+  differentially (the roll-by-aileron arrangement is general knowledge, not
+  cited here beyond that text). **Option for John:** (a) pitch only, the real
+  F-5E and the evidence; (b) pitch plus a small differential roll term as the
+  fleet's tailerons (opinionated, not the real aircraft).
+- **Ailerons and flaps.** Thin wedge strips, chord 3 units (1 ft) at the
+  aileron, 7 units (2.3 ft) at the flap root narrowing to 3. The flap hinge
+  line is not parallel to the aileron's (y -4 to -5 against y -5 flat), a
+  fraction of a degree. Together they take the whole trailing edge from x 7 to
+  43. Both layers' hinge vertices are 1 unit apart in z, the same wedge gap as
+  the Mirage (0.17 units at 10 degrees). Flap and aileron share the seam
+  vertices at x +/-31, so they must not take opposite angles at the seam
+  without a visible step; they are separate surfaces with different jobs
+  (flap: symmetric; aileron: differential). The flap root edge (x 7) is shared
+  with 1-unit closure strips (`3161`, `317d`; `23c0`, `38b2` on the left) that
+  stay fixed; turning the flap opens a gap up to `sin(angle)` x 7 units there.
+  The flap words delete the strip with no replacement, so the rig must not
+  hide it.
+- **Rudder.** One hinged quad per winding; its leading edge is shared with
+  fixed fin faces (`3cd7`, `3d86`), its top trailing vertex with `3cf2`,
+  `3da1`. The retail swap is a roughly 40 degree one-way offset rounded to
+  units, not an exact rotation (the same as the Mirage).
+- **Speed brake.** The source plate is a single 4-unit-wide dorsal plate on the
+  spine, hinged on its forward edge. The real F-5E has paired brakes under the
+  fuselage (general knowledge, not cited this pass). It is the source's brake;
+  options are to rig exactly that, or to leave the brake unrigged.
+- **Leading-edge flaps.** The real aircraft has full-span automatic
+  leading-edge flaps (`F5E.INF`); the shape has no separate geometry or word.
+  Option: leave unrigged, as for the Mirage's slats.
+- **Wingtip rails.** The shape draws a small rail wedge at each tip (x 43 to 44,
+  y -9 to 4, 8 faces a side), in the wing skin; the hardpoint row 6 sits at its
+  x 43 (see below).
+
+### F-5E hardpoints
+
+All seven source rows, original order. Positions are source units; feet divide
+by three; x right, y up, z forward. Location byte: 0 Centerline, 1 Fuselage,
+2 Internal Gun, 4 Wing, 5 Wingtip. Flag `0x4` is the mirror (pair) flag.
+
+| Row | Location | Flags | Position x/y/z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `F18.ECM` | Fixed jammer |
+| 3 | Internal Gun | `0x000c` | 4 / -5 / 41 | 1.3 / -1.7 / 13.7 | 560 | 0 | `M61.JT` | Internal gun, 560 rounds |
+| 4 | Centerline | `0x0605` | 0 / -14 / 0 | 0 / -4.7 / 0 | 1 | 11 | `F150.GAS` | 150 gal tank |
+| 5 | Wing | `0x07e5` | 22 / -14 / 3 | 7.3 / -4.7 / 1.0 | 4 | 40 | `AIM7.JT` | A2A and stores, wing pair |
+| 6 | Wingtip | `0x0085` | 43 / -3 / -3 | 14.3 / -1.0 / -1.0 | 2 | 4 | `AIM9B.JT` | Wingtip rail pair |
+
+**Seven rows, three weapon rows.** The record has one centreline station, one
+wing pair (two stores a side) and the wingtip pair. The real F-5E has seven
+external stations (Wikipedia: 7 hardpoints; the layout of two pylons a side, one
+centreline and two wingtip rails is general knowledge, not cited this pass), so the source gives the centreline and
+the wingtips and one of the two wing stations per side, and no second wing
+pair. Row 5's x 22 (7.3 ft) is the inboard wing region; the outer pylon has no
+row. **Wingtip rails are real on the F-5E**, the shape draws them, and row 6
+sits on the rail (x 43), so row 6 stays under B7. The default `AIM7.JT` on the
+wing pair is a Sparrow, which the real F-5E does not carry; the F-5E's own
+missile is the Sidewinder, which row 6 supplies (`AIM9B.JT` x2 as default). The
+gun row is the real 560 rounds (2 x 280). There is **no sensor or designator
+pod row** and none may be hung (John, 2026-11-07).
+
+Things F5E-5 must handle: the centreline tank (row 4, y -14 = 4.7 ft below the
+reference) with the shape's underside at z -5; the wing pair at x 22 against a
+wing of semi-span 43; the wingtip pair on the rail (the tip rule on a 1-unit
+rail); the second wing pair is a John question if a real-station layout is
+wanted (option: leave as one pair, or add pylons at the real outboard station
+as an opinionated change, with a cited position).
+
+### F-5E size against the real aircraft (for John)
+
+Measured on `F5E.SH` at 1 unit = 1/3 ft, gear down (neutral extents plus the
+`63cc` plates), nose probe included:
+
+| Axis | Shape | Real | Shape / real |
+| --- | ---: | ---: | ---: |
+| Span, wing tips | 86 units = 28.7 ft | 26.67 ft (8.13 m) | +7.5% |
+| Span, over the rail wedges | 88 units = 29.3 ft | 26.67 ft clean; 27.99 ft with tip missiles (8.53 m) | +10.0% / +4.8% |
+| Length, nose probe tip to nozzle ring | 135 units = 45.0 ft | 47.33 ft (14.45 m, `F5E.INF`); 48.19 ft (14.69 m, Wikipedia) | -4.9% / -6.6% |
+| Length, fuselage without probe | 123 units = 41.0 ft | n/a | |
+| Height, gear down to fin top | 42 units = 14.0 ft (z -18 to 24) | 13.35 ft (4.07 m); 13.38 ft (4.08 m, Wikipedia) | +4.9% |
+| Tailplane span | 40 units = 13.3 ft | 14.1 ft (4.31 m) | -5.7% |
+
+**Verdict: the shape is close to true size** (every axis within 10%, against
+the Mirage's -26% / -19% / -45%). Options (none chosen): (a) **no scaling**,
+retail size (smallest change, no per-aircraft scale entry); (b) per-axis scale
+to the real aircraft as the Mirage decision did, about x 0.91 (to the 26.67 ft
+clean span) or 0.95 (to the 27.99 ft span over missiles), y 1.05, z 0.95,
+fitted from these extents in F5E-2; (c) a uniform 1.0 that leaves length
+alone. Agent note: with wingtip missiles the span is within 5%, so (a) is the
+evidenced default.
+
+### F-5E roster note
+
+`F5E.PT` appends as checkpoint code 43 in the batch order (F-15E 41, Gripen 42,
+F-5E 43, Tornado 44, Mirage F1 45). The wire identity is 9 bits
+([NET-ID9](#wire-identity-widened-to-9-bits-net-id9-2026-11-10)), so capacity is
+not a constraint. `F5EE.PT` and `F5EV.PT` are not added.
+
+### F-5E unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| HUD and cockpit choice (X-29 panel) | F5E-7 cannot start without it | John, three options above |
+| Stabilator pitch only or with roll | F5E-3 rig | John, two options above |
+| Ceiling, G, fuel, radar, Sparrow default | Record corrections | John; F5E-8 reports the envelope |
+| Real-size scaling | F5E-2 | John, options above |
+| Second wing pair and outboard pylon | F5E-5 | John, options in hardpoints |
+| `typeSize` 612 | `aircraft.rs` size arm | F5E-1 |
+| Speed brake as one dorsal plate | Real brakes are paired and ventral | F5E-4 rigs the source panel only |
+| What the original does with `63d8`/`63de` | They delete the flap strip | Unknown; the rig keeps the strip drawn |
+| Leading-edge flaps | Real, not in the source | None drawn |
