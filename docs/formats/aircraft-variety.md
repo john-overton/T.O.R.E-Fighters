@@ -2100,3 +2100,53 @@ commands are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
 The M2K-0 unknowns row for fuel, thrust and flow is resolved by this section:
 kept as retail and listed for John.
+
+## Mirage 2000 in missions, multiplayer and replay (M2K-9, 2026-11-10)
+
+Implementation and verification, slice M2K-9 of the Mirage 2000 port. No game
+code changed: `AircraftId::M2000` was appended to every identity list in M2K-1
+(checkpoint code 40, `SELECTABLE` index 40, `ALL` 40 entries), and the wire
+codes an identity by its 6-bit `SELECTABLE` position, so 23 of the 64 slots
+remain and no golden, replay or network fixture moved. The AI builds a wing
+member from the record like any aircraft: `Systems::new(config.engines, ...)`
+now sees the one engine of decision 2, and the default AI load check in
+`ordnance.rs` (external fuel and engine count against the load's configuration)
+passes for it, so an AI Mirage carries the record's `F150.GAS`, `AS15.JT`,
+`R530.JT` and `R550.JT` load. `strike_class.rs` already lists it in the
+fighter family (M2K-1), so no AI behaviour work was done.
+
+What changed is coverage: a Quick Mission test
+(`the_m2000_is_a_quick_mission_player_and_a_wing_choice`) naming `M2000.PT` as
+the player's aircraft and in every AI wing field, the
+`ai-m2000-quick-mission-2v2` and `replay-rec-m2000-2v2` battery scenarios, the
+Mirage 2000 row in the Load Ordnance notes loop
+(`menus-snap-quick-lobby-ordnance-laser-notes-m2000`: the lobby page warns about
+a laser-guided store and offers the pod helper, the same as the F-16A and the
+MiG-31, because its decoded wing mask admits both), and `ai-m2000-*` in the
+`ai-fights` battery family.
+
+Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile`):
+
+- `--ai-roster-probe-ticks 3600`: the four `M2000.PT` lines (Novice, Average,
+  Experienced, Ace) each `ticks=3600 models=2 radar=true ir=false stores=4
+  gun=true projectiles=0 dropped=0 PASS` (four source rows: the DEFA gun, the
+  AS-15 row, the Super 530D row and the Magic 2 row; no wingtip row), so the AI
+  flies it finite with an exact input replay at every skill.
+- `ai-m2000-quick-mission-2v2` passes: every wing the Mirage 2000, one missile
+  kill by the player, two kills in all, nothing dropped. The `cap`, `intercept`,
+  `escort` and `hold` presets of the same fight ran headless with no warnings.
+- `replay-rec-m2000-2v2` passes: the recording reads back `player.aircraft =
+  M2000.PT`, `probe.enemy = M2000.PT`, `draw.models = M2000.PT`, two runs are
+  identical and `--verify-render` finds nothing missing.
+- `net-content-missing` and `net-window-lobby` pass with the rebuilt
+  `tore-server` (the one built on 2026-11-08 had a 207 item content list
+  against the Mirage build's 208, so a bot joined under a different
+  compatibility code; the battery needs `cargo build --locked -p tore-server`
+  after any change to the identity list).
+
+The parked Mirage 2000 path is unchanged and checked: `--surface-parked FRA
+QFLAIR` and `FRA QFSAIR` list `M2000.PT` with `gear 0x589c`, `scale 0.3333` and
+`origin-up 6.02` (the scaled gear low point), and `--surface-scene` draws it
+gear down on the apron at the same size as the flown aircraft (see
+[parked aircraft](../spec/surface-defenses.md#parked-aircraft)).
+

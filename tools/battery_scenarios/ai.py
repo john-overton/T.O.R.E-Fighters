@@ -1758,6 +1758,20 @@ def scenarios() -> list[Scenario]:
                            "MIG31.PT identity (MIG31R.SEE radar, MIG31.ECM jammer, AA-9 and "
                            "AA-8 default load) in a 2 v 2 fight."))
 
+    # 13f. The Mirage 2000 in a mission (slice M2K-9): every wing the Mirage 2000, the
+    # player's own included, 2 v 2 with the fight script, so the M2000.PT identity flies a
+    # mission with its single M53-P2 engine (a TORE override of the retail two), the F18R.SEE
+    # radar, F18.ECM jammer, the Rafale HUD and cockpit by name, and its DEFA gun, Super 530D,
+    # Magic 2 and AS-15 default load. It is never aliased to the Rafale or M2000E.PT. The
+    # roster probe flies it against itself at every skill; this one has it shoot and be shot at.
+    out.append(probe("m2000-quick-mission-2v2", fight(2, 2, "--aircraft", "m2000",
+                                                       "--probe-friendly-aircraft", "m2000",
+                                                       "--probe-enemy-aircraft", "m2000",
+                                                       "--separation", "5", *attack), ticks=7200,
+                     notes="All Mirage 2000: the player's wing and the enemy wing fly the "
+                           "M2000.PT identity (one M53-P2, F18R.SEE radar, F18.ECM jammer, "
+                           "Super 530D, Magic 2 and AS-15 default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

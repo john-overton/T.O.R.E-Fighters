@@ -2197,6 +2197,20 @@ not static scenery), engines off, and they never take off. The templates'
   destruction travels as the ground-destroyed event plus the usual effect and
   mark events; a surface record is sent while damaged so damage smoke shows.
 
+- **The parked Mirage 2000 at its real size (M2K-9, 2026-11-10).** `M2000.PT`
+  is a parked type (`gear 0x589c`) and is now also a flown identity with a
+  per-axis shape scale (M2K-2, opinionated, John, 2026-11-09). The parked path
+  is unchanged: it reads the same record and gear word, and the aircraft stands
+  on the lowest point of the scaled gear-down shape (`origin-up 6.02` ft, a
+  12 unit gear low point at the Mirage scale, against 4.00 ft unscaled). On the
+  Mirage 2000 pair of the French air base `~QFLAIR` (`FRA`, template ordinals
+  15 and 16) and of `~QFSAIR`, `--surface-parked` prints the Mirage at
+  `scale 0.3333` with the scaled `origin-up`, and `--surface-scene` draws both
+  gear down on the apron, wheels on the pavement, at the same size as the
+  flown aircraft (frames in `.local/m3-aircraft/frames/M2K-9/`). `M2000E.PT`
+  (the desert record at `~QELAIR` and `~QESAIR`) is a different identity and
+  keeps its own unscaled gear word `0x592c`.
+
 ## Destroyed looks and drawing
 
 ### Size

@@ -493,6 +493,19 @@ def scenarios() -> list[Scenario]:
             )
         )
 
+    # The Mirage 2000 as the player and in both wings (slice M2K-9): a 2 v 2 recorded three
+    # times, so the M2000.PT identity (checkpoint code 40, one M53-P2 engine) round-trips through
+    # the recording, plays back with nothing missing and records the same twice.
+    out.append(
+        record_scenario(
+            "replay-rec-m2000-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "m2000", "--probe-friendly-aircraft", "m2000",
+             "--probe-enemy-aircraft", "m2000", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(
