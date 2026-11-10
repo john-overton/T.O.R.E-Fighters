@@ -3901,3 +3901,469 @@ is 9 bits (NET-ID9), so there is no capacity constraint.
 | Pave Spike fixed row | Not on a Tornado | John, options above |
 | Real station positions | Rows 5 to 8 vs the real pylons | Needs a cited drawing (TOR-5) |
 | Gear dimensions | Wheelbase and track unverified | TOR-4 with a cited source |
+||||||| 25a8c5b0
+
+
+## Mirage F1 source review (2026-11-10)
+
+Research mode, slice MF1-0 (batch 5). This reviews `MF1.PT` and its dependency
+closure before `AircraftId::Mf1` exists. `MF1.PT` becomes the 45th retail
+identity in the batch identity slice (B5-1, checkpoint code 45). The Mirage F1
+is a parked target today; `parked_aircraft.rs` lists `MF1.PT` with gear word
+`0x5adc` and that path stays as it is. No original module was executed. PT,
+SEE, ECM, JT and GAS are read as bounded BRF data with the shared field order
+in `aircraft_schema.rs`; SH is inspected as data. Slice done by Claude Sonnet
+(sonnet-medium). Nothing here changes code or behaviour.
+
+Questions for John, **not decided here**: the record template and thrust
+([below](#mirage-f1-record-template-and-thrust-for-john)), the HUD and cockpit
+([below](#mirage-f1-hud-and-cockpit-for-john)), the surfaces
+([below](#mirage-f1-surfaces-and-rule-11-for-john)), the centreline jammer pod
+([below](#mirage-f1-pods-and-stations-for-john)) and the size
+([below](#mirage-f1-real-size-for-john)).
+
+### Mirage F1 build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (SHA-256
+`657254c5...` and `fb8b3021...`, see the [MiG-31 build
+section](#build-and-extraction)). Only the named closure was extracted, to
+`.local/m3-imports/scratch/mf1`, with `tore-extract --source
+gameassets/fighters-anthology --out .local/m3-imports/scratch/mf1 --include
+'MF1*' --include '_MF1*' ...` plus the SEE, ECM, JT, GAS, HUD, AI and sound
+files the record names and four comparison records (`RAFALE.PT`, `M2000.PT`,
+`MR3.PT`, `M5.PT`). The `SETUP.ESA` installer copy was extracted too: every
+file is byte-identical to the root copy except `RAFALE.HUD` (4 bytes, build
+difference, as in the Mirage 2000 review). The usual five unrelated archive
+errors appear (`LHX*.LIB` compression flags and `_SETUP.LIB`).
+
+### Mirage F1 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `MF1.PT`, 12,659 bytes, SHA-256 `ea10025dfe50ebeeb543e2173fb9a033404845183294c16485a3d38fd1537249` |
+| Displayed names | `MF1`, `Mirage F1`, `MF1.PT` |
+| Schema | OBJECT + NPC + PLANE; `structType` 5; **`typeSize` 636**; `instanceSize` 609 |
+| Object class / year / hit points | `0x8000` (fighter) / 1970 / 95; `expType` 30 |
+| PLANE flags | `0x11` (seat `0x10`, base `0x01`); hook, no-lift, carrier and multi-crew clear |
+| Engines | **1** (the real aircraft has one Atar 9K-50) |
+| Shape | `mf1.SH` (25,088 bytes), shadow `mf1_s.SH` (15 faces) |
+| Damage looks | `MF1_A.SH` 225 faces, `MF1_B.SH` 53, `MF1_C.SH` 216, `MF1_D.SH` 49 |
+| Skins | `_MF1.PIC` (153,204 bytes), `_MF1_A.PIC` 140,984, `_MF1_B.PIC` 71,564, `_MF1_C.PIC` 138,904, `_MF1_D.PIC` 42,704 (all in `FA_2.LIB`) |
+| Sounds | `&JET1N.11K` loop, `&JET1A.11K` second, `&powerup.5k`, `&powerdn.5k` (present) |
+| HUD | `rafale.HUD` (resolves to the existing `RAFALE.HUD`) |
+| AI script | `f.BI` (12,800 bytes, shared) |
+| Sensors / jammer / gun | `VIS340.SEE`, `F18R.SEE`, `AV8.ECM` (row 2), `DEFA.JT`; pod `ALQ167.ECM` (row 4) |
+| Radio callout | `^ACMF1.5K` exists (5,648 bytes) |
+| Encyclopedia | `MF1.INF` and `MF1_0/1/2/C.PIC` in `disc2/FA_3.LIB`; reference media, numbers only |
+| PTS | none: no `MF1.PTS` exists |
+| Checkpoint code / CLI key | 45 and `mf1`/`mf1.pt`, reserved for B5-1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field (1970, `0x8000`, 1 engine, 15,542 / 6,120 / 30,203 lb, 15,000 /
+30,000 lbf, 1,345 kt top, 66,125 ft, G -3/+7, 95 hit points, 8 hardpoints, the
+default-store list and `rafale.HUD`).
+
+**B5-1 must add a type-size entry.** `AircraftId::Mf1` needs `=> 636` in the
+`typeSize` match in `crates/tore-formats/src/aircraft.rs` (the F-4E, F-14 and
+MiG-29 use 636); the fall-through value 660 would refuse to load. `instanceSize`
+(609) is not validated.
+
+Resource hashes of the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `MF1.PT` | 12,659 | `ea10025dfe50ebeeb543e2173fb9a033404845183294c16485a3d38fd1537249` |
+| `MF1.SH` | 25,088 | `a19501cfa37ad8b28315080ff97db2ec232cdb33a7cde9a109879e00367cbe41` |
+| `MF1_S.SH` | 4,608 | `77deb0f5d32e6e3f5f60d4ab9f212e5ec61c8c2f03f85b148d48261f33107d53` |
+| `MF1_A.SH` | 16,896 | `21ec1c3ac526646a3c7f53d546044a5d1867c29a555c001f308b6f9c3970fa5d` |
+| `MF1_B.SH` | 4,608 | `fa4ab5d0d3ae5d3d2bc706dd875107dd64c8140b2783bcd3da44a8b94b140224` |
+| `MF1_C.SH` | 16,896 | `dccf56cf4f8d22475cb2ccc50270d4e07f438c9a520e92e4dcf38eb488b50d54` |
+| `MF1_D.SH` | 4,608 | `02364ac9c89546e251fa2f294eca23140f4af9d2b64a0a18e6be0f6f87ae0c72` |
+| `_MF1.PIC` | 153,204 | `85b82d8647d44965903cdbc6d3209ec983369eb39a16c0c8c316c055c21c6eee` |
+| `RAFALE.HUD` | 4,608 | `b555f9febf6041297393c8d92e9e70343b1c5c9439316b1c0c1ec0721fe39228` |
+| `AV8.ECM` | 344 | `90d9dff4344c2914a2b90f240de63f021a0e5b73cb6ea894a186986a916f6ce2` |
+| `ALQ167.ECM` | 376 | `cab8049aa941866fc906fcef385f19b78b721545f8b36ab7bdaa62f9563065a8` |
+| `F250.GAS` | 205 | `974e49de6eb22237bf7a1bd24b3ed9308300bbb95270a9c0fe7104892514f0de` |
+
+### Mirage F1 record template and thrust (for John)
+
+**Fact: this record is the Mirage III record with new numbers, not the Rafale
+template.** Diffed field by field (238 decoded fields and named blocks), `MF1.PT`
+is identical to `MR3.PT` (Mirage III) in 198 and differs in 40, against 178
+identical and 60 different for `RAFALE.PT`, and 188 identical and 50 different
+for `M2000.PT`. `M5.PT` (Mirage 5) is identical in 191. Only three fields match
+the Rafale but not the Mirage III (`dmgDebrisPos.z` 0, `dstDebrisPos.x` 0,
+`throttleAcc` 40). The 44 system-damage bytes equal both the Mirage III and the
+Rafale. Fields that match **no** other record I compared (the F1's own
+numbers): year 1970, `maxVisDist` 144, `maxAlt` 66,125, G range -3/+7, structure
+1,328 / 2,107, the three turn-rate acceleration words (147 / 294), turbulence
+103, `spinExit` -1, thrust 15,000, afterburner thrust 30,000, afterburner fuel
+flow 23 and `_gpullDrag` 43, plus all eleven G rows.
+
+Differences from the Mirage III record (all 40): debris positions, year, view
+distance, ceiling, G range, structure, turn-rate words, turbulence, spin exit,
+thrust, afterburner thrust, throttle acceleration (40 against 50), afterburner
+fuel flow (23 against 21), `_gpullDrag` (43 against 46), `hudName` (`rafale.HUD`
+against `seaharcc.HUD`), the shape, shadow and names, the four rows of the
+station block that differ and the G table.
+
+**Copies from the Mirage III record, with the cited real Mirage F1C figure.**
+The real figures are Jane's text in the game's own encyclopedia (`MF1.INF`, F1-C
+variant) unless a web source is named; none establishes original behaviour.
+
+| Field | `MF1.PT` | Copied from | Real F1C | Difference |
+| --- | ---: | --- | ---: | ---: |
+| Empty weight, lb | 15,542 | `MR3.PT`, `MR3E.PT`, `M5.PT` (exactly) | 16,314 (7,400 kg) | -4.7% |
+| Maximum takeoff, lb | 30,203 | same three | 35,715 (16,200 kg) | -15.4% |
+| Internal fuel, lb | 6,120 | `MR3.PT`, `MR3E.PT` | about 7,385 (4,300 L, [MIGFlug](https://migflug.com/afterburner/aircraft/dassault-mirage-f1/)); 7,580 at 0.8 kg/L | -17% to -19% |
+| Hit points | 95 | `MR3.PT` | none | n/a |
+| Signatures 87, 87, 100, 100; `sigs` | as Mirage III | `MR3.PT` | none | n/a |
+| Wheel-brake drag 102, PLANE `flags`, OBJECT `flags` | as Mirage III | `MR3.PT` | none | n/a |
+| Rudder yaw -3 / 3 / 3, `spinEntry` 0, view offset z 60 | as Mirage III | `MR3.PT` | none | n/a |
+| Station rows 0 to 2 (`VIS340.SEE`, `F18R.SEE`, `AV8.ECM`), gun row, wingtip `R550.JT` | as Mirage III | `MR3.PT` | see stations | n/a |
+| Sounds, AI script `f.BI`, crash, stall, spin and drag words | as Mirage III and Rafale | family template | none | n/a |
+
+The F1's thrust is **not** a Mirage III copy and is the largest departure:
+
+| Field | Record | Real F1C (one Atar 9K-50) | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Military thrust, lbf | 15,000 | 11,020 (49.0 kN dry, [MIGFlug](https://migflug.com/afterburner/aircraft/dassault-mirage-f1/)) | +36% | Over |
+| Afterburner thrust, lbf | 30,000 | 15,873 (70.6 kN, Jane's text in `MF1.INF`; [MILAVIA](https://milavia.net/aircraft/miragef1/miragef1_specs.htm) gives 70.21 kN) | +89% | Nearly double |
+| Ceiling, ft | 66,125 | 65,600 (20,000 m service ceiling) | +0.8% | Agrees |
+| Top speed, kt | 1,345 | 1,266 (the encyclopedia's data line; Mach 2.2) | +6.2% | Agrees closely |
+| Sea-level top speed, kt | 800 | 800 ("Mach 1.2 (800 knots)") | 0% | Agrees exactly |
+| G range | -3 / +7 | +7.5 / -3.6 (as commonly published, [MIGFlug](https://migflug.com/afterburner/aircraft/dassault-mirage-f1/)) | -0.5 G on the positive side | Agrees closely |
+| Engines | 1 | 1 | none | Agrees |
+| Year | 1970 | prototype flew 23 December 1966 (`MF1.INF`); service 1973 | n/a | Left |
+
+The Mirage III record next to it has the real Atar 9C thrust (13,668 lbf
+afterburner), so the F1's 15,000 / 30,000 is an authored pair, not a template
+inheritance. The record's military figure (15,000) is within 6% of the real
+**afterburner** thrust (15,873) and the afterburner figure is almost exactly
+double it; I note this and conclude nothing. The record's top speeds, ceiling
+and eleven G rows are consistent with the encyclopedia: the 1 G row peaks at
+2,270 ft/s (1,345 kt) at 36,000 ft and 1,350 ft/s (800 kt) at sea level, and it
+reaches 66,125 ft. So the envelope looks authored for the real aircraft while
+the thrust looks inflated; the flight model uses the envelope as a speed limit
+and the thrust for acceleration and climb. Clean weight (empty plus internal
+fuel) is 21,662 lb, so retail thrust-to-weight with afterburner is 1.38 against
+about 0.73 for the real aircraft at its 24,030 lb clean weight.
+
+**G rows** (speed in ft/s at altitude in ft; eleven rows, -3 to +7):
+
+| G | Points |
+| ---: | --- |
+| -3 | 475@0, 627@14,000, 880@26,000, 1,130@26,000, 1,310@20,000, 1,250@0 |
+| -2 | 365@0, 487@15,000, 673@30,500, 870@40,000, 1,225@40,000, 1,477@35,000, 1,580@27,000, 1,445@19,000, 1,290@0 |
+| -1 | 240@0, 320@14,750, 430@29,500, 620@44,250, 870@59,000, 1,467@59,000, 1,882@50,000, 2,017@35,000, 1,508@18,000, 1,330@0 |
+| 0 | 100@0, 140@13,000, 225@27,000, 313@39,000, 541@56,000, 870@71,000, 1,555@71,125, 2,120@57,250, 2,410@36,000, 1,615@18,000, 1,370@0 |
+| 1 | 170@0, 235@13,000, 307@26,000, 433@39,000, 631@54,000, 870@66,000, 1,481@66,125, 2,033@54,250, 2,270@36,000, 1,550@18,000, 1,350@0 |
+| 2 | same polygon as -1 |
+| 3 | 295@0, 431@18,500, 559@31,750, 697@40,000, 870@49,000, 1,355@49,000, 1,687@44,000, 1,790@31,000, 1,475@18,500, 1,310@0 |
+| 4 | same polygon as -2 |
+| 5 | 427@0, 540@12,250, 693@23,500, 870@33,000, 1,115@33,000, 1,327@29,500, 1,410@23,000, 1,270@0 |
+| 6 | same polygon as -3 |
+| 7 | 520@0, 645@11,500, 900@20,000, 1,075@20,000, 1,240@17,000, 1,230@0 |
+
+None of the eleven rows equals the same-G row of the Mirage III, Mirage 5,
+Rafale or Mirage 2000. The 0 G row has a point at 71,125 ft above `maxAlt`; the
+host caps altitude at the record field, as for the MiG-31.
+
+Options for the template and thrust (none chosen; the Mirage 2000 precedent,
+John 2026-11-09, was one-engine real thrust, labelled opinionated):
+
+1. **Keep retail** (15,000 / 30,000 lbf). Matches the catalog and the audit
+   rule that record facts stay retail. Cost: nearly double the real
+   afterburner thrust, so acceleration and climb are well above the real
+   aircraft inside an envelope that is otherwise right.
+2. **Override to the real Atar 9K-50**: 11,020 lbf dry, 15,873 lbf with
+   afterburner (the Mirage 2000 approach; `aircraft_corrections.rs`). No engine
+   count change is needed, the record already says 1. MF1-8 would check climb
+   and acceleration against the retained envelope rows.
+3. **Override the afterburner only** (30,000 to 15,873) and keep 15,000 as
+   military thrust, which is already near the real wet figure. Smallest change;
+   leaves military thrust 36% over the real dry thrust.
+
+Empty weight (-4.7%), maximum takeoff (-15.4%) and internal fuel (-17% to -19%)
+are Mirage III copies below the real figures. Whether to correct them is also
+John's call (the Mirage 2000 left weights at retail). Hit points and the
+signature block are template values with no real counterpart.
+
+### Mirage F1 HUD and cockpit (for John)
+
+**Fact.** `MF1.PT` names `rafale.HUD`. It resolves (case-insensitive) to the
+existing `RAFALE.HUD`, the same file TORE's Rafale and, since the Mirage 2000,
+`M2000.PT` use (same hash `b555f9fe...`), with the Rafale cockpit family
+(`~RAF*.PIC`, 13 pictures in `FA_1.LIB`, stem `RAF`, `~RAFH.PIC`). The Mirage
+III record next to it names `seaharcc.HUD` (the Sea Harrier panel), so naming
+`rafale.HUD` was a deliberate choice by the record's author. **No Mirage F1
+cockpit art exists in any archive**: sweeps for `*MF1*`, `~MF*`, `*MIR*`,
+`*F1.*`, `*F1_*`, `*F-1*` and `$MF1*` find only the `MF1*` shapes, skins, the
+`^ACMF1.5K` callout, the `MF1_*` encyclopedia pictures, the unrelated `AF1`,
+`MTF1` and `MIF1` records and the same stray `IFMIRA.PIC` the Mirage 2000
+review noted.
+
+Options (none chosen), as in the Mirage 2000 review:
+
+1. **Follow the record: `RAFALE.HUD`, stem `RAF`, `~RAFH.PIC`.** What retail
+   does and what John chose for the Mirage 2000 (2026-11-09). Bind by name, never
+   alias the Rafale record. The player sees a Rafale cockpit in a Mirage F1.
+2. **Substitute another reviewed HUD family**, for example the Mirage III's
+   `seaharcc.HUD` panel if it is wired. Opinionated, extra stem arms.
+3. **Author a Mirage F1 panel.** Invented art; a separate later decision.
+
+Agent note: option 1 is evidenced and needs one exhaustive stem arm in MF1-7,
+exactly as M2K-7 did.
+
+### Mirage F1 parked path
+
+`("MF1.PT", Some(0x5adc))` is in the `GEAR` table of the retail test in
+`crates/tore-formats/src/parked_aircraft.rs`. That path reads only the OBJECT
+block of the record (names, shape and shadow, class, flags, hit points, the five
+signatures, the two debris positions, `expType`, `craterSize`) plus the shape's
+gear word. `parked_inspect` on the real media confirms the same values the
+identity slice must leave alone:
+
+| Item | Value |
+| --- | --- |
+| Shape / shadow | `MF1.SH` / `MF1_S.SH`, scale 1 |
+| Class / hit points / `expType` / crater | `0x8000` / 95 / 30 / 0 |
+| Debris | damaged (-40, 0, 0), destroyed (0, 10, -30) |
+| State words | `5ad0 5ad6 5adc 5ae8 5aee 5af4` (236 faces) |
+| Gear word | `0x5adc` (+6 faces, low point -17); shape low point gear up is -10 |
+| Ground contact offset | -17 (the gear low point) |
+
+B5-1 adds `AircraftId::Mf1` reading the same `MF1.PT`; because the parked reader
+neither reads the flight model nor the hardpoints and has no whitelist, adding
+the flown identity does not touch it. Never alias `MF1.PT` to another record
+(B6). The state words follow the family order flame, brake, gear, flap, flap,
+rudder (the Mirage 2000 order).
+
+### Mirage F1 surfaces and rule 11 (for John)
+
+**State words.** From `shape_inspect` with each word set to 1 alone (runtime
+faces; the export path adds two). Axes are shape units (1 unit = 1/3 ft), x
+right, y forward, z up.
+
+| Word | Faces | Low point | Geometry | Reading | Status |
+| --- | ---: | ---: | --- | --- | --- |
+| `0x5ad0` | +8 | -5 | Four crossed plates behind the nozzle, y -42 to -81 | Afterburner flame | Slot order and position |
+| `0x5ad6` | +2 | +5 | One quad, (2/-2/3, 19, 14) down to (+-2/3, 29, 5), two windings | Dorsal airbrake: one centreline plate | Slot order; geometry unusual |
+| `0x5adc` | +6 | -17 | Three flat plates: mains at x +-3 to +-7 (y -5 to 4, z -6 to -17), nose at x 0 (y 38 to 47, z -7 to -17) | Landing gear down | Confirmed; the parked word |
+| `0x5ae8` | -4 | none | Removes the whole left outboard trailing-edge panel (x -23 to -35) | Left flap-slot word | Slot order only |
+| `0x5aee` | -4 | none | Removes the whole right outboard trailing-edge panel (x 23 to 35) | Right flap-slot word | Slot order only |
+| `0x5af4` | 0 net | +3 | Swaps the rudder quad (x 0) for a copy deflected about 45 degrees to +x | Rudder deflection, one direction | Confirmed by geometry |
+
+There is **no hook word** (hook flag clear), **no slat geometry**, **no spoiler
+geometry**, **no inboard flap panel**, **no canopy word** and **no nozzle word**
+in the source. The only trailing-edge panel on the wing is the outboard one;
+the wing's inboard trailing edge (x 6 to 23) is fixed faces. I recommend none
+of the missing parts be invented. The word-to-face mapping for the two panel
+words is a reading from slot order and geometry (the Mirage 2000 slots 4 and 5
+are the same, and there they delete the inboard strips); the original's use of
+them is unknown.
+
+**Real aircraft.** Cited facts (all web sources are secondary; the encyclopedia
+text is the game's own): full-span leading-edge slats and double-slotted
+trailing-edge flaps ([Wikipedia](https://en.wikipedia.org/wiki/Dassault_Mirage_F1),
+[MIGFlug](https://migflug.com/afterburner/aircraft/dassault-mirage-f1/)); ailerons
+with carbonfibre skin and an "All-moving, mid-mounted, swept tapered tailplane"
+(Jane's text, `MF1.INF`); the roll control described in the secondary sources
+found is ailerons plus two-section upper-wing spoilers, with no source
+describing differential tailplane action; the airbrake position is reported
+inconsistently (twin perforated brakes under the intakes in one source, on the
+wing in another), and the source shape has neither, only one dorsal plate.
+
+**The all-moving tailplane.** It is **one flat five-vertex panel per side**
+(right `2d0e`/`2d36`, left `2c60`/`2c88`, two windings each), at z -1, with no
+state word. It is a whole panel, so it can be rigged as one without a fold:
+root chord about y -22 to -41 at x 5 to 6, tip at x 23 (right) or -22 (left)
+(the two sides differ by one unit), no anhedral. The lateral spindle runs
+through the root chord midpoint (y -31.5, z -1). The root vertex (5, -39, -1) is
+shared with four fixed rear-fuselage faces, so a turn opens a small crack there
+(accepted for a whole-panel turn, as on the MiG-31). **Does it take roll?**
+The cited evidence says no: the real F1 has ailerons (Jane's text) and I found
+no source for taileron roll; the batch standard ("with roll where the real tails
+roll") then means pitch only. This is unconfirmed beyond those sources, so it is
+a question for John.
+
+Options for the tailplane and ailerons (none chosen):
+
+1. **Tailplane pitch only, ailerons roll** (the evidence-led reading): the
+   outboard trailing-edge panel carries roll with a differential angle; the
+   tailplane turns together both sides for pitch.
+2. **Tailplane pitch plus differential roll** (taileron, as the F-15 and
+   Rafale-style tails): no cited source for the F1; opinionated.
+3. **Ailerons only on the outboard panel and no roll from the tail**, with the
+   panel also taking the flap-slot words as a droop (same as option 1 for roll;
+   decide the droop in MF1-3).
+
+**Rule 11 face table** (from the `state_neutral` dump; "on hinge" means within
+one unit of the hinge line, the thickness of the wedge; no face has a fixed
+vertex):
+
+| Surface | Face | Vertices | Moved | On hinge | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right outboard panel (x 23 to 35) | `3ce8` (top quad) | 4 | 3 | 1 | 0 |
+| Right outboard panel | `3cc9` (bottom quad) | 4 | 3 | 1 | 0 |
+| Right outboard panel | `3d0f` (top leading wedge) | 3 | 1 | 2 | 0 |
+| Right outboard panel | `3d30` (bottom leading wedge) | 3 | 1 | 2 | 0 |
+| Left outboard panel (x -23 to -35) | `3e93`, `3e74`, `3eba`, `3edb` | 4, 4, 3, 3 | 3, 3, 1, 1 | 1, 1, 2, 2 | 0 |
+| Right tailplane | `2d0e`, `2d36` | 5 each | 5 | 0 (turns about a spindle) | 0 |
+| Left tailplane | `2c60`, `2c88` | 5 each | 5 | 0 (turns about a spindle) | 0 |
+| Rudder | `40e1`, `4108` (deflected pair `4007`, `402e`) | 4 | 2 | 2 | 0 |
+| Gear (each of 6 faces) | `3b7e` to `3c73` | 4 | 2 | 2 | 0 |
+| Airbrake (each of 2 faces) | `4182`, `4199` | 4 | 2 | 2 | 0 |
+
+Notes behind the table:
+
+- **Outboard panel, each side.** The four faces form one tapered
+  trailing-edge panel: a quad pair plus a thin leading wedge pair, all removed
+  by the same word. The hinge line is the straight leading edge of the wedge,
+  from (23, -6) to (35, -11) at mid thickness z about 1 to 1.5; chord 6 units
+  (2 ft) at the root, 4 (1.3 ft) at the tip, so the surface is 4 ft wide at 59%
+  to 90% of the semi-span, the aileron position on the real wing. It is a whole
+  panel (the quad vertices (23, -8) and (23, -12) are the moving seam,
+  shared with the fixed inboard wing faces `2103`, `2121`, `21ff`, `22f6`, `230e`
+  and `2321`, so a turn opens a crack there; the outboard seam at x 35 meets the
+  fixed wing-tip faces `216c`, `2190`, `2339`, `2384`). No diagonal or partial
+  surface: no face of the panel has a fixed vertex off the hinge.
+- **Rudder.** One quad (two windings) on a fin line from (0, -30, 3) to (0, -39,
+  22). Two vertices lie on that hinge and are shared with the fixed fin faces
+  `2f4d` and `3073`; the other two move, and the trailing top vertex (0, -44,
+  22) is also shared with fixed fin-cap faces `2f70` and `3096` (a crack, as the
+  retail swap itself leaves). The retail deflection is about 45 degrees, one way.
+- **Gear.** Three flat plates (6 faces), no doors, no wheels, no struts.
+  Wheelbase 43 units (14.3 ft), main track at the ground 14 units (4.7 ft).
+- **Airbrake.** One plate 5 units wide: forward edge on the spine at (y 29, z 5),
+  free edge aft and raised at (y 19, z 14). The hinge is the forward edge
+  (MF1-4 to confirm against the spine faces). The source has no paired brakes.
+- **Burner.** Four crossed plates, additive plume, no hinge. One nozzle ring at
+  y -42 and one flame group, which agrees with the record's one engine.
+- No face of any moving surface is split across a diagonal or a coordinate
+  threshold, and no probe sheet is needed.
+
+### Mirage F1 pods and stations (for John)
+
+All eight source rows, in original order. Positions are source units; feet
+divide by three; x right, y up, z forward ([aircraft
+ordnance](aircraft-ordnance.md#hardpoint-positions)). Location byte: 0
+Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip. Flag
+`0x8` marks a fixed internal row.
+
+| Row | Location | Flags | Position x/y/z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `AV8.ECM` | Fixed internal jammer suite |
+| 3 | Internal Gun | `0x000c` | 3 / -5 / 51 | 1 / -1.7 / 17 | 250 | 0 | `DEFA.JT` | Internal gun, 250 rounds |
+| 4 | Centerline | `0x07e5` | 0 / -18 / 5 | 0 / -6 / 1.7 | 1 | 22 | `ALQ167.ECM` | Centreline station, jammer pod default |
+| 5 | Wing | `0x07e5` | 6 / -17 / 0 | 2 / -5.7 / 0 | 4 | 46 | `F250.GAS` | Inner pair, tank default |
+| 6 | Wing | `0x01c5` | 21 / -10 / -3 | 7 / -3.3 / -1 | 2 | 20 | `R550.JT` | Outer wing pair, Magic default |
+| 7 | Wingtip | `0x0085` | 41 / 3 / -11 | 13.7 / 1 / -3.7 | 2 | 4 | `R550.JT` | Wingtip rail pair |
+
+Default stores in the catalog (`VIS340.SEE`, `F18R.SEE`, `AV8.ECM`, `DEFA.JT`,
+`ALQ167.ECM`, `F250.GAS`, `R550.JT` x2) count one default per row; the per-row
+quantities are a host rule for MF1-6. All three weapon names are live in TORE
+today (`DEFA.JT`, `R550.JT`, `F250.GAS`); `AV8.ECM` is a reviewed internal
+suite; `ALQ167.ECM` is decoded but its inventory row says unreviewed and hidden.
+
+**Real stations (Jane's text, `MF1.INF`).** Centreline pylon 2,100 kg; inner
+wing pylon 1,300 kg each; outer wing pylon 550 kg each; wingtip AAM rail 150 kg
+each (Magic or Sidewinder); chaff and flare dispensers, 100 kg, on each fuselage
+shoulder. Auxiliary tanks: two of 1,200 L (317 US gal) on the inner wing pylons
+and one of 2,200 L (581 US gal) on the underfuselage station. Armament: two 30
+mm DEFA 553 cannon, 135 rounds per gun. [Aerospaceweb](https://aerospaceweb.org/aircraft/fighter/miragef1)
+gives "five external hardpoints and two wingtip rails". The record has one
+centreline row plus three mirrored pairs, which is seven positions: a station
+count that agrees with the real five pylons and two rails. The row positions
+were not checked against a cited real pylon location (none cited); the shape
+decides clipping in MF1-5.
+
+**`AV8.ECM` (row 2).** An internal, fixed, weight-0 jammer suite at the aft
+reference point (z -50), the same row the Mirage III and Mirage 5 records carry.
+It is not a pod and hangs from no station. TORE already reviews it for the
+AV-8B (chaff and flare, jammer generation). The real F1 carries chaff and flare
+dispensers on the fuselage shoulders, so an internal countermeasure suite is
+consistent. Nothing to decide beyond the ordinary reuse of a reviewed record.
+
+**`ALQ167.ECM` (row 4, B7).** The station is real (the centreline pylon). The
+default **pod** is the ALQ-167, an American pod that in this roster rides the
+A-6, AV-8B and Kfir (see [aircraft ordnance](aircraft-ordnance.md#external-equipment-pods-name-no-shape-eq-2-2026-11-06)).
+Jane's text in `MF1.INF` lists no ECM pod among the F1's loads (only the
+fuselage-shoulder chaff and flare dispensers), and the secondary sources found
+name French pods (the Syrel ELINT pod on the centreline, Remora and Barem on
+other Mirage types) without an authoritative F1 station assignment. So the
+record puts a US jammer on a real centreline station. In TORE a fixed pod draws
+as a fitted body (12.0 by 1.4 ft for the ALQ-167) under the belly when its row
+sits below the reference point, as the Rafale's `AAS38.SEE` does; row 4 is at
+-6 ft, so it would draw.
+
+Options (none chosen):
+
+1. **Follow the record:** ALQ-167 default on the centreline row, drawn as the
+   fitted pod body; the real station, the record's choice of pod.
+2. **Keep the station, drop the pod default:** an empty centreline row that
+   takes the 250 gal tank (or nothing); never hang a sensor or designator pod
+   there. Opinionated.
+3. **Retire the pod row** (a `retire` entry as the Mirage 2000 used for its
+   wingtip): no centreline store at all. Loses the real centreline station.
+
+Never hang `PAVESPK.SEE` or `AAS38.SEE` on an F1 (B7; neither row exists).
+
+### Mirage F1 real size (for John)
+
+Shape extents at scale 1 (1 unit = 1/3 ft), `MF1.SH` neutral state: x -40 to 40,
+y -45 to 82, z -10 to 25 (gear down -17). The x extreme includes the wingtip
+rails (wing alone x +-39); the y maximum includes a pitot-style spike from
+y 68 to 82 (the radome ends at y 68).
+
+| Axis | Shape | Real F1C | Difference |
+| --- | ---: | ---: | ---: |
+| Span (rails included), 80 units | 26.7 ft (wing alone 26.0 ft) | 27.6 ft (8.40 m without missiles; Jane's text and [MILAVIA](https://milavia.net/aircraft/miragef1/miragef1_specs.htm) agree) | -3.3% |
+| Length, 127 units to the spike tip | 42.3 ft | 50.0 ft (15.23 m, Jane's text), 50.2 ft (15.30 m, [Aerospaceweb](https://aerospaceweb.org/aircraft/fighter/miragef1)) | -15.3% to -15.7% |
+| Length to the radome, 113 units | 37.7 ft | same | -24.6% |
+| Height, gear down 42 units | 14.0 ft | 14.8 ft (4.50 m) | -5.1% |
+| Height, gear up 35 units | 11.7 ft | n/a | n/a |
+
+The Mirage F1 shape is far closer to true size than the Mirage 2000 was (that
+shape was 26% narrow and 19% short): span and height are within 5%, and only the
+length is short, by about a sixth. Per-axis factors to the cited real figures
+would be about x 1.03, y 1.18, z 1.05 (against the Mirage 2000's 1.36 / 1.23 /
+1.5). A uniform 1.05 would bring span to 28.0 ft and height to 14.7 ft, and
+leave the length 11% short.
+
+Options (none chosen; the Mirage 2000 precedent, John 2026-11-09, was
+per-axis real size with one per-aircraft scale):
+
+1. **Leave the shape as authored** (scale 1). Span and height are already
+   within 5%; only the length is short. No per-aircraft scale code.
+2. **Uniform scale about 1.05.** One factor; span and height within 2%, length
+   still 11% short.
+3. **Per-axis to the real figures** (about 1.03 / 1.18 / 1.05, fitted from the
+   measured extents in MF1-2). The Mirage 2000 method; stretches the nose and
+   tail, so the stations, pylons and the gear wheelbase move with it.
+
+### Mirage F1 roster note
+
+`MF1.PT` appends last in the batch: checkpoint code 45, `ALL` 45 and
+`SELECTABLE` 46 after the batch (B5-1). Wire capacity is not a constraint (9-bit
+identity, NET-ID9). `MTF1.PT`, `MIF1.PT` and `AF1.PT` are different records and
+are not added; `MR3.PT` (Mirage III) is the record the F1 was built from and
+stays a separate identity.
+
+### Mirage F1 unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| Thrust 15,000 / 30,000 against real 11,020 / 15,873 | Climb, acceleration | John, three options above; MF1-8 validates |
+| Weights are Mirage III copies | Takeoff load, stores | John (leave or correct) |
+| HUD and cockpit choice | MF1-7 cannot start without it | John, three options above |
+| Tailplane roll | Rig design | John; cited evidence says pitch only |
+| What the original does with `5ae8`/`5aee` | They delete the outboard panel | Unknown; the rig keeps the panel drawn |
+| Airbrake as one dorsal plate | Real brakes are paired | MF1-4 rigs the source panel only |
+| ALQ-167 pod on the centreline | B7 (pod real for the type) | John, three options above |
+| Real pylon x positions | Row 5 sits inside the fuselage width | MF1-5 measures on the shape; no cited real position |
+| Real size | Pylon and gear scale | John, three options above |
+| `typeSize` 636 | Refusal if missing | B5-1 adds the entry |
+| Per-row default quantities | Stores load | MF1-6 |
