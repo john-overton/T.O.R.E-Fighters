@@ -13,6 +13,9 @@ pub const RAFALE_CENTER: usize = 9;
 /// The Mirage 2000's belly pairs (`M2000.PT` row 5, four stores in two
 /// tandem pairs either side of the centreline tank).
 pub const M2000_BELLY: usize = 5;
+/// The Mirage 2000's decoded wingtip row (`M2000.PT` row 8), retired by
+/// [`retire`].
+pub const M2000_TIP: usize = 8;
 
 /// The source row of the F-4B's centreline station (`F4B.PT` row 3: four
 /// AIM-9Bs, Mk 82s and the other stores on the centreline) that also takes
@@ -100,6 +103,36 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
         // loading skips this check, and the 150 and 250 gallon tanks stay.
         "F350.GAS" | "F500.GAS" => !(id == AircraftId::M2000 && row == M2000_BELLY),
         _ => true,
+    }
+}
+
+/// Source rows T.O.R.E does not carry (John, 2026-11-10, opinionated): the
+/// Mirage 2000's wingtip row (`M2000.PT` row 8: Wingtip, x 33, two `R550.JT`,
+/// mask 0x85). It is the Rafale template's wingtip rail carried into the
+/// Mirage record; the real aircraft has nine store stations (five under the
+/// fuselage, two under each wing) and no tip rail, and its two Magics ride the
+/// outer wing pylons (row 7). The decoder still reads the retail row and the
+/// documents keep it as retail (docs/formats/aircraft-variety.md); like
+/// the guarded additions of [`append`], the row is dropped here, after
+/// decoding, only when it is exactly the retail row and the last one, so every
+/// consumer (default and saved loads, the AI, the audit, Cheat loading, the
+/// stores drawing) sees the same eight rows and no station index moves.
+/// Repeated application is a no-op.
+pub fn retire(id: AircraftId, rows: &mut Vec<Hardpoint>) {
+    if id != AircraftId::M2000 || rows.len() != M2000_TIP + 1 {
+        return;
+    }
+    let tip = &rows[M2000_TIP];
+    if (
+        tip.location,
+        tip.flags,
+        tip.position,
+        tip.store.as_deref(),
+        tip.count,
+        tip.weight_class,
+    ) == (5, 0x85, [33, -4, -29], Some("R550.JT"), 2, 4)
+    {
+        rows.pop();
     }
 }
 
@@ -451,5 +484,48 @@ mod tests {
         for name in ["F150.GAS", "F250.GAS"] {
             assert!(tank_allowed(AircraftId::M2000, M2000_BELLY, name));
         }
+    }
+
+    #[test]
+    fn the_mirage_2000_carries_no_wingtip_row_and_only_that_row_goes() {
+        let row = |location, flags, position, store: &str, count, weight_class| Hardpoint {
+            location,
+            flags,
+            position,
+            store: Some(store.into()),
+            count,
+            weight_class,
+        };
+        let retail = vec![
+            row(1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            row(1, 0x8, [0, 0, 0], "F18R.SEE", 1, 0),
+            row(1, 0x8, [0, 0, -50], "F18.ECM", 1, 0),
+            row(2, 0xc, [3, -5, 45], "DEFA.JT", 250, 0),
+            row(0, 0x605, [0, -15, 0], "F150.GAS", 1, 13),
+            row(1, 0x7e5, [4, -20, 0], "AS15.JT", 4, 46),
+            row(4, 0x7e5, [11, -20, -10], "R530.JT", 2, 20),
+            row(4, 0x7e5, [20, -20, -20], "R550.JT", 2, 20),
+            row(5, 0x85, [33, -4, -29], "R550.JT", 2, 4),
+        ];
+        let key = |rows: &[Hardpoint]| -> Vec<_> {
+            rows.iter()
+                .map(|h| (h.location, h.flags, h.position, h.store.clone(), h.count))
+                .collect()
+        };
+        let mut rows = retail.clone();
+        retire(AircraftId::M2000, &mut rows);
+        assert_eq!(key(&rows), key(&retail[..M2000_TIP]));
+        // The outer wing pair keeps its two Magics, and a second call is a no-op.
+        assert_eq!(rows[7].store.as_deref(), Some("R550.JT"));
+        retire(AircraftId::M2000, &mut rows);
+        assert_eq!(rows.len(), 8);
+        // Any other aircraft, or an edited tip row, keeps every row.
+        let mut rafale = retail.clone();
+        retire(AircraftId::Rafale, &mut rafale);
+        assert_eq!(key(&rafale), key(&retail));
+        let mut edited = retail.clone();
+        edited[M2000_TIP].count = 4;
+        retire(AircraftId::M2000, &mut edited);
+        assert_eq!(edited.len(), 9);
     }
 }

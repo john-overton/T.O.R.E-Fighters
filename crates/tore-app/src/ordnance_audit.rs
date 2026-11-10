@@ -31,7 +31,9 @@ const TANK_RECORDS: usize = 9;
 /// and two 0x0085 rows). See docs/baselines/ordnance-availability.md.
 /// 3,892 from 3,817: the MiG-31 joins with its unreviewed record (M31-1).
 /// 4,076 from 3,892: the Mirage 2000 joins the same way (M2K-1, 2026-11-09).
-const WEAPON_PLACEMENTS: usize = 4076;
+/// 4,066 from 4,076: the Mirage 2000 carries no wingtip row, so its ten
+/// compatible weapon placements there go (M2K-5, John 2026-11-10).
+const WEAPON_PLACEMENTS: usize = 4066;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -41,7 +43,8 @@ const TANK_PLACEMENTS: usize = 199;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
 /// F-16A's four wing and wingtip rows (slice F16A-4). 186: the MiG-31 (M31-1). 194: the Mirage 2000 (M2K-1).
-const NOVELTY_PLACEMENTS: usize = 194;
+/// 192 from 194: the Mirage 2000's wingtip row is gone, two fewer (M2K-5, John 2026-11-10).
+const NOVELTY_PLACEMENTS: usize = 192;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).

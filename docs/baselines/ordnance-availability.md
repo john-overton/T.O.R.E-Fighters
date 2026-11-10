@@ -367,3 +367,22 @@ battery expected lines now read 199.
 ordnance audit: 40 aircraft, 14 recovered weapon stations, 4076 weapon placements, 199 tank placements, 82 weapon and 9 tank records; passed
 ```
 
+## The Mirage 2000 carries no wingtip row (M2K-5, 2026-11-10)
+
+John decided on 2026-11-10 that TORE carries no store on the Mirage 2000's
+wingtip row (the Rafale template's rail; the real aircraft has nine stations and
+no tip rail). `aircraft_stations::retire` drops the decoded row 8 after decoding,
+so normal loading, Cheat loading, the default load and the AI all see eight
+rows. The pins moved on purpose: 4,076 to 4,066 weapon placements (the ten
+compatible placements of the row) and 194 to 192 Cheat-only novelty placements;
+the 199 tank and 71 pod placements did not move. The per-aircraft line reads
+`ordnance M2000.PT: 5 source rows, 0 optional weapon rows, 174 compatible weapon
+placements, 7 tank placements; defaults and restart passed; catalog 62 normal,
+83 Cheat`. The `menus-ordnance-availability` and `a2g-catalog` battery expected
+lines now read 4,066 and 192.
+
+```text
+ordnance audit: 40 aircraft, 14 recovered weapon stations, 4066 weapon placements, 199 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 2 novelty records, 192 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+

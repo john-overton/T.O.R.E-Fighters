@@ -994,6 +994,7 @@ impl Aircraft {
             });
         }
         stations::append(id, &mut hardpoints);
+        stations::retire(id, &mut hardpoints);
         let (min, max) = (plane["envMin"].number()?, plane["envMax"].number()?);
         let env = b.block("env")?;
         if min > 0 || max < 1 || min < -20 || max > 30 || env.len() != (max - min + 1) as usize * 44

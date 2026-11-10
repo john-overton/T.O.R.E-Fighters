@@ -1943,3 +1943,10 @@ real station. That station is row 7's own outboard wing pylon, so row 8 stayed
 where it was and the slice stopped again with measured options; see [the
 decisions](../spec/stores-on-pylons.md#the-mirage-2000-decisions-m2k-5-2026-11-10).
 
+M2K-5, later on 2026-11-10 (opinionated, John): TORE carries no store on the
+Mirage 2000's wingtip row 8, which is the Rafale template's wingtip rail (the real
+aircraft has nine stations and no tip rail); the retail row above stays decoded
+and documented as retail, and TORE's parsed record drops it
+(`aircraft_stations::retire`). This supersedes the row 8 option left open in the
+previous note; see [the decision](../spec/stores-on-pylons.md#no-mirage-2000-wingtip-station-m2k-5-2026-11-10-later-the-same-day).
+

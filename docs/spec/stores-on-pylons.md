@@ -951,6 +951,36 @@ John, 2026-11-10). The measurements above are kept as they were.
   (d) mask `R550.JT` off row 8 so the row carries nothing. The decoded row,
   mask and capacity are unchanged in every option.
 
+#### No Mirage 2000 wingtip station (M2K-5, 2026-11-10, later the same day)
+
+John decided (opinionated, John, 2026-11-10) that TORE carries **no store on
+the Mirage 2000's wingtip row**, superseding the wingtip part of the decisions
+above (those lines stay as written). Row 8 of `M2000.PT` (Wingtip, x 33, two
+`R550.JT`, mask 0x85) is the Rafale template's wingtip rail carried into the
+Mirage record; the real aircraft has nine store stations and no tip rail. The two
+Magics ride the outer-wing pylons (row 7, unchanged: `R550.JT` x2, one a wing).
+
+- **How.** `aircraft_stations::retire` drops that exact retail row, only while it
+  is the last of nine and unedited, right after the PT is decoded and after the
+  guarded additions of `append` (the same place and kind of rule: an opinionated
+  station table applied to the decoded record, one function, a unit test). The
+  decoder, the catalog CSV and the retail row in
+  [the source review](../formats/aircraft-variety.md#mirage-hardpoints) are
+  unchanged and stay documented as retail. Because the row is absent from
+  TORE's record, every consumer agrees: the default load and its AI and saved
+  copies, Load Ordnance, the audit, the stores drawing and the placements
+  measured above. No station index moves (it was the last row).
+- **Cheat loading.** It has no row 8 either, as for any station TORE's record does
+  not have; the two Cheat-only novelty placements it had there are gone.
+- **Counts.** `ordnance M2000.PT: 5 source rows, 0 optional weapon rows, 174
+  compatible weapon placements, 7 tank placements; ... catalog 62 normal, 83
+  Cheat`. Audit pins: weapon placements 4,076 to 4,066 (the ten compatible
+  placements of the row) and Cheat-only 194 to 192; tank (199) and pod (71)
+  placements and the roster are unchanged.
+- **Default load.** Fixed gun, F150 centreline tank, four AS-15, two R530 and two
+  R550 on the outer wing pylons; no tip missiles. The 1.21 ft tip clipping case
+  and its options above no longer apply.
+
 ## The F-16C and fleet rail audit
 
 
