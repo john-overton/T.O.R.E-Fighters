@@ -2162,3 +2162,424 @@ use, 471 of the 512 identity slots remain (the readout reserves a code for
 `wire::AIRCRAFT_BITS`, codes every aircraft field, and a compile-time
 assertion fails the build when `AircraftId::SELECTABLE` outgrows it. See
 [the protocol](net-protocol.md) for the field list.
+
+## F-15E source review (2026-11-10)
+
+Research mode, slice F15E-0. This reviews `F15E.PT` and its dependency closure
+before `AircraftId::F15E` exists (checkpoint code 41, reserved for B5-1). No
+original module was executed. PT, SEE, ECM, JT and GAS are read as bounded BRF
+data with the shared field order in `aircraft_schema.rs`; SH, HUD and INF are
+inspected as data. Slice done by Claude Sonnet (sonnet-medium). Nothing here
+changes code or behaviour. `F15.PT` (the F-15C, `AircraftId::F15`) and
+`F15J.PT` are separate records: no alias and no shared identity.
+
+Open for John, **not decided here**: the record template values
+([below](#f-15e-record-against-the-f-15c-and-the-real-aircraft)), the HUD and
+cockpit ([below](#f-15e-hud-and-cockpit-for-john)), the pod rows
+([below](#f-15e-pods-for-john)), the rudders
+([below](#f-15e-surfaces-for-john)) and the real-size scaling
+([below](#f-15e-size-for-john)).
+
+### F-15E build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the
+[MiG-31 build section](#build-and-extraction)). The closure was extracted to
+`.local/m3-imports/scratch/f15e` with `cargo run --locked -p tore-extract --
+--source gameassets/fighters-anthology --out .local/m3-imports/scratch/f15e
+--include 'F15E.PT' --include 'F15.PT' --include 'f15e*' --include 'F15*'
+--include '*.HUD'`, and a name sweep (`~F15*`, `*F15*`, `*F-15*`, `*STRIKE*`,
+`*EAGLE*`, `*LANT*`, `~AV8*`, `AV8*`, the pod, store, sound and AI names) to
+`.../names`. The `SETUP.ESA` installer copy of `FA_2.LIB` holds the same
+`F15E.PT`, `F15E.SH`, `F15E_S.SH`, `F15E_A.SH` and `F15E_C.SH` bytes (compared);
+the usual five unrelated archive errors appear.
+
+### F-15E identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `F15E.PT`, 14,746 bytes, SHA-256 `6c92d010665d8e23da21269783752568e30571660dadcec39688ba56e1e76989` |
+| Displayed names | `F-15E`, `F- 15E Strike Eagle`, `F15E.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 660; `instanceSize` 626 (the F-15C's are 588 / 575; 660 is the parser's usual size for nine hardpoints, so B5-1 adds a size entry) |
+| Class / year / hit points | `0x8000` (fighter) / 1990 / 129; `expType` 30 |
+| PLANE flags | `0x15`: seat `0x10`, multi-crew `0x04`, base `0x01`; hook, no-lift and carrier clear (the F-15C is `0x11`) |
+| Shape | `f15e.SH` (33,280 bytes), shadow `f15e_s.SH` (16 faces) |
+| Damage looks | `F15E_A.SH` 311 faces, `F15E_B.SH` 138, `F15E_C.SH` 350, `F15E_D.SH` 33 |
+| Skins | `_F15E.PIC` (167,764 bytes), `_F15E_A.PIC` 100,424, `_F15E_B.PIC` 52,844, `_F15E_C.PIC` 133,444, `_F15E_D.PIC` 52,064 (all in `FA_2.LIB`) |
+| Sounds | `&JET1N.11K` loop, `&JET1A.11K` second, `&powerup.5k`, `&powerdn.5k` (present; the F-15C's too) |
+| HUD | `av8.HUD` (resolves to the existing `AV8.HUD`) |
+| AI script | `f.BI` (12,800 bytes, present) |
+| Sensors / jammer / gun | `VIS340.SEE`, `F15R.SEE`, `F15.ECM`, `AV8IR.SEE`, `PAVESPK.SEE`, `M61.JT` |
+| PTS | none: no `F15E.PTS` (nor `F15.PTS`) |
+| Radio callout | none: `^ACF15.5K` and `^ACF15J.5K` exist, no `^ACF15E.5K` |
+| Encyclopedia | `F15E.INF` only (4,567 bytes, text, `disc2/FA_3.LIB`); no `F15E_*.PIC` pictures |
+| Checkpoint code / CLI key | 41 and `f15e`/`f15e.pt`, reserved for B5-1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes of the files later slices depend on (first 16 hex
+digits, full values are in the scratch folder): `F15E.SH` `d67183064e083578`,
+`F15E_S.SH` `c83286459c491f2c`, `F15E_A.SH` `05aea1207c78d240`, `F15E_B.SH`
+`60a3ed7292268d2c`, `F15E_C.SH` `e921ecd8a47b8002`, `F15E_D.SH`
+`aef081cf423ef054`, `AV8.HUD` `369e32a63ac1e7b7`, `_F15E.PIC`
+`0431a9f36124787d`, `AV8IR.SEE` `d4791bcb3faf9379`, `PAVESPK.SEE`
+`7fd9c6d3e909015e`, `F350.GAS` `fde47be5904b2cb6`, `F.BI`
+`8719314060695f82`.
+
+### F-15E record against the F-15C and the real aircraft
+
+**17 of 219 statements differ from `F15.PT`**; 202 are identical. Of the 17, two
+are the size words that follow from nine hardpoints against six. The rest:
+
+| Field | `F15E.PT` | `F15.PT` |
+| --- | ---: | ---: |
+| `year` | 1990 | 1979 |
+| PLANE `flags` | `0x15` (multi-crew) | `0x11` |
+| `numHards` | 9 | 6 |
+| Debris (`dmg` z, `dst` x) | 50, 60 | -90, -60 |
+| Pitch rate `_brv.x` min/max, acc/dacc | -240/240, 311/621 | -225/225, 286/571 |
+| `puffRot` x/y/z acc/dacc | 311/621 | 286/571 |
+
+Everything else is the F-15C's, including all fourteen G envelope rows
+(identical, row for row), empty weight, internal fuel, maximum takeoff, both
+thrusts, top speed, ceiling, hit points (129), signatures, structure, drag,
+stall, spin and crash words, damage tables, sounds, view offset and AI script.
+The names, shape, default stores and the other changes above are the F-15E's
+own, so the [record rule](../spec/aircraft-records.md#rule) is met by the shape,
+stations, flag and handling rates. The numbers below are a **template-copy
+list for John**, each against the game's own `F15E.INF` / `F15.INF`
+(Jane's-style text, retail media, numbers only) and a cited public source. They
+do not establish original game behaviour.
+
+| Field | Record (= F-15C) | Real F-15E | Difference | Note |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 28,600 | 32,000 (14,515 kg, `F15E.INF`); plan figure about 31,700 | -10.6% | Copied. The F-15C's own `F15.INF` empty is 28,600 |
+| Maximum takeoff, lb | 68,000 | 81,000 (36,741 kg, `F15E.INF`) | -16.0% | Copied. 68,000 is the F-15C with CFTs (`F15.INF`) |
+| Internal fuel, lb | 13,662 | about 13,700 (7,643 L, 2,019 US gal at about 6.8 lb/gal) | about -0.5% | Agrees; the C's 13,455 lb is close too |
+| Military thrust, lbf (both) | 32,558 | 29,200 (-220, public figure, unverified here) or 35,600 (-229, 17,800 each) | +11.5% / -8.5% | Copied |
+| Afterburner thrust, lbf (both) | 47,860 | 46,900 (-220, 23,450 each, `F15E.INF`) or 58,200 (-229, 29,100 each, `F15E.INF`) | +2.0% / -17.8% | Matches the early -220 engine; short of the -229 |
+| Engines | 2 | 2 | 0 | Agrees; two flame groups in the shape |
+| Top speed, kt | 1,434 | Mach 2.5, 1,434 kt (`F15E.INF`) | 0 | Agrees exactly |
+| Sea-level max, kt | 806 | 800 CAS (`F15.INF`) | +0.8% | Agrees |
+| Ceiling `maxAlt`, ft | 100,000 | about 60,000 to 65,000 service | +54% to +67% | Envelope 0 G row reaches 105,000 ft; the host caps at the field |
+| G limits | -4 / +9 | design +9 / -3 (`F15.INF`) | +9 agrees, -4 vs -3 | Agrees |
+| Gun rounds | 450 | 512 (`F15E.INF`) | -12% | The C record has 940 |
+| Hit points | 129 | none | n/a | Copied |
+
+Thrust options for John (none chosen): keep retail (the early -220 figure
+within 2% on afterburner); the -229 totals 35,600 / 58,200 lbf as in the plan;
+or retail empty weight and maximum takeoff replaced by 32,000 / 81,000 lb. The
+catalog year, 1990, fits the early -220 aircraft. Sources: Jane's text in
+`F15E.INF`; public -229 figures (about 17,800 / 29,000 lbf) agree across
+[migflug.com](https://migflug.com/?p=16829) and the
+[Air Force fact sheet](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104499/f-15e-strike-eagle/)
+(accessed 2026-11-10).
+
+### F-15E G envelope rows
+
+Speed in ft/s at altitude in ft. Fourteen rows, -4 to +9, identical to
+`F15.PT`'s. The -3 and +6 rows are the same polygon, the -2 and +4 rows are the
+same polygon and the -1 and +2 rows are the same polygon.
+
+| G | Points |
+| ---: | --- |
+| -4 | 910@0, 920@1,000, 940@0, 950@0 |
+| -3 | 475@0, 647@15,000, 880@29,000, 1,220@29,000, 1,380@21,000, 1,240@0 |
+| -2 | 365@0, 567@21,000, 930@54,000, 1,440@54,000, 1,680@45,500, 1,770@30,000, 1,480@15,000, 1,270@0 |
+| -1 | 250@0, 320@14,750, 430@29,500, 670@58,250, 900@85,000, 1,635@85,000, 2,007@71,000, 2,192@52,500, 2,257@35,000, 1,663@17,500, 1,310@0 |
+| 0 | 140@0, 170@13,000, 245@31,000, 373@52,000, 531@74,000, 715@96,500, 870@105,000, 1,574@105,000, 1,980@95,250, 2,297@75,500, 2,470@54,250, 2,510@36,000, 1,865@18,000, 1,440@0 |
+| 1 | 200@0, 235@13,000, 307@26,000, 563@65,000, 801@96,000, 870@100,000, 1,554@100,000, 1,897@91,500, 2,183@74,250, 2,366@53,625, 2,420@36,000, 1,750@18,000, 1,360@0 |
+| 2 | same as -1 |
+| 3 | 305@0, 441@18,500, 637@39,000, 930@68,000, 1,575@68,000, 1,897@56,000, 2,000@33,000, 1,575@16,500, 1,290@0 |
+| 4 | same as -2 |
+| 5 | 427@0, 633@18,500, 920@41,000, 1,290@41,000, 1,540@25,000, 1,260@0 |
+| 6 | same as -3 |
+| 7 | 510@0, 655@11,500, 900@22,000, 1,115@22,000, 1,240@17,000, 1,220@0 |
+| 8 | 540@0, 675@8,000, 920@15,000, 1,090@14,000, 1,200@0 |
+| 9 | 585@0, 687@5,500, 940@10,000, 1,020@9,000, 1,180@0 |
+
+The 1 G row peaks at 2,420 ft/s (1,434 kt) at 36,000 ft, which is the record's
+top speed. The +9 G row is already in the source, so unlike the Mirage 2000 no
+G raise is needed; the record's -4 G floor is one more than the encyclopedia's
+design -3 (an F-15C template value, noted only).
+
+### F-15E resources
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `F15E.SH` | Shape | 350 runtime faces (352 export), 0 lines, 0 billboards, five state words |
+| `F15E_S.SH` | Shadow | 16 faces |
+| `F15E_A.SH` / `F15E_C.SH` | Damage bodies | 311 / 350 faces |
+| `F15E_B.SH` / `F15E_D.SH` | Damage pieces | 138 / 33 faces |
+| `VIS340.SEE`, `F15R.SEE`, `F15.ECM`, `M61.JT`, `AIM120.JT` | Sensor, radar, jammer, gun, missile | already live (the F-15C's) |
+| `F350.GAS`, `MK82.JT` | Default tank and bomb | live (F-4B/J, MiG-17, A-4 and the F-15C's derived rows) |
+| `AV8IR.SEE`, `PAVESPK.SEE` | Internal FLIR, designator row | both live; see pods below |
+
+The shape is a **new model**, not the F-15C's: no face of `f15e.SH` has the same
+vertex set as any face of `f15.SH` (the two neutral dumps, 346 and 350 faces, share no face), yet
+the outline is the same. The shape streamer has pivot 0 and hinge scale 0 (no
+streamer).
+
+### F-15E HUD and cockpit (for John)
+
+**Fact.** `F15E.PT` names `av8.HUD`, the same as `F15.PT` (the F-15C record
+already names it, so this is not a Strike Eagle error). TORE's F-15C flies
+`AV8.HUD`, stem `AV8`, cockpit `~AV8H.PIC` (the Harrier cockpit,
+`aircraft.rs`), so the retail F-15 family already flies a Harrier panel. The
+HUD names the panels `~av8`, `~av8h`, `~av8s`, `~av8_l/c/r`, `~av8_lh/ch/rh`,
+`~av8_ls/cs/rs`, `~av8_p`, `~av8_w`, plus GEAR, FLAP, BRAKE and HOOK symbols.
+**No F-15 or Strike Eagle cockpit art exists in any archive**: the sweeps
+`~F15*`, `*F15*`, `*F-15*`, `*STRIKE*`, `*EAGLE*` find only the shapes, skins,
+`F150.GAS`, the encyclopedia pictures, `^ACF15*.5K` and `$F150.PIC`. The record
+is a two-seater (`0x04`); TORE's crew-voice rule reads that flag and labels it
+`RIO` ([cockpit voice](../spec/cockpit-voice.md#which-aircraft-have-a-crew-voice)).
+
+Options (none chosen):
+
+1. **Follow the record: `AV8.HUD`, stem `AV8`, `~AV8H.PIC`.** What retail does
+   and what the F-15C does; no new art. The identity stays `F15E.PT`.
+2. **Substitute another reviewed HUD family** (for example `F18.HUD`, whose
+   aircraft is also a two-seater). Opinionated; extra wiring in `hud_aperture.rs`
+   and the stem tables.
+3. **Author a Strike Eagle panel.** Not in the media; only as a later decision.
+
+Agent note: option 1 is the evidenced one; it needs one stem arm in F15E-7.
+
+### F-15E pods (for John)
+
+**Fact.** Rows 3 and 4 are `AV8IR.SEE` and `PAVESPK.SEE`, both flag `0x0008`
+fixed rows at position (0, 0, 0), with no pylon, as `VIS340.SEE` and `F15R.SEE`.
+
+- `AV8IR.SEE` has weight 0 and flags 2: an **internal FLIR** (91,140 ft zone,
+  the Harrier's, X-31's and F-22's). It is not a pod and draws nothing.
+- `PAVESPK.SEE` ("AN/ASQ-153 Pave Spike", weight 425 lb, flags 1) is a laser
+  designator **pod**, a fixed pod row exactly like the F-16C's: its source
+  position is a placeholder, and TORE's existing rule draws it under the model's
+  lowest underside across its own length (see [external pods name no
+  shape](aircraft-ordnance.md#external-equipment-pods-name-no-shape-eq-2-2026-11-06)).
+- The real F-15E carries the **AN/AAQ-13 navigation and AN/AAQ-14 targeting
+  LANTIRN pods** under the engine intakes (which side carries which differs
+  between public sources; the pod weights are about 430 and 540 lb) on the
+  fuselage stations. A Pave Spike is not a real F-15E store. The record's two
+  rows are the game's stand-ins for the nav FLIR and the targeting/laser pod.
+
+Other rows with the pod bit `0x400`: row 6 (centreline, `0x0601`) and row 7
+(fuselage pair, `0x0505`); under TORE's current rule a Pave Spike could also be
+loaded on those two stations from the Load Ordnance page.
+
+Options (none chosen):
+
+1. **Follow the record: draw the fixed `PAVESPK.SEE` pod as for the F-16C, and
+   nothing for `AV8IR.SEE`.** The pod hangs under the belly, which is not the
+   real intake position.
+2. **Draw the fixed pod on the intake position** (one side of the fuselage pair,
+   about the row 7 x of 6.3 ft out): matches the real LANTIRN, but is an
+   authored placement over a placeholder row (B7 allows it only for stations the
+   real jet has, and the intake stations are real).
+3. **Do not draw the fixed pod at all** (keep the sight, hide the body).
+   Opinionated.
+
+Agent note: under B7 the intake position is the only real pod station; the belly
+position is the one real aircraft do not use.
+
+### F-15E shape state words
+
+Five state words, listed with the counts from `Shape::with_state` (the export
+path adds two to every count, 352 total). The slot order and offsets
+`0, 6, c, 18, 1e` are the shared base order of the F-15C, MiG-25 and Rafale
+families (flame, brake, gear, flap, flap); there is **no rudder word** (the
+Mirage's sixth), no hook word, no slat word, no canopy word and no nozzle word.
+
+| Word | Faces | Geometry (shape units, x right, y forward, z up) | Reading | Status |
+| --- | ---: | --- | --- | --- |
+| `80c0` | +8 | Eight plates at x +/-8 (z -6 to 5) and x +/-4 to 13 (z -1), y -62 to -115 | Two afterburner flames | Confirmed by slot order and the pair of positions |
+| `80c6` | +4 | Trapezoid y 20 to -1, z 16 to 30, x -6..5 to -3..3, and a front wedge to y 25, z 11 | Dorsal airbrake (one centreline plate, hinged at its front edge) | Confirmed as the source's brake word |
+| `80cc` | +18 | Nose gear x 0, y 48 to 62, z -8 to -27; main wheels x +/-13 (y -4 to 6, z -27 to -11) with cross plates; main struts x +/-7 | Landing gear down | Confirmed; low point -27 |
+| `80d8` | -2 | Removes the left inboard trailing-edge wedge, x -39 to -22, y -24 to -30 | Left flap word | Slot order only |
+| `80de` | -2 | Removes the right inboard wedge, x 21 to 39 | Right flap word | Slot order only |
+
+The F-15C shape has the same five words with the same face counts, apart from
+gear (22 faces against 18).
+
+**Rule 11 face table (from the `state_neutral` source dump).** The inboard
+wedges are the same kind of 2-face strip as the Mirage elevons: top layer front
+edge at z 1, bottom layer front edge at z 4, trailing edge at y -30, z 3. The
+front edge y = -24 is therefore 1.5 units above or below the mid axis (y -24,
+z 2.5), against the Mirage's 1.
+
+| Surface | Faces | Vertices | Moved | On hinge line | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right flap (x 21 to 39) | `5470` top, `548f` bottom | 4 each | 2 | 2 | 0 |
+| Left flap (x -39 to -22) | `5557` top, `5576` bottom | 4 each | 2 | 2 | 0 |
+| Right aileron (x 39 to 59) | `4b33` top, `4ac4` bottom | 4 each | 2 | 2 | 0 |
+| Left aileron (x -59 to -39) | `42c5` top, `41d9` bottom | 4 each | 2 | 2 | 0 |
+| Right stabilator | `4b5f`, `4b86`, `4ba7` top; `4c5d`, `4c8a` bottom | 4, 3, 4, 5, 4 | all | none (whole panel) | 0 |
+| Left stabilator | `42f1`, `4318`, `4339` top; `43ef`, `441c` bottom | 4, 3, 4, 5, 4 | all | none (whole panel) | 0 |
+| Right fin (x 21) | `4ae3`, `4b0a` | 4 each | see rudders | n/a | n/a |
+| Left fin (x -22) | `4242`, `4269` | 4 each | see rudders | n/a | n/a |
+| Airbrake (4 faces) | `568c`, `56a3`, `56ba`, `56d1` | 4 each | 2 | 2 | 0 |
+| Gear (18 faces) | `50e3` ... `539b` | 4 each | 2 | 2 | 0 |
+
+Verdicts:
+
+- **Flaps (`80d8`/`80de`):** whole panels (two quads each), no diagonal or
+  partial surface. Chord 6 units (2 ft), span 18 units (6 ft). The left strip is
+  one unit shorter than the right (x -22 against 21, as the Mirage).
+- **Ailerons (no state word):** the source has **no aileron word**. The outboard
+  strip x 39 to 59 is a wedge of two faces per side (top quad, bottom quad) in
+  the neutral shape. They are whole panels, but their front (hinge) edge is
+  **slanted**: from (39, -24) to (59, -27), and its top, bottom and tip
+  vertices are not collinear in 3D (z 1 and 4 at x 39, 3 at x 59). A turn about
+  the best-fit axis through (39, -24, 2.5) and (59, -27, 3) leaves a gap of up to
+  1.5 units at the root end. The inboard trailing corner (39, -30, 3) is shared
+  with the flap, so the two must take the same angle. **Flagged as a
+  slanted-hinge whole panel for John or F15E-3.** No diagonal split.
+- **Stabilators (no state word):** five coplanar faces per side at z = -1
+  (flat, zero anhedral; the real jet has about 15 degrees), root x 21 (-22
+  left), root chord y -41 to -70, tip x 47. All five faces lie wholly in the
+  panel, so the **whole-panel pitch turn about a lateral spindle** through the
+  root chord midpoint (y -55.5, z -1) is rigid. The root vertices (21, -41, -1)
+  and (21, -70, -1) are shared with fixed fuselage and fin faces (`4edd`,
+  `4bdb`), so a turn opens a gap there up to `sin(angle)` times 15 units (the
+  same root gap as other all-moving tails). Real stabilators also take roll
+  (taileron, plan Q4); the shape is a legitimate carrier for that.
+- **Rudders:** see below, a question for John.
+- **Airbrake, gear, flame:** whole panels, as the F-15C.
+
+The whole-surface gate (John, 2026-11-07 and 2026-11-08) is met by every flap,
+aileron, stabilator, the brake and the gear. No diagonal or partial surface was
+found, so **no probe sheet was needed**; only the slanted aileron hinge and the
+fin question are flagged.
+
+### F-15E surfaces (for John)
+
+**Rudders.** Each fin is a single flat plate at x = 21 (-22), two windings, with
+**no separate rudder face and no rudder state word** (the Mirage had both). The
+fin is a vertical plane, not canted. A rudder would have to be authored by
+splitting the fin plate (new geometry), or the whole fin turned (wrong), or left
+out.
+
+Options (none chosen):
+
+1. **No rudder motion** (the F-15C record has none either; match retail).
+2. **Split each fin quad at a hinge line (for example 30% of the chord from the
+   trailing edge) into fixed fin and rudder panel** in the rig, an authored
+   change over the source (fitted, John to approve since it adds geometry).
+3. **Turn the whole fin as a one-piece vertical surface**: breaks the
+   whole-surface rule's intent (the real fin is fixed).
+
+**Taileron.** All-moving stabilators take roll as well as pitch on the real jet
+(differential, fitted magnitudes, rule 12 style). The source has no state word
+for them; the rig reads the neutral faces. Options: pitch only (match the
+simple retail look), or pitch plus differential roll (the batch default,
+B7).
+
+**Flaps.** The two words delete the inboard wedge with nothing in its place; the
+rig must keep it drawn (as the Mirage). **Ailerons** turn about the slanted hinge
+above. **Slats, canopy and nozzles:** not in the source; recommend none.
+
+**Conformal tanks.** No state word and no separable tank geometry was
+identified; whether `f15e.SH` draws CFTs baked in is **unknown** and is
+F15E-2's first frame check. Row 7 (a fuselage pair carrying 12 Mk 82 each, class
+80, at 6.3 ft out and 8.7 ft below the origin) is the CFT-style carrier the
+record gives.
+
+### F-15E size (for John)
+
+Measured on `f15e.SH` at scale 1 (1 unit is 1/3 ft), from the `state_neutral`
+and gear dumps: x -68 to 68 (the wing tips, 136 units), y -73 to 116 (stabilator
+trailing corner to nose probe tip, 189 units), z -13 to 43 (belly to fin top, 56
+units; gear down -27 to 43, 70 units). The F-15C shape has the same extents
+(x 136, y 189 from -71 to 118, z -13 to 44). Real figures from `F15E.INF`:
+span 13.05 m (42 ft 9.75 in, 42.81 ft), length 19.43 m (63 ft 9 in, 63.75 ft),
+height 5.63 m (18 ft 5.5 in, 18.46 ft).
+
+| Axis | Shape | Real | Shape against real | Factor to real |
+| --- | ---: | ---: | ---: | ---: |
+| Span | 45.33 ft | 42.81 ft | +5.9% | 0.9444 |
+| Length | 63.00 ft | 63.75 ft | -1.2% | 1.0119 |
+| Height, belly to fin top (gear up) | 18.67 ft | 18.46 ft | +1.1% | 0.989 |
+| Height, gear-down low point to fin top | 23.33 ft | 18.46 ft | +26.4% | 0.791 |
+
+Verdict: **true size to within 6%**, a size match unlike the Mirage 2000's (26%
+and 19% short). Only the span (the wing tips) and the
+gear-down height stand out; the gear plates hang 14 units (4.7 ft) below the
+belly, a longer leg than the real jet's.
+
+Options (none chosen):
+
+1. **Keep 1:1 for the F-15E (and the F-15C, which has the same size).** The shape
+   is already close; no scale table entry.
+2. **Scale the span only** by 0.944 (a one-axis entry). Narrows the wing and the
+   pylon rows.
+3. **Per-axis to real** x 0.944, y 1.012, z 0.989 (z against the gear-up height).
+   The Mirage precedent was per-axis; here the factors are all within 6%.
+
+Agent note: option 1 or 3; the gear-down height is a gear-plate fact (F15E-4).
+
+### F-15E engines and thrust (for John)
+
+The record says 2 engines and the shape has two flame groups (`80c0`, x +/-8), so
+the count agrees with the real jet; no override is needed. The thrust totals are
+the F-15C's (see the template table): afterburner within 2% of two early
+F100-PW-220, short of two -229 by 17.8%. F15E-8 should compare the climb and
+acceleration against the envelope rows and the real figures.
+
+### F-15E hardpoints
+
+All nine source rows, in original order. Positions are source units; feet divide
+by three; x right, y up, z forward. Location byte: 0 Centerline, 1 Fuselage,
+2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip. Default stores here are the
+decoded defaults; the per-row count is the row's `maxItems`.
+
+| Row | Location | Flags | Position x/y/z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F15R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `F15.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `AV8IR.SEE` | Fixed internal FLIR |
+| 4 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `PAVESPK.SEE` | Fixed designator pod row |
+| 5 | Fuselage | `0x0008` | 7 / -5 / 73 | 2.3 / -1.7 / 24.3 | 450 | 0 | `M61.JT` | Internal gun, 450 rounds (real 512) |
+| 6 | Centerline | `0x0601` | 0 / -26 / 0 | 0 / -8.7 / 0 | 1 | 26 | `F350.GAS` | Tank (pod bit too) |
+| 7 | Fuselage | `0x0505` | 19 / -26 / -5 | 6.3 / -8.7 / -1.7 | 12 | 80 | `MK82.JT` | CFT-style bomb pair, 12 a side (pod bit) |
+| 8 | Wing | `0x01c5` | 43 / -14 / -14 | 14.3 / -4.7 / -4.7 | 4 | 14 | `AIM120.JT` | Wing pair, 4 a side |
+
+Compared with the F-15C: the C has rows 3 (gun 940, at 5/-5/-5), 4 (AIM-120
+x4 at 25/-10/0) and 5 (AIM-9M x4 at 50/-20/0), and TORE appends derived
+centreline and wing-tank rows for it only when the reviewed C signature matches
+(`aircraft_stations.rs`); the Strike Eagle's different rows never match, so it
+gets no derived rows. The F-15E has no AIM-9 or Sparrow row, no wing tank row
+and no wingtip row; the wing row (mask `0x01c5`) takes no tanks. Things F15E-5
+must handle (none decided):
+
+- The centreline tank (z -26) and the bomb rows (z -26) sit 14 units (4.7 ft)
+  below the intake bottom (z -12) and 13 below the belly (z -13), and hang near
+  the gear-down low point (z -27); expect ground clearance and pylon-rule
+  questions. Stop and report with frames on clipping (John, 2026-11-07).
+- The wing row at x 43 hangs 15 units (5 ft) below the wing surface (z 1 to 4), and 14.3 ft out of a 22.7 ft semi-span.
+  The F-15C's fitted wing pylon is 11 ft out; compare.
+- The bomb pair (12 a side, 6.3 ft out) and a LANTIRN-style pod share the
+  intake region.
+- There are no AIM-9 rails; the wing row's mask carries IR and radar bits
+  (`0x1c5`), so Sidewinders load by mask.
+- No sensor or designator pod may be hung on a station the real jet lacks (John,
+  2026-11-07): see pods above.
+
+### F-15E roster note
+
+`F15E.PT` appends as batch order 1: checkpoint code 41, after `M2000` (40). The
+wire identity is 9 bits since NET-ID9, so capacity is not a constraint.
+`F15.PT` and `F15J.PT` keep their own identities.
+
+### F-15E unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| Template numbers (empty, max takeoff, thrust, gun rounds) | Handling, takeoff, climb | John, options in the template table |
+| HUD and cockpit | F15E-7 cannot start | John, three options |
+| Fixed pod placement | Intake against belly | John, three options |
+| Rudders (fin is one plate) | Rig, whole-surface gate | John, three options |
+| Taileron roll | Real stabilators roll | John (batch default is yes) |
+| Slanted aileron hinge | Gap at the root | F15E-3 measures with a pose grid |
+| Real-size scaling | Stores, pylons | John, three options |
+| CFTs baked in the shape? | Row 7 and frames | F15E-2 frame check |
+| Tank and bomb clipping under the belly | Station rows | F15E-5 stop-and-report |
+| Per-row default quantities | Stores load | F15E-6 |
