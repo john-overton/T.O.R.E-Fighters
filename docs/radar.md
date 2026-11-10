@@ -220,7 +220,7 @@ borrowing a generation.
 | --- | --- | --- |
 | Early | F4.ECM, MIG21.ECM | A-4E; MiG-21, MiG-23 |
 | Transitional | F14.ECM, MIG29.ECM, SU24.ECM | F-14D; MiG-29; Su-25 |
-| Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM, MIG31.ECM | F/A-18D, Rafale C, X-31; Su-27, Su-35; F-22A; MiG-31 |
+| Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM, MIG31.ECM | F/A-18D, Rafale C, X-31, Mirage 2000; Su-27, Su-35; F-22A; MiG-31 |
 
 F4.ECM and MIG21.ECM carry no radar-deception mode flag and a zero deception
 chance, so the A-4E, MiG-21 and MiG-23 emit no RF noise at all and never reach

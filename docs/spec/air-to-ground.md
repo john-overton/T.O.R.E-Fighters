@@ -1372,6 +1372,13 @@ air-to-ground carrier; the per-record carrier ranges above were measured
 before it and were not re-measured
 ([MiG-31 ordnance](../formats/aircraft-ordnance.md#the-mig-31-m3-2026-11-08)).
 
+Since the Mirage 2000 import (M2K, 2026-11-10) the roster holds 40 retail aircraft
+(41 selectable). Its three paired rows 5, 6 and 7 carry the `0x07e5` mask, which
+admits the guided bombs, AS missiles and pods of the same signature-1 mask as the
+F-16C's, so it is a 31st air-to-ground carrier; the per-record carrier ranges
+above were measured before it and were not re-measured
+([Mirage 2000 ordnance](../formats/aircraft-ordnance.md#the-mirage-2000-m2k-6-2026-11-10)).
+
 ### Default air-to-ground loads
 
 Retail data (PT defaults, hardpoint in brackets).

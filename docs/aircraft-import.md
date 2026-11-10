@@ -27,7 +27,7 @@ linked research remains authoritative for byte layouts and native behavior.
 
 The [23-aircraft variety matrix](spec/aircraft-variety.md) now tracks the initial
 ports of transports, gunship, airborne radar aircraft, powered-lift aircraft,
-helicopters, fighters including all four F-4s, and airliners. There are 39 retail
+helicopters, fighters including all four F-4s, and airliners. There are 40 retail
 import identities plus F/A-XX. Source roots are [reviewed](formats/aircraft-variety.md);
 [flight validation](baselines/variety-flight.md) separates source configuration,
 fitted handling and remaining visual/systems work. Milestones live in the
@@ -387,7 +387,7 @@ quantity; the seeds add no default ammunition or mass. The report labels them
 PT pointer. Missing required seed definitions fail the import with a reason.
 
 With the imported development profile, run `cargo run --locked -p tore-app --
---validate-ordnance --no-audio` for all 39 reviewed retail aircraft. It checks
+--validate-ordnance --no-audio` for all 40 reviewed retail aircraft. It checks
 source compatibility coverage, default and older-load preservation, weapon/tank
 replacement, accepted-load restoration and lightweight multiplayer validation.
 The battery scenario is `menus-ordnance-availability`. This validates current
@@ -404,7 +404,7 @@ cargo run --locked -p tore-app -- --free-flight --aircraft rafale --researched-f
 The LHX exclusion only skips unrelated bundled media; adapt source selection as
 specified in [EXTRACTION](EXTRACTION.md). Register and document new CLI identities
 only after source review. The reviewed additions are `f14`, `a4e`, `x31`, `mig29`, `su27`, `mig21`,
-`su25`, `mig23`, `su35`, `f22`, `f22n`, `mig25`, `f16a` and `mig31`.
+`su25`, `mig23`, `su35`, `f22`, `f22n`, `mig25`, `f16a`, `mig31` and `m2000`.
 For FA-only CLI extraction, exclude `swpatch.lib` and unrelated disc archives,
 as shown in the [acceptance record](baselines/aircraft-fa-expansion.md).
 

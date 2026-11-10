@@ -209,7 +209,7 @@ guns. All six decode from `FA_2.LIB` and their full records are in
 | `20MM_4.JT` | 1 | 1 | `F8J.PT` |
 
 Every decoded carrier is outside `AircraftId::ALL`
-(`crates/tore-formats/src/aircraft.rs:308`), the 39 imported aircraft, so no
+(`crates/tore-formats/src/aircraft.rs:318`), the 40 imported aircraft, so no
 ported or variety aircraft gains any of the six. The carriers are the same rows
 the source catalog already records as their `internal_gun` or default store
 (`tools/catalog_fa.py`).
@@ -572,8 +572,10 @@ What the table shows, by inspection:
   middle and outer underwing pylons (opinionated, John 2026-10-14;
   [the Su-27 and Su-35](../spec/stores-on-pylons.md#the-su-27-and-su-35)).
 
-Weapon and tank rows of the 39 registered identities (sensor, ECM and gun rows
-omitted; Count is the default quantity):
+Weapon and tank rows of the registered identities (sensor, ECM and gun rows
+omitted; Count is the default quantity). The Mirage 2000 rows are the decoded
+retail rows; TORE retires its row 8 ([the Mirage
+2000](#the-mirage-2000-m2k-6-2026-11-10)):
 
 | PT | Row | Location | Flags | x / y / z | Feet right / up / fwd | Pair (0x4) | Default | Count |
 | --- | ---: | --- | --- | --- | --- | --- | --- | ---: |
@@ -680,6 +682,11 @@ omitted; Count is the default quantity):
 | `M25.PT` | 5 | Centerline | `0x0601` | 0 / -25 / -4 | 0.0 / -8.3 / -1.3 | no | F250.GAS | 1 |
 | `MIG31.PT` | 4 | Wing | `0x07e5` | 25 / -10 / 0 | 8.3 / -3.3 / 0.0 | yes | AA9.JT | 4 |
 | `MIG31.PT` | 5 | Wingtip | `0x0085` | 50 / -10 / 0 | 16.7 / -3.3 / 0.0 | yes | AA8.JT | 2 |
+| `M2000.PT` | 4 | Centerline | `0x0605` | 0 / -15 / 0 | 0.0 / -5.0 / 0.0 | yes | F150.GAS | 1 |
+| `M2000.PT` | 5 | Fuselage | `0x07e5` | 4 / -20 / 0 | 1.3 / -6.7 / 0.0 | yes | AS15.JT | 4 |
+| `M2000.PT` | 6 | Wing | `0x07e5` | 11 / -20 / -10 | 3.7 / -6.7 / -3.3 | yes | R530.JT | 2 |
+| `M2000.PT` | 7 | Wing | `0x07e5` | 20 / -20 / -20 | 6.7 / -6.7 / -6.7 | yes | R550.JT | 2 |
+| `M2000.PT` | 8 | Wingtip | `0x0085` | 33 / -4 / -29 | 11.0 / -1.3 / -9.7 | yes | R550.JT | 2 |
 
 The F-15C and F-16C rows above are source coordinates. Their current
 fitted placement is documented in [F-15C stores](../spec/stores-on-pylons.md#the-f-15c)

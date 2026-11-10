@@ -12,7 +12,7 @@ Implementation audit, 2026-10-05. John requested aircraft-by-aircraft headless
 animation checks after observing a detached A-7 rudder and missing control
 surfaces. This audit uses the actual clean drawing transforms through
 `Airframe::animation_faces`; it does not infer animation correctness from flight
-stability, imported branch counts, or creator launch tests. The individual CPU pose review is complete for all 40 profiles. Broader
+stability, imported branch counts, or creator launch tests. The individual CPU pose review is complete for all 41 profiles. Broader
 repository validation follows this review; results are recorded below.
 
 ## Method
@@ -463,9 +463,9 @@ gaps in the per-aircraft contracts remain outside this acceptance.
 
 ## Fleet coverage
 
-The code inventory covers all 40 playable profiles in the ignored local report
+The code inventory covers all 41 playable profiles in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
-variety imports lacked pitch, roll and flap mappings. All 40 profiles have bounded geometry acceptance in the table below, with
+variety imports lacked pitch, roll and flap mappings. All 41 profiles have bounded geometry acceptance in the table below, with
 explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline
 motion survey followed by individual attachment and pose acceptance. Existing
 transforms were not accepted merely because they were present.

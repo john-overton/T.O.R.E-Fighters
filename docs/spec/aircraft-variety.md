@@ -110,8 +110,8 @@ Keep complete validation evidence in feature baselines rather than per-check fil
 
 ## M3 additions
 
-The M3 aircraft round appends the MiG-25 Foxbat, the F-16A Falcon and the MiG-31
-Foxhound to the roster. None is one of the original 23-aircraft variety batch,
+The M3 aircraft round appends the MiG-25 Foxbat, the F-16A Falcon, the MiG-31
+Foxhound and the Mirage 2000 to the roster. None is one of the original 23-aircraft variety batch,
 and the batch count does not change.
 
 | Aircraft | Exact retail record | Family | Main behavior to review | Acceptance |
@@ -119,6 +119,7 @@ and the batch count does not change.
 | MiG-25 Foxbat | `M25.PT` | Fighter | Twin-engine fighter handling, A2A stores, the shared SU33 cockpit and its own rig | [M25 acceptance](../baselines/aircraft-mig25.md) |
 | F-16A Falcon | `F16.PT` | Fighter | Single-engine fighter handling, its five carrier rows, the shared F-16 cockpit and the shared F-16 rig | [F-16A acceptance](../baselines/aircraft-f16a.md) |
 | MiG-31 Foxhound | `MIG31.PT` | Fighter | Twin-engine interceptor handling, its two carrier rows, the opinionated AA-9 and AA-8 station table, the Yak-141 cockpit, and its own radar and jammer review | [MiG-31 acceptance](../baselines/aircraft-mig31.md) |
+| Mirage 2000 | `M2000.PT` | Fighter | Single-engine delta handling on one M53-P2's thrust (opinionated override of the record's two engines), real-size per-axis shape scale, whole-panel elevons, eight station rows with no wingtip, and the Rafale HUD and cockpit the record names | [Mirage 2000 acceptance](../baselines/aircraft-m2000.md) |
 
 AC-130 linked fire and the tank side task have additional acceptance cases in
 their linked contracts. New autonomous flight behavior is outside this batch;
@@ -323,7 +324,7 @@ carrier launch/arrestment remains a separate capability review.
 | AC-130 | Live aiming usability and wider engagement cases | Validate linked fire, barrel/muzzle agreement and blocked-gun feedback against the [contract](ac130-linked-guns.md); review a gunner view separately |
 | Radar and shared contacts | AWACS sharing/operator behavior beyond existing sensors | Installed/absent profiles are reviewed; additional shared-contact behavior needs its own contract and acceptance |
 | Cockpits | Wider display review and original fallback evidence | Current roots and null-pointer fits are explicit; verify every new cockpit on wide/tall windows and keep unsupported gauges unavailable |
-| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | All 40 playable profiles have bounded CPU pose acceptance; follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
+| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | All 41 playable profiles have bounded CPU pose acceptance; follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
 | Multiplayer | Selection, content compatibility, new control/state transport, seat handoff and replay | Trace client/server use of the shared aircraft type and every newly required control/state value |
 
 Player-flyable helicopters extend the recovered retail multiplayer
