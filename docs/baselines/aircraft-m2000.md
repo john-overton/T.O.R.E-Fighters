@@ -298,6 +298,29 @@ distinct and unchanged. Every air maneuver reported `non_finite=0`. The liftoff
 (125 to 150 kt) and approach (140 kt plus or minus 5 percent) battery ranges are
 fitted plausibility windows.
 
+## Mirage 2000 positive G limit +9 (M2K-11, 2026-11-10)
+
+Implementation and measurement mode. **Opinionated (John, 2026-11-10: "yeah go
+ahead and make the correction")**: the Mirage's positive G limit is +9, the real
+fly-by-wire limit, instead of the Rafale-template +8; the negative -4 stays.
+The +9 polygon is **fitted** from the Mirage's own +8 row (slow-side speeds times
+sqrt(9/8), fast side and altitudes from the +8 row, held to the 1 G top speed).
+The override lives in `aircraft_corrections.rs` beside the engine override and is
+applied where the record is read, only for `M2000.PT` while it still holds the
+retail range and +8 row; the decoder and `fa-aircraft.csv` stay retail. Full
+account, rows and measurements: [aircraft records](../spec/aircraft-records.md#mirage-2000-positive-g-limit-9-2026-11-10)
+and [Mirage +9 G measurements](variety-flight.md#mirage-2000-positive-g-limit-9-2026-11-10).
+
+| Fuel, lb | Pull at 461 kt, 1,000 ft, before | Now |
+| ---: | ---: | ---: |
+| 6,346 | 7.08 | 7.96 |
+| 3,173 | 7.57 | 8.52 |
+| 1,587 | 7.85 | 8.83 |
+| 300 | 8.09 | 9.09 |
+
+The M2K-8 flight table and the "Flight envelope" section above are the
+pre-change measurement and are kept as dated.
+
 ## Open findings for John
 
 Nothing here was changed; each is a decision or a fleet-level model question.
@@ -311,6 +334,9 @@ Nothing here was changed; each is a decision or a fleet-level model question.
    per-aircraft drag shape or ram factor (a fleet-level model change).
 2. **G limit +7.1 clean** is the record's +8 through the shared loaded-elevator
    rule (real +9; the negative side, 3.5, is close to the real 3.2).
+   Update (M2K-11, 2026-11-10): John raised the positive limit to +9 (see
+   [the +9 G section](#mirage-2000-positive-g-limit-9-m2k-11-2026-11-10)); the
+   full-fuel pull is now 7.96 G.
 3. **Fuel flows and tank retail.** Flows (2 and 16 lb/s) are the record's: dry
    45 percent under and afterburner 28 percent over the M53-P2's. Empty weight
    (17,100 lb) is 565 lb over the real 16,535 lb and the internal tank

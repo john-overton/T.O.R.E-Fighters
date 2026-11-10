@@ -9,7 +9,7 @@
 //! The corrected numbers are published figures (each row says which); they
 //! are **opinionated** (John's request), the choice of figure an agent
 //! decision.
-use super::{AircraftId, Token};
+use super::{AircraftId, Envelope, Token};
 use std::collections::BTreeMap;
 
 /// Which record block a field lives in.
@@ -109,6 +109,99 @@ pub const C130_THRUST_LBF: i32 = 40_000;
 pub const M2000_ENGINES: i32 = 1;
 pub const M2000_THRUST_LBF: i32 = 14_455;
 pub const M2000_AFT_THRUST_LBF: i32 = 21_380;
+
+/// Mirage 2000 positive G limit (M2K-11, **opinionated**, John, 2026-11-10):
+/// TORE gives the Mirage 2000 the real fly-by-wire limit of +9 G instead of
+/// the retail record's +8 (a Rafale-template value; the record's -4 stays).
+/// The real aircraft is cleared to +9 and -3.2 G (GlobalSecurity "Mirage 2000
+/// Specifications", "Design and Technical Features", as cited in the Mirage
+/// baseline in docs/baselines/variety-flight.md), and the F-16A and Rafale
+/// records already carry +9.
+pub const M2000_G_MAX: i32 = 9;
+/// The retail record's G range and its +8 row (speed ft/s, altitude ft); the
+/// +9 row is only added while the record still holds exactly this row.
+const M2000_RETAIL_G_MIN: i32 = -4;
+const M2000_RETAIL_G_MAX: i32 = 8;
+const M2000_RETAIL_PLUS_8: [[f64; 2]; 7] = [
+    [570., 0.],
+    [675., 11_000.],
+    [920., 20_000.],
+    [1_235., 20_000.],
+    [1_330., 18_000.],
+    [1_205., 9_000.],
+    [1_100., 0.],
+];
+
+/// The +9 G row fitted from the Mirage's own +8 row (**fitted**, agent
+/// decision 2026-11-10): the slow side (the vertices up to the first highest
+/// one) is lift-limited, so its speed at each altitude scales by
+/// sqrt(9 / 8), the corner speed rising with the square root of G, rounded to
+/// the record's whole ft/s; the fast side and every altitude are the +8
+/// row's, so any altitude cap keeps the +8 row's shape; each fast-side
+/// speed is then held to the 1 G row's top speed at its altitude, as a
+/// higher row never reaches past the 1 G edge.
+pub fn plus_nine_row(plus_eight: &Envelope, one_g: Option<&Envelope>) -> Envelope {
+    let top = plus_eight
+        .points
+        .iter()
+        .map(|p| p[1])
+        .fold(f64::MIN, f64::max);
+    let top_index = plus_eight
+        .points
+        .iter()
+        .position(|p| p[1] == top)
+        .unwrap_or(0);
+    let scale = (f64::from(M2000_G_MAX) / f64::from(plus_eight.g)).sqrt();
+    let points = plus_eight
+        .points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if i <= top_index {
+                [(p[0] * scale).round(), p[1]]
+            } else {
+                let limit = one_g
+                    .and_then(|e| e.speeds(p[1]))
+                    .map_or(f64::INFINITY, |(_, fast)| fast);
+                [p[0].min(limit.floor()), p[1]]
+            }
+        })
+        .collect();
+    Envelope {
+        g: M2000_G_MAX,
+        points,
+    }
+}
+
+/// Raises the Mirage 2000's positive G limit to +9 where the record is read:
+/// sets `envMax` and appends the fitted +9 row, so every consumer sees one G
+/// range. Applies only to `M2000` and only while the record still holds the
+/// retail range and the retail +8 row; true when it did.
+pub(crate) fn raise_g_limit(
+    id: AircraftId,
+    plane: &mut BTreeMap<String, Token>,
+    envelopes: &mut Vec<Envelope>,
+) -> bool {
+    if id != AircraftId::M2000 {
+        return false;
+    }
+    let range = |key: &str| plane.get(key).and_then(|t| t.number().ok());
+    if range("envMin") != Some(M2000_RETAIL_G_MIN) || range("envMax") != Some(M2000_RETAIL_G_MAX) {
+        return false;
+    }
+    let Some(last) = envelopes.last() else {
+        return false;
+    };
+    if last.g != M2000_RETAIL_G_MAX || last.points != M2000_RETAIL_PLUS_8 {
+        return false;
+    }
+    let row = plus_nine_row(last, envelopes.iter().find(|e| e.g == 1));
+    envelopes.push(row);
+    if let Some(token) = plane.get_mut("envMax") {
+        token.value = M2000_G_MAX.to_string();
+    }
+    true
+}
 
 const _: () = assert!(SU25_EMPTY_LB + SU25_INTERNAL_FUEL_LB < SU25_MAX_TAKEOFF_LB);
 
@@ -419,6 +512,74 @@ mod tests {
         p.get_mut("aftThrust").unwrap().value = "31999".into();
         assert!(!apply(AircraftId::M2000, &mut o, &mut p));
         assert_eq!(n(&p, "engines"), 2);
+    }
+
+    #[test]
+    fn the_plus_9_row_scales_the_slow_side_by_root_9_over_8_and_clips_the_fast_side_to_1_g() {
+        let plus_eight = Envelope {
+            g: 8,
+            points: M2000_RETAIL_PLUS_8.to_vec(),
+        };
+        let fit = |one: Option<&Envelope>| plus_nine_row(&plus_eight, one).points;
+        // Without a 1 G row only the slow side moves: x sqrt(9/8) = 1.06066.
+        let free = fit(None);
+        assert_eq!(free[0], [605., 0.]);
+        assert_eq!(free[1], [716., 11_000.]);
+        assert_eq!(free[2], [976., 20_000.]);
+        assert_eq!(free[3..], plus_eight.points[3..]);
+        // A 1 G row that tops out at 1,150 ft/s at every altitude holds the
+        // fast side to 1,150.
+        let one = Envelope {
+            g: 1,
+            points: vec![[100., 0.], [200., 60_000.], [1_150., 60_000.], [1_150., 0.]],
+        };
+        let clipped = fit(Some(&one));
+        assert_eq!(clipped[2], [976., 20_000.]);
+        for (c, f) in clipped[3..].iter().zip(&free[3..]) {
+            assert_eq!(c[1], f[1]);
+            assert_eq!(c[0], f[0].min(1_150.));
+        }
+        assert_eq!(clipped[3], [1_150., 20_000.]);
+    }
+
+    #[test]
+    fn the_mirage_2000_g_correction_needs_the_retail_range_and_row() {
+        let n = |map: &BTreeMap<String, Token>, key: &str| map[key].number().unwrap();
+        let record = || {
+            let plane = BTreeMap::from([
+                ("envMin".to_string(), token(-4)),
+                ("envMax".to_string(), token(8)),
+            ]);
+            let rows = vec![
+                Envelope {
+                    g: 1,
+                    points: vec![[200., 0.], [900., 59_000.], [1_500., 59_000.], [1_170., 0.]],
+                },
+                Envelope {
+                    g: 8,
+                    points: M2000_RETAIL_PLUS_8.to_vec(),
+                },
+            ];
+            (plane, rows)
+        };
+        let (mut p, mut rows) = record();
+        assert!(raise_g_limit(AircraftId::M2000, &mut p, &mut rows));
+        assert_eq!(n(&p, "envMax"), M2000_G_MAX);
+        assert_eq!(rows.last().unwrap().g, 9);
+        // Not for another identity, not for a record whose range or +8 row
+        // differs.
+        for other in [AircraftId::Rafale, AircraftId::F16A, AircraftId::Mig31] {
+            let (mut p, mut rows) = record();
+            assert!(!raise_g_limit(other, &mut p, &mut rows));
+            assert_eq!((n(&p, "envMax"), rows.len()), (8, 2));
+        }
+        let (mut p, mut rows) = record();
+        p.get_mut("envMin").unwrap().value = "-3".into();
+        assert!(!raise_g_limit(AircraftId::M2000, &mut p, &mut rows));
+        let (mut p, mut rows) = record();
+        rows[1].points[6][0] = 1_101.;
+        assert!(!raise_g_limit(AircraftId::M2000, &mut p, &mut rows));
+        assert_eq!((n(&p, "envMax"), rows.len()), (8, 2));
     }
 
     #[test]

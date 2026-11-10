@@ -711,3 +711,43 @@ scenarios are new in this slice.
 
 Not run: `--native-flight-tables` (tables not present locally, as for the MiG-31);
 no windowed frame capture (the slice asks for none).
+
+## Mirage 2000 positive G limit +9, 2026-11-10
+
+Implementation and measurement mode, slice M2K-11. **Opinionated (John,
+2026-11-10)**: the Mirage 2000's positive G limit is the real +9 instead of the
+record's +8; the +9 polygon is **fitted** from the Mirage's own +8 row (slow-side
+speeds times sqrt(9/8), fast side and altitudes from the +8 row, held to the 1 G
+top speed), listed in [aircraft records](../spec/aircraft-records.md#mirage-2000-positive-g-limit-9-2026-11-10).
+Nothing else changed: thrust, weights, drag and the -4 limit are as in the
+validation above. The lines of that section are the pre-change measurement.
+
+Probe: `performance_probe` on the local `M2000.PT`, clean, afterburner,
+`PROBE_ONLY=turn PROBE_ALTS=1000`, `PROBE_FUEL` as shown; full aft stick for
+three seconds at Mach 0.7 (461 kt) and 1,000 ft. Logs are local:
+`.local/m3-aircraft/checks/M2K-11/`.
+
+| Fuel, lb | Peak G before (+8 row) | Peak G now (+9 row) |
+| ---: | ---: | ---: |
+| 6,346 (full) | 7.08 | 7.96 |
+| 3,173 | 7.57 | 8.52 |
+| 1,587 | 7.85 | 8.83 |
+| 300 | 8.09 | 9.09 |
+
+Other points, full fuel: 15,000 ft at 564 kt 7.05 to 7.94 G; with the default
+stores (3,561 lb) 6.60 to 7.42 G at 461 kt; 461 kt turn rate 16.2 to 19.1 deg/s.
+Unchanged to the figure: the 330 kt pull (6.17 G), the 30,000
+and 36,000 ft pulls (5.27 and 4.39 G, altitude limited), the push limits
+(-3.5 G clean, -3.28 loaded) and every sustained turn (4.13 G at 461 kt and
+1,000 ft, 3.63 G at 564 kt and 15,000 ft). At 300 lb the pull reaches 9.09 G, a
+hair past the +9 row, the same overshoot the +8 row showed (8.09). The earlier
+finding that the model G limit (+7.1 clean) was 21 percent under the real +9 is
+now smaller: 7.96 G at full fuel (12 percent under), 8.5 at half fuel and 9.1
+nearly dry, because the loaded-elevator rule still scales the limit down by the
+fuel and stores carried.
+
+Battery: `flight-variety-m2000`, `flight-liftoff-m2000`,
+`flight-liftoff-retail-m2000`, `flight-approach-m2000`, `flight-animation-m2000`,
+`ai-m2000-quick-mission-2v2`, `replay-rec-m2000-2v2` and the three
+`a2g-*-m2000` scenarios passed (profile `.local/m3-aircraft/profile`). No combat-G
+battery scenario pins the Mirage (`PULL_G_RETAIL` has no entry).

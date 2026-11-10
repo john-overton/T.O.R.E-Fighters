@@ -131,3 +131,56 @@ their retail numbers. The Rafale record, which carries the same 32,000 lbf and
 2 engines, is not touched, and `M2000E.PT` is not part of this identity. The
 catalog row in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and the decoder
 keep the retail values.
+
+## Mirage 2000: positive G limit +9 (2026-11-10)
+
+**Opinionated (John, 2026-11-10: "yeah go ahead and make the correction"),
+implemented by slice M2K-11.** The retail `M2000.PT` record carries G rows -4 to
++8, the Rafale template's positive limit one G short of the F-16A's and the
+Rafale's own +9. The real Mirage 2000 is cleared to +9 and -3.2 G (GlobalSecurity
+"Mirage 2000 Specifications", "Design and Technical Features", as cited in the
+[Mirage validation](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10)).
+TORE flies the Mirage 2000 with +9 G. The negative limit stays the record's -4.
+This is a TORE override over the record, not retail behaviour; the decoder and
+[`fa-aircraft.csv`](../formats/fa-aircraft.csv) keep the retail -4 and +8.
+
+| Field | Retail | Game |
+| --- | ---: | ---: |
+| Lowest G row (`envMin`) | -4 | -4 |
+| Highest G row (`envMax`) | 8 | 9 |
+| Rows | 13 | 14 |
+
+**The +9 row is fitted** (agent decision, 2026-11-10), from the Mirage's own +8
+row and not copied from another record. The slow side (the vertices up to the
+first highest one) is lift-limited, so at each altitude its speed scales by
+sqrt(9 / 8) = 1.0607, the corner speed rising with the square root of G, rounded
+to the record's whole ft/s. The fast side and every altitude are the +8 row's,
+so the +8 row's altitude cap (20,000 ft) is the +9 row's. Each fast-side speed is
+then held to the 1 G row's top speed at its altitude (a no-op for this record:
+the +8 fast edge is far inside the 1 G edge). In ft/s, altitude in ft:
+
+| Row | Points (speed, altitude) |
+| --- | --- |
+| +8 (retail) | (570, 0) (675, 11000) (920, 20000) (1235, 20000) (1330, 18000) (1205, 9000) (1100, 0) |
+| +9 (fitted) | (605, 0) (716, 11000) (976, 20000) (1235, 20000) (1330, 18000) (1205, 9000) (1100, 0) |
+| +9 (Rafale record, for comparison only) | (540, 0) (665, 9000) (910, 14000) (1240, 13000) (1195, 6500) (1190, 0) |
+
+At sea level the +9 row spans 358 to 652 kt (the +8 row 338 to 652 kt); the
+Rafale's own +9 row is a different airframe and is not used.
+
+**Where it lives.** `aircraft_corrections.rs` (`raise_g_limit`, `plus_nine_row`),
+called by `Aircraft::parse` once the envelope rows are read, so the parsed record
+says `envMax` 9 and carries the +9 row for every reader: the flight model and its
+loaded-elevator divisor, the envelope window, the AI, the autopilot, the
+strike-class rule (`g_limit_max`), the diagnostic and native profile builders and
+the checkpoint. It applies only to `M2000` and only while the record still holds
+the retail range (-4 to +8) and the retail +8 polygon; the same rows on the
+Rafale or F-16A identity stay +8 here, and an edited Mirage record is read as it
+is. The catalog tooling (`tools/catalog_fa.py`) reads raw files and keeps the
+retail columns.
+
+What a player notices: a full-back-stick pull at 461 kt and 1,000 ft peaks at 7.96
+G with full fuel (was 7.08) and 9.09 G at 300 lb (was 8.09). The loaded-elevator
+rule still scales the limit down to the gross weight, so the clean, full-fuel
+aircraft does not reach 9. The push limit and the sustained turns do not change.
+Measurements: [Mirage validation](../baselines/variety-flight.md#mirage-2000-positive-g-limit-9-2026-11-10).

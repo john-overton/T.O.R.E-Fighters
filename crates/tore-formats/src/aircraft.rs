@@ -1020,6 +1020,8 @@ impl Aircraft {
             }
             envelopes.push(Envelope { g, points });
         }
+        // The Mirage 2000's +9 G limit (M2K-11): one range for every reader.
+        corrections::raise_g_limit(id, &mut plane, &mut envelopes);
         let mut sounds = BTreeMap::new();
         for name in [
             "loopSound",
@@ -1647,6 +1649,11 @@ impl Equipment {
 mod profile_tests {
     use super::*;
     fn fixture() -> String {
+        let row = |g| (g, vec![[100, 0], [200, 10_000], [300, 0]]);
+        fixture_with_rows(0, 1, &[row(0), row(1)])
+    }
+    /// The fixture with its own G range and rows (speed, altitude points).
+    fn fixture_with_rows(min: i32, max: i32, rows: &[(i32, Vec<[i32; 2]>)]) -> String {
         let mut text = String::from("[brent's_relocatable_format]\n");
         for (block, layout) in [
             ("o", schema::OBJECT),
@@ -1659,8 +1666,8 @@ mod profile_tests {
                     ("o", "typeSize") => 660,
                     ("o", "weight") => 1000,
                     ("n", "numHards") => 1,
-                    ("p", "envMin") => 0,
-                    ("p", "envMax") => 1,
+                    ("p", "envMin") => min,
+                    ("p", "envMax") => max,
                     ("p", "internalFuel") => 100,
                     // The retail Mirage 2000 / Rafale-template engine numbers.
                     ("p", "engines") => 2,
@@ -1691,15 +1698,12 @@ mod profile_tests {
             }
         }
         text += ":env\n";
-        for g in 0..2 {
+        for (g, points) in rows {
             for (i, (kind, _)) in schema::ENVELOPE.iter().enumerate() {
                 let v = match i {
-                    0 => g,
-                    1 => 3,
-                    4 => 100,
-                    6 => 200,
-                    7 => 10000,
-                    8 => 300,
+                    0 => *g,
+                    1 => points.len() as i32,
+                    4.. if (i - 4) / 2 < points.len() => points[(i - 4) / 2][(i - 4) % 2],
                     _ => 0,
                 };
                 text += &format!("{kind} {v}\n");
@@ -1796,6 +1800,105 @@ mod profile_tests {
         assert_eq!(r.number("engines"), 2.);
         assert_eq!(r.number("thrust"), 17_687.);
         assert_eq!(r.number("aftThrust"), 32_000.);
+    }
+    /// A Mirage-shaped record: G rows -4 to +8 with the retail +8 polygon
+    /// (or `plus_eight`), a 1 G row with a fast edge well past the +8 row's,
+    /// and plain triangles elsewhere.
+    fn mirage_rows(plus_eight: &[[i32; 2]]) -> Vec<(i32, Vec<[i32; 2]>)> {
+        (-4..=8)
+            .map(|g| match g {
+                1 => (
+                    g,
+                    vec![
+                        [200, 0],
+                        [870, 59_000],
+                        [2_100, 59_000],
+                        [1_500, 18_000],
+                        [1_170, 0],
+                    ],
+                ),
+                8 => (g, plus_eight.to_vec()),
+                _ => (g, vec![[100, 0], [200, 10_000], [300, 0]]),
+            })
+            .collect()
+    }
+    const RETAIL_PLUS_8: [[i32; 2]; 7] = [
+        [570, 0],
+        [675, 11_000],
+        [920, 20_000],
+        [1_235, 20_000],
+        [1_330, 18_000],
+        [1_205, 9_000],
+        [1_100, 0],
+    ];
+    fn mirage_text(plus_eight: &[[i32; 2]]) -> String {
+        fixture_with_rows(-4, 8, &mirage_rows(plus_eight))
+    }
+    fn mirage_2000(text: &str) -> String {
+        text.replace("F18.PT", "M2000.PT")
+            .replace("\"Synthetic\"", "\"M2000\"")
+            .replace("Synthetic plane", "Mirage 2000")
+    }
+    #[test]
+    fn the_mirage_2000_reads_g_rows_minus_4_to_plus_9_with_a_fitted_plus_9_row() {
+        // Opinionated (John, 2026-11-10) +9 G; the row is fitted from the
+        // Mirage's own +8 row: slow side x sqrt(9/8), fast side and altitudes
+        // as the +8 row's.
+        let text = mirage_text(&RETAIL_PLUS_8);
+        let m = Aircraft::parse(mirage_2000(&text).as_bytes()).unwrap();
+        assert_eq!(m.id, AircraftId::M2000);
+        assert_eq!(m.number("envMin"), -4.);
+        assert_eq!(m.number("envMax"), 9.);
+        let gs: Vec<i32> = m.envelopes.iter().map(|e| e.g).collect();
+        assert_eq!(gs, (-4..=9).collect::<Vec<_>>());
+        let plus_nine = m.envelopes.last().unwrap();
+        assert_eq!(
+            plus_nine.points,
+            vec![
+                [605., 0.],
+                [716., 11_000.],
+                [976., 20_000.],
+                [1_235., 20_000.],
+                [1_330., 18_000.],
+                [1_205., 9_000.],
+                [1_100., 0.],
+            ]
+        );
+        // Every other row is the record's own.
+        let plain = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(plain.id, AircraftId::F18);
+        assert_eq!(plain.number("envMax"), 8.);
+        assert_eq!(m.envelopes[..13], plain.envelopes[..]);
+    }
+    #[test]
+    fn only_the_mirage_2000_gets_the_plus_9_row_and_an_edited_record_is_read_as_it_is() {
+        let text = mirage_text(&RETAIL_PLUS_8);
+        // The same retail rows on other identities stay at +8.
+        for other in [
+            text.replace("F18.PT", "RAFALE.PT"),
+            text.replace("F18.PT", "F16.PT")
+                .replace("\"Synthetic\"", "\"F-16\"")
+                .replace("Synthetic plane", "F- 16A Falcon"),
+        ] {
+            let a = Aircraft::parse(other.as_bytes()).unwrap();
+            assert_eq!(a.number("envMax"), 8., "{:?}", a.id);
+            assert_eq!(a.envelopes.len(), 13);
+            assert_eq!(a.envelopes.last().unwrap().g, 8);
+        }
+        // One +8 point off the retail polygon: left alone.
+        let mut edited = RETAIL_PLUS_8;
+        edited[1][0] = 676;
+        let m = Aircraft::parse(mirage_2000(&mirage_text(&edited)).as_bytes()).unwrap();
+        assert_eq!(m.number("envMax"), 8.);
+        assert_eq!(m.envelopes.len(), 13);
+        assert_eq!(m.envelopes.last().unwrap().points[1][0], 676.);
+        // A record that already reaches +9 keeps its own rows.
+        let mut rows = mirage_rows(&RETAIL_PLUS_8);
+        rows.push((9, vec![[700, 0], [800, 9_000], [900, 0]]));
+        let nine = fixture_with_rows(-4, 9, &rows);
+        let m = Aircraft::parse(mirage_2000(&nine).as_bytes()).unwrap();
+        assert_eq!(m.envelopes.len(), 14);
+        assert_eq!(m.envelopes.last().unwrap().points[0], [700., 0.]);
     }
     #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {
