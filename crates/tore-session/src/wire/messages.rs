@@ -41,7 +41,7 @@ use super::migration::{
     Resumed, StandbyStatus, Succession, TakenOver, TokenGrant, UploadTest,
 };
 use super::names::ReceivedNames;
-use super::{Path, Platform, WireError, WireResult, limits};
+use super::{Path, Platform, WireError, WireResult, limits, read_aircraft, write_aircraft};
 use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
@@ -1291,20 +1291,6 @@ fn read_pilot(r: &mut BitReader<'_>) -> WireResult<DebriefPilot> {
     })
 }
 
-fn aircraft_code(id: AircraftId) -> u64 {
-    AircraftId::SELECTABLE
-        .iter()
-        .position(|a| *a == id)
-        .unwrap_or(0) as u64
-}
-
-fn read_aircraft(r: &mut BitReader<'_>) -> WireResult<AircraftId> {
-    AircraftId::SELECTABLE
-        .get(r.read_bits(6)? as usize)
-        .copied()
-        .ok_or(WireError::Invalid("aircraft"))
-}
-
 fn write_manifest(w: &mut BitWriter, manifest: &Manifest) -> WireResult<()> {
     if manifest.entries.len() > MANIFEST_LIMIT {
         return Err(WireError::TooMany {
@@ -1446,11 +1432,9 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         } = slot;
         w.write_varint(u64::from(*plane));
         write_wing(w, *wing);
-        bits::write_option(w, *choice, |w, a| {
-            let _ = w.write_bits(aircraft_code(a), 6);
-        });
+        bits::write_option(w, *choice, write_aircraft);
         let _ = w.write_bits(u64::from(*member), 8);
-        let _ = w.write_bits(aircraft_code(*aircraft), 6);
+        write_aircraft(w, *aircraft);
         bits::write_option(w, *holder, |w, id| {
             let _ = w.write_bits(u64::from(id), 8);
         });
@@ -1588,7 +1572,7 @@ fn write_roster(w: &mut BitWriter, roster: &Roster) -> WireResult<()> {
         w.write_bool(plane.wing.side == Side::Enemy);
         let _ = w.write_bits(u64::from(plane.wing.index), 2);
         let _ = w.write_bits(u64::from(plane.member), 8);
-        let _ = w.write_bits(aircraft_code(plane.aircraft), 6);
+        write_aircraft(w, plane.aircraft);
         match &plane.pilot {
             RosterPilot::Ai => w.write_bool(false),
             RosterPilot::Human { seat, callsign } => {
@@ -1969,7 +1953,7 @@ fn write_spawned(w: &mut BitWriter, spawned: &Spawned) -> WireResult<()> {
     let _ = w.write_bits(u64::from(spawned.tick), 32);
     write_wing(w, spawned.wing);
     let _ = w.write_bits(u64::from(spawned.member), 8);
-    let _ = w.write_bits(aircraft_code(spawned.aircraft), 6);
+    write_aircraft(w, spawned.aircraft);
     let spawn = &spawned.spawn;
     for value in spawn
         .position
@@ -2136,7 +2120,7 @@ fn write_results(w: &mut BitWriter, results: &Results) -> WireResult<()> {
         w.write_varint(u64::from(row.plane));
         write_wing(w, row.wing);
         let _ = w.write_bits(u64::from(row.member), 8);
-        let _ = w.write_bits(aircraft_code(row.aircraft), 6);
+        write_aircraft(w, row.aircraft);
         bits::write_option(w, row.callsign.as_deref(), write_str);
         w.write_bool(row.left);
         let status = match row.status {
@@ -2761,7 +2745,7 @@ impl Message {
                 w.write_varint(u64::from(load.plane));
                 w.write_bool(load.aircraft.is_some());
                 if let Some(aircraft) = load.aircraft {
-                    let _ = w.write_bits(aircraft_code(aircraft), 6);
+                    write_aircraft(&mut w, aircraft);
                 }
                 w.write_bool(load.loadout.is_some());
                 if let Some(loadout) = &load.loadout {
@@ -2808,7 +2792,7 @@ impl Message {
                 write_count(&mut w, flight.aircraft.len());
                 for (plane, aircraft) in &flight.aircraft {
                     w.write_varint(u64::from(*plane));
-                    let _ = w.write_bits(aircraft_code(*aircraft), 6);
+                    write_aircraft(&mut w, *aircraft);
                 }
                 write_count(&mut w, flight.loadouts.len());
                 for (plane, loadout) in &flight.loadouts {
@@ -2837,7 +2821,7 @@ impl Message {
                 w.write_varint(u64::from(*mission));
                 w.write_bool(aircraft.is_some());
                 if let Some(aircraft) = aircraft {
-                    let _ = w.write_bits(aircraft_code(*aircraft), 6);
+                    write_aircraft(&mut w, *aircraft);
                 }
                 w.write_bool(loadout.is_some());
                 if let Some(loadout) = loadout {

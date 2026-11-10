@@ -1107,3 +1107,71 @@ fn a_stores_event_carries_the_largest_station_code() {
         WireEvent::Stores { aircraft: 3, loads }
     );
 }
+
+#[test]
+fn the_aircraft_identity_is_nine_bits_on_the_wire() {
+    use super::messages::Loadout;
+    use super::{AIRCRAFT_BITS, WireError, read_aircraft, write_aircraft};
+    use tore_codec::{BitReader, BitWriter};
+
+    assert_eq!(AIRCRAFT_BITS, 9);
+    // The readout also needs a code for "none".
+    assert!(AircraftId::SELECTABLE.len() < 1 << AIRCRAFT_BITS);
+
+    // Every identity takes exactly nine bits and reads back.
+    for id in AircraftId::SELECTABLE {
+        let mut w = BitWriter::new();
+        write_aircraft(&mut w, id);
+        assert_eq!(w.bit_len(), 9, "{id:?}");
+        let bytes = w.finish();
+        assert_eq!(read_aircraft(&mut BitReader::new(&bytes)).unwrap(), id);
+    }
+
+    // Codes above the old 6-bit field's 63 are read whole: one that names an
+    // aircraft reads as it, one that names none is refused, never misread.
+    for code in [0u64, 40, 63, 64, 100, 255, 256, 511] {
+        let mut w = BitWriter::new();
+        let _ = w.write_bits(code, AIRCRAFT_BITS);
+        let bytes = w.finish();
+        let got = read_aircraft(&mut BitReader::new(&bytes));
+        match AircraftId::SELECTABLE.get(code as usize) {
+            Some(id) => assert_eq!(got.unwrap(), *id, "code {code}"),
+            None => assert!(
+                matches!(got, Err(WireError::Invalid("aircraft"))),
+                "code {code}"
+            ),
+        }
+    }
+
+    // A message that carries an aircraft codes the same nine bits: the Loadout
+    // is its mission and plane varints, a presence bit, the identity, a
+    // presence bit for the loadout.
+    let kind = Message::Loadout(Box::new(Loadout {
+        aircraft: None,
+        mission: 7,
+        plane: 2,
+        loadout: None,
+    }))
+    .kind();
+    for code in [0u64, 40, 100, 511] {
+        let mut w = BitWriter::new();
+        w.write_varint(7);
+        w.write_varint(2);
+        w.write_bool(true);
+        let _ = w.write_bits(code, AIRCRAFT_BITS);
+        w.write_bool(false);
+        let got = Message::decode(kind, &w.finish());
+        match AircraftId::SELECTABLE.get(code as usize) {
+            Some(id) => {
+                let Message::Loadout(load) = got.unwrap() else {
+                    panic!("not a Loadout");
+                };
+                assert_eq!(load.aircraft, Some(*id), "code {code}");
+            }
+            None => assert!(
+                matches!(got, Err(WireError::Invalid("aircraft"))),
+                "code {code}"
+            ),
+        }
+    }
+}

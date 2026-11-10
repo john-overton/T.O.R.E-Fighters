@@ -394,27 +394,12 @@ fn section_code(section: Option<DamageSection>) -> i64 {
     section.map_or(0, |s| s as i64 + 1)
 }
 
-/// An aircraft identity's 6-bit code: its place among the selectable ones.
-fn aircraft_code(id: AircraftId) -> u64 {
-    AircraftId::SELECTABLE
-        .iter()
-        .position(|a| *a == id)
-        .unwrap_or(0) as u64
-}
-
 fn write_aircraft_id(w: &mut BitWriter, id: Option<AircraftId>) {
-    bits::write_option(w, id, |w, id| {
-        let _ = w.write_bits(aircraft_code(id), 6);
-    });
+    bits::write_option(w, id, super::write_aircraft);
 }
 
 fn read_aircraft_id(r: &mut BitReader<'_>) -> WireResult<Option<AircraftId>> {
-    bits::read_option(r, |r| {
-        AircraftId::SELECTABLE
-            .get(r.read_bits(6)? as usize)
-            .copied()
-            .ok_or(WireError::Invalid("aircraft"))
-    })
+    bits::read_option(r, super::read_aircraft)
 }
 
 /// How a slow field is coded.

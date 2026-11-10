@@ -75,7 +75,8 @@ mod round_trip_tests;
 pub(crate) mod samples;
 
 use std::fmt;
-use tore_codec::CodecError;
+use tore_codec::{BitReader, BitWriter, CodecError};
+use tore_formats::aircraft::AircraftId;
 
 /// The operating system a player's game runs on: the transport's, which the
 /// lobby's player list carries too (protocol 7).
@@ -277,7 +278,41 @@ pub fn path_words(path: Path) -> &'static str {
 /// and releases stand-off stores outside known rings (new checkpoint state).
 /// 82 hides shoulder-fired SAM teams until spotted and adds the helicopter
 /// move-ahead ambush on moving targets (new checkpoint state).
-pub const PROTOCOL_VERSION: u16 = 82;
+/// 83 widens the aircraft identity on the wire from 6 to 9 bits (512
+/// identities, room for mods); no rules change.
+pub const PROTOCOL_VERSION: u16 = 83;
+
+/// Bits of an aircraft identity on the wire: its place among
+/// [`AircraftId::SELECTABLE`] (6 bits up to protocol 82, 9 since 83, so 512
+/// identities). The readout codes "no aircraft" as 0 and shifts the roster up
+/// by one, so the roster must also leave one code free.
+pub const AIRCRAFT_BITS: u32 = 9;
+
+const _: () = assert!(
+    AircraftId::SELECTABLE.len() < 1 << AIRCRAFT_BITS,
+    "the selectable aircraft no longer fit the wire's AIRCRAFT_BITS (the readout needs one code spare): widen the field and raise PROTOCOL_VERSION"
+);
+
+/// An aircraft identity's wire code: its place among the selectable ones.
+pub(crate) fn aircraft_code(id: AircraftId) -> u64 {
+    AircraftId::SELECTABLE
+        .iter()
+        .position(|a| *a == id)
+        .unwrap_or(0) as u64
+}
+
+/// Writes an aircraft identity in [`AIRCRAFT_BITS`] bits.
+pub(crate) fn write_aircraft(w: &mut BitWriter, id: AircraftId) {
+    let _ = w.write_bits(aircraft_code(id), AIRCRAFT_BITS);
+}
+
+/// Reads an aircraft identity written by [`write_aircraft`].
+pub(crate) fn read_aircraft(r: &mut BitReader<'_>) -> WireResult<AircraftId> {
+    AircraftId::SELECTABLE
+        .get(r.read_bits(AIRCRAFT_BITS)? as usize)
+        .copied()
+        .ok_or(WireError::Invalid("aircraft"))
+}
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

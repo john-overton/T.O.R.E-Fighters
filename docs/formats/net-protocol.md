@@ -1210,10 +1210,10 @@ each kind's count as a varint and its records in id order.
 | Body against a baseline | 1 bit "moved"; if set, the position residuals after the prediction, the velocity, angle and speed differences, each bucketed (position and velocity 3, 6, 10, 14 or 20 bits; angles 3, 6, 9, 12 or 17; speed 3, 6, 10 or 16); then for each group of slow fields a changed bit, and in a changed group a bit per field and each new value |
 
 The identity fields (full records only): an aircraft's type as 1 bit and its
-place among the 41 selectable aircraft (6 bits); a projectile's owner
+place among the selectable aircraft (9 bits since protocol 83, 6 before; 41 today); a projectile's owner
 (varint), weapon (12-bit name index), shape (1 and 12), target (1 and a
 varint) and whether it is aimed at this player; a debris piece's owner, the
-aircraft whose model draws it (1 and 6) and its damage variant (1 and 3); a
+aircraft whose model draws it (1 and 9 since protocol 83, 6 before) and its damage variant (1 and 3); a
 pilot's aircraft. An aircraft's slow groups are its devices (present, six
 levels at 1/255, three control surfaces at 1/127, the throttle at 1/255, actual vector pitch/conversion/collective at 1/255
 and actual vector yaw at 1/127, six normalized gun-mount angles at 1/32,767
@@ -1564,7 +1564,7 @@ since protocol 18 a presence bit and the tank list (at most nine, each a
 hardpoint byte, the tank record's name and a 16-bit quantity; absent keeps
 the aircraft's source tanks). A gun pod station's quantity counts pods, not
 rounds, also in Seated. A roster plane is its id, side, wing (2 bits), place
-in the wing, aircraft (6 bits since protocol 18) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
+in the wing, aircraft (6 bits since protocol 18, 9 since protocol 83) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
 game's debrief report field for field (the damage as a 64-bit float, the ten
 kill rows and the eight shot tallies). Mission ended carries its reason in 2
 bits (every human left 0, time limit 1, server stopping 2, ended by the
@@ -1611,7 +1611,7 @@ host left the game (4); the King's End mission is reason 3.
   6 and 7 invalid, and, since protocol 10, its
   Fighters Anthology build in 2 bits, as [Content](#content) codes it), the
   slots in plane order (a count, then each: plane
-  varint, side 1 bit, wing 2, member 8, aircraft 6, a presence bit and the
+  varint, side 1 bit, wing 2, member 8, aircraft 9 bits since protocol 83 (6 before), a presence bit and the
   holder's id) and the King's settings (a count, then each a number of 8
   bits and a varint value; none in phase 1) and, since protocol 20 (the
   lobby pass's slice K1), one last bit: the mission is locked. A dedicated
@@ -1726,9 +1726,9 @@ Refused (kind 20) with its words.
 | 27 | Slot lock | the King to host | The mission's number (varint), the plane (varint), the lock (2 bits: 0 open, 1 closed, 2 reserved) and, when reserved, the callsign (a string) |
 | 28 | Revive | client to host | Mission number (varint), optional aircraft and optional loadout: fly again after a loss with an atomically validated choice |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
-| 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (6 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
+| 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (9 bits since protocol 83, 6 before; the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
 | 31 | Scores | host to client | Tally (2 bits: kills 0, damage 1, ratio 2), fight (1 bit: sides 0, free for all 1), optional seconds left (presence bit, varint), kill limit (4 bits, 0 for none), kill owner (2 bits: total 0, side 1, individual 2). Combatants: count varint, at most 1,024; each has lobby id 8 bits, callsign string, left bit, optional AI lineage root (presence bit, varint u32), optional side (presence bit, side bit), then kills, losses, damage in thousandths of an aircraft, and tracked hits (four varints). Each side has kills, losses, damage and hits (eight varints total). Winner: 3 bits, 0 none, 1 side then side bit, 2 human then lobby id 8 bits, 3 AI then root varint u32, 4 draw; 5 to 7 invalid |
-| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 6 bits, a presence bit and the callsign of its last human pilot, a left bit, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
+| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 9 bits since protocol 83 (6 before), a presence bit and the callsign of its last human pilot, a left bit, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
 | 33 | Observe | client to host | 1 bit: 0 stop watching; 1 watch, then the subject (2 bits: 0 none, 1 an aircraft then its id as a varint, 2 a point then x, y and z in whole feet as signed varints) |
 | 34 | Observing | host to client | 1 bit: 0 the observer flight has ended (nothing follows); 1 it starts: the connection's new [flight](#flights) (8 bits), the delay in seconds (8 bits), the tick the first snapshot will show (32 bits), the roster as the Roster message codes it, and the destroyed ground objects (a count and varints) |
 | 35 | Away | client to host | Nothing: the game has been away (a menu, no focus, a lost controller) for the `idle-ai` setting's seconds |
@@ -1753,7 +1753,7 @@ refused "The mission has changed; choose again.", as the lobby's requests are.
   own field.
 - **Revival.** Lives over 10 are refused by the writer and the reader (4 bits
   would hold 15); the rule's code 3 is invalid.
-- **Spawned.** The aircraft is the roster's 4-bit code; the floats are the
+- **Spawned.** The aircraft is the roster's code (9 bits since protocol 83); the floats are the
   world's own (`tore_world::world::revive::Spawn`): position x, y, z in feet,
   then heading and speed.
 - **Scores.** The sides are the friendly side's three varints, then the
@@ -3306,6 +3306,16 @@ again with an observer; the capture format did not change for it.
   Checkpoints gain each pilot's spotted teams, the listing's team flag, the
   AI picture's unmasked teams and the helicopter's move-ahead plan. The
   compatibility simulation version is 11.
+  83 (2026-11-10, John's decision, NET-ID9): the aircraft identity is 9 bits
+  on the wire (512 identities, room for the base game's 145 aircraft records
+  about twice over, for mods), where it was 6 (64). One constant,
+  `wire::AIRCRAFT_BITS`, codes every aircraft field: the entity records'
+  aircraft type and debris model, the lobby's Choice and slot aircraft, the
+  roster, Spawned, Results, Loadout, FlightLoadouts and Revive, and the
+  readout's aircraft columns (code 0 is none there, and the roster shifts up
+  by one, so the build refuses a roster of `1 << AIRCRAFT_BITS` or more). The
+  other 6-bit fields (interpolation delay, stem-list counts) are unchanged.
+  No rules change; the compatibility simulation version stays 11.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

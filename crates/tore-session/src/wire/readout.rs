@@ -39,7 +39,7 @@ use super::entity::GUN_AIM_STEPS;
 use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
 use super::row::Row;
 use super::snapshot::{BASELINE_BACK_BITS, HISTORY_SNAPSHOTS, MAX_BASELINE_BACK, PENDING_PACKETS};
-use super::{WireError, WireResult};
+use super::{AIRCRAFT_BITS, WireError, WireResult};
 use std::borrow::Cow;
 
 mod a2g;
@@ -162,7 +162,10 @@ const MAP: Schema = &[
     BIT,
     BIT,
     BIT,
-    Kind::Slow(Slow::Bits(6, AircraftId::SELECTABLE.len() as i64)),
+    Kind::Slow(Slow::Bits(
+        AIRCRAFT_BITS,
+        AircraftId::SELECTABLE.len() as i64,
+    )),
 ];
 const PLOT: Schema = &[Kind::Slow(Slow::Bits(2, 2)), D, D, D, D, D, D, D];
 const STROBE: Schema = &[D, D, D, D, D];
@@ -197,7 +200,10 @@ const THREAT: Schema = &[
 ];
 const INBOUND: Schema = &[D, D, D, Kind::Slow(Slow::Bits(8, 255)), BIT];
 const ROW: Schema = &[
-    Kind::Slow(Slow::Bits(6, AircraftId::SELECTABLE.len() as i64)),
+    Kind::Slow(Slow::Bits(
+        AIRCRAFT_BITS,
+        AircraftId::SELECTABLE.len() as i64,
+    )),
     Kind::Pos {
         vel: 4,
         divisor: 240,

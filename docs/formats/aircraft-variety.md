@@ -2150,3 +2150,15 @@ QFLAIR` and `FRA QFSAIR` list `M2000.PT` with `gear 0x589c`, `scale 0.3333` and
 gear down on the apron at the same size as the flown aircraft (see
 [parked aircraft](../spec/surface-defenses.md#parked-aircraft)).
 
+
+## Wire identity widened to 9 bits (NET-ID9, 2026-11-10)
+
+John's decision, 2026-11-10: the wire codes an aircraft identity in 9 bits
+(512 identities) instead of 6 (64), which leaves room for the base game's 145
+aircraft records about twice over, for mods. This replaces the "23 of the 64
+slots remain" counts in the dated Mirage sections above: with codes 0 to 40 in
+use, 471 of the 512 identity slots remain (the readout reserves a code for
+"none", so the roster may reach 511 entries). Protocol 83; one constant,
+`wire::AIRCRAFT_BITS`, codes every aircraft field, and a compile-time
+assertion fails the build when `AircraftId::SELECTABLE` outgrows it. See
+[the protocol](net-protocol.md) for the field list.
