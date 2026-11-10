@@ -97,7 +97,47 @@ def origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Mirage 2000's default stores (M2K-6, 2026-11-10), one run each: (label, right ft, up ft,
+# forward ft, sides, pylon depth ft) per release, on the per-axis scaled shape. The belly row's
+# four AS-15s hang in two tandem pairs on 2 inch rails, the front pair first, left then right
+# (the 0.1 ft belly drop lives in the rail surface, not in these figures); the wing rows' two
+# missiles leave left then right from 1 ft pylons.
+M2000_CASES = [
+    ("AS-15 belly row", [(1.82, -3.18, 4.05), (1.82, -3.18, 4.05), (1.82, -2.72, -4.05),
+                         (1.82, -2.72, -4.05)], "LRLR", RAIL),
+    ("Super 530 inner wing", [(4.99, -3.44, -4.10)] * 2, "LR", WING),
+    ("Magic 2 outer wing", [(9.08, -3.27, -8.19)] * 2, "LR", WING),
+]
+
+
+def m2000_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(M2000_CASES):
+        return [f"{len(parts)} runs finished, want {len(M2000_CASES)}"]
+    problems: list[str] = []
+    for part, (label, wants, sides_want, depth_want) in zip(parts, M2000_CASES):
+        firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
+        if len(firsts) != len(wants):
+            problems.append(f"{label}: {len(firsts)} releases, want {len(wants)}")
+            continue
+        sides = []
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(firsts, wants)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(abs(r) - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want +-{wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth == "none" or abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+            sides.append("L" if r < 0 else "R")
+        if "".join(sides) != sides_want:
+            problems.append(f"{label}: sides {''.join(sides)}, want {sides_want}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
+    base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
+            "--speed", "420"]
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
            "--speed", "420", "--repeat", "4", "--gap", "0.5"]
     return [
@@ -116,5 +156,19 @@ def scenarios() -> list[Scenario]:
             ],
             check=origin_problems,
             notes="Four presses on four rows and two on a centreline row: each store leaves from where it hangs, under a 1 ft wing pylon or a 2 inch body rail, pairs beside a rack's bar (B3, BP2, PY2, PY3).",
+        ),
+        Scenario(
+            name="a2g-release-origin-m2000", lane="flight",
+            args=base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "m2000", "--station", "1", "--load", "AS15",
+                         "--count", "4"],
+            timeout=300,
+            then=[
+                Step(base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "m2000", "--station", "2", "--load",
+                             "R530", "--count", "2"], timeout=300),
+                Step(base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "m2000", "--station", "3", "--load",
+                             "R550", "--count", "2"], timeout=300),
+            ],
+            check=m2000_origin_problems,
+            notes="The Mirage 2000's default stores leave from where they hang: the belly AS-15s in two tandem pairs front first, the Super 530s and Magics from their 1 ft wing pylons, left then right (M2K-6).",
         ),
     ]

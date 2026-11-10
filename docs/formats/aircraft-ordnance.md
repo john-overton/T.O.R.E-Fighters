@@ -917,6 +917,129 @@ is read once and its counts are the aircraft's capacity. Confirmed with
 `--countermeasure-preview` (carried 60 and capacity 60 for both). The jammer
 record's own preset review stays M31-7.
 
+## The Mirage 2000 (M2K-6, 2026-11-10)
+
+Implementation note for slice M2K-6, the Mirage 2000's ordnance, default load and
+countermeasures. `M2000.PT` names nine source rows: a fixed visual sensor
+(`VIS340.SEE`), radar (`F18R.SEE`) and jammer (`F18.ECM`), the internal DEFA gun
+and five editable carrier rows ([source
+review](aircraft-variety.md#mirage-hardpoints)). John's decision of 2026-11-10
+(opinionated) retires the Rafale template's wingtip row 8 after decoding
+([the stations](../spec/stores-on-pylons.md#no-mirage-2000-wingtip-station-m2k-5-2026-11-10-later-the-same-day)),
+so TORE carries eight rows and every consumer (the default load, the AI, saved
+loads, Load Ordnance, the audit) sees the same eight. No row, mask, capacity or
+default was authored in M2K-6: the decoded masks flow through the shared loading
+rules ([source identity](#source-identity-is-a-row-not-a-pylon-count)) and the
+retail record's own defaults are the default load.
+
+| Row | Location | Mask | Accepts | Default |
+| ---: | --- | --- | --- | --- |
+| 3 | Internal Gun | `0x000c` | its own `DEFA.JT`, 250 rounds | `DEFA.JT` x250 |
+| 4 | Centerline | `0x0605` | `F150.GAS`, 1 | `F150.GAS` x1 |
+| 5 | Fuselage (paired, the belly) | `0x07e5` | 61 records and the `F150.GAS` and `F250.GAS` tanks, 4 a row | `AS15.JT` x4 |
+| 6 | Wing (paired, inner) | `0x07e5` | 56 records and the two tanks, 2 a row | `R530.JT` x2 |
+| 7 | Wing (paired, outer) | `0x07e5` | the same 56 and the two tanks, 2 a row | `R550.JT` x2 |
+
+The mask `0x07e5` is the same union the F-16A's and the MiG-31's carrier rows take:
+base `0x01`, pair `0x04`, active-radar `0x20`, semi-active radar `0x40`, infrared
+`0x80`, bomb `0x100`, tank `0x200` and pod `0x400`. Row 4's `0x0605` is the
+centreline rack (tank and pod bits, no weapon bits); a centreline rack is single
+whatever its pair bit says, and a tank row is not a weapon station, so it takes
+one `F150.GAS` and no pod. The 61 records measured on row 5 with the stores
+preview's catalog flag (two tank records beside them) are:
+
+`AA11.JT`, `AA11B.JT`, `AA12.JT`, `AA2.JT`, `AA6.JT`, `AA8.JT`, `AA9.JT`,
+`AS7.JT`, `B13.JT`, `B8.JT`, `MK82.JT`, `LAU61.JT`, `AIM9X.JT`, `AIM120.JT`,
+`AIM9M.JT`, `AGM65G.JT`, `MICA.JT`, `R530.JT`, `R550.JT`, `PL7.JT`, `PL10.JT`,
+`AGM88.JT`, `AIM7.JT`, `AIM7E.JT`, `AIM9B.JT`, `AT2.JT`, `MK84.JT`,
+`FAB250.JT`, `FAB500.JT`, `FAB1000.JT`, `MK82P3.JT`, `MK82HD.JT`, `MK82P.JT`,
+`MK82AIR.JT`, `CBU87.JT`, `CBU89.JT`, `MK20.JT`, `RBK250.JT`, `RBK500.JT`,
+`LAU10.JT`, `GBU12.JT`, `GBU16.JT`, `GBU38.JT`, `GBU10.JT`, `GBU10A.JT`,
+`PAVEWAY.JT`, `PAVEWA3.JT`, `GBU28.JT`, `GBU29.JT`, `GBU29P.JT`, `GBU30.JT`,
+`AS14.JT`, `AS30.JT`, `AT12.JT`, `AGM65A.JT`, `AGM84E.JT`, `AGM45.JT`,
+`AGM84A.JT`, `AM39.JT`, `AS16.JT`, `AS15.JT`.
+
+Rows 6 and 7 take the same list less five records that the wing rows' 2,000 lb
+weight limit refuses (`AS16.JT`, `FAB1000.JT`, `GBU28.JT`, `MK82AIR.JT`,
+`MK82P.JT`, each 2,272 to 4,500 lb; the belly row's limit is 4,600 lb), 56 records
+each. That is the decoded source compatibility, not a Mirage 2000 load
+list; the guided bombs and air-to-ground missiles fit the same signature bits
+every decoded carrier leaves open, and they are not asserted as real loads. The
+`F350.GAS` and `F500.GAS` records are not offered on row 5 (M2K-5, John,
+2026-11-10), and nothing loads on the wingtip row any more. The two novelty
+bombs (`~BLDR.JT`, `~MOOSE.JT`) load under Cheat loading only and never appear
+in the normal catalog. There is no pod row in the record, and the pod bit on the
+three weapon rows admits a `PAVESPK.SEE` designator pod on the Load Ordnance page
+as it does on every carrier with that bit (one to an aircraft; the page warns
+"No built-in designator: hang a Pave Spike pod to lase."), so no sensor or
+designator pod is hung by default. `--validate-ordnance` reports the Mirage 2000
+as 5 source rows, 0 optional weapon rows, 174 compatible weapon placements (1 gun
++ 61 + 56 + 56) and 7 tank placements (row 4: 1; rows 5, 6 and 7: 2 each), and
+62 normal catalog records.
+
+**Default load.** The source default, the same for the human and the AI
+(`live::Configuration::with_default_load` changes only the A-4E's quantities; the
+Mirage 2000 has no override): 250 `DEFA.JT` rounds on row 3, one full `F150.GAS`
+(990 lb of fuel) on row 4, four `AS15.JT` on row 5, two `R530.JT` (the Super 530D
+on the Load Ordnance page) on row 6 and two `R550.JT` (Magic 2) on row 7. Rows 5,
+6 and 7 are paired, so their maxima and edits move in twos, and no carrier row is
+empty, so no retained-selection seed is needed. The load weighs 27,007 lb against
+the 37,480 lb maximum. Release order, measured headless by `--a2g-run` (the
+`a2g-release-origin-m2000` scenario): the four AS-15s leave as two tandem pairs
+on 2 inch rails, the front pair first and left then right (right -1.82, up -3.18,
+forward +4.05 ft, then -2.72, -4.05 for the rear pair; depth 0.17 ft); the Super
+530s leave left then right from 1 ft pylons at 4.99 ft out, 3.44 ft down, 4.10 ft
+aft; the Magics at 9.08 ft out, 3.27 ft down, 8.19 ft aft. Each leaves from the
+point the drawing hangs it at (within 0.05 ft), on the per-axis scaled shape. The
+belly row's 0.1 ft rail drop (M2K-5) is already in those figures; the stores
+preview's clip line for the default load reads 0.57 ft.
+
+**Is it a plausible Mirage 2000 load?** The wing rows are: the real 2000C hangs
+the Super 530 on the inner wing pylons and the Magic on the outer (MILAVIA and the
+FAS DOD 101 Mirage 2000 page, accessed 2026-11-10), and a centreline tank is the
+usual third store. Four AS-15s on the belly is the record's own (Rafale template)
+default and not a published Mirage 2000 load, and the game's `AS15.JT` is a
+semi-active-radar air-to-ground missile (it launches and guides on the column's
+lead truck in the headless check below). It is kept as the record's default and
+listed for John; nothing was invented or changed.
+
+**The gun.** `DEFA.JT`, row 3, 250 rounds (the record's own 250 in the 1 ft
+starboard mount the source places, scaled with the shape; it takes no other
+weapon). The real Mirage 2000C carries two DEFA 554 30 mm revolver cannons with 125
+rounds each (MILAVIA Mirage 2000 specifications and combataircraft.com Mirage
+2000 page, accessed 2026-11-10), 250 together, so the record's total equals the
+real total; TORE models them as the one gun row with 250 and keeps the retail
+value (spec-derived). In the headless gun-key run (`--a2g-run --attack strafe`, Tab held 2 seconds)
+the DEFA fires 64 rounds, about 32 a second, from the 250. The real DEFA 554 fires
+1,200 to 1,800 rounds a minute per gun, so 40 to 60 a second for the pair; the
+difference is listed for John and nothing was changed (the shared gun cadence is
+not this slice's).
+
+**Countermeasures.** From the row 2 `F18.ECM` record, the same record the
+F/A-18D, Rafale C, X-31 and F-16A carry: chaff loaded 30 and flares loaded 30
+(spec-derived, retail). Nothing is per-aircraft in the host; the ECM record is
+read once and its counts are the aircraft's capacity, which is the fleet's
+convention (no aircraft overrides a retail ECM count), so no fitted value is
+authored. Confirmed with `--combat-command chaff` and `--combat-command flare`
+with `--countermeasure-preview 60` (`carried_chaff=29 carried_flares=30
+capacity 30/30` after one chaff, and `carried_chaff=30 carried_flares=29` after
+one flare). For plausibility only: the real aircraft's Spirale dispenser is
+usually quoted at 112 chaff cartridges and its flare count is disputed (16 in one
+forum post), with the earlier Eclair pod quoted at about 16 flares and 18 chaff
+(DCS forum and War Thunder forum posts, MBDA Eclair-M page, searched 2026-11-10;
+no official datasheet found). Those sources disagree, so the retail 30 and 30
+stand and the real fit is a question for John, not a change.
+
+**Live fire and jettison.** The flight battery's `STATIONS` entry for the
+Mirage 2000 is `[250, 4, 2, 2]` (gun, AS-15, Super 530, Magic); the tank is a
+tank station, and the AS-15 is a surface missile that refuses the practice
+aircraft (`REFUSED_SLOTS`). Results, headless unless noted: the gun fires all 250
+rounds (62 hits, a kill); the Super 530 and the Magic each fire one, guide and
+kill the practice aircraft; the AS-15 `--attack sarh` run is designated, CUED,
+launches, stays locked for 23 seconds and kills the lead truck; the tank and the
+selected group jettison. See [the baseline](../baselines/ordnance-availability.md#mirage-2000-ordnance-m2k-6-2026-11-10)
+for the commands and frames.
+
 ## Original icons and geometry candidates
 
 

@@ -261,6 +261,15 @@ def scenarios() -> list[Scenario]:
             notes="Tanks then selected bombs at 5,000 ft, inert fall, small craters, recorded sounds and replay picture verification.",
         ),
         Scenario(
+            name="a2g-jettison-m2000", lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                  "--aircraft", "m2000", "--load", "MK82", "--altitude", "5000",
+                  "--speed", "300", "--seconds", "30", "--defenses", "0", "0"],
+            timeout=300,
+            expect=[r"jettison: PASS released [1-9]\d* .* no-explosion"],
+            notes="The Mirage 2000's 150 gallon centreline tank, then its belly Mk 82s (M2K-6), jettison inert at 5,000 ft.",
+        ),
+        Scenario(
             name="a2g-bomb-motion", lane="flight",
             args=run + ["--aircraft", "a4e", "--load", "MK82", "--altitude", "5000", "--speed", "450"],
             timeout=300,

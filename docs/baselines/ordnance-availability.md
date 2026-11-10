@@ -386,3 +386,42 @@ ordnance audit: 40 aircraft, 14 recovered weapon stations, 4066 weapon placement
 ordnance audit: 2 novelty records, 192 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
 ```
 
+
+## Mirage 2000 ordnance (M2K-6, 2026-11-10)
+
+The Mirage 2000's eight rows (three fixed sensors, the DEFA gun, the centreline
+tank row and the three weapon rows; the wingtip row is retired) are reviewed and
+measured on the branch. No placement count moved, so the audit pins are the ones
+recorded in the [wingtip section above](#the-mirage-2000-carries-no-wingtip-row-m2k-5-2026-11-10):
+40 aircraft, 4,066 weapon placements, 199 tank placements, 192 Cheat-only
+novelty placements and 71 designator-pod placements. The per-aircraft line reads
+`ordnance M2000.PT: 5 source rows, 0 optional weapon rows, 174 compatible weapon
+placements, 7 tank placements; defaults and restart passed; catalog 62 normal,
+83 Cheat`, and the store-pair audit reads `M2000.PT row=5 maxItems=4 ...
+default=AS15.JT count=4`, `row=6 maxItems=2 ... default=R530.JT count=2`,
+`row=7 maxItems=2 ... default=R550.JT count=2`, then `store-pair audit: M2000.PT
+defaults, maxima, steps, saved loads and lobby checked`. The default load, the
+countermeasures (30 chaff and 30 flares from `F18.ECM`) and the gun (250 DEFA
+rounds) are described in [aircraft ordnance](../formats/aircraft-ordnance.md#the-mirage-2000-m2k-6-2026-11-10).
+
+Headless and windowed runs on the branch (all with `TORE_DATA_DIR` set to the
+local profile):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft m2000 --weapon-slot 1` (DEFA) | 250 shots, 62 hits, 1 kill, ammunition `[0, 4, 2, 2]` |
+| `--weapon-slot 3` (Super 530) and `4` (Magic) | one shot each, one hit and one kill, the other stations untouched |
+| `--weapon-slot 2` (AS-15) | refused at the practice aircraft (a surface missile), zero shots, recorded in `REFUSED_SLOTS` |
+| `--a2g-run --attack sarh --load AS15 --station 1` | designated, CUED, launched, locked 23 seconds, target killed |
+| `--a2g-run --attack release` on stations 1, 2 and 3 (`a2g-release-origin-m2000`) | each store leaves from where it hangs: AS-15s two tandem pairs, front first, left then right at 1.82 ft out; Super 530s 4.99 ft out; Magics 9.08 ft out; left before right |
+| `--a2g-run --attack jettison --load MK82` | 990 lb of tank fuel and 4,680 lb to 3,582 lb payload at the tank release, then the belly bombs, `PASS released 5 ... no-explosion` |
+| `--live-fire --combat-command jettison` on slots 2 to 4 | each station jettisons or fires, the others untouched |
+| `--combat-command chaff` and `flare` with `--countermeasure-preview 60` | carried 29 chaff or 29 flares, capacity 30 and 30 |
+
+`tools/battery.py` now carries `flight-livefire-m2000-slot1` to `slot4`,
+`flight-jettison-m2000-slot2` to `slot4`, `a2g-release-origin-m2000`,
+`a2g-sarh-as15-m2000` and `a2g-jettison-m2000`, all passing. The Load Ordnance
+page (`--quick-mission --snapshot-state ordnance --aircraft m2000`) reads `Internal
+Gun DEFA 30mm 250 (max 250)`, `Centerline 150 gallon tank 1 loaded (max 1)`,
+`Fuselage AS 15 4 loaded (max 4)`, `Wing Super 530D 2 loaded (max 2)` and `Wing
+R-550 Magic 2 2 loaded (max 2)`, with no wingtip row.

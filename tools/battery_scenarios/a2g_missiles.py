@@ -287,6 +287,15 @@ def other_missile_problems(output: str) -> list[str]:
     return problems
 
 
+def m2000_as15_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 1:
+        return [f"{len(parts)} runs finished, want 1"]
+    problems: list[str] = []
+    _cued_kill(parts[0], "Mirage 2000 AS-15", problems)
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run"]
     col = run + ["UKR", "QUCOL", "--speed", "350", "--seconds", "60"]
@@ -312,6 +321,13 @@ def scenarios() -> list[Scenario]:
             ],
             check=other_missile_problems,
             notes="SLAM IR, Shrike anti-radiation and AS-15 SARH retain their ground guidance.",
+        ),
+        Scenario(
+            name="a2g-sarh-as15-m2000", lane="flight",
+            args=col + ["--aircraft", "m2000", "--load", "AS15", "--station", "1", "--count", "2", "--attack", "sarh",
+                        "--from", "4", "--altitude", "3000"],
+            timeout=300, check=m2000_as15_problems,
+            notes="The Mirage 2000's belly AS-15 (row 5, default load) is designated, locks CUED on the page, launches and kills the column's lead truck (M2K-6).",
         ),
         Scenario(
             name="a2g-sarh-uncued", lane="flight",

@@ -72,6 +72,12 @@ STATIONS = {
     # two tandem pairs) and row 5 AA8.JT x2 (the two AA-8s, on wing pylons).
     # It has no tank or centreline row.
     "mig31": [260, 4, 2],
+    # The Mirage 2000 carries the DEFA gun on its internal row 3 (250 rounds)
+    # and three default weapon rows: row 5 AS15.JT x4 (the belly pairs), row 6
+    # R530.JT x2 (inner wing) and row 7 R550.JT x2 (outer wing). Its F150.GAS
+    # centreline tank is a tank station, and it has no wingtip row (John,
+    # 2026-11-10).
+    "m2000": [250, 4, 2, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -989,6 +995,8 @@ def combat_scenarios() -> list[Scenario]:
 REFUSED_SLOTS = {
     ("f18", 3), ("f18", 4), ("f22", 3), ("f22n", 3), ("faxx", 3), ("mig23", 3), ("mig23", 4),
     ("rafale", 2), ("su25", 3), ("x31", 3), ("f16a", 2),
+    # The Mirage 2000's belly AS-15 is a surface missile (M2K-6).
+    ("m2000", 2),
 }
 
 

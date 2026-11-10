@@ -1950,3 +1950,17 @@ and documented as retail, and TORE's parsed record drops it
 (`aircraft_stations::retire`). This supersedes the row 8 option left open in the
 previous note; see [the decision](../spec/stores-on-pylons.md#no-mirage-2000-wingtip-station-m2k-5-2026-11-10-later-the-same-day).
 
+## Mirage 2000 ordnance, default load and countermeasures (M2K-6, 2026-11-10)
+
+Slice M2K-6 confirmed the Mirage 2000's ordnance as the record's own, with no
+row, mask, capacity or default authored: the DEFA gun at 250 rounds (the real
+2000C's two guns of 125 rounds make the same 250 together), `F150.GAS` on the
+centreline, four `AS15.JT` on the belly row, two `R530.JT` and two `R550.JT` on
+the wing rows, and 30 chaff and 30 flares from `F18.ECM` (the fleet's
+convention, the ECM record is the capacity). Live fire, release positions,
+jettison and the audit are in [aircraft
+ordnance](aircraft-ordnance.md#the-mirage-2000-m2k-6-2026-11-10) and the
+[ordnance availability baseline](../baselines/ordnance-availability.md#mirage-2000-ordnance-m2k-6-2026-11-10).
+The earlier "per-row quantities are a host rule for M2K-6" sentence above is
+answered there: the rows' own capacities (250 rounds, 1 tank, 4, 2 and 2) are the
+default quantities.
