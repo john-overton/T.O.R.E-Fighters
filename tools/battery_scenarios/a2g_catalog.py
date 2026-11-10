@@ -27,7 +27,7 @@ AIRCRAFT = re.compile(
     re.M,
 )
 AUDIT = re.compile(r"^ordnance audit: 40 aircraft, 14 recovered weapon stations, \d+ weapon placements, "
-                   r"201 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
+                   r"199 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
 # radar aircraft carry nothing.
 LOADED = ("F18.PT", "A4E.PT", "F4B.PT", "SU25.PT", "A10.PT", "F16C.PT", "F15.PT", "F16.PT")
@@ -66,7 +66,7 @@ def scenarios() -> list[Scenario]:
             args=["--validate-ordnance", "--no-audio"],
             timeout=600,
             expect=[
-                r"ordnance audit: 40 aircraft, 14 recovered weapon stations, \d+ weapon placements, 201 tank placements, \d+ weapon and 9 tank records; passed",
+                r"ordnance audit: 40 aircraft, 14 recovered weapon stations, \d+ weapon placements, 199 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
                 r"ordnance audit: 2 novelty records, 194 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],

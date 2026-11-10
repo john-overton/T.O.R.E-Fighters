@@ -1008,6 +1008,22 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
 /// of the pod.
 const A10_WING: [f64; 2] = [10.75, 14.75];
 
+/// How much lower than the standard 2 inch rail a fuselage row's stores hang,
+/// feet, with the record's position kept: the Mirage 2000's belly pairs (row
+/// 5) take the MiG-31's fitted 0.1 ft drop (John, 2026-11-10, opinionated;
+/// the 0.1 ft is the MiG-31's agent-fitted value, [`Hang::PalletsFromBelow`]),
+/// which cuts the AS-15's fin entry into the belly from 0.56 to 0.75 ft; the
+/// R530 and R550 take the same drop. Zero everywhere else.
+pub fn rail_drop(id: AircraftId, hardpoint: usize) -> f64 {
+    match (id, hardpoint) {
+        (AircraftId::M2000, 5) => M2000_BELLY_DROP,
+        _ => 0.,
+    }
+}
+
+/// The Mirage 2000 belly rail drop, feet ([`rail_drop`]).
+const M2000_BELLY_DROP: f64 = 0.1;
+
 /// The MiG-31's four AA-9 row, [feet right of the centreline, feet forward]:
 /// two stores a side on tunnel pallets, the front pair first, under the
 /// fuselage about 2 ft either side of the centreline (John 2026-11-08,
@@ -1107,7 +1123,14 @@ pub fn placed_on(
     let Some(moved) =
         station_move(id, hardpoint).filter(|m| m.location == Location::from_byte(h.location))
     else {
-        return placed_scaled(h, model, axes);
+        let (mount, mut rack) = placed_scaled(h, model, axes);
+        let drop = rail_drop(id, hardpoint);
+        if drop > 0. && rack.location() == Location::Fuselage {
+            for over in &mut rack.over {
+                *over = over.map(|h| h - drop as f32);
+            }
+        }
+        return (mount, rack);
     };
     let mut mount: Vector = std::array::from_fn(|i| f64::from(h.position[i]) / 3. * axes[i]);
     mount[0] = moved.right;
@@ -1398,6 +1421,61 @@ mod tests {
         assert_eq!(placed_on(AircraftId::M2000, 0, &h, None).0, scaled);
         assert_eq!(placed_on(AircraftId::F16C, 0, &h, None).0, plain);
         assert_eq!(placed_scaled(&h, None, [1.; 3]).0, plain);
+    }
+
+    #[test]
+    fn the_mirage_2000_belly_pairs_hang_a_tenth_of_a_foot_lower_at_the_decoded_positions() {
+        let face = |x0, x1, z0, z1, up| tore_formats::shape::Face {
+            positions: vec![[x0, z0, up], [x1, z0, up], [x1, z1, up], [x0, z1, up]],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            faces: vec![face(-18., 18., -60., 60., -6.)],
+            lines: Vec::new(),
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&shape, 1. / 3.);
+        let row = Hardpoint {
+            location: Location::Fuselage.byte(),
+            position: [4, -20, 0],
+            flags: 0x07e5,
+            count: 4,
+            store: Some("AS15.JT".into()),
+            weight_class: 46,
+        };
+        let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::M2000);
+        let (plain_mount, plain) = placed_scaled(&row, Some(&model), axes);
+        let (mount, dropped) = placed_on(AircraftId::M2000, 5, &row, Some(&model));
+        // The decoded position is kept; only the surface the rails read drops.
+        assert_eq!(mount, plain_mount);
+        assert_eq!(dropped.location(), plain.location());
+        for (a, b) in plain.over.iter().zip(&dropped.over) {
+            let (a, b) = (
+                a.expect("belly over the row"),
+                b.expect("belly over the row"),
+            );
+            assert!((a - b - 0.1).abs() < 1e-5);
+        }
+        // Another row of the Mirage, and the Rafale's same row, are untouched.
+        assert_eq!(
+            placed_on(AircraftId::M2000, 6, &row, Some(&model)).1.over,
+            plain.over
+        );
+        let (rafale_mount, rafale) = placed_on(AircraftId::Rafale, 5, &row, Some(&model));
+        assert_eq!(rafale_mount, [4. / 3., -20. / 3., 0.]);
+        assert_eq!(
+            rafale.over,
+            placed_scaled(&row, Some(&model), [1.; 3]).1.over
+        );
+        assert_eq!(rail_drop(AircraftId::M2000, 5), 0.1);
+        assert_eq!(rail_drop(AircraftId::Mig31, 5), 0.);
     }
 
     fn rack(location: u8) -> Rack {

@@ -350,3 +350,20 @@ ordnance audit: 40 aircraft, 14 recovered weapon stations, 4076 weapon placement
 ordnance audit: 1 designator pods, 71 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
 ordnance audit: 2 novelty records, 194 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
 ```
+
+## The Mirage 2000 belly pairs take no big tanks (M2K-5, 2026-11-10)
+
+John decided on 2026-11-10 that the Mirage 2000's belly pairs (`M2000.PT` row 5)
+take no 350 or 500 gallon tank (they crossed the centreline tank). Normal
+loading refuses `F350.GAS` and `F500.GAS` there (`tank_allowed`); Cheat loading is
+unchanged. The audit pin moved on purpose from 201 to 199 tank placements; the
+weapon (4,076), Cheat-only (194) and pod (71) pins did not move. The per-aircraft
+line reads `ordnance M2000.PT: 6 source rows, 0 optional weapon rows, 184
+compatible weapon placements, 7 tank placements; defaults and restart passed;
+catalog 62 normal, 83 Cheat`. The `menus-ordnance-availability` and `a2g-catalog`
+battery expected lines now read 199.
+
+```text
+ordnance audit: 40 aircraft, 14 recovered weapon stations, 4076 weapon placements, 199 tank placements, 82 weapon and 9 tank records; passed
+```
+

@@ -35,7 +35,9 @@ const WEAPON_PLACEMENTS: usize = 4076;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
-const TANK_PLACEMENTS: usize = 201;
+/// 199 from 201: the Mirage 2000's belly pairs (row 5) take no 350 or 500
+/// gallon tank, two placements fewer (M2K-5, John 2026-11-10).
+const TANK_PLACEMENTS: usize = 199;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
 /// F-16A's four wing and wingtip rows (slice F16A-4). 186: the MiG-31 (M31-1). 194: the Mirage 2000 (M2K-1).

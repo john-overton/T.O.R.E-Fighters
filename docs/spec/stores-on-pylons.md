@@ -794,6 +794,163 @@ the wide upper fins enter the belly only to 0.48 ft; the pylon still meets the
 belly. The station table and the fitted drop are opinionated (John, 2026-11-08)
 and fitted (agent decision, 2026-11-08) respectively.
 
+## The Mirage 2000 (M2K-5, 2026-11-10)
+
+Measurement only, no station table adopted. `M2000.PT` has five editable
+carrier rows and four fixed or internal rows (visual sensor, radar, jammer and
+the DEFA gun, rows 0 to 3). The shape is scaled per axis to real size
+([aircraft shape scale](../formats/objects-and-shapes.md#aircraft-shape-scale-2026-11-09),
+factors 1.3616 right, 1.2290 forward, 1.5053 up, fitted), and the decoded rows
+scale with it (`placed_on`). They hang under the standard rules of 2026-10-13
+(1 ft wing pylon, 2 inch fuselage and centreline rail, a store on the tip's
+edge for a Wingtip row). No `station_move` exists for the Mirage 2000, and per
+John's standing decision (2026-11-07) nothing was moved: the slice stops here
+on clipping, with the options below for John. No fixed sensor or designator
+pod was added (the record has no pod row).
+
+| Row | Location | Decoded x / up / fwd, ft | Scaled x / up / fwd, ft | Default | Hang used | Hangs at (centre, ft) |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 4 | Centerline | 0 / -5.0 / 0 | 0 / -7.53 / 0 | `F150.GAS` x1 | 2 inch rail under the belly (surface -2.54) | 0 / -3.50 / 0, tank 10.28 ft long, 1.58 ft wide |
+| 5 | Fuselage, paired | 1.33 / -6.67 / 0 | 1.82 / -10.04 / 0 | `AS15.JT` x4 | two tandem 2 inch rails a side, surface -2.0 rear, -2.8 front | +-1.82 at -4.05 and +4.05 fwd, y -2.62 and -3.08 |
+| 6 | Wing, paired | 3.67 / -6.67 / -3.33 | 4.99 / -10.04 / -4.10 | `R530.JT` x2 | 1 ft wing pylon under the wing (surface -2.01) | +-4.99 / -3.44 / -4.10 |
+| 7 | Wing, paired | 6.67 / -6.67 / -6.67 | 9.08 / -10.04 / -8.19 | `R550.JT` x2 | 1 ft wing pylon (surface -2.01) | +-9.08 / -3.27 / -8.19 |
+| 8 | Wingtip, paired | 11 / -1.33 / -9.67 | 14.98 / -2.01 / -11.88 | `R550.JT` x2 | tip rule: centre line on the tip's edge, no pylon | +-14.98 / -1.51 / -11.88 |
+
+Measured with `tore-app --stores-preview` (CPU, audit, full, catalog flags, as
+for the MiG-31), plus a local triangle-level check of every store against the
+airframe, the gear (gear down, the M2K-4 rig, ground plane 6.02 ft under the
+reference), the pylons and every other store (edge and face crossings, vertical
+entry as the audit measures it, and surface distances sampled at 0.12 ft). The
+check tool and its dumps are local only.
+
+Default load (F150 tank, four AS-15, two R530, four R550):
+
+| Station | Entry into the airframe | Edge crossings | Nearest neighbour | Gear down | Ground |
+| --- | ---: | ---: | --- | --- | ---: |
+| Tank, row 4 | 0.09 ft (nose top into the belly) | 12 | 0.23 ft to the rear AS-15 | 2.88 ft | 1.73 ft |
+| AS-15, row 5, rear pair (-4.05 fwd) | 0.56 ft right, 0.75 ft left | 70, 34 | 1.00 ft to the front AS-15 | 0.52 ft to the main gear plate | 2.49 ft |
+| AS-15, row 5, front pair (+4.05 fwd) | 0.67 ft right, 0.58 ft left | 78, 72 | 0.39 ft to the tank | 3.00 ft | 2.04 ft |
+| R530, row 6 | none (0.42 ft clear) | 0 | 1.98 ft to the R550 outboard | 0.80 ft | 1.57 ft |
+| R550, row 7 | none (0.18 ft clear) | 0 | clear | 3.0 ft | 2.08 ft |
+| R550, row 8 (tip) | 1.21 ft (upper fins into the wing tip) | 12 | clear | 3.0 ft | 3.84 ft |
+
+**Clipping, two cases for John** (stop-and-report rule of 2026-11-07; the
+reviewed default loads read 0.27 ft for the MiG-25, 0.42 ft F-16A and F-16C,
+0.27 ft F-14, 0.29 ft F-15, 0.72 ft Su-27 and 0.48 ft MiG-31):
+
+1. **Wingtip R550 (row 8), 1.21 ft.** The decoded x (33 units, 14.98 ft scaled)
+   is the shape's own tip, a delta tip with a one foot chord whose corner is at
+   -11.88 ft forward. The standard tip rule centres the missile on that edge, so
+   its upper fins stand inside the thin wing for 1.21 ft, above every value
+   above. The decoded row and the shape agree on the position, so this is the
+   rule meeting a very thin tip, not a mis-scaled row. The real Mirage 2000 has
+   no wingtip rail (cited below), so no real station decides this row.
+2. **Belly AS-15 (row 5), 0.56 to 0.75 ft.** The four missiles hang on 2 inch
+   rails at +-1.82 ft, tandem 8.1 ft apart. Their fins and the wide body enter
+   the belly and fuselage flank, inboard edge at 0.89 ft. This sits in the range
+   of the Su-27 (0.72 ft), but it is clipping all the same and is listed for
+   John's decision. The expected tank-versus-AS-15 clash of M2K-0 did **not**
+   happen: the tank is 1.58 ft wide, so the AS-15's inboard edge clears it by
+   0.23 ft.
+
+The centreline tank's 0.09 ft entry, the two wing rows and every gap and
+ground clearance above are clean. Nothing touches the ground or the gear.
+
+**Options for John (not applied):**
+
+- Row 8: (a) accept 1.21 ft; (b) hang it on a standard 1 ft wing pylon at a
+  fitted position inboard of the tip (the MiG-31's `Hang::Wing`, but where the
+  wing has a chord to hang under, roughly 12 to 13 ft out), keeping the record's
+  mask, quantity and default; (c) move it to the nearest real station position.
+- Row 5: (a) accept 0.56 to 0.75 ft; (b) the MiG-31's fitted drop (rails 0.1 ft
+  lower) to cut the entry; (c) move the pairs outboard, which brings the rear
+  pair closer to the main gear (0.52 ft today); (d) a different pair spacing.
+
+**Alternatives the Load Ordnance page offers**, each against the default
+others (the live-fire list is `DEFA`, `R530`, `R550` and `AS15`, the tank
+records are on the same rows). Rows 6 and 7 are clean for every one of
+`AS15`, `R530`, `R550`, `F150` and `F250` (a tank hangs 1 ft under the wing,
+0.88 ft from the main gear on row 6). Row 5 alternatives:
+
+| Row 5 load | Entry into the airframe | Against the centreline tank | Gear down |
+| --- | --- | --- | --- |
+| R530 x4 | 0.62 to 0.91 ft | 0.45 ft | 0.35 ft (rear pair) |
+| R550 x4 | 0.86 to 1.02 ft | 0.05 ft (almost touching) | 0.50 ft |
+| F150 x4 | none | 0.28 ft | 0.57 ft |
+| F250 x2 | 0.15 ft right | 0.10 ft | 0.86 ft |
+| F350 x2 | 0.17 ft, 0.02 ft | **crosses the tank** (80 crossings) | 0.60 ft |
+| F500 x2 | 0.19 ft, 0.08 ft | **crosses the tank** (96 crossings) | 0.34 ft |
+
+The big tanks on row 5 are a Load Ordnance choice only (no default and not
+live-fire); they cross the centreline tank when both are loaded, a clash that
+needs its own decision if John wants it removed (for example a mask or capacity
+rule on row 5 when row 4 holds a tank).
+
+Real Mirage 2000 for plausibility only (the decoded rows decide): nine external
+stations, with the Super 530 on the inboard wing pylons and underbelly and the
+Magic on the outboard wing pylons (MILAVIA, Mirage 2000 specifications, and the
+FAS DOD 101 Mirage 2000 page, both accessed 2026-11-10; forum posts disagree on
+the fuselage and wing split, so no split is taken from them). The record has
+eleven store positions (one centreline, four belly, four wing, two tip) against
+nine real stations, so the wingtip row has no real counterpart; the placements
+above are the record's own.
+
+The row positions, masks, capacities and defaults are spec-derived from
+`M2000.PT` (M2K-0, M2K-1); the per-axis scale is opinionated (John, 2026-11-09)
+with fitted factors; the pylon and rail depths are the existing opinionated
+rules of 2026-10-13. The measurement, the comparison and the stop are agent
+findings, 2026-11-10. The ordnance audit pins did not move (no placement count
+changed).
+
+### The Mirage 2000 decisions (M2K-5, 2026-11-10)
+
+John decided the two clipping cases and a belly rule on 2026-11-10 (opinionated,
+John, 2026-11-10). The measurements above are kept as they were.
+
+- **Belly pairs (row 5): the MiG-31's 0.1 ft rail drop, decoded positions kept.**
+  `hardpoints::rail_drop` lowers the surface row 5's rails read by 0.1 ft, so
+  its stores hang 0.1 ft lower (`placed_on`, one place, every store on the row
+  including the tank records; the 0.1 ft is the MiG-31's agent-fitted value,
+  see [the MiG-31](#the-mig-31)). John accepts the remaining entry. Measured
+  after the drop (same triangle-level check as above; before the drop in
+  brackets):
+
+  | Row 5 load | Entry into the airframe | Against the centreline tank | Gear down |
+  | --- | --- | --- | --- |
+  | `AS15.JT` x4 (default) | 0.46 to 0.65 ft (0.56 to 0.75) | 0.26 ft (0.23) | 0.52 ft |
+  | `R530.JT` x4 | 0.52 to 0.81 ft (0.62 to 0.91) | 0.42 ft (0.45) | 0.35 ft |
+  | `R550.JT` x4 | 0.76 to 0.92 ft (0.86 to 1.02) | 0.02 ft, almost touching (0.06) | 0.50 ft |
+  | `F150.GAS` x4 | none | 0.32 ft (0.28) | 0.57 ft |
+  | `F250.GAS` x2 | 0.05 ft right, none left | 0.10 ft | 0.86 ft |
+
+  The audit's own `clip` line for the default load reads 0.57 ft (0.67 before).
+  The residual is recorded, not fixed further, as John asked.
+- **No big tanks on the belly pairs.** `aircraft_stations::tank_allowed` refuses
+  `F350.GAS` and `F500.GAS` on the Mirage 2000's row 5 in normal loading (they
+  crossed the centreline tank); Cheat loading skips that check as it does for the
+  other authored-tank masks, and the 150 and 250 gallon tanks stay. The tank
+  placement pin in `ordnance_audit.rs` moves from 201 to 199, two placements,
+  nothing else (4,076 weapon, 194 Cheat-only and 71 pod placements unchanged).
+- **Wingtip R550 (row 8): not moved, stopped for John.** John asked for the
+  nearest real station, and the real aircraft has two wing pylons a side (inner,
+  outboard) and no wingtip rail (nine stations, five under the fuselage and two
+  under each wing; the outboard wing pylons carry the Magic, the inboard ones
+  the Super 530: archived Mirage 2000 article and the Ukrainian defence press
+  numbering of the Mirage 2000-5, hardpoints 1 and 9 outer wing, 2 and 8 inner,
+  searched 2026-11-10; no source gives the pylons' lateral offsets). The record's
+  rows 6 and 7 already are those two real wing stations, so the nearest real
+  station to row 8 is row 7's own spot (9.08 ft out, R550). Putting row 8 there
+  coincides with row 7, so per the decision the slice stops. Measured options
+  (the row hung on a standard 1 ft wing pylon with `Hang::Wing`, default
+  load otherwise, each clean against the airframe): a pylon at 12.0 ft out,
+  -9.6 ft forward, no entry, 0.78 ft from the row 7 R550 (two missiles abreast, frames
+  `final-option-row8-pylon-x12-*`); at 13.0 ft out, -10.6 ft forward, no entry,
+  about 1.75 ft from row 7 (bounding boxes). Options for John: (a) a fitted second outboard pylon at
+  about 12 to 13 ft (the two above); (b) keep the tip rule (1.21 ft entry);
+  (c) put it on row 7's own pylon (coincident stores, needs a twin-rack rule);
+  (d) mask `R550.JT` off row 8 so the row carries nothing. The decoded row,
+  mask and capacity are unchanged in every option.
+
 ## The F-16C and fleet rail audit
 
 

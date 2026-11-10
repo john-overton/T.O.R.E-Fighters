@@ -1922,3 +1922,24 @@ gear down. Provenance: choice opinionated
 (John, 2026-11-09), factors fitted. Later slices use the scaled geometry: M2K-3
 and M2K-4 scale any shape-unit hinge point their rigs name, M2K-5 measures the
 stations on it.
+
+## Mirage 2000 stations measured (M2K-5, 2026-11-10)
+
+Slice M2K-5, Claude Sonnet (sonnet-high). The nine decoded rows were measured on
+the per-axis scaled shape under the standard pylon rules; the table, the
+clipping (wingtip R550 1.21 ft, belly AS-15 0.56 to 0.75 ft, centreline tank
+0.09 ft), the clearances to the gear and the ground, the alternatives and the
+options for John are in [stores on pylons](../spec/stores-on-pylons.md#the-mirage-2000-m2k-5-2026-11-10).
+The M2K-0 expectation that the tank would clash with the two belly rows did not
+hold (the tank is 1.58 ft wide, the AS-15's inboard edge clears it by 0.23 ft).
+No station table was adopted and no placement count moved, so the ordnance audit
+pins are unchanged. Open until John decides the two clipping cases.
+
+John's decisions on the M2K-5 stop (2026-11-10, opinionated): the belly pairs
+(row 5) take the MiG-31's 0.1 ft rail drop with the decoded positions kept
+(residual AS-15 entry 0.46 to 0.65 ft), no 350 or 500 gallon tank on the belly
+pairs (tank pin 201 to 199), and the wingtip R550 (row 8) moves to the nearest
+real station. That station is row 7's own outboard wing pylon, so row 8 stayed
+where it was and the slice stopped again with measured options; see [the
+decisions](../spec/stores-on-pylons.md#the-mirage-2000-decisions-m2k-5-2026-11-10).
+

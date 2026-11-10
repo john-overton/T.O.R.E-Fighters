@@ -10,6 +10,9 @@ pub const F16_TIP: usize = 8;
 pub const F22_WET: usize = 8;
 pub const MIG29_CENTER: usize = 8;
 pub const RAFALE_CENTER: usize = 9;
+/// The Mirage 2000's belly pairs (`M2000.PT` row 5, four stores in two
+/// tandem pairs either side of the centreline tank).
+pub const M2000_BELLY: usize = 5;
 
 /// The source row of the F-4B's centreline station (`F4B.PT` row 3: four
 /// AIM-9Bs, Mk 82s and the other stores on the centreline) that also takes
@@ -92,6 +95,10 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
         }
         "M396.GAS" => id == AircraftId::Mig29 && row == MIG29_CENTER,
         "R528.GAS" => id == AircraftId::Rafale && row == RAFALE_CENTER,
+        // No big tanks on the Mirage 2000's belly pairs: they would cross the
+        // centreline tank (John, 2026-11-10). Normal loading only; Cheat
+        // loading skips this check, and the 150 and 250 gallon tanks stay.
+        "F350.GAS" | "F500.GAS" => !(id == AircraftId::M2000 && row == M2000_BELLY),
         _ => true,
     }
 }
@@ -430,5 +437,19 @@ mod tests {
         assert_eq!(fuel_bank(F16_WET), Some(0));
         assert_eq!(fuel_bank(10), None);
         assert!(!tank_allowed(AircraftId::F18, 7, "F610.GAS"));
+    }
+
+    #[test]
+    fn the_mirage_2000_belly_pairs_take_no_big_tanks() {
+        for name in ["F350.GAS", "F500.GAS"] {
+            assert!(!tank_allowed(AircraftId::M2000, M2000_BELLY, name));
+            // Every other row of the Mirage and every other aircraft keep them.
+            assert!(tank_allowed(AircraftId::M2000, 6, name));
+            assert!(tank_allowed(AircraftId::M2000, 4, name));
+            assert!(tank_allowed(AircraftId::Rafale, M2000_BELLY, name));
+        }
+        for name in ["F150.GAS", "F250.GAS"] {
+            assert!(tank_allowed(AircraftId::M2000, M2000_BELLY, name));
+        }
     }
 }
