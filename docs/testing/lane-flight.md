@@ -104,13 +104,21 @@ traces is a tripwire, not exhaustive proof for every branch or platform.
 
 ## Variety aircraft checks
 
-`flight-variety-*` checks each of the 26 variety identities through real
+`flight-variety-*` checks each of the 27 variety identities through real
 application asset loading and 1,200 hybrid flight ticks, with finite motion, no
 crash and bounded fuel/energy output. It is separate from the original roster's fighter
 maneuver and AI acceptance cases. Source-backed powered-lift checks use
 `tore-sim`'s `variety_flight` example; synthetic tests cover hover limits,
 conversion, control release and exact-state continuation. See
 [the variety flight evidence](../baselines/variety-flight.md).
+
+`tore-sim`'s `performance_probe` example is the matching development harness for
+performance numbers: level acceleration at military and afterburner power, an
+afterburner climb on a speed schedule, sustained and instantaneous turns and fuel
+burn for any extracted PT (`PROBE_PAYLOAD`, `PROBE_FUEL`, `PROBE_ALTS`,
+`PROBE_ONLY`). Its pilots are scripted, so it records the model, not a best
+pilot. The Mirage 2000 results are in the
+[variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
 
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the

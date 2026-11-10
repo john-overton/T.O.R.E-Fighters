@@ -2057,3 +2057,46 @@ RWR window is aircraft-agnostic code (`rwr_readout`), covered by the shared unit
 tests. The frames show the window with the jammer lit and with the incoming
 round at the centre.
 
+
+## Mirage 2000 flight review (M2K-8, 2026-11-10)
+
+Dated section, additions only. The Mirage 2000 flies the hybrid adapter's own
+`variety` configuration built from `M2000.PT` (`M20.SH`) with the one-engine
+override of John's decision 2 (2026-11-09): 14,455 lbf military and 21,380 lbf
+afterburner, one engine. Retail stays as recorded in the M2K-0 and M2K-1 sections
+(two engines, 17,687 and 32,000 lbf). No envelope, G, weight, fuel or flow value
+was changed and no flight constant was touched.
+
+- Top speeds: the 1 G row decodes to 1,262 kt at 36,000 ft against a published
+  Mach 2.2 (1,261 kn) and 693 kt at sea level against a published 600 to 729 kn,
+  so `fitted_envelopes` leaves the record untouched. Full internal fuel settles
+  at 0.948 of the edge (1,197 kt, Mach 2.09 at 36,000 ft; 670 kt at 1,000 ft).
+- Climb and acceleration at the real thrust: peak specific excess power 418 to
+  435 ft/s (25,100 to 26,100 ft/min) at afterburner, 213 to 240 ft/s at military
+  power, a best sustained climb of 454 ft/s (27,200 ft/min), 36,000 ft in 110 to
+  129 s. The Rafale record's 32,000 lbf at the same weight gives 699 ft/s and
+  609 to 615 ft/s. The published 56,100 ft/min is out of reach by about a factor
+  of two; the cause is the shared drag law (drag equals the reference thrust at
+  the top speed) and the lack of ram thrust, not the thrust or the weight. For
+  John, if he wants the published climb: a per-aircraft drag or ram fit is a
+  fleet-level model change; raising the thrust would need about 2.2 times the
+  real M53-P2 and contradicts decision 2.
+- G limits: the record's -4 and +8 rows give +7.1 and -3.5 G on a clean aircraft
+  (+6.6 and -3.3 with the default stores) through the shared loaded-elevator
+  rule; the real limits are quoted at +9 and -3.2 G.
+- Fuel: record flows 2 and 16 lb/s kept; the 6,346 lb tank gives 52.9 minutes
+  dry and 6.6 minutes at afterburner, against about 29 and 8.5 minutes at the
+  M53-P2's published specific fuel consumption. Empty weight 17,100 lb (real
+  16,535 lb) and the tank (real about 6,970 lb) stay retail; the two errors almost
+  cancel at full fuel (within 60 lb).
+- Takeoff and landing: liftoff 130.3 kt after 1,026 ft, approach 145.2 kt at 65
+  percent fuel (published 140 kt), touchdown 132.6 kt, stopped; the record has no
+  hook.
+
+The liftoff (125 to 150 kt) and approach (133 to 147 kt) ranges in the flight
+battery are fitted windows, agent decisions of 2026-11-10; the approach range is
+the published 140 kt plus or minus 5 percent. Full tables, sources and the
+commands are in the
+[variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
+The M2K-0 unknowns row for fuel, thrust and flow is resolved by this section:
+kept as retail and listed for John.

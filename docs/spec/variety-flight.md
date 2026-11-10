@@ -587,6 +587,61 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## Mirage 2000 (M2K-8, 2026-11-10)
+
+The Mirage 2000 flies the hybrid adapter's own `variety` configuration, built
+from `M2000.PT` (`M20.SH`). Its values: empty 17,100 lb, internal fuel 6,346 lb,
+maximum takeoff 37,480 lb, environment rows -4 to +8 G and a 59,000 ft ceiling
+as decoded, with the one-engine override of John's decision 2 (2026-11-09):
+14,455 lbf military and 21,380 lbf afterburner thrust, one engine, applied where
+the record is read ([aircraft record corrections](aircraft-records.md)). The
+shared conventional flight, ground contact, actuator and loaded-mass rules apply
+unchanged, and no new fit was needed.
+
+The 1 G row's fast edge is 2,130 ft/s at 36,000 ft, 1,262 kt, against the
+published Mach 2.2 (1,261 kn, Wikipedia, "Dassault Mirage 2000"); the sea-level
+edge is 693 kt against a published 600 kn (most sources) to 729 kn
+(GlobalSecurity). Both stay as decoded, so `fitted_envelopes` leaves the record
+untouched. The shared loaded-drag rule settles full internal fuel at 0.948 of the
+edge at every altitude (1,197 kt, Mach 2.09, at 36,000 ft). The `climb` maneuver
+tops out at 64,422 ft, 1.092 of the 59,000 ft ceiling.
+
+The hybrid drag law reaches the reference thrust at the top speed, so cutting
+the thrust from the Rafale template's 32,000 lbf to the real M53-P2's 21,380
+lbf leaves every top speed where the record puts it and lowers acceleration and
+climb in proportion. At full internal fuel and afterburner the peak specific
+excess power is 418 to 435 ft/s (25,100 to 26,100 ft/min), against 699 ft/s for
+the Rafale record at the same weight, and the best sustained climb is 454 ft/s
+(27,200 ft/min). Level acceleration at 1,000 ft from 363 kt takes 10 s to 460 kt
+and 31 s to 590 kt; military power gives half the excess power (213 to 240 ft/s)
+and settles at 551 kt at 1,000 ft and 984 kt (Mach 1.71) at 36,000 ft. The
+published sea-level climb rate is 56,100 ft/min (285 m/s, test weight not
+stated); the model gives about 45 percent of it, because of the drag law and the
+absence of any ram thrust gain, not because of the thrust or the weight (see the
+[validation](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10)).
+Raising the thrust to close the gap would take about 2.2 times the real thrust,
+so it is reported, not changed.
+
+The G limits are the record's -4 and +8 rows through the shared
+loaded-elevator rule (40 percent): a full-stick pull peaks at 7.05 to 7.08 G on
+a clean aircraft and 6.60 G with the default stores, the full-stick push at -3.5
+G. The real aircraft is quoted at +9 and -3.2 G. The record's fuel flows (2 and
+16 lb/s, 0.50 and 2.69 lb/lbf/h against the override's thrust) are kept as retail
+with the tank: they give 52.9 minutes at military power and 6.6 minutes at
+afterburner, against about 29 and 8.5 minutes at the M53-P2's published specific
+fuel consumption for the same tank. The empty weight (17,100 lb, real 16,535 lb)
+and the 6,346 lb tank (real about 6,970 lb) stay retail; at full fuel the clean
+aircraft is within 60 lb of the real one.
+
+The default load takes off at 130.3 kt after 1,026 ft and approaches at 145.2 kt
+at 65 percent fuel (real approach 140 kt, Dassault), touches down at 132.6 kt
+and stops; the record has no arrestor hook. The liftoff and approach ranges the
+battery checks are fitted windows (agent decisions, 2026-11-10).
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift
