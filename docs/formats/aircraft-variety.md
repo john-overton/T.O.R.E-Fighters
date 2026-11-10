@@ -2162,3 +2162,477 @@ use, 471 of the 512 identity slots remain (the readout reserves a code for
 `wire::AIRCRAFT_BITS`, codes every aircraft field, and a compile-time
 assertion fails the build when `AircraftId::SELECTABLE` outgrows it. See
 [the protocol](net-protocol.md) for the field list.
+
+## Gripen source review (2026-11-10)
+
+Research mode, slice GRI-0 (batch 5). This reviews `GRIPEN.PT` and its
+dependency closure before `AircraftId::Gripen` exists. `GRIPEN.PT` is the 42nd
+retail identity (checkpoint code 42 in the batch order, after `F15E`); the wire
+identity is 9 bits now, so capacity is no constraint. It is not a parked target
+(`parked_aircraft.rs` has no `GRIPEN.PT` entry). No original module was
+executed; PT, SEE, ECM, JT and GAS are read as bounded BRF data with the shared
+field order, SH and HUD are inspected as data. Slice done by Claude Sonnet
+(sonnet-medium). Nothing here changes code or behaviour.
+
+Four questions are open for John and are **not decided here**: the HUD and
+cockpit ([below](#gripen-hud-and-cockpit-for-john)), the AAS-38 pod row
+([below](#gripen-aas-38-pod-row-for-john)), the canards
+([below](#gripen-canards-for-john)) and the record values that look copied
+([below](#gripen-record-values-that-look-copied-for-john)). The surfaces pass
+the whole-surface gate and real size needs no change (see
+[size](#gripen-real-size)).
+
+### Gripen build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the [MiG-31
+build section](#build-and-extraction)). The closure was extracted locally to
+`.local/m3-imports/scratch/gripen` with `tore-extract --include 'GRIPEN*'
+--include 'GRI*' --include '_GRI*' --include '~*' ...` (the `~*` sweep also
+pulled every cockpit picture) and the `SETUP.ESA` installer copy was extracted
+too. Its `GRIPEN.PT`, `GRI.SH`, `GRI_A.SH`, `GRI_S.SH`, `_GRI.PIC`, `_GRI_A.PIC`,
+`GRIPEN.PTS`, `AAS38.SEE`, `BK27.JT`, `F.BI`, `VIS340.SEE`, `F18R.SEE` and
+`F18.ECM` bytes are identical to the root copy; only `GRIPEN.HUD` differs by
+build (as `RAFALE.HUD` does). The usual five unrelated archive errors appear.
+
+### Gripen identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `GRIPEN.PT`, 14,805 bytes, SHA-256 `9cc5c3f11d10d4ce9b291164d77102d00ec16685b874d2b56d81384527251487` |
+| Displayed names | `Gripen`, `Saab Gripen`, `GRIPEN.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 660; `instanceSize` 626 (the parser default) |
+| Object class / year / hit points | `0x8000` (fighter) / 1998 / 99; `expType` 30 |
+| OBJECT flags / PLANE flags | `0x806bf3` (the Rafale and F/A-18 value) / `0x11` (seat and base bit; hook, no-lift, carrier, multi-crew clear) |
+| Shape | `gri.SH` (33,280 bytes), shadow `gri_s.SH` (15 faces) |
+| Damage looks | `GRI_A.SH` 409 faces, `GRI_B.SH` 50, `GRI_C.SH` 296, `GRI_D.SH` 256 |
+| Skins | `_GRI.PIC` (152,424 bytes, 256 x 586), `_GRI_A.PIC` 137,084, `_GRI_B.PIC` 42,704, `_GRI_C.PIC` 80,664, `_GRI_D.PIC` 71,044 |
+| Sounds | loop `&JET1N.11K`, second `&JET6A.11K` (the Rafale's), `&powerup.5k`, `&powerdn.5k`; all present |
+| HUD | `gripen.HUD` (own file, 4,608 bytes) |
+| AI script | `f.BI` (present) |
+| Sensors / jammer / gun | `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `AAS38.SEE`, `BK27.JT` |
+| PTS | `GRIPEN.PTS` (4,608 bytes; names `ICONGRI.PIC`) |
+| Radio callout | none: no `^ACMGRI*` exists (the callouts are `2000`, `F1`, `IG21/23/27/29/31`, `R3`, `R3E`) |
+| Encyclopedia | `GRIPEN.INF` and `GRIPEN_0..7/C/E/F/P.PIC` in `disc2/FA_3.LIB`; `GRI_D/M.11K` and `.CB8` narration in `FA_10B.LIB`; reference media |
+| Checkpoint code / CLI key | 42 and `gripen`/`gripen.pt`, reserved for B5-1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes of the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `GRIPEN.PT` | 14,805 | `9cc5c3f11d10d4ce9b291164d77102d00ec16685b874d2b56d81384527251487` |
+| `GRI.SH` | 33,280 | `ea05b2789f2c8b342517cd155f4f2e28c52aa77f0fab9ec1bb6cee6e885d96e3` |
+| `GRI_S.SH` | 4,608 | `80bfce4989c0e8318b9d1eccdfb29cca77dc5862e6544c45a4d3c6c69ced7134` |
+| `GRI_A.SH` | 29,184 | `fecb39f8c46f5eee52dcc1d6b8d13c945e60c505c795b085fb9ba28b8e0bd091` |
+| `GRI_B.SH` | 8,704 | `591e28812902504a7abbd541f21c6c6024fbc472b3c825967f02dbf5b135d34c` |
+| `GRI_C.SH` | 20,992 | `96163db969637ac59fbe795077192ac62d40b99a9a49f029b510fe28e3363c20` |
+| `GRI_D.SH` | 20,992 | `e17dbf501e1f77f2a7cf6a2ec2af0a833adc109fa8cd06efd6c9f4b0956b72d9` |
+| `GRIPEN.HUD` | 4,608 | `dab77fd5cc30007240e84f3c47b664a26a64f81444579bffd03a923e9df3ec80` |
+| `GRIPEN.PTS` | 4,608 | `e2b513a473c0deb2bf424d8f0bb013bf7ccafe76d01bc6e266be4fcc5e04d33c` |
+| `AAS38.SEE` | 492 | `9e447523a2fda1612d17fa7d76d3beb0fb03f11115f9e855937ffd2875f5f75b` |
+| `BK27.JT` | 2,719 | `0458077843fcc3c6252acfdb706f735cd7b26f80c0d36a74adbe80ab008a106f` |
+| `_GRI.PIC` | 152,424 | `b1f65130b86336e1d68795802c29f2cafe050c004741301826a44309e98b2eb2` |
+
+### Gripen record against the templates
+
+The closest records are `RAFALE.PT` and `F18.PT` (180 of the 219 statements
+equal, pointer statements excluded), then `F18C.PT` (179) and `M2000.PT` (177).
+**27 statements differ from the Rafale, 27 from the F/A-18, 30 from the Mirage
+2000.** 170 statements are identical in all five records: the damage and
+`systemDamage` tables (all 45 entries), stall, spin, crash, `puffRot`, `_bv`,
+`_brv`, rudder, throttle, `structureLimit` 5,120, `structureWarnLimit` 2,560,
+the Doppler settings, the minimum altitude, the drag constants `coefDrag`,
+`airBrakesDrag`, `flapsDrag`, `bayDrag`, `flapsLift` and the `loaded*` limits.
+That block is the shared F/A-18 family template, not Gripen data. The Gripen's
+own statements, with the other four records for comparison:
+
+| Field | Gripen | Rafale | F/A-18 | Mirage 2000 |
+| --- | ---: | ---: | ---: | ---: |
+| `year` | 1998 | 2005 | 1986 | 1984 |
+| Empty weight, lb | 14,599 | 17,100 | 23,050 | 17,100 |
+| Max takeoff, lb | 27,560 | 40,100 | 49,224 | 37,480 |
+| Internal fuel, lb | 5,000 | 9,900 | 11,220 | 6,346 |
+| Engines | 1 | 2 | 2 | 2 |
+| Thrust / afterburner, lbf | 12,140 / 18,100 | 24,000 / 32,000 | 17,687 / 32,000 | 17,687 / 32,000 |
+| `maxAlt`, ft | 60,000 | 65,000 | 60,000 | 59,000 |
+| `envMin` / `envMax` | -4 / +9 | -4 / +9 | -4 / +9 | -4 / +8 |
+| Hit points | 99 | 100 | 116 | 100 |
+| `structure[0]` / `[1]` | 1,229 / 1,933 | 1,278 / 1,946 | 1,193 / 1,743 | 1,161 / 2,129 |
+| Signatures 0..3 | 94, 94, 90, 100 | 95, 95, 70, 50 | 104, 104, 100, 100 | 91, 91, 100, 100 |
+| `maxVisDist` / view offset y, z | 168 / 30, 60 | 172 / 20, 80 | 204 / 20, 60 | 157 / 20, 60 |
+| Debris (`dmg` x, z; `dst` x, y, z) | -30, -20; 0, 0, 30 | -60, 0; 0, 20, -40 | 0, 40; -40, 0, 0 | -40, 0; 20, 10, 0 |
+| `turbulencePercent` | 131 | 130 | 116 | 122 |
+| `spinEntry` | 1 | 1 | 0 | 0 |
+| Fuel flow (`fuelConsumption` / `aftFuelConsumption`) | 2 / 14 | 3 / 16 | 2 / 16 | 2 / 16 |
+| `_gpullDrag` / `wheelBrakesDrag` / `gearDrag` / `loadedDrag` | 30 / 102 / 23 / 30 | 30 / 40 / 38 / 30 | 38 / 40 / 23 / 65 | 40 / 102 / 38 / 30 |
+| `negGLimit` | 0 | 0 | 2,560 | 0 |
+
+Apart from the table the Gripen differs from the Rafale in the resource names
+(shape, HUD, second sound is the same) and the nine hardpoint rows. The
+14 G rows are the Gripen's own (see [G rows](#gripen-g-envelope-rows)): none
+equals a Rafale, F/A-18 or Mirage polygon.
+
+### Gripen published audit
+
+The comparison is the game's own encyclopedia text (`GRIPEN.INF`, a Jane's
+extract in the retail media, numbers only) and public figures (Wikipedia, JAS
+39C/D specifications, accessed 2026-11-10; MILAVIA and other pages for the JAS
+39A). They do not establish original game behaviour.
+
+| Field | Record | Published | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 14,599 | 14,600 (6,622 kg, JAS 39A, encyclopedia) | 0.0% | Agrees exactly |
+| Maximum takeoff, lb | 27,560 | 27,558 (12,500 kg, JAS 39A, public); encyclopedia says about 28,660 (13,000 kg) | 0.0% / -3.8% | Agrees with the public 39A figure |
+| Internal fuel, lb | 5,000 | 5,000 (2,268 kg, encyclopedia) | 0.0% | Agrees exactly |
+| Engines | 1 | 1 (one RM12) | none | Agrees; shape has one nozzle |
+| Military thrust, lbf | 12,140 | 12,140 (54 kN, encyclopedia) | 0.0% | Agrees exactly |
+| Afterburner thrust, lbf | 18,100 | 18,100 (80.5 kN, encyclopedia) | 0.0% | Agrees exactly |
+| Ceiling, ft | 60,000 | 50,000 (15,240 m service ceiling, public) | +20% | Looks copied (equals the F/A-18 field) |
+| Top speed at 36,000 ft | 1,145 kt (1,933 ft/s, 1 G row) | Mach 2 (about 1,146 kt at that altitude) | 0% | Agrees |
+| Positive G | +9 | +9 (encyclopedia) | none | Agrees |
+| Negative G | -4 (row -4 exists) | -3 (public) | one row | Looks copied (all five records carry `envMin` -4) |
+| Gun rounds | 570 | 120 (BK27, public) | +375% | Looks copied (equals the F/A-18's M61 count) |
+| Store stations | 7 (centreline, 2 wing pairs, tip pair) | 7 (two wingtip, two under each wing, one centreline; encyclopedia) | none | Agrees |
+
+The record is genuinely the JAS 39A, not a template in the mass, fuel, engine
+and thrust fields.
+
+### Gripen record values that look copied (for John)
+
+Per standing rule B7, listed, not changed. Retail values stay retail unless
+John decides. "Copied" means equal to another record where the real aircraft
+disagrees:
+
+1. **Ceiling `maxAlt` 60,000 ft.** Equals the F/A-18 value; the real service
+   ceiling is 50,000 ft (15,240 m). Option: keep retail; or cap at 50,000 ft
+   as a TORE override (needs the 0 G and 1 G polygon peaks, which reach 63,000
+   and 60,000 ft, trimmed).
+2. **Negative G -4.** All five reviewed records have `envMin` -4 and a row at
+   -4; the real limit is -3 (public figure). Option: keep retail (the -4 row
+   is the Gripen's own polygon); or mask the -4 row.
+3. **Gun rounds 570.** The F/A-18's M61 count. Real BK27 holds 120 rounds
+   (public figure). Option: keep retail; or fit 120.
+4. **Template block.** The 170 shared statements listed above, plus
+   `OBJECT.flags` `0x806bf3` and `viewOffset.z` 60 and `sigs[3]` 100 (F/A-18
+   values), the second sound `&JET6A.11K` (the Rafale's), `gearDrag` 23 and
+   `fuelConsumption` 2 (F/A-18), `spinEntry` 1 (Rafale), `wheelBrakesDrag`
+   102 (Mirage). These are drag, damage, handling and sound constants; there
+   is no real-Gripen figure to cite, so they are recorded as template values.
+5. **Sensors.** `VIS340.SEE`, `F18R.SEE` (F/A-18 radar), `F18.ECM` are the
+   family sensors; the real aircraft has the PS-05/A radar. Record fact, left.
+6. **Everything else is the Gripen's own** and matches the real JAS 39A: empty
+   weight, takeoff weight, fuel, engine count, both thrusts, the 14 G rows,
+   year, hit points, structure and the station layout.
+
+### Gripen real size
+
+`gri.SH` at 1 unit = 1/3 ft, over the neutral dump (383 runtime faces; the
+shape's own export adds 5 branch faces for 388):
+
+| Axis | Units | Feet | Real (JAS 39A) | Difference |
+| --- | --- | ---: | ---: | ---: |
+| Span x (-41 to 41, wingtip rails) | 82 | 27.3 | 27.56 (8.40 m, encyclopedia) | -0.9% |
+| Length y (-61 to 77, nozzle to nose probe) | 138 | 46.0 | 46.25 (14.10 m, JAS 39A, encyclopedia) | -0.5% |
+| Height z, gear down (-16 to 29) | 45 | 15.0 | 14.76 (4.50 m, encyclopedia) | +1.6% |
+| Height z, gear up (-8 to 29) | 37 | 12.3 | n/a | n/a |
+
+**Verdict: true size within 2% on every axis. No scaling is needed.** The
+plan's "length 46.3 ft (JAS 39C)" is the JAS 39A figure; the 39C is 14.9 m
+(48.9 ft) in the public specification, 6% longer than this shape, but the
+record and the encyclopedia are the 39A. Decision for John: none required;
+the Mirage per-axis scale is not needed here.
+
+### Gripen state words and moving parts
+
+The shape has six state words, listed with the faces each adds or removes when
+set to 1 (`Shape::with_state`, 383 neutral faces; the export path adds 5):
+
+| Word | Faces | Low point | Geometry (shape units, x right, y forward, z up) | Reading | Status |
+| --- | ---: | ---: | --- | --- | --- |
+| `8080` | +4 | -4 | Two crossed flat plates behind the nozzle, y -61 to -85 | Afterburner flame | Confirmed by slot order and position |
+| `8086` | +4 | -4 | One quad per side at x +/-9 to +/-13, y -38 to -43, z 1 to -4, two windings | Side airbrake, rear fuselage | Confirmed; hinge on the forward vertical edge (x +/-9, y -38) |
+| `808c` | +22 | -16 | Nose plates x 0 (y 38 to 44, z -5 to -15), two cross plates; each main: strut plate x 4 to 6 (y -8 to -14), wheel plate y -11 (x 2 to 7), door plates x 9 to 15 (y 1 to -14, z -3 to -9) | Landing gear down | Confirmed; slot order |
+| `8098` | -6 | none | Removes the left trailing strip, x -12 to -40, y -27 to -33 | Left flap word | Slot order only |
+| `809e` | -6 | none | Removes the right trailing strip, x 12 to 40 | Right flap word | Slot order only |
+| `80a4` | 0 net | +4 | Swaps the fin's rudder quad for a copy turned about y -43: trailing edge (0,-50,6)/(0,-49,23) goes to (4,-49,6)/(3,-48,23) | Rudder, positive direction only | Confirmed by geometry |
+
+The slot order (flame, brake, gear, a skipped `8092`, flap, flap, rudder) is the
+shared family order. There is no hook word (hook flag clear), no slat word, no
+canopy word, no nozzle word and **no canard word: the canards are fixed
+geometry in the source**, so the rig must turn them from nothing. The shape
+streamer has pivot 0 and hinge scale 0.
+
+| Moving part | Source panel | State word | Rig note |
+| --- | --- | --- | --- |
+| Canard, each side | One pentagonal plate (two windings) plus a root filler triangle (two windings) | none | Fixed in the source; rig turns it |
+| Elevon, inboard, each side | Trailing strip, a quad on each layer | `8098`/`809e` remove it with the outboard strip | The rig keeps the strip drawn and turns it |
+| Elevon, outboard, each side | Outer strip, 2 triangles per layer | same word | Same hinge, same angle |
+| Rudder | 2-face quad on the single fin | `80a4` | Hinge on the fin leading edge of the rudder |
+| Airbrake | One quad (two windings) per side | `8086` | Appears only when open |
+| Gear | 22 faces, no wheels | `808c` | Rigid plates |
+| Burner | 4 plates | `8080` | Additive plume |
+
+### Gripen canards (for John)
+
+**Fact.** Each canard is one pentagonal plate, two faces (top and bottom
+winding), vertices (right side) (10,19,1), (22,15,2), (22,19,2), (8,37,1),
+(8,30,1): root edge on the intake side at x 8 to 10 (y 19 to 37, an 18-unit
+root chord, 6 ft), tip at x 22 with a 4-unit chord, trailing edge sweeping aft
+as it goes out, leading edge running 18 units aft over 14 outboard, and a 4
+degree dihedral (z rises 1 unit over 14). The plate is planar. A root filler
+triangle (10,19,1), (9,19,1), (8,30,1) with two windings sits against the
+fuselage. The left canard is the mirror with one root vertex 1 unit off (x -7
+against +8 at y 37); the faces are `24ae`/`2553` and filler `25c2`/`25e0`
+against `212d`/`2284` and `22f3`/`2311`.
+
+Rule 11 face table (no vertex lies on a hinge, because there is no source
+hinge; the rig supplies a lateral spindle through the root chord midpoint,
+about (9, 28, 1), tilted by the 4 degree dihedral):
+
+| Surface | Face | Vertices | Moved | On hinge | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right canard | `212d`, `2284` | 5 | 5 | 0 | 0 |
+| Right filler | `22f3`, `2311` | 3 | 3 | 0 | 0 |
+| Left canard | `24ae`, `2553` | 5 | 5 | 0 | 0 |
+| Left filler | `25c2`, `25e0` | 3 | 3 | 0 | 0 |
+
+The only fixed faces touching a canard share vertex (8,30,1) / (-8,30,1)
+(`2155`, `234a`, `273a`, `307b` and the left four): the root edge of a panel
+turned about a spindle opens a small gap against the intake side (up to
+`sin(angle)` times the half root chord, about 9 units from the spindle ends,
+so roughly 1.5 units at 10 degrees). This is the same root gap of any
+whole-panel tail. **Whole-surface gate: met.** Each canard is a whole panel
+(plate plus filler), no diagonal, no partial surface. No probe sheet is needed.
+
+Real aircraft: the foreplanes are all-moving, mainly for pitch, and angle
+leading-edge-down to act as air brakes on landing (public sources; Wikipedia
+article, accessed 2026-11-10). Whether they ever take differential roll is
+disputed in the public sources I found (forums and secondary articles say the
+elevons, inboard and outboard, carry pitch and roll and the canards move
+together). The encyclopedia says only "independently movable foreplanes ...
+leading-edge sweep of approximately 43o".
+
+Options for John (none chosen):
+
+1. **Pitch only (symmetric).** Both canards share one pitch angle. Simplest;
+   matches the cited reading that the elevons carry roll.
+2. **Pitch plus a landing air-brake bias** (leading edge down on the ground or
+   with the gear down and brakes). Adds the real landing behaviour.
+3. **Pitch plus differential roll.** Only if John wants the unconfirmed
+   reading; no evidence found that the real canards do.
+
+Agent note: option 1 or 2 is the supported reading; roll stays on the elevons.
+
+### Gripen elevons, rudder, airbrakes and gear (rule 11 tables)
+
+Each wing's trailing edge is the straight line y = -27 from x 12 to x 40 on the
+right (-12 to -40 on the left); the trailing edge of the strip falls from y -33
+at x 12 to -32 at x 26 and -31 at x 40 (chords 6, 5 and 4 units, 2.0 to 1.3
+ft). The hinge vertices sit at z -2 (top layer) and z -1 (bottom layer); the
+trailing edge is a knife edge at z -2, so the single hinge axis y -27, z -1.5
+is within 0.5 unit of every hinge vertex.
+
+| Surface | Face | Vertices | Moved | On hinge (y -27) | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right inboard (x 12 to 26) | `5fd2`, `5ff1` | 4 | 2 | 2 | 0 |
+| Right outboard (x 26 to 40) | `6010`, `602b` | 3 | 2 | 1 | 0 |
+| Right outboard | `6046`, `6061` | 3 | 1 | 2 | 0 |
+| Left inboard (x -12 to -25) | `6194`, `61b3` | 4 | 2 | 2 | 0 |
+| Left outboard (x -25 to -40) | `61d2`, `61ed` | 3 | 2 | 1 | 0 |
+| Left outboard | `6208`, `6223` | 3 | 1 | 2 | 0 |
+| Rudder (neutral) | `5d92`, `5db9` | 4 | 2 | 2 (y -43) | 0 |
+| Rudder (word `80a4`) | `5dff`, `5e26` | 4 | 2 | 2 (y -43) | 0 |
+| Airbrake (each side) | `62ad`/`62c4`, `634a`/`6361` | 4 | 2 | 2 (y -38) | 0 |
+| Gear (22 faces) | `594b` ... `5d5b` | 4 | 2 | 2 | 0 |
+
+Verdicts:
+
+- **Every elevon is a whole panel in the source.** No elevon is split across a
+  diagonal or threshold; no face has a fixed vertex off the hinge line. The
+  inboard strip is a quad on each layer; the outboard strip is the quad cut
+  into two triangles per layer. Each side is thus 6 faces. **Inboard and
+  outboard share the seam vertices (26,-32,-2) and (26,-27,*) on the right and
+  (-25,...) on the left**, so rule 12 applies: both take pitch and roll at the
+  same angle or the seam shows. The right and left seams are 1 unit apart (26
+  against -25). **The flap words remove inboard and outboard together**, one
+  word per side; the Mirage words removed only the inboard strip. The rig must
+  not hide the strip.
+- **Elevon crack at the inboard corner.** The trailing corner (12,-33,-2) is
+  also a vertex of the fixed centre-body strip faces `5716`/`57a8` (left:
+  `51d4`/`52dc`) at x 9 to 12, which fall away to y -36; turning the strip
+  leaves a small slit there. Every other neighbour shares only hinge-line
+  vertices. The strips are thin (up to 2 ft chord, about 0.7 ft trailing-edge
+  travel at 20 degrees) as on the Mirage.
+- **Rudder.** One hinged quad (two windings), hinge on the leading edge x 0, y
+  -43, z 6 to 23. Retail swap is about 31 to 34 degrees, rounded to whole
+  units, positive direction only. The trailing vertices (0,-50,6) and
+  (0,-49,23) are shared with fixed faces (`3bba`, `4ba9`, `4bd7`, `4c36`,
+  `4c9f`, `4d1c`, `4d85` and others) so a turned rudder leaves a one-unit crack
+  against the spine and the fin cap, as on every reviewed aircraft.
+- **Airbrake.** Two plates, one per side, each a quad with two windings; open
+  they swing out to (+/-13, -43) from the forward edge (+/-9, -38), about 39
+  degrees, matching the real paired rear-fuselage brakes. Hinge: the FORWARD
+  vertical edge. Closed, the word hides them; the rig must show a closed pose
+  flush with the fuselage (no source face to turn).
+- **Gear.** 22 rigid plates: nose (6 faces: a plane at x 0 and two thin cross
+  plates), each main strut and wheel plates (4 faces), each door wall (4 plus
+  4 faces). Wheelbase from nose centre y 41 to main centre y -11 is 52 units
+  (17.3 ft). No wheels or doors that fold.
+
+The whole-surface gate (John, 2026-11-07 and 2026-11-08) is met by every
+canard, elevon, the rudder, the airbrakes and the gear. **No diagonal or
+partial surface was found**, so no probe sheet was made.
+
+### Gripen engine and thrust
+
+The record says `engines` = 1 and thrust 12,140 / 18,100 lbf, equal to the
+real RM12 (54 kN dry, 80.5 kN with afterburner) and to the encyclopedia text.
+The shape agrees: one octagonal nozzle at y -61 (x -2 to 3) and one flame group.
+This is the first record of the batch where the count and the thrust are real
+and need no TORE override. Consumers (`ai_wings`, `Engine::new`, wreck power,
+contrail offsets) read the one engine; contrails need no special case.
+`aftFuelConsumption` 14 is the Gripen's own value (the others 16).
+
+### Gripen G envelope rows
+
+Points are speed in ft/s at altitude in ft. Fourteen consecutive rows, `envMin`
+-4 to `envMax` +9. The 1 G row peaks at 1,933 ft/s (1,145 kt, Mach 2.0) at 36,000 ft and
+1,230 ft/s (729 kt) at sea level.
+
+| G | Points |
+| ---: | --- |
+| -4 | 520@0, 615@11,000, 920@21,000, 1,230@21,000, 1,220@13,000, 1,010@0 |
+| -3 | 420@0, 462@8,250, 575@16,500, 707@24,750, 890@33,000, 1,305@33,000, 1,480@26,000, 1,320@15,500, 1,090@0 |
+| -2 | 330@0, 395@11,500, 520@23,000, 675@34,500, 870@46,000, 1,495@46,000, 1,650@30,000, 1,385@16,500, 1,160@0 |
+| -1 | 240@0, 300@14,750, 410@29,500, 600@44,250, 870@57,000, 1,625@57,000, 1,827@47,000, 1,847@34,000, 1,488@18,000, 1,210@0 |
+| 0 | 160@0, 180@13,000, 225@27,000, 313@39,000, 521@54,000, 870@63,000, 1,734@63,000, 2,027@49,250, 2,037@36,000, 1,613@18,000, 1,280@0 |
+| 1 | 200@0, 235@13,000, 307@26,000, 423@40,000, 611@53,000, 870@60,000, 1,684@60,000, 1,923@48,250, 1,933@36,000, 1,541@18,000, 1,230@0 |
+| 2 | same polygon as -1 |
+| 3 | 280@0, 342@13,000, 465@26,000, 637@39,000, 870@52,000, 1,526@51,875, 1,712@44,750, 1,750@32,000, 1,435@17,500, 1,180@0 |
+| 4 | same polygon as -2 |
+| 5 | 380@0, 427@10,000, 555@20,000, 702@30,000, 870@40,000, 1,395@40,000, 1,560@28,000, 1,325@14,500, 1,130@0 |
+| 6 | same polygon as -3 |
+| 7 | 470@0, 530@9,500, 670@18,250, 900@26,000, 1,320@26,000, 1,245@12,500, 1,050@0 |
+| 8 | same polygon as -4 |
+| 9 | 580@0, 685@9,000, 950@16,000, 1,150@16,000, 1,080@6,500, 980@0 |
+
+Rows -4 and 8, -3 and 6, -2 and 4, and -1 and 2 are the same polygon, as in
+every reviewed record (source data). No row equals a Rafale, F/A-18 or Mirage
+row. The 0 G row has a point at 63,000 ft, above `maxAlt` 60,000.
+
+### Gripen HUD and cockpit (for John)
+
+**Fact.** `GRIPEN.PT` names `gripen.HUD`, which resolves to its own
+`GRIPEN.HUD` (4,608 bytes). It is the Rafale's HUD program with different panel
+names (66 bytes differ): `~gri`, `~grih`, `~gris`, `~gri_l`, `~gri_c`, `~gri_r`,
+`~gri_lh`, `~gri_ch`, `~gri_rh`, `~gri_ls`, `~gri_cs`, `~gri_rs`, `~gri_p` and the
+Rafale's `~raf_w` window panel. **Gripen cockpit art exists**: all 13 pictures
+are in `FA_1.LIB` (`~GRI.PIC` 535 x 205, `~GRIH.PIC` 1279 x 490, `~GRIS.PIC`
+1601 x 613, `~GRI_L/C/R.PIC` 61 x 109 / 130 x 30 / 61 x 109, `~GRI_LH/CH/RH.PIC`,
+`~GRI_LS/CS/RS.PIC`, `~GRI_P.PIC` 81 x 80), with their own dimensions, not the
+Rafale's (`~RAF.PIC` 640 x 205, `~RAFH.PIC` 1280 x 490). The `ICONGRI.PIC` named
+by `GRIPEN.PTS` was not found as a separate picture. The files `~AGRIPEN.M`,
+`~B39.M`, `~E39.M`, `~U39.M` and `~V39.M` are named by no resource of this
+aircraft and were not examined. Cockpit stem `GRI`, shape stem `GRI`.
+
+Options (none chosen):
+
+1. **Follow the record: `GRIPEN.HUD`, cockpit stem `GRI`, `~GRIH.PIC`.** What
+   retail does, with real Gripen art; needs a new HUD family stem and the
+   cockpit-stem arms (the 13 panels follow the Rafale panel structure).
+2. **Bind the Rafale glass** (`RAFALE.HUD`, stem `RAF`) as the Mirage 2000 does:
+   no new wiring, but wrong art when real art exists.
+3. **Another reviewed HUD family.** No retail evidence.
+
+Agent note: option 1 is the evidenced one and the first batch aircraft with
+own cockpit art.
+
+### Gripen AAS-38 pod row (for John)
+
+**Fact.** Row 3 of the record is `AAS38.SEE`: location 1 (Fuselage), flags
+`0x8` (the fixed-sensor flag), position [0, 0, 0], max items 1, max weight 0.
+`AAS38.SEE` is a pod record: weight 350 lb, flag bit 1, no shape in the media
+(the existing authored AAS-38 model, 6.0 x 1.08 ft, is TORE's). The Rafale
+carries it on a real centreline station (flags `0x601`, [0, -20, 0]); the
+Gripen's row is the **A-10 pattern**: flags `0x8` at the reference point,
+inside the fuselage. Under the standing rule
+([fixed pods draw only on a real station](../spec/stores-on-pylons.md#fixed-pods-draw-only-on-a-real-station-2026-11-07),
+John, 2026-11-07) such a row **draws nothing**; the pod's mass and sensor
+effect stay. The encyclopedia (`GRIPEN.INF`) says the FLIR pod is "carried
+under starboard air intake trunk, forward of wing leading-edge": there is a
+real FLIR mounting, but it is not a numbered store station in the record.
+
+Options (none chosen):
+
+1. **Follow the rule: no pod drawn.** Mass and sensor kept. Satisfies B7.
+2. **Draw the pod under the starboard intake trunk** at a fitted spot (the
+   encyclopedia names the place; the record does not), as a separate decision
+   with frames.
+3. **Treat it as an internal sensor with no mass.** Departs from the
+   fixed-pod accounting.
+
+Agent note: option 1 is the standing rule and requires no new decision.
+
+### Gripen hardpoints
+
+All nine source rows in original order. Feet divide units by three; x right, y
+up, z forward ([aircraft ordnance](aircraft-ordnance.md#hardpoint-positions)).
+Location byte: 0 Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay,
+4 Wing, 5 Wingtip. Mirror flag is bit `0x4`.
+
+| Row | Location | Flags | Position x/y/z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `F18.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `AAS38.SEE` | Fixed FLIR pod (placeholder, see above) |
+| 4 | Internal Gun | `0x0008` | 4 / 2 / 37 | 1.3 / 0.7 / 12.3 | 570 | 0 | `BK27.JT` | Internal gun, 570 rounds |
+| 5 | Fuselage | `0x07e1` | 0 / -20 / 0 | 0 / -6.7 / 0 | 1 | 40 | `F150.GAS` | Centreline tank |
+| 6 | Wing | `0x07e5` | 15 / -15 / -14 | 5.0 / -5.0 / -4.7 | 2 | 40 | `AGM65G.JT` | A2G, inner wing pair |
+| 7 | Wing | `0x07e5` | 30 / -15 / -21 | 10.0 / -5.0 / -7.0 | 4 | 40 | `AIM120.JT` | A2A, outer wing pair |
+| 8 | Wingtip | `0x0085` | 44 / -2 / -26 | 14.7 / -0.7 / -8.7 | 2 | 4 | `AIM9M.JT` | A2A, wingtip pair |
+
+Default stores in the catalog (`VIS340.SEE`, `F18R.SEE`, `F18.ECM`,
+`AAS38.SEE`, `BK27.JT`, `F150.GAS`, `AGM65G.JT`, `AIM120.JT`, `AIM9M.JT`, one
+default per row; per-row quantities are a host rule for GRI-6). Every default
+is live in TORE except `BK27.JT`, which is decoded but hidden (the carriers
+`ALPH`, `E2000`, `GRIPEN`, `TOR` and `VIG` are not imported yet); GRI-6 wires
+the BK27 gun. The real aircraft has **seven** store stations (two wingtip, two
+under each wing, one centreline; the encyclopedia) and the record has the same
+seven: rows 5 to 8, mirrored. This is not a template row layout (the Rafale has
+a different set); the record's tip row is the AIM-9 pair, the real aircraft's
+standard fit. Things GRI-5 must handle:
+
+- The Wingtip row (x 44, z -26) sits **3 units (1 ft) outboard of the shape's
+  own tip rail** (x 41): measure it against the standard tip rule.
+- The centreline tank (row 5, [0, -20, 0]) hangs 12 units (4 ft) below the
+  shape's lowest belly point (z -8 at (0, 47)); a 150 gal tank on the standard
+  pylon rules, with the pylon drop, is a likely close call with the nose gear
+  doors and the main gear plates (z -16): measure.
+- Rows 6 and 7 sit under the wing at x 15 and 30 (semi-span 41); row 7 has 4
+  items per side (a host rule decides how many hang).
+- The gun row is at x +4 (starboard side), while the encyclopedia puts the
+  BK27 in the port side of the lower front fuselage. The sign may be the
+  position convention for the gun port; GRI-6 records it.
+- There is no designator pod station: the AAS-38 is the row-3 placeholder.
+
+### Gripen roster note
+
+`GRIPEN.PT` appends as the 42nd entry (checkpoint code 42 in the batch order
+after `F15E`); `ALL` and `SELECTABLE` growth is the B5-1 slice's. The identity
+is not aliased to any other record.
+
+### Gripen unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| HUD and cockpit choice | GRI-7 cannot start without it | John, three options above |
+| AAS-38 row (no pod, or under the intake) | B7 | John, three options above |
+| Canard behaviour (pitch, brake bias, roll) | GRI-3 | John, three options above |
+| Copied record values (ceiling, -4 G, 570 rounds) | Flight and gun | John, per value above |
+| Elevon thinness, root slit | Visual | GRI-3 measures with the 25-pose grid |
+| What the original does with `8098`/`809e` | They delete both strips | Unknown; the rig keeps the strips drawn |
+| Closed airbrake pose | No source face for closed | GRI-4 |
+| Wingtip row 1 ft outboard of the tip | Stations | GRI-5 measures |
+| Gun side and 570 rounds | Gun row | GRI-5/GRI-6 |
+| Radio callout absent | Chatter | None (no `^ACMGRI*`); GRI-9 notes |
