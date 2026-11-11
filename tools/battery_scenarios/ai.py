@@ -1772,6 +1772,20 @@ def scenarios() -> list[Scenario]:
                            "M2000.PT identity (one M53-P2, F18R.SEE radar, F18.ECM jammer, "
                            "Super 530D, Magic 2 and AS-15 default load) in a 2 v 2 fight."))
 
+    # 13g. The F-15E in a mission (slice F15E-9): every wing the F-15E, the player's own
+    # included, 2 v 2 with the fight script, so the F15E.PT identity flies a mission with its
+    # two engines, the F15R.SEE radar, F15.ECM jammer, AV8IR.SEE and PAVESPK.SEE sensor rows, the
+    # Harrier HUD by name, its M61 and its Mk 82 and AIM-120 default load. It is never aliased to
+    # the F-15C. The roster probe flies it against itself at every skill; this one has it shoot
+    # and be shot at.
+    out.append(probe("f15e-quick-mission-2v2", fight(2, 2, "--aircraft", "f15e",
+                                                      "--probe-friendly-aircraft", "f15e",
+                                                      "--probe-enemy-aircraft", "f15e",
+                                                      "--separation", "5", *attack), ticks=7200,
+                     notes="All F-15E: the player's wing and the enemy wing fly the F15E.PT "
+                           "identity (two engines, F15R.SEE radar, F15.ECM jammer, M61, Mk 82 "
+                           "and AIM-120 default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

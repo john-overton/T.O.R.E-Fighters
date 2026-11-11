@@ -4703,3 +4703,55 @@ liftoff 149.1 kt after 1,155 ft and approach 156.1 kt with the default load.
 Findings for John, nothing changed: the ceiling, the +9 G reached only near empty
 (the fleet loaded-elevator rule, as the Mirage before M2K-11), fuel flows 39 percent
 under the real F100 at military power, and the default load's weight.
+
+## F-15E in missions, multiplayer and replay (F15E-9, 2026-11-10)
+
+Implementation and verification, slice F15E-9 of the F-15E port. No game code
+changed: `AircraftId::F15E` was appended to every identity list in B5-1
+(checkpoint code 41, wire index 41 of the `SELECTABLE` order), the wire codes it in the 9-bit identity field since protocol 83,
+and `strike_class.rs` already lists it in the fighter family. The AI builds a
+wing member from the record like any aircraft (two engines, the default AI load
+check passes for its Mk 82, AIM-120 and M61 stores), so no AI behaviour work
+was done.
+
+Added coverage: a Quick Mission test
+(`the_f15e_is_a_quick_mission_player_and_a_wing_choice`) naming `F15E.PT` as the
+player's aircraft and in every AI wing field and refusing the F-15C in its
+place, the `ai-f15e-quick-mission-2v2` and `replay-rec-f15e-2v2` battery
+scenarios, the F-15E row in the Load Ordnance notes loop
+(`menus-snap-quick-lobby-ordnance-laser-notes-f15e`: no laser warning, sensor
+helper shown, as the F-16C, because the record has the PAVESPK.SEE row; decision
+3 of the F-15E plan keeps that sensor without a drawn pod), and `ai-f15e-*` in
+the `ai-fights` battery family.
+
+AI strike finding (reported, no behaviour work). The strike class is Fighter, as
+the F-15C's and the F-16C's. In a Quick Mission with a ground target set, the
+mission gives a fighter the CAP role: `--a2g-run UKR QUFACT --pilot ai
+--aircraft f15e --load MK82 --quick-wing --seconds 300` prints `ROLE plane=1
+role=cap`, `releases=0` and `store_rounds_left=12` (the twelve Mk 82s untouched),
+the same as the F-16C of `qmc-strike-wing`. The Mk 82 load is not refused on
+that account: when the player orders the wingman onto the ground (`--order
+engage-my-target --order-at 3` on `UKR QUCOL`), the order is taken ("1
+applied"), the wingman flies a level pass, releases a Mk 82 at 5,027 ft and 401
+kt, lands it 123 ft from the aim, egresses and keeps 11 rounds. So an AI F-15E
+bombs when ordered or assigned the Strike role and otherwise flies as a fighter.
+Whether the Strike role should default for an aircraft carrying a bomb load is
+an AI behaviour question and is left to John.
+
+Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile-f15e`):
+
+- `--ai-roster-probe-ticks 3600`: the four `F15E.PT` lines (Novice, Average,
+  Experienced, Ace) each `models=2 radar=true ir=true stores=3 gun=true
+  projectiles=0 dropped=0 PASS` (two engines; the `ir` is the AV8IR.SEE row).
+- `ai-f15e-quick-mission-2v2` passes: every wing the F-15E, one missile kill by
+  the player at 14.9 s, nothing dropped, no warnings.
+- `replay-rec-f15e-2v2` passes: the recording reads back `player.aircraft =
+  F15E.PT`, `probe.enemy = F15E.PT`, `draw.models = F15E.PT`, the aircraft
+  listed as `F-15E (F15E.PT)`, two runs identical, `--verify-render` finds
+  nothing missing or differing.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding
+  `tore-server` **and `tore-bot`** (`cargo build --locked -p tore-session --bin
+  tore-bot`): with the 2026-11-10 18:31 bot, the same server and bot counted the
+  same 213 content items but derived different compatibility codes, and the bot
+  was refused. Rebuild both before a net scenario after the identity list
+  changes.

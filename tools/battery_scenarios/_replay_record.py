@@ -506,6 +506,19 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The F-15E as the player and in both wings (slice F15E-9): a 2 v 2 recorded three times, so
+    # the F15E.PT identity (checkpoint code 41, wire index 41 of the 9-bit field) round-trips
+    # through the recording, plays back with nothing missing and records the same twice.
+    out.append(
+        record_scenario(
+            "replay-rec-f15e-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "f15e", "--probe-friendly-aircraft", "f15e",
+             "--probe-enemy-aircraft", "f15e", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

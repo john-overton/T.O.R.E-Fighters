@@ -3491,6 +3491,36 @@ mod tests {
             assert_eq!(wing.aircraft, AircraftId::M2000);
         }
     }
+    /// Slice F15E-9: the F-15E is offered as the player's aircraft and,
+    /// because the AI can fly it, in every AI wing field. The identity the
+    /// mission flies is named exactly (`F15E.PT`), never aliased to the
+    /// F-15C (`F15.PT`).
+    #[test]
+    fn the_f15e_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        // The player's own list offers it by its selection key, F15E.PT.
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::F15E.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::F15E));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::F15E).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::F15E));
+        }
+        // The mission the draft flies carries the F-15E as the player and in
+        // every wing, and never the F-15C.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::F15E);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::F15E);
+            assert_ne!(wing.aircraft, AircraftId::F15);
+        }
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI
