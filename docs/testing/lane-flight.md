@@ -119,6 +119,12 @@ burn for any extracted PT (`PROBE_PAYLOAD`, `PROBE_FUEL`, `PROBE_ALTS`,
 `PROBE_ONLY`). Its pilots are scripted, so it records the model, not a best
 pilot. The Mirage 2000 results are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
+Update (TOR-8, 2026-11-11): the Panavia Tornado IDS results, clean and with the
+default load, with the full-stick pull by fuel against the F-15E, the F-5E, the
+Gripen and the Mirage F1, are in the
+[variety flight baseline](../baselines/variety-flight.md#panavia-tornado-ids-validation-2026-11-11);
+`tornado` joins the liftoff, approach and internal-fuel tables of `flight.py`
+(fitted windows 135 to 165 kt and 140 to 175 kt).
 
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the

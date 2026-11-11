@@ -642,6 +642,52 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## Panavia Tornado IDS (TOR-8, 2026-11-11)
+
+The Tornado IDS flies the hybrid adapter's own `variety` configuration, built from
+`TOR.PT` (`tor.SH`). Its values are the retail record's with John's B5-2 and B5-3
+corrections ([aircraft record corrections](aircraft-records.md)): empty 31,065 lb,
+maximum takeoff 61,620 lb, two engines at 17,300 lbf military and 32,150 lbf
+afterburner in all, environment rows -3 to +7 G (the +7 row fitted from the +6 row,
+real +7.5), fuel flows 3 and 22 lb/s; the 11,221 lb tank and the 60,000 ft ceiling
+are the record's own. The shared conventional flight, ground contact, actuator and
+loaded-mass rules apply unchanged, and no new fit was needed. **No flight law reads
+the wing sweep**: TOR-3 and TOR-5 draw it (spread to 250 kt, 67 degrees at 600 kt)
+and move the swivelling pylons by it, and that is all it does. The real sweep changes
+lift and drag a great deal; TORE has one envelope, drag law and stall speed per
+aircraft, and because the drawn sweep is a function of speed only, the Tornado's own
+envelope rows already hold the speed-dependent result.
+
+Clean (31,065 lb plus 11,221 lb of fuel, 42,286 lb) the afterburner level speed is
+793 kt (Mach 1.20) at 1,000 ft and 1,321 kt (Mach 2.30) at 36,000 ft, 0.965 of the
+1 G edge, against the published about Mach 1.2 at sea level and Mach 2.2 at altitude;
+level flight holds to the record's 60,000 ft (the published service ceiling is
+50,000 ft). Thrust to weight is 0.76 clean and 0.56 at the default gross of 56,982
+lb; the peak specific excess power is 406 ft/s at sea level clean (285 ft/s with the
+default load) and the afterburner climb from a 450 kt start reaches 30,000 ft in 91
+to 101 s clean (120 to 134 s loaded), against the published "less than two minutes"
+from brake release. A full-stick pull at 461 kt and 1,000 ft peaks at 6.17 G with
+full fuel, 6.59, 6.82 and 7.04 G with half, a quarter and 300 lb of fuel (5.29 to
+5.91 G with the default load), the shared loaded-elevator rule scaling the limit with
+the fuel carried (the F-15E 7.57 to 9.10 G, the F-5E 5.98 to 7.00 G, the Gripen 8.00
+to 9.03 G and the Mirage F1 6.14 to 7.06 G for the same four states). The real limit
+is +7.5 G, 0.5 G above the whole-G top row. The sustained level turn is 4.82 G
+(10.2 deg/s) at 461 kt and 1,000 ft, from a scripted pilot (a lower bound). The
+record's fuel flows give 62 minutes at military power and 8.5 at afterburner from
+the internal tank.
+
+The default load (14,696 lb, which depends on the open station question) takes off
+at 150.6 kt after 1,945 ft (593 m; the published run is 900 m at a typical strike
+weight) and approaches at 160.1 kt (the 1.05 times loaded minimum floor), stopping
+757 m after touchdown; the published landing run is 370 m with thrust reversers,
+which TORE does not model (no field, panel or flight rule). The liftoff and
+approach ranges the battery checks are fitted windows (agent decisions,
+2026-11-11).
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

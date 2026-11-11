@@ -4700,3 +4700,40 @@ Provenance: sensor rows, HUD module, panel names and cockpit art spec-derived (r
 the Eurofighter cockpit binding opinionated (John, 2026-11-10); the glass polygon, the
 mirror seeds and the eye-point reading fitted or agent decisions (2026-11-11). Evidence
 and frames: `.local/m3-aircraft/frames/TOR-7/` and `.local/m3-aircraft/checks/TOR-7/`.
+
+## Tornado flight review (TOR-8, 2026-11-11)
+
+Dated section, additions only. The Tornado IDS flies the hybrid adapter's own
+`variety` configuration built from `TOR.PT` (`tor.SH`), two RB199 Mk 103 at 17,300
+lbf military and 32,150 lbf afterburner in all, empty 31,065 lb, maximum takeoff
+61,620 lb, rows -3 to +7 G (the +7 row fitted, real +7.5) and fuel flows 3 and 22
+lb/s (B5-2 and B5-3). No envelope, G, weight, fuel, flow, ceiling or thrust value
+was changed and no flight constant was touched. Figures are given clean (42,286 lb
+with full internal fuel) and with the current default load (56,982 lb gross),
+because the stations question (TOR-5) is open with John.
+
+- Top speeds: afterburner level speed 793 kt (Mach 1.20) at 1,000 ft and 1,321 kt
+  (Mach 2.30) at 36,000 ft, 0.965 of the 1 G edge; with the default load 760 kt and
+  1,266 kt (Mach 2.21). Published: about Mach 1.2 at sea level, Mach 2.2 at altitude.
+  Level flight holds to the record's 60,000 ft, 20 percent over the published 50,000 ft
+  service ceiling (the record's own value, not a B5-2 correction; option for John).
+- Climb: 30,000 ft in 91 to 101 s clean and 120 to 134 s loaded from a 450 kt start,
+  sustained rate 25,400 to 26,000 ft/min, against "less than two minutes" from brake
+  release (published); the 30,000 ft/min of the brief was not found in any page read.
+- G: 6.17 G at 461 kt and 1,000 ft with full fuel, 7.04 G nearly dry (never more than
+  0.04 G over the +7 row; real +7.5), 5.29 to 5.91 G with the default load; the same
+  four fuel states for the F-15E, F-5E, Gripen and Mirage F1 are in the baseline. The
+  sustained turn is 4.82 G, 10.2 deg/s at 461 kt and 1,000 ft.
+- Fuel: 62 minutes at military power and 8.5 at afterburner from 11,221 lb.
+- Takeoff and landing (default load): liftoff 150.6 kt after 1,945 ft (593 m),
+  approach 160.1 kt, touchdown 158.7 kt, rollout 757 m. The published landing run
+  (370 m) uses thrust reversers, which TORE does not model; open for John.
+- **Swing wing.** No flight law reads the sweep (TOR-3, TOR-5 draw it and swivel the
+  pylons only). The real sweep changes lift and drag a lot; TORE has no sweep term.
+  Because the drawn sweep is a function of speed, the Tornado's own envelope rows
+  already carry the speed-dependent result; a sweep multiplier would be a fitted
+  per-aircraft change, not made. Finding for John.
+- The liftoff (135 to 165 kt) and approach (140 to 175 kt) ranges in the flight battery
+  are fitted plausibility windows, agent decisions of 2026-11-11 (no primary speed
+  was found for the IDS). Full tables, sources and commands are in the
+  [variety flight baseline](../baselines/variety-flight.md#panavia-tornado-ids-validation-2026-11-11).
