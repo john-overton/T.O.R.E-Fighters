@@ -459,3 +459,27 @@ ordnance audit: 45 aircraft, 17 recovered weapon stations, 4663 weapon placement
 ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
 ordnance audit: 2 novelty records, 222 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
 ```
+
+## Batch 5 record and station corrections (B5-2, 2026-11-10)
+
+The Tornado's outer wing row is retired, the F-5E's wing pair and jammer defaults
+are cleared (its radar is the F-104's) and the Mirage F1's centreline pod default
+is cleared ([stores on pylons](../spec/stores-on-pylons.md#batch-5-stations-tornado-outer-wing-mirage-f1-centreline-f-5e-defaults-b5-2-2026-11-10)).
+The audit pins moved: recovered weapon stations 17 to 18 (the F-5E wing pair has no
+default weapon), weapon placements 4,663 to 4,652 (the Tornado's outer row held
+eleven), tank placements 231 to 233 (the Mirage F1 centreline takes two tanks now
+that no pod occupies it), Cheat-only placements 222 to 220 (the Tornado row held
+two). Pods (80), weapon records (82) and tank records (9) are unchanged. The
+per-aircraft lines changed:
+
+```text
+ordnance F5E.PT: 4 source rows, 1 optional weapon rows, 71 compatible weapon placements, 5 tank placements; defaults and restart passed; catalog 61 normal, 83 Cheat
+ordnance TOR.PT: 4 source rows, 0 optional weapon rows, 85 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 61 normal, 83 Cheat
+ordnance MF1.PT: 5 source rows, 2 optional weapon rows, 175 compatible weapon placements, 6 tank placements; defaults and restart passed; catalog 62 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4652 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` and `a2g-catalog` battery expected lines read 18,
+4,652 (menus only), 233 and 220.
