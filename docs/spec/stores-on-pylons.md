@@ -1655,3 +1655,105 @@ Audit pins: recovered stations 17 to 18, weapon placements 4,663 to 4,652, tank
 placements 231 to 233, Cheat-only placements 222 to 220; the pod placements (80)
 and the roster (45) are unchanged. See the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-record-and-station-corrections-b5-2-2026-11-10).
+
+## The Tornado IDS: swivelling wing pylons and a stop on clipping (TOR-5, 2026-11-10)
+
+**Status: stopped on clipping, as John's standing rule requires.** The swivel is
+built and tested; no station position, `station_move` or default was changed.
+Every default store of the Tornado clips something, so John chooses the fix.
+Numbers below are measured with `tore-app --stores-preview` (CPU, audit, with
+`TORE_STORES_PREVIEW_SWEEP`, `TORE_STORES_PREVIEW_CLEARANCE`; see
+[development](../DEVELOPMENT.md#headless-development)) and the frames in the
+slice's local frame folder.
+
+**The swivel rule (opinionated, John 2026-11-10, decision 19).** The real
+Tornado's wing pylons swivel so the stores stay aligned with the airflow as the
+wing sweeps; stores on them follow. Here:
+
+- **Which rows swivel.** Only the inner wing pair (`TOR.PT` row 7, `Location::Wing`).
+  The centreline tank pair (row 5) and the shoulder pylons (row 6) hang from the
+  fuselage and stay fixed. Row 8 is retired. The row is chosen by
+  `combat::swing::swivels(id, row)`.
+- **Where the store goes.** The sweep is a pure function of the aircraft's speed and
+  flaps (`combat::swing::wing_turn`: spread to 250 kt, linear to fully swept at
+  600 kt, 25 to 67 degrees, flaps hold the wing out; the numbers are TOR-3's,
+  moved from the drawing rig into the simulation unchanged). A swivelling
+  station's pylon is carried to where the wing's turn about its pivot puts it
+  (`swing::swept`); the pylon swivels back by the same turn, so the store's heading
+  stays along the fuselage at every sweep and only its position moves. The height
+  does not change, because the wing panel is rigid.
+- **One value, three consumers.** `Rack::turn` (a new `f32`, zero for every other
+  station) holds the turn. `Rack::side_pylons` applies it, so the release origin
+  (`Rack::store_point`, `Station::release_point`), the drawn store (`pylons::hung`)
+  and the jettison points all agree. `Configuration::set_wing_turn` sets it on
+  swivelling stations every tick from `tore-world` combat (`flight::State::speed` and
+  `flaps`), so every peer works out the same value; it is derived, never carried by
+  a checkpoint or a recording (`turn` is a `skip` field of the `Rack` checkpoint). The
+  drawing sets the same value from the aircraft's own state (`pylons::swung`), so
+  replays and remote aircraft draw it too. The pylon's underside is read from the
+  model with the wing turned (`Airframe::underside_at`, a cached copy of the
+  Tornado's shape with the two wing panels turned by `tornado_animation::swept_shape`).
+- **Tests.** `combat::swing` (schedule, inverse, round trip, which rows),
+  `live::tests::a_swivelling_wing_station_rides_the_swept_wing_and_a_fixed_row_stays`
+  (a swivelling row lands on the swept wing at 25 and 67 degrees, the fixed row does
+  not move), `pylons::tests::a_swivelling_station_is_drawn_where_the_swept_wing_carries_it`.
+
+**Station table (default load: two `F250.GAS`, four `PAVEWAY.JT`, two `MK82P3.JT`;
+feet right / up / forward of the reference point, right side; header scale 2/3).**
+
+| Row | Location | Default | At 25 degrees (spread) | At 67 degrees | Swivels |
+| ---: | --- | --- | --- | --- | --- |
+| 5 | Wing, pair at x 0 | 250 gal x2 | tanks 1.18 either side of 0, up -5.94, forward 5.67, underside -4.0 | same | no |
+| 6 | Fuselage, 4 | Paveway x4 | x 2.00, up -4.55 / -4.92, forward -2.93 and 12.27, underside -4.0 / -2.6 | same | no |
+| 7 | Wing, 2 | Mk 82 x2 | x 3.67, up -4.89, forward 3.00, lugs 1.00 under the belly (-3.44) | right (7.03, -4.89, 3.76), left (-7.20, -4.89, 4.20), nothing above them | yes |
+
+Gear down (contact -7.33 ft): lowest store points 0.46 ft (tank), 0.50 ft (rear
+Paveway), 0.86 ft (front Paveway) and 1.97 ft (Mk 82) above the ground; the
+Mk 82 store box contains gear-leg points at 25 degrees (the main legs stand at
+about 3.3 ft out, row 7 is 3.67 ft out) and clears the legs by 1.9 ft at 67.
+The all-heavy load (500 gal tank, four Mk 84 on row 6, two Mk 84 on row 7) comes
+within 0.03 ft of the ground at the tank.
+
+**Clipping, for John (nothing fixed).**
+
+1. **Row 7 hangs from the fuselage side, not from the wing.** It is 3.67 ft out and
+   3 ft forward; the movable panel's pivot is 6.3 ft out and 1 ft aft, and the model
+   has no wing or glove ahead of y +1 unit (0.7 ft). At 25 degrees its Mk 82 enters
+   the airframe by 2.61 ft (the `clip` report; larger alternatives: 2.18 to 2.83 ft,
+   the GBU-30 1.27 ft; a Mk 84 reads 0.00). Carried by the swinging wing, the same
+   station ends 7 ft out and 3.8 to 4.2 ft forward with **nothing above it** (the
+   model's wing is swept away behind it), so the swivel draws a pylon standing in
+   air and a bomb floating ahead of the swept wing (front frames). The swivel is
+   correct for a pylon that is on the panel; row 7 as decoded is not.
+2. **Row 6 Paveways enter the fuselage 0.96 ft** (hardpoint 6 `clip`), at x 2.00
+   with their fins in the belly. Load Ordnance alternatives: GBU-12 0.90, AGM-88
+   0.93, AS-30 2.12, GBU-28 0.33, AIM-9M 0.60; Mk 82 and Mk 84 read 0.00.
+3. **Default load store against store.** The tank pair (centres 1.18 either side of
+   x 0, radius about 0.9 ft) overlaps the Paveways beside them (x 2.0, radius about
+   0.55 ft) along their whole length: bounding boxes overlap by 1.5 to 1.8 ft
+   (Paveway and tank), 0.7 ft (Paveway and Mk 82). A single 350 or 500 gal tank at
+   x 0 overlaps the Paveways by 0.9 to 1.1 ft; two 350 or 500 gal tanks on row 6
+   overlap the centreline pair by 1.2 to 1.3 ft. A Mk 84 four on row 6 with the
+   single 500 gal tank on row 5 is clear (the only default-compatible clean combination
+   measured). The bounding-box gaps are conservative for thin bodies; the frames show
+   the Paveway, tank and Mk 82 bunched and cutting each other under the belly.
+
+**Options (agent analysis, John decides; nothing applied).**
+
+- *Row 7 onto the panel.* A fitted station move (`station_move`) to a point
+  on the movable panel outboard of the pivot, about 7 to 8 ft out (the real inner
+  wing pylon is on the swinging panel, not the fuselage; the real position is not
+  cited here: no dimensioned drawing is available), then the swivel is as built and
+  its pylon meets the swept wing. Also needs its default (Mk 82 triple) re-fitted.
+- *Row 7 as a fixed fuselage station.* Keep 3.67 ft and drop the swivel (the stores
+  keep their station but contradict decision 19).
+- *Rows 5 and 6.* Spread the Paveway pairs outboard (about x 2.9 ft with the pair of
+  tanks at x 0), or take the MiG-31's 0.1 ft rail drop (0.96 ft remains), or hang the
+  default tank pair as one 500 gal tank at x 0 (the real centreline store).
+- *Accept* the measured entries with a note (the Su-27 precedent accepted 0.72 ft).
+
+**Provenance.** Which rows swivel, the pylon rule and the swept-surface lookup are
+opinionated (John 2026-11-10, decision 19, for the rotating pylons; the row choice
+is an agent decision); the schedule, pivot and sweep range are TOR-3's fitted
+values and the cited 25 to 67 degrees; the measurements are agent findings. The
+real station numbers are not claimed. No audit pin moves.

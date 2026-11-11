@@ -658,6 +658,37 @@ pub struct Configuration {
     pub fixed_pods: Vec<FixedPod>,
 }
 impl Configuration {
+    /// Turn the swivelling wing stations ([`super::swing::swivels`]) with the
+    /// swinging wing: every drawn rack on such a hardpoint is carried to where
+    /// a wing turned `turn` radians ([`super::swing::wing_turn`]) puts it,
+    /// and everything that leaves from, or hangs at, that rack follows. The
+    /// host calls this every tick with the turn its aircraft's speed and
+    /// flaps give, so every peer sees the same value; an aircraft without a
+    /// swivelling station is untouched.
+    pub fn set_wing_turn(&mut self, turn: f64) {
+        if !super::swing::has_swivel(self.aircraft) {
+            return;
+        }
+        let turn = turn as f32;
+        let id = self.aircraft;
+        let slots = &self.hardpoint_slots;
+        for (index, station) in self.stations.iter_mut().enumerate() {
+            let row = slots.iter().position(|slot| *slot == Some(index));
+            if row.is_some_and(|row| super::swing::swivels(id, row)) {
+                station.rack.turn = turn;
+            }
+        }
+        for tank in &mut self.tanks {
+            if super::swing::swivels(id, tank.hardpoint) {
+                tank.rack.turn = turn;
+            }
+        }
+        for pod in &mut self.fixed_pods {
+            if super::swing::swivels(id, pod.hardpoint) {
+                pod.rack.turn = turn;
+            }
+        }
+    }
     /// The gun pod on weapon station `station`, when that station's weapon
     /// is the pod: a row that can take a pod keeps its (empty) entry while it
     /// carries something else, which is no pod.
@@ -2439,6 +2470,11 @@ impl Ownship {
     /// stations count as loaded.
     pub fn start_load(&mut self) {
         self.ever_loaded = self.ammo.iter().map(|a| a & 0x7fff != 0).collect();
+    }
+    /// Carry the swivelling wing stations with the swinging wing
+    /// ([`Configuration::set_wing_turn`]); the host calls it every tick.
+    pub fn set_wing_turn(&mut self, turn: f64) {
+        self.config.set_wing_turn(turn);
     }
     /// Remember which stations hold something now (every tick, so a station
     /// that later runs dry is known to have been loaded).
@@ -7820,6 +7856,84 @@ mod tests {
         assert_eq!(state.own().payload_lbs(), 1702.);
         state.command(0, Command::Jettison, launcher());
         assert_eq!(state.own().payload_lbs(), 0.);
+    }
+
+    /// TOR-5: a store on the Tornado's swivelling inner wing row rides the
+    /// swept wing and leaves from there with the heading it always has; a
+    /// fixed row does not move.
+    #[test]
+    fn a_swivelling_wing_station_rides_the_swept_wing_and_a_fixed_row_stays() {
+        use crate::combat::{hardpoints::Rack, swing};
+        let mut config = fixture(false).own().configuration().clone();
+        let mut wing = config.stations[0].clone();
+        wing.weapon.source = "MK82.JT".into();
+        wing.count = 2;
+        wing.internal = false;
+        wing.mount = [8.0, -8.3, 3.0];
+        wing.rack = Rack {
+            location: 4,
+            paired: true,
+            ..Rack::default()
+        };
+        let mut fixed = wing.clone();
+        fixed.mount = [2.0, -8.3, 4.67];
+        fixed.rack.location = 1;
+        config.stations = vec![wing, fixed];
+        config.aircraft = tore_formats::aircraft::AircraftId::Tornado;
+        // Station 0 is hardpoint row 7, station 1 row 6.
+        config.hardpoint_slots = vec![None, None, None, None, None, None, Some(1), Some(0)];
+        let spread: Vec<_> = (0..2)
+            .map(|i| [0, 1].map(|n| config.stations[i].release_point(n)))
+            .collect();
+        for degrees in [25., 67.] {
+            let turn = swing::wing_turn(swing::speed_for_sweep(degrees), 0.);
+            config.set_wing_turn(turn);
+            assert_eq!(
+                config.stations[1].rack.turn, 0.,
+                "the fixed row is not turned"
+            );
+            assert_eq!(config.stations[0].rack.turn, turn as f32);
+            for n in [0u32, 1] {
+                // The record mirrors per side: n = 1 leaves the right wing's
+                // store (one whole release left, odd), n = 0 the left wing's.
+                let fixed_point = config.stations[1].release_point(n);
+                assert_eq!(
+                    fixed_point, spread[1][n as usize],
+                    "a fixed row never moves"
+                );
+                let point = config.stations[0].release_point(n);
+                let was = spread[0][n as usize];
+                let right = point[0] > 0.;
+                let expected = swing::swept(right, was, f64::from(turn as f32));
+                for i in 0..3 {
+                    assert!(
+                        (point[i] - expected[i]).abs() < 1e-9,
+                        "{degrees} degrees, release {n}: {point:?} against {expected:?}"
+                    );
+                }
+                // Height is the wing's, whatever the sweep.
+                assert_eq!(point[1], was[1]);
+            }
+        }
+        // At 25 degrees the wing is spread and nothing has moved.
+        config.set_wing_turn(0.);
+        for n in [0u32, 1] {
+            assert_eq!(config.stations[0].release_point(n), spread[0][n as usize]);
+        }
+        // At 67 degrees both wings' stores have swung aft.
+        let turn = swing::wing_turn(swing::speed_for_sweep(67.), 0.);
+        config.set_wing_turn(turn);
+        let mut sides = [0u32, 1].map(|n| config.stations[0].release_point(n));
+        sides.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        let [left, right] = sides;
+        assert!(left[0] < 0. && right[0] > 0., "{left:?} {right:?}");
+        // (The left glove sits a unit further out, so the pair is not an
+        // exact mirror image.)
+        assert!(
+            left[2] < 3.0 && right[2] < 3.0,
+            "both swept aft of the spread row"
+        );
+        assert!(spread[0].iter().all(|was| *was != right));
     }
 
     #[test]

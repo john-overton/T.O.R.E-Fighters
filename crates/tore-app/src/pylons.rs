@@ -81,6 +81,8 @@ const NEAR_SURFACE: f64 = tore_sim::combat::hardpoints::PYLON_DEPTH + 1.5;
 pub struct MountCache {
     undersides: Mutex<HashMap<[i64; 4], Option<f64>>>,
     edges: Mutex<HashMap<[i64; 4], Option<[f64; 3]>>>,
+    /// The model with the swing wing turned, by quarter degrees of turn.
+    swept: Mutex<HashMap<i64, std::sync::Arc<tore_sim::combat::hardpoints::Underside>>>,
 }
 
 impl MountCache {
@@ -99,6 +101,25 @@ impl MountCache {
         }
         found
     }
+    pub fn swept(
+        &self,
+        quarter_degrees: i64,
+        make: impl FnOnce() -> tore_sim::combat::hardpoints::Underside,
+    ) -> std::sync::Arc<tore_sim::combat::hardpoints::Underside> {
+        if let Some(found) = self
+            .swept
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&quarter_degrees).cloned())
+        {
+            return found;
+        }
+        let made = std::sync::Arc::new(make());
+        if let Ok(mut m) = self.swept.lock() {
+            m.insert(quarter_degrees, made.clone());
+        }
+        made
+    }
     pub fn tip_edge(
         &self,
         key: [i64; 4],
@@ -113,6 +134,67 @@ impl MountCache {
         }
         found
     }
+}
+
+/// The surface a pylon meets: the clean model, or the model with the swing
+/// wing turned (a swivelling wing station, TOR-5).
+pub trait Under {
+    fn underside(&self, right: f64, forward: f64, from: f64, inboard_steps: u8) -> Option<f64>;
+    fn tip_edge(&self, right: f64, up: f64, forward: f64, half_length: f64) -> Option<[f64; 3]>;
+}
+
+impl Under for Airframe {
+    fn underside(&self, right: f64, forward: f64, from: f64, inboard_steps: u8) -> Option<f64> {
+        Airframe::underside(self, right, forward, from, inboard_steps)
+    }
+    fn tip_edge(&self, right: f64, up: f64, forward: f64, half_length: f64) -> Option<[f64; 3]> {
+        Airframe::tip_edge(self, right, up, forward, half_length)
+    }
+}
+
+/// An airframe seen with its swing wing turned `turn` radians
+/// ([`tore_sim::combat::swing::wing_turn`]): the surface over a swivelling
+/// wing station, whose pylon hangs from wherever the swept wing is.
+pub struct Surface<'a> {
+    pub airframe: &'a Airframe,
+    pub turn: f64,
+}
+
+impl Under for Surface<'_> {
+    fn underside(&self, right: f64, forward: f64, from: f64, inboard_steps: u8) -> Option<f64> {
+        self.airframe
+            .underside_at(self.turn, right, forward, from, inboard_steps)
+    }
+    fn tip_edge(&self, right: f64, up: f64, forward: f64, half_length: f64) -> Option<[f64; 3]> {
+        self.airframe.tip_edge(right, up, forward, half_length)
+    }
+}
+
+/// `stores` with the swinging wing's turn put on every swivelling station:
+/// the turn this aircraft's speed and flaps give ([`tore_sim::combat::swing`]),
+/// the same value the simulation releases stores by, so a replayed or remote
+/// aircraft's stores ride its wing as a flown one's do. Aircraft without a
+/// swivelling station get their stores back unchanged.
+pub fn swung<'a>(
+    stores: &'a [StorePose],
+    airframe: &Airframe,
+    state: &crate::flight::State,
+) -> std::borrow::Cow<'a, [StorePose]> {
+    use tore_sim::combat::swing;
+    let id = airframe.profile.id;
+    if !swing::has_swivel(id) {
+        return std::borrow::Cow::Borrowed(stores);
+    }
+    let turn = swing::wing_turn(state.speed, state.flaps) as f32;
+    let mut posed = stores.to_vec();
+    for store in &mut posed {
+        store.rack.turn = if swing::swivels(id, usize::from(store.hardpoint)) {
+            turn
+        } else {
+            0.
+        };
+    }
+    std::borrow::Cow::Owned(posed)
 }
 
 /// A store's size, feet: length, largest cross-section width (fins
@@ -243,6 +325,11 @@ pub fn vertices<'a>(
         let dims = dims(store, shape);
         let size = store.size();
         let places = hung(store);
+        // A swivelling wing station meets the wing where it has swept to.
+        let surface = airframe.map(|airframe| Surface {
+            airframe,
+            turn: f64::from(store.rack.turn),
+        });
         // Each pylon once, with what it carries.
         let mut drawn: Vec<&PylonPlace> = Vec::new();
         for place in &places {
@@ -250,7 +337,7 @@ pub fn vertices<'a>(
             if store.rack.location() == Location::Shoulder {
                 if !drawn.contains(&&place.pylon) {
                     drawn.push(&place.pylon);
-                    shoulder_rail(out, &at, airframe, &place.pylon, &dims, size);
+                    shoulder_rail(out, &at, surface.as_ref(), &place.pylon, &dims, size);
                 }
                 continue;
             }
@@ -263,7 +350,7 @@ pub fn vertices<'a>(
                 hanger(
                     out,
                     &at,
-                    airframe,
+                    surface.as_ref(),
                     &place.pylon,
                     &dims,
                     place.pylon.slots.len() as u16,
@@ -353,7 +440,7 @@ fn dims(store: &StorePose, shape: Option<&Shape>) -> Dims {
 /// station sampler starts at the source record, but drawing starts at the
 /// raised store: that can bring a rotor into its 12 ft search and mask the
 /// stub wing inboard. Keep the existing search when no short attachment fits.
-fn hanger_surface(airframe: &Airframe, right: f64, forward: f64, from: f64) -> Option<f64> {
+fn hanger_surface(airframe: &impl Under, right: f64, forward: f64, from: f64) -> Option<f64> {
     let surface = airframe.underside(right, forward, from, 6);
     if surface.is_some_and(|h| h - from > NEAR_SURFACE) {
         for step in 1..=6 {
@@ -376,7 +463,7 @@ fn hanger_surface(airframe: &Airframe, right: f64, forward: f64, from: f64) -> O
 /// origin is under it. Move only the hanger toward that origin, up to 12 ft
 /// in quarter-foot steps, until it reaches the same nearby surface.
 fn hanger_attachment(
-    airframe: &Airframe,
+    airframe: &impl Under,
     right: f64,
     middle: f64,
     origin: f64,
@@ -406,7 +493,7 @@ fn hanger_attachment(
 fn hanger(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
-    airframe: Option<&Airframe>,
+    airframe: Option<&impl Under>,
     pylon: &PylonPlace,
     dims: &Dims,
     on: u16,
@@ -514,7 +601,7 @@ fn hanger(
 fn shoulder_rail(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
-    airframe: Option<&Airframe>,
+    airframe: Option<&impl Under>,
     pylon: &PylonPlace,
     dims: &Dims,
     size: StoreSize,
@@ -581,7 +668,7 @@ const ARM: f64 = 0.15;
 /// model is straight over the middle (the pylon reached inboard for it), it
 /// keeps its length and meets `surface` flat.
 fn along_surface(
-    airframe: &Airframe,
+    airframe: &impl Under,
     right: f64,
     middle: f64,
     length: f64,
@@ -868,9 +955,10 @@ pub fn for_flown(
     let _frame_log = crate::frame_log::span(crate::frame_log::Phase::Aircraft);
     let mut out = Vec::new();
     if !state.wreck_gone() {
+        let stores = swung(stores, airframe, state);
         vertices(
             &mut out,
-            visible(stores, state.bay),
+            visible(&stores, state.bay),
             scenery.relative(state.position),
             [state.yaw, state.pitch, state.bank],
             Some(airframe),
@@ -1279,6 +1367,30 @@ mod tests {
             .reduce(f32::max)
             .unwrap();
         assert!((f64::from(top) - SINK).abs() < 1e-5);
+    }
+
+    /// TOR-5: a store on a swivelling wing station is drawn where the swept
+    /// wing carries its pylon, at the same height, hanging from the same
+    /// offsets; the store has no heading of its own to change.
+    #[test]
+    fn a_swivelling_station_is_drawn_where_the_swept_wing_carries_it() {
+        use tore_sim::combat::swing;
+        let mut store = plain([8., -8.3, 3.], 4, 2);
+        store.rack.paired = true;
+        let spread = hung(&store);
+        for degrees in [25., 67.] {
+            let turn = swing::wing_turn(swing::speed_for_sweep(degrees), 0.);
+            store.rack.turn = turn as f32;
+            let swept = hung(&store);
+            assert_eq!(swept.len(), spread.len());
+            for (was, now) in spread.iter().zip(&swept) {
+                let expected = swing::swept(now.side == 0, was.centre, f64::from(turn as f32));
+                for (got, want) in now.centre.iter().zip(expected) {
+                    assert!((got - want).abs() < 1e-9);
+                }
+                assert_eq!(now.centre[1], was.centre[1], "the height does not change");
+            }
+        }
     }
 
     #[test]

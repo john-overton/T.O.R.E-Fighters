@@ -173,9 +173,10 @@ fn target_vertices(
 ) -> Vec<f32> {
     let mut vertices = model.vertices(pose, camera, world, scenery);
     if !pose.wreck_gone() {
+        let stores = crate::pylons::swung(&target.stores, model, pose);
         crate::pylons::vertices(
             &mut vertices,
-            crate::pylons::visible(&target.stores, pose.bay),
+            crate::pylons::visible(&stores, pose.bay),
             scenery.relative(pose.position),
             [pose.yaw, pose.pitch, pose.bank],
             Some(model),

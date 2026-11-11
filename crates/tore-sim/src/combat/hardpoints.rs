@@ -275,6 +275,16 @@ pub struct Rack {
     /// rail below the tip). `None` for other stations, or when the model was
     /// not read.
     pub tip: Option<[f32; 2]>,
+    /// How far the swinging wing has turned from spread, radians, on a
+    /// swivelling wing station ([`super::swing::swivels`]); zero on every
+    /// other and while the wing is spread. Worked out from the aircraft's
+    /// speed and flaps every tick ([`super::swing::wing_turn`]) by the host
+    /// and by the drawing alike, never carried by a checkpoint or a recording:
+    /// the pylon is carried to where the wing has swept it and swivels back
+    /// to stay streamwise, so the store keeps its heading (TOR-5, John
+    /// 2026-11-10, decision 19). The model's underside over it is read at the
+    /// spread position, because the panel is rigid.
+    pub turn: f32,
 }
 
 /// One pylon of one side of a station: the point its stores hang from (feet
@@ -302,6 +312,7 @@ impl Rack {
                     || matches!(location, Location::Wing | Location::Wingtip)),
             over: [None; 5],
             tip: None,
+            turn: 0.,
         }
     }
     pub fn location(self) -> Location {
@@ -472,8 +483,16 @@ impl Rack {
                     }
                     _ => mount[1],
                 };
+                let point = [right, up, mount[2] + offset[1]];
                 PylonPlace {
-                    point: [right, up, mount[2] + offset[1]],
+                    // A swivelling wing pylon is carried by the swept wing;
+                    // the pylon swivels back, so nothing else about the
+                    // store turns.
+                    point: if self.turn == 0. {
+                        point
+                    } else {
+                        super::swing::swept(side == 0, point, f64::from(self.turn))
+                    },
                     slots,
                 }
             })
@@ -1765,6 +1784,7 @@ mod tests {
             paired: false,
             over: [Some(-2.); 5],
             tip: None,
+            turn: 0.,
         };
         for slot in 0..2 {
             let p = belly.store_point([0., -6., 0.], 2, 0, slot, mk82);

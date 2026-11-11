@@ -4532,3 +4532,24 @@ No audit pin moves (the F-5E row keeps its place and the audit counts weapon row
 only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
 placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
 on the retail record and has a unit test.
+
+## Tornado stations measured and the swivelling pylon wiring (TOR-5, 2026-11-10)
+
+Implementation and review mode, slice TOR-5; stopped on clipping (John's standing
+rule). The full table, the rule and the options are in
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-ids-swivelling-wing-pylons-and-a-stop-on-clipping-tor-5-2026-11-10).
+
+Update (TOR-5, 2026-11-10) to the TOR-3 pylon note in
+[the Tornado control rig](aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10):
+the swivel is now wired. The sweep schedule and pivot moved from the drawing rig to
+`tore_sim::combat::swing` (same numbers); inner wing row 7 is the only swivelling
+row; the shoulder (row 6) and centreline (row 5) pylons are fixed. The earlier
+statement that row 7 sits inboard of the pivot stands: as decoded (3.67 ft out, 3 ft
+forward) it hangs from the fuselage side, enters the airframe by 2.61 ft with the
+default Mk 82, and with the swivel it stands under no wing at 67 degrees.
+
+Update (TOR-5, 2026-11-10) to the TOR-0 hardpoints table: nothing changed in the
+rows; the row 5 tank pair, row 6 Paveways and row 7 Mk 82s overlap each other and the
+fuselage under the belly (numbers in the stores specification). Audit pins are
+unchanged (45 aircraft, 18 stations, 4,652 weapon placements, 233 tank placements,
+220 Cheat-only placements, 80 pod placements).

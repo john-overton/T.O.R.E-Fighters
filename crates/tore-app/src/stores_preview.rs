@@ -309,6 +309,19 @@ pub fn run() -> AppResult<()> {
                 .ok_or("missing fixture row")?;
             config.stations[slot].mount = point;
         }
+        // `TORE_STORES_PREVIEW_SWEEP=DEGREES` (25 to 67) poses a swing wing
+        // at that sweep: the wing is drawn swept and the swivelling wing
+        // stations ride it (TOR-5, `tore_sim::combat::swing`).
+        let sweep = std::env::var("TORE_STORES_PREVIEW_SWEEP")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok());
+        let turn = sweep.map_or(0., |degrees| {
+            tore_sim::combat::swing::wing_turn(
+                tore_sim::combat::swing::speed_for_sweep(degrees),
+                0.,
+            )
+        });
+        config.set_wing_turn(turn);
         // `TORE_STORES_PREVIEW_COUNTS=f18d:2=8,a10:1=6` loads those
         // stations with that many stores (a rack close-up); the output
         // names carry `-n<station>x<count>` for each.
@@ -411,7 +424,10 @@ pub fn run() -> AppResult<()> {
             ),
             ("empty", store_poses(&config, |_| 0, loaded)),
         ];
-        clip_report(short, &airframe, &art, &loads[1].1);
+        clip_report(short, &airframe, &art, &loads[1].1, turn);
+        if std::env::var_os("TORE_STORES_PREVIEW_CLEARANCE").is_some() {
+            clearance_report(short, &airframe, &art, &loads[1].1);
+        }
         if std::env::var_os("TORE_STORES_PREVIEW_AUDIT").is_some() {
             audit(short, &profile, &config, &airframe, &art, &loads[1].1);
             continue;
@@ -421,6 +437,9 @@ pub fn run() -> AppResult<()> {
         state.position[1] = ground.max(0.) + HEIGHT_FT;
         state.gear = 0.;
         state.flaps = 0.;
+        if let Some(degrees) = sweep {
+            state.speed = tore_sim::combat::swing::speed_for_sweep(degrees);
+        }
         state.yaw = 0.;
         state.pitch = 0.;
         state.bank = 0.;
@@ -450,7 +469,10 @@ pub fn run() -> AppResult<()> {
         }
         if cpu {
             for (view, eye, look, fov) in VIEWS {
-                if ["below", "side-front", "ahead", "top"].contains(&view) && preview_view(view) {
+                if (["below", "side-front", "ahead", "top"].contains(&view)
+                    || std::env::var_os("TORE_STORES_PREVIEW_ALL_VIEWS").is_some())
+                    && preview_view(view)
+                {
                     cpu_render(
                         &mut scenery,
                         &world,
@@ -1200,6 +1222,7 @@ fn clip_report(
     airframe: &crate::aircraft::Airframe,
     art: &CombatArt,
     stores: &[StorePose],
+    turn: f64,
 ) {
     use crate::snapshot::StoreLook;
     for store in stores {
@@ -1231,7 +1254,7 @@ fn clip_report(
         for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
             for q in &points {
                 let v: [f64; 3] = std::array::from_fn(|i| place.centre[i] + q[i]);
-                if let Some(face) = airframe.underside(v[0], v[2], v[1] - 12., 0)
+                if let Some(face) = airframe.underside_at(turn, v[0], v[2], v[1] - 12., 0)
                     && v[1] - face > worst.0
                 {
                     worst = (v[1] - face, v);
@@ -1247,6 +1270,139 @@ fn clip_report(
             worst.1[0],
             worst.1[1],
             worst.1[2]
+        );
+    }
+}
+
+/// A store's body points in its own frame, feet (a weapon shape's faces, or a
+/// ring of points round a fitted body), as the clip report reads them.
+fn store_points(store: &StorePose, art: &CombatArt) -> Vec<[f64; 3]> {
+    use crate::snapshot::StoreLook;
+    let shape = store
+        .shape
+        .as_deref()
+        .and_then(|name| art.shape(name))
+        .filter(|_| store.look == StoreLook::Store);
+    match shape {
+        Some(shape) => shape
+            .faces
+            .iter()
+            .filter(|f| !crate::pylons::texture_only(f))
+            .flat_map(|f| f.positions.iter())
+            .map(|q| [q[0], q[2], q[1]].map(|v| f64::from(v) / 3.))
+            .collect(),
+        None => {
+            let size = store.size();
+            let radius = size.top;
+            (0..16)
+                .flat_map(|k| {
+                    let (s, c) = (f64::from(k) * std::f64::consts::TAU / 16.).sin_cos();
+                    [-0.5, -0.25, 0., 0.25, 0.5].map(|a| [c * radius, s * radius, a * size.length])
+                })
+                .collect()
+        }
+    }
+}
+
+/// TOR-5 clearances for the stores of `stores` (`TORE_STORES_PREVIEW_CLEARANCE`):
+/// the gap between every pair of held stores (their bounding boxes, negative
+/// when the boxes overlap), the gap from each store to the gear-down legs
+/// (Tornado only: the rig's gear faces at gear 1, sampled along their edges)
+/// and the store's lowest point against the gear's contact height.
+fn clearance_report(
+    short: &str,
+    airframe: &crate::aircraft::Airframe,
+    art: &CombatArt,
+    stores: &[StorePose],
+) {
+    // Each held store's box: label, min, max.
+    let mut boxes: Vec<(String, [f64; 3], [f64; 3])> = Vec::new();
+    for store in stores {
+        let points = store_points(store, art);
+        for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
+            let moved: Vec<[f64; 3]> = points
+                .iter()
+                .map(|q| std::array::from_fn(|i| place.centre[i] + q[i]))
+                .collect();
+            let (mut low, mut high) = ([f64::MAX; 3], [f64::MIN; 3]);
+            for v in &moved {
+                for i in 0..3 {
+                    low[i] = low[i].min(v[i]);
+                    high[i] = high[i].max(v[i]);
+                }
+            }
+            let side = if place.side == 0 { "R" } else { "L" };
+            boxes.push((
+                format!(
+                    "row{} {} {side}{}",
+                    store.hardpoint,
+                    store.shape.as_deref().unwrap_or("body"),
+                    place.slot
+                ),
+                low,
+                high,
+            ));
+        }
+    }
+    let mut closest: Option<(f64, String)> = None;
+    for (a, one) in boxes.iter().enumerate() {
+        for two in &boxes[a + 1..] {
+            let gap = (0..3)
+                .map(|i| (one.1[i] - two.2[i]).max(two.1[i] - one.2[i]))
+                .fold(f64::MIN, f64::max);
+            if gap < 1.0 {
+                println!(
+                    "Stores preview: {short} pair {} / {}: gap {gap:.2} ft",
+                    one.0, two.0
+                );
+            }
+            if closest.as_ref().is_none_or(|c| gap < c.0) {
+                closest = Some((gap, format!("{} / {}", one.0, two.0)));
+            }
+        }
+    }
+    if let Some((gap, pair)) = closest {
+        println!("Stores preview: {short} closest pair {pair}: gap {gap:.2} ft");
+    }
+    if airframe.profile.id != tore_formats::aircraft::AircraftId::Tornado {
+        return;
+    }
+    let Some(shape) = airframe.poses.first() else {
+        return;
+    };
+    let scale = f64::from(airframe.animation_scale());
+    let mut gear: Vec<[f64; 3]> = Vec::new();
+    for face in shape
+        .faces
+        .iter()
+        .filter(|f| crate::tornado_animation::GEAR.contains(&f.address))
+    {
+        let p: Vec<[f64; 3]> = face
+            .positions
+            .iter()
+            .map(|q| [q[0], q[2], q[1]].map(|v| f64::from(v) * scale))
+            .collect();
+        for k in 0..p.len() {
+            let (a, b) = (p[k], p[(k + 1) % p.len()]);
+            for t in [0., 0.25, 0.5, 0.75] {
+                gear.push(std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t));
+            }
+        }
+    }
+    let ground = gear.iter().map(|g| g[1]).fold(f64::MAX, f64::min);
+    for (label, low, high) in &boxes {
+        let gap = gear
+            .iter()
+            .map(|g| {
+                let d: [f64; 3] =
+                    std::array::from_fn(|i| (low[i] - g[i]).max(g[i] - high[i]).max(0.));
+                d.iter().map(|v| v * v).sum::<f64>().sqrt()
+            })
+            .fold(f64::MAX, f64::min);
+        println!(
+            "Stores preview: {short} gear {label}: gap {gap:.2} ft, lowest point {:.2} ft, {:.2} ft above the ground (gear contact {ground:.2})",
+            low[1],
+            low[1] - ground
         );
     }
 }

@@ -477,6 +477,52 @@ impl Airframe {
             })
         })
     }
+    /// The clean model's surface with its swing wing turned `turn` radians
+    /// ([`tore_sim::combat::swing::wing_turn`]), to the nearest quarter
+    /// degree; `None` for any aircraft without a swing wing or a turn of
+    /// zero. The surface a swivelling wing station meets, and what the stores
+    /// preview measures clearances against.
+    pub fn swept_surface(
+        &self,
+        turn: f64,
+    ) -> Option<std::sync::Arc<tore_sim::combat::hardpoints::Underside>> {
+        let quarters = (turn.to_degrees() * 4.).round() as i64;
+        if quarters == 0 || self.profile.id != tore_formats::aircraft::AircraftId::Tornado {
+            return None;
+        }
+        let base = self.poses.first()?;
+        let scale = f64::from(self.animation_scale());
+        Some(self.mounts.swept(quarters, || {
+            let shape =
+                crate::tornado_animation::swept_shape(base, (quarters as f64 / 4.).to_radians());
+            tore_sim::combat::hardpoints::Underside::of(&shape, scale)
+        }))
+    }
+    /// [`Self::underside`] with the swing wing turned `turn` radians.
+    pub fn underside_at(
+        &self,
+        turn: f64,
+        right: f64,
+        forward: f64,
+        from: f64,
+        inboard_steps: u8,
+    ) -> Option<f64> {
+        let Some(swept) = self.swept_surface(turn) else {
+            return self.underside(right, forward, from, inboard_steps);
+        };
+        let right = right.abs();
+        let quarters = (turn.to_degrees() * 4.).round() as i64;
+        let key =
+            [right, forward, from, f64::from(inboard_steps)].map(|v| (v * 100.).round() as i64);
+        // The turned model's lookups are kept apart from the spread model's.
+        let key = [key[0], key[1], key[2], key[3] + 1000 * quarters];
+        self.mounts.underside(key, || {
+            (0..=inboard_steps).find_map(|step| {
+                let inboard = f64::from(step) * 0.5;
+                swept.over(right - inboard, forward, from)
+            })
+        })
+    }
     /// The clean model's outermost edge inboard of a wingtip store at
     /// `right`, `up`, `forward` (feet), over `half_length` feet fore and aft
     /// of it: how far out it is and its lowest and highest point there, or

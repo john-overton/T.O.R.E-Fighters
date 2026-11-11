@@ -24,6 +24,7 @@ pub mod sight;
 pub mod smoke;
 pub mod store_sizes;
 pub mod surface_guns;
+pub mod swing;
 pub mod systems;
 pub mod threats;
 use tore_formats::{

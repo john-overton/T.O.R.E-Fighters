@@ -142,7 +142,7 @@ crate::checkpoint_struct!(Rack {
     paired,
     over,
     tip
-});
+} skip { turn = 0. });
 
 crate::checkpoint_struct!(Tank {
     empty_weight,
@@ -408,6 +408,7 @@ mod tests {
                         paired: true,
                         over: [Some(-0.25), None, Some(1.5), None, Some(-3.)],
                         tip: Some([19.25, 0.5]),
+                        turn: 0.,
                     },
                     store: Some(TankStore {
                         source: "F18_330.GAS".into(),
@@ -450,6 +451,7 @@ mod tests {
                     paired: false,
                     over: [Some(0.5), None, Some(-1.5), None, Some(2.)],
                     tip: None,
+                    turn: 0.,
                 },
             }],
         }

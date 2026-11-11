@@ -60,7 +60,7 @@ const GEAR_MAIN_R: [usize; 10] = [
     0x4908, 0x4927, 0x4946, 0x4965, 0x4984, 0x499b, 0x49b2, 0x49c9, 0x49e0, 0x49ff,
 ];
 const GEAR_NOSE: [usize; 6] = [0x4a97, 0x4ab6, 0x4ad5, 0x4af4, 0x4b13, 0x4b2a];
-const GEAR: [usize; 26] = [
+pub(crate) const GEAR: [usize; 26] = [
     0x4705, 0x4724, 0x4743, 0x4762, 0x4781, 0x4798, 0x47af, 0x47c6, 0x47dd, 0x47fc, 0x4908, 0x4927,
     0x4946, 0x4965, 0x4984, 0x499b, 0x49b2, 0x49c9, 0x49e0, 0x49ff, 0x4a97, 0x4ab6, 0x4ad5, 0x4af4,
     0x4b13, 0x4b2a,
@@ -97,6 +97,8 @@ const NOSE_STEER: [f32; 3] = [0., 27., 0.];
 /// Brake hinge: the forward edge of both plates, a line along X at y -7, z 2.
 const BRAKE_HINGE: [f32; 3] = [0., -7., 2.];
 
+#[cfg(test)]
+pub(crate) use tore_sim::combat::swing::{FEET_PER_UNIT, SWEEP_MAX, pivot_feet};
 /// Wing sweep pivots, vertical axis, shape units. The glove fillets are fixed
 /// faces that share five vertices with each wing panel (right: (9,1,0), (9,1,1),
 /// (10,-1,0), (10,-1,1), (10,-4,0)), and no single point sits on all of them.
@@ -106,21 +108,11 @@ const BRAKE_HINGE: [f32; 3] = [0., -7., 2.];
 /// opens at most 2 * 2.55 * sin(turn / 2) (1.83 units, 1.2 ft at the full
 /// 42 degree turn). The left glove sits one unit further out, as the source has
 /// it, so its pivot is (-10.5, -1.5). Fitted.
-pub(crate) const PIVOT_R: [f32; 3] = [9.5, -1.5, 0.5];
-pub(crate) const PIVOT_L: [f32; 3] = [-10.5, -1.5, 0.5];
-/// Shape units to feet at the header scale 2 (2/3 ft a unit).
-pub(crate) const FEET_PER_UNIT: f64 = 2. / 3.;
-/// Real minimum and maximum wing sweep, degrees (`TOR.INF`, Jane's); the
-/// shape's spread pose is the minimum (its leading edge sweeps atan(10/21) =
-/// 25.5 degrees on the planform).
-pub(crate) const SWEEP_MIN: f64 = 25.;
-pub(crate) const SWEEP_MAX: f64 = 67.;
-/// Fitted speed schedule, knots: the wing stays spread up to the first speed
-/// and is fully swept at the second (Mach 0.9 at sea level is about 595 kt).
-/// Flaps hold the wing out, as the MiG-23's rig does and as the real
-/// aircraft's flaps need a spread wing.
-const SWEEP_FROM_KNOTS: f64 = 250.;
-const SWEEP_TO_KNOTS: f64 = 600.;
+///
+/// The pivots, the sweep range and the speed schedule live in the simulation
+/// (`tore_sim::combat::swing`, moved there in TOR-5 without changing a number),
+/// so the stations on the swinging wing ride the same turn the drawing uses.
+pub(crate) use tore_sim::combat::swing::{PIVOT_L, PIVOT_R, SWEEP_MIN};
 
 /// Taileron law, fitted and smaller than the fleet's 0.40 clamp (John,
 /// 2026-11-10, decision 20): the whole panel turns about a lateral spindle
@@ -176,10 +168,7 @@ pub(crate) fn rudder(address: usize) -> bool {
 /// the MiG-23's, and the flaps hold the wing out. This does not invent a flight
 /// law; it only draws the wing.
 pub(crate) fn sweep_turn(state: &State) -> f64 {
-    let knots = state.speed / 1.68781;
-    ((knots - SWEEP_FROM_KNOTS) / (SWEEP_TO_KNOTS - SWEEP_FROM_KNOTS)).clamp(0., 1.)
-        * (SWEEP_MAX - SWEEP_MIN).to_radians()
-        * (1. - state.flaps.clamp(0., 1.))
+    tore_sim::combat::swing::wing_turn(state.speed, state.flaps)
 }
 /// The wing's leading-edge sweep angle for a turn, degrees (25 spread to 67).
 pub(crate) fn sweep_degrees(turn: f64) -> f64 {
@@ -219,36 +208,43 @@ pub(crate) struct StationPose {
     pub heading: f64,
 }
 
-/// The pivot of one wing, feet right, up and forward (the station frame).
-pub(crate) fn pivot_feet(right: bool) -> [f64; 3] {
-    let p = if right { PIVOT_R } else { PIVOT_L };
-    [
-        f64::from(p[0]) * FEET_PER_UNIT,
-        f64::from(p[2]) * FEET_PER_UNIT,
-        f64::from(p[1]) * FEET_PER_UNIT,
-    ]
-}
-
 /// A station on one wing, `mount` in feet right, up and forward of the aircraft
 /// at the spread pose, carried by the wing's own turn about its pivot. A mount
 /// inboard of the pivot or under the fixed glove is carried by the same rigid
 /// turn: only stations that hang from the movable panel may use it, and
 /// TOR-5 chooses which rows those are.
 pub(crate) fn wing_station(right: bool, mount: [f64; 3], turn: f64) -> StationPose {
-    let pivot = pivot_feet(right);
-    // Tip aft: clockwise seen from above on the right wing (negative about +z).
-    let angle = if right { -turn } else { turn };
-    let (dx, dz) = (mount[0] - pivot[0], mount[2] - pivot[2]);
-    let (s, c) = angle.sin_cos();
     StationPose {
-        mount: [
-            pivot[0] + dx * c - dz * s,
-            mount[1],
-            pivot[2] + dx * s + dz * c,
-        ],
+        mount: tore_sim::combat::swing::swept(right, mount, turn),
         turn,
-        swivel: -turn * if right { 1. } else { -1. },
+        swivel: tore_sim::combat::swing::pylon_swivel(right, turn),
         heading: 0.,
+    }
+}
+
+/// `shape`'s faces with both wing panels turned `turn_by` radians from spread
+/// (the rest of the airframe untouched, the flaps up): the model a swivelling
+/// wing station meets and the stores preview measures against (TOR-5).
+pub(crate) fn swept_shape(shape: &Shape, turn_by: f64) -> Shape {
+    let faces = shape
+        .faces
+        .iter()
+        .map(|face| {
+            let mut face = face.clone();
+            let a = face.address;
+            if wing_right(a) {
+                turn(&mut face, PIVOT_R, [0., 0., 1.], -turn_by);
+            } else if wing_left(a) {
+                turn(&mut face, PIVOT_L, [0., 0., 1.], turn_by);
+            }
+            face
+        })
+        .collect();
+    Shape {
+        lines: Vec::new(),
+        faces,
+        billboards: Vec::new(),
+        state_words: BTreeSet::new(),
     }
 }
 
