@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -90,6 +90,12 @@ STATIONS = {
     # centreline row 5 with no weapon loaded (its F150.GAS is a tank station),
     # listed last as the F-22's empty row is (GRI-6, 2026-11-10).
     "gripen": [570, 2, 4, 2, 0],
+    # The F-5E carries the M61 gun on its internal row 3 (560 rounds, two guns
+    # of 280), the wingtip AIM9B.JT x2 (row 6) as its only default weapon, and
+    # an empty wing pair (row 5, four stores allowed, retained at 0 so it is
+    # never loaded by default; B5-2). Its F150.GAS centreline tank is a tank
+    # station (F5E-6, 2026-11-10).
+    "f5e": [560, 2, 0],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -246,7 +252,7 @@ def liftoff_problems(output: str) -> list[str]:
 # What John asked for on 2026-09-29 (unsourced real-world figures, a plausibility
 # range only), in knots: liftoff at the default gross weight and approach at a
 # landing weight of 65 percent internal fuel. `None` where there is no figure.
-LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "gripen": (125, 150)}
+LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "gripen": (125, 150), "f5e": (135, 165)}
 # The MiG-25PD's own figures are fitted from the flight manual quoted in the
 # AviaSimHD MSFS manual: V1 300 km/h, V2 350 km/h at maximum takeoff weight and
 # a 270-290 km/h landing speed (agent decision, 2026-11-07, M25-8).
@@ -270,11 +276,17 @@ LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f2
 # touchdown figure found, the Swedish Air Force's "just under 300 km/h" (about 162
 # kt, quoted by Migflug), and the measured 147.5 kt approach / 142 kt touchdown
 # (agent decision, 2026-11-10, GRI-8).
+# The F-5E's windows (F5E-8, 2026-11-10) are fitted from one published figure, the
+# stall speed with flaps and gear down at 50 percent internal fuel, 124 kt (230
+# km/h, Migflug, Northrop F-5 page, read 2026-11-10): liftoff 1.1 to 1.33 times it
+# (135 to 165 kt) and approach 1.25 to 1.4 times it (155 to 175 kt). The measured
+# 153.4 kt liftoff after 1,763 ft (real ground run about 2,000 ft with two
+# Sidewinders at 15,745 lb) and 166.2 kt approach are recorded below.
 APPROACH_TARGET = {
     "f18": (135, 135), "rafale": (130, 140), "f14": (130, 140), "a4e": (130, 140), "mig29": (135, 145),
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157), "mig31": (143, 160),
-    "m2000": (133, 147), "gripen": (140, 160),
+    "m2000": (133, 147), "gripen": (140, 160), "f5e": (155, 175),
 }
 # The F-15E (F15E-8, 2026-11-10; agent decision, fitted windows). Its liftoff
 # band is the fleet plausibility range (130 to 150 kt): no primary takeoff speed
@@ -291,8 +303,8 @@ APPROACH_TARGET.update({"f15e": (125, 145)})
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1}
-KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1, "f5e": 153.4}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5, "f5e": 166.2}
 # The F-15E's measured liftoff and approach at its default load (F15E-8, 2026-11-10).
 KNOWN_LIFTOFF.update({"f15e": 149.1})
 KNOWN_APPROACH.update({"f15e": 156.1})
@@ -308,6 +320,9 @@ INTERNAL_FUEL_LB = {
     "m2000": 6346,
     # GRIPEN.PT internal fuel, 5,000 lb (GRI-0; the real JAS 39 holds about 5,160 lb).
     "gripen": 5000,
+    # F5E.PT internal fuel, 4,400 lb (B5-2 correction of the retail 6,240 lb; the
+    # real F-5E holds 677 US gal, about 4,500 lb).
+    "f5e": 4400,
     # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
     "f16a": 6972,
 }
@@ -402,6 +417,8 @@ def check_retail_liftoff(output: str) -> list[str]:
 LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a", "mig31", "m2000", "gripen"]
 # The F-15E joins the liftoff, retail-stall and approach scenarios (F15E-8, 2026-11-10).
 LIFTOFF_AIRCRAFT += ["f15e"]
+# The F-5E joins the liftoff, retail-stall and approach scenarios (F5E-8, 2026-11-10).
+LIFTOFF_AIRCRAFT += ["f5e"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

@@ -21,6 +21,7 @@ mod f16;
 mod f18;
 mod f22;
 mod f4;
+mod f5e;
 mod gripen;
 mod il76;
 mod m2000;
@@ -224,6 +225,7 @@ impl Control {
                         | Id::M2000
                         | Id::F15E
                         | Id::Gripen
+                        | Id::F5E
                 ) =>
             {
                 Expectation::Required
@@ -271,6 +273,7 @@ impl Control {
                         | Id::M2000
                         | Id::F15E
                         | Id::Gripen
+                        | Id::F5E
                 ) =>
             {
                 Expectation::Required
@@ -612,6 +615,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::M2000
             | AircraftId::F15E
             | AircraftId::Gripen
+            | AircraftId::F5E
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1082,6 +1086,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F5E {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f5e::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1249,6 +1264,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::Gripen {
         failures.extend(gripen::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F5E {
+        failures.extend(f5e::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

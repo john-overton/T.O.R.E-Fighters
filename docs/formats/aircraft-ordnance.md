@@ -1331,3 +1331,92 @@ Guards: `a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not`
 `a_loaded_designator_pod_draws_a_fitted_body_on_its_station`
 (`crates/tore-world/src/snapshot.rs`) and the retail
 `crates/tore-world/src/pod_equipment_tests.rs` (skips without media).
+
+## The F-5E Tiger (F5E-6, 2026-11-10)
+
+Implementation note for slice F5E-6, the F-5E's ordnance, default load and
+countermeasures. No gameplay code changed: the record's own rows, masks, capacities
+and defaults, with the guarded B5-2 and B5-3 changes (John, 2026-11-10: no AIM-7 in
+the default load, `F104R.SEE` radar, `F104.ECM` dispensers), flow through the shared
+loading rules ([source identity](#source-identity-is-a-row-not-a-pylon-count)). The
+station geometry (one wing pair, wingtip rails, the 0.32 ft tip entry John accepted)
+is in [stores on pylons](../spec/stores-on-pylons.md#the-f-5e-tiger-f5e-5-2026-11-10).
+
+| Row | Location | Mask | Accepts | Default |
+| ---: | --- | --- | --- | --- |
+| 0 | Sensor | `0x0008` | `VIS340.SEE` | `VIS340.SEE` |
+| 1 | Radar | `0x0008` | the record's radar | `F104R.SEE` (the APQ-159 stand-in, B5-2) |
+| 2 | Jammer row | `0x0008` | the dispenser record | `F104.ECM` (B5-3) |
+| 3 | Internal gun | `0x000c` | its own `M61.JT`, 560 rounds | `M61.JT` x560 |
+| 4 | Centerline | `0x0605` | `F150.GAS`, 1 | `F150.GAS` x1 |
+| 5 | Wing pair | `0x07e5` | 60 weapon records and the four tanks, 4 a row | empty (B5-2) |
+| 6 | Wingtip | `0x0085` | 10 infrared records, 2 a row | `AIM9B.JT` x2 |
+
+**Default load** (the same for the human and the AI: `with_default_load` changes
+only the A-4E's quantities; also saved loads and the lobby, which the store-pair
+audit checks): 560 `M61.JT` rounds on row 3, one full `F150.GAS` (990 lb of fuel) on
+row 4, nothing on the wing pair (row 5, four stores allowed, the Load Ordnance page
+shows an empty Wing box) and two `AIM9B.JT` on the wingtip rails. The
+[retail test](../../crates/tore-import/tests/f5e_ordnance.rs) pins the seven rows
+(`VIS340.SEE`, `F104R.SEE`, `F104.ECM`, `M61.JT` 560, `F150.GAS` 1, the empty wing
+pair, `AIM9B.JT` 2). The load weighs 15,365 lb against the 24,664 lb maximum (Load
+Ordnance page, 4,400 lb of internal fuel included). `--validate-ordnance` reports
+`ordnance F5E.PT: 4 source rows, 1 optional weapon rows, 71 compatible weapon
+placements, 5 tank placements; defaults and restart passed; catalog 61 normal, 83
+Cheat`; no audit pin moved (45 / 18 / 4,652 / 233 / 220 / 80).
+
+**The wing pair is empty by default, so it is a retained selection station.** The
+weapon cycle skips it until something is loaded (the flight battery's `STATIONS`
+entry is `[560, 2, 0]`: gun, wingtip AIM-9B, wing pair at zero). `--a2g-run`'s
+automatic station pick finds no bomb or rocket station on the default load, so a
+bomb run names it (`--station 2 --load MK82 --count 4`); stations count from the
+gun at 0, the tip rails are 1 and the wing pair is 2.
+
+**Is it a plausible F-5E load?** The pieces match the type: two wingtip AIM-9 rails
+(the AIM-9B is the early Sidewinder), a 150 gallon centreline tank, and the wing
+pylons empty in the clean air-superiority configuration. What the wing row would
+take (the decoded source mask, 60 weapon records) is not a list of real F-5E loads:
+guided bombs and air-to-ground missiles fit the same mask bits every decoded
+carrier leaves open, and they are not asserted as real. Nothing was invented or
+changed.
+
+**The gun.** `M61.JT`, row 3, 560 rounds (the record's own, spec-derived). The real
+F-5E carries two M39A2 20 mm cannons with 280 rounds each (`F5E.INF` in the
+retail media, and Wikipedia "Northrop F-5" specifications, accessed 2026-11-10), so
+the record's 560 equals the real total; TORE models the pair as one gun row and the
+record names the M61 (generic) rather than the M39. Results: `--live-fire --weapon-slot 1`
+fires 320 rounds in the 1,200 tick probe (47 hits, one kill); the headless gun key
+(`--a2g-run --attack strafe`, Tab held two seconds) fires 64 rounds, about 32 a
+second, 22 tracers drawn. That is the shared gun cadence (the Mirage 2000's DEFA
+shows the same 64 rounds), not this aircraft's; no real F-5E rate was sourced here,
+so nothing was compared or changed.
+
+**Countermeasures.** From the row 2 `F104.ECM` record (B5-3): 20 chaff and 20 flares
+(spec-derived, retail record; the choice of record is John's, round 2, D2). The
+weapons page shows `20 CHAFF` and `20 FLARE` at the start and the counts fall with
+each release (cockpit frame in the plan log). Confirmed with `--combat-command chaff`
+and `flare` with `--countermeasure-preview 60`: after one chaff `carried_chaff=19
+carried_flares=20`, after one flare `carried_chaff=20 carried_flares=19` (a flare
+release drops two flares in the air), capacity 20 and 20; after five chaff and three
+flares `carried_chaff=15 carried_flares=17`.
+
+**Live fire, release and jettison.** The flight battery's `STATIONS["f5e"]` is
+`[560, 2, 0]`. `flight-livefire-f5e-slot1` to `slot3` and `flight-jettison-f5e-slot2`
+pass. Results: the gun above; the AIM-9B (slot 2) fires one, guides and hits the
+practice aircraft (hit, no kill from a single Sidewinder); slot 3, the empty wing
+pair, only proves the station stays empty. Surface stores, headless, from the F5E-5
+positions (`--a2g-run --attack release`, the `origin` lines, `a2g-release-origin-f5e`):
+
+| Store | Hang point, ft (right / up / forward) | Pylon depth | Order |
+| --- | --- | --- | --- |
+| `MK82` x4, wing pair | 8.02 / -2.78 / +1.00, then 6.64 | 1.00 | left outer, right outer, left inner, right inner |
+| `AGM65G` x4, wing pair | 8.18 / -2.83 / +1.00, then 6.48 | 1.00 | the same |
+| `AIM9B` x2, wingtip | 14.33 / -1.17 / -1.00 | none (tip rule) | left, right |
+
+Each store leaves from the point it hangs at (within 0.05 ft across and up), left
+first on a paired row, which is the alternation the other fighters show. The
+`a2g-maverick-f5e` scenario fires an `AGM65G` from the wing pair at the column's
+lead truck and kills it (`a2g-run: kill 0x50000000`). `a2g-jettison-f5e` (`--attack
+jettison --station 2 --load MK82 --count 4`): the tank drops first (external fuel 990
+lb to 0, payload 3,406.6 lb to 2,308.6 lb, internal fuel 4,400 lb), then the four
+bombs, `PASS released 5 ... no-explosion`.

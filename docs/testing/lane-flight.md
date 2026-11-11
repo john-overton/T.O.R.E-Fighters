@@ -104,7 +104,7 @@ traces is a tripwire, not exhaustive proof for every branch or platform.
 
 ## Variety aircraft checks
 
-`flight-variety-*` checks each of the 29 variety identities through real
+`flight-variety-*` checks each of the 30 variety identities through real
 application asset loading and 1,200 hybrid flight ticks, with finite motion, no
 crash and bounded fuel/energy output. It is separate from the original roster's fighter
 maneuver and AI acceptance cases. Source-backed powered-lift checks use
@@ -119,6 +119,10 @@ burn for any extracted PT (`PROBE_PAYLOAD`, `PROBE_FUEL`, `PROBE_ALTS`,
 `PROBE_ONLY`). Its pilots are scripted, so it records the model, not a best
 pilot. The Mirage 2000 results are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
+Update (F5E-8, 2026-11-10): the Northrop F-5E results, with the full-stick pull by
+fuel against the Gripen, the F-16A and the Mirage 2000, are in the
+[variety flight baseline](../baselines/variety-flight.md#northrop-f-5e-validation-2026-11-10);
+`f5e` joins the liftoff, approach and internal-fuel tables of `flight.py`.
 
 The F-15E results (clean and default load, a full-aft-stick pull table by fuel,
 liftoff, approach and fuel) are in the
@@ -844,6 +848,7 @@ The art inspection cases below check for blank frames; look at their PPMs:
 | `render-m2000-skin` | The Mirage 2000 in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its real size (per-axis scale) with no underside showing through the top and no z-fighting on the double-sided panels; the omitted E0 decal slots leave no blank or skin-filled patch. |
 | `render-f15e-skin` | The F-15E in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its own size with no underside showing through the top and no z-fighting on the double-sided panels; the omitted E0 decal slots leave no blank or skin-filled patch. |
 | `render-gripen-skin` | The Saab Gripen in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its own true size with no underside showing through the top and no z-fighting on the double-sided panels; the five omitted E0 decal slots leave no blank or skin-filled patch. |
+| `render-f5e-skin` | The F-5E in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The F-5E draws its own `F5E.SH` and `_F5E.PIC` with no underside showing through the top and no z-fighting on the double-sided panels; the two omitted E0 wing decal slots leave no blank or skin-filled patch. |
 | `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |
 
 The synthetic GPU checks run separately with
@@ -877,6 +882,8 @@ and direction checks. The Mirage 2000 adds the same 202-value dense gear sweep (
 mains inward, nose rearward), a seven-value airbrake sweep that checks the
 closed plate on the spine, and the 25-combination pitch/roll grid; its
 `flight-variety-m2000` scenario flies 1,200 headless ticks.
+The F-5E (F5E-3) adds the 25-combination pitch/roll grid (`flight-animation-f5e`): its stabilators must follow pitch only and its ailerons roll only, each staying put under every other control; its gear, brake and plume follow in F5E-4 (next paragraph).
+The F-5E (F5E-4, 2026-11-10) adds the same 202-value dense gear sweep (grounded at gear 1, mains inward, nose forward) and a seven-value brake sweep that checks the closed plate on the dorsal ridge; `flight-animation-f5e` now also expects the 203-row `dense-gear.csv`, and `flight-variety-f5e` flies 1,200 headless ticks.
 
 The F-15E (F15E-4, 2026-11-10) adds the same 202-value dense gear sweep (grounded at gear 1, legs and nose forward, doors outward) and a seven-value brake sweep that checks the closed piece on the dorsal ridge; its control-surface rows stay `unreviewed` until F15E-3, and `flight-variety-f15e` flies 1,200 headless ticks.
 F15E-3 (2026-11-10) makes elevator, aileron and flaps `required` (whole-panel stabilators with roll, ailerons about their slanted hinges, flaps), rudder `not-applicable` (no rudder motion), and adds the 25-combination pitch/roll grid and 21-value elevator, aileron and flap sweeps to the `flight-animation-f15e` sweep row.

@@ -1199,4 +1199,78 @@ mod tests {
         assert_eq!(bounds[0], [-13., -4., -7., 4.]);
         assert_eq!(bounds[1], [4., 13., -7., 4.]);
     }
+
+    /// The F-5E has two engines and two nozzle octagons at y -48: two trails,
+    /// one behind each nozzle's centre, 2 ft behind its exit plane (F5E-4).
+    #[test]
+    fn the_f5e_draws_two_contrails_one_behind_each_nozzle() {
+        use tore_formats::aircraft::{AircraftId, scale::scale_point};
+        let id = AircraftId::F5E;
+        assert_eq!(crate::engine_material::outlet_count(id), 2);
+        let face = |address: usize, points: &[[f32; 3]]| tore_formats::shape::Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![],
+            positions: points.iter().map(|&p| scale_point(id, p)).collect(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0x6c,
+            normal: None,
+            fog: tore_formats::shape::FogMode::Enabled,
+        };
+        let left = [
+            [-2., -48., -3.],
+            [-4., -48., -3.],
+            [-5., -48., -1.],
+            [-5., -48., 0.],
+            [-4., -48., 1.],
+            [-2., -48., 1.],
+            [-1., -48., 0.],
+            [-1., -48., -1.],
+        ];
+        let right = [
+            [4., -48., -3.],
+            [2., -48., -3.],
+            [1., -48., -1.],
+            [1., -48., 0.],
+            [2., -48., 1.],
+            [4., -48., 1.],
+            [5., -48., 0.],
+            [5., -48., -1.],
+        ];
+        let neutral = Shape {
+            lines: vec![],
+            faces: vec![
+                face(0x42a6, &left),
+                face(0x4454, &right),
+                // A face farther forward: only the nozzle faces place a trail.
+                face(0x1c64, &[[-3., 26., -6.], [0., 14., -6.], [2., 26., -6.]]),
+            ],
+            billboards: vec![],
+            state_words: Default::default(),
+        };
+        let offsets = contrail_offsets(id, &neutral, None, 2);
+        assert_eq!(offsets.len(), 2);
+        // Group 0 is the left nozzle (x -5 to -1), group 1 the right (1 to 5);
+        // both span z -3 to 1 and their exit plane is y -48.
+        for (group, x) in [(0usize, -3f32), (1, 3.)] {
+            let centre = scale_point(id, [x, -48., -1.]);
+            let want = [
+                f64::from(centre[0]) / 3.,
+                f64::from(centre[2]) / 3.,
+                f64::from(centre[1]) / 3. - 2.,
+            ];
+            for k in 0..3 {
+                assert!(
+                    (offsets[group][k] - want[k]).abs() < 1e-6,
+                    "{group} axis {k}"
+                );
+            }
+        }
+        // The two trails are mirror images across the centreline.
+        assert!((offsets[0][0] + offsets[1][0]).abs() < 1e-9);
+        // The bounds the engine material spans are each nozzle's own x and z.
+        let bounds = nozzle_bounds(id, &neutral);
+        assert_eq!(bounds[0], [-5., -1., -3., 1.]);
+        assert_eq!(bounds[1], [1., 5., -3., 1.]);
+    }
 }

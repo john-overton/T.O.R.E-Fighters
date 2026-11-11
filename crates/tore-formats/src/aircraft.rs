@@ -523,6 +523,8 @@ impl AircraftId {
             // own gripen.HUD; F5E.PT names f29.HUD, TOR.PT e2000.HUD and
             // MF1.PT rafale.HUD.
             // F-15E: decided, not interim (opinionated, John, 2026-11-10, F15E-7).
+            // The F-5E's f29.HUD binding is decided: it follows the record and
+            // flies the X-29's panel (John, 2026-11-10, opinionated; F5E-7).
             Self::F15E => "AV8.HUD",
             // Gripen: decided, not interim (opinionated, John, 2026-11-10,
             // GRI-7): its own HUD and ~GRI*.PIC cockpit family.
@@ -631,6 +633,8 @@ impl AircraftId {
             Self::F15E => "AV8",
             // Gripen: decided as above (John, 2026-11-10, GRI-7).
             Self::Gripen => "GRI",
+            // F-5E: decided, follows the record (John, 2026-11-10,
+            // opinionated; F5E-7), so no longer interim.
             Self::F5E => "F29",
             Self::Tornado => "EF2",
             Self::Mf1 => "RAF",

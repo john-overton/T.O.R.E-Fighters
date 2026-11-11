@@ -111,6 +111,10 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // GRI.SH: the octagon and the hexagon that make the one exit disc at
         // y -61 (GRI-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::Gripen => crate::gripen_animation::NOZZLE.contains(&address),
+        // F5E.SH: the two nozzle exit octagons at y -48 (subtype 0x6c): the
+        // left 0x42a6 (x -5 to -1) and the right 0x4454 (x 1 to 5), the two
+        // J85 nozzles (F5E-4; docs/formats/aircraft-control-surfaces.md).
+        AircraftId::F5E => matches!(address, 0x42a6 | 0x4454),
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
         AircraftId::A4E
@@ -138,7 +142,8 @@ pub fn outlet_count(id: AircraftId) -> usize {
         | AircraftId::Mig29
         | AircraftId::Su27
         | AircraftId::Su35
-        | AircraftId::F15E => 2,
+        | AircraftId::F15E
+        | AircraftId::F5E => 2,
         _ => 0,
     }
 }
@@ -176,6 +181,7 @@ mod tests {
             AircraftId::Su27,
             AircraftId::Su35,
             AircraftId::F15E,
+            AircraftId::F5E,
         ] {
             assert_eq!(outlet_count(id), 2);
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);

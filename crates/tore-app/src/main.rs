@@ -60,6 +60,7 @@ mod f15e_animation;
 mod f16_animation;
 mod f22_animation;
 mod f4_animation;
+mod f5e_animation;
 mod feedback;
 mod fill_renderer;
 mod flak_pass;

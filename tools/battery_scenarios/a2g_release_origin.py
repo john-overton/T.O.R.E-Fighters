@@ -219,6 +219,47 @@ def gripen_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The F-5E Tiger's stores (F5E-6, 2026-11-10), one run each: (label, right ft, up ft, forward ft)
+# per release, sides, pylon depth ft or None. The wing pair (row 5, empty by default, loaded here)
+# hangs two stores a pylon at 7.33 ft out: the outer pair of each wing leaves first, left then
+# right, then the inner pair; the wingtip AIM-9Bs leave from the tip rails (no pylon depth).
+F5E_CASES = [
+    ("Mk 82 wing pair", [(8.02, -2.78, 1.00), (8.02, -2.78, 1.00), (6.64, -2.78, 1.00),
+                         (6.64, -2.78, 1.00)], "LRLR", WING),
+    ("AGM-65G wing pair", [(8.18, -2.83, 1.00), (8.18, -2.83, 1.00), (6.48, -2.83, 1.00),
+                           (6.48, -2.83, 1.00)], "LRLR", WING),
+    ("AIM-9B wingtip", [(14.33, -1.17, -1.00)] * 2, "LR", None),
+]
+
+
+def f5e_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(F5E_CASES):
+        return [f"{len(parts)} runs finished, want {len(F5E_CASES)}"]
+    problems: list[str] = []
+    for part, (label, wants, sides_want, depth_want) in zip(parts, F5E_CASES):
+        firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
+        if len(firsts) != len(wants):
+            problems.append(f"{label}: {len(firsts)} releases, want {len(wants)}")
+            continue
+        sides = []
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(firsts, wants)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(abs(r) - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want +-{wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth_want is None:
+                if depth != "none":
+                    problems.append(f"{label}: release {n} pylon depth {depth}, want none")
+            elif depth == "none" or abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+            sides.append("L" if r < 0 else "R")
+        if "".join(sides) != sides_want:
+            problems.append(f"{label}: sides {''.join(sides)}, want {sides_want}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -280,5 +321,19 @@ def scenarios() -> list[Scenario]:
             ],
             check=gripen_origin_problems,
             notes="The Gripen's default stores leave from where they hang: the AGM-65Gs from the inner wing pylons, the four AIM-120s from the outer pair's twin bars outboard pair first, the AIM-9Ms from the tips, alternating left and right (GRI-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-f5e", lane="flight",
+            args=base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "f5e", "--station", "2", "--load", "MK82",
+                         "--count", "4"],
+            timeout=300,
+            then=[
+                Step(base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "f5e", "--station", "2", "--load",
+                             "AGM65G", "--count", "4"], timeout=300),
+                Step(base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "f5e", "--station", "1", "--load",
+                             "AIM9B", "--count", "2"], timeout=300),
+            ],
+            check=f5e_origin_problems,
+            notes="The F-5E's wing-pair stores (an iron bomb and an AGM-65G, loaded on the empty default row 5) leave from their 1 ft pylons, outer pair first, left then right, and the default wingtip AIM-9Bs from the tip rails, left then right (F5E-6).",
         ),
     ]

@@ -191,14 +191,41 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::Ch47
         | AircraftId::B747
         | AircraftId::A310 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        // F-5E (F5E-7, 2026-11-10): `F5E.PT` names f29.HUD, so it flies the
+        // X-29's cockpit art `~F29H.PIC` by name (John, 2026-11-10,
+        // opinionated). The glass is the opening between the two canopy
+        // struts (inner edges at x 522 and 759), under the thin combiner arc
+        // (its underside runs from y 132 at the struts to y 107 at the centre)
+        // and above the coaming (y 372); the transparency test drops the
+        // struts, the arc line and the coaming bumps. Measured on the imported
+        // art, `the_f5e_glass_matches_the_imported_x29_art`.
+        AircraftId::F5E => (
+            (1280, 490),
+            &[
+                (522, 132),
+                (535, 127),
+                (550, 120),
+                (565, 116),
+                (580, 112),
+                (610, 108),
+                (640, 107),
+                (670, 108),
+                (700, 112),
+                (715, 116),
+                (730, 120),
+                (745, 127),
+                (759, 132),
+                (759, 372),
+                (522, 372),
+            ],
+        ),
         // Interim, agent decision 2026-11-10, pending John (batch decision
-        // round): the Gripen (~GRIH.PIC), F-5E (~F29H.PIC, the X-29's art) and
-        // Tornado (~EF2H.PIC) name their own cockpit pictures, whose glass has
-        // not been measured. No expected size, so the aperture fails closed
-        // (an empty mask) until their cockpit slices measure a polygon.
-        // Update (GRI-7, 2026-11-10): the Gripen's glass is measured below, so
-        // only the F-5E and the Tornado still fail closed here.
-        AircraftId::F5E | AircraftId::Tornado => ((0, 0), &[]),
+        // round): the Tornado (~EF2H.PIC) names its own cockpit picture, whose
+        // glass has not been measured. No expected size, so the aperture fails
+        // closed (an empty mask) until its cockpit slice measures a polygon.
+        // Update (GRI-7, 2026-11-10): the Gripen's glass is measured below.
+        // Update (F5E-7, 2026-11-10): the F-5E's glass is measured above.
+        AircraftId::Tornado => ((0, 0), &[]),
         // The Gripen's own ~GRIH.PIC is 1279x490, not 1280. Fitted, measured
         // from the transparent run inside the teal combiner outline and
         // between the two slanted posts, down to the top of the base bar
@@ -274,6 +301,9 @@ fn inside((x, y): Point, polygon: &[Point]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Transparent pixels inside the F-5E polygon on the retail `~F29H.PIC`.
+    const F5E_GLASS_PIXELS: usize = 58_556;
 
     fn transparent(width: usize, height: usize) -> Sprite {
         Sprite {
@@ -379,5 +409,120 @@ mod tests {
         assert_eq!(f15e, mask(&source, AircraftId::F15));
         assert_eq!(f15e, mask(&source, AircraftId::Su27));
         assert!(f15e.contains(&1));
+    }
+
+    #[test]
+    fn the_f5e_draws_the_x29_glass_between_the_canopy_struts() {
+        // Synthetic art: all transparent, so the mask is the polygon itself.
+        let source = transparent(1280, 490);
+        let mask = mask(&source, AircraftId::F5E);
+        assert_eq!(mask.len(), 1280 * 490);
+        // Centre of the glass is in; above the combiner arc, outside the
+        // struts and below the coaming are out.
+        assert_eq!(mask[240 * 1280 + 640], 1);
+        assert_eq!(mask[100 * 1280 + 640], 0);
+        assert_eq!(mask[240 * 1280 + 500], 0);
+        assert_eq!(mask[240 * 1280 + 780], 0);
+        assert_eq!(mask[380 * 1280 + 640], 0);
+        // The Gripen's glass is measured for its own 1279-wide picture and the Tornado's
+        // is unmeasured, so this 1280-wide synthetic art fails closed for both.
+        assert!(mask.contains(&1));
+        assert!(
+            super::mask(&source, AircraftId::Gripen)
+                .iter()
+                .all(|v| *v == 0)
+        );
+        assert!(
+            super::mask(&source, AircraftId::Tornado)
+                .iter()
+                .all(|v| *v == 0)
+        );
+        // Wrong picture size fails closed.
+        assert!(
+            super::mask(&transparent(640, 245), AircraftId::F5E)
+                .iter()
+                .all(|v| *v == 0)
+        );
+    }
+
+    /// Retail-reading (skips without an install): the measured polygon on the
+    /// real `~F29H.PIC`. The mask is the transparent opening between the canopy
+    /// struts, so it never covers an opaque pixel, is one connected glass (the
+    /// struts and the arc line stay out) and its area is pinned.
+    #[test]
+    fn the_f5e_glass_matches_the_imported_x29_art() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let Ok(library) = media.archive("FA_1.LIB") else {
+            eprintln!("skipped: no retail FA_1.LIB");
+            return;
+        };
+        let name = AircraftId::F5E.cockpit();
+        assert_eq!(name, "~F29H.PIC");
+        let pic = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+        assert_eq!((pic.width, pic.height), (1280, 490));
+        let rgba = pic.rgba(&[[0; 3]; 256]);
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba,
+            glyphs: vec![],
+        };
+        let mask = mask(&source, AircraftId::F5E);
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        assert_eq!(covered, F5E_GLASS_PIXELS, "glass area moved");
+        let (width, height) = (source.width, source.height);
+        let mut left = width;
+        let mut right = 0;
+        let (mut top, mut bottom) = (height, 0);
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            if *covered_pixel == 1 {
+                assert_eq!(source.rgba[at * 4 + 3], 0, "mask covers opaque art");
+                let (x, y) = (at % width, at / width);
+                left = left.min(x);
+                right = right.max(x);
+                top = top.min(y);
+                bottom = bottom.max(y);
+            }
+        }
+        // The glass spans the opening between the struts and sits under the arc.
+        assert!((520..=530).contains(&left), "left {left}");
+        assert!((752..=760).contains(&right), "right {right}");
+        assert!((105..=112).contains(&top), "top {top}");
+        assert!((365..=372).contains(&bottom), "bottom {bottom}");
+        // Flood from the centre: every covered pixel is reached (one glass).
+        let mut seen = vec![false; width * height];
+        let mut todo = vec![240 * width + 640];
+        let mut reached = 0;
+        while let Some(at) = todo.pop() {
+            if seen[at] || mask[at] != 1 {
+                continue;
+            }
+            seen[at] = true;
+            reached += 1;
+            let x = at % width;
+            if x > 0 {
+                todo.push(at - 1);
+            }
+            if x + 1 < width {
+                todo.push(at + 1);
+            }
+            if at >= width {
+                todo.push(at - width);
+            }
+            if at + width < width * height {
+                todo.push(at + width);
+            }
+        }
+        assert_eq!(reached, covered, "the glass is one connected region");
     }
 }

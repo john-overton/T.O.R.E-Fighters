@@ -581,3 +581,36 @@ a2g-run scene), `missile-row7-just-after-release-t004` (AIM-120),
 the nose), `chaff-release`, `flare-release`. The AGM-65G row cannot fire in the
 stores preview (it refuses without a designated target), so its frame is the
 headless run's scene.
+
+## F-5E ordnance (F5E-6, 2026-11-10)
+
+The F-5E's seven rows (the sensor, the `F104R.SEE` radar, the `F104.ECM` dispenser
+row, the M61 gun, the centreline tank row, the empty wing pair and the wingtip
+pair) are reviewed and measured on the branch. No placement count moved, so the
+audit pins are the B5-2 ones recorded in the
+[corrections section above](#batch-5-record-and-station-corrections-b5-2-2026-11-10):
+45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
+placements, 220 Cheat-only novelty placements and 80 designator-pod placements.
+The per-aircraft line is unchanged (`ordnance F5E.PT: 4 source rows, 1 optional
+weapon rows, 71 compatible weapon placements, 5 tank placements; defaults and
+restart passed; catalog 61 normal, 83 Cheat`) and the store-pair audit reads
+`F5E.PT row=5 maxItems=4 ... default=AIM9B.JT count=0` and `row=6 maxItems=2 ...
+default=AIM9B.JT count=2`. The default load, countermeasures and gun are described in
+[aircraft ordnance](../formats/aircraft-ordnance.md#the-f-5e-tiger-f5e-6-2026-11-10).
+
+Headless and windowed runs on the branch (profile `profile-f5e`):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft f5e --weapon-slot 1` (M61) | 320 shots, 47 hits, 1 kill, ammunition `[240, 2, 0]` |
+| `--weapon-slot 2` (AIM-9B) | one shot, one hit, no kill, the other stations untouched, ammunition `[560, 1, 0]` |
+| `--weapon-slot 3` (empty wing pair) | stays at 0; the cycle fires the gun, 320 shots |
+| `--a2g-run --attack release` on stations 2 and 1 (`a2g-release-origin-f5e`) | Mk 82 and AGM-65G leave their 1 ft wing pylons 8.02 / 6.64 and 8.18 / 6.48 ft out, left first then alternating; AIM-9Bs 14.33 ft out, left then right |
+| `--a2g-run --attack maverick --load AGM65G --station 2` (`a2g-maverick-f5e`) | launched from the wing pair, target killed |
+| `--a2g-run --attack jettison --station 2 --load MK82 --count 4` (`a2g-jettison-f5e`) | tank 990 lb to 0, then four bombs, `PASS released 5 ... no-explosion` |
+| `--a2g-run --attack strafe` | 64 rounds in a 2 second hold, 22 tracers |
+| `--combat-command chaff` and `flare` with `--countermeasure-preview 60` | carried 19 chaff or 19 flares, capacity 20 and 20; five chaff and three flares leave 15 and 17 |
+
+`tools/battery.py` carries `flight-livefire-f5e-slot1` to `slot3`,
+`flight-jettison-f5e-slot2`, `a2g-release-origin-f5e`, `a2g-maverick-f5e` and
+`a2g-jettison-f5e`, all passing.

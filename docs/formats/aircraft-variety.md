@@ -3413,6 +3413,10 @@ Options (none chosen):
 
 Agent note: option 1 is the evidenced one.
 
+Update (F5E-7, 2026-11-10): John chose option 1 in the batch decision round
+("follow the record", opinionated), and the F-5E now measures and uses the family:
+see [F-5E sensors, HUD and cockpit](#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+
 ### F-5E control surfaces (for John)
 
 **Fact.** Six state words, counts from `Shape::with_state` (gear down extends
@@ -3548,6 +3552,8 @@ rail); the second wing pair is a John question if a real-station layout is
 wanted (option: leave as one pair, or add pylons at the real outboard station
 as an opinionated change, with a cited position).
 
+Update (F5E-5, 2026-11-10): the stations are measured, see [F-5E stations measured](#f-5e-stations-measured-f5e-5-2026-11-10) and [stores on pylons](../spec/stores-on-pylons.md#the-f-5e-tiger-f5e-5-2026-11-10). John kept the one wing pair (2026-11-10); B5-2 emptied its default.
+
 ### F-5E size against the real aircraft (for John)
 
 Measured on `F5E.SH` at 1 unit = 1/3 ft, gear down (neutral extents plus the
@@ -3591,6 +3597,58 @@ not a constraint. `F5EE.PT` and `F5EV.PT` are not added.
 | Speed brake as one dorsal plate | Real brakes are paired and ventral | F5E-4 rigs the source panel only |
 | What the original does with `63d8`/`63de` | They delete the flap strip | Unknown; the rig keeps the strip drawn |
 | Leading-edge flaps | Real, not in the source | None drawn |
+
+### F-5E shape, skin and damage looks (F5E-2, 2026-11-10)
+
+Implementation, slice F5E-2, mirroring the Mirage 2000's M2K-2 **without a
+scale**: the size question (keep 1:1 or fit per axis) is still John's, so
+`aircraft_scale.rs` keeps `[1, 1, 1]` for `F5E` and the shape draws at retail
+size (the "no scaling" option above). Everything else in the slice is
+independent of that answer. The skin, twin and decal review is in the
+objects and shapes guide, [F-5E skin
+review](objects-and-shapes.md#f-5e-skin-review-2026-11-10); the
+`render-f5e-skin` battery scenario captures the top and under views with the
+gear down.
+
+| Check | Result |
+| --- | --- |
+| Shape | `F5E.SH` loads: 253 runtime faces (259 gear down), six state words, extents x -44 to 44, y -48 to 87, z -5 to 24 (gear down z -18 to 24) |
+| Own art | Every face reads `_F5E.PIC`; the damage looks read `_F5E_A..D.PIC`. Lookup is by exact name (`F5E.SH`, `_F5E.PIC`), so the importer's `_F5E` prefix match, which also carries the desert `_F5EE*` skins (byte-identical to the F-5E's) and the snow `_F5EV*` skins, never feeds the F-5E (the desert and snow shapes are not carried at all). A retail-reading test pins it: `F5EE.SH` and `F5EV.SH` differ from `F5E.SH`, and no face names a `_F5EE` picture |
+| Twin faces | 8 exact-vertex twin groups, every one a pair with opposite stored normals: three windshield and canopy plates on the centreline (`2a01`/`2a7d`, `2a34`/`2a4c`, `2aad`/`2ac5`), the two stabilators (`3a9d`/`3b8c`, `3f2c`/`40eb`), two fin plates (`3cd7`/`3d86`, `3cf2`/`3da1`) and the rudder (`4755`/`4774`). No MiG-21 normal exception is needed. F5E-3 turns each stabilator and the rudder as a twin pair |
+| Decals | Two `E0` slots on the wings, both omitted (see the skin review) |
+| Damage looks | `F5E_A` 228 faces, `F5E_B` 128, `F5E_C` 234, `F5E_D` 24 (each its own mesh, none a subset of the intact shape). `A` is the body with the nose cut away at y 35 (wings clipped to x +/-36, fin to z 18) and `B` is the nose piece (x +/-4, y -19 to 26); `C` is the body with the fin cut to z 13 and the nose tip cut at y 63 (wings x -35 to 36) and `D` is a flat fin plate on x 0 (y -9 to 8, z -7 to 12) |
+| Damage pairing (agent decision) | `debris::damage_variant` pairs Nose and Cockpit with `A`/`B` and Tail with `C`/`D`; the wings and core keep the fitted regional tears. A destroyed F-5E hit in the nose or tail therefore draws the original broken body and sheds the original piece, like the F/A-18 and the Rafale. Frames below; revert is the three arms in `debris.rs` |
+
+Frames (`.local/m3-aircraft/frames/F5E-2/`): the scenario pair, top, side,
+three-quarter and under views, 3x crops, and damage at 0.6 and 1.0 (1.0 draws the `A` body; the `C` tail body
+is `f5e-damage-1.0-tail-variant`). The shape reads as an F-5E (single fin,
+low straight-edged wing, long pointed nose, twin nozzles) with no clipping, no
+underside through the top and no z-fighting.
+
+Provenance: shape and skin spec-derived (retail data read as data); the
+damage pairing and the omitted decals agent decisions (2026-11-10); size
+pending John (no scale).
+
+### F-5E stations measured (F5E-5, 2026-11-10)
+
+The default load and every alternative the record's masks offer, measured on the
+1:1 shape under the standard pylon rules (full tables, clipping and options in
+[stores on pylons](../spec/stores-on-pylons.md#the-f-5e-tiger-f5e-5-2026-11-10)):
+
+| Row | Position, ft right / up / fwd | Default | Hang | Result |
+| ---: | --- | --- | --- | --- |
+| 4 | 0 / -4.67 / 0 | `F150.GAS` x1 | 2 inch rail, belly -1.67 | clean (0.17 ft off the belly, 2.58 ft off the ground) |
+| 5 | 7.33 / -4.67 / 1.00 | empty (B5-2) | 1 ft twin-rail pylon, wing underside -1.33 | defaults clean; of 64 alternatives 8 enter the wing (0.07 to 0.23 ft), 13 cross a neighbour on the pylon, 4 touch the gear sheet (`AIM7`, `AIM7E`, `GBU16`, `GBU30`) |
+| 6 | 14.33 / -1.00 / -1.00 | `AIM9B.JT` x2 | tip rule on the 0.33 ft thick tip | **0.32 ft entry, both sides** (stop, options for John) |
+
+Rows 0 to 3 (sensor, radar, empty jammer, gun) draw nothing. No pod was added
+(B7). F5E-5 is `[~]`: the default tip AIM-9B clips 0.32 ft (inside the 0.27 to
+0.72 ft range of the default loads reviewed so far) and several Load Ordnance
+alternatives clip, so the decision is John's. At full flap (0.40 rad) the drooped
+flap crosses `R550`, `AGM45`, `GBU12` and `AA6` on the wing row (not the AIM-9B,
+0.14 ft clear). Nothing touches the ground in the default load. Provenance:
+measurement and comparison agent findings (2026-11-10); no Rust, pin or count
+changed.
 
 ## Tornado source review (2026-11-10)
 
@@ -4610,6 +4668,13 @@ interim (opinionated, John, 2026-11-10, decision 7), and its HUD glass is measur
 (`hud_aperture.rs`, no longer an empty mask). The F-5E and Tornado rows above are
 unchanged. See [the GRI-7 section](#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10).
 
+Update (F5E-7, 2026-11-10): for the F-5E the HUD and cockpit binding row is
+decided, no longer interim: John chose to follow the record, `f29.HUD`, so it is
+opinionated (John, 2026-11-10), and the F-5E's HUD glass row is measured (a polygon
+replaces the empty mask). The Gripen's and Tornado's rows stay as their own slices
+find them. See [F-5E sensors, HUD and
+cockpit](#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
 identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
@@ -5025,3 +5090,235 @@ Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile-gripen`):
   `tore-server` and `tore-bot` (the battery needs both rebuilt after any change
   to the identity list). They take no aircraft argument, so they cover the
   identity list and content code, not a Gripen in flight over the wire.
+
+## F-5E ordnance, default load and countermeasures (F5E-6, 2026-11-10)
+
+Slice F5E-6 confirmed the F-5E's ordnance as the record's own plus the guarded B5-2
+and B5-3 defaults, with no gameplay code change. This answers the F-5E review's
+"default AIM-7 on the wing (not real)" and "radar and jammer F18 pair" findings (the
+corrections are in the B5-2 and B5-3 notes above; the earlier text is kept as
+written). Full tables, positions and results are in
+[aircraft ordnance](aircraft-ordnance.md#the-f-5e-tiger-f5e-6-2026-11-10).
+
+| Item | Result |
+| --- | --- |
+| Default load (human, AI, saved loads, lobby) | `M61.JT` x560, `F150.GAS` centreline x1, empty wing pair, `AIM9B.JT` x2 on the wingtips; 15,365 lb of 24,664 lb with 4,400 lb of fuel |
+| Gun | 560 rounds equal the real two M39A2 with 280 each (`F5E.INF`); the shared gun cadence (about 32 rounds a second) is unchanged |
+| Countermeasures | `F104.ECM`: 20 chaff and 20 flares, shown on the weapons page; one chaff leaves 19, one flare leaves 19 |
+| Live fire | gun 320 shots, 47 hits, 1 kill; AIM-9B one shot, one hit; an AGM-65G from the wing pair kills the column's lead truck |
+| Release origins | wing pair 8.02 then 6.64 ft out (Mk 82) and 8.18 then 6.48 ft (AGM-65G), 2.8 ft down, 1 ft pylon, left first then alternating; wingtip AIM-9Bs 14.33 ft out, left then right |
+| Jettison | the tank (990 lb) drops first, then the four wing-pair bombs |
+| Audit | 4 source rows, 1 optional weapon row, 71 weapon placements, 5 tank placements; no pin moved |
+
+Open for John: the wing pair's empty default means a bomb run must name the station
+(`--station 2`); the real F-5E fit sources for the dispenser are second hand (see the
+B5-3 note); the cadence is shared, not F-5E specific.
+
+## F-5E sensors, HUD and cockpit (F5E-7, 2026-11-10)
+
+Slice F5E-7 (implementation mode) made the X-29's cockpit family work for the
+F-5E and confirmed its sensors. John's decision round of 2026-11-10 decided the
+review's [HUD and cockpit question](#f-5e-hud-and-cockpit-for-john): **follow the
+record**, `f29.HUD`, cockpit stem `F29`, forward art `~F29H.PIC` (the game's own
+encyclopedia says the X-29s were built from F-5E fuselages; no F-5E art exists).
+That settles what the batch identity slice wired as an interim agent decision, so
+the binding is now **opinionated (John, 2026-11-10)**; the stem arm and the
+picture names already existed from B5-1 and did not change. The F-5E is the first
+aircraft to use the family: TORE has no X-29 (`F29.PT` is not on the roster), and no
+other identity names `F29.HUD` or stem `F29` (checked by the new test). Changed:
+the glass polygon (`hud_aperture.rs`), a `"F29"` mirror seed row (`mirrors.rs`), two
+comments in `aircraft.rs` and a retail-reading test; the docs listed in the log.
+
+**Sensors (spec-derived, retail records and the B5-2 and B5-3 defaults).** The
+fixed rows are `VIS340.SEE`, `F104R.SEE` (the F-104's radar as the AN/APQ-159
+stand-in, John's pick D1) and `F104.ECM` (20 chaff and 20 flares, no deception
+jammer, John's pick D2). `--sensor-summary` reads: `F5E: radar F104R.SEE search 50
+nmi 60x60 deg track 25 nmi 45x45 deg look-down 50 BASIC; infrared none; visual
+VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer F104.ECM EARLY
+strength 0.00 (no RF mode); signature radar 100 infrared 100`. The radar and
+jammer are the F-104's line record for record (`--sensor-summary` of `F104`); the
+visual sensor is the F/A-18's (`VIS340.SEE`). Nothing under
+`crates/tore-sim/src/sensors` branches on the aircraft, so the radar modes, the lock
+and the RWR behave as for the other aircraft. A live-fire run (`--live-fire
+--aircraft f5e --weapon-slot 2`) shows the Radar window `TWS 10 ... TRACK`, the
+HUD `ARM 1 AIM-9B 89%`, the lock frame on the target and the target camera `F-
+5E TIGER 1.1 NM`; at 1,500 ticks the round has flown and hit (`shots=1 hits=1
+kills=0 active=0`: a single AIM-9B hits and does not kill the practice aircraft, as
+F5E-6 found). `--scope-range 25` redraws the scope at 25. There is no infrared
+channel, and no jammer for the RWR window to light (strength 0.00). The diagnostic
+incoming round plots at the window centre; no scripted path plots an emitter on
+the RWR, as for the Mirage 2000 and the F-15E (the RWR code is aircraft-agnostic and
+unit tested). Countermeasure counts show on the Weapons window as `20 CHAFF` and
+`20 FLARE` (F5E-6).
+
+**HUD glass (measured, fitted).** `hud_aperture::mask` now has a polygon for the
+F-5E, replacing the empty mask the B5-1 interim left (the aperture fails closed
+for a picture of any other size). `~F29H.PIC` is 1280 x 490 with a 64-colour
+palette. Its glass is the transparent opening between the two canopy struts, under
+a thin combiner arc and above the coaming. Measured on the imported art (every
+row's transparent run through x 640, plus the first opaque pixel of columns 520 to
+760): the strut inner edges are at x 522 and 759, the arc line runs from y 125 at
+the struts to y 105 at the centre (one pixel thick), the coaming top is at y 375
+to 376 (bumps near x 556 and x 646 rise to y 368 and y 355). The fitted polygon
+(522,132) (535,127) (550,120) (565,116) (580,112) (610,108) (640,107) (670,108)
+(700,112) (715,116) (730,120) (745,127) (759,132) (759,372) (522,372) runs under the
+arc and between the struts; the shared rule keeps only the transparent pixels
+inside it, so the struts, the arc line and the coaming bumps stay out. Pinned by
+two tests in `hud_aperture.rs`: a synthetic one (centre in, above the arc, outside
+the struts and below the coaming out, the Gripen and Tornado still empty) and a
+retail-reading one that skips without an install: on the real art the mask never
+covers an opaque pixel, has its left edge within x 520 to 530, its right edge within
+x 752 to 760, its top within y 105 to 112 and its bottom within y 365 to 372, is one connected
+region, and has exactly 58,556 pixels. The HUD draws inside the glass: the
+heading tape under the arc, the airspeed and altitude boxes (`497` and `5000` at
+the live-fire start) just inside the struts, `ARM 1 AIM-9B 89%` and the lock frame
+(3x crop `hud-with-target-lock-aim9b-crop3x`). The HUD reads the F-5E's own state.
+
+**Cockpit views (windowed, every one draws the `~F29*` art).** Front with the HUD
+in the glass and the six small-layout windows; look left and right 45 degrees (the
+art turns away with the look, the HUD and the struts slide to the frame edge and
+the side mirror comes into view); 90 degrees left and right and 60 degrees up (no
+cockpit art, open sky and ground, as for the other aircraft); `--flight-view 4` (F3
+Up) and `--flight-view 3` (F2 Back, the spine and stabilator plates from the
+pilot's eye). `Airframe::load` accepts the family: the cockpit palette prefix has
+64 colours, the three overlays `~F29_LH.PIC`, `~F29_CH.PIC` and `~F29_RH.PIC` and
+the instrument frame `~F29_P.PIC` (81 x 80) exist and `Hud::parse` of `F29.HUD`
+names `~F29_P.PIC`. The family is thirteen pictures in `FA_1.LIB`.
+
+**Mirrors (fitted, agent decision 2026-11-10).** The art has three flat light-blue
+mirror fills (top centre and the two lower canopy rails) and the B5-1 interim gave
+them no seeds. A `"F29"` row in `mirrors::seeds` now fills them with the shared
+rear feed: `--cockpit-sheet` goes from `NO MIRRORS FITTED` to `FITTED CLR` with the
+centre at x 477 y 17 w 323 h 84, the left at x 62 y 291 w 116 h 199 and the right
+at x 1097 y 287 w 116 h 203. The unit test lists the F-5E among the fitted
+families, and the X-31 (`F31`) stays unfitted.
+See [mirrors](../baselines/mirrors.md#2026-11-10-f-5e-cockpit-and-mirror-seeds-f5e-7).
+
+**Instruments and two engines.** The Systems window shows `THR 70%`, `TEMP 0%`,
+`OIL 100%`, `HYD 100%` and `FUEL 4400 LBS`, with `(+ EXT 990 LBS)` for the default
+centreline tank; one engine readout serves every aircraft, so the two-engine F-5E
+shows one throttle and one temperature (the panel has no per-engine needle; the
+readouts are generated text). Fuel reads the F-5E's own corrected 4,400 lb (B5-2,
+John, 2026-11-10), not the record's 6,240. The Weapons window lists `560 M61`, `2
+AIM-9B` and `20 CHAFF` / `20 FLARE`. The ten instrument pages (0 to 9) draw with the
+`~F29_P.PIC` bezel; the Envelope page draws the F-5E's own envelope.
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye` is
+one fixed offset for every aircraft (7 ft above and 10 ft ahead of the model
+origin), used only by F2 Back, the rear-view mirrors and the replay views; the
+forward cockpit view looks from the origin with 2D art. The record's `viewOffset`
+(0, 20, 60) is the F-15C's and the F/A-18's and no host code reads it. Measured on
+the neutral `F5E.SH` (the faces within 10 units of the centreline, 1 unit = 1/3 ft;
+the fin top at 24 units is excluded, it stands behind the canopy): the canopy top is
+10 units, 3.3 ft above the origin, between 37 and 55 units ahead, 12.3 to 18.3 ft
+(the windshield base reaches 20 ft). The fixed eye is therefore 3.7 ft above the
+canopy top and 2.3 ft behind its aft end; the F-15C's is 1.7 ft above its canopy and
+5.0 ft behind its aft end (measured in F15E-7 on the same rule). The eye stands high
+over a small canopy, and F2 Back shows the spine, the fin edge-on and the two
+stabilator plates. Not changed: a seated eye would be a fleet change (a table keyed
+by aircraft through six call sites), a question for John, as in the Mirage 2000
+review.
+
+**Test.** `crates/tore-import/tests/f5e_cockpit.rs` (retail-reading, skips without
+media): the sensor rows `VIS340.SEE, F104R.SEE, F104.ECM`, `hud()` `F29.HUD`
+different from the X-31's, stem `F29` with shape stem `F5E`, `~F29H.PIC`,
+`~F29_P.PIC` from `Hud::parse`, the overlays, thirteen `~F29*` pictures, no
+other roster aircraft on the family, no `~F5*` picture, and the record's eye offset.
+The aperture is pinned in `hud_aperture.rs`.
+
+Provenance: sensor rows, HUD module, panel names and cockpit art spec-derived
+(retail); the X-29 cockpit binding opinionated (John, 2026-11-10); the glass polygon,
+the mirror seeds and the eye-point reading fitted or agent decisions (2026-11-10).
+Evidence and frames: `.local/m3-aircraft/frames/F5E-7/` and
+`.local/m3-aircraft/checks/F5E-7/`.
+
+## F-5E flight review (F5E-8, 2026-11-10)
+
+Dated section, additions only. The F-5E flies the hybrid adapter's own `variety`
+configuration built from `F5E.PT` (`f5e.SH`), two J85-GE-21 at 7,000 lbf military
+and 10,000 lbf afterburner in all, with John's B5-2 corrections (4,400 lb of fuel,
+a 51,800 ft ceiling, top row +7, no +8 row). No envelope, G, weight, fuel, flow,
+ceiling or thrust value was changed and no flight constant was touched.
+
+- Top speeds: the 1 G row is 1,090 kt at 36,000 ft (Mach 1.90), 17 percent over the
+  published Mach 1.63, and 731 kt at 1,000 ft (no published sea-level figure was
+  found). Full internal fuel settles at 0.937 of the edge: 1,021 kt (Mach 1.78) at
+  36,000 ft, 685 kt at 1,000 ft. Level flight is held to the corrected 51,800 ft
+  ceiling and the zoom peaks at 52,214 ft. The fast edge falls steeply above 39,000
+  ft (586 kt at 50,000 ft).
+- Climb and acceleration: peak specific excess power 332 ft/s at sea level (19,900
+  ft/min), best sustained climb 314 to 316 ft/s, 36,000 ft in 138 to 159 s: 55 to 58
+  percent of the published 34,500 ft/min, from the shared drag law and the missing
+  ram thrust (the thrust and weights are the real ones). Not changed; a fleet-level
+  drag or ram fit remains John's call.
+- G: the +7 top row gives 5.98 G at 461 kt and 1,000 ft with full fuel and 7.00 G
+  nearly dry (never above it; no +8 row), -2.55 to -2.99 G on the push. The sustained
+  turn at 461 kt and 1,000 ft is 4.13 G, 9.6 deg/s. The record's high-speed G rows
+  are narrow (2.6 G at 593 kt and 1,000 ft), a retail shape, not changed.
+- Fuel: record flows 1 and 8 lb/s kept; 73.3 minutes dry and 9.2 at afterburner
+  from 4,400 lb, against about 30 and 12.4 minutes at the J85-GE-21's published
+  specific fuel consumption.
+- Takeoff and landing: liftoff 153.4 kt after 1,763 ft (537 m), approach 166.2 kt,
+  touchdown 159.8 kt, rollout 703 m; the record has no hook.
+- The scripted `climb` maneuver ends in an overspeed loss after the zoom (the fast
+  edge falls to 832 kt at 43,000 ft); the Mirage and the Gripen do not. Reported.
+
+The liftoff (135 to 165 kt) and approach (155 to 175 kt) ranges in the flight
+battery are fitted windows, agent decisions of 2026-11-10, from the published 124 kt
+landing-configuration stall speed. Full tables, sources and commands are in the
+[variety flight baseline](../baselines/variety-flight.md#northrop-f-5e-validation-2026-11-10).
+
+## F-5E in missions, multiplayer and replay (F5E-9, 2026-11-10)
+
+Implementation and verification, slice F5E-9 of the F-5E port. No game code
+changed. `AircraftId::F5E` was appended to every identity list in B5-1
+(checkpoint code 43, `SELECTABLE` index 43, carried in the 9-bit wire field
+since protocol 83), and `strike_class.rs` lists it in the fighter family
+(strike class Fighter, B5-1), so the AI wing build needed no change: it reads
+the record's two J85 engines (the roster probe's `models=2`) and the default
+load of F5E-6 (the M61 with 560 rounds, the `F150.GAS` tank, two wingtip
+AIM-9B and the empty wing pair, which the probe prints as
+`[M61 x560, AIM-9B x2, AIM-9B x0]`). No AI behaviour work was done (Mirage plan
+rule 1).
+
+What changed is coverage: a Quick Mission test
+(`the_f5e_is_a_quick_mission_player_and_a_wing_choice`) naming `F5E.PT` as the
+player's aircraft and in every AI wing field, and asserting that neither
+`F5EE.PT` nor `F5EV.PT` appears in the player or wing lists in its place; a
+checkpoint test in `tore-sim` (`the_f5e_round_trips_at_code_43_and_no_identity_shares_it`:
+the coded identity is the single byte 43, every identity in `ALL` round-trips,
+no two share a code, 46 is unknown); the `ai-f5e-quick-mission-2v2` and
+`replay-rec-f5e-2v2` battery scenarios; the F-5E row in the Load Ordnance notes
+loop (`menus-snap-quick-lobby-ordnance-laser-notes-f5e`: the lobby page warns
+about a laser-guided store and offers the pod helper, measured, the same as the
+F-16A, the MiG-31, the Mirage 2000), and `ai-f5e-*` in the `ai-fights` battery
+family.
+
+Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile-f5e`, logs
+in `.local/m3-aircraft/checks/F5E-9/`):
+
+- `--ai-roster-probe-ticks 3600`: the four `F5E.PT` lines (Novice, Average,
+  Experienced, Ace) each `ticks=3600 models=2 radar=true ir=false stores=3
+  gun=true projectiles=0 dropped=0 PASS`; the whole roster has no FAIL line.
+- `ai-f5e-quick-mission-2v2` passes: every wing the F-5E, nothing dropped, zero
+  anomalies. The F-5E's record has no infrared sensor row, so the wing's AIM-9B
+  logs `no AIM-9B shot (ACQUIRING)` and the attack changes to the gun: 29 rounds,
+  no hit, no kill in this run (the Gripen's run had a missile kill). That is the
+  existing weapon-selection behaviour for a record without an infrared sensor;
+  it was not tuned (no AI behaviour work). A finding for John, not a defect of
+  this slice.
+- `replay-rec-f5e-2v2` passes: the recording reads back `player.aircraft =
+  F5E.PT`, `probe.enemy = F5E.PT` and `draw.models = F5E.PT`, two runs are
+  identical, and `--verify-render` finds `missing=0 differing=0` over 2,401
+  ticks.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding
+  `tore-server` and `tore-bot`. They take no aircraft argument, so they cover
+  the identity list and content code, not an F-5E in flight over the wire.
+
+Parked check. `F5EE.PT` (desert) and `F5EV.PT` (snow) are separate records and
+parked targets, and are unchanged: `--surface-parked EGY QELAIR` lists two
+`F5EE.PT` at `gear 0x639c`, `scale 0.3333`, `origin-up 6.00` (18 units at a
+third), `EGY QESAIR` one more, and `VLA QVLAIR` lists two `F5EV.PT` at
+`gear 0x614c`, same scale and `origin-up 6.00`; the ignored retail test
+`parked_aircraft::import_tests::every_parked_type_reads_and_stands_on_its_gear`
+passes. `F5E.PT` is not parked and never replaces either (B6).

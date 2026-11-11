@@ -792,6 +792,7 @@ def scenarios() -> list[Scenario]:
     # Slice F15E-9 adds the F-15E: its record has the PAVESPK.SEE fixed pod row (F15E-0, John's decision 3,
     # 2026-11-10), so the lobby page shows no laser warning (as the F-16C) and offers the sensor helper.
     # Slice GRI-9 adds the Saab Gripen: the same warning and helper (measured, not assumed).
+    # Slice F5E-9 adds the F-5E Tiger (measured, not assumed; see the row below).
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
         ("f18", "ordnance-laser", True, True, False),
@@ -805,6 +806,7 @@ def scenarios() -> list[Scenario]:
         ("m2000", "lobby-ordnance-laser", True, True, True),
         ("f15e", "lobby-ordnance-laser", False, True, True),
         ("gripen", "lobby-ordnance-laser", True, True, True),
+        ("f5e", "lobby-ordnance-laser", True, True, True),
     ):
         out.append(
             Scenario(

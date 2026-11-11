@@ -270,7 +270,10 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x808c, Part::Gear, 22)],
                 1. / 3.,
             ),
-            // F5E.SH: six words, gear 0x63cc adds 6 faces (three plates).
+            // F5E.SH: six words, gear 0x63cc adds 6 faces (three plates). F5E-3
+            // and F5E-4 load it through its own `f5e_animation` rig (surfaces,
+            // gear, speed brake, plume); this entry gives the load-time layout,
+            // the scale and `supported`.
             Id::F5E => (
                 21488,
                 253,
@@ -374,6 +377,9 @@ enum SpecificRig {
     M2000(crate::m2000_animation::Rig),
     F15E(crate::f15e_animation::Rig),
     Gripen(crate::gripen_animation::Rig),
+    /// F5E-3 and F5E-4: the control surfaces, the gear, the speed brake and
+    /// the plume.
+    F5E(crate::f5e_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -676,6 +682,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::F5E => {
+                let (rig, shape) = crate::f5e_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F5E(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -803,6 +818,7 @@ impl Rig {
                 SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
                 SpecificRig::F15E(_) => crate::f15e_animation::flame(address),
                 SpecificRig::Gripen(_) => crate::gripen_animation::flame(address),
+                SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
             };
         }
         self.groups
@@ -865,6 +881,7 @@ impl Rig {
                 SpecificRig::M2000(rig) => rig.animate(source, state),
                 SpecificRig::F15E(rig) => rig.animate(source, state),
                 SpecificRig::Gripen(rig) => rig.animate(source, state),
+                SpecificRig::F5E(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

@@ -1469,3 +1469,201 @@ the rig turns the whole quad and accepts the opening, as every reviewed fin does
 Frames and probe sheets: `.local/m3-aircraft/frames/GRI-3/`; probe CSVs:
 `.local/m3-aircraft/checks/GRI-3/probe/`. See the [Gripen control
 fit](../spec/variety-animation.md#gripen-control-fit).
+
+## F-5E control surfaces (F5E-3, 2026-11-10)
+
+`F5E.SH` (21,488 CODE bytes, 253 runtime faces, six state words `0x63c0`,
+`0x63c6`, `0x63cc`, `0x63d8`, `0x63de`, `0x63e4`; review in [aircraft
+variety](aircraft-variety.md#f-5e-control-surfaces-for-john)) names no signed
+pitch, roll or flap-travel branch, and its stabilators and ailerons have no
+state word at all, so every control role below is a **fitted** whole-panel
+assignment over exact reviewed source faces. John's decisions of 2026-11-10
+(stabilators pitch only, ailerons roll, size 1:1) fix the roles. Coordinates are
+shape units (x right, y forward, z up, one third foot; the F-5E has the identity
+scale, so shape units are the drawn units).
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right stabilator | `3a9d` (top), `3b8c` (back winding) | One flat plate at z -4: root x 5 (y -23 to -37), tip x 20 (y -30 to -35); shares no vertex with any other face |
+| Left stabilator | `3f2c`, `40eb` | Mirror, x -5 to -20 |
+| Right aileron | `3b45` (top layer), `3b9f` (bottom layer) | Strip x 31 to 43: hinge y -5 at z -3 (top) and z -4 (bottom), trailing edge y -8 (x 31) and y -7 (x 43) at z -4 |
+| Left aileron | `4067`, `41ce` | Mirror, x -31 to -43 |
+| Right flap | `44d9`, `44f8` | Strip x 7 to 31: hinge (7,-4) to (31,-5), trailing edge y -11 (x 7) to y -8 (x 31); word `0x63de` deletes both |
+| Left flap | `45c0`, `45df` | Mirror; word `0x63d8` deletes both |
+| Rudder | `4755`, `4774` (quad, both windings) | Hinge edge (0,-31,4) to (0,-29,22); trailing edge (0,-37,4) to (0,-32,22); word `0x63e4` swaps it for `469b`/`46ba` (about 40 degrees to starboard, rounded) |
+
+**Selection.** The rig selects every panel by face address, never by a
+coordinate threshold: the ailerons, which have no state word, are the four
+faces above (each wholly on one side of the wing, x 31 to 43), and the load
+refuses the shape if a face is missing, duplicated, or holds a vertex off the
+reviewed corners. The flap words, the rudder word and the three device words
+(gear `0x63cc` adds `49cc 49eb 4a37 4a56 4aa2 4ac1`, speed brake `0x63c6` adds
+`4802 4819`, plume `0x63c0` adds the eight `48a7` to `4980` plates) are
+checked against their exact added and removed face sets at load.
+
+**Hinge axes.** Stabilators: a lateral line (along X) through the root chord
+midpoint, (+/-5, -30, -4), the taileron standard. The plate is flat (every
+vertex z -4), so its own anhedral is zero and the spindle is not tilted; it is
+never a swept span axis. Ailerons: the straight line y -5, z -3.5 along X
+through the strip (the mid axis of the hinge pair, as the Mirage's elevons).
+Flaps: the line from (7,-4,-3.5) to (31,-5,-3.5), so the flap axis is 2.4
+degrees off the aileron's and each side turns about its own axis. Rudder: the
+fin trailing edge from (0,-31,4) toward (0,-29,22), direction (0,2,18); a
+positive angle swings the trailing edge toward +X (right), the sense of the
+fleet's rudders.
+
+**Rule 11 fold table (rig definitions).** Every moving face turns whole about
+its axis; no face has a fixed vertex off its hinge line.
+
+| Surface | Face | Vertices | Turn about the axis | On the axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right stabilator | `3a9d`, `3b8c` | 4 each | 4 each (the root midpoint is not a vertex) | 0 | 0 |
+| Left stabilator | `3f2c`, `40eb` | 4 each | 4 each | 0 | 0 |
+| Right aileron | `3b45`, `3b9f` | 4 each | 4 each (hinge pair 0.5 unit off the mid axis) | 0 | 0 |
+| Left aileron | `4067`, `41ce` | 4 each | 4 each | 0 | 0 |
+| Right flap | `44d9`, `44f8` | 4 each | 4 each (hinge pair 0.5 unit off the mid axis) | 0 | 0 |
+| Left flap | `45c0`, `45df` | 4 each | 4 each | 0 | 0 |
+| Rudder quad | `4755`, `4774` | 4 each | 2 each | 2 each: (0,-31,4), (0,-29,22) | 0 |
+
+Verdict: **no face folds**; the probe reports the largest inter-vertex distance
+change in each group as about 6e-7 ft (floating point). The fin cap
+(`3cf2`, `3da1`) touches the rudder's top trailing vertex (0,-32,22) only at
+that corner and stays fixed (it is not part of the rudder quad); that corner
+opens by about 0.35 ft at full rudder (`seam-opening.csv`, the same corner
+opening the Mirage's rudder reports), at the top edge of the rudder only.
+
+**Flap words (agent decision, 2026-11-10; Mirage precedent).** Each flap word
+deletes one wing's strip and adds nothing, so a rig that set it would make the
+flap vanish in flight. The rig pins both words at load but never sets them: the
+strips stay drawn at every flap setting and the flap lever **droops** them. The
+flap and the aileron strips share the seam vertices at x +/-31; they are
+separate surfaces with separate jobs, so a step opens there when they take
+different angles. From the hinge geometry the trailing corner (31,-8,-4) drops
+about 0.38 ft at full flap with a neutral aileron, and the step against a
+fully raised right aileron is about 0.58 ft. That seam, the rudder's top corner
+and the flap root edge are reported, not gated.
+
+**Flap root edge (measured).** The root edge (x 7) is shared with the 1-unit
+closure strips `3161`, `317d` (left `23c0`, `38b2`), which stay fixed (they hold
+the fuselage side). Their free corner (7,-11,-4) is 7 units from the hinge, so
+at the full 0.40 rad droop it opens about 0.93 ft (measured). John may want a
+smaller droop; it is one constant (`FLAP_DROOP`).
+
+**Fitted magnitudes (agent decisions, 2026-11-10, matching the fleet).** Angle
+positive lowers the trailing edge.
+
+| Control | Law |
+| --- | --- |
+| Pitch | Both stabilators, `-0.30*elevator` radians (pull raises both trailing edges), **no roll term** (John, 2026-11-10: stabilators pitch only). The F-4 and F-104 stabilators use the same law (TR-10). |
+| Roll | The ailerons only, `-0.20*aileron` on the right and `+0.20*aileron` on the left (a positive aileron raises the right trailing edge and lowers the left, as every fleet aileron). The ailerons take no pitch and no flap droop. |
+| Flaps | `+0.40*flaps` lowers both flap strips (the Mirage and MiG-31 droop). |
+| Yaw | The rudder quad `0.35*rudder` radians about its hinge edge. |
+
+Nothing here is a source value. The shape draws no leading-edge flap (the real
+aircraft has full-span automatic ones) and none is invented.
+
+**Gear, speed brake and plume (F5E-4).** Not owned by this rig yet: the six
+gear plates keep the shared interim rise and the brake and plume words stay
+unmapped. The rig lists the reviewed faces and pins the three words so F5E-4
+takes them over in the same module. See the [F-5E
+fit](../spec/variety-animation.md#f-5e-control-fit). Update (F5E-4,
+2026-11-10): the same rig now owns them; see
+[F-5E gear, speed brake and plume (F5E-4, 2026-11-10)](#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10).
+
+## F-5E gear, speed brake and plume (F5E-4, 2026-11-10)
+
+Slice F5E-4, Claude Sonnet (sonnet-high), implementation mode. This maps the
+three device words of `F5E.SH` that [F5E-3](#f-5e-control-surfaces-f5e-3-2026-11-10)
+left to the shared groups, in the same `f5e_animation` module. Source
+coordinates are shape units (x right, y forward, z up, a third of a foot; the
+F-5E has the identity scale). Motion and angles are **fitted** (agent
+decisions, 2026-11-10); the faces and the word roles are spec-derived from the
+retail shape. Each of the three words adds its faces and removes none; the rig
+checks that at load, with every plate's exact corners.
+
+| Word | Faces | Source geometry | Rig |
+| --- | --- | --- | --- |
+| `0x63cc` gear | 6: right main `49cc`, `49eb`; left main `4a37`, `4a56`; nose `4aa2`, `4ac1` | Three flat plates, both windings each. Mains in the planes x +14 and x -15 (y -2 to 6, z -18 to -4); nose in the plane x 0 (y 53 to 60, z -17 to -5). No doors, struts or wheels beyond them | One rigid piece per plate |
+| `0x63c6` speed brake | 2: `4802` (untextured), `4819` (textured) | One plate, x +/-2: front edge (y 29, z 10), free edge (y 22, z 16), rising aft | One rigid piece about its front edge |
+| `0x63c0` plume | 8: `48a7`, `48e5`, `4961`, `4980` (left), `48c6`, `4904`, `4923`, `4942` (right) | Per engine a vertical plate (x -3 or +3, z -3 to 3) and a horizontal plate (z 0, x -6 to 0 or 0 to 5), both windings, y -49 to -79 | Scaled along Y from the exit plane |
+
+The two nozzle exit rings are the octagons `42a6` (left, x -5 to -1) and `4454`
+(right, x 1 to 5) at y -48, z -3 to 1 (subtype `0x6c`). The three flap and
+rudder words stay as F5E-3 left them (pinned, never set).
+
+**Gear motion and source.** Each main plate turns `90 degrees * (1 - gear)` about
+the line along Y at its own top edge (z -4, on its own x), swinging inward and
+up: the foot (x 14, z -18) arrives at (x 0, z -4), so the plate ends flat at the
+wing root under the fuselage, hidden at gear 0. The nose plate turns about a
+lateral line through its aft top corner (y 53, z -5) and swings forward and up
+into the nose (the foot (y 53, z -17) arrives at (y 65, z -5)), and steers about
+a vertical line through its centre (y 56.5) before the fold. Grounded at gear
+down: the pose at gear 1 is the source pose, whose lowest point (the mains, z
+-18) is the 18 unit low point the flight model stands the aircraft on
+(`variety.rs`, B5-1). The nose plate's foot is z -17, one unit (0.33 ft) above
+the mains' ground line, as the retail shape draws it (the parked frames
+show all three wheels at the runway).
+
+**Public source (cited honestly).** I could not reach a primary source (the
+T.O. 1F-5E-1 flight manual, `usaf-sig.org` lists it, was not fetched). A
+web search surfaced an aircraft summary page (`ccxy.tripod.com/f-5e.html`,
+Jane's-style data, host not reachable from here) whose excerpts say the main
+units retract inward into the fuselage; the same page's two excerpts disagree
+about the nose, one saying the nosewheel retracts forward and the other aft.
+**Mains inward is the task's stated direction and the one consistent excerpt.
+The nose forward is an agent decision from one of two conflicting secondary
+excerpts: open item, one sign (`NOSE_HINGE` and the `angle` sign in
+`gear_positions`) to flip if the flight manual says aft.** The Wikipedia
+"Northrop F-5" article and the DCS and Virtavia manuals I read give no
+retraction direction (Wikipedia notes only the Canadair CF-5's two-position nose
+gear, "incorporated" on the F-5E to reduce take-off distance).
+
+**Speed brake.** The one dorsal plate is all the source has (John, 2026-11-10:
+rig the source's plate). The real F-5E's brakes are a pair under the fuselage
+(general knowledge, not cited this pass); not drawn. The plate turns whole
+(both windings) about its front edge, the line y 29, z 10 along X. Open (brake
+1) is the source pose; closed is the turn of **0.866 rad (49.6 degrees)** that
+lays the free edge on the dorsal ridge line from (0, 37, 10) to the mid point
+(0, -34, 4) of the rear pair (+/-1, -34, 4) (all in face `3420`): the free edge
+lands at (0, 19.9, 8.55), the plate lies along the ridge, and the front edge sits
+0.68 unit above the ridge at y 29, the source's own step (there is no closing
+front plate in this shape). Hidden at brake 0.
+
+**Plume and nozzles.** The plume plates scale along Y from the nozzle exit plane
+(y -48): at full afterburner they are the source pose (first edge y -49, tip y
+-79), at partial they shorten toward the exit plane, hidden with no exhaust. The
+engine material gives the F-5E two outlets (`engine_material::outlet_count` 2,
+nozzle faces `42a6` and `4454`, left and right by the sign of x), so two nozzle
+glows draw and, from the engine count of 2, two contrails: one behind each
+nozzle's centre at x -3 and +3, z -1, 2 ft behind the exit plane (unit test
+`the_f5e_draws_two_contrails_one_behind_each_nozzle`). The renderer draws the
+glow and trail from the pilot's heat and the plume from `state.exhaust`.
+
+**Rule 11 fold table (rig definitions).** Every moving piece turns whole; no
+face has a vertex held off its hinge line.
+
+| Piece | Faces | Vertices | Turn about the axis | On the axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right main | `49cc`, `49eb` | 4 each | 2 each (feet) | 2 each: (14, -2, -4), (14, 6, -4) | 0 |
+| Left main | `4a37`, `4a56` | 4 each | 2 each | 2 each: (-15, -2, -4), (-15, 6, -4) | 0 |
+| Nose plate | `4aa2`, `4ac1` | 4 each | 3 each | 1 each: (0, 53, -5) (the other top corner swings) | 0 |
+| Speed brake | `4802`, `4819` | 4 each | 2 each (free edge) | 2 each: (+/-2, 29, 10) | 0 |
+| Plume | eight plates | 4 each | the tip vertices | root edge stays on the exit plane's side | 0 |
+
+Verdict: **no piece folds**. The probe reports rigidity of at most 1.6e-6 ft for
+every gear pose and at most 6.4e-7 ft for every brake pose (floating point).
+Fixed seam openings: none (the gear and brake hang from or rest on faces they do
+not share vertices with; the closed-brake front edge step above is the source's).
+
+**Findings and open items.** (1) Nose retraction direction above. (2) The brake
+is dorsal and single against the real paired ventral brakes (John's decision).
+(3) The gear is plates without doors, so the closed bay is the skin; near stow
+the main plate lies flat in the wing's lower skin plane (z -4) and at gear 0 is
+hidden. (4) Nose foot 0.33 ft above the main ground line, retail geometry.
+
+**Provenance.** Faces, word roles and plate corners spec-derived (retail shape
+read as data); the retraction directions, angles, the closed brake angle and the
+plume scaling are fitted agent decisions (2026-11-10); the dorsal brake rig is
+John's decision (2026-11-10); the twin glow and trail from the engine count of 2
+(record, real aircraft: two J85-GE-21). Not a claim of original retraction
+timing.

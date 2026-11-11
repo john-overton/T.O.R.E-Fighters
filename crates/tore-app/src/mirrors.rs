@@ -33,6 +33,9 @@ pub(crate) fn seeds(id: AircraftId) -> Option<[Option<[usize; 2]>; 3]> {
         "F104" => [None, s(231, 232), s(1049, 232)],
         "SU33" => [None, s(176, 195), s(1103, 195)],
         "Y141" => [None, s(375, 91), s(902, 91)],
+        // F-5E (F5E-7, 2026-11-10): the X-29 picture ~F29H has three flat
+        // light-blue mirror fills (top centre and the two lower canopy rails).
+        "F29" => [s(640, 70), s(120, 420), s(1160, 420)],
         _ => return None,
     })
 }
@@ -301,7 +304,7 @@ mod tests {
         family(&[Su27, Av8, F15]);
         family(&[Mig29, Su25, Mig23, Mi24]);
         family(&[F104, A10]);
-        for id in [F18, F14, Rafale, Su35, A7, Yak141, Gripen] {
+        for id in [F18, F14, Rafale, Su35, A7, Yak141, Gripen, F5E] {
             assert!(seeds(id).is_some(), "{id:?}");
         }
         // The F-16, F-22, X-31, MiG-17, MiG-21 and AC-130 pictures have no

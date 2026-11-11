@@ -650,6 +650,7 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |
 | `f15e` | Gear, brake and burner words unmapped (generic interim rig) | Whole rigid gear (legs flat and forward, doors outward, nose forward), the dorsal brake piece and two burner plumes reviewed; whole-panel stabilators with roll, ailerons about their slanted hinges and flaps reviewed (F15E-3), no rudder; mechanics fitted |
 | `gripen` | Gear, brake and burner words unmapped (interim gear rise); canards, elevons and rudder not yet mapped | Whole canards (pitch plus differential roll), elevon wedges (pitch, roll, flap droop), rudder, rigid gear (legs, door pairs, nose), the two rear-fuselage airbrake plates and the burner plume reviewed (GRI-3, GRI-4); mechanics fitted |
+| `f5e` | Gear, brake and burner words unmapped (interim gear rise); surfaces unmapped | Whole stabilators (pitch only), ailerons, flap strips and rudder reviewed with the 25-pose pitch/roll grid (F5E-3); whole rigid gear plates (mains inward, nose forward), the one dorsal speed brake plate and the twin burner plumes with two nozzle glows reviewed (F5E-4); mechanics fitted |
 
 ## F-15E gear, speed brake and plume results (2026-11-10)
 
@@ -741,3 +742,21 @@ at pitch plus roll, 1.75 ft at the extreme flap, pitch and roll corner; canard
 root 0.17 ft at full pitch; rudder 0.81 ft. The `flight-animation-gripen`
 scenario is registered (`animation.py`, 203-line dense gear and 26-line pitch/roll
 sweeps). Frames: `.local/m3-aircraft/frames/GRI-3/`.
+
+## F-5E gear, speed brake and plume results (2026-11-10)
+
+Exact `f5e` (`F5E.PT`) passes the probe with the F5E-3 control fit and the F5E-4
+devices (`TORE_DATA_DIR=.local/m3-aircraft/profile-f5e target/debug/tore-app
+--aircraft f5e --animation-probe .local/m3-aircraft/checks/F5E-4/poses`): scope
+`reviewed-controls-and-attachments`, 253 neutral faces, zero required or check
+failures; gear, brake and exhaust each read `required moved`. The 202-value
+dense gear sweep has every row passing (anchor gap 0, skin gap 0, rigidity at
+most 1.6e-6 ft, no new planar crossings, lowest gear point at the 18 unit low
+point at gear 1); the seven-value brake sweep lays the closed plate's free edge
+on the dorsal ridge within 3e-6 ft with rigidity at most 6.4e-7 ft and the
+hinge edge fixed; the 25 pitch/roll poses still pass. Mutation check: turning
+the right main the wrong way fails the gear row and every dense row. `flight-animation-f5e`
+and `flight-variety-f5e` pass in the battery. The geometry, citations, fold
+table and open items are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10).
+Frames: `.local/m3-aircraft/frames/F5E-4/`.

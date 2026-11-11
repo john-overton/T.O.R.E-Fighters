@@ -1870,3 +1870,58 @@ canopy top on the neutral shape (1/3 ft a unit) is 2.3 to 2.7 ft above the model
 origin and 6.7 to 15.7 ft ahead of it, against the fixed pilot's eye 7 ft up and 10
 ft ahead. No per-aircraft eye was added; see [the Gripen sensors, HUD and cockpit
 section](aircraft-variety.md#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10).
+
+## F-5E skin review (2026-11-10)
+
+Slice F5E-2 checked the flyable `F5E.PT` import's skin (media identity in [the
+F-5E source review](aircraft-variety.md#f-5e-source-review-2026-11-10)). Size
+is unchanged: the F-5E has no [aircraft shape scale](#aircraft-shape-scale-2026-11-09)
+entry (`[1, 1, 1]`, pending John's size decision), so everything below is on
+the retail shape. The flyable path draws `F5E.SH`: 253 faces on the runtime
+state path (255 on the export path, the two extra being the decals below), one
+texture `_F5E.PIC`. The four damage shapes `F5E_A.SH` to `F5E_D.SH` and their
+textures `_F5E_A.PIC` to `_F5E_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs).
+
+**Own art, no alias.** Resources are read by exact name. The importer keeps
+every resource whose name starts `_F5E` or `F5E_`, which also brings in the
+desert record's `_F5EE*` skins (byte-identical to the F-5E's) and the snow
+record's `_F5EV*` skins; the F-5E never reads them. The desert and snow shapes
+(`F5EE.SH`, `F5EV.SH`) are not carried by that prefix and are separate shapes
+at other addresses. A retail-reading test
+(`crates/tore-import/tests/f5e_shape.rs`) pins that the three shapes differ and
+that no F-5E face names a `_F5EE` picture.
+
+The F-5E does **not** need the [MiG-21 stored-normal exception](#mig-21-skin-review).
+`F5E.SH` has 8 exact-vertex twin groups, each a pair with opposite stored
+normals (the canopy and windshield centre plates, both stabilators, the fin
+plates and the rudder; pinned by the retail test), so smooth mode pairs each
+double-sided panel through the shared [panel
+contract](../spec/aircraft-animation.md#double-sided-panels) and hides the rear
+member. The wing's upper and lower surfaces are separate layers (z -3 and -4),
+not twins. A top and an under capture in smooth mode, gear down, show no grey
+underside through the top, no flicker and no clipped marking.
+
+**Decal slots.** The shape carries two `E0` runtime decal slots on the wings,
+both 12 by 12 units (4 ft): slot 4 at address `3c2f` (x 18 to 30, y -4 to 8,
+z -4, right wing) and slot 3 at `40b9` (x -30 to -18, y -4 to 8, z -3, left
+wing); the guide's slots 3 and 4 are the wing markings. The runtime projector
+omits both and neither is filled with a piece of the main skin, following
+[texture state and decals](#texture-state-and-decals). No other slot (the tail
+art slots 0 and 1, the nose slot 2) exists in the shape, so there is no tail
+art to omit. The wing underside under the omitted slots is plain skin, so no
+blank patch shows (3x crop in the frames). The round mark seen under each wing
+in the under frame is the gear-down main wheel plate, not a decal. Every other
+textured face draws whole.
+
+**Damage looks.** Their reviewed pairing and geometry are in the [F-5E shape,
+skin and damage looks](aircraft-variety.md#f-5e-shape-skin-and-damage-looks-f5e-2-2026-11-10)
+section. The review frames live under `.local/m3-aircraft/frames/F5E-2/`. No
+mesh bytes, exported geometry or retail art are committed.
+
+**Cockpit family (F5E-7, 2026-11-10).** The F-5E draws the X-29's `~F29H.PIC` cockpit
+art (the record names `f29.HUD`; John, 2026-11-10, opinionated), the first aircraft
+to use the family. Its HUD glass aperture and mirror seeds are measured on that
+art; see [the F-5E sensors, HUD and cockpit
+section](aircraft-variety.md#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+No F-5E cockpit art exists, and no retail art is committed.
