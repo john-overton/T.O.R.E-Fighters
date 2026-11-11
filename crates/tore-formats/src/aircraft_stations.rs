@@ -16,6 +16,18 @@ pub const M2000_BELLY: usize = 5;
 /// The Mirage 2000's decoded wingtip row (`M2000.PT` row 8), retired by
 /// [`retire`].
 pub const M2000_TIP: usize = 8;
+/// The Tornado's decoded outer wing pair (`TOR.PT` row 8, the last row),
+/// retired by [`retire`].
+pub const TORNADO_OUTER_WING: usize = 8;
+/// The F-5E's radar, jammer and wing-pair rows and the Mirage F1's centreline
+/// row, whose defaults [`adjust_defaults`] changes.
+pub const F5E_RADAR: usize = 1;
+pub const F5E_JAMMER: usize = 2;
+pub const F5E_WING_PAIR: usize = 5;
+pub const MF1_CENTRELINE: usize = 4;
+/// The radar the F-5E carries in place of the generic `F18R.SEE`: the F-104
+/// record, the closest reviewed small-fighter radar (see [`adjust_defaults`]).
+pub const F5E_RADAR_RECORD: &str = "F104R.SEE";
 
 /// The source row of the F-4B's centreline station (`F4B.PT` row 3: four
 /// AIM-9Bs, Mk 82s and the other stores on the centreline) that also takes
@@ -119,20 +131,117 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// stores drawing) sees the same eight rows and no station index moves.
 /// Repeated application is a no-op.
 pub fn retire(id: AircraftId, rows: &mut Vec<Hardpoint>) {
-    if id != AircraftId::M2000 || rows.len() != M2000_TIP + 1 {
+    let (index, retail): (usize, Signature) = match id {
+        AircraftId::M2000 => (M2000_TIP, (5, 0x85, [33, -4, -29], "R550.JT", 2, 4)),
+        // The Tornado's outer wing pair (John, 2026-11-10, opinionated: "remove
+        // end wing stations typically reserved for the pods"): `TOR.PT` row 8,
+        // Wing, x 16, two `AIM9M.JT`, mask 0x85. The real aircraft's outer
+        // wing pylons carry pods and no weapons; the row is the last, so no
+        // other index moves. The inner wing pair (row 7) stays.
+        AircraftId::Tornado => (
+            TORNADO_OUTER_WING,
+            (4, 0x85, [16, -22, 4], "AIM9M.JT", 2, 5),
+        ),
+        _ => return,
+    };
+    if rows.len() != index + 1 {
         return;
     }
-    let tip = &rows[M2000_TIP];
+    let row = &rows[index];
     if (
-        tip.location,
-        tip.flags,
-        tip.position,
-        tip.store.as_deref(),
-        tip.count,
-        tip.weight_class,
-    ) == (5, 0x85, [33, -4, -29], Some("R550.JT"), 2, 4)
-    {
+        row.location,
+        row.flags,
+        row.position,
+        row.store.as_deref(),
+        row.count,
+        row.weight_class,
+    ) == (
+        retail.0,
+        retail.1,
+        retail.2,
+        Some(retail.3),
+        retail.4,
+        retail.5,
+    ) {
         rows.pop();
+    }
+}
+
+/// The retail rows of the aircraft whose default load [`adjust_defaults`]
+/// changes: the whole table, so an edited record keeps its own defaults.
+fn default_signature(id: AircraftId) -> &'static [Signature] {
+    match id {
+        AircraftId::F5E => &[
+            (1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 0x8, [0, 0, -50], "F18.ECM", 1, 0),
+            (2, 0xc, [4, -5, 41], "M61.JT", 560, 0),
+            (0, 0x605, [0, -14, 0], "F150.GAS", 1, 11),
+            (4, 0x7e5, [22, -14, 3], "AIM7.JT", 4, 40),
+            (5, 0x85, [43, -3, -3], "AIM9B.JT", 2, 4),
+        ],
+        AircraftId::Mf1 => &[
+            (1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 0x8, [0, 0, -50], "AV8.ECM", 1, 0),
+            (2, 0xc, [3, -5, 51], "DEFA.JT", 250, 0),
+            (0, 0x7e5, [0, -18, 5], "ALQ167.ECM", 1, 22),
+            (4, 0x7e5, [6, -17, 0], "F250.GAS", 4, 46),
+            (4, 0x1c5, [21, -10, -3], "R550.JT", 2, 20),
+            (5, 0x85, [41, 3, -11], "R550.JT", 2, 4),
+        ],
+        _ => &[],
+    }
+}
+
+/// Default-load corrections (John, 2026-11-10, opinionated, batch decision
+/// round), applied after decoding only when every source row is exactly the
+/// retail one. No row is added, removed or moved and no row's mask, count,
+/// weight class or position changes, so every station index and everything
+/// each station accepts stays as decoded; only what the row holds by default
+/// changes (`store`).
+///
+/// - **Mirage F1** (`MF1.PT` row 4, the centreline station): no default
+///   `ALQ167.ECM` pod. The record's American jammer pod is not in Jane's list
+///   of the F1's loads (`MF1.INF`); the station is real and still takes what
+///   its mask admits.
+/// - **F-5E** (`F5E.PT`): row 5, the wing pair, defaults to empty (no `AIM7.JT`:
+///   the real F-5E does not carry the Sparrow); the `AIM9B.JT` wingtip pair
+///   stays. Row 2 (`F18.ECM`) is empty by default: the real F-5E has no internal
+///   jammer, and the sensor profile reads a jammer only from a row that holds
+///   an `.ECM` record. Row 1 holds `F104R.SEE` in place of the generic
+///   `F18R.SEE`: the real radar is the Emerson AN/APQ-159 (20 nm, `F5E.INF`;
+///   Wikipedia "Northrop F-5"), which TORE has no record for; the closest
+///   reviewed record is the F-104's `F104R.SEE` (50 nm search, 25 nm track,
+///   look-down 50, the Basic radar preset: a lightweight 1960s fighter set).
+///   The alternatives are `F4BR.SEE` (the same ranges, a two-seat interceptor's
+///   set) and `YAK141R.SEE` (40 / 25 nm, Transitional); `F8R.SEE` (35 / 20 nm)
+///   is closest in range but has no reviewed preset and would never switch on.
+pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
+    let signature = default_signature(id);
+    if signature.is_empty()
+        || rows.len() != signature.len()
+        || !rows.iter().zip(signature).all(|(h, s)| {
+            (
+                h.location,
+                h.flags,
+                h.position,
+                h.store.as_deref(),
+                h.count,
+                h.weight_class,
+            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
+        })
+    {
+        return;
+    }
+    match id {
+        AircraftId::F5E => {
+            rows[F5E_RADAR].store = Some(F5E_RADAR_RECORD.into());
+            rows[F5E_JAMMER].store = None;
+            rows[F5E_WING_PAIR].store = None;
+        }
+        AircraftId::Mf1 => rows[MF1_CENTRELINE].store = None,
+        _ => {}
     }
 }
 
@@ -527,5 +636,157 @@ mod tests {
         edited[M2000_TIP].count = 4;
         retire(AircraftId::M2000, &mut edited);
         assert_eq!(edited.len(), 9);
+    }
+
+    fn row((location, flags, position, store, count, weight_class): Signature) -> Hardpoint {
+        Hardpoint {
+            location,
+            flags,
+            position,
+            store: Some(store.into()),
+            count,
+            weight_class,
+        }
+    }
+
+    fn tornado_retail() -> Vec<Hardpoint> {
+        [
+            (1, 0x8, [0, 0, 0], "VIS240.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 0x8, [0, -15, -60], "MIG31.ECM", 1, 0),
+            (1, 0x8, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (2, 0xc, [7, -5, 55], "BK27.JT", 360, 0),
+            (4, 0x205, [0, -25, 17], "F250.GAS", 2, 40),
+            (1, 0x7e5, [6, -25, 14], "PAVEWAY.JT", 4, 80),
+            (4, 0x505, [11, -25, 9], "MK82P3.JT", 2, 30),
+            (4, 0x85, [16, -22, 4], "AIM9M.JT", 2, 5),
+        ]
+        .into_iter()
+        .map(row)
+        .collect()
+    }
+
+    type RowKey = (u8, i32, [i32; 3], Option<String>, i32, i32);
+
+    fn key(rows: &[Hardpoint]) -> Vec<RowKey> {
+        rows.iter()
+            .map(|h| {
+                (
+                    h.location,
+                    h.flags,
+                    h.position,
+                    h.store.clone(),
+                    h.count,
+                    h.weight_class,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_tornado_carries_no_outer_wing_row_and_only_that_row_goes() {
+        // John, 2026-11-10: "remove end wing stations typically reserved for
+        // the pods". The row is the last, so no other index moves.
+        let retail = tornado_retail();
+        let mut rows = retail.clone();
+        retire(AircraftId::Tornado, &mut rows);
+        assert_eq!(key(&rows), key(&retail[..TORNADO_OUTER_WING]));
+        // The inner wing pair (row 7) keeps its place and its Mk 82 default.
+        assert_eq!(rows[7].store.as_deref(), Some("MK82P3.JT"));
+        retire(AircraftId::Tornado, &mut rows);
+        assert_eq!(rows.len(), 8);
+        // Any other aircraft, or an edited outer row, keeps every row.
+        for other in [AircraftId::Mig23, AircraftId::Su25, AircraftId::Mf1] {
+            let mut rows = retail.clone();
+            retire(other, &mut rows);
+            assert_eq!(key(&rows), key(&retail));
+        }
+        let mut edited = retail.clone();
+        edited[TORNADO_OUTER_WING].count = 4;
+        retire(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited.len(), 9);
+        let mut shifted = retail.clone();
+        shifted.push(row((4, 0x85, [16, -22, 4], "AIM9M.JT", 2, 5)));
+        retire(AircraftId::Tornado, &mut shifted);
+        assert_eq!(shifted.len(), 10);
+    }
+
+    fn default_rows(id: AircraftId) -> Vec<Hardpoint> {
+        default_signature(id).iter().copied().map(row).collect()
+    }
+
+    #[test]
+    fn the_mirage_f1_centreline_keeps_its_station_but_defaults_to_no_pod() {
+        let retail = default_rows(AircraftId::Mf1);
+        assert_eq!(retail.len(), 8);
+        assert_eq!(retail[MF1_CENTRELINE].store.as_deref(), Some("ALQ167.ECM"));
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::Mf1, &mut rows);
+        // Only the default store of the centreline row changes: same index,
+        // same mask, count, weight class and position, so it accepts what it did.
+        let mut expected = key(&retail);
+        expected[MF1_CENTRELINE].3 = None;
+        assert_eq!(key(&rows), expected);
+        assert_eq!(rows[MF1_CENTRELINE].flags, 0x7e5);
+        // The jammer suite (row 2), the tank pair and the Magics stay.
+        assert_eq!(rows[2].store.as_deref(), Some("AV8.ECM"));
+        assert_eq!(rows[5].store.as_deref(), Some("F250.GAS"));
+        adjust_defaults(AircraftId::Mf1, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // Another identity with the same rows, or an edited record: unchanged.
+        let mut other = retail.clone();
+        adjust_defaults(AircraftId::M2000, &mut other);
+        assert_eq!(key(&other), key(&retail));
+        for index in 0..retail.len() {
+            let mut edited = retail.clone();
+            edited[index].count += 1;
+            adjust_defaults(AircraftId::Mf1, &mut edited);
+            assert_eq!(
+                key(&edited),
+                key(&{
+                    let mut r = retail.clone();
+                    r[index].count += 1;
+                    r
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn the_f5e_has_the_f104_radar_no_jammer_and_an_empty_wing_pair() {
+        let retail = default_rows(AircraftId::F5E);
+        assert_eq!(retail.len(), 7);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::F5E, &mut rows);
+        let mut expected = key(&retail);
+        expected[F5E_RADAR].3 = Some("F104R.SEE".into());
+        expected[F5E_JAMMER].3 = None;
+        expected[F5E_WING_PAIR].3 = None;
+        assert_eq!(key(&rows), expected);
+        // The wing pair still takes what its mask took (0x7e5: the Sparrow
+        // among them), and the AIM-9B wingtip default stays.
+        assert_eq!(rows[F5E_WING_PAIR].flags, 0x7e5);
+        assert_eq!(
+            (rows[F5E_WING_PAIR].count, rows[F5E_WING_PAIR].weight_class),
+            (4, 40)
+        );
+        assert_eq!(rows[6].store.as_deref(), Some("AIM9B.JT"));
+        assert_eq!(rows[3].store.as_deref(), Some("M61.JT"));
+        assert_eq!(rows[4].store.as_deref(), Some("F150.GAS"));
+        adjust_defaults(AircraftId::F5E, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // The F-5E's retail rows on another identity, or edited, stay retail.
+        for id in [AircraftId::F4E, AircraftId::F104, AircraftId::Mf1] {
+            let mut other = retail.clone();
+            adjust_defaults(id, &mut other);
+            assert_eq!(key(&other), key(&retail));
+        }
+        for index in 0..retail.len() {
+            let mut edited = retail.clone();
+            edited[index].weight_class += 1;
+            let before = key(&edited);
+            adjust_defaults(AircraftId::F5E, &mut edited);
+            assert_eq!(key(&edited), before);
+        }
     }
 }

@@ -28,7 +28,9 @@ mod store_pairs;
 const AIRCRAFT: usize = 45;
 /// 17 from 14: the Gripen's one and the Mirage F1's two optional weapon rows
 /// (B5-1, 2026-11-10; the batch-5 records carry rows with no default weapon).
-const RECOVERED_STATIONS: usize = 17;
+/// 18 from 17: the F-5E's wing pair no longer holds the AIM-7 by default, so it
+/// is a third batch-5 optional weapon row (B5-2, John 2026-11-10).
+const RECOVERED_STATIONS: usize = 18;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
@@ -40,7 +42,10 @@ const TANK_RECORDS: usize = 9;
 /// 4,663 from 4,066: the five batch-5 records join the same way (B5-1,
 /// 2026-11-10): F-15E 65, Gripen 190, F-5E 71, Tornado 96, Mirage F1 175. First
 /// measurements; each aircraft's station slice owns its count.
-const WEAPON_PLACEMENTS: usize = 4663;
+/// 4,652 from 4,663: the Tornado carries no outer wing row, so its eleven
+/// compatible weapon placements there go (B5-2, John 2026-11-10); the F-5E and
+/// Mirage F1 default-load changes move no placement.
+const WEAPON_PLACEMENTS: usize = 4652;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -48,13 +53,17 @@ const WEAPON_PLACEMENTS: usize = 4663;
 /// gallon tank, two placements fewer (M2K-5, John 2026-11-10).
 /// 231 from 199: the batch-5 records (B5-1, 2026-11-10): F-15E 3, Gripen 12,
 /// F-5E 5, Tornado 8, Mirage F1 4.
-const TANK_PLACEMENTS: usize = 231;
+/// 233 from 231: the Mirage F1's centreline row has no default pod now, so its
+/// two tank placements (150 and 250 gallon) count (B5-2, John 2026-11-10).
+const TANK_PLACEMENTS: usize = 233;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
 /// F-16A's four wing and wingtip rows (slice F16A-4). 186: the MiG-31 (M31-1). 194: the Mirage 2000 (M2K-1).
 /// 192 from 194: the Mirage 2000's wingtip row is gone, two fewer (M2K-5, John 2026-11-10).
 /// 222 from 192: the batch-5 records (B5-1, 2026-11-10).
-const NOVELTY_PLACEMENTS: usize = 222;
+/// 220 from 222: the Tornado's outer wing row is gone, two fewer (B5-2, John
+/// 2026-11-10).
+const NOVELTY_PLACEMENTS: usize = 220;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).

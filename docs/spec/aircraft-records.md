@@ -184,3 +184,96 @@ G with full fuel (was 7.08) and 9.09 G at 300 lb (was 8.09). The loaded-elevator
 rule still scales the limit down to the gross weight, so the clean, full-fuel
 aircraft does not reach 9. The push limit and the sustained turns do not change.
 Measurements: [Mirage validation](../baselines/variety-flight.md#mirage-2000-positive-g-limit-9-2026-11-10).
+
+## Batch 5 record corrections: Tornado IDS, Mirage F1, F-5E (B5-2, 2026-11-10)
+
+**Opinionated (John, 2026-11-10, batch decision round), implemented by slice
+B5-2.** The source reviews in
+[the variety document](../formats/aircraft-variety.md) found values in three of
+the five batch records that are another aircraft's, not the real one's. John
+decided, for each, to follow the real aircraft. The Gripen (570 gun rounds kept)
+and the F-15E (retail kept) have no correction. Like the Mirage 2000 above, each
+correction is a TORE override over the record, not retail behaviour, and applies
+only to its own identity and only while every value it replaces still holds the
+retail number (`aircraft_corrections.rs`, applied where `Aircraft::parse` reads
+the record). The decoder, the catalog and the retail rows stay documented as
+retail.
+
+| Aircraft | Field | Retail | Game | Source |
+| --- | --- | ---: | ---: | --- |
+| Tornado IDS | Military thrust, lbf (both engines) | 35,270 | 17,300 | 2 x RB199-34R Mk 103 at 38.48 kN (8,650 lbf) (MILAVIA, "Tornado specifications", accessed 2026-11-10) |
+| Tornado IDS | Afterburner thrust, lbf (both engines) | 50,700 | 32,150 | 2 x 71.50 kN (16,075 lbf) (MILAVIA, same page) |
+| Tornado IDS | Empty weight, lb | 41,885 | 31,065 | 14,091 kg (MILAVIA; aerospaceweb.org "Tornado IDS data" agrees) |
+| Tornado IDS | Maximum take-off, lb | 90,390 | 61,620 | 27,961 kg (MILAVIA) |
+| Tornado IDS | Highest G row (`envMax`) | 6 | 7 | real limit +7.5 (`TOR.INF`); see below |
+| Mirage F1 | Military thrust, lbf | 15,000 | 11,020 | one Atar 9K-50, 49.0 kN dry (MIGFlug, "Dassault Mirage F1") |
+| Mirage F1 | Afterburner thrust, lbf | 30,000 | 15,873 | 70.6 kN (Jane's text in `MF1.INF`; MILAVIA gives 70.21 kN) |
+| F-5E | Internal fuel, lb | 6,240 | 4,400 | `F5E.INF` prints 4,400 lb; 677 US gal (Wikipedia, "Northrop F-5", F-5E specifications) is about 4,500 lb |
+| F-5E | Ceiling (`maxAlt`), ft | 42,000 | 51,800 | 15,800 m service ceiling (Wikipedia, same page; `F5E.INF` 15,790 m) |
+| F-5E | Highest G row (`envMax`) | 8 | 7 | real limit +7.33 / -3.0 G (T.O. 1F-5E-1, cited secondhand); see below |
+
+The Mirage F1 already says one engine, and its weights and fuel stay retail
+(John: keep). The Tornado's engine count (2) and its fuel (11,221 lb) are its own
+and stay; its fuel flows are still the Su-24's (6 and 38 lb/s) and are not part of
+this decision. The F-5E's thrust, weights and engine count already match the real
+aircraft.
+
+**How a whole-G envelope honours +7.5 and +7.33.** The envelope rows and `envMax`
+are whole G, so neither +7.5 nor +7.33 has a row of its own. Both are held to
++7, the nearest whole row below the real limit, the conservative side.
+
+- **Tornado.** The retail record has rows -3 to +6. A fitted +7 row is added from
+  the Tornado's own +6 row, the way `plus_nine_row` fits the Mirage's +9 (now
+  `fitted_row`): each slow-side speed is multiplied by sqrt(7 / 6) = 1.0801 and
+  rounded; the fast side and every altitude are the +6 row's; each fast-side speed
+  is held to the 1 G row's top speed at its altitude (a no-op here).
+
+  | Row | Points (speed ft/s, altitude ft) |
+  | --- | --- |
+  | +6 (retail) | (575, 0) (667, 7000) (880, 14000) (1120, 14000) (1140, 0) |
+  | +7 (fitted) | (621, 0) (720, 7000) (951, 14000) (1120, 14000) (1140, 0) |
+
+  Residual: 0.5 G (6.7 percent) under the real +7.5. The +6 row is a repeat of the
+  record's -3 row (the review noted it), so the fitted row inherits that polygon's
+  14,000 ft altitude cap.
+- **F-5E.** The retail record has rows -4 to +8, but the +8 row is word for word
+  the -4 row (570 ft/s at sea level, 610 at 4,000 ft, 730 at 3,000 ft, 760 at sea
+  level), a copy, not an authored row. It is retired and `envMax` becomes 7, so the
+  record's own +7 row is the top. Residual: 0.33 G (4.5 percent) under the real
+  +7.33. The retirement applies only while the +8 row still equals the -4 row.
+
+**The F-5E ceiling.** Two things express a ceiling: the record's `maxAlt` field
+(read by the diagnostic readers) and the top of the 1 G envelope polygon (the flight
+model's ceiling: above it the air is too thin to hold level flight). Both move:
+`maxAlt` goes to 51,800 ft, and the two vertices at the top edge of the 1 G
+polygon (580 and 965 ft/s at 42,000 ft) and of the 0 G polygon (570 and 995 ft/s
+at 44,000 ft) go up by 9,800 ft, to 51,800 and 53,800 ft. That is the minimal
+consistent change: no other vertex of any row moves, so the low and medium altitude
+envelope, the corner speeds and the stall edge below 38,750 ft are the record's own.
+The 1 G slow edge now runs from 458 ft/s at 38,750 ft straight to 580 ft/s at 51,800
+ft, and the fast edge from 1,607 ft/s at 39,000 ft to 965 ft/s at 51,800 ft (about
+1,300 ft/s, Mach 1.35, at 45,000 ft). The ceiling rows move only when the record's
+`maxAlt` has just been corrected and both polygons are the retail ones.
+
+Where it lives: `aircraft_corrections.rs` (`CORRECTIONS` rows, `fit_envelopes`,
+`fitted_row`), called from `Aircraft::parse`; every reader sees one set of numbers.
+
+What a player notices (`performance_probe`, clean, afterburner, local records;
+the retail column is the record with one value nudged so the guards skip):
+
+- **Tornado.** Half the thrust and 10,820 lb less empty weight. The afterburner
+  thrust-to-weight at empty weight plus full internal fuel falls from 0.95 to 0.76
+  (military power from 0.66 to 0.41), so the aircraft holds less speed in a hard
+  turn: at 461 kt and 1,000 ft the sustained pull is the same 4.8 G but it settles
+  at 508 kt where the Fencer numbers held 567 kt. The instantaneous pull at 461 kt
+  and 1,000 ft rises from 5.47 to 6.17 G, because the lighter airframe is scaled
+  down less by the loaded-elevator rule; the +7 row itself is not reached with
+  fuel aboard.
+- **Mirage F1.** The sustained 461 kt turn at 1,000 ft falls from 5.76 G to 3.63 G
+  (12.7 to 8.1 degrees a second); the instantaneous pull (6.14 G) is the G rows',
+  unchanged.
+- **F-5E.** A little more sustained turn from the smaller fuel load (4,400 lb
+  against 6,240 lb): 4.13 G against 3.63 G at 461 kt and 1,000 ft. The 461 kt
+  instantaneous pull at 1,000 ft falls from 6.27 to 5.98 G with the +8 row gone.
+
+Logs are local: `.local/m3-aircraft/checks/B5-2/`.

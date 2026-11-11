@@ -4478,3 +4478,32 @@ John's decision round), no battery list extension. The ordnance audit pins moved
 to 45 aircraft as first measurements of five records not yet reviewed station by
 station; see the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-identities-join-the-roster-b5-1-2026-11-10).
+
+## Batch 5 record and station corrections (B5-2, 2026-11-10)
+
+Implementation mode, slice B5-2, John's decision round of 2026-11-10 (opinionated).
+The retail reading of every record in the five source reviews above is unchanged
+and stays the research record; TORE now overrides the values below where the
+record is read, only while the record still holds the retail numbers, and each
+override has a unit test (retail still decodes as retail, the identity sees the
+correction, other identities and edited records are untouched). The F-15E and the
+Gripen have no correction (the F-15E's retail values and the Gripen's 570 rounds
+are kept). Behaviour, numbers, sources and the whole-G representation are in
+[aircraft records](../spec/aircraft-records.md#batch-5-record-corrections-tornado-ids-mirage-f1-f-5e-b5-2-2026-11-10);
+the stations are in [stores on pylons](../spec/stores-on-pylons.md#batch-5-stations-tornado-outer-wing-mirage-f1-centreline-f-5e-defaults-b5-2-2026-11-10).
+
+| Aircraft | Correction |
+| --- | --- |
+| Tornado IDS | thrust 17,300 / 32,150 lbf (two RB199 Mk 103), empty 31,065 lb, maximum take-off 61,620 lb, G limit +7 (fitted +7 row from the +6 row; real +7.5), outer wing row (`TOR.PT` row 8) retired |
+| Mirage F1 | thrust 11,020 / 15,873 lbf (one Atar 9K-50), no default `ALQ167.ECM` on the centreline (row 4 keeps its station and mask); weights retail |
+| F-5E | internal fuel 4,400 lb, `maxAlt` 51,800 ft with the 1 G and 0 G top edges moved to match, G limit +7 (the copied +8 row retired; real +7.33), `F104R.SEE` radar in place of `F18R.SEE`, no `F18.ECM` jammer, empty wing pair (no `AIM7.JT`) |
+
+Station indices: none moves. The Tornado row is the last, so it is dropped as the
+Mirage 2000's wingtip row was; the Mirage F1 and F-5E rows keep their place and
+only their default store changes.
+
+Open for John: the F-5E radar stands in with the F-104's `F104R.SEE` (alternatives
+`F4BR.SEE`, `YAK141R.SEE`; the AN/APQ-159 has no record), and clearing the F-5E's
+`F18.ECM` also removes its chaff and flares (`F104.ECM` would keep dispensers
+without a jammer). Tornado fuel flows (6 and 38 lb/s) are still the Su-24's. The
+Tornado's default load has no Sidewinders now that the outer wing pair is retired.
