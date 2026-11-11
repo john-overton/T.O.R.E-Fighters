@@ -1780,3 +1780,10 @@ handling John's decision of 2026-11-10 (opinionated) on the 2026-11-07 rule; the
 measurement, the clipping classification and the options are agent findings,
 2026-11-10; the estimates marked "not run" are agent estimates; real-aircraft station
 counts from public pages (secondary, conflicting).
+
+### Gripen station decisions (John, 2026-11-10)
+
+Round 2 of the batch decisions (opinionated, John, 2026-11-10): the
+Gripen station measurements above are accepted as they stand ("keep"); no
+station, mask, pylon or rail drop changes, and the clipping cases listed above
+remain as recorded.
