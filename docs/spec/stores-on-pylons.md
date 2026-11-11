@@ -1639,3 +1639,127 @@ Audit pins: recovered stations 17 to 18, weapon placements 4,663 to 4,652, tank
 placements 231 to 233, Cheat-only placements 222 to 220; the pod placements (80)
 and the roster (45) are unchanged. See the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-record-and-station-corrections-b5-2-2026-11-10).
+
+## The F-5E Tiger (F5E-5, 2026-11-10)
+
+Measurement only, no station move, rail drop or mask adopted. `F5E.PT` has seven
+rows: three fixed sensor rows (visual sensor, radar, and the jammer that B5-2
+cleared), the internal M61 (560 rounds), the centreline tank row, one wing pair
+and the wingtip pair. The shape is drawn 1:1 (no scale, John 2026-11-10), so the
+decoded rows are used as recorded: feet are source units divided by three. They
+hang under the standard rules of 2026-10-13 (1 ft wing pylon, 2 inch centreline
+rail, a store centred on the tip's edge for a Wingtip row). No `station_move`
+exists for the F-5E and none was added: per John's standing rule (2026-11-07)
+the slice stops on clipping with the options below. **John kept the record's one
+wing pair (decision 15) and the B5-2 empty wing default; no second pair and no
+sensor or designator pod was added** (the record has no pod row, and the real F-5E
+carries no such pod on a station).
+
+| Row | Location | Decoded x / up / fwd, ft | Default | Hang used | Hangs at (centre, ft) |
+| ---: | --- | --- | --- | --- | --- |
+| 0 to 2 | fixed sensor, radar, jammer | 0 / 0 / 0 (jammer 0 / 0 / -16.7) | `VIS340.SEE`, `F104R.SEE`, none | nothing drawn | none |
+| 3 | internal gun | 1.3 / -1.7 / 13.7 | `M61.JT` 560 rounds | internal, not drawn | none |
+| 4 | Centerline | 0 / -4.67 / 0 | `F150.GAS` x1 | 2 inch rail under the belly (belly -1.67) | 0 / -2.62 / 0, tank 10.28 ft long, 1.58 ft wide |
+| 5 | Wing, paired (4 stores, two a side) | 7.33 / -4.67 / 1.00 | empty (B5-2) | 1 ft pylon at 7.33 ft out, twin rail, wing underside -1.33 | stores 1.32 ft apart, centres +-6.67 and +-7.99 / -2.54 / 1.00 (an AIM-9B) |
+| 6 | Wingtip, paired | 14.33 / -1.00 / -1.00 | `AIM9B.JT` x2 | tip rule: centre line on the tip's edge, no pylon | +-14.33 / -1.17 / 0.21 (missile 9.3 ft long) |
+
+Measured with `tore-app --stores-preview` (CPU, audit and catalog flags), plus a
+local triangle-level check of every store against the airframe, the gear (gear
+down, the F5E-4 rig, the ground plane 6.0 ft under the reference), the pylons,
+every other store and, for the wing row, the drooped flap (edge and face
+crossings, the audit's vertical entry, and surface distances sampled at 0.12 ft,
+good to about 0.05 ft). The check tools and their dumps are local only
+(`.local/m3-aircraft/checks/F5E-5/`); a temporary dump hook in
+`stores_preview.rs` was reverted and nothing in the tree changed but these docs.
+
+The wing is a flat panel 0.33 ft thick (undersides at -1.33 ft, tops at -1.0 ft)
+out to the tip at 14.33 ft, with a 0.67 ft wide, 4.33 ft long tip rail plate
+under the outer end. The belly under the tank is at -1.67 ft.
+
+**Default load (F150 tank on the centreline, AIM-9B on each tip):**
+
+| Station | Entry into the airframe | Edge crossings | Nearest neighbour | Gear down | Ground |
+| --- | ---: | ---: | --- | --- | ---: |
+| Tank, row 4 | none (0.17 ft off the belly, the 2 inch rail) | 0 | clear | 3.0 ft or more | 2.58 ft |
+| AIM-9B, row 6, right | **0.32 ft** (fins and body in the 0.33 ft thick tip) | 122 | clear | 3.0 ft or more | 4.19 ft |
+| AIM-9B, row 6, left | **0.32 ft** | 148 | clear | 3.0 ft or more | 4.19 ft |
+
+**Clipping, one case on the default load, for John (stop-and-report rule of
+2026-11-07; not fixed):**
+
+1. **Wingtip AIM-9B (row 6), 0.32 ft.** The missile's centre line sits on the
+   tip's edge at mid-thickness of the 0.33 ft tip (y -1.17 between the wing's
+   -1.0 and -1.33), so half its body and the upper and lower fins stand inside
+   the thin wing tip and the drawn tip rail plate. It is the tip rule meeting a
+   very thin tip, as on the Mirage 2000 (1.21 ft there). The value sits inside
+   the range of the default loads already reviewed (0.27 ft F-14 and MiG-25, 0.29
+   ft F-15, 0.42 ft F-16, 0.48 ft MiG-31, 0.72 ft Su-27) but is not zero. The
+   record's tip position and the shape's tip agree (43 units is 14.33 ft, the
+   wing's own edge), and the real F-5E does carry the AIM-9 on a wingtip rail at
+   this place (cited below), so the row's position is real; only the missile's
+   depth against a thin tip clips.
+   Options (none applied): (a) accept 0.32 ft; (b) lower the tip rail (a rail
+   drop of the kind the Mirage 2000's belly row uses, extended to Wingtip rows)
+   about 0.36 ft to put the body under the slab (estimated from the 0.33 ft slab
+   and the 0.2 ft body radius, not measured; the fins, 0.65 ft each way, would
+   still cross unless the drop is about 0.8 ft, which would hang the missile
+   visibly under the tip); (c) hang it on a 1 ft wing pylon inboard (MiG-31
+   `Hang::Wing`), which moves the missile off the real rail position. The
+   centreline tank is clean (0.17 ft is the 2 inch rail itself).
+
+Nothing in the default load touches the gear, the ground, the flap or another
+store. With the ailerons moved the outer end of each aileron strip (x 10.3 to
+14.3 ft) turns through the lower part of the tip missile, which already overlaps
+it; the flap strips end at x 10.3 ft and are clear (3.0 ft).
+
+**Alternatives the Load Ordnance page offers** (record masks unchanged; the live
+list is the same one the page prints). Row 4 takes only the `F150.GAS` tank. Row 6
+takes ten small A2A records (`AA2`, `AA8`, `AA11`, `AA11B`, `AIM9B`, `AIM9M`,
+`AIM9X`, `AT12`, `PL7`, `R550`). Row 5 takes 64 records: the 150, 250, 350 and 500
+gallon tanks and 60 missiles, rockets and bombs; each was loaded to its capacity
+(two a side, or one a side for the long and heavy ones) against the default tank
+and tip missiles. Distances are to the airframe (wing, fuselage), the main gear sheet,
+each other and the ground.
+
+| Row 5 load | Result |
+| --- | --- |
+| Clean (no entry, no crossing, at least 0.1 ft from the wing): `AA2`, `AA8`, `AA9`, `AA11`, `AGM45`, `AGM65A/G`, `AGM84A/E`, `AGM88`, `AIM120`, `AIM9B`, `AIM9M`, `AS7`, `AS14`, `AS16`, `AT2`, `B8`, `B13`, `CBU87`, `F150`, `F250`, `F350`, `F500`, `FAB250/500/1000`, `GBU29`, `GBU29P`, `LAU10`, `LAU61`, `MK20`, `MK82` and variants, `MK84`, `PAVEWA3`, `RBK250/500` | Gear 0.38 ft (`B8`) to 1.95 ft, ground 0.37 ft (`GBU29` family, the lowest) to 3.1 ft; the two missiles of a pair 0.01 to 0.05 ft apart (touching, no crossing); every store is more than 1 ft from the centreline tank |
+| Enter the wing | `AA6` 0.17 ft (26 crossings), `AM39` 0.23 ft (24), `AS30` 0.09 ft (20), `GBU10`, `GBU10A` and `PAVEWAY` 0.12 ft (12), `GBU12` 0.07 ft (16), `GBU16` 0.14 ft (28) |
+| Fins cross the other store on the same pylon | `AA11B` 30, `AA12` 6, `AIM9X` 16, `AS15` 52, `AT12` 40, `CBU89` 16, `GBU30` 28, `GBU38` 28, `MICA` 16, `PL10` 16, `PL7` 63, `R530` 84, `R550` 59 (crossings per pair, no airframe entry) |
+| Touch the main gear sheet (gear down) | `AIM7` and `AIM7E` 20 crossings (the Sparrow, the retail default of this row before B5-2), `GBU16` 28, `GBU30` 8; `GBU12` is 0.15 ft off it |
+
+Row 6 alternatives against the tip (entry into the thin tip): `AIM9B` 0.32 ft (the
+default), `AA2` 0.32, `AIM9M` 0.32, `AA11` 0.36, `AA11B` 0.17, `AA8` 0.62, `AIM9X`
+0.90, `PL7` 1.17, `R550` 1.25 ft, and `AT12` no entry but 56 crossings. The
+default missile is the least deep of its row. None comes near the gear or the
+ground (3 ft or more from the gear, 3.8 ft or more above the ground).
+
+**Flap droop (computed, F5E-3 hinge, 0.40 rad at full flap).** The wing-row stores
+hang under the flap strip's chord (x 2.3 to 10.3 ft, hinge 1.3 to 1.5 ft forward
+of the trailing edge). A flap at 100 percent comes 0.14 to 0.16 ft from an AIM-9B,
+0.27 ft from an AIM-7, 0.42 to 0.70 ft from `MK82`, `MK84` and `F500`, and crosses
+`R550`, `AGM45`, `GBU12` and `AA6` (28 to 46 crossings). A pylon's rear edge is
+0.01 to 0.03 ft from the drooped flap. The flap droop is a fleet-fitted constant
+(`FLAP_DROOP`); this is listed, not changed.
+
+**Gear down and ground.** The rig's main gear sheets stand at 4.67 ft and 5.0 ft
+out; the wing pylon at 7.33 ft (stores 5.9 to 8.6 ft out) clears them by 1.1 to
+1.4 ft for an AIM-9B, and the centreline tank (0.79 ft each way) by more than 3 ft.
+Parked on a runway (`--ground-start 2`) the default load stands on all three
+wheels, the tank 2.58 ft above the ground, the tip missiles 4.19 ft. The lowest
+alternative store is the `GBU29` family, 0.37 ft above the ground.
+
+Real F-5E for plausibility only (the decoded rows decide): seven external stations,
+two wingtip rails, four underwing pylons and one under the fuselage (Wikipedia,
+"Northrop F-5", Specifications; "five external hardpoints and two wingtip rails",
+aerospaceweb.org F-5 page, accessed 2026-11-10; no source gives the lateral
+offsets). The record has three store positions (the centreline, one wing pair and
+the tip pair), so two of the four real underwing stations have no row, which John
+decided to keep (2026-11-10). The Sidewinder on the tip rail is the real F-5E's own weapon.
+
+The row positions, masks, capacities and defaults are spec-derived from
+`F5E.PT` (F5E-0, B5-1) and B5-2; the pylon and rail depths are the existing
+opinionated rules of 2026-10-13; the keep-one-pair choice is John's (2026-11-10).
+The measurement, the comparison, the flap check and the stop are agent findings,
+2026-11-10. The ordnance audit pins did not move (no placement count changed).
+Frames: `.local/m3-aircraft/frames/F5E-5/`.

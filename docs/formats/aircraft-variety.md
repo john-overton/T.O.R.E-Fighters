@@ -3363,6 +3363,8 @@ rail); the second wing pair is a John question if a real-station layout is
 wanted (option: leave as one pair, or add pylons at the real outboard station
 as an opinionated change, with a cited position).
 
+Update (F5E-5, 2026-11-10): the stations are measured, see [F-5E stations measured](#f-5e-stations-measured-f5e-5-2026-11-10) and [stores on pylons](../spec/stores-on-pylons.md#the-f-5e-tiger-f5e-5-2026-11-10). John kept the one wing pair (2026-11-10); B5-2 emptied its default.
+
 ### F-5E size against the real aircraft (for John)
 
 Measured on `F5E.SH` at 1 unit = 1/3 ft, gear down (neutral extents plus the
@@ -3437,6 +3439,27 @@ underside through the top and no z-fighting.
 Provenance: shape and skin spec-derived (retail data read as data); the
 damage pairing and the omitted decals agent decisions (2026-11-10); size
 pending John (no scale).
+
+### F-5E stations measured (F5E-5, 2026-11-10)
+
+The default load and every alternative the record's masks offer, measured on the
+1:1 shape under the standard pylon rules (full tables, clipping and options in
+[stores on pylons](../spec/stores-on-pylons.md#the-f-5e-tiger-f5e-5-2026-11-10)):
+
+| Row | Position, ft right / up / fwd | Default | Hang | Result |
+| ---: | --- | --- | --- | --- |
+| 4 | 0 / -4.67 / 0 | `F150.GAS` x1 | 2 inch rail, belly -1.67 | clean (0.17 ft off the belly, 2.58 ft off the ground) |
+| 5 | 7.33 / -4.67 / 1.00 | empty (B5-2) | 1 ft twin-rail pylon, wing underside -1.33 | defaults clean; of 64 alternatives 8 enter the wing (0.07 to 0.23 ft), 13 cross a neighbour on the pylon, 4 touch the gear sheet (`AIM7`, `AIM7E`, `GBU16`, `GBU30`) |
+| 6 | 14.33 / -1.00 / -1.00 | `AIM9B.JT` x2 | tip rule on the 0.33 ft thick tip | **0.32 ft entry, both sides** (stop, options for John) |
+
+Rows 0 to 3 (sensor, radar, empty jammer, gun) draw nothing. No pod was added
+(B7). F5E-5 is `[~]`: the default tip AIM-9B clips 0.32 ft (inside the 0.27 to
+0.72 ft range of the default loads reviewed so far) and several Load Ordnance
+alternatives clip, so the decision is John's. At full flap (0.40 rad) the drooped
+flap crosses `R550`, `AGM45`, `GBU12` and `AA6` on the wing row (not the AIM-9B,
+0.14 ft clear). Nothing touches the ground in the default load. Provenance:
+measurement and comparison agent findings (2026-11-10); no Rust, pin or count
+changed.
 
 ## Tornado source review (2026-11-10)
 
