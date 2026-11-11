@@ -917,6 +917,9 @@ impl AircraftId {
             Self::M2000 => &["DEFA.JT"],
             Self::F15E => &["M61.JT"],
             // BK27.JT is not a live weapon yet (the ordnance slices own it).
+            // Update (GRI-6, 2026-11-10): listing it here is what makes it the
+            // Gripen's working internal gun (`is_gun`, Tab, tracers, sound, the
+            // live-fire probe); it still stays out of SUPPORTED_WEAPONS.
             Self::Gripen => &["BK27.JT"],
             Self::F5E => &["M61.JT"],
             Self::Tornado => &["BK27.JT"],

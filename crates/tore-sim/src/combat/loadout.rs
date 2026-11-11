@@ -914,6 +914,9 @@ mod tests {
                 // B5-1 (2026-11-10): the Gripen and the Tornado IDS are the
                 // decoded carriers of BK27.JT and mount it as their own
                 // internal gun. It stays out of SUPPORTED_WEAPONS.
+                // Update (GRI-6, 2026-11-10): still exactly these two. The
+                // Gripen's BK27 fires (live-fire battery, retail test
+                // `gripen_ordnance`); it stays a fixed gun, never a store.
                 let carrier =
                     name == "BK27.JT" && matches!(id, AircraftId::Gripen | AircraftId::Tornado);
                 assert_eq!(

@@ -1018,6 +1018,9 @@ impl Configuration {
                 // only the station's own default here: it stays out of
                 // SUPPORTED_WEAPONS and gets no other weapon work (ordnance
                 // slices own it).
+                // Update (GRI-6, 2026-11-10): the Gripen's BK27 fires as an
+                // internal gun (570 rounds, 32 a second, tracers, hits and
+                // kills); the Tornado's own slice verifies it there.
                 AircraftId::F15E => ["M61.JT", "MK82.JT", "AIM120.JT"].contains(&name),
                 AircraftId::Gripen => {
                     ["BK27.JT", "AGM65G.JT", "AIM120.JT", "AIM9M.JT"].contains(&name)

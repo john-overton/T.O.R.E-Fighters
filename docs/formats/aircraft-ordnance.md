@@ -1047,6 +1047,109 @@ launches, stays locked for 23 seconds and kills the lead truck; the tank and the
 selected group jettison. See [the baseline](../baselines/ordnance-availability.md#mirage-2000-ordnance-m2k-6-2026-11-10)
 for the commands and frames.
 
+## The Saab Gripen (GRI-6, 2026-11-10)
+
+Implementation and review note for the Gripen's ordnance (`AircraftId::Gripen`,
+`GRIPEN.PT`). Nothing about the default load changed: the record's rows, masks,
+capacities and defaults flow through the shared loading rules (as for the Mirage
+2000 above). The one gameplay question was the BK 27 gun, which B5-1 admitted as
+the Gripen's own internal gun; this slice proves it fires and records its values.
+Frames and commands: [the baseline](../baselines/ordnance-availability.md#saab-gripen-ordnance-gri-6-2026-11-10).
+
+**Default load** (decoded, the same for the human player, AI wings, saved loads
+and the lobby). Nine source rows: `VIS340.SEE`, `F18R.SEE`, `F18.ECM` and the
+`AAS38.SEE` placeholder (rows 0 to 3, fixed equipment), then
+
+| Row | Position (ft, source) | Default | Notes |
+| ---: | --- | --- | --- |
+| 4 | 1.33 / 0.67 / 12.33 (starboard) | `BK27.JT` x570 | internal gun, takes no other store |
+| 5 | centreline | `F150.GAS` x1 (990 lb of fuel) | a tank station; also takes weapons (the "optional weapon row") |
+| 6 | inner wing pair | `AGM65G.JT` x2 | paired, weight limit 4,000 lb |
+| 7 | outer wing pair, two a side | `AIM120.JT` x4 | paired, twin bars |
+| 8 | wingtip pair | `AIM9M.JT` x2 | tip rule |
+
+The stations stay as measured in GRI-5 (John, 2026-11-10, "for the gripen keep -
+no changes", including the gun row on the starboard side). The Load Ordnance
+page's catalog is 60 normal and 83 Cheat choices; `BK27.JT` is in neither (see
+below). The default stores weigh 4,210 lb with the tank's fuel (the live-fire
+probe's `payload_start_lb`). `--validate-ordnance` reads `ordnance GRIPEN.PT: 5
+source rows, 1 optional weapon rows, 190 compatible weapon placements, 12 tank
+placements; defaults and restart passed` (unchanged), and the AI probe's wing
+leader starts with the same stores (at 60 ticks: `tanks=1 external_fuel=989
+payload=4209 stations=[BK27 x570, AGM-65 x2, AIM-120 x4, AIM-9M x2, AGM-65 x0]`;
+after a 20 second fight the tank is gone and the first Sidewinder fired). The retail-reading test
+`crates/tore-import/tests/gripen_ordnance.rs` pins the nine rows and the ECM
+counts.
+
+**The BK 27 gun.** `BK27.JT` (27-mm Mauser BK27 Cannon, `fa-weapons.csv`) is a
+gun round whose compatibility flag 2 is clear, so only the station that names it
+can hold it, and it is in `AircraftId::guns()` for the Gripen and the Tornado
+(and in no catalog, no `SUPPORTED_WEAPONS`, no Cheat list: a fixed gun, never a
+store). Because `guns()` feeds `is_gun`, Tab, the gun tracer, the hit effects and
+the live-fire stations, it needed no other code: the shared gun path of the M61,
+DEFA and GSh records fires it. Values, with where each comes from:
+
+| Value | In TORE | Source | Real BK 27 |
+| --- | --- | --- | --- |
+| Calibre | 27 mm | record name | 27 mm (27x145 mm), Wikipedia "Mauser BK-27", accessed 2026-11-10 |
+| Rounds | 570 | row 4 count of `GRIPEN.PT` (spec-derived; John kept it, 2026-11-10) | 120 on the Gripen (GRI-0 review, public sources) |
+| Muzzle velocity | 2,933 ft/s (894 m/s) | record initial and max speed, the same value every gun record carries | about 1,100 m/s (3,600 ft/s), Wikipedia; sources vary |
+| Rounds per shot | 2 (`actualRoundsPerGame`), burst fields the same as M61 and DEFA | record | n/a |
+| Cadence | 32 rounds a second (1,920 a minute) | fitted shared rule: [individual cannon rounds](../spec/damage-smoke.md#individual-cannon-rounds) (`4 * 4 * 2 / 1` a second, 120 Hz ticks, 3 or 4 tick gaps) | 1,000 to 1,700 a minute selectable, one gun (28 a second at the top rate), Wikipedia |
+| Damage by class | 25 / 2 / 7 / 7 / 25, one third per bullet | record (the same row as M61 and DEFA) | n/a |
+| Dispersion | the shared 0.25 degree half angle | fitted shared rule | n/a |
+| Fire sound | `&FSTGUN3.11K`, audible to 6,000 ft | record (M61 is `&FASTGUN.11K`, DEFA `&EUROGUN.11K`; BK 27 has its own) | n/a |
+| Shape and tracer | `BULLET.SH`, a red ribbon every third round | record; the tracer colour families leave it red ([tracer colour families](../spec/damage-smoke.md#tracer-colour-families)) | n/a |
+
+Differences from the real gun, listed and not changed: the record's muzzle
+velocity is 18 to 19 percent below the real figure (it is the one value all the
+gun records share); TORE fires about 13 percent faster than the real top rate
+(1,920 against 1,700 a minute), so the 570 rounds last 17.8 seconds of trigger
+against 4.2 seconds for the real 120 at 1,700; and the gun sits 1.33 ft inside
+the starboard skin where the real BK 27 is port side (GRI-5, kept by John). None
+of these is Gripen specific: the cadence and the velocity belong to the shared
+gun fields (the same note stands in the Mirage 2000 section).
+
+Measured, headless: `--a2g-run --attack strafe` holds Tab for 2 seconds and the
+gun fires 64 rounds (570 to 506, 32 a second) with 22 tracers; `--live-fire
+--weapon-slot 1` for 1,200 ticks fires 320 shots, 59 hits and 1 kill on the
+practice aircraft (the battery's `flight-livefire-gripen-slot1`). The Tornado's
+own slice verifies its gun, which shares the record; the guard tests
+(`loadout.rs` and `crates/tore-import/tests/hidden_guns.rs`) still expect exactly
+the Gripen and the Tornado to mount `BK27.JT`, with dated GRI-6 notes.
+
+**Countermeasures.** From the row 2 `F18.ECM` record, the fleet's convention (no
+aircraft overrides a retail ECM count): 30 chaff and 30 flares (spec-derived,
+retail). Confirmed with `--combat-command chaff` and `--combat-command flare`
+with `--countermeasure-preview 60` (`carried_chaff=29 carried_flares=30` after
+one chaff, `carried_chaff=30 carried_flares=29` after one flare, capacity 30 and
+30; the frames show the chaff cloud and two burning flares). Finding for John
+only: the real Gripen's dispensers are the BOL (a wing-mounted, high-capacity
+dispenser used mainly for flares that fits in the unused space of a missile
+launch rail, Saab "BOL: Giving Gripen Pilots Sustained Defensive Capability")
+and the BOP family (BOP-G on the Gripen, Saab BOP product sheet); a Chemring
+BOL chaff pack holds 16 cassettes. No source found gives an official total
+fit per aircraft (a War Thunder bug report quotes four BOP pods of 30 flares, not
+verified). The retail 30 and 30 stand; a Gripen-specific count would be the first
+per-aircraft ECM override and would be John's call.
+
+**Live fire and release.** The flight battery's `STATIONS["gripen"]` is `[570, 2,
+4, 2, 0]` (gun, AGM-65G, AIM-120, AIM-9M and the centreline row with no weapon
+loaded); the AGM-65G is a surface missile that refuses the practice aircraft
+(`REFUSED_SLOTS`). Results: gun 320 shots, 59 hits, 1 kill; AIM-9M one shot, hit
+and kill; AIM-120 one shot, hit and kill (it is still flying at the usual 1,200
+ticks and lands at 3,600, as the F-16A's does); AGM-65G `--attack maverick`:
+designated, CUED, launched, locked 18 seconds, the truck killed (`a2g-maverick-gripen`).
+Release origins (`a2g-release-origin-gripen`, `--attack release`): the AGM-65Gs
+leave left then right from the 1 ft pylons at 5.00 ft out, 2.21 ft down, 4.67 ft
+aft; the four AIM-120s leave outboard pair first, left then right at 10.63 ft and
+then 9.37 ft out, 1.96 ft down, 7.00 ft aft; the AIM-9Ms leave left then right
+from the tips at 13.67 ft out, 0.67 ft down, 8.67 ft aft (the GRI-5 hang
+points, within 0.05 ft). Jettison (`a2g-jettison-gripen`, `--attack jettison
+--load MK82`): the tank goes first (external fuel 990 to 0, payload 3,870 to
+2,772 lb), then the two inner wing Mk 82s, and the run passes with no explosion.
+`flight-jettison-gripen-slot2..4` pass too.
+
 ## Original icons and geometry candidates
 
 

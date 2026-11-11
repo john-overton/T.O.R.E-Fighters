@@ -296,6 +296,15 @@ def m2000_as15_problems(output: str) -> list[str]:
     return problems
 
 
+def gripen_maverick_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 1:
+        return [f"{len(parts)} runs finished, want 1"]
+    problems: list[str] = []
+    _cued_kill(parts[0], "Gripen AGM-65G", problems)
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run"]
     col = run + ["UKR", "QUCOL", "--speed", "350", "--seconds", "60"]
@@ -328,6 +337,13 @@ def scenarios() -> list[Scenario]:
                         "--from", "4", "--altitude", "3000"],
             timeout=300, check=m2000_as15_problems,
             notes="The Mirage 2000's belly AS-15 (row 5, default load) is designated, locks CUED on the page, launches and kills the column's lead truck (M2K-6).",
+        ),
+        Scenario(
+            name="a2g-maverick-gripen", lane="flight",
+            args=col + ["--aircraft", "gripen", "--load", "AGM65G", "--station", "1", "--count", "2",
+                        "--attack", "maverick", "--from", "6", "--altitude", "3000"],
+            timeout=300, check=gripen_maverick_problems,
+            notes="The Gripen's default-load AGM-65G (row 6, inner wing) is designated, locks CUED on the page, launches and kills the column's lead truck (GRI-6).",
         ),
         Scenario(
             name="a2g-sarh-uncued", lane="flight",

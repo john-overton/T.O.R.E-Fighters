@@ -4513,3 +4513,28 @@ default load and listed for completeness).
 Provenance: positions and masks spec-derived (retail `GRIPEN.PT`, `GRI.SH`); the
 measurements and the classification agent findings, 2026-11-10; the real station count
 (seven in the in-game encyclopedia, eight on public pages) plausibility only.
+
+## Gripen ordnance (GRI-6, 2026-11-10)
+
+Update to the B5-1 and Gripen review notes above (they are left as written).
+`BK27.JT` is now proven as the Gripen's working internal gun: it was already in
+`AircraftId::Gripen.guns()` and the live-fire list, which is all the shared gun
+path needs, so no gameplay code changed. It stays out of `SUPPORTED_WEAPONS`
+and the catalogs, and the Tornado shares the record (its own slice verifies it).
+Record values: 27 mm, 570 rounds (John kept the count), 2,933 ft/s, 2 rounds a
+shot, 32 rounds a second through the shared fitted cadence, damage 25 / 2 / 7 / 7 /
+25, own sound `&FSTGUN3.11K`, red tracers. Against the real Mauser BK 27 (27 mm,
+1,000 to 1,700 a minute, about 1,100 m/s, 120 rounds on the Gripen; Wikipedia
+"Mauser BK-27", accessed 2026-11-10) TORE's cadence is about 13 percent above the
+top real rate and its muzzle velocity about 18 percent below; neither is Gripen
+specific and neither was changed. Default load: `F150.GAS` centreline,
+`AGM65G.JT` x2 inner wing, `AIM120.JT` x4 outer wing pair, `AIM9M.JT` x2 tips,
+the same for the player, AI and saved loads. Countermeasures 30 chaff and 30
+flares from `F18.ECM` (fleet convention); the real BOL and BOP dispensers have
+no verified official count (finding only). Live fire: gun, AIM-9M, AIM-120 and
+AGM-65G each fire and kill; release origins are the GRI-5 hang points left then
+right; the tank and Mk 82s jettison. Details:
+[aircraft ordnance](aircraft-ordnance.md#the-saab-gripen-gri-6-2026-11-10) and
+[the baseline](../baselines/ordnance-availability.md#saab-gripen-ordnance-gri-6-2026-11-10).
+The guard tests keep expecting exactly the Gripen and the Tornado for
+`BK27.JT`, with GRI-6 notes.

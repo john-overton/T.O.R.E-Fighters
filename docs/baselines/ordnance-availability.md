@@ -483,3 +483,48 @@ ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Ch
 
 The `menus-ordnance-availability` and `a2g-catalog` battery expected lines read 18,
 4,652 (menus only), 233 and 220.
+
+## Saab Gripen ordnance (GRI-6, 2026-11-10)
+
+The Gripen's default load, BK 27 gun and countermeasures were measured on the
+`m3-gripen` branch (HEAD d8c6725b plus this slice), profile
+`.local/m3-aircraft/profile-gripen`, away mode, everything through `light3.sh`.
+No station, mask, record or pin changed, so the audit counts are the B5-2 ones
+(45 aircraft, 18 recovered stations, 4,652 weapon placements, 233 tank
+placements, 82 and 9 records, 80 pods, 220 Cheat-only) and no pin note is needed.
+Per-aircraft line, unchanged:
+
+```text
+ordnance GRIPEN.PT: 5 source rows, 1 optional weapon rows, 190 compatible weapon placements, 12 tank placements; defaults and restart passed; catalog 60 normal, 83 Cheat
+```
+
+What was measured (details in [aircraft ordnance](../formats/aircraft-ordnance.md#the-saab-gripen-gri-6-2026-11-10)):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Default rows | retail test `gripen_ordnance` | nine rows: three sensors, AAS-38, `BK27.JT` 570, `F150.GAS` 1, `AGM65G.JT` 2, `AIM120.JT` 4, `AIM9M.JT` 2; `F18.ECM` 30 chaff and 30 flares |
+| BK 27 record | the same test | initial speed 2,933 ft/s, 2 rounds per shot, damage 25 / 2 / 7 / 7 / 25, `&FSTGUN3.11K`, burst, movement and damage equal to M61 and DEFA |
+| Gun | battery `flight-livefire-gripen-slot1` (`--live-fire --weapon-slot 1`) | 320 shots, 59 hits, 1 kill, 570 to 250 |
+| Gun key | `--a2g-run --attack strafe` | Tab held 2 s: 64 rounds (32 a second), 22 tracers |
+| AIM-9M | `flight-livefire-gripen-slot4` | 1 shot, hit, kill |
+| AIM-120 | `flight-livefire-gripen-slot3` (1,200 ticks), then `--combat-probe-ticks 3600` | 1 shot in flight at 1,200 ticks; hit and kill at 3,600 (the F-16A behaves the same) |
+| AGM-65G | `a2g-maverick-gripen` (`--attack maverick`) | designated, CUED, launched, 18 s locked, target killed (hp 0/200) |
+| Release origins | `a2g-release-origin-gripen` | AGM-65G +-5.00 / -2.21 / -4.67, AIM-120 +-10.63 then +-9.37 / -1.96 / -7.00, AIM-9M +-13.67 / -0.67 / -8.67, left then right, each at its hang point |
+| Jettison | `a2g-jettison-gripen`, `flight-jettison-gripen-slot2..4` | tank (990 lb of fuel) then the Mk 82s, no explosion |
+| Countermeasures | `--combat-command chaff` and `flare` with `--countermeasure-preview 60` | 29 / 30 and 30 / 29 carried, capacity 30 and 30 |
+| AI | `--ai-probe-ticks 60 --probe-fight 1:1` | `tanks=1 external_fuel=989 payload=4209 stations=[BK27 x570, AGM-65 x2, AIM-120 x4, AIM-9M x2, AGM-65 x0]` |
+
+Battery scenarios added (all pass): `a2g-release-origin-gripen`,
+`a2g-maverick-gripen`, `a2g-jettison-gripen`, and the `STATIONS["gripen"]`
+entry `[570, 2, 4, 2, 0]` that creates `flight-livefire-gripen-slot1..5` and
+`flight-jettison-gripen-slot2..4` (`("gripen", 2)` joined `REFUSED_SLOTS`, the
+AGM-65G refusing the practice aircraft). Raw logs are local only
+(`.local/m3-aircraft/checks/GRI-6/`).
+
+Frames (local, `.local/m3-aircraft/frames/GRI-6/`): `default-load-below`,
+`default-load-side`, `missile-agm65g-just-after-release-t2.40` (a crop of the
+a2g-run scene), `missile-row7-just-after-release-t004` (AIM-120),
+`missile-row8-just-after-release-t004` (AIM-9M), `gun-firing` (the tracer leaving
+the nose), `chaff-release`, `flare-release`. The AGM-65G row cannot fire in the
+stores preview (it refuses without a designated target), so its frame is the
+headless run's scene.

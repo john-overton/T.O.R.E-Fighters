@@ -80,6 +80,8 @@ fn decoded_cannon_records_are_internal_gun_style_and_mounted_by_no_roster_aircra
             // B5-1 (2026-11-10): the Gripen and the Tornado IDS are the
             // decoded carriers of BK27.JT and name it as their own gun row.
             // It stays out of `SUPPORTED_WEAPONS`.
+            // Update (GRI-6, 2026-11-10): still exactly these two; the
+            // Gripen's BK27 now fires (see `gripen_ordnance.rs`).
             let carrier =
                 name == "BK27.JT" && matches!(id, AircraftId::Gripen | AircraftId::Tornado);
             assert_eq!(

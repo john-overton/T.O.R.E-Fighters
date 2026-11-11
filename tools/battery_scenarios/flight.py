@@ -78,6 +78,12 @@ STATIONS = {
     # centreline tank is a tank station, and it has no wingtip row (John,
     # 2026-11-10).
     "m2000": [250, 4, 2, 2],
+    # The Gripen carries the BK27 gun on its internal row 4 (570 rounds, John
+    # 2026-11-10) and four weapon rows: row 6 AGM65G.JT x2 (inner wing), row 7
+    # AIM120.JT x4 (outer wing pair), row 8 AIM9M.JT x2 (wingtip) and the
+    # centreline row 5 with no weapon loaded (its F150.GAS is a tank station),
+    # listed last as the F-22's empty row is (GRI-6, 2026-11-10).
+    "gripen": [570, 2, 4, 2, 0],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -1009,6 +1015,8 @@ REFUSED_SLOTS = {
     ("rafale", 2), ("su25", 3), ("x31", 3), ("f16a", 2),
     # The Mirage 2000's belly AS-15 is a surface missile (M2K-6).
     ("m2000", 2),
+    # The Gripen's AGM-65G is a surface missile (GRI-6).
+    ("gripen", 2),
 }
 
 
