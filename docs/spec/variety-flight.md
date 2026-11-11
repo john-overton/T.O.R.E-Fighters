@@ -642,6 +642,67 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## Dassault Mirage F1 (MF1-8, 2026-11-11)
+
+The Mirage F1 flies the hybrid adapter's own `variety` configuration, built from
+`MF1.PT` (`mf1.SH`). Its values are the retail record's with John's B5-2 thrust
+correction ([aircraft record corrections](aircraft-records.md)): one Atar 9K-50 at
+11,020 lbf military and 15,873 lbf afterburner (retail 15,000 and 30,000). Empty
+weight 15,542 lb, internal fuel 6,120 lb and maximum takeoff 30,203 lb stay the
+retail (Mirage III) values by John's decision, and so do the record's own
+environment rows -3 to +7 G, the 66,125 ft ceiling and the 1,345 kt top row. The
+shared conventional flight, ground contact, actuator and loaded-mass rules apply
+unchanged, and no new fit was needed.
+
+The 1 G row's fast edge is 1,345 kt at 36,000 ft (Mach 2.35) and 806 kt at 1,000 ft.
+The shared loaded-drag rule settles full internal fuel at 0.945 of the edge: 1,271
+kt (Mach 2.22) at 36,000 ft and 762 kt (Mach 1.16) at 1,000 ft, against the game
+encyclopedia's Mach 2.2 (data line 1,266 kt) and about 800 kt at low altitude.
+Level flight holds to the 66,125 ft ceiling (published 65,600 ft); the scripted
+climb reaches 63,914 ft before the tank runs dry.
+
+At full internal fuel (21,662 lb clean, thrust to weight 0.73) and afterburner the
+peak specific excess power is 338 to 376 ft/s (22,600 ft/min at sea level) and the
+best sustained climb 360 to 375 ft/s (21,600 to 22,500 ft/min), with 36,000 ft in
+121 to 135 s. Level acceleration at 1,000 ft from 363 kt takes 11 s to 460 kt and 29
+s to 590 kt; military power gives about 57 percent of the excess power (194 to 215
+ft/s). The published sea-level climb rate is 41,930 ft/min (the encyclopedia) or
+47,800 ft/min (MIGFlug, Wikipedia); the model gives 54 and 47 percent of them
+because of the drag law and the absence of any ram thrust gain, not because of the
+thrust (the real 15,873 lbf) or the weights. It is reported, not changed.
+
+A full-stick pull at 461 kt and 1,000 ft peaks at 6.14 G with full fuel and 6.59,
+6.84 and 7.06 G with half, a quarter and 300 lb of fuel, the shared loaded-elevator
+rule scaling the limit with the fuel carried (the Mirage 2000 7.96 to 9.09 G, the
+Gripen 8.00 to 9.03 G, the F-5E 5.98 to 7.00 G and the F-16A 7.67 to 9.09 G for the
+same four states). The pull passes the +7 top row by 0.06 G when nearly dry and
+the real limit is +7.5 G; the full-stick push is -2.61 G (full) to -3.00 G (near
+empty), against the real -3.6 G. The G rows hold at speed (6.1 G from 330 kt to Mach
+1.1 at 1,000 ft). The sustained level turn is 3.63 G (8.1 deg/s) at 461 kt and
+1,000 ft, 2.68 G at 593 kt and about 3.2 G at 30,000 and 36,000 ft, from a
+scripted pilot (a lower bound); it fell from 5.76 G to 3.63 G with the real thrust.
+The record's fuel flows (3 and 23 lb/s) are kept: the dry flow matches the real
+engine's published specific fuel consumption (0.98 lb/lbf/h), but the 4.4 minutes
+the 6,120 lb tank lasts at afterburner is 2.6 times the real consumption (about
+11.8 minutes), because 23 lb/s was authored for the retail 30,000 lbf.
+
+**The default load changes the weight-dependent numbers.** The record's default
+stores (the DEFA gun, four belly 250 gallon tanks, two `R550.JT`, centreline empty)
+weigh 8,177 lb, a gross weight of 29,839 lb (99 percent of the maximum). With them
+the 461 kt pull is 5.18 G and the sustained turn 2.93 G, the afterburner speed at
+36,000 ft is 1,190 kt (Mach 2.07) and at 1,000 ft 714 kt, the peak excess power
+252 ft/s, and the takeoff is 135.4 kt after 1,655 ft (504 m; clean 103.9 kt after
+691 ft, 211 m; the published run is 600 m). Approach is 145.6 kt (clean 115.9 kt;
+published about 125 kt), touching down at 135.9 kt at 65 percent fuel and stopping
+584 m later (clean 376 m; published landing run 670 m). The record has no arrestor
+hook. These default-load numbers depend on John's open stations decision
+(MF1-5/MF1-6); the clean ones do not. The liftoff and approach ranges the battery
+checks (125 to 150 kt) are fitted windows (agent decisions, 2026-11-11).
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

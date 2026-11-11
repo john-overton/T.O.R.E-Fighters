@@ -119,6 +119,12 @@ burn for any extracted PT (`PROBE_PAYLOAD`, `PROBE_FUEL`, `PROBE_ALTS`,
 `PROBE_ONLY`). Its pilots are scripted, so it records the model, not a best
 pilot. The Mirage 2000 results are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
+Update (MF1-8, 2026-11-11): the Mirage F1 results, clean and with the default load,
+with the full-stick pull by fuel against the Mirage 2000, the Gripen, the F-5E and
+the F-16A, are in the
+[variety flight baseline](../baselines/variety-flight.md#mirage-f1-validation-2026-11-11);
+`mf1` joins the liftoff, approach and internal-fuel tables of `flight.py` (the
+windows depend on the open default-load decision).
 
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the

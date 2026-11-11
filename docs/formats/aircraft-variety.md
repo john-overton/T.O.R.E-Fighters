@@ -4696,3 +4696,45 @@ through six call sites), a question for John as in the Mirage 2000 review.
 
 Evidence and frames: `.local/m3-aircraft/frames/MF1-7/` and
 `.local/m3-aircraft/checks/MF1-7/` (local only, no retail bytes committed).
+
+## Mirage F1 flight review (MF1-8, 2026-11-11)
+
+Dated section, additions only. The Mirage F1 flies the hybrid adapter's own
+`variety` configuration built from `MF1.PT` (`mf1.SH`): one Atar 9K-50 at 11,020 lbf
+military and 15,873 lbf afterburner (B5-2), retail weights and fuel (decision 24),
+its own G rows -3 to +7, a 66,125 ft ceiling and a 1,345 kt top row. No envelope, G,
+weight, fuel, flow, ceiling or thrust value was changed and no flight constant was
+touched.
+
+- Top speeds are the real ones: full internal fuel settles at 0.945 of the edge, 1,271
+  kt (Mach 2.22) at 36,000 ft against the published Mach 2.2 and 762 kt at 1,000 ft
+  against about 800 kt. Level flight is held to the 66,125 ft ceiling (published 65,600
+  ft).
+- Climb and acceleration: peak specific excess power 376 ft/s at sea level (22,600
+  ft/min), best sustained climb 360 to 375 ft/s: 54 percent of the encyclopedia's
+  41,930 ft/min and 47 percent of the 47,800 ft/min of MIGFlug and Wikipedia, from
+  the shared drag law and the missing ram thrust (the thrust and weights are the
+  real ones). Not changed; a fleet-level drag or ram fit remains John's call.
+- G: the +7 top row gives 6.14 G at 461 kt and 1,000 ft with full fuel, 6.59 and 6.84
+  G at half and a quarter, and 7.06 G nearly dry (0.06 G past the row), -2.61 to
+  -3.00 G on the push; the real limits are +7.5 and -3.6. The sustained turn at 461
+  kt and 1,000 ft is 3.63 G, 8.1 deg/s (the B5-2 figure). The rows hold their
+  strength at speed (6.1 G at Mach 1.1).
+- Fuel: record flows 3 and 23 lb/s kept; the dry flow equals the real Atar's
+  specific fuel consumption (0.98 lb/lbf/h) but the afterburner flow is 2.6 times it
+  (5.22 against 1.96 to 1.99), so the 6,120 lb tank gives 4.4 minutes at afterburner
+  (real consumption: about 11.8). Finding for John: a guarded override of
+  `aftFuelConsumption` 23 to about 9 lb/s would be the Tornado's B5-3 correction
+  again; not made.
+- Default load (29,839 lb, four 250 gallon belly tanks, 99 percent of the maximum):
+  5.2 G at 461 kt, a 2.93 G sustained turn, Mach 2.07 at 36,000 ft, liftoff 135.4 kt
+  after 504 m and approach 145.6 kt, against 6.1 G, 3.63 G, Mach 2.22, 103.9 kt after
+  211 m and 115.9 kt clean. These depend on John's open stations decision (MF1-5).
+- Takeoff and landing run: published 600 m and 670 m (the game's Jane's text, weights
+  unstated); the model gives 211 m and 376 to 384 m clean, 504 m and 584 to 598 m with
+  the default load.
+
+The liftoff and approach ranges (125 to 150 kt each) in the flight battery are fitted
+windows, agent decisions of 2026-11-11, from the published approach speed of about
+125 kt. Full tables, sources and commands are in the
+[variety flight baseline](../baselines/variety-flight.md#mirage-f1-validation-2026-11-11).

@@ -751,3 +751,319 @@ Battery: `flight-variety-m2000`, `flight-liftoff-m2000`,
 `ai-m2000-quick-mission-2v2`, `replay-rec-m2000-2v2` and the three
 `a2g-*-m2000` scenarios passed (profile `.local/m3-aircraft/profile`). No combat-G
 battery scenario pins the Mirage (`PULL_G_RETAIL` has no entry).
+
+## Mirage F1 validation, 2026-11-11
+
+Validation mode, slice MF1-8. The Mirage F1 flies the hybrid `--researched-flight`
+default on its own record (`MF1.PT`, shape `mf1.SH`, `variety` identity from B5-1);
+`--legacy-flight` and `--native-flight-tables` stay separate. The record is the
+retail `MF1.PT` with John's B5-2 thrust correction (decision of 2026-11-10): one
+Atar 9K-50 at 11,020 lbf military and 15,873 lbf afterburner (retail 15,000 and
+30,000). Weights and fuel stay retail (empty 15,542 lb, internal fuel 6,120 lb,
+maximum takeoff 30,203 lb, all copied from the Mirage III record), as do the
+Mirage F1's own G rows -3 to +7, the 66,125 ft ceiling and the 1,345 kt top row.
+**Nothing was fitted**: no value, envelope or constant changed. The only fitted
+values are the two battery windows at the end.
+
+**Which numbers depend on the open stations question.** The record's default load
+(MF1-5, stopped on clipping, John's call) is the DEFA gun with 250 rounds, four
+belly `F250.GAS` tanks and two `R550.JT`, with the centreline empty (B5-2). It
+weighs 29,839 lb (`loadout:` line: 6,600 lb of tank fuel plus 1,577 lb of other
+stores on top of the 21,662 lb clean aircraft), 99 percent of the 30,203 lb
+maximum, so it changes everything that depends on weight. Every table below is
+therefore given twice, **clean** (`--loadout none` on the ground, no payload in
+the probes, 21,662 lb) and **default load** (the ground runs as they stand;
+`PROBE_PAYLOAD=8177`, the whole carried 8,177 lb as dead mass, which also counts
+the tank fuel as mass that does not burn). The clean figures do not depend on the
+stations answer. The default-load figures, the battery's liftoff and approach
+windows and their recorded values, and the endurance with tanks all do: if John
+caps the belly row at two tanks or drops it, those numbers and the windows move
+(an in-between load, never the clean figures, unless the default is cleared).
+
+**Harness.** As for the Mirage 2000, the Gripen and the F-5E: `envelope_probe`
+(`PROBE_POINTS=1 PROBE_LEVEL=1 PROBE_PULLS=1`) and `performance_probe`
+(`PROBE_ALTS=1000,15000,30000,36000,50000,60000`; `PROBE_PAYLOAD=8177` for the
+default load; `PROBE_ONLY=turn PROBE_ALTS=1000 PROBE_FUEL=...` for the pull by fuel)
+on the local `MF1.PT`; `variety_flight` printed `aircraft=MF1 conventional=pass
+deterministic=pass landing=pass ticks=1200`; `target/debug/tore-app --aircraft mf1
+--headless-flight N --maneuver ...` with the profile
+`.local/m3-aircraft/profile-mf1`. Pilots are scripted, so turn and climb figures are
+a repeatable harness reading, not a best-pilot figure. All knots are true airspeed.
+Logs are local: `.local/m3-aircraft/checks/MF1-8/`.
+
+### Top speed and ceiling
+
+| Altitude | 1 G edge (record), kt | Level, AB, clean, kt | Ratio | Level, AB, default load, kt | Level, military, clean, kt |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 ft | 806 | 762 (Mach 1.16) | 0.945 | 714 (Mach 1.08) | 635 (Mach 0.96) |
+| 10,000 ft | 866 | 818 | 0.945 | | |
+| 15,000 ft | | 850 (Mach 1.36) | | 795 (Mach 1.27) | 708 (Mach 1.13) |
+| 20,000 ft | 966 | 913 | 0.945 | | |
+| 30,000 ft | 1,203 | 1,137 (Mach 1.93) | 0.945 | 1,064 (Mach 1.81) | 947 (Mach 1.61) |
+| 36,000 ft | 1,345 | 1,271 (Mach 2.22) | 0.945 | 1,190 (Mach 2.07) | 1,059 (Mach 1.85) |
+| 40,000 ft | 1,314 | 1,242 | 0.945 | | |
+| 50,000 ft | 1,237 | 1,170 | 0.945 | | |
+| 60,000 ft | 1,046 | 989 | 0.945 | | |
+| 66,000 ft | 881 | 832 | 0.945 | | |
+
+Level flight is held at every altitude to the 66,125 ft ceiling (`held=true` up
+to 66,000 ft). The shared loaded-drag rule settles full internal fuel at 0.945 of
+the edge, inside the fighters' 87 to 96 percent band. The sea-level edge at the
+airport (6 ft) is 800 kt. The scripted `climb` maneuver tops out at 63,914 ft
+(0.967 of the ceiling, 771.5 kt) and then the tank runs dry (the afterburner
+burns 23 lb/s, so 6,120 lb lasts 266 s); the performance probe's zoom climbs
+reach 69,360 ft (Mach 0.8 schedule) and 68,725 ft (Mach 0.9).
+
+### Acceleration and climb (afterburner unless stated, full internal fuel)
+
+Clean weight 21,662 lb. Thrust to weight is 0.73 with the afterburner (15,873
+lbf), 0.51 at military power, and 0.53 with the 29,839 lb default load.
+
+| Level acceleration | Time, s | Peak specific excess power |
+| --- | --- | --- |
+| 1,000 ft, AB, 363 to 460 / 590 / 660 / 730 kt | 11 / 29 / 45 / 78 | 376 ft/s (22,600 ft/min) |
+| 1,000 ft, military, 363 to 460 / 530 / 590 kt | 18 / 37 / 67 | 215 ft/s |
+| 15,000 ft, AB, 345 to 500 / 690 / 810 kt | 19 / 53 / 109 | 338 ft/s |
+| 36,000 ft, AB, 316 to 520 / 800 / 1,030 / 1,150 kt | 28 / 75 / 133 / 190 | 369 ft/s |
+| 36,000 ft, military, 316 to 520 / 800 / 980 kt | 43 / 124 / 241 | 213 ft/s |
+
+| Afterburner climb from sea level | Speed schedule Mach 0.8 | Mach 0.9 |
+| --- | --- | --- |
+| 10,000 ft | 46 s | 58 s |
+| 36,000 ft | 121 s | 135 s |
+| 50,000 ft | 166 s | 177 s |
+| 59,000 ft | 228 s | 212 s |
+| Best sustained rate | 360 ft/s (21,600 ft/min) at 32,200 ft | 375 ft/s (22,500 ft/min) at 36,300 ft |
+
+With the default load the peak specific excess power falls to 228 to 252 ft/s
+(15,100 ft/min at 1,000 ft) and the Mach 0.8 climb takes 61 s to 10,000 ft and
+170 s to 36,000 ft. The load's climb readings above 50,000 ft (a "best sustained
+rate" of 728 ft/s at 61,400 ft, a Mach 0.9 schedule that never leaves the runway
+height) are a harness limit with a payload of that size, not a flight finding, and
+are not used. The Mirage F1's clean thrust to weight (0.73) is below the Mirage
+2000's 0.91 (peak excess power 418 ft/s) and the Gripen's 0.92 (445 ft/s), about
+the F-5E's 0.72 (332 ft/s), and far below the F-16A's (789 ft/s); its 376 ft/s sits
+between the F-5E and the Mirage 2000, as the thrust to weight does.
+
+### Turns and G limits
+
+| Case (afterburner, full internal fuel) | Clean | Default load |
+| --- | --- | --- |
+| Full aft stick, 3 s, 1,000 ft, 330 kt | 6.12 G, 18.1 deg/s | 5.17 G, 14.7 deg/s |
+| Full aft stick, 1,000 ft, 461 kt (Mach 0.7) | 6.14 G, 13.4 deg/s | 5.18 G, 10.8 deg/s |
+| Full aft stick, 1,000 ft, 593 kt | 6.13 G, 10.2 deg/s | 5.17 G, 8.2 deg/s |
+| Full aft stick, 1,000 ft, 725 kt (Mach 1.1) | 6.12 G, 8.3 deg/s | 5.17 G, 6.7 deg/s |
+| Full aft stick, 15,000 ft, 439 / 564 kt | 5.25 G, 11.5 deg/s / 6.12 G, 10.8 deg/s | 4.43 G / 5.17 G |
+| Full aft stick, 30,000 ft, 413 / 530 kt | 3.49 G, 6.8 deg/s / 4.36 G, 7.2 deg/s | 2.95 G / 3.68 G |
+| Full aft stick, 36,000 ft, 517 kt | 3.48 G, 5.4 deg/s | 2.95 G, 4.2 deg/s |
+| Full forward stick, 461 kt at 1,000 ft | -2.61 G | -2.20 G |
+| Sustained level turn, 1,000 ft, 461 kt | 3.63 G, 8.1 deg/s (bank 74 deg) | 2.93 G, 6.6 deg/s |
+| Sustained level turn, 1,000 ft, 593 kt | 2.68 G, 4.5 deg/s | 2.00 G, 3.2 deg/s |
+| Sustained level turn, 15,000 ft, 439 kt | 3.63 G, 8.7 deg/s | 2.67 G, 6.0 deg/s |
+| Sustained level turn, 15,000 ft, 564 kt | 2.93 G, 5.3 deg/s | 2.29 G, 4.0 deg/s |
+| Sustained level turn, 30,000 ft, 530 kt | 3.24 G, 6.3 deg/s | 2.46 G, 4.5 deg/s |
+| Sustained level turn, 36,000 ft, 517 kt | 3.24 G, 6.6 deg/s | 2.46 G, 4.6 deg/s |
+
+The record's top row is +7 (rows -3 to +7). The loaded-elevator rule scales the
+limit to the gross weight, so the clean aircraft pulls 6.1 G at sea level and the
+default load (99 percent of the maximum weight) 5.2 G. The G rows keep their
+strength at speed: 6.1 G holds from 330 kt to Mach 1.1 at 1,000 ft and to 564 kt
+at 15,000 ft (the +7 row ends at 729 kt at sea level), unlike the F-5E's rows. The
+sustained turns come from a scripted pilot that raises the bank in 2 degree steps
+until speed or altitude is lost, so they are lower bounds, and their steps
+are coarse (the same bank gives the same G at nearby fuel loads). The B5-2 note
+stands: the 461 kt sustained turn fell from 5.76 G to 3.63 G (12.7 to 8.1 deg/s)
+with the real thrust. At 1,000 ft and Mach 1.1 (725 kt, just under the 806 kt edge) the clean aircraft
+sustains only 1.56 G (1.8 deg/s), and the default load none.
+
+**Full-aft-stick pull by fuel**, 461 kt (Mach 0.7), 1,000 ft, afterburner, 3 s
+(`PROBE_ONLY=turn PROBE_ALTS=1000 PROBE_FUEL=...`), against the F-5E (the F5E-8
+table), the Gripen (GRI-8), the F-16A and the Mirage 2000 (the M2K-11 table), all
+re-run on this tree:
+
+| Fuel | Mirage F1 clean G (deg/s) | Mirage F1 default load G (deg/s) | Mirage 2000 G (deg/s) | Gripen G (deg/s) | F-5E G (deg/s) | F-16A G (deg/s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full (6,120 / 6,346 / 5,000 / 4,400 / 6,972 lb) | 6.14 (13.4) | 5.18 (10.8) | 7.96 (19.1) | 8.00 (18.6) | 5.98 (12.8) | 7.67 (16.8) |
+| Half (3,060 / 3,173 / 2,500 / 2,200 / 3,486 lb) | 6.59 (14.6) | 5.50 (11.7) | 8.52 (20.7) | 8.52 (20.0) | 6.49 (14.2) | 8.35 (18.3) |
+| Quarter (1,530 / 1,587 / 1,250 / 1,100 / 1,743 lb) | 6.84 (15.3) | 5.68 (12.2) | 8.83 (21.6) | 8.80 (20.7) | 6.78 (14.9) | 8.74 (19.1) |
+| Near empty (300 lb) | 7.06 (15.9) | 5.83 (12.6) | 9.09 (22.3) | 9.03 (21.3) | 7.00 (15.5) | 9.09 (19.8) |
+| Full forward stick, same four | -2.61 / -2.80 / -2.91 / -3.00 | -2.20 / -2.34 / -2.41 / -2.48 | -3.52 / -3.76 / -3.90 / -4.02 | -3.55 / -3.78 / -3.90 / -4.01 | -2.55 / -2.77 / -2.89 / -2.99 | -3.39 / -3.70 / -3.87 / -4.02 |
+
+(The default-load column keeps the 8,177 lb payload as dead mass at all four
+fuel states; with real tanks the external fuel would burn off first.) The pull
+rises as the tank empties for every aircraft, the shared loaded-elevator rule
+scaling the limit with the fuel and stores carried. The Mirage F1's clean full-fuel
+pull (6.14 G) is the F-5E's (5.98 G) plus a little, and 23 percent under the Mirage
+2000 and the Gripen, whose rows are +9; as a fraction of its own top row it is 88
+percent (the Mirage 2000's 88, the Gripen's 89, the F-5E's 85 and the F-16A's
+85 percent). Near empty the pull reaches 7.06 G, 0.06 G past the +7 row, the same
+small overshoot the +9 aircraft show (9.03 to 9.09). The real limit is +7.5 G
+(MIGFlug), 0.5 G above the top row and 1.4 G above the clean full-fuel pull. The
+push is -2.61 G (full) to -3.00 G (near empty) against the -3 row, because the -3
+row's slow edge is 475 kt at sea level.
+
+### Fuel and endurance
+
+The record's flows are 3 lb/s at military power and 23 lb/s at afterburner,
+10,800 and 82,800 lb/h, or 0.98 and 5.22 lb/lbf/h against the corrected thrust
+(11,020 and 15,873 lbf). The 6,120 lb tank lasts 34.0 minutes at military power
+and 4.4 minutes at afterburner (burn measured: 3.00 and 23.00 lb/s over 300 s).
+A level cruise at 65 percent of the top speed (627 kt at 1,000 ft, throttle
+trimmed) burns 2.05 lb/s, which is 49.8 minutes or 520 nautical miles clean
+(extrapolated from 300 s); with the default load's mass 2.34 lb/s, 43.5 minutes
+and 455 nautical miles on the internal tank alone (the 6,600 lb of tank fuel is
+extra range the probe does not count). The `sprint` maneuver burns the whole tank
+(6,120 lb in 266 s at afterburner).
+
+### Takeoff, approach and landing
+
+Ground probes at `--theater UKR --ground-start 1`. **Default load**: gross 29,839
+lb (maximum 30,203 lb), `loading=0.920`, flapped stall 104.7 kt after the weight
+scaling. **Clean** (`--loadout none`): gross 21,662 lb, `loading=0.394`, flapped
+stall 89.2 kt.
+
+| Probe | Default load | Clean |
+| --- | --- | --- |
+| takeoff | liftoff tick 1,721 at 135.4 kt after 1,655 ft (504 m), rotation 116.9 kt | tick 937 at 103.9 kt after 691 ft (211 m), rotation 97.7 kt |
+| takeoff, `--retail-stall-speeds` | liftoff 100.4 kt after 895 ft (imported polygon speeds, no weight scaling) | 89.5 kt after 512 ft |
+| land, 65 percent fuel (3,978 lb) | approach 145.6 kt, touchdown 135.9 kt at 3.5 ft/s sink, stopped 1,917 ft (584 m) after touchdown with 1,738 ft of the 5,532 ft runway left, score 100 | approach 115.9 kt, touchdown 107.7 kt at 2.7 ft/s, stopped 1,233 ft (376 m) after touchdown, 2,382 ft left |
+| land, full internal fuel | touchdown 137.8 kt, 5.2 ft/s, stopped 1,963 ft (598 m) after touchdown, 1,883 ft left | touchdown 109.5 kt, 2.8 ft/s, stopped 1,259 ft (384 m), 2,519 ft left |
+| land-hard | touchdown 149.6 kt at 33.5 ft/s, stopped, score 100 | not run |
+| land-gear-up, land-off-runway | crashed for the gear and for the not-landable ground, by design | not run |
+| nosewheel | no crash, 11.2 kt maximum | not run |
+
+The takeoff-gear-airborne probe ran with the same liftoff. The record has no
+arrestor hook (`hook_available=false`). The scripted approach speed does not
+change with the `--flight-fuel` value (145.6 kt at both fuel states), as for the
+other aircraft; it is flown at 1.3 times the weight-scaled stall speed.
+
+Eleven air maneuvers: nine ended with `non_finite=0` and no loss (`level` 7,200
+ticks at 541.8 kt, 65 percent of the 5,000 ft edge; `pull` 6.13 G with the loop
+completed; `loop` completed at 2,630 ticks, 6.20 G; `sprint` 36,000 ticks, 828.5
+kt, 0.995 of the edge, tank empty at the end; `climb` as above, `crashed=false`,
+fuel empty; `rudder`; `devices` violations 0; `stall-recover` alert at tick
+1,539, recovered at 2,037, 0 ft lost; `spin-recover` entered at tick 3, recovered
+at 1,132 after 0.58 revolutions of recovery and 2.12 in all, 1,827 ft lost);
+`dive` and `overspeed` ended in the overspeed loss by design (1.145 and 1.100 of
+the edge). Logs under `.local/m3-aircraft/checks/MF1-8/probes/` and `ground/`.
+
+### Against the real aircraft
+
+Real figures read 2026-11-11. The first column of cited facts is the game's own
+encyclopedia (`MF1.INF`, Jane's All The World's Aircraft text, F1-C) which is
+reference media, not original behaviour: empty 16,314 lb (7,400 kg), clean takeoff
+24,030 lb, maximum 35,715 lb, 4,300 L internal fuel, Mach 2.2 at altitude (data
+line 1,266 kt), Mach 1.2 (800 kt, 920 mph EAS) at low altitude, maximum climb at sea
+level with afterburning 12,780 m/min (41,930 ft/min), service ceiling 65,600 ft,
+stabilised supersonic ceiling 52,500 ft, takeoff run 600 m, landing run 670 m. Web
+sources: MIGFlug, "Dassault Mirage F1" (+7.5 / -3.6 G, rate of climb 243 m/s = 47,800
+ft/min, approach about 125 kt, thrust to weight 0.66 at clean takeoff weight, 49.0
+kN = 11,020 lbf dry and 70.6 kN afterburner, internal fuel about 4,300 L = 7,385 lb);
+MILAVIA ("Mirage F1 specifications": Mach 2.2 at 12,000 m, ceiling 65,615 ft, 70.21
+kN); Wikipedia, "Dassault Mirage F1" (rate of climb 243 m/s, thrust 15,873 lbf
+afterburner); GlobalSpec's Atar datasheet and Wikipedia's thrust specific fuel
+consumption table (Atar 9K-50: about 0.96 to 0.98 lb/lbf/h dry, 1.96 to 1.99
+afterburning). No primary flight manual was found; the sources agree on everything
+except the sea-level climb, where the encyclopedia and MIGFlug differ by 14 percent.
+
+| Quantity | Measured clean | Measured default load | Retail record | Real (cited) |
+| --- | --- | --- | --- | --- |
+| Top speed at 36,000 ft | 1,271 kt (Mach 2.22) | 1,190 kt (Mach 2.07) | 1,345 kt (Mach 2.35) | Mach 2.2, 1,266 kt data line (Jane's text, MILAVIA, MIGFlug) |
+| Top speed at sea level | 762 kt at 1,000 ft (Mach 1.16) | 714 kt (Mach 1.08) | 800 kt (806 at 1,000 ft) | 800 kt, Mach 1.2 (Jane's text); 913 mph = 793 kt (MIGFlug) |
+| Service ceiling | level flight held at 66,000 ft; scripted climb 63,914 ft; zoom 68,700 to 69,400 ft | | 66,125 ft | 65,600 ft (Jane's text), 65,615 ft (MILAVIA) |
+| Rate of climb, sea level | 376 ft/s peak excess power (22,600 ft/min); 360 to 375 ft/s sustained (21,600 to 22,500 ft/min) | 252 ft/s (15,100 ft/min) | 15,000 / 30,000 lbf thrust would give more | 41,930 ft/min (Jane's text); 47,800 ft/min (MIGFlug, Wikipedia); test weight not stated |
+| Thrust | 11,020 dry, 15,873 AB, 1 engine | same | 15,000 / 30,000 | 11,020 / 15,873, 1 engine |
+| Thrust to weight | 0.73 clean full fuel | 0.53 | | 0.66 at 24,030 lb (MIGFlug) |
+| G limits | +6.1 (+7.1 nearly dry) / -2.6 clean at 461 kt | +5.2 / -2.2 | +7 / -3 | +7.5 / -3.6 (MIGFlug) |
+| Instantaneous turn | 18.1 deg/s at 330 kt (6.12 G); 13.4 deg/s at 461 kt | 14.7 / 10.8 deg/s | | not found |
+| Sustained turn (scripted, lower bound) | 3.63 G, 8.1 deg/s at 461 kt, 1,000 ft | 2.93 G, 6.6 deg/s | | not found |
+| Liftoff / takeoff run | 103.9 kt, 691 ft (211 m) at 21,662 lb | 135.4 kt, 1,655 ft (504 m) at 29,839 lb | | takeoff run 600 m (Jane's text; weight not stated) |
+| Approach / landing run | 115.9 kt approach, 107.7 kt touchdown, 376 m rollout | 145.6 kt approach, 135.9 kt touchdown, 584 m rollout | | about 125 kt approach (MIGFlug); landing run 670 m (Jane's text; weight and brake parachute not stated) |
+| Empty weight | 15,542 lb | same | 15,542 lb | 16,314 lb (retail 4.7 percent under) |
+| Internal fuel | 6,120 lb | same | 6,120 lb | 4,300 L, about 7,385 lb (retail 17 percent under) |
+| Clean takeoff weight | 21,662 lb | | | 24,030 lb (model 10 percent under) |
+| Maximum takeoff | 30,203 lb | | 30,203 lb | 35,715 lb (retail 15 percent under) |
+| Dry fuel flow | 10,800 lb/h (0.98 per lbf) | same | same | 0.96 to 0.98 per lbf, 10,600 to 10,800 lb/h |
+| Afterburner fuel flow | 82,800 lb/h (5.22 per lbf) | same | same | 1.96 to 1.99 per lbf, about 31,100 to 31,600 lb/h (8.6 to 8.8 lb/s) |
+| Endurance, internal tank | 34.0 min military, 4.4 min AB; cruise 49.8 min, 520 nm | 43.5 min cruise | | combat air patrol 2 h 15 min with two missiles and a 1,200 L centreline tank (MIGFlug) |
+
+Findings (no value was changed):
+
+- **Top speeds are the real ones.** The model flies Mach 2.22 at 36,000 ft against
+  the published Mach 2.2 (1,271 kt against the encyclopedia's 1,266 kt data line,
+  0.4 percent over) and 762 kt at 1,000 ft against about 800 kt (4.8 percent
+  under, 806 kt on the record's own edge). No `fitted_envelopes` entry is
+  needed. With the default load the speeds fall by 6 to 7 percent (1,190 kt,
+  714 kt).
+- **The ceiling matches.** Level flight is held to the record's 66,125 ft against
+  the published 65,600 ft (0.8 percent), and the scripted climb reaches 0.967 of
+  it before the tank runs dry.
+- **Climb is about half the published figure, and the cause is the shared drag
+  law, not the thrust.** The model's sea-level peak specific excess power is 376
+  ft/s (22,600 ft/min) and its best sustained climb 360 to 375 ft/s (21,600 to
+  22,500 ft/min): 54 percent of the encyclopedia's 41,930 ft/min and 47 percent of
+  the 47,800 ft/min of MIGFlug and Wikipedia. The thrust is the real 15,873 lbf,
+  the clean thrust to weight (0.73) is above the published 0.66, and the weights
+  are within 10 percent. The cause is the one found for the Mirage 2000 (45
+  percent) and the F-5E (55 to 58 percent): drag equals the reference thrust at the
+  top speed and grows with the square of speed, and no ram thrust gain is
+  modelled. Reported, not changed (a per-aircraft drag shape or ram factor is a
+  fleet-level change).
+- **The sustained turn fell with the real thrust and stays low.** 3.63 G (8.1
+  deg/s) at 461 kt and 1,000 ft clean, 2.93 G with the default load, 2.68 G at 593
+  kt. Against the others at the same point: the Mirage 2000 and F-5E 4.13 G, the
+  Gripen 4.80 G, the F-16A 7.15 G. It rises with lower fuel (4.14 G at half and
+  quarter, 4.81 G near empty) because the scripted bank steps are coarse. No
+  published figure was found.
+- **The instantaneous G holds up at speed but sits under the real limit.** The F1's
+  own +7 row gives 6.1 G clean at 461 kt (88 percent of the row) rising to 7.06 G
+  nearly dry, against the real +7.5 G; the 0.06 G overshoot past the row is the
+  same hair the +9 aircraft show. Whole-G rows leave no +7.5 row, so a correction
+  as for the Tornado would be a +8 row fitted from the +7 row (not done; John's
+  call, and `plus_nine_row`/`fitted_row` would do it). The push is -2.61 to -3.00
+  G against the real -3.6.
+- **The afterburner fuel flow is now far above the real engine's.** The record's
+  flows were authored for the retail 30,000 lbf: 23 lb/s is 2.76 lb/lbf/h there,
+  but 5.22 lb/lbf/h against the real 15,873 lbf, 2.6 times the published
+  specific fuel consumption (1.96 to 1.99; 8.6 to 8.8 lb/s). The tank lasts 4.4
+  minutes at afterburner where the real engine's consumption would give about 11.8.
+  The dry flow (3 lb/s, 0.98 lb/lbf/h) is exact to the published 0.96 to 0.98. As
+  with the Tornado (B5-3, flows set from the real specific fuel consumption), a
+  guarded override of `aftFuelConsumption` 23 to 9 lb/s would be a small, sourced
+  correction; it is John's call and was not made.
+- **Weights and fuel are the retail Mirage III copies** (decision 24): empty 4.7
+  percent under, fuel 17 percent under (6,120 against 7,385 lb), maximum 15
+  percent under, so the clean aircraft weighs 10 percent less than the real
+  24,030 lb. Kept as John decided.
+- **Takeoff and landing are quicker than the Jane's text for the clean aircraft and
+  close for the default load.** Clean the model lifts off after 211 m and rolls out
+  in 376 to 384 m (published 600 m and 670 m, weights unstated, brake parachute not
+  stated); with the default load it needs 504 m and 584 to 598 m, which brackets
+  the published figures from below. The approach speed is 115.9 kt clean and 145.6
+  kt with the load, either side of the published 125 kt (the load flies at 1.3 times
+  a stall speed scaled to 29,839 lb, near the maximum). The imported polygon speeds
+  alone (`--retail-stall-speeds`) lift off at 100.4 and 89.5 kt.
+- **The `climb` maneuver runs the tank dry** at 113,602 ticks (the scripted climb
+  and cruise out of fuel), with no crash and no loss, unlike the F-5E's overspeed
+  loss after the zoom.
+
+The liftoff range (125 to 150 kt) and the approach range (125 to 150 kt) in
+`tools/battery_scenarios/flight.py` are fitted plausibility windows, agent
+decisions of 2026-11-11. The approach range starts at the published 125 kt and
+allows 20 percent above, because the scripted approach flies the default load; the
+liftoff band is the Mirage 2000's, no primary figure having been found. The
+measured 135.4 kt and 145.6 kt are the regression values (`KNOWN_LIFTOFF`,
+`KNOWN_APPROACH`). They depend on John's stations decision: a lighter default load
+lowers both speeds (clean 103.9 and 115.9 kt) and the windows then need re-fitting.
+
+The battery: `python3 tools/battery.py --scenario '*-mf1*' --lane flight --profile
+.local/m3-aircraft/profile-mf1 --windows 1 --jobs 2` passed 6 of 6, run
+`20261111-000852`: `flight-animation-mf1`, `flight-liftoff-mf1`,
+`flight-liftoff-retail-mf1`, `flight-approach-mf1`, `flight-variety-mf1` and
+`render-mf1-skin`. The liftoff, liftoff-retail and approach scenarios are new in
+this slice. The combat-G table has no entry for the Mirage F1 (`PULL_G_RETAIL`).
+
+Not run: `--native-flight-tables` (tables not present locally), the live-fire and
+jettison battery slots (MF1-6), the AI, Quick Mission and multiplayer scenarios
+(MF1-9), and a pull or turn probe with the tank fuel burning off (the probe takes
+stores as dead mass).

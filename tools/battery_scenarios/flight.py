@@ -257,6 +257,21 @@ APPROACH_TARGET = {
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157), "mig31": (143, 160),
     "m2000": (133, 147),
 }
+# The Mirage F1's windows (MF1-8, 2026-11-11) are fitted, agent decisions. Its
+# approach range (125 to 150 kt) starts at the one published figure, about 125 kt
+# (MIGFlug, "Dassault Mirage F1", read 2026-11-11, a secondary history site) and
+# allows 20 percent above it, because the scripted approach flies the DEFAULT
+# load, which still carries four full 250 gallon tanks (gross 29,839 lb against
+# the real clean 24,030 lb): measured 145.6 kt with that load, 115.9 kt clean
+# (`--loadout none`). No primary liftoff speed was found (the game's Jane's text
+# gives a 600 m takeoff run and a 670 m landing run), so the liftoff band is the
+# same 125 to 150 kt plausibility band as the Mirage 2000's; measured 135.4 kt
+# after 1,655 ft (504 m) with the default load, 103.9 kt after 691 ft clean. All of
+# these depend on John's open stations decision (MF1-5/MF1-6): a lighter
+# default load lowers both speeds and the windows and the recorded values must
+# then be re-fitted.
+LIFTOFF_TARGET["mf1"] = (125, 150)
+APPROACH_TARGET["mf1"] = (125, 150)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -264,6 +279,8 @@ APPROACH_TARGET = {
 # range, so the range's own window already holds them; these record the values.
 KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3}
 KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2}
+KNOWN_LIFTOFF["mf1"] = 135.4
+KNOWN_APPROACH["mf1"] = 145.6
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -277,6 +294,9 @@ INTERNAL_FUEL_LB = {
     # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
     "f16a": 6972,
 }
+
+# MF1.PT internal fuel, 6,120 lb (MF1-0; the real F1 holds about 7,385 lb).
+INTERNAL_FUEL_LB["mf1"] = 6120
 
 
 def _in_target(value: float, target: tuple, known: float | None) -> str | None:
@@ -363,6 +383,7 @@ def check_retail_liftoff(output: str) -> list[str]:
 # its record equals the F-16C's, which is in AIRCRAFT and has none, so the two
 # are checked alike.
 LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a", "mig31", "m2000"]
+LIFTOFF_AIRCRAFT += ["mf1"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
