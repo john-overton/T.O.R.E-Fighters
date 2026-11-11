@@ -357,6 +357,22 @@ impl Airframe {
                 })
             }));
         }
+        if self.profile.id == tore_formats::aircraft::AircraftId::Tornado {
+            // The swing wing carries its vapor point with the tip (TOR-3).
+            let turn = crate::tornado_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::tornado_animation::streamer_point(def, side, turn)?;
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
         streamer_world_points(
             def,
             s.position,
@@ -458,6 +474,52 @@ impl Airframe {
             (0..=inboard_steps).find_map(|step| {
                 let inboard = f64::from(step) * 0.5;
                 underside(shape, scale, right - inboard, forward, from).map(|h| from + h)
+            })
+        })
+    }
+    /// The clean model's surface with its swing wing turned `turn` radians
+    /// ([`tore_sim::combat::swing::wing_turn`]), to the nearest quarter
+    /// degree; `None` for any aircraft without a swing wing or a turn of
+    /// zero. The surface a swivelling wing station meets, and what the stores
+    /// preview measures clearances against.
+    pub fn swept_surface(
+        &self,
+        turn: f64,
+    ) -> Option<std::sync::Arc<tore_sim::combat::hardpoints::Underside>> {
+        let quarters = (turn.to_degrees() * 4.).round() as i64;
+        if quarters == 0 || self.profile.id != tore_formats::aircraft::AircraftId::Tornado {
+            return None;
+        }
+        let base = self.poses.first()?;
+        let scale = f64::from(self.animation_scale());
+        Some(self.mounts.swept(quarters, || {
+            let shape =
+                crate::tornado_animation::swept_shape(base, (quarters as f64 / 4.).to_radians());
+            tore_sim::combat::hardpoints::Underside::of(&shape, scale)
+        }))
+    }
+    /// [`Self::underside`] with the swing wing turned `turn` radians.
+    pub fn underside_at(
+        &self,
+        turn: f64,
+        right: f64,
+        forward: f64,
+        from: f64,
+        inboard_steps: u8,
+    ) -> Option<f64> {
+        let Some(swept) = self.swept_surface(turn) else {
+            return self.underside(right, forward, from, inboard_steps);
+        };
+        let right = right.abs();
+        let quarters = (turn.to_degrees() * 4.).round() as i64;
+        let key =
+            [right, forward, from, f64::from(inboard_steps)].map(|v| (v * 100.).round() as i64);
+        // The turned model's lookups are kept apart from the spread model's.
+        let key = [key[0], key[1], key[2], key[3] + 1000 * quarters];
+        self.mounts.underside(key, || {
+            (0..=inboard_steps).find_map(|step| {
+                let inboard = f64::from(step) * 0.5;
+                swept.over(right - inboard, forward, from)
             })
         })
     }
@@ -1353,5 +1415,68 @@ mod tests {
                 scale_point(id, [0., 0., 3.])[2]
             ]
         );
+    }
+
+    /// The Tornado has two engines and two nozzle exit octagons at y -24 (faces
+    /// 0x3e90 left and 0x3eb7 right): two trails, one behind each octagon's
+    /// centre, 2 ft behind the exit plane (TOR-4). This test passes no rig, so
+    /// the offsets use the 1/3 ft default; the loaded Tornado rig multiplies the
+    /// shape units by its 2/3 ft header scale instead (`Rig::scale`).
+    #[test]
+    fn the_tornado_draws_two_contrails_one_behind_each_nozzle() {
+        use tore_formats::aircraft::AircraftId;
+        let id = AircraftId::Tornado;
+        assert_eq!(crate::engine_material::outlet_count(id), 2);
+        let face = |address: usize, points: &[[f32; 3]]| tore_formats::shape::Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![],
+            positions: points.to_vec(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0x64,
+            normal: None,
+            fog: tore_formats::shape::FogMode::Enabled,
+        };
+        let octagon = |side: f32| {
+            [
+                [3., 1.],
+                [4., 1.],
+                [5., -1.],
+                [5., -2.],
+                [4., -3.],
+                [3., -3.],
+                [2., -2.],
+                [2., -1.],
+            ]
+            .map(|[x, z]| [side * x, -24., z])
+        };
+        let neutral = Shape {
+            lines: vec![],
+            faces: vec![
+                face(0x3eb7, &octagon(1.)),
+                face(0x3e90, &octagon(-1.)),
+                // A face farther forward: only the nozzle faces place a trail.
+                face(0x1c64, &[[-3., 26., -6.], [0., 14., -6.], [2., 26., -6.]]),
+            ],
+            billboards: vec![],
+            state_words: Default::default(),
+        };
+        let offsets = contrail_offsets(id, &neutral, None, 2);
+        assert_eq!(offsets.len(), 2);
+        // Group 0 is the left nozzle (x -5 to -2), group 1 the right (2 to 5);
+        // both span z -3 to 1 and their exit plane is y -24.
+        for (group, x) in [(0usize, -3.5f64), (1, 3.5)] {
+            let want = [x / 3., -1. / 3., -24. / 3. - 2.];
+            for k in 0..3 {
+                assert!(
+                    (offsets[group][k] - want[k]).abs() < 1e-6,
+                    "{group} axis {k}"
+                );
+            }
+        }
+        assert!((offsets[0][0] + offsets[1][0]).abs() < 1e-9);
+        let bounds = nozzle_bounds(id, &neutral);
+        assert_eq!(bounds[0], [-5., -2., -3., 1.]);
+        assert_eq!(bounds[1], [2., 5., -3., 1.]);
     }
 }

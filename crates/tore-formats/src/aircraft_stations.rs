@@ -23,6 +23,10 @@ pub const M2000_TIP: usize = 8;
 /// The Tornado's decoded outer wing pair (`TOR.PT` row 8, the last row),
 /// retired by [`retire`].
 pub const TORNADO_OUTER_WING: usize = 8;
+/// The Tornado's AIM-9 side rails (`TOR.PT` row 8 again, appended by
+/// [`side_rail`] where [`retire`] dropped the outer wing pair): one rail a
+/// side on the inboard swivelling pylon (row 7).
+pub const TORNADO_SIDE_RAIL: usize = 8;
 /// The F-5E's radar, jammer and wing-pair rows and the Mirage F1's centreline
 /// row, whose defaults [`adjust_defaults`] changes.
 pub const F5E_RADAR: usize = 1;
@@ -149,6 +153,12 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// paired wing row, [`MF1_WING_REFUSED`], `AS30.JT` at 0.33 ft) refuse the stores
 /// that enter the airframe by more than about 0.3 ft. The default `R550.JT` is
 /// never refused (its left Magic reads 0.05 ft on row 6, kept).
+/// The Tornado has its own refusals (agent decision, 2026-11-11, John's F-15E
+/// A2 precedent, TOR-6 and TOR-6b): the shoulder pair (row 6,
+/// [`TORNADO_SHOULDER_REFUSED`]), the inner wing pair (row 7,
+/// [`TORNADO_INNER_WING_REFUSED`]) and the AIM-9 side rails (row 8,
+/// [`TORNADO_SIDE_RAIL_REFUSED`], which otherwise take what their infrared
+/// mask (0x85) admits, as the F-14's glove-pylon rail does).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     match id {
         AircraftId::F15E => match row {
@@ -159,6 +169,12 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
         AircraftId::Mf1 => match row {
             MF1_BELLY => !MF1_BELLY_REFUSED.contains(&source),
             MF1_WING => !MF1_WING_REFUSED.contains(&source),
+            _ => true,
+        },
+        AircraftId::Tornado => match row {
+            TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
+            TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
+            TORNADO_SIDE_RAIL => !TORNADO_SIDE_RAIL_REFUSED.contains(&source),
             _ => true,
         },
         _ => true,
@@ -221,6 +237,78 @@ pub const MF1_BELLY_REFUSED: [&str; 33] = [
 /// six that enter by 0.06 to 0.15 ft (`PL7`, `PL10`, `AGM88`, `AGM45`, `AIM7`,
 /// `AIM7E`) and the default `R550.JT` (0.05 ft on the left) are kept.
 pub const MF1_WING_REFUSED: [&str; 1] = ["AS30.JT"];
+
+/// The Tornado's shoulder pair (`TOR.PT` row 6: Fuselage, x 6, four
+/// `PAVEWAY.JT`) and inner wing pair (row 7: Wing, x 11, two `MK82P3.JT`,
+/// carried on the swinging panel by the sim's `station_move`).
+pub const TORNADO_SHOULDER: usize = 6;
+pub const TORNADO_INNER_WING: usize = 7;
+
+/// Stores normal loading refuses on the Tornado's shoulder pair (row 6), John's
+/// F-15E A2 precedent applied by an agent (2026-11-11, TOR-6): refuse the
+/// stores that enter the airframe over about 0.3 ft, keep anything at 0.3 ft
+/// or less and anything that only crosses a neighbour store. Each store below enters the
+/// fuselage flank (intake and belly) by more than 0.3 ft with the row's
+/// own pylon geometry, measured with the CPU stores preview against the
+/// airframe at both sweeps (docs/spec/stores-on-pylons.md, TOR-6 section):
+/// every row 6 catalog store, 0.33 ft (GBU-28, AT-12) to 2.12 ft (AS-30). The
+/// default `PAVEWAY.JT` and the two other stores that hang the same shape
+/// (`GBU10.JT`, `GBU10A.JT`; the fin-tip entry of 0.96 ft front and 0.55 ft
+/// rear that John accepted on 2026-11-11, TOR-5 round 3) stay. Stores at or
+/// under 0.3 ft (the Mk 82 and Mk 84 families, cluster and rocket dispensers,
+/// FAB bombs, the Maverick, GBU-38, the AS-7 at exactly 0.30,
+/// and every tank) stay.
+pub const TORNADO_SHOULDER_REFUSED: [&str; 33] = [
+    "AA11.JT",
+    "AA12.JT",
+    "AA2.JT",
+    "AA6.JT",
+    "AA9.JT",
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AGM84E.JT",
+    "AGM88.JT",
+    "AIM120.JT",
+    "AIM7.JT",
+    "AIM7E.JT",
+    "AIM9B.JT",
+    "AIM9M.JT",
+    "AIM9X.JT",
+    "AM39.JT",
+    "AS14.JT",
+    "AS15.JT",
+    "AS30.JT",
+    "AT12.JT",
+    "AT2.JT",
+    "GBU12.JT",
+    "GBU16.JT",
+    "GBU28.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "MICA.JT",
+    "PAVEWA3.JT",
+    "PL10.JT",
+    "PL7.JT",
+    "R530.JT",
+    "R550.JT",
+];
+
+/// Stores normal loading refuses on the Tornado's inner wing pair (row 7,
+/// on the swinging panel): the three 2,000 lb bombs of the `GB27.SH` shape,
+/// which enter the airframe 1.10 ft at 67 degrees of sweep (0.00 at 25).
+/// Every other row 7 catalog store reads 0.00 at both sweeps.
+pub const TORNADO_INNER_WING_REFUSED: [&str; 3] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT"];
+
+/// Stores normal loading refuses on the Tornado's AIM-9 side rails (row 8,
+/// TOR-6b, 2026-11-11, agent decision applying the 0.3 ft line): the four
+/// stores the rail's infrared mask admits that enter the airframe or the
+/// pylon's store more than the line, measured alone on the rail at 25 and 67
+/// degrees against the Mk 82 pack: `PL7.JT` (0.50 ft, 0.83 at 67), `R550.JT`
+/// (0.40), `AT12.JT` (0.44) and `GBU12.JT` (1.02, a laser bomb on a missile
+/// rail). The seven that stay (`AIM9B`, `AIM9M`, `AIM9X`, `AA2`, `AA8`,
+/// `AA11`, `AA11B`) read 0.00 ft against the airframe at both sweeps.
+pub const TORNADO_SIDE_RAIL_REFUSED: [&str; 4] = ["PL7.JT", "R550.JT", "AT12.JT", "GBU12.JT"];
 
 /// Source rows T.O.R.E does not carry (John, 2026-11-10, opinionated): the
 /// Mirage 2000's wingtip row (`M2000.PT` row 8: Wingtip, x 33, two `R550.JT`,
@@ -287,6 +375,46 @@ fn is_retail(id: AircraftId, rows: &[Hardpoint]) -> bool {
                 h.weight_class,
             ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
         })
+}
+
+/// The Tornado's AIM-9 side rails (John, 2026-11-11, after TOR-6: "Lets do a
+/// custom side rail kind of like the f-14 for this station and put it on the
+/// inner [wing] rail like the RL Tornado", opinionated). The real Tornado
+/// carries its AIM-9L on a rail beside each inboard swivelling wing pylon,
+/// alongside the pylon's main store; [`retire`] drops the retail outer wing
+/// pair, and this appends one row in its place at the end of the table, so
+/// no other row's index moves. The row is the retail outer pair's own
+/// content, restored: Wing, mask 0x85 (infrared missiles), two `AIM9M.JT`
+/// (one a side), weight class 5, as the retail row 8 held them. Only its
+/// position is the inner pylon's record's (the sim's `station_move` hangs it
+/// on that pylon's side). Applied after
+/// [`retire`], only when the table is exactly the retail eight rows the
+/// retirement leaves (an edited record or a different count keeps its own
+/// rows), on the Tornado only; repeated application is a no-op.
+pub fn side_rail(id: AircraftId, rows: &mut Vec<Hardpoint>) {
+    if id != AircraftId::Tornado || rows.len() != TORNADO_SIDE_RAIL {
+        return;
+    }
+    let inner = &rows[TORNADO_INNER_WING];
+    if (
+        inner.location,
+        inner.flags,
+        inner.position,
+        inner.store.as_deref(),
+        inner.count,
+        inner.weight_class,
+    ) != (4, 0x505, [11, -25, 9], Some("MK82P3.JT"), 2, 30)
+    {
+        return;
+    }
+    rows.push(Hardpoint {
+        location: 4,
+        flags: 0x85,
+        position: inner.position,
+        store: Some("AIM9M.JT".into()),
+        count: 2,
+        weight_class: 5,
+    });
 }
 
 /// The retail rows of the aircraft whose default load [`adjust_defaults`]
@@ -367,6 +495,39 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             rows[MF1_BELLY].count = MF1_BELLY_CAPACITY;
         }
         _ => {}
+    }
+}
+
+/// The Tornado's centreline tank row (`TOR.PT` row 5: Wing, x 0, two
+/// `F250.GAS`), whose default quantity [`default_counts`] changes.
+pub const TORNADO_CENTRELINE: usize = 5;
+
+/// Default quantities where T.O.R.E's default load differs from the source
+/// row's capacity (John, 2026-11-11, round 3 "T3", opinionated: "the default
+/// load gets one centreline tank instead of the crossing pair"). The real
+/// Tornado IDS carries one tank on its centreline station; the retail row
+/// holds two (a pair 1.18 ft either side of x 0 that crosses the shoulder
+/// Paveways beside it). The default is one tank, the record's own type, at
+/// x 0. Only the quantity that starts loaded changes: the row keeps its
+/// place, mask, capacity (two), weight class and position, so Load Ordnance
+/// still admits what it did. Guarded on the whole retail row (an edited
+/// record keeps its own default) and on the identity; repeated application
+/// is a no-op. Applied by `tore_sim::combat::hardpoints::default_records`.
+pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
+    if id != AircraftId::Tornado {
+        return;
+    }
+    if let Some(row) = rows.get_mut(TORNADO_CENTRELINE)
+        && (
+            row.location,
+            row.flags,
+            row.position,
+            row.store.as_deref(),
+            row.count,
+            row.weight_class,
+        ) == (4, 0x205, [0, -25, 17], Some("F250.GAS"), 2, 40)
+    {
+        row.count = 1;
     }
 }
 
@@ -735,7 +896,7 @@ mod tests {
             assert!(weapon_allowed(AircraftId::F15E, 6, name), "{name}");
             assert!(weapon_allowed(AircraftId::F15, F15E_BELLY, name), "{name}");
             assert!(
-                weapon_allowed(AircraftId::Tornado, F15E_BELLY, name),
+                weapon_allowed(AircraftId::Mig23, F15E_BELLY, name),
                 "{name}"
             );
         }
@@ -745,6 +906,59 @@ mod tests {
         assert!(!weapon_allowed(AircraftId::F15E, F15E_WING, "AA6.JT"));
         assert!(weapon_allowed(AircraftId::F15E, F15E_WING, "AIM120.JT"));
         assert!(weapon_allowed(AircraftId::M2000, F15E_WING, "AA6.JT"));
+    }
+
+    /// TOR-6 (agent decision 2026-11-11, John's F-15E A2 precedent): the
+    /// Tornado's shoulder and inner wing pairs refuse the stores that enter
+    /// the airframe over 0.3 ft; the default Paveway family, the bombs and
+    /// every other row and aircraft are untouched.
+    #[test]
+    fn the_tornado_refuses_the_stores_that_enter_the_airframe_on_its_wing_and_shoulder_rows() {
+        for name in TORNADO_SHOULDER_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tornado, TORNADO_SHOULDER, name),
+                "{name}"
+            );
+            // Not another row, not another aircraft.
+            assert!(weapon_allowed(AircraftId::Tornado, 5, name), "{name}");
+            assert!(weapon_allowed(AircraftId::Tornado, 4, name), "{name}");
+            assert!(
+                weapon_allowed(AircraftId::Mig23, TORNADO_SHOULDER, name),
+                "{name}"
+            );
+        }
+        // The shoulder keeps the default, its two siblings of the same shape,
+        // and the bombs, dispensers and Maverick that fit.
+        for name in [
+            "PAVEWAY.JT",
+            "GBU10.JT",
+            "GBU10A.JT",
+            "MK82.JT",
+            "MK84.JT",
+            "CBU87.JT",
+            "AGM65G.JT",
+            "AS7.JT",
+        ] {
+            assert!(
+                weapon_allowed(AircraftId::Tornado, TORNADO_SHOULDER, name),
+                "{name}"
+            );
+        }
+        for name in TORNADO_INNER_WING_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tornado, TORNADO_INNER_WING, name),
+                "{name}"
+            );
+            // The same three bombs are also refused on the shoulder pair.
+            assert!(TORNADO_SHOULDER_REFUSED.contains(&name), "{name}");
+        }
+        for name in ["MK82P3.JT", "MK84.JT", "GBU38.JT", "AGM88.JT", "LAU10.JT"] {
+            assert!(
+                weapon_allowed(AircraftId::Tornado, TORNADO_INNER_WING, name),
+                "{name}"
+            );
+        }
+        assert!(!TORNADO_SHOULDER_REFUSED.contains(&"PAVEWAY.JT"));
     }
 
     #[test]
@@ -861,6 +1075,95 @@ mod tests {
         shifted.push(row((4, 0x85, [16, -22, 4], "AIM9M.JT", 2, 5)));
         retire(AircraftId::Tornado, &mut shifted);
         assert_eq!(shifted.len(), 10);
+    }
+
+    /// TOR-6b (John, 2026-11-11): the retired outer pair's place at the end of
+    /// the table is taken by one AIM-9 side rail row, the retail row's own
+    /// content (mask, class, default `AIM9M.JT` pair); guarded and idempotent.
+    #[test]
+    fn the_tornado_gains_one_side_rail_row_in_place_of_the_retired_outer_pair() {
+        let retail = tornado_retail();
+        let mut rows = retail.clone();
+        retire(AircraftId::Tornado, &mut rows);
+        side_rail(AircraftId::Tornado, &mut rows);
+        assert_eq!(rows.len(), 9);
+        // No other row moved: rows 0 to 7 are the retail rows.
+        assert_eq!(key(&rows[..8]), key(&retail[..8]));
+        let rail = &rows[TORNADO_SIDE_RAIL];
+        assert_eq!(
+            (rail.location, rail.flags, rail.count, rail.weight_class),
+            (4, 0x85, 2, 5)
+        );
+        assert_eq!(rail.store.as_deref(), Some("AIM9M.JT"));
+        // Repeated application, in either order, changes nothing.
+        let once = key(&rows);
+        retire(AircraftId::Tornado, &mut rows);
+        side_rail(AircraftId::Tornado, &mut rows);
+        assert_eq!(key(&rows), once);
+        // Another aircraft, an edited inner row or an edited outer row keeps its own.
+        let mut other = retail.clone();
+        retire(AircraftId::Mig23, &mut other);
+        side_rail(AircraftId::Mig23, &mut other);
+        assert_eq!(key(&other), key(&retail));
+        let mut edited = retail.clone();
+        edited[TORNADO_INNER_WING].count = 4;
+        retire(AircraftId::Tornado, &mut edited);
+        side_rail(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited.len(), 8);
+        let mut edited = retail.clone();
+        edited[TORNADO_OUTER_WING].count = 4;
+        retire(AircraftId::Tornado, &mut edited);
+        side_rail(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited.len(), 9);
+        assert_eq!(edited[8].count, 4);
+    }
+
+    #[test]
+    fn the_tornado_side_rail_refuses_what_enters_the_airframe_and_the_bombs() {
+        for name in TORNADO_SIDE_RAIL_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tornado, TORNADO_SIDE_RAIL, name),
+                "{name}"
+            );
+            assert!(weapon_allowed(AircraftId::Mig23, TORNADO_SIDE_RAIL, name));
+        }
+        for name in [
+            "AIM9B.JT", "AIM9M.JT", "AIM9X.JT", "AA2.JT", "AA8.JT", "AA11.JT", "AA11B.JT",
+        ] {
+            assert!(
+                weapon_allowed(AircraftId::Tornado, TORNADO_SIDE_RAIL, name),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tornado_default_load_is_one_centreline_tank() {
+        // John, 2026-11-11 (T3): one tank at x 0 instead of the crossing pair.
+        let mut rows = tornado_retail();
+        retire(AircraftId::Tornado, &mut rows);
+        let retail = rows.clone();
+        default_counts(AircraftId::Tornado, &mut rows);
+        let mut expected = key(&retail);
+        expected[TORNADO_CENTRELINE].4 = 1;
+        assert_eq!(key(&rows), expected);
+        // The record's own tank type and position stay; only the count moves.
+        assert_eq!(rows[TORNADO_CENTRELINE].store.as_deref(), Some("F250.GAS"));
+        assert_eq!(rows[TORNADO_CENTRELINE].position, [0, -25, 17]);
+        default_counts(AircraftId::Tornado, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // Another identity with the same rows, or an edited record, keeps its own.
+        let mut other = retail.clone();
+        default_counts(AircraftId::Mig23, &mut other);
+        assert_eq!(key(&other), key(&retail));
+        let mut edited = retail.clone();
+        edited[TORNADO_CENTRELINE].store = Some("F350.GAS".into());
+        default_counts(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited[TORNADO_CENTRELINE].count, 2);
+        let mut edited = retail.clone();
+        edited[TORNADO_CENTRELINE].count = 4;
+        default_counts(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited[TORNADO_CENTRELINE].count, 4);
     }
 
     fn default_rows(id: AircraftId) -> Vec<Hardpoint> {

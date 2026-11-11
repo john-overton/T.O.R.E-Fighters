@@ -299,6 +299,66 @@ def mf1_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tornado's default stores (TOR-6, 2026-11-11), one run each: (label, [(right ft, up ft,
+# forward ft) per release, signed], pylon depth ft). The shoulder Paveways hang from 2 inch
+# fuselage rails at 2.00 ft out, the forward pair (12.27 ft ahead) first, left then right; they
+# never move with the sweep. The inner wing's Mk 82s hang from 1 ft pylons on the swinging panel
+# at 9.50 ft out, 1.50 ft ahead with the wing spread (25 degrees, 200 kt); at 67 degrees (650 kt)
+# the pylons swivel with the panel, so the left bomb leaves from -10.53 ft and 0.81 ft aft, the
+# right from 10.36 ft and 1.26 ft aft (the left glove is a source unit further out, so the pair is
+# not an exact mirror image). Left first on a paired row.
+TORNADO_CASES = [
+    ("Paveway shoulder row, 25 degrees",
+     [(-2.00, -4.92, 12.27), (2.00, -4.92, 12.27), (-2.00, -4.55, -2.93), (2.00, -4.55, -2.93)], RAIL),
+    ("Mk 82 inner wing, 25 degrees", [(-9.50, -1.45, 1.50), (9.50, -1.45, 1.50)], WING),
+    ("Paveway shoulder row, 67 degrees",
+     [(-2.00, -4.92, 12.27), (2.00, -4.92, 12.27), (-2.00, -4.55, -2.93), (2.00, -4.55, -2.93)], RAIL),
+    ("Mk 82 inner wing, 67 degrees", [(-10.53, -1.45, -0.81), (10.36, -1.45, -1.26)], WING),
+]
+
+
+# The Tornado's AIM-9 side rails (row 8, TOR-6b, 2026-11-11): the AIM-9M on the shoulder rail
+# of the inner pylon, 1.25 ft outboard of the Mk 82 pack's pylon, level with it fore and aft at
+# every sweep (the 1.25 ft is not turned with the wing); 0.53 ft from the wing's underside
+# (the shoulder rail's own depth: the pylon's 1 ft less the rail's rise). Left first.
+TORNADO_RAIL_CASES = [
+    ("AIM-9M side rail, 25 degrees", [(-10.75, -0.74, 1.50), (10.75, -0.74, 1.50)], 0.53),
+    ("AIM-9M side rail, 67 degrees", [(-11.78, -0.74, -0.81), (11.61, -0.74, -1.26)], 0.53),
+]
+
+
+def tornado_rail_problems(output: str) -> list[str]:
+    return tornado_origin_problems(output, TORNADO_RAIL_CASES)
+
+
+def tornado_origin_problems(output: str, cases=None) -> list[str]:
+    cases = TORNADO_CASES if cases is None else cases
+    parts = runs(output)
+    if len(parts) != len(cases):
+        return [f"{len(parts)} runs finished, want {len(cases)}"]
+    problems: list[str] = []
+    for part, (label, wants, depth_want) in zip(parts, cases):
+        firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
+        if len(firsts) != len(wants):
+            problems.append(f"{label}: {len(firsts)} releases, want {len(wants)}")
+            continue
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(firsts, wants)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(r - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want {wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth == "none" or abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+    return problems
+
+
+def tornado_args(speed: str, station: str, load: str, count: str) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
+            "--speed", speed, "--repeat", count, "--gap", "0.5", "--aircraft", "tornado", "--station", station,
+            "--load", load, "--count", count]
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -388,5 +448,25 @@ def scenarios() -> list[Scenario]:
             ],
             check=mf1_origin_problems,
             notes="The Mirage F1's stores leave from where they hang: the wing Magics from 1 ft pylons, the wingtip Magics from the shifted tip rail, a Mk 82 pair from the belly pylon slot at 3.24 ft, left then right (MF1-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-tornado", lane="flight",
+            args=tornado_args("200", "1", "PAVEWAY", "4"),
+            timeout=300,
+            then=[
+                Step(tornado_args("200", "2", "MK82P3", "2"), timeout=300),
+                Step(tornado_args("650", "1", "PAVEWAY", "4"), timeout=300),
+                Step(tornado_args("650", "2", "MK82P3", "2"), timeout=300),
+            ],
+            check=tornado_origin_problems,
+            notes="The Tornado's default stores leave from where they hang at both sweeps: the shoulder Paveways from fixed 2 inch rails whatever the speed, the inner wing Mk 82s from 9.50 ft out at 25 degrees (200 kt) and from the swivelled pylons at 67 degrees (650 kt), left then right (TOR-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-tornado-rail", lane="flight",
+            args=tornado_args("200", "3", "AIM9M", "2"),
+            timeout=300,
+            then=[Step(tornado_args("650", "3", "AIM9M", "2"), timeout=300)],
+            check=tornado_rail_problems,
+            notes="The Tornado's AIM-9 side rails leave from where they hang at both sweeps: 10.75 ft out and 1.50 ft ahead at 25 degrees (200 kt), and beside the swivelled pylons at 67 degrees (650 kt), 1.25 ft outboard of the Mk 82 packs, left then right (TOR-6b).",
         ),
     ]

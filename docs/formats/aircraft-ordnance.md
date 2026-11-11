@@ -1360,6 +1360,79 @@ belly row, `PASS released 4 ... no-explosion`. An AGM-65G loaded on a belly stat
 (kept after the mask) launches from the page, locks CUED and kills the lead truck.
 See [the baseline](../baselines/ordnance-availability.md#mirage-f1-ordnance-masks-and-default-load-mf1-6-2026-11-11).
 
+## The Panavia Tornado IDS (TOR-6, 2026-11-11)
+
+Implementation and review note for the Tornado's ordnance (`AircraftId::Tornado`,
+`TOR.PT`). The record's rows, masks, capacities and defaults flow through the
+shared loading rules, as for the Mirage 2000 above. Two things are new: the BK 27
+gun, which B5-1 admitted as the Tornado's own internal gun, is proven here, and
+normal loading now refuses the shoulder and inner wing stores that enter the
+airframe ([the measurements](../spec/stores-on-pylons.md#the-tornado-ordnance-masks-and-the-measured-catalog-tor-6-2026-11-11)).
+Frames and commands: [the baseline](../baselines/ordnance-availability.md#tornado-ordnance-tor-6-2026-11-11).
+
+**Default load** (decoded, the same for the human player, AI wings, saved loads
+and the lobby; John's round 3 answers T1 and T3 applied by TOR-5):
+
+| Row | Position (ft, source) | Default | Notes |
+| ---: | --- | --- | --- |
+| 0 to 3 | fixed | `VIS240.SEE`, `F18R.SEE`, `MIG31.ECM`, `PAVESPK.SEE` | sensors, jammer and the laser row stay retail, no pod body (decision 22) |
+| 4 | 2.33 right, 1.67 down, 18.33 forward | `BK27.JT` x360 | internal gun, takes no other store |
+| 5 | centreline | `F250.GAS` x1 (1,650 lb of fuel) | capacity two, the default is one (T3) |
+| 6 | shoulder pair, 2.00 ft out | `PAVEWAY.JT` x4 (the GBU-10E) | four in two pairs, weight limit 8,000 lb |
+| 7 | inner wing, 9.50 ft out on the swinging panel | `MK82P3.JT` x2 | each press releases a three-bomb pack (1,500 lb), swivelling |
+| 8 | retired | none | John, 2026-11-10 (the outer wing is reserved for pods) |
+
+The default stores weigh 12,848 lb with the tank's fuel (the live-fire probe's
+`payload_start_lb`); the Load Ordnance page reads `55,134 lbs` current of `61,620`
+maximum, `6,486 lbs` available. Its rows read `BK27 360 (max 360)`, `250 gallon
+tank 1 loaded (max 2)`, `GBU-10E Paveway 4 loaded (max 4)` and `MK-82 3-Pack 2
+loaded (max 2)`. With the refusals below, the air-to-air page holds only `AA-11B`
+and `R-60M`: there is no Sidewinder or Sparrow choice (an open question for John).
+`--validate-ordnance` reads `ordnance TOR.PT: 4 source rows, 0 optional weapon
+rows, 49 compatible weapon placements, 8 tank placements; defaults and restart
+passed; catalog 31 normal, 83 Cheat` (85 placements and a catalog of 61 before the
+refusals). The retail-reading test `crates/tore-import/tests/tornado_ordnance.rs`
+pins the nine rows and masks, the jammer's 60 chaff and 60 flares and the BK27
+record.
+
+**Countermeasures.** The `MIG31.ECM` row stays as retail (John, decision 22):
+60 chaff and 60 flares (the weapons window reads `60 CHAFF 60 FLARE`), a
+deception jammer, no pod body. `--combat-command chaff` and `flare` with
+`--countermeasure-preview 60`: five chaff leave 55 and three flares leave 57,
+capacity 60 and 60. No source for the real dispenser counts was read, so the
+retail 60 and 60 stand and nothing was changed.
+
+**The BK 27 gun.** `BK27.JT` (27-mm Mauser BK27 cannon) is a gun round whose
+compatibility flag 2 is clear, so only the row that names it can hold it. It is
+in `AircraftId::guns()` for the Gripen and the Tornado, in no catalog, in no
+`SUPPORTED_WEAPONS` and in no Cheat list: a fixed gun, never a store. The shared
+gun path of the M61, DEFA and GSh records fires it unchanged (as GRI-6 found for
+the Gripen), so this slice changed no gun code. Values, with where each comes from:
+
+| Value | TORE | Source | Real |
+| --- | --- | --- | --- |
+| Rounds | 360 (row 4 count) | `TOR.PT`, spec-derived | two guns, 180 each = 360 (aerospaceweb.org, milavia.net, read 2026-11-11), so the record total equals the real total |
+| Muzzle velocity | 2,933 ft/s (the value every gun record shares) | `BK27.JT`, equal to `M61.JT` and `DEFA.JT` | about 1,100 m/s (3,609 ft/s), Wikipedia "Mauser BK-27": TORE is about 19 percent low, a shared field |
+| Rounds per shot, burst | 2 per shot, M61 and DEFA burst fields | `BK27.JT` | not applicable |
+| Cadence | 32 rounds a second (shared) | the fitted gun rule | 1,000 to 1,700 rounds a minute a gun, two guns 33 to 57 a second: TORE is at the bottom of the real range, the 360 rounds last 11.3 s against 6.4 to 10.8 s |
+| Damage by class | 25 / 2 / 7 / 7 / 25 | `BK27.JT`, equal to the M61 and DEFA | |
+| Fire sound | `&FSTGUN3.11K` (6,000 ft) | `BK27.JT` | |
+| Tracer | `BULLET.SH`, red, every third round | shared | |
+
+Behaviour checked (`flight-livefire-tornado-slot1`): 320 rounds fired, 51 hits,
+1 kill, ammunition `[40, 4, 2]`; a 2 second strafe hold fires about 64 rounds (the
+shared 32 a second). **Sight:** the HUD reads `LCOS 354 BK27 RADAR` with the radar
+tracking (TOR-7 evidence), and the sight solution starts from the station's own
+mount, the same point the rounds leave. **Loading:** the row appears on the Load
+Ordnance page as `BK27 360 (max 360)`, selected first; the audit's saved loads
+and lobby round trip keep it; the row takes no other store. **Muzzle position:**
+the record's one gun row is a point 2.33 ft right of the centreline, 1.67 ft
+below the origin and 18.33 ft forward, about 11.7 ft behind the nose tip (the
+shape reaches 30 ft); rounds and the muzzle flash start from there, beside the
+cockpit's right side. The real aircraft carries two guns, one each side of the
+lower forward fuselage; TORE draws one muzzle on the starboard side, as the
+Gripen's single gun row (GRI-5 B3, kept). Listed, not changed.
+
 ## Original icons and geometry candidates
 
 
@@ -1543,3 +1616,40 @@ lead truck and kills it (`a2g-run: kill 0x50000000`). `a2g-jettison-f5e` (`--att
 jettison --station 2 --load MK82 --count 4`): the tank drops first (external fuel 990
 lb to 0, payload 3,406.6 lb to 2,308.6 lb, internal fuel 4,400 lb), then the four
 bombs, `PASS released 5 ... no-explosion`.
+
+## The Tornado's AIM-9 side rails (TOR-6b, 2026-11-11)
+
+Implementation note, opinionated (John, 2026-11-11: "a custom side rail kind of like the
+f-14 for this station ... on the inner [wing] rail like the RL Tornado"). The TOR-6 table
+above lists row 8 as retired; **Update (TOR-6b, 2026-11-11): row 8 is the AIM-9 side rail
+row.** `aircraft_stations::side_rail` appends it after `retire` dropped the retail outer
+wing pair, so the table is the retail rows 0 to 7 plus one appended row, and no earlier
+index moves. The retail row's own content is restored, nothing new is invented:
+
+| Field | Row 8 (retail outer pair, retired) | Row 8 (side rail, appended) |
+| --- | --- | --- |
+| Location byte | 4 (Wing) | 4 (Wing), moved by the sim onto the shoulder rail of row 7's pylon |
+| Flags (mask) | 0x85 (infrared missiles, paired) | 0x85, the same |
+| Position (source units) | 16, -22, 4 (16 ft out) | 11, -25, 9 (row 7's record; the sim's `station_move` sets the out and forward, the height is read from the wing) |
+| Default | `AIM9M.JT` x2 | `AIM9M.JT` x2 (one a side) |
+| Weight class | 5 | 5 |
+
+The appended row exists only while rows 0 to 7 are exactly the retail ones (an edited
+record keeps its own table), on `AircraftId::Tornado` only, and repeated application is a
+no-op. **Mask.** The mask admits 11 catalog stores; normal loading refuses four
+(`PL7.JT`, `R550.JT`, `AT12.JT`, `GBU12.JT`, over the 0.3 ft line or not a rail missile)
+and keeps seven: `AIM9B.JT`, `AIM9M.JT`, `AIM9X.JT`, `AA2.JT`, `AA8.JT`, `AA11.JT`,
+`AA11B.JT` ([measurements](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11)).
+The F-14's glove-pylon rail takes everything its infrared mask admits; the Tornado's takes
+the same minus those four. The air-to-air page of Load Ordnance lists seven missiles
+(`AA-11B`, `AIM-9B`, `AIM-9M`, `AIM-9X`, `R-3S`, `R-60M`, `R-73`; the page names the AA-2, AA-8 and AA-11
+by their Russian names), where it listed only `AA-11B` and `R-60M` before.
+
+`--validate-ordnance` reads `ordnance TOR.PT: 5 source rows, 0 optional weapon rows, 56
+compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 36
+normal, 83 Cheat` (4 rows, 49 placements and 31 before). The retail-reading test
+`tornado_ordnance.rs` pins the nine rows and the row 8 mask (0x85) and class (5). The
+default load is the TOR-6 default plus two `AIM9M.JT` (one a side, 380 lb): the weapons
+window lists `2 AIM-9M`, the live-fire probe starts at 13,228 lb of payload (12,848 before);
+the Load Ordnance page reads `AIM-9M Sidewinder 2 loaded (max 2)` under `Wing`, `55,514 lbs` current of `61,620`
+maximum, `6,106 lbs` available (frame `load-ordnance-page`).

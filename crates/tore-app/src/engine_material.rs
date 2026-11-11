@@ -118,6 +118,9 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // MF1.SH: the one Atar 9K-50 exit disc at y -42, two half discs either
         // side of x = 0 (subtype 0x64; MF1-4, docs/formats/aircraft-control-surfaces.md).
         AircraftId::Mf1 => crate::mf1_animation::nozzle(address),
+        // TOR.SH: the two nozzle exit octagons at y -24 (subtype 0x64), left
+        // 0x3e90 and right 0x3eb7 (TOR-4; docs/formats/aircraft-control-surfaces.md).
+        AircraftId::Tornado => matches!(address, 0x3e90 | 0x3eb7),
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
         AircraftId::A4E
@@ -150,7 +153,8 @@ pub fn outlet_count(id: AircraftId) -> usize {
         | AircraftId::Su27
         | AircraftId::Su35
         | AircraftId::F15E
-        | AircraftId::F5E => 2,
+        | AircraftId::F5E
+        | AircraftId::Tornado => 2,
         _ => 0,
     }
 }
@@ -190,6 +194,7 @@ mod tests {
             AircraftId::Su35,
             AircraftId::F15E,
             AircraftId::F5E,
+            AircraftId::Tornado,
         ] {
             assert_eq!(outlet_count(id), 2);
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);

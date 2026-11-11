@@ -2083,6 +2083,10 @@ impl Combat {
                     own.heat = crate::ai_wings::energy_heat(s, own.heat);
                 }
                 own.note_loaded();
+                // The swing wing's pylons ride the wing: the turn is a pure
+                // function of this aircraft's speed and flaps, the same on
+                // every peer (TOR-5).
+                own.set_wing_turn(tore_sim::combat::swing::wing_turn(s.speed, s.flaps));
             }
             if s.airburst()
                 && let Some(event) = self.state.ownship_airburst(aircraft, s.position)

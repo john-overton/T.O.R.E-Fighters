@@ -3861,6 +3861,11 @@ Options (none chosen):
    Opinionated, no retail evidence.
 3. **Author a Tornado panel.** Not in the media; invented art, later decision.
 
+Update (TOR-7, 2026-11-11): John chose option 1 in the batch decision round
+(decision 21, "follow the record", opinionated). The Tornado now measures and
+uses the family: see [Tornado sensors, HUD and cockpit
+(TOR-7)](#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
+
 ### Tornado engine count and thrust
 
 The record says 2 engines, correct for the Tornado (two RB199). The shape
@@ -3965,6 +3970,17 @@ the fillet seam. Options (none chosen):
 The wingtip vapor streamer should follow whichever the swept tip is
 (Mig23 precedent in the spec).
 
+Update (TOR-3, 2026-11-10): the pivot suggested above, (9.5, 0.5, 0.5), is not
+within 1.5 units of every shared vertex: the shared corner (10, -4) is 4.5 units
+from it, so the worst seam at a 42 degree turn is 3.25 units (2.2 ft), not 1.5.
+The point that minimizes the worst separation is the centre of the smallest
+circle round the three distinct glove corners (9,1), (10,-1), (10,-4): (9.5,
+-1.5), radius 2.55 units, which opens the seam by at most 1.83 units (1.22 ft) at
+the full turn. TOR-3 ships that pivot (left (-10.5, -1.5), the left glove being a
+unit further out), a speed-scheduled sweep like the MiG-23's, and the other
+findings of this section as measured in
+[the Tornado control rig](aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10).
+
 ### Tornado surfaces (for John)
 
 State words (neutral 287 faces; counts from `Shape::with_state`):
@@ -4052,6 +4068,14 @@ Verdicts:
 The whole-surface gate (John, 2026-11-07/08) is met by every face above except
 the taileron's forward-corner strain and the missing-surface gaps; no
 diagonal or partial surface is in the source, so no probe sheet is needed.
+
+Update (TOR-4, 2026-11-10): the airbrake word's four faces are two plates, one
+a side, each in both windings (`57ec`/`5803` right, `5889`/`58a0` left), not four
+plates; the gear is rigged as three rigid pieces (each main leg of ten faces and
+the nose of six, folding forward) rather than "rigid plates, hinge at top edge";
+and the burner word's eight faces are two crossed plate pairs, one per nozzle
+(nozzle octagons `3e90`, `3eb7` at y -24). See [the Tornado gear, airbrake and
+burner rig](aircraft-control-surfaces.md#tornado-gear-airbrake-and-burner-rig-tor-4-2026-11-10).
 
 ### Tornado sensors, jammer and pod (for John)
 
@@ -4716,6 +4740,12 @@ batch decision round (decision 25), so it is opinionated (John, 2026-11-10). The
 other aircraft's bindings stay as their own slices find them. See [Mirage F1
 sensors, HUD and cockpit](#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).
 
+Update (TOR-7, 2026-11-11): for the Tornado the HUD and cockpit binding row is
+decided, no longer interim (John followed the record: `E2000.HUD`, stem `EF2`;
+opinionated, 2026-11-10), and the Tornado's HUD glass row is measured (a polygon
+replaces the empty mask). The Gripen's and F-5E's rows are their own slices'. See
+[Tornado sensors, HUD and cockpit](#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
+
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
 identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
@@ -4726,6 +4756,9 @@ shape, the stores preview, the underside probe and the damage pieces all use
 2/3; `aircraft_scale.rs` stays `[1, 1, 1]` (no per-axis fit; that is John's
 call). The gear low point is 11 units at 2/3 ft, 7.33 ft. Store rows are
 measured in TOR-5 on the drawn shape.
+
+Update (TOR-2, 2026-11-10): the 2/3 draw scale is confirmed in every consumer that
+matters, with tests; see [the Tornado shape section](#tornado-shape-scale-and-skin-tor-2-2026-11-10).
 
 **Not done here, by design.** No cockpit measurement, no rig mapping beyond the
 gear word, no station, pylon or ordnance review, no flight-model change, no
@@ -4861,6 +4894,37 @@ groups, two omitted wing-marking decal slots). The parked path
 captures the top and under views. Provenance: choice opinionated (John,
 2026-11-10), factors fitted. Later slices use the scaled geometry: MF1-3 and MF1-4
 scale any shape-unit hinge point their rigs name, MF1-5 measures the stations.
+
+## Tornado shape, scale and skin (TOR-2, 2026-11-10)
+
+Implementation, slice TOR-2, Claude Sonnet (sonnet-high). John's decision of
+2026-11-10 (draw at the header scale, true size) is confirmed in code and
+frames; nothing in the draw path needed to change beyond B5-1's `Tornado`
+entry in `debris::scale`. The Tornado is drawn from `TOR.SH` of `FA_2.LIB`
+(the toolkit patch archive's different `TOR.SH` is never imported), at 2/3 ft a
+unit with the identity per-axis scale: 44.7 ft span (real 45.6), 54.0 ft long
+(54.8), 20.0 ft high (19.5). Every consumer was checked: the drawn aircraft,
+the stores preview and station underside, the damage looks and their section
+extents, the damage bodies and pieces, breakup offsets, gear low point (7.33
+ft), contrail offsets and the wingtip vapor point (22.67 ft, on the drawn wing
+tip) all use 2/3; no consumer is at 1/3. The table, the skin review (22 twin
+groups, 21 with opposite normals, the centreline sliver pair `255c` and `257a`
+that both draw), the two omitted `E0` fin decal slots (`2ce3`, `2e3d`) and the
+damage looks are in [the Tornado shape, scale and skin
+review](objects-and-shapes.md#tornado-shape-scale-and-skin-review). The
+`render-tornado-skin` battery scenario captures the top and under views with
+the gear down. Frames: `.local/m3-aircraft/frames/TOR-2/` (local only).
+
+The MiG-23 (the other header-scale-2 aircraft in the roster) draws at the same
+scale beside it. The Su-24 is not a roster aircraft (`SU24.PT` is only the
+Tornado's template record), so it cannot be drawn for comparison.
+
+Later slices use the 2/3 scale as it stands: TOR-3 and TOR-4 work in shape
+units at 2/3 ft; TOR-5 measures the stations on the drawn shape; a rig that
+names a hinge in CE (third-of-a-foot) units divides by 3 as the streamer does,
+and a hinge in shape units uses the shape's own units. The wing stays the fixed
+spread pose (no sweep word), so the sweep rig is TOR-3's. No whole-body damage
+variant is registered (open decision, as for the Mirage 2000 and the MiG-25).
 
 ## Batch 5 follow-up corrections (B5-3, 2026-11-10)
 
@@ -5825,3 +5889,413 @@ Open items for John: the centreline (row 4) still lets 36 records enter the bell
 and 15 cross the gear (not asked); the gun cadence is the shared one and was not re-measured; the real
 chaff and flare counts of the F1 were not sourced.
 
+## Tornado stations measured and the swivelling pylon wiring (TOR-5, 2026-11-10)
+
+Implementation and review mode, slice TOR-5; stopped on clipping (John's standing
+rule). The full table, the rule and the options are in
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-ids-swivelling-wing-pylons-and-a-stop-on-clipping-tor-5-2026-11-10).
+
+Update (TOR-5, 2026-11-10) to the TOR-3 pylon note in
+[the Tornado control rig](aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10):
+the swivel is now wired. The sweep schedule and pivot moved from the drawing rig to
+`tore_sim::combat::swing` (same numbers); inner wing row 7 is the only swivelling
+row; the shoulder (row 6) and centreline (row 5) pylons are fixed. The earlier
+statement that row 7 sits inboard of the pivot stands: as decoded (3.67 ft out, 3 ft
+forward) it hangs from the fuselage side, enters the airframe by 2.61 ft with the
+default Mk 82, and with the swivel it stands under no wing at 67 degrees.
+
+Update (TOR-5, 2026-11-10) to the TOR-0 hardpoints table: nothing changed in the
+rows; the row 5 tank pair, row 6 Paveways and row 7 Mk 82s overlap each other and the
+fuselage under the belly (numbers in the stores specification). Audit pins are
+unchanged (45 aircraft, 18 stations, 4,652 weapon placements, 233 tank placements,
+220 Cheat-only placements, 80 pod placements).
+
+Update (TOR-5b, 2026-11-11) to the TOR-5 stop on clipping: John's round-3 answers moved
+row 7 onto the swinging panel (9.5 ft out, 1.5 ft forward), put one centreline tank in
+the default load and added a glove plate; see
+[Tornado stations moved, one tank and a glove plate (TOR-5b, 2026-11-11)](#tornado-stations-moved-one-tank-and-a-glove-plate-tor-5b-2026-11-11)
+at the end of this file. The measurement above stands as the TOR-5 record.
+
+## Tornado sensors, HUD and cockpit (TOR-7, 2026-11-11)
+
+Slice TOR-7 (implementation mode) made the Eurofighter 2000's cockpit family work
+for the Tornado IDS and confirmed its sensors. John's decision round of 2026-11-10
+(decision 21) decided the review's [HUD and cockpit
+question](#tornado-hud-and-cockpit-for-john): **follow the record**, `e2000.HUD`,
+cockpit stem `EF2`, forward art `~EF2H.PIC`. That settles what the batch identity
+slice wired as an interim agent decision, so the binding is now **opinionated
+(John, 2026-11-10)**; the stem arm, picture and overlay names already existed from
+B5-1 and did not change. The Tornado is the first aircraft to use the family: TORE
+has no Eurofighter (`E2000.PT` is not on the roster), and no other identity names
+`E2000.HUD` or stem `EF2` (checked by the new test). Changed: the glass polygon
+(`hud_aperture.rs`), an `"EF2"` mirror seed row (`mirrors.rs`), two comments in
+`aircraft.rs` and a retail-reading test (`tore-import/tests/tornado_cockpit.rs`).
+Before the slice every cockpit view already drew the `~EF2*` art (the stem and picture
+were wired); what was missing was the HUD (the glass mask was empty, so no HUD
+drew) and the mirrors (three dead blue-grey panels).
+
+**Sensors (spec-derived, retail records; nothing changed).** The record's fixed
+rows stay as retail (decision 22): `VIS240.SEE`, `F18R.SEE`, `MIG31.ECM` and
+`PAVESPK.SEE`; the remaining rows are the weapons, the 3,300 lb tank pair and the
+gun. `--sensor-summary` reads: `Tornado: radar F18R.SEE search 90 nmi 60x60 deg track
+50 nmi 45x45 deg look-down 0 ADVANCED; infrared none; visual VIS240.SEE search 10 nmi
+120x90 deg track 5 nmi 120x90 deg; jammer MIG31.ECM LATE strength 0.30; signature
+radar 100 infrared 100`. The radar is the F/A-18's `Preset::Advanced` (not the
+Tornado's ground-mapping radar, left as retail), the visual sensor is the
+Tornado's own narrower `VIS240.SEE` (120 x 90 degrees against the fleet's 170 x
+140), and the jammer is `MIG31.ECM` read as the `LateColdWar` generation at
+strength 0.30. No match arm branches on the aircraft, so the radar modes, the lock
+and the RWR behave as for the other aircraft.
+
+A live-fire run (`--live-fire --aircraft tornado --weapon-slot 1`, the BK27 gun)
+shows the Radar window `TWS 10 ... TRACK`, the HUD `LCOS 354 BK27 RADAR` with the lock
+circle on the target and the target camera `TORNADO IDS`; `--scope-range 50` redraws
+the scope at 50. **There is no AIM-9 on the Tornado:** the record's `AIM9M.JT` row is
+the outer wing station that B5-2 retired on John's decision (23b), so the default
+store for a lock is the gun, and slots 2 and 3 are `4 GBU-10` and `2 MK-82P3` (the
+Weapons window also reads `60 CHAFF` and `60 FLARE`, the `MIG31.ECM` counts).
+`--jammer-on --combat-command incoming` lights `JAM` on the RWR window; the incoming
+round plots at the window centre, and no scripted path plots an emitter on the RWR,
+as for the other aircraft.
+
+**Pave Spike and the laser bomb run (no pod body).** The `PAVESPK.SEE` row is a fixed
+internal row (flag `0x8`, position (0, 0, 0), as on the A-10), so the aircraft has
+the AC-130 targeting sight's laser designator with nothing hung under it and no
+pod drawn (decision 22). With the GBU-10 selected (slot 2) and a ground point pinned
+(`--combat-command sight-pin`) the HUD reads `ARM 1`, `3 GBU-10`, `IN RNG`, `LSR 4.6`
+and `TTI 0:32` with the laser box on the point, and the target camera shows the
+Paveway seeker. With nothing designated it reads `NO LASER`, as for the F-16C. The
+default load therefore allows a laser bomb run without any pod station, which the
+Tornado does not have in this record. The sensor summary shows `infrared none`
+because the Pave Spike is a laser sight, not a radar-window infrared channel.
+
+**HUD glass (measured, fitted).** `hud_aperture::mask` now has a polygon for the
+Tornado, replacing the empty mask the B5-1 interim left (the aperture fails closed
+for a picture of any other size). `~EF2H.PIC` is 1280 x 490. Its glass is the one
+closed region of transparent pixels inside the combiner frame: a thin arc on top
+(green, from y 105 at the centre), two thin side lines (x 475 and 803 at the widest, y 209 to
+217), two support cables that pinch it from y 225 down, and a green bar at the bottom
+(y 365). A flood from the middle (640, 250) over the art's transparency fills exactly
+73,769 pixels, x 475 to 803 and y 105 to 364, and stops at the frame, so the glass is
+bounded by the art itself. The fitted polygon is 36 vertices every 16 rows along those
+lines, taken on the opaque line pixels (one pixel out from the flood), so it never
+reaches the transparent sky outside the frame (0 pixels leak) and loses 852 pixels
+(1.2 percent) at the chords. The vertices are in `hud_aperture.rs`. Two tests pin
+it: a synthetic one (centre in; above the arc, outside the side lines and below the
+bottom bar out; an opaque pixel inside is left out; a picture of the wrong size fails
+closed) and a retail-reading one that skips without an install: on the real art the
+frame still closes exactly 73,769 pixels, the mask covers exactly 72,917 pixels, never
+covers an opaque pixel, lies wholly inside the flood-bounded glass, covers at least 98
+percent of it and is one connected region. The HUD draws inside the glass: heading tape
+under the arc, the airspeed and altitude boxes (`574` and `5000` at the live-fire
+start) just inside the side lines, `LCOS`, the weapon and `RADAR` lines and the lock
+circle (frames `hud-glass-whole-3x` and `hud-with-target-lock-bk27-crop3x`).
+
+**Cockpit views (windowed; every one draws the `~EF2*` art).** Front with the HUD in
+the glass and the six small-layout windows; look left and right 45 degrees (the art
+turns away with the look, the side mirror comes into view and shows the rear feed); 90
+degrees left and right and 60 degrees up (no cockpit art, open sky and ground, as for
+the other aircraft); `--flight-view 4` (F3 Up) and `--flight-view 3` (F2 Back, the
+tailplanes and fin from the pilot's eye). `Airframe::load` accepts the family: the
+three overlays `~EF2_LH.PIC`, `~EF2_CH.PIC` and `~EF2_RH.PIC` and the instrument frame
+`~EF2_P.PIC` (81 x 80) exist, and `Hud::parse` of `E2000.HUD` names `~EF2_P.PIC`. The
+family is thirteen pictures in `FA_1.LIB`; no `~TOR*` cockpit picture exists (TOR-0).
+The art is the Eurofighter's single-seat cockpit; the Tornado is a two-seater (next
+paragraphs).
+
+**Mirrors (fitted, agent decision 2026-11-11).** The art has three flat fills of one
+blue-grey (105, 113, 134): the top centre panel and two lower canopy rails. An `"EF2"`
+row in `mirrors::seeds` (centre (640, 50), left (200, 330), right (1090, 330)) fills them
+with the shared rear feed. `--cockpit-sheet OUT_DIR tornado,rafale,f18` (through
+`tools/agent-run.sh`) prints `tornado: stem TOR cockpit ~EF2H.PIC art 1280x490 FITTED
+CLR`, the centre at x 479 y 11 w 319 h 78, the left at x 125 y 183 w 153 h 262 and the
+right at x 999 y 183 w 153 h 262; the left and right sizes equal the `~EF2_LH` and
+`~EF2_RH` overlay pictures (153 x 262, checked in a retail-reading test in
+`mirrors.rs`). Each flood stays under the cap (the largest is 19,816 pixels).
+See [mirrors](../baselines/mirrors.md#2026-11-11-tornado-cockpit-and-mirror-seeds-tor-7).
+
+**Instruments and two engines.** The Systems window shows `THR 70%`, `TEMP 0%`, `OIL
+100%`, `HYD 100%` and `FUEL 11221 LBS`, with `(+ EXT 3300 LBS)` for the default tank
+pair: one engine readout serves every aircraft, so the two-engine Tornado shows one
+throttle and one temperature (the fleet readout; the panel has no per-engine needle).
+Fuel reads the Tornado's own record, 11,221 lb. The Weapons window lists `360 BK27`,
+`4 GBU-10`, `2 MK-82P3` and `60 CHAFF` / `60 FLARE`. The ten instrument pages (0 to 9)
+draw with the `~EF2_P.PIC` bezel; the Envelope page draws the Tornado's own envelope
+(the corrected B5-2 G rows); the Weapons page of the headless `--panel-snapshot` reads
+`NO WEAPONS`, as for every aircraft (the loaded Weapons window is in the live frames).
+
+**Eye point: a two-seater (agent decision, 2026-11-11, left unchanged).**
+`mirrors::pilot_eye` is one fixed offset for every aircraft (7 ft above and 10 ft
+ahead of the model origin), used only by F2 Back, the rear-view mirrors and the replay
+views; the forward cockpit view looks from the origin with 2D art. The record's
+`viewOffset` (0, 20, 60) is the Su-24 record's and no host code reads it (pinned in the
+test). The Tornado shape has no separate canopy faces or canopy state word (TOR-3), only
+a raised top: reading the neutral `TOR.SH` faces within 5 units of the centreline, the
+top of the fuselage and canopy stands 5 units, 3.3 ft at 2/3 ft a unit, above the origin
+from about 0 to 26 units ahead (0 to 17 ft), with one raised piece 15 to 26 units ahead
+(10 to 17 ft). The fixed eye (10 ft ahead) is 3.7 ft above that top and sits at the
+back of the forward piece, which is plausibly where the front-seat pilot's head is.
+There is no rear seat to move to: TORE draws one pilot's cockpit (the Eurofighter art is
+single-seat), and the real rear-seat weapon systems officer has no seat, view or
+station. A seated or per-aircraft eye would be a fleet change (a table keyed by aircraft
+through six call sites), a question for John, as in the Mirage 2000 and F-5E reviews.
+
+**Test.** `crates/tore-import/tests/tornado_cockpit.rs` (retail-reading, skips without
+media): the four sensor rows `VIS240.SEE, F18R.SEE, MIG31.ECM, PAVESPK.SEE`, `hud()`
+`E2000.HUD` different from the Rafale's, stem `EF2` with shape stem `TOR`,
+`~EF2H.PIC`, `~EF2_P.PIC` from `Hud::parse`, the overlays, thirteen `~EF2*` pictures,
+no other roster aircraft on the family, no `~TOR*` picture and the record's eye offset.
+The aperture is pinned in `hud_aperture.rs` and the mirror seeds in `mirrors.rs`.
+
+Provenance: sensor rows, HUD module, panel names and cockpit art spec-derived (retail);
+the Eurofighter cockpit binding opinionated (John, 2026-11-10); the glass polygon, the
+mirror seeds and the eye-point reading fitted or agent decisions (2026-11-11). Evidence
+and frames: `.local/m3-aircraft/frames/TOR-7/` and `.local/m3-aircraft/checks/TOR-7/`.
+
+## Tornado flight review (TOR-8, 2026-11-11)
+
+Dated section, additions only. The Tornado IDS flies the hybrid adapter's own
+`variety` configuration built from `TOR.PT` (`tor.SH`), two RB199 Mk 103 at 17,300
+lbf military and 32,150 lbf afterburner in all, empty 31,065 lb, maximum takeoff
+61,620 lb, rows -3 to +7 G (the +7 row fitted, real +7.5) and fuel flows 3 and 22
+lb/s (B5-2 and B5-3). No envelope, G, weight, fuel, flow, ceiling or thrust value
+was changed and no flight constant was touched. Figures are given clean (42,286 lb
+with full internal fuel) and with the current default load (56,982 lb gross),
+because the stations question (TOR-5) is open with John.
+
+Update (TOR-5b, 2026-11-11) to the TOR-8 default-load figures: the default load now
+carries one 250 gallon tank (1,650 lb of external fuel, was 3,300 lb with the pair), so
+every default-load figure in this section (gross weight 56,982 lb, liftoff, ground run,
+approach, rollout, loaded climb, top speed, turns, pull with stores, endurance with
+external fuel) is lighter than measured by the second tank (at least its 1,650 lb of
+fuel, plus its empty shell); the clean figures, the record envelope
+and the flows do not move. The Quick Mission and AI wings of the TOR-9 section load the
+same default.
+
+- Top speeds: afterburner level speed 793 kt (Mach 1.20) at 1,000 ft and 1,321 kt
+  (Mach 2.30) at 36,000 ft, 0.965 of the 1 G edge; with the default load 760 kt and
+  1,266 kt (Mach 2.21). Published: about Mach 1.2 at sea level, Mach 2.2 at altitude.
+  Level flight holds to the record's 60,000 ft, 20 percent over the published 50,000 ft
+  service ceiling (the record's own value, not a B5-2 correction; option for John).
+- Climb: 30,000 ft in 91 to 101 s clean and 120 to 134 s loaded from a 450 kt start,
+  sustained rate 25,400 to 26,000 ft/min, against "less than two minutes" from brake
+  release (published); the 30,000 ft/min of the brief was not found in any page read.
+- G: 6.17 G at 461 kt and 1,000 ft with full fuel, 7.04 G nearly dry (never more than
+  0.04 G over the +7 row; real +7.5), 5.29 to 5.91 G with the default load; the same
+  four fuel states for the F-15E, F-5E, Gripen and Mirage F1 are in the baseline. The
+  sustained turn is 4.82 G, 10.2 deg/s at 461 kt and 1,000 ft.
+- Fuel: 62 minutes at military power and 8.5 at afterburner from 11,221 lb.
+- Takeoff and landing (default load): liftoff 150.6 kt after 1,945 ft (593 m),
+  approach 160.1 kt, touchdown 158.7 kt, rollout 757 m. The published landing run
+  (370 m) uses thrust reversers, which TORE does not model; open for John.
+- **Swing wing.** No flight law reads the sweep (TOR-3, TOR-5 draw it and swivel the
+  pylons only). The real sweep changes lift and drag a lot; TORE has no sweep term.
+  Because the drawn sweep is a function of speed, the Tornado's own envelope rows
+  already carry the speed-dependent result; a sweep multiplier would be a fitted
+  per-aircraft change, not made. Finding for John.
+- The liftoff (135 to 165 kt) and approach (140 to 175 kt) ranges in the flight battery
+  are fitted plausibility windows, agent decisions of 2026-11-11 (no primary speed
+  was found for the IDS). Full tables, sources and commands are in the
+  [variety flight baseline](../baselines/variety-flight.md#panavia-tornado-ids-validation-2026-11-11).
+
+## Tornado IDS in missions, multiplayer and replay (TOR-9, 2026-11-11)
+
+Implementation and verification, slice TOR-9 of the Tornado port. `AircraftId::Tornado`
+was appended to every identity list in B5-1 (checkpoint code 44, `SELECTABLE` index 44,
+carried in the 9-bit wire field since protocol 83), and `strike_class.rs` lists it as
+Fighter (B5-1, interim), so the AI wing build needed no change: it reads the record's
+two engines (the roster probe's `models=2`) and the default load (the BK27 gun with 360
+rounds, four GBU-10 and two MK-82P3; the probe prints `stores=[BK27 x360, GBU-10 x4,
+MK-82P3 x2]`, a friendly wing leader also carries the two tanks, 3,175 lb of external
+fuel). The default load depends on the open stations question (TOR-5): the numbers
+above are the current default load, and the AI wing, its payload and its range will move
+with whatever John decides. No AI behaviour work was done (Mirage plan rule 1).
+
+Added coverage:
+
+- A Quick Mission test, `the_tornado_is_a_quick_mission_player_and_a_wing_choice`,
+  naming `TOR.PT` as the player's aircraft and in every AI wing field and asserting
+  that `SU24.PT` appears in neither the player nor the wing list in its place (the
+  Su-24 stays a parked target, B6).
+- A checkpoint test in `tore-sim`,
+  `the_tornado_round_trips_at_code_44_and_no_identity_shares_it`: the coded identity is
+  the single byte 44, every identity in `ALL` round-trips, no two share a code, 46 is
+  unknown. The swing wing's sweep and the swivelling stations' turn are not saved: both
+  are pure functions of speed and flaps (`combat::swing`), recomputed each tick.
+- `ai-tornado-quick-mission-2v2` and `replay-rec-tornado-2v2` battery scenarios, the
+  Tornado row in the Load Ordnance notes loop
+  (`menus-snap-quick-lobby-ordnance-laser-notes-tornado`: no laser warning, sensor
+  helper shown, as the F-16C and F-15E, because the record has the PAVESPK.SEE row;
+  decision 22 keeps that sensor with no drawn pod), and `ai-tornado-*` in the
+  `ai-fights` battery family.
+
+**A fix found by the replay check (shared code).** `--verify-render` on the first
+Tornado recording failed on every tick (`aircraft 0's stores differ at tick 1`,
+`differing=2400`). TOR-5 put the swing wing's turn on each swivelling station
+(`Rack::turn`), set by the host from speed and flaps and not recorded; the comparison
+between the live picture and the rebuilt one counted it as a difference. The turn is
+derived, and the drawing sets it again from the aircraft's own speed and flap devices
+(`pylons::swung`), so `tore-session`'s `recording::convert::difference` now leaves
+`Rack::turn` out of the stores comparison (`same_stores`). The devices the sweep comes
+from (speed, slot 9, and flaps, slot 1) are still compared within their precision on
+every tick, which keeps the replayed sweep within about 0.1 degree of the flown one.
+The recorded aircraft are drawn over the recorded speed device (`pose.devices`), not the
+model's 450 kt start state: the replay rebuilds the devices, and `model_pose` applies
+them over the start state, so a replayed or remote Tornado draws its own sweep. The fix
+is in shared code (`recording/convert.rs`) but only changes a result where
+`Rack::turn` is nonzero, which is the Tornado alone.
+
+**Replay sweep check.** The unit test
+`replay::convert::tests::a_replayed_tornado_draws_the_wing_sweep_it_flew` records
+Tornados at 700 kt (fully swept, 42 degrees of turn), 425 kt (half), and 700 kt with
+half flaps (half, the flaps hold the wing out), reads them back through a replay file,
+and checks that the sweep worked out from the rebuilt devices matches the live one
+within the devices' precision, that a wrongly recorded speed is reported, and that
+stores equal but for the station turn are one picture while stores that differ in
+anything else are not. In the real probe recording the AI Tornados fly 545 to 580 kt
+(the AI's cruise; about 93 percent swept, 39.9 degrees of turn at 579.6 kt): the
+recorded speed device at tick 1320 is 969.76 ft/s for the enemy leader, and the
+replayed frame draws the wing swept back (frames below).
+
+Results (2026-11-11, throttled, profile `.local/m3-aircraft/profile-tornado`, logs in
+`.local/m3-aircraft/checks/TOR-9/`):
+
+- `--ai-roster-probe-ticks 3600`: the four `TOR.PT` lines (Novice, Average, Experienced,
+  Ace) each `ticks=3600 models=2 radar=true ir=false stores=3 gun=true projectiles=0
+  dropped=0 PASS`; the whole roster has no FAIL line (180 PASS).
+- `ai-tornado-quick-mission-2v2` passes: every wing the Tornado, nothing dropped, no
+  warnings, no anomalies. The attack script's stations are `BK27 x360`, `GBU-10 x4 ...
+  (not air to air)`, `MK-82P3 x2 ... (not air to air)`, and the Tornado's record has no
+  infrared sensor row, so the AI fights with the gun: 32 rounds, no hit, no kill in this
+  run. Existing weapon-selection behaviour, not tuned.
+- `replay-rec-tornado-2v2` passes: `--verify-render` PASS `ticks=2401 missing=0
+  differing=0`, two runs identical, the recording reads back `player.aircraft = TOR.PT`,
+  `probe.enemy = TOR.PT`, `draw.models = TOR.PT`, the aircraft listed as `Tornado (TOR.PT)`.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding `tore-server` and
+  `tore-bot`. They take no aircraft argument, so they cover the identity list and
+  content code, not a Tornado in flight over the wire.
+
+**AI strike finding (reported, no behaviour work).** The strike class is Fighter (B5-1),
+but the AI's Quick Mission role comes from the record's object class word, and
+`TOR.PT` carries `0x4000`, the bomber class (the same as the A-4E, the F-111F and the
+Su-24; the F-15C and F/A-18D carry `0x8000`). So an AI Tornado in a Quick Mission with a ground target
+set takes the Strike role by default, unlike the AI F-15E, which keeps CAP:
+`--a2g-run UKR QUFACT --pilot ai --aircraft tornado --load MK82P3 --quick-wing
+--seconds 300` prints `ROLE plane=1 role=strike` and the run ends `releases=3
+impacts=3 kills=1 egress=yes` (target hit points 100 of 100 at the summary, one
+kill), and on an engage-my-target order against `UKR QUCOL` it releases three,
+lands them 345 to 544 ft from the aim, kills two and egresses. So an AI Tornado
+bombs by default when the mission has a ground target and the wing is a friendly
+wing past the first, and otherwise (no ground target, or an enemy wing) flies as a
+fighter with the gun only: its laser-bomb and Mk 82 stations are not air to air. Not
+tuned.
+
+Frames (`.local/m3-aircraft/frames/TOR-9/`): `ai-tornado-live-chase-t1320` and its 4x
+crop (a live AI Tornado at 580 kt from behind: both wings swept back, twin burners),
+`quick-mission-aircraft-list-tornado` (Tornado IDS on page 3 of 4, no Su-24),
+`replay-high-speed-sweep-top-t1320` and `-side-t1320` (the replayed Tornado at tick
+1320, 580 kt, planform and side), `replay-banner-580kt-t1320` (the viewer's own banner,
+580 kt).
+
+Provenance: the AI wing wiring, default load and class word are spec-derived (the
+record); the stores comparison change and the replay sweep check are agent decisions of
+2026-11-11 (the sweep schedule and swivel rule stay as TOR-3 and TOR-5 left them). No
+retail bytes committed.
+
+## Tornado stations moved, one tank and a glove plate (TOR-5b, 2026-11-11)
+
+Implementation and measurement mode, slice TOR-5 finish (round 3). John's answers T1 to T5
+of 2026-11-11 (opinionated) were applied except T2, which stopped on clipping again. The
+station table, the clearances at 25 and 67 degrees (default load and 22 alternatives), the
+option lists and the cited real-aircraft figures are in
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-ids-inner-wing-pair-on-the-wing-one-centreline-tank-a-glove-plate-tor-5b-2026-11-11);
+the glove plate is in
+[the Tornado control rig](aircraft-control-surfaces.md#tornado-glove-plate-tor-5b-2026-11-11).
+Here, the format-level facts:
+
+| Item | Before | After |
+| --- | --- | --- |
+| Row 7 (`MK82P3.JT` x2, Wing, flags 0x505) | recorded 3.67 ft out, 3 ft forward (fuselage side) | `station_move`: 9.5 ft out, 1.5 ft forward, on the swinging panel; swivels as TOR-5 built it |
+| Row 5 default (`F250.GAS`, Wing, x 0, capacity 2) | two tanks, 3,300 lb external | one tank at x 0, 1,650 lb; capacity, mask and place unchanged (`default_counts`, guarded to the retail row) |
+| Row 6 (`PAVEWAY.JT` x4) | x 2.00, entering the belly 0.96 ft (fin tips) | unchanged (no outboard move clears it; options with John) |
+| Tornado shape | 287 faces | 291: four glove plate faces added by the rig at load |
+| Row 8 | retired | retired |
+
+The retail records are unchanged; row 7's recorded position is still the record's, and the
+move is applied by `station_move` only where the record is the Wing row (the guard
+`placed_on` applies). The audit pins do not move (45 aircraft, 18 stations, 4,652
+weapon placements, 233 tank placements, 220 Cheat-only placements, 80 pod placements):
+capacities are untouched and the default rule changes only the quantity that starts loaded.
+
+Provenance: John's answers opinionated (2026-11-11); row 7's 9.5 / 1.5 ft position, the
+default-rule form of T3, the plate geometry and every measurement agent decisions or
+findings; the real station layout (seven stations, two swivelling pylons a wing, pivots in
+the fixed nibs) from the public pages cited in the stores specification, with no offsets
+claimed. No retail bytes committed.
+
+## Tornado ordnance masks, BK 27 gun and the live release at both sweeps (TOR-6, 2026-11-11)
+
+Implementation and review mode (Claude Sonnet, sonnet-high). Update to the
+[Tornado stations](#tornado-stations-moved-one-tank-and-a-glove-plate-tor-5b-2026-11-11)
+section: the 4,652 weapon placements quoted there are 4,616 on this branch after the
+refusals below. Details: [aircraft ordnance](aircraft-ordnance.md#the-panavia-tornado-ids-tor-6-2026-11-11),
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-ordnance-masks-and-the-measured-catalog-tor-6-2026-11-11),
+[baseline](../baselines/ordnance-availability.md#tornado-ordnance-tor-6-2026-11-11).
+
+- **Default load** unchanged from TOR-5b: `BK27.JT` x360, one `F250.GAS`, four `PAVEWAY.JT`,
+  two `MK82P3.JT` packs; 12,848 lb with the tank's fuel, 55,134 of 61,620 lb on the Load
+  Ordnance page. The jammer row stays as retail (60 chaff, 60 flares).
+- **Refusals** (agent decision applying John's F-15E A2 precedent, 2026-11-11): 33 stores on the
+  shoulder pair and 3 on the inner wing pair, each over 0.3 ft into the airframe (measured
+  for every catalog store); the default Paveway and the two stores that hang its shape stay.
+  Weapon placements 4,652 to 4,616. The air-to-air page keeps only `AA-11B` and `R-60M`.
+- **BK 27:** the shared gun path fires it as it does the M61, DEFA and GSh records (no gun
+  code changed); 360 rounds equal the real two guns of 180; muzzle velocity and cadence are
+  the shared fields (about 19 percent under the real muzzle velocity; 32 rounds a second at
+  the bottom of the real two-gun 33 to 57 range); one muzzle point on the starboard side
+  (the real aircraft has two guns).
+- **Live release at both sweeps:** row 7's packs leave from 9.50 ft out at 25 degrees and from
+  the swivelled pylons at 67 degrees (left -10.53 / -0.81 ft, right 10.36 / -1.26 ft); row 6
+  never moves; jettison does the same.
+- **Tooling:** `--flight-speed` scales the starting velocity too (an Update beside the TOR-3
+  text); the `jettison` attack prints each store's offset from the aircraft;
+  `SHOTS_PER_ROUND` in `flight.py` counts a Mk 82 pack as three shots and one round.
+- Provenance: rows, masks, capacities, gun record, jammer record spec-derived (retail); refusal
+  list, thresholds, battery scenarios and findings agent decisions 2026-11-11; real gun facts
+  (two BK-27 with 180 rounds each, 1,000 to 1,700 rounds a minute, 1,100 m/s) from public
+  pages for plausibility only (aerospaceweb.org, milavia.net, Wikipedia "Mauser BK-27", read
+  2026-11-11). No retail bytes committed.
+
+## Tornado AIM-9 side rails (TOR-6b, 2026-11-11)
+
+Implementation and review mode (Claude Sonnet, sonnet-high). Update to the
+[TOR-6 section](#tornado-ordnance-masks-bk-27-gun-and-the-live-release-at-both-sweeps-tor-6-2026-11-11):
+the Tornado has an AIM-9 again, as one side rail on each inboard swivelling pylon, appended as
+row 8 (John, 2026-11-11, opinionated). The weapon placements 4,616 quoted there are 4,623
+here, the Cheat-only placements 220 are 222 (the rail row takes the two novelty bombs under
+Cheat loading, as the retired outer row did), and `TOR.PT` reads 56 placements and a catalog
+of 36 (49 and 31 before). Details: [aircraft ordnance](aircraft-ordnance.md#the-tornados-aim-9-side-rails-tor-6b-2026-11-11),
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11),
+[baseline](../baselines/ordnance-availability.md#tornado-aim-9-side-rails-tor-6b-2026-11-11).
+
+- **Mechanism:** the F-14's shoulder rail (`Location::Shoulder`, `Hang::Shoulder`) on row 7's
+  swivelling pylon, listed beside it in `swing::swivels`; the rail's 1.25 ft sideways offset
+  stays beside the pylon at every sweep (one guarded change in `Rack::side_pylons`).
+- **Position:** 10.75 ft out (1.25 ft outboard of the pack's pylon), 1.50 ft forward, fitted;
+  no source gives the flank, the outboard one is the F-14's and keeps the missile clear of
+  the fuselage.
+- **Mask:** AIM-9B, AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B; PL-7, R.550, AT-12 and the
+  GBU-12 refused (0.40 to 1.02 ft into the airframe or not a rail missile).
+- **Default:** `AIM9M.JT` x2, the retail default, one a side.
+- **Clearance:** every kept missile 0.00 ft into the airframe at 25 and 67 degrees; the
+  AIM-9M is 0.06 ft clear of the Mk 82 pack by bounding box; gear legs 5.5 ft (25 degrees) and
+  6.3 ft (67); the other row 7 stores cross the missile's box by up to 0.79 ft (not a refusal,
+  as at TOR-6).
+- **Live:** an AIM-9M leaves from 10.75 ft out, 1.50 ft ahead at 25 degrees and from
+  -11.78 / -0.81 (left) and 11.61 / -1.26 ft (right) at 67 degrees; it jettisons from the same
+  points. Scenarios `a2g-release-origin-tornado-rail`, `a2g-jettison-tornado-rail`,
+  `flight-livefire-tornado-slot4` and `flight-livefire-tornado-slot4-sweep67`.
+- Provenance: John's request opinionated; row content spec-derived (the retail row 8); the
+  position, flank, refusals, the guarded sim change and the measurements agent decisions or
+  findings (2026-11-11). Real carriage (one AIM-9L on the inboard stub pylon of each wing)
+  from public pages for plausibility only. No retail bytes committed.

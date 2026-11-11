@@ -260,6 +260,31 @@ fn the_f5e_round_trips_at_code_43_and_no_identity_shares_it() {
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
 }
 
+/// Slice TOR-9: the Tornado IDS is checkpoint code 44 (the batch table pins
+/// the code, appended after the F-5E's 43), every identity in
+/// `AircraftId::ALL` round-trips, and no two identities share a code, so a
+/// saved Tornado loads back as the Tornado and never as another record. The
+/// swing wing's sweep is not saved: it is a pure function of speed and flaps
+/// (`combat::swing`), so a restored Tornado draws the sweep its speed gives.
+#[test]
+fn the_tornado_round_trips_at_code_44_and_no_identity_shares_it() {
+    assert_eq!(same(&AircraftId::Tornado).body, vec![44]);
+    let mut codes = std::collections::BTreeSet::new();
+    for id in AircraftId::ALL {
+        let coded = same(&id);
+        assert!(codes.insert(coded.body.clone()), "{id:?} repeats a code");
+        let loaded: AircraftId = from_bytes(&coded, &NONE).unwrap();
+        assert_eq!(loaded, id);
+    }
+    assert_eq!(codes.len(), AircraftId::ALL.len());
+    // The code after the batch's last identity is still unknown.
+    let unknown = Coded {
+        body: vec![46],
+        records: Vec::new(),
+    };
+    assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
+}
+
 /// Slice MF1-9: the Mirage F1 is checkpoint code 45 (the batch table pins the
 /// code, appended after the Tornado's 44), every identity in `AircraftId::ALL`
 /// round-trips, and no two identities share a code, so a saved Mirage F1 loads

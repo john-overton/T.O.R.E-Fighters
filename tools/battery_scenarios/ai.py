@@ -1829,6 +1829,20 @@ def scenarios() -> list[Scenario]:
                            "MF1.PT identity (one Atar 9K-50, F18R.SEE radar, AV8.ECM jammer, "
                            "DEFA gun, R550 Magic and F250 tank default load) in a 2 v 2 fight."))
 
+    # 13h. The Tornado IDS in a mission (slice TOR-9): every wing the Tornado, the player's own
+    # included, 2 v 2 with the fight script, so the TOR.PT identity flies a mission with its two
+    # RB199 engines, the F18R.SEE radar, the MIG31.ECM jammer, the Eurofighter HUD and cockpit by
+    # name, and its BK27 gun, tank and laser-bomb default load (no AIM-9: B5-2 retired row 8). It is
+    # never aliased to the parked Su-24 (SU24.PT). The roster probe flies it against itself at every
+    # skill; this one has it shoot and be shot at.
+    out.append(probe("tornado-quick-mission-2v2", fight(2, 2, "--aircraft", "tornado",
+                                                         "--probe-friendly-aircraft", "tornado",
+                                                         "--probe-enemy-aircraft", "tornado",
+                                                         "--separation", "5", *attack), ticks=7200,
+                     notes="All Tornado: the player's wing and the enemy wing fly the "
+                           "TOR.PT identity (two RB199, F18R.SEE radar, MIG31.ECM, BK27, "
+                           "tank and laser-bomb default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

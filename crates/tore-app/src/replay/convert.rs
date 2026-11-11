@@ -576,6 +576,111 @@ mod tests {
         })
     }
 
+    /// TOR-9: the Tornado's swing wing is a pure function of the aircraft's
+    /// speed and flaps, which a recording keeps as animated devices. A
+    /// replayed Tornado therefore draws the sweep it flew: the turn worked
+    /// out from the rebuilt devices matches the live one within the devices'
+    /// precision at a high-speed frame (fully swept), at a middle speed, and
+    /// spread at low speed. The turn a swivelling station carries is derived,
+    /// not recorded, so the picture check leaves it out.
+    #[test]
+    fn a_replayed_tornado_draws_the_wing_sweep_it_flew() {
+        use tore_sim::combat::{hardpoints::Rack, swing};
+        let dir = TempDir::new("convert-tornado");
+        let pose = |id: u32, knots: f64, flaps: f64| {
+            let mut devices = [0.; DEVICES];
+            devices[1] = flaps;
+            devices[9] = knots * swing::FPS_PER_KNOT;
+            AircraftPose {
+                id,
+                aircraft: Some(AircraftId::Tornado),
+                draw: Draw::Model(AircraftId::Tornado),
+                position: [10_000. + 300. * f64::from(id), 6_000., 20_000.],
+                attitude: [0.3, 0.02, -0.1],
+                velocity: [0., 0., knots * swing::FPS_PER_KNOT],
+                devices: Some(devices),
+                airborne: true,
+                ..AircraftPose::default()
+            }
+        };
+        let snapshot = |tick: u64, knots: [f64; 4]| RenderSnapshot {
+            tick,
+            models: vec![AircraftId::Tornado],
+            player: AircraftPose {
+                draw: Draw::Ownship,
+                ..pose(0, knots[0], 0.)
+            },
+            targets: vec![
+                pose(1, knots[1], 0.),
+                pose(2, knots[2], 0.),
+                pose(3, knots[3], 0.5),
+            ],
+            ..RenderSnapshot::default()
+        };
+        // Fast and fully swept (700 kt), part swept (425 kt), spread (180
+        // kt), and fast with the flaps half out, which hold the wing out.
+        let live = [
+            snapshot(40, [700.3, 700.3, 425.1, 700.]),
+            snapshot(41, [700.7, 701.1, 425.4, 700.]),
+        ];
+        let replayed = round_trip(dir.path(), "tornado.tore-replay", &live);
+        let turn = |p: &AircraftPose| {
+            let d = p.devices.expect("a Tornado's devices are recorded");
+            swing::wing_turn(d[9], d[1])
+        };
+        // The sweep may differ by the speed and flap precision, no more.
+        let bound = tolerance::SPEED * 0.00125 + tolerance::UNIT_DEVICE * 0.74 + 1e-9;
+        for (a, b) in live.iter().zip(&replayed) {
+            assert_eq!(difference(a, b), None);
+            let poses = |s: &RenderSnapshot| {
+                std::iter::once(s.player.clone())
+                    .chain(s.targets.clone())
+                    .collect::<Vec<_>>()
+            };
+            for (x, y) in poses(a).iter().zip(poses(b)) {
+                assert!(
+                    (turn(x) - turn(&y)).abs() <= bound,
+                    "{} sweeps differently",
+                    x.id
+                );
+            }
+        }
+        let high = turn(&replayed[1].player);
+        let full = (swing::SWEEP_MAX - swing::SWEEP_MIN).to_radians();
+        assert!((high - full).abs() < 1e-9, "700 kt is fully swept: {high}");
+        let middle = turn(&replayed[1].targets[1]);
+        assert!(
+            (middle - full * (425.4 - 250.) / 350.).abs() < 0.01,
+            "{middle}"
+        );
+        // Half flaps hold the wing half out at the same speed.
+        let flapped = turn(&replayed[1].targets[2]);
+        assert!((flapped - full / 2.).abs() < 0.01, "{flapped}");
+        // A sweep recorded wrongly is a difference, not forgiven with the turn.
+        let mut slow = replayed[1].clone();
+        slow.player.devices.as_mut().unwrap()[9] = 200. * swing::FPS_PER_KNOT;
+        assert!(difference(&live[1], &slow).unwrap().contains("device 9"));
+        // The station turn is derived: stores equal but for it are the same
+        // picture, stores that differ in anything else are not.
+        let store = |turn: f32| StorePose {
+            hardpoint: 7,
+            rack: Rack {
+                turn,
+                ..Rack::default()
+            },
+            items: 2,
+            loaded: 2,
+            ..StorePose::default()
+        };
+        let mut swept = live[1].clone();
+        swept.player.stores = vec![store(0.7)];
+        let mut flat = live[1].clone();
+        flat.player.stores = vec![store(0.)];
+        assert_eq!(difference(&swept, &flat), None);
+        flat.player.stores[0].items = 1;
+        assert!(difference(&swept, &flat).unwrap().contains("stores differ"));
+    }
+
     /// Vertex streams drawn from a live and a replayed picture agree: the
     /// same vertices in the same order, each value within the position
     /// precision of 1/64 ft (quantized angles and devices move a vertex far

@@ -652,6 +652,7 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `gripen` | Gear, brake and burner words unmapped (interim gear rise); canards, elevons and rudder not yet mapped | Whole canards (pitch plus differential roll), elevon wedges (pitch, roll, flap droop), rudder, rigid gear (legs, door pairs, nose), the two rear-fuselage airbrake plates and the burner plume reviewed (GRI-3, GRI-4); mechanics fitted |
 | `f5e` | Gear, brake and burner words unmapped (interim gear rise); surfaces unmapped | Whole stabilators (pitch only), ailerons, flap strips and rudder reviewed with the 25-pose pitch/roll grid (F5E-3); whole rigid gear plates (mains inward, nose forward), the one dorsal speed brake plate and the twin burner plumes with two nozzle glows reviewed (F5E-4); mechanics fitted |
 | `mf1` | None open: all six state words accounted for (gear, brake and plume set by the rig; flap-slot and rudder words pinned, never set) | Whole tailplane (pitch only), outboard-panel ailerons (roll) and rudder with the 25-pose pitch/roll grid (MF1-3); the flap lever moves nothing (no flap panel in the source); whole rigid gear plates (mains forward and inward, nose rearward, 202-value dense sweep), the one dorsal airbrake plate and the single burner plume with one nozzle glow and one contrail (MF1-4); mechanics fitted |
+| `tornado` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear (mains and nose forward), the two dorsal airbrake plates and the two burner plumes reviewed; mechanics fitted (control surfaces: TOR-3) |
 
 ## F-15E gear, speed brake and plume results (2026-11-10)
 
@@ -761,3 +762,21 @@ and `flight-variety-f5e` pass in the battery. The geometry, citations, fold
 table and open items are in [control-surface
 geometry](../formats/aircraft-control-surfaces.md#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10).
 Frames: `.local/m3-aircraft/frames/F5E-4/`.
+
+## Tornado gear, airbrake and plume results (2026-11-10)
+
+Exact `tornado` (`TOR.PT`) passes the probe with the TOR-4 devices
+(`TORE_DATA_DIR=.local/m3-aircraft/profile-tornado target/debug/tore-app --aircraft
+tornado --animation-probe .local/m3-aircraft/checks/TOR-4/probe`): scope
+`reviewed-controls-and-attachments`, 287 neutral faces, zero required or check
+failures; gear, brake and exhaust read `required moved`. The 202-value dense gear
+sweep has every row passing (anchor gap 0, skin gap 0, rigidity at most 2.2e-6 ft,
+no new planar crossings, ground contact 7.3333 ft at gear 1, near-stow overshoot
+outside the neutral skin at most 0.17 ft on the left main); the seven-value brake
+sweep is rigid with the hinge fixed and the closed plate flat at the hinge
+height; the exhaust sweep pins root and tip. The mains and the nose retract
+forward (public summary, fitted law). Two plumes, two nozzle glows and two
+contrails draw from the two engines. Battery: `flight-animation-tornado` and
+`flight-variety-tornado` pass. Frames: `.local/m3-aircraft/frames/TOR-4/`. In the
+gear 0.2 frame a sliver of the main leg still shows at the wing root (a transit
+pose; fully stowed nothing draws).

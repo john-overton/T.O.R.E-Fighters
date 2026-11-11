@@ -2014,3 +2014,355 @@ Not run: `--native-flight-tables` (tables not present locally), the live-fire an
 jettison battery slots (MF1-6), the AI, Quick Mission and multiplayer scenarios
 (MF1-9), and a pull or turn probe with the tank fuel burning off (the probe takes
 stores as dead mass).
+
+## Panavia Tornado IDS validation, 2026-11-11
+
+Validation mode, slice TOR-8. The Tornado IDS flies the hybrid `--researched-flight`
+default on its own record (`TOR.PT`, shape `tor.SH`, `variety` identity from B5-1);
+`--legacy-flight` and `--native-flight-tables` stay separate. The record is the
+retail `TOR.PT` with John's B5-2 and B5-3 corrections: two RB199 Mk 103 at 17,300 lbf
+military and 32,150 lbf afterburner in all, empty weight 31,065 lb, maximum takeoff
+61,620 lb, a fitted +7 G row (real +7.5), fuel flows 3 and 22 lb/s from the
+RB199's specific fuel consumption. The internal fuel (11,221 lb) and the 60,000 ft
+ceiling are the record's own and stay. **Nothing was fitted**: no value, envelope
+or constant changed. The only fitted values are the two battery windows at the end.
+The wing sweeps with speed (TOR-3) but only draws the wing and moves the swivelling
+pylons (TOR-5); no flight law reads it (see "The swing wing" below).
+
+**Clean and default load.** The stations question (TOR-5) is open with John, so
+every figure is given clean (empty weight plus full internal fuel, 42,286 lb) and
+with the current default load. The default load carries 14,696 lb: two
+`F250.GAS` tanks (3,300 lb of fuel in all, which feeds first), four `PAVEWAY.JT`
+laser bombs, two `MK82P3.JT` and the 27 mm gun with its 360 rounds, so the default gross is 56,982 lb
+(`loading=0.834`, 4,638 lb under the 61,620 lb maximum). The probe runs "default
+load" as `PROBE_PAYLOAD=14696` with the tank fuel counted as dead weight, so burn is
+unchanged; the headless ground starts (`--ground-start`) always carry the default
+load. The shared loaded-drag and loaded-elevator rules scale drag, stall speed and
+the pull limit with the weight carried; stores have no drag of their own. Numbers
+that depend on John's TOR-5 answer are listed at the end of the section.
+
+**Harness.** `envelope_probe` (`PROBE_POINTS=1 PROBE_LEVEL=1 PROBE_PULLS=1`, then
+`PROBE_ALTS` up to 62,000 ft for the ceiling) and `performance_probe`
+(`PROBE_ALTS=1000,15000,30000,36000,50000`, then `PROBE_PAYLOAD=14696`) on the
+local `TOR.PT`; `target/debug/tore-app --aircraft tornado --headless-flight N
+--maneuver ...` with the profile `.local/m3-aircraft/profile-tornado`;
+`variety_flight` (conventional, deterministic, landing: pass). Pilots are scripted,
+so turn and climb figures are a repeatable harness reading, not a best-pilot
+figure. All knots are true airspeed. Logs are local:
+`.local/m3-aircraft/checks/TOR-8/`.
+
+### Top speed and ceiling
+
+| Altitude | 1 G edge (record), kt | Level, AB, clean, kt | Ratio |
+| --- | ---: | ---: | ---: |
+| 1,000 ft | 821 | 793 (Mach 1.20) | 0.966 |
+| 10,000 ft | 962 | 929 | 0.966 |
+| 20,000 ft | 1,118 | 1,080 | 0.965 |
+| 30,000 ft | 1,275 | 1,231 (Mach 2.09) | 0.965 |
+| 36,000 ft | 1,369 | 1,321 (Mach 2.30) | 0.965 |
+| 40,000 ft | 1,363 | 1,316 | 0.965 |
+| 45,000 ft | 1,282 | 1,238 | 0.965 |
+| 50,000 ft | 1,198 | 1,156 (Mach 2.02) | 0.965 |
+| 55,000 ft | 1,042 | 1,006 | 0.965 |
+| 58,000 ft | 944 | 912 | 0.965 |
+| 60,000 ft | 879 | 837 | 0.952 |
+
+Level flight is held at every altitude to the record's 60,000 ft ceiling. The
+`climb` maneuver zooms to 64,966 ft (1.083 of the ceiling) and the probe's scripted
+climb to 62,108 ft. The dry (military power) level speed at full fuel is 582 kt
+(Mach 0.88) at 1,000 ft, 903 kt (Mach 1.53) at 30,000 ft and 969 kt (Mach 1.69) at
+36,000 ft. With the default load the afterburner speed is 760 kt (Mach 1.15) at
+1,000 ft, 963 kt (Mach 1.54) at 15,000 ft and 1,266 kt (Mach 2.21) at 36,000 ft,
+dry 558 kt (Mach 0.85) at 1,000 ft and 928 kt (Mach 1.62) at 36,000 ft.
+
+### Acceleration and climb (afterburner unless stated, full internal fuel)
+
+| Level acceleration | Clean (42,286 lb): time, s | Default load (56,982 lb): time, s |
+| --- | --- | --- |
+| 1,000 ft, AB, 363 to 460 / 590 / 730 kt | 10 / 26 / 61 | 14 / 38 / 103 |
+| 1,000 ft, military, 363 to 460 / 530 kt | 26 / 61 | 39 / 104 |
+| 15,000 ft, AB, 345 to 500 / 690 / 880 kt | 17 / 42 / 86 | 23 / 59 / 131 |
+| 36,000 ft, AB, 316 to 520 / 800 / 1,210 kt | 27 / 70 / 201 | 37 / 98 / 323 |
+| Peak specific excess power, AB | 398 to 414 ft/s (sea level 406, 24,400 ft/min) | 282 to 292 ft/s (sea level 285) |
+| Peak specific excess power, military | 154 to 162 ft/s | 107 to 161 ft/s |
+
+(The 50,000 ft rows of the probe start 315 kt below the envelope's slow edge, so the
+aircraft is not in level flight there and they are not used.)
+
+| Afterburner climb from sea level, 450 kt start | Clean, Mach 0.8 | Clean, Mach 0.9 | Default load, Mach 0.8 | Default load, Mach 0.9 |
+| --- | --- | --- | --- | --- |
+| 10,000 ft | 42 s | 52 s | 53 s | 68 s |
+| 30,000 ft | 91 s | 101 s | 120 s | 134 s |
+| 36,000 ft | 106 s | 115 s | 142 s | 154 s |
+| 50,000 ft | 147 s | 153 s | 207 s | 211 s |
+| Best sustained rate | 423 ft/s (25,400 ft/min) at 25,600 ft | 433 ft/s (26,000 ft/min) at 29,700 ft | about 283 ft/s (17,000 ft/min), from the 5,000 to 20,000 ft marks | about 273 ft/s (16,400 ft/min), same marks |
+
+The probe's "best rate" for the default load (448 and 455 ft/s at 54,700 to 55,000
+ft and 860 kt) is a zoom, not a steady climb, and is not used. Thrust to weight is
+0.76 clean with full fuel (32,150 lbf over 42,286 lb), 0.56 at the default gross
+and 0.52 at the 61,620 lb maximum, against the Mirage 2000's 0.91, the Gripen's 0.92,
+the F-5E's 0.72 and the F-15E's 1.13.
+
+### Turns and G limits
+
+| Case (afterburner, full internal fuel) | Clean (42,286 lb) | Default load (56,982 lb) |
+| --- | --- | --- |
+| Full aft stick, 3 s, 1,000 ft, 330 kt | 4.39 G, 11.9 deg/s | 3.77 G, 9.7 deg/s |
+| Full aft stick, 1,000 ft, 461 kt (Mach 0.7) | 6.17 G, 13.1 deg/s | 5.29 G, 10.8 deg/s |
+| Full aft stick, 1,000 ft, 593 kt | 6.17 G, 10.0 deg/s | 5.29 G, 8.3 deg/s |
+| Full aft stick, 15,000 ft, 564 kt | 4.39 G, 6.7 deg/s | 3.77 G, 5.5 deg/s |
+| Full aft stick, 30,000 ft, 530 kt | 3.51 G, 5.2 deg/s | 3.01 G, 4.2 deg/s |
+| Full forward stick, 461 kt, 1,000 ft | -2.63 G | -2.26 G |
+| `pull` maneuver (450 kt, 5,000 ft) | 6.17 G | not run |
+| Sustained level turn, 1,000 ft, 461 kt | 4.82 G, 10.2 deg/s (bank 78 deg, settled 508 kt) | 4.14 G, 9.4 deg/s |
+| Sustained level turn, 1,000 ft, 593 kt | 4.15 G, 7.5 deg/s | 2.93 G, 5.0 deg/s |
+| Sustained level turn, 15,000 ft, 439 kt | 4.14 G, 8.2 deg/s | 3.63 G, 7.8 deg/s |
+| Sustained level turn, 15,000 ft, 564 kt | 4.15 G, 7.2 deg/s | 3.64 G, 6.7 deg/s |
+| Sustained level turn, 36,000 ft, 631 kt | 2.47 G, 3.2 deg/s | 2.14 G, 2.8 deg/s |
+
+The sustained turns come from a scripted pilot that raises the bank in 2 degree
+steps, so they are lower bounds. At 1,000 ft and Mach 1.1 the clean sustained turn is
+2.28 G (3.1 deg/s); at 50,000 ft there is no sustained turn at Mach 0.7 above 20
+degrees of bank. The record's rows explain the shape: the +6 G row (a repeat of the
+-3 G row) and the fitted +7 row end at 14,000 ft, the +5 G row at 24,000 ft, so the
+pull falls to 4.4 G at 15,000 ft; and at 330 kt and 1,000 ft the slow edge of the +6
+G row (341 kt) limits the pull to 4.39 G, so the corner speed of the record is
+about 340 to 370 kt at sea level. This is the record's shape, not a fit.
+
+**Full-aft-stick pull by fuel**, 461 kt (Mach 0.7), 1,000 ft, clean, afterburner,
+3 s (`PROBE_ONLY=turn PROBE_ALTS=1000 PROBE_FUEL=...`), against the F-15E, the F-5E,
+the Gripen and the Mirage F1, all re-run on this tree:
+
+| Fuel | Tornado G (deg/s) | F-15E G (deg/s) | F-5E G (deg/s) | Gripen G (deg/s) | Mirage F1 G (deg/s) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full (11,221 / 13,662 / 4,400 / 5,000 / 6,120 lb) | 6.17 (13.1) | 7.57 (17.1) | 5.98 (12.8) | 8.00 (18.6) | 6.14 (13.4) |
+| Half (5,610 / 6,831 / 2,200 / 2,500 / 3,060 lb) | 6.59 (14.2) | 8.28 (18.9) | 6.49 (14.2) | 8.52 (20.0) | 6.59 (14.6) |
+| Quarter (2,805 / 3,416 / 1,100 / 1,250 / 1,530 lb) | 6.82 (14.7) | 8.69 (19.8) | 6.78 (14.9) | 8.80 (20.7) | 6.84 (15.3) |
+| Near empty (300 lb) | 7.04 (15.3) | 9.10 (20.8) | 7.00 (15.5) | 9.03 (21.3) | 7.06 (15.9) |
+| Top G row | +7 (fitted) | +9 | +7 | +9 | +7 (retail) |
+| Full forward stick, same four | -2.63 / -2.81 / -2.91 / -3.01 | -2.51 / -2.74 / -2.88 / -3.02 | -2.55 / -2.77 / -2.89 / -2.99 | -3.55 / -3.78 / -3.90 / -4.01 | -2.61 / -2.80 / -2.91 / -3.00 |
+| Tornado, default load (56,982 lb gross at full fuel) | 5.29 / 5.59 / 5.76 / 5.91 | | | | |
+
+The Mirage F1 (empty 15,542 lb, one Atar at 11,020 / 15,873 lbf after B5-2) keeps
+its retail rows up to +7. The Tornado's full-fuel pull is 12 percent under its +7 row: the 11,221 lb tank is 36
+percent of the 31,065 lb empty weight, so the shared loaded-elevator rule takes
+off more than from the Gripen (11 percent, tank 34 percent of empty) and less than
+from the F-5E (15 percent, 46 percent). Near empty it gives 7.04 G, a hair above
+the +7 row, as the +9 aircraft pass theirs (9.03 to 9.10); the F-5E, whose row is
+hard against the limit, stops at exactly 7.00. The real limit is +7.5 G, 0.5 G above
+the whole-G top row (John's B5-2 decision); at no fuel state does the model reach
+it. At 330 kt the four fuel states give 4.39 / 4.69 / 4.86 / 5.01 G (-1.75 to
+-2.97 G on the push), held down by the slow edge of the +5 to +7 rows. The default load also rises as
+fuel burns: 5.29 G full to 5.91 G near empty at 461 kt. A payload sweep at full fuel
+at 461 kt and 1,000 ft: 0 lb 6.17 G (sustained 4.82 G), 5,000 lb 5.84 G (4.81 G),
+10,000 lb 5.54 G (4.14 G), 14,696 lb 5.29 G (4.14 G).
+
+### Fuel and endurance
+
+The record's flows are 3 lb/s at military power and 22 lb/s at afterburner (10,800
+and 79,200 lb/h), or 0.624 and 2.463 lb/lbf/h against the engines' thrust (the
+RB199's published 0.598 dry and 2.5 reheat, rounded to whole lb/s). The 11,221 lb
+tank lasts 62.3 minutes at military power and 8.5 minutes at afterburner (burn
+measured: 3.00 and 22.00 lb/s over 300 s); with the default load's 3,300 lb of
+external fuel (feeds first) the same flows give 80.7 and 11.0 minutes. A level cruise
+at 65 percent of the top speed (726 kt clean at 1,000 ft, throttle trimmed) burns
+2.54 lb/s, which is 73.7 minutes or 891 nautical miles (extrapolated from 300 s);
+with the default load 723 kt, 2.76 lb/s, 67.9 minutes, 818 nautical miles from the
+internal tank. The `sprint` maneuver burns 6,600 lb in 300 s at afterburner (869.5
+kt at 5,000 ft). Maneuver `climb` ran the tank to zero (124,540 ticks) and ended
+without a crash.
+
+### Takeoff, approach and landing
+
+Ground probes at `--theater UKR --ground-start 1` with the default load (gross
+56,982 lb; `loading=0.834`, flapped stall 120.4 kt after the weight scaling,
+minimum level speed with flaps 152.5 kt):
+
+| Probe | Result |
+| --- | --- |
+| takeoff | liftoff tick 1,813 at 150.6 kt after 1,945 ft (593 m), rotation 130.8 kt, 100 ft at tick 2,643 (196.6 kt) |
+| takeoff, `--retail-stall-speeds` | liftoff 113.4 kt after 1,083 ft (imported polygon speeds, no weight scaling) |
+| takeoff-gear-airborne | same liftoff, gear raised after the wheels are clear |
+| land, 65 percent fuel (7,293 lb internal, tanks 3,212 lb) | approach 160.1 kt (the 1.05 times 152.5 kt floor), touchdown 158.7 kt at 7.6 ft/s sink, stopped 2,482 ft (757 m) after touchdown, 1,621 ft of the 5,532 ft runway left, score 100 |
+| land, full fuel | approach 160.1 kt, touchdown 159.4 kt at 9.7 ft/s, stopped 2,494 ft (760 m) after touchdown, 1,720 ft left, score 100 |
+| land-hard | touchdown 166.4 kt at 34.0 ft/s, stopped, score 100 |
+| land-gear-up, land-off-runway | crashed for the gear and for the not-landable ground, by design |
+| nosewheel | no crash, 11.2 kt maximum |
+
+The record has no arrestor hook (`hook_available=false`; the devices probe reports
+violations 0 and 3.00 s for the gear, flaps and brakes). The landings carry the full
+default load (bombs and tanks), because the ground starts cannot drop it; a clean
+approach was not measured.
+
+Eleven air maneuvers: nine ended with `non_finite=0` and no loss (`level` 7,200
+ticks at 574.6 kt, 65 percent of the 5,000 ft edge; `pull` 6.17 G, loop completed;
+`loop` completed at 3,342 ticks; `sprint` 36,000 ticks, 869.5 kt, 0.984 of the edge;
+`rudder`; `devices` violations 0; `stall-recover` alert at tick 1,405, recovered at
+1,916, 0 ft lost; `spin-recover` entered at tick 3, recovered at 1,249 after 0.58
+revolutions of recovery and 2.13 in all, 2,227 ft lost; `climb` zoomed to 64,966 ft
+at 438 s and glided on after the fuel ran out, `crashed=false`), `dive` and
+`overspeed` ended in the overspeed loss by design (1.198 and 1.100 of the edge).
+Unlike the F-5E, the Tornado's `climb` does not end in an overspeed loss: its fast
+edge falls slowly above the ceiling. Logs under
+`.local/m3-aircraft/checks/TOR-8/probes/`.
+
+### The swing wing (finding, nothing changed)
+
+Real wing sweep changes a lot (general aerodynamics, not a cited Tornado figure):
+spread (25 degrees) it gives the Tornado its low landing and take-off speeds and
+its lift for manoeuvring; swept (67 degrees) it
+cuts wave drag for the Mach 2.2 and the low-level dash it was built for, and trades
+away lift (a swept wing has a lower lift slope and a lower usable lift
+coefficient). TORE's model has **no sweep term**: stall speed, the G rows, the drag
+law and the thrust are one set of numbers per aircraft (the retail record's
+polygons, scaled by the shared weight rules), and nothing reads the sweep angle
+that TOR-3 and TOR-5 draw (spread to 250 kt, 67 degrees at 600 kt, flaps hold the
+wing out; `swing::wing_turn`). The drawn sweep at the probe's points is 25 degrees
+at takeoff and approach (flaps out), 34 degrees at 330 kt, 50 degrees at 461 kt,
+66 degrees at 593 kt and 67 degrees above 600 kt. Because the drawn sweep is a pure
+function of speed, any real sweep effect would be a function of speed only; the
+Tornado's own envelope rows (its slow and fast edges per G) already describe the
+aircraft over that speed range as the retail data authors it (a "blended" wing),
+so a sweep term would add nothing the polygons do not hold, apart from the
+pilot-selected sweep (a real pilot chooses 25, 45 or 67 degrees; TORE's
+speed-scheduled sweep takes that choice away). Where it would show: the 330 kt
+pull (4.39 G, the record's slow edge) would be higher for a pilot who sweeps 45
+degrees and lower for one who sweeps to 67; a spread-wing low-speed envelope with a
+lower slow edge (and the dash at 67 degrees with a lower drag) would need new
+polygons per sweep or a sweep multiplier on the slow edge and the drag, both fitted
+per-aircraft changes, not made here. Finding for John: whether to leave the sweep
+visual only (the current choice, John's decision 19 asks for the rig and the
+pylons only) or fit a sweep multiplier.
+
+### Against the real aircraft
+
+Public figures read 2026-11-11 (Tornado IDS unless noted): Wikipedia, "Panavia
+Tornado", Tornado GR4 specifications (maximum speed Mach 2.2, 2,400 km/h = 1,300 kn
+at 30,000 ft, 1,482 km/h = 800 kn IAS near sea level; service ceiling 50,000 ft;
+30,000 ft in less than 2 minutes from brake release; wing area 286 sq ft; thrust to
+weight 0.77; combat radius over 850 nmi hi-lo-hi, over 500 nmi lo-lo-lo; wing sweep
+25 to 67 degrees); aerospaceweb.org, "Tornado IDS data" (Mach 2.2, 1,450 mph at 36,090
+ft; Mach 1.2, 915 mph at sea level; ceiling 50,000 ft; empty 31,065 lb, normal
+take-off 45,000 lb, maximum take-off 60,000 lb; internal fuel 14,000 lb); MILAVIA,
+"Specifications Tornado" (more than Mach 2.2, 2,337 km/h at 11,000 m; ceiling more
+than 50,000 ft; Mk 103 8,650 lbf dry and 16,075 lbf reheat; empty 31,065 lb, maximum
+61,620 lb); Migflug, "Panavia Tornado" (Mach 2.2 at 9,000 m with the intake ramps
+working, which were inhibited on most airframes, capping them near Mach 1.9; Mach
+1.3 at sea level as the Bundeswehr's figure; take-off run 900 m at typical strike
+weight, wings at 25 degrees; landing run 370 m with thrust reversers; G limit
++7.5 / -3); Dinger's Aviation Pages (30,000 ft in less than two minutes). Other
+pages read give a rate of climb of 76.7 m/s (15,100 ft/min) for the GR4; **no
+page read gives 30,000 ft/min**, nor any approach, take-off or stall speed, nor a
+sustained or instantaneous turn rate (one search returned only game forums).
+None of these pages is a flight manual; the Mk 103 thrust differs between them
+(8,650 lbf dry in MILAVIA, 9,850 in Migflug, 9,220 for the Bundeswehr), and the
+B5-2 figures are kept.
+
+| Quantity | Measured clean | Measured, default load | Retail record (corrected) | Real (cited) |
+| --- | --- | --- | --- | --- |
+| Top speed at altitude | 1,321 kt (Mach 2.30) at 36,000 ft | 1,266 kt (Mach 2.21) | 1,369 kt (Mach 2.38) at 36,000 ft | Mach 2.2 (1,262 kt at 36,090 ft), ramps working; about Mach 1.9 on most airframes |
+| Top speed at sea level | 793 kt (Mach 1.20) at 1,000 ft | 760 kt (Mach 1.15) | 806 kt at sea level, 821 kt at 1,000 ft | Mach 1.2 (795 kt, 915 mph); Mach 1.3 (Bundeswehr); 800 kn IAS (Wikipedia GR4) |
+| Service ceiling | 60,000 ft held in level flight; zoom 62,108 to 64,966 ft | not run | 60,000 ft | 50,000 ft (more than) |
+| Climb | 30,000 ft in 91 to 101 s; 25,400 to 26,000 ft/min sustained; 406 ft/s peak excess power (24,400 ft/min) | 30,000 ft in 120 to 134 s; about 17,000 ft/min | | 30,000 ft in less than 120 s from brake release (not from 450 kt); 15,100 ft/min (76.7 m/s) quoted for the GR4 |
+| Acceleration | 363 to 590 kt in 26 s, 1,000 ft | 38 s | | not found |
+| Thrust | 17,300 dry, 32,150 AB, 2 engines | same | same | 17,300 / 32,150 (MILAVIA Mk 103); 19,700 / 34,500 (Migflug) |
+| Thrust to weight | 0.76 | 0.56 (0.52 at maximum) | | 0.77 (Wikipedia GR4, weight not stated) |
+| G limits | +6.2 (+7.0 nearly dry) / -2.6 at 461 kt | 5.3 (5.9 nearly dry) | +7 / -3 | +7.5 / -3 |
+| Instantaneous turn | 13.1 deg/s at 461 kt (6.17 G); 11.9 deg/s at 330 kt (4.39 G) | 10.8 / 9.7 deg/s | | not found |
+| Sustained turn (scripted, lower bound) | 4.82 G, 10.2 deg/s at 461 kt, 1,000 ft | 4.14 G, 9.4 deg/s | | not found |
+| Liftoff | not run (ground starts carry the default load) | 150.6 kt, 1,945 ft (593 m), 56,982 lb | | take-off run 900 m (2,950 ft) at typical strike weight |
+| Approach / touchdown | not run | 160.1 kt approach, 158.7 kt touchdown, 757 m rollout (no reversers modelled) | | landing run 370 m (1,215 ft) with thrust reversers; no approach speed found |
+| Empty weight | 31,065 lb | | 31,065 lb | 31,065 lb equipped (30,620 lb basic) |
+| Maximum take-off | | 56,982 lb gross | 61,620 lb | 61,620 lb (MILAVIA), 60,000 lb (aerospaceweb) |
+| Internal fuel | 11,221 lb | + 3,300 lb external | 11,221 lb | about 14,000 lb (aerospaceweb), 10,280 lb (the game's encyclopedia) |
+| Dry fuel flow | 10,800 lb/h (0.624 per lbf) | | same | 0.598 per lbf |
+| Afterburner fuel flow | 79,200 lb/h (2.463 per lbf) | | same | 2.5 per lbf |
+
+Findings (no value was changed):
+
+- **Top speeds need no fit and are close to the cited figures.** Sea level agrees
+  with Mach 1.2 (793 kt against 795). The altitude figure is 4.7 percent over the
+  published Mach 2.2 clean (Mach 2.30) and 0.3 percent over it with the default
+  load, which also matches the cited note that most real airframes were held to
+  Mach 1.9 by inhibited intake ramps.
+- **The ceiling is the record's 60,000 ft, 20 percent over the real 50,000 ft
+  service ceiling.** Level flight holds to 60,000 ft (837 kt) and the zoom peaks
+  at 62,108 to 64,966 ft. B5-2 corrected thrust, weights and G, not the ceiling.
+  Option for John: lower `maxAlt` and the top vertices of the 0 G and 1 G polygons
+  to about 50,000 to 55,000 ft the way B5-2 moved the F-5E's.
+- **Climb is on or above the published figure.** 30,000 ft in 91 to 101 s clean
+  from a 450 kt sea-level start (120 to 134 s with the default load) against "less
+  than two minutes" from brake release, so about even with the default load and
+  quicker clean. The 25,400 to 26,000 ft/min sustained rate is 85 to 87 percent of
+  the 30,000 ft/min figure in the brief, which no source read gives; the published
+  one found is 15,100 ft/min. The shared drag law that left the Mirage at 45
+  percent and the F-5E at 55 to 58 percent cannot be read across: those were
+  compared with 34,500 to 50,000 ft/min figures, and the Tornado's published figures
+  are much weaker (15,100 ft/min, 30,000 ft in under two minutes), so the model is
+  1.7 times the sea-level figure found.
+- **G follows the rule.** The +7 row is never passed by more than 0.04 G; the
+  pull is 6.17 G at full fuel, 7.04 G nearly dry (real +7.5), and 5.29 to 5.91 G
+  with the default load. The F-15E, Gripen and F-5E move the same way with the fuel.
+  The -3 G row gives -2.63 to -3.01 G.
+- **High-speed and low-speed G are the retail rows.** The +5 G row ends at
+  24,000 ft and the +6 G row (a repeat of the -3 G row) and the fitted +7 row at
+  14,000 ft, so the pull is 4.4 G at 15,000 ft and 3.5 G at 30,000 ft; the slow
+  edge puts the corner speed at 340 to 370 kt (the pull at 330 kt is 4.39 G).
+  John may want these rows reshaped; not done.
+- **No thrust reverser in flight.** The rollout (757 m) is twice the published
+  370 m landing run, which assumes thrust reversers; the record, the flight model
+  and the shape have no reverser (TOR-0). The model's liftoff (593 m) is shorter
+  than the published 900 m take-off run, which is for a typical strike weight with
+  the wings at 25 degrees and full flap and slat. A fitted reverser would be a
+  decision for John.
+- **The default load lowers every figure.** 56,982 lb is 35 percent over the clean
+  weight and 7 percent under the maximum; it costs 33 kt at sea level, 55 kt at
+  36,000 ft, 4 s on the 363 to 460 kt acceleration and about 0.9 G of pull.
+- **Fuel flows are close to the published TSFC.** The record's whole-pound flows
+  give 0.624 and 2.463 lb/lbf/h against 0.598 and 2.5. Endurance is 62 minutes dry
+  and 8.5 at afterburner from the internal tank. The internal fuel (11,221 lb) is
+  20 percent under aerospaceweb's 14,000 lb and 9 percent over the encyclopedia's
+  10,280 lb; sources disagree, the record stands.
+- **No published sustained or instantaneous turn rate, stall speed, take-off or
+  approach speed was found**, so the Tornado's turns, liftoff and approach are
+  reported, not compared.
+- **Sweep.** See "The swing wing" above: no sweep term.
+
+**Which numbers depend on John's stations answer (TOR-5).** Everything under
+"default load" does: the carried weight (14,696 lb; the two tanks, four laser
+bombs, two Mk 82 and the gun), the gross (56,982 lb), the liftoff speed and ground
+run, the approach, touchdown and rollout (the landings carry the whole load), the
+default-load climb, acceleration, top speeds and turns, the pull by fuel with
+stores, and the endurance with external fuel. A lighter load moves them along the
+payload sweep above (for example 5,000 lb: 5.84 G pull and 4.81 G sustained at 461
+kt). The clean figures, the record envelope, the ceiling, the G by fuel table, the
+fuel flows and the sweep finding do not depend on it.
+
+### Battery windows (fitted, agent decisions 2026-11-11)
+
+`flight-liftoff-tornado`, `flight-liftoff-retail-tornado` and
+`flight-approach-tornado` join the battery with `INTERNAL_FUEL_LB["tornado"] =
+11221`, a liftoff window of 135 to 165 kt and an approach window of 140 to 175 kt
+(a fleet plausibility band, the width of the F-5E's: no primary figure was found for
+the IDS), and the recorded default-load values 150.6 and 160.1 kt as the plus or
+minus 6 percent regression windows. `flight-variety-tornado` and
+`flight-animation-tornado` were already in the battery.
+
+The battery: `python3 tools/battery.py --scenario '*-tornado*' --lane flight
+--profile .local/m3-aircraft/profile-tornado --windows 1` passed 6 of 6 (run
+`20261111-002325`), including `flight-liftoff-tornado`,
+`flight-liftoff-retail-tornado`, `flight-approach-tornado`, `flight-variety-tornado`,
+`flight-animation-tornado` and `render-tornado-skin`.
+
+Provenance: record values and G rows spec-derived (retail); thrust, weights, the +7
+row and the fuel flows opinionated (John, 2026-11-10, B5-2 and B5-3); the
+measurements agent findings of 2026-11-11; the liftoff and approach battery ranges
+fitted agent decisions of 2026-11-11; the real figures are public pages (Wikipedia,
+aerospaceweb.org, MILAVIA, Migflug, Dinger's Aviation Pages), for comparison only,
+which disagree among themselves and are not flight manuals. Nothing here is
+attributed to John beyond the B5-2 and B5-3 corrections.
+
+Not run: `--native-flight-tables` (tables not present locally), a windowed free
+flight (the slice asks for no frames), a clean-load takeoff or landing, a
+primary-source takeoff or landing run, a better-pilot sustained turn, the default
+load's ceiling and sustained rate.

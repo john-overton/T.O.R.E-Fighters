@@ -530,6 +530,8 @@ impl AircraftId {
             // GRI-7): its own HUD and ~GRI*.PIC cockpit family.
             Self::Gripen => "GRIPEN.HUD",
             Self::F5E => "F29.HUD",
+            // Tornado: decided, follows the record and flies the Eurofighter
+            // 2000's panel (opinionated, John, 2026-11-10; TOR-7).
             Self::Tornado => "E2000.HUD",
             // Mirage F1: decided, not interim (opinionated, John, 2026-11-10,
             // decision 25, MF1-7); the same binding as the Mirage 2000.
@@ -638,6 +640,8 @@ impl AircraftId {
             // F-5E: decided, follows the record (John, 2026-11-10,
             // opinionated; F5E-7), so no longer interim.
             Self::F5E => "F29",
+            // Tornado: decided as above (John, 2026-11-10, TOR-7), no longer
+            // interim; the first aircraft on the ~EF2*.PIC family.
             Self::Tornado => "EF2",
             // Mirage F1: decided as above (John, 2026-11-10); the Rafale family.
             Self::Mf1 => "RAF",
@@ -1095,6 +1099,7 @@ impl Aircraft {
         }
         stations::append(id, &mut hardpoints);
         stations::retire(id, &mut hardpoints);
+        stations::side_rail(id, &mut hardpoints);
         stations::adjust_defaults(id, &mut hardpoints);
         let (min, max) = (plane["envMin"].number()?, plane["envMax"].number()?);
         let env = b.block("env")?;

@@ -1009,3 +1009,59 @@ passing (rigidity about 1e-6 ft, anchor gap about 2e-7 ft, skin gap 0, lowest
 gear point at the scaled low point at gear 1, stowed mains inside the fuselage
 section), and the closed airbrake within 4e-6 ft of the ridge line. Not a claim
 of original retraction timing.
+
+## Tornado control fit
+
+Agent-authored whole-panel motion, 2026-11-10 (slice TOR-3), over `TOR.SH`
+(header scale 2, 2/3 ft a unit). The shape has no sweep word and a fixed spread
+wing; it names two flap words (`0x7dd8`, `0x7dde`) that delete the trailing strips
+and a rudder word (`0x7de4`) that skews the lower fin block, so the sweep, the
+tailerons, the strips and the rudder are fitted assignments over exact reviewed
+source faces. Every moving piece turns whole. The source groups, the pivot choice
+and seam measurements, the rule 11 fold table and the provenance are in
+[control-surface
+geometry](../formats/aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Sweep | Each wing panel (13 faces a side, the trailing strip included) turns as one rigid piece about a vertical axis through (+9.5, -1.5) on the right and (-10.5, -1.5) on the left, tip aft, 0 to 42 degrees (leading-edge sweep 25 to 67 degrees, the real range). Speed schedule: spread to 250 knots, linear to fully swept at 600 knots. Flaps hold the wing out (the turn times `1 - flaps`). Draws only; no flight law depends on it. |
+| Pitch | Both tailerons, whole panels, `-0.20*elevator` radians about the lateral spindle through the root chord midpoint (6, -22.5, -2) (mirrored on the left); positive elevator raises the trailing edges. |
+| Roll | The same panels, `-0.08*aileron` on the right and `+0.08*aileron` on the left. Pitch plus roll is clamped to 0.25 rad, below the fleet's 0.40 (John, 2026-11-10); the forward corner (7,-8,-2) swings 2.41 ft at the clamp. |
+| Flaps | The trailing strips droop `0.40*flaps` about their leading edge and ride with the sweep. The source flap words delete the strips and are never set. |
+| Yaw | The lower fin block turns whole, `0.35*rudder` radians about its leading edge from (0,-21,4) to (0,-26,12); positive swings the trailing edge to +X. The source rudder word is never set. |
+| Gear | The 26 `0x7dcc` plates keep the interim rise until TOR-4; the burner (`0x7dc0`) and airbrake (`0x7dc6`) plates stay unmapped (checked at load). |
+| Wing stations | `tornado_animation::wing_station` gives a station's place on the swept wing and the pylon's swivel, so a store keeps its heading along the fuselage as the real swivelling pylons do (John, 2026-11-10, decision 19). An interface for TOR-5; the stores drawing does not use it yet. |
+
+Acceptance: `--aircraft tornado --animation-probe` reports
+`reviewed-controls-and-attachments`, elevator, aileron, rudder, flaps, wing-sweep
+and gear `required moved`, with `anchor_gap_ft=0`, `skin_gap_ft=0`, no direction
+failures, no fold, no fixed face moved and a largest inter-vertex distance change of
+about 1e-6 ft; the 25-pose pitch/roll grid at 25 and at 67 degrees
+(`pitch-roll-combinations-25deg.csv`, `-67deg.csv`); the sweep, flap and speed grid
+(`sweep-flap-combinations.csv`); the glove seam at each sweep angle
+(`sweep-seam.csv`, at most 1.22 ft at 67 degrees); the taileron corner swings and
+the strip and rudder seam openings (`taileron-corner-swing.csv`,
+`seam-opening.csv`, both reported, not gated); and the station witnesses
+(`pylon-poses.csv`). The probe isolates the controls at 200 knots, below the sweep
+threshold. Not a claim of the original's sweep law (it has none) or surface travel.
+
+## Tornado gear, airbrake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice TOR-4), over `TOR.SH` at its
+header scale (2/3 ft a unit). Faces, the airbrake count correction, the fold
+table and provenance: [control-surface
+geometry](../formats/aircraft-control-surfaces.md#tornado-gear-airbrake-and-burner-rig-tor-4-2026-11-10).
+It adds to the [Tornado control fit](#tornado-control-fit) above, which is
+unchanged.
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | The right main leg, the left main leg and the nose (10, 10 and 6 faces) are each one rigid body: `90 degrees * (1 - gear)` forward about a lateral line at the leg's rear edge, which lays it flat inside the fuselage side or nose. The nose steers first about a vertical line through its cross. Hidden at 0, the source pose at 1, grounded at 7.33 ft. The real undercarriage retracts forward (cited); the law is fitted. |
+| Airbrakes | One plate a side (two windings each) turns about its forward edge by `0.588 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie flat at the hinge height, 0 hides them. |
+| Afterburner | Each nozzle's crossed plate pair (eight faces in all) scales along Y from the nozzle exit plane (y -24) by the afterburner fraction, hidden at 0. Two nozzle glows and two contrails, from the engine count of 2. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity at most 2.2e-6 ft, anchor gap 0, skin gap 0, ground contact at
+gear 1, near-stow overshoot at most 0.17 ft) and the closed brake flat within
+2e-6 units. Not a claim of original retraction timing.

@@ -28,6 +28,10 @@ AIRCRAFT = re.compile(
 )
 # B5-2 (2026-11-10): 18 recovered stations, 233 tank and 220 Cheat-only placements
 # (the pins in crates/tore-app/src/ordnance_audit.rs carry the per-aircraft notes).
+# Update (TOR-6b, 2026-11-11, m3-tornado): 222 Cheat-only placements, the Tornado's AIM-9 side
+# rail row takes the two novelty bombs under Cheat loading as the retired outer row did.
+# Update (Tornado merge, 2026-11-11): the merged tree measures 4,581 weapon placements; the
+# weapon count here matches any number, and 222 Cheat-only placements stay as measured.
 AUDIT = re.compile(r"^ordnance audit: 45 aircraft, 18 recovered weapon stations, \d+ weapon placements, "
                    r"233 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
@@ -70,7 +74,7 @@ def scenarios() -> list[Scenario]:
             expect=[
                 r"ordnance audit: 45 aircraft, 18 recovered weapon stations, \d+ weapon placements, 233 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 222 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

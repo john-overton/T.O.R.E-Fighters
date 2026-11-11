@@ -59,7 +59,26 @@ const TANK_RECORDS: usize = 9;
 /// tree: 4,610 = 4,644 (m3-aircraft, with the F-15E's eight) less the Mirage
 /// F1's 34 (the branch alone measured 4,618 from 4,652). Every other pin is
 /// unchanged by the merge.
-const WEAPON_PLACEMENTS: usize = 4610;
+/// 4,616 from 4,652 (on the Tornado's branch, `m3-tornado`): the Tornado's
+/// shoulder pair (row 6) refuses 33 stores and its inner wing pair (row 7)
+/// refuses 3 that enter the airframe over 0.3 ft, 36 placements fewer
+/// (TOR-6, agent decision 2026-11-11 applying John's F-15E A2
+/// precedent; `TOR.PT` 85 to 49). The F-15E branch's own refusals move the
+/// same pin; the coordinator recomputes the total at integration (B4).
+/// 4,623 from 4,616: the Tornado's AIM-9 side rail (row 8, appended in the
+/// retired outer pair's place) takes seven stores (`AIM9B`, `AIM9M`, `AIM9X`,
+/// `AA2`, `AA8`, `AA11`, `AA11B`; its four others are refused), seven more
+/// placements (TOR-6b, John 2026-11-11; `TOR.PT` 49 to 56, catalog 31 to 36).
+/// Dated note, B4: the coordinator recomputes the total at integration.
+/// Integration note (Tornado merge, 2026-11-11): the Tornado's refusals and
+/// side rail (`TOR.PT` 85 to 56 placements, 29 fewer) are independent of the
+/// F-15E's and the Mirage F1's, so they add. Measured with `--validate-ordnance`
+/// on the merged tree: 4,581 = 4,610 (m3-aircraft, with the F-15E and Mirage F1)
+/// less 29 (the Tornado branch alone measured 4,623 from 4,652). Cheat-only
+/// placements are 222 (the Tornado's side rail, TOR-6b), tanks 233, pods 80 and
+/// the recovered stations 18, as measured, with no change to those pins by the
+/// merge beyond the Cheat-only 222 the Tornado branch carries.
+const WEAPON_PLACEMENTS: usize = 4581;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -77,7 +96,10 @@ const TANK_PLACEMENTS: usize = 233;
 /// 222 from 192: the batch-5 records (B5-1, 2026-11-10).
 /// 220 from 222: the Tornado's outer wing row is gone, two fewer (B5-2, John
 /// 2026-11-10).
-const NOVELTY_PLACEMENTS: usize = 220;
+/// 222 from 220: the Tornado's AIM-9 side rail row (row 8, mask 0x85) takes
+/// the two novelty bombs under Cheat loading as the retired outer row did, two
+/// more (TOR-6b, John 2026-11-11).
+const NOVELTY_PLACEMENTS: usize = 222;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).
@@ -286,7 +308,18 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             }
             for slot in 0..standard.configuration.stations.len() {
                 let capacity = standard.capacity(slot, donor);
-                if capacity > 0 && standard.capacity(slot, variant) < capacity {
+                // A row that refuses the derived bomb by name (TOR-6, agent
+                // decision 2026-11-11: it enters the airframe) keeps the
+                // donor.
+                let refused = standard
+                    .configuration
+                    .hardpoint_slots
+                    .iter()
+                    .position(|s| *s == Some(slot))
+                    .is_some_and(|row| {
+                        !tore_formats::aircraft::stations::weapon_allowed(id, row, &variant.source)
+                    });
+                if capacity > 0 && !refused && standard.capacity(slot, variant) < capacity {
                     return Err(
                         format!("{} station {slot} loses {name} donor capacity", id.pt()).into(),
                     );
@@ -368,6 +401,9 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 // Agent decision, 2026-11-11 (MF1-6, John's A2 and C2 precedents):
                 // the Mirage F1's belly pair and wing pair refuse the stores
                 // that enter the airframe; normal loading must offer none.
+                // Agent decision 2026-11-11 (TOR-6): the Tornado's shoulder and
+                // inner wing pairs refuse the stores that enter the airframe;
+                // normal loading must offer none.
                 if !tore_formats::aircraft::stations::weapon_allowed(id, hardpoint, &weapon.source)
                 {
                     if let Some(slot) = rows

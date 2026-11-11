@@ -142,6 +142,13 @@ the F-16A, are in the
 `mf1` joins the liftoff, approach and internal-fuel tables of `flight.py` (the
 windows depend on the open default-load decision).
 
+Update (TOR-8, 2026-11-11): the Panavia Tornado IDS results, clean and with the
+default load, with the full-stick pull by fuel against the F-15E, the F-5E, the
+Gripen and the Mirage F1, are in the
+[variety flight baseline](../baselines/variety-flight.md#panavia-tornado-ids-validation-2026-11-11);
+`tornado` joins the liftoff, approach and internal-fuel tables of `flight.py`
+(fitted windows 135 to 165 kt and 140 to 175 kt).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
@@ -857,6 +864,7 @@ The art inspection cases below check for blank frames; look at their PPMs:
 | `render-gripen-skin` | The Saab Gripen in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its own true size with no underside showing through the top and no z-fighting on the double-sided panels; the five omitted E0 decal slots leave no blank or skin-filled patch. |
 | `render-f5e-skin` | The F-5E in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The F-5E draws its own `F5E.SH` and `_F5E.PIC` with no underside showing through the top and no z-fighting on the double-sided panels; the two omitted E0 wing decal slots leave no blank or skin-filled patch. |
 | `render-mf1-skin` | The Mirage F1 in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its real size (per-axis scale) with no underside showing through the top and no z-fighting on the double-sided panels; the two omitted E0 wing-marking decal slots leave no blank or skin-filled patch. |
+| `render-tornado-skin` | The Tornado IDS in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its header scale (true size) with no underside showing through the top and no z-fighting on the double-sided panels; the two omitted E0 fin decal slots leave no blank or skin-filled patch. |
 | `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |
 
 The synthetic GPU checks run separately with
@@ -900,6 +908,8 @@ The Gripen (GRI-3, GRI-4) adds a 202-value dense gear sweep, a seven-value airbr
 
 The Mirage F1 (MF1-3) adds the 25-combination pitch/roll grid (`flight-animation-mf1`): its tailplane must follow pitch only and its aileron panels roll only, each staying put under every other control including the flap lever (the probe records the flap control as not applicable for this aircraft); its gear, airbrake and plume are still the interim rig.
 Update (MF1-4, 2026-11-10): the Mirage F1 adds the same 202-value dense gear sweep (grounded at gear 1, mains forward and inward into the fuselage side, nose rearward), a seven-value airbrake sweep with the closed plate on the ridge line, the exhaust sweep, and is registered in the variety flight scenarios (`flight-variety-mf1` flies 1,200 headless ticks); `flight-animation-mf1` now expects the 203-line dense gear file beside the 26-line grid.
+
+The Tornado (TOR-4, 2026-11-10) adds the same 202-value dense gear sweep (grounded at 7.33 ft at gear 1, three rigid pieces folding forward, near-stow checked against the neutral skin), a seven-value brake sweep (two plates, closed flat at the hinge height) and a seven-value exhaust sweep (two plumes from the exit plane), beside TOR-3's 25-pose grids at 25 and 67 degrees and its 35-pose sweep/flap grid; `flight-variety-tornado` flies 1,200 headless ticks.
 
 Run one repaired aircraft before expanding the audit:
 

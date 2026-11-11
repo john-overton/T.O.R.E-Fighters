@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -102,6 +102,14 @@ STATIONS = {
     # two F250.GAS tanks by default) are optional weapon rows with a retained
     # selection and no default weapon, so they end the list at 0 (MF1-6).
     "mf1": [250, 2, 2, 0, 0],
+    # The Tornado IDS carries the BK27 on its internal row 4 (360 rounds, the
+    # two guns together) and two default weapon rows: row 6 PAVEWAY.JT x4 (the
+    # shoulder Paveways) and row 7 MK82P3.JT x2 (the inner wing pair on the
+    # swinging panel). Its centreline F250.GAS tank is a tank station, row 8
+    # is retired (TOR-6, 2026-11-11). Update (TOR-6b, 2026-11-11): row 8 is
+    # now the AIM-9 side rail, AIM9M.JT x2 (one a side) on the inner pylon, so
+    # a fourth weapon slot.
+    "tornado": [360, 4, 2, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -258,7 +266,7 @@ def liftoff_problems(output: str) -> list[str]:
 # What John asked for on 2026-09-29 (unsourced real-world figures, a plausibility
 # range only), in knots: liftoff at the default gross weight and approach at a
 # landing weight of 65 percent internal fuel. `None` where there is no figure.
-LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "gripen": (125, 150), "f5e": (135, 165)}
+LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "gripen": (125, 150), "f5e": (135, 165), "tornado": (135, 165)}
 # The MiG-25PD's own figures are fitted from the flight manual quoted in the
 # AviaSimHD MSFS manual: V1 300 km/h, V2 350 km/h at maximum takeoff weight and
 # a 270-290 km/h landing speed (agent decision, 2026-11-07, M25-8).
@@ -288,11 +296,17 @@ LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f2
 # (135 to 165 kt) and approach 1.25 to 1.4 times it (155 to 175 kt). The measured
 # 153.4 kt liftoff after 1,763 ft (real ground run about 2,000 ft with two
 # Sidewinders at 15,745 lb) and 166.2 kt approach are recorded below.
+# The Tornado's windows (TOR-8, 2026-11-11) are a fleet plausibility band, agent
+# decisions: no primary liftoff, stall or approach speed was found for the IDS
+# (the pages read give only a 900 m take-off run at typical strike weight and a
+# 370 m landing run with thrust reversers). The measured 150.6 kt liftoff after
+# 1,945 ft at the 56,982 lb default gross and 160.1 kt approach (the 1.05 times
+# the loaded minimum floor) are recorded below.
 APPROACH_TARGET = {
     "f18": (135, 135), "rafale": (130, 140), "f14": (130, 140), "a4e": (130, 140), "mig29": (135, 145),
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157), "mig31": (143, 160),
-    "m2000": (133, 147), "gripen": (140, 160), "f5e": (155, 175),
+    "m2000": (133, 147), "gripen": (140, 160), "f5e": (155, 175), "tornado": (140, 175),
 }
 # The F-15E (F15E-8, 2026-11-10; agent decision, fitted windows). Its liftoff
 # band is the fleet plausibility range (130 to 150 kt): no primary takeoff speed
@@ -324,8 +338,8 @@ APPROACH_TARGET["mf1"] = (125, 150)
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1, "f5e": 153.4}
-KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5, "f5e": 166.2}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1, "f5e": 153.4, "tornado": 150.6}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5, "f5e": 166.2, "tornado": 160.1}
 # The F-15E's measured liftoff and approach at its default load (F15E-8, 2026-11-10).
 KNOWN_LIFTOFF.update({"f15e": 149.1})
 KNOWN_APPROACH.update({"f15e": 156.1})
@@ -337,6 +351,10 @@ KNOWN_APPROACH.update({"f15e": 156.1})
 # above stay; the plus or minus 6 percent recorded windows follow the new values.
 KNOWN_LIFTOFF["mf1"] = 121.0
 KNOWN_APPROACH["mf1"] = 127.6
+# TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
+# lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
+# windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
+# stay as TOR-8 recorded them.
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -352,6 +370,9 @@ INTERNAL_FUEL_LB = {
     # F5E.PT internal fuel, 4,400 lb (B5-2 correction of the retail 6,240 lb; the
     # real F-5E holds 677 US gal, about 4,500 lb).
     "f5e": 4400,
+    # TOR.PT internal fuel, 11,221 lb (the record's own tank; the 3,300 lb of
+    # external tanks on the default load are not counted).
+    "tornado": 11221,
     # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
     "f16a": 6972,
 }
@@ -452,6 +473,8 @@ LIFTOFF_AIRCRAFT += ["f15e"]
 # The F-5E joins the liftoff, retail-stall and approach scenarios (F5E-8, 2026-11-10).
 LIFTOFF_AIRCRAFT += ["f5e"]
 LIFTOFF_AIRCRAFT += ["mf1"]
+# The Tornado joins the liftoff, retail-stall and approach scenarios (TOR-8, 2026-11-11).
+LIFTOFF_AIRCRAFT += ["tornado"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1103,9 +1126,16 @@ REFUSED_SLOTS = {
 }
 
 
+# Stations whose one round is a pack of several bodies: the shots counted are the bodies, the
+# station's ammunition falls by one pack. The Tornado's MK82P3.JT row (inner wing) is the only
+# one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11).
+SHOTS_PER_ROUND = {("tornado", 3): 3}
+
+
 def check_slot(ac: str, slot: int):
     capacity = STATIONS[ac]
     refused = (ac, slot) in REFUSED_SLOTS
+    per_round = SHOTS_PER_ROUND.get((ac, slot), 1)
 
     def check(output: str) -> list[str]:
         problems = []
@@ -1135,7 +1165,7 @@ def check_slot(ac: str, slot: int):
             problems.append(f"a surface weapon fired at the practice aircraft ({shots} shots)")
         if not refused and shots == 0:
             problems.append("the trigger fired nothing")
-        fired_slot = capacity[slot - 1] - ammo[slot - 1]
+        fired_slot = (capacity[slot - 1] - ammo[slot - 1]) * per_round
         if fired_slot != shots:
             problems.append(f"fired {shots} but the station lost {fired_slot}")
         for index, (left, cap) in enumerate(zip(ammo, capacity)):
@@ -1164,6 +1194,19 @@ def slot_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+    # TOR-6b (2026-11-11): the Tornado's AIM-9 side rail fires with the wing swept too (650 kt, 67
+    # degrees; the slot-4 scenario above flies at the default speed, wing spread).
+    out.append(
+        Scenario(
+            name="flight-livefire-tornado-slot4-sweep67",
+            lane="flight",
+            args=["--live-fire", "--aircraft", "tornado", "--weapon-slot", "4", "--flight-speed", "650", "--combat-probe-ticks", "1200", "--capture-flight", "{work}/shot.ppm", "--no-audio"],
+            window=True,
+            check=check_slot("tornado", 4),
+            timeout=180,
+            notes="One AIM-9M leaves the Tornado's side rail with the wing swept to 67 degrees (TOR-6b).",
+        )
+    )
     for ac in ("f22", "f22n"):
         for row in (5, 7, 8):
             out.append(Scenario(
@@ -1213,7 +1256,7 @@ def check_jettison(ac: str, slot: int):
             # The emptied station cannot be selected, so the selection moves on
             # to the next loaded station and the probe's shots come from there:
             # every shot is accounted for by other stations' ammunition.
-            used = sum(cap - left for _, left, cap in others)
+            used = sum((cap - left) * SHOTS_PER_ROUND.get((ac, index + 1), 1) for index, left, cap in others)
             if used != shots:
                 problems.append(f"{shots} shots but the other stations used {used} after station {slot} was jettisoned")
         else:

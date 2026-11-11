@@ -694,6 +694,7 @@ review. Omit the aircraft filter to cover the selectable roster.
 the normal Load Ordnance capacity, preserving installed tanks on shared rows.
 `TORE_STORES_PREVIEW_CATALOG=1` prints compatible weapon and tank choices
 and capacities by source row for reproducing alternative loads.
+`TORE_STORES_PREVIEW_SWEEP=25..67` poses a swing wing (the Tornado) at that sweep, with its swivelling stations carried by it; `TORE_STORES_PREVIEW_CLEARANCE=1` prints store-to-store gaps and, for the Tornado, gear and ground clearances; `TORE_STORES_PREVIEW_ALL_VIEWS=1` adds the other camera views to the CPU images.
 `TORE_STORES_PREVIEW_BAY=0..1` poses the doors. With GPU mode,
 `TORE_STORES_PREVIEW_FIRE=5` instead presses the trigger once for hardpoint
 row 5 and captures actual simulation at ticks 0, 60, release, release +3,

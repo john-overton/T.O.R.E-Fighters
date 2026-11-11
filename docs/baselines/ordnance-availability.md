@@ -686,3 +686,111 @@ Only the weapon placements moved against `m3-aircraft` (4,644 to 4,610). The pin
 the `a2g-catalog` line matches any count. `weapon_allowed` is one function with the
 F-15E's and the Mirage F1's arms, and each loading path (`Loadout::capacity`, the
 retained-selection rule in `combat/live.rs`, the audit) calls it once.
+
+## Tornado ordnance (TOR-6, 2026-11-11)
+
+The Tornado's eight rows (four fixed sensors, the BK27 gun, the centreline tank row,
+the shoulder Paveways and the inner wing Mk 82 pair; the outer wing row is retired) are
+reviewed and measured on `m3-tornado`. Normal loading now refuses 36 stores that enter the
+airframe over 0.3 ft (33 on the shoulder pair, 3 on the inner wing pair; the
+[measured catalog](../spec/stores-on-pylons.md#the-tornado-ordnance-masks-and-the-measured-catalog-tor-6-2026-11-11)),
+so the audit pins move on this branch:
+
+```text
+ordnance TOR.PT: 4 source rows, 0 optional weapon rows, 49 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 31 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4616 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+Weapon placements 4,652 to 4,616 (`TOR.PT` 85 to 49); recovered stations, tank
+placements, Cheat-only placements, pods, records and aircraft unchanged. The F-15E and
+Mirage F1 branches' own refusals move the same pin; the coordinator recomputes the
+total at integration (B4). The `menus-ordnance-availability` expected line reads 4,616
+on this branch.
+
+Headless and windowed runs on the branch (profile `profile-tornado`, windows through
+`tools/agent-run.sh`):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft tornado --weapon-slot 1` (BK27) | 320 shots, 51 hits, 1 kill, ammunition `[40, 4, 2]` |
+| `--weapon-slot 2` (GBU-10) | one shot, ammunition `[360, 3, 2]` (the laser bomb has no designated target, no hit) |
+| `--weapon-slot 3` (Mk 82 pack) | one release of three bodies: 3 shots, 3 hits, 1 kill; one round taken (`SHOTS_PER_ROUND` in `flight.py`) |
+| `--weapon-slot 3 --flight-speed 200` and `650` | the same release with the wing spread (25 degrees) and swept (67 degrees); frames `mk82-sweep25-below` and `mk82-sweep67-below` |
+| `--a2g-run --attack release` on stations 1 and 2 at 200 and 650 kt (`a2g-release-origin-tornado`) | shoulder Paveways from 2.00 ft out, 12.27 then -2.93 ft forward, left then right, depth 0.17 ft, identical at both sweeps; Mk 82 packs from 9.50 ft out, 1.50 ft forward at 25 degrees, and from -10.53 ft out, 0.81 ft aft (left) and 10.36 ft out, 1.26 ft aft (right) at 67 degrees, depth 1.00 ft |
+| `--a2g-run --attack jettison --station 2 --load MK82P3` at 200 and 650 kt (`a2g-jettison-tornado`) | the tank leaves x 0, 5.94 ft down, 5.67 ft ahead at both sweeps; the Mk 82 packs leave right then left from 9.50 / 1.50 ft (25 degrees) and 10.36 / -1.26 and -10.53 / -0.81 ft (67 degrees), `PASS released 3 ... no-explosion`, payload 12,848 lb to 11,000 to 8,000 |
+| `--live-fire --combat-command jettison` on slots 2 and 3 | the station jettisons (8,000 lb for the four Paveways, 3,000 lb for the two packs), the others untouched; after the Paveways go the selection moves on to the packs |
+| `--combat-command chaff` and `flare` with `--countermeasure-preview 60` | five chaff leave 55, three flares leave 57, capacity 60 and 60 |
+
+`tools/battery.py` carries `flight-livefire-tornado-slot1` to `slot3`,
+`flight-jettison-tornado-slot2` and `slot3`, `a2g-release-origin-tornado` and
+`a2g-jettison-tornado`. A new `jettison: offset` line in the `jettison` attack prints each
+store's start against the aircraft (right, up, forward). The Load Ordnance page
+(`--quick-mission --snapshot-state ordnance --aircraft tornado`) reads `BK27 360 (max
+360)`, `250 gallon tank 1 loaded (max 2)`, `GBU-10E Paveway 4 loaded (max 4)` and `MK-82
+3-Pack 2 loaded (max 2)`, 55,134 of 61,620 lb. Frames:
+`.local/m3-aircraft/frames/TOR-6/`.
+
+## Tornado AIM-9 side rails (TOR-6b, 2026-11-11)
+
+Update to the TOR-6 section above, whose "outer wing row is retired" and eight rows are now nine:
+John asked on 2026-11-11 for an AIM-9 side rail on the inboard swivelling pylon, which
+`aircraft_stations::side_rail` appends as row 8 in the retired outer pair's place (the
+[rules and measurements](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11)).
+Seven stores stay on it (AIM-9B, AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B) and four are refused
+(PL-7, R.550, AT-12, GBU-12), so the audit pins move on this branch:
+
+```text
+ordnance TOR.PT: 5 source rows, 0 optional weapon rows, 56 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 36 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4623 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 222 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+Weapon placements 4,616 to 4,623 (`TOR.PT` 49 to 56) and Cheat-only placements 220 to 222 (the
+row's mask admits Boulder and Moose under Cheat loading, as the retired outer row did); recovered
+stations (18), tank placements, pods, records and the roster unchanged. Dated pin notes are in
+`ordnance_audit.rs`, and the `menus-ordnance-availability` and `a2g-catalog` expected lines carry
+the new totals. The F-15E and Mirage F1 branches move the same pins: the coordinator recomputes
+the totals at integration (B4).
+
+Runs on the branch (profile `profile-tornado`, windows through `tools/agent-run.sh`):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft tornado --weapon-slot 4` at the default speed, and with `--flight-speed 200` and `650` | one AIM-9M leaves the left rail (left first), ammunition `[360, 4, 2, 1]`, payload 13,228 to 13,038 lb; frames `aim9-sweep25-*` and `aim9-sweep67-*` |
+| `--a2g-run --attack release --station 3 --load AIM9M --count 2` at 200 and 650 kt (`a2g-release-origin-tornado-rail`) | left then right from (-10.75, -0.74, 1.50) and (10.75, -0.74, 1.50) at 25 degrees; (-11.78, -0.74, -0.81) and (11.61, -0.74, -1.26) at 67 degrees; depth 0.53 ft, the point it hangs at |
+| `--a2g-run --attack jettison --station 3 --load AIM9M` at 200 and 650 kt (`a2g-jettison-tornado-rail`) | the tank, then both missiles from the same points; payload 13,228 to 11,380 to 11,000 lb |
+| CPU stores preview, every catalog store of row 8 at 25 and 67 degrees (`checks/TOR-6b/matrix.sh`) | AIM-9B, AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B 0.00 ft into the airframe; R.550 0.40, AT-12 0.44, PL-7 0.50 (0.83 at 67), GBU-12 1.02 |
+
+Frames: `.local/m3-aircraft/frames/TOR-6b/`.
+
+## Tornado merge: audit pins recomputed (2026-11-11)
+
+The Tornado branch (`m3-tornado`, through TOR-9 with TOR-5 round 3, TOR-6 and TOR-6b)
+merged into `m3-aircraft`. The Tornado's refusals and its AIM-9 side rail (`TOR.PT` 85 to
+56 weapon placements, 29 fewer) are independent of the F-15E's and the Mirage F1's, so the
+weapon placements add: 4,610 less 29 is 4,581. The numbers below are measured with
+`--validate-ordnance --no-audio` on the merged tree (profile `.local/m3-aircraft/profile`),
+not computed; the sections above that quote 4,616 and 4,623 (the Tornado, before the merge)
+and 4,610 (the Mirage F1 merge) stay as written for their own states:
+
+```text
+ordnance F15E.PT: 4 source rows, 0 optional weapon rows, 57 compatible weapon placements, 3 tank placements; defaults and restart passed; catalog 48 normal, 83 Cheat
+ordnance TOR.PT: 5 source rows, 0 optional weapon rows, 56 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 36 normal, 83 Cheat
+ordnance MF1.PT: 5 source rows, 2 optional weapon rows, 141 compatible weapon placements, 6 tank placements; defaults and restart passed; catalog 60 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4581 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 222 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+Against `m3-aircraft` before the merge the weapon placements moved 4,610 to 4,581 and the
+Cheat-only placements 220 to 222 (the Tornado's side rail row, TOR-6b); tank placements
+(233), pods (80), recovered stations (18) and the roster are unchanged. The pin in
+`ordnance_audit.rs` and the `menus-ordnance-availability` expected line read 4,581; the
+`a2g-catalog` line matches any count and `tools/test_battery_a2g.py` pins no live count.
+`weapon_allowed` is one function with the F-15E's (rows 7 and 8), the Mirage F1's (rows 5
+and 6) and the Tornado's (rows 6, 7 and 8) arms, and each loading path
+(`Loadout::capacity`, the retained-selection rule in `combat/live.rs`, the audit) calls it
+once.

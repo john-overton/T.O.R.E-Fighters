@@ -285,6 +285,11 @@ fn specification(id: Id) -> Option<Spec> {
             // scale is 2, so the shape draws at 2/3 ft a unit (interim, agent
             // decision 2026-11-10, pending John, batch decision round; the
             // Tornado review measures it true size within 3 percent at 2/3).
+            // Update (TOR-3, 2026-11-10): the Tornado loads through its own
+            // `tornado_animation` rig (swing wing, tailerons, flap strips,
+            // rudder, interim gear rise); this row only pins the layout.
+            // Update (TOR-4, 2026-11-10): the same rig now owns the gear (three
+            // rigid pieces), the two airbrake plates and the two plumes.
             Id::Tornado => (
                 28150,
                 287,
@@ -391,6 +396,7 @@ enum SpecificRig {
     /// MF1-3 and MF1-4: the control surfaces, the gear, the airbrake and the
     /// plume.
     Mf1(crate::mf1_animation::Rig),
+    Tornado(crate::tornado_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -711,6 +717,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Tornado => {
+                let (rig, shape) = crate::tornado_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tornado(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -840,6 +855,7 @@ impl Rig {
                 SpecificRig::Gripen(_) => crate::gripen_animation::flame(address),
                 SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
                 SpecificRig::Mf1(_) => crate::mf1_animation::flame(address),
+                SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
             };
         }
         self.groups
@@ -904,6 +920,7 @@ impl Rig {
                 SpecificRig::Gripen(rig) => rig.animate(source, state),
                 SpecificRig::F5E(rig) => rig.animate(source, state),
                 SpecificRig::Mf1(rig) => rig.animate(source, state),
+                SpecificRig::Tornado(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
@@ -1016,6 +1033,22 @@ fn animate_gun(face: &mut Face, state: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// TOR-2: a generic rig draws at the scale the simulation measures the
+    /// same aircraft at (stores, breakup pieces, gear), and the Tornado's
+    /// is its header scale, 2/3 ft a unit.
+    #[test]
+    fn generic_rig_scales_match_the_simulation_scale() {
+        for id in Id::ALL {
+            if let Some(spec) = specification(id) {
+                assert_eq!(
+                    spec.scale,
+                    tore_sim::combat::debris::scale(id) as f32,
+                    "{id:?}"
+                );
+            }
+        }
+        assert_eq!(specification(Id::Tornado).unwrap().scale, 2. / 3.);
+    }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =
             |p: [f32; 3], q: [f32; 3]| (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f32>().sqrt();

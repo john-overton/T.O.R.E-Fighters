@@ -1045,6 +1045,15 @@ X-31 keeps its existing fitted aerodynamic model. See [aircraft behavior](spec/a
 `--flight-throttle 0..1` sets the initial throttle for engine-material captures;
 see the [engine material contract](spec/engine-material.md).
 
+`--flight-speed KNOTS` (0 to 2000) sets the initial speed for pose inspection captures,
+so a swing wing's drawn sweep (the Tornado's, which follows speed) can be shown at a
+chosen angle; it changes only the starting speed (TOR-3, developer switch).
+
+Update (TOR-6, 2026-11-11): the switch now also scales the starting velocity to the
+chosen speed, so a probe that steps the flight afterwards (a `--live-fire` shot with
+`--combat-probe-ticks`) starts at that speed and the swinging stations release from
+the sweep it implies; a capture with no probe ticks is unchanged.
+
 Researched flight is now the default; `--legacy-flight` preserves the previous
 model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
 including the original imported warning samples.

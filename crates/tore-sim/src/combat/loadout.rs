@@ -383,6 +383,9 @@ impl Loadout {
             // decision, 2026-11-11 (MF1-6, following John's F-15E A2 and F-5E
             // C2 precedents): the Mirage F1's belly pair and wing pair refuse
             // the stores that enter the airframe (same check, same place).
+            // Agent decision 2026-11-11 (TOR-6, John's F-15E A2 precedent):
+            // the Tornado's shoulder and inner wing pairs refuse the stores
+            // that enter the airframe (normal loading only).
             if row.is_some_and(|row| {
                 !tore_formats::aircraft::stations::weapon_allowed(self.aircraft, row, &w.source)
             }) {

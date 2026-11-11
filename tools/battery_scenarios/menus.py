@@ -492,7 +492,10 @@ def scenarios() -> list[Scenario]:
             # F15E-5 (2026-11-10): 4,644 weapon placements, the F-15E's bomb and wing pairs refuse eight clipping stores.
             # MF1-6 (2026-11-11, agent decision following John's F-15E A2 0.3 ft line): 4,618 weapon placements on the branch alone, the Mirage F1's belly and wing pairs refuse 34 stores.
             # Mirage F1 merge (2026-11-11): both refusal sets on m3-aircraft, 4,644 less 34 = 4,610 weapon placements (measured).
-            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4610 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
+            # TOR-6 (2026-11-11, m3-tornado): 4,616 weapon placements, the Tornado's shoulder and inner wing pairs refuse 36 clipping stores (agent decision applying John's F-15E A2 precedent; the coordinator recomputes the total at integration).
+            # TOR-6b (2026-11-11, m3-tornado): 4,623 weapon placements, the Tornado's AIM-9 side rail row takes seven missiles (John's side rail, appended in the retired outer pair's place); the coordinator recomputes the total at integration.
+            # Tornado merge (2026-11-11): the Tornado's refusals and side rail are independent of the F-15E's and the Mirage F1's, so 4,610 less the Tornado's 29 (TOR.PT 85 to 56) = 4,581 weapon placements (measured).
+            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4581 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -797,6 +800,7 @@ def scenarios() -> list[Scenario]:
     # Slice F5E-9 adds the F-5E Tiger (measured, not assumed; see the row below).
     # Slice MF1-9 adds the Mirage F1: its decoded wing mask admits a laser-guided store, but its record
     # has no Pave Spike row (the ALQ-167 centreline is cleared), so the lobby page warns and offers the pod helper.
+    # Slice TOR-9 adds the Tornado IDS (measured, not assumed; see the row below).
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
         ("f18", "ordnance-laser", True, True, False),
@@ -812,6 +816,7 @@ def scenarios() -> list[Scenario]:
         ("gripen", "lobby-ordnance-laser", True, True, True),
         ("f5e", "lobby-ordnance-laser", True, True, True),
         ("mf1", "lobby-ordnance-laser", True, True, True),
+        ("tornado", "lobby-ordnance-laser", False, True, True),
     ):
         out.append(
             Scenario(
