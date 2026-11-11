@@ -4831,3 +4831,36 @@ whole-retail-table guard as the empty centreline), `hardpoints::station_move`
 Mirage F1's retail wingtip row only). Audit pins unchanged (45, 18, 4,652, 233, 80,
 220). Default load 26,143 lb (was 29,839); battery windows refitted (liftoff 121.0
 kt, approach 127.6 kt). Frames: `.local/m3-aircraft/frames/MF1-5b/` (local only).
+
+Update (MF1-6, 2026-11-11): the audit pins of the paragraph above moved to 4,618
+weapon placements when MF1-6 refused 34 clipping stores; see the next section.
+
+## Mirage F1 ordnance, default load and countermeasures (MF1-6, 2026-11-11)
+
+Implementation, slice MF1-6, Claude Sonnet (sonnet-high). Details, lists and
+numbers are in [aircraft ordnance](aircraft-ordnance.md#the-mirage-f1-mf1-6-2026-11-11),
+[stores on pylons](../spec/stores-on-pylons.md#the-mirage-f1-refusals-mf1-6-2026-11-11)
+and [the baseline](../baselines/ordnance-availability.md#mirage-f1-ordnance-masks-and-default-load-mf1-6-2026-11-11).
+
+- **Masks (agent decision following John's F-15E A2 0.3 ft line; the F-5E kept its wing entries, C2).**
+  Normal loading refuses 33 stores on the belly pair (row 5, entries 0.37 to 3.39 ft)
+  and the `AS30.JT` on the paired wing row (row 6, 0.33 ft); the default
+  `R550.JT` is kept on row 6 (left 0.05 ft). Weapon placements 4,652 to 4,618.
+- **Default load (unchanged by this slice, proved).** Gun 250 `DEFA.JT`, empty
+  centreline, two `F250.GAS`, two wing and two wingtip `R550.JT`; 26,143 lb.
+  Same for the human, the AI, saved loads, the lobby and restart.
+- **Countermeasures.** `AV8.ECM` 30 chaff and 30 flares (O4: keep, John 2026-11-11).
+- **Live fire and jettison.** Gun 250 shots (54 hits, one kill), wing and wingtip
+  Magic one shot each (hit and kill), the two wing and wingtip groups jettison, two
+  tanks then two Mk 82s `PASS released 4`, a belly AGM-65G kills the lead truck.
+- **Code.** `aircraft_stations::weapon_allowed` (new), one check in
+  `Loadout::capacity_before_store_pairs`, one in the ordnance audit, and in
+  `live.rs` the empty-row selection skips a refused store (the belly row falls back
+  to `MK82.JT`). New retail-reading test `crates/tore-import/tests/mf1_ordnance.rs`
+  and battery scenarios `a2g-release-origin-mf1`, `a2g-jettison-mf1`,
+  `a2g-maverick-mf1`, `STATIONS["mf1"] = [250, 2, 2, 0, 0]`.
+
+Open items for John: the centreline (row 4) still lets 36 records enter the belly
+and 15 cross the gear (not asked); the gun cadence is the shared one and was not re-measured; the real
+chaff and flare counts of the F1 were not sourced.
+

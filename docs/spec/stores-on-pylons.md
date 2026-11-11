@@ -1955,9 +1955,66 @@ whether 46 row 5 alternatives that enter the airframe at 3.24 ft should be refus
 by a mask (they are only reachable through Load Ordnance; John's call), and a larger
 tip offset for `PL7` (1.4 ft, not applied).
 
+Update (MF1-6, 2026-11-11): a mask was applied on the coordinator's instruction,
+following John's F-15E A2 0.3 ft line; see [the Mirage F1 refusals](#the-mirage-f1-refusals-mf1-6-2026-11-11).
+`PL7` stays on the tip at 1.1 ft (no crossing).
+
 Provenance: capacity and the move opinionated (John, 2026-11-11, round 3, M1 "follow
 recs"); the 3.24 ft, 1.1 ft and the mechanisms fitted agent decisions; measurements
 by the MF1-5 tools (`.local/m3-aircraft/checks/MF1-5b/`); the retail rows, masks and
 defaults spec-derived from `MF1.PT` with B5-2's empty centreline (John, 2026-11-10);
 the real inner pylon tanks and the wingtip rails from Jane's text in `MF1.INF` and
 Aerospaceweb (plausibility only, no lateral offsets).
+
+## The Mirage F1 refusals (MF1-6, 2026-11-11)
+
+John answered the F-15E (A2, 2026-11-10) by refusing the large stores that enter
+the belly by more than about 0.3 ft. For the F-5E he answered C2 "for the f-5 keep",
+so the F-5E refused nothing and kept its wing entries. The coordinator asked for a
+mask on the Mirage F1 once MF1-5b had put the belly pair at 3.24 ft and the tip
+Magic 1.1 ft off the tip. The rows chosen, the 0.3 ft line and the lists below are
+agent decisions that follow A2's 0.3 ft line on both rows (a first version of this
+slice refused all seven row 6 entries on a reading of C2 that John's answer does not
+support; corrected in place the same day, nothing was committed). They apply to normal loading only (Cheat loading skips the check,
+as it skips every other refusal) and are in `aircraft_stations::weapon_allowed`
+(read by `Loadout::capacity`, the audit and the empty-row selection).
+
+**Row 5, the belly pair (33 refused).** Measured by MF1-5b at the 3.24 ft slot, the
+alternatives that enter the airframe by more than 0.3 ft (ft entered, triangle
+level): `AA11B` 0.43, `AA2` 0.37, `AA6` 2.80, `AA9` 1.39, `AIM9M` 0.73, `MICA` 0.65,
+`R530` 1.44, `R550` 2.02, `PL7` 2.32, `PL10` 2.34, `AGM88` 2.35, `AIM7` 1.94,
+`AIM7E` 1.94, `AIM9B` 0.48, `GBU12` 2.30, `GBU16` 2.37, `GBU10` 2.32, `GBU10A`
+2.32, `PAVEWAY` 2.32, `PAVEWA3` 3.39, `GBU28` 2.61, `GBU29` 3.39, `GBU29P` 3.39,
+`GBU30` 3.39, `AS14` 1.56, `AS30` 2.52, `AT12` 0.41, `AGM84E` 1.42, `AGM45` 2.35,
+`AGM84A` 1.36, `AM39` 2.65, `AS16` 0.49, `AS15` 0.99. Kept: the 19 clean records
+and the 13 that enter by 0.3 ft or less (`AA11` 0.23, `AA12` 0.21, `AS7` 0.29,
+`AIM9X` 0.19, `AIM120` 0.21, `AGM65G` 0.20, `AGM65A` 0.20, `AT2` 0.26, `FAB1000`
+0.08, `CBU89` 0.18, `GBU38` 0.13, and the `F350.GAS` 0.03 and `F500.GAS` 0.23
+tanks, which the weapon check does not touch). No row 5 record crosses the main
+gear at this slot, so no gear refusal arose.
+
+**Row 6, the paired wing row (1 refused).** MF1-5 lists eight records that enter the
+wing (0.05 to 0.33 ft). Only `AS30` (0.33 ft) is over the 0.3 ft line and is
+refused. Kept: `PL7` 0.07, `PL10` 0.15, `AGM88` 0.15, `AGM45` 0.15, `AIM7` 0.06,
+`AIM7E` 0.06, and `R550.JT`, 0.05 ft with 20 crossings on the left side only (the
+right side is clean), which is the default of this row (and of the tip row): a
+default store is never refused.
+
+**Wingtip row.** Unchanged: nine of ten records clean at 1.1 ft; `PL7` has no
+crossing (0.35 ft clearance, 1.24 and 1.35 ft by the vertical metric) and stays on
+the tip.
+
+**Centreline.** Unchanged and not asked for: 36 of its 58 records enter the belly
+by 0.05 to 0.71 ft and 15 cross the gear (MF1-5, row 4).
+
+**Effects.** `--validate-ordnance`: `ordnance MF1.PT: ... 141 compatible weapon
+placements` (was 175), `catalog 60 normal` (was 62: `AS16.JT` and `GBU28.JT` were
+only on the belly row), weapon placements 4,652 to 4,618. The Load Ordnance catalog
+dropped from 181 to 147 choices (exactly these 34). An empty belly row remembers
+`MK82.JT` now (it remembered `R550.JT`, which it refuses). Nothing else of the
+default load, the stations or the clearances moved.
+
+Provenance: the rule is an agent decision (2026-11-11) following John's F-15E A2
+answer (2026-11-10), applied on both rows; the F-5E kept its wing entries (C2); the entries are MF1-5b's measurements
+(`.local/m3-aircraft/checks/MF1-5b/`); the lists are `MF1_BELLY_REFUSED` and
+`MF1_WING_REFUSED`.

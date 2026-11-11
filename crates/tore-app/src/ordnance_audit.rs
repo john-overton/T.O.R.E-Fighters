@@ -45,7 +45,12 @@ const TANK_RECORDS: usize = 9;
 /// 4,652 from 4,663: the Tornado carries no outer wing row, so its eleven
 /// compatible weapon placements there go (B5-2, John 2026-11-10); the F-5E and
 /// Mirage F1 default-load changes move no placement.
-const WEAPON_PLACEMENTS: usize = 4652;
+/// 4,618 from 4,652: the Mirage F1's belly pair (row 5) refuses 33 stores that
+/// enter the airframe by more than about 0.3 ft and its wing pair (row 6)
+/// refuses the `AS30.JT` (0.33 ft), 34 placements fewer (MF1-6, agent decision
+/// 2026-11-11 following John's F-15E A2 0.3 ft line; the F-5E kept its wing
+/// entries; MF1.PT 175 to 141). Other aircraft's refusals are their own notes.
+const WEAPON_PLACEMENTS: usize = 4618;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -349,6 +354,27 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 } else {
                     expected
                 };
+                // Agent decision, 2026-11-11 (MF1-6, John's A2 and C2 precedents):
+                // the Mirage F1's belly pair and wing pair refuse the stores
+                // that enter the airframe; normal loading must offer none.
+                if !tore_formats::aircraft::stations::weapon_allowed(id, hardpoint, &weapon.source)
+                {
+                    if let Some(slot) = rows
+                        .iter()
+                        .find(|r| r.hardpoint == hardpoint)
+                        .and_then(|r| r.weapon)
+                        .filter(|slot| standard.capacity(*slot, weapon) != 0)
+                    {
+                        return Err(format!(
+                            "{} source station {} offers refused {} ({slot})",
+                            id.pt(),
+                            hardpoint + 1,
+                            weapon.source
+                        )
+                        .into());
+                    }
+                    continue;
+                }
                 if !(1..32767).contains(&expected) {
                     continue;
                 }

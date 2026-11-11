@@ -78,6 +78,12 @@ STATIONS = {
     # centreline tank is a tank station, and it has no wingtip row (John,
     # 2026-11-10).
     "m2000": [250, 4, 2, 2],
+    # The Mirage F1 carries the DEFA gun on its internal row 3 (250 rounds) and
+    # two default weapon rows: row 6 R550.JT x2 (wing) and row 7 R550.JT x2
+    # (wingtip). Its centreline (row 4, empty by default) and belly pair (row 5,
+    # two F250.GAS tanks by default) are optional weapon rows with a retained
+    # selection and no default weapon, so they end the list at 0 (MF1-6).
+    "mf1": [250, 2, 2, 0, 0],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]

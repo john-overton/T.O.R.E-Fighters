@@ -500,3 +500,34 @@ reductions for `AGM84A`, `AGM84E`, `AM39`, `AS14` and `MK82P3` on row 5 no longe
 occur, and the bomb carriage of `GBU12`, `GBU16` and `GBU38` reads 2 on that row (was
 4). Frames and the per-record clearance of the alternatives: [stores on
 pylons](../spec/stores-on-pylons.md#the-mirage-f1-stations-finished-mf1-5b-2026-11-11).
+
+Update (MF1-6, 2026-11-11): the pins in the paragraph above no longer hold after the
+mask below ([the Mirage F1 refusals](../spec/stores-on-pylons.md#the-mirage-f1-refusals-mf1-6-2026-11-11)).
+
+## Mirage F1 ordnance masks and default load (MF1-6, 2026-11-11)
+
+Agent decision following John's F-15E A2 answer (the 0.3 ft line; the F-5E kept its
+wing entries, C2): normal loading refuses 33 stores on the Mirage F1's belly pair
+(row 5, 3.24 ft out) that enter the airframe by more than about 0.3 ft and the
+`AS30.JT` on its paired wing row (row 6, 0.33 ft); the default `R550.JT` is never
+refused. The audit pins moved: weapon placements 4,652 to 4,618 (`MF1.PT` 175 to
+141). Recovered stations (18), tank
+placements (233), Cheat-only placements (220), pods (80) and the weapon and tank
+records (82 and 9) did not move. The per-aircraft and audit lines:
+
+```text
+ordnance MF1.PT: 5 source rows, 2 optional weapon rows, 141 compatible weapon placements, 6 tank placements; defaults and restart passed; catalog 60 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4618 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 4,618 (menus only). The audit
+also fails when a refused store is still offered on a row that has a weapon slot.
+The totals in this file for other aircraft's refusals (the F-15E's eight) are the
+coordinator's to recompute at integration (B4). `--stores-preview` with the catalog
+flag lists 147 choices for the Mirage F1 (was 181); the diff is exactly the 34
+refusals. Default load: gun 250, centreline empty, two `F250.GAS`, wing and wingtip
+Magics (26,143 lb of 30,203 lb); live-fire stations `[250, 2, 2, 0, 0]`. Commands,
+frames and the release origins are in [aircraft
+ordnance](../formats/aircraft-ordnance.md#the-mirage-f1-mf1-6-2026-11-11).
