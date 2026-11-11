@@ -2628,6 +2628,25 @@ draws while it is down; rudders: none, as John decided the same day. The
 "Rudders" and "Taileron" options in "F-15E surfaces (for John)" above are
 settled by his 2026-11-10 answers (no rudder motion, tailerons with roll).
 
+### F-15E stations measured (F15E-5, 2026-11-10)
+
+Slice F15E-5 measured every decoded store row on the drawn shape under the
+standard pylon rules and **stopped on clipping** (John's rule): see [the F-15E in
+stores on pylons](../spec/stores-on-pylons.md#the-f-15e-f15e-5-2026-11-10) for the
+station table, every alternative, the frames and the options. In short: row 6
+(centreline tank) and row 8 (wing AIM-120 pair, 14.3 ft out) are clean; row 7
+(the 12 Mk 82 conformal-style pair, 6.3 ft out) hangs on two triple racks a side,
+its aft inboard bombs enter the body by 0.06 ft (right) and 0.02 ft (left), they
+sit 0.32 ft from the main gear and the gear leg crosses them while it retracts
+(gear 0.4); several larger alternatives (GBU-10/GBU-30 about 2 ft, HARM and
+Shrike 1.0 ft) clip the belly flank. The "Things F15E-5 must handle" list in
+"F-15E hardpoints" above is answered: the tank and bombs hang 0.17 ft under the
+shelf and flank and are 3.3 to 3.9 ft above the ground (the gear-down low point is
+9 ft under the reference, so they do not hang near it once the pylon rules place
+them). The Pave Spike row already draws no body under the 2026-11-07 fixed-pod
+rule (John's decision 3 of 2026-11-10), checked by the retail pod guard. No row,
+mask or default changed and the ordnance audit pins did not move.
+
 ## Gripen source review (2026-11-10)
 
 Research mode, slice GRI-0 (batch 5). This reviews `GRIPEN.PT` and its

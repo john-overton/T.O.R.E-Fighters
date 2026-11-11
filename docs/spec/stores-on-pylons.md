@@ -1639,3 +1639,166 @@ Audit pins: recovered stations 17 to 18, weapon placements 4,663 to 4,652, tank
 placements 231 to 233, Cheat-only placements 222 to 220; the pod placements (80)
 and the roster (45) are unchanged. See the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-record-and-station-corrections-b5-2-2026-11-10).
+
+## The F-15E (F15E-5, 2026-11-10)
+
+Implementation and review mode, slice F15E-5 of batch 5. **Stopped on clipping,
+as John's standing rule (2026-11-07, batch rule B7) requires: no station table,
+`station_move`, mask or pylon code was authored, and nothing changed in
+behaviour.** The decoded rows hang under the standard pylon rules (no per-aircraft
+entry in `station_move`, so `Hang::AsRecorded` for every row). Measurements are
+the shape as drawn (350 faces, true size, no scale), the default load and every
+store each row accepts, checked against the fuselage, the wings, the main and
+nose gear (gear down and in transit) and the ground, and every store against
+every other store and pylon. Evidence and scripts are local only
+(`.local/m3-aircraft/checks/F15E-5/`, frames in
+`.local/m3-aircraft/frames/F15E-5/`); the method is the Mirage 2000's
+([M2K-5](#the-mirage-2000-m2k-5-2026-11-10)): the stores preview's aircraft-frame
+triangles, then a triangle-level analysis, surface distances good to about 0.05 ft.
+
+### Station table (default load, feet from the reference point)
+
+| Row | Location, decoded right / up / forward | What it holds | Where it hangs | Result |
+| ---: | --- | --- | --- | --- |
+| 0 to 4 | Fuselage flag `0x8`, fixed sensors and jammer | `VIS340.SEE`, `F15R.SEE`, `F15.ECM`, `AV8IR.SEE`, `PAVESPK.SEE` | not stations; no store is drawn | see [the pods](#the-f-15e-pods) |
+| 5 | Fuselage, 2.3 / -1.7 / 24.3 | the M61 (450 rounds, real 512) | internal gun, never drawn | not measured (no store) |
+| 6 | Centerline, 0 / -8.7 / 0 | `F350.GAS` x1 (alternatives `F150.GAS`, `F250.GAS`) | 2 inch rail under the belly, body y -5.26 to -3.17, z -6.8 to 6.8 | clean: 0.17 ft to the belly, 1.29 ft to the gear, 3.74 ft to the ground |
+| 7 | Fuselage pair `0x0505`, 6.3 / -8.7 / -1.7 | `MK82.JT` x12: six a side, two triple ejector racks one behind the other (centres z -5.8 and 2.5), the pair 5.6 and 7.0 ft out and the third under at 6.3 | 2 inch rails, tops 0.17 ft under the underside (the shelf and intake flank), racks 1.0 ft apart | see below |
+| 8 | Wing `0x01c5`, 14.3 / -4.7 / -4.7 | `AIM120.JT` x4: two a side on a twin rail, 13.7 and 15.0 ft out | 1 ft wing pylon, bodies y -1.39 to -0.15 | clean: 0.55 to 0.64 ft from the wing, 3.0 ft from the gear, 7.6 ft from the ground |
+
+Row 7 on the default load (12 Mk 82):
+
+- **Airframe.** Ten of the twelve bombs are 0.17 to 0.25 ft clear (the third bomb
+  under each rack 0.75 ft). The **aft inboard top bomb on each side enters the
+  body by 0.06 ft (right) and 0.02 ft (left)**, with 32 and 26 fin and edge
+  crossings at x 5.3 to 5.6 ft: the underside is read at the record's x and the
+  intake flank slopes in aft of it. This is inside the 2 inch rail depth the
+  rail rule already accepts (the reviewed fuselage values are 0.02 to 0.15 ft,
+  the Su-27's 0.72 ft was accepted), but it is a measured entry.
+- **Bomb to bomb.** On every rack the third (under) bomb's fin tips touch the
+  inboard top bomb's: 0.005 ft apart, 20 crossings per rack, four racks. This is
+  the generic three-on-a-rack layout ([stores on one pylon](#drawing-opinionated-john-2026-10-12)),
+  not F-15E specific: the two top bombs sit 0.69 ft out of the bar and the third
+  0.57 ft below it, 0.90 ft between centres against a 0.91 ft fin span. The other
+  pairs clear (0.047 ft under-bomb to outboard bomb, 0.47 ft top pair, 1.0 ft tandem).
+- **Gear down.** 0.32 ft from the main gear (the aft inboard bombs; the others
+  1.0 to 3.0 ft), 3.3 to 3.9 ft from the ground. No crossing.
+- **Gear in transit (finding).** With the default load, the main gear leg of
+  each side **crosses the aft inboard top bomb** while retracting: at gear 0.4,
+  28 crossings and 0.010 ft; 0.064 ft at 0.6; 0.327 ft at 0.8 and 0.319 ft down.
+  The leg plates reach 5.7 ft from the centreline at gear 0.2 and 5.5 ft at 0.4,
+  where the racks hang (5.2 to 7.5 ft). Gear up is clear. The captured frames are dark and
+  not conclusive; the figures are from the triangles of the fitted gear
+  ([F15E-4](../formats/aircraft-control-surfaces.md#f-15e-gear-speed-brake-and-plume-f15e-4-2026-11-10)).
+
+Row 8: the two AIM-120s of a pair are 0.022 ft apart (bodies; their fins are at
+45 degrees and do not cross). No clip.
+
+### Alternatives each row accepts, measured
+
+Row 6 takes only tanks (`F150`, `F250`, `F350`): all clean (0.17 ft to the belly,
+gear 1.29 to 1.54 ft, ground 3.7 to 4.3 ft). Row 7 accepts 25 stores (counts are
+the catalog capacity) and row 8 accepts 39. Entry is the deepest vertical entry
+into the airframe; crossings are fin and edge crossings between neighbours of one
+station.
+
+| Row, store, count | Airframe entry (ft) | Neighbours and gear |
+| --- | --- | --- |
+| 7 `GBU29.JT` and `GBU29P.JT` x4 | **2.14** (aft inboard), 0.81 to 1.01 front | 0.02 ft from the gear |
+| 7 `GBU30.JT` x8 | **1.85 to 1.93** (inboard), 0.53 to 0.70 | pairs of the racks cross (28 each), 0.01 ft from the gear |
+| 7 `AGM88.JT` and `AGM45.JT` x10 | **0.95 to 1.02** (aft inboard), 0.73 to 0.77 | under-bomb crosses its neighbours 108 to 114 times, 0.03 ft from the gear |
+| 7 `AT2.JT` x12 | 0.36 to 0.56 | 24 crossings a rack |
+| 7 `GBU38.JT` x12 | 0.22 to 0.42 | 28 to 86 crossings a rack, 0.19 ft from the gear |
+| 7 `CBU89.JT` x10 | 0.13 to 0.34 | 16 to 94 crossings a rack |
+| 7 `CBU87.JT` x12 | 0.14 (aft inboard) | 110 to 114 crossings a rack |
+| 7 `B13.JT` x6, `LAU61.JT` x12 | 0.05 to 0.08 (preview metric) | 64 crossings a rack, 0.04 to 0.05 ft from the gear |
+| 7 `MK84.JT` x4, `FAB1000.JT` x2, `FAB500.JT` x6 | none | clean (FAB500 0.04 ft from the gear) |
+| 7 the rest (`B8`, `FAB250`, `MK82HD`, `MK82P`, `MK82AIR`, `MK82P3`, `MK20`, `RBK250`, `RBK500`, `LAU10`) | 0.00 to 0.23 (preview metric only; the triangle analysis was not run for these) | not measured |
+| 8 `AA6.JT` x2 (20 ft long) | crosses the right wing (28), 0.25 left | wing clip |
+| 8 `GBU30.JT` x2 | 0.62 | |
+| 8 `GBU12.JT`, `GBU16.JT`, `AS30.JT`, `AGM88.JT`/`AGM45.JT`, `AIM7.JT`/`AIM7E.JT` x2 | 0.19 to 0.28 (the missiles 0.06 or crossings 8 to 14 left) | marginal |
+| 8 every other (`AIM-9M`, `AIM-9X`, `AIM-9B`, `AIM-120`, `AA-2`, `AA-8`, `AA-11`, `R550`, `PL-7`, `AGM-65`, `AGM-84`, `AS-15`, `AT-12`, bombs and rocket pods of the catalog) | 0.00 to 0.01 (preview metric; the triangle analysis ran for `AIM-9M`, `AA-11`, `AGM-65G` and the Mk 82, all clean) | clean where analysed |
+
+The heaviest case (`F350` tank, row 7 `GBU30` x8, row 8 `GBU30` x2) is the row 7
+and row 8 entries above and adds no tank contact (the tank is 4 ft from the
+bombs). Pictures: the GBU-30 and the AGM-88 loads pile into the belly flank and
+into each other (frames below).
+
+### What the real aircraft has (plausibility only, cited)
+
+The F-15E has a centreline station and two wing pylons, and conformal fuel
+tanks with six tangential bomb stations each (three inboard, three outboard;
+the inboard fore and aft stations take 2,000 lb stores, the outboard ones
+1,000 lb), plus the two LANTIRN stations just aft of the intakes (navigation pod
+on one, targeting pod on the other); the aircraft can carry three 610 gallon
+tanks. Sources: the [F-15E Strike Eagle article](https://en.wikipedia.org/wiki/McDonnell_Douglas_F-15E_Strike_Eagle)
+and [Air Power Australia's F-15E study](https://www.ausairpower.net/TE-F-15E-Strike-Eagle.html),
+read 2026-11-10; one search, and no source for a 12 Mk 82 load was found.
+Against the decoded rows: row 6 is a real station (the record's tank is 350
+gallons, the real one 610); row 7's 6.3 ft out and 12 stores is a stand-in for the
+conformal tank stations, which the shape does not hold
+([F15E-2](../formats/aircraft-variety.md#f-15e-shape-damage-looks-and-decals-f15e-2-2026-11-10));
+row 8 sits 14.3 ft out where the real pylon is about 9 to 10 ft of 21 (the
+F-15C's was moved to 11 ft by John on 2026-10-20). The real wing pylon takes
+tanks and bombs; the record's wing row takes no tank.
+
+### The F-15E pods
+
+John's 2026-11-10 decision (F-15E plan decision 3): **the Pave Spike row draws no
+pod body; its sensor stays.** The 2026-11-07 rule
+([fixed pods draw only on a real station](#fixed-pods-draw-only-on-a-real-station-2026-11-07))
+already gives exactly this, so no code changed: row 4 (`PAVESPK.SEE`, flag `0x8`,
+position 0 / 0 / 0) lies inside the airframe, so it is a placeholder and
+`Configuration::fixed_pods` is empty for the F-15E. Its mass (425 lb) and its
+designator behaviour are unchanged (neither reads the drawn list). Row 3
+(`AV8IR.SEE`, weight 0) is an internal FLIR and never drew anything. The retail
+guard `a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body`
+(`crates/tore-world/src/pod_equipment_tests.rs`) now includes the F-15E
+(`PAVESPK.SEE` on `F15E.PT` draws nothing) and passes against the user's install.
+No pod is hung on a LANTIRN position: the decoded rows have no intake station and
+none was invented (B7). A designator pod loaded through Load Ordnance (rows 6 and
+7 carry the pod bit `0x400`, so the retail equipment rule accepts one) still draws
+its authored model on the centreline or the conformal-style station; neither is a
+LANTIRN position, and Pave Spike is not a real F-15E store. That stays as the
+standing rule for every aircraft unless John says otherwise.
+
+### Options for John (none chosen)
+
+1. **Default load as it stands** (accept): the 0.06 ft entry is inside the rail
+   tolerance; the fin-tip touch of the rack's third bomb is the generic rack
+   layout and affects every aircraft with three on a rack.
+2. **Aft inboard bomb entry and the gear.** (a) The Mirage 2000 precedent
+   (`rail_drop`, 0.1 ft) lowers the rails and clears the 0.06 ft entry but takes
+   the bombs closer to the gear (0.32 to about 0.22 ft). (b) A fitted
+   `station_move` for row 7 (for example 0.5 ft further out, 6.8 ft, or the aft
+   rack forward) moves the bombs out of the leg's sweep and off the sloping flank,
+   as the F-15C's wing pylon was moved. (c) Accept: the leg passes through the
+   aft inboard bomb for part of a second while the gear moves.
+3. **Alternatives that clip hard.** Row 7 `GBU29`/`GBU29P` x4 and `GBU30` x8 (about
+   2 ft into the belly), `AGM88`/`AGM45` x10 (1.0 ft) and the weaker cases (`AT2`,
+   `GBU38`, `CBU89`): refuse them on row 7 as the Mirage 2000's belly pairs refuse
+   the 350 and 500 gallon tanks; or cap the count; or accept for large bombs (the
+   real inboard stations take 2,000 lb stores but not in this fit). Row 8 `AA6`
+   crosses the wing: refuse it or accept.
+4. **Row 8 position.** 14.3 ft out as decoded, or about 11 ft like the F-15C
+   (closer to the real 9 to 10 ft), a fitted `station_move`.
+5. **Pods on rows 6 and 7:** leave the retail pod rule, or refuse a designator pod
+   on row 7 (the conformal-style station); the real aircraft carries no Pave Spike.
+
+### Frames and provenance
+
+Frames (`.local/m3-aircraft/frames/F15E-5/`, png): `default-gear-{down,up}-{side,front,rear,below,quarter}`
+(free flight, default load, zoom 3, small instrument layout, noon; the below look
+is dark), `default-gear04-*` (gear at 0.4, the transit case), `raw-default/`
+(stores preview, loaded views and close-ups), 3x crops `crop3x-cft-rack-aft-front`,
+`crop3x-cft-bombs-side`, `crop3x-tank-centreline-front`, `crop3x-wing-aim120-front`,
+`crop3x-gear04-*`, and the clipping cases `clip-crop3x-GBU30x8-belly-front`,
+`clip-crop3x-GBU30x8-side`, `clip-crop3x-HARMx10-belly-front`,
+`clip-crop3x-GBU38x12-side` (with `raw-gbu30/`, `raw-agm88/`, `raw-gbu38/`).
+
+Provenance: rows, masks, counts and defaults **spec-derived** from `F15E.PT`;
+the placement is the existing opinionated pylon rules; the measurements, the
+transit finding, the comparison and the stop are agent findings of 2026-11-10;
+the real-aircraft facts are cited from public pages for plausibility only; the pod
+handling is John's decision of 2026-11-10 already satisfied by the 2026-11-07
+rule. The audit pins do not move (no row, mask, count or default changed).
