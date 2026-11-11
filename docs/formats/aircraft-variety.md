@@ -4721,3 +4721,58 @@ The liftoff (135 to 165 kt) and approach (155 to 175 kt) ranges in the flight
 battery are fitted windows, agent decisions of 2026-11-10, from the published 124 kt
 landing-configuration stall speed. Full tables, sources and commands are in the
 [variety flight baseline](../baselines/variety-flight.md#northrop-f-5e-validation-2026-11-10).
+
+## F-5E in missions, multiplayer and replay (F5E-9, 2026-11-10)
+
+Implementation and verification, slice F5E-9 of the F-5E port. No game code
+changed. `AircraftId::F5E` was appended to every identity list in B5-1
+(checkpoint code 43, `SELECTABLE` index 43, carried in the 9-bit wire field
+since protocol 83), and `strike_class.rs` lists it in the fighter family
+(strike class Fighter, B5-1), so the AI wing build needed no change: it reads
+the record's two J85 engines (the roster probe's `models=2`) and the default
+load of F5E-6 (the M61 with 560 rounds, the `F150.GAS` tank, two wingtip
+AIM-9B and the empty wing pair, which the probe prints as
+`[M61 x560, AIM-9B x2, AIM-9B x0]`). No AI behaviour work was done (Mirage plan
+rule 1).
+
+What changed is coverage: a Quick Mission test
+(`the_f5e_is_a_quick_mission_player_and_a_wing_choice`) naming `F5E.PT` as the
+player's aircraft and in every AI wing field, and asserting that neither
+`F5EE.PT` nor `F5EV.PT` appears in the player or wing lists in its place; a
+checkpoint test in `tore-sim` (`the_f5e_round_trips_at_code_43_and_no_identity_shares_it`:
+the coded identity is the single byte 43, every identity in `ALL` round-trips,
+no two share a code, 46 is unknown); the `ai-f5e-quick-mission-2v2` and
+`replay-rec-f5e-2v2` battery scenarios; the F-5E row in the Load Ordnance notes
+loop (`menus-snap-quick-lobby-ordnance-laser-notes-f5e`: the lobby page warns
+about a laser-guided store and offers the pod helper, measured, the same as the
+F-16A, the MiG-31, the Mirage 2000), and `ai-f5e-*` in the `ai-fights` battery
+family.
+
+Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile-f5e`, logs
+in `.local/m3-aircraft/checks/F5E-9/`):
+
+- `--ai-roster-probe-ticks 3600`: the four `F5E.PT` lines (Novice, Average,
+  Experienced, Ace) each `ticks=3600 models=2 radar=true ir=false stores=3
+  gun=true projectiles=0 dropped=0 PASS`; the whole roster has no FAIL line.
+- `ai-f5e-quick-mission-2v2` passes: every wing the F-5E, nothing dropped, zero
+  anomalies. The F-5E's record has no infrared sensor row, so the wing's AIM-9B
+  logs `no AIM-9B shot (ACQUIRING)` and the attack changes to the gun: 29 rounds,
+  no hit, no kill in this run (the Gripen's run had a missile kill). That is the
+  existing weapon-selection behaviour for a record without an infrared sensor;
+  it was not tuned (no AI behaviour work). A finding for John, not a defect of
+  this slice.
+- `replay-rec-f5e-2v2` passes: the recording reads back `player.aircraft =
+  F5E.PT`, `probe.enemy = F5E.PT` and `draw.models = F5E.PT`, two runs are
+  identical, and `--verify-render` finds `missing=0 differing=0` over 2,401
+  ticks.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding
+  `tore-server` and `tore-bot`. They take no aircraft argument, so they cover
+  the identity list and content code, not an F-5E in flight over the wire.
+
+Parked check. `F5EE.PT` (desert) and `F5EV.PT` (snow) are separate records and
+parked targets, and are unchanged: `--surface-parked EGY QELAIR` lists two
+`F5EE.PT` at `gear 0x639c`, `scale 0.3333`, `origin-up 6.00` (18 units at a
+third), `EGY QESAIR` one more, and `VLA QVLAIR` lists two `F5EV.PT` at
+`gear 0x614c`, same scale and `origin-up 6.00`; the ignored retail test
+`parked_aircraft::import_tests::every_parked_type_reads_and_stands_on_its_gear`
+passes. `F5E.PT` is not parked and never replaces either (B6).
