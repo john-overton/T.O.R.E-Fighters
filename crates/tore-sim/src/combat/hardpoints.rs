@@ -1008,6 +1008,16 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         // halfway to the outermost pylon (John 2026-10-14).
         (AircraftId::A10, 6) => at(Location::Wing, A10_WING[0], 0., Hang::AsRecorded),
         (AircraftId::A10, 7) => at(Location::Wing, A10_WING[1], 0., Hang::AsRecorded),
+        // The Tornado's inner wing pair (row 7, John 2026-11-11, round 3 T1):
+        // on the swinging wing panel, outboard of the sweep pivot, where the
+        // real aircraft's inboard swivelling pylons are, so the swivel
+        // (`swing::swivels`) carries it.
+        (AircraftId::Tornado, 7) => at(
+            Location::Wing,
+            TORNADO_WING_INNER[0],
+            TORNADO_WING_INNER[1],
+            Hang::AsRecorded,
+        ),
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
@@ -1093,6 +1103,24 @@ const SU35_WING: [f64; 2] = [15.0, -0.9];
 /// its 6.7 ft rail's front 0.25 ft behind the leading edge and its nose
 /// 4.6 ft ahead of it. Retail records the row 8.33 ft out at 0 ft forward.
 const YAK141_INNER: [f64; 2] = [7.5, -2.8];
+/// The Tornado's inboard swivelling wing pylon (`TOR.PT` row 7), feet out and
+/// forward, fitted (agent decision 2026-11-11, John's round-3 answer T1: on the
+/// swinging wing panel, outboard of the 6.33 ft sweep pivot, where the real
+/// aircraft's inboard swivelling pylons are; their position is not in any
+/// source found, only that the pivots sit in the fixed inboard glove and that
+/// each wing carries two swivelling pylons). 9.5 ft out is 3.2 ft outboard of
+/// the pivot and 12.5 ft inboard of the spread tip (22 ft out); 1.5 ft forward
+/// is a little ahead of the panel's mid chord there (leading edge 3.2 ft
+/// forward, trailing edge 3.4 ft aft at that span), so a store about 7 ft long
+/// hangs with its nose about 1.8 ft ahead of the leading edge, as underwing
+/// stores do. Retail records the row 3.67 ft out and 3 ft forward, inside the
+/// fuselage side. Chosen from a grid of 8.5, 9.5 and 10.5 ft out by -1, 1.5
+/// and 3 ft forward as the position where the default Mk 82 and the Mk 84
+/// clear the airframe at every sweep and the largest alternative (the GBU-30)
+/// enters it least. The station stays under the wing surface and its store
+/// streamwise from 25 to 67 degrees (docs/spec/stores-on-pylons.md).
+const TORNADO_WING_INNER: [f64; 2] = [9.5, 1.5];
+
 /// The Yak-141's outer underwing pylon (retail's row 16.67 ft out, which
 /// is past two thirds of the model's 18.5 ft half span, by the tip): 11 ft
 /// out, where the leading edge is about 2 ft back; its AA-11 (9.5 ft)
@@ -1219,8 +1247,14 @@ pub fn placed_on(
 /// holds two (one a wing, the most it can then take, as the real inner
 /// pylons do) and the centreline row one tank in place of the Mk 82s, which
 /// stay loadable there. About 1,000 lb less fuel than retail's four.
+///
+/// The Tornado's tank row starts with one tank, not its pair (John
+/// 2026-11-11, [`tore_formats::aircraft::stations::default_counts`]).
 pub fn default_records(a: &tore_formats::aircraft::Aircraft) -> Vec<Hardpoint> {
     let mut records = a.hardpoints.clone();
+    // The Tornado's one centreline tank (John, 2026-11-11), guarded to the
+    // retail row inside the rule.
+    tore_formats::aircraft::stations::default_counts(a.id, &mut records);
     if a.id == tore_formats::aircraft::AircraftId::A4E {
         let tank = records
             .iter()
@@ -1907,6 +1941,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_tornado_defaults_to_one_centreline_tank() {
+        // John, 2026-11-11 (T3): the default load's tank row holds one tank
+        // at x 0, the capacity (two) and every other row as retail.
+        let row = |location, flags, position, store: &str, count, weight_class| Hardpoint {
+            location,
+            flags,
+            position,
+            store: Some(store.into()),
+            count,
+            weight_class,
+        };
+        let aircraft = |id| tore_formats::aircraft::Aircraft {
+            id,
+            name: String::new(),
+            shape: String::new(),
+            fields: Default::default(),
+            object: Default::default(),
+            hardpoints: vec![
+                row(4, 0x205, [0, -25, 17], "F250.GAS", 2, 40),
+                row(1, 0x7e5, [6, -25, 14], "PAVEWAY.JT", 4, 80),
+            ],
+            envelopes: Vec::new(),
+            sounds: Default::default(),
+        };
+        // The fixture's row 5 is the Tornado's row; build one with it there.
+        let mut tornado = aircraft(tore_formats::aircraft::AircraftId::Tornado);
+        let filler = row(1, 8, [0, 0, 0], "VIS240.SEE", 1, 0);
+        let mut rows = vec![filler; 5];
+        rows.extend(tornado.hardpoints.clone());
+        tornado.hardpoints = rows;
+        let records = default_records(&tornado);
+        assert_eq!(records[5].store.as_deref(), Some("F250.GAS"));
+        assert_eq!(records[5].count, 1);
+        assert_eq!(tornado.hardpoints[5].count, 2, "the capacity stays");
+        assert_eq!(records[6].count, 4);
+        let mut other = aircraft(tore_formats::aircraft::AircraftId::Mig23);
+        other.hardpoints = tornado.hardpoints.clone();
+        assert_eq!(default_records(&other)[5].count, 2);
+    }
+
     /// A model of a flat wing 1 ft below the reference out to 20 ft, with a
     /// nacelle hanging 3 ft below it from 3 to 5 ft out.
     fn nacelle_wing() -> Underside {
@@ -2097,6 +2172,49 @@ mod tests {
                 assert!(pair[0][0] < right && pair[1][0] > right);
             }
         }
+    }
+
+    /// TOR-5b, John 2026-11-11 (T1): the Tornado's inner wing pair hangs on the
+    /// swinging wing panel, outboard of the sweep pivot, and rides the swivel
+    /// to the swept wing; the fuselage rows keep the record's places.
+    #[test]
+    fn the_tornado_inner_wing_pair_hangs_on_the_swinging_panel() {
+        use crate::combat::swing;
+        let row = Hardpoint {
+            location: 4,
+            position: [11, -25, 9],
+            flags: 0x505,
+            count: 2,
+            store: Some("MK82P3.JT".into()),
+            weight_class: 30,
+        };
+        let moved = station_move(AircraftId::Tornado, 7).expect("row 7 is moved");
+        assert_eq!(moved.location, Location::Wing);
+        let pivot = swing::pivot_feet(true);
+        assert!(
+            moved.right > pivot[0] + 2.,
+            "outboard of the sweep pivot ({} ft)",
+            pivot[0]
+        );
+        // The tank row (5) and the shoulder Paveways (6) keep the record.
+        assert_eq!(station_move(AircraftId::Tornado, 5), None);
+        assert_eq!(station_move(AircraftId::Tornado, 6), None);
+        // Only the Tornado's Wing record moves; another location keeps its place.
+        assert_eq!(station_move(AircraftId::Mig23, 7), None);
+        let (mount, rack) = placed_on(AircraftId::Tornado, 7, &row, None);
+        assert_eq!([mount[0], mount[2]], [moved.right, moved.forward]);
+        assert_eq!(rack.location(), Location::Wing);
+        assert!(swing::swivels(AircraftId::Tornado, 7));
+        // The swivel carries it with the wing: at full sweep it stays outboard
+        // of the pivot's fuselage side and the left station mirrors it within
+        // the source's one-unit glove offset.
+        let turn = (swing::SWEEP_MAX - swing::SWEEP_MIN).to_radians();
+        let right = swing::swept(true, mount, turn);
+        let left = swing::swept(false, [-mount[0], mount[1], mount[2]], turn);
+        assert!(right[0] > pivot[0], "{right:?}");
+        assert!(left[0] < -pivot[0], "{left:?}");
+        assert!((right[0] + left[0]).abs() < 1.0, "{right:?} {left:?}");
+        assert_eq!(right[1], mount[1], "the height does not change");
     }
 
     #[test]

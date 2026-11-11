@@ -254,6 +254,39 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
     }
 }
 
+/// The Tornado's centreline tank row (`TOR.PT` row 5: Wing, x 0, two
+/// `F250.GAS`), whose default quantity [`default_counts`] changes.
+pub const TORNADO_CENTRELINE: usize = 5;
+
+/// Default quantities where T.O.R.E's default load differs from the source
+/// row's capacity (John, 2026-11-11, round 3 "T3", opinionated: "the default
+/// load gets one centreline tank instead of the crossing pair"). The real
+/// Tornado IDS carries one tank on its centreline station; the retail row
+/// holds two (a pair 1.18 ft either side of x 0 that crosses the shoulder
+/// Paveways beside it). The default is one tank, the record's own type, at
+/// x 0. Only the quantity that starts loaded changes: the row keeps its
+/// place, mask, capacity (two), weight class and position, so Load Ordnance
+/// still admits what it did. Guarded on the whole retail row (an edited
+/// record keeps its own default) and on the identity; repeated application
+/// is a no-op. Applied by `tore_sim::combat::hardpoints::default_records`.
+pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
+    if id != AircraftId::Tornado {
+        return;
+    }
+    if let Some(row) = rows.get_mut(TORNADO_CENTRELINE)
+        && (
+            row.location,
+            row.flags,
+            row.position,
+            row.store.as_deref(),
+            row.count,
+            row.weight_class,
+        ) == (4, 0x205, [0, -25, 17], Some("F250.GAS"), 2, 40)
+    {
+        row.count = 1;
+    }
+}
+
 /// Weapons an existing source row takes in normal loading beyond its own mask,
 /// on aircraft whose guarded rows were appended (so the reviewed source
 /// signature matched). The F-16C's wingtip launchers (stations 1 and 9,
@@ -718,6 +751,35 @@ mod tests {
         shifted.push(row((4, 0x85, [16, -22, 4], "AIM9M.JT", 2, 5)));
         retire(AircraftId::Tornado, &mut shifted);
         assert_eq!(shifted.len(), 10);
+    }
+
+    #[test]
+    fn the_tornado_default_load_is_one_centreline_tank() {
+        // John, 2026-11-11 (T3): one tank at x 0 instead of the crossing pair.
+        let mut rows = tornado_retail();
+        retire(AircraftId::Tornado, &mut rows);
+        let retail = rows.clone();
+        default_counts(AircraftId::Tornado, &mut rows);
+        let mut expected = key(&retail);
+        expected[TORNADO_CENTRELINE].4 = 1;
+        assert_eq!(key(&rows), expected);
+        // The record's own tank type and position stay; only the count moves.
+        assert_eq!(rows[TORNADO_CENTRELINE].store.as_deref(), Some("F250.GAS"));
+        assert_eq!(rows[TORNADO_CENTRELINE].position, [0, -25, 17]);
+        default_counts(AircraftId::Tornado, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // Another identity with the same rows, or an edited record, keeps its own.
+        let mut other = retail.clone();
+        default_counts(AircraftId::Mig23, &mut other);
+        assert_eq!(key(&other), key(&retail));
+        let mut edited = retail.clone();
+        edited[TORNADO_CENTRELINE].store = Some("F350.GAS".into());
+        default_counts(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited[TORNADO_CENTRELINE].count, 2);
+        let mut edited = retail.clone();
+        edited[TORNADO_CENTRELINE].count = 4;
+        default_counts(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited[TORNADO_CENTRELINE].count, 4);
     }
 
     fn default_rows(id: AircraftId) -> Vec<Hardpoint> {

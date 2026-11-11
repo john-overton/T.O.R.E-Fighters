@@ -1757,3 +1757,131 @@ opinionated (John 2026-11-10, decision 19, for the rotating pylons; the row choi
 is an agent decision); the schedule, pivot and sweep range are TOR-3's fitted
 values and the cited 25 to 67 degrees; the measurements are agent findings. The
 real station numbers are not claimed. No audit pin moves.
+
+## The Tornado IDS: inner wing pair on the wing, one centreline tank, a glove plate (TOR-5b, 2026-11-11)
+
+Update (TOR-5b, 2026-11-11) to the [TOR-5 section](#the-tornado-ids-swivelling-wing-pylons-and-a-stop-on-clipping-tor-5-2026-11-10)
+above (its text stands as the measurement it was): John answered the clipping stop on
+2026-11-11 ("For the Tornado follow recs", answers T1 to T5, opinionated). Three of the
+answers are applied and measured below; **the Paveway move (T2) could not be done as
+asked** and is held for John with the measurements and frames. Numbers come from
+`tore-app --stores-preview` (CPU, audit, clearance, `TORE_STORES_PREVIEW_SWEEP` 25, 35,
+46, 55, 60 and 67 degrees, default load and 22 alternatives) and free-flight frames; both
+are local only.
+
+**T1, row 7 on the swinging panel (opinionated, John 2026-11-11; the position is fitted,
+agent decision).** `station_move(Tornado, 7)` puts the inner wing pair at **9.5 ft out,
+1.5 ft forward** (`TORNADO_WING_INNER`), a `Location::Wing` station on a standard 1 ft
+wing pylon. The sweep pivot is 6.33 ft out, so the station is 3.2 ft outboard of it on the
+movable panel, and the existing swivel (`combat::swing::swivels`, `Rack::turn`,
+`side_pylons`) carries it: the pylon rides the wing and turns back by the wing's own turn,
+so the store stays streamwise. Where the real inboard swivelling pylons are is not in any
+source found. What is cited (read 2026-11-11): the Tornado IDS has seven store stations,
+one centreline, two fuselage shoulders and **two swivelling pylons under each wing**
+([Sir Viper](https://sirviper.com/index.php?page=fighters%2Ftornado%2Ftornado_ids),
+[Dinger](https://dingeraviation.net/tornado/tornado.html)); the wing pivots sit in the
+fixed inboard "nibs" ([Bomber Aircraft wiki](https://bomberaircraft.fandom.com/wiki/Panavia_Tornado_IDS));
+the span is 45 ft 7.5 in spread and 28 ft 2.5 in swept
+([Migflug](https://migflug.com/aircraft/panavia-tornado/)). No dimensioned drawing was
+found, so the 9.5 / 1.5 ft pair is **fitted**: chosen from a grid of 8.5, 9.5 and
+10.5 ft out by -1, 1.5 and 3 ft forward as the place where the default Mk 82 and the Mk 84
+clear the airframe at every sweep and the largest alternative (the GBU-30) enters it
+least. At 9.5 ft the panel's leading edge is 3.2 ft forward and its trailing edge 3.4 ft
+aft, so a 7 ft store hangs with its nose about 1.8 ft ahead of the leading edge. Retail
+records the row at 3.67 ft out and 3 ft forward, inside the fuselage side, with the
+default Mk 82 entering the airframe 2.61 ft; that is gone.
+
+**T3, one centreline tank (opinionated, John 2026-11-11).** The default load holds one
+`F250.GAS` at x 0 instead of the crossing pair. It is a default rule, not a capacity
+change: `aircraft_stations::default_counts` (guarded on the Tornado and the whole retail
+row 5: Wing, flags 0x205, position 0 / -25 / 17, `F250.GAS`, two, weight class 40) lowers
+the quantity that starts loaded to one, and `hardpoints::default_records` hands it to the
+default loading as the A-4E's three tanks are. Row 5 keeps its capacity (two), place,
+mask and weight class, so Load Ordnance still admits what it did and no audit pin moves.
+External fuel is 1,650 lb (3,300 lb before).
+
+**T4, the glove plate (opinionated, John 2026-11-11; the geometry is fitted).** See
+[the Tornado control rig](../formats/aircraft-control-surfaces.md#tornado-glove-plate-tor-5b-2026-11-11).
+It is stores-neutral: it lies above the wing, so no pylon reads it.
+
+**T5, tailerons:** unchanged, 0.25 rad.
+
+**Station table (default load: one `F250.GAS`, four `PAVEWAY.JT`, two `MK82P3.JT`; feet
+right / up / forward, right side; header scale 2/3).**
+
+| Row | Location | Default | At 25 degrees (spread) | At 67 degrees | Swivels |
+| ---: | --- | --- | --- | --- | --- |
+| 5 | Wing, x 0 | 250 gal x1 | tank at x 0, up -5.94, forward 5.67, underside -4.0 | same | no |
+| 6 | Fuselage, 4 | Paveway x4 | x 2.00, up -4.55 / -4.92, forward -2.93 and 12.27 | same | no |
+| 7 | Wing, 2 | Mk 82 x2 | x 9.50, up -1.45, forward 1.50, lugs 1.00 under the wing | right (10.36, -1.45, -1.26), left (-10.53, -1.45, -0.81) | yes |
+
+At 67 degrees the left and right Mk 82 sit 0.45 ft apart fore and aft: the source's left
+glove is one unit (0.67 ft) further out, so the left pivot is too (TOR-3), and the pair is
+not an exact mirror. Row 7's clip is 0.00 at 25, 35, 46, 55, 60 and 67 degrees.
+
+**Clearances, default load** (clip: deepest point of a store's shape above the airframe's
+lowest face straight under it, in feet; the airframe is the clean shape with no gear, so
+gear up and gear down read the same; "gear" lines are against the gear-down legs).
+
+| Measure | Before TOR-5b (25 / 67) | After (25 and 67, every sweep) |
+| --- | --- | --- |
+| Row 7 Mk 82 against the airframe | 2.61 / 0.00 (and floating over nothing at 67) | **0.00** |
+| Row 5 tank against the airframe | 0.00 | **0.00** |
+| Row 6 Paveways against the airframe | 0.96 | **0.96** front pair, 0.55 rear pair (unchanged, see T2) |
+| Paveway against tank (bounding boxes) | -1.84 (pair) | **-0.85** (single tank) |
+| Paveway against Mk 82 | -0.70 | **none within 1 ft** |
+| Gear down, Mk 82 against the legs | boxes held gear points | **4.4 ft (25), 5.3 and 5.5 ft (67)** |
+| Gear down, lowest store above the ground | tank 0.46, Paveways 0.50 / 0.86, Mk 82 1.97 | tank **0.46**, Paveways **0.50 / 0.86**, Mk 82 **5.42** |
+
+Load Ordnance alternatives (row by row, as in TOR-5): every Mk 82, Mk 84, GBU-38, AGM-45,
+AGM-88, CBU-87, FAB-500, LAU-10 and B-8 on row 7 reads **0.00** at both sweeps; the
+GBU-30 reads 0.00 at 25 and **1.10** at 67 degrees (its fins reach the airframe's lower
+flank at the swept position; was 1.27 at the old position, 2.43 at 8.5 ft out and the
+middle of the panel). The 500 gal tank with four Mk 84 on row 6 and two Mk 84 on row 7
+(all-heavy) reads 0.00 everywhere and stands 0.03 ft into the ground with the gear down
+(the tank, as before). On row 6: Mk 82, Mk 84 and two 350 or 500 gal tanks read 0.00; the
+AIM-9M 0.60, GBU-28 0.33, AGM-88 0.93, GBU-12 0.90, Paveway 0.96 and AS-30 2.12.
+
+**T2, row 6 Paveways, stopped (clearing is not possible by moving them outboard).** The
+0.96 ft the TOR-5 report called "the Paveways entering the fuselage" is the **fin tips**,
+not the bodies: the Paveway's wings span about 3.8 ft, and with the fins in an X the
+upper inboard tip stands 1.9 ft inboard of and 1.9 ft above the store's centre line, which
+is inside the belly (flat at -4.0 ft out to about 3 ft, then a flank to -2 ft). The
+deepest tips are the front pair's at 12 ft forward (0.95 ft) and the rear pair's tails
+at -2.9 ft forward (0.55 ft). Measured moves of the whole row (right side shown, both
+mirror; forward kept at the record's 4.67 ft):
+
+| Row 6 out (ft) | Worst store clip | Paveway against the tank | What changes |
+| ---: | ---: | ---: | --- |
+| 2.00 (record) | 0.96 (front pair 0.95, rear pair 0.55) | -0.85 | the default |
+| 2.25 to 2.60 | 0.96 (same two) | -0.60 to -0.25 | tips still in the belly |
+| 2.70 to 2.75 | **3.41** | -0.15 to 0.0 | the front pair's pylon reads the intake side wall ahead of it (-1.7 ft) and the pair hangs 2.1 ft higher, into the flank |
+| 3.00 to 4.50 | 3.3 to 3.6 (rear pair 1.8 to 2.7 at 3.0, 0.78 at 3.5) | clear | both pairs in the flank |
+| 4.75 to 5.00 | 4.9, 2.1 | clear | under the edge of the glove |
+| 5.50 to 7.00 | 3.8 falling to 2.3 (rear pair); front pair 1.07 falling to 0.00 | clear | the stores hang from the wing glove, fins in the wing |
+
+So the smallest outboard move that clears the tank (about 2.85 ft) is past the 2.70 ft
+where the front pair climbs into the flank, and no outboard move gets the fin tips out of
+the fuselage under 0.3 ft. Nothing was moved; row 6 is as TOR-5 left it. The fix does not
+come from the row's lateral place. **Options for John** (agent analysis, frames
+`opt-row6-*` in the slice's frame folder):
+
+- *Accept* the fin-tip entries (0.55 and 0.96 ft; the bodies are clear; the Su-27's accepted
+  0.72 ft is the precedent). The Paveway against the tank overlap (-0.85 ft, a fin tip
+  into the tank's shoulder) stays too, or moves out to about 2.6 ft (-0.25 ft).
+- *A rail drop* like the Mirage 2000's and MiG-31's 0.1 ft (each foot of drop takes a foot
+  off every clip). It cannot clear: the front pair stands 0.50 ft above the ground gear
+  down, so at most 0.5 ft is available (0.45 ft would remain at the front pair, the rear
+  pair would clear), and the front pair would touch the ground.
+- *A default of Mk 82 or Mk 84 on row 6* instead of the Paveway (both read 0.00 and clear
+  the tank), through a default rule like T3; it takes the laser bombs off the default
+  load (the Quick Mission and the laser-bomb scenarios use them).
+- *A smaller Paveway shape*: the fins are the retail shape (`PAVE.SH`); a fitted smaller
+  copy would be new art, which no slice has proposed.
+
+**Provenance.** T1 to T5 are John's round-3 answers (opinionated, 2026-11-11); the
+9.5 / 1.5 ft position, the choice of a default rule over a capacity change, the glove
+plate's outline and the measurements are agent decisions or findings; the station counts
+are from the cited public pages and no station offsets are claimed. The audit pins do not
+move (45 aircraft, 18 stations, 4,652 weapon placements, 233 tank placements, 220
+Cheat-only placements, 80 pod placements).

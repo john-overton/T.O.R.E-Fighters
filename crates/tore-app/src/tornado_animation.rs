@@ -48,6 +48,50 @@ pub(crate) const TAIL_L: [usize; 2] = [0x4176, 0x42f8];
 pub(crate) const RUDDER: [usize; 2] = [0x5723, 0x5750];
 /// Faces the rudder word 0x7de4 swaps in for the block (never drawn).
 const RUDDER_WORD: [usize; 2] = [0x5625, 0x5652];
+/// The glove plates (TOR-5b, 2026-11-11, John's round-3 answer T4): one thin
+/// fixed plate a side, two windings each (top first), that fills the wedge the
+/// swinging wing opens between the fixed glove and its own root as it sweeps
+/// (TOR-3 measured 2.7 to 5 ft at 67 degrees). They are new fitted geometry,
+/// not source faces, so their addresses lie past the end of the module's code
+/// (28,150 bytes) and no source word can name them. The plates are fixed to
+/// the fuselage: [`Rig::animate`] never moves them, and they lie wholly above
+/// the wing panel (which reaches z 1 at most), so no face of either passes
+/// through the other at any sweep and no seam opens inside a face.
+pub(crate) const GLOVE_PLATE_R: [usize; 2] = [0x7e00, 0x7e01];
+pub(crate) const GLOVE_PLATE_L: [usize; 2] = [0x7e02, 0x7e03];
+/// Plate height, shape units: 0.1 above the wing's top (z 1) and the glove's
+/// outer edge, so the plate never shares a plane with the sweeping panel.
+pub(crate) const GLOVE_Z: f32 = 1.1;
+const _: () = assert!(GLOVE_Z > 1., "above the wing panel's top");
+/// Plate outlines in shape units (x right, y forward), clockwise seen from
+/// above, each starting at the one reflex corner (the fan of triangles the
+/// drawing cuts every face into runs from the first vertex, which sees all the
+/// others). Fitted: the front corner is the glove's outer front corner
+/// ((10, 8), left (-10, 8)); the outline follows the wing root's edge at full
+/// sweep (the root's ends (9,1) and (9,7) land at (10.80, 0.69) and (14.82,
+/// 5.15) after 42 degrees about the pivot; left (-11.80, 0.69) and (-15.82,
+/// 5.15)) kept 0.3 unit inside the wing so no gap opens between plate and
+/// wing, passes down the rear root edge to y -1.2, and returns along the
+/// glove's outer edge (x 10, left x -10) to the front corner.
+pub(crate) const GLOVE_OUTLINE_R: [[f32; 2]; 5] = [
+    [11.02, 0.49],
+    [10.4, -1.2],
+    [10., -1.],
+    [10., 8.],
+    [14.78, 4.85],
+];
+pub(crate) const GLOVE_OUTLINE_L: [[f32; 2]; 5] = [
+    [-12.02, 0.49],
+    [-15.78, 4.85],
+    [-10., 8.],
+    [-10., -1.],
+    [-11.4, -1.2],
+];
+/// Source glove top faces the plates take their look from (the glove's outer
+/// top triangle: right `4526`, left `4232`).
+const GLOVE_LOOK_R: usize = 0x4526;
+const GLOVE_LOOK_L: usize = 0x4232;
+
 /// Gear word 0x7dcc adds 26 faces in three rigid pieces (TOR-4): the left main
 /// leg (x -3 to -7), the right main leg (x 3 to 7), each ten faces (the wheel
 /// sheet, the cross plate, the slanted strut and the top caps), and the nose
@@ -329,6 +373,43 @@ fn branch(
     Ok(pose)
 }
 
+/// The four glove plate faces: per side a top face and its reversed winding,
+/// taking colours, texture and flags from the glove's own outer top triangle.
+fn glove_plates(shape: &Shape) -> AppResult<Vec<Face>> {
+    let mut faces = Vec::new();
+    for (look, outline, ids) in [
+        (GLOVE_LOOK_R, GLOVE_OUTLINE_R, GLOVE_PLATE_R),
+        (GLOVE_LOOK_L, GLOVE_OUTLINE_L, GLOVE_PLATE_L),
+    ] {
+        let source = one(shape, look)?;
+        if source.positions.len() != 3 || !source.positions.iter().all(|p| p[2] == 1. || p[2] == 2.)
+        {
+            return Err(format!("unreviewed TOR.SH glove top face {look:x}").into());
+        }
+        let top: Vec<[f32; 3]> = outline.iter().map(|p| [p[0], p[1], GLOVE_Z]).collect();
+        let mut under = top.clone();
+        under.reverse();
+        for (address, positions, flip) in [(ids[0], top, 1.), (ids[1], under, -1.)] {
+            let n = positions.len();
+            faces.push(Face {
+                address,
+                colors: vec![source.colors[0]; n],
+                uv: if source.uv.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![source.uv[0]; n]
+                },
+                positions,
+                texture: source.texture.clone(),
+                subtype: source.subtype,
+                normal: source.normal.map(|v| v.map(|c| c * flip)),
+                fog: source.fog,
+            });
+        }
+    }
+    Ok(faces)
+}
+
 fn has(face: &Face, p: [f32; 3]) -> bool {
     face.positions.contains(&p)
 }
@@ -502,6 +583,8 @@ impl Rig {
         if root != NOZZLE_PLANE - 1. || tip != FLAME_TIP {
             return Err("unreviewed TOR.SH plume extent".into());
         }
+        let plates = glove_plates(&shape)?;
+        shape.faces.extend(plates);
         shape.faces.extend(
             gear.faces
                 .into_iter()
@@ -1050,5 +1133,139 @@ mod tests {
             assert_eq!(moved[2], before[2]);
         }
         assert!(flame(0x591e) && flame(0x59f7) && !flame(0x57ec));
+    }
+
+    /// The point-in-outline test the drawing's own fan of triangles implies
+    /// (every face is cut `p[0], p[i], p[i + 1]`).
+    fn in_fan(outline: &[[f32; 2]], q: [f64; 2]) -> bool {
+        let p: Vec<[f64; 2]> = outline
+            .iter()
+            .map(|v| [f64::from(v[0]), f64::from(v[1])])
+            .collect();
+        (1..p.len() - 1).any(|i| {
+            let side = |a: [f64; 2], b: [f64; 2]| {
+                (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+            };
+            let s = [side(p[0], p[i]), side(p[i], p[i + 1]), side(p[i + 1], p[0])];
+            s.iter().all(|v| *v <= 1e-9) || s.iter().all(|v| *v >= -1e-9)
+        })
+    }
+
+    fn glove_source() -> Shape {
+        // The two glove top triangles the plates take their look from.
+        let tri = |address, pts: [[f32; 3]; 3]| {
+            let mut f = face(address, &pts);
+            f.normal = Some([0., 0., 1.]);
+            f
+        };
+        Shape {
+            lines: Vec::new(),
+            faces: vec![
+                tri(GLOVE_LOOK_R, [[7., 13., 1.], [10., 8., 1.], [10., 6., 1.]]),
+                tri(
+                    GLOVE_LOOK_L,
+                    [[-10., 6., 1.], [-10., 8., 1.], [-7., 13., 1.]],
+                ),
+            ],
+            billboards: Vec::new(),
+            state_words: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn the_glove_plates_are_four_whole_faces_above_the_wing() {
+        // TOR-5b, John 2026-11-11 (T4): per side a top face and its reversed
+        // winding, one flat polygon each, wholly above the wing (top z 1).
+        let plates = glove_plates(&glove_source()).unwrap();
+        assert_eq!(plates.len(), 4);
+        let addresses: Vec<usize> = plates.iter().map(|f| f.address).collect();
+        assert_eq!(
+            addresses,
+            [GLOVE_PLATE_R, GLOVE_PLATE_L].concat(),
+            "right pair then left pair"
+        );
+        for pair in plates.chunks(2) {
+            let (top, under) = (&pair[0], &pair[1]);
+            assert_eq!(top.positions.len(), 5);
+            let reversed: Vec<_> = top.positions.iter().rev().copied().collect();
+            assert_eq!(under.positions, reversed);
+            assert!(top.positions.iter().all(|p| p[2] == GLOVE_Z));
+            assert_eq!(under.normal.unwrap()[2], -top.normal.unwrap()[2]);
+        }
+        // Past the end of the module's code, so no source word can name them.
+        assert!(addresses.iter().all(|a| *a >= 28150));
+        // Above everything the wing panel can reach (its faces sit at z 0 and 1).
+        let mut s = state();
+        let rig = rig();
+        for turn in [0., 0.4, 0.733] {
+            s.speed = (250. + turn / 0.733 * 350.) * 1.68781;
+            for plate in &plates {
+                let out = rig.animate(plate, &s).unwrap();
+                assert_eq!(out.positions, plate.positions, "fixed to the fuselage");
+            }
+        }
+        // A shape without the glove face it takes its look from is refused.
+        assert!(
+            glove_plates(&Shape {
+                faces: Vec::new(),
+                ..glove_source()
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_glove_plates_fill_the_wedge_the_wing_opens_at_full_sweep() {
+        // The swept root line and the glove's outer edge bound the wedge; every
+        // point between them, from the glove's front corner back to the root's
+        // rear corner, is under a plate, at the full 42 degree turn.
+        let turn = (SWEEP_MAX - SWEEP_MIN).to_radians();
+        let swept = |right: bool, p: [f64; 2]| {
+            let pivot = if right { PIVOT_R } else { PIVOT_L };
+            let (dx, dy) = (p[0] - f64::from(pivot[0]), p[1] - f64::from(pivot[1]));
+            let a = if right { -turn } else { turn };
+            let (s, c) = a.sin_cos();
+            [
+                f64::from(pivot[0]) + dx * c - dy * s,
+                f64::from(pivot[1]) + dx * s + dy * c,
+            ]
+        };
+        for (right, outline, root, edge) in [
+            (true, &GLOVE_OUTLINE_R, 9.0, 10.0),
+            (false, &GLOVE_OUTLINE_L, -10.0, -10.0),
+        ] {
+            let mut covered = 0;
+            for k in 0..=11 {
+                // A point on the wing's root line (x 9 right, x -10 left, y 1 to 6.5).
+                let on_root = swept(right, [root, 1. + f64::from(k) * 0.5]);
+                assert!(in_fan(outline, on_root), "root line {on_root:?}");
+                // Points between the glove's outer edge and that root point, at its y.
+                if on_root[1] > 0.8 {
+                    for j in 0..=8 {
+                        let x = edge + (on_root[0] - edge) * f64::from(j) / 8.;
+                        assert!(in_fan(outline, [x, on_root[1]]), "wedge {x} {}", on_root[1]);
+                        covered += 1;
+                    }
+                }
+            }
+            assert!(covered > 50);
+            // The glove's outer front corner is a plate corner.
+            assert!(outline.iter().any(|v| v[0] == edge as f32 && v[1] == 8.));
+            // The root's leading end lands within the margin of a plate corner.
+            let end = swept(right, [root, 7.]);
+            let near = outline
+                .iter()
+                .any(|v| (f64::from(v[0]) - end[0]).hypot(f64::from(v[1]) - end[1]) < 0.4);
+            assert!(near, "leading root end {end:?}");
+        }
+        // The wing's spread pose keeps every plate point over the panel or ahead
+        // of its leading edge: no plate point is behind the trailing edge.
+        for outline in [&GLOVE_OUTLINE_R, &GLOVE_OUTLINE_L] {
+            assert!(
+                outline
+                    .iter()
+                    .all(|v| v[1] >= -1.5 && v[0].abs() >= 10. - 1e-6 && v[0].abs() <= 16.)
+            );
+        }
     }
 }

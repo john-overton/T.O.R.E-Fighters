@@ -4565,6 +4565,12 @@ fuselage under the belly (numbers in the stores specification). Audit pins are
 unchanged (45 aircraft, 18 stations, 4,652 weapon placements, 233 tank placements,
 220 Cheat-only placements, 80 pod placements).
 
+Update (TOR-5b, 2026-11-11) to the TOR-5 stop on clipping: John's round-3 answers moved
+row 7 onto the swinging panel (9.5 ft out, 1.5 ft forward), put one centreline tank in
+the default load and added a glove plate; see
+[Tornado stations moved, one tank and a glove plate (TOR-5b, 2026-11-11)](#tornado-stations-moved-one-tank-and-a-glove-plate-tor-5b-2026-11-11)
+at the end of this file. The measurement above stands as the TOR-5 record.
+
 ## Tornado sensors, HUD and cockpit (TOR-7, 2026-11-11)
 
 Slice TOR-7 (implementation mode) made the Eurofighter 2000's cockpit family work
@@ -4712,6 +4718,15 @@ was changed and no flight constant was touched. Figures are given clean (42,286 
 with full internal fuel) and with the current default load (56,982 lb gross),
 because the stations question (TOR-5) is open with John.
 
+Update (TOR-5b, 2026-11-11) to the TOR-8 default-load figures: the default load now
+carries one 250 gallon tank (1,650 lb of external fuel, was 3,300 lb with the pair), so
+every default-load figure in this section (gross weight 56,982 lb, liftoff, ground run,
+approach, rollout, loaded climb, top speed, turns, pull with stores, endurance with
+external fuel) is lighter than measured by the second tank (at least its 1,650 lb of
+fuel, plus its empty shell); the clean figures, the record envelope
+and the flows do not move. The Quick Mission and AI wings of the TOR-9 section load the
+same default.
+
 - Top speeds: afterburner level speed 793 kt (Mach 1.20) at 1,000 ft and 1,321 kt
   (Mach 2.30) at 36,000 ft, 0.965 of the 1 G edge; with the default load 760 kt and
   1,266 kt (Mach 2.21). Published: about Mach 1.2 at sea level, Mach 2.2 at altitude.
@@ -4841,3 +4856,34 @@ Provenance: the AI wing wiring, default load and class word are spec-derived (th
 record); the stores comparison change and the replay sweep check are agent decisions of
 2026-11-11 (the sweep schedule and swivel rule stay as TOR-3 and TOR-5 left them). No
 retail bytes committed.
+
+## Tornado stations moved, one tank and a glove plate (TOR-5b, 2026-11-11)
+
+Implementation and measurement mode, slice TOR-5 finish (round 3). John's answers T1 to T5
+of 2026-11-11 (opinionated) were applied except T2, which stopped on clipping again. The
+station table, the clearances at 25 and 67 degrees (default load and 22 alternatives), the
+option lists and the cited real-aircraft figures are in
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-ids-inner-wing-pair-on-the-wing-one-centreline-tank-a-glove-plate-tor-5b-2026-11-11);
+the glove plate is in
+[the Tornado control rig](aircraft-control-surfaces.md#tornado-glove-plate-tor-5b-2026-11-11).
+Here, the format-level facts:
+
+| Item | Before | After |
+| --- | --- | --- |
+| Row 7 (`MK82P3.JT` x2, Wing, flags 0x505) | recorded 3.67 ft out, 3 ft forward (fuselage side) | `station_move`: 9.5 ft out, 1.5 ft forward, on the swinging panel; swivels as TOR-5 built it |
+| Row 5 default (`F250.GAS`, Wing, x 0, capacity 2) | two tanks, 3,300 lb external | one tank at x 0, 1,650 lb; capacity, mask and place unchanged (`default_counts`, guarded to the retail row) |
+| Row 6 (`PAVEWAY.JT` x4) | x 2.00, entering the belly 0.96 ft (fin tips) | unchanged (no outboard move clears it; options with John) |
+| Tornado shape | 287 faces | 291: four glove plate faces added by the rig at load |
+| Row 8 | retired | retired |
+
+The retail records are unchanged; row 7's recorded position is still the record's, and the
+move is applied by `station_move` only where the record is the Wing row (the guard
+`placed_on` applies). The audit pins do not move (45 aircraft, 18 stations, 4,652
+weapon placements, 233 tank placements, 220 Cheat-only placements, 80 pod placements):
+capacities are untouched and the default rule changes only the quantity that starts loaded.
+
+Provenance: John's answers opinionated (2026-11-11); row 7's 9.5 / 1.5 ft position, the
+default-rule form of T3, the plate geometry and every measurement agent decisions or
+findings; the real station layout (seven stations, two swivelling pylons a wing, pivots in
+the fixed nibs) from the public pages cited in the stores specification, with no offsets
+claimed. No retail bytes committed.

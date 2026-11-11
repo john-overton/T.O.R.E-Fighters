@@ -1063,6 +1063,10 @@ fillets stand out beside the wing. That is what a rigid turn of a straight root
 against fixed fillets does; it is John's call whether to keep it (an alternative
 needs fitted geometry, such as a new glove, which TOR-3 does not invent).
 
+Update (TOR-5b, 2026-11-11): John asked for that fitted glove plate (round 3, T4); it
+is in [the Tornado glove plate](#tornado-glove-plate-tor-5b-2026-11-11) below. The
+seam numbers above stand as the TOR-3 measurement.
+
 **Fold check (rule 11).** The wing is moved whole, all 13 faces about one axis.
 The probe's `folds` count (faces that keep some vertices while others move) is 0
 at every sweep sample, every vertex of every wing face moves (no vertex is on the
@@ -1328,3 +1332,70 @@ re-verified at load); retraction direction forward from the cited public summary
 (secondary); every hinge line, the quarter-turn law, the stow poses, the
 0.588 rad closed brake angle and the plume scaling fitted (agent decisions
 2026-11-10); engine count 2 from the record; nothing here is attributed to John.
+
+## Tornado glove plate (TOR-5b, 2026-11-11)
+
+John's round-3 answer T4 (opinionated, 2026-11-11): add a small fitted plate that fills
+the wedge the swinging wing opens between the fuselage glove and its own root as it
+sweeps. TOR-3 measured that wedge at 2.7 to 5 ft at 67 degrees (the free leading root
+corner (9,7) moves outboard 5.8 units while the glove has nothing forward of y 1).
+
+**What it is.** New static geometry fixed to the fuselage: per side **one flat plate of
+five vertices, two windings** (a top face and its reverse), so four faces in all, added
+to the Tornado's shape by the rig at load (`tornado_animation::glove_plates`, addresses
+`0x7e00` to `0x7e03`, past the end of the module's 28,150 bytes so no source word names
+them). They take colours, texture and flags from the glove's own outer top triangle
+(right `4526`, left `4232`); the rig refuses a shape without those faces. The reviewed
+source layout is still checked first (287 faces), and the probe now reads 291 neutral
+faces.
+
+| Side | Outline (x, y in shape units; first vertex is the one reflex corner) |
+| --- | --- |
+| Right | (11.02, 0.49), (10.40, -1.20), (10, -1), (10, 8), (14.78, 4.85) |
+| Left | (-12.02, 0.49), (-15.78, 4.85), (-10, 8), (-10, -1), (-11.40, -1.20) |
+
+All at z 1.1 (the wing panel's top is z 1, the glove's outer edge z 1). The outline is
+fitted: the front corner is the glove's outer front corner (10, 8) (left (-10, 8)); the
+long edge follows the wing root line at full sweep (the root's ends (9,1) and (9,7) land at
+(10.80, 0.69) and (14.82, 5.15) after 42 degrees about the pivot) kept 0.3 unit inside the
+wing so no gap opens between plate and wing; it passes down the swept rear root edge to
+y -1.2 and back along the glove's outer edge. The drawing cuts every face as a fan from its
+first vertex, which is why each outline starts at its reflex corner.
+
+**Whole-surface gate.** Whole faces only: no partial or diagonal surface, no vertex of
+either plate on or between the panel's faces (the plate is flat at z 1.1, the wing at z 0
+and 1, so neither passes through the other at any sweep), nothing of the wing is held or
+moved by it, and [`Rig::animate`] never moves it. The probe's fold, rigidity, anchor and
+skin checks pass unchanged (`287` to `291` neutral faces, 0 required or check failures).
+Tests: `the_glove_plates_are_four_whole_faces_above_the_wing` (four faces, reversed
+windings, fixed under every sweep, addresses past the code) and
+`the_glove_plates_fill_the_wedge_the_wing_opens_at_full_sweep` (every point from the
+swept root line to the glove's outer edge, both sides, lies on a plate at the full 42
+degree turn).
+
+**Check against the sweep 25 to 67 degrees.** In the plan view the area of enclosed gaps
+beside the glove (computed from the neutral faces, wing turned about its pivot):
+
+| Sweep | Right, before / after | Left, before / after |
+| --- | --- | --- |
+| 25 | 1.8 / 1.8 square units | 5.0 / 5.0 |
+| 46 | 8.8 / 3.4 | 16.9 / 5.0 |
+| 67 | 16.5 / 3.2 | 23.1 / 4.7 |
+
+The 25 degree figure is gaps that exist in the source model itself (they are in the
+spread pose too); at 67 degrees the left side is back to its spread figure and the right
+side has about 1.8 units (0.8 square feet) more: a small triangle between the right
+glove's outer edge (x 10) and the fillet edge (9,1) to (10,-1), which the plate leaves
+open so as not to cut through the glove's top face (z 1 at its edge, rising to 2 at the
+fuselage). Frames (`.local/m3-aircraft/frames/TOR-5b/`): `glove-top-sweep25|46|67` and the
+3x crops `glove-3x-top-sweep25|46|67`, and below, front and rear views with the stores.
+At 25 degrees each plate reads as a short glove extension ahead of the wing's leading
+edge (about 0.9 ft past it at the front corner); at 46 and 67 degrees it fills the
+wedge. The plates are flat colours from the glove's top triangle, where the wing has the
+camouflage pattern, so each shows as a plain patch of the glove's colour (the right one
+olive, the left one blue-grey).
+
+Provenance: the plate geometry, height, margins and addresses are fitted (agent
+decisions 2026-11-11); the request is John's (round 3, T4, opinionated); the wedge
+measurement is TOR-3's. No retail bytes committed: the outlines are numbers, the look is
+cloned from the loaded shape at run time.
