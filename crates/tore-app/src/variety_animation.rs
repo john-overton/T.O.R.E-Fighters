@@ -947,6 +947,22 @@ fn animate_gun(face: &mut Face, state: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// TOR-2: a generic rig draws at the scale the simulation measures the
+    /// same aircraft at (stores, breakup pieces, gear), and the Tornado's
+    /// is its header scale, 2/3 ft a unit.
+    #[test]
+    fn generic_rig_scales_match_the_simulation_scale() {
+        for id in Id::ALL {
+            if let Some(spec) = specification(id) {
+                assert_eq!(
+                    spec.scale,
+                    tore_sim::combat::debris::scale(id) as f32,
+                    "{id:?}"
+                );
+            }
+        }
+        assert_eq!(specification(Id::Tornado).unwrap().scale, 2. / 3.);
+    }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =
             |p: [f32; 3], q: [f32; 3]| (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f32>().sqrt();

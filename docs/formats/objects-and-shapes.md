@@ -1638,6 +1638,82 @@ span, as the real aircraft's fin does; the review frames live under
 `.local/m3-aircraft/frames/M2K-2/`. No mesh bytes, exported geometry or retail
 art are committed.
 
+## Tornado shape, scale and skin review
+
+On 2026-11-10, slice TOR-2 of the Tornado IDS port checked what TORE draws for
+`AircraftId::Tornado` (media identity in [the Tornado source
+review](aircraft-variety.md#tornado-source-review-2026-11-10)). Implementation
+mode, Claude Sonnet (sonnet-high).
+
+**What is loaded.** The shape is `TOR.SH` from `FA_2.LIB` (CODE 28,150 bytes,
+287 runtime faces, 313 with the gear down, one texture `_TOR.PIC`). The toolkit
+patch archive `swpatch.lib` holds a different `TOR.SH` (CODE 28,198 bytes), but
+the importer reads only `FA_1.LIB` and `FA_2.LIB`, so TORE never sees it and
+never substitutes it; a retail test pins the CODE size of the base shape.
+
+**Scale: the header scale, true size, no per-axis factor.** The SH header
+exponent gives scale 2, so one unit is 2/3 ft at the aircraft convention
+(`tore_sim::combat::debris::scale`, which lists `Tornado` beside `Mig23`).
+`aircraft::scale::shape_axis_scale` stays `[1, 1, 1]`. Measured on 2026-11-10
+(retail test `crates/tore-import/tests/tornado_shape.rs`): x -34 to 33, y -36 to
+45 (the flame plates reach y -43), z -11 (gear down) to 19, so 44.7 ft span
+with the wing spread (real 45.6), 54.0 ft long (54.8) and 20.0 ft high (19.5):
+-2.0, -1.5 and +2.6 percent. The generic rig's scale equals `debris::scale` for
+every identity that has a generic spec (unit test), the animation probe prints
+`source_units_to_feet` 0.6666667 for the Tornado and the MiG-23, and the two
+draw at the same scale side by side (frames under
+`.local/m3-aircraft/frames/TOR-2/`).
+
+| Consumer | At 2/3 ft a unit? |
+| --- | --- |
+| Drawn aircraft | Yes: `Rig::load` takes `debris::scale`; the Tornado's generic rig spec says 2/3 |
+| Stores preview, station rows, underside the stores hang from | Yes: both use `debris::scale` |
+| Damage looks (regional marks and cuts) | Yes: the marks and the feet-based section thresholds take the drawn scale; the extents the wing and tail cuts use are relative to the shape |
+| Damage bodies `TOR_A.SH`, `TOR_C.SH` and pieces `TOR_B.SH`, `TOR_D.SH` | Yes: the same header scale (test); loaded by `DamageArt::load` at the same scale as the intact shape |
+| Breakup piece offsets | Yes: `debris::attachment` multiplies by `scale(id)` |
+| Gear low point | Yes: 11 units, 7.33 ft (unit test) |
+| Parked placement | None exists (`TOR.PT` is not a parked target); the parked path reads the header scale (`object_scale / 3`), so it would be 2/3 |
+| Contrail and nozzle offsets | Yes: they take the rig scale; the nozzle faces are not mapped yet, so the fitted fallback sits behind the body (TOR-4 maps them) |
+| Wingtip vapor | Yes: the streamer record is in third-of-a-foot units whatever the header scale; the spread-wing point is 68 units, 22.67 ft, exactly the drawn wing tip (34 units at 2/3; retail test) |
+| Hit size, cockpit eye point | Not shape-derived; unchanged (one 28 ft sphere, one fixed seat offset) |
+
+No consumer is still at 1/3.
+
+**Skin.** `TOR.SH` has 22 exact-vertex twin groups. Twenty-one are double-sided
+panels with opposite stored normals, so smooth mode pairs them through the
+shared [panel contract](../spec/aircraft-animation.md#double-sided-panels) and
+hides the rear member; the Tornado does not need the [MiG-21 stored-normal
+exception](#mig-21-skin-review). The 22nd group (`255c` and `257a`, a thin
+vertical sliver on the centreline at x 0, y 0 to -25, z 3 to 4, in the dorsal
+ridge line) carries two normals mirrored in x rather than opposite, so the
+pairing skips it and both members draw; they lie inside the ridge, and no
+flicker shows in the top, side or under frames. A top and an under capture with
+the gear down show no grey underside through the top skin and no z-fighting
+(`render-tornado-skin`).
+
+**Decal slots.** The export path of the reader finds two `E0` runtime decal
+slots that the runtime path omits (315 faces against 313): slot 3 at address
+`2ce3` and slot 4 at `2e3d`, both a 5 by 6 unit plate on the centreline at x 0,
+y -21 to -16, z 6 to 12 (the fin, two windings of one plate). By the guide they
+are the wing-marking slots, but this shape uses them on the fin. Both stay
+omitted, not filled with a piece of the main skin, following [texture state and
+decals](#texture-state-and-decals): the fin draws as plain camouflage, with no
+blank or skin-filled patch (the fin crop frame). Every other marking (fuselage
+code, chevrons, stencils, the nose art) is a textured face of `_TOR.PIC` and
+draws whole.
+
+**Damage looks.** No whole-body variant is registered for the Tornado
+(`debris::damage_variant` has none), as for the MiG-25, the MiG-31 and the
+Mirage 2000, so a destroyed Tornado draws the intact skin with regional cuts
+and marks rather than a `TOR_A.SH` or `TOR_C.SH` body. The bodies and pieces
+load at the same scale (frames at damage 0.6 and 1.0). Registering a section
+would be a later decision.
+
+Provenance: scale spec-derived (the shape's own header), true size confirmed
+against the real aircraft (cited in the source review); every other finding is
+a measurement of the retail shape. No mesh bytes, exported geometry or retail
+art are committed.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards

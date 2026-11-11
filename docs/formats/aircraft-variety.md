@@ -4425,6 +4425,9 @@ shape, the stores preview, the underside probe and the damage pieces all use
 call). The gear low point is 11 units at 2/3 ft, 7.33 ft. Store rows are
 measured in TOR-5 on the drawn shape.
 
+Update (TOR-2, 2026-11-10): the 2/3 draw scale is confirmed in every consumer that
+matters, with tests; see [the Tornado shape section](#tornado-shape-scale-and-skin-tor-2-2026-11-10).
+
 **Not done here, by design.** No cockpit measurement, no rig mapping beyond the
 gear word, no station, pylon or ordnance review, no flight-model change, no
 record correction (thrust, weights, G limits and engine counts stay retail for
@@ -4461,3 +4464,34 @@ Open for John: the F-5E radar stands in with the F-104's `F104R.SEE` (alternativ
 `F18.ECM` also removes its chaff and flares (`F104.ECM` would keep dispensers
 without a jammer). Tornado fuel flows (6 and 38 lb/s) are still the Su-24's. The
 Tornado's default load has no Sidewinders now that the outer wing pair is retired.
+
+## Tornado shape, scale and skin (TOR-2, 2026-11-10)
+
+Implementation, slice TOR-2, Claude Sonnet (sonnet-high). John's decision of
+2026-11-10 (draw at the header scale, true size) is confirmed in code and
+frames; nothing in the draw path needed to change beyond B5-1's `Tornado`
+entry in `debris::scale`. The Tornado is drawn from `TOR.SH` of `FA_2.LIB`
+(the toolkit patch archive's different `TOR.SH` is never imported), at 2/3 ft a
+unit with the identity per-axis scale: 44.7 ft span (real 45.6), 54.0 ft long
+(54.8), 20.0 ft high (19.5). Every consumer was checked: the drawn aircraft,
+the stores preview and station underside, the damage looks and their section
+extents, the damage bodies and pieces, breakup offsets, gear low point (7.33
+ft), contrail offsets and the wingtip vapor point (22.67 ft, on the drawn wing
+tip) all use 2/3; no consumer is at 1/3. The table, the skin review (22 twin
+groups, 21 with opposite normals, the centreline sliver pair `255c` and `257a`
+that both draw), the two omitted `E0` fin decal slots (`2ce3`, `2e3d`) and the
+damage looks are in [the Tornado shape, scale and skin
+review](objects-and-shapes.md#tornado-shape-scale-and-skin-review). The
+`render-tornado-skin` battery scenario captures the top and under views with
+the gear down. Frames: `.local/m3-aircraft/frames/TOR-2/` (local only).
+
+The MiG-23 (the other header-scale-2 aircraft in the roster) draws at the same
+scale beside it. The Su-24 is not a roster aircraft (`SU24.PT` is only the
+Tornado's template record), so it cannot be drawn for comparison.
+
+Later slices use the 2/3 scale as it stands: TOR-3 and TOR-4 work in shape
+units at 2/3 ft; TOR-5 measures the stations on the drawn shape; a rig that
+names a hinge in CE (third-of-a-foot) units divides by 3 as the streamer does,
+and a hinge in shape units uses the shape's own units. The wing stays the fixed
+spread pose (no sweep word), so the sweep rig is TOR-3's. No whole-body damage
+variant is registered (open decision, as for the Mirage 2000 and the MiG-25).

@@ -169,6 +169,22 @@ mod tests {
         assert_eq!(at[1], ground(at[0], at[2]));
         assert!(at[2] > 20.);
     }
+    /// TOR-2: the Tornado draws, hangs stores and breaks up at its shape
+    /// header scale (2, so 2/3 ft a unit), like the MiG-23; the other four
+    /// batch-5 aircraft keep the default third of a foot.
+    #[test]
+    fn the_tornado_is_drawn_at_its_header_scale() {
+        assert_eq!(scale(AircraftId::Tornado), 2. / 3.);
+        assert_eq!(scale(AircraftId::Tornado), scale(AircraftId::Mig23));
+        for id in [
+            AircraftId::F15E,
+            AircraftId::Gripen,
+            AircraftId::F5E,
+            AircraftId::Mf1,
+        ] {
+            assert_eq!(scale(id), 1. / 3., "{id:?}");
+        }
+    }
 }
 
 // Exact checkpoints (docs/formats/checkpoint.md).

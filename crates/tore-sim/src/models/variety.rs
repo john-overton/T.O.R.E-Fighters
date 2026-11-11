@@ -417,6 +417,17 @@ pub(crate) mod tests {
         // The MiG-31 keeps its 30 unit low point at a third of a foot.
         assert_eq!(clearance(AircraftId::Mig31), 30. / 3.);
     }
+    /// TOR-2: `TOR.SH` deployed gear low point Z=-11 is at its header scale,
+    /// 2/3 ft a unit (7.33 ft), and follows the drawn scale.
+    #[test]
+    fn the_tornado_gear_low_point_is_at_its_header_scale() {
+        let model = AircraftModel::for_aircraft(&synthetic(AircraftId::Tornado)).unwrap();
+        let clearance = model.configuration().equipment.ground_clearance_ft;
+        assert!(
+            (clearance - 11. * crate::combat::debris::scale(AircraftId::Tornado)).abs() < 1e-12
+        );
+        assert!((clearance - 22. / 3.).abs() < 1e-12);
+    }
     #[test]
     fn fitted_top_speeds_move_only_the_fast_side_and_stay_valid() {
         // Synthetic rows: slow side 200 ft/s at sea level, top at 50,000 ft,
