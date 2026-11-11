@@ -1572,3 +1572,70 @@ Guards: `a_fixed_pod_row_inside_the_airframe_is_a_placeholder`
 (`crates/tore-sim/src/combat/live.rs`) and the retail
 `crates/tore-world/src/pod_equipment_tests.rs`, which checks each of the four
 aircraft and that the Rafale's pod keeps its place.
+
+## Batch 5 stations: Tornado outer wing, Mirage F1 centreline, F-5E defaults (B5-2, 2026-11-10)
+
+**Opinionated (John, 2026-11-10, batch decision round), implemented by slice
+B5-2.** Three station tables change, all in `aircraft_stations.rs` and all applied
+to the decoded record only while every row involved is exactly the retail one, so
+an edited record keeps its own stations. The decoder, the catalog CSV and the retail
+rows in [the source reviews](../formats/aircraft-variety.md) stay documented as
+retail. In every case **no station index moves, and no row's mask, count, weight
+class or position changes**: a row is either dropped from the end of the table or
+keeps its place and only its default store changes.
+
+- **Tornado IDS: no outer wing row** (John: "remove end wing stations typically
+  reserved for the pods"). `retire` drops row 8 of `TOR.PT` (Wing, x 16, y -22,
+  z 4, mask 0x85, two `AIM9M.JT`, weight class 5), the outer wing pair; the real
+  aircraft's outer wing pylons carry pods and not weapons. It is the last of nine
+  rows, so rows 0 to 7 keep their indices (the same mechanism and guard as the
+  Mirage 2000's wingtip row above: exact retail row, last of nine, one function,
+  repeated application is a no-op). The inner wing pair (row 7: Wing, x 11, two
+  `MK82P3.JT`, mask 0x505) stays, as do the centreline tank pair (row 5) and the
+  shoulder pylons (row 6, mask 0x7e5, which still take the AIM-9M). What changes
+  for the player: the default load has no wingtip-side Sidewinders (they stay
+  loadable on the shoulder pylons), and the audit counts fall (below). The swivelling
+  wing pylons are TOR-3's and TOR-5's.
+- **Mirage F1: no default pod on the centreline.** Row 4 (Centerline, y -18, mask
+  0x7e5, one store, weight class 22) keeps its station, mask, count and class, so
+  it still accepts what it accepted; its default `ALQ167.ECM` is cleared. The
+  record's American jammer pod is not in Jane's list of the F1's loads
+  (`MF1.INF`), and a pod is never hung where the real aircraft has none. The row
+  now starts empty and takes a 150 or 250 gallon tank through Load Ordnance
+  (two more tank placements). `adjust_defaults` clears it by setting the row's
+  store to none, exactly as the rows TORE appends to other aircraft start empty.
+- **F-5E: closer to the real aircraft's default load.** The wing pair (row 5,
+  Wing, x 22, mask 0x7e5, four stores, class 40) defaults to empty instead of two
+  `AIM7.JT` (the real F-5E does not carry the Sparrow); it still accepts what it
+  accepted, the Sparrow among them, in Load Ordnance. The `AIM9B.JT` wingtip
+  default (row 6) and the gun and centreline tank stay. Its radar and jammer rows
+  are covered in [aircraft records](aircraft-records.md#batch-5-record-corrections-tornado-ids-mirage-f1-f-5e-b5-2-2026-11-10):
+  row 1 holds the F-104's `F104R.SEE` instead of the generic `F18R.SEE`, and row 2
+  holds no `F18.ECM`. A fixed sensor row with no store is how an aircraft has none
+  of that sensor: the sensor profile reads radar and jammer only from the rows that
+  hold one.
+
+**The F-5E radar.** The real set is the Emerson AN/APQ-159 (20 nm, `F5E.INF`;
+Wikipedia "Northrop F-5"), and TORE has no record for it and invents none. The
+closest reviewed record is the F-104's `F104R.SEE` (search 50 nm, track 25 nm,
+look-down 50, the Basic radar preset): the same lightweight single-seat
+fighter set. Options for John: `F4BR.SEE` (the same ranges, the F-4B and A-4E set),
+`YAK141R.SEE` (40 and 25 nm, Transitional preset), or `F8R.SEE` (35 and 20 nm, the
+closest in range but it has no reviewed preset, so it would never switch on). The
+choice stays `F104R.SEE` until John says otherwise.
+
+**The F-5E jammer.** The real F-5E has no internal jammer. `F18.ECM` is a bundle:
+30 chaff and 30 flares plus a radar-deception jammer (chance 30) and an infrared
+one. Clearing the row removes all of it, so the F-5E has no countermeasure
+dispensers either. If John wants chaff and flares without a jammer, `F104.ECM`
+(20 and 20, no deception, an Early-generation label) is the alternative record.
+
+**Counts.** `ordnance TOR.PT: 4 source rows, 0 optional weapon rows, 85 compatible
+weapon placements, 8 tank placements` (was 5, 0, 96, 8); `ordnance F5E.PT: 4 source
+rows, 1 optional weapon rows, 71 compatible weapon placements, 5 tank placements`
+(was 0 optional rows); `ordnance MF1.PT: 5 source rows, 2 optional weapon rows,
+175 compatible weapon placements, 6 tank placements` (was 4 tank placements).
+Audit pins: recovered stations 17 to 18, weapon placements 4,663 to 4,652, tank
+placements 231 to 233, Cheat-only placements 222 to 220; the pod placements (80)
+and the roster (45) are unchanged. See the [ordnance availability
+baseline](../baselines/ordnance-availability.md#batch-5-record-and-station-corrections-b5-2-2026-11-10).
