@@ -224,8 +224,10 @@ fn panels(control: Control) -> Vec<Panel> {
                     [15., 3., -11.]
                 ]
             ),
-            panel!(&[0x5a82, 0x5aa1, 0x5aee, 0x5b0d], &[[0., 64., -8.]]),
-            panel!(&[0x5ac0, 0x5ad7], &[[-2., 52., -8.], [2., 52., -8.]]),
+            // B5-3: the nose folds forward as one rigid body about a lateral
+            // line behind every vertex (Y 48, Z -8), so no nose vertex stays
+            // fixed; `wheels` witnesses the direction, the grounding and the
+            // stow instead of an anchor.
             panel!(
                 &[0x573a, 0x5751, 0x5768, 0x577f],
                 &[[-7., -4., -12.], [-7., 11., -12.]]
@@ -472,6 +474,22 @@ fn wheels(reference: &[Face], pose: &[Face], travel: f64, scale: f32, metric: &m
             continue;
         };
         let cut = if side == 2 { -20. } else { -18. };
+        if side == 2 {
+            // B5-3 (John, 2026-11-10): the nosewheel retracts forward. Its
+            // lowest vertices (source z -21 and below) never swing aft of where
+            // they hang, the whole assembly stays ahead of the fold line, and
+            // gear down (travel 1) is the source pose.
+            if let Some(actual) = after.get(&key) {
+                for (a, b) in original.positions.iter().zip(&actual.positions) {
+                    metric.reviewed_direction_failures +=
+                        usize::from((a[2] <= -21. && b[1] < a[1] - 1e-3) || b[1] < 48. - 1e-3);
+                    if travel >= 1. - 1e-5 {
+                        metric.reviewed_direction_failures +=
+                            usize::from(distance(*a, *b) * scale > EPSILON);
+                    }
+                }
+            }
+        }
         if side != 2 && original.positions.iter().any(|p| p[2] > cut + EPSILON) {
             continue;
         }
@@ -502,13 +520,14 @@ fn wheels(reference: &[Face], pose: &[Face], travel: f64, scale: f32, metric: &m
             }
         }
         if travel < 1e-5 {
-            // All 24 complete rigid nose/door corners fit neutral body sections.
+            // All 24 complete rigid nose/door corners fit neutral body sections
+            // (B5-3: the stow is forward, Y 48 to 67 and Z -8 to 8).
             // This envelope is broader than the painted wheel footprint.
             let outside = actual.positions.iter().any(|p| {
                 if side == 2 {
                     p[0].abs() > 2. + 1e-3
-                        || !(39. - 1e-3..=64. + 1e-3).contains(&p[1])
-                        || !(-8. - 1e-3..=6. + 1e-3).contains(&p[2])
+                        || !(48. - 1e-3..=67. + 1e-3).contains(&p[1])
+                        || !(-8. - 1e-3..=8. + 1e-3).contains(&p[2])
                 } else {
                     !(9. - 1e-3..=15. + 1e-3).contains(&p[0].abs())
                         || !(-15. - 1e-3..=-6. + 1e-3).contains(&p[1])

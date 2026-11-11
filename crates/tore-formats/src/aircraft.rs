@@ -2086,6 +2086,8 @@ mod profile_tests {
             ("aftThrust", 50_700),
             ("maxTakeoffWeight", 90_390),
             ("internalFuel", 11_221),
+            ("fuelConsumption", 6),
+            ("aftFuelConsumption", 38),
         ];
         let text = batch_text(
             "TOR.PT",
@@ -2104,6 +2106,11 @@ mod profile_tests {
         assert_eq!(t.number("weight"), 31_065.);
         assert_eq!(t.number("maxTakeoffWeight"), 61_620.);
         assert_eq!(t.number("envMax"), 7.);
+        // B5-3: the RB199 flows, 3 dry and 22 reheat lb/s (the Su-24's 6 / 38).
+        assert_eq!(
+            (t.number("fuelConsumption"), t.number("aftFuelConsumption")),
+            (3., 22.)
+        );
         let gs: Vec<i32> = t.envelopes.iter().map(|e| e.g).collect();
         assert_eq!(gs, (-3..=7).collect::<Vec<_>>());
         // The same numbers on the MiG-23 record stay retail.
@@ -2121,6 +2128,7 @@ mod profile_tests {
         )
         .unwrap();
         assert_eq!((m.number("thrust"), m.number("envMax")), (35_270., 6.));
+        assert_eq!(m.number("aftFuelConsumption"), 38.);
         // Every Tornado row below +7 is the record's own.
         assert_eq!(t.envelopes[..10], m.envelopes[..]);
         // An edited Tornado (one thrust off) is read as it is, rows and all.

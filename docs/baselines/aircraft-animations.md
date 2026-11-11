@@ -102,6 +102,14 @@ rigid fold preserves an atlas-supported painted root. All 621 inspected opaque
 nose texel centers fit sampled forebody bounds at stow. Transparent panel
 rectangle bounds are not treated as solid wheel or strut volume.
 
+Update (B5-3, 2026-11-10): the F-15 nose now folds forward (see the
+[F-15C update](../spec/variety-animation.md#f-15c-control-and-device-fit)). Rerun
+of the F15.PT probe on the local record (`.local/m3-aircraft/checks/B5-3/f15-after`):
+362 neutral faces, 0 required/check failures, 22 gear positions, the nose pieces
+rigid to 2e-6 ft, no new planar crossings; `flight-animation-f15` passes. The
+stowed nose stands at Y 48 to 67 and Z -8 to 8, so the 24 corner fit above is
+re-based on that envelope, not the earlier aft one.
+
 These are bounded fitted geometry results. GPU texture/culling, damage-state
 motion, recovered timing and retail runtime comparison were not validated.
 
