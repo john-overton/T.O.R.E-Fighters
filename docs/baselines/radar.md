@@ -256,3 +256,25 @@ Super 530D (`R530.JT`) locks, hits and kills (`shots=1 hits=1 kills=1` at 700
 ticks). Not run: any side-by-side tuning, or an RWR with a plotted emitter (no
 scripted path exists).
 
+
+## F-5E radar and countermeasures, 2026-11-10 (F5E-7)
+
+The F-5E flies the already reviewed `F104R.SEE` (the F-104's `Preset::Basic`
+radar, John's pick D1 as the AN/APQ-159 stand-in, B5-2) and the `F104.ECM`
+dispenser record (`Generation::EarlyColdWar`, 20 chaff and 20 flares, John's
+pick D2, B5-3), with the record's `VIS340.SEE` visual sensor; no match arm and no
+code changed. `--sensor-summary` reads: `F5E: radar F104R.SEE search 50 nmi
+60x60 deg track 25 nmi 45x45 deg look-down 50 BASIC; infrared none; visual
+VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer F104.ECM
+EARLY strength 0.00 (no RF mode); signature radar 100 infrared 100` (the F-104's
+line for radar and jammer, with the F/A-18's visual sensor). `--live-fire
+--aircraft f5e --weapon-slot 2` (the wingtip AIM-9B pair) shows `TWS 10 ...
+TRACK` on the radar window, the HUD `ARM 1 AIM-9B 89%` and the target camera on
+the practice aircraft at 1.1 nmi; the round flies and hits (`shots=1 hits=1
+kills=0 active=0` at 1,500 ticks, a single AIM-9B hits but does not kill the
+practice aircraft). `--scope-range 25` redraws the scope at 25. The infrared
+channel does not exist (`infrared none`). There is no jammer to light in the
+RWR (strength 0.00, no RF mode); the diagnostic incoming round plots at the
+window centre, as for the other aircraft. The Weapons window shows `20 CHAFF`
+and `20 FLARE` (F5E-6). Not run: any side-by-side tuning, or an RWR with a
+plotted emitter (no scripted path exists).

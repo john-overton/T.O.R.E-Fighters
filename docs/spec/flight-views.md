@@ -277,3 +277,18 @@ and at its aft end, the same place relative to its canopy as the Rafale's, so
 Back shows the Mirage's spine and fin the way it shows the Rafale's. Evidence in
 [the Mirage section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+
+## Pilot's eye on the F-5E (2026-11-10, F5E-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for
+the F-5E (agent decision, no per-aircraft eye exists; the record's own
+`viewOffset` 0 / 20 / 60 is the F-15C's and no host code reads it). Measured on
+the neutral shape (the faces within 10 units of the centreline, 1 unit = 1/3
+ft): the canopy top is 10 units, 3.3 ft above the origin, between 12.3 and 18.3
+ft ahead of it (the windshield base reaches 20 ft), so the fixed eye stands 3.7
+ft above the canopy top and 2.3 ft behind its aft end. The F-15C's eye stands 1.7
+ft above its canopy and 5.0 ft behind its aft end. The F-5E eye is therefore
+higher over a smaller canopy; Back shows the spine, the fin edge-on and the two
+stabilator plates from above (frame `cockpit-view-back-f2`). Not changed: a
+seated eye would be a fleet change, a question for John. Evidence in [the F-5E
+section](../formats/aircraft-variety.md#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).

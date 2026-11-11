@@ -296,3 +296,10 @@ What shipped in TORE (2026-09-23, `crates/tore-app/src/instruments.rs`):
 8. **Not implemented.** The number box click area (22, 4) has no action in
    TORE; its original action is not recorded here. The six-window small
    layout at scale 1 is not reproduced.
+
+The F-5E flies the X-29's cockpit family by John's decision of 2026-11-10
+(opinionated): `F5E.PT` names `f29.HUD`, whose panel is `~f29_p`. The F-5E therefore
+draws the `~F29_P.PIC` bezel over `~F29H.PIC` (F5E-7; the first aircraft to use
+the family). Its Systems window shows one engine readout, as every aircraft's
+does (it has two J85 engines), and its own fuel: `FUEL 4400 LBS` and `(+ EXT
+990 LBS)` with the default centreline tank (F5E-7 frames, instrument pages 0 to 9).

@@ -200,3 +200,24 @@ position against the scaled canopy is measured in [the Mirage sensors, HUD and
 cockpit section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 Frames are under `.local/m3-aircraft/frames/M2K-7/`.
 
+
+## 2026-11-10 F-5E cockpit and mirror seeds (F5E-7)
+
+Slice F5E-7 gave the F-5E (`F5E.PT`) the X-29's cockpit family its record names
+(`f29.HUD`, stem `F29`, `~F29H.PIC`; John, 2026-11-10, opinionated). The
+picture has three flat light-blue mirror fills (top centre and the two lower
+canopy rails) that B5-1 left with no seeds, so the mirrors drew as dead blue
+panels. `mirrors::seeds` now has a `"F29"` row (fitted, agent decision
+2026-11-10): centre (640, 70), left (120, 420), right (1160, 420). `--cockpit-sheet
+OUT_DIR F5E,F15,X31` (through `tools/agent-run.sh`) before the row printed `f5e:
+stem F5E cockpit ~F29H.PIC art 1280x490 NO MIRRORS FITTED`; after it prints `FITTED CLR` with
+the centre mask at x 477 y 17 w 323 h 84, the left at x 62 y 291 w 116 h 199 and
+the right at x 1097 y 287 w 116 h 203 (the left and right masks reach the bottom
+of the picture), and `Cockpit mirrors: 3 reviewed regions, 768x384 rear feed,
+every other visible frame`. The live frames show the ground behind the aircraft
+in the top mirror and the side mirrors turned in with a look. The X-31 stays
+unfitted. No other aircraft uses the family (the X-29 is not flown). The one
+shared pilot's eye (`mirrors::pilot_eye`) feeds the rear feed unchanged;
+measured in [the F-5E sensors, HUD and cockpit
+section](../formats/aircraft-variety.md#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+Frames are under `.local/m3-aircraft/frames/F5E-7/`.

@@ -1794,3 +1794,10 @@ textured face draws whole.
 skin and damage looks](aircraft-variety.md#f-5e-shape-skin-and-damage-looks-f5e-2-2026-11-10)
 section. The review frames live under `.local/m3-aircraft/frames/F5E-2/`. No
 mesh bytes, exported geometry or retail art are committed.
+
+**Cockpit family (F5E-7, 2026-11-10).** The F-5E draws the X-29's `~F29H.PIC` cockpit
+art (the record names `f29.HUD`; John, 2026-11-10, opinionated), the first aircraft
+to use the family. Its HUD glass aperture and mirror seeds are measured on that
+art; see [the F-5E sensors, HUD and cockpit
+section](aircraft-variety.md#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+No F-5E cockpit art exists, and no retail art is committed.

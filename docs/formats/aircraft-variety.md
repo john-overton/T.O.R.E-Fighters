@@ -3228,6 +3228,10 @@ Options (none chosen):
 
 Agent note: option 1 is the evidenced one.
 
+Update (F5E-7, 2026-11-10): John chose option 1 in the batch decision round
+("follow the record", opinionated), and the F-5E now measures and uses the family:
+see [F-5E sensors, HUD and cockpit](#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+
 ### F-5E control surfaces (for John)
 
 **Fact.** Six state words, counts from `Shape::with_state` (gear down extends
@@ -4468,6 +4472,13 @@ name `BK27.JT` as mounted by exactly the Gripen and the Tornado.
 | Tornado draw scale | 2/3 ft a unit | See below. |
 | Rig and gear | Gear word only; the other words pinned, unmapped | As the Mirage 2000 interim: the shared fitted gear law until X-3 and X-4. |
 
+Update (F5E-7, 2026-11-10): for the F-5E the HUD and cockpit binding row is
+decided, no longer interim: John chose to follow the record, `f29.HUD`, so it is
+opinionated (John, 2026-11-10), and the F-5E's HUD glass row is measured (a polygon
+replaces the empty mask). The Gripen's and Tornado's rows stay as their own slices
+find them. See [F-5E sensors, HUD and
+cockpit](#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
 identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
@@ -4556,3 +4567,121 @@ written). Full tables, positions and results are in
 Open for John: the wing pair's empty default means a bomb run must name the station
 (`--station 2`); the real F-5E fit sources for the dispenser are second hand (see the
 B5-3 note); the cadence is shared, not F-5E specific.
+
+## F-5E sensors, HUD and cockpit (F5E-7, 2026-11-10)
+
+Slice F5E-7 (implementation mode) made the X-29's cockpit family work for the
+F-5E and confirmed its sensors. John's decision round of 2026-11-10 decided the
+review's [HUD and cockpit question](#f-5e-hud-and-cockpit-for-john): **follow the
+record**, `f29.HUD`, cockpit stem `F29`, forward art `~F29H.PIC` (the game's own
+encyclopedia says the X-29s were built from F-5E fuselages; no F-5E art exists).
+That settles what the batch identity slice wired as an interim agent decision, so
+the binding is now **opinionated (John, 2026-11-10)**; the stem arm and the
+picture names already existed from B5-1 and did not change. The F-5E is the first
+aircraft to use the family: TORE has no X-29 (`F29.PT` is not on the roster), and no
+other identity names `F29.HUD` or stem `F29` (checked by the new test). Changed:
+the glass polygon (`hud_aperture.rs`), a `"F29"` mirror seed row (`mirrors.rs`), two
+comments in `aircraft.rs` and a retail-reading test; the docs listed in the log.
+
+**Sensors (spec-derived, retail records and the B5-2 and B5-3 defaults).** The
+fixed rows are `VIS340.SEE`, `F104R.SEE` (the F-104's radar as the AN/APQ-159
+stand-in, John's pick D1) and `F104.ECM` (20 chaff and 20 flares, no deception
+jammer, John's pick D2). `--sensor-summary` reads: `F5E: radar F104R.SEE search 50
+nmi 60x60 deg track 25 nmi 45x45 deg look-down 50 BASIC; infrared none; visual
+VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer F104.ECM EARLY
+strength 0.00 (no RF mode); signature radar 100 infrared 100`. The radar and
+jammer are the F-104's line record for record (`--sensor-summary` of `F104`); the
+visual sensor is the F/A-18's (`VIS340.SEE`). Nothing under
+`crates/tore-sim/src/sensors` branches on the aircraft, so the radar modes, the lock
+and the RWR behave as for the other aircraft. A live-fire run (`--live-fire
+--aircraft f5e --weapon-slot 2`) shows the Radar window `TWS 10 ... TRACK`, the
+HUD `ARM 1 AIM-9B 89%`, the lock frame on the target and the target camera `F-
+5E TIGER 1.1 NM`; at 1,500 ticks the round has flown and hit (`shots=1 hits=1
+kills=0 active=0`: a single AIM-9B hits and does not kill the practice aircraft, as
+F5E-6 found). `--scope-range 25` redraws the scope at 25. There is no infrared
+channel, and no jammer for the RWR window to light (strength 0.00). The diagnostic
+incoming round plots at the window centre; no scripted path plots an emitter on
+the RWR, as for the Mirage 2000 and the F-15E (the RWR code is aircraft-agnostic and
+unit tested). Countermeasure counts show on the Weapons window as `20 CHAFF` and
+`20 FLARE` (F5E-6).
+
+**HUD glass (measured, fitted).** `hud_aperture::mask` now has a polygon for the
+F-5E, replacing the empty mask the B5-1 interim left (the aperture fails closed
+for a picture of any other size). `~F29H.PIC` is 1280 x 490 with a 64-colour
+palette. Its glass is the transparent opening between the two canopy struts, under
+a thin combiner arc and above the coaming. Measured on the imported art (every
+row's transparent run through x 640, plus the first opaque pixel of columns 520 to
+760): the strut inner edges are at x 522 and 759, the arc line runs from y 125 at
+the struts to y 105 at the centre (one pixel thick), the coaming top is at y 375
+to 376 (bumps near x 556 and x 646 rise to y 368 and y 355). The fitted polygon
+(522,132) (535,127) (550,120) (565,116) (580,112) (610,108) (640,107) (670,108)
+(700,112) (715,116) (730,120) (745,127) (759,132) (759,372) (522,372) runs under the
+arc and between the struts; the shared rule keeps only the transparent pixels
+inside it, so the struts, the arc line and the coaming bumps stay out. Pinned by
+two tests in `hud_aperture.rs`: a synthetic one (centre in, above the arc, outside
+the struts and below the coaming out, the Gripen and Tornado still empty) and a
+retail-reading one that skips without an install: on the real art the mask never
+covers an opaque pixel, has its left edge within x 520 to 530, its right edge within
+x 752 to 760, its top within y 105 to 112 and its bottom within y 365 to 372, is one connected
+region, and has exactly 58,556 pixels. The HUD draws inside the glass: the
+heading tape under the arc, the airspeed and altitude boxes (`497` and `5000` at
+the live-fire start) just inside the struts, `ARM 1 AIM-9B 89%` and the lock frame
+(3x crop `hud-with-target-lock-aim9b-crop3x`). The HUD reads the F-5E's own state.
+
+**Cockpit views (windowed, every one draws the `~F29*` art).** Front with the HUD
+in the glass and the six small-layout windows; look left and right 45 degrees (the
+art turns away with the look, the HUD and the struts slide to the frame edge and
+the side mirror comes into view); 90 degrees left and right and 60 degrees up (no
+cockpit art, open sky and ground, as for the other aircraft); `--flight-view 4` (F3
+Up) and `--flight-view 3` (F2 Back, the spine and stabilator plates from the
+pilot's eye). `Airframe::load` accepts the family: the cockpit palette prefix has
+64 colours, the three overlays `~F29_LH.PIC`, `~F29_CH.PIC` and `~F29_RH.PIC` and
+the instrument frame `~F29_P.PIC` (81 x 80) exist and `Hud::parse` of `F29.HUD`
+names `~F29_P.PIC`. The family is thirteen pictures in `FA_1.LIB`.
+
+**Mirrors (fitted, agent decision 2026-11-10).** The art has three flat light-blue
+mirror fills (top centre and the two lower canopy rails) and the B5-1 interim gave
+them no seeds. A `"F29"` row in `mirrors::seeds` now fills them with the shared
+rear feed: `--cockpit-sheet` goes from `NO MIRRORS FITTED` to `FITTED CLR` with the
+centre at x 477 y 17 w 323 h 84, the left at x 62 y 291 w 116 h 199 and the right
+at x 1097 y 287 w 116 h 203. The unit test lists the F-5E among the fitted
+families, and the X-31 (`F31`) stays unfitted.
+See [mirrors](../baselines/mirrors.md#2026-11-10-f-5e-cockpit-and-mirror-seeds-f5e-7).
+
+**Instruments and two engines.** The Systems window shows `THR 70%`, `TEMP 0%`,
+`OIL 100%`, `HYD 100%` and `FUEL 4400 LBS`, with `(+ EXT 990 LBS)` for the default
+centreline tank; one engine readout serves every aircraft, so the two-engine F-5E
+shows one throttle and one temperature (the panel has no per-engine needle; the
+readouts are generated text). Fuel reads the F-5E's own corrected 4,400 lb (B5-2,
+John, 2026-11-10), not the record's 6,240. The Weapons window lists `560 M61`, `2
+AIM-9B` and `20 CHAFF` / `20 FLARE`. The ten instrument pages (0 to 9) draw with the
+`~F29_P.PIC` bezel; the Envelope page draws the F-5E's own envelope.
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye` is
+one fixed offset for every aircraft (7 ft above and 10 ft ahead of the model
+origin), used only by F2 Back, the rear-view mirrors and the replay views; the
+forward cockpit view looks from the origin with 2D art. The record's `viewOffset`
+(0, 20, 60) is the F-15C's and the F/A-18's and no host code reads it. Measured on
+the neutral `F5E.SH` (the faces within 10 units of the centreline, 1 unit = 1/3 ft;
+the fin top at 24 units is excluded, it stands behind the canopy): the canopy top is
+10 units, 3.3 ft above the origin, between 37 and 55 units ahead, 12.3 to 18.3 ft
+(the windshield base reaches 20 ft). The fixed eye is therefore 3.7 ft above the
+canopy top and 2.3 ft behind its aft end; the F-15C's is 1.7 ft above its canopy and
+5.0 ft behind its aft end (measured in F15E-7 on the same rule). The eye stands high
+over a small canopy, and F2 Back shows the spine, the fin edge-on and the two
+stabilator plates. Not changed: a seated eye would be a fleet change (a table keyed
+by aircraft through six call sites), a question for John, as in the Mirage 2000
+review.
+
+**Test.** `crates/tore-import/tests/f5e_cockpit.rs` (retail-reading, skips without
+media): the sensor rows `VIS340.SEE, F104R.SEE, F104.ECM`, `hud()` `F29.HUD`
+different from the X-31's, stem `F29` with shape stem `F5E`, `~F29H.PIC`,
+`~F29_P.PIC` from `Hud::parse`, the overlays, thirteen `~F29*` pictures, no
+other roster aircraft on the family, no `~F5*` picture, and the record's eye offset.
+The aperture is pinned in `hud_aperture.rs`.
+
+Provenance: sensor rows, HUD module, panel names and cockpit art spec-derived
+(retail); the X-29 cockpit binding opinionated (John, 2026-11-10); the glass polygon,
+the mirror seeds and the eye-point reading fitted or agent decisions (2026-11-10).
+Evidence and frames: `.local/m3-aircraft/frames/F5E-7/` and
+`.local/m3-aircraft/checks/F5E-7/`.
