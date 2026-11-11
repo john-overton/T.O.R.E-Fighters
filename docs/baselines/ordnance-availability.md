@@ -483,3 +483,48 @@ ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Ch
 
 The `menus-ordnance-availability` and `a2g-catalog` battery expected lines read 18,
 4,652 (menus only), 233 and 220.
+
+## Tornado ordnance (TOR-6, 2026-11-11)
+
+The Tornado's eight rows (four fixed sensors, the BK27 gun, the centreline tank row,
+the shoulder Paveways and the inner wing Mk 82 pair; the outer wing row is retired) are
+reviewed and measured on `m3-tornado`. Normal loading now refuses 36 stores that enter the
+airframe over 0.3 ft (33 on the shoulder pair, 3 on the inner wing pair; the
+[measured catalog](../spec/stores-on-pylons.md#the-tornado-ordnance-masks-and-the-measured-catalog-tor-6-2026-11-11)),
+so the audit pins move on this branch:
+
+```text
+ordnance TOR.PT: 4 source rows, 0 optional weapon rows, 49 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 31 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4616 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+Weapon placements 4,652 to 4,616 (`TOR.PT` 85 to 49); recovered stations, tank
+placements, Cheat-only placements, pods, records and aircraft unchanged. The F-15E and
+Mirage F1 branches' own refusals move the same pin; the coordinator recomputes the
+total at integration (B4). The `menus-ordnance-availability` expected line reads 4,616
+on this branch.
+
+Headless and windowed runs on the branch (profile `profile-tornado`, windows through
+`tools/agent-run.sh`):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft tornado --weapon-slot 1` (BK27) | 320 shots, 51 hits, 1 kill, ammunition `[40, 4, 2]` |
+| `--weapon-slot 2` (GBU-10) | one shot, ammunition `[360, 3, 2]` (the laser bomb has no designated target, no hit) |
+| `--weapon-slot 3` (Mk 82 pack) | one release of three bodies: 3 shots, 3 hits, 1 kill; one round taken (`SHOTS_PER_ROUND` in `flight.py`) |
+| `--weapon-slot 3 --flight-speed 200` and `650` | the same release with the wing spread (25 degrees) and swept (67 degrees); frames `mk82-sweep25-below` and `mk82-sweep67-below` |
+| `--a2g-run --attack release` on stations 1 and 2 at 200 and 650 kt (`a2g-release-origin-tornado`) | shoulder Paveways from 2.00 ft out, 12.27 then -2.93 ft forward, left then right, depth 0.17 ft, identical at both sweeps; Mk 82 packs from 9.50 ft out, 1.50 ft forward at 25 degrees, and from -10.53 ft out, 0.81 ft aft (left) and 10.36 ft out, 1.26 ft aft (right) at 67 degrees, depth 1.00 ft |
+| `--a2g-run --attack jettison --station 2 --load MK82P3` at 200 and 650 kt (`a2g-jettison-tornado`) | the tank leaves x 0, 5.94 ft down, 5.67 ft ahead at both sweeps; the Mk 82 packs leave right then left from 9.50 / 1.50 ft (25 degrees) and 10.36 / -1.26 and -10.53 / -0.81 ft (67 degrees), `PASS released 3 ... no-explosion`, payload 12,848 lb to 11,000 to 8,000 |
+| `--live-fire --combat-command jettison` on slots 2 and 3 | the station jettisons (8,000 lb for the four Paveways, 3,000 lb for the two packs), the others untouched; after the Paveways go the selection moves on to the packs |
+| `--combat-command chaff` and `flare` with `--countermeasure-preview 60` | five chaff leave 55, three flares leave 57, capacity 60 and 60 |
+
+`tools/battery.py` carries `flight-livefire-tornado-slot1` to `slot3`,
+`flight-jettison-tornado-slot2` and `slot3`, `a2g-release-origin-tornado` and
+`a2g-jettison-tornado`. A new `jettison: offset` line in the `jettison` attack prints each
+store's start against the aircraft (right, up, forward). The Load Ordnance page
+(`--quick-mission --snapshot-state ordnance --aircraft tornado`) reads `BK27 360 (max
+360)`, `250 gallon tank 1 loaded (max 2)`, `GBU-10E Paveway 4 loaded (max 4)` and `MK-82
+3-Pack 2 loaded (max 2)`, 55,134 of 61,620 lb. Frames:
+`.local/m3-aircraft/frames/TOR-6/`.

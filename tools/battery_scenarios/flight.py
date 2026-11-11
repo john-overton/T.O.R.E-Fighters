@@ -78,6 +78,12 @@ STATIONS = {
     # centreline tank is a tank station, and it has no wingtip row (John,
     # 2026-11-10).
     "m2000": [250, 4, 2, 2],
+    # The Tornado IDS carries the BK27 on its internal row 4 (360 rounds, the
+    # two guns together) and two default weapon rows: row 6 PAVEWAY.JT x4 (the
+    # shoulder Paveways) and row 7 MK82P3.JT x2 (the inner wing pair on the
+    # swinging panel). Its centreline F250.GAS tank is a tank station, row 8
+    # is retired (TOR-6, 2026-11-11).
+    "tornado": [360, 4, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -270,6 +276,10 @@ APPROACH_TARGET = {
 # range, so the range's own window already holds them; these record the values.
 KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "tornado": 150.6}
 KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "tornado": 160.1}
+# TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
+# lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
+# windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
+# stay as TOR-8 recorded them.
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -1021,9 +1031,16 @@ REFUSED_SLOTS = {
 }
 
 
+# Stations whose one round is a pack of several bodies: the shots counted are the bodies, the
+# station's ammunition falls by one pack. The Tornado's MK82P3.JT row (inner wing) is the only
+# one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11).
+SHOTS_PER_ROUND = {("tornado", 3): 3}
+
+
 def check_slot(ac: str, slot: int):
     capacity = STATIONS[ac]
     refused = (ac, slot) in REFUSED_SLOTS
+    per_round = SHOTS_PER_ROUND.get((ac, slot), 1)
 
     def check(output: str) -> list[str]:
         problems = []
@@ -1053,7 +1070,7 @@ def check_slot(ac: str, slot: int):
             problems.append(f"a surface weapon fired at the practice aircraft ({shots} shots)")
         if not refused and shots == 0:
             problems.append("the trigger fired nothing")
-        fired_slot = capacity[slot - 1] - ammo[slot - 1]
+        fired_slot = (capacity[slot - 1] - ammo[slot - 1]) * per_round
         if fired_slot != shots:
             problems.append(f"fired {shots} but the station lost {fired_slot}")
         for index, (left, cap) in enumerate(zip(ammo, capacity)):
@@ -1131,7 +1148,7 @@ def check_jettison(ac: str, slot: int):
             # The emptied station cannot be selected, so the selection moves on
             # to the next loaded station and the probe's shots come from there:
             # every shot is accounted for by other stations' ammunition.
-            used = sum(cap - left for _, left, cap in others)
+            used = sum((cap - left) * SHOTS_PER_ROUND.get((ac, index + 1), 1) for index, left, cap in others)
             if used != shots:
                 problems.append(f"{shots} shots but the other stations used {used} after station {slot} was jettisoned")
         else:

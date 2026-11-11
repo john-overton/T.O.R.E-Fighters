@@ -378,6 +378,14 @@ impl Loadout {
             .iter()
             .position(|s| *s == Some(slot));
         if !self.cheat {
+            // Agent decision 2026-11-11 (TOR-6, John's F-15E A2 precedent):
+            // the Tornado's shoulder and inner wing pairs refuse the stores
+            // that enter the airframe (normal loading only).
+            if row.is_some_and(|row| {
+                !tore_formats::aircraft::stations::weapon_allowed(self.aircraft, row, &w.source)
+            }) {
+                return 0;
+            }
             if self.aircraft == AircraftId::F15
                 && row == Some(6)
                 && !super::ballistics::is_bomb(w)

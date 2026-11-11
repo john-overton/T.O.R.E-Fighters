@@ -64,6 +64,16 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
                     motion.position(0.),
                     motion.velocity(0.)
                 );
+                // Where the store started against the aircraft as the tick
+                // began (it flies level on heading 0, so right, up and
+                // forward are x, y and z): a swing wing's swivelled stations
+                // leave from where they hang at the current sweep (TOR-6).
+                let at = [start[0], start[1], start[2] + speed * t];
+                let from: [f64; 3] = std::array::from_fn(|i| motion.position(0.)[i] - at[i]);
+                println!(
+                    "jettison: offset id {} right {:.2} up {:.2} forward {:.2}",
+                    p.id, from[0], from[1], from[2]
+                );
             }
         }
         airborne = airborne.max(scene.world.combat.state.projectiles.len());

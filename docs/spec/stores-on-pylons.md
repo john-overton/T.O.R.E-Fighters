@@ -1885,3 +1885,98 @@ plate's outline and the measurements are agent decisions or findings; the statio
 are from the cited public pages and no station offsets are claimed. The audit pins do not
 move (45 aircraft, 18 stations, 4,652 weapon placements, 233 tank placements, 220
 Cheat-only placements, 80 pod placements).
+
+## The Tornado ordnance masks and the measured catalog (TOR-6, 2026-11-11)
+
+Agent decision applying John's F-15E A2 precedent (2026-11-10: refuse the stores
+that enter the airframe by more than about 0.3 ft), as the coordinator restated
+it on 2026-11-11: refuse alternatives over 0.3 ft, keep anything at 0.3 ft or less
+and anything that only crosses a neighbour store, never refuse the default
+`PAVEWAY.JT`. The stations are the final ones from [TOR-5b](#the-tornado-ids-inner-wing-pair-on-the-wing-one-centreline-tank-a-glove-plate-tor-5b-2026-11-11)
+(row 5 one centreline tank, row 6 shoulder Paveways unchanged with John's accepted
+0.96 ft front and 0.55 ft rear fin-tip entry, row 7 on the swinging panel at 9.5 ft
+out, row 8 retired).
+
+**Measurement.** Every store the Load Ordnance catalog offered on rows 5, 6 and 7
+(4, 65 and 23 stores) was hung alone on its row, at its largest count, with the
+rest of the default load, in the CPU stores preview
+(`.local/m3-aircraft/checks/TOR-6/matrix.sh`, 117 runs; row 7 at 25 and 67
+degrees, the fixed rows 5 and 6 at 25) and clipped against the airframe without
+gear. Entry is the deepest point of any triangle inside the skin. Summary:
+`checks/TOR-6/summary.txt`.
+
+**Row 6, the shoulder pair (fixed pylons, 2.00 ft out): 33 stores refused.**
+
+| Store | Shape | Entry (ft) |
+| --- | --- | ---: |
+| `AT12.JT` | `SWNGR.SH` | 0.33 |
+| `GBU28.JT` | `GB28.SH` | 0.33 |
+| `AA12.JT` | `AMSKI.SH` | 0.35 |
+| `AIM9X.JT` | `AM9X.SH` | 0.36 |
+| `AIM120.JT` | `AMRAM.SH` | 0.37 |
+| `AA11.JT` | `ARCHR.SH` | 0.39 |
+| `AT2.JT` | `SWATR.SH` | 0.44 |
+| `AGM84E.JT` | `SLAM.SH` | 0.46 |
+| `AGM84A.JT` | `HARPN.SH` | 0.47 |
+| `AA2.JT` | `ATOLL.SH` | 0.48 |
+| `AS14.JT` | `KEDGE.SH` | 0.48 |
+| `MICA.JT` | `MICA.SH` | 0.48 |
+| `AIM9B.JT` | `SIDEB.SH` | 0.52 |
+| `AA9.JT` | `AMOS.SH` | 0.58 |
+| `AIM9M.JT` | `SIDEM.SH` | 0.60 |
+| `AS15.JT` | `AS12.SH` | 0.62 |
+| `R530.JT` | `M53.SH` | 0.62 |
+| `AIM7.JT` | `SPAR.SH` | 0.75 |
+| `AIM7E.JT` | `SPAR.SH` | 0.75 |
+| `GBU12.JT` | `GB12.SH` | 0.90 |
+| `R550.JT` | `M55.SH` | 0.90 |
+| `AGM45.JT` | `HARM.SH` | 0.93 |
+| `AGM88.JT` | `HARM.SH` | 0.93 |
+| `PL10.JT` | `PL10.SH` | 0.93 |
+| `PL7.JT` | `PL7.SH` | 0.93 |
+| `GBU16.JT` | `GB16.SH` | 0.98 |
+| `AA6.JT` | `ACRID.SH` | 1.01 |
+| `AM39.JT` | `EXO.SH` | 1.17 |
+| `GBU29.JT` | `GB27.SH` | 1.93 |
+| `GBU29P.JT` | `GB27.SH` | 1.93 |
+| `GBU30.JT` | `GB27.SH` | 1.93 |
+| `PAVEWA3.JT` | `GB27.SH` | 1.93 |
+| `AS30.JT` | `AS30.SH` | 2.12 |
+
+Kept (entry in ft, at or under 0.3 ft or the default's own shape): `GBU10.JT` 0.96, `GBU10A.JT` 0.96, `PAVEWAY.JT` 0.96, `AS7.JT` 0.30, `GBU38.JT` 0.22, `AGM65A.JT` 0.17, `AGM65G.JT` 0.17, `AS16.JT` 0.15, `F250.GAS` 0.15, `B13.JT` 0.14, `CBU89.JT` 0.13, `AA8.JT` 0.12, `F150.GAS` 0.10, `AA11B.JT` 0.08, `B8.JT` 0.07, `MK82HD.JT` 0.06, `FAB500.JT` 0.05, `LAU10.JT` 0.05, `RBK500.JT` 0.05, `CBU87.JT` 0.04, `MK20.JT` 0.04, `MK82P.JT` 0.02, `RBK250.JT` 0.01, `F350.GAS` 0.00, `F500.GAS` 0.00, `FAB1000.JT` 0.00, `FAB250.JT` 0.00, `LAU61.JT` 0.00, `MK82.JT` 0.00, `MK82AIR.JT` 0.00, `MK82P3.JT` 0.00, `MK84.JT` 0.00.
+`GBU10.JT` and `GBU10A.JT` hang the same `PAVE.SH` as the default `PAVEWAY.JT`
+and read exactly its 0.96 ft; they stay with it (agent decision: John accepted
+that shape's fin-tip entry on 2026-11-11, so refusing its siblings would refuse
+the same geometry twice). `AS7.JT` reads 0.30 and stays by the "0.3 ft or less"
+rule. Crossings of the neighbouring centreline tank or Paveways (down to
+-1.64 ft for the 2,000 lb `GB27.SH` bombs) are not refusals.
+
+**Row 7, the inner wing pair (swinging panel, 9.5 ft out): 3 stores refused.**
+`GBU29.JT`, `GBU29P.JT` and `GBU30.JT` (`GB27.SH`) enter the airframe 1.10 ft at 67
+degrees (0.00 at 25). The other 20 stores read 0.00 at both sweeps; none comes
+within 2.1 ft of the gear legs.
+
+**Row 5, the centreline: nothing refused.** `F150.GAS`, `F250.GAS`, `F350.GAS`,
+`F500.GAS` read 0.00; the 500 gallon tank sits 0.03 ft into the ground with the
+gear down (the all-heavy case TOR-5 found; under the 0.3 ft line).
+
+**Gear.** The preview's gear gap is a bounding-box test; on row 6 it reads 0.00
+for the default and nearly every store alike (a gear sample point lies inside the
+store's box), so it cannot separate a refusal and none was made from it.
+Row 7 never comes within 2 ft.
+
+**Effect.** `weapon_allowed(Tornado, 6 | 7, ...)` in
+`aircraft_stations::{TORNADO_SHOULDER_REFUSED, TORNADO_INNER_WING_REFUSED}`
+returns false; `Loadout::capacity_before_store_pairs` gives those stores capacity
+0 in normal loading (Cheat loading skips the check), so the Load Ordnance page,
+saved loads and the lobby never offer them. The ordnance audit asserts that no
+refused store has capacity, and its derived-bomb check (a laser-bomb variant such as `GBU12.JT` must keep
+its donor's capacity) skips a row that refuses the variant by name.
+Weapon placements 4,652 to 4,616 (36 fewer; `TOR.PT` 85 to 49), the Tornado's
+Load Ordnance air-to-air page holds only `AA-11B` and `R-60M`. The refusal list
+is a plain constant; John can narrow it.
+
+The release points at both sweeps (`a2g-release-origin-tornado`): row 6 from
+2.00 ft out, 12.27 then -2.93 ft forward, never moving; row 7 from 9.50 ft out
+and 1.50 ft forward at 25 degrees, and swivelled with the panel at 67 degrees:
+left -10.53 ft out and 0.81 ft aft, right 10.36 ft out and 1.26 ft aft.

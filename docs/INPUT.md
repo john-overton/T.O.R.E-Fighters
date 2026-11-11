@@ -1049,6 +1049,11 @@ see the [engine material contract](spec/engine-material.md).
 so a swing wing's drawn sweep (the Tornado's, which follows speed) can be shown at a
 chosen angle; it changes only the starting speed (TOR-3, developer switch).
 
+Update (TOR-6, 2026-11-11): the switch now also scales the starting velocity to the
+chosen speed, so a probe that steps the flight afterwards (a `--live-fire` shot with
+`--combat-probe-ticks`) starts at that speed and the swinging stations release from
+the sweep it implies; a capture with no probe ticks is unchanged.
+
 Researched flight is now the default; `--legacy-flight` preserves the previous
 model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
 including the original imported warning samples.

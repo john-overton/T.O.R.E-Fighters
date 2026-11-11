@@ -4887,3 +4887,36 @@ default-rule form of T3, the plate geometry and every measurement agent decision
 findings; the real station layout (seven stations, two swivelling pylons a wing, pivots in
 the fixed nibs) from the public pages cited in the stores specification, with no offsets
 claimed. No retail bytes committed.
+
+## Tornado ordnance masks, BK 27 gun and the live release at both sweeps (TOR-6, 2026-11-11)
+
+Implementation and review mode (Claude Sonnet, sonnet-high). Update to the
+[Tornado stations](#tornado-stations-moved-one-tank-and-a-glove-plate-tor-5b-2026-11-11)
+section: the 4,652 weapon placements quoted there are 4,616 on this branch after the
+refusals below. Details: [aircraft ordnance](aircraft-ordnance.md#the-panavia-tornado-ids-tor-6-2026-11-11),
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-ordnance-masks-and-the-measured-catalog-tor-6-2026-11-11),
+[baseline](../baselines/ordnance-availability.md#tornado-ordnance-tor-6-2026-11-11).
+
+- **Default load** unchanged from TOR-5b: `BK27.JT` x360, one `F250.GAS`, four `PAVEWAY.JT`,
+  two `MK82P3.JT` packs; 12,848 lb with the tank's fuel, 55,134 of 61,620 lb on the Load
+  Ordnance page. The jammer row stays as retail (60 chaff, 60 flares).
+- **Refusals** (agent decision applying John's F-15E A2 precedent, 2026-11-11): 33 stores on the
+  shoulder pair and 3 on the inner wing pair, each over 0.3 ft into the airframe (measured
+  for every catalog store); the default Paveway and the two stores that hang its shape stay.
+  Weapon placements 4,652 to 4,616. The air-to-air page keeps only `AA-11B` and `R-60M`.
+- **BK 27:** the shared gun path fires it as it does the M61, DEFA and GSh records (no gun
+  code changed); 360 rounds equal the real two guns of 180; muzzle velocity and cadence are
+  the shared fields (about 19 percent under the real muzzle velocity; 32 rounds a second at
+  the bottom of the real two-gun 33 to 57 range); one muzzle point on the starboard side
+  (the real aircraft has two guns).
+- **Live release at both sweeps:** row 7's packs leave from 9.50 ft out at 25 degrees and from
+  the swivelled pylons at 67 degrees (left -10.53 / -0.81 ft, right 10.36 / -1.26 ft); row 6
+  never moves; jettison does the same.
+- **Tooling:** `--flight-speed` scales the starting velocity too (an Update beside the TOR-3
+  text); the `jettison` attack prints each store's offset from the aircraft;
+  `SHOTS_PER_ROUND` in `flight.py` counts a Mk 82 pack as three shots and one round.
+- Provenance: rows, masks, capacities, gun record, jammer record spec-derived (retail); refusal
+  list, thresholds, battery scenarios and findings agent decisions 2026-11-11; real gun facts
+  (two BK-27 with 180 rounds each, 1,000 to 1,700 rounds a minute, 1,100 m/s) from public
+  pages for plausibility only (aerospaceweb.org, milavia.net, Wikipedia "Mauser BK-27", read
+  2026-11-11). No retail bytes committed.

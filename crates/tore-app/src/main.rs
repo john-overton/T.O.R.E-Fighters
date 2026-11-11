@@ -15614,7 +15614,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     // Pose inspection: a swing wing's drawn sweep follows speed (TOR-3).
     if let Some(knots) = flight_speed {
-        flight.speed = knots * 1.68781;
+        // The velocity carries it, so a probe that steps the flight (a
+        // live-fire shot at a chosen sweep, TOR-6) starts from the same speed.
+        let speed = knots * 1.68781;
+        let along = flight.velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if along > 1. {
+            flight.velocity = flight.velocity.map(|v| v * speed / along);
+        }
+        flight.speed = speed;
     }
 
     // Headless probes and captures have no instrument panel to read, so the

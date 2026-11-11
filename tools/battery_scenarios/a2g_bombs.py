@@ -230,6 +230,35 @@ def ai_jettison_recording_problems(work: Path, output: str) -> list[str]:
     return problems
 
 
+# The Tornado's jettison (TOR-6, 2026-11-11), one run at each sweep: the centreline tank leaves
+# from the fuselage whatever the sweep (x 0, 5.94 ft down, 5.67 ft ahead); the inner wing's Mk 82
+# pair leaves from where it hangs, right bomb first: 9.50 ft out and 1.50 ft ahead with the wing
+# spread (200 kt, 25 degrees) and from the swivelled pylons at 67 degrees (650 kt).
+TORNADO_JETTISON = [
+    ("25 degrees", [(0.0, -5.94, 5.67), (9.50, -1.45, 1.50), (-9.50, -1.45, 1.50)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (10.36, -1.45, -1.26), (-10.53, -1.45, -0.81)]),
+]
+
+
+def tornado_jettison_problems(output: str) -> list[str]:
+    parts = output.split("jettison: before")[1:]
+    if len(parts) != len(TORNADO_JETTISON):
+        return [f"{len(parts)} jettison runs, want {len(TORNADO_JETTISON)}"]
+    problems: list[str] = []
+    for part, (label, wants) in zip(parts, TORNADO_JETTISON):
+        found = re.findall(r"jettison: offset id \d+ right (\S+) up (\S+) forward (\S+)", part)
+        if len(found) != len(wants):
+            problems.append(f"{label}: {len(found)} stores left, want {len(wants)}")
+            continue
+        for n, (got, want) in enumerate(zip(found, wants)):
+            r, u, f = (float(v) for v in got)
+            if abs(r - want[0]) > 0.05 or abs(u - want[1]) > 0.05 or abs(f - want[2]) > 0.05:
+                problems.append(f"{label}: store {n} left from {r:.2f} {u:.2f} {f:.2f}, want {want}")
+        if not re.search(r"jettison: PASS released 3 .* no-explosion", part):
+            problems.append(f"{label}: no PASS for three stores")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1"]
     return [
@@ -268,6 +297,18 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             expect=[r"jettison: PASS released [1-9]\d* .* no-explosion"],
             notes="The Mirage 2000's 150 gallon centreline tank, then its belly Mk 82s (M2K-6), jettison inert at 5,000 ft.",
+        ),
+        Scenario(
+            name="a2g-jettison-tornado", lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                  "--aircraft", "tornado", "--station", "2", "--load", "MK82P3", "--altitude", "5000",
+                  "--speed", "200", "--seconds", "30", "--defenses", "0", "0"],
+            timeout=300,
+            then=[Step(["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                        "--aircraft", "tornado", "--station", "2", "--load", "MK82P3", "--altitude", "5000",
+                        "--speed", "650", "--seconds", "30", "--defenses", "0", "0"], timeout=300)],
+            check=tornado_jettison_problems,
+            notes="The Tornado's centreline tank, then its inner wing Mk 82s, jettison inert at 5,000 ft with the wing spread (200 kt) and swept (650 kt): the tank leaves the fuselage either way, each bomb from where its swivelled pylon hangs (TOR-6).",
         ),
         Scenario(
             name="a2g-bomb-motion", lane="flight",

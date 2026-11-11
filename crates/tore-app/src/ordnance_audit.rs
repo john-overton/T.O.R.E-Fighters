@@ -45,7 +45,13 @@ const TANK_RECORDS: usize = 9;
 /// 4,652 from 4,663: the Tornado carries no outer wing row, so its eleven
 /// compatible weapon placements there go (B5-2, John 2026-11-10); the F-5E and
 /// Mirage F1 default-load changes move no placement.
-const WEAPON_PLACEMENTS: usize = 4652;
+/// 4,616 from 4,652 (on the Tornado's branch, `m3-tornado`): the Tornado's
+/// shoulder pair (row 6) refuses 33 stores and its inner wing pair (row 7)
+/// refuses 3 that enter the airframe over 0.3 ft, 36 placements fewer
+/// (TOR-6, agent decision 2026-11-11 applying John's F-15E A2
+/// precedent; `TOR.PT` 85 to 49). The F-15E branch's own refusals move the
+/// same pin; the coordinator recomputes the total at integration (B4).
+const WEAPON_PLACEMENTS: usize = 4616;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -272,7 +278,18 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             }
             for slot in 0..standard.configuration.stations.len() {
                 let capacity = standard.capacity(slot, donor);
-                if capacity > 0 && standard.capacity(slot, variant) < capacity {
+                // A row that refuses the derived bomb by name (TOR-6, agent
+                // decision 2026-11-11: it enters the airframe) keeps the
+                // donor.
+                let refused = standard
+                    .configuration
+                    .hardpoint_slots
+                    .iter()
+                    .position(|s| *s == Some(slot))
+                    .is_some_and(|row| {
+                        !tore_formats::aircraft::stations::weapon_allowed(id, row, &variant.source)
+                    });
+                if capacity > 0 && !refused && standard.capacity(slot, variant) < capacity {
                     return Err(
                         format!("{} station {slot} loses {name} donor capacity", id.pt()).into(),
                     );
@@ -349,6 +366,27 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 } else {
                     expected
                 };
+                // Agent decision 2026-11-11 (TOR-6): the Tornado's shoulder and
+                // inner wing pairs refuse the stores that enter the airframe;
+                // normal loading must offer none.
+                if !tore_formats::aircraft::stations::weapon_allowed(id, hardpoint, &weapon.source)
+                {
+                    if let Some(slot) = rows
+                        .iter()
+                        .find(|r| r.hardpoint == hardpoint)
+                        .and_then(|r| r.weapon)
+                        .filter(|slot| standard.capacity(*slot, weapon) != 0)
+                    {
+                        return Err(format!(
+                            "{} source station {} offers refused {} ({slot})",
+                            id.pt(),
+                            hardpoint + 1,
+                            weapon.source
+                        )
+                        .into());
+                    }
+                    continue;
+                }
                 if !(1..32767).contains(&expected) {
                     continue;
                 }
