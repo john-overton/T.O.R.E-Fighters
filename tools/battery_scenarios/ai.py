@@ -1772,6 +1772,20 @@ def scenarios() -> list[Scenario]:
                            "M2000.PT identity (one M53-P2, F18R.SEE radar, F18.ECM jammer, "
                            "Super 530D, Magic 2 and AS-15 default load) in a 2 v 2 fight."))
 
+    # 13g. The Saab Gripen in a mission (slice GRI-9): every wing the Gripen, the player's own
+    # included, 2 v 2 with the fight script, so the GRIPEN.PT identity flies a mission with its
+    # single RM12 engine, the F18R.SEE radar, F18.ECM jammer and AAS38.SEE infrared sensor, its
+    # own GRIPEN.HUD and ~GRI cockpit, and its BK 27 gun, AIM-120, AIM-9M and AGM-65G default
+    # load. The roster probe flies it against itself at every skill; this one has it shoot and
+    # be shot at.
+    out.append(probe("gripen-quick-mission-2v2", fight(2, 2, "--aircraft", "gripen",
+                                                       "--probe-friendly-aircraft", "gripen",
+                                                       "--probe-enemy-aircraft", "gripen",
+                                                       "--separation", "5", *attack), ticks=7200,
+                     notes="All Gripen: the player's wing and the enemy wing fly the "
+                           "GRIPEN.PT identity (one RM12, F18R.SEE radar, F18.ECM jammer, "
+                           "BK 27, AIM-120, AIM-9M and AGM-65G default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

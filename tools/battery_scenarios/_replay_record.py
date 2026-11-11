@@ -506,6 +506,19 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The Saab Gripen as the player and in both wings (slice GRI-9): a 2 v 2 recorded three
+    # times, so the GRIPEN.PT identity (checkpoint code 42, one RM12 engine) round-trips through
+    # the recording, plays back with nothing missing and records the same twice.
+    out.append(
+        record_scenario(
+            "replay-rec-gripen-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "gripen", "--probe-friendly-aircraft", "gripen",
+             "--probe-enemy-aircraft", "gripen", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

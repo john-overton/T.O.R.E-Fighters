@@ -4713,3 +4713,39 @@ The liftoff (125 to 150 kt) and approach (140 to 160 kt) ranges in the flight
 battery are fitted windows, agent decisions of 2026-11-10. Full tables, sources and
 commands are in the
 [variety flight baseline](../baselines/variety-flight.md#saab-gripen-validation-2026-11-10).
+
+## Gripen in missions, multiplayer and replay (GRI-9, 2026-11-10)
+
+Implementation and verification, slice GRI-9 of the Saab Gripen port. No game
+code changed. `AircraftId::Gripen` was appended to every identity list in B5-1
+(checkpoint code 42, `SELECTABLE` index 42, carried in the 9-bit wire field
+since protocol 83), `strike_class.rs` lists it in the fighter family (B5-1), and
+the AI wing build reads the record's single RM12 engine like any other fighter,
+so an AI Gripen carries the record's default load (BK 27, AGM-65G, AIM-120,
+AIM-9M and the `F150.GAS` tank). No AI behaviour work was done. The Gripen is
+not a parked target, so there is no parked check.
+
+What changed is coverage: a Quick Mission test
+(`the_gripen_is_a_quick_mission_player_and_a_wing_choice`) naming `GRIPEN.PT` as
+the player's aircraft and in every AI wing field, the
+`ai-gripen-quick-mission-2v2` and `replay-rec-gripen-2v2` battery scenarios, the
+Gripen row in the Load Ordnance notes loop
+(`menus-snap-quick-lobby-ordnance-laser-notes-gripen`: the lobby page warns about
+a laser-guided store and offers the pod helper, the same as the Mirage 2000,
+the F-16A and the MiG-31), and `ai-gripen-*` in the `ai-fights` battery family.
+
+Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile-gripen`):
+
+- `--ai-roster-probe-ticks 3600`: the four `GRIPEN.PT` lines (Novice, Average,
+  Experienced, Ace) each `ticks=3600 models=2 radar=true ir=true stores=5
+  gun=true projectiles=0 dropped=0 PASS` (the infrared sensor shows because the
+  Gripen's record carries `AAS38.SEE`).
+- `ai-gripen-quick-mission-2v2` passes: every wing the Gripen, one missile kill
+  by the player, two kills in all, nothing dropped, no anomalies.
+- `replay-rec-gripen-2v2` passes: the recording reads back `player.aircraft =
+  GRIPEN.PT`, `probe.enemy = GRIPEN.PT` and `draw.models = GRIPEN.PT`, two runs
+  are identical and `--verify-render` finds nothing missing or differing.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding
+  `tore-server` and `tore-bot` (the battery needs both rebuilt after any change
+  to the identity list). They take no aircraft argument, so they cover the
+  identity list and content code, not a Gripen in flight over the wire.

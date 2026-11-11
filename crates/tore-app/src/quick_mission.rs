@@ -3491,6 +3491,35 @@ mod tests {
             assert_eq!(wing.aircraft, AircraftId::M2000);
         }
     }
+    /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
+    /// because the AI can fly it, in every AI wing field. The identity the
+    /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another
+    /// fighter record.
+    #[test]
+    fn the_gripen_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        // The player's own list offers it by its selection key, GRIPEN.PT.
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Gripen.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Gripen));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Gripen).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Gripen));
+        }
+        // The mission the draft flies carries the Gripen as the player and in
+        // every wing.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Gripen);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Gripen);
+        }
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI
