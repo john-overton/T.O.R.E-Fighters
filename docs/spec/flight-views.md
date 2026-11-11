@@ -277,3 +277,12 @@ and at its aft end, the same place relative to its canopy as the Rafale's, so
 Back shows the Mirage's spine and fin the way it shows the Rafale's. Evidence in
 [the Mirage section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+## Pilot's eye on the Gripen (2026-11-10, GRI-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for
+the Gripen at its true size (agent decision, no per-aircraft eye exists). Measured
+against the shape it sits about 4.5 feet above the canopy top (2.3 to 2.7 feet above
+the origin, 6.7 to 15.7 feet ahead), over its middle, so Back shows the Gripen's
+spine and wing roots. The forward cockpit view draws the Gripen's own 1279x490
+`~GRIH.PIC` and does not depend on the eye. Evidence in
+[the Gripen section](../formats/aircraft-variety.md#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10).

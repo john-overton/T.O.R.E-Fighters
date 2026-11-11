@@ -2966,6 +2966,10 @@ Options (none chosen):
 Agent note: option 1 is the evidenced one and the first batch aircraft with
 own cockpit art.
 
+Update (GRI-7, 2026-11-10): John chose option 1 (decision 7, the batch decision
+round); [the GRI-7 section](#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10) wires
+and measures it.
+
 ### Gripen AAS-38 pod row (for John)
 
 **Fact.** Row 3 of the record is `AAS38.SEE`: location 1 (Fuselage), flags
@@ -2991,6 +2995,9 @@ Options (none chosen):
    fixed-pod accounting.
 
 Agent note: option 1 is the standing rule and requires no new decision.
+
+Update (GRI-7, 2026-11-10): John chose option 1 (decision 8): no pod body is
+drawn and the sensor stays (the AAS-38 infrared channel, below).
 
 ### Gripen hardpoints
 
@@ -4414,6 +4421,11 @@ name `BK27.JT` as mounted by exactly the Gripen and the Tornado.
 | Tornado draw scale | 2/3 ft a unit | See below. |
 | Rig and gear | Gear word only; the other words pinned, unmapped | As the Mirage 2000 interim: the shared fitted gear law until X-3 and X-4. |
 
+Update (GRI-7, 2026-11-10): the Gripen's HUD and cockpit binding is decided, not
+interim (opinionated, John, 2026-11-10, decision 7), and its HUD glass is measured
+(`hud_aperture.rs`, no longer an empty mask). The F-5E and Tornado rows above are
+unchanged. See [the GRI-7 section](#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10).
+
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
 identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
@@ -4556,3 +4568,110 @@ No audit pin moves (the F-5E row keeps its place and the audit counts weapon row
 only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
 placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
 on the retail record and has a unit test.
+
+## Gripen sensors, HUD and cockpit (GRI-7, 2026-11-10)
+
+Implementation and review mode, slice GRI-7 (batch 5). The Gripen flies its own
+`GRIPEN.HUD` and its own 13 `~GRI*.PIC` cockpit pictures (John, 2026-11-10,
+decision 7, opinionated), the F/A-18's reviewed radar and jammer records, and the
+AAS-38 infrared channel. B5-1 had bound the names by record as an interim; this
+slice makes the cockpit family work end to end and relabels the binding as decided.
+Gameplay code changed in two small places (the mirror table and the HUD glass,
+both for the Gripen's 1279-wide picture); the sensor records needed none.
+
+**Sensors (spec-derived, retail records, already reviewed).** `--sensor-summary`
+reads: `Gripen: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg
+look-down 0 ADVANCED; infrared AAS38.SEE search 15 nmi 60x60 deg track 15 nmi 45x45
+deg; visual VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer
+F18.ECM LATE strength 0.30; signature radar 100 infrared 90`. The record's four
+fixed sensor rows are `VIS340.SEE`, `F18R.SEE`, `F18.ECM` and `AAS38.SEE` (pinned
+by `crates/tore-import/tests/gripen_cockpit.rs`, retail-reading, skips without
+media). The infrared line equals the Rafale's (the same `AAS38.SEE` record); the
+signature numbers are the Gripen record's own. No `sensors/profile.rs` arm was
+needed and nothing under `crates/tore-sim/src/sensors` branches on the aircraft.
+Live fire with the radar window open (`--live-fire --aircraft gripen --weapon-slot
+3`): the Radar window reads `TWS 10NM 1 CONTACTS TRACK`, the HUD shows `ARM 3
+AIM-120`, `92% IN RNG`, the AIM-120 locks (`T2 HP 99 LOCK`) and at 3,600 ticks
+`shots=1 hits=1 kills=1`; the AIM-9M (slot 4) hits and kills (`shots=1 hits=1
+kills=1`, 700 ticks); the gun (slot 1) fires 187 rounds with 59 hits and 1 kill in
+700 ticks. With `--sensor-channel ir` the Radar window reads `IR IR 10NM 1 CONTACTS`
+(the AAS-38 channel; the radar-guided AIM-120 has no lock on it, as for the F-15E
+and Rafale). With `--jammer-on --combat-command incoming` the RWR lights `JAM`. The
+air-to-ground Maverick is designated, CUED, launched and kills the column's lead
+truck (the existing `a2g-maverick-gripen` scenario, passed again in this slice).
+Because `fixed_sight` takes any infrared or laser `.SEE` row, the AAS-38 is the
+Gripen's FLIR sight (no laser, so the sight is the infrared one, as the Rafale's);
+the target window FLIR pages draw (frames). No pod body is drawn: row 3 is flags
+`0x8` at the reference point (decision 8).
+
+**HUD and cockpit wiring (opinionated, John, 2026-11-10).** `AircraftId::Gripen`:
+`hud()` `GRIPEN.HUD`, `cockpit_stem()` `GRI`, `cockpit()` `~GRIH.PIC`,
+`instrument_panel()` `~GRI_P.PIC` (81 x 80). `Hud::parse` of `GRIPEN.HUD` names
+`~gri_p`, which `Airframe::load` requires. All 13 pictures exist and are pinned in
+the test with sizes: `~GRI` 535 x 205, `~GRIH` **1279** x 490, `~GRIS` 1601 x 613,
+`~GRI_L/C/R` 61 x 109, 130 x 30 and 61 x 109, the `_LH/_CH/_RH` and `_LS/_CS/_RS`
+overlays and the panel. The loader reads every pixel size from the picture, so the
+1279 width needed no renderer change; the only code that assumed 1280 were the
+mirror flood (`mirrors::masks`) and the HUD glass (`hud_aperture::mask`), which
+accept the Gripen's 1279x490 now (any other width still fails closed).
+
+**HUD aperture (fitted, measured, GRI-7).** The glass is the transparent area
+inside the teal combiner outline and between its two slanted posts, down to the
+top of the base bar. The polygon (art pixels, 1279x490) is `(632,118) (583,124)
+(531,136) (501,148) (477,178) (466,190) (466,262) (469,300) (510,383) (770,383)
+(811,300) (814,262) (814,190) (803,178) (779,148) (749,136) (697,124) (648,118)`:
+the arc over the top (the outline's inner edge at x = 640 is y = 118), the
+vertical sides at x 466 and 814, the posts sloping in, and the bar at y 383. It was
+measured from the transparent run per row in the imported `~GRIH.PIC` (left and
+right edges per ten rows, 467 to 813 on the straight section, 510 to 770 at y 380).
+Opaque art (the teal outline, posts) is excluded by the existing alpha test. It is
+pinned by `hud_aperture::tests::the_gripen_glass_is_measured_for_its_1279_picture`
+(inside and outside points, left and right symmetric, an opaque pixel stays out, a
+1280x490 picture fails closed). The front frame shows the HUD inside the glass.
+This is a fitted aperture (the fleet's convention for every family); the real
+Gripen HUD's own glass extent is not known.
+
+**Rear-view mirrors (fitted, GRI-7).** `~GRIH.PIC` has three flat blue-grey
+(117, 138, 154) mirror glasses, one flat colour. `mirrors::seeds` gains the `GRI`
+family: centre (640, 44), left (245, 304), right (1040, 304). `--cockpit-sheet OUT
+GRIPEN,RAFALE,F18` reports `gripen: stem GRI cockpit ~GRIH.PIC art 1279x490 FITTED
+CLR`, centre x 481 y 8 w 316 h 77, left x 169 y 174 w 151 h 267, right x 959 y 174
+w 151 h 267, and the cockpit prints `Cockpit mirrors: 3 reviewed regions`. Before the
+change it said `NO MIRRORS FITTED` (the guard demanded 1280 wide). Pinned by
+`mirrors::tests::the_gripen_picture_is_1279_wide_and_floods_three_mirrors` and the
+seed-table test.
+
+**Views (windowed).** Forward cockpit (`~GRIH.PIC` with the HUD inside the glass and
+live mirrors), look left and right at 45 degrees (the art turns away with the look),
+90 degrees left and right and 60 degrees up (no cockpit art, open sky), F3 Up and
+F2 Back all draw as for the other families. F2 Back shows the Gripen's spine and wing
+roots from the pilot's eye. The Gripen's own
+instrument bezel (`~GRI_P.PIC`, a dark frame with dark buttons) is drawn around the
+four windows, or six on the small layout. The standalone pages 0 to 9 render with it.
+
+**Instruments and the single engine.** The Systems window shows one engine readout,
+as every aircraft's does: `THR 70%`, `TEMP 0%`, `OIL 100%`, `HYD 100%`, `FUEL 5000
+LBS` and `(+ EXT 990 LBS)` with the `F150.GAS` centreline tank (the Gripen's own
+record, internal 5,000 lb; 989 LBS after a few live-fire seconds). The Weapons window lists
+`570 BK27`, `2 AGM-65`, `4 AIM-120`, `2 AIM-9M`, `30 CHAFF` and `30 FLARE`. HUD
+airspeed and altitude read the Gripen's own state (507 kt and 5,000 ft at the
+live-fire start).
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye` is
+the one fixed offset for every aircraft (7 ft up, 10 ft ahead of the model origin;
+see [the Mirage section](#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10) for
+the call sites). Measured on the neutral shape dump (1/3 ft a unit, forward +Y,
+up +Z), the topmost faces within 4 units of the centreline are 5 units (1.7 ft)
+over the aft canopy, 7 units (2.3 ft) at 20 to 30 units ahead and 8 units (2.7 ft)
+at 41 to 47 units ahead of the origin, i.e. a canopy top 2.3 to 2.7 ft above the
+origin between 6.7 and 15.7 ft ahead of it. The fixed eye (7 ft up, 10 ft ahead) sits
+about 4.5 ft above the canopy and over its middle. The F2 Back frame
+(`rafale-view-back-f2-comparison`) shows the spine and wing roots the way the
+Rafale's does. Not changed; a seated eye would be a fleet change (one eye table
+keyed by aircraft).
+
+**RWR with a threat.** As in the Mirage note: no scripted path puts an emitter on
+the RWR; the frames show the window with the jammer lit and the incoming round at the
+centre. Evidence and frames: `.local/m3-aircraft/frames/GRI-7/`. Not run: an RWR with
+a plotted emitter, the menu and net batteries.
+

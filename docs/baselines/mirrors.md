@@ -200,3 +200,18 @@ position against the scaled canopy is measured in [the Mirage sensors, HUD and
 cockpit section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 Frames are under `.local/m3-aircraft/frames/M2K-7/`.
 
+## 2026-11-10 Gripen cockpit mirrors
+
+Slice GRI-7 fitted the Gripen's own cockpit picture (`GRIPEN.PT` names `gripen.HUD`,
+stem `GRI`, art `~GRIH.PIC`, John's decision of 2026-11-10, opinionated). The picture
+is 1279x490, not 1280x490, so the mirror flood refused it and the sheet said `NO
+MIRRORS FITTED`. `mirrors::masks` now accepts the 1279 width, and `mirrors::seeds`
+has a `GRI` row (centre 640,44; left 245,304; right 1040,304; fitted, one flat fill
+of 117, 138, 154). `--cockpit-sheet OUT GRIPEN,RAFALE,F18` reported `gripen: stem
+GRI cockpit ~GRIH.PIC art 1279x490 FITTED CLR` with the centre mask at x 481 y 8 w
+316 h 77, the left mask at x 169 y 174 w 151 h 267 and the right mask at x 959 y
+174 w 151 h 267, and the windowed cockpit prints `Cockpit mirrors: 3 reviewed
+regions, 768x384 rear feed, every other visible frame`. The Gripen's masks are its
+own, not the Rafale's. The shared pilot's eye feeds the rear feed unchanged; its
+position against the Gripen's canopy is measured in [the Gripen section](../formats/aircraft-variety.md#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10).
+Frames are under `.local/m3-aircraft/frames/GRI-7/`.

@@ -523,6 +523,8 @@ impl AircraftId {
             // own gripen.HUD; F5E.PT names f29.HUD, TOR.PT e2000.HUD and
             // MF1.PT rafale.HUD.
             Self::F15E => "AV8.HUD",
+            // Gripen: decided, not interim (opinionated, John, 2026-11-10,
+            // GRI-7): its own HUD and ~GRI*.PIC cockpit family.
             Self::Gripen => "GRIPEN.HUD",
             Self::F5E => "F29.HUD",
             Self::Tornado => "E2000.HUD",
@@ -625,6 +627,7 @@ impl AircraftId {
             // ~GRI*.PIC, the F-5E the X-29's ~F29*.PIC, the Tornado the
             // Eurofighter 2000's ~EF2*.PIC and the Mirage F1 the Rafale's.
             Self::F15E => "AV8",
+            // Gripen: decided as above (John, 2026-11-10, GRI-7).
             Self::Gripen => "GRI",
             Self::F5E => "F29",
             Self::Tornado => "EF2",

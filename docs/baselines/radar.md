@@ -256,3 +256,17 @@ Super 530D (`R530.JT`) locks, hits and kills (`shots=1 hits=1 kills=1` at 700
 ticks). Not run: any side-by-side tuning, or an RWR with a plotted emitter (no
 scripted path exists).
 
+## Gripen radar, jammer and infrared channel, 2026-11-10 (GRI-7)
+
+The Gripen flies the already reviewed `F18R.SEE` (`Preset::Advanced`) and `F18.ECM`
+(`Generation::LateColdWar`) of its record and the AAS-38 infrared channel; no match
+arm and no code changed. `--sensor-summary` reads: `Gripen: radar F18R.SEE search 90
+nmi 60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED; infrared AAS38.SEE search
+15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi 170x140 deg
+track 5 nmi 170x140 deg; jammer F18.ECM LATE strength 0.30; signature radar 100
+infrared 90`. `--live-fire --aircraft gripen --weapon-slot 3` shows `RADAR TWS 10NM
+1 CONTACTS TRACK` and the AIM-120 locks, hits and kills (`shots=1 hits=1 kills=1` at
+3,600 ticks; at 700 still flying). `--sensor-channel ir` shows `IR IR 10NM 1
+CONTACTS` on the Radar window. `--jammer-on --combat-command incoming` lights `JAM` on
+the RWR. Not run: an RWR with a plotted emitter (no scripted path), side-by-side
+tuning.

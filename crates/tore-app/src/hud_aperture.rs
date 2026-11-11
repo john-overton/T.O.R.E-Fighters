@@ -194,7 +194,38 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // Tornado (~EF2H.PIC) name their own cockpit pictures, whose glass has
         // not been measured. No expected size, so the aperture fails closed
         // (an empty mask) until their cockpit slices measure a polygon.
-        AircraftId::Gripen | AircraftId::F5E | AircraftId::Tornado => ((0, 0), &[]),
+        // Update (GRI-7, 2026-11-10): the Gripen's glass is measured below, so
+        // only the F-5E and the Tornado still fail closed here.
+        AircraftId::F5E | AircraftId::Tornado => ((0, 0), &[]),
+        // The Gripen's own ~GRIH.PIC is 1279x490, not 1280. Fitted, measured
+        // from the transparent run inside the teal combiner outline and
+        // between the two slanted posts, down to the top of the base bar
+        // (GRI-7, 2026-11-10): the arc from (632, 118) over (531, 136) to the
+        // vertical sides at x 466 and 814 from y 190 to 262, the posts sloping
+        // in to (510, 383) and (770, 383).
+        AircraftId::Gripen => (
+            (1279, 490),
+            &[
+                (632, 118),
+                (583, 124),
+                (531, 136),
+                (501, 148),
+                (477, 178),
+                (466, 190),
+                (466, 262),
+                (469, 300),
+                (510, 383),
+                (770, 383),
+                (811, 300),
+                (814, 262),
+                (814, 190),
+                (803, 178),
+                (779, 148),
+                (749, 136),
+                (697, 124),
+                (648, 118),
+            ],
+        ),
         // The cockpit aliases above exhaust these identities.
         AircraftId::Av8
         | AircraftId::Mi24
@@ -298,5 +329,42 @@ mod tests {
         assert_eq!(f22, mask(&source, AircraftId::Faxx));
         assert_eq!(f22[200 * 1000 + 500], 1);
         assert_eq!(f22[100 * 1000 + 320], 0);
+    }
+
+    /// GRI-7: the Gripen's own 1279x490 picture has a measured glass polygon
+    /// (the arc, the vertical sides, the sloping posts and the base bar), not
+    /// the empty mask of the B5-1 interim; any other size fails closed.
+    #[test]
+    fn the_gripen_glass_is_measured_for_its_1279_picture() {
+        let source = transparent(1279, 490);
+        let gripen = mask(&source, AircraftId::Gripen);
+        assert_eq!(gripen.len(), 1279 * 490);
+        let at = |x: usize, y: usize| gripen[y * 1279 + x];
+        // Inside: centre of the glass, near the top of the arc, between posts.
+        assert_eq!(at(640, 250), 1);
+        assert_eq!(at(640, 121), 1);
+        assert_eq!(at(500, 350), 1);
+        // Outside: above the arc, outside the sides, the post area, the bar.
+        assert_eq!(at(640, 110), 0);
+        assert_eq!(at(470, 150), 0);
+        assert_eq!(at(450, 250), 0);
+        assert_eq!(at(480, 350), 0);
+        assert_eq!(at(640, 390), 0);
+        // Left and right are mirror images about the centre column 640.
+        for y in [120, 150, 190, 262, 300, 350, 380] {
+            let left = (0..640).filter(|x| at(*x, y) == 1).count();
+            let right = (640..1279).filter(|x| at(*x, y) == 1).count();
+            assert!(left.abs_diff(right) <= 1, "{y}: {left} {right}");
+        }
+        // An opaque art pixel inside the polygon stays out of the glass.
+        let mut framed = transparent(1279, 490);
+        framed.rgba[(200 * 1279 + 466) * 4 + 3] = 255;
+        assert_eq!(mask(&framed, AircraftId::Gripen)[200 * 1279 + 466], 0);
+        // A 1280x490 picture is not the Gripen's: fail closed.
+        assert!(
+            mask(&transparent(1280, 490), AircraftId::Gripen)
+                .iter()
+                .all(|v| *v == 0)
+        );
     }
 }

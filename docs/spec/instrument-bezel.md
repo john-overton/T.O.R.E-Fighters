@@ -296,3 +296,10 @@ What shipped in TORE (2026-09-23, `crates/tore-app/src/instruments.rs`):
 8. **Not implemented.** The number box click area (22, 4) has no action in
    TORE; its original action is not recorded here. The six-window small
    layout at scale 1 is not reproduced.
+
+The Gripen flies its own cockpit by John's decision of 2026-11-10 (opinionated):
+`GRIPEN.PT` names `gripen.HUD`, which is its own `GRIPEN.HUD`, whose panel is
+`~gri_p`. The Gripen therefore draws its own `~GRI_P.PIC` bezel (81 x 80, a dark
+frame with dark buttons) over `~GRIH.PIC`, the first batch aircraft with its own
+cockpit art. Its Systems window shows one engine readout, as every aircraft's does,
+and its own fuel (`FUEL 5000 LBS`, `(+ EXT 990 LBS)`) (GRI-7).

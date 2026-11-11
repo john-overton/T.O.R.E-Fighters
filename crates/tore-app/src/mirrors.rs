@@ -24,6 +24,9 @@ pub(crate) fn seeds(id: AircraftId) -> Option<[Option<[usize; 2]>; 3]> {
         "F14" => [s(640, 40), s(140, 250), s(1140, 250)],
         "F4" => [s(640, 40), s(200, 300), s(1080, 300)],
         "RAF" => [s(640, 40), s(190, 360), s(1090, 360)],
+        // The Gripen's own ~GRIH.PIC (1279x490, GRI-7, 2026-11-10): one flat
+        // blue-grey fill (117, 138, 154) for the three mirror glasses.
+        "GRI" => [s(640, 44), s(245, 304), s(1040, 304)],
         "AV8" => [s(640, 40), s(204, 257), s(1064, 257)],
         "SU35" => [s(640, 40), s(203, 297), s(1075, 297)],
         "A7" => [s(641, 35), s(120, 304), s(1161, 304)],
@@ -35,7 +38,9 @@ pub(crate) fn seeds(id: AircraftId) -> Option<[Option<[usize; 2]>; 3]> {
 }
 /// Four-connected exact-color flood; bounds prevent unrelated artwork leaks.
 pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
-    if [source.width, source.height] != [1280, 490] {
+    // Every reviewed picture is 1280x490 except the Gripen's `~GRIH.PIC`,
+    // which is 1279x490 (GRI-7).
+    if !matches!((source.width, source.height), (1280 | 1279, 490)) {
         return None;
     }
     flood(source, seeds(id)?)
@@ -296,7 +301,7 @@ mod tests {
         family(&[Su27, Av8, F15]);
         family(&[Mig29, Su25, Mig23, Mi24]);
         family(&[F104, A10]);
-        for id in [F18, F14, Rafale, Su35, A7, Yak141] {
+        for id in [F18, F14, Rafale, Su35, A7, Yak141, Gripen] {
             assert!(seeds(id).is_some(), "{id:?}");
         }
         // The F-16, F-22, X-31, MiG-17, MiG-21 and AC-130 pictures have no
@@ -318,5 +323,37 @@ mod tests {
             points.dedup();
             assert_eq!(points.len(), table.iter().flatten().count());
         }
+    }
+    /// GRI-7: the Gripen's own 1279x490 picture takes its three flat mirror
+    /// fills; a picture of any other width does not.
+    #[test]
+    fn the_gripen_picture_is_1279_wide_and_floods_three_mirrors() {
+        let (w, h) = (1279, 490);
+        let mut s = Sprite {
+            width: w,
+            height: h,
+            rgba: vec![0; w * h * 4],
+            glyphs: vec![],
+        };
+        let fills = [(600, 30, 80, 30), (200, 280, 90, 60), (990, 280, 90, 60)];
+        for (x0, y0, fw, fh) in fills {
+            for y in y0..y0 + fh {
+                for x in x0..x0 + fw {
+                    s.rgba[(y * w + x) * 4..(y * w + x) * 4 + 4]
+                        .copy_from_slice(&[117, 138, 154, 255]);
+                }
+            }
+        }
+        let m = masks(&s, AircraftId::Gripen).expect("three mirrors");
+        assert_eq!(m.rects[0], [600., 30., 80., 30.]);
+        assert_eq!(m.rects[1], [200., 280., 90., 60.]);
+        assert_eq!(m.rects[2], [990., 280., 90., 60.]);
+        let wrong = Sprite {
+            width: 1278,
+            height: h,
+            rgba: vec![0; 1278 * h * 4],
+            glyphs: vec![],
+        };
+        assert!(masks(&wrong, AircraftId::Gripen).is_none());
     }
 }

@@ -1814,3 +1814,9 @@ This artwork is research evidence only. The exploratory vegetation renderer
 uses original text-generated material sprites. Its camera-facing, distance and
 density rules are agent choices in the
 [vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).
+
+Cockpit eye point, 2026-11-10 (GRI-7, agent decision, unchanged): the Gripen's
+canopy top on the neutral shape (1/3 ft a unit) is 2.3 to 2.7 ft above the model
+origin and 6.7 to 15.7 ft ahead of it, against the fixed pilot's eye 7 ft up and 10
+ft ahead. No per-aircraft eye was added; see [the Gripen sensors, HUD and cockpit
+section](aircraft-variety.md#gripen-sensors-hud-and-cockpit-gri-7-2026-11-10).
