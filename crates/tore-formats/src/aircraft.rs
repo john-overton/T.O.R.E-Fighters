@@ -846,7 +846,7 @@ impl AircraftId {
             Self::M2000 => Some("F18R.SEE"),
             Self::F15E => Some("F15R.SEE"),
             Self::Gripen => Some("F18R.SEE"),
-            Self::F5E => Some("F18R.SEE"),
+            Self::F5E => Some("F104R.SEE"),
             Self::Tornado => Some("F18R.SEE"),
             Self::Mf1 => Some("F18R.SEE"),
         }
@@ -1080,6 +1080,7 @@ impl Aircraft {
         }
         stations::append(id, &mut hardpoints);
         stations::retire(id, &mut hardpoints);
+        stations::adjust_defaults(id, &mut hardpoints);
         let (min, max) = (plane["envMin"].number()?, plane["envMax"].number()?);
         let env = b.block("env")?;
         if min > 0 || max < 1 || min < -20 || max > 30 || env.len() != (max - min + 1) as usize * 44
@@ -1107,6 +1108,8 @@ impl Aircraft {
         }
         // The Mirage 2000's +9 G limit (M2K-11): one range for every reader.
         corrections::raise_g_limit(id, &mut plane, &mut envelopes);
+        // The batch aircraft's G limits and the F-5E's ceiling (B5-2).
+        corrections::fit_envelopes(id, &object, &mut plane, &mut envelopes);
         let mut sounds = BTreeMap::new();
         for name in [
             "loopSound",
@@ -1739,6 +1742,15 @@ mod profile_tests {
     }
     /// The fixture with its own G range and rows (speed, altitude points).
     fn fixture_with_rows(min: i32, max: i32, rows: &[(i32, Vec<[i32; 2]>)]) -> String {
+        fixture_with_fields(min, max, rows, &[])
+    }
+    /// [`fixture_with_rows`] with named record fields set (by field name).
+    fn fixture_with_fields(
+        min: i32,
+        max: i32,
+        rows: &[(i32, Vec<[i32; 2]>)],
+        fields: &[(&str, i32)],
+    ) -> String {
         let mut text = String::from("[brent's_relocatable_format]\n");
         for (block, layout) in [
             ("o", schema::OBJECT),
@@ -1761,6 +1773,10 @@ mod profile_tests {
                     ("p", "maxTakeoffWeight") => 2000,
                     _ => 0,
                 };
+                let v = fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map_or(v, |(_, value)| *value);
                 match *kind {
                     "ptr" => {
                         if ["ot_names", "shape", "hards", "env"].contains(name) {
@@ -2029,6 +2045,203 @@ mod profile_tests {
         let m = Aircraft::parse(mirage_2000(&nine).as_bytes()).unwrap();
         assert_eq!(m.envelopes.len(), 14);
         assert_eq!(m.envelopes.last().unwrap().points[0], [700., 0.]);
+    }
+    /// A batch-aircraft record: the fixture dressed as `file` with retail
+    /// numbers for the fields B5-2 corrects.
+    fn batch_text(
+        file: &str,
+        short: &str,
+        long: &str,
+        size: i32,
+        range: (i32, i32),
+        rows: &[(i32, Vec<[i32; 2]>)],
+        fields: &[(&str, i32)],
+    ) -> String {
+        let mut all = vec![("typeSize", size)];
+        all.extend_from_slice(fields);
+        fixture_with_fields(range.0, range.1, rows, &all)
+            .replace("F18.PT", file)
+            .replace("\"Synthetic\"", &format!("\"{short}\""))
+            .replace("Synthetic plane", long)
+    }
+    fn plain_rows(min: i32, max: i32) -> Vec<(i32, Vec<[i32; 2]>)> {
+        (min..=max)
+            .map(|g| (g, vec![[100, 0], [200, 10_000], [900, 10_000], [300, 0]]))
+            .collect()
+    }
+    #[test]
+    fn the_tornado_reads_real_thrust_weights_and_a_plus_7_row_everyone_else_retail() {
+        // Opinionated (John, 2026-11-10): two RB199 Mk 103, real weights, +7 G.
+        let mut rows = plain_rows(-3, 6);
+        rows[9].1 = vec![
+            [575, 0],
+            [667, 7_000],
+            [880, 14_000],
+            [1_120, 14_000],
+            [1_140, 0],
+        ];
+        let retail = [
+            ("weight", 41_885),
+            ("thrust", 35_270),
+            ("aftThrust", 50_700),
+            ("maxTakeoffWeight", 90_390),
+            ("internalFuel", 11_221),
+        ];
+        let text = batch_text(
+            "TOR.PT",
+            "Tornado",
+            "Tornado IDS",
+            660,
+            (-3, 6),
+            &rows,
+            &retail,
+        );
+        let t = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(t.id, AircraftId::Tornado);
+        assert_eq!(t.number("engines"), 2.);
+        assert_eq!(t.number("thrust"), 17_300.);
+        assert_eq!(t.number("aftThrust"), 32_150.);
+        assert_eq!(t.number("weight"), 31_065.);
+        assert_eq!(t.number("maxTakeoffWeight"), 61_620.);
+        assert_eq!(t.number("envMax"), 7.);
+        let gs: Vec<i32> = t.envelopes.iter().map(|e| e.g).collect();
+        assert_eq!(gs, (-3..=7).collect::<Vec<_>>());
+        // The same numbers on the MiG-23 record stay retail.
+        let m = Aircraft::parse(
+            batch_text(
+                "MIG23.PT",
+                "MiG-23",
+                "MiG-23 Flogger-B",
+                660,
+                (-3, 6),
+                &rows,
+                &retail,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((m.number("thrust"), m.number("envMax")), (35_270., 6.));
+        // Every Tornado row below +7 is the record's own.
+        assert_eq!(t.envelopes[..10], m.envelopes[..]);
+        // An edited Tornado (one thrust off) is read as it is, rows and all.
+        let mut edited = retail;
+        edited[1].1 = 35_271;
+        let e = Aircraft::parse(
+            batch_text(
+                "TOR.PT",
+                "Tornado",
+                "Tornado IDS",
+                660,
+                (-3, 6),
+                &rows,
+                &edited,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((e.number("thrust"), e.number("weight")), (35_271., 41_885.));
+    }
+    #[test]
+    fn the_mirage_f1_reads_one_atar_9k_50_and_the_f5e_its_real_fuel_g_and_ceiling() {
+        // Mirage F1: 11,020 / 15,873 lbf, retail weights.
+        let mf1 = [
+            ("engines", 1),
+            ("weight", 15_542),
+            ("thrust", 15_000),
+            ("aftThrust", 30_000),
+            ("maxTakeoffWeight", 30_203),
+            ("internalFuel", 6_120),
+        ];
+        let rows = plain_rows(-3, 7);
+        let text = batch_text("MF1.PT", "MF1", "Mirage F1", 636, (-3, 7), &rows, &mf1);
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::Mf1);
+        assert_eq!((a.number("engines"), a.number("thrust")), (1., 11_020.));
+        assert_eq!(a.number("aftThrust"), 15_873.);
+        assert_eq!(a.number("weight"), 15_542.);
+        assert_eq!(a.number("maxTakeoffWeight"), 30_203.);
+        // F-5E: fuel 4,400 lb, +7 G, 51,800 ft.
+        let mut rows = plain_rows(-4, 8);
+        let minus_four = vec![[570, 0], [610, 4_000], [730, 3_000], [760, 0]];
+        rows[0].1 = minus_four.clone();
+        rows[12].1 = minus_four;
+        rows[4].1 = vec![
+            [200, 0],
+            [255, 21_000],
+            [317, 30_500],
+            [418, 39_750],
+            [570, 44_000],
+            [995, 44_000],
+            [1_607, 41_000],
+            [1_940, 36_000],
+            [1_545, 18_000],
+            [1_270, 0],
+        ];
+        rows[5].1 = vec![
+            [240, 0],
+            [295, 21_000],
+            [357, 30_500],
+            [458, 38_750],
+            [580, 42_000],
+            [965, 42_000],
+            [1_607, 39_000],
+            [1_840, 36_000],
+            [1_475, 18_000],
+            [1_220, 0],
+        ];
+        let f5e = [
+            ("weight", 9_558),
+            ("maxAlt", 42_000),
+            ("thrust", 7_000),
+            ("aftThrust", 10_000),
+            ("maxTakeoffWeight", 24_664),
+            ("internalFuel", 6_240),
+        ];
+        let text = batch_text("F5E.PT", "F-5", "F-  5E Tiger", 612, (-4, 8), &rows, &f5e);
+        let f = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(f.id, AircraftId::F5E);
+        assert_eq!(f.number("internalFuel"), 4_400.);
+        assert_eq!(f.number("maxAlt"), 51_800.);
+        assert_eq!(
+            (f.number("thrust"), f.number("aftThrust")),
+            (7_000., 10_000.)
+        );
+        assert_eq!((f.number("envMin"), f.number("envMax")), (-4., 7.));
+        assert_eq!(f.envelopes.len(), 12);
+        let one = f.envelopes.iter().find(|e| e.g == 1).unwrap();
+        assert_eq!(one.points[4], [580., 51_800.]);
+        assert_eq!(one.points[5], [965., 51_800.]);
+        // The desert F-5E has its own record and keeps the retail ceiling.
+        // One value off the copy (the fuel) leaves the whole ceiling and fuel
+        // as they were, but the repeated +8 row is still retired.
+        let mut edited = f5e;
+        edited[5].1 = 6_241;
+        let text = batch_text(
+            "F5E.PT",
+            "F-5",
+            "F-  5E Tiger",
+            612,
+            (-4, 8),
+            &rows,
+            &edited,
+        );
+        let e = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            (e.number("internalFuel"), e.number("maxAlt")),
+            (6_241., 42_000.)
+        );
+        let top = |e: &Aircraft| {
+            e.envelopes
+                .iter()
+                .find(|r| r.g == 1)
+                .unwrap()
+                .points
+                .iter()
+                .map(|p| p[1])
+                .fold(f64::MIN, f64::max)
+        };
+        assert_eq!(top(&e), 42_000.);
+        assert_eq!(top(&f), 51_800.);
     }
     #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {
