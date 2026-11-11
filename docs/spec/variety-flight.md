@@ -642,6 +642,55 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## F-15E (F15E-8, 2026-11-10)
+
+The F-15E flies the hybrid adapter's `variety` configuration built from
+`F15E.PT`. Its flight words are the F-15C record's (John kept retail, decision 1,
+2026-11-10): empty 28,600 lb, internal fuel 13,662 lb, maximum takeoff 68,000 lb,
+two engines at 32,558 lbf military and 47,860 lbf afterburner, environment rows
+-4 to +9 G and a 100,000 ft ceiling. The shared conventional flight, ground
+contact, actuator and loaded-mass rules apply unchanged; no new fit was needed,
+and the numbers equal the F-15C's on the same load.
+
+The record's 1 G fast edge is 2,420 ft/s at 36,000 ft, 1,434 kt (Mach 2.5, the
+Jane's text and the published figure); the sea-level edge is 806 kt (published:
+about Mach 1.2, 800 kt CAS). Both stay as decoded. The shared loaded-drag rule
+settles full internal fuel at 0.916 of the edge at every altitude (1,313 kt,
+Mach 2.29, at 36,000 ft; 750 kt at 1,000 ft). The record's ceiling is 100,000 ft
+and the model holds level flight to about 95,000 ft, against a published service
+ceiling of 60,000 ft (Jane's) to 65,000 ft; the `climb` maneuver tops out at
+108,921 ft. This is the retail copy, left as is.
+
+At full internal fuel and afterburner the peak specific excess power is 588 to
+594 ft/s (35,300 to 35,600 ft/min) clean and 436 to 453 ft/s with the default
+load, and the best sustained climb is 36,000 ft/min against the published
+50,000 ft/min or more: about 71 percent, because of the shared drag law (drag
+equals the reference thrust at the top speed, no ram thrust gain), the same
+cause as the Mirage but a smaller shortfall since the F-15E's thrust to weight
+is 1.13 clean. Level acceleration at 1,000 ft from 363 kt takes 7 s to 460 kt
+and 19 s to 590 kt; military power halves the excess power and settles at 619
+kt at 1,000 ft and 1,083 kt (Mach 1.89) at 36,000 ft.
+
+The G limits are the record's -4 and +9 rows through the shared loaded-elevator
+rule (43 percent): a full-aft-stick pull at 461 kt and 1,000 ft peaks at 7.57 G
+at full fuel, 8.28 at half, 8.69 at a quarter and 9.10 at 300 lb (clean); the
+default stores give 6.73 to 7.91 G; the push is -2.5 to -3.0 G. A scripted
+sustained turn at 461 kt and 1,000 ft reaches 5.74 G and 12.8 deg/s clean. The
+record's fuel flows (4 and 24 lb/s, 0.442 and 1.805 lb/lbf/h) are kept: 56.9
+minutes at military power and 9.5 minutes at afterburner, against about 35
+minutes at the real F100-PW-220's 0.73 lb/lbf/h.
+
+The default load (gross 52,202 lb) takes off at 149.1 kt after 1,155 ft and
+approaches at 156.1 kt at 65 percent fuel; the clean aircraft lifts off at 127.3
+kt after 673 ft and approaches at 140.4 kt (Jane's: take-off run 274 m,
+approach 125 kt CAS, landing run 1,067 m, for the F-15C). The battery's liftoff
+and approach windows are fitted (agent decisions, 2026-11-10; see the
+[validation](../baselines/variety-flight.md#f-15e-validation-2026-11-10)).
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path stay
+separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

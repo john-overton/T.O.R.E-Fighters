@@ -4678,3 +4678,28 @@ ordnance](aircraft-ordnance.md#the-f-15e-strike-eagle-f15e-6-2026-11-10) and the
 [ordnance availability baseline](../baselines/ordnance-availability.md#f-15e-ordnance-f15e-6-2026-11-10).
 No audit pin moved. Update to the F15E-5 "default load" lines above: the gear leg
 crossing the aft inboard bombs in transit is still open.
+
+## F-15E flight review (F15E-8, 2026-11-10)
+
+Slice F15E-8 validated the F-15E headless against the record, TORE's F-15C and the
+cited real aircraft; nothing in the flight model or the record changed (John kept
+the retail copy of the F-15C's numbers, decision 1). The sim reads the record only,
+and the F-15E's flight words equal the F-15C's, so every F-15E result equals the
+F-15C's on the same load; the two differ by default load alone (9,940 against
+2,152 lb). Details, tables and the battery windows are in the
+[variety flight baseline](../baselines/variety-flight.md#f-15e-validation-2026-11-10)
+and the [spec](../spec/variety-flight.md#f-15e-f15e-8-2026-11-10).
+
+Summary (afterburner, full internal fuel, clean 42,262 lb): Mach 2.29 at 36,000 ft
+against the record's Mach 2.5 edge (0.916 of it, the shared loaded-drag rule), 750
+kt at 1,000 ft against about Mach 1.2 at sea level, level flight to about 95,000
+ft and a climb peak of 108,921 ft against a published 60,000 to 65,000 ft service
+ceiling (the record's 100,000 ft, a retail copy); best sustained climb 36,000
+ft/min against more than 50,000 published (about 71 percent, the shared drag law);
+full-aft-stick pull at 461 kt and 1,000 ft 7.57 / 8.28 / 8.69 / 9.10 G at full,
+half, quarter and near-empty fuel (clean; 6.73 to 7.91 G with the default load);
+liftoff 149.1 kt after 1,155 ft and approach 156.1 kt with the default load.
+
+Findings for John, nothing changed: the ceiling, the +9 G reached only near empty
+(the fleet loaded-elevator rule, as the Mirage before M2K-11), fuel flows 39 percent
+under the real F100 at military power, and the default load's weight.

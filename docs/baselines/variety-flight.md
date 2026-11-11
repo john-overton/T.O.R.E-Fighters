@@ -751,3 +751,250 @@ Battery: `flight-variety-m2000`, `flight-liftoff-m2000`,
 `ai-m2000-quick-mission-2v2`, `replay-rec-m2000-2v2` and the three
 `a2g-*-m2000` scenarios passed (profile `.local/m3-aircraft/profile`). No combat-G
 battery scenario pins the Mirage (`PULL_G_RETAIL` has no entry).
+
+## F-15E validation, 2026-11-10
+
+Implementation and measurement mode, slice F15E-8. Nothing in the flight model,
+the record or a shared constant changed. The `F15E.PT` record was read from the
+ignored local FA_2.LIB extraction under `.local/m3-imports/scratch/f15e` and the
+app profile is `.local/m3-aircraft/profile-f15e`. The F-15E flies its own record
+on the default hybrid `--researched-flight` path (John kept the retail copy of
+the F-15C's numbers, decision 1 of 2026-11-10, so no thrust or weight
+correction applies). Its flight words are the F-15C's: of the 17 statements that
+differ from `F15.PT` (see [aircraft variety](../formats/aircraft-variety.md))
+none is an envelope row, a weight, a thrust or a fuel flow, and the sim reads the
+record only, so **every F-15E number below equals the F-15C's** on the same load
+(`diff` of the clean `performance_probe` logs: identical). The two aircraft
+differ only by the load they start with. Everything below is measured, not
+fitted; the only fitted values are the two battery windows at the end. All knots
+are true airspeed. The logs are local: `.local/m3-aircraft/checks/F15E-8/`.
+
+The record: empty 28,600 lb, internal fuel 13,662 lb, maximum 68,000 lb, military
+32,558 lbf and afterburner 47,860 lbf (both engines together), 1 G top speed
+1,434 kt at 36,000 ft (806 kt at sea level), ceiling 100,000 ft, G rows -4 to +9,
+fuel flows 4 and 24 lb/s. The clean aircraft with full internal fuel weighs
+42,262 lb. The default load (a 2,300 lb centreline tank, 12 Mk 82 on the belly
+pair, four AIM-120, 450 rounds) carries 9,940 lb, so the default gross is 52,202
+lb (Load Ordnance page; the F-15C's default 2,152 lb gives 44,414 lb). The probe
+runs "default load" as `PROBE_PAYLOAD=9940`, with the tank's fuel counted as dead
+weight, so burn is unchanged.
+
+**Harness.** `variety_flight` was not rerun (the `flight-variety-f15e` scenario
+covers it). `PROBE_POINTS=1 PROBE_LEVEL=1 PROBE_PULLS=1 envelope_probe` gave the
+level and pull rows; `performance_probe` (clean, `PROBE_PAYLOAD=9940`, and
+`PROBE_ONLY=turn PROBE_ALTS=1000 PROBE_FUEL=... PROBE_PAYLOAD=...` for the fuel
+table) gave the rest; `--headless-flight` with `--aircraft f15e` the maneuvers.
+The pilots are scripted, so turn and climb figures are a repeatable harness
+reading, not a best-pilot figure.
+
+### Top speed and ceiling
+
+| Altitude | 1 G edge (record), kt | Level, AB, clean, kt | Ratio | Level, AB, default load, kt | Level, military, clean, kt |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 ft | 819 (806 at sea level) | 750 (Mach 1.14) | 0.916 | 710 (Mach 1.08) | 619 (Mach 0.94) |
+| 10,000 ft | 934 | 856 | 0.916 | | |
+| 15,000 ft | | 915 (Mach 1.46) | | 865 (Mach 1.38) | 754 (Mach 1.20) |
+| 20,000 ft | 1,081 | 990 | 0.916 | | |
+| 30,000 ft | 1,301 | 1,192 (Mach 2.02) | 0.916 | 1,128 (Mach 1.91) | 983 (Mach 1.67) |
+| 36,000 ft | 1,434 | 1,313 (Mach 2.29) | 0.916 | 1,243 (Mach 2.17) | 1,083 (Mach 1.89) |
+| 40,000 ft | 1,427 | 1,307 | 0.916 | | |
+| 50,000 ft | 1,408 | 1,290 | 0.916 | | |
+| 60,000 ft | 1,368 | 1,253 | 0.916 | | |
+| 80,000 ft | 1,237 | 1,133 | 0.916 | | |
+| 95,000 ft | 1,040 | 953 | 0.916 | | |
+| 100,000 ft | 921 | 807, not held | 0.876 | | |
+
+The loaded-drag rule (`loadedDrag=40`) settles full internal fuel at 0.916 of
+the edge at every altitude, a little lower than the Mirage (0.948), inside the
+fighters' 87 to 96 percent band. The maximum is Mach 2.29 against the record's
+Mach 2.5 edge. The `climb` maneuver tops out at 108,921 ft (1.089 of the record
+ceiling) on a dry tank. The 1 G polygon runs to 100,000 ft, so level flight is
+held up to about 95,000 ft, far above the real service ceiling (below).
+
+### Acceleration and climb (afterburner unless stated, full internal fuel)
+
+| Level acceleration | Clean, s | Default load, s | Peak specific excess power, clean / default |
+| --- | --- | --- | --- |
+| 1,000 ft, AB, 363 to 460 / 530 / 590 / 660 kt | 7 / 13 / 19 / 30 | 9 / 17 / 26 / 46 | 588 / 446 ft/s |
+| 1,000 ft, military, 363 to 460 / 530 / 590 kt | 13 / 27 / 52 | 17 / 39 / not reached | 319 / 238 ft/s |
+| 15,000 ft, AB, 345 to 500 / 690 / 810 kt | 12 / 31 / 53 | 15 / 42 / 79 | 573 / 436 ft/s |
+| 36,000 ft, AB, 316 to 520 / 800 / 1,030 / 1,150 kt | 18 / 48 / 83 / 114 | 23 / 61 / 110 / 163 | 594 / 453 ft/s |
+| 36,000 ft, military, 316 to 520 / 800 / 980 kt | 28 / 80 / 148 | 35 / 106 / 228 | 332 / 253 ft/s |
+
+| Afterburner climb from sea level | Clean, Mach 0.8 | Clean, Mach 0.9 | Default load, Mach 0.8 | Default load, Mach 0.9 |
+| --- | --- | --- | --- | --- |
+| 10,000 ft | 36 s | 44 s | 43 s | 55 s |
+| 36,000 ft | 84 s | 94 s | 104 s | 118 s |
+| 50,000 ft | 109 s | 119 s | 138 s | 151 s |
+| 59,000 ft | 129 s | 137 s | 165 s | 177 s |
+| Best sustained rate | 593 ft/s (35,574 ft/min) at 36,900 ft | 604 ft/s (36,245 ft/min) at 39,800 ft | zoom reading only | zoom reading only |
+
+The default load's "best rate" rows print 623 to 634 ft/s at 87,000 ft and 850
+kt: that is a late zoom reading, not a sustained climb, so only the times above
+are quoted for the loaded aircraft. The clean best sustained climb is 36,000 ft
+per minute and the peak specific excess power 588 to 594 ft/s (35,300 to 35,600
+ft/min).
+
+### Turns and G limits
+
+| Case (afterburner, full internal fuel) | Clean (42,262 lb) | Default load (52,202 lb) |
+| --- | --- | --- |
+| Full aft stick, 3 s, 1,000 ft, 330 kt | 6.69 G, 19.1 deg/s | 5.94 G, 16.4 deg/s |
+| Full aft stick, 1,000 ft, 461 kt (Mach 0.7) | 7.57 G, 17.1 deg/s | 6.73 G, 14.9 deg/s |
+| Full aft stick, 1,000 ft, 593 kt | 7.57 G, 13.0 deg/s | 6.73 G, 11.4 deg/s |
+| Full aft stick, 15,000 ft, 564 kt | 5.87 G, 9.8 deg/s | 5.22 G, 8.5 deg/s |
+| Full aft stick, 30,000 ft, 530 kt | 4.18 G, 6.6 deg/s | 3.71 G, 5.6 deg/s |
+| Full forward stick, 461 kt, 1,000 ft | -2.51 G | -2.23 G |
+| Sustained level turn, 1,000 ft, 461 kt | 5.74 G, 12.8 deg/s (bank 80 deg, speed settled at 485 kt) | 4.80 G, 11.1 deg/s |
+| Sustained level turn, 1,000 ft, 593 kt | 4.14 G, 7.4 deg/s | 3.24 G, 5.8 deg/s |
+| Sustained level turn, 15,000 ft, 439 kt (Mach 0.7) | 5.74 G, 13.1 deg/s | 4.80 G, 11.2 deg/s |
+| Sustained level turn, 15,000 ft, 564 kt | 4.82 G, 8.7 deg/s | 4.14 G, 7.8 deg/s |
+| Sustained level turn, 36,000 ft, 631 kt | 4.17 G, 6.4 deg/s | 3.64 G, 5.7 deg/s |
+
+**Full aft stick at 461 kt, 1,000 ft, by fuel (the Mirage M2K-11 table).** The
+record's +9 G row is in the source, so unlike the Mirage no correction was
+needed; the shared loaded-elevator rule (`loadedElev=43`) scales the limit with
+gross weight, so the limit climbs as fuel burns.
+
+| Internal fuel, lb | 13,662 (full) | 6,831 (half) | 3,416 (quarter) | 300 (near empty) |
+| --- | ---: | ---: | ---: | ---: |
+| Clean gross, lb | 42,262 | 35,431 | 32,016 | 28,900 |
+| Peak G, clean | 7.57 | 8.28 | 8.69 | 9.10 |
+| Turn rate, clean, deg/s | 17.1 | 18.9 | 19.8 | 20.8 |
+| Full forward stick, clean | -2.51 | -2.74 | -2.88 | -3.02 |
+| Peak G, default stores | 6.73 | 7.29 | 7.60 | 7.91 |
+| Sustained turn, clean | 5.74 G, 12.8 deg/s | 7.14 G, 16.3 deg/s | 7.16 G, 15.0 deg/s | 7.17 G, 13.9 deg/s |
+
+So a full-fuel clean F-15E peaks at 7.57 G against the record's +9, and reaches
++9 only at near-empty tanks (9.10 G at 300 lb). The push stops at -2.5 to -3.0 G
+against the record's -4 (and the Jane's text's design -3). The sustained turn
+comes from a scripted pilot that raises the bank in 2 degree steps until speed
+or altitude is lost, so it is a lower bound; with light fuel the pilot settles
+near the 82 degree bank limit and the speed drifts up (521 to 563 kt), which is
+why the sustained rate falls while the G stays at 7.2.
+
+### Fuel and endurance
+
+The record's flows are 4 lb/s at military power and 24 lb/s at afterburner (14,400
+and 86,400 lb/h), which is 0.442 and 1.805 lb/lbf/h against the record's 32,558 and
+47,860 lbf. The 13,662 lb tank lasts 56.9 minutes at military power and 9.5
+minutes at afterburner (burn measured: 4.00 and 24.00 lb/s over 300 s). A level
+cruise at 65 percent of the top speed at 20,000 ft (702 kt, throttle trimmed) burns
+2.96 lb/s, which is 77.0 minutes or 901 nautical miles clean, and 68.9 minutes or
+806 nautical miles with the default stores. Military power gives 754 nautical miles
+clean and afterburner 153 nautical miles. The `climb` maneuver burns the tank dry
+and the 300 s `sprint` burns 7,200 lb (24 lb/s).
+
+### Takeoff, approach and landing
+
+Ground probes at `--theater UKR --ground-start 1` (the first Ukrainian airfield,
+a 5,532 ft runway), default load (gross 52,202 lb, `loading=0.825`, stall scale
+1.351, 120.1 kt stall and 148.5 kt minimum level flapped speed after the weight
+scaling):
+
+| Probe | Result |
+| --- | --- |
+| takeoff, default load | liftoff tick 1,085 at 149.1 kt after 1,155 ft (352 m), rotation 135.1 kt |
+| takeoff, `--loadout none` (42,262 lb) | liftoff 127.3 kt after 673 ft (205 m), rotation 121.0 kt |
+| takeoff, F-15C default (44,414 lb) | liftoff 131.8 kt after 759 ft, rotation 124.2 kt |
+| takeoff, `--retail-stall-speeds`, default load | liftoff 113.1 kt after 656 ft (imported polygon speeds, no weight scaling) |
+| land, 65 percent fuel (8,880 lb), default load | approach 156.1 kt, touchdown 155.0 kt at 4.7 ft/s sink, 2,247 ft rollout, stopped, score 100 |
+| land, 65 percent fuel, `--loadout none` | approach 140.4 kt, touchdown 137.7 kt, 1,808 ft rollout |
+| land, 65 percent fuel, F-15C default | approach 144.0 kt, touchdown 141.4 kt, 1,899 ft rollout |
+| land (full fuel, default load) | touchdown 156.9 kt at 7.5 ft/s, stopped, score 100 |
+| land-hard | touchdown 166.2 kt at 33.8 ft/s, stopped, score 100 |
+| land-gear-up, land-off-runway | crashed for the gear and for the not-landable ground, by design |
+| nosewheel | no crash, 11.2 kt maximum |
+
+Eleven air maneuvers all ended with `non_finite=0`: `level` 7,200 ticks, `pull`
+7,200 (7.57 G, loop completed), `loop` completed at 2,565 ticks (7.62 G), `sprint`
+36,000 (831 kt), `climb` 115,554 ticks (108,921 ft, 1,059 kt), `dive` and
+`overspeed` ending in the overspeed loss, `rudder`, `devices` (no violations),
+`stall-recover` (recovered, no loss) and `spin-recover` (recovered).
+
+### Against the real aircraft
+
+Retail text (Jane's All the World's Aircraft, `F15E.INF` and `F15.INF` on the
+retail media, read 2026-11-10; numbers only) and public pages read the same day:
+Wikipedia, "McDonnell Douglas F-15E Strike Eagle" (early aircraft F100-PW-220 at
+23,770 lbf afterburner, later -229 at 29,160 lbf) and "Pratt & Whitney F100"
+(-220: 14,590 lbf military, 0.73 lb/lbf/h; -229: 17,800 lbf and 29,160 lbf, 0.76
+and 1.94 lb/lbf/h); milavia.net, "Specifications F-15 Eagle" (F-15E: more than
+2,655 km/h = 1,650 mph at altitude, 50,000 ft/min at sea level; F-15C: Mach 2.5
+plus, service ceiling more than 60,000 ft); migflug.com, "McDonnell Douglas F-15
+Eagle" (service ceiling 65,000 ft, climb more than 50,000 ft/min, sea level
+about Mach 1.2 = 1,450 km/h; a stripped record aircraft reached 30,000 m in
+207.8 s); a Key.aero forum post (an early F-15C at 41,000 lb with a centreline
+tank and eight missiles sustaining about 5.2 G at Mach 0.8, 15,000 ft; unverified,
+a forum figure). No primary source gave a sustained turn rate, a take-off speed
+or an F-15E landing speed.
+
+| Quantity | Measured (clean / default load) | Retail record | Real (cited) |
+| --- | --- | --- | --- |
+| Top speed at altitude | 1,313 kt (Mach 2.29) at 36,000 ft / 1,243 kt (Mach 2.17) | 1,434 kt at 36,000 ft | Mach 2.5 (`F15E.INF`), 1,650 mph (1,434 kt) |
+| Top speed at sea level | 750 kt at 1,000 ft (Mach 1.14) / 710 kt | 806 kt (819 at 1,000 ft) | about Mach 1.2 (migflug), 800 kt CAS (`F15.INF`) |
+| Ceiling | level flight to about 95,000 ft, climb peak 108,921 ft | 100,000 ft | 60,000 ft service (`F15.INF`, milavia), 65,000 ft (migflug) |
+| Climb | 35,300 to 36,200 ft/min best; 36,000 ft in 84 s / 104 s (Mach 0.8 schedule) | not in the record | more than 50,000 ft/min (milavia, migflug) |
+| Specific excess power | 588 to 594 ft/s / 436 to 453 ft/s (AB) | | about 833 ft/s if the 50,000 ft/min figure is a sea-level rate at light weight |
+| G limits | +7.57 / -2.51 at full fuel, +9.10 / -3.02 near empty (461 kt, 1,000 ft); default load +6.73 | +9 / -4 | design +9 / -3 (`F15.INF`) |
+| Sustained turn, 461 kt, 1,000 ft | 5.74 G, 12.8 deg/s / 4.80 G, 11.1 deg/s (lower bound) | | about 5.2 G at Mach 0.8, 15,000 ft, 41,000 lb loaded (forum, unverified); model 5.3 G interpolated at 42,262 lb clean |
+| Fuel, military / AB | 56.9 / 9.5 min; 0.442 / 1.805 lb/lbf/h | 4 / 24 lb/s | -220 about 0.73 lb/lbf/h (35 min at 32,558 lbf); -229 AB 1.94 |
+| Range | 901 nmi cruise clean (extrapolated) | | 2,400 nmi ferry, combat radius 685 nmi (`F15E.INF`), not like for like |
+| Liftoff | 149.1 kt, 1,155 ft (default) / 127.3 kt, 673 ft (clean) | | take-off run 274 m = 899 ft (`F15.INF`, F-15C, weight not stated) |
+| Approach / landing | 156.1 kt (default, 65% fuel) / 140.4 kt (clean); rollout 2,247 / 1,808 ft | | approach 125 kt CAS, landing run 1,067 m = 3,500 ft (`F15.INF`) |
+
+### Findings (nothing changed)
+
+1. **Top speeds need no fit.** The record's Mach 2.5 edge equals the real
+   figure; the model reaches 0.916 of it (Mach 2.29) through the shared
+   loaded-drag rule, and 750 kt (Mach 1.14) at 1,000 ft against about Mach 1.2
+   at sea level.
+2. **The ceiling is the record's 100,000 ft, not the real 60,000 ft.** The model
+   holds level flight at Mach 2.1 at 60,000 ft and to about 95,000 ft, and the
+   `climb` maneuver peaks at 108,921 ft. The F-15C does the same (identical
+   record). It is a retail copy kept by John's decision 1; the envelope's 0 G
+   row reaches 105,000 ft.
+3. **Climb is about 71 percent of the published 50,000 ft/min clean and about 53
+   percent with the default load.** The cause is the shared drag law again (drag
+   equals the reference thrust at the top speed and grows with speed squared,
+   no ram thrust gain). The shortfall is smaller than the Mirage's (about 45
+   percent) because the F-15E's thrust to weight is 1.13 clean, so more of the
+   thrust is left over; thrust is not the lever. Options: accept; a fleet-level
+   drag shape or ram factor (not an F-15E fit, not done).
+4. **G reaches +9 only when nearly empty.** The record has the +9 G row, but the
+   loaded-elevator rule scales it with weight: 7.57 G at full fuel, 8.28 at half,
+   9.10 at 300 lb (clean); the default load peaks at 6.73 to 7.91 G. The push is
+   -2.5 to -3.0 G against the record's -4. A fleet rule, as for the Mirage
+   before M2K-11; John may want the same +9 treatment (an opinionated change he
+   has not asked for here).
+5. **Fuel flows are the F-15C record's.** Military flow is 39 percent under the
+   real F100 (0.442 against 0.73 lb/lbf/h), so the endurance at military power
+   is 57 minutes against about 35; afterburner is within 7 percent of the -229
+   figure. Kept retail.
+6. **Default load is heavy for the airframe's numbers.** The default 12 Mk 82,
+   tank and four AIM-120 add 9,940 lb, 52,202 lb gross against a 68,000 lb record
+   maximum (81,000 lb real): liftoff 149.1 kt, approach 156.1 kt, climb to 36,000
+   ft in 104 s. The retail 68,000 lb maximum and the F-15C's 129 hit points stay
+   as the record has them (decision 1).
+7. **Takeoff and landing are plausible.** Clean liftoff after 205 m and clean
+   rollout 551 m against Jane's 274 m and 1,067 m (for the F-15C, weights not
+   stated); the model's approach (140 to 144 kt clean) is 12 to 15 percent above
+   Jane's 125 kt CAS, in line with the weight-scaled stall rule the other jets
+   show.
+
+### Battery windows (fitted, agent decisions 2026-11-10)
+
+`flight-liftoff-f15e`, `flight-liftoff-retail-f15e` and `flight-approach-f15e`
+join the battery with `INTERNAL_FUEL_LB["f15e"] = 13662`, a liftoff window of 130
+to 150 kt (fleet plausibility band; no primary figure), an approach window of 125
+to 145 kt (Jane's 125 kt CAS up to the F-15C's measured 144 kt) and the recorded
+default-load values 149.1 and 156.1 kt as the plus or minus 6 percent regression
+windows. The F-15E's default load measures above the approach window (156.1 kt, 7.7
+percent over 145), which the shared 10 percent allowance and the recorded value
+accept; it is a regression guard, not a claim of the real approach speed.
+
+Provenance: every flight figure is a measurement of the existing hybrid model on
+retail record values (spec-derived); the liftoff and approach windows are
+fitted (agent decisions, 2026-11-10); the real-aircraft figures are cited public
+pages and the Jane's text on the retail media, for plausibility only and not
+evidence of original behaviour. Nothing was attributed to John beyond decision 1.
