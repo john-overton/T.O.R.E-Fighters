@@ -153,12 +153,27 @@ TORNADO_CASES = [
 ]
 
 
-def tornado_origin_problems(output: str) -> list[str]:
+# The Tornado's AIM-9 side rails (row 8, TOR-6b, 2026-11-11): the AIM-9M on the shoulder rail
+# of the inner pylon, 1.25 ft outboard of the Mk 82 pack's pylon, level with it fore and aft at
+# every sweep (the 1.25 ft is not turned with the wing); 0.53 ft from the wing's underside
+# (the shoulder rail's own depth: the pylon's 1 ft less the rail's rise). Left first.
+TORNADO_RAIL_CASES = [
+    ("AIM-9M side rail, 25 degrees", [(-10.75, -0.74, 1.50), (10.75, -0.74, 1.50)], 0.53),
+    ("AIM-9M side rail, 67 degrees", [(-11.78, -0.74, -0.81), (11.61, -0.74, -1.26)], 0.53),
+]
+
+
+def tornado_rail_problems(output: str) -> list[str]:
+    return tornado_origin_problems(output, TORNADO_RAIL_CASES)
+
+
+def tornado_origin_problems(output: str, cases=None) -> list[str]:
+    cases = TORNADO_CASES if cases is None else cases
     parts = runs(output)
-    if len(parts) != len(TORNADO_CASES):
-        return [f"{len(parts)} runs finished, want {len(TORNADO_CASES)}"]
+    if len(parts) != len(cases):
+        return [f"{len(parts)} runs finished, want {len(cases)}"]
     problems: list[str] = []
-    for part, (label, wants, depth_want) in zip(parts, TORNADO_CASES):
+    for part, (label, wants, depth_want) in zip(parts, cases):
         firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
         if len(firsts) != len(wants):
             problems.append(f"{label}: {len(firsts)} releases, want {len(wants)}")
@@ -227,5 +242,13 @@ def scenarios() -> list[Scenario]:
             ],
             check=tornado_origin_problems,
             notes="The Tornado's default stores leave from where they hang at both sweeps: the shoulder Paveways from fixed 2 inch rails whatever the speed, the inner wing Mk 82s from 9.50 ft out at 25 degrees (200 kt) and from the swivelled pylons at 67 degrees (650 kt), left then right (TOR-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-tornado-rail", lane="flight",
+            args=tornado_args("200", "3", "AIM9M", "2"),
+            timeout=300,
+            then=[Step(tornado_args("650", "3", "AIM9M", "2"), timeout=300)],
+            check=tornado_rail_problems,
+            notes="The Tornado's AIM-9 side rails leave from where they hang at both sweeps: 10.75 ft out and 1.50 ft ahead at 25 degrees (200 kt), and beside the swivelled pylons at 67 degrees (650 kt), 1.25 ft outboard of the Mk 82 packs, left then right (TOR-6b).",
         ),
     ]

@@ -259,6 +259,33 @@ def tornado_jettison_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tornado's AIM-9 side rails jettison (TOR-6b, 2026-11-11): the tank, then the two AIM-9Ms
+# from the shoulder rails beside the swivelled pylons, right then left.
+TORNADO_RAIL_JETTISON = [
+    ("25 degrees", [(0.0, -5.94, 5.67), (10.75, -0.74, 1.50), (-10.75, -0.74, 1.50)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (11.61, -0.74, -1.26), (-11.78, -0.74, -0.81)]),
+]
+
+
+def tornado_rail_jettison_problems(output: str) -> list[str]:
+    parts = output.split("jettison: before")[1:]
+    if len(parts) != len(TORNADO_RAIL_JETTISON):
+        return [f"{len(parts)} jettison runs, want {len(TORNADO_RAIL_JETTISON)}"]
+    problems: list[str] = []
+    for part, (label, wants) in zip(parts, TORNADO_RAIL_JETTISON):
+        found = re.findall(r"jettison: offset id \d+ right (\S+) up (\S+) forward (\S+)", part)
+        if len(found) != len(wants):
+            problems.append(f"{label}: {len(found)} stores left, want {len(wants)}")
+            continue
+        for n, (got, want) in enumerate(zip(found, wants)):
+            r, u, f = (float(v) for v in got)
+            if abs(r - want[0]) > 0.05 or abs(u - want[1]) > 0.05 or abs(f - want[2]) > 0.05:
+                problems.append(f"{label}: store {n} left from {r:.2f} {u:.2f} {f:.2f}, want {want}")
+        if not re.search(r"jettison: PASS released 3 .* no-explosion", part):
+            problems.append(f"{label}: no PASS for three stores")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1"]
     return [
@@ -309,6 +336,18 @@ def scenarios() -> list[Scenario]:
                         "--speed", "650", "--seconds", "30", "--defenses", "0", "0"], timeout=300)],
             check=tornado_jettison_problems,
             notes="The Tornado's centreline tank, then its inner wing Mk 82s, jettison inert at 5,000 ft with the wing spread (200 kt) and swept (650 kt): the tank leaves the fuselage either way, each bomb from where its swivelled pylon hangs (TOR-6).",
+        ),
+        Scenario(
+            name="a2g-jettison-tornado-rail", lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                  "--aircraft", "tornado", "--station", "3", "--load", "AIM9M", "--altitude", "5000",
+                  "--speed", "200", "--seconds", "30", "--defenses", "0", "0"],
+            timeout=300,
+            then=[Step(["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                        "--aircraft", "tornado", "--station", "3", "--load", "AIM9M", "--altitude", "5000",
+                        "--speed", "650", "--seconds", "30", "--defenses", "0", "0"], timeout=300)],
+            check=tornado_rail_jettison_problems,
+            notes="The Tornado's centreline tank, then its AIM-9M side rails, jettison inert at 5,000 ft with the wing spread (200 kt) and swept (650 kt): each missile leaves from the shoulder rail beside its swivelled pylon (TOR-6b).",
         ),
         Scenario(
             name="a2g-bomb-motion", lane="flight",

@@ -1,9 +1,10 @@
 //! TOR-6: the Panavia Tornado IDS's default load, its BK 27 gun and its
 //! countermeasures are the retail records' own. This reads `TOR.PT`, `BK27.JT`,
 //! `DEFA.JT`, `M61.JT` and `MIG31.ECM` from the user's install and pins what the
-//! shared loading rules start from: the eight source rows (the four fixed
+//! shared loading rules start from: the nine rows (the four fixed
 //! sensors, the BK27 gun at 360 rounds, the centreline tank row, the shoulder
-//! Paveways and the inner wing Mk 82 pair; the outer wing row is retired), the
+//! Paveways and the inner wing Mk 82 pair; the outer wing row is retired and,
+//! since TOR-6b, its place at the end holds the AIM-9 side rail row), the
 //! retail jammer record that stays as it is (no pod body), and the BK27
 //! record's gun fields (muzzle velocity, damage by class, rounds per shot,
 //! burst timing, fire sound), so a change to the shared gun code or the record
@@ -44,12 +45,14 @@ fn the_tornados_rows_gun_and_jammer_are_the_records_own() {
             .unwrap()
     };
     let aircraft = Aircraft::parse(&read(AircraftId::Tornado.pt())).unwrap();
-    // Eight source rows: the four fixed sensors, the BK27 gun, the centreline
+    // Nine rows: the four fixed sensors, the BK27 gun, the centreline
     // tank row (capacity two; the default of one is the T3 default rule in
-    // `aircraft_stations::default_counts`), the shoulder Paveways and the inner
-    // wing Mk 82 pair. The retail outer wing Sidewinder pair (a ninth row,
-    // `AIM9M.JT` x2) is retired by `aircraft_stations::retire` before the
-    // record reaches the loading rules (John, 2026-11-10).
+    // `aircraft_stations::default_counts`), the shoulder Paveways, the inner
+    // wing Mk 82 pair and the AIM-9 side rail row. The retail outer wing
+    // Sidewinder pair (the retail ninth row, `AIM9M.JT` x2 at 16 ft out) is
+    // retired by `aircraft_stations::retire` (John, 2026-11-10) and
+    // `aircraft_stations::side_rail` appends the side rail in its place with
+    // the same mask, weight class and default (John, 2026-11-11, TOR-6b).
     let rows: Vec<_> = aircraft
         .hardpoints
         .iter()
@@ -66,6 +69,7 @@ fn the_tornados_rows_gun_and_jammer_are_the_records_own() {
             ("F250.GAS", 2),
             ("PAVEWAY.JT", 4),
             ("MK82P3.JT", 2),
+            ("AIM9M.JT", 2),
         ]
     );
     // Masks and weight classes of the tank row and the two weapon rows that
@@ -76,7 +80,7 @@ fn the_tornados_rows_gun_and_jammer_are_the_records_own() {
         .skip(5)
         .map(|h| (h.flags, h.weight_class))
         .collect();
-    assert_eq!(masks, [(0x205, 40), (0x7e5, 80), (0x505, 30)]);
+    assert_eq!(masks, [(0x205, 40), (0x7e5, 80), (0x505, 30), (0x85, 5)]);
 
     // Countermeasures: the retail `MIG31.ECM` row stays (John, 2026-11-10,
     // decision 22): 60 chaff and 60 flares with its deception jammer, and no

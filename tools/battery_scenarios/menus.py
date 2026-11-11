@@ -490,7 +490,8 @@ def scenarios() -> list[Scenario]:
             # after the Tornado's outer wing row went and the F-5E and Mirage F1
             # default loads were cleared (ordnance_audit.rs has the per-aircraft note).
             # TOR-6 (2026-11-11, m3-tornado): 4,616 weapon placements, the Tornado's shoulder and inner wing pairs refuse 36 clipping stores (agent decision applying John's F-15E A2 precedent; the coordinator recomputes the total at integration).
-            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4616 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
+            # TOR-6b (2026-11-11, m3-tornado): 4,623 weapon placements, the Tornado's AIM-9 side rail row takes seven missiles (John's side rail, appended in the retired outer pair's place); the coordinator recomputes the total at integration.
+            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4623 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

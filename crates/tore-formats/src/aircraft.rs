@@ -1084,6 +1084,7 @@ impl Aircraft {
         }
         stations::append(id, &mut hardpoints);
         stations::retire(id, &mut hardpoints);
+        stations::side_rail(id, &mut hardpoints);
         stations::adjust_defaults(id, &mut hardpoints);
         let (min, max) = (plane["envMin"].number()?, plane["envMax"].number()?);
         let env = b.block("env")?;

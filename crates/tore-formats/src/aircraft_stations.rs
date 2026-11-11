@@ -19,6 +19,10 @@ pub const M2000_TIP: usize = 8;
 /// The Tornado's decoded outer wing pair (`TOR.PT` row 8, the last row),
 /// retired by [`retire`].
 pub const TORNADO_OUTER_WING: usize = 8;
+/// The Tornado's AIM-9 side rails (`TOR.PT` row 8 again, appended by
+/// [`side_rail`] where [`retire`] dropped the outer wing pair): one rail a
+/// side on the inboard swivelling pylon (row 7).
+pub const TORNADO_SIDE_RAIL: usize = 8;
 /// The F-5E's radar, jammer and wing-pair rows and the Mirage F1's centreline
 /// row, whose defaults [`adjust_defaults`] changes.
 pub const F5E_RADAR: usize = 1;
@@ -184,9 +188,21 @@ pub const TORNADO_SHOULDER_REFUSED: [&str; 33] = [
 /// Every other row 7 catalog store reads 0.00 at both sweeps.
 pub const TORNADO_INNER_WING_REFUSED: [&str; 3] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT"];
 
+/// Stores normal loading refuses on the Tornado's AIM-9 side rails (row 8,
+/// TOR-6b, 2026-11-11, agent decision applying the 0.3 ft line): the four
+/// stores the rail's infrared mask admits that enter the airframe or the
+/// pylon's store more than the line, measured alone on the rail at 25 and 67
+/// degrees against the Mk 82 pack: `PL7.JT` (0.50 ft, 0.83 at 67), `R550.JT`
+/// (0.40), `AT12.JT` (0.44) and `GBU12.JT` (1.02, a laser bomb on a missile
+/// rail). The seven that stay (`AIM9B`, `AIM9M`, `AIM9X`, `AA2`, `AA8`,
+/// `AA11`, `AA11B`) read 0.00 ft against the airframe at both sweeps.
+pub const TORNADO_SIDE_RAIL_REFUSED: [&str; 4] = ["PL7.JT", "R550.JT", "AT12.JT", "GBU12.JT"];
+
 /// Stores normal loading refuses on one source row (John's F-15E A2
 /// precedent, applied to the Tornado by an agent decision, 2026-11-11). Cheat loading skips the check; every other aircraft and row
-/// keeps its stores.
+/// keeps its stores. The side-rail row (8, TOR-6b, 2026-11-11) takes what its
+/// infrared mask (0x85) admits, as the F-14's glove-pylon rail does, minus
+/// [`TORNADO_SIDE_RAIL_REFUSED`].
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     if id != AircraftId::Tornado {
         return true;
@@ -194,6 +210,7 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     match row {
         TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
         TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
+        TORNADO_SIDE_RAIL => !TORNADO_SIDE_RAIL_REFUSED.contains(&source),
         _ => true,
     }
 }
@@ -245,6 +262,46 @@ pub fn retire(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     ) {
         rows.pop();
     }
+}
+
+/// The Tornado's AIM-9 side rails (John, 2026-11-11, after TOR-6: "Lets do a
+/// custom side rail kind of like the f-14 for this station and put it on the
+/// inner [wing] rail like the RL Tornado", opinionated). The real Tornado
+/// carries its AIM-9L on a rail beside each inboard swivelling wing pylon,
+/// alongside the pylon's main store; [`retire`] drops the retail outer wing
+/// pair, and this appends one row in its place at the end of the table, so
+/// no other row's index moves. The row is the retail outer pair's own
+/// content, restored: Wing, mask 0x85 (infrared missiles), two `AIM9M.JT`
+/// (one a side), weight class 5, as the retail row 8 held them. Only its
+/// position is the inner pylon's record's (the sim's `station_move` hangs it
+/// on that pylon's side). Applied after
+/// [`retire`], only when the table is exactly the retail eight rows the
+/// retirement leaves (an edited record or a different count keeps its own
+/// rows), on the Tornado only; repeated application is a no-op.
+pub fn side_rail(id: AircraftId, rows: &mut Vec<Hardpoint>) {
+    if id != AircraftId::Tornado || rows.len() != TORNADO_SIDE_RAIL {
+        return;
+    }
+    let inner = &rows[TORNADO_INNER_WING];
+    if (
+        inner.location,
+        inner.flags,
+        inner.position,
+        inner.store.as_deref(),
+        inner.count,
+        inner.weight_class,
+    ) != (4, 0x505, [11, -25, 9], Some("MK82P3.JT"), 2, 30)
+    {
+        return;
+    }
+    rows.push(Hardpoint {
+        location: 4,
+        flags: 0x85,
+        position: inner.position,
+        store: Some("AIM9M.JT".into()),
+        count: 2,
+        weight_class: 5,
+    });
 }
 
 /// The retail rows of the aircraft whose default load [`adjust_defaults`]
@@ -726,7 +783,7 @@ mod tests {
             );
             // Not another row, not another aircraft.
             assert!(weapon_allowed(AircraftId::Tornado, 5, name), "{name}");
-            assert!(weapon_allowed(AircraftId::Tornado, 8, name), "{name}");
+            assert!(weapon_allowed(AircraftId::Tornado, 4, name), "{name}");
             assert!(
                 weapon_allowed(AircraftId::Mig23, TORNADO_SHOULDER, name),
                 "{name}"
@@ -880,6 +937,66 @@ mod tests {
         shifted.push(row((4, 0x85, [16, -22, 4], "AIM9M.JT", 2, 5)));
         retire(AircraftId::Tornado, &mut shifted);
         assert_eq!(shifted.len(), 10);
+    }
+
+    /// TOR-6b (John, 2026-11-11): the retired outer pair's place at the end of
+    /// the table is taken by one AIM-9 side rail row, the retail row's own
+    /// content (mask, class, default `AIM9M.JT` pair); guarded and idempotent.
+    #[test]
+    fn the_tornado_gains_one_side_rail_row_in_place_of_the_retired_outer_pair() {
+        let retail = tornado_retail();
+        let mut rows = retail.clone();
+        retire(AircraftId::Tornado, &mut rows);
+        side_rail(AircraftId::Tornado, &mut rows);
+        assert_eq!(rows.len(), 9);
+        // No other row moved: rows 0 to 7 are the retail rows.
+        assert_eq!(key(&rows[..8]), key(&retail[..8]));
+        let rail = &rows[TORNADO_SIDE_RAIL];
+        assert_eq!(
+            (rail.location, rail.flags, rail.count, rail.weight_class),
+            (4, 0x85, 2, 5)
+        );
+        assert_eq!(rail.store.as_deref(), Some("AIM9M.JT"));
+        // Repeated application, in either order, changes nothing.
+        let once = key(&rows);
+        retire(AircraftId::Tornado, &mut rows);
+        side_rail(AircraftId::Tornado, &mut rows);
+        assert_eq!(key(&rows), once);
+        // Another aircraft, an edited inner row or an edited outer row keeps its own.
+        let mut other = retail.clone();
+        retire(AircraftId::Mig23, &mut other);
+        side_rail(AircraftId::Mig23, &mut other);
+        assert_eq!(key(&other), key(&retail));
+        let mut edited = retail.clone();
+        edited[TORNADO_INNER_WING].count = 4;
+        retire(AircraftId::Tornado, &mut edited);
+        side_rail(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited.len(), 8);
+        let mut edited = retail.clone();
+        edited[TORNADO_OUTER_WING].count = 4;
+        retire(AircraftId::Tornado, &mut edited);
+        side_rail(AircraftId::Tornado, &mut edited);
+        assert_eq!(edited.len(), 9);
+        assert_eq!(edited[8].count, 4);
+    }
+
+    #[test]
+    fn the_tornado_side_rail_refuses_what_enters_the_airframe_and_the_bombs() {
+        for name in TORNADO_SIDE_RAIL_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tornado, TORNADO_SIDE_RAIL, name),
+                "{name}"
+            );
+            assert!(weapon_allowed(AircraftId::Mig23, TORNADO_SIDE_RAIL, name));
+        }
+        for name in [
+            "AIM9B.JT", "AIM9M.JT", "AIM9X.JT", "AA2.JT", "AA8.JT", "AA11.JT", "AA11B.JT",
+        ] {
+            assert!(
+                weapon_allowed(AircraftId::Tornado, TORNADO_SIDE_RAIL, name),
+                "{name}"
+            );
+        }
     }
 
     #[test]

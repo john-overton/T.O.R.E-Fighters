@@ -1980,3 +1980,80 @@ The release points at both sweeps (`a2g-release-origin-tornado`): row 6 from
 2.00 ft out, 12.27 then -2.93 ft forward, never moving; row 7 from 9.50 ft out
 and 1.50 ft forward at 25 degrees, and swivelled with the panel at 67 degrees:
 left -10.53 ft out and 0.81 ft aft, right 10.36 ft out and 1.26 ft aft.
+
+## The Tornado AIM-9 side rails on the inboard swivelling pylons (TOR-6b, 2026-11-11)
+
+**Opinionated (John, 2026-11-11, after TOR-6): "Lets do a custom side rail kind of
+like the f-14 for this station and put it on the inner [wing] rail like the RL
+Tornado."** The 0.3 ft refusal line ([TOR-6](#the-tornado-ordnance-masks-and-the-measured-catalog-tor-6-2026-11-11))
+refused every AIM-9 on the shoulder row (fin tips 0.36 to 0.60 ft) and row 7's mask
+takes no air-to-air missile, so the Tornado had no Sidewinder. It now carries one
+AIM-9 on a side rail of each inboard swivelling wing pylon, at the same time as row
+7's main store, as the real Tornado carries its AIM-9L on a rail beside the inboard
+wing pylon (public pages: the GR1 and GR4 carry no more than one Sidewinder or
+ASRAAM a wing, only on the inboard stub pylons: the War Thunder forum's "Panavia
+Tornado (UK versions) - Technical data and discussion" thread, posts quoting the
+manual, and the CombatAce "alternative Tornado Sidewinder stations" thread, both accessed
+2026-11-11; forum posts, so plausibility only).
+
+**Mechanism: the F-14's shoulder rail, on a new row.** The F-14's glove-pylon
+Sidewinder is a source row (`F14.PT` row 7) that `station_move` hangs on its own
+pylon's *shoulder rail* (`Location::Shoulder`, `Hang::Shoulder`; [the F-14](#the-f-14);
+rules: [Shoulder rail](#rules)): 1.25 ft out from the pylon's centre line, its body 0.05
+ft above the lugs of whatever hangs under the pylon, an arm drawn off the pylon's
+side. The Tornado takes exactly that treatment. `aircraft_stations::side_rail` appends
+one row at the end of the table, **row 8** (the index the retired outer wing pair held,
+so no row index moves): Wing, mask 0x85 (infrared missiles), weight class 5, two
+`AIM9M.JT` (one a side), the retail outer pair's own content restored; only its
+position is the pylon's. `station_move(Tornado, 8)` puts it on row 7's pylon,
+`Hang::Shoulder`, and `swing::swivels` lists row 8 with row 7, so the rail is carried
+by the swinging wing with the pylon. Rows 0 to 7 are untouched; nothing in a format
+(rows are a decoded list, not a fixed array) limits the count, and the
+checkpoint's station records, replay conversion and `same_stores` follow the rows.
+
+**One change in shared sim code (`Rack::side_pylons`, guarded to a shoulder rail with a
+wing turn, which only the Tornado has).** A swivelling pylon is carried to where the
+wing has swept it and swivels back to stay streamwise, so a rail on its side stays
+beside it: the pylon's point is swept about the wing pivot and the 1.25 ft sideways
+offset is added after, not turned with the wing. (Turning the whole point, as row
+7's does, would have slid the rail 0.84 ft aft of its pylon at 67 degrees.) The
+drawing's pylon and arm read the same point, so the rail and its pylon stay together.
+
+| Quantity | Value |
+| --- | --- |
+| Position, right side (left mirrors) | the pylon of row 7 (9.50 ft out, 1.50 ft forward at 25 degrees) plus 1.25 ft outboard: **10.75 ft out, 1.50 ft forward**; AIM-9M origin 0.74 ft under the reference (the Mk 82 pack's 1.45 under) |
+| At 67 degrees | right (11.61, -0.74, -1.26), left (-11.78, -0.74, -0.81): always 1.25 ft beside the pack, level with it fore and aft |
+| Capacity, default | one a side, `AIM9M.JT` x2 (the retail default) |
+| Mask | row 8's 0x85 minus four stores (below) |
+
+**Which flank (fitted).** No source gives it. The public pages say only "inboard
+Sidewinder stub pylons"; one modding page's note puts the missile "just to the inside of
+the pylon", a second hand statement not taken as evidence. The F-14 rail sits outboard
+of its pylon, and outboard keeps the missile away from the fuselage and the glove as the
+wing sweeps in (measured: 0.00 ft into the airframe at 25 and 67 degrees; the inboard flank
+was not measured), so the rail is on the **outboard** flank (agent decision, fitted).
+
+**Mask and refusals (agent decision, the 0.3 ft line).** The mask admits 11 stores (the
+F-14 precedent: its rail takes everything its infrared mask admits). Each was hung alone
+on the rail, with the default Mk 82 pack, at 25 and 67 degrees in the CPU stores preview
+(`.local/m3-aircraft/checks/TOR-6b/matrix.sh`, `catalog-row8.txt`). Entry into the airframe
+(ft, same at both sweeps unless given): `AIM9B`, `AIM9M`, `AIM9X`, `AA2`, `AA8`, `AA11`,
+`AA11B` **0.00**; `R550` 0.40; `AT12` 0.44; `PL7` 0.50 (0.83 at 67); `GBU12` 1.02. The
+last four are refused in normal loading (`TORNADO_SIDE_RAIL_REFUSED`; a laser bomb and
+an anti-tank missile are not rail missiles in any case), the seven others stay: AIM-9B,
+AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B. Cheat loading skips the check.
+
+**Against the pylon's own store.** Bounding boxes (the preview's `pair` gap, which counts
+a crossing of the boxes, not a cut through the mesh): the AIM-9M against the default Mk 82
+pack **0.06 ft clear** (the AIM-9B 0.15, AA-2 0.19, AA-11 0.21, AA-8 0.34, AA-11B 0.06), at
+both sweeps. Against the alternative row 7 stores the boxes cross by 0.04 ft clear (FAB-250)
+to 0.79 ft (the HARM family: -0.79) because the missile's fins reach 1.03 ft from its centre
+line and a bigger store's fins and body reach beyond 1.25 ft; as at TOR-6 a crossing of a
+neighbour is not a refusal, and as on the F-14 ("its lower fins can touch a wide one",
+John accepts a little clipping, 2026-10-14) the rail's body stays above the main store's
+lugs whatever hangs there. Table: `checks/TOR-6b/matrix7/`.
+
+**Airframe, gear.** Every kept AIM-9 reads **0.00 ft** entry into the airframe at 25 and
+67 degrees; the gear-down legs are 5.5 ft (25 degrees) and 6.3 to 6.5 ft (67 degrees) from
+the rail missile; its lowest point is 5.9 ft above the ground, gear down. The pack,
+Paveways and the centreline tank are unchanged (0.00, 0.96 front pair, 0.00).

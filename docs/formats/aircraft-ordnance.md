@@ -1214,3 +1214,40 @@ Guards: `a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not`
 `a_loaded_designator_pod_draws_a_fitted_body_on_its_station`
 (`crates/tore-world/src/snapshot.rs`) and the retail
 `crates/tore-world/src/pod_equipment_tests.rs` (skips without media).
+
+## The Tornado's AIM-9 side rails (TOR-6b, 2026-11-11)
+
+Implementation note, opinionated (John, 2026-11-11: "a custom side rail kind of like the
+f-14 for this station ... on the inner [wing] rail like the RL Tornado"). The TOR-6 table
+above lists row 8 as retired; **Update (TOR-6b, 2026-11-11): row 8 is the AIM-9 side rail
+row.** `aircraft_stations::side_rail` appends it after `retire` dropped the retail outer
+wing pair, so the table is the retail rows 0 to 7 plus one appended row, and no earlier
+index moves. The retail row's own content is restored, nothing new is invented:
+
+| Field | Row 8 (retail outer pair, retired) | Row 8 (side rail, appended) |
+| --- | --- | --- |
+| Location byte | 4 (Wing) | 4 (Wing), moved by the sim onto the shoulder rail of row 7's pylon |
+| Flags (mask) | 0x85 (infrared missiles, paired) | 0x85, the same |
+| Position (source units) | 16, -22, 4 (16 ft out) | 11, -25, 9 (row 7's record; the sim's `station_move` sets the out and forward, the height is read from the wing) |
+| Default | `AIM9M.JT` x2 | `AIM9M.JT` x2 (one a side) |
+| Weight class | 5 | 5 |
+
+The appended row exists only while rows 0 to 7 are exactly the retail ones (an edited
+record keeps its own table), on `AircraftId::Tornado` only, and repeated application is a
+no-op. **Mask.** The mask admits 11 catalog stores; normal loading refuses four
+(`PL7.JT`, `R550.JT`, `AT12.JT`, `GBU12.JT`, over the 0.3 ft line or not a rail missile)
+and keeps seven: `AIM9B.JT`, `AIM9M.JT`, `AIM9X.JT`, `AA2.JT`, `AA8.JT`, `AA11.JT`,
+`AA11B.JT` ([measurements](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11)).
+The F-14's glove-pylon rail takes everything its infrared mask admits; the Tornado's takes
+the same minus those four. The air-to-air page of Load Ordnance lists seven missiles
+(`AA-11B`, `AIM-9B`, `AIM-9M`, `AIM-9X`, `R-3S`, `R-60M`, `R-73`; the page names the AA-2, AA-8 and AA-11
+by their Russian names), where it listed only `AA-11B` and `R-60M` before.
+
+`--validate-ordnance` reads `ordnance TOR.PT: 5 source rows, 0 optional weapon rows, 56
+compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 36
+normal, 83 Cheat` (4 rows, 49 placements and 31 before). The retail-reading test
+`tornado_ordnance.rs` pins the nine rows and the row 8 mask (0x85) and class (5). The
+default load is the TOR-6 default plus two `AIM9M.JT` (one a side, 380 lb): the weapons
+window lists `2 AIM-9M`, the live-fire probe starts at 13,228 lb of payload (12,848 before);
+the Load Ordnance page reads `AIM-9M Sidewinder 2 loaded (max 2)` under `Wing`, `55,514 lbs` current of `61,620`
+maximum, `6,106 lbs` available (frame `load-ordnance-page`).

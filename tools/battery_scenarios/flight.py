@@ -82,8 +82,10 @@ STATIONS = {
     # two guns together) and two default weapon rows: row 6 PAVEWAY.JT x4 (the
     # shoulder Paveways) and row 7 MK82P3.JT x2 (the inner wing pair on the
     # swinging panel). Its centreline F250.GAS tank is a tank station, row 8
-    # is retired (TOR-6, 2026-11-11).
-    "tornado": [360, 4, 2],
+    # is retired (TOR-6, 2026-11-11). Update (TOR-6b, 2026-11-11): row 8 is
+    # now the AIM-9 side rail, AIM9M.JT x2 (one a side) on the inner pylon, so
+    # a fourth weapon slot.
+    "tornado": [360, 4, 2, 2],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -1099,6 +1101,19 @@ def slot_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+    # TOR-6b (2026-11-11): the Tornado's AIM-9 side rail fires with the wing swept too (650 kt, 67
+    # degrees; the slot-4 scenario above flies at the default speed, wing spread).
+    out.append(
+        Scenario(
+            name="flight-livefire-tornado-slot4-sweep67",
+            lane="flight",
+            args=["--live-fire", "--aircraft", "tornado", "--weapon-slot", "4", "--flight-speed", "650", "--combat-probe-ticks", "1200", "--capture-flight", "{work}/shot.ppm", "--no-audio"],
+            window=True,
+            check=check_slot("tornado", 4),
+            timeout=180,
+            notes="One AIM-9M leaves the Tornado's side rail with the wing swept to 67 degrees (TOR-6b).",
+        )
+    )
     for ac in ("f22", "f22n"):
         for row in (5, 7, 8):
             out.append(Scenario(

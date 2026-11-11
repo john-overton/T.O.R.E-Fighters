@@ -96,8 +96,10 @@ pub fn pylon_swivel(right: bool, turn: f64) -> f64 {
 /// decision 19). The Tornado IDS's inner wing pair (row 7) swivels; the
 /// centreline tank pair (row 5) and the shoulder pylons (row 6) are on the
 /// fuselage and stay fixed. Row 8, the outer wing pair, is retired.
+/// Update (TOR-6b, 2026-11-11): row 8 is now the AIM-9 side rail on the row 7
+/// pylon, which swivels with it.
 pub fn swivels(id: AircraftId, hardpoint: usize) -> bool {
-    id == AircraftId::Tornado && hardpoint == 7
+    id == AircraftId::Tornado && matches!(hardpoint, 7 | 8)
 }
 
 /// Whether `id` has any swivelling station.
@@ -154,11 +156,13 @@ mod tests {
     }
 
     #[test]
-    fn only_the_tornados_inner_wing_pair_swivels() {
+    fn only_the_tornados_inner_wing_pair_and_its_side_rail_swivel() {
         let rows: Vec<usize> = (0..9)
             .filter(|row| swivels(AircraftId::Tornado, *row))
             .collect();
-        assert_eq!(rows, [7]);
+        // Row 7, the inner wing pair, and row 8, the AIM-9 side rails on its
+        // pylons (TOR-6b, 2026-11-11).
+        assert_eq!(rows, [7, 8]);
         assert!(has_swivel(AircraftId::Tornado));
         for id in [AircraftId::F15E, AircraftId::Mig23, AircraftId::F14] {
             assert!(!has_swivel(id));

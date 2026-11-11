@@ -4920,3 +4920,37 @@ refusals below. Details: [aircraft ordnance](aircraft-ordnance.md#the-panavia-to
   (two BK-27 with 180 rounds each, 1,000 to 1,700 rounds a minute, 1,100 m/s) from public
   pages for plausibility only (aerospaceweb.org, milavia.net, Wikipedia "Mauser BK-27", read
   2026-11-11). No retail bytes committed.
+
+## Tornado AIM-9 side rails (TOR-6b, 2026-11-11)
+
+Implementation and review mode (Claude Sonnet, sonnet-high). Update to the
+[TOR-6 section](#tornado-ordnance-masks-bk-27-gun-and-the-live-release-at-both-sweeps-tor-6-2026-11-11):
+the Tornado has an AIM-9 again, as one side rail on each inboard swivelling pylon, appended as
+row 8 (John, 2026-11-11, opinionated). The weapon placements 4,616 quoted there are 4,623
+here, the Cheat-only placements 220 are 222 (the rail row takes the two novelty bombs under
+Cheat loading, as the retired outer row did), and `TOR.PT` reads 56 placements and a catalog
+of 36 (49 and 31 before). Details: [aircraft ordnance](aircraft-ordnance.md#the-tornados-aim-9-side-rails-tor-6b-2026-11-11),
+[stores on pylons](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11),
+[baseline](../baselines/ordnance-availability.md#tornado-aim-9-side-rails-tor-6b-2026-11-11).
+
+- **Mechanism:** the F-14's shoulder rail (`Location::Shoulder`, `Hang::Shoulder`) on row 7's
+  swivelling pylon, listed beside it in `swing::swivels`; the rail's 1.25 ft sideways offset
+  stays beside the pylon at every sweep (one guarded change in `Rack::side_pylons`).
+- **Position:** 10.75 ft out (1.25 ft outboard of the pack's pylon), 1.50 ft forward, fitted;
+  no source gives the flank, the outboard one is the F-14's and keeps the missile clear of
+  the fuselage.
+- **Mask:** AIM-9B, AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B; PL-7, R.550, AT-12 and the
+  GBU-12 refused (0.40 to 1.02 ft into the airframe or not a rail missile).
+- **Default:** `AIM9M.JT` x2, the retail default, one a side.
+- **Clearance:** every kept missile 0.00 ft into the airframe at 25 and 67 degrees; the
+  AIM-9M is 0.06 ft clear of the Mk 82 pack by bounding box; gear legs 5.5 ft (25 degrees) and
+  6.3 ft (67); the other row 7 stores cross the missile's box by up to 0.79 ft (not a refusal,
+  as at TOR-6).
+- **Live:** an AIM-9M leaves from 10.75 ft out, 1.50 ft ahead at 25 degrees and from
+  -11.78 / -0.81 (left) and 11.61 / -1.26 ft (right) at 67 degrees; it jettisons from the same
+  points. Scenarios `a2g-release-origin-tornado-rail`, `a2g-jettison-tornado-rail`,
+  `flight-livefire-tornado-slot4` and `flight-livefire-tornado-slot4-sweep67`.
+- Provenance: John's request opinionated; row content spec-derived (the retail row 8); the
+  position, flank, refusals, the guarded sim change and the measurements agent decisions or
+  findings (2026-11-11). Real carriage (one AIM-9L on the inboard stub pylon of each wing)
+  from public pages for plausibility only. No retail bytes committed.

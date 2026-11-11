@@ -51,7 +51,12 @@ const TANK_RECORDS: usize = 9;
 /// (TOR-6, agent decision 2026-11-11 applying John's F-15E A2
 /// precedent; `TOR.PT` 85 to 49). The F-15E branch's own refusals move the
 /// same pin; the coordinator recomputes the total at integration (B4).
-const WEAPON_PLACEMENTS: usize = 4616;
+/// 4,623 from 4,616: the Tornado's AIM-9 side rail (row 8, appended in the
+/// retired outer pair's place) takes seven stores (`AIM9B`, `AIM9M`, `AIM9X`,
+/// `AA2`, `AA8`, `AA11`, `AA11B`; its four others are refused), seven more
+/// placements (TOR-6b, John 2026-11-11; `TOR.PT` 49 to 56, catalog 31 to 36).
+/// Dated note, B4: the coordinator recomputes the total at integration.
+const WEAPON_PLACEMENTS: usize = 4623;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -69,7 +74,10 @@ const TANK_PLACEMENTS: usize = 233;
 /// 222 from 192: the batch-5 records (B5-1, 2026-11-10).
 /// 220 from 222: the Tornado's outer wing row is gone, two fewer (B5-2, John
 /// 2026-11-10).
-const NOVELTY_PLACEMENTS: usize = 220;
+/// 222 from 220: the Tornado's AIM-9 side rail row (row 8, mask 0x85) takes
+/// the two novelty bombs under Cheat loading as the retired outer row did, two
+/// more (TOR-6b, John 2026-11-11).
+const NOVELTY_PLACEMENTS: usize = 222;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).

@@ -490,6 +490,18 @@ impl Rack {
                     // store turns.
                     point: if self.turn == 0. {
                         point
+                    } else if self.location() == Location::Shoulder {
+                        // A shoulder rail on a swivelling pylon (the
+                        // Tornado's AIM-9 rails, TOR-6b): the pylon is
+                        // carried by the wing, the rail stays beside it as
+                        // the pylon swivels, so the sideways offset is not
+                        // turned with the wing.
+                        let sign = if right < 0. { -1. } else { 1. };
+                        let pylon = [point[0] - sign * SHOULDER_OUT, point[1], point[2]];
+                        let mut carried =
+                            super::swing::swept(sign > 0., pylon, f64::from(self.turn));
+                        carried[0] += sign * SHOULDER_OUT;
+                        carried
                     } else {
                         super::swing::swept(side == 0, point, f64::from(self.turn))
                     },
@@ -1018,6 +1030,17 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             TORNADO_WING_INNER[1],
             Hang::AsRecorded,
         ),
+        // The Tornado's AIM-9 side rails (row 8, TOR-6b, John 2026-11-11):
+        // on the shoulder rail of the same inboard swivelling pylon as row 7,
+        // as the F-14's glove-pylon Sidewinder rides its pylon's shoulder.
+        (AircraftId::Tornado, 8) => at(
+            Location::Wing,
+            TORNADO_WING_INNER[0] + SHOULDER_OUT,
+            TORNADO_WING_INNER[1] + TORNADO_RAIL_FORWARD,
+            Hang::Shoulder {
+                pylon_forward: TORNADO_WING_INNER[1],
+            },
+        ),
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
@@ -1120,6 +1143,11 @@ const YAK141_INNER: [f64; 2] = [7.5, -2.8];
 /// enters it least. The station stays under the wing surface and its store
 /// streamwise from 25 to 67 degrees (docs/spec/stores-on-pylons.md).
 const TORNADO_WING_INNER: [f64; 2] = [9.5, 1.5];
+
+/// How far ahead of the inboard swivelling pylon's own store the Tornado's
+/// AIM-9 side rail hangs its missile, feet (TOR-6b, fitted, agent decision
+/// 2026-11-11; see docs/spec/stores-on-pylons.md).
+const TORNADO_RAIL_FORWARD: f64 = 0.0;
 
 /// The Yak-141's outer underwing pylon (retail's row 16.67 ft out, which
 /// is past two thirds of the model's 18.5 ft half span, by the tip): 11 ft
@@ -2215,6 +2243,60 @@ mod tests {
         assert!(left[0] < -pivot[0], "{left:?}");
         assert!((right[0] + left[0]).abs() < 1.0, "{right:?} {left:?}");
         assert_eq!(right[1], mount[1], "the height does not change");
+    }
+
+    /// TOR-6b, John 2026-11-11: the Tornado's AIM-9 side rail (row 8) rides
+    /// the shoulder of row 7's swivelling pylon, SHOULDER_OUT outboard of it,
+    /// at every sweep, on both wings.
+    #[test]
+    fn the_tornado_side_rail_stays_beside_the_swivelling_pylon_at_every_sweep() {
+        use crate::combat::swing;
+        let pylon_row = Hardpoint {
+            location: 4,
+            position: [11, -25, 9],
+            flags: 0x505,
+            count: 2,
+            store: Some("MK82P3.JT".into()),
+            weight_class: 30,
+        };
+        let rail_row = Hardpoint {
+            flags: 0x85,
+            store: Some("AIM9M.JT".into()),
+            weight_class: 5,
+            ..pylon_row.clone()
+        };
+        let moved = station_move(AircraftId::Tornado, 8).expect("row 8 is moved");
+        let inner = station_move(AircraftId::Tornado, 7).expect("row 7 is moved");
+        assert_eq!(moved.location, Location::Wing);
+        assert_eq!(moved.right, inner.right + SHOULDER_OUT);
+        assert_eq!(moved.forward, inner.forward);
+        assert!(swing::swivels(AircraftId::Tornado, 8));
+        assert!(!swing::swivels(AircraftId::Tornado, 6));
+        // Only the Tornado, only that row.
+        assert_eq!(station_move(AircraftId::Mig23, 8), None);
+        let (mount, mut rack) = placed_on(AircraftId::Tornado, 8, &rail_row, None);
+        let (pylon_mount, mut pylon_rack) = placed_on(AircraftId::Tornado, 7, &pylon_row, None);
+        assert_eq!(rack.location(), Location::Shoulder);
+        assert_eq!(pylon_rack.location(), Location::Wing);
+        let aim9 = StoreSize::of_shape(Some("SIDEM.SH"));
+        let bomb = StoreSize::of_shape(Some("MK82.SH"));
+        for degrees in [25., 35., 46., 60., 67.] {
+            let turn = swing::wing_turn(swing::speed_for_sweep(degrees), 0.) as f32;
+            rack.turn = turn;
+            pylon_rack.turn = turn;
+            for side in [0, 1] {
+                let rail = rack.store_point(mount, 2, side, 0, aim9);
+                let held = pylon_rack.store_point(pylon_mount, 2, side, 0, bomb);
+                let sign = if side == 0 { 1. } else { -1. };
+                // Beside the pylon's store, outboard by the shoulder offset,
+                // at the same place fore and aft, whatever the sweep.
+                assert!(
+                    (sign * (rail[0] - held[0]) - SHOULDER_OUT).abs() < 1e-9,
+                    "{degrees} degrees, side {side}: {rail:?} against {held:?}"
+                );
+                assert!((rail[2] - held[2]).abs() < 1e-9, "{degrees} degrees");
+            }
+        }
     }
 
     #[test]

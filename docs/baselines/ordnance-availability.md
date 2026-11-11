@@ -528,3 +528,37 @@ store's start against the aircraft (right, up, forward). The Load Ordnance page
 360)`, `250 gallon tank 1 loaded (max 2)`, `GBU-10E Paveway 4 loaded (max 4)` and `MK-82
 3-Pack 2 loaded (max 2)`, 55,134 of 61,620 lb. Frames:
 `.local/m3-aircraft/frames/TOR-6/`.
+
+## Tornado AIM-9 side rails (TOR-6b, 2026-11-11)
+
+Update to the TOR-6 section above, whose "outer wing row is retired" and eight rows are now nine:
+John asked on 2026-11-11 for an AIM-9 side rail on the inboard swivelling pylon, which
+`aircraft_stations::side_rail` appends as row 8 in the retired outer pair's place (the
+[rules and measurements](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11)).
+Seven stores stay on it (AIM-9B, AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B) and four are refused
+(PL-7, R.550, AT-12, GBU-12), so the audit pins move on this branch:
+
+```text
+ordnance TOR.PT: 5 source rows, 0 optional weapon rows, 56 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 36 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4623 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 222 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+Weapon placements 4,616 to 4,623 (`TOR.PT` 49 to 56) and Cheat-only placements 220 to 222 (the
+row's mask admits Boulder and Moose under Cheat loading, as the retired outer row did); recovered
+stations (18), tank placements, pods, records and the roster unchanged. Dated pin notes are in
+`ordnance_audit.rs`, and the `menus-ordnance-availability` and `a2g-catalog` expected lines carry
+the new totals. The F-15E and Mirage F1 branches move the same pins: the coordinator recomputes
+the totals at integration (B4).
+
+Runs on the branch (profile `profile-tornado`, windows through `tools/agent-run.sh`):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft tornado --weapon-slot 4` at the default speed, and with `--flight-speed 200` and `650` | one AIM-9M leaves the left rail (left first), ammunition `[360, 4, 2, 1]`, payload 13,228 to 13,038 lb; frames `aim9-sweep25-*` and `aim9-sweep67-*` |
+| `--a2g-run --attack release --station 3 --load AIM9M --count 2` at 200 and 650 kt (`a2g-release-origin-tornado-rail`) | left then right from (-10.75, -0.74, 1.50) and (10.75, -0.74, 1.50) at 25 degrees; (-11.78, -0.74, -0.81) and (11.61, -0.74, -1.26) at 67 degrees; depth 0.53 ft, the point it hangs at |
+| `--a2g-run --attack jettison --station 3 --load AIM9M` at 200 and 650 kt (`a2g-jettison-tornado-rail`) | the tank, then both missiles from the same points; payload 13,228 to 11,380 to 11,000 lb |
+| CPU stores preview, every catalog store of row 8 at 25 and 67 degrees (`checks/TOR-6b/matrix.sh`) | AIM-9B, AIM-9M, AIM-9X, AA-2, AA-8, AA-11, AA-11B 0.00 ft into the airframe; R.550 0.40, AT-12 0.44, PL-7 0.50 (0.83 at 67), GBU-12 1.02 |
+
+Frames: `.local/m3-aircraft/frames/TOR-6b/`.
