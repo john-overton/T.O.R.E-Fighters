@@ -4685,3 +4685,39 @@ Provenance: sensor rows, HUD module, panel names and cockpit art spec-derived
 the mirror seeds and the eye-point reading fitted or agent decisions (2026-11-10).
 Evidence and frames: `.local/m3-aircraft/frames/F5E-7/` and
 `.local/m3-aircraft/checks/F5E-7/`.
+
+## F-5E flight review (F5E-8, 2026-11-10)
+
+Dated section, additions only. The F-5E flies the hybrid adapter's own `variety`
+configuration built from `F5E.PT` (`f5e.SH`), two J85-GE-21 at 7,000 lbf military
+and 10,000 lbf afterburner in all, with John's B5-2 corrections (4,400 lb of fuel,
+a 51,800 ft ceiling, top row +7, no +8 row). No envelope, G, weight, fuel, flow,
+ceiling or thrust value was changed and no flight constant was touched.
+
+- Top speeds: the 1 G row is 1,090 kt at 36,000 ft (Mach 1.90), 17 percent over the
+  published Mach 1.63, and 731 kt at 1,000 ft (no published sea-level figure was
+  found). Full internal fuel settles at 0.937 of the edge: 1,021 kt (Mach 1.78) at
+  36,000 ft, 685 kt at 1,000 ft. Level flight is held to the corrected 51,800 ft
+  ceiling and the zoom peaks at 52,214 ft. The fast edge falls steeply above 39,000
+  ft (586 kt at 50,000 ft).
+- Climb and acceleration: peak specific excess power 332 ft/s at sea level (19,900
+  ft/min), best sustained climb 314 to 316 ft/s, 36,000 ft in 138 to 159 s: 55 to 58
+  percent of the published 34,500 ft/min, from the shared drag law and the missing
+  ram thrust (the thrust and weights are the real ones). Not changed; a fleet-level
+  drag or ram fit remains John's call.
+- G: the +7 top row gives 5.98 G at 461 kt and 1,000 ft with full fuel and 7.00 G
+  nearly dry (never above it; no +8 row), -2.55 to -2.99 G on the push. The sustained
+  turn at 461 kt and 1,000 ft is 4.13 G, 9.6 deg/s. The record's high-speed G rows
+  are narrow (2.6 G at 593 kt and 1,000 ft), a retail shape, not changed.
+- Fuel: record flows 1 and 8 lb/s kept; 73.3 minutes dry and 9.2 at afterburner
+  from 4,400 lb, against about 30 and 12.4 minutes at the J85-GE-21's published
+  specific fuel consumption.
+- Takeoff and landing: liftoff 153.4 kt after 1,763 ft (537 m), approach 166.2 kt,
+  touchdown 159.8 kt, rollout 703 m; the record has no hook.
+- The scripted `climb` maneuver ends in an overspeed loss after the zoom (the fast
+  edge falls to 832 kt at 43,000 ft); the Mirage and the Gripen do not. Reported.
+
+The liftoff (135 to 165 kt) and approach (155 to 175 kt) ranges in the flight
+battery are fitted windows, agent decisions of 2026-11-10, from the published 124 kt
+landing-configuration stall speed. Full tables, sources and commands are in the
+[variety flight baseline](../baselines/variety-flight.md#northrop-f-5e-validation-2026-11-10).

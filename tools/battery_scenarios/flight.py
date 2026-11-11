@@ -240,7 +240,7 @@ def liftoff_problems(output: str) -> list[str]:
 # What John asked for on 2026-09-29 (unsourced real-world figures, a plausibility
 # range only), in knots: liftoff at the default gross weight and approach at a
 # landing weight of 65 percent internal fuel. `None` where there is no figure.
-LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150)}
+LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "f5e": (135, 165)}
 # The MiG-25PD's own figures are fitted from the flight manual quoted in the
 # AviaSimHD MSFS manual: V1 300 km/h, V2 350 km/h at maximum takeoff weight and
 # a 270-290 km/h landing speed (agent decision, 2026-11-07, M25-8).
@@ -257,19 +257,25 @@ LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f2
 # speeds of a simulator manual (FlightGear Mirage 2000 guide, not a primary
 # source), and the measured value is recorded below (agent decision, 2026-11-10,
 # M2K-8).
+# The F-5E's windows (F5E-8, 2026-11-10) are fitted from one published figure, the
+# stall speed with flaps and gear down at 50 percent internal fuel, 124 kt (230
+# km/h, Migflug, Northrop F-5 page, read 2026-11-10): liftoff 1.1 to 1.33 times it
+# (135 to 165 kt) and approach 1.25 to 1.4 times it (155 to 175 kt). The measured
+# 153.4 kt liftoff after 1,763 ft (real ground run about 2,000 ft with two
+# Sidewinders at 15,745 lb) and 166.2 kt approach are recorded below.
 APPROACH_TARGET = {
     "f18": (135, 135), "rafale": (130, 140), "f14": (130, 140), "a4e": (130, 140), "mig29": (135, 145),
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157), "mig31": (143, 160),
-    "m2000": (133, 147),
+    "m2000": (133, 147), "f5e": (155, 175),
 }
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3}
-KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "f5e": 153.4}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "f5e": 166.2}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -280,6 +286,9 @@ INTERNAL_FUEL_LB = {
     # M2000.PT internal fuel, 6,346 lb (M2K-0; the Rafale template's 9,900 lb is
     # not used: the Mirage record carries its own tank).
     "m2000": 6346,
+    # F5E.PT internal fuel, 4,400 lb (B5-2 correction of the retail 6,240 lb; the
+    # real F-5E holds 677 US gal, about 4,500 lb).
+    "f5e": 4400,
     # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
     "f16a": 6972,
 }
@@ -368,7 +377,7 @@ def check_retail_liftoff(output: str) -> list[str]:
 # where they differ (M25-8, F16A-6, M31-8, M2K-8). The F-16A carries no speed target of its own:
 # its record equals the F-16C's, which is in AIRCRAFT and has none, so the two
 # are checked alike.
-LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a", "mig31", "m2000"]
+LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a", "mig31", "m2000", "f5e"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

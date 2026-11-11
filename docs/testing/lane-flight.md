@@ -119,6 +119,10 @@ burn for any extracted PT (`PROBE_PAYLOAD`, `PROBE_FUEL`, `PROBE_ALTS`,
 `PROBE_ONLY`). Its pilots are scripted, so it records the model, not a best
 pilot. The Mirage 2000 results are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
+Update (F5E-8, 2026-11-10): the Northrop F-5E results, with the full-stick pull by
+fuel against the Gripen, the F-16A and the Mirage 2000, are in the
+[variety flight baseline](../baselines/variety-flight.md#northrop-f-5e-validation-2026-11-10);
+`f5e` joins the liftoff, approach and internal-fuel tables of `flight.py`.
 
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the

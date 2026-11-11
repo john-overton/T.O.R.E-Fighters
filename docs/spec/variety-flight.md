@@ -642,6 +642,63 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## Northrop F-5E (F5E-8, 2026-11-10)
+
+The F-5E Tiger flies the hybrid adapter's own `variety` configuration, built from
+`F5E.PT` (`f5e.SH`). Its values are the retail record's with John's B5-2
+corrections ([aircraft record corrections](aircraft-records.md)): empty 9,558 lb,
+internal fuel 4,400 lb (retail 6,240 lb), maximum takeoff 24,664 lb, two engines
+at 7,000 lbf military and 10,000 lbf afterburner in all, environment rows -4 to +7
+G (the retail +8 row, a repeat of the -4 row, is retired) and a 51,800 ft ceiling
+(retail 42,000 ft). The shared conventional flight, ground contact, actuator and
+loaded-mass rules apply unchanged, and no new fit was needed.
+
+The 1 G row's fast edge is 1,090 kt at 36,000 ft (Mach 1.90), against the
+published Mach 1.63 (939 kn, Wikipedia, "Northrop F-5"); the sea-level edge is 731
+kt at 1,000 ft (no published sea-level figure was found). Both stay as decoded. The
+shared loaded-drag rule settles full internal fuel at 0.937 of the edge (1,021 kt,
+Mach 1.78, at 36,000 ft; 685 kt at 1,000 ft) and level flight holds to the 51,800
+ft ceiling (535 kt); the `climb` maneuver zooms to 52,214 ft, 1.008 of it. The
+polygon's fast edge falls about 29 kt per 1,000 ft above 39,000 ft (the B5-2
+correction moved only the top edge), so the speed at 50,000 ft is 586 kt.
+
+At full internal fuel (13,958 lb, thrust to weight 0.72) and afterburner the peak
+specific excess power is 291 to 332 ft/s (19,900 ft/min at sea level) and the best
+sustained climb 314 to 316 ft/s (about 18,900 ft/min), with 36,000 ft in 138 to
+159 s. Level acceleration at 1,000 ft from 363 kt takes 12 s to 460 kt and 37 s to
+590 kt; military power gives about 55 percent of the excess power (170 to 185
+ft/s). The published sea-level climb rate is 34,500 ft/min (575 ft/s, test weight
+not stated); the model gives 55 to 58 percent of it, because of the drag law and
+the absence of any ram thrust gain, not because of the thrust or the weights (see
+the [validation](../baselines/variety-flight.md#northrop-f-5e-validation-2026-11-10)).
+It is reported, not changed.
+
+A full-stick pull at 461 kt and 1,000 ft peaks at 5.98 G with full fuel, 6.49,
+6.78 and 7.00 G with half, a quarter and 300 lb of fuel, the shared
+loaded-elevator rule scaling the limit with the fuel carried (the Gripen 8.00 to
+9.03 G, the F-16A 7.67 to 9.09 G, the Mirage 2000 7.96 to 9.09 G for the same four
+states). The top row is +7: the pull stops at 7.00 G, never passes it and there is
+no +8 row; the real limit is +7.33 G. The full-stick push is -2.55 G (full) to -2.99
+G (near empty), because the -4 row starts at 570 kt at sea level. The record's G rows
+fall off quickly with speed and altitude (+3 G reaches 622 kt at sea level and ends
+at 28,875 ft), so a pull at 593 kt and 1,000 ft gives 2.6 G and the sustained level
+turn is 4.13 G (9.6 deg/s) at 461 kt, 2.5 G at 593 kt and about 1.6 G at 30,000 ft
+and above, from a scripted pilot (a lower bound). The record's fuel flows (1 and 8
+lb/s) are kept: the 4,400 lb tank lasts 73.3 minutes at military power and 9.2 at
+afterburner, against about 30 and 12.4 minutes at the J85-GE-21's published
+specific fuel consumption.
+
+The default load (15,365 lb) takes off at 153.4 kt after 1,763 ft (537 m; the real
+ground run is about 2,000 ft at 15,745 lb) and approaches at 166.2 kt (1.3 times the
+published 124 kt landing-configuration stall speed is 161 kt), touching down at
+159.8 kt at 65 percent fuel and stopping 703 m later; the record has no arrestor
+hook. The liftoff and approach ranges the battery checks are fitted windows (agent
+decisions, 2026-11-10).
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift
