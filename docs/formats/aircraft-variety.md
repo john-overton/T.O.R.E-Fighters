@@ -3821,6 +3821,14 @@ The whole-surface gate (John, 2026-11-07/08) is met by every face above except
 the taileron's forward-corner strain and the missing-surface gaps; no
 diagonal or partial surface is in the source, so no probe sheet is needed.
 
+Update (TOR-4, 2026-11-10): the airbrake word's four faces are two plates, one
+a side, each in both windings (`57ec`/`5803` right, `5889`/`58a0` left), not four
+plates; the gear is rigged as three rigid pieces (each main leg of ten faces and
+the nose of six, folding forward) rather than "rigid plates, hinge at top edge";
+and the burner word's eight faces are two crossed plate pairs, one per nozzle
+(nozzle octagons `3e90`, `3eb7` at y -24). See [the Tornado gear, airbrake and
+burner rig](aircraft-control-surfaces.md#tornado-gear-airbrake-and-burner-rig-tor-4-2026-11-10).
+
 ### Tornado sensors, jammer and pod (for John)
 
 Nine rows. Rows 0 to 3 are fixed internal rows (flag `0x8`); `F18R.SEE` is the

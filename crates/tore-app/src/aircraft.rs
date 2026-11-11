@@ -1074,4 +1074,67 @@ mod tests {
             [-2. * 1.3616, 2. * 1.3616, -4. * 1.5053, 2. * 1.5053]
         );
     }
+
+    /// The Tornado has two engines and two nozzle exit octagons at y -24 (faces
+    /// 0x3e90 left and 0x3eb7 right): two trails, one behind each octagon's
+    /// centre, 2 ft behind the exit plane (TOR-4). This test passes no rig, so
+    /// the offsets use the 1/3 ft default; the loaded Tornado rig multiplies the
+    /// shape units by its 2/3 ft header scale instead (`Rig::scale`).
+    #[test]
+    fn the_tornado_draws_two_contrails_one_behind_each_nozzle() {
+        use tore_formats::aircraft::AircraftId;
+        let id = AircraftId::Tornado;
+        assert_eq!(crate::engine_material::outlet_count(id), 2);
+        let face = |address: usize, points: &[[f32; 3]]| tore_formats::shape::Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![],
+            positions: points.to_vec(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0x64,
+            normal: None,
+            fog: tore_formats::shape::FogMode::Enabled,
+        };
+        let octagon = |side: f32| {
+            [
+                [3., 1.],
+                [4., 1.],
+                [5., -1.],
+                [5., -2.],
+                [4., -3.],
+                [3., -3.],
+                [2., -2.],
+                [2., -1.],
+            ]
+            .map(|[x, z]| [side * x, -24., z])
+        };
+        let neutral = Shape {
+            lines: vec![],
+            faces: vec![
+                face(0x3eb7, &octagon(1.)),
+                face(0x3e90, &octagon(-1.)),
+                // A face farther forward: only the nozzle faces place a trail.
+                face(0x1c64, &[[-3., 26., -6.], [0., 14., -6.], [2., 26., -6.]]),
+            ],
+            billboards: vec![],
+            state_words: Default::default(),
+        };
+        let offsets = contrail_offsets(id, &neutral, None, 2);
+        assert_eq!(offsets.len(), 2);
+        // Group 0 is the left nozzle (x -5 to -2), group 1 the right (2 to 5);
+        // both span z -3 to 1 and their exit plane is y -24.
+        for (group, x) in [(0usize, -3.5f64), (1, 3.5)] {
+            let want = [x / 3., -1. / 3., -24. / 3. - 2.];
+            for k in 0..3 {
+                assert!(
+                    (offsets[group][k] - want[k]).abs() < 1e-6,
+                    "{group} axis {k}"
+                );
+            }
+        }
+        assert!((offsets[0][0] + offsets[1][0]).abs() < 1e-9);
+        let bounds = nozzle_bounds(id, &neutral);
+        assert_eq!(bounds[0], [-5., -2., -3., 1.]);
+        assert_eq!(bounds[1], [2., 5., -3., 1.]);
+    }
 }

@@ -1207,3 +1207,124 @@ TOR-4. See the [Tornado control fit](../spec/variety-animation.md#tornado-contro
 | Flap droop 0.40, rudder travel 0.35 | fitted to the fleet's values, agent decision 2026-11-10 |
 | Rudder as one rigid panel about its leading edge | fitted; the source word is a one-way skew, not a rotation |
 | Gear interim rise | fitted placeholder until TOR-4 |
+
+## Tornado gear, airbrake and burner rig (TOR-4, 2026-11-10)
+
+Implementation, slice TOR-4, Claude Sonnet (sonnet-high). The Tornado's own rig
+`tornado_animation.rs` (TOR-3) now owns the gear, the two airbrake plates and the
+two afterburner plumes, replacing the interim gear rise and the load-time-only
+checks TOR-3 left marked. The shape is read at the header scale 2/3 ft a unit;
+every hinge point below is in shape units, so all pieces stay rigid. The text
+TOR-3 wrote above is unchanged; this section adds to it.
+
+**Word map.** All six words are now accounted for.
+
+| Word | Reading | Rig |
+| --- | --- | --- |
+| `0x7dc0` | Two afterburner flames, 8 plates | Mapped: plumes scale from the nozzle exit plane |
+| `0x7dc6` | Airbrakes, 4 faces | Mapped: two plates (one a side, both windings), each turns whole about its forward edge |
+| `0x7dcc` | Gear down, 26 faces | Mapped: three whole rigid pieces (below) |
+| `0x7dd8`, `0x7dde` | Left and right flap words | TOR-3: pinned at load, never set; the strips droop as whole panels |
+| `0x7de4` | Rudder | TOR-3: pinned; the block turns whole |
+
+**Correction to the TOR-0 count.** The review and TOR-3 call the airbrake word's
+four faces "four plates, two a side". They are **two plates, one a side**, each
+drawn in both windings (`57ec`/`5803` right, `5889`/`58a0` left). The rig and
+the probe treat them that way; earlier text is left as written (rule B11).
+
+**Gear faces (26, three pieces).** Left main (`4705` to `47fc`) and right main
+(`4908` to `49ff`), ten faces each: a wheel sheet (the slanted side plate,
+x 5 to 6 at the top, 6 at the foot, y -1 to 3, z -11 to -4), a cross plate
+(plane y 2, x 3 to 7, z -11 to -5), a slanted strut plate (x 6 to 7, y -2 to 3,
+z -6 to -4), a horizontal cap (z -4, x 5 to 6) and a top strip, each in both
+windings. Nose (`4a97` to `4b2a`), six faces: a side sheet (plane x 0, y 25 to
+29, z -11 to -5), a cross sheet (plane y 27, x +-1) and a slanted strut plate
+(x +-1, y 25 to 26, z -8 to -5), both windings. The rig checks every corner
+against these boxes at load. The source has no doors and no wheels; the wheel
+art is the sheets' texture.
+
+**Retraction direction (cited).** The real Tornado's "undercarriage retracts
+forwards into the airframe" ([Panavia Tornado Multirole Aircraft, Surya Malam
+blog, 2016](https://suryamalam.blogspot.com/2016/02/panavia-tornado-multirole-aircraft.html),
+accessed 2026-11-10; a hobbyist summary, not a maintenance manual). No public
+text found says more per leg (whether the mains also turn their wheels flat or
+swing inward), so the fit folds forward only and claims nothing else. A
+Tornado main/nose leg manual would settle it. The two-wheel nose and
+single-wheel mains of the real aircraft are not in the shape.
+
+**Gear law (fitted, agent decision 2026-11-10).** `quarter = 90 degrees * (1 -
+gear)`, every piece one rigid body.
+
+- Each main leg (10 faces) turns `quarter` about a lateral line (along X) at
+  y -1, z -2: the line sits at the leg's rear edge (the y of its rear foot
+  corner) so no corner ever dips below the gear-down contact (a pivot at the leg
+  centre dipped 0.07 ft), and 9 units above the foot. Stowed, the leg lies flat
+  at y -1 to 8, z -3 to 2 inside the fuselage side skin (x 3 to 7), checked
+  vertex by vertex against the neutral skin; the hinge heights were chosen so
+  the right leg is wholly inside. The left upper skin is 0.2 units lower than
+  the right (the source is not a mirror), so the left foot corner overshoots it by
+  0.25 units, **0.17 ft**, at full stow (the probe's stow tolerance is 0.2 ft).
+- The six nose faces turn `quarter` about a lateral line at y 25, z -3.5, at
+  the leg's rear edge, and steer first about a vertical line through the cross
+  of the sheets (x 0, y 27) by `-nosewheel_angle` (zero off the ground). Stowed,
+  they lie at y 26 to 32, z -5.5 to -1.5, inside the nose (skin z -6 to 1 there).
+- Gear 1 is the source pose with the lowest point at z -11 (7.33 ft at 2/3 ft a
+  unit, the flight model's gear low point, B5-1); 0 hides the pieces. Closing
+  never lowers a plate (probe gate); the feet fold forward.
+
+**Airbrakes.** Each plate rises aft from its forward edge (y -7, z 2) to its free
+edge (y -10, z 4): the source's open pose, brake 1. The real brakes are large
+hydraulic plates "either side of the fin" (same blog), which the two dorsal
+plates match in place if not in size. The plate turns whole about the line along
+X through its forward edge by `0.588 rad * (1 - brake)` (33.7 degrees: brake 1
+is the source pose, near 0 lays the plate flat at the hinge height z 2, 0 hides
+it). The dorsal skin under the right plate is z 2.0 to 2.3, so the closed right
+plate sits within 0.3 units of it; the skin falls to 1.1 under the left outer
+corner, so a closed left plate hovers up to 0.35 ft over it (reported in
+`brake-sweep.csv`, not gated; a single hinge cannot follow a roll-wise slope).
+Fitted.
+
+**Burners and trails.** Per nozzle one crossed pair of plates (a vertical plate
+at x -3 or 4, z -3 to 1, and a flat plate at z -1, x -5 to -2 or 2 to 5), both
+windings, from y -25 back to y -43 (18 units, 12 ft). They scale along Y from the
+nozzle exit plane y -24 by the afterburner fraction. `engine_material` names the
+two nozzle exit octagons at y -24 (`3e90` left, `3eb7` right, subtype 0x64) and
+`outlet_count` is 2 (the record's engine count, which agrees with the shape),
+so there are two nozzle glows and `contrail_offsets` makes two trails (centre
+of each octagon, 2 ft behind its exit plane, using the rig's 2/3 ft scale),
+replacing the fitted fallback TOR-2 noted. A unit test pins the two offsets and
+nozzle bounds on synthetic faces at the default scale.
+
+**Rule 11 fold table.**
+
+| Piece | Faces | Vertices | Moved | On a hinge | Fixed |
+| --- | --- | --- | ---: | ---: | ---: |
+| Right main leg (one body) | `4908`, `4927`, `4946`, `4965`, `4984`, `499b`, `49b2`, `49c9`, `49e0`, `49ff` | 4 each | all | 0 (the line lies behind and above the leg) | 0 |
+| Left main leg (one body) | `4705`, `4724`, `4743`, `4762`, `4781`, `4798`, `47af`, `47c6`, `47dd`, `47fc` | 4 each | all | 0 | 0 |
+| Nose (one body) | `4a97`, `4ab6`, `4ad5`, `4af4`, `4b13`, `4b2a` | 4 each | all | 0 | 0 |
+| Right airbrake plate | `57ec`, `5803` | 4 each | 2 each | 2 each: (5,-7,2), (2,-7,2) | 0 |
+| Left airbrake plate | `5889`, `58a0` | 4 each | 2 each | 2 each: (-2,-7,2), (-6,-7,2) | 0 |
+| Plumes (eight faces) | `591e`, `593d`, `595c`, `597b`, `599a`, `59b9`, `59d8`, `59f7` | 4 each | all (scaled from y -24) | 0 | 0 |
+
+Verdict: **no face folds** (the probe's `folds` count is 0 for every gear and
+brake group at every sample). The legs and the nose have no vertex on their
+fold lines; the brake plates keep their two hinge-edge vertices; the load-time
+check refuses a shape whose corners differ.
+
+**Probe** (`--aircraft tornado --animation-probe`, `reviewed-controls-and-attachments`).
+287 neutral faces, 0 required or check failures; gear, brake and exhaust read
+`required moved`, and the TOR-3 sweep, 25-pose and control grids still pass. The
+202-value dense gear sweep (`dense-gear.csv`, 203 lines) passes every row: rigidity
+at most 2.2e-6 ft, anchor gap 0, skin gap 0, no new planar crossings, ground
+contact at gear 1 (lowest point 7.3333 ft), nothing below the gear-down height,
+feet forward, and near stow the worst overshoot outside the neutral skin 0.17 ft.
+`brake-sweep.csv` (7 values) is rigid to 4.8e-7 ft with the hinge gap 0 and the
+closed free edge flat at z 2.0 within 2e-6 units; `exhaust-sweep.csv` (7 values)
+has the root edge `value` units behind the exit plane and the tips at `19 *
+value`, gaps 0. Frames in `.local/m3-aircraft/frames/TOR-4/` (local only).
+
+Provenance: faces, word roles and corners spec-derived (retail `TOR.SH`,
+re-verified at load); retraction direction forward from the cited public summary
+(secondary); every hinge line, the quarter-turn law, the stow poses, the
+0.588 rad closed brake angle and the plume scaling fitted (agent decisions
+2026-11-10); engine count 2 from the record; nothing here is attributed to John.

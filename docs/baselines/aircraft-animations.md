@@ -648,3 +648,22 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |
+| `tornado` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear (mains and nose forward), the two dorsal airbrake plates and the two burner plumes reviewed; mechanics fitted (control surfaces: TOR-3) |
+
+## Tornado gear, airbrake and plume results (2026-11-10)
+
+Exact `tornado` (`TOR.PT`) passes the probe with the TOR-4 devices
+(`TORE_DATA_DIR=.local/m3-aircraft/profile-tornado target/debug/tore-app --aircraft
+tornado --animation-probe .local/m3-aircraft/checks/TOR-4/probe`): scope
+`reviewed-controls-and-attachments`, 287 neutral faces, zero required or check
+failures; gear, brake and exhaust read `required moved`. The 202-value dense gear
+sweep has every row passing (anchor gap 0, skin gap 0, rigidity at most 2.2e-6 ft,
+no new planar crossings, ground contact 7.3333 ft at gear 1, near-stow overshoot
+outside the neutral skin at most 0.17 ft on the left main); the seven-value brake
+sweep is rigid with the hinge fixed and the closed plate flat at the hinge
+height; the exhaust sweep pins root and tip. The mains and the nose retract
+forward (public summary, fitted law). Two plumes, two nozzle glows and two
+contrails draw from the two engines. Battery: `flight-animation-tornado` and
+`flight-variety-tornado` pass. Frames: `.local/m3-aircraft/frames/TOR-4/`. In the
+gear 0.2 frame a sliver of the main leg still shows at the wing root (a transit
+pose; fully stowed nothing draws).

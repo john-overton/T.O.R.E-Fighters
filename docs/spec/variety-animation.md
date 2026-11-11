@@ -846,3 +846,24 @@ the strip and rudder seam openings (`taileron-corner-swing.csv`,
 `seam-opening.csv`, both reported, not gated); and the station witnesses
 (`pylon-poses.csv`). The probe isolates the controls at 200 knots, below the sweep
 threshold. Not a claim of the original's sweep law (it has none) or surface travel.
+
+## Tornado gear, airbrake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice TOR-4), over `TOR.SH` at its
+header scale (2/3 ft a unit). Faces, the airbrake count correction, the fold
+table and provenance: [control-surface
+geometry](../formats/aircraft-control-surfaces.md#tornado-gear-airbrake-and-burner-rig-tor-4-2026-11-10).
+It adds to the [Tornado control fit](#tornado-control-fit) above, which is
+unchanged.
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | The right main leg, the left main leg and the nose (10, 10 and 6 faces) are each one rigid body: `90 degrees * (1 - gear)` forward about a lateral line at the leg's rear edge, which lays it flat inside the fuselage side or nose. The nose steers first about a vertical line through its cross. Hidden at 0, the source pose at 1, grounded at 7.33 ft. The real undercarriage retracts forward (cited); the law is fitted. |
+| Airbrakes | One plate a side (two windings each) turns about its forward edge by `0.588 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie flat at the hinge height, 0 hides them. |
+| Afterburner | Each nozzle's crossed plate pair (eight faces in all) scales along Y from the nozzle exit plane (y -24) by the afterburner fraction, hidden at 0. Two nozzle glows and two contrails, from the engine count of 2. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity at most 2.2e-6 ft, anchor gap 0, skin gap 0, ground contact at
+gear 1, near-stow overshoot at most 0.17 ft) and the closed brake flat within
+2e-6 units. Not a claim of original retraction timing.

@@ -865,6 +865,7 @@ and direction checks. The Mirage 2000 adds the same 202-value dense gear sweep (
 mains inward, nose rearward), a seven-value airbrake sweep that checks the
 closed plate on the spine, and the 25-combination pitch/roll grid; its
 `flight-variety-m2000` scenario flies 1,200 headless ticks.
+The Tornado (TOR-4, 2026-11-10) adds the same 202-value dense gear sweep (grounded at 7.33 ft at gear 1, three rigid pieces folding forward, near-stow checked against the neutral skin), a seven-value brake sweep (two plates, closed flat at the hinge height) and a seven-value exhaust sweep (two plumes from the exit plane), beside TOR-3's 25-pose grids at 25 and 67 degrees and its 35-pose sweep/flap grid; `flight-variety-tornado` flies 1,200 headless ticks.
 
 Run one repaired aircraft before expanding the audit:
 

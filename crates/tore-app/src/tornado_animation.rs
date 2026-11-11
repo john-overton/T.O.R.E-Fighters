@@ -1,7 +1,9 @@
-//! Tornado IDS (`TOR.SH`) own-source control rig (TOR-3): the swing wing, the
-//! two whole-panel tailerons, the trailing flap strips and the rudder panel.
-//! See docs/spec/variety-animation.md "Tornado control fit" and
-//! docs/formats/aircraft-control-surfaces.md "Tornado control rig (TOR-3)".
+//! Tornado IDS (`TOR.SH`) own-source rig: the swing wing, the two whole-panel
+//! tailerons, the trailing flap strips and the rudder panel (TOR-3), and the
+//! three rigid gear pieces, the two airbrake plates and the two afterburner
+//! plumes (TOR-4). See docs/spec/variety-animation.md "Tornado control fit" and
+//! "Tornado gear, airbrake and plume fit", and docs/formats/aircraft-control-surfaces.md
+//! "Tornado control rig (TOR-3)" and "Tornado gear, airbrake and burner rig (TOR-4)".
 //!
 //! `TOR.SH` ships six state words: 0x7dc0 the burner plates, 0x7dc6 the
 //! airbrake plates, 0x7dcc the gear, 0x7dd8 and 0x7dde the left and right flap
@@ -46,22 +48,54 @@ pub(crate) const TAIL_L: [usize; 2] = [0x4176, 0x42f8];
 pub(crate) const RUDDER: [usize; 2] = [0x5723, 0x5750];
 /// Faces the rudder word 0x7de4 swaps in for the block (never drawn).
 const RUDDER_WORD: [usize; 2] = [0x5625, 0x5652];
-/// Gear word 0x7dcc: nose plates (6 faces) and two mains of 10 faces. TOR-4
-/// owns the plates' hinges and the stowed pose; until then the interim fitted
-/// rise lifts the whole group by its own vertical extent as the gear stows.
+/// Gear word 0x7dcc adds 26 faces in three rigid pieces (TOR-4): the left main
+/// leg (x -3 to -7), the right main leg (x 3 to 7), each ten faces (the wheel
+/// sheet, the cross plate, the slanted strut and the top caps), and the nose
+/// leg, six faces (a cross of two sheets and a slanted strut plate). Every
+/// piece turns whole about a lateral axis, so no vertex stays fixed off an axis.
+const GEAR_MAIN_L: [usize; 10] = [
+    0x4705, 0x4724, 0x4743, 0x4762, 0x4781, 0x4798, 0x47af, 0x47c6, 0x47dd, 0x47fc,
+];
+const GEAR_MAIN_R: [usize; 10] = [
+    0x4908, 0x4927, 0x4946, 0x4965, 0x4984, 0x499b, 0x49b2, 0x49c9, 0x49e0, 0x49ff,
+];
+const GEAR_NOSE: [usize; 6] = [0x4a97, 0x4ab6, 0x4ad5, 0x4af4, 0x4b13, 0x4b2a];
 const GEAR: [usize; 26] = [
     0x4705, 0x4724, 0x4743, 0x4762, 0x4781, 0x4798, 0x47af, 0x47c6, 0x47dd, 0x47fc, 0x4908, 0x4927,
     0x4946, 0x4965, 0x4984, 0x499b, 0x49b2, 0x49c9, 0x49e0, 0x49ff, 0x4a97, 0x4ab6, 0x4ad5, 0x4af4,
     0x4b13, 0x4b2a,
 ];
-/// TOR-4 marker: burner word 0x7dc0 adds eight plates behind the nozzles (x
-/// -5 to -2 and 2 to 5, y -43 to -25) and airbrake word 0x7dc6 adds four plates
-/// (two a side, hinged at y -7). Both are only checked here; the rig neither
-/// draws nor moves them until TOR-4 maps them.
+/// Burner word 0x7dc0 adds eight plates: per nozzle one crossed pair (a plate
+/// in the vertical plane and one in the horizontal plane through the nozzle
+/// centre, each with both windings), 18 units long from y -25 to -43. Airbrake
+/// word 0x7dc6 adds four faces: one plate a side, both windings, hinged on its
+/// forward edge (y -7, z 2) and raised aft to (y -10, z 4).
 const FLAME: [usize; 8] = [
     0x591e, 0x593d, 0x595c, 0x597b, 0x599a, 0x59b9, 0x59d8, 0x59f7,
 ];
 const BRAKE: [usize; 4] = [0x57ec, 0x5803, 0x5889, 0x58a0];
+const BRAKE_R: [usize; 2] = [0x57ec, 0x5803];
+const BRAKE_L: [usize; 2] = [0x5889, 0x58a0];
+/// The two nozzle exit octagons (subtype 0x64, y -24): left, right.
+const NOZZLE: [usize; 2] = [0x3e90, 0x3eb7];
+const NOZZLE_PLANE: f32 = -24.;
+const FLAME_TIP: f32 = -43.;
+
+/// Main leg bay pivots, a lateral axis (shape units) at the leg's rear edge
+/// (y -1, the y of its rear foot corner, so no corner dips below the gear-down
+/// contact as the leg folds) and 9 units above the foot: the leg turns forward
+/// through a quarter turn and lies flat in the fuselage. Fitted so every
+/// stowed vertex sits inside the hull (the probe checks it against the neutral
+/// skin). The pivot's x is the leg's middle and does not matter.
+const MAIN_HINGE_R: [f32; 3] = [5., -1., -2.];
+const MAIN_HINGE_L: [f32; 3] = [-5., -1., -2.];
+/// Nose leg bay pivot (lateral axis at the leg's rear edge, y 25) and its
+/// vertical steering axis through the cross of the two sheets (y 27). Fitted
+/// likewise.
+const NOSE_HINGE: [f32; 3] = [0., 25., -3.5];
+const NOSE_STEER: [f32; 3] = [0., 27., 0.];
+/// Brake hinge: the forward edge of both plates, a line along X at y -7, z 2.
+const BRAKE_HINGE: [f32; 3] = [0., -7., 2.];
 
 /// Wing sweep pivots, vertical axis, shape units. The glove fillets are fixed
 /// faces that share five vertices with each wing panel (right: (9,1,0), (9,1,1),
@@ -233,6 +267,39 @@ pub(crate) fn streamer_point(
     Some(wing_station(side == 1, spread, turn).mount)
 }
 
+/// Closed airbrake angle, radians: the turn about the forward hinge that lays
+/// the raised plate flat at the hinge height (the dorsal skin under both plates
+/// sits within 0.3 units of z 2 at the hinge and 2.0 at the free edge on the
+/// right, and falls away to 1.1 at the left outer edge). Worked out from the
+/// source plate: the free edge is 3 units aft and 2 units above the hinge.
+/// Fitted.
+pub(crate) fn brake_closed() -> f64 {
+    let direction =
+        |a: [f32; 3], b: [f32; 3]| f64::atan2(f64::from(b[2] - a[2]), f64::from(b[1] - a[1]));
+    let open = direction(BRAKE_HINGE, [0., -10., 4.]);
+    let flat = direction(BRAKE_HINGE, [0., -10., 2.]);
+    (flat - open).rem_euclid(std::f64::consts::TAU)
+}
+
+/// Whole-piece gear motion (TOR-4). Each main leg turns as one rigid body about
+/// a lateral axis in its bay and folds forward through a quarter turn; the nose
+/// leg does the same about its own bay axis and steers about its vertical axis
+/// first. Gear down (1) is the source pose; hidden at gear 0 by the caller.
+pub(crate) fn gear_positions(f: &mut Face, gear: f64, steering: f64) {
+    let angle = std::f64::consts::FRAC_PI_2 * (1. - gear.clamp(0., 1.));
+    let a = f.address;
+    if GEAR_NOSE.contains(&a) {
+        if steering != 0. {
+            turn(f, NOSE_STEER, [0., 0., 1.], -steering);
+        }
+        turn(f, NOSE_HINGE, [1., 0., 0.], angle);
+    } else if GEAR_MAIN_R.contains(&a) {
+        turn(f, MAIN_HINGE_R, [1., 0., 0.], angle);
+    } else if GEAR_MAIN_L.contains(&a) {
+        turn(f, MAIN_HINGE_L, [1., 0., 0.], angle);
+    }
+}
+
 fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
     let mut found = shape.faces.iter().filter(|f| f.address == address);
     let result = found
@@ -270,11 +337,7 @@ fn has(face: &Face, p: [f32; 3]) -> bool {
     face.positions.contains(&p)
 }
 
-pub struct Rig {
-    /// The interim fitted gear rise: the whole source group lifts by its own
-    /// vertical extent as the gear stows.
-    gear_rise: f32,
-}
+pub struct Rig;
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 28150
@@ -369,28 +432,98 @@ impl Rig {
         branch(bytes, &original, 0x7dde, &[], &STRIP_R)?;
         // The rudder word swaps the block for a skewed copy.
         branch(bytes, &original, 0x7de4, &RUDDER_WORD, &RUDDER)?;
-        // TOR-4 marker: the burner and airbrake words add exactly the plates
-        // named above; they are checked and left unmapped.
-        branch(bytes, &original, 0x7dc0, &FLAME, &[])?;
-        branch(bytes, &original, 0x7dc6, &BRAKE, &[])?;
-        // The gear word adds exactly the 26 reviewed plates.
+        // The gear, airbrake and burner words add exactly the reviewed faces and
+        // remove nothing. Every plate's corners are checked against the reviewed
+        // source box, so the rig refuses a shape that differs.
         let gear = branch(bytes, &original, 0x7dcc, &GEAR, &[])?;
-        let (mut low, mut high) = (f32::INFINITY, f32::NEG_INFINITY);
-        for face in gear.faces.iter().filter(|f| GEAR.contains(&f.address)) {
-            for p in &face.positions {
-                low = low.min(p[2]);
-                high = high.max(p[2]);
+        let brake = branch(bytes, &original, 0x7dc6, &BRAKE, &[])?;
+        let flame = branch(bytes, &original, 0x7dc0, &FLAME, &[])?;
+        let inside = |face: &Face, lo: [f32; 3], hi: [f32; 3]| {
+            face.positions.len() == 4
+                && face
+                    .positions
+                    .iter()
+                    .all(|p| (0..3).all(|k| p[k] >= lo[k] && p[k] <= hi[k]))
+        };
+        for (ids, lo, hi) in [
+            (&GEAR_MAIN_R[..], [3., -2., -11.], [7., 3., -4.]),
+            (&GEAR_MAIN_L[..], [-7., -2., -11.], [-3., 3., -4.]),
+            (&GEAR_NOSE[..], [-1., 25., -11.], [1., 29., -5.]),
+        ] {
+            for &address in ids {
+                if !inside(one(&gear, address)?, lo, hi) {
+                    return Err(format!("unreviewed TOR.SH gear plate {address:x}").into());
+                }
             }
         }
-        shape
-            .faces
-            .extend(gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)));
-        Ok((
-            Self {
-                gear_rise: (high - low).max(1.),
-            },
-            shape,
-        ))
+        for (ids, points) in [
+            (
+                &BRAKE_R,
+                [[5., -7., 2.], [2., -7., 2.], [2., -10., 4.], [5., -10., 4.]],
+            ),
+            (
+                &BRAKE_L,
+                [
+                    [-2., -7., 2.],
+                    [-6., -7., 2.],
+                    [-5., -10., 4.],
+                    [-3., -10., 4.],
+                ],
+            ),
+        ] {
+            for &address in ids {
+                let face = one(&brake, address)?;
+                if face.positions.len() != 4 || !points.iter().all(|&q| has(face, q)) {
+                    return Err(format!("unreviewed TOR.SH airbrake plate {address:x}").into());
+                }
+            }
+        }
+        // Each nozzle is one exit octagon on the plane y -24; the plume plates
+        // run from one unit behind it to y -43.
+        for (address, side) in NOZZLE.into_iter().zip([-1f32, 1.]) {
+            let face = one(&shape, address)?;
+            if face.positions.len() != 8
+                || !face.positions.iter().all(|p| p[1] == NOZZLE_PLANE)
+                || !face
+                    .positions
+                    .iter()
+                    .all(|p| p[0] * side > 1. && p[0] * side < 6.)
+            {
+                return Err(format!("unreviewed TOR.SH nozzle {address:x}").into());
+            }
+        }
+        let (mut root, mut tip) = (f32::NEG_INFINITY, f32::INFINITY);
+        for &address in &FLAME {
+            let face = one(&flame, address)?;
+            if face.positions.len() != 4 {
+                return Err(format!("unreviewed TOR.SH plume plate {address:x}").into());
+            }
+            for p in &face.positions {
+                root = root.max(p[1]);
+                tip = tip.min(p[1]);
+            }
+        }
+        if root != NOZZLE_PLANE - 1. || tip != FLAME_TIP {
+            return Err("unreviewed TOR.SH plume extent".into());
+        }
+        shape.faces.extend(
+            gear.faces
+                .into_iter()
+                .filter(|f| GEAR.contains(&f.address))
+                .chain(
+                    brake
+                        .faces
+                        .into_iter()
+                        .filter(|f| BRAKE.contains(&f.address)),
+                )
+                .chain(
+                    flame
+                        .faces
+                        .into_iter()
+                        .filter(|f| FLAME.contains(&f.address)),
+                ),
+        );
+        Ok((Self, shape))
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
@@ -444,17 +577,35 @@ impl Rig {
             if state.gear <= 0. {
                 return None;
             }
-            let rise = self.gear_rise * (1. - state.gear.clamp(0., 1.)) as f32;
+            gear_positions(&mut result, state.gear, state.nosewheel_angle());
+        } else if BRAKE.contains(&a) {
+            if state.brake <= 0. {
+                return None;
+            }
+            // Open (brake 1) is the source pose; closing turns the whole plate
+            // about its forward edge down onto the spine.
+            turn(
+                &mut result,
+                BRAKE_HINGE,
+                [1., 0., 0.],
+                brake_closed() * (1. - state.brake.clamp(0., 1.)),
+            );
+        } else if FLAME.contains(&a) {
+            if state.exhaust <= 0. {
+                return None;
+            }
+            // The plume grows from the nozzle exit plane; every plate scales
+            // from the same root, so the shared edges stay together.
             for p in &mut result.positions {
-                p[2] += rise;
+                p[1] = NOZZLE_PLANE + (p[1] - NOZZLE_PLANE) * state.exhaust.clamp(0., 1.) as f32;
             }
         }
         Some(result)
     }
 }
-/// The burner plates are mapped by TOR-4.
-pub(crate) fn flame(_address: usize) -> bool {
-    false
+/// The plume plates, drawn as the afterburner flame.
+pub(crate) fn flame(address: usize) -> bool {
+    FLAME.contains(&address)
 }
 
 #[cfg(test)]
@@ -476,7 +627,7 @@ mod tests {
         }
     }
     fn rig() -> Rig {
-        Rig { gear_rise: 10. }
+        Rig
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =
@@ -729,5 +880,179 @@ mod tests {
                 assert!((pose.turn + if right { pose.swivel } else { -pose.swivel }).abs() < 1e-12);
             }
         }
+    }
+
+    #[test]
+    fn each_gear_piece_turns_whole_and_folds_forward_to_a_stow_inside_the_hull() {
+        let rig = rig();
+        let mut s = state();
+        // The right main leg's wheel sheet (the slanted side plate 0x4908), the
+        // left one (0x4705) and the nose cross sheet (0x4ad5), as in the source.
+        for (a, pts) in [
+            (
+                0x4908,
+                [
+                    [6., -1., -11.],
+                    [5., -1., -4.],
+                    [5., 3., -4.],
+                    [6., 3., -11.],
+                ],
+            ),
+            (
+                0x4705,
+                [
+                    [-6., -1., -11.],
+                    [-6., 3., -11.],
+                    [-5., 3., -4.],
+                    [-5., -1., -4.],
+                ],
+            ),
+            (
+                0x4ad5,
+                [
+                    [1., 27., -11.],
+                    [-1., 27., -11.],
+                    [-1., 27., -5.],
+                    [1., 27., -5.],
+                ],
+            ),
+        ] {
+            let source = face(a, &pts);
+            // Gear down is the source pose, so the ground contact stays -11.
+            s.gear = 1.;
+            assert_eq!(rig.animate(&source, &s).unwrap().positions, pts);
+            // Gear up draws nothing.
+            s.gear = 0.;
+            assert!(rig.animate(&source, &s).is_none());
+            for gear in [0.75, 0.5, 0.25, 0.1, 1e-6] {
+                s.gear = gear;
+                let out = rig.animate(&source, &s).unwrap();
+                // Rigid, and the foot (the lowest corner) travels forward.
+                assert!(spread(&source.positions, &out.positions) < 1e-4, "{a:x}");
+                assert!(out.positions[0][1] > pts[0][1], "{a:x} {gear}");
+                // Nothing ever hangs below the gear-down pose.
+                assert!(out.positions.iter().all(|p| p[2] >= -11. - 1e-4));
+            }
+            // Stowed: the foot has swung up to the hinge height and forward.
+            let foot = rig.animate(&source, &s).unwrap().positions[0];
+            let hinge = if a == 0x4ad5 {
+                NOSE_HINGE
+            } else if pts[0][0] > 0. {
+                MAIN_HINGE_R
+            } else {
+                MAIN_HINGE_L
+            };
+            assert!(
+                (foot[1] - hinge[1] - (hinge[2] - pts[0][2])).abs() < 1e-3,
+                "{a:x}"
+            );
+            assert!(foot[2] > pts[0][2] + 6.);
+        }
+    }
+
+    #[test]
+    fn the_nose_cross_steers_about_its_vertical_axis_and_keeps_its_centre() {
+        let rig = rig();
+        let mut s = state();
+        s.gear = 1.;
+        let pts = [
+            [0., 25., -11.],
+            [0., 29., -11.],
+            [0., 29., -5.],
+            [0., 25., -5.],
+        ];
+        let source = face(0x4a97, &pts);
+        let out = rig.animate(&source, &s).unwrap();
+        assert_eq!(out.positions, pts);
+        // A steered wheel stays rigid and turns about x 0, y 27.
+        let mut face_steered = source.clone();
+        gear_positions(&mut face_steered, 1., 0.5);
+        assert!(spread(&source.positions, &face_steered.positions) < 1e-4);
+        let centre = |f: &Face| {
+            [
+                f.positions.iter().map(|p| p[0]).sum::<f32>() / 4.,
+                f.positions.iter().map(|p| p[1]).sum::<f32>() / 4.,
+            ]
+        };
+        assert!((centre(&face_steered)[1] - 27.).abs() < 1e-4);
+        assert!(centre(&face_steered)[0].abs() < 1e-4);
+        assert!(face_steered.positions[0][0].abs() > 0.5);
+    }
+
+    #[test]
+    fn the_airbrake_plate_turns_whole_about_its_forward_edge_and_lies_flat_closed() {
+        let rig = rig();
+        let mut s = state();
+        for (a, pts) in [
+            (
+                0x57ec,
+                [[5., -7., 2.], [2., -7., 2.], [2., -10., 4.], [5., -10., 4.]],
+            ),
+            (
+                0x5889,
+                [
+                    [-3., -10., 4.],
+                    [-5., -10., 4.],
+                    [-6., -7., 2.],
+                    [-2., -7., 2.],
+                ],
+            ),
+        ] {
+            let source = face(a, &pts);
+            s.brake = 0.;
+            assert!(rig.animate(&source, &s).is_none());
+            s.brake = 1.;
+            assert_eq!(rig.animate(&source, &s).unwrap().positions, pts);
+            assert!((brake_closed().to_degrees() - (2f64 / 3.).atan().to_degrees()).abs() < 1e-9);
+            for brake in [0.75, 0.5, 0.25, 1e-9] {
+                s.brake = brake;
+                let out = rig.animate(&source, &s).unwrap();
+                assert!(spread(&source.positions, &out.positions) < 1e-4, "{brake}");
+                // The forward edge (y -7) is the hinge and stays.
+                for (moved, before) in out.positions.iter().zip(&pts) {
+                    if before[1] == -7. {
+                        for k in 0..3 {
+                            assert!((moved[k] - before[k]).abs() < 1e-4);
+                        }
+                    } else {
+                        // The free edge only comes down as the brake closes.
+                        assert!(moved[2] < before[2] - 1e-3);
+                    }
+                }
+            }
+            // Closed: the free edge is level with the hinge, flat at z 2.
+            let closed = rig.animate(&source, &s).unwrap();
+            for i in 0..4 {
+                assert!((closed.positions[i][2] - 2.).abs() < 1e-4);
+            }
+        }
+    }
+
+    #[test]
+    fn the_plume_grows_from_the_nozzle_exit_plane() {
+        let rig = rig();
+        let mut s = state();
+        let pts = [
+            [-3., -43., 1.],
+            [-3., -25., 1.],
+            [-3., -25., -3.],
+            [-3., -43., -3.],
+        ];
+        let source = face(0x591e, &pts);
+        s.exhaust = 0.;
+        assert!(rig.animate(&source, &s).is_none());
+        s.exhaust = 1.;
+        assert_eq!(rig.animate(&source, &s).unwrap().positions, pts);
+        s.exhaust = 0.5;
+        let out = rig.animate(&source, &s).unwrap();
+        // The tip pulls forward toward the exit plane y -24, the shared edge
+        // pair keeps its length ratio, x and z do not move.
+        assert!((out.positions[0][1] - (-24. + (-43. + 24.) * 0.5)).abs() < 1e-4);
+        assert!((out.positions[1][1] - (-24. + (-25. + 24.) * 0.5)).abs() < 1e-4);
+        for (moved, before) in out.positions.iter().zip(&pts) {
+            assert_eq!(moved[0], before[0]);
+            assert_eq!(moved[2], before[2]);
+        }
+        assert!(flame(0x591e) && flame(0x59f7) && !flame(0x57ec));
     }
 }

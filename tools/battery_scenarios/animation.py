@@ -13,7 +13,7 @@ from battery import Scenario
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
                      "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e", "mig25",
-                     "f16a", "mig31", "m2000")
+                     "f16a", "mig31", "m2000", "tornado")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -68,6 +68,9 @@ def check_report(work: Path, _output: str) -> list[str]:
         "M25.PT": {"dense-gear.csv": 203, "flap-roll-combinations.csv": 26},
         "MIG31.PT": {"dense-gear.csv": 203, "flap-roll-combinations.csv": 26},
         "M2000.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26},
+        "TOR.PT": {"dense-gear.csv": 203, "pitch-roll-combinations-25deg.csv": 26,
+                   "pitch-roll-combinations-67deg.csv": 26, "sweep-flap-combinations.csv": 36,
+                   "brake-sweep.csv": 8, "exhaust-sweep.csv": 8},
     }.get(aircraft, {})
     for csv_name, row_count in sweeps.items():
         try:
@@ -81,7 +84,7 @@ def check_report(work: Path, _output: str) -> list[str]:
 def selection_key(aircraft: str) -> str:
     # Keep the concept identity separate from its F22N retail donor.
     return {"f4g": "F4.PT", "mig17": "MIG17F.PT", "x31": "F31.PT", "faxx": "faxx", "mig25": "M25.PT",
-            "f16a": "F16.PT"}.get(
+            "f16a": "F16.PT", "tornado": "TOR.PT"}.get(
         aircraft, aircraft.upper() + ".PT")
 
 

@@ -216,6 +216,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::Tornado
                 ) =>
             {
                 Expectation::Required
@@ -261,6 +262,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::Tornado
                 ) =>
             {
                 Expectation::Required

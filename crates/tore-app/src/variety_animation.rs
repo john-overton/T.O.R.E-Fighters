@@ -279,6 +279,8 @@ fn specification(id: Id) -> Option<Spec> {
             // Update (TOR-3, 2026-11-10): the Tornado loads through its own
             // `tornado_animation` rig (swing wing, tailerons, flap strips,
             // rudder, interim gear rise); this row only pins the layout.
+            // Update (TOR-4, 2026-11-10): the same rig now owns the gear (three
+            // rigid pieces), the two airbrake plates and the two plumes.
             Id::Tornado => (
                 28150,
                 287,
