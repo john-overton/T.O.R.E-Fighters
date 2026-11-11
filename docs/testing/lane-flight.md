@@ -104,7 +104,7 @@ traces is a tripwire, not exhaustive proof for every branch or platform.
 
 ## Variety aircraft checks
 
-`flight-variety-*` checks each of the 27 variety identities through real
+`flight-variety-*` checks each of the 28 variety identities through real
 application asset loading and 1,200 hybrid flight ticks, with finite motion, no
 crash and bounded fuel/energy output. It is separate from the original roster's fighter
 maneuver and AI acceptance cases. Source-backed powered-lift checks use
@@ -119,6 +119,10 @@ burn for any extracted PT (`PROBE_PAYLOAD`, `PROBE_FUEL`, `PROBE_ALTS`,
 `PROBE_ONLY`). Its pilots are scripted, so it records the model, not a best
 pilot. The Mirage 2000 results are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-2000-validation-2026-11-10).
+Update (GRI-8, 2026-11-10): the Saab Gripen results, with the full-stick pull by
+fuel against the F-16A and the Mirage 2000, are in the
+[variety flight baseline](../baselines/variety-flight.md#saab-gripen-validation-2026-11-10);
+`gripen` joins the liftoff, approach and internal-fuel tables of `flight.py`.
 
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the

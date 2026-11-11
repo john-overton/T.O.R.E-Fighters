@@ -4675,3 +4675,41 @@ the RWR; the frames show the window with the jammer lit and the incoming round a
 centre. Evidence and frames: `.local/m3-aircraft/frames/GRI-7/`. Not run: an RWR with
 a plotted emitter, the menu and net batteries.
 
+
+## Gripen flight review (GRI-8, 2026-11-10)
+
+Dated section, additions only. The Gripen flies the hybrid adapter's own `variety`
+configuration built from `GRIPEN.PT` (`gri.SH`), one RM12 at the record's
+12,140 lbf military and 18,100 lbf afterburner. No envelope, G, weight, fuel, flow,
+ceiling or thrust value was changed and no flight constant was touched; the GRI-0
+verdict (genuine JAS 39A) stands and John kept the 60,000 ft ceiling and the -4
+limit (decision 10).
+
+- Top speeds: the 1 G row is 1,145 kt at 36,000 ft (Mach 2.0, the published
+  figure) and 739 kt at 1,000 ft (Mach 1.10, under the published Mach 1.15 to 1.2).
+  Full internal fuel settles at 0.952 of the edge: 1,090 kt (Mach 1.90) at
+  36,000 ft, 1,065 kt (Mach 1.86) at 50,000 ft, 704 kt at 1,000 ft. Level flight
+  is held to 60,000 ft; the published ceiling is 50,000 ft.
+- Climb and acceleration: peak specific excess power 445 ft/s at sea level
+  (26,700 ft/min), best sustained climb 427 to 432 ft/s, 36,000 ft in 107 to 123 s.
+  This is the same shape the Mirage 2000 showed (418 ft/s at the same thrust to
+  weight), produced by the shared drag law and the missing ram thrust, not by
+  the thrust or weights, which are the real ones. No published C/D climb rate was
+  found, so no factor to a published figure is stated. Not changed; a fleet-level
+  drag or ram fit remains John's call.
+- G: the record's own +9 row gives 8.00 G at 461 kt and 1,000 ft with full fuel
+  and 9.03 G nearly dry (F-16A 7.67 to 9.09 G, Mirage 8.0 to 9.09 G), 7.26 G with
+  the default load; the push is -3.55 G clean (real limit -3, decision 10 keeps -4).
+  The sustained turn at 461 kt and 1,000 ft is 4.8 G, 10.4 deg/s (F-16A 7.15 G,
+  15.4 deg/s; Mirage 4.13 G, 9.6 deg/s).
+- Fuel: record flows 2 and 14 lb/s kept; 41.7 minutes dry and 6.0 at afterburner
+  from 5,000 lb, against about 29 and 9.3 minutes at the RM12's published specific
+  fuel consumption.
+- Takeoff and landing: liftoff 132.1 kt after 1,097 ft (334 m), approach 147.5 kt,
+  touchdown 142.0 kt, rollout 589 m; the record has no hook, correct for the real
+  aircraft (Saab dropped the hook, brake chute and thrust reverser).
+
+The liftoff (125 to 150 kt) and approach (140 to 160 kt) ranges in the flight
+battery are fitted windows, agent decisions of 2026-11-10. Full tables, sources and
+commands are in the
+[variety flight baseline](../baselines/variety-flight.md#saab-gripen-validation-2026-11-10).

@@ -751,3 +751,264 @@ Battery: `flight-variety-m2000`, `flight-liftoff-m2000`,
 `ai-m2000-quick-mission-2v2`, `replay-rec-m2000-2v2` and the three
 `a2g-*-m2000` scenarios passed (profile `.local/m3-aircraft/profile`). No combat-G
 battery scenario pins the Mirage (`PULL_G_RETAIL` has no entry).
+
+## Saab Gripen validation, 2026-11-10
+
+Validation mode, slice GRI-8. The Gripen flies the hybrid `--researched-flight`
+default on its own record (`GRIPEN.PT`, shape `gri.SH`, `variety` identity from
+GRI-1 and B5-1); `--legacy-flight` and `--native-flight-tables` stay separate. The
+record is a genuine JAS 39A (GRI-0): empty 14,599 lb, internal fuel 5,000 lb,
+maximum takeoff 27,560 lb, one engine at 12,140 lbf military and 18,100 lbf
+afterburner, G rows -4 to +9, 1 G top speed 1,145 kt at 36,000 ft (739 kt at
+1,000 ft, 729 kt at the 5 ft airport), ceiling 60,000 ft, fuel flows 2 and 14
+lb/s. No record correction applies, none was made, and **nothing was fitted**:
+John kept the 60,000 ft ceiling and the -4 limit (decision 10, 2026-11-10). The
+only fitted values are the two battery windows at the end. The default load
+(`AGM65G.JT` x2, `AIM120.JT` x4, `AIM9M.JT` x2, the `F150.GAS` centreline tank
+and 570 BK 27 rounds) weighs 23,809 lb, so the carried stores are 4,210 lb
+including 990 lb in the tank.
+
+**Harness.** As for the Mirage: `variety_flight` printed `aircraft=Gripen
+conventional=pass deterministic=pass landing=pass ticks=1200`; `envelope_probe`
+(`PROBE_POINTS=1 PROBE_LEVEL=1 PROBE_PULLS=1`) and `performance_probe`
+(`PROBE_ALTS=1000,15000,30000,36000,50000`, then `PROBE_PAYLOAD=4210` for the
+default load) on the local `GRIPEN.PT`; `target/debug/tore-app --aircraft gripen
+--headless-flight N --maneuver ...` with the profile
+`.local/m3-aircraft/profile-gripen`. Pilots are scripted, so the turn and climb
+figures are a repeatable harness reading, not a best-pilot figure. All knots are
+true airspeed. Logs are local: `.local/m3-aircraft/checks/GRI-8/`.
+
+### Top speed and ceiling
+
+| Altitude | 1 G edge (record), kt | Level, AB, clean, kt | Ratio |
+| --- | ---: | ---: | ---: |
+| 1,000 ft | 739 | 704 (Mach 1.07) | 0.952 |
+| 10,000 ft | 831 | 791 | 0.952 |
+| 20,000 ft | 939 | 894 | 0.952 |
+| 30,000 ft | 1,068 | 1,017 (Mach 1.72) | 0.952 |
+| 36,000 ft | 1,145 | 1,090 (Mach 1.90) | 0.952 |
+| 40,000 ft | 1,143 | 1,088 | 0.952 |
+| 50,000 ft | 1,118 | 1,065 (Mach 1.86) | 0.952 |
+| 55,000 ft | 1,058 | 1,007 | 0.952 |
+| 60,000 ft | 998 | 933 (Mach 1.62) | 0.935 |
+
+Level flight is held at every altitude to the 60,000 ft ceiling. The dry
+(military power) level speed at full fuel is 576 kt at 1,000 ft and 893 kt
+(Mach 1.56) at 36,000 ft. With the default load the level speed is 678 kt at
+1,000 ft and 809 kt at 15,000 ft. The `climb` maneuver zooms to 68,470 ft (1.141
+of the ceiling, the Mirage 1.092 and the MiG-31 1.132) with the tank burned dry;
+the scripted afterburner climb reaches 66,385 ft (Mach 0.8 schedule). The model
+ceiling is a record value kept by decision.
+
+### Acceleration and climb (afterburner unless stated, full internal fuel, 19,599 lb)
+
+| Level acceleration | Time, s | Peak specific excess power |
+| --- | --- | --- |
+| 1,000 ft, AB, 363 to 460 / 590 / 660 kt | 9 / 27 / 47 | 445 ft/s (26,700 ft/min) |
+| 1,000 ft, military, 363 to 460 / 530 kt | 18 / 42 | 230 ft/s |
+| 15,000 ft, AB, 345 to 500 / 690 / 810 kt | 15 / 43 / 93 | 426 ft/s |
+| 36,000 ft, AB, 316 to 520 / 800 / 1,030 / 1,090 kt | 23 / 67 / 154 / 394 | 402 ft/s |
+| 36,000 ft, military, 316 to 520 / 800 kt | 38 / 137 | 220 ft/s |
+
+| Afterburner climb from sea level | Speed schedule Mach 0.8 | Mach 0.9 |
+| --- | --- | --- |
+| 10,000 ft | 43 s | 56 s |
+| 36,000 ft | 107 s | 123 s |
+| 50,000 ft | 144 s | 158 s |
+| 59,000 ft | 212 s | 187 s |
+| Best sustained rate | 427 ft/s (25,600 ft/min) at 35,400 ft | 432 ft/s (25,900 ft/min) at 37,200 ft |
+
+With the default load the peak specific excess power falls to 336 to 349 ft/s
+(20,200 to 20,900 ft/min). The Gripen's clean thrust to weight is 0.92 (18,100
+lbf over 19,599 lb), the Mirage's 0.91, and the two give the same acceleration
+shape (445 and 418 ft/s). The F-16A record, with the F100's retail thrust and
+more thrust per pound, gives 789 ft/s and 655 ft/s sustained (39,300 ft/min).
+
+### Turns and G limits
+
+| Case (afterburner, full internal fuel, clean) | Result |
+| --- | --- |
+| Full aft stick, 3 s, 1,000 ft, 330 kt | 7.06 G, 22.5 deg/s |
+| Full aft stick, 1,000 ft, 461 kt (Mach 0.7) | 8.00 G, 18.6 deg/s |
+| Full aft stick, 1,000 ft, 593 kt | 8.01 G, 14.0 deg/s |
+| Full aft stick, 15,000 ft, 564 kt | 7.98 G, 14.0 deg/s |
+| Full aft stick, 30,000 ft, 530 kt | 5.31 G, 9.3 deg/s |
+| Full aft stick, 36,000 ft, 517 kt | 4.43 G, 7.4 deg/s |
+| Full forward stick, 461 kt and up at 1,000 ft | -3.55 G |
+| Same pulls with the default load | 7.26 G (461 kt), -3.22 G |
+| Sustained level turn, 1,000 ft, 461 kt | 4.80 G, 10.4 deg/s (bank 78 deg, speed rose to 497 kt) |
+| Sustained level turn, 1,000 ft, 593 kt | 3.24 G, 5.7 deg/s |
+| Sustained level turn, 15,000 ft, 564 kt | 4.14 G, 7.5 deg/s |
+| Sustained level turn, 30,000 ft, 530 kt | 4.81 G, 9.7 deg/s |
+| Sustained level turn, 36,000 ft, 631 kt | 4.15 G, 6.9 deg/s |
+
+The sustained turns come from a scripted pilot that raises the bank in 2 degree
+steps, so they are lower bounds. At 1,000 ft and Mach 1.1 there is no sustained or
+instantaneous turn (above the 739 kt edge); at 50,000 ft the pull is altitude
+limited (0.4 to 3.5 deg/s).
+
+**Full-aft-stick pull by fuel**, 461 kt (Mach 0.7), 1,000 ft, clean, afterburner,
+3 s (`PROBE_ONLY=turn PROBE_ALTS=1000 PROBE_FUEL=...`), against the F-16A and the
+Mirage 2000 (the Mirage column is the M2K-11 +9 G result, reproduced):
+
+| Fuel | Gripen G (deg/s) | F-16A G (deg/s) | Mirage 2000 G (deg/s) |
+| --- | ---: | ---: | ---: |
+| Full (5,000 / 6,972 / 6,346 lb) | 8.00 (18.6) | 7.67 (16.8) | 7.96 (19.1) |
+| Half (2,500 / 3,486 / 3,173 lb) | 8.52 (20.0) | 8.35 (18.3) | 8.52 (20.7) |
+| Quarter (1,250 / 1,743 / 1,587 lb) | 8.80 (20.7) | 8.74 (19.1) | 8.83 (21.6) |
+| Near empty (300 lb) | 9.03 (21.3) | 9.09 (19.8) | 9.09 (22.3) |
+| Full forward stick, same four | -3.55 / -3.78 / -3.90 / -4.01 | -3.39 / -3.70 / -3.87 / -4.02 | -3.52 / -3.76 / -3.90 / -4.02 |
+
+All three aircraft carry a +9 row (the Gripen and the F-16A from their records,
+the Mirage from M2K-11's fitted row), and the shared loaded-elevator rule scales
+the limit with the fuel and stores carried, so the pull rises from 8.0 G at full
+fuel to 9.0 G nearly dry, a hair past the +9 row as for the Mirage's 9.09. At full
+tanks the Gripen gives the highest figure of the three (8.00, against 7.67 and
+7.96), because it is the lightest aircraft and carries the least fuel; the three
+converge as the tanks empty. The -4 limit is reached on the push nearly dry (-4.01); the real limit is -3
+(decision 10 keeps -4).
+
+### Fuel and endurance
+
+The record's flows are 2 lb/s at military power and 14 lb/s at afterburner, 7,200
+and 50,400 lb/h, or 0.593 and 2.785 lb/lbf/h against the engine's thrust. The 5,000
+lb tank lasts 41.7 minutes at military power and 6.0 minutes at afterburner
+(burn measured: 2.00 and 14.00 lb/s over 300 s). A level cruise at 65 percent of
+the top speed (610 kt at 20,000 ft, throttle trimmed) burns 1.39 lb/s, which is
+59.8 minutes or 608 nautical miles; with the default load 55.5 minutes and 563
+nautical miles. The `sprint` maneuver burns 4,200 lb in 300 s at afterburner and
+the `climb` maneuver burns the tank dry.
+
+### Takeoff, approach and landing
+
+Ground probes at `--theater UKR --ground-start 1` with the default load (gross
+23,809 lb; `loading=0.631`, flapped stall 113.5 kt after the weight scaling):
+
+| Probe | Result |
+| --- | --- |
+| takeoff | liftoff tick 1,164 at 132.1 kt after 1,097 ft (334 m), rotation 123.4 kt |
+| takeoff, `--retail-stall-speeds` | liftoff 105.7 kt after 695 ft (imported polygon speeds, no weight scaling) |
+| takeoff-gear-airborne | same liftoff, gear raised after the wheels are clear (gear 0.55 at the end) |
+| land, 65 percent fuel (3,250 lb) | approach 147.5 kt, touchdown 142.0 kt at 3.3 ft/s sink, stopped 1,932 ft (589 m) after touchdown with 1,462 ft of the 5,532 ft runway left, score 100 |
+| land, full fuel | touchdown 143.5 kt, 2.9 ft/s, stopped 1,969 ft (600 m) after touchdown, 1,616 ft left, score 100 |
+| land-hard | touchdown 157.1 kt at 33.7 ft/s, stopped, score 100 |
+| land-gear-up, land-off-runway | crashed for the gear and for the not-landable ground, by design |
+| nosewheel | no crash, 11.2 kt maximum |
+
+The record has no arrestor hook (`hook_available=false`), like the real aircraft.
+
+Eleven air maneuvers all ended with `non_finite=0`: `level` 7,200 ticks (502 kt,
+65 percent of the 5,000 ft edge), `pull` 7,200 (8.00 G, loop completed), `loop`
+completed at 2,011 ticks (8.03 G), `sprint` 36,000 (771.7 kt, 0.989 of the edge),
+`climb` as above, `dive` and `overspeed` ending in the overspeed loss (1.154 and
+1.100 of the edge), `rudder`, `devices` (violations 0), `stall-recover` (alert at
+tick 1,131, recovered at 1,713, 0 ft lost) and `spin-recover` (entered at tick 3,
+recovered at 1,048 after 0.12 revolutions of recovery and 1.23 in all, 1,949 ft
+lost). Logs under `.local/m3-aircraft/checks/GRI-8/probes/`.
+
+### Against the real aircraft
+
+Public figures read 2026-11-10: Wikipedia, "Saab JAS 39 Gripen", JAS 39C/D
+specifications (empty 6,800 kg = 14,991 lb, maximum takeoff 14,000 kg = 30,865 lb,
+internal fuel 3,000 L = about 2,340 kg, Mach 2 at 15,240 m = 50,000 ft, Mach 1.2
+at sea level, service ceiling 15,240 m = 50,000 ft, g limits +9/-3, thrust to
+weight 0.97, combat range 800 km, ferry range 3,200 km, takeoff distance 400 m,
+landing distance 500 m); Wikipedia "Volvo RM12" (54 kN = 12,100 lbf dry, 80.5 kN =
+18,100 lbf with afterburner; specific fuel consumption 0.844 lb/lbf/h dry, 1.79
+afterburner); Migflug, "Fighter Jet Takeoff and Landing: The Real Numbers"
+(Saab's three takeoff and landing distance sets: 400 m and 500 m in the 2016
+*Gripen C In Brief* sheet, 800 m by 16 m road strips in 2019, 500 and 600 m for
+the Gripen E; the Swedish Air Force's touchdown speed of just under 300 km/h, about
+162 kt; Saab deliberately dropped the thrust reverser, brake chute and arrestor
+hook). The JAS 39A weights are those of the GRI-0 review (MILAVIA and others).
+No climb rate, sustained or instantaneous turn rate, approach speed or liftoff
+speed was found for the C/D in a primary source. None of these pages is a flight
+manual.
+
+| Quantity | Measured (clean unless stated) | Retail record | Real (cited) |
+| --- | --- | --- | --- |
+| Top speed at altitude | 1,090 kt at 36,000 ft (Mach 1.90); 1,065 kt (Mach 1.86) at 50,000 ft | 1,145 kt at 36,000 ft (Mach 2.0), 1,118 kt at 50,000 ft | Mach 2 at 50,000 ft (about 1,147 kn) |
+| Top speed at sea level | 704 kt at 1,000 ft (Mach 1.07) | 739 kt at 1,000 ft, 729 kt at 5 ft (Mach 1.10) | Mach 1.2 (about 794 kn) Wikipedia; Mach 1.15 (about 760 kn) other sources |
+| Service ceiling | 66,385 ft zoom peak (68,470 ft on the `climb` maneuver); level flight held to 60,000 ft | 60,000 ft | 50,000 ft |
+| Rate of climb, sea level | 445 ft/s peak excess power (26,700 ft/min); 427 to 432 ft/s sustained (25,600 to 25,900 ft/min) | | not found for the C/D |
+| Thrust | 12,140 dry, 18,100 AB, 1 engine | same | 12,100 / 18,100, 1 engine |
+| Thrust to weight | 0.92 clean full fuel, 0.76 default load | | 0.97 (loading not stated) |
+| G limits | +8.0 (+9.0 nearly dry) / -3.55 clean; +7.3 / -3.2 default load | +9 / -4 | +9 / -3 |
+| Instantaneous turn | 22.5 deg/s at 330 kt (7.1 G); 18.6 deg/s at 461 kt (8.0 G) | | not found |
+| Sustained turn (scripted, lower bound) | 4.8 G, 10.4 deg/s at 461 kt, 1,000 ft | | not found |
+| Liftoff | 132.1 kt, 1,097 ft (334 m) | | takeoff distance 400 m (500 m, other sets) |
+| Approach / touchdown | 147.5 kt approach, 142.0 kt touchdown, 589 m rollout | | touchdown just under 162 kt; landing distance 500 to 600 m |
+| Arrestor hook | none | none | none |
+| Empty weight | 14,599 lb | 14,599 lb | JAS 39A 14,599 lb (39C/D 14,991 lb) |
+| Internal fuel | 5,000 lb | 5,000 lb | about 5,160 lb (3,000 L; retail 3 percent low) |
+| Dry fuel flow | 7,200 lb/h (0.593 per lbf) | same | 0.844 per lbf, about 10,250 lb/h |
+| Afterburner fuel flow | 50,400 lb/h (2.785 per lbf) | same | 1.79 per lbf, about 32,400 lb/h |
+| Range, clean 5,000 lb | 608 nm cruise at 20,000 ft | | combat range 800 km (432 nm, a radius with weapons), ferry 3,200 km with tanks: not comparable |
+
+Findings (no value was changed):
+
+- **Top speed at altitude needs no fit.** The record's 1 G row peaks at 1,145 kt
+  at 36,000 ft, which is Mach 2.0, the published figure; at the published
+  50,000 ft the record edge is Mach 1.95 (1,118 kt) and the model flies Mach 1.86.
+  The fleet loaded-drag rule puts the level speed 4.8 percent under the edge.
+- **Sea-level top speed is under the published Mach 1.15 to 1.2.** The record edge
+  is Mach 1.10 (729 kt at the airport, 739 kt at 1,000 ft) and the model flies Mach
+  1.07 (704 kt). The shortfall against the 794 kn of Wikipedia is 7 percent at the
+  edge and 11 percent in the model. The rows are the retail JAS 39A rows and John
+  asked for no speed fit; it can be done with `fitted_envelopes` if he wants it.
+- **The 60,000 ft ceiling is 10,000 ft over the real one, by decision.** The model
+  holds level flight at 60,000 ft (Mach 1.62), 933 kt, and zooms to 66,000 to
+  68,000 ft; real 50,000 ft. The F-16A record, whose ceiling is its own, zooms to
+  66,000 ft as well.
+- **Climb and the shared drag law.** No published sea-level climb rate was found
+  for the JAS 39C/D (the Wikipedia page gives one only for the Gripen E/F), so the
+  Mirage's 45 percent factor cannot be computed. The shape is the Mirage's:
+  peak excess power 445 ft/s at a thrust to weight of 0.92 (the Mirage 418 ft/s at
+  0.91); 460 kt takes 9 s and 590 kt takes 27 s from 363 kt at 1,000 ft; the
+  best sustained climb is about 430 ft/s. The F-16A record, with more thrust per
+  pound, climbs at 655 ft/s. The drag law (drag equals the reference thrust at the
+  top speed and grows with the square of speed) and the lack of ram thrust apply
+  to the Gripen exactly as to the Mirage, and the Gripen's sustained turn is
+  governed by it too (see the next finding).
+- **Sustained turn is two thirds of the F-16A's.** 4.8 G and 10.4 deg/s at 461 kt
+  and 1,000 ft, against the F-16A's 7.15 G and 15.4 deg/s and the Mirage's 4.13 G
+  and 9.6 deg/s; at 15,000 ft and 564 kt 4.14 G (7.5 deg/s) against 5.76 G (10.6
+  deg/s) and 3.63 G (6.8 deg/s). Thrust to weight and the same drag law explain
+  it. No published figure was found, so the gap to the real aircraft is not
+  known.
+- **G limit.** The Gripen's own +9 row gives 8.00 G at full fuel and 7.26 G with
+  the default load at 461 kt and 1,000 ft, reaching 9.03 G nearly dry. The rule
+  that scales the limit with fuel and stores is the fleet's. No G fit.
+- **Fuel flows are the record's, not the RM12's.** The dry flow is 30 percent under
+  the published specific fuel consumption (0.593 against 0.844 lb/lbf/h) and the
+  afterburner flow 56 percent over (2.785 against 1.79). At the published values
+  the 5,000 lb tank would last about 29 minutes dry (the record gives 42) and 9.3
+  minutes at afterburner (the record gives 6.0). They stay retail, as for the
+  Mirage and the MiG-25.
+- **Record values are real.** Weights, tank (3 percent under the real litres),
+  thrust and engine count match the JAS 39A or the RM12, so unlike the Mirage no
+  weight error shows.
+- **Takeoff and landing agree with Saab's short-field figures.** The model lifts
+  off after 334 m (Saab: 400 m minimum, 500 m in another set) and stops 589 to 600
+  m after touchdown (Saab 500 to 600 m). Its 142 to 143.5 kt touchdown is under the
+  Swedish Air Force's just under 162 kt. The approach speed is the shared rule's
+  147.5 kt at both fuel loads (1.05 times the loaded minimum speed is the floor).
+  The record has no hook, which is correct for this aircraft.
+
+The liftoff range (125 to 150 kt) and the approach range (140 to 160 kt) in
+`tools/battery_scenarios/flight.py` are fitted plausibility windows, agent
+decisions of 2026-11-10. The liftoff band is the Mirage's: it brackets the
+record's own 118.5 kt sea-level 1 G minimum speed, and no primary liftoff speed
+exists in the sources read. The approach band brackets the measured 147.5 kt
+approach and the Swedish Air Force's roughly 162 kt touchdown figure. The measured
+132.1 kt and 147.5 kt are recorded as regression values (`KNOWN_LIFTOFF`,
+`KNOWN_APPROACH`); `INTERNAL_FUEL_LB` holds 5,000 lb.
+
+The battery: `python3 tools/battery.py --scenario '*-gripen*' --lane flight
+--profile .local/m3-aircraft/profile-gripen --windows 1` passed 17 of 17 (run
+`20261110-215803`), including `flight-liftoff-gripen`,
+`flight-liftoff-retail-gripen`, `flight-approach-gripen` and
+`flight-variety-gripen`.
+
+Not run: `--native-flight-tables` (tables not present locally), a windowed free
+flight (the slice asks for no frames), a primary-source takeoff or landing run.

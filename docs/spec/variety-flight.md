@@ -642,6 +642,58 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+## Saab Gripen (GRI-8, 2026-11-10)
+
+The Saab Gripen flies the hybrid adapter's own `variety` configuration, built
+from `GRIPEN.PT` (`gri.SH`). Its values are the record's own, a real JAS 39A:
+empty 14,599 lb, internal fuel 5,000 lb, maximum takeoff 27,560 lb, one engine at
+12,140 lbf military and 18,100 lbf afterburner, environment rows -4 to +9 G and a
+60,000 ft ceiling as decoded. No record correction applies, and John kept the
+ceiling and the -4 limit (decision 10, 2026-11-10). The shared conventional
+flight, ground contact, actuator and loaded-mass rules apply unchanged, and no new
+fit was needed.
+
+The 1 G row's fast edge is 1,145 kt at 36,000 ft (Mach 2.0), matching the
+published Mach 2 (Wikipedia, "Saab JAS 39 Gripen"); the sea-level edge is 739 kt
+at 1,000 ft (Mach 1.10), under the published Mach 1.15 to 1.2. Both stay as
+decoded. The shared loaded-drag rule settles full internal fuel at 0.952 of the
+edge (1,090 kt, Mach 1.90, at 36,000 ft; 704 kt at 1,000 ft) and level flight
+holds to the 60,000 ft ceiling (933 kt); the `climb` maneuver zooms to 68,470 ft,
+1.141 of the ceiling. The published ceiling is 50,000 ft.
+
+At full internal fuel (19,599 lb, thrust to weight 0.92) and afterburner the peak
+specific excess power is 402 to 445 ft/s (26,700 ft/min at sea level) and the
+best sustained climb 427 to 432 ft/s (about 25,800 ft/min), with 36,000 ft in
+107 to 123 s. Level acceleration at 1,000 ft from 363 kt takes 9 s to 460 kt and
+27 s to 590 kt; military power gives half the excess power (about 225 ft/s). The
+shape matches the Mirage 2000's (418 to 435 ft/s at 0.91), because both use the
+shared drag law, in which drag equals the reference thrust at the top speed and
+grows with the square of speed and no ram thrust gain is modelled. No published
+sea-level climb rate exists for the JAS 39C/D, so no ratio to a published figure
+is claimed; see the
+[validation](../baselines/variety-flight.md#saab-gripen-validation-2026-11-10).
+
+A full-stick pull at 461 kt and 1,000 ft peaks at 8.00 G with full fuel (7.26 G
+with the default load) and 9.03 G with 300 lb of fuel, against the F-16A's
+7.67 to 9.09 G and the Mirage 2000's 7.96 to 9.09 G for the same four fuel states
+(the loaded-elevator rule scales the limit with the fuel and stores carried). The
+full-stick push is -3.55 G clean. The sustained level turn at 461 kt and 1,000 ft
+is 4.8 G and 10.4 deg/s from the scripted pilot (a lower bound), two thirds of
+the F-16A record's. The real limits are +9 and -3 G. The record's fuel flows (2
+and 14 lb/s) are kept: the 5,000 lb tank lasts 41.7 minutes at military power and
+6.0 minutes at afterburner, against about 29 and 9.3 minutes at the RM12's
+published specific fuel consumption.
+
+The default load (23,809 lb) takes off at 132.1 kt after 1,097 ft (334 m; Saab
+quotes 400 m) and approaches at 147.5 kt, touching down at 142.0 kt at 65
+percent fuel and stopping 589 m later (Saab quotes 500 to 600 m); the record has no
+arrestor hook, which is right for the real aircraft. The liftoff and approach
+ranges the battery checks are fitted windows (agent decisions, 2026-11-10).
+
+The hybrid researched default is the validated path. The legacy
+`--legacy-flight` adapter and the restricted `--native-flight-tables` path
+stay separate and are not changed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift
