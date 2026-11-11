@@ -2211,6 +2211,20 @@ not static scenery), engines off, and they never take off. The templates'
   (the desert record at `~QELAIR` and `~QESAIR`) is a different identity and
   keeps its own unscaled gear word `0x592c`.
 
+- **The parked Mirage F1 at its real size (MF1-9, 2026-11-11).** `MF1.PT` is a
+  parked type (`gear 0x5adc`, hit points 95) and is also a flown identity with a
+  per-axis shape scale (MF1-2, opinionated, John, 2026-11-10). The parked path
+  is unchanged (the `("MF1.PT", Some(0x5adc))` entry in `parked_aircraft.rs`
+  was not touched): it reads the same record and gear word, and the aircraft
+  stands on the lowest point of the scaled gear-down shape (`origin-up 5.98` ft,
+  the 17 unit gear low point at the Mirage F1 factors, against 5.67 ft
+  unscaled). `--surface-parked FRA QFLAIR` lists two `MF1.PT` (`0x50000011` and
+  `0x50000012`, `scale 0.3333`, heading 89) and `FRA QFSAIR` one (`0x5000000d`),
+  and `--surface-scene FRA QFLAIR --focus 17,18` draws them gear down on the
+  apron, wheels on the pavement, at the same size as the flown aircraft, beside
+  the Mirage 2000 and Rafale pairs of the same field, which keep their own
+  records and gear words (frames in `.local/m3-aircraft/frames/MF1-9/`).
+
 ## Destroyed looks and drawing
 
 ### Size

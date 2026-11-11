@@ -3491,6 +3491,48 @@ mod tests {
             assert_eq!(wing.aircraft, AircraftId::M2000);
         }
     }
+    /// Slice MF1-9: the Mirage F1 is offered as the player's aircraft and,
+    /// because the AI can fly it, in every AI wing field. The identity the
+    /// mission flies is named exactly (`MF1.PT`), never aliased to the
+    /// Mirage 2000 or the Rafale, whose lists keep their own rows.
+    #[test]
+    fn the_mf1_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::Mf1.selection_key(), "MF1.PT");
+        assert_ne!(AircraftId::Mf1, AircraftId::M2000);
+        assert_ne!(AircraftId::Mf1, AircraftId::Rafale);
+        // The player's own list offers it by its selection key, MF1.PT, as a
+        // row of its own beside the Mirage 2000 and the Rafale.
+        for other in [AircraftId::M2000, AircraftId::Rafale] {
+            assert_ne!(AircraftId::Mf1.selection_key(), other.selection_key());
+            assert_ne!(AircraftId::Mf1.label(), other.label());
+            assert!(q.aircraft_files.iter().any(|f| f == other.selection_key()));
+        }
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Mf1.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Mf1));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Mf1).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Mf1));
+        }
+        // The mission the draft flies carries the Mirage F1 as the player and
+        // in every wing, and neither the Mirage 2000 nor the Rafale.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Mf1);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Mf1);
+        }
+        for wing in &spec.wings {
+            assert_ne!(wing.aircraft, AircraftId::M2000);
+            assert_ne!(wing.aircraft, AircraftId::Rafale);
+        }
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI

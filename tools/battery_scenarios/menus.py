@@ -788,6 +788,8 @@ def scenarios() -> list[Scenario]:
     # pod, but its record has no Pave Spike row, so the lobby page warns and offers the pod helper.
     # Slice M2K-9 adds the Mirage 2000: its decoded wing mask admits a laser-guided store and a Pave
     # Spike pod, but its record has no Pave Spike row, so the lobby page warns and offers the pod helper.
+    # Slice MF1-9 adds the Mirage F1: its decoded wing mask admits a laser-guided store, but its record
+    # has no Pave Spike row (the ALQ-167 centreline is cleared), so the lobby page warns and offers the pod helper.
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
         ("f18", "ordnance-laser", True, True, False),
@@ -799,6 +801,7 @@ def scenarios() -> list[Scenario]:
         ("f16a", "lobby-ordnance-laser", True, True, True),
         ("mig31", "lobby-ordnance-laser", True, True, True),
         ("m2000", "lobby-ordnance-laser", True, True, True),
+        ("mf1", "lobby-ordnance-laser", True, True, True),
     ):
         out.append(
             Scenario(

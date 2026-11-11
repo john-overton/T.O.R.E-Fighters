@@ -4738,3 +4738,59 @@ The liftoff and approach ranges (125 to 150 kt each) in the flight battery are f
 windows, agent decisions of 2026-11-11, from the published approach speed of about
 125 kt. Full tables, sources and commands are in the
 [variety flight baseline](../baselines/variety-flight.md#mirage-f1-validation-2026-11-11).
+
+## Mirage F1 in missions, multiplayer and replay (MF1-9, 2026-11-11)
+
+Implementation and verification, slice MF1-9 of the Mirage F1 port. No game
+code changed: `AircraftId::Mf1` was appended to every identity list in B5-1
+(checkpoint code 45, `SELECTABLE` index 45, `ALL` 45 entries), and the wire
+codes an identity by its 9-bit `SELECTABLE` position since protocol 83, so no
+golden, replay or network fixture moved. The AI builds a wing member from the
+record like any aircraft: it sees the one Atar 9K-50 of decision 23, and the
+default AI load check passes for it. `strike_class.rs` already lists it in the
+fighter family, so no AI behaviour work was done (rule 1). The AI default load
+is the record's current default load (DEFA gun 250 rounds, four R550 Magic, four
+`F250.GAS` belly tanks); the four tanks are MF1-5's open stations question with
+John, so anything below that mentions the tanks (the 8,050 lb payload and 6,474
+lb external fuel of the unengaged wingman) changes with his answer.
+
+What changed is coverage: a Quick Mission test
+(`the_mf1_is_a_quick_mission_player_and_a_wing_choice`) naming `MF1.PT` as the
+player's aircraft and in every AI wing field and asserting it is neither the
+Mirage 2000 nor the Rafale, a checkpoint test
+(`the_mf1_round_trips_at_code_45_and_no_identity_shares_it`), the
+`ai-mf1-quick-mission-2v2` and `replay-rec-mf1-2v2` battery scenarios, the
+Mirage F1 row in the Load Ordnance notes loop
+(`menus-snap-quick-lobby-ordnance-laser-notes-mf1`: the lobby page warns about a
+laser-guided store and offers the pod helper, the same as the Mirage 2000,
+because its record has no Pave Spike row), and `ai-mf1-*` in the `ai-fights`
+battery family.
+
+Results (2026-11-11, throttled, profile `.local/m3-aircraft/profile-mf1`):
+
+- `--ai-roster-probe-ticks 3600`: the four `MF1.PT` lines (Novice, Average,
+  Experienced, Ace) each `ticks=3600 models=2 radar=true ir=false stores=5
+  gun=true projectiles=0 dropped=0 PASS` (the DEFA row and four R550 rows), so
+  the AI flies it finite with an exact input replay at every skill; the whole
+  roster has no FAIL.
+- `ai-mf1-quick-mission-2v2` passes: every wing the Mirage F1, the AI fires its
+  R550 twice (at 20,744 and 7,810 ft), one missile kill by the player, nothing
+  dropped, zero anomalies. Unlike the F-5E's AIM-9B, the F1's Magic is fired
+  (the F1 has a radar row, `F18R.SEE`, though no infrared sensor row).
+- `replay-rec-mf1-2v2` passes: the recording reads back `player.aircraft =
+  MF1.PT`, `probe.enemy = MF1.PT`, `draw.models = MF1.PT`, two runs are
+  identical and `--verify-render` finds nothing missing or differing.
+- `net-content-missing` and `net-window-lobby` pass with `tore-server` and
+  `tore-bot` rebuilt on this branch first.
+
+The parked Mirage F1 path is unchanged and checked: `--surface-parked FRA
+QFLAIR` lists two `MF1.PT` (`gear 0x5adc`, `scale 0.3333`, `origin-up 5.98`) and
+`QFSAIR` one, and `--surface-scene` draws them gear down on the apron at the
+same size as the flown aircraft (see
+[parked aircraft](../spec/surface-defenses.md#parked-aircraft)). Frames:
+`.local/m3-aircraft/frames/MF1-9/`.
+
+Provenance: identity wiring spec-derived (record) and B5-1 (agent decision,
+2026-11-10); the AI behaviour is the existing fighter family, unchanged; test
+and scenario coverage agent work, 2026-11-11. Living roster counts are left to
+X-10.

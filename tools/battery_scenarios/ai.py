@@ -1772,6 +1772,21 @@ def scenarios() -> list[Scenario]:
                            "M2000.PT identity (one M53-P2, F18R.SEE radar, F18.ECM jammer, "
                            "Super 530D, Magic 2 and AS-15 default load) in a 2 v 2 fight."))
 
+    # 13m. The Mirage F1 in a mission (slice MF1-9): every wing the Mirage F1, the player's own
+    # included, 2 v 2 with the fight script, so the MF1.PT identity flies a mission with its single
+    # Atar 9K-50 (TORE's real-thrust correction of the record), the F18R.SEE radar and AV8.ECM
+    # jammer, the Rafale HUD and cockpit by name, and its DEFA gun, R550 Magic and F250 tank
+    # default load (stations question open with John, MF1-5). It is never aliased to the Mirage
+    # 2000 or the Rafale. The roster probe flies it against itself at every skill; this one has it
+    # shoot and be shot at.
+    out.append(probe("mf1-quick-mission-2v2", fight(2, 2, "--aircraft", "mf1",
+                                                     "--probe-friendly-aircraft", "mf1",
+                                                     "--probe-enemy-aircraft", "mf1",
+                                                     "--separation", "5", *attack), ticks=7200,
+                     notes="All Mirage F1: the player's wing and the enemy wing fly the "
+                           "MF1.PT identity (one Atar 9K-50, F18R.SEE radar, AV8.ECM jammer, "
+                           "DEFA gun, R550 Magic and F250 tank default load) in a 2 v 2 fight."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",
