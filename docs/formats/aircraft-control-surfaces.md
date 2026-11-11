@@ -1067,9 +1067,13 @@ positive lowers the trailing edge.
 Nothing here is a source value. The shape draws no leading-edge flap (the real
 aircraft has full-span automatic ones) and none is invented.
 
-**Gear, speed brake and plume.** Owned by the same rig since F5E-4: see
-[F-5E gear, speed brake and plume (F5E-4, 2026-11-10)](#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10)
-and the [F-5E fit](../spec/variety-animation.md#f-5e-control-fit).
+**Gear, speed brake and plume (F5E-4).** Not owned by this rig yet: the six
+gear plates keep the shared interim rise and the brake and plume words stay
+unmapped. The rig lists the reviewed faces and pins the three words so F5E-4
+takes them over in the same module. See the [F-5E
+fit](../spec/variety-animation.md#f-5e-control-fit). Update (F5E-4,
+2026-11-10): the same rig now owns them; see
+[F-5E gear, speed brake and plume (F5E-4, 2026-11-10)](#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10).
 
 ## F-5E gear, speed brake and plume (F5E-4, 2026-11-10)
 

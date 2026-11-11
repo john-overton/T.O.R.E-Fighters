@@ -818,7 +818,7 @@ geometry](../formats/aircraft-control-surfaces.md#f-5e-control-surfaces-f5e-3-20
 | Roll | The ailerons turn `-0.20*aileron` (right) and `+0.20*aileron` (left) radians about the line y -5, z -3.5; positive aileron raises the right trailing edge and lowers the left. No pitch and no flap term. |
 | Flaps | `+0.40*flaps` lowers both flap strips about the line (7,-4,-3.5) to (31,-5,-3.5) (mirrored). The flap words delete the strips and are never set, so a flap never vanishes. |
 | Yaw | The rudder quad turns `0.35*rudder` radians about the fin trailing edge from (0,-31,4) toward (0,-29,22); positive swings the trailing edge to +X. The fin cap stays fixed. |
-| Gear, speed brake, plume | Mapped by F5E-4: see [F-5E gear, speed brake and plume fit](#f-5e-gear-speed-brake-and-plume-fit). |
+| Gear, speed brake, plume | Not mapped by this slice: the gear keeps the interim rise, the brake and plume words stay unmapped until F5E-4. Update (F5E-4, 2026-11-10): mapped, see [F-5E gear, speed brake and plume fit](#f-5e-gear-speed-brake-and-plume-fit). |
 
 Provenance: fitted magnitudes and the flap-strip and rudder-quad decisions are
 agent decisions (2026-11-10); the pitch-only stabilators are opinionated, John
