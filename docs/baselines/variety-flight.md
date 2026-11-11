@@ -780,6 +780,19 @@ windows and their recorded values, and the endurance with tanks all do: if John
 caps the belly row at two tanks or drops it, those numbers and the windows move
 (an in-between load, never the clean figures, unless the default is cleared).
 
+Update (MF1-5b, 2026-11-11): John chose the cap (two tanks). The default load is now
+the gun, two `F250.GAS` and four R550 (`loadout:` external fuel 3,300 lb, carried
+4,481 lb, gross 26,143 lb, 87 percent of the 30,203 lb maximum). Re-run through the
+battery's scripted runs (`flight-liftoff-mf1`, `flight-approach-mf1`, profile
+`profile-mf1`): liftoff 121.0 kt after 1,144 ft (349 m; was 135.4 kt, 504 m),
+rotation 108.5 kt; approach 127.6 kt (was 145.6 kt), touchdown 118.7 kt, stop 447 m
+after touchdown. Both pass the unchanged 125 to 150 kt bands (the liftoff 121.0 kt
+is 3 percent under the band start, inside the battery's 10 percent slack); the
+recorded values in `tools/battery_scenarios/flight.py` were refitted to 121.0 and
+127.6 (plus or minus 6 percent, agent decision). The pull, turn, top-speed,
+climb and endurance rows in the tables of this section were measured with the
+four-tank load and were not re-run; the clean columns are unchanged.
+
 **Harness.** As for the Mirage 2000, the Gripen and the F-5E: `envelope_probe`
 (`PROBE_POINTS=1 PROBE_LEVEL=1 PROBE_PULLS=1`) and `performance_probe`
 (`PROBE_ALTS=1000,15000,30000,36000,50000,60000`; `PROBE_PAYLOAD=8177` for the

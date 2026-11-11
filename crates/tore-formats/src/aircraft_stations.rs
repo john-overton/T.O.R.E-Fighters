@@ -25,6 +25,13 @@ pub const F5E_RADAR: usize = 1;
 pub const F5E_JAMMER: usize = 2;
 pub const F5E_WING_PAIR: usize = 5;
 pub const MF1_CENTRELINE: usize = 4;
+/// The Mirage F1's belly row (`MF1.PT` row 5, four stores) whose capacity
+/// [`adjust_defaults`] cuts to two.
+pub const MF1_BELLY: usize = 5;
+/// The capacity of the Mirage F1's belly row after [`adjust_defaults`]: one store
+/// a side, as the real aircraft carries one tank on each inner wing pylon,
+/// never four abreast.
+pub const MF1_BELLY_CAPACITY: i32 = 2;
 /// The radar the F-5E carries in place of the generic `F18R.SEE`: the F-104
 /// record, the closest reviewed small-fighter radar (see [`adjust_defaults`]).
 pub const F5E_RADAR_RECORD: &str = "F104R.SEE";
@@ -171,6 +178,24 @@ pub fn retire(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     }
 }
 
+/// Whether `rows` are exactly the retail rows of `id`'s [`default_signature`]
+/// table (every source row, so an edited record keeps its own stations).
+fn is_retail(id: AircraftId, rows: &[Hardpoint]) -> bool {
+    let signature = default_signature(id);
+    !signature.is_empty()
+        && rows.len() == signature.len()
+        && rows.iter().zip(signature).all(|(h, s)| {
+            (
+                h.location,
+                h.flags,
+                h.position,
+                h.store.as_deref(),
+                h.count,
+                h.weight_class,
+            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
+        })
+}
+
 /// The retail rows of the aircraft whose default load [`adjust_defaults`]
 /// changes: the whole table, so an edited record keeps its own defaults.
 fn default_signature(id: AircraftId) -> &'static [Signature] {
@@ -203,12 +228,20 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 /// retail one. No row is added, removed or moved and no row's mask, count,
 /// weight class or position changes, so every station index and everything
 /// each station accepts stays as decoded; only what the row holds by default
-/// changes (`store`).
+/// changes (`store`), with one exception, the Mirage F1's belly capacity
+/// (below).
 ///
 /// - **Mirage F1** (`MF1.PT` row 4, the centreline station): no default
 ///   `ALQ167.ECM` pod. The record's American jammer pod is not in Jane's list
 ///   of the F1's loads (`MF1.INF`); the station is real and still takes what
-///   its mask admits.
+///   its mask admits. Update (MF1-5b, 2026-11-11, opinionated, John's round 3,
+///   item M1): the belly row (row 5, Wing, paired, four `F250.GAS`, class 46)
+///   has capacity two (one a side, the real aircraft's tank on each inner
+///   wing pylon, Jane's text in `MF1.INF`); four abreast made the inner tanks
+///   cross each other and both main-gear plates. This is the one place the
+///   function changes a count, and the default `F250.GAS` count follows it, so
+///   the default load is two. The row keeps its place, mask, class and store;
+///   its drawn position moves in `hardpoints::station_move`.
 /// - **F-5E** (`F5E.PT`): row 5, the wing pair, defaults to empty (no `AIM7.JT`:
 ///   the real F-5E does not carry the Sparrow); the `AIM9B.JT` wingtip pair
 ///   stays. Row 2 holds `F104.ECM` in place of the generic `F18.ECM` (John,
@@ -227,20 +260,7 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   set) and `YAK141R.SEE` (40 / 25 nm, Transitional); `F8R.SEE` (35 / 20 nm)
 ///   is closest in range but has no reviewed preset and would never switch on.
 pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
-    let signature = default_signature(id);
-    if signature.is_empty()
-        || rows.len() != signature.len()
-        || !rows.iter().zip(signature).all(|(h, s)| {
-            (
-                h.location,
-                h.flags,
-                h.position,
-                h.store.as_deref(),
-                h.count,
-                h.weight_class,
-            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
-        })
-    {
+    if !is_retail(id, rows) {
         return;
     }
     match id {
@@ -249,7 +269,10 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             rows[F5E_JAMMER].store = Some(F5E_ECM_RECORD.into());
             rows[F5E_WING_PAIR].store = None;
         }
-        AircraftId::Mf1 => rows[MF1_CENTRELINE].store = None,
+        AircraftId::Mf1 => {
+            rows[MF1_CENTRELINE].store = None;
+            rows[MF1_BELLY].count = MF1_BELLY_CAPACITY;
+        }
         _ => {}
     }
 }
@@ -725,19 +748,24 @@ mod tests {
     }
 
     #[test]
-    fn the_mirage_f1_centreline_keeps_its_station_but_defaults_to_no_pod() {
+    fn the_mirage_f1_centreline_keeps_its_station_but_defaults_to_no_pod_and_the_belly_holds_two() {
         let retail = default_rows(AircraftId::Mf1);
         assert_eq!(retail.len(), 8);
         assert_eq!(retail[MF1_CENTRELINE].store.as_deref(), Some("ALQ167.ECM"));
         let mut rows = retail.clone();
         adjust_defaults(AircraftId::Mf1, &mut rows);
-        // Only the default store of the centreline row changes: same index,
-        // same mask, count, weight class and position, so it accepts what it did.
+        // The centreline row changes only its default store (same index, mask,
+        // count, weight class and position, so it accepts what it did); the
+        // belly row changes only its capacity, four to two (John, 2026-11-11,
+        // round 3, M1): same index, mask, class, position and store.
         let mut expected = key(&retail);
         expected[MF1_CENTRELINE].3 = None;
+        expected[MF1_BELLY].4 = 2;
+        assert_eq!(retail[MF1_BELLY].count, 4);
         assert_eq!(key(&rows), expected);
         assert_eq!(rows[MF1_CENTRELINE].flags, 0x7e5);
-        // The jammer suite (row 2), the tank pair and the Magics stay.
+        assert_eq!(rows[MF1_BELLY].count, MF1_BELLY_CAPACITY);
+        // The jammer suite (row 2), the belly tanks and the Magics stay.
         assert_eq!(rows[2].store.as_deref(), Some("AV8.ECM"));
         assert_eq!(rows[5].store.as_deref(), Some("F250.GAS"));
         adjust_defaults(AircraftId::Mf1, &mut rows);

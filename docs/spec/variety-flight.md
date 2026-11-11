@@ -699,6 +699,14 @@ hook. These default-load numbers depend on John's open stations decision
 (MF1-5/MF1-6); the clean ones do not. The liftoff and approach ranges the battery
 checks (125 to 150 kt) are fitted windows (agent decisions, 2026-11-11).
 
+Update (MF1-5b, 2026-11-11): the stations decision is made: the belly row holds two
+`F250.GAS`, so the default load weighs 4,481 lb carried, a gross weight of 26,143 lb
+(87 percent of the maximum). The scripted liftoff is now 121.0 kt after 1,144 ft
+(349 m) and the approach 127.6 kt, touching down at 118.7 kt and stopping in about
+447 m; the 125 to 150 kt bands stay and the recorded values moved to 121.0 and 127.6
+(agent decision). The pull, turn and top-speed figures above were measured with the
+heavier load and were not re-run.
+
 The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.

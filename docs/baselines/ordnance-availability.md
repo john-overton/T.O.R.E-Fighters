@@ -483,3 +483,20 @@ ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Ch
 
 The `menus-ordnance-availability` and `a2g-catalog` battery expected lines read 18,
 4,652 (menus only), 233 and 220.
+
+## Mirage F1 belly row capped at two (MF1-5b, 2026-11-11)
+
+John's round-3 answer (M1, 2026-11-11, opinionated): `MF1.PT` row 5 (Wing, paired,
+four `F250.GAS`, class 46) holds two stores, one a side, and hangs 3.24 ft out; the
+wingtip Magic (row 7) stands 1.1 ft outboard of the tip. No placement count moved:
+`--validate-ordnance` still reads `ordnance MF1.PT: 5 source rows, 2 optional weapon
+rows, 175 compatible weapon placements, 6 tank placements` and `ordnance audit: 45
+aircraft, 18 recovered weapon stations, 4652 weapon placements, 233 tank placements,
+82 weapon and 9 tank records; passed` with 80 pod and 220 Cheat-only placements, so
+neither the pins in `ordnance_audit.rs` nor the battery expected lines changed. What
+changed is capacity: all 181 catalog choices remain; the 46 row 5 records that took
+four now take two (the other 19 already took two), the odd-weight "3 to 2" store-pair
+reductions for `AGM84A`, `AGM84E`, `AM39`, `AS14` and `MK82P3` on row 5 no longer
+occur, and the bomb carriage of `GBU12`, `GBU16` and `GBU38` reads 2 on that row (was
+4). Frames and the per-record clearance of the alternatives: [stores on
+pylons](../spec/stores-on-pylons.md#the-mirage-f1-stations-finished-mf1-5b-2026-11-11).

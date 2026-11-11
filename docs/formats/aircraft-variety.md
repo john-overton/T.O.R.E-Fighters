@@ -4329,6 +4329,10 @@ other and the main gear, and the wingtip Magic enters the tip by 1.48 ft. See
 The B5-2 remark that the centreline "takes two tanks" means two tank records
 (150 and 250 gallon); the row holds one store.
 
+Update (MF1-5b, 2026-11-11): John's round 3 answered both cases. Row 5 holds two
+stores (one a side) at 3.24 ft out and the wingtip Magic stands 1.1 ft outboard of
+the tip; both clean. See [Mirage F1 stations finished](#mirage-f1-stations-finished-mf1-5b-2026-11-11).
+
 ### Mirage F1 real size (for John)
 
 Shape extents at scale 1 (1 unit = 1/3 ft), `MF1.SH` neutral state: x -40 to 40,
@@ -4673,7 +4677,8 @@ needle (the panel art has none; the readouts are generated text). Fuel reads the
 record's own number: `FUEL 6120 LBS` (the Rafale reads 9,900, the Mirage 2000
 6,346), and `(+ EXT 6600 LBS)` with the default four `F250.GAS` of row 5 (1,650 lb
 each; the clipping on that row is MF1-5's open question), 6,595 to 6,592 lb after
-the first seconds of a run. The Weapons window lists `250 DEFA`, `4 R-550` and `30
+the first seconds of a run (Update, MF1-5b, 2026-11-11: two tanks now, `(+ EXT 3300
+LBS)`). The Weapons window lists `250 DEFA`, `4 R-550` and `30
 CHAFF` / `30 FLARE`. Throttle shows 70 percent at the free-flight start, as for
 the other aircraft. The HUD airspeed and altitude boxes read the F1's own state
 (540 kt and 5,000 ft at the live-fire start).
@@ -4730,6 +4735,9 @@ touched.
   5.2 G at 461 kt, a 2.93 G sustained turn, Mach 2.07 at 36,000 ft, liftoff 135.4 kt
   after 504 m and approach 145.6 kt, against 6.1 G, 3.63 G, Mach 2.22, 103.9 kt after
   211 m and 115.9 kt clean. These depend on John's open stations decision (MF1-5).
+  Update (MF1-5b, 2026-11-11): the stations decision is made (two belly tanks): the
+  default load is 26,143 lb (87 percent of the maximum), liftoff 121.0 kt after
+  349 m and approach 127.6 kt; the other default-load figures above were not re-run.
 - Takeoff and landing run: published 600 m and 670 m (the game's Jane's text, weights
   unstated); the model gives 211 m and 376 to 384 m clean, 504 m and 584 to 598 m with
   the default load.
@@ -4753,6 +4761,11 @@ is the record's current default load (DEFA gun 250 rounds, four R550 Magic, four
 `F250.GAS` belly tanks); the four tanks are MF1-5's open stations question with
 John, so anything below that mentions the tanks (the 8,050 lb payload and 6,474
 lb external fuel of the unengaged wingman) changes with his answer.
+
+Update (MF1-5b, 2026-11-11): the answer is two belly tanks, so the AI's default load
+is the gun, two `F250.GAS` (3,300 lb of external fuel) and four R550 Magic; the
+8,050 lb payload and 6,474 lb external fuel above were measured with four tanks and
+were not re-measured. No AI code changed.
 
 What changed is coverage: a Quick Mission test
 (`the_mf1_is_a_quick_mission_player_and_a_wing_choice`) naming `MF1.PT` as the
@@ -4794,3 +4807,27 @@ Provenance: identity wiring spec-derived (record) and B5-1 (agent decision,
 2026-11-10); the AI behaviour is the existing fighter family, unchanged; test
 and scenario coverage agent work, 2026-11-11. Living roster counts are left to
 X-10.
+
+## Mirage F1 stations finished (MF1-5b, 2026-11-11)
+
+Implementation, slice MF1-5 finish (round 3), Claude Sonnet (sonnet-high). John's
+round-3 answers of 2026-11-11 (M1 and the coordinator's reading M2, opinionated)
+applied to the stations the MF1-5 section above measured: the belly row (row 5,
+`F250.GAS` x4) holds two stores, one a side, at 3.24 ft out, and the wingtip Magic
+(row 7) stands 1.1 ft outboard of the tip. The jammer, the empty centreline and the
+per-axis scale are unchanged. Details, tables and the ten-record tip check are in
+[stores on pylons](../spec/stores-on-pylons.md#the-mirage-f1-stations-finished-mf1-5b-2026-11-11).
+
+| Row | Location | Default | Result on the scaled shape |
+| ---: | --- | --- | --- |
+| 4 | Centerline | empty (B5-2) | unchanged; a centreline `F250.GAS` is 1.36 ft clear of the new pair |
+| 5 | Wing, capped at two | `F250.GAS` x2 | clean: 1.25 ft off the main gear, 3.10 ft off the ground, no entry, 0.06 ft off the flank |
+| 6 | Wing, paired | `R550.JT` x2 | unchanged (left 0.05 ft) |
+| 7 | Wingtip | `R550.JT` x2 | clean (0.48 and 0.24 ft off the tip; was 1.48 ft entry); 9 of 10 tip records clean |
+
+Code: `aircraft_stations::adjust_defaults` (capacity four to two, under the same
+whole-retail-table guard as the empty centreline), `hardpoints::station_move`
+(`Mf1`, row 5, Wing, 3.24 ft) and `hardpoints::tip_offset` (1.1 ft outboard, the
+Mirage F1's retail wingtip row only). Audit pins unchanged (45, 18, 4,652, 233, 80,
+220). Default load 26,143 lb (was 29,839); battery windows refitted (liftoff 121.0
+kt, approach 127.6 kt). Frames: `.local/m3-aircraft/frames/MF1-5b/` (local only).

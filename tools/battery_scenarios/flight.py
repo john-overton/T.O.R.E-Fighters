@@ -279,8 +279,14 @@ APPROACH_TARGET["mf1"] = (125, 150)
 # range, so the range's own window already holds them; these record the values.
 KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3}
 KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2}
-KNOWN_LIFTOFF["mf1"] = 135.4
-KNOWN_APPROACH["mf1"] = 145.6
+# Update (MF1-5b, 2026-11-11, agent decision): John's round-3 answer capped the
+# belly row at two stores, so the default load is two `F250.GAS` (gross 26,143 lb,
+# 87 percent of the maximum, was 29,839 lb). The scripted runs now measure
+# 121.0 kt at liftoff (after 1,144 ft, 349 m; was 135.4 kt) and an approach at
+# 127.6 kt (was 145.6 kt, near the published 125 kt). The 125 to 150 kt bands
+# above stay; the plus or minus 6 percent recorded windows follow the new values.
+KNOWN_LIFTOFF["mf1"] = 121.0
+KNOWN_APPROACH["mf1"] = 127.6
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
