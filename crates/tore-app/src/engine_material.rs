@@ -104,6 +104,10 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // M20.SH: the one hexagonal exit disc at y -44 (subtype 0x64), the
         // single M53 nozzle (M2K-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::M2000 => address == 0x3794,
+        // F15E.SH: the two nozzle exit rings at y -61 (subtype 0x64): the right
+        // octagon 0x3d2e with its top cap 0x3d94, and the left 0x3d55 with its
+        // lower plate 0x3d79 (F15E-4; docs/formats/aircraft-control-surfaces.md).
+        AircraftId::F15E => matches!(address, 0x3d2e | 0x3d55 | 0x3d79 | 0x3d94),
         // GRI.SH: the octagon and the hexagon that make the one exit disc at
         // y -61 (GRI-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::Gripen => crate::gripen_animation::NOZZLE.contains(&address),
@@ -133,7 +137,8 @@ pub fn outlet_count(id: AircraftId) -> usize {
         | AircraftId::F14
         | AircraftId::Mig29
         | AircraftId::Su27
-        | AircraftId::Su35 => 2,
+        | AircraftId::Su35
+        | AircraftId::F15E => 2,
         _ => 0,
     }
 }
@@ -166,7 +171,12 @@ mod tests {
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
             assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 0);
         }
-        for id in [AircraftId::Mig29, AircraftId::Su27, AircraftId::Su35] {
+        for id in [
+            AircraftId::Mig29,
+            AircraftId::Su27,
+            AircraftId::Su35,
+            AircraftId::F15E,
+        ] {
             assert_eq!(outlet_count(id), 2);
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
             assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 1);

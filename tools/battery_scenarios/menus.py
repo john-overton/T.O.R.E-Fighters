@@ -489,7 +489,8 @@ def scenarios() -> list[Scenario]:
             # B5-2 (2026-11-10): 18 stations, 4,652 weapon and 233 tank placements
             # after the Tornado's outer wing row went and the F-5E and Mirage F1
             # default loads were cleared (ordnance_audit.rs has the per-aircraft note).
-            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4652 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
+            # F15E-5 (2026-11-10): 4,644 weapon placements, the F-15E's bomb and wing pairs refuse eight clipping stores.
+            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4644 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -788,6 +789,8 @@ def scenarios() -> list[Scenario]:
     # pod, but its record has no Pave Spike row, so the lobby page warns and offers the pod helper.
     # Slice M2K-9 adds the Mirage 2000: its decoded wing mask admits a laser-guided store and a Pave
     # Spike pod, but its record has no Pave Spike row, so the lobby page warns and offers the pod helper.
+    # Slice F15E-9 adds the F-15E: its record has the PAVESPK.SEE fixed pod row (F15E-0, John's decision 3,
+    # 2026-11-10), so the lobby page shows no laser warning (as the F-16C) and offers the sensor helper.
     # Slice GRI-9 adds the Saab Gripen: the same warning and helper (measured, not assumed).
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
@@ -800,6 +803,7 @@ def scenarios() -> list[Scenario]:
         ("f16a", "lobby-ordnance-laser", True, True, True),
         ("mig31", "lobby-ordnance-laser", True, True, True),
         ("m2000", "lobby-ordnance-laser", True, True, True),
+        ("f15e", "lobby-ordnance-laser", False, True, True),
         ("gripen", "lobby-ordnance-laser", True, True, True),
     ):
         out.append(

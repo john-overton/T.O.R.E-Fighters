@@ -2341,6 +2341,10 @@ Options (none chosen):
 
 Agent note: option 1 is the evidenced one; it needs one stem arm in F15E-7.
 
+Update (F15E-7, 2026-11-10): John chose option 1 in the batch decision round ("go
+with recs", opinionated); the stem arm already existed from B5-1 and needed no
+change. See [F-15E sensors, HUD and cockpit](#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10).
+
 ### F-15E pods (for John)
 
 **Fact.** Rows 3 and 4 are `AV8IR.SEE` and `PAVESPK.SEE`, both flag `0x0008`
@@ -2377,6 +2381,9 @@ Options (none chosen):
 
 Agent note: under B7 the intake position is the only real pod station; the belly
 position is the one real aircraft do not use.
+
+Update (F15E-7, 2026-11-10): option 3 was chosen: the sensor stays and no pod body
+is drawn (see [F-15E sensors, HUD and cockpit](#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10)).
 
 ### F-15E shape state words
 
@@ -2581,6 +2588,177 @@ wire identity is 9 bits since NET-ID9, so capacity is not a constraint.
 | CFTs baked in the shape? | Row 7 and frames | F15E-2 frame check |
 | Tank and bomb clipping under the belly | Station rows | F15E-5 stop-and-report |
 | Per-row default quantities | Stores load | F15E-6 |
+
+### F-15E shape, damage looks and decals (F15E-2, 2026-11-10)
+
+Implementation, slice F15E-2, Claude Sonnet (sonnet-high). `AircraftId::F15E`
+flies `F15E.SH` at its own size: `aircraft_scale` stays `[1, 1, 1]`, because
+the size question ([above](#f-15e-size-for-john)) is John's and is still open.
+Nothing in this slice depends on the answer. The skin review (double-sided
+panels, the two omitted decal slots, damage looks, the conformal-tank answer)
+is in [the F-15E skin review](objects-and-shapes.md#f-15e-skin-review) in the
+objects and shapes guide; the `render-f15e-skin` battery scenario captures the
+top and under views with the gear down.
+
+- **Shape and twins.** 350 runtime faces (352 on the export path), 17
+  exact-vertex twin groups, every one a pair with opposite stored normals
+  (pinned by `crates/tore-import/tests/f15e_shape.rs`, which skips without a
+  retail install). No stored-normal exception is needed, as for the MiG-31 and
+  the Mirage 2000.
+- **Conformal fuel tanks: not in the shape.** The F-15E outline in plan and side
+  view matches the F-15C's; the only extra volume is a flat shelf on the lower
+  fuselage side. No tank shape exists to hang or hide, so F15E-5 draws any
+  tank as a store.
+- **Damage looks.** `F15E_A.SH` to `F15E_D.SH` (311, 138, 350 and 33 faces) and
+  their four skins load (pinned by the same test). No whole-body variant is
+  registered for the F-15E, as for the F-15C, MiG-25, MiG-31, F-16A and Mirage
+  2000, so a destroyed F-15E draws the intact skin with regional cuts. Choosing
+  an A to D substitution would be a decision for the damage slice; nothing here
+  changes `damage_variant`.
+- **Decals.** Two `E0` slots (3 and 4, the wing markings) stay omitted; the
+  tail and fuselage art are textured faces and draw whole.
+
+Provenance: spec-derived (retail shape, face counts and twins read as data);
+the omit-not-fill decal rule follows the existing texture-state decision;
+frames are review evidence only.
+
+### F-15E control surfaces resolved (F15E-3, 2026-11-10)
+
+The review's open surface items are answered by slice F15E-3 (details, fold
+table and measured gaps in [control-surface
+geometry](aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10)).
+The slanted aileron hinge is a whole-panel turn about the line from the root
+pair's mid point to the tip vertex, root gap 0.10 ft at full travel; the
+stabilators are whole panels with roll about a lateral spindle through the root
+chord midpoint; the flap wedge turns whole and the `-1` branch's end triangle
+draws while it is down; rudders: none, as John decided the same day. The
+"Rudders" and "Taileron" options in "F-15E surfaces (for John)" above are
+settled by his 2026-11-10 answers (no rudder motion, tailerons with roll).
+
+### F-15E stations measured (F15E-5, 2026-11-10)
+
+Slice F15E-5 measured every decoded store row on the drawn shape under the
+standard pylon rules and **stopped on clipping** (John's rule): see [the F-15E in
+stores on pylons](../spec/stores-on-pylons.md#the-f-15e-f15e-5-2026-11-10) for the
+station table, every alternative, the frames and the options. In short: row 6
+(centreline tank) and row 8 (wing AIM-120 pair, 14.3 ft out) are clean; row 7
+(the 12 Mk 82 conformal-style pair, 6.3 ft out) hangs on two triple racks a side,
+its aft inboard bombs enter the body by 0.06 ft (right) and 0.02 ft (left), they
+sit 0.32 ft from the main gear and the gear leg crosses them while it retracts
+(gear 0.4); several larger alternatives (GBU-10/GBU-30 about 2 ft, HARM and
+Shrike 1.0 ft) clip the belly flank. The "Things F15E-5 must handle" list in
+"F-15E hardpoints" above is answered: the tank and bombs hang 0.17 ft under the
+shelf and flank and are 3.3 to 3.9 ft above the ground (the gear-down low point is
+9 ft under the reference, so they do not hang near it once the pylon rules place
+them). The Pave Spike row already draws no body under the 2026-11-07 fixed-pod
+rule (John's decision 3 of 2026-11-10), checked by the retail pod guard. No row,
+mask or default changed and the ordnance audit pins did not move.
+
+### F-15E sensors, HUD and cockpit (F15E-7, 2026-11-10)
+
+Slice F15E-7 confirmed the F-15E on the records it names. John's decision round of
+2026-11-10 ("go with recs") decided the question the review left open in [F-15E
+HUD and cockpit](#f-15e-hud-and-cockpit-for-john): **follow the record**, `av8.HUD`,
+the same as TORE's F-15C, and the Pave Spike row draws no pod body while its
+sensor stays. That settles what the batch identity slice had wired as an interim
+agent decision, so the F-15E's binding is now **opinionated (John, 2026-11-10)**,
+no longer interim; only the comments in `aircraft.rs` and `hud_aperture.rs`
+changed. Added: a retail-reading test and one aperture test. No behaviour changed.
+
+**Sensors (spec-derived, retail records, already reviewed).** `--sensor-summary`
+reads: `F15E: radar F15R.SEE search 150 nmi 60x60 deg track 100 nmi 45x45 deg
+look-down 30 ADVANCED; infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi
+45x45 deg; visual VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg;
+jammer F15.ECM LATE strength 0.30; signature radar 100 infrared 100`. Radar and
+jammer are the F-15C's line, record for record (`F15R.SEE`, `F15.ECM`); the F-15E
+adds the internal FLIR as an infrared channel. Nothing under
+`crates/tore-sim/src/sensors` branches on the aircraft identity, so radar modes,
+the RWR and the jammer behave as for the F-15C. A live-fire run (`--live-fire
+--aircraft f15e --weapon-slot 3`) shows the Radar window `TWS 10 ... TRACK`, the
+HUD `ARM 3 AIM-120 92% IN RNG`, and the AIM-120 locks, flies, hits and kills
+(`shots=1 hits=1 kills=1` at 1,500 ticks; at 700 ticks the round is still flying,
+`hits=0 active=1`). `--sensor-channel ir` shows `IR` on the Radar window (frame).
+The jammer key lights `JAM` in the RWR window.
+
+**FLIR and laser designation (decision 3).** The aircraft's own sight takes the
+first laser record among its fixed rows, else the first FLIR
+(`combat::sight::fixed_sight`). The F-15E carries both `PAVESPK.SEE` and
+`AV8IR.SEE`, so its targeting sight is the **Pave Spike laser** (10 nmi, the
+pod's hemisphere below the aircraft, as the F-16C and A-10), and the internal
+FLIR stays a sensor channel on the scope. `--a2g-run UKR QUCOL --aircraft f15e
+--load GBU12 --station 2 --count 2 --attack laser --altitude 15000 --speed 480
+--from 6 --seconds 120` prints `sight ... kind Laser`, designates the tank at
+t 0.26 s, reads `OUT-OF-REACH` then `in-reach yes`, releases at 15.2 s with
+`laser Lasing`, and the bomb impacts 2.9 ft from the target (`target-hp 100/200`).
+The target-cam page for the F-15E shows the flashing `LASE` cue and the pin and
+FLIR pages. **No pod body is drawn.** The row sits at (0, 0, 0) inside the
+airframe, which the 2026-11-07 fixed-pod rule never draws; the retail guard in
+`pod_equipment_tests.rs` (extended in F15E-5) pins that the F-15E's `fixed_pods`
+list is empty, and the F15E-5 below and quarter frames show a clean belly. The
+real jet's intake LANTIRN pods are not drawn either (no row decoded, none
+invented).
+
+**HUD and cockpit (opinionated, John, 2026-11-10).** `AircraftId::F15E.hud()` is
+`AV8.HUD`, the cockpit stem `AV8`, the forward art `~AV8H.PIC` and the instrument
+window frame `~AV8_P.PIC` (`Hud::parse` of `AV8.HUD` names it), each equal to the
+F-15C's. The F-15E record is not aliased: `F15E.PT` stays the identity. Pinned in
+`crates/tore-import/tests/f15e_cockpit.rs` (retail-reading, skips without media):
+the five sensor rows `VIS340.SEE, F15R.SEE, F15.ECM, AV8IR.SEE, PAVESPK.SEE`, the
+F-15C's first three rows, the binding, the panel, the overlays and the record's
+own eye offset. `hud_aperture.rs` resolves the stem `AV8` to the Su-27's measured
+glass (the Harrier cockpit art), checked by a new unit test: the F-15E mask equals
+the F-15C's and the Su-27's and is not empty. `--cockpit-sheet OUT_DIR
+F15E,F15,AV8` (run through `tools/agent-run.sh`) printed `f15e: stem F15E cockpit
+~AV8H.PIC art 1280x490 FITTED CLR`, centre mirror x 531 y 5 w 208 h 51, left x
+156 y 180 w 109 h 171, right x 1005 y 180 w 109 h 171, identical to the F-15C and
+the Harrier. No F-15 or Strike Eagle cockpit art exists (`~F15*` is absent from
+both archives, as the review found), so the F-15E flies a Harrier cockpit, as the
+F-15C does.
+
+**Views (windowed).** Front cockpit with the HUD inside the combiner glass and
+the six small-layout windows; look left and right 45 degrees (the cockpit art
+turns away with the look, the HUD and canopy bow at the frame edge); 90 degrees
+left and right and 60 degrees up (no cockpit art, open sky, as for the F-15C);
+`--flight-view 4` (F3 Up) and `--flight-view 3` (F2 Back). F2 Back shows the
+spine, the two outboard fins and the engine nozzles from the pilot's eye, the same
+picture as the F-15C's. The standalone instrument pages 0 to 9 draw with the
+Harrier bezel.
+
+**Instruments and two engines.** The Systems window shows `THR`, `TEMP`, `OIL`,
+`HYD` and `FUEL` / `(+ EXT)`; one engine readout serves every aircraft, so the
+two-engine F-15E shows one throttle and one temperature, as the F-15C's twin
+engines do (the panel art has no per-engine needle; the readouts are generated
+text, and no host code reads a second engine's state for the panel). Fuel reads
+the F-15E record's own number: `FUEL 13662 LBS`, and `(+ EXT 2300 LBS)` with the
+default `F350.GAS` centreline tank (the F-15C record's 13,662 as well, a copied
+value listed in the review; the tank is the F-15E's own default row). The Weapons
+window lists `450 M61`, `12 MK-82`, `4 AIM-120` and `30 CHAFF` / `30 FLARE`. The
+HUD reads the F-15E's own state (airspeed and altitude boxes `564` and `5000` in
+the lock frame, `1.0G`, `70%` throttle).
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye`
+is one fixed offset for every aircraft, 7 ft above and 10 ft ahead of the model
+origin, used only by F2 Back, the rear-view mirrors and the replay views; the
+forward cockpit looks from the origin with 2D art. The record's own `viewOffset`
+(x 0, y 20, z 60) is the F-15C's and no host code reads it (as the F-16A review
+found), so no per-aircraft eye exists. Measured on the neutral shape (the faces
+inside 4 units of the centreline, 1 unit = 1/3 ft): the F-15E's canopy top is 16
+units, 5.3 ft above the origin, over 43 to 73 units, 14.3 to 24.3 ft ahead of it;
+the F-15C's is the same 16 units over 45 to 77 units, 15.0 to 25.7 ft. The fixed
+eye therefore stands 1.7 ft above the canopy top and 4.3 ft behind its forward
+span on the F-15E, 5.0 ft behind on the F-15C: the same place against both
+canopies, and the F2 Back frames match. Not changed. A seated eye would be a fleet
+change (a table keyed by aircraft through six call sites), a question for John, as
+in the Mirage 2000 review.
+
+**RWR with a threat.** As for the Mirage 2000: no scripted path plots an emitter
+on the player's RWR (the live-fire target emits no radar and the diagnostic
+incoming round plots at the centre). The frames show the window with the jammer
+lit and with an incoming round; the RWR code is aircraft-agnostic and unit
+tested.
+
+Evidence and frames: `.local/m3-aircraft/frames/F15E-7/` and
+`.local/m3-aircraft/checks/F15E-7/`.
 
 ## Gripen source review (2026-11-10)
 
@@ -4421,6 +4599,12 @@ name `BK27.JT` as mounted by exactly the Gripen and the Tornado.
 | Tornado draw scale | 2/3 ft a unit | See below. |
 | Rig and gear | Gear word only; the other words pinned, unmapped | As the Mirage 2000 interim: the shared fitted gear law until X-3 and X-4. |
 
+Update (F15E-7, 2026-11-10): for the F-15E the HUD and cockpit binding row is
+decided, no longer interim: John chose to follow the record, `av8.HUD`, in the
+batch decision round, so it is opinionated (John, 2026-11-10). The other four
+aircraft's bindings stay as their own slices find them. See [F-15E sensors, HUD
+and cockpit](#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10).
+
 Update (GRI-7, 2026-11-10): the Gripen's HUD and cockpit binding is decided, not
 interim (opinionated, John, 2026-11-10, decision 7), and its HUD glass is measured
 (`hud_aperture.rs`, no longer an empty mask). The F-5E and Tornado rows above are
@@ -4568,6 +4752,98 @@ No audit pin moves (the F-5E row keeps its place and the audit counts weapon row
 only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
 placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
 on the retail record and has a unit test.
+
+## F-15E ordnance, default load and countermeasures (F15E-6, 2026-11-10)
+
+Slice F15E-6 confirmed the F-15E's ordnance as the record's own, with no row, mask,
+capacity or default authored: the M61 gun at 450 rounds (the real jet's 512 is a
+finding only; John kept retail), `F350.GAS` on the centreline, twelve `MK82.JT` on the
+belly pair, four `AIM120.JT` on the wing pair, and 30 chaff and 30 flares from
+`F15.ECM` (the fleet's convention, the record is the capacity). The F15E-5 belly rail
+drop and refused stores are in place in these releases. Live fire (gun, Mk 82 and
+AIM-120 kill), release positions and rack order, the tank-then-bombs jettison and a
+Pave Spike laser bomb that destroys its tank are in [aircraft
+ordnance](aircraft-ordnance.md#the-f-15e-strike-eagle-f15e-6-2026-11-10) and the
+[ordnance availability baseline](../baselines/ordnance-availability.md#f-15e-ordnance-f15e-6-2026-11-10).
+No audit pin moved. Update to the F15E-5 "default load" lines above: the gear leg
+crossing the aft inboard bombs in transit is still open.
+
+## F-15E flight review (F15E-8, 2026-11-10)
+
+Slice F15E-8 validated the F-15E headless against the record, TORE's F-15C and the
+cited real aircraft; nothing in the flight model or the record changed (John kept
+the retail copy of the F-15C's numbers, decision 1). The sim reads the record only,
+and the F-15E's flight words equal the F-15C's, so every F-15E result equals the
+F-15C's on the same load; the two differ by default load alone (9,940 against
+2,152 lb). Details, tables and the battery windows are in the
+[variety flight baseline](../baselines/variety-flight.md#f-15e-validation-2026-11-10)
+and the [spec](../spec/variety-flight.md#f-15e-f15e-8-2026-11-10).
+
+Summary (afterburner, full internal fuel, clean 42,262 lb): Mach 2.29 at 36,000 ft
+against the record's Mach 2.5 edge (0.916 of it, the shared loaded-drag rule), 750
+kt at 1,000 ft against about Mach 1.2 at sea level, level flight to about 95,000
+ft and a climb peak of 108,921 ft against a published 60,000 to 65,000 ft service
+ceiling (the record's 100,000 ft, a retail copy); best sustained climb 36,000
+ft/min against more than 50,000 published (about 71 percent, the shared drag law);
+full-aft-stick pull at 461 kt and 1,000 ft 7.57 / 8.28 / 8.69 / 9.10 G at full,
+half, quarter and near-empty fuel (clean; 6.73 to 7.91 G with the default load);
+liftoff 149.1 kt after 1,155 ft and approach 156.1 kt with the default load.
+
+Findings for John, nothing changed: the ceiling, the +9 G reached only near empty
+(the fleet loaded-elevator rule, as the Mirage before M2K-11), fuel flows 39 percent
+under the real F100 at military power, and the default load's weight.
+
+## F-15E in missions, multiplayer and replay (F15E-9, 2026-11-10)
+
+Implementation and verification, slice F15E-9 of the F-15E port. No game code
+changed: `AircraftId::F15E` was appended to every identity list in B5-1
+(checkpoint code 41, wire index 41 of the `SELECTABLE` order), the wire codes it in the 9-bit identity field since protocol 83,
+and `strike_class.rs` already lists it in the fighter family. The AI builds a
+wing member from the record like any aircraft (two engines, the default AI load
+check passes for its Mk 82, AIM-120 and M61 stores), so no AI behaviour work
+was done.
+
+Added coverage: a Quick Mission test
+(`the_f15e_is_a_quick_mission_player_and_a_wing_choice`) naming `F15E.PT` as the
+player's aircraft and in every AI wing field and refusing the F-15C in its
+place, the `ai-f15e-quick-mission-2v2` and `replay-rec-f15e-2v2` battery
+scenarios, the F-15E row in the Load Ordnance notes loop
+(`menus-snap-quick-lobby-ordnance-laser-notes-f15e`: no laser warning, sensor
+helper shown, as the F-16C, because the record has the PAVESPK.SEE row; decision
+3 of the F-15E plan keeps that sensor without a drawn pod), and `ai-f15e-*` in
+the `ai-fights` battery family.
+
+AI strike finding (reported, no behaviour work). The strike class is Fighter, as
+the F-15C's and the F-16C's. In a Quick Mission with a ground target set, the
+mission gives a fighter the CAP role: `--a2g-run UKR QUFACT --pilot ai
+--aircraft f15e --load MK82 --quick-wing --seconds 300` prints `ROLE plane=1
+role=cap`, `releases=0` and `store_rounds_left=12` (the twelve Mk 82s untouched),
+the same as the F-16C of `qmc-strike-wing`. The Mk 82 load is not refused on
+that account: when the player orders the wingman onto the ground (`--order
+engage-my-target --order-at 3` on `UKR QUCOL`), the order is taken ("1
+applied"), the wingman flies a level pass, releases a Mk 82 at 5,027 ft and 401
+kt, lands it 123 ft from the aim, egresses and keeps 11 rounds. So an AI F-15E
+bombs when ordered or assigned the Strike role and otherwise flies as a fighter.
+Whether the Strike role should default for an aircraft carrying a bomb load is
+an AI behaviour question and is left to John.
+
+Results (2026-11-10, throttled, profile `.local/m3-aircraft/profile-f15e`):
+
+- `--ai-roster-probe-ticks 3600`: the four `F15E.PT` lines (Novice, Average,
+  Experienced, Ace) each `models=2 radar=true ir=true stores=3 gun=true
+  projectiles=0 dropped=0 PASS` (two engines; the `ir` is the AV8IR.SEE row).
+- `ai-f15e-quick-mission-2v2` passes: every wing the F-15E, one missile kill by
+  the player at 14.9 s, nothing dropped, no warnings.
+- `replay-rec-f15e-2v2` passes: the recording reads back `player.aircraft =
+  F15E.PT`, `probe.enemy = F15E.PT`, `draw.models = F15E.PT`, the aircraft
+  listed as `F-15E (F15E.PT)`, two runs identical, `--verify-render` finds
+  nothing missing or differing.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding
+  `tore-server` **and `tore-bot`** (`cargo build --locked -p tore-session --bin
+  tore-bot`): with the 2026-11-10 18:31 bot, the same server and bot counted the
+  same 213 content items but derived different compatibility codes, and the bot
+  was refused. Rebuild both before a net scenario after the identity list
+  changes.
 
 ## Gripen sensors, HUD and cockpit (GRI-7, 2026-11-10)
 

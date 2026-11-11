@@ -135,6 +135,51 @@ def m2000_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The F-15E's default stores (F15E-6, 2026-11-10), one run each, on the true-size shape, from the
+# F15E-5 positions. The belly pair's twelve Mk 82s hang as two triple racks of six bombs a side
+# on 2 inch rails (the 0.1 ft belly drop of F15E-5 round 2 is already in these figures): the
+# first four leave from under the racks' bars (6.33 ft out, 5.29 ft down, 0.74 ft deep), front
+# pair first then the rear pair, left then right; then the outboard column (7.02 ft out), then
+# the inboard column (5.64 ft out), each front pair first. The eleven checked presses are the
+# ones the bomb sight lets through before the target (the twelfth goes past it on some runs). The
+# wing pair's four AIM-120s hang two a side on twin bars from 1 ft pylons at 14.33 ft: the
+# outboard pair (14.96 ft) first, then the inboard (13.70 ft), left then right.
+F15E_BOMBS = (
+    [(6.33, -5.29, 2.48, 0.74)] * 2 + [(6.33, -5.29, -5.82, 0.74)] * 2
+    + [(7.02, -4.72, 2.48, RAIL)] * 2 + [(7.02, -4.72, -5.82, RAIL)] * 2
+    + [(5.64, -4.72, 2.48, RAIL)] * 2 + [(5.64, -4.72, -5.82, RAIL)]
+)
+F15E_CASES = [
+    ("Mk 82 belly racks", F15E_BOMBS, "LR" * 5 + "L", 11),
+    ("AIM-120 wing pair", [(14.96, -0.77, -4.67, WING)] * 2 + [(13.70, -0.77, -4.67, WING)] * 2, "LRLR", 4),
+]
+
+
+def f15e_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(F15E_CASES):
+        return [f"{len(parts)} runs finished, want {len(F15E_CASES)}"]
+    problems: list[str] = []
+    for part, (label, wants, sides_want, need) in zip(parts, F15E_CASES):
+        firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
+        if len(firsts) < need:
+            problems.append(f"{label}: {len(firsts)} releases, want at least {need}")
+            continue
+        sides = []
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf, wd)) in enumerate(zip(firsts, wants)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(abs(r) - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want +-{wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth == "none" or abs(float(depth) - wd) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {wd:.2f}")
+            sides.append("L" if r < 0 else "R")
+        if "".join(sides) != sides_want[: len(sides)]:
+            problems.append(f"{label}: sides {''.join(sides)}, want {sides_want[: len(sides)]}")
+    return problems
+
+
 # The Gripen's default stores (GRI-6, 2026-11-10), one run each: (label, right ft, up ft,
 # forward ft, sides, pylon depth ft) per release, at the GRI-5 station positions on the true-size
 # shape. The inner wing's two AGM-65Gs hang from 1 ft pylons at +-5.00 ft, 2.21 ft down, 4.67 ft
@@ -209,6 +254,18 @@ def scenarios() -> list[Scenario]:
             ],
             check=m2000_origin_problems,
             notes="The Mirage 2000's default stores leave from where they hang: the belly AS-15s in two tandem pairs front first, the Super 530s and Magics from their 1 ft wing pylons, left then right (M2K-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-f15e", lane="flight",
+            args=base + ["--repeat", "12", "--gap", "0.5", "--aircraft", "f15e", "--station", "1", "--load", "MK82",
+                         "--count", "12"],
+            timeout=300,
+            then=[
+                Step(base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "f15e", "--station", "2", "--load",
+                             "AIM120", "--count", "4"], timeout=300),
+            ],
+            check=f15e_origin_problems,
+            notes="The F-15E's default stores leave from where they hang: the twelve belly Mk 82s from under the two triple racks (the four under the bars first, then the outboard and inboard columns, front pair first, left then right), the four AIM-120s from the wing pair outboard pair first (F15E-6).",
         ),
         Scenario(
             name="a2g-release-origin-gripen", lane="flight",

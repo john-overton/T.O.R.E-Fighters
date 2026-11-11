@@ -277,6 +277,15 @@ and at its aft end, the same place relative to its canopy as the Rafale's, so
 Back shows the Mirage's spine and fin the way it shows the Rafale's. Evidence in
 [the Mirage section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+## Pilot's eye on the F-15E (2026-11-10, F15E-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for
+the F-15E (agent decision, no per-aircraft eye exists). Measured against the
+shape it sits 1.7 feet above the canopy top and 4.3 feet behind its forward span,
+the same place relative to its canopy as the F-15C's (5.0 feet behind), so Back
+shows the F-15E's spine, two fins and nozzles the way it shows the F-15C's.
+Evidence in [the F-15E section](../formats/aircraft-variety.md#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10).
+
 ## Pilot's eye on the Gripen (2026-11-10, GRI-7)
 
 The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for

@@ -484,6 +484,59 @@ ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` and `a2g-catalog` battery expected lines read 18,
 4,652 (menus only), 233 and 220.
 
+## F-15E stations (F15E-5, 2026-11-10)
+
+The F-15E's bomb pair (row 7) refuses seven large stores in normal loading
+(`GBU29.JT`, `GBU29P.JT`, `GBU30.JT`, `GBU38.JT`, `AGM88.JT`, `AGM45.JT`, `AT2.JT`)
+and its wing pair (row 8) refuses `AA6.JT` (John, 2026-11-10, opinionated; Cheat
+loading unchanged; see [the F-15E in stores on
+pylons](../spec/stores-on-pylons.md#the-f-15e-f15e-5-2026-11-10)). The audit pin
+moved: weapon placements 4,652 to 4,644 (`F15E.PT` 65 to 57); tank placements
+(233), Cheat-only placements (220), pods (80), records (82 and 9), recovered
+stations (18) and the roster (45) are unchanged:
+
+```text
+ordnance F15E.PT: 4 source rows, 0 optional weapon rows, 57 compatible weapon placements, 3 tank placements; defaults and restart passed; catalog 48 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4644 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+```
+
+The `menus-ordnance-availability` battery expected line reads 4,644 weapon
+placements; the `a2g-catalog` line matches any count.
+
+## F-15E ordnance (F15E-6, 2026-11-10)
+
+The F-15E's nine rows (five fixed sensors and the placeholder, the M61 gun, the
+centreline tank row, the belly Mk 82 row and the wing AIM-120 row) are reviewed and
+measured on the branch. No placement count moved: the audit pins are the ones in the
+[F-15E stations section above](#f-15e-stations-f15e-5-2026-11-10) (45 aircraft, 18
+recovered weapon stations, 4,644 weapon placements, 233 tank placements, 80 pod
+placements, 220 Cheat-only). The default load, the gun (450 M61 rounds, the real jet's
+512 a finding only), the countermeasures (30 chaff and 30 flares from `F15.ECM`) and the
+release positions are described in [aircraft
+ordnance](../formats/aircraft-ordnance.md#the-f-15e-strike-eagle-f15e-6-2026-11-10).
+
+Headless and windowed runs on the branch (all with `TORE_DATA_DIR` set to the local
+`profile-f15e`; logs under `.local/m3-aircraft/checks/F15E-6/`):
+
+| Check | Result |
+| --- | --- |
+| `--live-fire --aircraft f15e --weapon-slot 1` (M61), 1,200 ticks | 320 shots, 52 hits, 1 kill, ammunition `[130, 12, 4]` |
+| `--weapon-slot 2` (Mk 82) | one shot, one hit and one kill, ammunition `[450, 11, 4]` |
+| `--weapon-slot 3` (AIM-120), 1,200 / 1,800 / 3,600 ticks | one shot, hit 0 at 1,200 (still flying), hit and kill at 1,800 and 3,600; ammunition `[450, 12, 3]` |
+| `--a2g-run --attack strafe` | 64 rounds in 2 s, 22 tracers, 450 to 386 |
+| `--a2g-run --attack release` stations 1 and 2 (`a2g-release-origin-f15e`) | Mk 82s from under the rack bars (6.33 ft out), then the 7.02 ft and 5.64 ft columns, front pair first; AIM-120s outboard pair (14.96 ft) then inboard (13.70 ft); left before right |
+| `--a2g-run --attack jettison --load MK82` | tank (2,300 lb fuel; payload 9,940 to 7,392 lb) then 12 bombs (to 1,392 lb), `PASS released 13 ... no-explosion` |
+| `--a2g-run --attack laser --load GBU10 --station 1 --count 2` from 15,000 ft | Pave Spike lases, released 15.2 s, guided, impact 3.3 ft from the tank, killed |
+| `--a2g-run --attack laser --load GBU12 --station 1 --count 4` | released 15.2 s, impact 4.0 ft from the tank, tank at 100 of 200 hit points |
+| `--live-fire --combat-command chaff` and `flare` with `--countermeasure-preview 60` | carried 29 chaff or 29 flares, capacity 30 and 30 |
+| `--ai-probe-ticks 60 --aircraft f15e` | `tanks=1 external_fuel=2298 payload=9938 stations=[M61 x450, MK-82 x12, AIM-120 x4]` |
+| `--quick-mission --snapshot-state ordnance --aircraft f15e` | `M61 Vulcan Cannon 450 (max 450)`, `350 gallon tank 1 loaded`, `MK-82 Slick 12 loaded (max 12)`, `AIM-120 AMRAAM 4 loaded (max 4)`; weight 52,202 of 68,000 lb |
+| `TORE_STORES_PREVIEW_FIRE=5`, `7`, `8` | `Stores firing: f15e row=N PASS` for the gun, Mk 82 and AIM-120 rows |
+
+`tools/battery.py` now carries `flight-livefire-f15e-slot1` to `slot3`,
+`flight-jettison-f15e-slot2` and `slot3`, `a2g-release-origin-f15e`,
+`a2g-jettison-f15e` and `a2g-laser-f15e`, all passing (8 of 8 on the last run).
+
 ## Saab Gripen ordnance (GRI-6, 2026-11-10)
 
 The Gripen's default load, BK 27 gun and countermeasures were measured on the

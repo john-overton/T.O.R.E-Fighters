@@ -45,7 +45,11 @@ const TANK_RECORDS: usize = 9;
 /// 4,652 from 4,663: the Tornado carries no outer wing row, so its eleven
 /// compatible weapon placements there go (B5-2, John 2026-11-10); the F-5E and
 /// Mirage F1 default-load changes move no placement.
-const WEAPON_PLACEMENTS: usize = 4652;
+/// 4,644 from 4,652: the F-15E's bomb pair (row 7) refuses seven large stores
+/// that clip the intake flank (GBU-29, GBU-29P, GBU-30, GBU-38, AGM-88,
+/// AGM-45 and AT-2) and its wing pair (row 8) refuses the AA-6, eight
+/// placements fewer (F15E-5, John 2026-11-10; F15E.PT 65 to 57).
+const WEAPON_PLACEMENTS: usize = 4644;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -349,6 +353,26 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 } else {
                     expected
                 };
+                // John, 2026-11-10 (F15E-5): the F-15E's bomb pair and wing pair
+                // refuse the stores that clip; normal loading must offer none.
+                if !tore_formats::aircraft::stations::weapon_allowed(id, hardpoint, &weapon.source)
+                {
+                    if let Some(slot) = rows
+                        .iter()
+                        .find(|r| r.hardpoint == hardpoint)
+                        .and_then(|r| r.weapon)
+                        .filter(|slot| standard.capacity(*slot, weapon) != 0)
+                    {
+                        return Err(format!(
+                            "{} source station {} offers refused {} ({slot})",
+                            id.pt(),
+                            hardpoint + 1,
+                            weapon.source
+                        )
+                        .into());
+                    }
+                    continue;
+                }
                 if !(1..32767).contains(&expected) {
                     continue;
                 }

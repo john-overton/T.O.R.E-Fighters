@@ -610,7 +610,7 @@ what the page and its camera show. The AC-130 keeps its
 The target display (camera slot 4, Shift+4) is the targeting page instead of the
 plain window when any of these holds, and the plain window otherwise:
 
-- **Sight aircraft** (F-16C, A-10, Su-25, V-22 with a laser; Rafale, X-31,
+- **Sight aircraft** (F-16C, A-10, F-15E, Su-25, V-22 with a laser; Rafale, X-31,
   F-22, AV-8B, AH-64, MiG-29, Su-27, Su-35 with a FLIR; any aircraft carrying
   a Pave Spike pod): the sight is pinned or tracking an object,
   or slewed off its default look, or the laser is on (lasing or masked), or a

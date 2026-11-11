@@ -270,6 +270,15 @@ def scenarios() -> list[Scenario]:
             notes="The Mirage 2000's 150 gallon centreline tank, then its belly Mk 82s (M2K-6), jettison inert at 5,000 ft.",
         ),
         Scenario(
+            name="a2g-jettison-f15e", lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                  "--aircraft", "f15e", "--load", "MK82", "--altitude", "5000",
+                  "--speed", "300", "--seconds", "30", "--defenses", "0", "0"],
+            timeout=300,
+            expect=[r"jettison: PASS released 13 .* no-explosion"],
+            notes="The F-15E's 350 gallon centreline tank, then its twelve belly Mk 82s, jettison inert at 5,000 ft (F15E-6).",
+        ),
+        Scenario(
             name="a2g-jettison-gripen", lane="flight",
             args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
                   "--aircraft", "gripen", "--load", "MK82", "--altitude", "5000",

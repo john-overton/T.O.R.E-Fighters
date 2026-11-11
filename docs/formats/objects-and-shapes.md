@@ -1604,6 +1604,12 @@ ft up and 10 ft ahead, the same relation the Rafale's own canopy has to the same
 eye (top 3.0 ft, 8 to 16 ft ahead). No per-aircraft eye was added; see [the
 Mirage sensors, HUD and cockpit section](aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+Cockpit eye point, 2026-11-10 (F15E-7, agent decision, unchanged): the F-15E's
+canopy top is 5.3 ft above the model origin and 14.3 to 24.3 ft ahead of it, the
+F-15C's 5.3 ft and 15.0 to 25.7 ft, against the fixed pilot's eye 7 ft up and 10
+ft ahead. No per-aircraft eye was added; see [the F-15E sensors, HUD and cockpit
+section](aircraft-variety.md#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10).
+
 ## Mirage 2000 skin review
 
 On 2026-11-09, slice M2K-2 checked the flyable `M2000.PT` import's skin (media
@@ -1637,6 +1643,50 @@ fuselage height by half (z 1.5053): the fin and canopy read tall against the
 span, as the real aircraft's fin does; the review frames live under
 `.local/m3-aircraft/frames/M2K-2/`. No mesh bytes, exported geometry or retail
 art are committed.
+
+## F-15E skin review
+
+On 2026-11-10, slice F15E-2 checked the flyable `F15E.PT` import's skin (media
+identity in [the F-15E source review](aircraft-variety.md#f-15e-source-review-2026-11-10)).
+The shape draws at its own size: `aircraft_scale` stays identity for the F-15E
+(the size question is open with John). The flyable path draws the reviewed
+`F15E.SH`: 350 faces on the runtime state path (352 on the export path, the two
+extra being the decals below), one texture `_F15E.PIC`. The four damage shapes
+`F15E_A.SH` to `F15E_D.SH` (311, 138, 350 and 33 faces) and textures
+`_F15E_A.PIC` to `_F15E_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs). No damage variant
+is registered for this identity, so a destroyed F-15E draws the intact skin
+with regional cuts rather than an A/C body substitution, as the F-15C, MiG-25,
+MiG-31, F-16A and Mirage 2000 do. A damage capture at 1.0 shows the cuts and
+smoke without a blank or skin-filled patch.
+
+The F-15E does **not** need the [MiG-21 stored-normal
+exception](#mig-21-skin-review). `F15E.SH` has 17 exact-vertex twin groups,
+every one a pair with opposite stored normals (pinned by a retail-reading
+test), so smooth mode pairs each double-sided panel through the shared [panel
+contract](../spec/aircraft-animation.md#double-sided-panels) and hides the rear
+member. A top and an under capture in smooth mode, gear down, show no grey
+underside through the top and no flicker.
+
+The shape carries two `E0` runtime decal slots on the wings, both in the guide's
+wing-marking slots: slot 3 at address `4294` (left, x -55 to -41, y -19 to -5,
+z 5) and slot 4 at `4a93` (right, x 43 to 57, y -21 to -6, z 1 to 2). The
+runtime projector omits both, and neither is filled with a piece of the main
+skin, following [texture state and decals](#texture-state-and-decals); the
+3x wing crops show plain skin with panel lines and no patch. There is no tail
+or nose art slot (slots 0 to 2 are absent). The fins are plain dark skin with
+panel lines: no serial or marking is lost, and neither fin clips the other or
+the stabilators. No mesh bytes, exported geometry or retail art are committed.
+
+**Conformal fuel tanks are not part of the shape.** Compared with the F-15C's
+shape (same outline), the F-15E adds one lower-fuselage feature only: a flat
+shelf on each side from the belly edge (x 16) out to x 21 (1.7 ft), 2.3 ft
+tall at the wall (z -5 to -11) and about 16 ft long (y -24 to 25). The plan and
+side silhouettes are the F-15C's within two units, the under views are the same
+layout, and no tank-sized volume, pylon or flat tank face appears. So no
+tank has to be hidden or replaced; F15E-5 decides any external tank as a store
+under the usual pylon rules. The
+review frames live under `.local/m3-aircraft/frames/F15E-2/`.
 
 ## Saab Gripen skin review
 

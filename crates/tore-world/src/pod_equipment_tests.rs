@@ -46,6 +46,9 @@ fn a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body() {
         (AircraftId::F16C, "PAVESPK.SEE", None),
         (AircraftId::Rafale, "AAS38.SEE", Some([0., -20. / 3., 0.])),
         (AircraftId::Av8, "ALQ167.ECM", None),
+        // John 2026-11-10 (F15E-5): the F-15E's Pave Spike row draws no pod
+        // body; its row is at the reference point, inside the airframe.
+        (AircraftId::F15E, "PAVESPK.SEE", None),
         // GRI-5, 2026-11-10: the Gripen's AAS-38 row is flags 0x8 at the
         // reference point, the A-10 pattern: a placeholder, no body drawn
         // (John, 2026-11-10); the sensor and the mass stay.

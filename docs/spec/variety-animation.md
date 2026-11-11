@@ -812,6 +812,54 @@ passing (rigidity about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at
 the scaled low point at gear 1), and the closed airbrake within 3e-6 ft of the
 spine line. Not a claim of original retraction timing.
 
+## F-15E gear, speed brake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice F15E-4), over `F15E.SH` at
+its own size (`aircraft_scale` identity until John decides). The source faces,
+the flap-word finding, the fold table and the provenance are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#f-15e-gear-speed-brake-and-plume-f15e-4-2026-11-10).
+The control surfaces are not in this fit yet (F15E-3).
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | Each main leg (wheel sheet and cross plate) is one rigid body: `90 degrees * (1 - gear)` about a vertical line through the wheel centre (lays it flat), then the same about a lateral line behind and above it (folds it forward) into the bay under the wing root. Each inboard door turns about its own top edge and closes outward. The six nose plates are one rigid body that folds forward about a lateral line behind and above them and steers about a vertical line through the strut. Hidden at 0, the source pose at 1. The real F-15's mains retract forward turning 90 degrees and its nose retracts forward (public text, cited in the geometry note); the law is fitted. |
+| Speed brake | The four source faces turn as one piece about the line y 25, z 11 by `0.774 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie on the dorsal ridge, 0 hides it. |
+| Afterburner | The eight plume plates scale along Y from the nozzle exit plane (y -61) by the afterburner fraction, hidden at 0. Two nozzle glows and two contrails, from the engine count of 2. |
+| Flaps | The two flap words are pinned and never set (value 1 deletes the inboard wedge, value -1 swaps in a lowered copy); the wedge stays drawn. The droop is F15E-3's. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity at most 2.2e-6 ft, anchor gap 0, skin gap 0, lowest gear point
+at the scaled low point at gear 1) and the closed brake within 8e-6 ft of the
+ridge. Not a claim of original retraction timing.
+
+## F-15E control surfaces
+
+Agent-authored whole-panel motion, 2026-11-10 (slice F15E-3), over `F15E.SH` at
+its own size. Faces, hinge choices, fold table, measured gaps and provenance are
+in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10).
+Magnitudes are fitted, not recovered laws.
+
+| Control | Fitted motion |
+| --- | --- |
+| Pitch and roll (stabilators) | Each whole five-face panel turns about a lateral spindle through its root chord midpoint by `(-0.30 * elevator - side * 0.10 * aileron)` radians, clamped to 0.40 (the F-15C's law). A pull raises both trailing edges; a positive aileron raises the right and lowers the left. |
+| Roll (ailerons) | Each two-face wedge turns whole about its slanted front edge, the line from the root pair's mid point to the tip vertex, by `-aileron * 0.20` radians about the outward axis: positive raises the right trailing edge and lowers the left. Root gap 0.10 ft at full travel. |
+| Flaps | Each inboard wedge turns whole, trailing edge down, about the lateral line through its front edge's mid height by `0.80 * flaps` radians (46 degrees), the rigid turn nearest the source's lowered branch; the branch's end triangle draws while the flap is down. |
+| Rudder | None. The fins are fixed (John, 2026-11-10: the source has no rudder geometry). |
+
+Acceptance: `--animation-probe` reports elevator, aileron and flaps `required
+moved` and rudder `not-applicable`; every pose is a rigid whole panel (rigidity
+at most 3e-6 ft) with anchors held, skin gap 0 and the signed direction, over
+the 25 pitch and roll poses and 21-value elevator, aileron and flap sweeps. Not a
+claim of original control timing or deflection limits.
+
+**Update (F15E-5, 2026-11-10).** The F-15E flap row above now reads 30 degrees
+(0.5236 rad) at full flaps, not `0.80 * flaps` (46 degrees): John's decision of
+2026-11-10 (opinionated), the real F-15's flap travel (NASA Dryden, NTRS
+19950005778). Everything else in that row is unchanged; details in
+[F-15E control surfaces](../formats/aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10).
+
 ## Gripen gear, airbrake and plume fit
 
 Agent-authored whole-piece motion, 2026-11-10 (slice GRI-4), over `GRI.SH` (no

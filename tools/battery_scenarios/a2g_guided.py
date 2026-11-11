@@ -128,6 +128,25 @@ def laser_self_problems(output: str) -> list[str]:
     return problems
 
 
+def f15e_laser_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 1:
+        return [f"{len(parts)} runs finished, want 1"]
+    problems: list[str] = []
+    label = "F-15E GBU-10 on the Pave Spike's spot"
+    release, sight, impact, target = _one(parts[0], label, problems)
+    if release and (release.group(2), release.group(3), release.group(4)) != ("Laser", "Guiding", "0"):
+        problems.append(f"{label}: released {release.group(0)}, want a laser bomb guiding on aircraft 0's spot")
+    if sight and (sight.group(7), sight.group(6)) != ("Lasing", "no"):
+        problems.append(f"{label}: the laser was {sight.group(7)} (buddy {sight.group(6)}) at release")
+    if impact and (impact.group(2) != "Guiding" or float(impact.group(3)) > 40):
+        problems.append(f"{label}: ended {impact.group(0)}, want guiding onto the tank")
+    if not _killed(parts[0], target):
+        problems.append(f"{label}: the tank was not destroyed")
+    _countdown(parts[0], label, problems)
+    return problems
+
+
 def buddy_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 1:
@@ -272,6 +291,14 @@ def scenarios() -> list[Scenario]:
             then=[Step(laser + ["--laser-off", "10"], timeout=300)],
             check=laser_self_problems,
             notes="F-16C Pave Spike and a GBU-10 from 15,000 ft; again with the laser off mid-fall.",
+        ),
+        Scenario(
+            name="a2g-laser-f15e", lane="flight",
+            args=run("UKR", "QUCOL", "laser", "--aircraft", "f15e", "--load", "GBU10", "--station", "1",
+                     "--count", "2", "--altitude", "15000", "--speed", "480", "--from", "6", "--seconds", "120"),
+            timeout=300,
+            check=f15e_laser_problems,
+            notes="The F-15E's Pave Spike (no pod body, the sensor row) lases a tank and a GBU-10 from the belly pair guides onto it and destroys it (F15E-6, F15E-7).",
         ),
         Scenario(
             name="a2g-laser-buddy", lane="flight",

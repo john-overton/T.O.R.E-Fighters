@@ -522,6 +522,7 @@ impl AircraftId {
             // F-15E record names av8.HUD (the F-15C's too); the Gripen has its
             // own gripen.HUD; F5E.PT names f29.HUD, TOR.PT e2000.HUD and
             // MF1.PT rafale.HUD.
+            // F-15E: decided, not interim (opinionated, John, 2026-11-10, F15E-7).
             Self::F15E => "AV8.HUD",
             // Gripen: decided, not interim (opinionated, John, 2026-11-10,
             // GRI-7): its own HUD and ~GRI*.PIC cockpit family.
@@ -626,6 +627,7 @@ impl AircraftId {
             // F-15E flies the AV8 family as the F-15C does, the Gripen its own
             // ~GRI*.PIC, the F-5E the X-29's ~F29*.PIC, the Tornado the
             // Eurofighter 2000's ~EF2*.PIC and the Mirage F1 the Rafale's.
+            // F-15E: decided as above (John, 2026-11-10); the same family as the F-15C.
             Self::F15E => "AV8",
             // Gripen: decided as above (John, 2026-11-10, GRI-7).
             Self::Gripen => "GRI",

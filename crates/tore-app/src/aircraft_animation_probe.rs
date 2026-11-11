@@ -16,6 +16,7 @@ mod e2;
 mod f104;
 mod f14;
 mod f15;
+mod f15e;
 mod f16;
 mod f18;
 mod f22;
@@ -171,6 +172,11 @@ impl Control {
         match self {
             Self::Rudder if id == Id::Ch47 => Expectation::Required,
             Self::Rudder | Self::Flaps if helicopter => Expectation::Unknown,
+            // F15E-3 (2026-11-10): the F-15E has no rudder motion (John's
+            // decision of the same day; the source has no rudder geometry and
+            // the fin is one fixed plate), so the pedals must not move anything.
+            // Its stabilators, ailerons and flaps are `Required` below.
+            Self::Rudder if id == Id::F15E => Expectation::Unsupported,
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -216,6 +222,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::F15E
                         | Id::Gripen
                 ) =>
             {
@@ -262,6 +269,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::F15E
                         | Id::Gripen
                 ) =>
             {
@@ -602,6 +610,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mig25
             | AircraftId::Mig31
             | AircraftId::M2000
+            | AircraftId::F15E
             | AircraftId::Gripen
     ) {
         "reviewed-controls-and-attachments"
@@ -1051,6 +1060,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F15E {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f15e::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Gripen {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 gripen::check(
@@ -1223,6 +1243,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::M2000 {
         failures.extend(m2000::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F15E {
+        failures.extend(f15e::combinations(&airframe, &neutral, out)?);
     }
     if id == AircraftId::Gripen {
         failures.extend(gripen::combinations(&airframe, &neutral, out)?);

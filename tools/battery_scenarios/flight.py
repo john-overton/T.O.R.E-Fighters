@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "gripen"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -78,6 +78,12 @@ STATIONS = {
     # centreline tank is a tank station, and it has no wingtip row (John,
     # 2026-11-10).
     "m2000": [250, 4, 2, 2],
+    # The F-15E carries the M61 gun on its internal row 5 (450 rounds, the
+    # record's count; the real jet's 512 is a finding only, John kept retail,
+    # 2026-11-10), row 7 MK82.JT x12 (the belly pair's two triple racks) and
+    # row 8 AIM120.JT x4 (the wing pair). Its F350.GAS centreline tank is a
+    # tank station (F15E-6, 2026-11-10).
+    "f15e": [450, 12, 4],
     # The Gripen carries the BK27 gun on its internal row 4 (570 rounds, John
     # 2026-11-10) and four weapon rows: row 6 AGM65G.JT x2 (inner wing), row 7
     # AIM120.JT x4 (outer wing pair), row 8 AIM9M.JT x2 (wingtip) and the
@@ -270,6 +276,16 @@ APPROACH_TARGET = {
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157), "mig31": (143, 160),
     "m2000": (133, 147), "gripen": (140, 160),
 }
+# The F-15E (F15E-8, 2026-11-10; agent decision, fitted windows). Its liftoff
+# band is the fleet plausibility range (130 to 150 kt): no primary takeoff speed
+# was found, and the Jane's text in `F15.INF` gives only a 274 m take-off run. Its
+# approach band starts at the 125 kt CAS approach speed in `F15.INF` (Jane's,
+# retail media, the F-15C) and ends at 145 kt, about what the same weight rule
+# gives the lighter F-15C (144.0 kt at 65 percent fuel); the F-15E's own default
+# load (12 Mk 82 and a tank, 52,202 lb at takeoff) approaches faster, so its
+# measured 156.1 kt sits above the band and is held by `KNOWN_APPROACH` below.
+LIFTOFF_TARGET.update({"f15e": (130, 150)})
+APPROACH_TARGET.update({"f15e": (125, 145)})
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -277,6 +293,9 @@ APPROACH_TARGET = {
 # range, so the range's own window already holds them; these record the values.
 KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1}
 KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5}
+# The F-15E's measured liftoff and approach at its default load (F15E-8, 2026-11-10).
+KNOWN_LIFTOFF.update({"f15e": 149.1})
+KNOWN_APPROACH.update({"f15e": 156.1})
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -292,6 +311,8 @@ INTERNAL_FUEL_LB = {
     # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
     "f16a": 6972,
 }
+# F15E.PT internal fuel, 13,662 lb (the F-15C record's tank; F15E-8, 2026-11-10).
+INTERNAL_FUEL_LB["f15e"] = 13662
 
 
 def _in_target(value: float, target: tuple, known: float | None) -> str | None:
@@ -379,6 +400,8 @@ def check_retail_liftoff(output: str) -> list[str]:
 # its record equals the F-16C's, which is in AIRCRAFT and has none, so the two
 # are checked alike.
 LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a", "mig31", "m2000", "gripen"]
+# The F-15E joins the liftoff, retail-stall and approach scenarios (F15E-8, 2026-11-10).
+LIFTOFF_AIRCRAFT += ["f15e"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

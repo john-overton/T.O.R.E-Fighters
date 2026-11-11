@@ -334,6 +334,21 @@ def scenarios() -> list[Scenario]:
             notes="Mirage 2000 skin from above and below with the gear down, at its real size (per-axis shape scale 1.3616, 1.2290, 1.5053, docs/formats/objects-and-shapes.md, Aircraft shape scale): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's E0 decal slots stay omitted rather than filled with skin.",
         ),
         Scenario(
+            name="render-f15e-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "f15e", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f15e-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["f15e-top.ppm", "f15e-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "f15e", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f15e-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="F-15E skin from above and below with the gear down, at the shape's own size (no shape scale): its 17 double-sided panels are exact-vertex twins with opposite stored normals, so they must not z-fight and the underside must not show through the top (docs/formats/objects-and-shapes.md, F-15E skin review).",
+        ),
+        Scenario(
             name="render-gripen-skin",
             lane="flight",
             args=["--free-flight", "--aircraft", "gripen", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/gripen-top.ppm", "--no-audio"],

@@ -297,6 +297,12 @@ What shipped in TORE (2026-09-23, `crates/tore-app/src/instruments.rs`):
    TORE; its original action is not recorded here. The six-window small
    layout at scale 1 is not reproduced.
 
+The F-15E flies the Harrier cockpit by John's decision of 2026-11-10
+(opinionated, the same as the F-15C): `F15E.PT` names `av8.HUD`, whose panel is
+`~av8_p`. The F-15E therefore draws the Harrier `~AV8_P.PIC` bezel over
+`~AV8H.PIC` (F15E-7). Its Systems window shows one engine readout, as every
+aircraft's does (it has two engines), and its own fuel.
+
 The Gripen flies its own cockpit by John's decision of 2026-11-10 (opinionated):
 `GRIPEN.PT` names `gripen.HUD`, which is its own `GRIPEN.HUD`, whose panel is
 `~gri_p`. The Gripen therefore draws its own `~GRI_P.PIC` bezel (81 x 80, a dark
