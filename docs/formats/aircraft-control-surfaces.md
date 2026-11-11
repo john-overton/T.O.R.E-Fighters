@@ -974,3 +974,101 @@ row passing: rigid, hinges fixed, feet inward or aft, nothing below the hinge
 height near stow, ground contact at 1), a seven-value airbrake sweep
 (`brake-sweep.csv`) and the gear, brake and exhaust witnesses. See the
 [Mirage 2000 gear, airbrake and plume fit](../spec/variety-animation.md#mirage-2000-gear-airbrake-and-plume-fit).
+
+## F-5E control surfaces (F5E-3, 2026-11-10)
+
+`F5E.SH` (21,488 CODE bytes, 253 runtime faces, six state words `0x63c0`,
+`0x63c6`, `0x63cc`, `0x63d8`, `0x63de`, `0x63e4`; review in [aircraft
+variety](aircraft-variety.md#f-5e-control-surfaces-for-john)) names no signed
+pitch, roll or flap-travel branch, and its stabilators and ailerons have no
+state word at all, so every control role below is a **fitted** whole-panel
+assignment over exact reviewed source faces. John's decisions of 2026-11-10
+(stabilators pitch only, ailerons roll, size 1:1) fix the roles. Coordinates are
+shape units (x right, y forward, z up, one third foot; the F-5E has the identity
+scale, so shape units are the drawn units).
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right stabilator | `3a9d` (top), `3b8c` (back winding) | One flat plate at z -4: root x 5 (y -23 to -37), tip x 20 (y -30 to -35); shares no vertex with any other face |
+| Left stabilator | `3f2c`, `40eb` | Mirror, x -5 to -20 |
+| Right aileron | `3b45` (top layer), `3b9f` (bottom layer) | Strip x 31 to 43: hinge y -5 at z -3 (top) and z -4 (bottom), trailing edge y -8 (x 31) and y -7 (x 43) at z -4 |
+| Left aileron | `4067`, `41ce` | Mirror, x -31 to -43 |
+| Right flap | `44d9`, `44f8` | Strip x 7 to 31: hinge (7,-4) to (31,-5), trailing edge y -11 (x 7) to y -8 (x 31); word `0x63de` deletes both |
+| Left flap | `45c0`, `45df` | Mirror; word `0x63d8` deletes both |
+| Rudder | `4755`, `4774` (quad, both windings) | Hinge edge (0,-31,4) to (0,-29,22); trailing edge (0,-37,4) to (0,-32,22); word `0x63e4` swaps it for `469b`/`46ba` (about 40 degrees to starboard, rounded) |
+
+**Selection.** The rig selects every panel by face address, never by a
+coordinate threshold: the ailerons, which have no state word, are the four
+faces above (each wholly on one side of the wing, x 31 to 43), and the load
+refuses the shape if a face is missing, duplicated, or holds a vertex off the
+reviewed corners. The flap words, the rudder word and the three device words
+(gear `0x63cc` adds `49cc 49eb 4a37 4a56 4aa2 4ac1`, speed brake `0x63c6` adds
+`4802 4819`, plume `0x63c0` adds the eight `48a7` to `4980` plates) are
+checked against their exact added and removed face sets at load.
+
+**Hinge axes.** Stabilators: a lateral line (along X) through the root chord
+midpoint, (+/-5, -30, -4), the taileron standard. The plate is flat (every
+vertex z -4), so its own anhedral is zero and the spindle is not tilted; it is
+never a swept span axis. Ailerons: the straight line y -5, z -3.5 along X
+through the strip (the mid axis of the hinge pair, as the Mirage's elevons).
+Flaps: the line from (7,-4,-3.5) to (31,-5,-3.5), so the flap axis is 2.4
+degrees off the aileron's and each side turns about its own axis. Rudder: the
+fin trailing edge from (0,-31,4) toward (0,-29,22), direction (0,2,18); a
+positive angle swings the trailing edge toward +X (right), the sense of the
+fleet's rudders.
+
+**Rule 11 fold table (rig definitions).** Every moving face turns whole about
+its axis; no face has a fixed vertex off its hinge line.
+
+| Surface | Face | Vertices | Turn about the axis | On the axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right stabilator | `3a9d`, `3b8c` | 4 each | 4 each (the root midpoint is not a vertex) | 0 | 0 |
+| Left stabilator | `3f2c`, `40eb` | 4 each | 4 each | 0 | 0 |
+| Right aileron | `3b45`, `3b9f` | 4 each | 4 each (hinge pair 0.5 unit off the mid axis) | 0 | 0 |
+| Left aileron | `4067`, `41ce` | 4 each | 4 each | 0 | 0 |
+| Right flap | `44d9`, `44f8` | 4 each | 4 each (hinge pair 0.5 unit off the mid axis) | 0 | 0 |
+| Left flap | `45c0`, `45df` | 4 each | 4 each | 0 | 0 |
+| Rudder quad | `4755`, `4774` | 4 each | 2 each | 2 each: (0,-31,4), (0,-29,22) | 0 |
+
+Verdict: **no face folds**; the probe reports the largest inter-vertex distance
+change in each group as about 6e-7 ft (floating point). The fin cap
+(`3cf2`, `3da1`) touches the rudder's top trailing vertex (0,-32,22) only at
+that corner and stays fixed (it is not part of the rudder quad); that corner
+opens by about 0.35 ft at full rudder (`seam-opening.csv`, the same corner
+opening the Mirage's rudder reports), at the top edge of the rudder only.
+
+**Flap words (agent decision, 2026-11-10; Mirage precedent).** Each flap word
+deletes one wing's strip and adds nothing, so a rig that set it would make the
+flap vanish in flight. The rig pins both words at load but never sets them: the
+strips stay drawn at every flap setting and the flap lever **droops** them. The
+flap and the aileron strips share the seam vertices at x +/-31; they are
+separate surfaces with separate jobs, so a step opens there when they take
+different angles. From the hinge geometry the trailing corner (31,-8,-4) drops
+about 0.38 ft at full flap with a neutral aileron, and the step against a
+fully raised right aileron is about 0.58 ft. That seam, the rudder's top corner
+and the flap root edge are reported, not gated.
+
+**Flap root edge (measured).** The root edge (x 7) is shared with the 1-unit
+closure strips `3161`, `317d` (left `23c0`, `38b2`), which stay fixed (they hold
+the fuselage side). Their free corner (7,-11,-4) is 7 units from the hinge, so
+at the full 0.40 rad droop it opens about 0.93 ft (measured). John may want a
+smaller droop; it is one constant (`FLAP_DROOP`).
+
+**Fitted magnitudes (agent decisions, 2026-11-10, matching the fleet).** Angle
+positive lowers the trailing edge.
+
+| Control | Law |
+| --- | --- |
+| Pitch | Both stabilators, `-0.30*elevator` radians (pull raises both trailing edges), **no roll term** (John, 2026-11-10: stabilators pitch only). The F-4 and F-104 stabilators use the same law (TR-10). |
+| Roll | The ailerons only, `-0.20*aileron` on the right and `+0.20*aileron` on the left (a positive aileron raises the right trailing edge and lowers the left, as every fleet aileron). The ailerons take no pitch and no flap droop. |
+| Flaps | `+0.40*flaps` lowers both flap strips (the Mirage and MiG-31 droop). |
+| Yaw | The rudder quad `0.35*rudder` radians about its hinge edge. |
+
+Nothing here is a source value. The shape draws no leading-edge flap (the real
+aircraft has full-span automatic ones) and none is invented.
+
+**Gear, speed brake and plume (F5E-4).** Not owned by this rig yet: the six
+gear plates keep the shared interim rise and the brake and plume words stay
+unmapped. The rig lists the reviewed faces and pins the three words so F5E-4
+takes them over in the same module. See the [F-5E
+fit](../spec/variety-animation.md#f-5e-control-fit).

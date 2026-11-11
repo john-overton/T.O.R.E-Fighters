@@ -20,6 +20,7 @@ mod f16;
 mod f18;
 mod f22;
 mod f4;
+mod f5e;
 mod il76;
 mod m2000;
 mod mi24;
@@ -599,6 +600,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mig25
             | AircraftId::Mig31
             | AircraftId::M2000
+            | AircraftId::F5E
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1047,6 +1049,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F5E {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f5e::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1208,6 +1221,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::M2000 {
         failures.extend(m2000::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F5E {
+        failures.extend(f5e::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

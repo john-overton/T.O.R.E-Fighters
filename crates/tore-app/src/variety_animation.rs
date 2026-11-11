@@ -366,6 +366,9 @@ enum SpecificRig {
     Mig25(crate::mig25_animation::Rig),
     Mig31(crate::mig31_animation::Rig),
     M2000(crate::m2000_animation::Rig),
+    /// F5E-3: the control surfaces only; the gear, speed brake and plume
+    /// faces stay with the shared groups until F5E-4.
+    F5E(crate::f5e_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -662,6 +665,10 @@ impl Rig {
             )
             .into());
         }
+        let specific = (id == Id::F5E)
+            .then(|| crate::f5e_animation::Rig::load(bytes, &shape))
+            .transpose()?
+            .map(SpecificRig::F5E);
         let neutral: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
         let mut removed = BTreeSet::new();
         let mut added = Vec::new();
@@ -722,7 +729,7 @@ impl Rig {
                 id,
                 groups,
                 scale: spec.scale,
-                specific: None,
+                specific,
             },
             shape,
         ))
@@ -775,6 +782,13 @@ impl Rig {
                 SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
                 SpecificRig::Mig31(_) => crate::mig31_animation::flame(address),
                 SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
+                // F5E-3: no plume is owned yet; fall to the shared groups below.
+                SpecificRig::F5E(_) => {
+                    return self
+                        .groups
+                        .get(&address)
+                        .is_some_and(|g| g.part == Part::Flame);
+                }
             };
         }
         self.groups
@@ -802,7 +816,13 @@ impl Rig {
         Some(face)
     }
     fn animate_devices(&self, source: &Face, state: &State) -> Option<Face> {
-        if let Some(rig) = &self.specific {
+        // F5E-3: the F-5E rig turns its control surfaces; every other face
+        // (gear, speed brake, plume until F5E-4) takes the shared groups below.
+        if let Some(SpecificRig::F5E(rig)) = &self.specific {
+            if rig.owns(source.address) {
+                return Some(rig.animate(source, state));
+            }
+        } else if let Some(rig) = &self.specific {
             return match rig {
                 SpecificRig::A4E(rig) => rig.animate(source, state),
                 SpecificRig::A7(rig) => rig.animate(source, state),
@@ -835,6 +855,7 @@ impl Rig {
                 SpecificRig::Mig25(rig) => rig.animate(source, state),
                 SpecificRig::Mig31(rig) => rig.animate(source, state),
                 SpecificRig::M2000(rig) => rig.animate(source, state),
+                SpecificRig::F5E(_) => unreachable!("handled above"),
             };
         }
         let mut face = source.clone();

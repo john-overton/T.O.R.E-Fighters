@@ -640,3 +640,4 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |
+| `f5e` | Gear, brake and burner words unmapped (interim gear rise); surfaces unmapped | Whole stabilators (pitch only), ailerons, flap strips and rudder reviewed with the 25-pose pitch/roll grid (F5E-3); gear, brake and burner still interim; mechanics fitted |

@@ -865,6 +865,7 @@ and direction checks. The Mirage 2000 adds the same 202-value dense gear sweep (
 mains inward, nose rearward), a seven-value airbrake sweep that checks the
 closed plate on the spine, and the 25-combination pitch/roll grid; its
 `flight-variety-m2000` scenario flies 1,200 headless ticks.
+The F-5E (F5E-3) adds the 25-combination pitch/roll grid (`flight-animation-f5e`): its stabilators must follow pitch only and its ailerons roll only, each staying put under every other control; its gear, brake and plume are still the interim rig.
 
 Run one repaired aircraft before expanding the audit:
 
