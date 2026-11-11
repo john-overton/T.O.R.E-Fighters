@@ -16,6 +16,9 @@ const GEAR: [usize; 22] = [
 const MAIN_LEFT: [usize; 4] = [0x57db, 0x57fa, 0x5819, 0x5838];
 const MAIN_RIGHT: [usize; 4] = [0x59a9, 0x59c8, 0x59e7, 0x5a06];
 const NOSE: [usize; 6] = [0x5a82, 0x5aa1, 0x5ac0, 0x5ad7, 0x5aee, 0x5b0d];
+/// The nose gear's fold line (B5-3): lateral, at the back of the six plates
+/// (their smallest Y, the door's lower edge) and at the top edge Z=-8.
+const NOSE_FOLD_Y: f32 = 48.;
 const FIN: [usize; 8] = [
     0x2470, 0x5282, 0x24b8, 0x52df, 0x24de, 0x4e3c, 0x2526, 0x4e99,
 ];
@@ -376,20 +379,19 @@ fn gear(face: &mut Face, deployed: f64) {
     let source = face.clone();
     let address = face.address;
     if NOSE.contains(&address) {
-        // The side image paints a diagonal brace reaching the forward top
-        // corner at Y=64. Fold the complete wheel/strut around that attachment.
-        // Its transparent rectangle corners are not additional fixed joints.
-        // The separate untextured door retains its own source hinge at Y=52.
-        let y = if matches!(address, 0x5ac0 | 0x5ad7) {
-            52.
-        } else {
-            64.
-        };
+        // B5-3 (John, 2026-11-10, opinionated): the real F-15's nosewheel
+        // retracts forward (aircraftinformation.info, McDonnell F-15 Eagle,
+        // airframe and flight control systems). The six nose plates (wheel
+        // sheets, door and cross plates) fold as one rigid body about the
+        // lateral line at the back of the assembly (Y=48, Z=-8), which no
+        // vertex lies behind or above. The 2026-10-05 fit swung them aft
+        // about the painted brace's forward corner; that text stays in the
+        // docs and this supersedes it.
         turn(
             face,
-            [0., y, -8.],
+            [0., NOSE_FOLD_Y, -8.],
             [1., 0., 0.],
-            -std::f64::consts::FRAC_PI_2 * (1. - deployed),
+            std::f64::consts::FRAC_PI_2 * (1. - deployed),
         );
     } else if MAIN_LEFT.contains(&address) || MAIN_RIGHT.contains(&address) {
         face.positions = main_linkage(&source, deployed).positions;
@@ -465,8 +467,8 @@ fn verify_gear(shape: &Shape) -> AppResult<()> {
                 && moved.positions.iter().any(|p| {
                     if nose {
                         p[0].abs() > 2.01
-                            || !(38.99..=64.01).contains(&p[1])
-                            || !(-8.01..=6.01).contains(&p[2])
+                            || !(47.99..=67.01).contains(&p[1])
+                            || !(-8.01..=8.01).contains(&p[2])
                     } else {
                         !(8.99..=15.01).contains(&p[0].abs())
                             || !(-15.01..=-5.99).contains(&p[1])
@@ -744,28 +746,78 @@ mod tests {
         }
     }
     #[test]
-    fn nose_assembly_folds_rigidly_at_forward_attachment() {
-        let source = synthetic(
-            NOSE[0],
+    fn nose_assembly_folds_forward_rigidly_and_stays_grounded_at_gear_down() {
+        // B5-3 (John, 2026-11-10, opinionated): the real F-15's nosewheel
+        // retracts forward; the 2026-10-05 fit swung it aft.
+        let plates: Vec<_> = [
             vec![
                 [0., 64., -8.],
                 [0., 50., -8.],
-                [0., 50., -26.],
-                [0., 64., -26.],
+                [0., 50., -27.],
+                [0., 64., -27.],
             ],
-        );
-        for step in 0..=400 {
-            let mut moved = source.clone();
-            gear(&mut moved, step as f64 / 400.);
-            close(source.positions[0], moved.positions[0]);
-            for i in 0..4 {
-                for j in i + 1..4 {
+            vec![
+                [-2., 48., -21.],
+                [2., 48., -21.],
+                [2., 52., -8.],
+                [-2., 52., -8.],
+            ],
+        ]
+        .into_iter()
+        .zip([NOSE[0], NOSE[2]])
+        .map(|(points, address)| synthetic(address, points))
+        .collect();
+        let foot = |poses: &[Face]| {
+            poses
+                .iter()
+                .flat_map(|f| f.positions.iter())
+                .map(|p| p[2])
+                .fold(f32::INFINITY, f32::min)
+        };
+        for step in (0..=400).rev() {
+            let deployed = step as f64 / 400.;
+            let moved: Vec<_> = plates
+                .iter()
+                .map(|plate| {
+                    let mut f = plate.clone();
+                    gear(&mut f, deployed);
+                    f
+                })
+                .collect();
+            if step == 400 {
+                // Gear down is the source pose, grounded at its own lowest point.
+                for (a, b) in plates.iter().zip(&moved) {
+                    assert_eq!(a.positions, b.positions);
+                }
+                assert_eq!(foot(&moved), -27.);
+            }
+            // Rigid as one body, across the two plates too.
+            let all = |fs: &[Face]| -> Vec<[f32; 3]> {
+                fs.iter().flat_map(|f| f.positions.clone()).collect()
+            };
+            let (before, after) = (all(&plates), all(&moved));
+            for i in 0..before.len() {
+                for j in i + 1..before.len() {
                     assert!(
-                        (distance_squared(source.positions[i], source.positions[j])
-                            - distance_squared(moved.positions[i], moved.positions[j]))
+                        (distance_squared(before[i], before[j])
+                            - distance_squared(after[i], after[j]))
                         .abs()
                             < 0.001
                     );
+                }
+            }
+            // The wheel's foot (source z -27, y 50) never swings aft of where it
+            // hangs and never dips below it.
+            let tip = moved[0].positions[2];
+            assert!(tip[1] >= 50. - 1e-3, "foot swung aft: {tip:?}");
+            assert!(tip[2] >= -27. - 1e-3);
+            if step == 0 {
+                // Stowed: the foot (y 50, z -27) leads the fold line at y 67 and
+                // sits at z -6; every plate lies within the reviewed stow
+                // envelope (Y 48 to 67, Z -8 to 8).
+                assert!((tip[1] - 67.).abs() < 1e-3 && (tip[2] + 6.).abs() < 1e-3);
+                for p in &after {
+                    assert!((47.99..=67.01).contains(&p[1]) && (-8.01..=8.01).contains(&p[2]));
                 }
             }
         }

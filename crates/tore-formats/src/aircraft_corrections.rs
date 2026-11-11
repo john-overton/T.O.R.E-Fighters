@@ -217,6 +217,21 @@ pub const TORNADO_THRUST_LBF: i32 = 17_300;
 pub const TORNADO_AFT_THRUST_LBF: i32 = 32_150;
 pub const TORNADO_EMPTY_LB: i32 = 31_065;
 pub const TORNADO_MAX_TAKEOFF_LB: i32 = 61_620;
+/// The Tornado's fuel flows (B5-3, **opinionated**, John, 2026-11-10, round 2
+/// item D3 "follow recs"): the record's `fuelConsumption` 6 and
+/// `aftFuelConsumption` 38 are the Su-24's. The record stores whole pounds a
+/// second for all the engines together, at full military power and at full
+/// afterburner ([`docs/formats/aircraft.md`], "Rotorcraft fuel records"). The
+/// flow is the corrected thrust times the engine's thrust-specific fuel
+/// consumption, over 3,600 seconds an hour, rounded to the whole pound:
+/// dry 17,300 lbf x 0.598 lb/(lbf h) / 3,600 = 2.87, so 3 lb/s; reheat
+/// 32,150 lbf x 2.5 lb/(lbf h) / 3,600 = 22.3, so 22 lb/s. The SFCs are the
+/// Turbo-Union RB.199 (Tornado) static sea-level figures, 0.598 dry and 2.5
+/// reheat (Wikipedia "Thrust-specific fuel consumption", citing the
+/// jet-engine.net engine database, accessed 2026-11-10; the Tornado ECR's
+/// Mk 105 is listed at 0.637 dry). The retail 6 and 38 lb/s are the Su-24's.
+pub const TORNADO_FUEL_LB_PER_S: i32 = 3;
+pub const TORNADO_AB_FUEL_LB_PER_S: i32 = 22;
 /// The Tornado's positive G limit: **+7**, not the real +7.5 (the encyclopedia
 /// text `TOR.INF` gives +7.5). Envelope rows are whole G (`envMax` and each
 /// row's G are integers), so +7.5 has no row of its own; +7 is the nearest
@@ -548,6 +563,22 @@ pub const CORRECTIONS: &[Correction] = &[
         retail: 50_700,
         corrected: TORNADO_AFT_THRUST_LBF,
     },
+    // B5-3: the fuel flows of two RB199 Mk 103 (opinionated, John,
+    // 2026-11-10); the retail 6 / 38 lb/s are the Su-24's.
+    Correction {
+        id: AircraftId::Tornado,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 6,
+        corrected: TORNADO_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::Tornado,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: 38,
+        corrected: TORNADO_AB_FUEL_LB_PER_S,
+    },
     // Mirage F1: one Atar 9K-50 (opinionated, John, 2026-11-10).
     Correction {
         id: AircraftId::Mf1,
@@ -853,11 +884,25 @@ mod tests {
                     ("aftThrust".to_string(), token(50_700)),
                     ("maxTakeoffWeight".to_string(), token(90_390)),
                     ("internalFuel".to_string(), token(11_221)),
+                    ("fuelConsumption".to_string(), token(6)),
+                    ("aftFuelConsumption".to_string(), token(38)),
                 ]),
             )
         };
         let (mut o, mut p) = retail();
         assert!(apply(AircraftId::Tornado, &mut o, &mut p));
+        // B5-3 (John, 2026-11-10): the flows of two RB199 Mk 103, the
+        // corrected thrust times the cited SFC (0.598 dry, 2.5 reheat).
+        assert_eq!(n(&p, "fuelConsumption"), 3);
+        assert_eq!(n(&p, "aftFuelConsumption"), 22);
+        assert_eq!(
+            TORNADO_FUEL_LB_PER_S,
+            (f64::from(TORNADO_THRUST_LBF) * 0.598 / 3600.).round() as i32
+        );
+        assert_eq!(
+            TORNADO_AB_FUEL_LB_PER_S,
+            (f64::from(TORNADO_AFT_THRUST_LBF) * 2.5 / 3600.).round() as i32
+        );
         assert_eq!(n(&o, "weight"), 31_065);
         assert_eq!(n(&p, "thrust"), 17_300);
         assert_eq!(n(&p, "aftThrust"), 32_150);
@@ -868,8 +913,13 @@ mod tests {
             let (mut o, mut p) = retail();
             assert!(!apply(other, &mut o, &mut p));
             assert_eq!((n(&o, "weight"), n(&p, "thrust")), (41_885, 35_270));
+            assert_eq!(n(&p, "aftFuelConsumption"), 38);
         }
-        // An edited record is read as it is.
+        // An edited record is read as it is (a changed flow included).
+        let (mut o, mut p) = retail();
+        p.get_mut("aftFuelConsumption").unwrap().value = "37".into();
+        assert!(!apply(AircraftId::Tornado, &mut o, &mut p));
+        assert_eq!(n(&p, "fuelConsumption"), 6);
         let (mut o, mut p) = retail();
         p.get_mut("aftThrust").unwrap().value = "50701".into();
         assert!(!apply(AircraftId::Tornado, &mut o, &mut p));
