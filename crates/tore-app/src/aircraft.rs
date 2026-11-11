@@ -357,6 +357,22 @@ impl Airframe {
                 })
             }));
         }
+        if self.profile.id == tore_formats::aircraft::AircraftId::Tornado {
+            // The swing wing carries its vapor point with the tip (TOR-3).
+            let turn = crate::tornado_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::tornado_animation::streamer_point(def, side, turn)?;
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
         streamer_world_points(
             def,
             s.position,

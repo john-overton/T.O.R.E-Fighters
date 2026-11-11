@@ -1,0 +1,733 @@
+//! Tornado IDS (`TOR.SH`) own-source control rig (TOR-3): the swing wing, the
+//! two whole-panel tailerons, the trailing flap strips and the rudder panel.
+//! See docs/spec/variety-animation.md "Tornado control fit" and
+//! docs/formats/aircraft-control-surfaces.md "Tornado control rig (TOR-3)".
+//!
+//! `TOR.SH` ships six state words: 0x7dc0 the burner plates, 0x7dc6 the
+//! airbrake plates, 0x7dcc the gear, 0x7dd8 and 0x7dde the left and right flap
+//! words (each deletes the trailing strip and adds nothing) and 0x7de4 the
+//! rudder (swaps the lower fin block for a copy skewed 1 to 3 units in X). The
+//! shape has no sweep word: the wing is one fixed spread pose, 13 whole faces a
+//! side, so the sweep is a **fitted rig** that turns every wing face as one
+//! rigid panel. The rig never sets the flap or rudder words; it keeps the
+//! strips and the rudder block drawn and turns them, so no panel ever vanishes
+//! in flight. There is no slat, spoiler, canopy, hook or reverser word and
+//! none is invented.
+//!
+//! All the hinge points below are in shape units (x right, y forward, z up, 2/3
+//! ft a unit at the header scale 2) and the shape arrives with the identity
+//! per-axis scale, so a panel turned about one of them stays rigid.
+use crate::{AppResult, additional_animation::turn, flight::State};
+use std::collections::BTreeSet;
+use tore_formats::shape::{Face, Shape};
+
+const WORDS: [usize; 6] = [0x7dc0, 0x7dc6, 0x7dcc, 0x7dd8, 0x7dde, 0x7de4];
+
+/// The right wing panel: 13 whole faces, the trailing strip (the last two)
+/// included. Flat plates at z 0 and 1, joined to the glove fillets at x 9 to 10.
+pub(crate) const WING_R: [usize; 13] = [
+    0x4cf1, 0x4d2b, 0x4d54, 0x4dea, 0x4eba, 0x4edd, 0x4f00, 0x4f23, 0x4f46, 0x4f7f, 0x4fa8, 0x4ff5,
+    0x501c,
+];
+/// The left wing panel: 13 whole faces, the trailing strip (the last two)
+/// included. The source puts the left glove joint one unit further out.
+pub(crate) const WING_L: [usize; 13] = [
+    0x52c3, 0x52e6, 0x5309, 0x5332, 0x535b, 0x537e, 0x53a1, 0x542b, 0x5454, 0x5483, 0x54a6, 0x5549,
+    0x5570,
+];
+/// The trailing strips the flap words delete (0x7dde right, 0x7dd8 left): two
+/// layers each, part of the wing panel and hinged on its leading edge.
+pub(crate) const STRIP_R: [usize; 2] = [0x4ff5, 0x501c];
+pub(crate) const STRIP_L: [usize; 2] = [0x5549, 0x5570];
+/// The tailerons: one 5-vertex polygon per side at z -2, two windings each.
+pub(crate) const TAIL_R: [usize; 2] = [0x446a, 0x45e9];
+pub(crate) const TAIL_L: [usize; 2] = [0x4176, 0x42f8];
+/// The lower fin block (both windings) the rudder word skews.
+pub(crate) const RUDDER: [usize; 2] = [0x5723, 0x5750];
+/// Faces the rudder word 0x7de4 swaps in for the block (never drawn).
+const RUDDER_WORD: [usize; 2] = [0x5625, 0x5652];
+/// Gear word 0x7dcc: nose plates (6 faces) and two mains of 10 faces. TOR-4
+/// owns the plates' hinges and the stowed pose; until then the interim fitted
+/// rise lifts the whole group by its own vertical extent as the gear stows.
+const GEAR: [usize; 26] = [
+    0x4705, 0x4724, 0x4743, 0x4762, 0x4781, 0x4798, 0x47af, 0x47c6, 0x47dd, 0x47fc, 0x4908, 0x4927,
+    0x4946, 0x4965, 0x4984, 0x499b, 0x49b2, 0x49c9, 0x49e0, 0x49ff, 0x4a97, 0x4ab6, 0x4ad5, 0x4af4,
+    0x4b13, 0x4b2a,
+];
+/// TOR-4 marker: burner word 0x7dc0 adds eight plates behind the nozzles (x
+/// -5 to -2 and 2 to 5, y -43 to -25) and airbrake word 0x7dc6 adds four plates
+/// (two a side, hinged at y -7). Both are only checked here; the rig neither
+/// draws nor moves them until TOR-4 maps them.
+const FLAME: [usize; 8] = [
+    0x591e, 0x593d, 0x595c, 0x597b, 0x599a, 0x59b9, 0x59d8, 0x59f7,
+];
+const BRAKE: [usize; 4] = [0x57ec, 0x5803, 0x5889, 0x58a0];
+
+/// Wing sweep pivots, vertical axis, shape units. The glove fillets are fixed
+/// faces that share five vertices with each wing panel (right: (9,1,0), (9,1,1),
+/// (10,-1,0), (10,-1,1), (10,-4,0)), and no single point sits on all of them.
+/// The point that minimizes the worst separation of those shared vertices as the
+/// wing turns is the centre of their smallest enclosing circle, the midpoint of
+/// the (9,1) and (10,-4) corners: (9.5, -1.5), radius 2.55 units, so the seam
+/// opens at most 2 * 2.55 * sin(turn / 2) (1.83 units, 1.2 ft at the full
+/// 42 degree turn). The left glove sits one unit further out, as the source has
+/// it, so its pivot is (-10.5, -1.5). Fitted.
+pub(crate) const PIVOT_R: [f32; 3] = [9.5, -1.5, 0.5];
+pub(crate) const PIVOT_L: [f32; 3] = [-10.5, -1.5, 0.5];
+/// Shape units to feet at the header scale 2 (2/3 ft a unit).
+pub(crate) const FEET_PER_UNIT: f64 = 2. / 3.;
+/// Real minimum and maximum wing sweep, degrees (`TOR.INF`, Jane's); the
+/// shape's spread pose is the minimum (its leading edge sweeps atan(10/21) =
+/// 25.5 degrees on the planform).
+pub(crate) const SWEEP_MIN: f64 = 25.;
+pub(crate) const SWEEP_MAX: f64 = 67.;
+/// Fitted speed schedule, knots: the wing stays spread up to the first speed
+/// and is fully swept at the second (Mach 0.9 at sea level is about 595 kt).
+/// Flaps hold the wing out, as the MiG-23's rig does and as the real
+/// aircraft's flaps need a spread wing.
+const SWEEP_FROM_KNOTS: f64 = 250.;
+const SWEEP_TO_KNOTS: f64 = 600.;
+
+/// Taileron law, fitted and smaller than the fleet's 0.40 clamp (John,
+/// 2026-11-10, decision 20): the whole panel turns about a lateral spindle
+/// through its root chord midpoint, so its forward corner (7,-8,-2), 14.5 units
+/// ahead of the spindle, swings 2 * 14.5 * sin(limit / 2) units.
+pub(crate) const TAIL_PITCH: f64 = 0.20;
+pub(crate) const TAIL_ROLL: f64 = 0.08;
+pub(crate) const TAIL_LIMIT: f64 = 0.25;
+const _: () = assert!(
+    TAIL_LIMIT < 0.40,
+    "John: smaller than the fleet's taileron clamp"
+);
+/// Root chord midpoint of the right taileron (x 6, y -25 to -20, z -2); the
+/// spindle is the lateral line through it, and the left side mirrors it.
+pub(crate) const TAIL_SPINDLE: [f32; 3] = [6., -22.5, -2.];
+/// Flap droop and rudder travel, radians, fitted to the fleet (the Rafale's
+/// rudder 0.35 and flap droop 0.40).
+pub(crate) const FLAP: f64 = 0.40;
+pub(crate) const RUDDER_TRAVEL: f64 = 0.35;
+/// Strip hinge: the line along the wing's leading edge of the strip, from the
+/// glove root (10,-1) to the outer corner (30,-7). The two root vertices sit at
+/// z 0 and 1, so the mid axis goes through z 0.5 at the root; the right
+/// strip's pivot is the midpoint and the left one mirrors the pivot and axis
+/// (the left strip runs from (-11,-1) to (-31,-7)).
+const STRIP_PIVOT: [f32; 3] = [20., -4., 0.25];
+const STRIP_AXIS: [f32; 3] = [20., -6., -0.5];
+const STRIP_PIVOT_L: [f32; 3] = [-21., -4., 0.25];
+const STRIP_AXIS_L: [f32; 3] = [-20., -6., -0.5];
+/// Rudder hinge, the leading edge of the lower fin block: from (0,-21,4) up and
+/// aft to (0,-26,12). A positive angle swings the trailing edge toward +X
+/// (right), as the fleet's rudders do.
+const RUDDER_HINGE: [f32; 3] = [0., -21., 4.];
+const RUDDER_AXIS: [f32; 3] = [0., -5., 8.];
+
+pub(crate) fn wing_right(address: usize) -> bool {
+    WING_R.contains(&address)
+}
+pub(crate) fn wing_left(address: usize) -> bool {
+    WING_L.contains(&address)
+}
+pub(crate) fn tail_right(address: usize) -> bool {
+    TAIL_R.contains(&address)
+}
+pub(crate) fn tail_left(address: usize) -> bool {
+    TAIL_L.contains(&address)
+}
+pub(crate) fn rudder(address: usize) -> bool {
+    RUDDER.contains(&address)
+}
+
+/// How far the wing panel has turned from its spread pose, radians (0 spread,
+/// `SWEEP_MAX - SWEEP_MIN` degrees fully swept): a fitted speed schedule, like
+/// the MiG-23's, and the flaps hold the wing out. This does not invent a flight
+/// law; it only draws the wing.
+pub(crate) fn sweep_turn(state: &State) -> f64 {
+    let knots = state.speed / 1.68781;
+    ((knots - SWEEP_FROM_KNOTS) / (SWEEP_TO_KNOTS - SWEEP_FROM_KNOTS)).clamp(0., 1.)
+        * (SWEEP_MAX - SWEEP_MIN).to_radians()
+        * (1. - state.flaps.clamp(0., 1.))
+}
+/// The wing's leading-edge sweep angle for a turn, degrees (25 spread to 67).
+pub(crate) fn sweep_degrees(turn: f64) -> f64 {
+    SWEEP_MIN + turn.to_degrees()
+}
+
+/// One taileron angle in radians, positive lowering the trailing edge: pitch
+/// raises both trailing edges for a positive elevator, a positive aileron raises
+/// the right and lowers the left, and the sum is clamped to the taileron limit.
+pub(crate) fn tail_angle(right: bool, state: &State) -> f64 {
+    let side = if right { 1. } else { -1. };
+    (-TAIL_PITCH * state.elevator.clamp(-1., 1.) - side * TAIL_ROLL * state.aileron.clamp(-1., 1.))
+        .clamp(-TAIL_LIMIT, TAIL_LIMIT)
+}
+
+/// Where a store station rides on the swing wing, and how its pylon turns
+/// (TOR-3 interface for TOR-5). The real Tornado's wing pylons swivel to stay
+/// streamwise as the wing sweeps (John, 2026-11-10, decision 19), so a station
+/// on the movable wing keeps its heading with the airframe while its position
+/// rides on the wing: the panel turns by [`StationPose::turn`], the pylon turns
+/// back by the same angle against the panel, and the store hangs from it with
+/// no yaw of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StationPose {
+    /// The station's place now, feet right, up and forward of the aircraft's
+    /// reference point (the frame the pylon and store drawing uses).
+    pub mount: [f64; 3],
+    /// How far the wing panel has turned from spread, radians, positive with the
+    /// wing tip moving aft on either side.
+    pub turn: f64,
+    /// The pylon's yaw against the wing panel, radians, positive to the
+    /// aircraft's right: the negative of the panel's own turn, so the store's
+    /// heading stays along the fuselage whatever the sweep.
+    pub swivel: f64,
+    /// The store's yaw against the airframe: always zero, the pylon swivels
+    /// to keep it there.
+    pub heading: f64,
+}
+
+/// The pivot of one wing, feet right, up and forward (the station frame).
+pub(crate) fn pivot_feet(right: bool) -> [f64; 3] {
+    let p = if right { PIVOT_R } else { PIVOT_L };
+    [
+        f64::from(p[0]) * FEET_PER_UNIT,
+        f64::from(p[2]) * FEET_PER_UNIT,
+        f64::from(p[1]) * FEET_PER_UNIT,
+    ]
+}
+
+/// A station on one wing, `mount` in feet right, up and forward of the aircraft
+/// at the spread pose, carried by the wing's own turn about its pivot. A mount
+/// inboard of the pivot or under the fixed glove is carried by the same rigid
+/// turn: only stations that hang from the movable panel may use it, and
+/// TOR-5 chooses which rows those are.
+pub(crate) fn wing_station(right: bool, mount: [f64; 3], turn: f64) -> StationPose {
+    let pivot = pivot_feet(right);
+    // Tip aft: clockwise seen from above on the right wing (negative about +z).
+    let angle = if right { -turn } else { turn };
+    let (dx, dz) = (mount[0] - pivot[0], mount[2] - pivot[2]);
+    let (s, c) = angle.sin_cos();
+    StationPose {
+        mount: [
+            pivot[0] + dx * c - dz * s,
+            mount[1],
+            pivot[2] + dx * s + dz * c,
+        ],
+        turn,
+        swivel: -turn * if right { 1. } else { -1. },
+        heading: 0.,
+    }
+}
+
+/// The wingtip vapor attachment of one side (0 left, 1 right) for a wing turn,
+/// feet right, up and forward of the aircraft. The shape's streamer record is
+/// the spread-wing tip (third-of-a-foot CE units, whatever the header scale); it
+/// is carried by the same rigid turn as the wing faces, so the vapor leaves the
+/// drawn tip at every sweep. The record's own hinge (pivot (20,2,16) CE) is not
+/// used: it is not the pivot the wing turns about.
+pub(crate) fn streamer_point(
+    def: &tore_formats::shape::StreamerDef,
+    side: usize,
+    turn: f64,
+) -> Option<[f64; 3]> {
+    let spread = def.attachment(side, 0).ok()?.map(|v| v / 3.);
+    Some(wing_station(side == 1, spread, turn).mount)
+}
+
+fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
+    let mut found = shape.faces.iter().filter(|f| f.address == address);
+    let result = found
+        .next()
+        .ok_or_else(|| format!("TOR.SH missing reviewed face {address:x}"))?;
+    if found.next().is_some() {
+        return Err(format!("TOR.SH duplicate reviewed face {address:x}").into());
+    }
+    Ok(result)
+}
+
+fn branch(
+    bytes: &[u8],
+    neutral: &BTreeSet<usize>,
+    word: usize,
+    added: &[usize],
+    removed: &[usize],
+) -> AppResult<Shape> {
+    let pose = Shape::with_state(bytes, &[(word, 1)].into())?;
+    let active: BTreeSet<_> = pose.faces.iter().map(|f| f.address).collect();
+    if active.difference(neutral).copied().collect::<BTreeSet<_>>()
+        != added.iter().copied().collect()
+        || neutral
+            .difference(&active)
+            .copied()
+            .collect::<BTreeSet<_>>()
+            != removed.iter().copied().collect()
+    {
+        return Err(format!("unreviewed TOR.SH branch {word:x}").into());
+    }
+    Ok(pose)
+}
+
+fn has(face: &Face, p: [f32; 3]) -> bool {
+    face.positions.contains(&p)
+}
+
+pub struct Rig {
+    /// The interim fitted gear rise: the whole source group lifts by its own
+    /// vertical extent as the gear stows.
+    gear_rise: f32,
+}
+impl Rig {
+    pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
+        if tore_formats::module::code(bytes)?.0.len() != 28150
+            || shape.faces.len() != 287
+            || shape.state_words != WORDS.into_iter().collect()
+        {
+            return Err("unreviewed TOR.SH layout".into());
+        }
+        // Wing panels: 13 whole faces a side, each present once. The five
+        // vertices shared with the glove fillets are in the panel.
+        for (ids, glove) in [
+            (
+                &WING_R,
+                &[
+                    [9., 1., 0.],
+                    [9., 1., 1.],
+                    [10., -1., 0.],
+                    [10., -1., 1.],
+                    [10., -4., 0.],
+                ],
+            ),
+            (
+                &WING_L,
+                &[
+                    [-10., 1., 0.],
+                    [-10., 1., 1.],
+                    [-11., -1., 0.],
+                    [-11., -1., 1.],
+                    [-11., -4., 0.],
+                ],
+            ),
+        ] {
+            for &address in ids {
+                one(&shape, address)?;
+            }
+            for &p in glove {
+                if !ids.iter().any(|&a| one(&shape, a).is_ok_and(|f| has(f, p))) {
+                    return Err(format!("unreviewed TOR.SH wing glove vertex {p:?}").into());
+                }
+            }
+        }
+        // The two flap strips: the wing's trailing strips, hinged on the
+        // leading edge from the glove root to the outer corner.
+        for (ids, root, tip) in [
+            (&STRIP_R, 10., [30., -7., 0.]),
+            (&STRIP_L, -11., [-31., -7., 0.]),
+        ] {
+            for &address in ids {
+                let face = one(&shape, address)?;
+                if face.positions.len() != 4
+                    || !has(face, tip)
+                    || !face
+                        .positions
+                        .iter()
+                        .any(|p| p[0] == root && p[1] == -1. && p[2] <= 1.)
+                {
+                    return Err(format!("unreviewed TOR.SH flap strip {address:x}").into());
+                }
+            }
+        }
+        // Tailerons: five vertices, all at z -2, with the root chord on x 6.
+        for (ids, side) in [(&TAIL_R, 1f32), (&TAIL_L, -1f32)] {
+            for &address in ids {
+                let face = one(&shape, address)?;
+                if face.positions.len() != 5
+                    || !face.positions.iter().all(|p| p[2] == -2.)
+                    || !has(face, [side * 6., -25., -2.])
+                    || !has(face, [side * 6., -20., -2.])
+                    || !has(face, [side * 7., -8., -2.])
+                {
+                    return Err(format!("unreviewed TOR.SH taileron {address:x}").into());
+                }
+            }
+        }
+        // Rudder: the lower fin block, a polygon in the fin plane whose
+        // leading edge is the hinge.
+        for &address in &RUDDER {
+            let face = one(&shape, address)?;
+            if face.positions.len() != 5
+                || !face.positions.iter().all(|p| p[0] == 0.)
+                || !has(face, RUDDER_HINGE)
+                || !has(face, [0., -26., 12.])
+            {
+                return Err(format!("unreviewed TOR.SH rudder block {address:x}").into());
+            }
+        }
+        let original: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
+        // The flap words remove exactly the strips (0x7dd8 left, 0x7dde right)
+        // and add nothing. They pin the strips as the surfaces the source
+        // treats as flaps; the rig never sets them.
+        branch(bytes, &original, 0x7dd8, &[], &STRIP_L)?;
+        branch(bytes, &original, 0x7dde, &[], &STRIP_R)?;
+        // The rudder word swaps the block for a skewed copy.
+        branch(bytes, &original, 0x7de4, &RUDDER_WORD, &RUDDER)?;
+        // TOR-4 marker: the burner and airbrake words add exactly the plates
+        // named above; they are checked and left unmapped.
+        branch(bytes, &original, 0x7dc0, &FLAME, &[])?;
+        branch(bytes, &original, 0x7dc6, &BRAKE, &[])?;
+        // The gear word adds exactly the 26 reviewed plates.
+        let gear = branch(bytes, &original, 0x7dcc, &GEAR, &[])?;
+        let (mut low, mut high) = (f32::INFINITY, f32::NEG_INFINITY);
+        for face in gear.faces.iter().filter(|f| GEAR.contains(&f.address)) {
+            for p in &face.positions {
+                low = low.min(p[2]);
+                high = high.max(p[2]);
+            }
+        }
+        shape
+            .faces
+            .extend(gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)));
+        Ok((
+            Self {
+                gear_rise: (high - low).max(1.),
+            },
+            shape,
+        ))
+    }
+    pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
+        let a = source.address;
+        let mut result = source.clone();
+        let right = wing_right(a);
+        if right || wing_left(a) {
+            // The trailing strips droop about their leading edge first, in the
+            // wing's own frame, then the whole panel (strips included) turns
+            // about the glove pivot.
+            let flaps = state.flaps.clamp(0., 1.);
+            if flaps > 0. && (STRIP_R.contains(&a) || STRIP_L.contains(&a)) {
+                let (pivot, axis, angle) = if right {
+                    (STRIP_PIVOT, STRIP_AXIS, FLAP * flaps)
+                } else {
+                    (STRIP_PIVOT_L, STRIP_AXIS_L, -FLAP * flaps)
+                };
+                turn(&mut result, pivot, axis, angle);
+            }
+            let swept = sweep_turn(state);
+            if swept > 0. {
+                turn(
+                    &mut result,
+                    if right { PIVOT_R } else { PIVOT_L },
+                    [0., 0., 1.],
+                    if right { -swept } else { swept },
+                );
+            }
+        } else if tail_right(a) || tail_left(a) {
+            // The whole panel turns about the lateral spindle through the root
+            // chord midpoint: no vertex is held while another turns. The panel
+            // is flat (every vertex at z -2), so it has no anhedral.
+            let right = tail_right(a);
+            let angle = tail_angle(right, state);
+            if angle != 0. {
+                let side = if right { 1. } else { -1. };
+                turn(
+                    &mut result,
+                    [side * TAIL_SPINDLE[0], TAIL_SPINDLE[1], TAIL_SPINDLE[2]],
+                    [1., 0., 0.],
+                    angle,
+                );
+            }
+        } else if rudder(a) {
+            // One rigid panel about the fin block's leading edge: the two
+            // vertices on that edge stay, the rest swing out of the fin plane.
+            let angle = RUDDER_TRAVEL * state.rudder.clamp(-1., 1.);
+            if angle != 0. {
+                turn(&mut result, RUDDER_HINGE, RUDDER_AXIS, angle);
+            }
+        } else if GEAR.contains(&a) {
+            if state.gear <= 0. {
+                return None;
+            }
+            let rise = self.gear_rise * (1. - state.gear.clamp(0., 1.)) as f32;
+            for p in &mut result.positions {
+                p[2] += rise;
+            }
+        }
+        Some(result)
+    }
+}
+/// The burner plates are mapped by TOR-4.
+pub(crate) fn flame(_address: usize) -> bool {
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn state() -> State {
+        State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap()
+    }
+    fn face(address: usize, points: &[[f32; 3]]) -> Face {
+        Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![[0.2, 0.8]; points.len()],
+            positions: points.to_vec(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0xed,
+            normal: Some([0., 0., 1.]),
+            fog: tore_formats::shape::FogMode::Enabled,
+        }
+    }
+    fn rig() -> Rig {
+        Rig { gear_rise: 10. }
+    }
+    fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
+        let d =
+            |p: [f32; 3], q: [f32; 3]| (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f32>().sqrt();
+        let mut worst = 0f32;
+        for i in 0..a.len() {
+            for j in i + 1..a.len() {
+                worst = worst.max((d(a[i], a[j]) - d(b[i], b[j])).abs());
+            }
+        }
+        worst
+    }
+    fn knots(s: &mut State, kt: f64) {
+        s.speed = kt * 1.68781;
+    }
+
+    /// The right wing's glove vertices in (x, y), for the pivot test.
+    const GLOVE_R: [[f64; 2]; 3] = [[9., 1.], [10., -1.], [10., -4.]];
+
+    #[test]
+    fn the_pivot_is_the_centre_of_the_smallest_circle_round_the_glove_vertices() {
+        // No other point has a smaller worst distance to the three glove
+        // corners: the seam opens by 2 r sin(turn / 2) at most.
+        let radius = |c: [f64; 2]| {
+            GLOVE_R
+                .iter()
+                .map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt())
+                .fold(0., f64::max)
+        };
+        let here = radius([f64::from(PIVOT_R[0]), f64::from(PIVOT_R[1])]);
+        assert!((here - 2.5495).abs() < 1e-3);
+        for dx in -20..=20 {
+            for dy in -20..=20 {
+                let c = [
+                    f64::from(PIVOT_R[0]) + f64::from(dx) * 0.1,
+                    f64::from(PIVOT_R[1]) + f64::from(dy) * 0.1,
+                ];
+                assert!(radius(c) >= here - 1e-9, "{c:?}");
+            }
+        }
+        // The left glove is the right one shifted one unit out and mirrored.
+        assert_eq!(PIVOT_L[0], -PIVOT_R[0] - 1.);
+        assert_eq!(PIVOT_L[1], PIVOT_R[1]);
+    }
+
+    #[test]
+    fn the_sweep_schedule_runs_from_spread_to_67_degrees_and_flaps_hold_it_out() {
+        let mut s = state();
+        for (kt, degrees) in [
+            (0., 25.),
+            (250., 25.),
+            (425., 46.),
+            (600., 67.),
+            (900., 67.),
+        ] {
+            knots(&mut s, kt);
+            s.flaps = 0.;
+            assert!(
+                (sweep_degrees(sweep_turn(&s)) - degrees).abs() < 1e-9,
+                "{kt}"
+            );
+            s.flaps = 1.;
+            assert_eq!(sweep_turn(&s), 0.);
+        }
+    }
+
+    #[test]
+    fn the_wing_turns_whole_about_its_pivot_and_the_tip_goes_aft() {
+        let rig = rig();
+        let mut s = state();
+        for (a, side) in [(0x4eba, 1f32), (0x537e, -1f32)] {
+            let pts = [
+                [side * 33., -10., 0.],
+                [side * 30., -9., 0.],
+                [side * 30., -7., 0.],
+            ];
+            let source = face(a, &pts);
+            knots(&mut s, 200.);
+            assert_eq!(rig.animate(&source, &s).unwrap().positions, pts);
+            for kt in [300., 425., 600., 800.] {
+                knots(&mut s, kt);
+                let out = rig.animate(&source, &s).unwrap();
+                assert!(out.positions[0][1] < source.positions[0][1]);
+                assert!(out.positions[0][0].abs() < source.positions[0][0].abs());
+                assert!(spread(&source.positions, &out.positions) < 1e-4);
+                // The tip stays at its distance from the pivot.
+                let pivot = if side > 0. { PIVOT_R } else { PIVOT_L };
+                let r = |p: [f32; 3]| (p[0] - pivot[0]).hypot(p[1] - pivot[1]);
+                assert!((r(out.positions[0]) - r(source.positions[0])).abs() < 1e-3);
+            }
+        }
+    }
+
+    #[test]
+    fn the_flap_strips_droop_about_their_leading_edge_and_ride_with_the_sweep() {
+        let rig = rig();
+        let mut s = state();
+        for (a, side) in [(0x501c, 1f32), (0x5570, -1f32)] {
+            let (root, tip) = if side > 0. { (10., 30.) } else { (-11., -31.) };
+            let pts = [
+                [root, -4., 0.],
+                [tip, -9., 0.],
+                [tip, -7., 0.],
+                [root, -1., 0.],
+            ];
+            let source = face(a, &pts);
+            knots(&mut s, 150.);
+            s.flaps = 1.;
+            let out = rig.animate(&source, &s).unwrap();
+            // The trailing corners drop, the strip stays rigid.
+            assert!(out.positions[1][2] < source.positions[1][2] - 0.5);
+            assert!(out.positions[0][2] < source.positions[0][2] - 0.5);
+            assert!(spread(&source.positions, &out.positions) < 1e-4);
+            // With the flaps up the strip is the wing's: the sweep carries it aft.
+            s.flaps = 0.;
+            knots(&mut s, 600.);
+            let out = rig.animate(&source, &s).unwrap();
+            assert!(out.positions[1][1] < source.positions[1][1]);
+            assert!(spread(&source.positions, &out.positions) < 1e-4);
+        }
+    }
+
+    #[test]
+    fn whole_taileron_panels_keep_their_root_midpoint_on_pitch_and_roll() {
+        let rig = rig();
+        let mut s = state();
+        for (a, side) in [(0x446a, 1f32), (0x4176, -1f32)] {
+            let pts = [
+                [side * 18., -27., -2.],
+                [side * 6., -25., -2.],
+                [side * 6., -20., -2.],
+                [side * 7., -8., -2.],
+                [side * 18., -23., -2.],
+            ];
+            let source = face(a, &pts);
+            for control in [-1., -0.5, 0., 0.5, 1.] {
+                for (elevator, aileron) in [(control, 0.), (0., control), (control, 1.)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    let out = rig.animate(&source, &s).unwrap();
+                    let mid = (out.positions[1][1] + out.positions[2][1]) * 0.5;
+                    let midz = (out.positions[1][2] + out.positions[2][2]) * 0.5;
+                    assert!((mid + 22.5).abs() < 1e-4 && (midz + 2.).abs() < 1e-4);
+                    assert!(spread(&source.positions, &out.positions) < 1e-3);
+                    let angle = tail_angle(side > 0., &s);
+                    assert!(angle.abs() <= TAIL_LIMIT + 1e-12);
+                    // The trailing tip moves up for a positive angle command sign.
+                    let dz = out.positions[0][2] - source.positions[0][2];
+                    assert!(dz * (angle as f32) <= 1e-6);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_taileron_limit_is_below_the_fleet_clamp_and_pitch_and_roll_have_signs() {
+        let mut s = state();
+        s.elevator = 1.;
+        assert_eq!(tail_angle(true, &s), -TAIL_PITCH);
+        s.elevator = 0.;
+        s.aileron = 1.;
+        assert_eq!(tail_angle(true, &s), -TAIL_ROLL);
+        assert_eq!(tail_angle(false, &s), TAIL_ROLL);
+        s.elevator = 1.;
+        assert_eq!(tail_angle(true, &s), -TAIL_LIMIT);
+        // The forward corner is 14.5 units ahead of the spindle.
+        let swing = 2. * 14.5 * (TAIL_LIMIT / 2.).sin();
+        assert!((swing * FEET_PER_UNIT - 2.41).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_rudder_block_turns_whole_about_its_leading_edge() {
+        let rig = rig();
+        let mut s = state();
+        let pts = [
+            [0., -31., 12.],
+            [0., -25., 3.],
+            [0., -21., 3.],
+            [0., -21., 4.],
+            [0., -26., 12.],
+        ];
+        let source = face(0x5723, &pts);
+        for value in [-1., -0.5, 0., 0.5, 1.] {
+            s.rudder = value;
+            let out = rig.animate(&source, &s).unwrap();
+            assert_eq!(out.positions[3], pts[3]);
+            assert!((out.positions[4][1] - -26.).abs() < 1e-4);
+            assert!((out.positions[4][2] - 12.).abs() < 1e-4);
+            assert!(spread(&source.positions, &out.positions) < 1e-4);
+            if value != 0. {
+                for i in [0usize, 1] {
+                    assert!(out.positions[i][0] * value as f32 > 0.);
+                }
+            } else {
+                assert_eq!(out.positions, source.positions);
+            }
+        }
+    }
+
+    #[test]
+    fn the_vapor_attachment_follows_the_swept_tip() {
+        let def = tore_formats::shape::StreamerDef {
+            pivot: [5120, 512, 4096],
+            hinge_scale: 40,
+            points: [[12288, 0, -8704]; 2],
+        };
+        // Spread: the record's own tip, 68 CE units out and 18 aft of the origin.
+        for (side, x) in [(0usize, -68. / 3.), (1, 68. / 3.)] {
+            let spread = streamer_point(&def, side, 0.).unwrap();
+            assert!((spread[0] - x).abs() < 1e-9);
+            assert!((spread[1] - 2. / 3.).abs() < 1e-9);
+            assert!((spread[2] + 6.).abs() < 1e-9);
+            let full = streamer_point(&def, side, (SWEEP_MAX - SWEEP_MIN).to_radians()).unwrap();
+            // Aft and in, at the same distance from the pivot.
+            assert!(full[2] < spread[2] - 5.);
+            assert!(full[0].abs() < spread[0].abs() - 3.);
+            let pivot = pivot_feet(side == 1);
+            let r = |p: [f64; 3]| (p[0] - pivot[0]).hypot(p[2] - pivot[2]);
+            assert!((r(full) - r(spread)).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_wing_station_rides_the_wing_and_the_pylon_swivels_back() {
+        for right in [true, false] {
+            let side = if right { 1. } else { -1. };
+            // The right wing tip vertex, in the station frame.
+            let tip_units = [side * 33., -10., 0.];
+            let mount = [
+                f64::from(tip_units[0]) * FEET_PER_UNIT,
+                f64::from(tip_units[2]) * FEET_PER_UNIT,
+                f64::from(tip_units[1]) * FEET_PER_UNIT,
+            ];
+            let rig = rig();
+            let mut s = state();
+            for kt in [200., 300., 425., 600.] {
+                knots(&mut s, kt);
+                let turned = sweep_turn(&s);
+                let pose = wing_station(right, mount, turned);
+                let source = face(
+                    if right { 0x4eba } else { 0x537e },
+                    &[tip_units, [side * 30., -9., 0.], [side * 30., -7., 0.]],
+                );
+                let wing = rig.animate(&source, &s).unwrap().positions[0];
+                // The mount lands exactly on the swept wing vertex it was given.
+                assert!((pose.mount[0] - f64::from(wing[0]) * FEET_PER_UNIT).abs() < 1e-4);
+                assert!((pose.mount[2] - f64::from(wing[1]) * FEET_PER_UNIT).abs() < 1e-4);
+                assert_eq!(pose.mount[1], mount[1]);
+                assert_eq!(pose.heading, 0.);
+                assert!((pose.turn + if right { pose.swivel } else { -pose.swivel }).abs() < 1e-12);
+            }
+        }
+    }
+}

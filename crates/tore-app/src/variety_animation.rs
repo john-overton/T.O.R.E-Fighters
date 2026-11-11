@@ -276,6 +276,9 @@ fn specification(id: Id) -> Option<Spec> {
             // scale is 2, so the shape draws at 2/3 ft a unit (interim, agent
             // decision 2026-11-10, pending John, batch decision round; the
             // Tornado review measures it true size within 3 percent at 2/3).
+            // Update (TOR-3, 2026-11-10): the Tornado loads through its own
+            // `tornado_animation` rig (swing wing, tailerons, flap strips,
+            // rudder, interim gear rise); this row only pins the layout.
             Id::Tornado => (
                 28150,
                 287,
@@ -366,6 +369,7 @@ enum SpecificRig {
     Mig25(crate::mig25_animation::Rig),
     Mig31(crate::mig31_animation::Rig),
     M2000(crate::m2000_animation::Rig),
+    Tornado(crate::tornado_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -650,6 +654,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Tornado => {
+                let (rig, shape) = crate::tornado_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tornado(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -775,6 +788,7 @@ impl Rig {
                 SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
                 SpecificRig::Mig31(_) => crate::mig31_animation::flame(address),
                 SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
+                SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
             };
         }
         self.groups
@@ -835,6 +849,7 @@ impl Rig {
                 SpecificRig::Mig25(rig) => rig.animate(source, state),
                 SpecificRig::Mig31(rig) => rig.animate(source, state),
                 SpecificRig::M2000(rig) => rig.animate(source, state),
+                SpecificRig::Tornado(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

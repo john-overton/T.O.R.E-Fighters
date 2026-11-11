@@ -974,3 +974,223 @@ row passing: rigid, hinges fixed, feet inward or aft, nothing below the hinge
 height near stow, ground contact at 1), a seven-value airbrake sweep
 (`brake-sweep.csv`) and the gear, brake and exhaust witnesses. See the
 [Mirage 2000 gear, airbrake and plume fit](../spec/variety-animation.md#mirage-2000-gear-airbrake-and-plume-fit).
+
+## Tornado control rig (TOR-3, 2026-11-10)
+
+`TOR.SH` (28,150 CODE bytes, 287 runtime faces, six state words `0x7dc0`,
+`0x7dc6`, `0x7dcc`, `0x7dd8`, `0x7dde`, `0x7de4`; review in
+[aircraft variety](aircraft-variety.md#tornado-source-review-2026-11-10)) has no
+sweep word, no sweep branch and no swept geometry: the wing is one fixed spread
+pose of 13 whole faces a side. Every moving piece below is therefore a
+**fitted** whole-panel assignment over exact reviewed source faces, in shape
+units (x right, y forward, z up, 2/3 ft a unit at the header scale 2, identity
+per-axis scale). The rig (`tornado_animation.rs`) refuses a shape whose faces,
+glove vertices, hinge vertices or state branches differ from the reviewed ones.
+Nothing in the shape (no slat, spoiler, reverser, canopy or hook word) is
+invented.
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right wing (13) | `4cf1 4d2b 4d54 4dea 4eba 4edd 4f00 4f23 4f46 4f7f 4fa8 4ff5 501c` | Flat plates at z 0 and 1, root x 9 to 10, tip (33,-10,0), trailing strip x 10 to 30 (the last two faces) |
+| Left wing (13) | `52c3 52e6 5309 5332 535b 537e 53a1 542b 5454 5483 54a6 5549 5570` | The left glove sits one unit further out (x -10 to -11), tip (-34,-10,0), strip x -11 to -31 (the last two) |
+| Taileron | right `446a`, `45e9`; left `4176`, `42f8` | One 5-vertex polygon per side, two windings, all at z -2: (18,-27), (6,-25), (6,-20), (7,-8), (18,-23) |
+| Rudder block | `5723`, `5750` | Fin-plane polygon (0,-31,12), (0,-25,3), (0,-21,3), (0,-21,4), (0,-26,12), both windings |
+
+### Sweep: pivot, range and drive
+
+**Drive (fitted, agent decision 2026-11-10; John's decision 19 asks for a fitted
+rig with rotating pylons).** The wing turns by a **speed schedule**, the way the
+MiG-23's does: the wing stays spread at 25 degrees up to 250 knots, sweeps
+linearly to 67 degrees at 600 knots (Mach 0.9 at sea level is about 595 knots)
+and stays there; the flaps lever holds it out (the turn is multiplied by
+`1 - flaps`), as the MiG-23's does and as the real flaps need a spread wing. It
+draws the wing only: no flight law depends on it (the MiG-23 spec says the same).
+The real range is 25 to 67 degrees (`TOR.INF`, Jane's), and the spread pose in
+the shape is the minimum: its leading edge sweeps atan(10/21) = 25.5 degrees on
+the planform. The panel therefore turns 0 to 42 degrees about a vertical axis,
+the right wing clockwise seen from above (tip aft), the left the other way.
+
+**Pivot (fitted).** The real pivot is at the wing root joint on the fuselage
+glove; its position was not found in a source (unknown), so the rig puts it where
+it costs the least seam. Each wing panel shares five vertices with six fixed
+glove fillets (right: (9,1,0), (9,1,1), (10,-1,0), (10,-1,1), (10,-4,0); left:
+the same at x -10, -11, -11, -11, -11). No point is on all of them, so a turn
+separates each shared vertex from its fillet partner by `2 r sin(turn/2)`, where
+`r` is its distance from the pivot (the axis is vertical, so only x and y count).
+The point that minimizes the worst `r` is the centre of the smallest circle round
+the three distinct (x,y) corners (9,1), (10,-1), (10,-4): the midpoint of the
+(9,1) and (10,-4) corners, **(9.5, -1.5), r = 2.55 units** (left (-10.5, -1.5)).
+The TOR-0 review's suggested (9.5, 0.5) is 4.5 units from the (10,-4) corner, not
+1.5 as written there; the table compares them. Separation of the worst shared
+vertex at a 42 degree turn (units and feet at 2/3):
+
+| Pivot (right) | Worst separation | Opening outboard | Overlap inboard | Leading root opens |
+| --- | ---: | ---: | ---: | ---: |
+| **(9.5, -1.5) smallest circle (shipped)** | 1.83 u (1.22 ft) | 1.80 u | 1.80 u | 5.8 u |
+| (10, -1) middle glove vertex | 2.15 u (1.43 ft) | 1.60 u | 2.01 u | 5.6 u |
+| (9.5, 0.5) TOR-0 suggestion | 3.25 u (2.16 ft) | 0.46 u | 3.14 u | 4.5 u |
+| (9, 1) front glove vertex | 3.65 u (2.44 ft) | 0.00 u | 3.60 u | 4.0 u |
+| (10, -4) rear glove vertex | 3.65 u (2.44 ft) | 3.60 u | 0.00 u | 7.6 u |
+
+Opening is the outboard shift of a shared vertex (a visible gap to the glove),
+overlap the inboard shift (the wing root sliding under the glove); "leading root"
+is the outboard shift of the free root corner (9,7,0), which has no fillet. Every
+pivot opens the free leading root by 4 to 8 units (2.7 to 5 ft) at full sweep,
+because the shape has no glove forward of y 1. The measured seam of the shipped
+pivot (`sweep-seam.csv`, both sides identical, feet at 2/3):
+
+| Sweep (deg) | 25 | 35 | 45 | 55 | 60 | 65 | 67 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Worst shared-vertex separation (ft) | 0 | 0.30 | 0.59 | 0.88 | 1.02 | 1.16 | 1.22 |
+
+**Frames show the seam** (`.local/m3-aircraft/frames/TOR-3/`): top views at 25,
+46 and 67 degrees and 3x crops of each glove. The seam is visible: at 67 degrees
+a wedge of sky shows between the fuselage and the wing's leading root, and the
+fillets stand out beside the wing. That is what a rigid turn of a straight root
+against fixed fillets does; it is John's call whether to keep it (an alternative
+needs fitted geometry, such as a new glove, which TOR-3 does not invent).
+
+**Fold check (rule 11).** The wing is moved whole, all 13 faces about one axis.
+The probe's `folds` count (faces that keep some vertices while others move) is 0
+at every sweep sample, every vertex of every wing face moves (no vertex is on the
+axis), the largest inter-vertex distance change is 1.3e-6 ft, the skin gap between
+wing faces is 0 and no fixed face moves. The seam is between faces, never inside
+one.
+
+### Rotating pylons: the station interface (not wired to the drawing)
+
+The real Tornado's wing pylons swivel so the stores stay along the airflow as the
+wing sweeps (John, 2026-11-10, decision 19). `tornado_animation::wing_station(right,
+mount, turn)` gives, for a station given on the spread wing in feet right, up and
+forward of the aircraft (the frame the pylon and store drawing uses), its place on
+the swept wing (`mount`, the same rigid turn the wing faces take about the pivot
+in feet: right (6.33, 0.33, -1.0), left (-7.0, 0.33, -1.0)), the wing panel's turn
+(`turn`, radians, tip aft positive on either side, `sweep_turn(state)` for the
+present state), the pylon's yaw against the wing (`swivel`, the negative of the
+panel's turn in yaw-right-positive terms) and the store's yaw against the airframe
+(`heading`, always 0). The probe checks (`pylon-poses.csv`) that a mount named on
+the wing tip lands on the swept tip vertex within 3e-6 ft at every speed and that
+`turn + swivel = 0` and `heading = 0`.
+
+It is **not** wired into the stores drawing: a store's place comes from the
+simulation (`Rack::store_point`, `pylons::hung`), the released store leaves from
+that same point, and a pylon's height is read from the unswept
+`Airframe::underside`, so a per-station transform needs the sweep in all three
+(TOR-5). A mount inboard of the pivot, or under the fixed glove, is carried by the
+same rigid turn; only stations on the movable wing may use the function. The
+record's inner wing pair (row 7, 3.7 ft out) is inboard of the pivot (6.3 ft), so
+TOR-5 decides which rows swivel when it moves them onto the wing.
+
+### Wingtip vapor and the shape's own hinge record
+
+`TOR.SH`'s streamer record names a hinge pivot (20, 2, 16) in third-of-a-foot CE
+units (right, up, forward) and a hinge scale of 40 degrees, with the tip at (48, 0,
+-34) from it. The MiG-23 and F-14 rigs take their sweep pivot from the same record
+in their own shapes (the MiG-23's (18, 6, 8) CE is exactly its rig pivot (9, 4) at
+2/3 ft a unit). For the Tornado the record maps to (10, 8) in shape units, out at
+the wing's leading root corner (9, 7). It was **not** used as the sweep pivot: it
+is 12 units from the glove corner (10,-4), so a turn about it would separate that
+vertex from its fillet by 8.6 units (5.7 ft) at full sweep, against 1.22 ft for
+the shipped pivot. Whether the retail record states the real pivot is unknown (it
+is also the only place the retail data mentions a hinge at all). The shipped pivot
+therefore differs from the record's, and the wingtip vapor does **not** use the
+record's hinge law either: `Airframe::streamer_points` takes the record's
+spread-wing tip and carries it by the same rigid turn as the wing faces
+(`tornado_animation::streamer_point`), so the vapor leaves the drawn tip at every
+sweep. At the spread pose it is unchanged.
+
+### Tailerons
+
+Whole panels, pitch plus roll, one angle per side, positive lowering the trailing
+edge: `(-0.20*elevator - side*0.08*aileron)` clamped to **0.25 rad** (14.3
+degrees), `side` +1 right and -1 left (a positive aileron raises the right
+trailing edge). The fleet's taileron law is `-0.30*elevator - side*0.10*aileron`
+clamped to 0.40; John's decision 20 asks for a smaller limit, so the Tornado's is
+0.20 pitch, 0.08 roll and a 0.25 clamp (fitted, agent decision 2026-11-10, a
+number for John to change). The panel turns about the lateral spindle through the
+midpoint of its root chord, (6,-22.5,-2) on the right and its mirror on the left;
+the panel is flat, so the spindle is lateral and there is no anhedral to tilt it.
+
+The forward corner (7,-8,-2) is 14.5 units ahead of the spindle and swings
+`2 * 14.5 * sin(angle/2)` units: **2.41 ft at the 0.25 clamp**, 1.93 ft at full
+pitch alone (0.20), 0.77 ft at full roll alone (0.08); at the fleet's 0.40 it
+would be 3.8 ft (`taileron-corner-swing.csv`). The tip trailing corner moves 0.60
+ft at full pitch. Fold table: every vertex of the four taileron faces turns (none
+is on the spindle), no vertex stays, none is fixed off it. The polygon touches the
+fixed fuselage at the one vertex (6,-20,-2) (the one-vertex seam, 0.6 ft at full
+pitch).
+
+### Flap strips
+
+The flap words `0x7dd8` (left) and `0x7dde` (right) delete the trailing strips (two
+layers each, `5549`/`5570` left, `4ff5`/`501c` right) and add nothing. The rig
+pins both words at load and never sets them; the strips stay drawn, ride with the
+sweep, and **droop 0.40 rad at flaps 1** (the fleet's flap droop) about the line
+along their leading edge, from the glove root (10,-1) to the outer corner (30,-7)
+(through z 0.5 at the root, where the two layers are 1 unit apart), after which
+the sweep turns the whole panel. Fold table: each strip face has one vertex on the
+hinge axis ((30,-7,0), stays) and three that turn; both root vertices (10,-1,0)
+and (10,-1,1) are 0.5 unit off the mid axis and turn by 0.2 unit at full droop,
+which with the root corner (10,-4,0) (3 units from the axis) opens the strip
+against the glove fillets by **0.77 ft** at full droop (`seam-opening.csv`); the
+probe reports it, as the Mirage's elevon wedge. Real: full-span flaps and slats
+and spoilers; the source has only this strip (x 10 to 30 of a half span of 33) and
+no slat or spoiler panel, so none is invented.
+
+### Rudder
+
+The source word `0x7de4` swaps the lower fin block (`5723`, `5750`) for a copy
+skewed 1 to 3 units. The block's leading edge, from (0,-21,4) up and aft to
+(0,-26,12), is the hinge: the geometry allows one rigid panel (both windings turn
+as one flat polygon about that line; the two vertices on it stay). The rig pins
+the word at load and never sets it; the block turns `0.35*rudder` radians (the
+fleet's rudder travel) about (0,-21,4) with axis (0,-5,8), positive swinging the
+trailing edge to +X. The vertices (0,-25,3) and (0,-31,12) are 3.9 and 4.2 units
+from the axis, so full travel swings them 1.3 and 1.4 units out of the fin plane;
+the seam opening of the top aft corner against the fixed upper fin is **0.98 ft**
+(measured). The retail swap is a one-way skew, not a rotation, so the rig makes
+no claim of matching it.
+
+### Rule 11 fold table (rig definitions)
+
+| Surface | Faces | Vertices a face | Turn | On the hinge axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Wing panel, right (13) | `4cf1 ... 501c` | 3 to 5 | all | 0 | 0 |
+| Wing panel, left (13) | `52c3 ... 5570` | 3 to 5 | all | 0 | 0 |
+| Flap strip (droop) | `4ff5`, `501c`, `5549`, `5570` | 4 each | 3 each | 1 each ((30,-7,0), (-31,-7,0)) | 0 |
+| Taileron | `446a`, `45e9`, `4176`, `42f8` | 5 each | 5 each | 0 | 0 |
+| Rudder block | `5723`, `5750` | 5 each | 3 each | 2 each: (0,-21,4), (0,-26,12) | 0 |
+
+Verdict: **no face folds**: the strips and the rudder keep only vertices on their
+hinge axes, and the wing and tailerons keep none. The probe's `folds` count is 0
+at every sample, and it also checks that no fixed face moves with any control.
+
+### Probe results (`--aircraft tornado --animation-probe`)
+
+Scope `reviewed-controls-and-attachments`, 287 neutral faces, 0 failures.
+Elevator, aileron, rudder, flap and wing-sweep sweeps are `moved` with the
+per-side whole-panel checks (rigidity at most 1.3e-6 ft, skin gap 0, anchor gap 0,
+folds 0, directions correct, neutral reversible); the 25-pose pitch and roll grid
+passes at 25 degrees (200 kt) and at 67 degrees (650 kt); the 35-pose
+sweep-and-flap grid (`sweep-flap-combinations.csv`: 200 to 700 kt against flaps 0
+to 1) measures the turn against the schedule within 0.01 degree and shows the
+flaps holding the wing out. The probe's neutral state is set to 200 kt (below the
+sweep threshold) so the controls are isolated, as the F-14's is at 400 kt. The
+gear keeps the interim rise (the 26 `0x7dcc` faces lift by their own vertical
+extent as the gear stows); the burner plates (`0x7dc0`, eight faces) and the
+airbrake plates (`0x7dc6`, four faces) are checked at load and left unmapped for
+TOR-4. See the [Tornado control fit](../spec/variety-animation.md#tornado-control-fit).
+
+### Provenance
+
+| Component | Label |
+| --- | --- |
+| Face lists, vertices, state-word branches | spec-derived (retail `TOR.SH`, read at run time, refused if different) |
+| Sweep range 25 to 67 degrees | cited real figure (`TOR.INF`, Jane's), used as the endpoints of a fitted range |
+| Sweep speed schedule (250 to 600 knots, flaps hold out) | fitted, agent decision 2026-11-10, after the MiG-23's rig |
+| Sweep pivot (9.5, -1.5) and (-10.5, -1.5) | fitted, chosen to minimize the glove seam; the real pivot position is unknown (no source found) |
+| Rotating pylons as a design | opinionated, John 2026-11-10 (decision 19); the interface is agent-authored |
+| Taileron law and 0.25 rad limit | fitted, agent decision 2026-11-10, smaller than the fleet's 0.40 on John's request (decision 20) |
+| Flap droop 0.40, rudder travel 0.35 | fitted to the fleet's values, agent decision 2026-11-10 |
+| Rudder as one rigid panel about its leading edge | fitted; the source word is a one-way skew, not a rotation |
+| Gear interim rise | fitted placeholder until TOR-4 |

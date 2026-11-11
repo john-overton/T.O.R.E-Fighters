@@ -3722,6 +3722,17 @@ the fillet seam. Options (none chosen):
 The wingtip vapor streamer should follow whichever the swept tip is
 (Mig23 precedent in the spec).
 
+Update (TOR-3, 2026-11-10): the pivot suggested above, (9.5, 0.5, 0.5), is not
+within 1.5 units of every shared vertex: the shared corner (10, -4) is 4.5 units
+from it, so the worst seam at a 42 degree turn is 3.25 units (2.2 ft), not 1.5.
+The point that minimizes the worst separation is the centre of the smallest
+circle round the three distinct glove corners (9,1), (10,-1), (10,-4): (9.5,
+-1.5), radius 2.55 units, which opens the seam by at most 1.83 units (1.22 ft) at
+the full turn. TOR-3 ships that pivot (left (-10.5, -1.5), the left glove being a
+unit further out), a speed-scheduled sweep like the MiG-23's, and the other
+findings of this section as measured in
+[the Tornado control rig](aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10).
+
 ### Tornado surfaces (for John)
 
 State words (neutral 287 faces; counts from `Shape::with_state`):
