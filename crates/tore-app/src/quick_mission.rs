@@ -3491,6 +3491,40 @@ mod tests {
             assert_eq!(wing.aircraft, AircraftId::M2000);
         }
     }
+    /// Slice TOR-9: the Panavia Tornado IDS is offered as the player's
+    /// aircraft and, because the AI can fly it, in every AI wing field. The
+    /// identity the mission flies is named exactly (`TOR.PT`), never aliased
+    /// to the Su-24 (`SU24.PT`), which stays a parked target and appears in
+    /// no aircraft list in its place.
+    #[test]
+    fn the_tornado_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::Tornado.selection_key(), "TOR.PT");
+        // The Su-24 is not a selectable aircraft or in any list.
+        assert!(!q.aircraft_files.iter().any(|f| f == "SU24.PT"));
+        assert!(!q.wing_files.iter().any(|f| f == "SU24.PT"));
+        // The player's own list offers it by its selection key, TOR.PT.
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Tornado.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Tornado));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Tornado).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Tornado));
+        }
+        // The mission the draft flies carries the Tornado as the player and
+        // in every wing.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Tornado);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Tornado);
+        }
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI

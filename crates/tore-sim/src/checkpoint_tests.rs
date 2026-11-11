@@ -237,6 +237,31 @@ fn a_shared_record_read_as_another_type_or_ahead_of_itself_is_refused() {
 // ---------------------------------------------------------------------------
 // The shared leaf types.
 
+/// Slice TOR-9: the Tornado IDS is checkpoint code 44 (the batch table pins
+/// the code, appended after the F-5E's 43), every identity in
+/// `AircraftId::ALL` round-trips, and no two identities share a code, so a
+/// saved Tornado loads back as the Tornado and never as another record. The
+/// swing wing's sweep is not saved: it is a pure function of speed and flaps
+/// (`combat::swing`), so a restored Tornado draws the sweep its speed gives.
+#[test]
+fn the_tornado_round_trips_at_code_44_and_no_identity_shares_it() {
+    assert_eq!(same(&AircraftId::Tornado).body, vec![44]);
+    let mut codes = std::collections::BTreeSet::new();
+    for id in AircraftId::ALL {
+        let coded = same(&id);
+        assert!(codes.insert(coded.body.clone()), "{id:?} repeats a code");
+        let loaded: AircraftId = from_bytes(&coded, &NONE).unwrap();
+        assert_eq!(loaded, id);
+    }
+    assert_eq!(codes.len(), AircraftId::ALL.len());
+    // The code after the batch's last identity is still unknown.
+    let unknown = Coded {
+        body: vec![46],
+        records: Vec::new(),
+    };
+    assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
+}
+
 #[test]
 fn the_shared_leaf_types_round_trip() {
     for aircraft in [

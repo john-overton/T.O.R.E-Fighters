@@ -25,7 +25,7 @@ use tore_sim::{
 };
 use tore_world::snapshot::{
     AircraftPose, DEVICES, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
-    ProjectilePose, RenderSnapshot,
+    ProjectilePose, RenderSnapshot, StorePose,
 };
 use tore_world::surface::{SurfacePose, UnitId};
 
@@ -1138,6 +1138,30 @@ fn aircraft_difference(live: &AircraftPose, replayed: &AircraftPose) -> Option<S
     None
 }
 
+/// Whether two lists of stores are the same, leaving out the swinging wing's
+/// turn on a swivelling station ([`tore_sim::combat::hardpoints::Rack::turn`]).
+/// The host sets it every tick from the aircraft's speed and flaps and the
+/// drawing sets it again from the same two devices ([`tore_world::snapshot::DEVICES`]
+/// slots 9 and 1), so a recording does not carry it; the devices are compared
+/// within their precision, which keeps the drawn sweep of a replayed Tornado
+/// within a few hundredths of a degree of the flown one (TOR-9, 2026-11-11).
+fn same_stores(live: &[StorePose], replayed: &[StorePose]) -> bool {
+    if live == replayed {
+        return true;
+    }
+    let bare = |stores: &[StorePose]| -> Vec<StorePose> {
+        stores
+            .iter()
+            .cloned()
+            .map(|mut store| {
+                store.rack.turn = 0.;
+                store
+            })
+            .collect()
+    };
+    bare(live) == bare(replayed)
+}
+
 /// The first difference between a live snapshot and the one a recording
 /// rebuilt, beyond the format's documented precision, in plain words.
 /// `None` means both draw the same picture. Ground objects are left out:
@@ -1153,7 +1177,7 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
     if let Some(d) = aircraft_difference(&live.player, &replayed.player) {
         return Some(d);
     }
-    if live.player.stores != replayed.player.stores {
+    if !same_stores(&live.player.stores, &replayed.player.stores) {
         return Some(format!("aircraft {}'s stores differ", live.player.id));
     }
     let aircraft: Vec<&AircraftPose> = live
@@ -1175,7 +1199,7 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
         if let Some(d) = aircraft_difference(a, b) {
             return Some(d);
         }
-        if a.stores != b.stores {
+        if !same_stores(&a.stores, &b.stores) {
             return Some(format!("aircraft {}'s stores differ", a.id));
         }
     }

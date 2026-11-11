@@ -4737,3 +4737,107 @@ because the stations question (TOR-5) is open with John.
   are fitted plausibility windows, agent decisions of 2026-11-11 (no primary speed
   was found for the IDS). Full tables, sources and commands are in the
   [variety flight baseline](../baselines/variety-flight.md#panavia-tornado-ids-validation-2026-11-11).
+
+## Tornado IDS in missions, multiplayer and replay (TOR-9, 2026-11-11)
+
+Implementation and verification, slice TOR-9 of the Tornado port. `AircraftId::Tornado`
+was appended to every identity list in B5-1 (checkpoint code 44, `SELECTABLE` index 44,
+carried in the 9-bit wire field since protocol 83), and `strike_class.rs` lists it as
+Fighter (B5-1, interim), so the AI wing build needed no change: it reads the record's
+two engines (the roster probe's `models=2`) and the default load (the BK27 gun with 360
+rounds, four GBU-10 and two MK-82P3; the probe prints `stores=[BK27 x360, GBU-10 x4,
+MK-82P3 x2]`, a friendly wing leader also carries the two tanks, 3,175 lb of external
+fuel). The default load depends on the open stations question (TOR-5): the numbers
+above are the current default load, and the AI wing, its payload and its range will move
+with whatever John decides. No AI behaviour work was done (Mirage plan rule 1).
+
+Added coverage:
+
+- A Quick Mission test, `the_tornado_is_a_quick_mission_player_and_a_wing_choice`,
+  naming `TOR.PT` as the player's aircraft and in every AI wing field and asserting
+  that `SU24.PT` appears in neither the player nor the wing list in its place (the
+  Su-24 stays a parked target, B6).
+- A checkpoint test in `tore-sim`,
+  `the_tornado_round_trips_at_code_44_and_no_identity_shares_it`: the coded identity is
+  the single byte 44, every identity in `ALL` round-trips, no two share a code, 46 is
+  unknown. The swing wing's sweep and the swivelling stations' turn are not saved: both
+  are pure functions of speed and flaps (`combat::swing`), recomputed each tick.
+- `ai-tornado-quick-mission-2v2` and `replay-rec-tornado-2v2` battery scenarios, the
+  Tornado row in the Load Ordnance notes loop
+  (`menus-snap-quick-lobby-ordnance-laser-notes-tornado`: no laser warning, sensor
+  helper shown, as the F-16C and F-15E, because the record has the PAVESPK.SEE row;
+  decision 22 keeps that sensor with no drawn pod), and `ai-tornado-*` in the
+  `ai-fights` battery family.
+
+**A fix found by the replay check (shared code).** `--verify-render` on the first
+Tornado recording failed on every tick (`aircraft 0's stores differ at tick 1`,
+`differing=2400`). TOR-5 put the swing wing's turn on each swivelling station
+(`Rack::turn`), set by the host from speed and flaps and not recorded; the comparison
+between the live picture and the rebuilt one counted it as a difference. The turn is
+derived, and the drawing sets it again from the aircraft's own speed and flap devices
+(`pylons::swung`), so `tore-session`'s `recording::convert::difference` now leaves
+`Rack::turn` out of the stores comparison (`same_stores`). The devices the sweep comes
+from (speed, slot 9, and flaps, slot 1) are still compared within their precision on
+every tick, which keeps the replayed sweep within about 0.1 degree of the flown one.
+The recorded aircraft are drawn over the recorded speed device (`pose.devices`), not the
+model's 450 kt start state: the replay rebuilds the devices, and `model_pose` applies
+them over the start state, so a replayed or remote Tornado draws its own sweep. The fix
+is in shared code (`recording/convert.rs`) but only changes a result where
+`Rack::turn` is nonzero, which is the Tornado alone.
+
+**Replay sweep check.** The unit test
+`replay::convert::tests::a_replayed_tornado_draws_the_wing_sweep_it_flew` records
+Tornados at 700 kt (fully swept, 42 degrees of turn), 425 kt (half), and 700 kt with
+half flaps (half, the flaps hold the wing out), reads them back through a replay file,
+and checks that the sweep worked out from the rebuilt devices matches the live one
+within the devices' precision, that a wrongly recorded speed is reported, and that
+stores equal but for the station turn are one picture while stores that differ in
+anything else are not. In the real probe recording the AI Tornados fly 545 to 580 kt
+(the AI's cruise; about 93 percent swept, 39.9 degrees of turn at 579.6 kt): the
+recorded speed device at tick 1320 is 969.76 ft/s for the enemy leader, and the
+replayed frame draws the wing swept back (frames below).
+
+Results (2026-11-11, throttled, profile `.local/m3-aircraft/profile-tornado`, logs in
+`.local/m3-aircraft/checks/TOR-9/`):
+
+- `--ai-roster-probe-ticks 3600`: the four `TOR.PT` lines (Novice, Average, Experienced,
+  Ace) each `ticks=3600 models=2 radar=true ir=false stores=3 gun=true projectiles=0
+  dropped=0 PASS`; the whole roster has no FAIL line (180 PASS).
+- `ai-tornado-quick-mission-2v2` passes: every wing the Tornado, nothing dropped, no
+  warnings, no anomalies. The attack script's stations are `BK27 x360`, `GBU-10 x4 ...
+  (not air to air)`, `MK-82P3 x2 ... (not air to air)`, and the Tornado's record has no
+  infrared sensor row, so the AI fights with the gun: 32 rounds, no hit, no kill in this
+  run. Existing weapon-selection behaviour, not tuned.
+- `replay-rec-tornado-2v2` passes: `--verify-render` PASS `ticks=2401 missing=0
+  differing=0`, two runs identical, the recording reads back `player.aircraft = TOR.PT`,
+  `probe.enemy = TOR.PT`, `draw.models = TOR.PT`, the aircraft listed as `Tornado (TOR.PT)`.
+- `net-content-missing` and `net-window-lobby` pass after rebuilding `tore-server` and
+  `tore-bot`. They take no aircraft argument, so they cover the identity list and
+  content code, not a Tornado in flight over the wire.
+
+**AI strike finding (reported, no behaviour work).** The strike class is Fighter (B5-1),
+but the AI's Quick Mission role comes from the record's object class word, and
+`TOR.PT` carries `0x4000`, the bomber class (the same as the A-4E, the F-111F and the
+Su-24; the F-15C and F/A-18D carry `0x8000`). So an AI Tornado in a Quick Mission with a ground target
+set takes the Strike role by default, unlike the AI F-15E, which keeps CAP:
+`--a2g-run UKR QUFACT --pilot ai --aircraft tornado --load MK82P3 --quick-wing
+--seconds 300` prints `ROLE plane=1 role=strike` and the run ends `releases=3
+impacts=3 kills=1 egress=yes` (target hit points 100 of 100 at the summary, one
+kill), and on an engage-my-target order against `UKR QUCOL` it releases three,
+lands them 345 to 544 ft from the aim, kills two and egresses. So an AI Tornado
+bombs by default when the mission has a ground target and the wing is a friendly
+wing past the first, and otherwise (no ground target, or an enemy wing) flies as a
+fighter with the gun only: its laser-bomb and Mk 82 stations are not air to air. Not
+tuned.
+
+Frames (`.local/m3-aircraft/frames/TOR-9/`): `ai-tornado-live-chase-t1320` and its 4x
+crop (a live AI Tornado at 580 kt from behind: both wings swept back, twin burners),
+`quick-mission-aircraft-list-tornado` (Tornado IDS on page 3 of 4, no Su-24),
+`replay-high-speed-sweep-top-t1320` and `-side-t1320` (the replayed Tornado at tick
+1320, 580 kt, planform and side), `replay-banner-580kt-t1320` (the viewer's own banner,
+580 kt).
+
+Provenance: the AI wing wiring, default load and class word are spec-derived (the
+record); the stores comparison change and the replay sweep check are agent decisions of
+2026-11-11 (the sweep schedule and swivel rule stay as TOR-3 and TOR-5 left them). No
+retail bytes committed.
