@@ -214,6 +214,15 @@ ported or variety aircraft gains any of the six. The carriers are the same rows
 the source catalog already records as their `internal_gun` or default store
 (`tools/catalog_fa.py`).
 
+Update (GRI-10, 2026-11-10): the roster now holds 45 imported aircraft
+(`AircraftId::ALL`, `crates/tore-formats/src/aircraft.rs`), and the Saab Gripen is
+one of the `BK27.JT` carriers above: its default gun row is the Mauser BK 27,
+admitted as that station's own internal gun and kept out of the Load Ordnance and
+Cheat catalogs ([the Gripen](#the-saab-gripen-gri-6-2026-11-10)). The Tornado
+IDS, the other `BK27.JT` carrier above, is also in `ALL` since B5-1 and admits
+the gun the same way; its own verification slice has not run. The JT-1 paragraph above keeps its 2026-11-06
+counts.
+
 The records cannot load as pylon stores either. Each carries projectile flags
 `0x0348c4`, with the compatibility bit 2 (value 2) clear. `Station::allowed_count`
 (`crates/tore-sim/src/combat/loading.rs:118`) refuses a projectile with flag 2

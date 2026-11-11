@@ -41,18 +41,21 @@ first ones to confirm.
 
 | Object type | Records | Imported D/P/N/NA | Animations D/P/N/NA | AI D/P/N/NA | Logic D/P/N/NA |
 |---|---:|---|---|---|---|
-| Aircraft (PT) | 145 | 66 / 0 / 79 / 0 | 35 / 31 / 79 / 0 | 30 / 10 / 105 / 0 | 29 / 37 / 79 / 0 |
+| Aircraft (PT) | 145 | 69 / 0 / 76 / 0 | 38 / 31 / 76 / 0 | 33 / 10 / 102 / 0 | 32 / 37 / 76 / 0 |
 | Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
 | Equipment (SEE/ECM/GAS) | 85 | 55 / 26 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 53 / 3 / 29 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **475 / 47 / 97 / 0** | **250 / 178 / 116 / 75** | **204 / 31 / 138 / 246** | **407 / 82 / 129 / 1** |
+| **Total** | **619** | **478 / 47 / 94 / 0** | **253 / 178 / 113 / 75** | **207 / 31 / 135 / 246** | **410 / 82 / 126 / 1** |
 
 ## What remains, by object type
 
-- **Aircraft.** 40 of 145 are flyable by players and AI (13 original roster, 23
-  variety, and the MiG-25, F-16A, MiG-31 and Mirage 2000 M3 additions). 25 more
-  are parked scenery only (no AI, static pose). 80 are decoded
+- **Aircraft.** 43 of 145 are flyable by players and AI (13 original roster, 23
+  variety, and the MiG-25, F-16A, MiG-31, Mirage 2000, F-15E, Gripen and F-5E M3
+  additions; 2026-11-10, X-10 of batch 5. The Tornado IDS and Mirage F1 joined
+  `AircraftId::ALL` in the same batch with interim rigs and are not counted
+  here until their own slices run, so the table above still lists them as
+  before). 25 more are parked scenery only (no AI, static pose). 76 are decoded
   in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and nothing else. Variety
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
@@ -107,8 +110,9 @@ first ones to confirm.
   surface units (`combat/missiles.rs`, `SURFACE_TO_SURFACE`).
 
 - [ai-experience.md](../spec/ai-experience.md) "Currently ported aircraft" says
-  twelve; `AircraftId::ALL` holds 40 (13 roster including F22N, plus 23 variety
-  and the MiG-25, F-16A, MiG-31 and Mirage 2000 M3 additions).
+  twelve; `AircraftId::ALL` holds 45 (13 roster including F22N, plus 23 variety
+  and the MiG-25, F-16A, MiG-31, Mirage 2000, F-15E, Gripen, F-5E, Tornado IDS
+  and Mirage F1 M3 additions).
 
 
 ## Aircraft (PT)
@@ -223,7 +227,7 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | F105.PT | F-105 Thunderchief | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | F111.PT | F-111F Aardvark | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | F117.PT | F-117A Nighthawk | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f117.BI |
-| F15E.PT | F- 15E Strike Eagle | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
+| F15E.PT | F- 15E Strike Eagle | Done | Done | Done | Done | M3 import (AircraftId, batch 5); rig reviewed; record and AV8 HUD kept as the F-15C copy (John), whole-panel stabilators that roll, no rudder motion, 30 degree flaps; 12 Mk 82 belly row on a 0.1 ft rail with large stores refused; ai_script f.BI |
 | F15J.PT | F- 15J Eagle | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | F16F.PT | F- 16A (Forest) Falcon | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | F18C.PT | F/A- 18C Hornet | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
@@ -232,13 +236,13 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | F31E.PT | X-31 (Desert) EFM | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | F31F.PT | X-31 (Forest) EFM | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | F31V.PT | X-31 (Snow) EFM | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
-| F5E.PT | F-  5E Tiger | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
+| F5E.PT | F-  5E Tiger | Done | Done | Done | Done | M3 import (AircraftId, batch 5); rig reviewed; real fuel, ceiling and +7 G (John), pitch-only stabilators, dorsal speed brake, X-29 panel by the record's name, F104R radar and F104.ECM stand-ins; ai_script f.BI |
 | F8J.PT | F-  8J Crusader | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | FSX.PT | Fighter Support-X | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | GAZ.PT | Gazelle | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script h.BI |
 | GAZE.PT | Gazelle (Desert) | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script h.BI |
 | GAZV.PT | Gazelle (Snow) | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script h.BI |
-| GRIPEN.PT | Saab Gripen | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
+| GRIPEN.PT | Saab Gripen | Done | Done | Done | Done | M3 import (AircraftId, batch 5); rig reviewed; canards pitch and roll, elevons, BK 27 570 rounds kept (John), own GRI cockpit and HUD; ai_script f.BI |
 | HWK.PT | BAe Hawk | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | IL96.PT | IL-96 | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script liner.BI |
 | JAG.PT | SEPECAT Jaguar | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
@@ -385,7 +389,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | 20MM_4.JT | Colt 20mmx4 | Partial | None | None | None | Hidden; built-in-gun flags; only decoded carrier F8J not imported (JT-1) |
 | ADEN.JT | Aden 30mm Cannon Pod | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers DRAK, SEAHAR not imported (JT-1) |
 | ADENIN.JT | Aden 30mm Cannon | Partial | None | None | None | Hidden; internal Aden gun; carriers HWK, JAG not imported (JT-1) |
-| BK27.JT | 27-mm Mauser BK27 Cannon | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ALPH, E2000, GRIPEN, TOR, VIG not imported (JT-1) |
+| BK27.JT | 27-mm Mauser BK27 Cannon | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ALPH, E2000, GRIPEN, TOR, VIG not imported (JT-1); Update (GRI-10, 2026-11-10): the Gripen and Tornado are now imported and fire it as their own gun (GRI-6 verified the Gripen) |
 | C_105.JT | 105mm Cannon | Done | Done | Done | Done | AC-130; authored 100 ft splash; muzzle flash, linked fire |
 | C_25.JT | 25mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
 | C_40.JT | 40mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |

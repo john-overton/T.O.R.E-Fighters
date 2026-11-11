@@ -1379,6 +1379,17 @@ F-16C's, so it is a 31st air-to-ground carrier; the per-record carrier ranges
 above were measured before it and were not re-measured
 ([Mirage 2000 ordnance](../formats/aircraft-ordnance.md#the-mirage-2000-m2k-6-2026-11-10)).
 
+Since the batch 5 imports (F-15E, Gripen and F-5E, 2026-11-10) the roster holds 45
+retail aircraft (46 selectable; the Tornado IDS and Mirage F1 are in the 45 with
+their own slices still to come). The F-15E (belly and wing rows), the Gripen
+(centreline, inner wing and wing pair rows) and the F-5E (its one wing pair and
+the centreline) each admit guided bombs and AS missiles, so they are the 32nd to
+34th air-to-ground carriers; the per-record carrier ranges above were measured
+before them and were not re-measured
+([F-15E](../formats/aircraft-ordnance.md#the-f-15e-strike-eagle-f15e-6-2026-11-10),
+[Gripen](../formats/aircraft-ordnance.md#the-saab-gripen-gri-6-2026-11-10),
+[F-5E](../formats/aircraft-ordnance.md#the-f-5e-tiger-f5e-6-2026-11-10)).
+
 ### Default air-to-ground loads
 
 Retail data (PT defaults, hardpoint in brackets).

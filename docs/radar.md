@@ -220,7 +220,7 @@ borrowing a generation.
 | --- | --- | --- |
 | Early | F4.ECM, MIG21.ECM | A-4E; MiG-21, MiG-23 |
 | Transitional | F14.ECM, MIG29.ECM, SU24.ECM | F-14D; MiG-29; Su-25 |
-| Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM, MIG31.ECM | F/A-18D, Rafale C, X-31, Mirage 2000; Su-27, Su-35; F-22A; MiG-31 |
+| Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM, MIG31.ECM | F/A-18D, Rafale C, X-31, Mirage 2000, Gripen; Su-27, Su-35; F-22A; MiG-31 |
 
 F4.ECM and MIG21.ECM carry no radar-deception mode flag and a zero deception
 chance, so the A-4E, MiG-21 and MiG-23 emit no RF noise at all and never reach
@@ -230,6 +230,11 @@ John assigned it Late-Cold-War on 2026-11-08 (opinionated), the generation of
 the identical SU27.ECM. F22.ECM has deception chance 50; every other RF record
 has 30, the reference strength below. The [retail record
 values](spec/radar.md#installed-ecm-records) are in the spec.
+
+Update (F5E-10, 2026-11-10): the F-5E carries `F104.ECM` (John's pick, round 2), read
+as Early with no RF mode and strength 0.00 (F5E-7 sensor summary), so like the
+A-4E and MiG-21 it emits no RF noise. The table above lists the records it
+named when it was written; the F-15E's `F15.ECM` is the F-15C's record.
 
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored
