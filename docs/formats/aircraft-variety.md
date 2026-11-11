@@ -4440,3 +4440,24 @@ John's decision round), no battery list extension. The ordnance audit pins moved
 to 45 aircraft as first measurements of five records not yet reviewed station by
 station; see the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-identities-join-the-roster-b5-1-2026-11-10).
+
+## Gripen shape, damage looks and decals (GRI-2, 2026-11-10)
+
+Implementation, slice GRI-2 (batch 5), Claude Sonnet. `gri.SH` draws at its own
+size: the [source review](#gripen-real-size) measured -0.9% span, -0.5% length
+and +1.6% height against the JAS 39A, so the Gripen keeps
+`aircraft::scale::shape_axis_scale` at `[1, 1, 1]` (**no scale, no John
+decision needed**) and every size consumer (rig, damage looks, stations,
+debris, gear low point, parked placement) reads the unscaled shape. The [skin
+review](objects-and-shapes.md#saab-gripen-skin-review) records the 383-face
+runtime shape, the 19 twin groups (18 double-sided panels with opposite stored
+normals plus one zero-area sliver), the four damage looks (`GRI_A.SH` to
+`GRI_D.SH`, no registered variant, regional cuts on the intact skin) and the
+verdict on all five `E0` decal slots (omitted, each over drawn skin, nothing
+clipped or filled). The `render-gripen-skin` battery scenario captures the top
+and under views with the gear down; `gripen_shape.rs` (retail-reading, skips
+without media) and a `debris.rs` unit test pin the facts. Review frames:
+`.local/m3-aircraft/frames/GRI-2/`. Provenance: shape and decal facts
+spec-derived from the retail shape; no scale (agent decision, from the measured
+sizes). Not touched here: control rigs (GRI-3), gear and brakes (GRI-4),
+stations (GRI-5).

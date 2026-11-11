@@ -169,6 +169,26 @@ mod tests {
         assert_eq!(at[1], ground(at[0], at[2]));
         assert!(at[2] > 20.);
     }
+    /// GRI-2: the Gripen has no registered A/C body substitution (it keeps its
+    /// intact skin with regional cuts), draws at the aircraft scale of one
+    /// third of a foot a unit, and its breakup pair is the C body with the D
+    /// fragment (roster index 41, odd).
+    #[test]
+    fn the_gripen_breakup_uses_the_c_and_d_pair_at_the_standard_scale() {
+        use super::super::live::DamageSection;
+        assert_eq!(variant(AircraftId::Gripen), 1);
+        assert_eq!(scale(AircraftId::Gripen), 1. / 3.);
+        for section in [
+            DamageSection::Nose,
+            DamageSection::Cockpit,
+            DamageSection::Core,
+            DamageSection::LeftWing,
+            DamageSection::RightWing,
+            DamageSection::Tail,
+        ] {
+            assert_eq!(damage_variant(AircraftId::Gripen, section as usize), None);
+        }
+    }
 }
 
 // Exact checkpoints (docs/formats/checkpoint.md).

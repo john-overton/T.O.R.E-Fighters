@@ -1638,6 +1638,74 @@ span, as the real aircraft's fin does; the review frames live under
 `.local/m3-aircraft/frames/M2K-2/`. No mesh bytes, exported geometry or retail
 art are committed.
 
+## Saab Gripen skin review
+
+On 2026-11-10, slice GRI-2 checked the flyable `GRIPEN.PT` import's skin (media
+identity in [the Gripen source review](aircraft-variety.md#gripen-source-review-2026-11-10)).
+The flyable path draws the reviewed `GRI.SH`: 383 faces on the runtime state
+path (388 on the export path, the five extra being the decals below), one
+texture `_GRI.PIC`. It draws at the aircraft convention of one third of a foot
+a unit with **no per-axis scale**: the review measured the gear-down shape at
+27.3 ft by 46.0 ft by 15.0 ft against the JAS 39A's 27.56, 46.25 and 14.76 ft
+(-0.9%, -0.5%, +1.6%), so `aircraft::scale::shape_axis_scale(Gripen)` stays
+`[1, 1, 1]` (the walk over every identity in `aircraft_scale.rs` pins it) and a
+retail-reading test pins the extents 82 by 138 by 45 units
+(`crates/tore-import/tests/gripen_shape.rs`).
+
+**Damage looks.** The four damage shapes `GRI_A.SH` (409 faces), `GRI_B.SH`
+(50), `GRI_C.SH` (296) and `GRI_D.SH` (256) and their textures `_GRI_A.PIC` to
+`_GRI_D.PIC` load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs) from the stem
+`GRI`; each names only its own texture, none carries a private palette (the
+damage atlas refuses one), and the shared `_F18_A.PIC` patch is used as for
+every identity. No damage variant is registered for this identity
+(`debris::damage_variant` returns none for every section), so a destroyed Gripen draws
+the intact skin with regional cuts rather than an A/C body substitution, as the
+MiG-25, MiG-31, F-16A and Mirage 2000 do. The shared breakup pieces use the
+C body with the D fragment (roster index 41, odd, through `debris::variant`) at
+one third of a foot a unit. A `--damage-preview 0.6` and `1.0` capture, whole
+aircraft and the left-wing, tail and nose sections, draws the intact skin with
+the dark patch and smoke and no missing body.
+
+**Twin faces.** `GRI.SH` has 19 exact-vertex twin groups, all pairs. 18 are
+double-sided panels: each pair has opposite stored normals (pinned by a
+retail-reading test), so smooth mode pairs them through the shared [panel
+contract](../spec/aircraft-animation.md#double-sided-panels) and hides the rear
+member without the [MiG-21 stored-normal exception](#mig-21-skin-review). They
+are eight fin plates (the single-thickness fin at x 0: `4a5f`, `4a86`, the
+cap `4c1f`, `4c36`, `4c5d`, `4c78`, `4c9f` and the neutral rudder `5d92`, each
+with its partner), two centreline plates (`3be0` at y 9 to 11, z 6 to 8 and
+`2f40` at y 46 to 49, z -8 to -6), the canard plate and root filler triangle
+on each side (`212d`, `22f3`, `24ae`, `25c2`), one outboard elevon triangle on
+each wing (`5674`, `4fb2`) and the two wingtip edge strips (`541a`, `5304`).
+The 19th group, `2856` and `286e`, is a
+two-corner sliver at x 8, y 30 to 38, z -5 (three vertices, two equal): it has
+no area, draws nothing, and its stored normals are meaningless, so it is not a
+panel. A top and an under capture in smooth mode, gear down, show no grey
+underside through the top, no flicker and no clipped marking; the
+`render-gripen-skin` battery scenario repeats that pair.
+
+**Decal clipping review.** The shape carries all five `E0` runtime decal slots.
+The runtime projector omits every one and none is filled with a piece of the
+main skin, following [texture state and decals](#texture-state-and-decals).
+Each lies on or within one unit of a fully drawn skin face, so omitting it
+leaves skin, not a hole:
+
+| Slot | Address | Where | Verdict |
+| --- | --- | --- | --- |
+| 2 (nose art) | `2edb` | left side of the nose, x -4, y 50 to 53, z 0 to -3 | Omitted; the left nose panel `2eb4` under it draws whole, with the skin's own markings (arrow, roundel, stripes) |
+| 1 (tail art) | `4ac6` | right side of the fin, x 0, y -43 to -29, z 7 to 20 | Omitted; the fin plates draw whole |
+| 0 (tail art) | `4b7a` | left side of the fin, same rectangle, reversed winding | Omitted; same |
+| 3 (left wing mark) | `5288` | x -38 to -26, y -27 to -16, z 0, one unit above the drawn wing top (z -1) | Omitted; the wing top skin `5265`, `5322` draws whole |
+| 4 (right wing mark) | `57ee` | x 18 to 30, y -24 to -14, z -3, one unit below the drawn wing underside (z -2) | Omitted; the right wing skin `55dc`, `572e`, `550b`, `559a` draws whole |
+
+No clipped panel, no skin-filled patch and no blank patch appeared in the top,
+side, three-quarter and under captures or in the 3x crops of the nose, fin and
+wing. The left wing mark lies over the wing top and the right over its
+underside: the two wing slots are on opposite faces of the wing. No mesh bytes,
+exported geometry or retail art are committed; the review frames live under
+`.local/m3-aircraft/frames/GRI-2/`.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards
