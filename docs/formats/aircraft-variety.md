@@ -4336,6 +4336,11 @@ per-axis real size with one per-aircraft scale):
    measured extents in MF1-2). The Mirage 2000 method; stretches the nose and
    tail, so the stations, pylons and the gear wheelbase move with it.
 
+Update (MF1-2, 2026-11-10): John chose option 3 in the batch decision round
+(per-axis to the real span, length and height); the fit is
+`[1.0335, 1.1804, 1.0546]`, see [Mirage F1 shape, real size and
+skin](#mirage-f1-shape-real-size-and-skin-mf1-2-2026-11-10).
+
 ### Mirage F1 roster note
 
 `MF1.PT` appends last in the batch: checkpoint code 45, `ALL` 45 and
@@ -4461,3 +4466,24 @@ Open for John: the F-5E radar stands in with the F-104's `F104R.SEE` (alternativ
 `F18.ECM` also removes its chaff and flares (`F104.ECM` would keep dispensers
 without a jammer). Tornado fuel flows (6 and 38 lb/s) are still the Su-24's. The
 Tornado's default load has no Sidewinders now that the outer wing pair is retired.
+
+## Mirage F1 shape, real size and skin (MF1-2, 2026-11-10)
+
+Implementation, slice MF1-2, Claude Sonnet (sonnet-high). John's decision of
+2026-11-10 ("per-axis scale to the real span, length and height, as the Mirage
+2000"). `mf1.SH` is scaled per axis to the real Mirage F1C: factors
+`[1.0335, 1.1804, 1.0546]` (x right, y forward, z up), fitted from the measured
+gear-down extents (80 by 127 by 42 units) to 8.40 m span, 15.23 m length **with
+the nose probe** (the shape's own y maximum includes its probe spike, so the two
+use one definition) and 4.50 m height. The table row, the fit, the definitions
+and the consumers (drawn aircraft, stores preview, damage looks, station rows,
+debris, gear low point 17 to 17.93 units, wingtip vapor, parked placement) are in
+[Mirage F1 shape scale](objects-and-shapes.md#mirage-f1-shape-scale-mf1-2-2026-11-10)
+and the [skin review](objects-and-shapes.md#mirage-f1-skin-review) (23 exact twin
+groups, two omitted wing-marking decal slots). The parked path
+`("MF1.PT", Some(0x5adc))` is unchanged: the two Mirage F1s on
+`FRA QFLAIR` keep their identity, 95 hit points and gear word, and now stand at
+`origin-up` 5.98 ft on the scaled shape. The `render-mf1-skin` battery scenario
+captures the top and under views. Provenance: choice opinionated (John,
+2026-11-10), factors fitted. Later slices use the scaled geometry: MF1-3 and MF1-4
+scale any shape-unit hinge point their rigs name, MF1-5 measures the stations.

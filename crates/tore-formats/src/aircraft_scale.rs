@@ -5,8 +5,8 @@
 //! per source unit (`tore_sim::combat::debris::scale` holds that scalar).
 //! This table adds a per-axis multiplier on top of it, `[x, y, z]` in shape
 //! units (x right, y forward, z up). It is `[1, 1, 1]` for every aircraft but
-//! the Mirage 2000 (M2K-2, docs/formats/objects-and-shapes.md, "Aircraft shape
-//! scale"). The factors are exact constants, never read from a device, so every
+//! the Mirage 2000 (M2K-2) and the Mirage F1 (MF1-2), docs/formats/objects-and-shapes.md,
+//! "Aircraft shape scale". The factors are exact constants, never read from a device, so every
 //! multiplayer peer holds the same values.
 //!
 //! Apply the factors to the shape's vertices when the shape is loaded
@@ -40,11 +40,36 @@ pub const M2000_REAL_FEET: [f64; 3] = [29.954, 47.113, 17.060];
 /// (height, so the 12 unit gear low point becomes 18.06 units, 6.02 ft).
 pub const M2000_SHAPE_SCALE: [f64; 3] = [1.3616, 1.2290, 1.5053];
 
+/// Measured `mf1.SH` extents with the gear down (gear word `0x5adc`), shape
+/// units (`docs/formats/aircraft-variety.md`, Mirage F1 source review): x -40
+/// to 40 (the wingtip rails included; the wing alone is 78), y -45 to 82 (the
+/// nose probe tip included; the radome ends at y 68), z -17 to 25.
+pub const MF1_SHAPE_EXTENT: [f64; 3] = [80., 127., 42.];
+
+/// The real Mirage F1C in feet: wingspan 8.40 m, length 15.23 m **with the
+/// nose probe** (the spike on the radome, so the length is matched to the
+/// shape's own extent including its spike), height 4.50 m ground to fin tip
+/// (Jane's text in the game's own `MF1.INF` and MILAVIA's Mirage F1
+/// specifications give 8.40 m and 15.23 m; Aerospaceweb gives 15.30 m and
+/// 4.50 m; accessed 2026-11-10). The length to the radome tip alone is about
+/// 11.5 m, which no source states, so it is not used.
+pub const MF1_REAL_FEET: [f64; 3] = [27.559, 49.967, 14.764];
+
+/// `[x, y, z]` factors that bring `mf1.SH` to [`MF1_REAL_FEET`]:
+/// `real_ft * 3 / extent_units`, rounded to four places. **Fitted** (agent
+/// derivation) for an **opinionated** choice (John, 2026-11-10, per-axis scale
+/// to the real span, length and height, as the Mirage 2000). x 1.0335 (span),
+/// y 1.1804 (length with the probe), z 1.0546 (height, so the 17 unit gear low
+/// point becomes 17.93 units, 5.98 ft).
+pub const MF1_SHAPE_SCALE: [f64; 3] = [1.0335, 1.1804, 1.0546];
+
 /// `[x, y, z]` factors for `id`'s shape, in shape-unit axes (x right, y
-/// forward, z up). `[1, 1, 1]` for every aircraft but the Mirage 2000.
+/// forward, z up). `[1, 1, 1]` for every aircraft but the Mirage 2000 and the
+/// Mirage F1.
 pub fn shape_axis_scale(id: AircraftId) -> [f64; 3] {
     match id {
         AircraftId::M2000 => M2000_SHAPE_SCALE,
+        AircraftId::Mf1 => MF1_SHAPE_SCALE,
         _ => IDENTITY,
     }
 }
@@ -79,10 +104,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_aircraft_but_the_mirage_2000_keeps_the_plain_shape_scale() {
+    fn every_aircraft_but_the_two_mirages_keeps_the_plain_shape_scale() {
         for id in AircraftId::ALL.into_iter().chain(AircraftId::SELECTABLE) {
             if id == AircraftId::M2000 {
                 assert_eq!(shape_axis_scale(id), M2000_SHAPE_SCALE);
+                assert!(!is_identity(id));
+            } else if id == AircraftId::Mf1 {
+                assert_eq!(shape_axis_scale(id), MF1_SHAPE_SCALE);
                 assert!(!is_identity(id));
             } else {
                 assert_eq!(shape_axis_scale(id), IDENTITY, "{id:?}");
@@ -91,6 +119,25 @@ mod tests {
         }
         // The exact record, desert variant and Rafale are never aliased to it.
         assert_eq!(shape_axis_scale(AircraftId::Rafale), IDENTITY);
+    }
+
+    #[test]
+    fn the_mirage_f1_factors_bring_the_shape_to_its_real_size() {
+        for axis in 0..3 {
+            let feet = MF1_SHAPE_EXTENT[axis] / 3. * MF1_SHAPE_SCALE[axis];
+            assert!(
+                (feet - MF1_REAL_FEET[axis]).abs() / MF1_REAL_FEET[axis] < 0.0005,
+                "axis {axis}: {feet} against {}",
+                MF1_REAL_FEET[axis]
+            );
+        }
+        // Span 8.40 m, length 15.23 m, height 4.50 m.
+        for (feet, meters) in MF1_REAL_FEET.iter().zip([8.40, 15.23, 4.50]) {
+            assert!((feet - meters / 0.3048).abs() < 0.001);
+        }
+        // Per axis, never uniform.
+        assert_ne!(MF1_SHAPE_SCALE[0], MF1_SHAPE_SCALE[1]);
+        assert_ne!(MF1_SHAPE_SCALE[1], MF1_SHAPE_SCALE[2]);
     }
 
     #[test]
@@ -118,5 +165,11 @@ mod tests {
             [10. * x as f32, 20. * y as f32, -12. * z as f32]
         );
         assert_eq!(scale_point(AircraftId::F16C, [1., 2., 3.]), [1., 2., 3.]);
+        let [x, y, z] = MF1_SHAPE_SCALE;
+        assert_eq!(right_up_forward(AircraftId::Mf1), [x, z, y]);
+        assert_eq!(
+            scale_point(AircraftId::Mf1, [10., 20., -17.]),
+            [10. * x as f32, 20. * y as f32, -17. * z as f32]
+        );
     }
 }

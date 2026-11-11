@@ -1548,6 +1548,7 @@ draws and measures the same aircraft.
 | --- | --- | --- |
 | Every aircraft but the Mirage 2000 | `[1, 1, 1]` | spec-derived (no change) |
 | Mirage 2000 (`M2000.PT`, `m20.SH`) | `[1.3616, 1.2290, 1.5053]` | **opinionated** (John, 2026-11-09, "Per axis to real", over uniform scaling); the factors are **fitted** (agent derivation, below) |
+| Mirage F1 (`MF1.PT`, `mf1.SH`) | `[1.0335, 1.1804, 1.0546]` | **opinionated** (John, 2026-11-10, per axis to the real span, length and height, as the Mirage 2000); the factors are **fitted** (agent derivation, [Mirage F1 shape scale](#mirage-f1-shape-scale-mf1-2-2026-11-10)) |
 
 **Fit.** `m20.SH` with the gear down measures x -33 to 33 (66 units, 22.0 ft),
 y -44 to 71 (115 units, 38.3 ft) and z -12 to 22 (34 units, 11.3 ft), checked
@@ -1637,6 +1638,101 @@ fuselage height by half (z 1.5053): the fin and canopy read tall against the
 span, as the real aircraft's fin does; the review frames live under
 `.local/m3-aircraft/frames/M2K-2/`. No mesh bytes, exported geometry or retail
 art are committed.
+
+## Mirage F1 shape scale (MF1-2, 2026-11-10)
+
+Update (MF1-2, 2026-11-10) to [aircraft shape scale](#aircraft-shape-scale-2026-11-09):
+the Mirage F1 is the second aircraft in the table. The mechanism, the order with
+animation and the consumer list are the Mirage 2000's and are not repeated; this
+section gives the Mirage F1's fit, the consumers as they apply to it and its
+[skin review](#mirage-f1-skin-review).
+
+**Fit (fitted constants, opinionated choice).** `mf1.SH` with the gear down (gear
+word `0x5adc`) measures x -40 to 40 (80 units, 26.7 ft), y -45 to 82 (127 units,
+42.3 ft) and z -17 to 25 (42 units, 14.0 ft), pinned by a retail-reading test.
+The real Mirage F1C is 8.40 m (27.56 ft) in span, 15.23 m (49.97 ft) long and
+4.50 m (14.76 ft) high (Jane's text in the game's own `MF1.INF` and MILAVIA's
+Mirage F1 specifications give 8.40 m and 15.23 m; Aerospaceweb gives 15.30 m
+length and 4.50 m height; accessed 2026-11-10). Each factor is `real feet * 3 /
+extent in units`: 1.03346 (span), 1.18035 (length) and 1.05456 (height), rounded
+to four places to `[1.0335, 1.1804, 1.0546]` (x right, y forward, z up). The
+scaled shape lands within 0.05% of the three real dimensions, pinned by a test.
+
+**Definitions matched.** The **length** is measured with the nose probe: the
+shape's y maximum 82 is the tip of the pitot-style spike that runs from the
+radome end (y 68) to y 82, and the real 15.23 m is the length with the probe, so
+both use the same definition (the shape's length to the radome alone, 113 units,
+would give a factor of 1.3265 and a 56 ft aircraft, which is why the
+radome-only definition is not used). The **span** includes the two wingtip
+missile rails (the wing alone is x -39 to 39, 78 units, which would give a span
+factor 1.0598); the real 8.40 m is the published span, and the rails are part of
+the shape's own extent, so rails are included, which makes the wing about 0.7 ft
+(2.5%) narrower in the drawing than the wing alone would. The **height** is
+ground to fin tip with the gear down, both.
+
+| | Shape (units) | Shape (ft) | Factor | Scaled (ft) | Real F1C |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Span | 80 | 26.7 | 1.0335 | 27.56 | 27.56 (8.40 m) |
+| Length (with probe) | 127 | 42.3 | 1.1804 | 49.97 | 49.97 (15.23 m) |
+| Height (gear down) | 42 | 14.0 | 1.0546 | 14.76 | 14.76 (4.50 m) |
+
+The small span and height factors leave the F1 close to its authored shape; the
+length factor stretches the nose and tail by 18%, so the gear wheelbase (mains
+to nose, 43 units) becomes 50.8 units (16.9 ft), and the sweep angle changes a
+little because x and y scale differently.
+
+| Consumer | Status for the Mirage F1 |
+| --- | --- |
+| Drawn aircraft (external views, the stores preview) | scaled at load by the generic path (`Rig::load`); the interim rig's six words and gear faces are unchanged |
+| Damage looks and regional damage sections | `DamageArt::load` scales the intact shape, `MF1_A.SH` and `MF1_C.SH` bodies and the `MF1_B.SH` and `MF1_D.SH` fragments alike; all five load and fit the scaled body |
+| Rig hinges and device groups | no reviewed rig yet (MF1-3, MF1-4 scale any shape-unit point they name with `scale_point`) |
+| Wingtip vapor attachments | `Airframe::streamer_points` scales the CE point |
+| Station rows as drawn and as fired | `hardpoints::placed_on` scales the record row and the underside is built on the scaled shape (a test pins it); MF1-5 measures the stations |
+| Breakup piece offsets | `debris::attachment` scales per axis |
+| Gear low point | `models/variety.rs`: 17 units become 17.93 units, 5.98 ft (was 5.67 ft) |
+| Parked placement and size | `("MF1.PT", Some(0x5adc))` unchanged (identity, hit points 95, gear word); a parked Mirage F1 draws and stands on the scaled gear-down shape, `origin-up` 5.98 ft |
+| Contrail and nozzle positions | come off the scaled shape; the F1 has no mapped nozzle (`outlet_count` 0) until MF1-4, so the contrail falls back to the aft end of the scaled shape |
+| Hit size, cockpit eye point | unchanged, as for the Mirage 2000 (one 28 ft contact sphere, one fixed seat offset) |
+
+Frames are under `.local/m3-aircraft/frames/MF1-2/`. No mesh bytes, exported
+geometry or retail art are committed.
+
+## Mirage F1 skin review
+
+On 2026-11-10, slice MF1-2 checked the flyable `MF1.PT` import's skin (media
+identity in [the Mirage F1 source review](aircraft-variety.md#mirage-f1-source-review-2026-11-10)),
+drawn at its [per-axis real size](#mirage-f1-shape-scale-mf1-2-2026-11-10). The
+flyable path draws `MF1.SH`: 236 faces on the runtime state path (238 on the
+export path, the two extra being the decals below), one texture `_MF1.PIC`. The
+four damage shapes `MF1_A.SH` (225 faces), `MF1_B.SH` (53), `MF1_C.SH` (216) and
+`MF1_D.SH` (49) and their textures load through
+[`DamageArt::load`](../../crates/tore-app/src/damage_art.rs), scaled alike. No
+damage variant is registered for this identity, so a destroyed Mirage F1 draws
+the intact skin with regional cuts rather than an A/C body substitution, as the
+Mirage 2000, MiG-25, MiG-31 and F-16A do. A `--damage-preview` capture at 0.6
+(intact body, smoke at the tail) and 1.0 (the C look) shows both looks cut on the
+scaled size.
+
+The Mirage F1 does **not** need the [MiG-21 stored-normal
+exception](#mig-21-skin-review). `MF1.SH` has 23 exact-vertex twin groups, every
+one a pair with opposite stored normals (pinned by a retail-reading test), so
+smooth mode pairs each double-sided panel through the shared [panel
+contract](../spec/aircraft-animation.md#double-sided-panels) and hides the rear
+member. A top and an under capture, gear down (the `render-mf1-skin` scenario),
+show no grey underside through the top and no flicker; the fuselage code, the
+tail art and the red fuselage markings are textured faces and draw whole.
+
+The shape carries two `E0` runtime decal slots, both on the export path only:
+slot 3 at address `2587` (x -29 to -15, y -7 to 6, z 2 to 3, the left wing
+marking) and slot 4 at `2d74` (x 17 to 27, y -4 to 6, z 0, the right wing
+marking). The runtime projector omits both, and neither is filled with a piece of
+the main skin, following [texture state and decals](#texture-state-and-decals):
+a 3x crop of the upper wing shows the whole camouflage skin and no blank or
+skin-filled patch where a marking would sit. Each slot is deliberately omitted
+for the same reason as the MiG-31's and the Mirage 2000's: the projector has no
+runtime slot textures. A test pins the two addresses. The nose probe draws as
+the dark spike on the radome in the 3x crop. No mesh bytes, exported geometry or
+retail art are committed.
 
 ## Pilot escape shapes
 

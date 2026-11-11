@@ -1424,6 +1424,19 @@ mod tests {
     }
 
     #[test]
+    fn the_mirage_f1_record_row_scales_with_its_shape_too() {
+        let h = hardpoint(Location::Wing.byte(), 0);
+        let (plain, _) = placed(&h, None);
+        let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::Mf1);
+        assert_eq!(axes, [1.0335, 1.0546, 1.1804]);
+        assert_eq!(
+            placed_on(AircraftId::Mf1, 0, &h, None).0,
+            [10. * axes[0], -2. * axes[1], -axes[2]]
+        );
+        assert_ne!(placed_on(AircraftId::Mf1, 0, &h, None).0, plain);
+    }
+
+    #[test]
     fn the_mirage_2000_belly_pairs_hang_a_tenth_of_a_foot_lower_at_the_decoded_positions() {
         let face = |x0, x1, z0, z1, up| tore_formats::shape::Face {
             positions: vec![[x0, z0, up], [x1, z0, up], [x1, z1, up], [x0, z1, up]],
