@@ -640,7 +640,7 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |
-| `gripen` | Gear, brake and burner words unmapped (interim gear rise); canards, elevons and rudder not yet mapped | Whole rigid gear (legs, door pairs, nose), the two rear-fuselage airbrake plates and the burner plume reviewed (GRI-4); control surfaces `unreviewed` until GRI-3; mechanics fitted |
+| `gripen` | Gear, brake and burner words unmapped (interim gear rise); canards, elevons and rudder not yet mapped | Whole canards (pitch plus differential roll), elevon wedges (pitch, roll, flap droop), rudder, rigid gear (legs, door pairs, nose), the two rear-fuselage airbrake plates and the burner plume reviewed (GRI-3, GRI-4); mechanics fitted |
 
 ## Gripen gear, airbrake and plume results (2026-11-10)
 
@@ -664,3 +664,22 @@ burner on, half and off from behind, and the aircraft parked on a runway). The
 mains are hidden by stores in the default-loadout side views, so the gear frames
 use `--loadout none`.
 
+
+## Gripen control surface results (2026-11-10)
+
+Exact `gripen` (`GRIPEN.PT`) passes the GRI-3 probe with the reviewed scope
+(`TORE_DATA_DIR=.local/m3-aircraft/profile-gripen target/debug/tore-app --aircraft
+gripen --animation-probe .local/m3-aircraft/checks/GRI-3/probe`): 383 neutral
+faces, zero required or check failures, scope `reviewed-controls-and-attachments`;
+elevator, aileron, rudder, flaps, gear, brake and exhaust each read `required
+moved`. Per sample the anchor gap is at most 4e-8 ft, the skin gap 0, the largest
+inter-vertex distance change 1.3e-6 ft, direction failures 0 and no new planar
+crossings. The 25-pose pitch/roll grid has all 25 poses passing (canards and
+elevons), the 202-value dense gear sweep and the airbrake sweep keep passing. A
+deliberate sign flip of the canard roll law makes the probe fail (32 direction
+failures on the aileron sweep and the grid), so the direction witnesses are live.
+Measured openings (not gated): inboard elevon root slit 0.60 ft at full pitch, 0.99 ft
+at pitch plus roll, 1.75 ft at the extreme flap, pitch and roll corner; canard
+root 0.17 ft at full pitch; rudder 0.81 ft. The `flight-animation-gripen`
+scenario is registered (`animation.py`, 203-line dense gear and 26-line pitch/roll
+sweeps). Frames: `.local/m3-aircraft/frames/GRI-3/`.

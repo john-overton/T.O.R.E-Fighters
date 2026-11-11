@@ -171,11 +171,6 @@ impl Control {
         match self {
             Self::Rudder if id == Id::Ch47 => Expectation::Required,
             Self::Rudder | Self::Flaps if helicopter => Expectation::Unknown,
-            // The Gripen's canards, elevons and rudder are GRI-3's: unreviewed
-            // until that slice maps them (GRI-4, 2026-11-10).
-            Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps if id == Id::Gripen => {
-                Expectation::Unknown
-            }
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -607,6 +602,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mig25
             | AircraftId::Mig31
             | AircraftId::M2000
+            | AircraftId::Gripen
     ) {
         "reviewed-controls-and-attachments"
     } else {

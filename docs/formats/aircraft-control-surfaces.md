@@ -1113,3 +1113,109 @@ forward, nose aft, ground contact at 1, stowed pieces inside the hull near 0,
 no new planar crossing), a seven-value airbrake sweep (`brake-sweep.csv`) and
 the gear, brake and exhaust witnesses. See the
 [Gripen gear, airbrake and plume fit](../spec/variety-animation.md#gripen-gear-airbrake-and-plume-fit).
+
+## Gripen control surfaces (GRI-3, 2026-11-10)
+
+`GRI.SH` (28,848 CODE bytes, 383 runtime faces; review in [aircraft
+variety](aircraft-variety.md#gripen-source-review-2026-11-10)) draws the Gripen at
+its own size (identity axis scale), so the source coordinates below are plain
+shape units (x right, y forward, z up, a third of a foot each). The shape has no
+canard word, two flap words (`0x8098` left, `0x809e` right, each deleting that
+wing's six elevon-strip faces) and a positive-only rudder word (`0x80a4`). The
+motion is **fitted** whole-panel assignments over exact reviewed faces; the rig
+(`gripen_animation.rs`) refuses a shape whose canard, elevon or rudder faces are
+missing, duplicated or hold a vertex off the reviewed points.
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right canard, plate | `212d`, `2284` | One pentagon, both windings: (10,19,1), (22,15,2), (22,19,2), (8,37,1), (8,30,1) |
+| Right canard, root filler | `22f3`, `2311` | Triangle (10,19,1), (9,19,1), (8,30,1), against the plate's root edge |
+| Left canard, plate | `24ae`, `2553` | Mirror, with the forward root corner at (-7,37,1) (a unit off the mirror) |
+| Left canard, root filler | `25c2`, `25e0` | Mirror triangle (-10,19,1), (-9,19,1), (-8,30,1) |
+| Right elevon, inboard | `5fd2`, `5ff1` | Quad, x 12 to 26; hinge edge y -27 (z -2 flat face, z -1 sloped face), trailing edge from (12,-33,-2) to (26,-32,-2) |
+| Right elevon, outboard | `6010`, `602b`, `6046`, `6061` | Four triangles, x 26 to 40; trailing corner (40,-31,-2) |
+| Left elevon, inboard | `6194`, `61b3` | Mirror quad, x -12 to -25 |
+| Left elevon, outboard | `61d2`, `61ed`, `6208`, `6223` | Mirror triangles, x -25 to -40 (the seam is at x -25 against the right's 26) |
+| Rudder | `5d92`, `5db9` | One quad, both windings: (0,-43,6), (0,-50,6), (0,-49,23), (0,-43,23) |
+
+**The filler belongs to the canard.** The root filler touches only the plate (its
+edge (10,19,1) to (8,30,1)) and the fuselage side at one vertex; every fixed
+face that shares a vertex with the canard group shares only (8,30,1) (right) or
+(-8,30,1) (left). Left fixed it would stay as a stray sliver in the root notch as
+the plate turned, so each canard is plate plus filler, four faces, one rigid
+panel.
+
+**Hinge axes.** Canards: a lateral spindle through each root chord midpoint,
+right (9,28,1) (midpoint of (8,37,1) and (10,19,1)), left (-8.5,28,1) (midpoint of
+(-7,37,1) and (-10,19,1)), direction (12,0,1) on the right (the plate's own
+dihedral, z rising 1 over the 12 units from the root edge to the tip) and its
+mirror on the left; never a swept span axis. The left canard is turned by
+reflecting, turning about the mirrored right spindle and reflecting back, so the
+two sides are exact mirrors. Elevons: the straight line y -27, z -1.5 along X
+through the whole span of both strips (the hinge vertices sit at z -2 and z -1,
+half a unit either side). Rudder: the vertical leading edge x 0, y -43.
+
+**Rule 11 fold table (rig definitions).** Every face of a moving surface turns
+whole; a vertex stays put only if it is on the hinge line.
+
+| Surface | Face | Vertices | Turn | On the axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Canard plate, each side | 2 faces | 5 | 5 | 0 | 0 |
+| Canard root filler, each side | 2 faces | 3 | 3 | 0 | 0 |
+| Elevon inboard, each side | 2 faces | 4 | 4 | 0 | 0 |
+| Elevon outboard, each side | 4 faces | 3 | 3 | 0 | 0 |
+| Rudder quad | `5d92`, `5db9` | 4 | 2 | 2 each: (0,-43,6), (0,-43,23) | 0 |
+
+Verdict: **no face folds.** Elevon hinge vertices are half a unit off the mid
+axis, so they move rather than stay, but a hinge pair (z -2 and z -1 at the same
+x) has its midpoint on the axis, and the probe holds those midpoints (anchor gap
+0). The canards have no source hinge, so no vertex is pinned; the probe holds each
+root chord midpoint. The probe's largest inter-vertex distance change is about
+1e-6 ft in every group.
+
+**Both strips take one angle.** The inboard and outboard strip of a side share
+the seam vertices (26,-32,-2), (26,-27,-2) and (26,-27,-1) (left x -25), so both
+turn by the same angle about the same line; the skin gap between the strips is 0
+on every sample. The flap words (`0x8098`, `0x809e`) delete both strips of a
+side together, so the rig pins them at load and never sets them: the strips stay
+drawn and turn. The rudder word `0x80a4` (a fixed, positive-only copy swung about
+31 to 34 degrees) is pinned and never set; the quad turns about its hinge in
+both directions.
+
+**Fitted magnitudes (agent decisions, 2026-11-10).** All in radians.
+
+| Surface | Law |
+| --- | --- |
+| Elevons, angle positive lowers the trailing edge | `-0.30*elevator -/+ 0.20*aileron` (a positive aileron raises the right trailing edge and lowers the left, as every fleet aileron), the pitch and roll sum clamped to 0.50, then `+0.40*flaps` droops both strips of both sides. The Mirage 2000's four numbers. |
+| Canards, angle positive raises the leading edge | `+0.25*elevator -/+ 0.15*aileron` (right `-`, left `+`), the sum clamped to 0.35. A nose-up command raises both leading edges; roll right lowers the right canard's leading edge and raises the left's, so the canard on the dropping wing loses lift. The 0.25 is the Su-35's canard pitch; the 0.15 roll and 0.35 bound are new. |
+| Rudder, positive swings the trailing edge to +X | `0.35*rudder` about the vertical hinge, the fleet's travel. |
+
+The canards take roll as well as pitch by John's decision of 2026-11-10 ("Canards
+definitely roll", the GRI-0 option 3); the magnitudes and the bound are an agent
+choice. The sum bound limits how far a canard root can open against the intake
+side. No landing air-brake bias (leading edge down with the brakes) is applied;
+that GRI-0 option was not chosen. Flaps do not move the canards.
+
+**Measured seam openings** (`seam-opening.csv`, reported, not gated; feet at full
+travel). Inboard elevon root slit, the strip's trailing corner (12,-33,-2) (left
+(-12,-33,-2)) against the fixed centre-body strip `5716`/`57a8` (left `51d4`/`52dc`),
+6.0 units from the hinge line so it opens `6.0 * angle` units: 0.40 ft at roll
+(0.20 rad), 0.60 ft at full pitch (0.30), 0.80 ft at full flaps (0.40), 0.99 ft at
+full pitch plus roll (0.50), 1.75 ft at the extreme corner, full flap droop with
+pitch and roll bringing one side to 0.90 rad. This is the largest opening on the
+aircraft: the Gripen's strips are 6 units (2 ft) deep at the root against the Mirage
+2000's 3 units. Canard root corner (8,30,1) against the intake side: 0.10 ft at roll,
+0.17 ft at full pitch (0.25 rad), 0.23 ft at the 0.35 bound. Rudder trailing corners
+against the spine and fin cap: 0.81 ft at 0.35 rad (the one unit drop of the spine to
+the quad's bottom corner shows as a notch in the rear frames).
+
+**Rudder shared vertices.** The trailing corners (0,-50,6) and (0,-49,23) are shared
+with fixed spine and fin-cap faces (`3bba`, `3bcd`, `4ba9`, `4bd7`, `4c36`, `4c9f`,
+`4d1c`, `4d85`); the quad's top edge (y -43 to -49 at z 23) is the lower edge of
+the cap strip. Turning the quad opens those corners as above. Neither fixed
+alternative is exact (holding a trailing vertex pins a vertex off the hinge), so
+the rig turns the whole quad and accepts the opening, as every reviewed fin does.
+
+Frames and probe sheets: `.local/m3-aircraft/frames/GRI-3/`; probe CSVs:
+`.local/m3-aircraft/checks/GRI-3/probe/`. See the [Gripen control
+fit](../spec/variety-animation.md#gripen-control-fit).

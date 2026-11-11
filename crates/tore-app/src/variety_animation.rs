@@ -257,9 +257,9 @@ fn specification(id: Id) -> Option<Spec> {
                 1. / 3.,
             ),
             // GRI.SH: six words, gear 0x808c adds 22 faces. GRI-4 loads it
-            // through its own `gripen_animation` rig (gear, airbrakes, plume;
-            // the canards, elevons and rudder wait for GRI-3); this row only
-            // supplies the shape scale and the pinned words.
+            // through its own `gripen_animation` rig (canards, elevons, rudder,
+            // gear, airbrakes, plume); this row only supplies the shape scale
+            // and the pinned words.
             Id::Gripen => (
                 28848,
                 383,

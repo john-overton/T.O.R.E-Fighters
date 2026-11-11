@@ -819,3 +819,30 @@ about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at the 16 unit low
 point at gear 1) and the closed airbrake on the side line within 2e-6 ft. The
 elevator, rudder, aileron and flap rows read `unreviewed` until GRI-3. Not a
 claim of original retraction timing.
+
+## Gripen control fit
+
+Agent-authored whole-panel motion, 2026-11-10 (slice GRI-3), over `GRI.SH` at its
+own size. The shape has no canard word, two flap words (`0x8098`, `0x809e`) and a
+positive-only rudder word (`0x80a4`), so the canards, the elevons and the rudder
+are fitted assignments over exact reviewed faces. Every moving surface is whole:
+each canard (plate plus root filler, four faces) turns as one rigid panel, each
+side's six elevon faces as one rigid wedge, the rudder quad as one panel. The
+source groups, the rule 11 fold table, the seam measurements and the flap-word
+decision are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#gripen-control-surfaces-gri-3-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Pitch | Both canards `+0.25*elevator` radians about a lateral spindle through each root chord midpoint, tilted only by the plate's own dihedral (positive raises the leading edge). Both elevon wedges, inboard and outboard strip together, `-0.30*elevator` about the line y -27, z -1.5 along X (positive elevator raises the trailing edges). |
+| Roll | Canards differential, `-0.15*aileron` on the right and `+0.15*aileron` on the left (positive aileron lowers the right leading edge and raises the left); sum with pitch clamped to 0.35. Elevons `-0.20*aileron` right, `+0.20*aileron` left, sum with pitch clamped to 0.50. John, 2026-11-10: the canards take roll. |
+| Flaps | `+0.40*flaps` lowers all four elevon strips after the clamp; the canards do not move. The flap words delete both strips of a side and are never set. |
+| Yaw | The rudder quad (both windings) turns `0.35*rudder` radians about its vertical leading edge (0,-43); positive swings the trailing edge to +X. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments` with
+`anchor_missing=false`, `anchor_gap_ft=0`, `skin_gap_ft=0`, no direction
+failures and a largest inter-vertex distance change of about 1e-6 ft for the
+pitch, roll, yaw and flap sweeps, plus the 25-pose pitch/roll grid
+(`pitch-roll-combinations.csv`, both canards and both elevons). The measured
+moving/fixed seam openings (`seam-opening.csv`) are reported, not gated; the
+inboard elevon root slit reaches 0.60 ft at full pitch.
