@@ -23,6 +23,15 @@ pub fn damage_variant(id: AircraftId, section: usize) -> Option<usize> {
         (AircraftId::Rafale, x) if x == DamageSection::LeftWing as usize => Some(0),
         (AircraftId::Rafale, x) if x == DamageSection::Tail as usize => Some(1),
         (AircraftId::F22 | AircraftId::F22n, x) if x == DamageSection::LeftWing as usize => Some(0),
+        // F-5E (F5E-2, agent decision 2026-11-10): `F5E_A.SH` is the body with
+        // the nose cut away at y 35 (piece `F5E_B.SH`) and `F5E_C.SH` the body
+        // with the fin cut to z 13 (piece `F5E_D.SH`, a fin plate).
+        (AircraftId::F5E, x)
+            if x == DamageSection::Nose as usize || x == DamageSection::Cockpit as usize =>
+        {
+            Some(0)
+        }
+        (AircraftId::F5E, x) if x == DamageSection::Tail as usize => Some(1),
         _ => None,
     }
 }
@@ -168,6 +177,19 @@ mod tests {
         let at = contact.expect("debris must fall to terrain");
         assert_eq!(at[1], ground(at[0], at[2]));
         assert!(at[2] > 20.);
+    }
+    #[test]
+    fn the_f5e_pairs_its_nose_and_tail_bodies_and_leaves_the_rest_to_tears() {
+        use super::super::live::DamageSection as S;
+        let f5e = |s: S| damage_variant(AircraftId::F5E, s as usize);
+        assert_eq!(f5e(S::Nose), Some(0));
+        assert_eq!(f5e(S::Cockpit), Some(0));
+        assert_eq!(f5e(S::Tail), Some(1));
+        assert_eq!(f5e(S::LeftWing), None);
+        assert_eq!(f5e(S::RightWing), None);
+        assert_eq!(f5e(S::Core), None);
+        // Other aircraft keep their own (here no) pairing.
+        assert_eq!(damage_variant(AircraftId::M2000, S::Nose as usize), None);
     }
 }
 

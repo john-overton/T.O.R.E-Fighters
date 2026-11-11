@@ -3411,6 +3411,37 @@ not a constraint. `F5EE.PT` and `F5EV.PT` are not added.
 | Speed brake as one dorsal plate | Real brakes are paired and ventral | F5E-4 rigs the source panel only |
 | What the original does with `63d8`/`63de` | They delete the flap strip | Unknown; the rig keeps the strip drawn |
 | Leading-edge flaps | Real, not in the source | None drawn |
+
+### F-5E shape, skin and damage looks (F5E-2, 2026-11-10)
+
+Implementation, slice F5E-2, mirroring the Mirage 2000's M2K-2 **without a
+scale**: the size question (keep 1:1 or fit per axis) is still John's, so
+`aircraft_scale.rs` keeps `[1, 1, 1]` for `F5E` and the shape draws at retail
+size (the "no scaling" option above). Everything else in the slice is
+independent of that answer. The skin, twin and decal review is in the
+objects and shapes guide, [F-5E skin
+review](objects-and-shapes.md#f-5e-skin-review-2026-11-10); the
+`render-f5e-skin` battery scenario captures the top and under views with the
+gear down.
+
+| Check | Result |
+| --- | --- |
+| Shape | `F5E.SH` loads: 253 runtime faces (259 gear down), six state words, extents x -44 to 44, y -48 to 87, z -5 to 24 (gear down z -18 to 24) |
+| Own art | Every face reads `_F5E.PIC`; the damage looks read `_F5E_A..D.PIC`. Lookup is by exact name (`F5E.SH`, `_F5E.PIC`), so the importer's `_F5E` prefix match, which also carries the desert `_F5EE*` skins (byte-identical to the F-5E's) and the snow `_F5EV*` skins, never feeds the F-5E (the desert and snow shapes are not carried at all). A retail-reading test pins it: `F5EE.SH` and `F5EV.SH` differ from `F5E.SH`, and no face names a `_F5EE` picture |
+| Twin faces | 8 exact-vertex twin groups, every one a pair with opposite stored normals: three windshield and canopy plates on the centreline (`2a01`/`2a7d`, `2a34`/`2a4c`, `2aad`/`2ac5`), the two stabilators (`3a9d`/`3b8c`, `3f2c`/`40eb`), two fin plates (`3cd7`/`3d86`, `3cf2`/`3da1`) and the rudder (`4755`/`4774`). No MiG-21 normal exception is needed. F5E-3 turns each stabilator and the rudder as a twin pair |
+| Decals | Two `E0` slots on the wings, both omitted (see the skin review) |
+| Damage looks | `F5E_A` 228 faces, `F5E_B` 128, `F5E_C` 234, `F5E_D` 24 (each its own mesh, none a subset of the intact shape). `A` is the body with the nose cut away at y 35 (wings clipped to x +/-36, fin to z 18) and `B` is the nose piece (x +/-4, y -19 to 26); `C` is the body with the fin cut to z 13 and the nose tip cut at y 63 (wings x -35 to 36) and `D` is a flat fin plate on x 0 (y -9 to 8, z -7 to 12) |
+| Damage pairing (agent decision) | `debris::damage_variant` pairs Nose and Cockpit with `A`/`B` and Tail with `C`/`D`; the wings and core keep the fitted regional tears. A destroyed F-5E hit in the nose or tail therefore draws the original broken body and sheds the original piece, like the F/A-18 and the Rafale. Frames below; revert is the three arms in `debris.rs` |
+
+Frames (`.local/m3-aircraft/frames/F5E-2/`): the scenario pair, top, side,
+three-quarter and under views, 3x crops, and damage at 0.6 and 1.0 (1.0 draws the `A` body; the `C` tail body
+is `f5e-damage-1.0-tail-variant`). The shape reads as an F-5E (single fin,
+low straight-edged wing, long pointed nose, twin nozzles) with no clipping, no
+underside through the top and no z-fighting.
+
+Provenance: shape and skin spec-derived (retail data read as data); the
+damage pairing and the omitted decals agent decisions (2026-11-10); size
+pending John (no scale).
 ||||||| 25a8c5b0
 
 ## Tornado source review (2026-11-10)

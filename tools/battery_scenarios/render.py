@@ -334,6 +334,21 @@ def scenarios() -> list[Scenario]:
             notes="Mirage 2000 skin from above and below with the gear down, at its real size (per-axis shape scale 1.3616, 1.2290, 1.5053, docs/formats/objects-and-shapes.md, Aircraft shape scale): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's E0 decal slots stay omitted rather than filled with skin.",
         ),
         Scenario(
+            name="render-f5e-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "f5e", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f5e-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["f5e-top.ppm", "f5e-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "f5e", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f5e-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="F-5E skin from above and below with the gear down: its exact-vertex twin panels carry opposite stored normals, so they must not z-fight and the underside must not show through the top. The F-5E draws its own F5E.SH and _F5E.PIC (the desert and snow records are separate). The shape's two E0 wing decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, F-5E skin review).",
+        ),
+        Scenario(
             name="render-runway-paint-calm",
             lane="flight",
             args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],
