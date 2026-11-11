@@ -104,6 +104,10 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // M20.SH: the one hexagonal exit disc at y -44 (subtype 0x64), the
         // single M53 nozzle (M2K-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::M2000 => address == 0x3794,
+        // F5E.SH: the two nozzle exit octagons at y -48 (subtype 0x6c): the
+        // left 0x42a6 (x -5 to -1) and the right 0x4454 (x 1 to 5), the two
+        // J85 nozzles (F5E-4; docs/formats/aircraft-control-surfaces.md).
+        AircraftId::F5E => matches!(address, 0x42a6 | 0x4454),
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
         AircraftId::A4E
@@ -128,7 +132,8 @@ pub fn outlet_count(id: AircraftId) -> usize {
         | AircraftId::F14
         | AircraftId::Mig29
         | AircraftId::Su27
-        | AircraftId::Su35 => 2,
+        | AircraftId::Su35
+        | AircraftId::F5E => 2,
         _ => 0,
     }
 }
@@ -160,7 +165,12 @@ mod tests {
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
             assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 0);
         }
-        for id in [AircraftId::Mig29, AircraftId::Su27, AircraftId::Su35] {
+        for id in [
+            AircraftId::Mig29,
+            AircraftId::Su27,
+            AircraftId::Su35,
+            AircraftId::F5E,
+        ] {
             assert_eq!(outlet_count(id), 2);
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
             assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 1);

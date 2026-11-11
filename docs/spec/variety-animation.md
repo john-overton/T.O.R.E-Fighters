@@ -818,7 +818,7 @@ geometry](../formats/aircraft-control-surfaces.md#f-5e-control-surfaces-f5e-3-20
 | Roll | The ailerons turn `-0.20*aileron` (right) and `+0.20*aileron` (left) radians about the line y -5, z -3.5; positive aileron raises the right trailing edge and lowers the left. No pitch and no flap term. |
 | Flaps | `+0.40*flaps` lowers both flap strips about the line (7,-4,-3.5) to (31,-5,-3.5) (mirrored). The flap words delete the strips and are never set, so a flap never vanishes. |
 | Yaw | The rudder quad turns `0.35*rudder` radians about the fin trailing edge from (0,-31,4) toward (0,-29,22); positive swings the trailing edge to +X. The fin cap stays fixed. |
-| Gear, speed brake, plume | Not mapped by this slice: the gear keeps the interim rise, the brake and plume words stay unmapped until F5E-4. |
+| Gear, speed brake, plume | Mapped by F5E-4: see [F-5E gear, speed brake and plume fit](#f-5e-gear-speed-brake-and-plume-fit). |
 
 Provenance: fitted magnitudes and the flap-strip and rudder-quad decisions are
 agent decisions (2026-11-10); the pitch-only stabilators are opinionated, John
@@ -829,3 +829,23 @@ inter-vertex distance change of about 6e-7 ft for pitch, roll, yaw and flap
 sweeps, plus the 25-pose pitch/roll grid (`pitch-roll-combinations.csv`); the
 stabilators and ailerons are also checked to stay put under every other
 control.
+
+## F-5E gear, speed brake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice F5E-4), over `F5E.SH` at
+its own size (identity scale, size 1:1, John 2026-11-10). The source faces, the
+citations, the fold table and the provenance are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | Each main plate (both windings) is one rigid body that turns `90 degrees * (1 - gear)` about the line along Y at its own top edge (z -4, on its own x, +14 and -15) and swings inward under the fuselage, lying flat at the wing root at gear 0. The nose plate turns the same angle about a lateral line through its aft top corner (y 53, z -5), swinging forward and up into the nose, and steers about a vertical line through its centre. Hidden at 0, the source pose at 1. The source has no doors, struts or wheels beyond these plates. |
+| Speed brake | The one dorsal plate (both windings) turns as one piece about its forward edge (y 29, z 10) by `0.866 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie along the dorsal ridge, 0 hides it. |
+| Afterburner | The eight plume plates (two crossed pairs, one per engine) scale along Y from the nozzle exit plane (y -48) by the afterburner fraction, hidden at 0. Two nozzle glows and two contrails, from the engine count of 2 and the two nozzle octagons. |
+| Flaps | Unchanged from the control fit above. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity at most 1.6e-6 ft, anchor gap 0, skin gap 0, lowest gear point
+at the 18 unit low point at gear 1) and the closed brake within 3e-6 ft of the
+ridge. Not a claim of original retraction timing.

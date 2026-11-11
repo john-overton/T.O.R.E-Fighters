@@ -264,7 +264,10 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x808c, Part::Gear, 22)],
                 1. / 3.,
             ),
-            // F5E.SH: six words, gear 0x63cc adds 6 faces (three plates).
+            // F5E.SH: six words, gear 0x63cc adds 6 faces (three plates). F5E-3
+            // and F5E-4 load it through its own `f5e_animation` rig (surfaces,
+            // gear, speed brake, plume); this entry gives the load-time layout,
+            // the scale and `supported`.
             Id::F5E => (
                 21488,
                 253,
@@ -366,8 +369,8 @@ enum SpecificRig {
     Mig25(crate::mig25_animation::Rig),
     Mig31(crate::mig31_animation::Rig),
     M2000(crate::m2000_animation::Rig),
-    /// F5E-3: the control surfaces only; the gear, speed brake and plume
-    /// faces stay with the shared groups until F5E-4.
+    /// F5E-3 and F5E-4: the control surfaces, the gear, the speed brake and
+    /// the plume.
     F5E(crate::f5e_animation::Rig),
 }
 pub struct Rig {
@@ -653,6 +656,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::F5E => {
+                let (rig, shape) = crate::f5e_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F5E(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -665,10 +677,6 @@ impl Rig {
             )
             .into());
         }
-        let specific = (id == Id::F5E)
-            .then(|| crate::f5e_animation::Rig::load(bytes, &shape))
-            .transpose()?
-            .map(SpecificRig::F5E);
         let neutral: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
         let mut removed = BTreeSet::new();
         let mut added = Vec::new();
@@ -729,7 +737,7 @@ impl Rig {
                 id,
                 groups,
                 scale: spec.scale,
-                specific,
+                specific: None,
             },
             shape,
         ))
@@ -782,13 +790,7 @@ impl Rig {
                 SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
                 SpecificRig::Mig31(_) => crate::mig31_animation::flame(address),
                 SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
-                // F5E-3: no plume is owned yet; fall to the shared groups below.
-                SpecificRig::F5E(_) => {
-                    return self
-                        .groups
-                        .get(&address)
-                        .is_some_and(|g| g.part == Part::Flame);
-                }
+                SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
             };
         }
         self.groups
@@ -816,13 +818,7 @@ impl Rig {
         Some(face)
     }
     fn animate_devices(&self, source: &Face, state: &State) -> Option<Face> {
-        // F5E-3: the F-5E rig turns its control surfaces; every other face
-        // (gear, speed brake, plume until F5E-4) takes the shared groups below.
-        if let Some(SpecificRig::F5E(rig)) = &self.specific {
-            if rig.owns(source.address) {
-                return Some(rig.animate(source, state));
-            }
-        } else if let Some(rig) = &self.specific {
+        if let Some(rig) = &self.specific {
             return match rig {
                 SpecificRig::A4E(rig) => rig.animate(source, state),
                 SpecificRig::A7(rig) => rig.animate(source, state),
@@ -855,7 +851,7 @@ impl Rig {
                 SpecificRig::Mig25(rig) => rig.animate(source, state),
                 SpecificRig::Mig31(rig) => rig.animate(source, state),
                 SpecificRig::M2000(rig) => rig.animate(source, state),
-                SpecificRig::F5E(_) => unreachable!("handled above"),
+                SpecificRig::F5E(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

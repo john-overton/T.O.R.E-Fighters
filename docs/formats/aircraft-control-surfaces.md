@@ -1067,8 +1067,104 @@ positive lowers the trailing edge.
 Nothing here is a source value. The shape draws no leading-edge flap (the real
 aircraft has full-span automatic ones) and none is invented.
 
-**Gear, speed brake and plume (F5E-4).** Not owned by this rig yet: the six
-gear plates keep the shared interim rise and the brake and plume words stay
-unmapped. The rig lists the reviewed faces and pins the three words so F5E-4
-takes them over in the same module. See the [F-5E
-fit](../spec/variety-animation.md#f-5e-control-fit).
+**Gear, speed brake and plume.** Owned by the same rig since F5E-4: see
+[F-5E gear, speed brake and plume (F5E-4, 2026-11-10)](#f-5e-gear-speed-brake-and-plume-f5e-4-2026-11-10)
+and the [F-5E fit](../spec/variety-animation.md#f-5e-control-fit).
+
+## F-5E gear, speed brake and plume (F5E-4, 2026-11-10)
+
+Slice F5E-4, Claude Sonnet (sonnet-high), implementation mode. This maps the
+three device words of `F5E.SH` that [F5E-3](#f-5e-control-surfaces-f5e-3-2026-11-10)
+left to the shared groups, in the same `f5e_animation` module. Source
+coordinates are shape units (x right, y forward, z up, a third of a foot; the
+F-5E has the identity scale). Motion and angles are **fitted** (agent
+decisions, 2026-11-10); the faces and the word roles are spec-derived from the
+retail shape. Each of the three words adds its faces and removes none; the rig
+checks that at load, with every plate's exact corners.
+
+| Word | Faces | Source geometry | Rig |
+| --- | --- | --- | --- |
+| `0x63cc` gear | 6: right main `49cc`, `49eb`; left main `4a37`, `4a56`; nose `4aa2`, `4ac1` | Three flat plates, both windings each. Mains in the planes x +14 and x -15 (y -2 to 6, z -18 to -4); nose in the plane x 0 (y 53 to 60, z -17 to -5). No doors, struts or wheels beyond them | One rigid piece per plate |
+| `0x63c6` speed brake | 2: `4802` (untextured), `4819` (textured) | One plate, x +/-2: front edge (y 29, z 10), free edge (y 22, z 16), rising aft | One rigid piece about its front edge |
+| `0x63c0` plume | 8: `48a7`, `48e5`, `4961`, `4980` (left), `48c6`, `4904`, `4923`, `4942` (right) | Per engine a vertical plate (x -3 or +3, z -3 to 3) and a horizontal plate (z 0, x -6 to 0 or 0 to 5), both windings, y -49 to -79 | Scaled along Y from the exit plane |
+
+The two nozzle exit rings are the octagons `42a6` (left, x -5 to -1) and `4454`
+(right, x 1 to 5) at y -48, z -3 to 1 (subtype `0x6c`). The three flap and
+rudder words stay as F5E-3 left them (pinned, never set).
+
+**Gear motion and source.** Each main plate turns `90 degrees * (1 - gear)` about
+the line along Y at its own top edge (z -4, on its own x), swinging inward and
+up: the foot (x 14, z -18) arrives at (x 0, z -4), so the plate ends flat at the
+wing root under the fuselage, hidden at gear 0. The nose plate turns about a
+lateral line through its aft top corner (y 53, z -5) and swings forward and up
+into the nose (the foot (y 53, z -17) arrives at (y 65, z -5)), and steers about
+a vertical line through its centre (y 56.5) before the fold. Grounded at gear
+down: the pose at gear 1 is the source pose, whose lowest point (the mains, z
+-18) is the 18 unit low point the flight model stands the aircraft on
+(`variety.rs`, B5-1). The nose plate's foot is z -17, one unit (0.33 ft) above
+the mains' ground line, as the retail shape draws it (the parked frames
+show all three wheels at the runway).
+
+**Public source (cited honestly).** I could not reach a primary source (the
+T.O. 1F-5E-1 flight manual, `usaf-sig.org` lists it, was not fetched). A
+web search surfaced an aircraft summary page (`ccxy.tripod.com/f-5e.html`,
+Jane's-style data, host not reachable from here) whose excerpts say the main
+units retract inward into the fuselage; the same page's two excerpts disagree
+about the nose, one saying the nosewheel retracts forward and the other aft.
+**Mains inward is the task's stated direction and the one consistent excerpt.
+The nose forward is an agent decision from one of two conflicting secondary
+excerpts: open item, one sign (`NOSE_HINGE` and the `angle` sign in
+`gear_positions`) to flip if the flight manual says aft.** The Wikipedia
+"Northrop F-5" article and the DCS and Virtavia manuals I read give no
+retraction direction (Wikipedia notes only the Canadair CF-5's two-position nose
+gear, "incorporated" on the F-5E to reduce take-off distance).
+
+**Speed brake.** The one dorsal plate is all the source has (John, 2026-11-10:
+rig the source's plate). The real F-5E's brakes are a pair under the fuselage
+(general knowledge, not cited this pass); not drawn. The plate turns whole
+(both windings) about its front edge, the line y 29, z 10 along X. Open (brake
+1) is the source pose; closed is the turn of **0.866 rad (49.6 degrees)** that
+lays the free edge on the dorsal ridge line from (0, 37, 10) to the mid point
+(0, -34, 4) of the rear pair (+/-1, -34, 4) (all in face `3420`): the free edge
+lands at (0, 19.9, 8.55), the plate lies along the ridge, and the front edge sits
+0.68 unit above the ridge at y 29, the source's own step (there is no closing
+front plate in this shape). Hidden at brake 0.
+
+**Plume and nozzles.** The plume plates scale along Y from the nozzle exit plane
+(y -48): at full afterburner they are the source pose (first edge y -49, tip y
+-79), at partial they shorten toward the exit plane, hidden with no exhaust. The
+engine material gives the F-5E two outlets (`engine_material::outlet_count` 2,
+nozzle faces `42a6` and `4454`, left and right by the sign of x), so two nozzle
+glows draw and, from the engine count of 2, two contrails: one behind each
+nozzle's centre at x -3 and +3, z -1, 2 ft behind the exit plane (unit test
+`the_f5e_draws_two_contrails_one_behind_each_nozzle`). The renderer draws the
+glow and trail from the pilot's heat and the plume from `state.exhaust`.
+
+**Rule 11 fold table (rig definitions).** Every moving piece turns whole; no
+face has a vertex held off its hinge line.
+
+| Piece | Faces | Vertices | Turn about the axis | On the axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right main | `49cc`, `49eb` | 4 each | 2 each (feet) | 2 each: (14, -2, -4), (14, 6, -4) | 0 |
+| Left main | `4a37`, `4a56` | 4 each | 2 each | 2 each: (-15, -2, -4), (-15, 6, -4) | 0 |
+| Nose plate | `4aa2`, `4ac1` | 4 each | 3 each | 1 each: (0, 53, -5) (the other top corner swings) | 0 |
+| Speed brake | `4802`, `4819` | 4 each | 2 each (free edge) | 2 each: (+/-2, 29, 10) | 0 |
+| Plume | eight plates | 4 each | the tip vertices | root edge stays on the exit plane's side | 0 |
+
+Verdict: **no piece folds**. The probe reports rigidity of at most 1.6e-6 ft for
+every gear pose and at most 6.4e-7 ft for every brake pose (floating point).
+Fixed seam openings: none (the gear and brake hang from or rest on faces they do
+not share vertices with; the closed-brake front edge step above is the source's).
+
+**Findings and open items.** (1) Nose retraction direction above. (2) The brake
+is dorsal and single against the real paired ventral brakes (John's decision).
+(3) The gear is plates without doors, so the closed bay is the skin; near stow
+the main plate lies flat in the wing's lower skin plane (z -4) and at gear 0 is
+hidden. (4) Nose foot 0.33 ft above the main ground line, retail geometry.
+
+**Provenance.** Faces, word roles and plate corners spec-derived (retail shape
+read as data); the retraction directions, angles, the closed brake angle and the
+plume scaling are fitted agent decisions (2026-11-10); the dorsal brake rig is
+John's decision (2026-11-10); the twin glow and trail from the engine count of 2
+(record, real aircraft: two J85-GE-21). Not a claim of original retraction
+timing.
