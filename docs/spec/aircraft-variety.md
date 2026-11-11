@@ -111,9 +111,9 @@ Keep complete validation evidence in feature baselines rather than per-check fil
 ## M3 additions
 
 The M3 aircraft round appends the MiG-25 Foxbat, the F-16A Falcon, the MiG-31
-Foxhound, the Mirage 2000, the F-15E Strike Eagle, the Saab Gripen and the F-5E
-Tiger to the roster (batch 5 also appends the Tornado IDS and the Mirage F1
-identities, whose slices have not run). None is one of the original 23-aircraft variety batch,
+Foxhound, the Mirage 2000, the F-15E Strike Eagle, the Saab Gripen, the F-5E
+Tiger and the Mirage F1 to the roster (batch 5 also appends the Tornado IDS
+identity, whose slices have not run). None is one of the original 23-aircraft variety batch,
 and the batch count does not change.
 
 | Aircraft | Exact retail record | Family | Main behavior to review | Acceptance |
@@ -125,6 +125,7 @@ and the batch count does not change.
 | F-15E Strike Eagle | `F15E.PT` | Fighter | Twin-engine fighter handling on the record's F-15C-copied numbers (John kept them), the F-15C-style whole-panel stabilators that roll, no rudder motion, 30 degree flaps, a 0.1 ft rail drop on the belly bomb row with the large stores refused, the Harrier-art cockpit the record names, and no pod body on the Pave Spike row | [F-15E acceptance](../baselines/aircraft-f15e.md) |
 | Saab Gripen | `GRIPEN.PT` | Fighter | Single-engine canard delta handling on the real RM12 numbers, canards that pitch and roll, whole-panel elevons, the BK 27 internal gun at 570 rounds, its own `GRI` cockpit and HUD glass, and no pod body on the AAS-38 row | [Gripen acceptance](../baselines/aircraft-gripen.md) |
 | F-5E Tiger | `F5E.PT` | Fighter | Twin J85 light-fighter handling on real fuel, ceiling and +7 G, pitch-only stabilators, ailerons that roll, a dorsal speed brake, the X-29 panel its record names, and an empty wing pair by default | [F-5E acceptance](../baselines/aircraft-f5e.md) |
+| Mirage F1 | `MF1.PT` | Fighter | Single-engine handling on one Atar 9K-50's real thrust (John), real-size per-axis shape scale, a pitch-only whole-panel tailplane, aileron roll, a dorsal airbrake, a +8 and -4 G fit and a 9 lb/s afterburner flow, two belly tanks at 3.24 ft, tip Magics 1.1 ft off the tip, an empty centreline, 34 refused stores, and the Rafale HUD and cockpit the record names | [Mirage F1 acceptance](../baselines/aircraft-mf1.md) |
 
 AC-130 linked fire and the tank side task have additional acceptance cases in
 their linked contracts. New autonomous flight behavior is outside this batch;
@@ -329,7 +330,7 @@ carrier launch/arrestment remains a separate capability review.
 | AC-130 | Live aiming usability and wider engagement cases | Validate linked fire, barrel/muzzle agreement and blocked-gun feedback against the [contract](ac130-linked-guns.md); review a gunner view separately |
 | Radar and shared contacts | AWACS sharing/operator behavior beyond existing sensors | Installed/absent profiles are reviewed; additional shared-contact behavior needs its own contract and acceptance |
 | Cockpits | Wider display review and original fallback evidence | Current roots and null-pointer fits are explicit; verify every new cockpit on wide/tall windows and keep unsupported gauges unavailable |
-| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | 44 of the 46 playable profiles (all but the Tornado IDS and Mirage F1, which wait for their own rig slices) have bounded CPU pose acceptance; follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
+| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | 45 of the 46 playable profiles (all but the Tornado IDS, which waits for its own rig slices) have bounded CPU pose acceptance; follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
 | Multiplayer | Selection, content compatibility, new control/state transport, seat handoff and replay | Trace client/server use of the shared aircraft type and every newly required control/state value |
 
 Player-flyable helicopters extend the recovered retail multiplayer

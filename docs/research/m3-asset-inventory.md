@@ -41,21 +41,25 @@ first ones to confirm.
 
 | Object type | Records | Imported D/P/N/NA | Animations D/P/N/NA | AI D/P/N/NA | Logic D/P/N/NA |
 |---|---:|---|---|---|---|
-| Aircraft (PT) | 145 | 69 / 0 / 76 / 0 | 38 / 31 / 76 / 0 | 33 / 10 / 102 / 0 | 32 / 37 / 76 / 0 |
+| Aircraft (PT) | 145 | 69 / 0 / 76 / 0 | 39 / 30 / 76 / 0 | 34 / 10 / 101 / 0 | 33 / 36 / 76 / 0 |
 | Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
 | Equipment (SEE/ECM/GAS) | 85 | 55 / 26 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 53 / 3 / 29 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **478 / 47 / 94 / 0** | **253 / 178 / 113 / 75** | **207 / 31 / 135 / 246** | **410 / 82 / 126 / 1** |
+| **Total** | **619** | **478 / 47 / 94 / 0** | **254 / 177 / 113 / 75** | **208 / 31 / 134 / 246** | **411 / 81 / 126 / 1** |
 
 ## What remains, by object type
 
-- **Aircraft.** 43 of 145 are flyable by players and AI (13 original roster, 23
-  variety, and the MiG-25, F-16A, MiG-31, Mirage 2000, F-15E, Gripen and F-5E M3
-  additions; 2026-11-10, X-10 of batch 5. The Tornado IDS and Mirage F1 joined
-  `AircraftId::ALL` in the same batch with interim rigs and are not counted
-  here until their own slices run, so the table above still lists them as
-  before). 25 more are parked scenery only (no AI, static pose). 76 are decoded
+- **Aircraft.** 44 of 145 are flyable by players and AI (13 original roster, 23
+  variety, and the MiG-25, F-16A, MiG-31, Mirage 2000, F-15E, Gripen, F-5E and
+  Mirage F1 M3 additions; 2026-11-10, X-10 of batch 5; Update (MF1-10,
+  2026-11-11): the Mirage F1 is counted now, its acceptance is
+  [here](../baselines/aircraft-mf1.md). The Tornado IDS joined
+  `AircraftId::ALL` in the same batch with an interim rig and is not counted
+  here until its own slices run, so the table above still lists it as
+  before). 24 more are parked scenery only (no AI, static pose; the Mirage F1
+  left this group, and the earlier count of 25 parked and 76 decoded summed to
+  144, the rows give 24 parked and 77 decoded-only). 77 are decoded
   in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and nothing else. Variety
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
@@ -162,6 +166,7 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | F16.PT | F- 16A Falcon | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; F16C shared rig, M61, AIM-9M, AIM-120, AGM-65G, 150 gal tank; AI flyable |
 | MIG31.PT | MiG-31 Foxhound | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; GSh-6-30, AA-9 x4 and AA-8 x2; opinionated tunnel and wing-pylon station table; also parkable |
 | M2000.PT | Mirage 2000 | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; one M53-P2 (opinionated override of the record's two engines), real-size per-axis scale, DEFA, Super 530, Magic 2 and AS-15; eight station rows (no wingtip); Rafale HUD and cockpit by the record's name; also parkable |
+| MF1.PT | Mirage F1 | Done | Done | Done | Done | M3 import (AircraftId, batch 5; [acceptance](../baselines/aircraft-mf1.md)); rig reviewed; one Atar 9K-50 at the real 11,020 / 15,873 lbf (John), real-size per-axis scale, afterburner flow 9 lb/s, +8 and -4 G rows; two belly tanks at 3.24 ft, tip Magics 1.1 ft off the tip, centreline empty, 34 refusals; Rafale HUD and cockpit by the record's name; also parkable (parked path unchanged) |
 | V22.PT | V-22 Osprey | Done | Done | Partial | Partial | variety import (AircraftId); nacelles tilt 0-97.5deg, props; fitted physics, AI conversion |
 | YAK141.PT | Yak-141 Freestyle-A | Done | Done | Partial | Partial | variety import (AircraftId); nozzle animates; AI VTOL fitted; Kiev parking unresolved |
 | A37.PT | A-37 Dragonfly | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
@@ -173,7 +178,6 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | KA50.PT | Ka-50 Hokum-A | Done | Partial | None | Partial | parked target only; skids always drawn; rotors static |
 | M2000E.PT | Mirage (Desert) 2000 | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | M5.PT | Mirage 5 | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
-| MF1.PT | Mirage F1 | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | MI17.PT | Mi-17 Hip | Done | Partial | None | Partial | parked target only; skids always drawn; rotors static |
 | MIG21F.PT | MiG-21F Fishbed-C | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
 | MIG27.PT | MiG-27 Flogger-J | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
@@ -322,7 +326,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | PL10.JT | Chinese PL-10 | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar (radar-concept PL10-R), own record envelope and motor; no default carrier anywhere ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | PL7.JT | Chinese PL-7 | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); infrared with a guarded motor fit and own record envelope; no imported default carrier ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
 | R530.JT | Super 530 | Done | Done | Done | Done | Live; Rafale, Mirage 2000 (M3); S530D semi-active |
-| R550.JT | R-550 Magic 2 | Done | Done | Done | Done | Live; Rafale, Mirage 2000 (M3); IR Magic 2 |
+| R550.JT | R-550 Magic 2 | Done | Done | Done | Done | Live; Rafale, Mirage 2000 (M3), Mirage F1 (M3, 2026-11-11); IR Magic 2 |
 
 #### Air-to-ground missile (14)
 
@@ -393,7 +397,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | C_105.JT | 105mm Cannon | Done | Done | Done | Done | AC-130; authored 100 ft splash; muzzle flash, linked fire |
 | C_25.JT | 25mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
 | C_40.JT | 40mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
-| DEFA.JT | DEFA 30mm | Done | Done | Done | Done | Rafale and Mirage 2000 (M3) gun; shared physical-round model, tracers; no fighter muzzle flash |
+| DEFA.JT | DEFA 30mm | Done | Done | Done | Done | Rafale, Mirage 2000 and Mirage F1 (M3) gun; shared physical-round model, tracers; no fighter muzzle flash |
 | GAU12.JT | GAU-12 Vulcan Cannon | Done | Done | Done | Done | AV-8B; physical rounds and tracers; no fighter muzzle flash |
 | GAU13.JT | GAU-13 Pave Claw | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ASTOVL variants not imported (JT-1) |
 | GAU8.JT | GAU-8/A Avenger | Done | Done | Done | Done | A-10; AI gun runs kill 150 HP vehicle; no fighter muzzle flash |
@@ -599,7 +603,7 @@ Per category:
 | A10.ECM | A10 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; A-10 |
 | A7.ECM | A7 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; A-7 |
 | AC130.ECM | AC130 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; AC-130 |
-| AV8.ECM | AV8 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; AV-8B |
+| AV8.ECM | AV8 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; AV-8B, Mirage F1 (M3, 2026-11-11; Early, strength 0.00) |
 | B52.ECM | B52 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; E-2, E-3, IL-76 |
 | F104.ECM | F104 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; F-104 |
 | F14.ECM | F14 ECM suite | Done | Done | Done | Done | Chaff/flare, decoy odds, jammer generation reviewed; F-14D |
@@ -632,7 +636,7 @@ Per category:
 | Resource | Name/role | Imported | Animations | AI | Logic | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | F150.GAS | 150 gal tank | Done | Done | Done | Done | A-4E, F-16C, F-16A, F-18, F-4, MiG-17, Mirage 2000; fitted body, fuel/mass, Shift+K jettison |
-| F250.GAS | 250 gal tank | Done | Done | Done | Done | F-14, F-104, MiG-25; fitted body, fuel/mass, Shift+K jettison |
+| F250.GAS | 250 gal tank | Done | Done | Done | Done | F-14, F-104, MiG-25, Mirage F1 (two belly tanks, M3); fitted body, fuel/mass, Shift+K jettison |
 | F350.GAS | 350 gal tank | Done | Done | Done | Done | F-4B/J; loadable on F-18, F-4E, Su-25; fitted body, fuel/mass, Shift+K jettison |
 | F500.GAS | 500 gal tank | Done | Done | Done | Done | Loadable on A-7, AV-8B, F-14, F-15, F-16C; fitted body, fuel/mass, Shift+K jettison |
 

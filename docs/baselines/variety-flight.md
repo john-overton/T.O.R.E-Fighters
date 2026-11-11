@@ -1712,6 +1712,21 @@ recorded values in `tools/battery_scenarios/flight.py` were refitted to 121.0 an
 climb and endurance rows in the tables of this section were measured with the
 four-tank load and were not re-run; the clean columns are unchanged.
 
+Update (MF1-10, 2026-11-11): the clean and default-load figures were re-measured
+with the same probes after B5-4's +8 and -4 rows and 9 lb/s afterburner flow and
+with the two-tank load (`PROBE_PAYLOAD=4481`), and the tables are in the
+[Mirage F1 acceptance record](aircraft-mf1.md#flight-envelope). Clean, what moved:
+the pull by fuel 7.01 / 7.53 / 7.82 / 8.07 G (was 6.14 / 6.59 / 6.84 / 7.06), the
+push -3.48 to -4.01 G (was -2.61 to -3.00), the instantaneous turn at 461 kt 7.01 G
+and 16.2 deg/s (was 6.14 G, 13.4) and the afterburner endurance 11.3 min (was 4.4);
+top speeds, climb, acceleration, sustained turn and cruise are unchanged. Default
+load (26,143 lb): top speed 734 kt at 1,000 ft and 1,225 kt at 36,000 ft, peak Ps
+298 ft/s, acceleration 363 to 460 / 590 kt in 13 / 37 s, pull 6.37 / 6.80 / 7.03 /
+7.23 G, push -3.16 to -3.59 G, sustained 461 kt turn 3.24 G at 7.4 deg/s, cruise
+46.2 min, liftoff 121.5 kt after 1,158 ft, approach 127.6 kt. The default-load rows
+above (four tanks) stay as the morning's record. Logs
+`.local/m3-aircraft/checks/MF1-10/`.
+
 **Harness.** As for the Mirage 2000, the Gripen and the F-5E: `envelope_probe`
 (`PROBE_POINTS=1 PROBE_LEVEL=1 PROBE_PULLS=1`) and `performance_probe`
 (`PROBE_ALTS=1000,15000,30000,36000,50000,60000`; `PROBE_PAYLOAD=8177` for the

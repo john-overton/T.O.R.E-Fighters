@@ -1390,6 +1390,13 @@ before them and were not re-measured
 [Gripen](../formats/aircraft-ordnance.md#the-saab-gripen-gri-6-2026-11-10),
 [F-5E](../formats/aircraft-ordnance.md#the-f-5e-tiger-f5e-6-2026-11-10)).
 
+Update (MF1-10, 2026-11-11): the Mirage F1 (its centreline and belly rows admit
+guided bombs and AS missiles, with 34 stores refused on the belly and wing
+rows) is the 35th air-to-ground carrier; the Tornado IDS has not
+been accepted yet. The per-record carrier ranges above still stand as measured
+before it
+([Mirage F1](../formats/aircraft-ordnance.md#the-mirage-f1-mf1-6-2026-11-11)).
+
 ### Default air-to-ground loads
 
 Retail data (PT defaults, hardpoint in brackets).

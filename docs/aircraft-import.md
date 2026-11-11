@@ -404,8 +404,8 @@ cargo run --locked -p tore-app -- --free-flight --aircraft rafale --researched-f
 The LHX exclusion only skips unrelated bundled media; adapt source selection as
 specified in [EXTRACTION](EXTRACTION.md). Register and document new CLI identities
 only after source review. The reviewed additions are `f14`, `a4e`, `x31`, `mig29`, `su27`, `mig21`,
-`su25`, `mig23`, `su35`, `f22`, `f22n`, `mig25`, `f16a`, `mig31`, `m2000`, `f15e`, `gripen` and `f5e`. The `tornado` and `mf1` keys
-exist since batch 5's identity slice but are not reviewed additions yet.
+`su25`, `mig23`, `su35`, `f22`, `f22n`, `mig25`, `f16a`, `mig31`, `m2000`, `f15e`, `gripen`, `f5e` and `mf1`. The `tornado` key
+exists since batch 5's identity slice but is not a reviewed addition yet.
 For FA-only CLI extraction, exclude `swpatch.lib` and unrelated disc archives,
 as shown in the [acceptance record](baselines/aircraft-fa-expansion.md).
 

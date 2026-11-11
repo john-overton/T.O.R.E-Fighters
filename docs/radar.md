@@ -236,6 +236,12 @@ as Early with no RF mode and strength 0.00 (F5E-7 sensor summary), so like the
 A-4E and MiG-21 it emits no RF noise. The table above lists the records it
 named when it was written; the F-15E's `F15.ECM` is the F-15C's record.
 
+Update (MF1-10, 2026-11-11): the Mirage F1 carries `AV8.ECM` (its record's, kept
+by John, O4), read as Early with no RF mode and strength 0.00 (MF1-7 sensor
+summary), so it too emits no RF noise; its radar is `F18R.SEE`. Unlike the
+Mirage 2000 it has no jammer worth a matchup row: the record gives chaff and
+flares only.
+
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored
 strength input, not its original probability semantics. P is S/0.30. Band
