@@ -1763,3 +1763,10 @@ opinionated rules of 2026-10-13; the keep-one-pair choice is John's (2026-11-10)
 The measurement, the comparison, the flap check and the stop are agent findings,
 2026-11-10. The ordnance audit pins did not move (no placement count changed).
 Frames: `.local/m3-aircraft/frames/F5E-5/`.
+
+### F-5E station decisions (John, 2026-11-10)
+
+Round 2 of the batch decisions (opinionated, John, 2026-11-10): the
+F-5E station measurements above are accepted as they stand ("keep"); no
+station, mask, pylon or rail drop changes, and the clipping cases listed above
+remain as recorded.
