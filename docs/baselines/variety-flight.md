@@ -1541,3 +1541,87 @@ manuals. Nothing here is attributed to John beyond the B5-2 corrections.
 Not run: `--native-flight-tables` (tables not present locally), a windowed free
 flight (the slice asks for no frames), a primary-source takeoff or landing run, a
 better-pilot sustained turn.
+
+## Batch 5 flight maxima and fuel flows (B5-4, 2026-11-11)
+
+Implementation and measurement mode, slice B5-4. **Opinionated (John,
+2026-11-11)**: the flight-model maxima and fuel flows of the five batch aircraft
+follow real figures that fit TORE. The rules, the cited figures and the rounding
+are in [aircraft records](../spec/aircraft-records.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11);
+the review per aircraft is in [the variety document](../formats/aircraft-variety.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11).
+The earlier sections of this page are the measurements before the change and are
+kept as written. Probes: `performance_probe` (`PROBE_ONLY=turn PROBE_ALTS=1000,15000,30000`,
+`PROBE_FUEL` full, half, quarter and 300 lb; `PROBE_ONLY=fuel`) and `envelope_probe`
+(`PROBE_POINTS PROBE_LEVEL PROBE_PULLS`), on the local extracted records (clean,
+afterburner, full aft stick for three seconds at Mach 0.7, 461 kt, 1,000 ft; push
+is full forward stick for two seconds). Logs are local, `before/` and `after/`
+under `.local/m3-aircraft/checks/B5-4/`. The Tornado and Mirage F1 numbers are
+clean only: their default loads are being changed on other branches.
+
+**Pull and push at 461 kt and 1,000 ft, clean, by fuel (full, half, quarter, 300
+lb).**
+
+| Aircraft | Row | Fuel, lb | Positive G before | Positive G after | Push before | Push after | Real |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| F-15E | +9 to +10, -4 to -3 | 13,662 / 6,831 / 3,416 / 300 | 7.57 / 8.28 / 8.69 / 9.10 | 8.41 / 9.19 / 9.65 / 10.10 | -2.51 / -2.74 / -2.88 / -3.02 | same | +9 / -3 |
+| Gripen | +9 kept, -4 to -3 | 5,000 / 2,500 / 1,250 / 300 | 8.00 / 8.52 / 8.80 / 9.03 | same | -3.55 / -3.78 / -3.90 / -4.01 | -2.66 / -2.83 / -2.92 / -3.00 | +9 / -3 |
+| F-5E | +7 to +8, -4 to -3 | 4,400 / 2,200 / 1,100 / 300 | 5.98 / 6.49 / 6.78 / 7.00 | 6.83 / 7.41 / 7.74 / 8.00 | -2.55 / -2.77 / -2.89 / -2.99 | same | +7.33 / -3.0 |
+| Tornado | +7 to +8, -3 kept | 11,221 / 5,610 / 2,805 / 300 | 6.17 / 6.59 / 6.82 / 7.04 | 7.05 / 7.52 / 7.79 / 8.04 | -2.63 / -2.81 / -2.91 / -3.01 | same | +7.5 / -3 |
+| Mirage F1 | +7 to +8, -3 to -4 | 6,120 / 3,060 / 1,530 / 300 | 6.14 / 6.59 / 6.84 / 7.06 | 7.01 / 7.53 / 7.82 / 8.07 | -2.61 / -2.80 / -2.91 / -3.00 | -3.48 / -3.74 / -3.88 / -4.01 | +7.5 / -3.6 |
+
+At half fuel the new positive G is within 0.1 G of the real limit for the F-5E
+(+0.08), the Tornado (+0.02), the Mirage F1 (+0.03) and 0.19 G over for the F-15E;
+the Gripen's +9 stays 0.48 G under (a +10 row would be 0.47 G over). Near empty
+every aircraft passes the real limit (the F-15E reaches 10.1 G, the F-5E 8.0 G, the
+Tornado 8.0 G, the Mirage F1 8.1 G): the loading divisor is the shared rule, and the
+half-fuel test is John's Mirage 2000 precedent. At 15,000 and 30,000 ft the pulls
+are the altitude-limited ones of the lower rows and did not change.
+
+**Ceilings and level top speed (`envelope_probe`, afterburner, level flight held
+to within 200 ft).** Below each new ceiling the envelope edges are the record's
+own, so the level speeds are unchanged: F-15E 750 kt at 1,000 ft, 1,313 kt at
+36,000 ft, 1,290 kt at 50,000 ft; Gripen 704, 1,090 and (50,000 ft, the new
+ceiling) 1,041 kt; Tornado 793, 1,321 and (50,000 ft) 1,135 kt; Mirage F1 762 and
+1,271 kt; F-5E 685 and 1,021 kt. The level-flight ceiling is now the polygon's: F-15E
+60,000 ft (1,229 kt there, it was held to 95,000 ft before), Gripen 50,000 ft (it
+was 60,000 ft), Tornado 50,000 ft (it was 60,000 ft).
+
+**Fuel (`PROBE_ONLY=fuel`, full tank, military and afterburner at 20,000 ft; the
+probe's burn equals the record flow).**
+
+| Aircraft | Flows before, lb/s | Flows after, lb/s | Implied lb/(lbf h) before | after | Cited | Full tank, military, min before / after | Afterburner, min before / after |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| F-15E | 4 / 24 | 7 / 26 | 0.442 / 1.805 | 0.774 / 1.956 | 0.73 / 1.94 | 56.9 / 32.5 | 9.5 / 8.8 |
+| Gripen | 2 / 14 | 3 / 9 | 0.593 / 2.785 | 0.890 / 1.790 | 0.844 / 1.79 | 41.7 / 27.8 | 6.0 / 9.3 |
+| F-5E | 1 / 8 | 2 / 6 | 0.514 / 2.880 | 1.029 / 2.160 | 1.24 / 2.13 | 73.3 / 36.7 | 9.2 / 12.2 |
+| Tornado (B5-3) | 3 / 22 | 3 / 22 | 0.624 / 2.463 | same | 0.598 / 2.5 | 62.3 / 62.3 | 8.5 / 8.5 |
+| Mirage F1 | 3 / 23 | 3 / 9 | 0.980 / 5.216 | 0.980 / 2.041 | 0.981 / 1.991 | 34.0 / 34.0 | 4.4 / 11.3 |
+
+The whole-pound unit leaves the F-5E's dry flow 17 percent under the cited figure
+(2 against 2.41 lb/s; 3 would be 24 percent over), the Gripen's dry flow 5 percent
+over and the F-15E's dry flow 6 percent over.
+
+**Not changed, and why (findings for John).**
+
+- **Top speeds.** F-15E: 750 kt (Mach 1.14) at 1,000 ft against a real 800 kt
+  (Mach 1.2), 6 percent under; 1,313 kt (Mach 2.29) at 36,000 ft against Mach 2.5,
+  8 percent under. Gripen: 704 kt (Mach 1.07) at sea level against Mach 1.2 (794
+  kt), 11 percent under; 1,090 kt (Mach 1.90) at 36,000 ft and 1,041 kt (Mach 1.82) at
+  50,000 ft against Mach 2 (Wikipedia gives it at 50,000 ft), 5 to 9 percent
+  under. F-5E: 1,021 kt (Mach 1.78) at 36,000 ft against Mach 1.63 (939 kn), 9
+  percent over (the record itself is Mach 1.90, 16 percent over). Tornado, Mirage
+  F1: within 5 percent. In every case the record's envelope is the aircraft's own,
+  not another's, and the measured level speed is 92 to 97 percent of the record's
+  top edge through the shared drag law (`reference_thrust` against drag at the top
+  edge), so a fix needs either a per-record polygon fit or a change to the shared
+  law. Neither was made. The F-5E would need a guarded fast-edge scale of about
+  0.92 (and its +8 and ceiling rows follow the same polygon).
+- **Gripen +9.** Half fuel pulls 8.52 G, 0.48 G under; kept.
+- **Mirage F1 ceiling,** Tornado top speeds, Tornado -3: inside the thresholds.
+
+Checks: workspace tests 7,614 passed, 0 failed; the flight lane battery for the
+F-15E, Gripen and F-5E (`--windows 1`, profile `.local/m3-aircraft/profile`) passed
+44 of 44, so no liftoff or approach window moved (the weights, stall edges and the
+envelope below the ceilings are unchanged); `--headless-flight 1200` for all five
+ran with 0 non-finite samples. Not run: a zoom-climb ceiling measurement after the
+cut, the AI, mission, replay and net batteries.

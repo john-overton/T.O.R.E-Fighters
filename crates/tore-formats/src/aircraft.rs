@@ -2082,8 +2082,9 @@ mod profile_tests {
             .collect()
     }
     #[test]
-    fn the_tornado_reads_real_thrust_weights_and_a_plus_7_row_everyone_else_retail() {
-        // Opinionated (John, 2026-11-10): two RB199 Mk 103, real weights, +7 G.
+    fn the_tornado_reads_real_thrust_weights_and_plus_7_and_plus_8_rows_everyone_else_retail() {
+        // Opinionated (John, 2026-11-10): two RB199 Mk 103, real weights; B5-4
+        // (John, 2026-11-11): +8 G (rows +7 and +8 fitted) and 50,000 ft.
         let mut rows = plain_rows(-3, 6);
         rows[9].1 = vec![
             [575, 0],
@@ -2094,6 +2095,7 @@ mod profile_tests {
         ];
         let retail = [
             ("weight", 41_885),
+            ("maxAlt", 60_000),
             ("thrust", 35_270),
             ("aftThrust", 50_700),
             ("maxTakeoffWeight", 90_390),
@@ -2117,14 +2119,15 @@ mod profile_tests {
         assert_eq!(t.number("aftThrust"), 32_150.);
         assert_eq!(t.number("weight"), 31_065.);
         assert_eq!(t.number("maxTakeoffWeight"), 61_620.);
-        assert_eq!(t.number("envMax"), 7.);
+        assert_eq!((t.number("envMin"), t.number("envMax")), (-3., 8.));
+        assert_eq!(t.number("maxAlt"), 50_000.);
         // B5-3: the RB199 flows, 3 dry and 22 reheat lb/s (the Su-24's 6 / 38).
         assert_eq!(
             (t.number("fuelConsumption"), t.number("aftFuelConsumption")),
             (3., 22.)
         );
         let gs: Vec<i32> = t.envelopes.iter().map(|e| e.g).collect();
-        assert_eq!(gs, (-3..=7).collect::<Vec<_>>());
+        assert_eq!(gs, (-3..=8).collect::<Vec<_>>());
         // The same numbers on the MiG-23 record stay retail.
         let m = Aircraft::parse(
             batch_text(
@@ -2141,11 +2144,12 @@ mod profile_tests {
         .unwrap();
         assert_eq!((m.number("thrust"), m.number("envMax")), (35_270., 6.));
         assert_eq!(m.number("aftFuelConsumption"), 38.);
+        assert_eq!(m.number("maxAlt"), 60_000.);
         // Every Tornado row below +7 is the record's own.
         assert_eq!(t.envelopes[..10], m.envelopes[..]);
         // An edited Tornado (one thrust off) is read as it is, rows and all.
         let mut edited = retail;
-        edited[1].1 = 35_271;
+        edited[2].1 = 35_271;
         let e = Aircraft::parse(
             batch_text(
                 "TOR.PT",
@@ -2171,8 +2175,18 @@ mod profile_tests {
             ("aftThrust", 30_000),
             ("maxTakeoffWeight", 30_203),
             ("internalFuel", 6_120),
+            ("fuelConsumption", 3),
+            ("aftFuelConsumption", 23),
         ];
-        let rows = plain_rows(-3, 7);
+        let mut rows = plain_rows(-3, 7);
+        rows[10].1 = vec![
+            [520, 0],
+            [645, 11_500],
+            [900, 20_000],
+            [1_075, 20_000],
+            [1_240, 17_000],
+            [1_230, 0],
+        ];
         let text = batch_text("MF1.PT", "MF1", "Mirage F1", 636, (-3, 7), &rows, &mf1);
         let a = Aircraft::parse(text.as_bytes()).unwrap();
         assert_eq!(a.id, AircraftId::Mf1);
@@ -2180,7 +2194,18 @@ mod profile_tests {
         assert_eq!(a.number("aftThrust"), 15_873.);
         assert_eq!(a.number("weight"), 15_542.);
         assert_eq!(a.number("maxTakeoffWeight"), 30_203.);
-        // F-5E: fuel 4,400 lb, +7 G, 51,800 ft.
+        // B5-4 (John, 2026-11-11): the Atar's reheat flow, 9 lb/s (the dry 3
+        // stays); +8 and -4 rows, the -4 row the +8 polygon.
+        assert_eq!(
+            (a.number("fuelConsumption"), a.number("aftFuelConsumption")),
+            (3., 9.)
+        );
+        assert_eq!((a.number("envMin"), a.number("envMax")), (-4., 8.));
+        let gs: Vec<i32> = a.envelopes.iter().map(|e| e.g).collect();
+        assert_eq!(gs, (-4..=8).collect::<Vec<_>>());
+        assert_eq!(a.envelopes[0].points, a.envelopes[12].points);
+        assert_eq!(a.envelopes[12].points[0], [556., 0.]);
+        // F-5E: fuel 4,400 lb, +8 G (B5-4), 51,800 ft.
         let mut rows = plain_rows(-4, 8);
         let minus_four = vec![[570, 0], [610, 4_000], [730, 3_000], [760, 0]];
         rows[0].1 = minus_four.clone();
@@ -2216,6 +2241,8 @@ mod profile_tests {
             ("aftThrust", 10_000),
             ("maxTakeoffWeight", 24_664),
             ("internalFuel", 6_240),
+            ("fuelConsumption", 1),
+            ("aftFuelConsumption", 8),
         ];
         let text = batch_text("F5E.PT", "F-5", "F-  5E Tiger", 612, (-4, 8), &rows, &f5e);
         let f = Aircraft::parse(text.as_bytes()).unwrap();
@@ -2226,7 +2253,13 @@ mod profile_tests {
             (f.number("thrust"), f.number("aftThrust")),
             (7_000., 10_000.)
         );
-        assert_eq!((f.number("envMin"), f.number("envMax")), (-4., 7.));
+        // B5-4 (John, 2026-11-11): J85 flows 2 and 6 lb/s; the -4 sliver is
+        // retired (-3) and the top row is a fitted +8.
+        assert_eq!(
+            (f.number("fuelConsumption"), f.number("aftFuelConsumption")),
+            (2., 6.)
+        );
+        assert_eq!((f.number("envMin"), f.number("envMax")), (-3., 8.));
         assert_eq!(f.envelopes.len(), 12);
         let one = f.envelopes.iter().find(|e| e.g == 1).unwrap();
         assert_eq!(one.points[4], [580., 51_800.]);
@@ -2262,6 +2295,169 @@ mod profile_tests {
         };
         assert_eq!(top(&e), 42_000.);
         assert_eq!(top(&f), 51_800.);
+    }
+    #[test]
+    fn the_f15e_reads_real_flows_a_60_000_ft_ceiling_and_a_plus_10_row_the_f15c_stays_retail() {
+        // Opinionated (John, 2026-11-11, B5-4). The F-15E's record shares its
+        // flight words with the F-15C's, which is its own, retail, record.
+        let mut rows = plain_rows(-4, 9);
+        rows[0].1 = vec![[910, 0], [920, 1_000], [940, 0], [950, 0]];
+        rows[4].1 = vec![
+            [140, 0],
+            [531, 74_000],
+            [870, 105_000],
+            [1_574, 105_000],
+            [1_440, 0],
+        ];
+        rows[5].1 = vec![
+            [200, 0],
+            [563, 65_000],
+            [870, 100_000],
+            [1_554, 100_000],
+            [1_360, 0],
+        ];
+        rows[13].1 = vec![
+            [585, 0],
+            [687, 5_500],
+            [940, 10_000],
+            [1_020, 9_000],
+            [1_180, 0],
+        ];
+        let retail = [
+            ("maxAlt", 100_000),
+            ("fuelConsumption", 4),
+            ("aftFuelConsumption", 24),
+            ("thrust", 32_558),
+            ("aftThrust", 47_860),
+        ];
+        let text = batch_text(
+            "F15E.PT",
+            "F-15E",
+            "F- 15E Strike Eagle",
+            660,
+            (-4, 9),
+            &rows,
+            &retail,
+        );
+        let e = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(e.id, AircraftId::F15E);
+        assert_eq!(
+            (e.number("fuelConsumption"), e.number("aftFuelConsumption")),
+            (7., 26.)
+        );
+        assert_eq!(e.number("maxAlt"), 60_000.);
+        // Thrust is John's earlier decision and stays.
+        assert_eq!(
+            (e.number("thrust"), e.number("aftThrust")),
+            (32_558., 47_860.)
+        );
+        assert_eq!((e.number("envMin"), e.number("envMax")), (-3., 10.));
+        let gs: Vec<i32> = e.envelopes.iter().map(|r| r.g).collect();
+        assert_eq!(gs, (-3..=10).collect::<Vec<_>>());
+        assert_eq!(e.envelopes.last().unwrap().points[0], [617., 0.]);
+        let one = e.envelopes.iter().find(|r| r.g == 1).unwrap();
+        assert_eq!(
+            one.points,
+            vec![[200., 0.], [535., 60_000.], [1_476., 60_000.], [1_360., 0.]]
+        );
+        // The F-15C record is another identity: the same numbers on it stay
+        // retail (no aliasing of F15.PT to F15E.PT).
+        let token = |v: &str| Token {
+            kind: "dword".into(),
+            value: v.into(),
+            scaled: false,
+        };
+        let mut object = BTreeMap::from([("maxAlt".to_string(), token("100000"))]);
+        let mut plane = BTreeMap::new();
+        assert!(!corrections::apply(
+            AircraftId::F15,
+            &mut object,
+            &mut plane
+        ));
+        assert_eq!(object["maxAlt"].value, "100000");
+        // One flow off the retail value leaves the whole record as it was.
+        let mut edited = retail;
+        edited[1].1 = 5;
+        let t = batch_text(
+            "F15E.PT",
+            "F-15E",
+            "F- 15E Strike Eagle",
+            660,
+            (-4, 9),
+            &rows,
+            &edited,
+        );
+        let x = Aircraft::parse(t.as_bytes()).unwrap();
+        assert_eq!(
+            (x.number("fuelConsumption"), x.number("maxAlt")),
+            (5., 100_000.)
+        );
+    }
+    #[test]
+    fn the_gripen_reads_rm12_flows_a_50_000_ft_ceiling_and_no_minus_4_row() {
+        // Opinionated (John, 2026-11-11, B5-4): the +9 limit stays.
+        let mut rows = plain_rows(-4, 9);
+        let plus_eight = vec![[520, 0], [615, 11_000], [920, 21_000], [1_010, 0]];
+        rows[0].1 = plus_eight.clone();
+        rows[12].1 = plus_eight;
+        rows[4].1 = vec![[160, 0], [870, 63_000], [1_734, 63_000], [1_280, 0]];
+        rows[5].1 = vec![[200, 0], [870, 60_000], [1_684, 60_000], [1_230, 0]];
+        let retail = [
+            ("maxAlt", 60_000),
+            ("fuelConsumption", 2),
+            ("aftFuelConsumption", 14),
+            ("thrust", 12_140),
+            ("aftThrust", 18_100),
+            ("internalFuel", 5_000),
+            ("weight", 14_599),
+            ("maxTakeoffWeight", 27_560),
+        ];
+        let text = batch_text(
+            "GRIPEN.PT",
+            "Gripen",
+            "Saab Gripen",
+            660,
+            (-4, 9),
+            &rows,
+            &retail,
+        );
+        let g = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(g.id, AircraftId::Gripen);
+        assert_eq!(
+            (g.number("fuelConsumption"), g.number("aftFuelConsumption")),
+            (3., 9.)
+        );
+        assert_eq!(g.number("maxAlt"), 50_000.);
+        assert_eq!((g.number("envMin"), g.number("envMax")), (-3., 9.));
+        assert_eq!(g.envelopes.len(), 13);
+        assert_eq!(g.envelopes[0].g, -3);
+        let one = g.envelopes.iter().find(|r| r.g == 1).unwrap();
+        assert_eq!(one.points[1], [758., 50_000.]);
+        let zero = g.envelopes.iter().find(|r| r.g == 0).unwrap();
+        assert_eq!(zero.points[1], [757., 53_000.]);
+        // Thrust and fuel are the real aircraft's and stay.
+        assert_eq!(
+            (g.number("thrust"), g.number("internalFuel")),
+            (12_140., 5_000.)
+        );
+        // One value off the retail flows (a changed thrust is not a guard) or
+        // a stale ceiling field: the flows and ceiling stay retail.
+        let mut edited = retail;
+        edited[2].1 = 15;
+        let t = batch_text(
+            "GRIPEN.PT",
+            "Gripen",
+            "Saab Gripen",
+            660,
+            (-4, 9),
+            &rows,
+            &edited,
+        );
+        let x = Aircraft::parse(t.as_bytes()).unwrap();
+        assert_eq!(
+            (x.number("aftFuelConsumption"), x.number("maxAlt")),
+            (15., 60_000.)
+        );
     }
     #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {

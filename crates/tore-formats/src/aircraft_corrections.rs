@@ -232,12 +232,28 @@ pub const TORNADO_MAX_TAKEOFF_LB: i32 = 61_620;
 /// Mk 105 is listed at 0.637 dry). The retail 6 and 38 lb/s are the Su-24's.
 pub const TORNADO_FUEL_LB_PER_S: i32 = 3;
 pub const TORNADO_AB_FUEL_LB_PER_S: i32 = 22;
-/// The Tornado's positive G limit: **+7**, not the real +7.5 (the encyclopedia
-/// text `TOR.INF` gives +7.5). Envelope rows are whole G (`envMax` and each
-/// row's G are integers), so +7.5 has no row of its own; +7 is the nearest
-/// whole row below, the conservative side, and the residual is 0.5 G (6.7%)
-/// short of the real limit. The retail record is -3 to +6.
-pub const TORNADO_G_MAX: i32 = 7;
+/// The Tornado's ceiling (B5-4, **opinionated**, John, 2026-11-11): 50,000 ft,
+/// the published service ceiling (Wikipedia "Panavia Tornado" and the GR4
+/// page, aerospaceweb.org "Tornado IDS data", as read for TOR-8 on
+/// 2026-11-11). The record carries the Su-24's 60,000 ft, in `maxAlt` and in
+/// the top edge of its 1 G polygon (0 G polygon 64,000 ft).
+pub const TORNADO_CEILING_FT: i32 = 50_000;
+const TORNADO_RETAIL_CEILING_FT: i32 = 60_000;
+const TORNADO_RETAIL_ZERO_G_TOP_FT: i32 = 64_000;
+/// The Tornado's positive G limit: **+8** (B5-4, **opinionated**, John,
+/// 2026-11-11: "correct all flight model maximums ... per realistic numbers
+/// that fit in TORE"; B5-2 had held it to +7). The real limit is +7.5 (the
+/// encyclopedia text `TOR.INF`). Envelope rows are whole G (`envMax` and each
+/// row's G are integers), so +7.5 has no row of its own. The model divides a
+/// row's G by the loaded-elevator divisor (`1 + (fuel + stores) / empty
+/// weight x loadedElevator / 100`), so a limit read off the top row is only
+/// reached near empty. The row is chosen where the clean aircraft at half its
+/// internal fuel pulls closest to the real limit without passing it by more
+/// than about 0.3 G (the Mirage 2000 precedent, M2K-11): at 5,610 lb of fuel
+/// the divisor is 1.072, so +7 pulls 6.53 G (0.97 under) and +8 pulls 7.46 G
+/// (0.04 under; 7.9 G near empty). The retail record is -3 to +6; rows +7 and
+/// +8 are fitted from the +6 row.
+pub const TORNADO_G_MAX: i32 = 8;
 const TORNADO_RETAIL_G_MIN: i32 = -3;
 const TORNADO_RETAIL_G_MAX: i32 = 6;
 /// The retail +6 row (speed ft/s, altitude ft), the base of the fitted +7 row.
@@ -271,13 +287,14 @@ pub const F5E_INTERNAL_FUEL_LB: i32 = 4_400;
 /// [`fit_envelopes`] moves to the same altitude.
 pub const F5E_CEILING_FT: i32 = 51_800;
 const F5E_RETAIL_CEILING_FT: i32 = 42_000;
-/// The F-5E's positive G limit: **+7**. The real limit is +7.33 G (T.O. 1F-5E-1
-/// "F-5E/F Flight Manual", load limit +7.33 / -3.0 G; cited secondhand from
-/// the DCS World forum thread "maximum g for f5 e", accessed 2026-11-10). The
-/// record's +8 row repeats its -4 row, so it is not an authored row; it is
-/// retired and the authored +7 row becomes the top. The residual is 0.33 G
-/// (4.5%) under the real limit, the conservative side.
-pub const F5E_G_MAX: i32 = 7;
+/// The F-5E's positive G limit: **+8** (B5-4; B5-2 had held it to +7, see
+/// [`F5E_RETAIL_STUB`] for the reasoning). The real limit is +7.33 G (T.O.
+/// 1F-5E-1 "F-5E/F Flight Manual", load limit +7.33 / -3.0 G; cited secondhand
+/// from the DCS World forum thread "maximum g for f5 e", accessed 2026-11-10).
+/// The retail record's +8 row repeats its -4 row, so it is not an authored
+/// row; B5-2 retired it and the authored +7 row became the top, B5-4 replaces
+/// it with a +8 row fitted from that +7 row.
+pub const F5E_G_MAX: i32 = 8;
 const F5E_RETAIL_G_MIN: i32 = -4;
 const F5E_RETAIL_G_MAX: i32 = 8;
 /// The retail 0 G and 1 G rows. Their top edges are the record's ceiling
@@ -307,12 +324,199 @@ const F5E_RETAIL_ONE_G: [[f64; 2]; 10] = [
     [1_220., 0.],
 ];
 
+/// F-5E fuel flows (B5-4, **opinionated**, John, 2026-11-11): the record's
+/// `fuelConsumption` 1 and `aftFuelConsumption` 8 lb/s (whole pounds a second
+/// for both engines, as in [`TORNADO_FUEL_LB_PER_S`]) become the corrected
+/// thrust times the J85-GE-21's thrust-specific fuel consumption (1.24 dry and
+/// 2.13 reheat lb/(lbf h), Wikipedia "Thrust-specific fuel consumption", static
+/// sea-level table, read 2026-11-11): 7,000 x 1.24 / 3,600 = 2.41, so 2 lb/s;
+/// 10,000 x 2.13 / 3,600 = 5.92, so 6 lb/s. The whole-pound record unit costs
+/// 17 percent on the dry flow (2 against 2.41) and 1 percent in reheat.
+pub const F5E_FUEL_LB_PER_S: i32 = 2;
+pub const F5E_AB_FUEL_LB_PER_S: i32 = 6;
+/// The F-5E's G limits (B5-4, **opinionated**, John, 2026-11-11): the real
+/// +7.33 now has a row, +8. The chosen row is the one where the clean
+/// aircraft at half fuel (2,200 lb, divisor 1.092) pulls closest to the real
+/// limit without passing it by more than 0.3 G: +7 pulls 6.41 G (0.92 under),
+/// +8 pulls 7.32 G (0.01 under). The retail record's +8 row is a repeat of its
+/// -4 row (B5-2 retired it); the new +8 row is fitted from the record's own +7
+/// row. The -4 row is that same stub (a 190 ft/s sliver below 4,000 ft that no
+/// pull reaches); the real negative limit is -3 (T.O. 1F-5E-1, as cited for
+/// +7.33), which the record's -3 row already gives, so the stub is retired and
+/// `envMin` is -3: at half fuel the push is 2.77 G, 0.23 G under the real -3.
+const F5E_RETAIL_STUB: [[f64; 2]; 4] = [[570., 0.], [610., 4_000.], [730., 3_000.], [760., 0.]];
+
+/// F-15E (B5-4, **opinionated**, John, 2026-11-11). The thrust is John's
+/// earlier decision (retail, 32,558 / 47,860 lbf) and stays.
+///
+/// Fuel flows: the record carries 4 and 24 lb/s (whole pounds a second for both
+/// engines). The corrected flow is the record's thrust times the F100's
+/// thrust-specific fuel consumption: 0.73 lb/(lbf h) at military power (the
+/// F100-PW-220, the engine the record's thrust matches; Wikipedia "Pratt &
+/// Whitney F100", read 2026-11-11) and 1.94 at full afterburner (the only
+/// afterburning figure that page lists, under the -229): 32,558 x 0.73 / 3,600
+/// = 6.60, so 7 lb/s (6 percent over); 47,860 x 1.94 / 3,600 = 25.79, so 26
+/// lb/s (1 percent over).
+pub const F15E_FUEL_LB_PER_S: i32 = 7;
+pub const F15E_AB_FUEL_LB_PER_S: i32 = 26;
+/// F-15E ceiling: 60,000 ft (18,000 m service ceiling, Wikipedia "McDonnell
+/// Douglas F-15E Strike Eagle", specifications, read 2026-11-11; the game's
+/// `F15.INF` 60,000 to 65,000 ft). The record carries 100,000 ft in `maxAlt`
+/// and the 1 G polygon's top edge (the 0 G polygon reaches 105,000 ft).
+pub const F15E_CEILING_FT: i32 = 60_000;
+const F15E_RETAIL_CEILING_FT: i32 = 100_000;
+const F15E_RETAIL_ZERO_G_TOP_FT: i32 = 105_000;
+/// The F-15E's positive G limit: **+10** (real +9, `F15E.INF` and Wikipedia
+/// "design +9 / -3"). The model divides a row's G by the loaded-elevator
+/// divisor (1 + (fuel + stores) / empty weight x 43 / 100 for this record), so
+/// the clean aircraft at half fuel (6,831 lb, divisor 1.103) pulls 8.28 G with
+/// the record's +9 row (0.72 G under the real limit) and 9.2 G with a +10 row
+/// (0.2 G over; 8.4 G at full fuel, 10 G nearly dry). A +10 row is the one
+/// whole row that lands closest to the real limit at half fuel without passing
+/// it by more than 0.3 G (the Mirage 2000 precedent, M2K-11). It is fitted from
+/// the record's own +9 row.
+pub const F15E_G_MAX: i32 = 10;
+const F15E_RETAIL_G_MIN: i32 = -4;
+const F15E_RETAIL_G_MAX: i32 = 9;
+const F15E_RETAIL_PLUS_9: [[f64; 2]; 5] = [
+    [585., 0.],
+    [687., 5_500.],
+    [940., 10_000.],
+    [1_020., 9_000.],
+    [1_180., 0.],
+];
+/// The F-15E record's -4 row is a sliver (910 to 950 ft/s near sea level):
+/// the real negative limit is -3 (`F15.INF`, "design +9 / -3") and the -3 row
+/// carries it (a 2.74 G push at half fuel, 0.26 under). The sliver is
+/// retired and `envMin` is -3.
+const F15E_RETAIL_STUB: [[f64; 2]; 4] = [[910., 0.], [920., 1_000.], [940., 0.], [950., 0.]];
+
+/// Gripen (B5-4, **opinionated**, John, 2026-11-11). Thrust and weights are
+/// the real JAS 39A's and stay.
+///
+/// Fuel flows: the record carries 2 and 14 lb/s. The RM12's thrust-specific
+/// fuel consumption is 0.844 lb/(lbf h) dry and 1.79 with afterburner
+/// (Wikipedia "Volvo RM12", read 2026-11-11): 12,140 x 0.844 / 3,600 = 2.85,
+/// so 3 lb/s (5 percent over); 18,100 x 1.79 / 3,600 = 9.00, so 9 lb/s.
+pub const GRIPEN_FUEL_LB_PER_S: i32 = 3;
+pub const GRIPEN_AB_FUEL_LB_PER_S: i32 = 9;
+/// Gripen ceiling: 50,000 ft (15,240 m, Wikipedia "Saab JAS 39 Gripen",
+/// specifications (JAS 39C/D), read 2026-11-11). The record carries 60,000 ft
+/// in `maxAlt` and in the 1 G polygon's top edge (0 G polygon 63,000 ft).
+pub const GRIPEN_CEILING_FT: i32 = 50_000;
+const GRIPEN_RETAIL_CEILING_FT: i32 = 60_000;
+const GRIPEN_RETAIL_ZERO_G_TOP_FT: i32 = 63_000;
+/// The Gripen's negative limit is -3 (real +9 / -3, same page). The record's -4
+/// row is a copy of its +8 row (the record mirrors every negative row on the
+/// positive row of twice the G); at half fuel (2,500 lb, divisor 1.068) it
+/// pushes 3.78 G, 0.78 over the real -3, where the -3 row pushes 2.81 G. The -4
+/// row is retired and `envMin` is -3. The +9 limit stays: at half fuel it pulls
+/// 8.52 G (0.48 under); a +10 row would pull 9.47 G (0.47 over, more than the
+/// 0.3 G allowed).
+const GRIPEN_RETAIL_G_MIN: i32 = -4;
+const GRIPEN_RETAIL_G_MAX: i32 = 9;
+/// The Gripen's new lowest G row.
+pub const GRIPEN_G_MIN: i32 = -3;
+
+/// Mirage F1 (B5-4, **opinionated**, John, 2026-11-11). Thrust is the real
+/// Atar 9K-50's (B5-2).
+///
+/// Fuel flow: the dry flow (3 lb/s) already matches (0.98 lb/(lbf h) against
+/// 0.981); the afterburner flow of 23 lb/s was authored for 30,000 lbf and is
+/// 5.2 lb/(lbf h). The corrected flow is 15,873 lbf x 1.991 lb/(lbf h) / 3,600
+/// = 8.78, so 9 lb/s (2.5 percent over); the Atar 09K-50's static sea-level
+/// figures, Wikipedia "Thrust-specific fuel consumption", read 2026-11-11.
+pub const MF1_AB_FUEL_LB_PER_S: i32 = 9;
+/// The Mirage F1's G limits: +8 and -4 rows. Real limits are +7.5 and -3.6
+/// (MIGFlug "Dassault Mirage F1", "as commonly published", read 2026-11-11).
+/// The clean aircraft at half fuel (3,060 lb, divisor 1.079) pulls 6.49 G with
+/// the record's +7 row (1.0 under) and 7.42 G with a +8 row (0.08 under; 7.9 G
+/// nearly dry), and pushes 2.78 G with the -3 row (0.82 under) and 3.71 G with
+/// a -4 row (0.11 over). Both new rows are fitted: +8 from the record's own +7
+/// row, and the -4 row is that same polygon, as every row of this record
+/// mirrors the positive row of twice the G (-3 is +6, -2 is +4, -1 is +2).
+pub const MF1_G_MAX: i32 = 8;
+pub const MF1_G_MIN: i32 = -4;
+const MF1_RETAIL_G_MIN: i32 = -3;
+const MF1_RETAIL_G_MAX: i32 = 7;
+const MF1_RETAIL_PLUS_7: [[f64; 2]; 6] = [
+    [520., 0.],
+    [645., 11_500.],
+    [900., 20_000.],
+    [1_075., 20_000.],
+    [1_240., 17_000.],
+    [1_230., 0.],
+];
+
+fn top_altitude(e: &Envelope) -> f64 {
+    e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max)
+}
+
+/// The polygon `points` cut off above `cap` (Sutherland-Hodgman against the
+/// half-plane altitude <= `cap`): every part at or below the cap is kept as it
+/// was, and each edge that crosses the cap ends on it, at the speed the edge
+/// had there (rounded to the record's whole ft/s). The speed bands at every
+/// altitude up to the cap are therefore the record's own.
+fn clip_below(points: &[[f64; 2]], cap: f64) -> Vec<[f64; 2]> {
+    let mut out: Vec<[f64; 2]> = Vec::new();
+    let n = points.len();
+    for i in 0..n {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        if a[1] <= cap {
+            out.push(a);
+        }
+        if (a[1] <= cap) != (b[1] <= cap) {
+            let t = (cap - a[1]) / (b[1] - a[1]);
+            out.push([(a[0] + (b[0] - a[0]) * t).round(), cap]);
+        }
+    }
+    out.dedup();
+    if out.len() > 1 && out.first() == out.last() {
+        out.pop();
+    }
+    out
+}
+
+/// Lowers a record's ceiling in the envelope polygons (B5-4), the companion of
+/// the `maxAlt` correction: each polygon is cut off at the new ceiling
+/// ([`clip_below`]), the 1 G polygon and every row but 0 G at `ceiling`, the 0
+/// G polygon at the step above the 1 G polygon that the record has
+/// (`retail_zero - retail_one`). Nothing below the cut moves, so every speed
+/// band up to the ceiling is the record's own; the F-5E's top-edge shift of B5-2
+/// is not used because these records have rows above their new ceiling. Applies
+/// only when `maxAlt` has just been corrected to `ceiling` and the 1 G and 0 G
+/// polygons still top out at the retail altitudes; true when it did.
+fn lower_ceiling(
+    object: &BTreeMap<String, Token>,
+    envelopes: &mut [Envelope],
+    ceiling: i32,
+    retail_one: i32,
+    retail_zero: i32,
+) -> bool {
+    if object.get("maxAlt").and_then(|t| t.number().ok()) != Some(ceiling) {
+        return false;
+    }
+    let top_of = |g: i32| envelopes.iter().find(|e| e.g == g).map(top_altitude);
+    if top_of(1) != Some(f64::from(retail_one)) || top_of(0) != Some(f64::from(retail_zero)) {
+        return false;
+    }
+    let step = retail_zero - retail_one;
+    for row in envelopes.iter_mut() {
+        let cap = f64::from(if row.g == 0 { ceiling + step } else { ceiling });
+        if top_altitude(row) > cap {
+            row.points = clip_below(&row.points, cap);
+        }
+    }
+    true
+}
+
 /// Envelope corrections of the batch aircraft, applied where the record is
-/// read: the Tornado's +7 G row, and the F-5E's +7 G limit and ceiling. Each
-/// applies only to its own identity and only while the record still holds
-/// the retail range and the retail rows it replaces; true when it did.
-/// `object` is read after [`apply`], so the F-5E's ceiling rows move only
-/// together with its `maxAlt`.
+/// read: the G limits of the Tornado (+8), F-5E (+8), F-15E (+10), Gripen (-3)
+/// and Mirage F1 (+8, -4), the F-5E's, F-15E's, Gripen's and Tornado's
+/// ceilings. Each applies only to its own identity and only while the record
+/// still holds the retail range and the retail rows it replaces; true when it
+/// did. `object` is read after [`apply`], so a ceiling moves only together with
+/// its `maxAlt`.
 pub(crate) fn fit_envelopes(
     id: AircraftId,
     object: &BTreeMap<String, Token>,
@@ -321,42 +525,62 @@ pub(crate) fn fit_envelopes(
 ) -> bool {
     let range =
         |plane: &BTreeMap<String, Token>, key: &str| plane.get(key).and_then(|t| t.number().ok());
-    let set_max = |plane: &mut BTreeMap<String, Token>, g: i32| {
-        if let Some(token) = plane.get_mut("envMax") {
+    let set = |plane: &mut BTreeMap<String, Token>, key: &str, g: i32| {
+        if let Some(token) = plane.get_mut(key) {
             token.value = g.to_string();
         }
     };
+    let one_g = |envelopes: &[Envelope]| envelopes.iter().find(|e| e.g == 1).cloned();
+    let row_g = |envelopes: &[Envelope], g: i32| envelopes.iter().find(|e| e.g == g).cloned();
+    let (min, max) = (range(plane, "envMin"), range(plane, "envMax"));
     match id {
         AircraftId::Tornado => {
-            if range(plane, "envMin") != Some(TORNADO_RETAIL_G_MIN)
-                || range(plane, "envMax") != Some(TORNADO_RETAIL_G_MAX)
+            let mut done = false;
+            if min == Some(TORNADO_RETAIL_G_MIN)
+                && max == Some(TORNADO_RETAIL_G_MAX)
+                && let Some(last) = envelopes.last().cloned()
+                && last.g == TORNADO_RETAIL_G_MAX
+                && last.points == TORNADO_RETAIL_PLUS_6
             {
-                return false;
+                // Rows +7 and +8, each fitted from the retail +6 row.
+                let one = one_g(envelopes);
+                for g in TORNADO_RETAIL_G_MAX + 1..=TORNADO_G_MAX {
+                    envelopes.push(fitted_row(&last, one.as_ref(), g));
+                }
+                set(plane, "envMax", TORNADO_G_MAX);
+                done = true;
             }
-            let Some(last) = envelopes.last() else {
-                return false;
-            };
-            if last.g != TORNADO_RETAIL_G_MAX || last.points != TORNADO_RETAIL_PLUS_6 {
-                return false;
-            }
-            let row = fitted_row(last, envelopes.iter().find(|e| e.g == 1), TORNADO_G_MAX);
-            envelopes.push(row);
-            set_max(plane, TORNADO_G_MAX);
-            true
+            done | lower_ceiling(
+                object,
+                envelopes,
+                TORNADO_CEILING_FT,
+                TORNADO_RETAIL_CEILING_FT,
+                TORNADO_RETAIL_ZERO_G_TOP_FT,
+            )
         }
         AircraftId::F5E => {
-            if range(plane, "envMin") != Some(F5E_RETAIL_G_MIN)
-                || range(plane, "envMax") != Some(F5E_RETAIL_G_MAX)
+            if min != Some(F5E_RETAIL_G_MIN)
+                || max != Some(F5E_RETAIL_G_MAX)
                 || envelopes.len() != 13
             {
                 return false;
             }
-            // The +8 row repeats the -4 row; only that row is retired.
-            if envelopes[12].g != F5E_RETAIL_G_MAX || envelopes[12].points != envelopes[0].points {
+            // The +8 row repeats the -4 row, which is itself a sliver.
+            if envelopes[12].g != F5E_RETAIL_G_MAX
+                || envelopes[12].points != envelopes[0].points
+                || envelopes[0].points != F5E_RETAIL_STUB
+            {
                 return false;
             }
+            // B5-2 retired the repeat; B5-4 fits a +8 row from the +7 row and
+            // retires the -4 sliver (the -3 row carries the real -3 G).
             envelopes.pop();
-            set_max(plane, F5E_G_MAX);
+            let plus_seven = envelopes[11].clone();
+            let one = one_g(envelopes);
+            envelopes.push(fitted_row(&plus_seven, one.as_ref(), F5E_G_MAX));
+            envelopes.remove(0);
+            set(plane, "envMin", -3);
+            set(plane, "envMax", F5E_G_MAX);
             // The ceiling follows `maxAlt`: only a record whose ceiling field
             // was just corrected, with the retail 0 G and 1 G polygons, moves.
             let one = envelopes.iter().position(|e| e.g == 1);
@@ -370,11 +594,7 @@ pub(crate) fn fit_envelopes(
                 {
                     let shift = f64::from(F5E_CEILING_FT - F5E_RETAIL_CEILING_FT);
                     for row in [zero, one] {
-                        let top = envelopes[row]
-                            .points
-                            .iter()
-                            .map(|p| p[1])
-                            .fold(f64::MIN, f64::max);
+                        let top = top_altitude(&envelopes[row]);
                         for p in &mut envelopes[row].points {
                             if p[1] == top {
                                 p[1] += shift;
@@ -383,6 +603,85 @@ pub(crate) fn fit_envelopes(
                     }
                 }
             }
+            true
+        }
+        AircraftId::F15E => {
+            let mut done = false;
+            if min == Some(F15E_RETAIL_G_MIN)
+                && max == Some(F15E_RETAIL_G_MAX)
+                && envelopes.len() == 14
+                && envelopes[0].g == F15E_RETAIL_G_MIN
+                && envelopes[0].points == F15E_RETAIL_STUB
+                && let Some(last) = envelopes.last().cloned()
+                && last.g == F15E_RETAIL_G_MAX
+                && last.points == F15E_RETAIL_PLUS_9
+            {
+                let one = one_g(envelopes);
+                envelopes.push(fitted_row(&last, one.as_ref(), F15E_G_MAX));
+                envelopes.remove(0);
+                set(plane, "envMin", -3);
+                set(plane, "envMax", F15E_G_MAX);
+                done = true;
+            }
+            done | lower_ceiling(
+                object,
+                envelopes,
+                F15E_CEILING_FT,
+                F15E_RETAIL_CEILING_FT,
+                F15E_RETAIL_ZERO_G_TOP_FT,
+            )
+        }
+        AircraftId::Gripen => {
+            let mut done = false;
+            // The -4 row is the +8 row (the record mirrors each negative row on
+            // the positive row of twice the G).
+            if min == Some(GRIPEN_RETAIL_G_MIN)
+                && max == Some(GRIPEN_RETAIL_G_MAX)
+                && envelopes
+                    .first()
+                    .is_some_and(|e| e.g == GRIPEN_RETAIL_G_MIN)
+                && let Some(plus_eight) = row_g(envelopes, 8)
+                && envelopes[0].points == plus_eight.points
+            {
+                envelopes.remove(0);
+                set(plane, "envMin", GRIPEN_G_MIN);
+                done = true;
+            }
+            done | lower_ceiling(
+                object,
+                envelopes,
+                GRIPEN_CEILING_FT,
+                GRIPEN_RETAIL_CEILING_FT,
+                GRIPEN_RETAIL_ZERO_G_TOP_FT,
+            )
+        }
+        AircraftId::Mf1 => {
+            if min != Some(MF1_RETAIL_G_MIN) || max != Some(MF1_RETAIL_G_MAX) {
+                return false;
+            }
+            let (Some(last), Some(plus_six)) = (envelopes.last().cloned(), row_g(envelopes, 6))
+            else {
+                return false;
+            };
+            if last.g != MF1_RETAIL_G_MAX
+                || last.points != MF1_RETAIL_PLUS_7
+                || envelopes
+                    .first()
+                    .is_none_or(|e| e.points != plus_six.points)
+            {
+                return false;
+            }
+            let plus_eight = fitted_row(&last, one_g(envelopes).as_ref(), MF1_G_MAX);
+            envelopes.insert(
+                0,
+                Envelope {
+                    g: MF1_G_MIN,
+                    points: plus_eight.points.clone(),
+                },
+            );
+            envelopes.push(plus_eight);
+            set(plane, "envMin", MF1_G_MIN);
+            set(plane, "envMax", MF1_G_MAX);
             true
         }
         _ => false,
@@ -608,6 +907,82 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "maxAlt",
         retail: F5E_RETAIL_CEILING_FT,
         corrected: F5E_CEILING_FT,
+    },
+    // B5-4 (opinionated, John, 2026-11-11): maxima and fuel flows per real
+    // figures. F-15E: flows of two F100 at the record's thrust, 60,000 ft.
+    Correction {
+        id: AircraftId::F15E,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 4,
+        corrected: F15E_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::F15E,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: 24,
+        corrected: F15E_AB_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::F15E,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: F15E_RETAIL_CEILING_FT,
+        corrected: F15E_CEILING_FT,
+    },
+    // Gripen: RM12 flows, 50,000 ft.
+    Correction {
+        id: AircraftId::Gripen,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 2,
+        corrected: GRIPEN_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::Gripen,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: 14,
+        corrected: GRIPEN_AB_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::Gripen,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: GRIPEN_RETAIL_CEILING_FT,
+        corrected: GRIPEN_CEILING_FT,
+    },
+    // F-5E: two J85-GE-21 flows.
+    Correction {
+        id: AircraftId::F5E,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 1,
+        corrected: F5E_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::F5E,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: 8,
+        corrected: F5E_AB_FUEL_LB_PER_S,
+    },
+    // Tornado: 50,000 ft (its fuel flows are the B5-3 rows above).
+    Correction {
+        id: AircraftId::Tornado,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: TORNADO_RETAIL_CEILING_FT,
+        corrected: TORNADO_CEILING_FT,
+    },
+    // Mirage F1: the Atar 9K-50's afterburner flow (the dry 3 lb/s is right).
+    Correction {
+        id: AircraftId::Mf1,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: 23,
+        corrected: MF1_AB_FUEL_LB_PER_S,
     },
 ];
 
@@ -877,7 +1252,10 @@ mod tests {
         // 61,620 lb maximum take-off; the engine count (2) is already right.
         let retail = || {
             (
-                BTreeMap::from([("weight".to_string(), token(41_885))]),
+                BTreeMap::from([
+                    ("weight".to_string(), token(41_885)),
+                    ("maxAlt".to_string(), token(60_000)),
+                ]),
                 BTreeMap::from([
                     ("engines".to_string(), token(2)),
                     ("thrust".to_string(), token(35_270)),
@@ -903,6 +1281,8 @@ mod tests {
             TORNADO_AB_FUEL_LB_PER_S,
             (f64::from(TORNADO_AFT_THRUST_LBF) * 2.5 / 3600.).round() as i32
         );
+        // B5-4 (John, 2026-11-11): the published 50,000 ft service ceiling.
+        assert_eq!(n(&o, "maxAlt"), 50_000);
         assert_eq!(n(&o, "weight"), 31_065);
         assert_eq!(n(&p, "thrust"), 17_300);
         assert_eq!(n(&p, "aftThrust"), 32_150);
@@ -913,7 +1293,7 @@ mod tests {
             let (mut o, mut p) = retail();
             assert!(!apply(other, &mut o, &mut p));
             assert_eq!((n(&o, "weight"), n(&p, "thrust")), (41_885, 35_270));
-            assert_eq!(n(&p, "aftFuelConsumption"), 38);
+            assert_eq!((n(&o, "maxAlt"), n(&p, "aftFuelConsumption")), (60_000, 38));
         }
         // An edited record is read as it is (a changed flow included).
         let (mut o, mut p) = retail();
@@ -935,11 +1315,22 @@ mod tests {
                 ("thrust".to_string(), token(15_000)),
                 ("aftThrust".to_string(), token(30_000)),
                 ("maxTakeoffWeight".to_string(), token(30_203)),
+                ("fuelConsumption".to_string(), token(3)),
+                ("aftFuelConsumption".to_string(), token(23)),
             ])
         };
         let mut o = BTreeMap::from([("weight".to_string(), token(15_542))]);
         let mut p = retail();
         assert!(apply(AircraftId::Mf1, &mut o, &mut p));
+        // B5-4 (John, 2026-11-11): the Atar's afterburner flow, the corrected
+        // thrust times the cited 1.991 lb/(lbf h) (8.78 lb/s, so 9); the dry
+        // 3 lb/s already matches (11,020 x 0.981 / 3,600 = 3.00).
+        assert_eq!(n(&p, "aftFuelConsumption"), 9);
+        assert_eq!(n(&p, "fuelConsumption"), 3);
+        assert_eq!(
+            MF1_AB_FUEL_LB_PER_S,
+            (f64::from(MF1_AFT_THRUST_LBF) * 1.991 / 3600.).round() as i32
+        );
         assert_eq!(n(&p, "thrust"), 11_020);
         assert_eq!(n(&p, "aftThrust"), 15_873);
         assert_eq!((n(&p, "engines"), n(&p, "maxTakeoffWeight")), (1, 30_203));
@@ -964,12 +1355,24 @@ mod tests {
                 BTreeMap::from([
                     ("internalFuel".to_string(), token(6_240)),
                     ("thrust".to_string(), token(7_000)),
+                    ("aftThrust".to_string(), token(10_000)),
+                    ("fuelConsumption".to_string(), token(1)),
+                    ("aftFuelConsumption".to_string(), token(8)),
                 ]),
             )
         };
         let (mut o, mut p) = retail();
         assert!(apply(AircraftId::F5E, &mut o, &mut p));
         assert_eq!(n(&p, "internalFuel"), 4_400);
+        // B5-4 (John, 2026-11-11): two J85-GE-21 at 1.24 dry and 2.13 reheat
+        // lb/(lbf h): 2.41 and 5.92 lb/s, so 2 and 6.
+        assert_eq!(n(&p, "fuelConsumption"), 2);
+        assert_eq!(n(&p, "aftFuelConsumption"), 6);
+        assert_eq!(F5E_FUEL_LB_PER_S, (7_000. * 1.24 / 3600_f64).round() as i32);
+        assert_eq!(
+            F5E_AB_FUEL_LB_PER_S,
+            (10_000. * 2.13 / 3600_f64).round() as i32
+        );
         assert_eq!(n(&o, "maxAlt"), 51_800);
         // Thrust, which is already the real F-5E's, is untouched.
         assert_eq!(n(&p, "thrust"), 7_000);
@@ -1012,7 +1415,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tornado_gets_a_fitted_plus_7_row_from_its_own_plus_6_row() {
+    fn the_tornado_gets_fitted_plus_7_and_plus_8_rows_from_its_own_plus_6_row() {
         let (mut plane, mut rows) = tornado_record();
         let none = BTreeMap::new();
         assert!(fit_envelopes(
@@ -1021,18 +1424,32 @@ mod tests {
             &mut plane,
             &mut rows
         ));
-        assert_eq!(n(&plane, "envMax"), 7);
-        assert_eq!(rows.len(), 11);
-        let top = rows.last().unwrap();
-        assert_eq!(top.g, 7);
+        assert_eq!(n(&plane, "envMax"), 8);
+        assert_eq!(rows.len(), 12);
+        let plus_seven = &rows[10];
+        assert_eq!(plus_seven.g, 7);
         // The slow side scales by sqrt(7 / 6) = 1.0801 and rounds; the fast
         // side and every altitude are the +6 row's.
         assert_eq!(
-            top.points,
+            plus_seven.points,
             vec![
                 [621., 0.],
                 [720., 7_000.],
                 [951., 14_000.],
+                [1_120., 14_000.],
+                [1_140., 0.]
+            ]
+        );
+        // B5-4: +8, sqrt(8 / 6) = 1.1547 on the slow side (575 to 664, 667 to
+        // 770, 880 to 1,016).
+        let top = rows.last().unwrap();
+        assert_eq!(top.g, 8);
+        assert_eq!(
+            top.points,
+            vec![
+                [664., 0.],
+                [770., 7_000.],
+                [1_016., 14_000.],
                 [1_120., 14_000.],
                 [1_140., 0.]
             ]
@@ -1064,6 +1481,77 @@ mod tests {
         assert_eq!((n(&plane, "envMax"), rows.len()), (6, 10));
     }
 
+    #[test]
+    fn the_tornado_flies_to_50_000_ft_only_with_the_corrected_ceiling_field() {
+        let corrected = BTreeMap::from([("maxAlt".to_string(), token(50_000))]);
+        let top = |e: &Envelope| e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+        let (mut plane, mut rows) = tornado_record();
+        // The 0 G polygon reaches 64,000 ft, the 1 G polygon 60,000 ft, and
+        // the 2 G polygon 52,000 ft; a 3 G polygon at 44,000 ft is under the
+        // new ceiling and is left alone.
+        rows[3].points = vec![[140., 0.], [820., 64_000.], [1_514., 64_000.], [1_420., 0.]];
+        rows[5].points = vec![
+            [270., 0.],
+            [600., 44_250.],
+            [870., 52_000.],
+            [1_375., 52_000.],
+            [2_007., 39_500.],
+            [1_290., 0.],
+        ];
+        rows[6].points = vec![[345., 0.], [870., 44_000.], [1_305., 44_000.], [1_250., 0.]];
+        let three = rows[6].points.clone();
+        assert!(fit_envelopes(
+            AircraftId::Tornado,
+            &corrected,
+            &mut plane,
+            &mut rows
+        ));
+        // 0 G keeps its 4,000 ft step above the 1 G polygon.
+        assert_eq!(top(&rows[3]), 54_000.);
+        assert_eq!(top(&rows[4]), 50_000.);
+        // The polygons are cut off at 50,000 ft: each edge that crossed it ends
+        // on it at the speed it had there (the 1 G slow edge, 200 ft/s at sea
+        // level to 870 at 60,000 ft, is 758 at 50,000 ft; the fast edge from
+        // 1,484 at 60,000 ft to 2,310 at 36,000 ft is 1,828 there), and every
+        // vertex at or below it stays.
+        assert_eq!(
+            rows[3].points,
+            vec![[140., 0.], [714., 54_000.], [1_499., 54_000.], [1_420., 0.]]
+        );
+        assert_eq!(
+            rows[4].points,
+            vec![
+                [200., 0.],
+                [758., 50_000.],
+                [1_828., 50_000.],
+                [2_310., 36_000.],
+                [1_360., 0.]
+            ]
+        );
+        assert_eq!(
+            rows[5].points,
+            vec![
+                [270., 0.],
+                [600., 44_250.],
+                [800., 50_000.],
+                [1_476., 50_000.],
+                [2_007., 39_500.],
+                [1_290., 0.]
+            ]
+        );
+        assert_eq!(rows[6].points, three);
+        // With the retail ceiling field still on the record the polygons stay.
+        let stale = BTreeMap::from([("maxAlt".to_string(), token(60_000))]);
+        let (mut plane, mut rows) = tornado_record();
+        assert!(fit_envelopes(
+            AircraftId::Tornado,
+            &stale,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!(top(&rows[4]), 60_000.);
+    }
+
     fn f5e_record() -> (BTreeMap<String, Token>, Vec<Envelope>) {
         let plane = BTreeMap::from([
             ("envMin".to_string(), token(-4)),
@@ -1077,15 +1565,16 @@ mod tests {
             .collect();
         rows[4].points = F5E_RETAIL_ZERO_G.to_vec();
         rows[5].points = F5E_RETAIL_ONE_G.to_vec();
+        // The +7 row (retail, 525@0 to 800@0).
+        rows[11].points = vec![[525., 0.], [580., 7_000.], [780., 6_000.], [800., 0.]];
         // The +8 row repeats the -4 row (570@0, 610@4000, 730@3000, 760@0).
-        let minus_four = vec![[570., 0.], [610., 4_000.], [730., 3_000.], [760., 0.]];
-        rows[0].points = minus_four.clone();
-        rows[12].points = minus_four;
+        rows[0].points = F5E_RETAIL_STUB.to_vec();
+        rows[12].points = F5E_RETAIL_STUB.to_vec();
         (plane, rows)
     }
 
     #[test]
-    fn the_f5e_tops_out_at_plus_7_and_flies_to_51_800_ft() {
+    fn the_f5e_tops_out_at_plus_8_with_a_fitted_row_and_flies_to_51_800_ft() {
         let object = BTreeMap::from([("maxAlt".to_string(), token(51_800))]);
         let (mut plane, mut rows) = f5e_record();
         assert!(fit_envelopes(
@@ -1094,25 +1583,34 @@ mod tests {
             &mut plane,
             &mut rows
         ));
-        // +8 (a repeat of -4) is retired; +7 is the top row.
-        assert_eq!((n(&plane, "envMin"), n(&plane, "envMax")), (-4, 7));
+        // B5-4 (John, 2026-11-11): the -4 sliver is retired (-3 is the real
+        // negative limit) and the repeated +8 row is replaced by a +8 row
+        // fitted from the +7 row (sqrt(8 / 7) = 1.069 on the slow side).
+        assert_eq!((n(&plane, "envMin"), n(&plane, "envMax")), (-3, 8));
         assert_eq!(rows.len(), 12);
-        assert_eq!(rows.last().unwrap().g, 7);
+        assert_eq!((rows[0].g, rows.last().unwrap().g), (-3, 8));
+        assert_eq!(
+            rows[10].points,
+            vec![[525., 0.], [580., 7_000.], [780., 6_000.], [800., 0.]]
+        );
+        assert_eq!(
+            rows[11].points,
+            vec![[561., 0.], [620., 7_000.], [780., 6_000.], [800., 0.]]
+        );
         // The 1 G and 0 G top edges move by 9,800 ft; nothing else does.
-        let one = &rows[5];
-        assert_eq!(one.g, 1);
+        let one = rows.iter().find(|e| e.g == 1).unwrap();
         assert_eq!(one.points[3], [458., 38_750.]);
         assert_eq!(one.points[4], [580., 51_800.]);
         assert_eq!(one.points[5], [965., 51_800.]);
         assert_eq!(one.points[6], [1_607., 39_000.]);
-        let zero = &rows[4];
+        let zero = rows.iter().find(|e| e.g == 0).unwrap();
         assert_eq!(zero.points[4], [570., 53_800.]);
         assert_eq!(zero.points[5], [995., 53_800.]);
         assert_eq!(zero.points[6], [1_607., 41_000.]);
         let top_alt = |e: &Envelope| e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
         assert_eq!(top_alt(one), 51_800.);
         // The retail ceiling field still on the record (an edited or partly
-        // corrected record) keeps its retail rows, but still loses the repeat.
+        // corrected record) keeps its retail rows, but still gets the G rows.
         let stale = BTreeMap::from([("maxAlt".to_string(), token(42_000))]);
         let (mut plane, mut rows) = f5e_record();
         assert!(fit_envelopes(
@@ -1121,14 +1619,14 @@ mod tests {
             &mut plane,
             &mut rows
         ));
-        assert_eq!(top_alt(&rows[5]), 42_000.);
-        assert_eq!(n(&plane, "envMax"), 7);
+        assert_eq!(top_alt(rows.iter().find(|e| e.g == 1).unwrap()), 42_000.);
+        assert_eq!((n(&plane, "envMin"), n(&plane, "envMax")), (-3, 8));
     }
 
     #[test]
     fn the_f5e_envelope_correction_needs_the_retail_range_and_repeat_row() {
         let object = BTreeMap::from([("maxAlt".to_string(), token(51_800))]);
-        for other in [AircraftId::F4E, AircraftId::F104, AircraftId::Tornado] {
+        for other in [AircraftId::F4E, AircraftId::F104, AircraftId::Mf1] {
             let (mut plane, mut rows) = f5e_record();
             assert!(!fit_envelopes(other, &object, &mut plane, &mut rows));
             assert_eq!((n(&plane, "envMax"), rows.len()), (8, 13));
@@ -1143,6 +1641,16 @@ mod tests {
             &mut rows
         ));
         assert_eq!((n(&plane, "envMax"), rows.len()), (8, 13));
+        // A -4 row that is not the sliver is authored too.
+        let (mut plane, mut rows) = f5e_record();
+        rows[0].points[1][0] += 1.;
+        rows[12].points[1][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::F5E,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
         let (mut plane, mut rows) = f5e_record();
         plane.get_mut("envMax").unwrap().value = "9".into();
         assert!(!fit_envelopes(
@@ -1151,5 +1659,389 @@ mod tests {
             &mut plane,
             &mut rows
         ));
+    }
+
+    /// A synthetic record shaped like the F-15E's: rows -4 (the sliver) to +9,
+    /// ceilings at 100,000 ft (1 G) and 105,000 ft (0 G).
+    fn f15e_record() -> (BTreeMap<String, Token>, Vec<Envelope>) {
+        let plane = BTreeMap::from([
+            ("envMin".to_string(), token(-4)),
+            ("envMax".to_string(), token(9)),
+        ]);
+        let mut rows: Vec<Envelope> = (-4..=9)
+            .map(|g| Envelope {
+                g,
+                points: vec![
+                    [300. + f64::from(g), 0.],
+                    [500., 20_000.],
+                    [1_500., 20_000.],
+                    [1_300., 0.],
+                ],
+            })
+            .collect();
+        rows[0].points = F15E_RETAIL_STUB.to_vec();
+        rows[4].points = vec![
+            [140., 0.],
+            [531., 74_000.],
+            [870., 105_000.],
+            [1_574., 105_000.],
+            [2_297., 75_500.],
+            [1_440., 0.],
+        ];
+        rows[5].points = vec![
+            [200., 0.],
+            [563., 65_000.],
+            [801., 96_000.],
+            [870., 100_000.],
+            [1_554., 100_000.],
+            [2_183., 74_250.],
+            [1_360., 0.],
+        ];
+        // The 2 G polygon reaches 85,000 ft; the 4 G polygon, 54,000 ft.
+        rows[6].points = vec![
+            [250., 0.],
+            [900., 85_000.],
+            [1_635., 85_000.],
+            [2_007., 71_000.],
+            [1_310., 0.],
+        ];
+        rows[8].points = vec![[365., 0.], [930., 54_000.], [1_440., 54_000.], [1_270., 0.]];
+        rows[13].points = F15E_RETAIL_PLUS_9.to_vec();
+        (plane, rows)
+    }
+
+    #[test]
+    fn the_f15e_gets_a_fitted_plus_10_row_and_loses_its_sliver_row() {
+        let object = BTreeMap::from([("maxAlt".to_string(), token(100_000))]);
+        let (mut plane, mut rows) = f15e_record();
+        assert!(fit_envelopes(
+            AircraftId::F15E,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        // -3 to +10, 14 rows, the +9 row untouched.
+        assert_eq!((n(&plane, "envMin"), n(&plane, "envMax")), (-3, 10));
+        let gs: Vec<i32> = rows.iter().map(|e| e.g).collect();
+        assert_eq!(gs, (-3..=10).collect::<Vec<_>>());
+        assert_eq!(rows[12].points, F15E_RETAIL_PLUS_9.to_vec());
+        // sqrt(10 / 9) = 1.0541 on the slow side (585 to 617, 687 to 724, 940
+        // to 991); the fast side and every altitude are the +9 row's.
+        assert_eq!(
+            rows[13].points,
+            vec![
+                [617., 0.],
+                [724., 5_500.],
+                [991., 10_000.],
+                [1_020., 9_000.],
+                [1_180., 0.]
+            ]
+        );
+        // The sliver is gone and no -3 row moved.
+        assert!(rows.iter().all(|e| e.points != F15E_RETAIL_STUB.to_vec()));
+        // Another identity (the F-15C carries the same rows), an authored -4
+        // row, a +9 row of another shape: unchanged.
+        for other in [AircraftId::F15, AircraftId::Gripen, AircraftId::F5E] {
+            let (mut plane, mut rows) = f15e_record();
+            assert!(!fit_envelopes(other, &object, &mut plane, &mut rows));
+            assert_eq!((n(&plane, "envMax"), rows.len()), (9, 14));
+        }
+        let (mut plane, mut rows) = f15e_record();
+        rows[0].points[1][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::F15E,
+            &BTreeMap::new(),
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!((n(&plane, "envMin"), rows.len()), (-4, 14));
+        let (mut plane, mut rows) = f15e_record();
+        rows[13].points[2][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::F15E,
+            &BTreeMap::new(),
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!((n(&plane, "envMax"), rows.len()), (9, 14));
+    }
+
+    #[test]
+    fn the_f15e_flies_to_60_000_ft_with_its_polygons_cut_off_there() {
+        let corrected = BTreeMap::from([("maxAlt".to_string(), token(60_000))]);
+        let top = |e: &Envelope| e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+        let (mut plane, mut rows) = f15e_record();
+        assert!(fit_envelopes(
+            AircraftId::F15E,
+            &corrected,
+            &mut plane,
+            &mut rows
+        ));
+        let row = |g: i32| rows.iter().find(|e| e.g == g).unwrap();
+        // 1 G: cut off at 60,000 ft; the slow edge (200 ft/s at sea level to 563
+        // at 65,000 ft) is 535 there, the fast edge (2,183 at 74,250 ft to
+        // 1,360 at sea level) 2,025, and everything below is the record's own.
+        assert_eq!(
+            row(1).points,
+            vec![[200., 0.], [535., 60_000.], [2_025., 60_000.], [1_360., 0.]]
+        );
+        // 0 G keeps its 5,000 ft step above the 1 G polygon (cut at 65,000).
+        assert_eq!(
+            row(0).points,
+            vec![[140., 0.], [483., 65_000.], [2_178., 65_000.], [1_440., 0.]]
+        );
+        // The 2 G row (85,000 ft) is cut at the 1 G ceiling; 4 G (54,000 ft)
+        // is under it and untouched.
+        assert_eq!(
+            row(2).points,
+            vec![[250., 0.], [709., 60_000.], [1_899., 60_000.], [1_310., 0.]]
+        );
+        assert_eq!(top(row(4)), 54_000.);
+        assert_eq!(row(4).points.len(), 4);
+        // The ceiling does not move a record whose `maxAlt` is not corrected,
+        // or whose polygons are not the retail ones.
+        let (mut plane, mut rows) = f15e_record();
+        fit_envelopes(
+            AircraftId::F15E,
+            &BTreeMap::from([("maxAlt".to_string(), token(100_000))]),
+            &mut plane,
+            &mut rows,
+        );
+        assert_eq!(top(rows.iter().find(|e| e.g == 1).unwrap()), 100_000.);
+        let (mut plane, mut rows) = f15e_record();
+        rows[5].points[3][1] = 99_000.;
+        rows[5].points[4][1] = 99_000.;
+        fit_envelopes(AircraftId::F15E, &corrected, &mut plane, &mut rows);
+        assert_eq!(top(rows.iter().find(|e| e.g == 1).unwrap()), 99_000.);
+    }
+
+    /// A synthetic record shaped like the Gripen's: rows -4 to +9 with the -4
+    /// row the +8 row, ceilings 60,000 ft (1 G) and 63,000 ft (0 G).
+    fn gripen_record() -> (BTreeMap<String, Token>, Vec<Envelope>) {
+        let plane = BTreeMap::from([
+            ("envMin".to_string(), token(-4)),
+            ("envMax".to_string(), token(9)),
+        ]);
+        let mut rows: Vec<Envelope> = (-4..=9)
+            .map(|g| Envelope {
+                g,
+                points: vec![
+                    [300. + f64::from(g), 0.],
+                    [500., 20_000.],
+                    [1_500., 20_000.],
+                    [1_300., 0.],
+                ],
+            })
+            .collect();
+        rows[4].points = vec![[160., 0.], [870., 63_000.], [1_734., 63_000.], [1_280., 0.]];
+        rows[5].points = vec![[200., 0.], [870., 60_000.], [1_684., 60_000.], [1_230., 0.]];
+        // The 3 G polygon: 52,000 ft with a second vertex just under it.
+        rows[7].points = vec![
+            [280., 0.],
+            [870., 52_000.],
+            [1_526., 51_875.],
+            [1_750., 32_000.],
+            [1_180., 0.],
+        ];
+        let plus_eight = vec![[520., 0.], [615., 11_000.], [920., 21_000.], [1_010., 0.]];
+        rows[12].points = plus_eight.clone();
+        rows[0].points = plus_eight;
+        (plane, rows)
+    }
+
+    #[test]
+    fn the_gripen_loses_its_minus_4_row_and_flies_to_50_000_ft() {
+        let corrected = BTreeMap::from([("maxAlt".to_string(), token(50_000))]);
+        let top = |e: &Envelope| e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+        let (mut plane, mut rows) = gripen_record();
+        assert!(fit_envelopes(
+            AircraftId::Gripen,
+            &corrected,
+            &mut plane,
+            &mut rows
+        ));
+        // The -4 row (a copy of +8) is retired; +9 stays the top row.
+        assert_eq!((n(&plane, "envMin"), n(&plane, "envMax")), (-3, 9));
+        let gs: Vec<i32> = rows.iter().map(|e| e.g).collect();
+        assert_eq!(gs, (-3..=9).collect::<Vec<_>>());
+        let row = |g: i32| rows.iter().find(|e| e.g == g).unwrap();
+        assert_eq!(top(row(1)), 50_000.);
+        assert_eq!(top(row(0)), 53_000.);
+        assert_eq!(
+            row(1).points,
+            vec![[200., 0.], [758., 50_000.], [1_608., 50_000.], [1_230., 0.]]
+        );
+        // The 3 G polygon's 52,000 ft and 51,875 ft vertices are both cut
+        // away; the edges ending on 50,000 ft keep the speed they had there.
+        assert_eq!(
+            row(3).points,
+            vec![
+                [280., 0.],
+                [847., 50_000.],
+                [1_547., 50_000.],
+                [1_750., 32_000.],
+                [1_180., 0.]
+            ]
+        );
+        // A -4 row that is its own shape, another identity or a stale ceiling
+        // field: the G rows or the ceiling stay as they were.
+        let (mut plane, mut rows) = gripen_record();
+        rows[0].points[1][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::Gripen,
+            &BTreeMap::new(),
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!((n(&plane, "envMin"), rows.len()), (-4, 14));
+        for other in [AircraftId::F15E, AircraftId::M2000, AircraftId::Rafale] {
+            let (mut plane, mut rows) = gripen_record();
+            assert!(!fit_envelopes(other, &corrected, &mut plane, &mut rows));
+            assert_eq!((n(&plane, "envMin"), rows.len()), (-4, 14));
+        }
+        let (mut plane, mut rows) = gripen_record();
+        let stale = BTreeMap::from([("maxAlt".to_string(), token(60_000))]);
+        assert!(fit_envelopes(
+            AircraftId::Gripen,
+            &stale,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!(top(rows.iter().find(|e| e.g == 1).unwrap()), 60_000.);
+        assert_eq!(n(&plane, "envMin"), -3);
+    }
+
+    /// A synthetic record shaped like the Mirage F1's: rows -3 to +7, each
+    /// negative row the positive row of twice the G.
+    fn mf1_record() -> (BTreeMap<String, Token>, Vec<Envelope>) {
+        let plane = BTreeMap::from([
+            ("envMin".to_string(), token(-3)),
+            ("envMax".to_string(), token(7)),
+        ]);
+        let mut rows: Vec<Envelope> = (-3..=7)
+            .map(|g| Envelope {
+                g,
+                points: vec![
+                    [300. + f64::from(g), 0.],
+                    [500., 20_000.],
+                    [1_500., 20_000.],
+                    [1_300., 0.],
+                ],
+            })
+            .collect();
+        rows[0].points = rows[9].points.clone();
+        rows[10].points = MF1_RETAIL_PLUS_7.to_vec();
+        rows[4].points = vec![[170., 0.], [870., 66_000.], [1_481., 66_125.], [1_350., 0.]];
+        (plane, rows)
+    }
+
+    #[test]
+    fn the_mirage_f1_gets_a_fitted_plus_8_row_and_the_same_polygon_as_its_minus_4_row() {
+        let (mut plane, mut rows) = mf1_record();
+        let none = BTreeMap::new();
+        assert!(fit_envelopes(AircraftId::Mf1, &none, &mut plane, &mut rows));
+        assert_eq!((n(&plane, "envMin"), n(&plane, "envMax")), (-4, 8));
+        let gs: Vec<i32> = rows.iter().map(|e| e.g).collect();
+        assert_eq!(gs, (-4..=8).collect::<Vec<_>>());
+        // sqrt(8 / 7) = 1.069 on the slow side (520 to 556, 645 to 690, 900 to
+        // 962); the fast side and every altitude are the +7 row's.
+        let expected = vec![
+            [556., 0.],
+            [690., 11_500.],
+            [962., 20_000.],
+            [1_075., 20_000.],
+            [1_240., 17_000.],
+            [1_230., 0.],
+        ];
+        assert_eq!(rows[12].points, expected);
+        assert_eq!(rows[0].points, expected);
+        assert_eq!(rows[11].points, MF1_RETAIL_PLUS_7.to_vec());
+        // The ceiling field (66,125 ft) is the real one and stays.
+        let top = |e: &Envelope| e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+        assert_eq!(top(rows.iter().find(|e| e.g == 1).unwrap()), 66_125.);
+        // Another identity, an edited +7 row, or a -3 row that is not the +6
+        // row: unchanged.
+        for other in [AircraftId::Tornado, AircraftId::M2000, AircraftId::F5E] {
+            let (mut plane, mut rows) = mf1_record();
+            assert!(!fit_envelopes(other, &none, &mut plane, &mut rows));
+            assert_eq!((n(&plane, "envMax"), rows.len()), (7, 11));
+        }
+        let (mut plane, mut rows) = mf1_record();
+        rows[10].points[1][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::Mf1,
+            &none,
+            &mut plane,
+            &mut rows
+        ));
+        let (mut plane, mut rows) = mf1_record();
+        rows[0].points[1][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::Mf1,
+            &none,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!((n(&plane, "envMin"), rows.len()), (-3, 11));
+    }
+
+    #[test]
+    fn cutting_a_polygon_at_the_ceiling_keeps_every_speed_band_below_it() {
+        let polygon = Envelope {
+            g: 1,
+            points: vec![
+                [200., 0.],
+                [563., 65_000.],
+                [801., 96_000.],
+                [870., 100_000.],
+                [1_554., 100_000.],
+                [2_183., 74_250.],
+                [2_366., 53_625.],
+                [2_420., 36_000.],
+                [1_360., 0.],
+            ],
+        };
+        let cut = Envelope {
+            g: 1,
+            points: clip_below(&polygon.points, 60_000.),
+        };
+        for altitude in [0., 1_000., 18_000., 36_000., 50_000., 53_625., 59_999.] {
+            let (old, new) = (
+                polygon.speeds(altitude).unwrap(),
+                cut.speeds(altitude).unwrap(),
+            );
+            // Rounding the two cut vertices to whole ft/s moves a band by
+            // less than 1 ft/s (a vertex at or below the cut is not moved).
+            assert!((old.0 - new.0).abs() < 1., "{altitude}: {old:?} {new:?}");
+            assert!((old.1 - new.1).abs() < 1., "{altitude}: {old:?} {new:?}");
+        }
+        assert_eq!(cut.speeds(60_001.), None);
+        assert_eq!(top_altitude(&cut), 60_000.);
+        // A polygon already under the cap is returned as it was, and a vertex
+        // exactly on the cap is not doubled.
+        let low = [[100., 0.], [200., 9_000.], [900., 9_000.], [800., 0.]];
+        assert_eq!(clip_below(&low, 9_000.), low.to_vec());
+        assert_eq!(clip_below(&low, 20_000.), low.to_vec());
+    }
+
+    #[test]
+    fn the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound() {
+        // (flow, thrust lbf, SFC lb/(lbf h)), each within the rounding of one
+        // whole pound a second, which is the record's unit.
+        let rows: [(i32, i32, f64); 8] = [
+            (F15E_FUEL_LB_PER_S, 32_558, 0.73),
+            (F15E_AB_FUEL_LB_PER_S, 47_860, 1.94),
+            (GRIPEN_FUEL_LB_PER_S, 12_140, 0.844),
+            (GRIPEN_AB_FUEL_LB_PER_S, 18_100, 1.79),
+            (MF1_AB_FUEL_LB_PER_S, MF1_AFT_THRUST_LBF, 1.991),
+            (TORNADO_FUEL_LB_PER_S, TORNADO_THRUST_LBF, 0.598),
+            (TORNADO_AB_FUEL_LB_PER_S, TORNADO_AFT_THRUST_LBF, 2.5),
+            (F5E_AB_FUEL_LB_PER_S, 10_000, 2.13),
+        ];
+        for (flow, thrust, sfc) in rows {
+            let exact = f64::from(thrust) * sfc / 3600.;
+            assert_eq!(flow, exact.round() as i32, "{thrust} lbf at {sfc}");
+            assert!((f64::from(flow) - exact).abs() <= 0.5);
+        }
     }
 }

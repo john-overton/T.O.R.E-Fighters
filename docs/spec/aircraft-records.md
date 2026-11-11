@@ -321,3 +321,84 @@ consumption of 0.624 and an afterburner one of 2.463 lb/(lbf h) at the record's
 thrust. Trimmed cruise at 65 percent of top speed burns 2.54 lb/s, 73.7 minutes
 and about 890 nm from a full tank. Thrust, weights and the G rows are the B5-2
 values.
+
+## Batch 5 flight maxima and fuel flows (B5-4, 2026-11-11)
+
+**Opinionated (John, 2026-11-11: "Correct all flight model maximums and fuel
+flows per realistic numbers that fit in TORE"), implemented by slice B5-4.** It
+applies to the five batch aircraft and supersedes the earlier "leave as retail"
+answers for these quantities (the Gripen's ceiling and -4 limit, the F-5E's G,
+the Tornado's ceiling, the Mirage F1's afterburner flow and +7 row, the F-15E's
+100,000 ft ceiling). Thrust and weights are John's earlier decisions and do not
+move. Like the corrections above, each is a TORE override that applies only
+while the record still holds the retail value it replaces
+(`aircraft_corrections.rs`: `CORRECTIONS` rows for the fields, `fit_envelopes`
+for the envelope rows). The earlier sections of this page are kept as written;
+where this section differs (the Tornado's +7, the F-5E's +7, the Mirage F1's
+unchanged flows) it is the current rule.
+
+**The rule for G.** Envelope rows are whole G, and the model divides a row's G by
+a loading divisor, `1 + (fuel + stores) / empty weight x loadedElevator / 100`
+(the F-15E record's `loadedElevator` is 43, the other four 40), so the limit on
+the record is only pulled nearly empty. John's Mirage 2000 precedent (M2K-11) is
+to judge the limit at half internal fuel. So for each aircraft the top row is the
+whole G at which the clean aircraft, at half its internal fuel, pulls closest to
+the real limit without passing it by more than about 0.3 G. The new row is fitted
+from the aircraft's own top row by `fitted_row` (slow side times
+sqrt(new G / old G) rounded to whole ft/s; fast side and altitudes from the base
+row; fast side held to the 1 G top speed). The negative limit follows the same
+test at half fuel. The record mirrors each negative row on the positive row of
+twice the G (the -3 row is the +6 row, and so on), so a new -4 row is a copy of
+the +8 row.
+
+**The rule for ceilings.** The record's `maxAlt` field and the polygons agree
+(the model's ceiling is the top of the 1 G polygon). The F-5E's B5-2 fix moved
+the two top-edge vertices, which cannot work here: the F-15E, Gripen and Tornado
+have rows above the new ceiling (the F-15E's 2 G polygon reaches 85,000 ft). Each
+polygon is instead cut off at the new ceiling (the 0 G polygon at the same step
+above it that the record has: 5,000, 3,000 and 4,000 ft), so every speed band up
+to the ceiling is the record's own to within 1 ft/s of rounding.
+
+**The rule for fuel flows.** The record stores whole pounds a second for all
+engines, at full military power and at full afterburner. The new value is the
+record's thrust times the cited thrust-specific fuel consumption, over 3,600
+seconds an hour, rounded to the whole pound.
+
+| Aircraft | Field | Retail | Game | Real (cited) | Rounding error |
+| --- | --- | ---: | ---: | --- | ---: |
+| F-15E | Ceiling `maxAlt`, ft | 100,000 | 60,000 | 60,000 (Wikipedia "McDonnell Douglas F-15E Strike Eagle", specifications, read 2026-11-11; the game's `F15.INF` 60,000 to 65,000) | 0 |
+| F-15E | Top G row (`envMax`) | 9 | 10 | +9 (Wikipedia, same page; `F15E.INF` design +9 / -3); half fuel pulls 8.28 G with +9, 9.19 G with +10 | n/a |
+| F-15E | Lowest G row (`envMin`) | -4 (a sliver, 910 to 950 ft/s) | -3 | -3 (`F15.INF`); the pull is unchanged (2.74 G push at half fuel) | n/a |
+| F-15E | `fuelConsumption`, lb/s | 4 | 7 | 32,558 lbf x 0.73 lb/(lbf h) / 3,600 = 6.60 (Wikipedia "Pratt & Whitney F100", F100-PW-220 military, read 2026-11-11) | +6% |
+| F-15E | `aftFuelConsumption`, lb/s | 24 | 26 | 47,860 x 1.94 / 3,600 = 25.79 (same page, full afterburner; listed under the -229) | +1% |
+| Gripen | Ceiling `maxAlt`, ft | 60,000 | 50,000 | 50,000 (15,240 m; Wikipedia "Saab JAS 39 Gripen", JAS 39C/D specifications, read 2026-11-11) | 0 |
+| Gripen | Lowest G row (`envMin`) | -4 (a copy of the +8 row) | -3 | -3 (same page, "+9 / -3"); half fuel pushes 3.78 G with -4, 2.83 G with -3 | n/a |
+| Gripen | `fuelConsumption`, lb/s | 2 | 3 | 12,140 lbf x 0.844 / 3,600 = 2.85 (Wikipedia "Volvo RM12", read 2026-11-11) | +5% |
+| Gripen | `aftFuelConsumption`, lb/s | 14 | 9 | 18,100 x 1.79 / 3,600 = 9.00 (same page) | 0 |
+| F-5E | Top G row (`envMax`) | 7 (after B5-2) | 8 | +7.33 (T.O. 1F-5E-1, cited secondhand as in B5-2); half fuel pulls 6.49 G with +7, 7.41 G with +8 | n/a |
+| F-5E | Lowest G row (`envMin`) | -4 (a sliver, 570 to 760 ft/s) | -3 | -3.0 (same source); pull unchanged (2.77 G at half fuel) | n/a |
+| F-5E | `fuelConsumption`, lb/s | 1 | 2 | 7,000 lbf x 1.24 / 3,600 = 2.41 (Wikipedia "Thrust-specific fuel consumption", J85-GE-21, read 2026-11-11) | -17% |
+| F-5E | `aftFuelConsumption`, lb/s | 8 | 6 | 10,000 x 2.13 / 3,600 = 5.92 (same table) | +1% |
+| Tornado IDS | Ceiling `maxAlt`, ft | 60,000 | 50,000 | 50,000 (Wikipedia "Panavia Tornado" and the GR4 page, aerospaceweb.org, as read for TOR-8 on 2026-11-11) | 0 |
+| Tornado IDS | Top G row (`envMax`) | 7 (after B5-2) | 8 | +7.5 (`TOR.INF`); half fuel pulls 6.59 G with +7, 7.52 G with +8 | n/a |
+| Tornado IDS | Fuel flows, lb/s | 3 and 22 (B5-3) | 3 and 22 | confirmed: 17,300 x 0.598 / 3,600 = 2.87 and 32,150 x 2.5 / 3,600 = 22.3 | +4.5%, -1.3% |
+| Mirage F1 | Top G row (`envMax`) | 7 | 8 | +7.5 (MIGFlug "Dassault Mirage F1", "as commonly published", read 2026-11-11); half fuel pulls 6.59 G with +7, 7.53 G with +8 | n/a |
+| Mirage F1 | Lowest G row (`envMin`) | -3 | -4 | -3.6 (same page); half fuel pushes 2.80 G with -3, 3.74 G with -4 | n/a |
+| Mirage F1 | `aftFuelConsumption`, lb/s | 23 | 9 | 15,873 lbf x 1.991 / 3,600 = 8.78 (Wikipedia TSFC table, Atar 09K-50, read 2026-11-11); the dry 3 lb/s already matches (0.98 against 0.981) | +2.5% |
+
+Left as retail (inside about 5 percent or half a G of the real figure): the
+Gripen's +9 (half fuel pulls 8.52 G; a +10 row would pull 9.47 G, 0.47 over),
+the F-5E's ceiling (B5-2, 51,800 ft), the Tornado's -3, the Mirage F1's ceiling
+(66,125 ft against 65,600 to 66,000) and its top speeds, the Tornado's top speeds.
+The F-15E, Gripen and F-5E top speeds were not changed: the record's envelope is
+not another aircraft's, and what is left is the shared drag law, which John has
+not decided (see [the variety flight baseline](../baselines/variety-flight.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11)).
+
+What a player notices (`performance_probe`, clean, afterburner, 461 kt at 1,000 ft,
+full aft stick; endurance from `PROBE_ONLY=fuel`): the F-15E pulls 9.19 G at half
+fuel instead of 8.28 and its military endurance on a full tank falls from 56.9 to
+32.5 minutes; the Gripen can no longer push -4 (2.83 G at half fuel) and burns its
+afterburner 55 percent longer (9.3 minutes); the F-5E pulls 7.41 G at half fuel
+and lasts 36.7 minutes at military power (73.3 before); the Tornado and the Mirage
+F1 pull 7.5 G at half fuel; the Mirage F1's afterburner lasts 11.3 minutes (4.4
+before). Every figure is in the baseline.

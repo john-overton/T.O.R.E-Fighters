@@ -5322,3 +5322,67 @@ third), `EGY QESAIR` one more, and `VLA QVLAIR` lists two `F5EV.PT` at
 `gear 0x614c`, same scale and `origin-up 6.00`; the ignored retail test
 `parked_aircraft::import_tests::every_parked_type_reads_and_stands_on_its_gear`
 passes. `F5E.PT` is not parked and never replaces either (B6).
+
+## Batch 5 flight maxima and fuel flows (B5-4, 2026-11-11)
+
+Implementation mode, slice B5-4, **opinionated (John, 2026-11-11: "Correct all
+flight model maximums and fuel flows per realistic numbers that fit in TORE")**.
+It supersedes the earlier "leave as retail" answers for these quantities in the
+F-15E, Gripen, F-5E, Tornado and Mirage F1 sections above (each is kept as
+written; this section is the current rule). Thrust and weights are untouched. The
+rules (G at half fuel, cut-off ceilings, thrust times cited consumption) are in
+[aircraft records](../spec/aircraft-records.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11);
+the before and after measurements are in
+[the variety flight baseline](../baselines/variety-flight.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11).
+Provenance: **cited** is a public page read 2026-11-11 unless dated otherwise;
+**measured** is a `performance_probe` or `envelope_probe` run on the local record;
+**judgement** is an agent decision.
+
+Audit, per aircraft (record before, game after, real; the provenance of each real
+figure in brackets).
+
+| Quantity | F-15E | Gripen | F-5E | Tornado IDS | Mirage F1 |
+| --- | --- | --- | --- | --- | --- |
+| Top G row | +9, now +10 (half fuel 8.28 to 9.19 G) | +9 kept (half fuel 8.52 G) | +7, now +8 (6.49 to 7.41 G) | +7, now +8 (6.59 to 7.52 G) | +7, now +8 (6.59 to 7.53 G) |
+| Real positive G | +9 [cited, Wikipedia F-15E, `F15E.INF`] | +9, +12 if needed [cited, Wikipedia JAS 39] | +7.33 [cited secondhand, T.O. 1F-5E-1 via a forum thread, B5-2] | +7.5 [cited, `TOR.INF`] | +7.5 [cited, MIGFlug, "as commonly published"] |
+| Lowest G row | -4 sliver, now -3 (push 2.74 G, unchanged) | -4 (+8 copy), now -3 (3.78 to 2.83 G) | -4 sliver, now -3 (2.77 G, unchanged) | -3 kept (2.81 G) | -3, now -4 (2.80 to 3.74 G) |
+| Real negative G | -3 [cited, `F15.INF`] | -3 [cited, Wikipedia JAS 39] | -3.0 [cited secondhand] | -3 [cited, TOR-8] | -3.6 [cited, MIGFlug] |
+| Ceiling, `maxAlt` and 1 G polygon top | 100,000, now 60,000 | 60,000, now 50,000 | 51,800 (B5-2) | 60,000, now 50,000 | 66,125 kept |
+| Real ceiling | 60,000 [cited, Wikipedia F-15E] | 50,000 [cited, Wikipedia JAS 39] | 51,800 [cited] | 50,000 [cited, TOR-8] | 65,600 to 66,000 [cited, Wikipedia, MIGFlug] |
+| Top speed at 36,000 ft, measured (record) | 1,313 kt, Mach 2.29 (1,434) | 1,090 kt, Mach 1.90 (1,145) | 1,021 kt, Mach 1.78 (1,090) | 1,321 kt, Mach 2.30 (1,369) | 1,271 kt, Mach 2.22 (1,345) |
+| Real top speed at altitude | Mach 2.5 [cited] | Mach 2 [cited] | Mach 1.63 [cited, B5-2 read] | Mach 2.2 [cited, TOR-8] | Mach 2.2, 1,262 kt [cited] |
+| Top speed at 1,000 ft, measured (record) | 750 kt, Mach 1.14 (819) | 704 kt, Mach 1.07 (739) | 685 kt, Mach 1.04 (731) | 793 kt, Mach 1.20 (821) | 762 kt, Mach 1.16 (806) |
+| Real top speed at sea level | Mach 1.2, 800 kt [cited] | Mach 1.2, 794 kt [cited] | none found | Mach 1.2 [cited, TOR-8] | 800 kt, Mach 1.2 [cited] |
+| Military flow, lb/s (implied lb/(lbf h)) | 4 (0.442), now 7 (0.774) | 2 (0.593), now 3 (0.890) | 1 (0.514), now 2 (1.029) | 3 (0.624), kept | 3 (0.980), kept |
+| Afterburner flow, lb/s (implied) | 24 (1.805), now 26 (1.956) | 14 (2.785), now 9 (1.790) | 8 (2.880), now 6 (2.160) | 22 (2.463), kept | 23 (5.216), now 9 (2.041) |
+| Cited consumption, lb/(lbf h) | 0.73 / 1.94 [cited, F100] | 0.844 / 1.79 [cited, RM12] | 1.24 / 2.13 [cited, J85-GE-21] | 0.598 / 2.5 [cited, RB.199] | 0.981 / 1.991 [cited, Atar 09K-50] |
+
+**Corrected.** F-15E: `maxAlt` 60,000 ft (polygons cut off there), +10 row,
+the -4 sliver retired, flows 7 and 26. Gripen: `maxAlt` 50,000 ft, the -4 row
+(a copy of the +8 row) retired, flows 3 and 9. F-5E: +8 row (fitted from +7), the
+-4 sliver retired, flows 2 and 6. Tornado: `maxAlt` 50,000 ft, rows +7 and +8,
+flows confirmed (B5-3). Mirage F1: rows +8 and -4, afterburner flow 9.
+
+**Declined, with reasons.**
+
+- Top speeds, all five: the record's envelope is the aircraft's own; the gap to
+  the real figure comes from the shared drag law (the level speed is 92 to 97
+  percent of the record's top edge), which is a fleet question for John; a per-
+  record polygon fit was not made. The largest gaps: Gripen at sea level 11 percent
+  under, F-15E at 36,000 ft 8 percent under, F-5E at 36,000 ft 9 percent over
+  (record 16 percent over).
+- Gripen +9: half fuel pulls 8.52 G (0.48 G under); +10 would pull 9.47 G (0.47 over
+  the 0.3 G allowance).
+- Mirage F1 ceiling, Tornado -3 and top speeds, F-5E ceiling: inside 5 percent or
+  half a G.
+- Mirage F1 -3.6 is not a whole G; the -4 row is the nearest at half fuel (3.74 G, 0.14
+  over).
+
+**Findings.** (1) The model pulls the limit only near empty, so at full fuel the
+corrected aircraft are still under the real limit (F-15E 8.41 G, Gripen 8.00 G,
+F-5E 6.83 G, Tornado 7.05 G, Mirage F1 7.01 G) and near empty they pass it by up
+to 1.1 G (F-15E 10.10 G); the half-fuel reading is John's Mirage 2000 choice. (2)
+The F-15E and Gripen `fuelConsumption` values are rounded to whole pounds a
+second, a 5 to 6 percent error on the dry flow; the F-5E's is 17 percent. (3) The
+F-5E speed polygon is 16 percent over the real top speed; the sea-level figure was
+not found in any source read.
