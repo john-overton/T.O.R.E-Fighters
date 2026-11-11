@@ -2057,7 +2057,6 @@ RWR window is aircraft-agnostic code (`rwr_readout`), covered by the shared unit
 tests. The frames show the window with the jammer lit and with the incoming
 round at the centre.
 
-
 ## Mirage 2000 flight review (M2K-8, 2026-11-10)
 
 Dated section, additions only. The Mirage 2000 flies the hybrid adapter's own
@@ -2149,7 +2148,6 @@ QFLAIR` and `FRA QFSAIR` list `M2000.PT` with `gear 0x589c`, `scale 0.3333` and
 `origin-up 6.02` (the scaled gear low point), and `--surface-scene` draws it
 gear down on the apron at the same size as the flown aircraft (see
 [parked aircraft](../spec/surface-defenses.md#parked-aircraft)).
-
 
 ## Wire identity widened to 9 bits (NET-ID9, 2026-11-10)
 
@@ -2583,7 +2581,6 @@ wire identity is 9 bits since NET-ID9, so capacity is not a constraint.
 | CFTs baked in the shape? | Row 7 and frames | F15E-2 frame check |
 | Tank and bomb clipping under the belly | Station rows | F15E-5 stop-and-report |
 | Per-row default quantities | Stores load | F15E-6 |
-||||||| 25a8c5b0
 
 ## Gripen source review (2026-11-10)
 
@@ -3058,8 +3055,6 @@ is not aliased to any other record.
 | Wingtip row 1 ft outboard of the tip | Stations | GRI-5 measures |
 | Gun side and 570 rounds | Gun row | GRI-5/GRI-6 |
 | Radio callout absent | Chatter | None (no `^ACMGRI*`); GRI-9 notes |
-||||||| 25a8c5b0
-
 
 ## F-5E source review (2026-11-10)
 
@@ -3442,7 +3437,6 @@ underside through the top and no z-fighting.
 Provenance: shape and skin spec-derived (retail data read as data); the
 damage pairing and the omitted decals agent decisions (2026-11-10); size
 pending John (no scale).
-||||||| 25a8c5b0
 
 ## Tornado source review (2026-11-10)
 
@@ -3932,8 +3926,6 @@ is 9 bits (NET-ID9), so there is no capacity constraint.
 | Pave Spike fixed row | Not on a Tornado | John, options above |
 | Real station positions | Rows 5 to 8 vs the real pylons | Needs a cited drawing (TOR-5) |
 | Gear dimensions | Wheelbase and track unverified | TOR-4 with a cited source |
-||||||| 25a8c5b0
-
 
 ## Mirage F1 source review (2026-11-10)
 
