@@ -22,6 +22,8 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // Batch 5 (B5-1): the Mirage F1 names rafale.HUD like the Mirage 2000
         // and flies the Rafale glass. The F-15E names av8.HUD like the F-15C,
         // and "AV8" above already resolves to the same glass.
+        // Mirage F1: rafale.HUD is the decided binding (opinionated, John,
+        // 2026-11-10, MF1-7), no longer interim; "RAF" above is its glass.
         _ => id,
     };
     let (expected, polygon): ((usize, usize), &[Point]) = match id {
@@ -298,5 +300,16 @@ mod tests {
         assert_eq!(f22, mask(&source, AircraftId::Faxx));
         assert_eq!(f22[200 * 1000 + 500], 1);
         assert_eq!(f22[100 * 1000 + 320], 0);
+    }
+
+    /// MF1-7: the Mirage F1 flies the Rafale's `rafale.HUD` family, so its glass
+    /// is the Rafale's measured polygon (the Mirage 2000's too), not an empty one.
+    #[test]
+    fn the_mirage_f1_draws_the_rafale_glass() {
+        let source = transparent(1280, 490);
+        let mf1 = mask(&source, AircraftId::Mf1);
+        assert_eq!(mf1, mask(&source, AircraftId::Rafale));
+        assert_eq!(mf1, mask(&source, AircraftId::M2000));
+        assert!(mf1.contains(&1));
     }
 }

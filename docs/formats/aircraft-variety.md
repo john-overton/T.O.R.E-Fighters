@@ -4107,6 +4107,11 @@ Options (none chosen), as in the Mirage 2000 review:
 Agent note: option 1 is evidenced and needs one exhaustive stem arm in MF1-7,
 exactly as M2K-7 did.
 
+Update (MF1-7, 2026-11-10): John chose option 1 in the batch decision round
+(decision 25, "follow the record", opinionated); the stem arm already existed
+from B5-1 and needed no change. See [Mirage F1 sensors, HUD and
+cockpit](#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).
+
 ### Mirage F1 parked path
 
 `("MF1.PT", Some(0x5adc))` is in the `GEAR` table of the retail test in
@@ -4440,6 +4445,12 @@ name `BK27.JT` as mounted by exactly the Gripen and the Tornado.
 | Tornado draw scale | 2/3 ft a unit | See below. |
 | Rig and gear | Gear word only; the other words pinned, unmapped | As the Mirage 2000 interim: the shared fitted gear law until X-3 and X-4. |
 
+Update (MF1-7, 2026-11-10): for the Mirage F1 the HUD and cockpit binding row is
+decided, no longer interim: John chose to follow the record, `rafale.HUD`, in the
+batch decision round (decision 25), so it is opinionated (John, 2026-11-10). The
+other aircraft's bindings stay as their own slices find them. See [Mirage F1
+sensors, HUD and cockpit](#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).
+
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
 identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
@@ -4579,3 +4590,109 @@ agree); the real carries one tank a side where the record's default carries two.
 No pod or designator was added. Counts and audit pins unchanged (45 aircraft, 18
 recovered stations, 4,652 weapon and 233 tank placements, 80 pods, 220
 Cheat-only). Frames: `.local/m3-aircraft/frames/MF1-5/` (local only).
+
+## Mirage F1 sensors, HUD and cockpit (MF1-7, 2026-11-10)
+
+Slice MF1-7 confirmed the Mirage F1 on the sensor records and the Rafale HUD and
+cockpit family its record names. John's decision round of 2026-11-10 (decision 25,
+"follow the record", opinionated) settled what the batch identity slice had wired
+as an interim agent decision: the F1 flies `rafale.HUD`, the same binding as the
+Mirage 2000. Only two comments changed (`aircraft.rs`, `hud_aperture.rs`). Added:
+a retail-reading test (`crates/tore-import/tests/mf1_cockpit.rs`), an aperture
+unit test and documentation. No behaviour changed.
+
+**Sensors (spec-derived, retail records, already reviewed).** `--sensor-summary`
+reads: `Mf1: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg
+look-down 0 ADVANCED; infrared none; visual VIS340.SEE search 10 nmi 170x140 deg
+track 5 nmi 170x140 deg; jammer AV8.ECM EARLY strength 0.00 (no RF mode); signature
+radar 100 infrared 100`. The radar is the Mirage 2000's and the F/A-18's
+(`F18R.SEE`, `Preset::Advanced`); no `sensors/profile.rs` arm was needed. The
+visual record is `VIS340.SEE`. The infrared channel is absent because the record
+has no `.SEE` infrared row. Nothing under `crates/tore-sim/src/sensors` branches
+on the aircraft identity, so radar modes, the scope and the RWR behave as for the
+other `F18R.SEE` aircraft. A live-fire run (`--live-fire --aircraft mf1
+--weapon-slot 2`, the wing Magic pair; slot 3, the wingtip pair, behaves alike)
+shows the Radar window `TWS 10NM 1 CONTACTS TRACK`, the weapon window `R-550
+Magic ... LOCK`, the HUD `ARM 1 R-550 ... IN RNG`, and the Magic locks, flies,
+hits and kills (`shots=1 hits=1 kills=1` at 700 and 1,500 ticks; at 150 to 450
+ticks it is still flying, `hits=0 active=1`). The signature numbers (radar 100,
+infrared 100) are the record's own and differ from the Rafale's 50 and 70.
+
+**Countermeasures and the jammer.** `AV8.ECM` is the AV-8B's reviewed internal
+suite (`Generation::Early`, decoy chance and counts from the record): it has **no
+radio-frequency jammer mode** (`strength 0.00`), only chaff and flares. The
+Weapons window shows `30 CHAFF` and `30 FLARE`; `--combat-command chaff` and
+`flare` with `--countermeasure-preview 240` read `carried_chaff=29
+carried_flares=29 capacity_chaff=30 capacity_flares=30` after one of each, and the
+devices draw behind the aircraft. The jammer key (`--jammer-on`) lights `ECM ON`
+and `JAM` in the RWR window as for any aircraft, but with strength 0.00 it adds
+no radar jamming: this is the one sensor difference from the Mirage 2000, whose
+`F18.ECM` is `LATE` at 0.30. The B5-2 default pod `ALQ167.ECM` on the centreline
+is empty for play (John, decision 27); the retail record still lists it, and the
+test accepts both. The RWR window draws as for every aircraft; no scripted path
+plots an emitter or a missile on the player's RWR (the live-fire fixture's target
+emits no radar and the incoming-round command plots at the centre), the same
+limit as the Mirage 2000 review ([lane-flight](../testing/lane-flight.md)). The
+frame shows the window with `JAM` lit and an incoming round.
+
+**HUD and cockpit (opinionated, John, 2026-11-10, decision 25).**
+`AircraftId::Mf1.hud()` is `RAFALE.HUD` (the record's `rafale.HUD` resolves
+case-insensitively; same file and hash as the Rafale's and the Mirage 2000's), the
+cockpit stem is `RAF`, the forward art `~RAFH.PIC` and the instrument window frame
+`~RAF_P.PIC` (`Hud::parse` of `RAFALE.HUD` names it). Neither the Rafale's nor
+the Mirage 2000's record is aliased: `MF1.PT` stays the identity (pinned in
+`mf1_cockpit.rs`, retail-reading, skips without media: the sensor rows
+`VIS340.SEE, F18R.SEE, AV8.ECM` and the centreline `ALQ167.ECM`, the first two
+equal to the Mirage 2000's and the jammer row present in the AV-8B's, the binding,
+the HUD's panel reference, the overlays `~RAF_LH`, `~RAF_CH`, `~RAF_RH`, the record
+naming `rafale.HUD`, the record's own eye offset, and that no `~MF*` cockpit
+resource exists). `hud_aperture.rs` resolves the stem `RAF` to the Rafale's
+measured glass; a new unit test pins that the F1's mask equals the Rafale's and
+the Mirage 2000's and is not empty. `--cockpit-sheet OUT_DIR MF1,M2000,RAFALE`
+(through `tools/agent-run.sh`; the flag takes no further options) printed `mf1:
+stem MF1 cockpit ~RAFH.PIC art 1280x490 FITTED CLR`, centre mirror x 461 y 24 w 360
+h 79, left x 140 y 242 w 118 h 248, right x 1024 y 242 w 118 h 248, identical to
+the Rafale and the Mirage 2000. No Mirage F1 cockpit art exists, so the F1 flies a
+Rafale cockpit, as the Mirage 2000 does. The front frame shows the HUD inside the
+Rafale combiner glass with no clipping.
+
+**Views (windowed, `--flight-view`, `--flight-look`).** Forward cockpit with the six
+small-layout windows; look left and right 45 degrees (the cockpit art turns away
+with the look, the HUD glass and canopy bow at the frame edge); 90 degrees left
+and right and 60 degrees up (no cockpit art, open sky, as for the Rafale and the
+Mirage 2000); `--flight-view 4` (F3 Up) and `--flight-view 3` (F2 Back). F2 Back
+shows the F1's spine, fin and tailplane roots from the pilot's eye. The standalone
+instrument pages 0 to 9 (RCS, Envelope, Front View, Other View, Target Cam, RWR,
+Nav Info, Systems, Weapons, Radar) draw with the Rafale bezel; the F1's own
+envelope polygon is drawn on page 1.
+
+**Instruments and the single engine.** The Systems window shows `THR`, `TEMP`,
+`OIL`, `HYD` and `FUEL` / `(+ EXT)`: one engine readout serves every aircraft, so
+the one-engine F1 shows one throttle and one temperature and no second engine
+needle (the panel art has none; the readouts are generated text). Fuel reads the F1
+record's own number: `FUEL 6120 LBS` (the Rafale reads 9,900, the Mirage 2000
+6,346), and `(+ EXT 6600 LBS)` with the default four `F250.GAS` of row 5 (1,650 lb
+each; the clipping on that row is MF1-5's open question), 6,595 to 6,592 lb after
+the first seconds of a run. The Weapons window lists `250 DEFA`, `4 R-550` and `30
+CHAFF` / `30 FLARE`. Throttle shows 70 percent at the free-flight start, as for
+the other aircraft. The HUD airspeed and altitude boxes read the F1's own state
+(540 kt and 5,000 ft at the live-fire start).
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye` is
+one fixed offset for every aircraft, 7 ft above and 10 ft ahead of the model
+origin, used only by F2 Back, the rear-view mirrors and the replay views; the
+forward cockpit looks from the origin with 2D art. The record's own `viewOffset`
+(x 0, y 20, z 60) equals the Mirage 2000's (the Rafale's z is 80) and no host
+code reads it, so there is no per-aircraft eye. Measured on the scaled neutral
+shape (the faces within 4 units of the centreline and ahead of the fin): the F1's
+roof line is 6 units, 2.1 ft above the origin after the height factor, and runs from
+unit 7 to unit 58 forward, 2.8 to 22.8 ft ahead; the shape draws no separate
+canopy bubble, so these are the spine and canopy faces together. The fixed eye
+therefore stands 4.9 ft above the roof and over its span, against 3.5 ft above
+the Mirage 2000's canopy top and 4.0 ft above the Rafale's. The F2 Back frames of
+the three show the same kind of picture (spine and fin from above and behind).
+Not changed; a seated eye would be a fleet change (a table keyed by aircraft
+through six call sites), a question for John as in the Mirage 2000 review.
+
+Evidence and frames: `.local/m3-aircraft/frames/MF1-7/` and
+`.local/m3-aircraft/checks/MF1-7/` (local only, no retail bytes committed).

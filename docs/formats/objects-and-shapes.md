@@ -1697,6 +1697,14 @@ little because x and y scale differently.
 Frames are under `.local/m3-aircraft/frames/MF1-2/`. No mesh bytes, exported
 geometry or retail art are committed.
 
+Cockpit eye point, 2026-11-10 (MF1-7, agent decision, unchanged): the table row
+above stays true. On the scaled Mirage F1 the roof line (faces within 4 units of
+the centreline, ahead of the fin) is 2.1 ft above the model origin and runs 2.8 to
+22.8 ft ahead of it, against the fixed pilot's eye 7 ft up and 10 ft ahead: the
+eye is 4.9 ft above the roof and over its span. The Mirage 2000's canopy top is
+3.5 ft below the eye, the Rafale's 4.0 ft. No per-aircraft eye was added; see [the
+Mirage F1 sensors, HUD and cockpit section](aircraft-variety.md#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).
+
 ## Mirage F1 skin review
 
 On 2026-11-10, slice MF1-2 checked the flyable `MF1.PT` import's skin (media

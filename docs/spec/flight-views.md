@@ -277,3 +277,11 @@ and at its aft end, the same place relative to its canopy as the Rafale's, so
 Back shows the Mirage's spine and fin the way it shows the Rafale's. Evidence in
 [the Mirage section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+## Pilot's eye on the Mirage F1 (2026-11-10, MF1-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for
+the Mirage F1 at its real-size scale (agent decision, no per-aircraft eye
+exists). Measured against the scaled shape it sits 4.9 feet above the roof line
+and over the roof's span (the Mirage 2000's eye is 3.5 feet above its canopy top,
+the Rafale's 4.0), so Back shows the F1's spine, fin and tailplane from above and
+behind. Evidence in [the Mirage F1 section](../formats/aircraft-variety.md#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).

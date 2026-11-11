@@ -89,6 +89,12 @@ whose panel is `~raf_p`. The Mirage therefore draws the Rafale `~RAF_P.PIC` beze
 over `~RAFH.PIC` (M2K-7). Its Systems window shows one engine readout, as every
 aircraft's does, and its own fuel.
 
+The Mirage F1 flies the Rafale cockpit by John's decision of 2026-11-10
+(opinionated, the same binding as the Mirage 2000): `MF1.PT` names `rafale.HUD`,
+whose panel is `~raf_p`. The F1 therefore draws the Rafale `~RAF_P.PIC` bezel over
+`~RAFH.PIC` (MF1-7). Its Systems window shows one engine readout (it has one
+engine) and its own fuel.
+
 ## Geometry (640x480, four windows)
 
 All numbers are window-relative pixels unless stated. The original computes
