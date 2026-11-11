@@ -94,6 +94,7 @@ class TakeoffAndLandingTests(unittest.TestCase):
         self.assertIn("mig31", flight.APPROACH_TARGET)
         self.assertIn("mig31", flight.INTERNAL_FUEL_LB)
         self.assertIn("m2000", flight.VARIETY_AIRCRAFT)
+        self.assertIn("gripen", flight.VARIETY_AIRCRAFT)
         self.assertIn("m2000", flight.LIFTOFF_AIRCRAFT)
         self.assertIn("m2000", flight.LIFTOFF_TARGET)
         self.assertIn("m2000", flight.APPROACH_TARGET)

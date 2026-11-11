@@ -974,3 +974,142 @@ row passing: rigid, hinges fixed, feet inward or aft, nothing below the hinge
 height near stow, ground contact at 1), a seven-value airbrake sweep
 (`brake-sweep.csv`) and the gear, brake and exhaust witnesses. See the
 [Mirage 2000 gear, airbrake and plume fit](../spec/variety-animation.md#mirage-2000-gear-airbrake-and-plume-fit).
+
+## Gripen gear, airbrakes and plume (GRI-4, 2026-11-10)
+
+Slice GRI-4 (batch 5), Claude Sonnet (sonnet-high), implementation mode. This is
+the first part of the `GRI.SH` rig, in its own module
+(`crates/tore-app/src/gripen_animation.rs`). It runs before GRI-3, which adds the
+canards, elevons and rudder to the same module (the `animate` method has the
+marked place for their arms, and the probe module `gripen.rs` has the marked
+place for their witnesses). Source coordinates are shape units (x right, y
+forward, z up, a third of a foot; the Gripen has the identity scale, so these
+are also the drawn units). Motion and angles are **fitted** (agent decisions,
+2026-11-10); the faces and the word roles are spec-derived from the retail
+shape, re-checked at load: the rig refuses a shape whose layout, branches or
+plate corners differ from the review of
+[GRI-0](aircraft-variety.md#gripen-source-review-2026-11-10).
+
+**Every word accounted for.** `0x8080` the plume (4 faces), `0x8086` the two
+airbrake plates (4 faces), `0x808c` the gear (22 faces). `0x8098` and `0x809e`
+are the left and right flap words (each deletes that wing's six elevon strip
+faces and adds none) and `0x80a4` the rudder word (swaps the rudder quad for a
+turned copy). The three trailing words are pinned at load (each branch must add
+and remove exactly the reviewed faces) and **never set**: the elevon strips and
+the neutral rudder stay drawn so the elevons never vanish in flight. Turning
+them is GRI-3's. The rudder naturally belongs with the other control surfaces (it
+shares the fin and the neutral/word swap with the flap words), so it is left to
+GRI-3. The slot at `0x8092` is skipped in the source. The shape has no hook
+(hook flag clear), slat, canopy, nozzle or canard word, and none is invented.
+
+| Piece | Faces | Source geometry |
+| --- | --- | --- |
+| Right main leg | `5bca`, `5be9` (slanted strut plate), `5c08`, `5c2f` (wheel plate) | Strut x 4 to 6, y -14 to -8, z -5 to -16; wheel plate in the plane y -11, x 2 to 7, z -5 to -16 |
+| Left main leg | `59ec`, `5a0b`, `5a2a`, `5a51` | Strut x -6 to -4; wheel plate x -6 to -1 (one unit nearer the centreline than the right mirrored: a source asymmetry, the rig mirrors the law, not the plate) |
+| Right door pair | wall `5b29`, `5b40`; root plate `5b57`, `5b6e` | Root plate x 9 to 13, z -3 to -4, y -14 to 1; wall x 13 to 15, z -4 to -9, sharing the edge x 13, z -4 with the root plate |
+| Left door pair | wall `594b`, `5962`; root plate `5979`, `5990` | The mirror |
+| Nose group | `5c9b`, `5cba` (side plate, plane x 0, y 38 to 44, z -15 to -5), `5cd9`, `5cf8` (cross plate, x +-1, y 40 to 41), `5d44`, `5d5b` (wheel plate, x +-2, y 42 to 43, z -11 to -5) | |
+| Airbrakes | right `62ad`, `62c4`; left `634a`, `6361` | One quad per side, forward edge (+-9, -38, z -4 to 1), free edge (+-13, -43, z -3 to 0) |
+| Plume | `63af`, `63d6` (plane x 0), `63fd`, `6424` (plane z -2) | y -85 to -61, two crossed double-sided plates |
+| Nozzle exit disc | `49a6` (octagon, z -3 to 1), `49d5` (hexagon, z -4 to -3) | Both at y -61, subtype `0x64`, x -2 to 3 |
+
+**Gear motion (fitted).** Whole pieces, none cut. Gear 1 is the source pose
+exactly (the lowest gear vertex is the shape's 16 unit low point, 5.333 ft, which
+the probe measures at gear 1); gear 0 hides every gear face.
+
+- *Main leg* (strut plus wheel plate, one rigid piece): turns about a horizontal
+  hinge line through (4, -16, 0) whose direction is 35 degrees from the X axis
+  toward Y, by `71.5 degrees * (1 - gear)`, so the leg folds **forward and
+  inboard**. The 71.5 degrees is worked out in code (`leg_stow`) as the turn that
+  lays the foot centre (5, -11, -10.5) level with the hinge. The hinge point sits
+  above the leg and behind its rear edge on purpose: with it no corner ever
+  dips below the gear-down low point while the leg folds (the probe's lowest
+  point never falls below -16 units), and the stowed leg lies in x -4.6 to 5.2,
+  y -11.0 to 1.4, z -4.6 to 4.6, inside the fuselage and above its belly (z -6).
+  The left leg is the exact mirror of the right law.
+- *Main door pair* (two rigid plates): the root plate turns a half turn about the
+  line along Y on its inboard edge (x 9, z -3), up and inboard, while the outer
+  wall folds back onto the root plate about their shared edge (x 13, z -4) by
+  125.8 degrees (`door_fold`, the turn from the wall's direction to the way back
+  along the root plate), so the closed pair lies flat in x 5.0 to 10.2, z -3.3 to
+  -2.0, inside the fuselage side apart from the wall's 1.3 unit overshoot past
+  the hinge (the wall is 5.4 units long, the root plate 4.1). The shared edge
+  stays together (probe: seam 0). The wall passes through the wing root as the
+  pair swings up: a one to two second transient at the end of the retraction,
+  recorded as a known cosmetic (the source has no wing-root skin in that
+  region to clip against, the rig keeps rigid plates).
+- *Nose group* (six faces, one rigid piece): turns about a lateral axis (along X)
+  through its forward top corner (0, 44, -5) by `100 degrees * (1 - gear)`,
+  swinging **rearward**, a little past level so the stowed plates lie above the
+  belly (stowed y 34.2 to 45.0, z -5.0 to 2.6). It steers about a vertical axis
+  through the strut (0, 41) by `-nosewheel_angle()`, as the MiG-31 nose.
+
+Provenance of the direction (public text only): the real Gripen's single-wheel
+main legs retract at a forward angle and its two-wheel nose leg retracts
+rearward (airvectors.net, "The SAAB JAS 39 Gripen", read as a search-result
+extract on 2026-11-10: the page itself returned 404 to a direct fetch, so this
+is secondary and not independently confirmed), and the mains stow in the
+fuselage (aircraftrecognitionguide.com, Saab 39 Gripen, accessed 2026-11-10: "Single
+wheel main gears retract in the fuselage or wing roots"). Wikipedia (JAS 39
+Gripen, accessed 2026-11-10) says only "retractable tricycle landing gear" and
+does not give a direction. **The inboard part, every hinge line, the hinge point
+placement, the stow angles and the door folding are fitted.** Real nose-gear
+retraction direction should be treated as unconfirmed (the same search results
+also named a twin-wheel nose leg, where the shape has one wheel plate).
+
+**Airbrakes (fitted).** The two plates (real: "a pair of air brakes ... on the
+sides of the rear fuselage", Wikipedia, accessed 2026-11-10; "below, and in front
+of the exhaust, ... on both sides of the fuselage", aircraftrecognitionguide.com)
+each turn whole about their **forward** vertical edge (x +-9, y -38, a line along
+Z), the hinge GRI-0 recorded. Brake 1 is the source open pose, brake 0 hides the
+plates, and between them each plate turns by `52.7 degrees * (1 - brake)`, the
+turn (computed in `brake_closed`) that lays the plate parallel to the rear
+fuselage side line from (9, -36) to (4, -56), half a unit outside it (the hinge
+vertex is half a unit outside that line, so the closed plate is flush to within
+that half unit). The probe's sweep measures the closed free edge on that
+direction line to 2e-6 ft. Both plates take the same brake value; the real
+canards also angle down as air brakes on landing, which is GRI-3's to decide
+with John's canard answer.
+
+**Plume (fitted).** The four plume plates scale along Y from the nozzle exit
+plane (y -61) by the afterburner fraction: the exit corners stay, the plume
+grows to the source length (y -85, 24 units, 8.0 ft) at 1, hidden at 0, every
+plate by the same function of y so the crossed planes stay joined.
+
+**Nozzle glow and contrail (engine count 1).** `engine_material::nozzle` names
+the two exit-disc faces `49a6` and `49d5` (one nozzle in two pieces: the
+octagon above z -3 and the hexagon below it) and `outlet_count` is 1 for the
+Gripen, so there is **one** nozzle glow and `contrail_offsets` makes **one**
+trail, centred on the discs' bounding box: x 0.17 ft right of the shape's
+centreline, 0.50 ft below the origin, 22.33 ft behind it (the exit plane at
+y -61 is 20.33 ft, plus 2 ft). The plume reaches 28.3 ft behind the origin, so
+the trail starts inside the burner. The record's engine count is 1 and real
+(GRI-0), so unlike the Mirage 2000 no override is involved. A unit test pins the
+offsets and the bounds on synthetic discs; a windowed contrail frame was not
+captured (trails form only above the onset altitude and the capture starts low).
+
+**Rule 11 fold table.** Every piece turns whole, named by address. "On axis" are
+vertices that stay put by lying on the hinge line; "turn" vertices move;
+"fixed off axis" would be a fold.
+
+| Piece | Face | Vertices | Turn | On the hinge axis (stay) | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right and left main leg | `5bca`, `5be9`, `5c08`, `5c2f` (and the left four) | 4 each | 4 each | 0 (hinge point (+-4, -16, 0) is not on a face) | 0 |
+| Door wall | `5b29`, `5b40` (left `594b`, `5962`) | 4 each | 4 each (2 of them only by the root plate's turn, on the fold axis) | 2 each: (13, 1, -4), (13, -14, -4) for the fold | 0 |
+| Door root plate | `5b57`, `5b6e` (left `5979`, `5990`) | 4 each | 2 each | 2 each: (9, -14, -3), (9, 1, -3) | 0 |
+| Nose | `5c9b`, `5cba` | 4 each | 3 each | 1 each: (0, 44, -5) for the retraction | 0 |
+| Nose | `5cd9`, `5cf8`, `5d44`, `5d5b` | 4 each | 4 each | 0 | 0 |
+| Airbrake | `62ad`, `62c4`, `634a`, `6361` | 4 each | 2 each | 2 each: (+-9, -38, 1), (+-9, -38, -4) | 0 |
+| Plume | `63af`, `63d6`, `63fd`, `6424` | 4 each | scaled from y -61 | the exit-plane vertices | 0 |
+
+Verdict: **no face folds and none keeps a fixed vertex off its axis.** The
+probe measures the largest inter-vertex distance change as 1.4e-6 ft over the
+202 gear values and 6.4e-7 ft over the airbrake sweep, the skin gap inside
+every piece as 0 and the door seam as 0.
+
+The probe adds a 202-value dense gear sweep (`dense-gear.csv`, 203 lines, every
+row passing: rigid, nothing below the gear-down low point, feet inboard and
+forward, nose aft, ground contact at 1, stowed pieces inside the hull near 0,
+no new planar crossing), a seven-value airbrake sweep (`brake-sweep.csv`) and
+the gear, brake and exhaust witnesses. See the
+[Gripen gear, airbrake and plume fit](../spec/variety-animation.md#gripen-gear-airbrake-and-plume-fit).

@@ -1002,6 +1002,60 @@ mod tests {
             [8., 6., -20.]
         );
     }
+    /// The Gripen has one engine (one RM12) and one exit disc made of two
+    /// faces (the octagon `0x49a6` and the hexagon `0x49d5` at y -61): one
+    /// trail on the centreline of the disc, 2 ft behind its exit plane (GRI-4).
+    #[test]
+    fn the_gripen_draws_one_contrail_behind_its_one_two_face_nozzle() {
+        use tore_formats::aircraft::AircraftId;
+        let id = AircraftId::Gripen;
+        assert_eq!(crate::engine_material::outlet_count(id), 1);
+        let face = |address: usize, points: &[[f32; 3]]| tore_formats::shape::Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![],
+            positions: points.to_vec(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0x64,
+            normal: None,
+            fog: tore_formats::shape::FogMode::Enabled,
+        };
+        let octagon = [
+            [-1., -61., 1.],
+            [1., -61., 1.],
+            [2., -61., 1.],
+            [3., -61., -1.],
+            [3., -61., -3.],
+            [-2., -61., -3.],
+            [-2., -61., -1.],
+            [-2., -61., 1.],
+        ];
+        let hexagon = [
+            [-2., -61., -3.],
+            [3., -61., -3.],
+            [2., -61., -4.],
+            [1., -61., -4.],
+            [-1., -61., -4.],
+            [-2., -61., -4.],
+        ];
+        let neutral = Shape {
+            lines: vec![],
+            faces: vec![
+                face(0x49a6, &octagon),
+                face(0x49d5, &hexagon),
+                face(0x1c64, &[[-3., 26., -6.], [0., 14., -6.], [2., 26., -6.]]),
+            ],
+            billboards: vec![],
+            state_words: Default::default(),
+        };
+        let offsets = contrail_offsets(id, &neutral, None, 1);
+        assert_eq!(offsets.len(), 1);
+        let want = [0.5 / 3., -1.5 / 3., -61. / 3. - 2.];
+        for k in 0..3 {
+            assert!((offsets[0][k] - want[k]).abs() < 1e-6, "axis {k}");
+        }
+        assert_eq!(nozzle_bounds(id, &neutral)[0], [-2., 3., -4., 1.]);
+    }
     /// The Mirage 2000 has one engine and one nozzle disc (face 0x3794, the
     /// hexagon at y -44): one trail on the centreline, at the scaled disc
     /// centre, 2 ft behind its exit plane (M2K-4).

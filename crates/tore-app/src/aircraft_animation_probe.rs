@@ -20,6 +20,7 @@ mod f16;
 mod f18;
 mod f22;
 mod f4;
+mod gripen;
 mod il76;
 mod m2000;
 mod mi24;
@@ -170,6 +171,11 @@ impl Control {
         match self {
             Self::Rudder if id == Id::Ch47 => Expectation::Required,
             Self::Rudder | Self::Flaps if helicopter => Expectation::Unknown,
+            // The Gripen's canards, elevons and rudder are GRI-3's: unreviewed
+            // until that slice maps them (GRI-4, 2026-11-10).
+            Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps if id == Id::Gripen => {
+                Expectation::Unknown
+            }
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -215,6 +221,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::Gripen
                 ) =>
             {
                 Expectation::Required
@@ -260,6 +267,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::Gripen
                 ) =>
             {
                 Expectation::Required
@@ -1047,6 +1055,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::Gripen {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                gripen::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1208,6 +1227,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::M2000 {
         failures.extend(m2000::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Gripen {
+        failures.extend(gripen::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

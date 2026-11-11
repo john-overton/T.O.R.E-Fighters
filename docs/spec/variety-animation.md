@@ -798,3 +798,24 @@ brake and exhaust `required moved`, a 202-value dense gear sweep with every row
 passing (rigidity about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at
 the scaled low point at gear 1), and the closed airbrake within 3e-6 ft of the
 spine line. Not a claim of original retraction timing.
+
+## Gripen gear, airbrake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice GRI-4), over `GRI.SH` (no
+shape scale). The canards, elevons and rudder are GRI-3's and are still drawn at
+their source pose. The source faces, the fold table and the provenance are in
+[control-surface
+geometry](../formats/aircraft-control-surfaces.md#gripen-gear-airbrakes-and-plume-gri-4-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | Each main leg (strut plus wheel plate) turns whole about a horizontal hinge through (4, -16, 0) at 35 degrees to the X axis, by `71.5 degrees * (1 - gear)`, folding forward and inboard into the fuselage. Each door pair is two whole plates: the root plate turns a half turn about its inboard edge, the wall folds back onto it by 125.8 degrees. The nose group turns whole about a lateral axis through its forward top corner by `100 degrees * (1 - gear)`, folding rearward, and steers about a vertical axis. Hidden at 0, the source pose at 1. Public text gives a forward main leg and a rearward nose leg (secondary source, cited in the geometry note); the law is fitted. |
+| Airbrake | Each of the two rear-fuselage plates turns whole about its forward vertical edge (x +-9, y -38) by `52.7 degrees * (1 - brake)`: brake 1 is the source open pose, small values lie along the fuselage side, 0 hides them. |
+| Afterburner | The four plume plates scale along Y from the nozzle exit plane (y -61) by the afterburner fraction, hidden at 0. One nozzle glow on the one exit disc (two faces) and one contrail, from the engine count of 1. |
+
+Acceptance (GRI-4): `--animation-probe` reports gear, brake and exhaust
+`required moved`, a 202-value dense gear sweep with every row passing (rigidity
+about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at the 16 unit low
+point at gear 1) and the closed airbrake on the side line within 2e-6 ft. The
+elevator, rudder, aileron and flap rows read `unreviewed` until GRI-3. Not a
+claim of original retraction timing.

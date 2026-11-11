@@ -81,6 +81,7 @@ mod graphics;
 mod graphics_api;
 mod graphics_prompt;
 mod graphics_screen;
+mod gripen_animation;
 mod gun_flash;
 mod gun_flash_preview;
 mod gunsight_probe;

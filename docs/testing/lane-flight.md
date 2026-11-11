@@ -865,6 +865,7 @@ and direction checks. The Mirage 2000 adds the same 202-value dense gear sweep (
 mains inward, nose rearward), a seven-value airbrake sweep that checks the
 closed plate on the spine, and the 25-combination pitch/roll grid; its
 `flight-variety-m2000` scenario flies 1,200 headless ticks.
+The Gripen (GRI-4) adds a 202-value dense gear sweep and a seven-value airbrake sweep with its gear, brake and exhaust witnesses; its elevator, rudder, aileron and flap rows stay `unreviewed` until GRI-3, so `flight-animation-gripen` is registered then, and `flight-variety-gripen` flies 1,200 headless ticks now.
 
 Run one repaired aircraft before expanding the audit:
 

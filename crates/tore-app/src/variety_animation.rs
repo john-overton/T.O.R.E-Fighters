@@ -256,7 +256,10 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x80cc, Part::Gear, 18)],
                 1. / 3.,
             ),
-            // GRI.SH: six words, gear 0x808c adds 22 faces.
+            // GRI.SH: six words, gear 0x808c adds 22 faces. GRI-4 loads it
+            // through its own `gripen_animation` rig (gear, airbrakes, plume;
+            // the canards, elevons and rudder wait for GRI-3); this row only
+            // supplies the shape scale and the pinned words.
             Id::Gripen => (
                 28848,
                 383,
@@ -366,6 +369,7 @@ enum SpecificRig {
     Mig25(crate::mig25_animation::Rig),
     Mig31(crate::mig31_animation::Rig),
     M2000(crate::m2000_animation::Rig),
+    Gripen(crate::gripen_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -650,6 +654,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Gripen => {
+                let (rig, shape) = crate::gripen_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Gripen(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -775,6 +788,7 @@ impl Rig {
                 SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
                 SpecificRig::Mig31(_) => crate::mig31_animation::flame(address),
                 SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
+                SpecificRig::Gripen(_) => crate::gripen_animation::flame(address),
             };
         }
         self.groups
@@ -835,6 +849,7 @@ impl Rig {
                 SpecificRig::Mig25(rig) => rig.animate(source, state),
                 SpecificRig::Mig31(rig) => rig.animate(source, state),
                 SpecificRig::M2000(rig) => rig.animate(source, state),
+                SpecificRig::Gripen(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

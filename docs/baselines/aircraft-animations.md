@@ -640,3 +640,27 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |
+| `gripen` | Gear, brake and burner words unmapped (interim gear rise); canards, elevons and rudder not yet mapped | Whole rigid gear (legs, door pairs, nose), the two rear-fuselage airbrake plates and the burner plume reviewed (GRI-4); control surfaces `unreviewed` until GRI-3; mechanics fitted |
+
+## Gripen gear, airbrake and plume results (2026-11-10)
+
+Exact `gripen` (`GRIPEN.PT`) passes the GRI-4 probe on its devices
+(`TORE_DATA_DIR=.local/m3-aircraft/profile-gripen target/debug/tore-app --aircraft
+gripen --animation-probe .local/m3-aircraft/checks/GRI-4/probe`): 383 neutral
+faces, zero required or check failures; gear, brake and exhaust each read
+`required moved`, and the elevator, rudder, aileron and flap rows read
+`unreviewed` (the canards, elevons and rudder are GRI-3's), so the report's
+validation scope is still `motion-survey` and the `flight-animation-gripen`
+scenario is **not registered yet**: its checker demands the reviewed scope and
+every primary control passing, which GRI-3 supplies. The 202-value dense gear
+sweep has every row passing (anchor gap 0, skin gap 0, rigidity at most 1.4e-6
+ft, no new planar crossings, lowest gear point at the 16 unit low point at gear
+1, stowed pieces inside the hull); the seven-value airbrake sweep lays the closed
+plates on the fuselage side line within 2e-6 ft; `flight-variety-gripen` passes
+a 1,200 tick headless flight. Frames: `.local/m3-aircraft/frames/GRI-4/` (gear
+down, half, near-stow and up from the side and below with 3x crops of the mains
+and the nose, the airbrakes open, half and closed from behind with 3x crops, the
+burner on, half and off from behind, and the aircraft parked on a runway). The
+mains are hidden by stores in the default-loadout side views, so the gear frames
+use `--loadout none`.
+
