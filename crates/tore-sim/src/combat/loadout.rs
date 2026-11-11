@@ -378,6 +378,13 @@ impl Loadout {
             .iter()
             .position(|s| *s == Some(slot));
         if !self.cheat {
+            // John, 2026-11-10: the F-15E's bomb pair and wing pair refuse the
+            // stores that clip the aircraft (normal loading only).
+            if row.is_some_and(|row| {
+                !tore_formats::aircraft::stations::weapon_allowed(self.aircraft, row, &w.source)
+            }) {
+                return 0;
+            }
             if self.aircraft == AircraftId::F15
                 && row == Some(6)
                 && !super::ballistics::is_bomb(w)

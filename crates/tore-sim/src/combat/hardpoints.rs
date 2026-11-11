@@ -1013,10 +1013,15 @@ const A10_WING: [f64; 2] = [10.75, 14.75];
 /// 5) take the MiG-31's fitted 0.1 ft drop (John, 2026-11-10, opinionated;
 /// the 0.1 ft is the MiG-31's agent-fitted value, [`Hang::PalletsFromBelow`]),
 /// which cuts the AS-15's fin entry into the belly from 0.56 to 0.75 ft; the
-/// R530 and R550 take the same drop. Zero everywhere else.
+/// R530 and R550 take the same drop. The F-15E's row 7 bomb pair takes the same
+/// 0.1 ft (John, 2026-11-10, opinionated). Zero everywhere else.
 pub fn rail_drop(id: AircraftId, hardpoint: usize) -> f64 {
     match (id, hardpoint) {
         (AircraftId::M2000, 5) => M2000_BELLY_DROP,
+        // John, 2026-11-10 (F15E-5, round 2, opinionated): the F-15E's
+        // conformal-style bomb pair (row 7) takes the same 0.1 ft drop, which
+        // cuts the aft inboard bombs' entry into the intake flank.
+        (AircraftId::F15E, 7) => M2000_BELLY_DROP,
         _ => 0.,
     }
 }
@@ -1476,6 +1481,59 @@ mod tests {
         );
         assert_eq!(rail_drop(AircraftId::M2000, 5), 0.1);
         assert_eq!(rail_drop(AircraftId::Mig31, 5), 0.);
+    }
+
+    /// John, 2026-11-10 (F15E-5, opinionated): the F-15E's row 7 bomb pair takes
+    /// the Mirage's 0.1 ft rail drop, the decoded position kept; no other F-15E
+    /// row, and no other aircraft's row 7, moves.
+    #[test]
+    fn the_f15e_bomb_pair_hangs_a_tenth_of_a_foot_lower_at_the_decoded_position() {
+        let face = |x0, x1, z0, z1, up| tore_formats::shape::Face {
+            positions: vec![[x0, z0, up], [x1, z0, up], [x1, z1, up], [x0, z1, up]],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            faces: vec![face(-30., 30., -90., 90., -6.)],
+            lines: Vec::new(),
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&shape, 1. / 3.);
+        let row = Hardpoint {
+            location: Location::Fuselage.byte(),
+            position: [19, -26, -5],
+            flags: 0x0505,
+            count: 12,
+            store: Some("MK82.JT".into()),
+            weight_class: 80,
+        };
+        let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::F15E);
+        let (plain_mount, plain) = placed_scaled(&row, Some(&model), axes);
+        let (mount, dropped) = placed_on(AircraftId::F15E, 7, &row, Some(&model));
+        assert_eq!(mount, plain_mount);
+        assert_eq!(dropped.location(), plain.location());
+        let mut seen = 0;
+        for (a, b) in plain.over.iter().zip(&dropped.over) {
+            if let (Some(a), Some(b)) = (a, b) {
+                assert!((a - b - 0.1).abs() < 1e-5);
+                seen += 1;
+            }
+        }
+        assert!(seen > 0, "the belly is over the row");
+        assert_eq!(rail_drop(AircraftId::F15E, 7), 0.1);
+        for (id, row) in [
+            (AircraftId::F15E, 6),
+            (AircraftId::F15E, 8),
+            (AircraftId::F15, 7),
+        ] {
+            assert_eq!(rail_drop(id, row), 0., "{id:?} row {row}");
+        }
     }
 
     fn rack(location: u8) -> Rack {

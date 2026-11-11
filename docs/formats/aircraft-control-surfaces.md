@@ -1192,3 +1192,22 @@ shape, re-verified at load); the stabilator law is the F-15C's fitted law
 flap travels, the axes and the closure re-seating fitted (agent decisions
 2026-11-10); nothing is attributed to John beyond the three decisions he made
 (whole-panel tailerons with roll, no rudder motion, size 1:1).
+
+**Update (F15E-5, 2026-11-10): flaps now deflect 30 degrees.** John decided on
+2026-11-10 (round 2, opinionated) that the F-15E's flaps deflect the real
+aircraft's roughly 30 degrees, not the 0.80 rad (46 degrees) fitted above. The
+NASA Dryden flight test report "Dynamic Ground Effects Flight Test of an F-15
+Aircraft" ([NTRS 19950005778](https://ntrs.nasa.gov/citations/19950005778), read
+2026-11-10) gives the F-15's trailing-edge flaps 30 degrees of downward travel.
+`FLAP_DOWN` in `crates/tore-app/src/f15e_animation.rs` is now pi/6 (0.5236 rad);
+the hinge line, the whole-panel turn and the end triangle re-seated on the wedge's
+trailing corner are unchanged. At 30 degrees the trailing corner lands 1.98 units
+(0.66 ft) from the source's lowered copy instead of 0.74 units, so the load check
+that refused a shape more than one unit from the copy now accepts up to three
+units (a different shape is still refused). Measured openings at full flaps drop
+with the angle: hinge edge against the wing 0.26 ft (was 0.39 ft), trailing
+corners 1.04 ft (was 1.56 ft). The probe (`--animation-probe`, `profile-f15e`)
+still reports `350 neutral faces, 0 required/check failures`; the 21-value flap
+sweep is rigid (at most 3e-7 ft) with skin gap 0. Frames:
+`.local/m3-aircraft/frames/F15E-5/final-crop3x-flaps0-vs-flaps30-*.png`. The
+text above is the F15E-3 slice's and is kept as written.

@@ -679,3 +679,14 @@ planar crossings, signed directions). Seam openings at full travel, from
 corner 0.46 ft; flap front edge 0.39 ft and trailing corners 1.56 ft. These are
 the opening of whole rigid panels against fixed skin, reported and bounded,
 not failures. Frames: `.local/m3-aircraft/frames/F15E-3/`.
+
+## F-15E flaps at 30 degrees (F15E-5, 2026-11-10)
+
+After John's 2026-11-10 decision the F-15E flap travel is 30 degrees (see [F-15E
+control surfaces](../formats/aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10)).
+Probe rerun, `TORE_DATA_DIR=.local/m3-aircraft/profile-f15e target/debug/tore-app
+--aircraft f15e --animation-probe`: `F15E.PT: 350 neutral faces, 0 required/check
+failures`; the 21-value flap sweep passes (rigidity at most 3e-7 ft, skin gap 0,
+0 crossings, direction failures 0); battery `flight-animation-f15e` and
+`flight-variety-f15e` 2/2 pass. The `F15E.PT` sweep row counts (22 lines per dense
+sweep) are unchanged.

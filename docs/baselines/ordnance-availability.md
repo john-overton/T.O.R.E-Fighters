@@ -483,3 +483,22 @@ ordnance audit: 2 novelty records, 220 Cheat-only placements, refused without Ch
 
 The `menus-ordnance-availability` and `a2g-catalog` battery expected lines read 18,
 4,652 (menus only), 233 and 220.
+
+## F-15E stations (F15E-5, 2026-11-10)
+
+The F-15E's bomb pair (row 7) refuses seven large stores in normal loading
+(`GBU29.JT`, `GBU29P.JT`, `GBU30.JT`, `GBU38.JT`, `AGM88.JT`, `AGM45.JT`, `AT2.JT`)
+and its wing pair (row 8) refuses `AA6.JT` (John, 2026-11-10, opinionated; Cheat
+loading unchanged; see [the F-15E in stores on
+pylons](../spec/stores-on-pylons.md#the-f-15e-f15e-5-2026-11-10)). The audit pin
+moved: weapon placements 4,652 to 4,644 (`F15E.PT` 65 to 57); tank placements
+(233), Cheat-only placements (220), pods (80), records (82 and 9), recovered
+stations (18) and the roster (45) are unchanged:
+
+```text
+ordnance F15E.PT: 4 source rows, 0 optional weapon rows, 57 compatible weapon placements, 3 tank placements; defaults and restart passed; catalog 48 normal, 83 Cheat
+ordnance audit: 45 aircraft, 18 recovered weapon stations, 4644 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+```
+
+The `menus-ordnance-availability` battery expected line reads 4,644 weapon
+placements; the `a2g-catalog` line matches any count.

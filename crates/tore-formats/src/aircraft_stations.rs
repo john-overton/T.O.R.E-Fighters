@@ -13,6 +13,10 @@ pub const RAFALE_CENTER: usize = 9;
 /// The Mirage 2000's belly pairs (`M2000.PT` row 5, four stores in two
 /// tandem pairs either side of the centreline tank).
 pub const M2000_BELLY: usize = 5;
+/// The F-15E's conformal-style bomb pair (`F15E.PT` row 7, six stores a side)
+/// and its wing pair (row 8).
+pub const F15E_BELLY: usize = 7;
+pub const F15E_WING: usize = 8;
 /// The Mirage 2000's decoded wingtip row (`M2000.PT` row 8), retired by
 /// [`retire`].
 pub const M2000_TIP: usize = 8;
@@ -117,6 +121,36 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
         _ => true,
     }
 }
+
+/// Stores normal loading refuses on one source row of the F-15E (John,
+/// 2026-11-10, opinionated; F15E-5 round 2). Row 7 refuses the stores that,
+/// after the 0.1 ft belly rail drop, still enter the intake flank by more than
+/// about 0.3 ft (measured, `docs/spec/stores-on-pylons.md`): the 2,000 lb
+/// guided bombs and the 500 lb guided bomb (2.04, 1.83 and 0.32 ft), the two
+/// anti-radiation missiles (0.92 ft) and the AT-2 dispenser (0.46 ft). Row 8
+/// refuses the AA-6, whose 20 ft body crosses the wing. Cheat loading skips
+/// the check; every other aircraft and row keeps its stores.
+pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
+    if id != AircraftId::F15E {
+        return true;
+    }
+    match row {
+        F15E_BELLY => !F15E_BELLY_REFUSED.contains(&source),
+        F15E_WING => source != "AA6.JT",
+        _ => true,
+    }
+}
+
+/// The weapons row 7 of the F-15E refuses ([`weapon_allowed`]).
+pub const F15E_BELLY_REFUSED: [&str; 7] = [
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "GBU38.JT",
+    "AGM88.JT",
+    "AGM45.JT",
+    "AT2.JT",
+];
 
 /// Source rows T.O.R.E does not carry (John, 2026-11-10, opinionated): the
 /// Mirage 2000's wingtip row (`M2000.PT` row 8: Wingtip, x 33, two `R550.JT`,
@@ -593,6 +627,33 @@ mod tests {
         for name in ["F150.GAS", "F250.GAS"] {
             assert!(tank_allowed(AircraftId::M2000, M2000_BELLY, name));
         }
+    }
+
+    /// John, 2026-11-10 (F15E-5 round 2, opinionated): the F-15E's bomb pair
+    /// refuses the large stores that enter the belly flank, its wing pair
+    /// refuses the AA-6; nothing else of the aircraft or any other aircraft moves.
+    #[test]
+    fn the_f15e_refuses_the_large_stores_on_its_bomb_pair_and_the_aa6_on_its_wing_pair() {
+        for name in F15E_BELLY_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::F15E, F15E_BELLY, name),
+                "{name}"
+            );
+            // Not on the wing pair or elsewhere, and not on another aircraft.
+            assert!(weapon_allowed(AircraftId::F15E, F15E_WING, name), "{name}");
+            assert!(weapon_allowed(AircraftId::F15E, 6, name), "{name}");
+            assert!(weapon_allowed(AircraftId::F15, F15E_BELLY, name), "{name}");
+            assert!(
+                weapon_allowed(AircraftId::Tornado, F15E_BELLY, name),
+                "{name}"
+            );
+        }
+        for name in ["MK82.JT", "MK84.JT", "FAB1000.JT", "CBU89.JT", "LAU61.JT"] {
+            assert!(weapon_allowed(AircraftId::F15E, F15E_BELLY, name), "{name}");
+        }
+        assert!(!weapon_allowed(AircraftId::F15E, F15E_WING, "AA6.JT"));
+        assert!(weapon_allowed(AircraftId::F15E, F15E_WING, "AIM120.JT"));
+        assert!(weapon_allowed(AircraftId::M2000, F15E_WING, "AA6.JT"));
     }
 
     #[test]

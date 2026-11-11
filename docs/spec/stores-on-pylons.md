@@ -1802,3 +1802,69 @@ transit finding, the comparison and the stop are agent findings of 2026-11-10;
 the real-aircraft facts are cited from public pages for plausibility only; the pod
 handling is John's decision of 2026-11-10 already satisfied by the 2026-11-07
 rule. The audit pins do not move (no row, mask, count or default changed).
+
+### The F-15E decisions (F15E-5, 2026-11-10, round 2)
+
+John answered the options above on 2026-11-10 ("the F-15 do recs"). All three
+station changes are **opinionated (John, 2026-11-10)**, each with a unit test;
+the text above is the stop report as written and is not rewritten.
+
+- **A1, rail drop.** The bomb pair (row 7) takes the Mirage 2000's 0.1 ft rail
+  drop (`rail_drop`, `crates/tore-sim/src/combat/hardpoints.rs`; the decoded
+  position is kept, only the surface the rails read drops). Test
+  `the_f15e_bomb_pair_hangs_a_tenth_of_a_foot_lower_at_the_decoded_position`.
+  Re-measured with the same triangle analysis: the default 12 Mk 82 now enter
+  the airframe by **0.00 ft** (the aft inboard bombs were 0.06 and 0.02 ft in,
+  now 0.049 ft clear); the lowest bomb stays 3.24 to 3.82 ft above the ground;
+  the aft inboard bomb is still 0.32 ft from the main gear (the drop does not
+  change the gear distance); the rack fin-tip touch (0.005 ft, 20 crossings a
+  rack) is the generic rack layout and is unchanged; **the gear leg still
+  crosses the aft inboard bomb while retracting** (28 crossings at gear 0.4,
+  0.017 ft), which John's answer did not address and which stays an open item.
+- **A2, large stores refused on row 7.** Normal loading (Cheat unchanged)
+  refuses the stores that still enter the intake flank by more than about
+  0.3 ft after the drop (`weapon_allowed` and `F15E_BELLY_REFUSED` in
+  `crates/tore-formats/src/aircraft_stations.rs`, used by `Loadout::capacity`;
+  test `the_f15e_refuses_the_large_stores_on_its_bomb_pair_and_the_aa6_on_its_wing_pair`).
+  Measured entries after the drop, worst bomb of the row:
+
+  | Store | Entry after the drop (ft) | Result |
+  | --- | ---: | --- |
+  | `GBU29.JT`, `GBU29P.JT` (x4) | 2.04 | refused |
+  | `GBU30.JT` (x8) | 1.83 | refused |
+  | `AGM88.JT`, `AGM45.JT` (x10) | 0.92 | refused |
+  | `AT2.JT` (x12) | 0.46 | refused |
+  | `GBU38.JT` (x12) | 0.32 | refused (just over the line) |
+  | `CBU89.JT` (x10) | 0.24 | kept |
+  | `MK20.JT`, `MK82HD.JT` | 0.13 | kept |
+  | `RBK250.JT`, `CBU87.JT`, `RBK500.JT`, `B8.JT` | 0.01 to 0.07 | kept |
+  | `MK82.JT`, `MK84.JT`, `FAB250/500/1000.JT`, `MK82P3.JT`, `MK82P.JT`, `MK82AIR.JT`, `B13.JT`, `LAU10.JT`, `LAU61.JT` | 0.00 | kept |
+
+  So **seven** stores are refused on row 7: `GBU29.JT`, `GBU29P.JT`, `GBU30.JT`,
+  `GBU38.JT`, `AGM88.JT`, `AGM45.JT` and `AT2.JT`. Several kept stores still have
+  fin crossings on the racks (the generic three-on-a-rack layout, up to 116) and
+  sit 0.02 to 0.05 ft from the main gear (`CBU87`, `CBU89`, `RBK`, `B8`, `LAU`);
+  those are not part of John's line and are left as measured
+  (`.local/m3-aircraft/checks/F15E-5/after/`).
+- **A3, no AA-6 on the wing row.** Row 8 refuses `AA6.JT` in normal loading (the
+  20 ft body crossed the wing). The wing row's other measured cases are kept
+  (`GBU30` 0.62 ft, `GBU12`/`GBU16`/`AS30` about 0.2 ft, `AGM88`/`AGM45`/`AIM7`
+  marginal): John asked only for the AA-6.
+- **Counts.** The audit pin `WEAPON_PLACEMENTS` moves 4,652 to 4,644 (eight
+  placements: seven on row 7, one on row 8; `F15E.PT` 65 to 57, catalog 51 to 48
+  normal, 83 Cheat unchanged); tank, Cheat-only, pod, record, station and roster
+  counts do not move. The audit now also checks that a refused store has capacity 0
+  on its row. The `menus-ordnance-availability` battery line reads 4644. See the
+  [ordnance availability baseline](../baselines/ordnance-availability.md#f-15e-stations-f15e-5-2026-11-10).
+- **Flaps (E1).** Not a station change: the F-15E flaps deflect 30 degrees,
+  documented in [F-15E control surfaces](../formats/aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10).
+- **Frames** (`.local/m3-aircraft/frames/F15E-5/`, prefix `final-`):
+  `final-default-{below,side,quarter}` (default load, gear down),
+  `final-crop3x-belly-rack-dropped-front` and `final-crop3x-belly-bombs-dropped-side`
+  (the dropped belly row, 3x), `final-flaps{0,30}-{tailabove,rearlow}` and
+  `final-crop3x-flaps0-vs-flaps30-*` (flaps neutral against 30 degrees; raw set
+  `raw-final/`).
+
+Still open (not decided): the gear leg crossing the aft inboard bombs in transit,
+the wing row's position (14.3 ft out against the real 9 to 10 ft), and a designator
+pod loadable on rows 6 and 7 through Load Ordnance.

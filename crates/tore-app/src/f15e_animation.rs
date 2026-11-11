@@ -107,12 +107,17 @@ pub(crate) const FLAP_END_R: usize = 0x5517;
 /// (y -24, z 2.5; the edge runs z 1 to 4). Flaps down turn the whole wedge by
 /// [`FLAP_DOWN`] about it, trailing edge down. Fitted to the lowered branch.
 const FLAP_HINGE: [f32; 3] = [0., -24., 2.5];
-/// Full flap travel, radians. Fitted (agent decision 2026-11-10): the rigid
-/// turn that brings the wedge's trailing edge closest to the source's lowered
-/// copy (trailing edge at y -29, z -2), about 0.74 units off; the source copy
-/// is a foreshortened silhouette (chord 5 against 6), so no rigid turn matches
-/// it exactly. Checked against the shape at load.
-const FLAP_DOWN: f64 = 0.80;
+/// Full flap travel, radians: 30 degrees, the real F-15's maximum trailing-edge
+/// flap deflection (the NASA Dryden flight test report "Dynamic Ground Effects
+/// Flight Test of an F-15 Aircraft", NTRS 19950005778, which gives the wing's
+/// trailing-edge flaps 30 degrees of downward travel; read 2026-11-10). John,
+/// 2026-11-10 (F15E-5 round 2, opinionated), replacing
+/// the 0.80 rad (46 degrees) the F15E-3 slice fitted to the source's lowered
+/// copy. The copy (trailing edge at y -29, z -2) is a foreshortened
+/// silhouette, so no rigid turn matches it; at 30 degrees the trailing corner
+/// lands about two units (0.66 ft) short of it, which the end triangle,
+/// re-seated on the wedge's own corner, does not need.
+const FLAP_DOWN: f64 = std::f64::consts::FRAC_PI_6;
 /// Stabilators: the five faces of each all-moving panel (both windings; flat at
 /// z -1, no anhedral; root chord y -41 to -70 on x 21 / -22, tip x 47 / -47).
 /// Each turns whole about a lateral spindle through its root chord midpoint.
@@ -139,6 +144,11 @@ const AIL_TRAVEL: f64 = 0.20;
 const STAB_PITCH: f64 = 0.30;
 const STAB_ROLL: f64 = 0.10;
 const STAB_LIMIT: f64 = 0.40;
+
+/// Largest accepted [`flap_fit_error`], shape units: the 30 degree turn is
+/// about 2 units from the foreshortened source copy, and a different shape
+/// (a copy more than 3 units off) is refused.
+const FLAP_FIT_LIMIT: f64 = 3.;
 
 /// Shape units between the wedge's trailing corner turned by [`FLAP_DOWN`] and
 /// the source's lowered trailing corner (y -29, z -2).
@@ -323,7 +333,7 @@ impl Rig {
         .scaled(axis);
         // The end triangle is the lowered copy's, re-seated on the neutral
         // wedge's trailing corner so it turns with the flap.
-        if flap_fit_error() > 1. {
+        if flap_fit_error() > FLAP_FIT_LIMIT {
             return Err("F15E.SH flap travel too far from the lowered branch".into());
         }
         let mut flap_ends = Vec::new();
@@ -1221,7 +1231,9 @@ mod tests {
     fn flaps_turn_whole_toward_the_lowered_branch_and_draw_its_end_triangle() {
         let rig = rig();
         let mut s = state();
-        assert!(flap_fit_error() < 0.8);
+        // 30 degrees (John 2026-11-10): near the source copy, not on it.
+        assert!((FLAP_DOWN - 30f64.to_radians()).abs() < 1e-12);
+        assert!(flap_fit_error() > 1. && flap_fit_error() < FLAP_FIT_LIMIT);
         let top = face(
             0x5470,
             &[
@@ -1268,15 +1280,18 @@ mod tests {
             assert_eq!(closing.positions[1], moved[0].positions[3]);
             assert_eq!(closing.positions[2], moved[1].positions[1]);
         }
-        // Full travel lands near the source's lowered trailing corner (y -29,
-        // z -2).
+        // Full travel (30 degrees) lands within two units of the source's
+        // lowered trailing corner (y -29, z -2).
         let corner = sp([39., -29., -2.]);
         let got = posed(&rig, &wedge, &s)[0].positions[3];
         let off = (0..3)
             .map(|k| (got[k] - corner[k]).powi(2))
             .sum::<f32>()
             .sqrt();
-        assert!(off < 0.8, "{off}");
+        assert!(
+            f64::from(off) > 1. && f64::from(off) < FLAP_FIT_LIMIT,
+            "{off}"
+        );
     }
     #[test]
     fn the_fins_and_the_rudder_command_leave_every_surface_still() {

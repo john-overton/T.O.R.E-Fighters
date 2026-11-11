@@ -840,3 +840,9 @@ moved` and rudder `not-applicable`; every pose is a rigid whole panel (rigidity
 at most 3e-6 ft) with anchors held, skin gap 0 and the signed direction, over
 the 25 pitch and roll poses and 21-value elevator, aileron and flap sweeps. Not a
 claim of original control timing or deflection limits.
+
+**Update (F15E-5, 2026-11-10).** The F-15E flap row above now reads 30 degrees
+(0.5236 rad) at full flaps, not `0.80 * flaps` (46 degrees): John's decision of
+2026-11-10 (opinionated), the real F-15's flap travel (NASA Dryden, NTRS
+19950005778). Everything else in that row is unchanged; details in
+[F-15E control surfaces](../formats/aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10).
