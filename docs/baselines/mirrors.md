@@ -200,3 +200,22 @@ position against the scaled canopy is measured in [the Mirage sensors, HUD and
 cockpit section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 Frames are under `.local/m3-aircraft/frames/M2K-7/`.
 
+## 2026-11-11 Tornado cockpit and mirror seeds (TOR-7)
+
+Slice TOR-7 gave the Tornado IDS (`TOR.PT`) the Eurofighter 2000's cockpit family its
+record names (`e2000.HUD`, stem `EF2`, `~EF2H.PIC`; John, 2026-11-10, opinionated). The
+picture has three flat blue-grey (105, 113, 134) mirror fills (top centre and the two
+lower canopy rails) that B5-1 left with no seeds, so the mirrors drew as dead panels.
+`mirrors::seeds` now has an `"EF2"` row (fitted, agent decision 2026-11-11): centre (640,
+50), left (200, 330), right (1090, 330). `--cockpit-sheet OUT_DIR tornado,rafale,f18`
+(through `tools/agent-run.sh`) prints `tornado: stem TOR cockpit ~EF2H.PIC art 1280x490
+FITTED CLR` with the centre mask at x 479 y 11 w 319 h 78, the left at x 125 y 183 w 153
+h 262 and the right at x 999 y 183 w 153 h 262, and `Cockpit mirrors: 3 reviewed regions,
+768x384 rear feed, every other visible frame`. The live frames show the ground behind the
+aircraft in the top mirror and the side mirrors turned in with a look. A unit test
+floods three synthetic fills, and a retail-reading test (skips without an install)
+checks the three rectangles and that the left and right match the sizes of the `~EF2_LH`
+and `~EF2_RH` overlays. No other aircraft uses the family. The one shared pilot's eye
+(`mirrors::pilot_eye`) feeds the rear feed unchanged; the Tornado's two-seat eye is
+discussed in [the Tornado section](../formats/aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
+Frames are under `.local/m3-aircraft/frames/TOR-7/`.

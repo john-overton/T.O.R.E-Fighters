@@ -29,6 +29,11 @@ pub(crate) fn seeds(id: AircraftId) -> Option<[Option<[usize; 2]>; 3]> {
         "A7" => [s(641, 35), s(120, 304), s(1161, 304)],
         "F104" => [None, s(231, 232), s(1049, 232)],
         "SU33" => [None, s(176, 195), s(1103, 195)],
+        // Tornado (TOR-7, 2026-11-11): the Eurofighter picture ~EF2H has three
+        // separate flat fills of one blue-grey (105, 113, 134): the top
+        // centre panel (x 479 to 797) and the two lower canopy rails
+        // (x 125 to 277 and 999 to 1151). Each floods well under the cap.
+        "EF2" => [s(640, 50), s(200, 330), s(1090, 330)],
         "Y141" => [None, s(375, 91), s(902, 91)],
         _ => return None,
     })
@@ -296,7 +301,7 @@ mod tests {
         family(&[Su27, Av8, F15]);
         family(&[Mig29, Su25, Mig23, Mi24]);
         family(&[F104, A10]);
-        for id in [F18, F14, Rafale, Su35, A7, Yak141] {
+        for id in [F18, F14, Rafale, Su35, A7, Yak141, Tornado] {
             assert!(seeds(id).is_some(), "{id:?}");
         }
         // The F-16, F-22, X-31, MiG-17, MiG-21 and AC-130 pictures have no
@@ -317,6 +322,76 @@ mod tests {
             points.sort();
             points.dedup();
             assert_eq!(points.len(), table.iter().flatten().count());
+        }
+    }
+
+    /// TOR-7: the Tornado's Eurofighter picture takes three flat mirror fills
+    /// and the flood stays inside each one.
+    #[test]
+    fn the_tornado_picture_floods_three_eurofighter_mirrors() {
+        let (w, h) = (1280, 490);
+        let mut s = Sprite {
+            width: w,
+            height: h,
+            rgba: vec![0; w * h * 4],
+            glyphs: vec![],
+        };
+        let fills = [
+            (479, 11, 318, 77),
+            (125, 183, 152, 261),
+            (999, 183, 152, 261),
+        ];
+        for (x0, y0, fw, fh) in fills {
+            for y in y0..y0 + fh {
+                for x in x0..x0 + fw {
+                    s.rgba[(y * w + x) * 4..(y * w + x) * 4 + 4]
+                        .copy_from_slice(&[105, 113, 134, 255]);
+                }
+            }
+        }
+        let m = masks(&s, AircraftId::Tornado).expect("three mirrors");
+        assert_eq!(m.rects[0], [479., 11., 318., 77.]);
+        assert_eq!(m.rects[1], [125., 183., 152., 261.]);
+        assert_eq!(m.rects[2], [999., 183., 152., 261.]);
+    }
+
+    /// Retail-reading (skips without an install): the three seeds land on the
+    /// three mirror fills of the real `~EF2H.PIC`, and the left and right
+    /// mirrors match the sizes of the `~EF2_LH` and `~EF2_RH` overlays.
+    #[test]
+    fn the_tornado_seeds_hit_the_imported_eurofighter_mirrors() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let Ok(library) = media.archive("FA_1.LIB") else {
+            eprintln!("skipped: no retail FA_1.LIB");
+            return;
+        };
+        let pic = tore_formats::Pic::parse(&library.read("~EF2H.PIC").unwrap()).unwrap();
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let m = masks(&source, AircraftId::Tornado).expect("three mirrors");
+        assert_eq!(m.rects[0], [479., 11., 319., 78.]);
+        assert_eq!(m.rects[1], [125., 183., 153., 262.]);
+        assert_eq!(m.rects[2], [999., 183., 153., 262.]);
+        for (name, rect) in [("~EF2_LH.PIC", m.rects[1]), ("~EF2_RH.PIC", m.rects[2])] {
+            let overlay = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+            assert_eq!(
+                [overlay.width as f32, overlay.height as f32],
+                [rect[2], rect[3]]
+            );
         }
     }
 }

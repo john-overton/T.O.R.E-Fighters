@@ -296,3 +296,10 @@ What shipped in TORE (2026-09-23, `crates/tore-app/src/instruments.rs`):
 8. **Not implemented.** The number box click area (22, 4) has no action in
    TORE; its original action is not recorded here. The six-window small
    layout at scale 1 is not reproduced.
+
+The Tornado flies the Eurofighter 2000's cockpit family by John's decision of 2026-11-10
+(opinionated): `TOR.PT` names `e2000.HUD`, whose panel is `~ef2_p`. The Tornado therefore
+draws the `~EF2_P.PIC` bezel over `~EF2H.PIC` (TOR-7; the first aircraft to use the family).
+Its Systems window shows one engine readout, as every aircraft's does (it has two
+engines), and its own fuel: `FUEL 11221 LBS` and `(+ EXT 3300 LBS)` with the default
+tank pair (TOR-7 frames, instrument pages 0 to 9).

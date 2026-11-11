@@ -525,6 +525,8 @@ impl AircraftId {
             Self::F15E => "AV8.HUD",
             Self::Gripen => "GRIPEN.HUD",
             Self::F5E => "F29.HUD",
+            // Tornado: decided, follows the record and flies the Eurofighter
+            // 2000's panel (opinionated, John, 2026-11-10; TOR-7).
             Self::Tornado => "E2000.HUD",
             Self::Mf1 => "RAFALE.HUD",
         }
@@ -627,6 +629,8 @@ impl AircraftId {
             Self::F15E => "AV8",
             Self::Gripen => "GRI",
             Self::F5E => "F29",
+            // Tornado: decided as above (John, 2026-11-10, TOR-7), no longer
+            // interim; the first aircraft on the ~EF2*.PIC family.
             Self::Tornado => "EF2",
             Self::Mf1 => "RAF",
             _ => self.stem(),

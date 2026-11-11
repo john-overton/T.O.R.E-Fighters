@@ -277,3 +277,15 @@ and at its aft end, the same place relative to its canopy as the Rafale's, so
 Back shows the Mirage's spine and fin the way it shows the Rafale's. Evidence in
 [the Mirage section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+## Pilot's eye on the Tornado (2026-11-11, TOR-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for the
+Tornado (agent decision, no per-aircraft eye exists; the record's own `viewOffset`
+0 / 20 / 60 is the Su-24 record's and no host code reads it). The Tornado is a two-seater
+and TORE draws one pilot's view. The neutral shape has no separate canopy faces; reading its
+top faces near the centreline (1 unit = 2/3 ft), the top of the fuselage and canopy is
+3.3 ft above the origin from about 0 to 17 ft ahead, with one raised piece 10 to 17 ft
+ahead, so the fixed eye stands 3.7 ft above that top and at the back of the forward piece.
+Back shows the tailplanes and fin from there (frame `cockpit-view-back-f2`). Not changed:
+a seated, per-aircraft or rear-seat eye would be a fleet change, a question for John.
+Evidence in [the Tornado section](../formats/aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).

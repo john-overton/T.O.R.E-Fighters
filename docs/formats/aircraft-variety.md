@@ -3618,6 +3618,11 @@ Options (none chosen):
    Opinionated, no retail evidence.
 3. **Author a Tornado panel.** Not in the media; invented art, later decision.
 
+Update (TOR-7, 2026-11-11): John chose option 1 in the batch decision round
+(decision 21, "follow the record", opinionated). The Tornado now measures and
+uses the family: see [Tornado sensors, HUD and cockpit
+(TOR-7)](#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
+
 ### Tornado engine count and thrust
 
 The record says 2 engines, correct for the Tornado (two RB199). The shape
@@ -4433,6 +4438,12 @@ name `BK27.JT` as mounted by exactly the Gripen and the Tornado.
 | Tornado draw scale | 2/3 ft a unit | See below. |
 | Rig and gear | Gear word only; the other words pinned, unmapped | As the Mirage 2000 interim: the shared fitted gear law until X-3 and X-4. |
 
+Update (TOR-7, 2026-11-11): for the Tornado the HUD and cockpit binding row is
+decided, no longer interim (John followed the record: `E2000.HUD`, stem `EF2`;
+opinionated, 2026-11-10), and the Tornado's HUD glass row is measured (a polygon
+replaces the empty mask). The Gripen's and F-5E's rows are their own slices'. See
+[Tornado sensors, HUD and cockpit](#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
+
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
 identity except the MiG-23, the F-14 (4/3) and the transports, so an imported
@@ -4553,3 +4564,139 @@ rows; the row 5 tank pair, row 6 Paveways and row 7 Mk 82s overlap each other an
 fuselage under the belly (numbers in the stores specification). Audit pins are
 unchanged (45 aircraft, 18 stations, 4,652 weapon placements, 233 tank placements,
 220 Cheat-only placements, 80 pod placements).
+
+## Tornado sensors, HUD and cockpit (TOR-7, 2026-11-11)
+
+Slice TOR-7 (implementation mode) made the Eurofighter 2000's cockpit family work
+for the Tornado IDS and confirmed its sensors. John's decision round of 2026-11-10
+(decision 21) decided the review's [HUD and cockpit
+question](#tornado-hud-and-cockpit-for-john): **follow the record**, `e2000.HUD`,
+cockpit stem `EF2`, forward art `~EF2H.PIC`. That settles what the batch identity
+slice wired as an interim agent decision, so the binding is now **opinionated
+(John, 2026-11-10)**; the stem arm, picture and overlay names already existed from
+B5-1 and did not change. The Tornado is the first aircraft to use the family: TORE
+has no Eurofighter (`E2000.PT` is not on the roster), and no other identity names
+`E2000.HUD` or stem `EF2` (checked by the new test). Changed: the glass polygon
+(`hud_aperture.rs`), an `"EF2"` mirror seed row (`mirrors.rs`), two comments in
+`aircraft.rs` and a retail-reading test (`tore-import/tests/tornado_cockpit.rs`).
+Before the slice every cockpit view already drew the `~EF2*` art (the stem and picture
+were wired); what was missing was the HUD (the glass mask was empty, so no HUD
+drew) and the mirrors (three dead blue-grey panels).
+
+**Sensors (spec-derived, retail records; nothing changed).** The record's fixed
+rows stay as retail (decision 22): `VIS240.SEE`, `F18R.SEE`, `MIG31.ECM` and
+`PAVESPK.SEE`; the remaining rows are the weapons, the 3,300 lb tank pair and the
+gun. `--sensor-summary` reads: `Tornado: radar F18R.SEE search 90 nmi 60x60 deg track
+50 nmi 45x45 deg look-down 0 ADVANCED; infrared none; visual VIS240.SEE search 10 nmi
+120x90 deg track 5 nmi 120x90 deg; jammer MIG31.ECM LATE strength 0.30; signature
+radar 100 infrared 100`. The radar is the F/A-18's `Preset::Advanced` (not the
+Tornado's ground-mapping radar, left as retail), the visual sensor is the
+Tornado's own narrower `VIS240.SEE` (120 x 90 degrees against the fleet's 170 x
+140), and the jammer is `MIG31.ECM` read as the `LateColdWar` generation at
+strength 0.30. No match arm branches on the aircraft, so the radar modes, the lock
+and the RWR behave as for the other aircraft.
+
+A live-fire run (`--live-fire --aircraft tornado --weapon-slot 1`, the BK27 gun)
+shows the Radar window `TWS 10 ... TRACK`, the HUD `LCOS 354 BK27 RADAR` with the lock
+circle on the target and the target camera `TORNADO IDS`; `--scope-range 50` redraws
+the scope at 50. **There is no AIM-9 on the Tornado:** the record's `AIM9M.JT` row is
+the outer wing station that B5-2 retired on John's decision (23b), so the default
+store for a lock is the gun, and slots 2 and 3 are `4 GBU-10` and `2 MK-82P3` (the
+Weapons window also reads `60 CHAFF` and `60 FLARE`, the `MIG31.ECM` counts).
+`--jammer-on --combat-command incoming` lights `JAM` on the RWR window; the incoming
+round plots at the window centre, and no scripted path plots an emitter on the RWR,
+as for the other aircraft.
+
+**Pave Spike and the laser bomb run (no pod body).** The `PAVESPK.SEE` row is a fixed
+internal row (flag `0x8`, position (0, 0, 0), as on the A-10), so the aircraft has
+the AC-130 targeting sight's laser designator with nothing hung under it and no
+pod drawn (decision 22). With the GBU-10 selected (slot 2) and a ground point pinned
+(`--combat-command sight-pin`) the HUD reads `ARM 1`, `3 GBU-10`, `IN RNG`, `LSR 4.6`
+and `TTI 0:32` with the laser box on the point, and the target camera shows the
+Paveway seeker. With nothing designated it reads `NO LASER`, as for the F-16C. The
+default load therefore allows a laser bomb run without any pod station, which the
+Tornado does not have in this record. The sensor summary shows `infrared none`
+because the Pave Spike is a laser sight, not a radar-window infrared channel.
+
+**HUD glass (measured, fitted).** `hud_aperture::mask` now has a polygon for the
+Tornado, replacing the empty mask the B5-1 interim left (the aperture fails closed
+for a picture of any other size). `~EF2H.PIC` is 1280 x 490. Its glass is the one
+closed region of transparent pixels inside the combiner frame: a thin arc on top
+(green, from y 105 at the centre), two thin side lines (x 475 and 803 at the widest, y 209 to
+217), two support cables that pinch it from y 225 down, and a green bar at the bottom
+(y 365). A flood from the middle (640, 250) over the art's transparency fills exactly
+73,769 pixels, x 475 to 803 and y 105 to 364, and stops at the frame, so the glass is
+bounded by the art itself. The fitted polygon is 36 vertices every 16 rows along those
+lines, taken on the opaque line pixels (one pixel out from the flood), so it never
+reaches the transparent sky outside the frame (0 pixels leak) and loses 852 pixels
+(1.2 percent) at the chords. The vertices are in `hud_aperture.rs`. Two tests pin
+it: a synthetic one (centre in; above the arc, outside the side lines and below the
+bottom bar out; an opaque pixel inside is left out; a picture of the wrong size fails
+closed) and a retail-reading one that skips without an install: on the real art the
+frame still closes exactly 73,769 pixels, the mask covers exactly 72,917 pixels, never
+covers an opaque pixel, lies wholly inside the flood-bounded glass, covers at least 98
+percent of it and is one connected region. The HUD draws inside the glass: heading tape
+under the arc, the airspeed and altitude boxes (`574` and `5000` at the live-fire
+start) just inside the side lines, `LCOS`, the weapon and `RADAR` lines and the lock
+circle (frames `hud-glass-whole-3x` and `hud-with-target-lock-bk27-crop3x`).
+
+**Cockpit views (windowed; every one draws the `~EF2*` art).** Front with the HUD in
+the glass and the six small-layout windows; look left and right 45 degrees (the art
+turns away with the look, the side mirror comes into view and shows the rear feed); 90
+degrees left and right and 60 degrees up (no cockpit art, open sky and ground, as for
+the other aircraft); `--flight-view 4` (F3 Up) and `--flight-view 3` (F2 Back, the
+tailplanes and fin from the pilot's eye). `Airframe::load` accepts the family: the
+three overlays `~EF2_LH.PIC`, `~EF2_CH.PIC` and `~EF2_RH.PIC` and the instrument frame
+`~EF2_P.PIC` (81 x 80) exist, and `Hud::parse` of `E2000.HUD` names `~EF2_P.PIC`. The
+family is thirteen pictures in `FA_1.LIB`; no `~TOR*` cockpit picture exists (TOR-0).
+The art is the Eurofighter's single-seat cockpit; the Tornado is a two-seater (next
+paragraphs).
+
+**Mirrors (fitted, agent decision 2026-11-11).** The art has three flat fills of one
+blue-grey (105, 113, 134): the top centre panel and two lower canopy rails. An `"EF2"`
+row in `mirrors::seeds` (centre (640, 50), left (200, 330), right (1090, 330)) fills them
+with the shared rear feed. `--cockpit-sheet OUT_DIR tornado,rafale,f18` (through
+`tools/agent-run.sh`) prints `tornado: stem TOR cockpit ~EF2H.PIC art 1280x490 FITTED
+CLR`, the centre at x 479 y 11 w 319 h 78, the left at x 125 y 183 w 153 h 262 and the
+right at x 999 y 183 w 153 h 262; the left and right sizes equal the `~EF2_LH` and
+`~EF2_RH` overlay pictures (153 x 262, checked in a retail-reading test in
+`mirrors.rs`). Each flood stays under the cap (the largest is 19,816 pixels).
+See [mirrors](../baselines/mirrors.md#2026-11-11-tornado-cockpit-and-mirror-seeds-tor-7).
+
+**Instruments and two engines.** The Systems window shows `THR 70%`, `TEMP 0%`, `OIL
+100%`, `HYD 100%` and `FUEL 11221 LBS`, with `(+ EXT 3300 LBS)` for the default tank
+pair: one engine readout serves every aircraft, so the two-engine Tornado shows one
+throttle and one temperature (the fleet readout; the panel has no per-engine needle).
+Fuel reads the Tornado's own record, 11,221 lb. The Weapons window lists `360 BK27`,
+`4 GBU-10`, `2 MK-82P3` and `60 CHAFF` / `60 FLARE`. The ten instrument pages (0 to 9)
+draw with the `~EF2_P.PIC` bezel; the Envelope page draws the Tornado's own envelope
+(the corrected B5-2 G rows); the Weapons page of the headless `--panel-snapshot` reads
+`NO WEAPONS`, as for every aircraft (the loaded Weapons window is in the live frames).
+
+**Eye point: a two-seater (agent decision, 2026-11-11, left unchanged).**
+`mirrors::pilot_eye` is one fixed offset for every aircraft (7 ft above and 10 ft
+ahead of the model origin), used only by F2 Back, the rear-view mirrors and the replay
+views; the forward cockpit view looks from the origin with 2D art. The record's
+`viewOffset` (0, 20, 60) is the Su-24 record's and no host code reads it (pinned in the
+test). The Tornado shape has no separate canopy faces or canopy state word (TOR-3), only
+a raised top: reading the neutral `TOR.SH` faces within 5 units of the centreline, the
+top of the fuselage and canopy stands 5 units, 3.3 ft at 2/3 ft a unit, above the origin
+from about 0 to 26 units ahead (0 to 17 ft), with one raised piece 15 to 26 units ahead
+(10 to 17 ft). The fixed eye (10 ft ahead) is 3.7 ft above that top and sits at the
+back of the forward piece, which is plausibly where the front-seat pilot's head is.
+There is no rear seat to move to: TORE draws one pilot's cockpit (the Eurofighter art is
+single-seat), and the real rear-seat weapon systems officer has no seat, view or
+station. A seated or per-aircraft eye would be a fleet change (a table keyed by aircraft
+through six call sites), a question for John, as in the Mirage 2000 and F-5E reviews.
+
+**Test.** `crates/tore-import/tests/tornado_cockpit.rs` (retail-reading, skips without
+media): the four sensor rows `VIS240.SEE, F18R.SEE, MIG31.ECM, PAVESPK.SEE`, `hud()`
+`E2000.HUD` different from the Rafale's, stem `EF2` with shape stem `TOR`,
+`~EF2H.PIC`, `~EF2_P.PIC` from `Hud::parse`, the overlays, thirteen `~EF2*` pictures,
+no other roster aircraft on the family, no `~TOR*` picture and the record's eye offset.
+The aperture is pinned in `hud_aperture.rs` and the mirror seeds in `mirrors.rs`.
+
+Provenance: sensor rows, HUD module, panel names and cockpit art spec-derived (retail);
+the Eurofighter cockpit binding opinionated (John, 2026-11-10); the glass polygon, the
+mirror seeds and the eye-point reading fitted or agent decisions (2026-11-11). Evidence
+and frames: `.local/m3-aircraft/frames/TOR-7/` and `.local/m3-aircraft/checks/TOR-7/`.

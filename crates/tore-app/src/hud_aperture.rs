@@ -189,12 +189,65 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::Ch47
         | AircraftId::B747
         | AircraftId::A310 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        // Tornado IDS (TOR-7, 2026-11-11): `TOR.PT` names e2000.HUD, so it
+        // flies the Eurofighter's cockpit art `~EF2H.PIC` by name (John,
+        // 2026-11-10, opinionated). The glass is the one closed transparent
+        // region inside the combiner frame: the thin frame lines (the green
+        // arc on top, the two side lines, the green bar at y 365) and the two
+        // support cables bound it, so it is flood-bounded by the art itself
+        // (73,769 pixels, x 475 to 803, y 105 to 364). The polygon runs along
+        // those lines every 16 rows, so it never reaches the transparent sky
+        // outside the frame and loses about 1.2 percent of the glass at the
+        // chords. Measured on the imported art,
+        // `the_tornado_glass_matches_the_imported_eurofighter_art`.
+        AircraftId::Tornado => (
+            (1280, 490),
+            &[
+                (611, 105),
+                (523, 121),
+                (498, 137),
+                (485, 153),
+                (480, 169),
+                (476, 185),
+                (475, 201),
+                (474, 217),
+                (486, 233),
+                (489, 249),
+                (489, 265),
+                (484, 281),
+                (488, 297),
+                (494, 313),
+                (505, 329),
+                (526, 345),
+                (551, 361),
+                (553, 364),
+                (725, 364),
+                (727, 361),
+                (752, 345),
+                (773, 329),
+                (784, 313),
+                (790, 297),
+                (794, 281),
+                (789, 265),
+                (789, 249),
+                (791, 233),
+                (804, 217),
+                (803, 201),
+                (802, 185),
+                (798, 169),
+                (793, 153),
+                (780, 137),
+                (755, 121),
+                (667, 105),
+            ],
+        ),
         // Interim, agent decision 2026-11-10, pending John (batch decision
-        // round): the Gripen (~GRIH.PIC), F-5E (~F29H.PIC, the X-29's art) and
-        // Tornado (~EF2H.PIC) name their own cockpit pictures, whose glass has
-        // not been measured. No expected size, so the aperture fails closed
-        // (an empty mask) until their cockpit slices measure a polygon.
-        AircraftId::Gripen | AircraftId::F5E | AircraftId::Tornado => ((0, 0), &[]),
+        // round): the Gripen (~GRIH.PIC) and F-5E (~F29H.PIC, the X-29's art)
+        // name their own cockpit pictures, whose glass has not been measured
+        // here (the Tornado's is measured above, TOR-7). No expected size, so
+        // the aperture fails closed (an empty mask) until their cockpit slices
+        // measure a polygon.
+        AircraftId::Gripen | AircraftId::F5E => ((0, 0), &[]),
         // The cockpit aliases above exhaust these identities.
         AircraftId::Av8
         | AircraftId::Mi24
@@ -298,5 +351,123 @@ mod tests {
         assert_eq!(f22, mask(&source, AircraftId::Faxx));
         assert_eq!(f22[200 * 1000 + 500], 1);
         assert_eq!(f22[100 * 1000 + 320], 0);
+    }
+
+    /// Opaque-glass pixels of the polygon on the retail `~EF2H.PIC`, and the
+    /// whole closed transparent region inside the combiner frame.
+    const TORNADO_GLASS_PIXELS: usize = 72_917;
+    const TORNADO_FRAME_INTERIOR: usize = 73_769;
+
+    #[test]
+    fn the_tornado_draws_the_eurofighter_glass_inside_the_combiner_frame() {
+        // Synthetic art: all transparent, so the mask is the polygon itself.
+        let source = transparent(1280, 490);
+        let mask = mask(&source, AircraftId::Tornado);
+        assert_eq!(mask.len(), 1280 * 490);
+        // The centre of the glass is in; above the arc, outside the side lines
+        // and below the bottom bar are out.
+        assert_eq!(mask[250 * 1280 + 640], 1);
+        assert_eq!(mask[100 * 1280 + 640], 0);
+        assert_eq!(mask[250 * 1280 + 450], 0);
+        assert_eq!(mask[250 * 1280 + 830], 0);
+        assert_eq!(mask[380 * 1280 + 640], 0);
+        // An opaque pixel inside the polygon is left out.
+        let mut framed = transparent(1280, 490);
+        framed.rgba[(250 * 1280 + 640) * 4 + 3] = 255;
+        assert_eq!(
+            super::mask(&framed, AircraftId::Tornado)[250 * 1280 + 640],
+            0
+        );
+        // Wrong picture size fails closed.
+        assert!(
+            super::mask(&transparent(640, 245), AircraftId::Tornado)
+                .iter()
+                .all(|v| *v == 0)
+        );
+    }
+
+    /// Retail-reading (skips without an install): the measured polygon on the
+    /// real `~EF2H.PIC`. The art closes the glass itself (frame lines and two
+    /// support cables), so the mask must sit inside the flood-bounded region
+    /// of transparent pixels around the centre, cover almost all of it, never
+    /// cover an opaque pixel, and be one connected glass.
+    #[test]
+    fn the_tornado_glass_matches_the_imported_eurofighter_art() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let Ok(library) = media.archive("FA_1.LIB") else {
+            eprintln!("skipped: no retail FA_1.LIB");
+            return;
+        };
+        let name = AircraftId::Tornado.cockpit();
+        assert_eq!(name, "~EF2H.PIC");
+        let pic = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+        assert_eq!((pic.width, pic.height), (1280, 490));
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let mask = mask(&source, AircraftId::Tornado);
+        let (width, height) = (source.width, source.height);
+        // Flood the transparent pixels from the glass centre: the frame art
+        // closes this region, so it is the whole glass.
+        let flood = |start: usize, allowed: &dyn Fn(usize) -> bool| -> Vec<bool> {
+            let mut seen = vec![false; width * height];
+            let mut todo = vec![start];
+            while let Some(at) = todo.pop() {
+                if seen[at] || !allowed(at) {
+                    continue;
+                }
+                seen[at] = true;
+                let x = at % width;
+                if x > 0 {
+                    todo.push(at - 1);
+                }
+                if x + 1 < width {
+                    todo.push(at + 1);
+                }
+                if at >= width {
+                    todo.push(at - width);
+                }
+                if at + width < width * height {
+                    todo.push(at + width);
+                }
+            }
+            seen
+        };
+        let centre = 250 * width + 640;
+        let interior = flood(centre, &|at| source.rgba[at * 4 + 3] == 0);
+        assert_eq!(
+            interior.iter().filter(|v| **v).count(),
+            TORNADO_FRAME_INTERIOR,
+            "the combiner frame no longer closes the glass"
+        );
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        assert_eq!(covered, TORNADO_GLASS_PIXELS, "glass area moved");
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            if *covered_pixel == 1 {
+                assert_eq!(source.rgba[at * 4 + 3], 0, "mask covers opaque art");
+                assert!(interior[at], "mask leaves the frame at {at}");
+            }
+        }
+        // Almost all of the glass is drawn (the polygon chords lose about 1.2%).
+        assert!(covered * 100 >= TORNADO_FRAME_INTERIOR * 98);
+        let connected = flood(centre, &|at| mask[at] == 1);
+        assert_eq!(
+            connected.iter().filter(|v| **v).count(),
+            covered,
+            "the glass is one connected region"
+        );
     }
 }

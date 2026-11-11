@@ -1822,3 +1822,10 @@ This artwork is research evidence only. The exploratory vegetation renderer
 uses original text-generated material sprites. Its camera-facing, distance and
 density rules are agent choices in the
 [vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).
+
+**Cockpit family (TOR-7, 2026-11-11).** The Tornado draws the Eurofighter 2000's
+`~EF2H.PIC` cockpit art (the record names `e2000.HUD`; John, 2026-11-10, opinionated),
+the first aircraft to use the family. Its HUD glass aperture and mirror seeds are
+measured on that art; see [the Tornado sensors, HUD and cockpit
+section](aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11). No
+Tornado cockpit art exists, and no retail art is committed.

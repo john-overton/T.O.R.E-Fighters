@@ -256,3 +256,21 @@ Super 530D (`R530.JT`) locks, hits and kills (`shots=1 hits=1 kills=1` at 700
 ticks). Not run: any side-by-side tuning, or an RWR with a plotted emitter (no
 scripted path exists).
 
+## Tornado radar, jammer and Pave Spike row, 2026-11-11 (TOR-7)
+
+The Tornado flies the already reviewed `F18R.SEE` (`Preset::Advanced`), the `MIG31.ECM`
+record (`Generation::LateColdWar`, strength 0.30, 60 chaff and 60 flares) and its own
+`VIS240.SEE`, all as retail (decision 22: no substitute, no pod body drawn); no match arm
+and no code changed. `--sensor-summary` reads: `Tornado: radar F18R.SEE search 90 nmi
+60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED; infrared none; visual VIS240.SEE
+search 10 nmi 120x90 deg track 5 nmi 120x90 deg; jammer MIG31.ECM LATE strength 0.30;
+signature radar 100 infrared 100`. `--live-fire --aircraft tornado --weapon-slot 1` shows
+`TWS 10 ... TRACK` on the radar window, the HUD `LCOS 354 BK27 RADAR` and the target
+camera `TORNADO IDS`; `--scope-range 50` redraws the scope at 50 (the other values are
+shared code). `--jammer-on --combat-command incoming` lights `JAM` on the RWR. The default
+load has no AIM-9 (B5-2 retired the outer wing station), so the lock is shown with the gun
+and the laser bomb. The fixed `PAVESPK.SEE` row (flag `0x8`, as the A-10's) gives the
+laser designator: `--weapon-slot 2 --combat-command sight-pin` reads `ARM 1`, `3 GBU-10`,
+`IN RNG`, `LSR 4.6`, `TTI 0:32` and the seeker view on the target camera; without a
+designation it reads `NO LASER`. Not run: any side-by-side tuning, or an RWR with a
+plotted emitter (no scripted path exists).
