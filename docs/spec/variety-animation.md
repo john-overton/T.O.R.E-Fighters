@@ -798,3 +798,31 @@ brake and exhaust `required moved`, a 202-value dense gear sweep with every row
 passing (rigidity about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at
 the scaled low point at gear 1), and the closed airbrake within 3e-6 ft of the
 spine line. Not a claim of original retraction timing.
+
+## Mirage F1 control fit
+
+Agent-authored whole-panel motion, 2026-11-10 (slice MF1-3), over `MF1.SH` after
+the per-axis shape scale of MF1-2 (hinge points and axes are scaled with
+`aircraft::scale::scale_point`). The shape names a rudder word (`0x5af4`), two
+flap-slot words (`0x5ae8`, `0x5aee`) and no signed pitch or roll branch, so the
+tailplane, the ailerons and the rudder are fitted assignments over exact reviewed
+source faces. Every moving surface is whole: each tailplane (two windings), each
+aileron (four faces) and the rudder (two windings) turns as one rigid panel. The
+source groups, the rule 11 fold table, the seam measurements and the flap-word
+decision are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#mirage-f1-control-surfaces-mf1-3-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Pitch | Both tailplane panels, `-0.30 * elevator` radians about a lateral spindle through the root chord midpoint (+-5.5, -31.5, -1) along X (positive elevator raises the trailing edges). Pitch only: no roll term (John, 2026-11-10). |
+| Roll | The outboard trailing-edge panels as ailerons, `-0.20 * aileron` on the right and `+0.20 * aileron` on the left (positive aileron raises the right trailing edge and lowers the left), about the wedge's leading edge line (23,-6,1) to (35,-11,1.5). No pitch term, no flap term. |
+| Flaps | Nothing moves: the source has no flap panel and the one trailing-edge panel is the aileron. The probe records the control as not applicable and fails if the lever moves geometry. |
+| Yaw | The rudder quad (both windings) turns `0.35 * rudder` radians about the fin line (0,-30,3) to (0,-39,22); positive swings the trailing edge to +X. |
+| Gear, airbrake, plume | Not owned yet: the six gear plates keep the shared interim rise until MF1-4; the airbrake and plume words are pinned and unmapped. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments` with
+`anchor_missing=false`, `anchor_gap_ft` about 2e-7, `skin_gap_ft=0`, no direction
+failures and a largest inter-vertex distance change of about 1e-6 ft for pitch,
+roll and yaw sweeps, plus the 25-pose pitch/roll grid
+(`pitch-roll-combinations.csv`). The `flight-animation-mf1` battery scenario
+checks the report and the 26-line grid file.

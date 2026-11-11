@@ -4190,6 +4190,14 @@ Options for the tailplane and ailerons (none chosen):
    panel also taking the flap-slot words as a droop (same as option 1 for roll;
    decide the droop in MF1-3).
 
+Update (MF1-3, 2026-11-10): John chose option 1 (tailplane pitch only; ailerons
+carry roll). MF1-3 rigged the tailplane, the two outboard panels as ailerons and
+the rudder as whole panels; the flap-slot words are pinned and never set, and
+the flap lever moves nothing because no source places the real F1's flaps at the
+aileron position (option 3's droop is not applied). The geometry, fold table,
+seam openings and magnitudes are in [Mirage F1 control
+surfaces](aircraft-control-surfaces.md#mirage-f1-control-surfaces-mf1-3-2026-11-10).
+
 **Rule 11 face table** (from the `state_neutral` dump; "on hinge" means within
 one unit of the hinge line, the thickness of the wedge; no face has a fixed
 vertex):
