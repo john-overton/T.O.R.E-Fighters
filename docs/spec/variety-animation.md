@@ -224,6 +224,19 @@ nose panel vertices were checked against neutral body cross sections. These
 checks establish bounded geometry, not original mechanical timing or GPU
 texture appearance.
 
+Update (B5-3, 2026-11-10, opinionated, John's decision round 2, item E3): the
+Nose gear row above is superseded. The real F-15's nosewheel retracts forward
+(aircraftinformation.info, McDonnell F-15 Eagle, airframe and flight control
+systems, accessed 2026-11-10). All six nose plates, the door included, now fold
+forward through pi/2 as one rigid piece about the lateral line Y=48, Z=-8 (the
+smallest Y of the assembly, level with its top edge); no vertex is fixed, gear 1
+is the source pose and still grounded at its lowest point (z -27), and the stow
+envelope is abs(X)<=2, Y=48..67, Z=-8..8 (it was Y=39..64, Z=-8..6). The probe
+no longer holds the old brace-root anchors and instead checks that the lowest
+vertices never swing aft, nothing goes behind Y=48, the pose at 1 is the source
+and the stow fits the envelope. The main gear and doors are unchanged. Agent
+decision on the fold line (the real hinge is not recovered).
+
 
 ## MiG-17F control and device fit
 
