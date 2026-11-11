@@ -127,6 +127,19 @@ that wheel cutout and have an upper edge at Y=52,Z=-8. The texture rectangle
 corners do not establish multiple fixed strut joints. The chosen continuous
 fold remains [fitted](../spec/variety-animation.md#f-15c-control-and-device-fit).
 
+Update (B5-3, 2026-11-10, opinionated, John's decision round 2, item E3): the
+nose gear no longer folds aft about the forward brace root. The real F-15's
+nosewheel "retracts forward" (aircraftinformation.info, McDonnell F-15 Eagle,
+airframe and flight control systems,
+<https://www.aircraftinformation.info/JB_AIF/usaf_fighters/f15_2.html>,
+accessed 2026-11-10; the F-15E rig of F15E-4 cites the same page). The six nose
+faces (`5a82`/`5aa1` wheel sheets, `5ac0`/`5ad7` strut plates, `5aee`/`5b0d` cross
+plates; source x -2 to 2, y 48 to 64, z -27 to -8) now fold forward through 90
+degrees as one rigid body about the lateral line Y=48, Z=-8, behind and level
+with every vertex. Gear down (1) is the source pose with the foot at z -27; the
+stow is Y 48 to 67 and Z -8 to 8 inside the nose. The main legs, doors and the
+F-15C text above are unchanged.
+
 Local source evidence is `single-geometry.json`, `f15-rig-plan.json` and the
 F-15 atlas inspection under `.local/animation-audit/`. Retail retraction timing
 and exact mechanisms remain unknown; a live retail comparison is unavailable.

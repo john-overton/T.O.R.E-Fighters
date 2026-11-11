@@ -1630,6 +1630,22 @@ one. Clearing the row removes all of it, so the F-5E has no countermeasure
 dispensers either. If John wants chaff and flares without a jammer, `F104.ECM`
 (20 and 20, no deception, an Early-generation label) is the alternative record.
 
+Update (B5-3, 2026-11-10, opinionated, John's round 2, item D2, "follow recs"):
+the F-5E's row 2 now holds `F104.ECM` in place of the empty row B5-2 left: 20
+chaff, 20 flares and no deception jammer, with the Early-generation jammer label
+the F-104 and the Hawk already carry. The real F-5E has no internal jammer but
+carries an AN/ALE-40 chaff and flare dispenser (John's round 2 note; the
+AN/ALE-40 is the standard US dispenser, taking 30 chaff or 15 flare cartridges,
+[FAS, AN/ALE-40](https://man.fas.org/dod-101/sys/ac/equip/an-ale-40.htm), accessed
+2026-11-10; for the F-5 itself only secondary sources were found, a DCS F-5E
+community thread quoting the type's technical order for two cartridges, so the
+installation is cited second hand). TORE's record counts are not
+the ALE-40's, because `F104.ECM` is the closest existing dispenser-only record,
+not a model of the real cartridge count. The row keeps its place, mask, count and
+position, so no station index moves; only the retail row (all seven rows
+unchanged from retail except the B5-2 defaults) takes the change, and an edited
+record keeps its own jammer row.
+
 **Counts.** `ordnance TOR.PT: 4 source rows, 0 optional weapon rows, 85 compatible
 weapon placements, 8 tank placements` (was 5, 0, 96, 8); `ordnance F5E.PT: 4 source
 rows, 1 optional weapon rows, 71 compatible weapon placements, 5 tank placements`
