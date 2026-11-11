@@ -4533,3 +4533,26 @@ No audit pin moves (the F-5E row keeps its place and the audit counts weapon row
 only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
 placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
 on the retail record and has a unit test.
+
+## F-5E ordnance, default load and countermeasures (F5E-6, 2026-11-10)
+
+Slice F5E-6 confirmed the F-5E's ordnance as the record's own plus the guarded B5-2
+and B5-3 defaults, with no gameplay code change. This answers the F-5E review's
+"default AIM-7 on the wing (not real)" and "radar and jammer F18 pair" findings (the
+corrections are in the B5-2 and B5-3 notes above; the earlier text is kept as
+written). Full tables, positions and results are in
+[aircraft ordnance](aircraft-ordnance.md#the-f-5e-tiger-f5e-6-2026-11-10).
+
+| Item | Result |
+| --- | --- |
+| Default load (human, AI, saved loads, lobby) | `M61.JT` x560, `F150.GAS` centreline x1, empty wing pair, `AIM9B.JT` x2 on the wingtips; 15,365 lb of 24,664 lb with 4,400 lb of fuel |
+| Gun | 560 rounds equal the real two M39A2 with 280 each (`F5E.INF`); the shared gun cadence (about 32 rounds a second) is unchanged |
+| Countermeasures | `F104.ECM`: 20 chaff and 20 flares, shown on the weapons page; one chaff leaves 19, one flare leaves 19 |
+| Live fire | gun 320 shots, 47 hits, 1 kill; AIM-9B one shot, one hit; an AGM-65G from the wing pair kills the column's lead truck |
+| Release origins | wing pair 8.02 then 6.64 ft out (Mk 82) and 8.18 then 6.48 ft (AGM-65G), 2.8 ft down, 1 ft pylon, left first then alternating; wingtip AIM-9Bs 14.33 ft out, left then right |
+| Jettison | the tank (990 lb) drops first, then the four wing-pair bombs |
+| Audit | 4 source rows, 1 optional weapon row, 71 weapon placements, 5 tank placements; no pin moved |
+
+Open for John: the wing pair's empty default means a bomb run must name the station
+(`--station 2`); the real F-5E fit sources for the dispenser are second hand (see the
+B5-3 note); the cadence is shared, not F-5E specific.

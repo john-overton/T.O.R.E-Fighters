@@ -78,6 +78,12 @@ STATIONS = {
     # centreline tank is a tank station, and it has no wingtip row (John,
     # 2026-11-10).
     "m2000": [250, 4, 2, 2],
+    # The F-5E carries the M61 gun on its internal row 3 (560 rounds, two guns
+    # of 280), the wingtip AIM9B.JT x2 (row 6) as its only default weapon, and
+    # an empty wing pair (row 5, four stores allowed, retained at 0 so it is
+    # never loaded by default; B5-2). Its F150.GAS centreline tank is a tank
+    # station (F5E-6, 2026-11-10).
+    "f5e": [560, 2, 0],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
