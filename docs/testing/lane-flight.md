@@ -866,6 +866,7 @@ mains inward, nose rearward), a seven-value airbrake sweep that checks the
 closed plate on the spine, and the 25-combination pitch/roll grid; its
 `flight-variety-m2000` scenario flies 1,200 headless ticks.
 The Mirage F1 (MF1-3) adds the 25-combination pitch/roll grid (`flight-animation-mf1`): its tailplane must follow pitch only and its aileron panels roll only, each staying put under every other control including the flap lever (the probe records the flap control as not applicable for this aircraft); its gear, airbrake and plume are still the interim rig.
+Update (MF1-4, 2026-11-10): the Mirage F1 adds the same 202-value dense gear sweep (grounded at gear 1, mains forward and inward into the fuselage side, nose rearward), a seven-value airbrake sweep with the closed plate on the ridge line, the exhaust sweep, and is registered in the variety flight scenarios (`flight-variety-mf1` flies 1,200 headless ticks); `flight-animation-mf1` now expects the 203-line dense gear file beside the 26-line grid.
 
 Run one repaired aircraft before expanding the audit:
 

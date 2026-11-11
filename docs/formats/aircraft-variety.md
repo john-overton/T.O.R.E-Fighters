@@ -4198,6 +4198,12 @@ aileron position (option 3's droop is not applied). The geometry, fold table,
 seam openings and magnitudes are in [Mirage F1 control
 surfaces](aircraft-control-surfaces.md#mirage-f1-control-surfaces-mf1-3-2026-11-10).
 
+Update (MF1-4, 2026-11-10): the airbrake is rigged as the source's one dorsal
+plate only (hinge the forward edge, y 29, z 5), as planned; the real paired brakes
+are not in the shape and are not drawn. The gear and burner follow the same
+section: [Mirage F1 gear, airbrake and
+plume](aircraft-control-surfaces.md#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10).
+
 **Rule 11 face table** (from the `state_neutral` dump; "on hinge" means within
 one unit of the hinge line, the thickness of the wedge; no face has a fixed
 vertex):
@@ -4513,3 +4519,36 @@ No audit pin moves (the F-5E row keeps its place and the audit counts weapon row
 only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
 placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
 on the retail record and has a unit test.
+
+## Mirage F1 gear, airbrake and plume (MF1-4, 2026-11-10)
+
+Implementation, slice MF1-4, Claude Sonnet (sonnet-high). The Mirage F1 rig
+(`mf1_animation.rs`) now owns the three device words. Results, with the geometry
+and the rule 11 fold table in [Mirage F1 gear, airbrake and
+plume](aircraft-control-surfaces.md#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10)
+and the player-visible laws in [Mirage F1 gear, airbrake and plume
+fit](../spec/variety-animation.md#mirage-f1-gear-airbrake-and-plume-fit):
+
+- **Gear.** The three plates turn as whole rigid pieces: the mains forward and
+  inward (95 degrees about an axis on their own top edge, 15 degrees off lateral),
+  the nose rearward (110 degrees about a lateral axis through its forward top
+  corner) with steering. The F1's mains retract forward and its nose gear
+  rearward ([Air Vectors, "The Dassault Mirage F1"](https://airvectors.net/avmirf1.html),
+  a general history). Gear 1 is the source pose, grounded at the MF1-2 scaled low
+  point (5.98 ft); gear 0 draws nothing.
+- **Parked path.** `("MF1.PT", Some(0x5adc))` is unchanged: `--surface-parked FRA
+  QFLAIR --seconds 0` lists both parked F1s exactly as before (class `0x8000`,
+  gear `0x5adc`, `origin-up` 5.98), and the windowed scene shows them gear down
+  on the apron.
+- **Airbrake.** The one dorsal plate turns whole about its forward edge
+  (`0.707 rad * (1 - brake)` onto the ridge, hidden at 0).
+- **Burner and engine count.** One plume from the nozzle exit plane, one nozzle
+  glow on the two half discs (`2e92`, `2eb3`) and one contrail from the engine
+  count of 1 (`outlet_count(Mf1) = 1`); the shape-end fallback MF1-2 noted is gone.
+- **Remaining words.** `0x5ae8`, `0x5aee` and `0x5af4` are pinned and never set
+  (the ailerons and the rudder are turned instead); no word is left unaccounted for.
+- **Open for John.** (1) The F1's real brakes are paired panels under the
+  intakes; only the source's dorsal plate is drawn. (2) The hull model used to
+  fit the stow is read off the skin faces; a stowed main is inside it to within
+  0.1 unit, but the shape has no gear bay, so nothing is cut open. (3) The main
+  foot dips 0.08 ft in the first degrees of travel (inclined axis).

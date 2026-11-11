@@ -104,6 +104,9 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // M20.SH: the one hexagonal exit disc at y -44 (subtype 0x64), the
         // single M53 nozzle (M2K-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::M2000 => address == 0x3794,
+        // MF1.SH: the one Atar 9K-50 exit disc at y -42, two half discs either
+        // side of x = 0 (subtype 0x64; MF1-4, docs/formats/aircraft-control-surfaces.md).
+        AircraftId::Mf1 => crate::mf1_animation::nozzle(address),
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
         AircraftId::A4E
@@ -117,7 +120,11 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
 /// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
 pub fn outlet_count(id: AircraftId) -> usize {
     match id {
-        AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 | AircraftId::M2000 => 1,
+        AircraftId::X31
+        | AircraftId::Mig21
+        | AircraftId::Mig23
+        | AircraftId::M2000
+        | AircraftId::Mf1 => 1,
         AircraftId::A4E
         | AircraftId::Su25
         | AircraftId::F22
@@ -155,6 +162,7 @@ mod tests {
             AircraftId::Mig23,
             AircraftId::X31,
             AircraftId::M2000,
+            AircraftId::Mf1,
         ] {
             assert_eq!(outlet_count(id), 1);
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);

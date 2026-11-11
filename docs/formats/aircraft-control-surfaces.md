@@ -1098,3 +1098,123 @@ shared interim rise (word `0x5adc`, plates `3b7e`, `3b9d`, `3be9`, `3c08`,
 until MF1-4; `mf1_animation.rs` pins those words and face lists at load as the
 places MF1-4 takes over. See the
 [Mirage F1 fit](../spec/variety-animation.md#mirage-f1-control-fit).
+
+Update (MF1-4, 2026-11-10): the gear, airbrake and plume are now owned by the
+rig; see [Mirage F1 gear, airbrake and plume](#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10).
+
+## Mirage F1 gear, airbrake and plume (MF1-4, 2026-11-10)
+
+Slice MF1-4 (implementation, Claude Sonnet, sonnet-high). `mf1_animation.rs` now
+loads the three device words with the control surfaces of
+[MF1-3](#mirage-f1-control-surfaces-mf1-3-2026-11-10). Each word adds faces and
+removes none (pinned at load: a different face set refuses the shape), the added
+faces are scaled per axis `[1.0335, 1.1804, 1.0546]` like the rest of the shape,
+and every hinge point and axis below is in shape units run through
+`scale_point(Mf1, ..)`. Nothing is split: each device is whole rigid pieces
+selected by face address. All six words are accounted for:
+
+| Word | Effect in the source | Rig |
+| --- | --- | --- |
+| `0x5adc` | Adds the three gear plates (6 faces, both windings) | Set by the gear lever, animated (this section) |
+| `0x5ad6` | Adds the one dorsal airbrake plate (2 faces) | Set by the brake lever, animated |
+| `0x5ad0` | Adds the plume (8 faces) | Set by the afterburner, animated |
+| `0x5ae8`, `0x5aee` | Delete one wing's outboard trailing-edge panel, add nothing | Pinned, never set (MF1-3: the panels are the ailerons) |
+| `0x5af4` | Swaps the rudder quad for a copy 45 degrees to starboard | Pinned, never set (MF1-3: the quad turns) |
+
+Beyond the six words the shape has no door, canopy, hook, slat, spoiler, nozzle
+petal or inboard flap geometry, and none is invented.
+
+**Gear (fitted; direction from a public source).** The F1's nose gear retracts
+rearward and its main gear retracts forward and rotates to tuck into the
+fuselage (Greg Goebel, "The Dassault Mirage F1", Air Vectors,
+`airvectors.net/avmirf1.html`: "The nose landing gear assembly retracted
+backwards while the main gear assemblies retracted forward, rotating to tuck
+neatly into the fuselage"; a general history, not a maintenance manual). The
+source plates, in shape units:
+
+| Plate | Faces | Geometry |
+| --- | --- | --- |
+| Left main | `3b7e`, `3b9d` | Top edge x -3, y -5 to 4, z -6; foot edge x -7, z -17 (a leg and wheel seen from the side, 9 wide, 11 tall, leaning outboard) |
+| Right main | `3be9`, `3c08` | Mirror, x +3 and +7 |
+| Nose | `3c54`, `3c73` | Plane x 0, y 38 to 47, z -7 to -17 |
+
+| Piece | Hinge (rig definition) | Angle |
+| --- | --- | --- |
+| Each main | The point of its own top edge 1 unit forward of the rear corner, (+-3, -4, -6), axis 15 degrees off lateral toward forward (right (0.966, 0.259, 0), left (0.966, -0.259, 0), the mirror) | `95 degrees * (1 - gear)`, the foot swings forward and inward |
+| Nose | Lateral axis (along X) through its own top forward corner (0, 47, -7) | `-110 degrees * (1 - gear)`, the foot swings rearward and the whole plate rises above the hinge line |
+| Nose steering | Vertical axis through the plate centre (0, 42.5, -12) | `-nosewheel_angle`, applied first |
+
+Gear 1 is the source pose (grounded: the lowest vertex is z -17 units, the MF1-2
+scaled gear low point 17/3 * 1.0546 = 5.98 ft the flight model and the parked
+path stand on); gear 0 draws nothing. A purely lateral axis would not stow the
+mains: the plate is 9 deep and 11 tall, so a quarter turn stands it on edge with
+its outboard foot corner about 1 ft above the wing shoulder, outside the hull.
+The 15 degree lean and the 95 degree angle were found by searching the hinge
+point, lean and angle against the fuselage section read off the skin faces
+(7 units half-wide from z -4 to 1 at y 7, 6 at z -7 and z 3, 2 at the ridge z 5,
+narrowing aft to 0.72 of that at y -39): stowed, each main lies at x 2.7 to 6.1,
+y -4.0 to 6.5, z -7.3 to 2.5 (shape units), inside the hull to within 0.1 unit.
+The cost of the lean: the main foot's rear corner dips 0.22 unit (0.08 ft)
+below its gear-down height in the first few degrees of travel. The probe allows
+0.1 ft. The nose plate stows in the plane x 0 between y 38.6 and 50.1, z -7 to 5.9 (the nose bay roof is at z 6).
+
+**Airbrake (fitted).** The one source plate (`4182`, `4199`, both windings):
+forward edge (-2, 29, 5) to (3, 29, 5), free edge (+-2, 19, 14) raised aft. The
+hinge is the forward edge, a line along X at (y 29, z 5), and the whole plate
+turns about it (the plate is not split: its four vertices are two on the hinge
+and two on the free edge). Brake 1 is the source raised pose; the angle
+`0.707 rad (40.5 degrees) * (1 - brake)` lays the plate along the dorsal ridge
+line (0, 37, 6) to (0, 7, 5) at a small brake (measured on the scaled shape: the
+free edge within 4e-6 ft of the ridge line at 1e-6); brake 0 hides it. The
+closed plate lies 0.7 unit under the ridge skin, so a thin sliver of its
+outboard corner shows beside the spine at small values (frame
+`crop3x-airbrake-closed-side`). The real F1's brakes are paired panels under the
+intakes (MF1-0 review); the source has only this dorsal plate, so only it moves.
+
+**Burner (fitted).** The plume is two crossed pairs of double-sided plates: x = 0
+plane (`4207`, `422e` outer, y -56 to -81; `42a3`, `42ca` inner, y -42 to -56,
+z -5 to 3) and z = -1 plane (`4255`, `427c` outer; `42f1`, `4318` inner, x -3 to
+4). The nozzle exit plane y -42 is the root: every plume vertex scales along Y
+about it by the afterburner fraction, so each plate stays in its plane (nothing
+folds; a plate that only stretches along its own plane stays flat), shared edges
+stay together (the y -56 edge is the same in the inner and outer plate), and the
+exit corners never move. Exhaust 0 draws nothing. `engine_material` gains the
+Mirage F1: `outlet_count(Mf1) = 1` (the record's one Atar 9K-50) and the nozzle
+faces `2e92` and `2eb3`, the two half discs either side of x = 0 at y -42 (x -4
+to 4, z -6 to 3, subtype 0x64; the two thin triangles at x +-4 in that plane have
+no area and carry no material). That gives one glow on the whole disc and one
+contrail at the disc centre (x 0, z -1.5) 2 ft behind the exit plane; MF1-2's
+shape-end fallback is no longer used (unit test
+`the_mirage_f1_draws_one_contrail_on_the_centreline_behind_its_one_nozzle`).
+
+**Rule 11 fold table (rig definitions).** Every added face turns or stretches
+whole; no vertex is held fixed off its hinge, and no face is selected by a
+coordinate threshold.
+
+| Piece | Faces | Vertices | Moved as one rigid body | Held fixed | Fixed off the hinge |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Left main | `3b7e`, `3b9d` | 4 each | 4 each | 0 (the hinge point is on the top edge, not a vertex) | 0 |
+| Right main | `3be9`, `3c08` | 4 each | 4 each | 0 | 0 |
+| Nose | `3c54`, `3c73` | 4 each | 3 each | 1 each: (0, 47, -7), on the hinge | 0 |
+| Airbrake | `4182`, `4199` | 4 each | 2 each | 2 each: (-2, 29, 5), (3, 29, 5), on the hinge | 0 |
+| Plume | the eight plates | 4 each | stretched about y -42 | the exit-plane vertices (y -42) | 0 |
+
+**Verdict: no face folds.** The probe's largest inter-vertex distance change in
+each gear plate and in the airbrake is about 6e-7 ft; the gear skin gap is 0.
+
+**Probe numbers** (`.local/m3-aircraft/checks/MF1-4/poses`, 0 failures): gear,
+brake and exhaust `required moved`; 202 dense gear values (0 to 1 in 200 steps
+plus 1e-6), every row passing: rigidity about 1e-6 ft, anchor gap about 2e-7 ft,
+skin gap 0, no direction failure, no new planar crossing, ground contact at gear
+1 (lowest point the scaled low point within 1e-3 ft), stow gates at 1e-6; the
+seven-value brake sweep (hinge gap 0, rigidity about 6e-7 ft, closed within
+4e-6 ft of the ridge, never raising the free edge); exhaust: exit corners fixed
+(gap 0), tips forward as the demand falls, the MF1-3 25-pose pitch/roll grid
+still passing.
+
+**Provenance.** Gear, airbrake and plume motion and every hinge and angle:
+fitted, agent decisions 2026-11-10. Retraction directions: public secondary
+source (Air Vectors, above), not original behaviour. Face lists, word effects,
+plate corners and the nozzle disc: spec-derived from the shape. Engine count 1:
+John's decision 23, 2026-11-10. Nothing here is a claim of the original's
+retraction timing or travel.

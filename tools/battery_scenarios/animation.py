@@ -68,7 +68,7 @@ def check_report(work: Path, _output: str) -> list[str]:
         "M25.PT": {"dense-gear.csv": 203, "flap-roll-combinations.csv": 26},
         "MIG31.PT": {"dense-gear.csv": 203, "flap-roll-combinations.csv": 26},
         "M2000.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26},
-        "MF1.PT": {"pitch-roll-combinations.csv": 26},
+        "MF1.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26},
     }.get(aircraft, {})
     for csv_name, row_count in sweeps.items():
         try:

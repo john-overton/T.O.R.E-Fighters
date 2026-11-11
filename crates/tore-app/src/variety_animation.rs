@@ -284,13 +284,14 @@ fn specification(id: Id) -> Option<Spec> {
                 2. / 3.,
             ),
             // MF1.SH: six words, gear 0x5adc adds 6 faces (the parked word).
-            // MF1-3 loads it with its own `mf1_animation` rig for the
-            // tailplane, the two outboard trailing-edge (aileron) panels and
-            // the rudder; the gear, airbrake (0x5ad6) and plume (0x5ad0) stay
-            // with these shared groups until MF1-4. The flap-slot words
+            // MF1-3 and MF1-4 load it through its own `mf1_animation` rig,
+            // which owns the tailplane, the two outboard trailing-edge
+            // (aileron) panels, the rudder, the three rigid gear plates, the
+            // dorsal airbrake plate (0x5ad6) and the plume (0x5ad0); the
+            // shared groups are no longer used for it. The flap-slot words
             // (0x5ae8, 0x5aee) and the rudder word (0x5af4) are pinned but
             // never set; docs/spec/variety-animation.md, "Mirage F1 control
-            // fit".
+            // fit" and "Mirage F1 gear, airbrake and plume fit".
             Id::Mf1 => (
                 19200,
                 236,
@@ -373,8 +374,8 @@ enum SpecificRig {
     Mig25(crate::mig25_animation::Rig),
     Mig31(crate::mig31_animation::Rig),
     M2000(crate::m2000_animation::Rig),
-    /// MF1-3: the control surfaces only; the gear, airbrake and plume faces
-    /// stay with the shared groups until MF1-4.
+    /// MF1-3 and MF1-4: the control surfaces, the gear, the airbrake and the
+    /// plume.
     Mf1(crate::mf1_animation::Rig),
 }
 pub struct Rig {
@@ -660,6 +661,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Mf1 => {
+                let (rig, shape) = crate::mf1_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Mf1(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -672,10 +682,6 @@ impl Rig {
             )
             .into());
         }
-        let specific = (id == Id::Mf1)
-            .then(|| crate::mf1_animation::Rig::load(bytes, &shape))
-            .transpose()?
-            .map(SpecificRig::Mf1);
         let neutral: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
         let mut removed = BTreeSet::new();
         let mut added = Vec::new();
@@ -736,7 +742,7 @@ impl Rig {
                 id,
                 groups,
                 scale: spec.scale,
-                specific,
+                specific: None,
             },
             shape,
         ))
@@ -789,14 +795,7 @@ impl Rig {
                 SpecificRig::Mig25(_) => crate::mig25_animation::flame(address),
                 SpecificRig::Mig31(_) => crate::mig31_animation::flame(address),
                 SpecificRig::M2000(_) => crate::m2000_animation::flame(address),
-                // MF1-3: no plume is owned yet; fall to the shared groups below
-                // (MF1-4 maps the plume).
-                SpecificRig::Mf1(_) => {
-                    return self
-                        .groups
-                        .get(&address)
-                        .is_some_and(|g| g.part == Part::Flame);
-                }
+                SpecificRig::Mf1(_) => crate::mf1_animation::flame(address),
             };
         }
         self.groups
@@ -824,13 +823,7 @@ impl Rig {
         Some(face)
     }
     fn animate_devices(&self, source: &Face, state: &State) -> Option<Face> {
-        // MF1-3: the Mirage F1 rig turns its control surfaces; every other face
-        // (gear, airbrake, plume until MF1-4) takes the shared groups below.
-        if let Some(SpecificRig::Mf1(rig)) = &self.specific {
-            if rig.owns(source.address) {
-                return Some(rig.animate(source, state));
-            }
-        } else if let Some(rig) = &self.specific {
+        if let Some(rig) = &self.specific {
             return match rig {
                 SpecificRig::A4E(rig) => rig.animate(source, state),
                 SpecificRig::A7(rig) => rig.animate(source, state),
@@ -863,7 +856,7 @@ impl Rig {
                 SpecificRig::Mig25(rig) => rig.animate(source, state),
                 SpecificRig::Mig31(rig) => rig.animate(source, state),
                 SpecificRig::M2000(rig) => rig.animate(source, state),
-                SpecificRig::Mf1(_) => unreachable!("handled above"),
+                SpecificRig::Mf1(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
