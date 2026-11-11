@@ -402,3 +402,74 @@ afterburner 55 percent longer (9.3 minutes); the F-5E pulls 7.41 G at half fuel
 and lasts 36.7 minutes at military power (73.3 before); the Tornado and the Mirage
 F1 pull 7.5 G at half fuel; the Mirage F1's afterburner lasts 11.3 minutes (4.4
 before). Every figure is in the baseline.
+
+## F-5E top-speed trim (B5-5, 2026-11-11)
+
+**Opinionated (John, 2026-11-11, after B5-4: "Trim F-5E only"); the factor is
+fitted (agent decision, measured).** The F-5E's speed polygon is the one
+B5-4 left as retail: its 1 G fast edge reaches 1,840 ft/s (1,090 kt, Mach 1.90)
+at 36,000 ft, 16 percent over the real Mach 1.63 (Wikipedia "Northrop F-5",
+Specifications (F-5E Tiger II), "Mach 1.63 (1,739 km/h; 1,080 mph) at 36,000 ft";
+MILAVIA F-5 specifications, Mach 1.64 at 36,000 ft; both read 2026-11-11). The
+record has no separate maximum-speed field: the 1 G polygon is the top speed.
+In TORE the level top speed is that fast edge divided by the shared drag law's
+loaded-drag factor (0.937 for the F-5E at full fuel, the same at every altitude),
+and the overspeed limit reads the same edge, so scaling the edge by `s` moves
+both by exactly `s`. **The shared drag law is unchanged, and so are the Gripen
+and the F-15E.**
+
+| Quantity | Retail record | B5-4 (before) | B5-5 (after) | Real |
+| --- | --- | --- | --- | --- |
+| 1 G fast edge at 36,000 ft, ft/s | 1,840 | 1,840 | 1,693 | n/a |
+| 0 G fast edge at 36,000 ft, ft/s | 1,940 | 1,940 | 1,785 | n/a |
+| Level top speed at 36,000 ft, afterburner, clean | n/a | 1,021 kt (Mach 1.78) | 940 kt (Mach 1.64) | Mach 1.63 to 1.64 (935 to 941 kt) |
+| Level top speed at 1,000 ft | n/a | 685 kt (Mach 1.04) | 630 kt (Mach 0.96) | not found |
+| Level top speed at sea level | n/a | 677 kt (Mach 1.02) | 623 kt (Mach 0.94) | not found |
+| Overspeed limit (1 G fast edge) at 1,000 ft | n/a | 731 kt | 673 kt | n/a |
+
+**The rule.** `F5E_TOP_SPEED_SCALE` is 0.92 (measured: 940 / 1,021 = 0.920 at
+36,000 ft and 623 / 677 = 0.920 at sea level; Mach 1.64 sits between the two
+cited figures, 1.63 and 1.64). In `fit_envelopes`, after every B5-4 row change
+(the fitted +8 row and the ceiling shift included), the fast side of the 1 G and
+0 G polygons (the vertices after the first highest one, including the far end of
+the top plateau) is multiplied by 0.92 and rounded to the record's whole ft/s;
+the slow sides, every altitude, the ceiling and every stall edge stay. Every
+other row's fast side is held to the new 1 G edge at its altitude (the rule of
+the fitted G rows), so no higher row passes the 1 G edge. The result is that the
+rows used at ordinary fighting speeds (every low-altitude G row, all of them
+inside the new 1 G edge) are untouched, and only the high-altitude fast vertices
+of the +2, +3 and -1 rows move (1,620 to 1,581 ft/s at 30,000 ft, 1,390 to 1,343
+at 17,000 ft and 1,130 to 1,122 at sea level). It applies only while the 1 G
+polygon tops out at 1,840 ft/s and the 0 G polygon at 1,940 ft/s together with
+the retail range, sliver, repeat row and top rows B5-4 already requires; a record
+edited at any of them keeps its speeds. A uniform scale of every row was worked out
+and not used: it would pull the +7 and +8 rows' fast edges at 1,000 ft down to
+434 kt, under the 461 kt reference speed, and so take the top two G rows away
+from the most-flown fighting speed, for a change that only concerns the top
+speed (not run).
+
+**What a player notices (clean, afterburner, `performance_probe`; the pull table is at 461 kt, 1,000 ft, full aft stick).**
+
+| Quantity | Before | After |
+| --- | --- | --- |
+| Pull by fuel 4,400 / 2,200 / 1,100 / 300 lb | 6.83 / 7.41 / 7.74 / 8.00 G | 6.84 / 7.42 / 7.75 / 8.01 G |
+| Push by fuel | -2.55 / -2.77 / -2.89 / -2.99 G | same |
+| Instantaneous turn at 330 kt | 5.95 G, 17.8 deg/s | 5.96 G, 17.8 deg/s |
+| Corner speed (slow edge of the +8 row, sea level) | 332 kt | 332 kt |
+| Sustained turn at 461 kt, 1,000 ft | 4.13 G, 9.6 deg/s | 3.63 G, 8.3 deg/s |
+| Sustained turn at 593 kt, 1,000 ft | 2.47 G, 4.2 deg/s | 1.79 G, 2.8 deg/s |
+| Peak Ps at 1,000 ft, afterburner | 332 ft/s | 303 ft/s |
+| Best sustained climb (Mach 0.8 schedule) | 314 ft/s (18,836 ft/min) | 286 ft/s (17,148 ft/min) |
+| Acceleration 363 to 590 kt at 1,000 ft | 37 s | 50 s |
+| Time to 36,000 ft (Mach 0.8 schedule) | 138 s | 156 s |
+
+The cost is the shared drag law: it sets drag equal to full thrust at the 1 G
+edge, so a lower edge raises the drag at every speed by 1 / 0.92^2 (18 percent).
+Climb and sustained turns fall by about 9 and 13 percent (the climb was already
+55 to 58 percent of the published 34,500 ft/min and is now about 50 percent).
+The scripted Mach 0.9 sea-level climb schedule of the probe can no longer be
+held (best rate 36 ft/s): the F-5E's sea-level top speed is 623 kt, a little
+over Mach 0.9 (593 kt). The real sea-level top speed was not found in any source
+read (Wikipedia, MILAVIA, MIGFlug, aerospaceweb.org, which lists it as unknown;
+MIGFlug gives a never-exceed 710 kt indicated), so 623 kt is the record's shape
+at the same factor, not a cited figure, and stays under that 710 kt limit.

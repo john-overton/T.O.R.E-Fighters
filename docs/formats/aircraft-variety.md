@@ -5386,3 +5386,57 @@ The F-15E and Gripen `fuelConsumption` values are rounded to whole pounds a
 second, a 5 to 6 percent error on the dry flow; the F-5E's is 17 percent. (3) The
 F-5E speed polygon is 16 percent over the real top speed; the sea-level figure was
 not found in any source read.
+
+## F-5E top-speed trim (B5-5, 2026-11-11)
+
+Implementation mode, slice B5-5, **opinionated (John, 2026-11-11, after B5-4:
+"Trim F-5E only")**, factor **fitted** (agent decision). It adds to the F-5E
+reviews above (the "F-5E flight review" and B5-4 sections are kept as written;
+their "top speed 16 percent over" finding is what this slice answers). The rule,
+the measured numbers and the cost are in
+[aircraft records](../spec/aircraft-records.md#f-5e-top-speed-trim-b5-5-2026-11-11)
+and [the variety flight baseline](../baselines/variety-flight.md#f-5e-top-speed-trim-b5-5-2026-11-11).
+
+**How top speed arises (measured, read from the code).** `F5E.PT` has no
+maximum-speed field; the 1 G polygon's fast edge is the record's top speed. The
+flight model sets airframe drag equal to full thrust times lapse at that edge
+(`Configuration` drag law, `airframe_drag`) and adds the loaded-drag percent for
+the fuel carried: at full fuel (4,400 lb over 9,558 lb empty, loaded drag 30
+percent) the level top speed is the edge divided by sqrt(1.138) = 0.937 at every
+altitude (`envelope_probe`: ratio 0.937 at 0 to 51,800 ft). The overspeed loss
+and the instruments' envelope window read the same 1 G edge, so one polygon
+change moves the level speed, the overspeed limit and the window together. The
+decoded record's 1 G edge: 1,220 ft/s (723 kt) at sea level, 1,475 at 18,000 ft,
+1,840 at 36,000 ft (Mach 1.90).
+
+**Change.** `fit_envelopes` (F-5E arm of `aircraft_corrections.rs`), after B5-4's
+rows: `trim_top_speed` multiplies the fast sides of the 1 G and 0 G polygons by
+`F5E_TOP_SPEED_SCALE` 0.92 (whole ft/s), holds every other row's fast vertices to
+the new 1 G edge at their altitudes (only the +2, +3 and -1 rows' high-altitude
+vertices move), and runs only while the 1 G polygon still tops out at 1,840 ft/s
+and the 0 G polygon at 1,940 ft/s, on top of B5-4's guard (retail range, sliver
+and repeat row). Three new unit tests and two changed asserts
+(`aircraft_corrections.rs`, `aircraft.rs`). `models/variety.rs` already has a
+`SpeedFit::Scale` mechanism (AC-130, V-22, AH-64) that scales fast sides at the
+flight-model level; it was not used because it has no guard on the record's
+values, which this slice was asked to have.
+
+**Factor.** 0.92 was measured, not assumed: the model flew 1,021.5 kt (Mach 1.78)
+at 36,000 ft; the real figure is Mach 1.63 (Wikipedia) to 1.64 (MILAVIA), 935 to
+941 kt in TORE's atmosphere, so the scale lies in 0.915 to 0.921; 0.92 gives 939.9
+kt, Mach 1.64. At sea level the same factor gives 623 kt (Mach 0.94), 685 to 630
+kt at 1,000 ft. **Sea-level figure:** none found (Wikipedia and MILAVIA give
+altitude only, aerospaceweb.org lists it as unknown, MIGFlug gives Mach 1.63 at
+36,000 ft and a 710 kt indicated never-exceed, all read 2026-11-11). The brief's
+sea-level figure stays unsupported; 623 kt is the record's shape at the same
+factor.
+
+**Findings.** (1) The shared drag law makes a lower top edge a higher drag at
+every speed (+18 percent): climb, sustained turns and acceleration fall (the
+sustained turn at 461 kt from 4.13 to 3.63 G; the best climb from 314 to 286
+ft/s). The climb was already 55 to 58 percent of the published rate and is now
+about 50 percent; John may want the thrust or drag side reviewed separately. (2)
+The instantaneous pull is unchanged (6.84 / 7.42 / 7.75 / 8.01 G by fuel, B5-4's
+numbers to 0.01 G) because the trim leaves every row below the new 1 G edge
+alone. (3) The Gripen (11 percent under at sea level) and F-15E (8 percent under
+at 36,000 ft) stay slow; the shared drag law is untouched.

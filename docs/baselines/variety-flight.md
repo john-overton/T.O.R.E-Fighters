@@ -1625,3 +1625,48 @@ F-15E, Gripen and F-5E (`--windows 1`, profile `.local/m3-aircraft/profile`) pas
 envelope below the ceilings are unchanged); `--headless-flight 1200` for all five
 ran with 0 non-finite samples. Not run: a zoom-climb ceiling measurement after the
 cut, the AI, mission, replay and net batteries.
+
+## F-5E top-speed trim (B5-5, 2026-11-11)
+
+Implementation and measurement mode, slice B5-5. **Opinionated (John,
+2026-11-11: "Trim F-5E only"); factor fitted.** The rule and the numbers a player
+notices are in [aircraft records](../spec/aircraft-records.md#f-5e-top-speed-trim-b5-5-2026-11-11);
+how top speed arises is in [the variety document](../formats/aircraft-variety.md#f-5e-top-speed-trim-b5-5-2026-11-11).
+The earlier sections of this page are the measurements before the change and are
+kept as written. Probes (local record, clean, afterburner, full fuel 4,400 lb,
+`performance_probe` and `envelope_probe`, logs under
+`.local/m3-aircraft/checks/B5-5/before/` and `after/`, driver `run_probes.sh`):
+
+| Measurement | Before (HEAD 52c0178b) | After |
+| --- | --- | --- |
+| Envelope top edge at 0 / 1,000 / 10,000 / 20,000 / 30,000 / 36,000 / 40,000 / 50,000 / 51,800 ft, kt | 723 / 731 / 807 / 898 / 1,018 / 1,090 / 922 / 625 / 572 | 665 / 673 / 742 / 826 / 937 / 1,003 / 848 / 575 / 526 |
+| Level top speed, same altitudes, kt | 677 / 685 / 756 / 841 / 954 / 1,021 / 864 / 586 / 535 | 623 / 630 / 695 / 774 / 878 / 940 / 795 / 539 / 493 |
+| Level speed over envelope edge | 0.937 | 0.937 |
+| Mach at 36,000 ft | 1.78 | 1.64 (real 1.63 to 1.64) |
+| Pull at 461 kt, 1,000 ft, fuel 4,400 / 2,200 / 1,100 / 300 lb | 6.83 / 7.41 / 7.74 / 8.00 G | 6.84 / 7.42 / 7.75 / 8.01 G |
+| Push at 461 kt, same fuels | -2.55 / -2.77 / -2.89 / -2.99 G | same |
+| Instantaneous turn 330 kt / 461 kt, 1,000 ft | 5.95 G 17.8 deg/s / 6.83 G 15.4 deg/s | 5.96 G 17.8 deg/s / 6.84 G 15.5 deg/s |
+| Peak Ps, 1,000 / 15,000 / 36,000 ft | 332 / 311 / 291 ft/s | 303 / 286 / 268 ft/s |
+| Acceleration 363 to 460 / 530 / 590 kt, 1,000 ft | 12 / 23 / 37 s | 13 / 27 / 50 s |
+| Best sustained climb (Mach 0.8 schedule); 36,000 ft in | 314 ft/s at 29,127 ft; 138 s | 286 ft/s at 31,711 ft; 156 s |
+| Sustained turn, 1,000 ft, 461 kt / 593 kt | 4.13 G / 2.47 G | 3.63 G / 1.79 G |
+| Military and afterburner level speed on the fuel probe | 675 / 803 kt | 624 / 742 kt |
+| Fuel endurance (military 36.7 min, afterburner 12.2 min) | same | same |
+
+The probe's Mach 0.9 sea-level climb schedule (593 kt) can no longer be held after
+the trim (best rate 36 ft/s, highest 218 ft) because sea-level top speed is now
+623 kt; it is a probe schedule, not a game rule. The Mach 0.9 sea-level
+instantaneous peak rose from 2.56 to 2.92 G only because the aircraft bleeds speed
+faster and passes into the +4 row sooner (the row table is unchanged there).
+
+`tore-app --aircraft f5e --headless-flight` (profile `.local/m3-aircraft/profile`,
+through `tools/agent-run.sh`): `--headless-flight 1200` ran with 0 non-finite
+samples (fuel 4,400 lb); the F5E-8 air maneuvers (`level`, `pull`, `loop`, `sprint`,
+`climb`, `dive`, `overspeed`, `rudder`, `devices`, `stall-recover`, `spin-recover`)
+all ran with `non_finite=0`; `dive`, `overspeed` and `climb` still end in an
+overspeed loss as in the F-5E validation above (`speed_over_envelope_top` 1.15,
+1.10 and 1.02 against the new edge; climb zoom to 52,289 ft, 1.009 of the ceiling).
+`sprint` 36,000 ticks ends at 675 kt (739.8 kt before B5-4 and this slice).
+
+Not run: `--native-flight-tables`, windowed runs, a second aircraft's probes (the
+Gripen and F-15E are unchanged by construction: the fit applies only to `F5E.PT`).

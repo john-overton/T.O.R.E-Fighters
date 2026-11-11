@@ -346,6 +346,25 @@ pub const F5E_AB_FUEL_LB_PER_S: i32 = 6;
 /// `envMin` is -3: at half fuel the push is 2.77 G, 0.23 G under the real -3.
 const F5E_RETAIL_STUB: [[f64; 2]; 4] = [[570., 0.], [610., 4_000.], [730., 3_000.], [760., 0.]];
 
+/// The F-5E's top-speed trim (B5-5, **opinionated**, John, 2026-11-11: "trim
+/// F-5E only"; the factor is a **fitted** agent decision). The record's 1 G
+/// polygon reaches 1,840 ft/s (1,090 kt, Mach 1.90) at 36,000 ft and 1,220
+/// ft/s (723 kt) at sea level; the real F-5E reaches Mach 1.63 at 36,000 ft
+/// (Wikipedia "Northrop F-5", Specifications (F-5E Tiger II); MILAVIA F-5
+/// specifications, Mach 1.64; both read 2026-11-11), 16 percent under the
+/// record. TORE's level top speed is the 1 G polygon's fast edge divided by
+/// the loaded-drag factor of the shared drag law (0.937 for the F-5E at full
+/// fuel, the same at every altitude), so the model flew Mach 1.78 and a
+/// scale `s` of the fast edge moves it by exactly `s`. `F5E_TOP_SPEED_SCALE`
+/// 0.92 gives Mach 1.64 at 36,000 ft (measured, docs/baselines/variety-flight.md).
+/// No sea-level figure was found (aerospaceweb.org lists it as unknown), so
+/// the sea level and every other altitude take the same factor and the record's
+/// shape.
+pub const F5E_TOP_SPEED_SCALE: f64 = 0.92;
+/// The retail top speeds of the 1 G and 0 G polygons, ft/s, that the trim needs.
+const F5E_RETAIL_ONE_G_TOP_FPS: f64 = 1_840.;
+const F5E_RETAIL_ZERO_G_TOP_FPS: f64 = 1_940.;
+
 /// F-15E (B5-4, **opinionated**, John, 2026-11-11). The thrust is John's
 /// earlier decision (retail, 32,558 / 47,860 lbf) and stays.
 ///
@@ -510,6 +529,58 @@ fn lower_ceiling(
     true
 }
 
+/// The index of a polygon's first highest vertex: the vertices before it are
+/// the slow side, the ones after it the fast side (the decoded row layout).
+fn top_index(points: &[[f64; 2]]) -> usize {
+    let top = points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+    points.iter().position(|p| p[1] == top).unwrap_or(0)
+}
+
+fn top_speed_of(e: &Envelope) -> f64 {
+    e.points.iter().map(|p| p[0]).fold(f64::MIN, f64::max)
+}
+
+/// Trims a record's top speed (B5-5): multiplies the fast side of the 1 G and
+/// 0 G polygons by `scale` (to the record's whole ft/s, never below the top
+/// vertex's own speed), which moves the flight model's level top speed and the
+/// overspeed limit by the same factor. Every other row's fast side is then held
+/// to the new 1 G edge at its altitude, the rule of [`fitted_row`], so no
+/// higher row reaches past the 1 G edge; a row already inside it (every low
+/// altitude G row) does not move, so the pull at ordinary fighting speeds is the
+/// record's own. Applies only while the 1 G and 0 G polygons still top out at
+/// `retail_one` and `retail_zero` ft/s; true when it did.
+fn trim_top_speed(
+    envelopes: &mut [Envelope],
+    scale: f64,
+    retail_one: f64,
+    retail_zero: f64,
+) -> bool {
+    let top_of =
+        |envelopes: &[Envelope], g: i32| envelopes.iter().find(|e| e.g == g).map(top_speed_of);
+    if top_of(envelopes, 1) != Some(retail_one) || top_of(envelopes, 0) != Some(retail_zero) {
+        return false;
+    }
+    for row in envelopes.iter_mut().filter(|e| e.g == 0 || e.g == 1) {
+        let top = top_index(&row.points);
+        let slowest = row.points[top][0];
+        for p in row.points.iter_mut().skip(top + 1) {
+            p[0] = (p[0] * scale).round().max(slowest);
+        }
+    }
+    let Some(one) = envelopes.iter().find(|e| e.g == 1).cloned() else {
+        return false;
+    };
+    for row in envelopes.iter_mut().filter(|e| e.g != 0 && e.g != 1) {
+        let top = top_index(&row.points);
+        for p in row.points.iter_mut().skip(top + 1) {
+            if let Some((_, fast)) = one.speeds(p[1]) {
+                p[0] = p[0].min(fast.floor());
+            }
+        }
+    }
+    true
+}
+
 /// Envelope corrections of the batch aircraft, applied where the record is
 /// read: the G limits of the Tornado (+8), F-5E (+8), F-15E (+10), Gripen (-3)
 /// and Mirage F1 (+8, -4), the F-5E's, F-15E's, Gripen's and Tornado's
@@ -603,6 +674,13 @@ pub(crate) fn fit_envelopes(
                     }
                 }
             }
+            // B5-5: the top-speed trim, after every row change above.
+            trim_top_speed(
+                envelopes,
+                F5E_TOP_SPEED_SCALE,
+                F5E_RETAIL_ONE_G_TOP_FPS,
+                F5E_RETAIL_ZERO_G_TOP_FPS,
+            );
             true
         }
         AircraftId::F15E => {
@@ -1597,16 +1675,22 @@ mod tests {
             rows[11].points,
             vec![[561., 0.], [620., 7_000.], [780., 6_000.], [800., 0.]]
         );
-        // The 1 G and 0 G top edges move by 9,800 ft; nothing else does.
+        // The 1 G and 0 G top edges move by 9,800 ft; the slow side does not.
+        // B5-5: their fast sides are trimmed by 0.92 (the vertices after the
+        // first highest one), whole ft/s.
         let one = rows.iter().find(|e| e.g == 1).unwrap();
         assert_eq!(one.points[3], [458., 38_750.]);
         assert_eq!(one.points[4], [580., 51_800.]);
-        assert_eq!(one.points[5], [965., 51_800.]);
-        assert_eq!(one.points[6], [1_607., 39_000.]);
+        assert_eq!(one.points[5], [888., 51_800.]);
+        assert_eq!(one.points[6], [1_478., 39_000.]);
+        assert_eq!(one.points[7], [1_693., 36_000.]);
+        assert_eq!(one.points[8], [1_357., 18_000.]);
+        assert_eq!(one.points[9], [1_122., 0.]);
         let zero = rows.iter().find(|e| e.g == 0).unwrap();
         assert_eq!(zero.points[4], [570., 53_800.]);
-        assert_eq!(zero.points[5], [995., 53_800.]);
-        assert_eq!(zero.points[6], [1_607., 41_000.]);
+        assert_eq!(zero.points[5], [915., 53_800.]);
+        assert_eq!(zero.points[6], [1_478., 41_000.]);
+        assert_eq!(zero.points[7], [1_785., 36_000.]);
         let top_alt = |e: &Envelope| e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
         assert_eq!(top_alt(one), 51_800.);
         // The retail ceiling field still on the record (an edited or partly
@@ -1659,6 +1743,108 @@ mod tests {
             &mut plane,
             &mut rows
         ));
+    }
+
+    #[test]
+    fn the_f5e_top_speed_trim_scales_the_fast_edge_and_keeps_the_other_rows() {
+        let object = BTreeMap::from([("maxAlt".to_string(), token(51_800))]);
+        let (mut plane, mut rows) = f5e_record();
+        // A high-altitude row that reaches past the trimmed 1 G edge: its fast
+        // vertex is held to the new edge at its altitude, never raised.
+        rows[7].points = vec![[320., 0.], [400., 36_000.], [1_700., 36_000.]];
+        let before_low = rows[11].points.clone();
+        assert!(fit_envelopes(
+            AircraftId::F5E,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        let speed = |g: i32| top_speed_of(rows.iter().find(|e| e.g == g).unwrap());
+        // 1,840 ft/s x 0.92 = 1,692.8, so 1,693; the record's top edge was 1,840.
+        assert_eq!(speed(1), 1_693.);
+        assert_eq!(speed(0), 1_785.);
+        assert!((speed(1) / F5E_RETAIL_ONE_G_TOP_FPS - F5E_TOP_SPEED_SCALE).abs() < 1e-3);
+        // The +8 row's fast side (780 at 6,000 ft and 800 at sea level) is
+        // inside the trimmed 1 G edge and stays the record's own.
+        assert_eq!(
+            rows.last().unwrap().points,
+            vec![[561., 0.], [620., 7_000.], [780., 6_000.], [800., 0.]]
+        );
+        assert_eq!(rows[10].points, before_low);
+        // The +3 row's 1,700 ft/s at 36,000 ft is held to the 1 G edge there.
+        let three = rows.iter().find(|e| e.g == 3).unwrap();
+        assert_eq!(three.points[2], [1_693., 36_000.]);
+        assert_eq!(three.points[..2], [[320., 0.], [400., 36_000.]]);
+        // No row passes the 1 G edge at its own fast-side altitudes.
+        let one = rows.iter().find(|e| e.g == 1).unwrap().clone();
+        for row in rows.iter().filter(|e| e.g > 1) {
+            for p in row.points.iter().skip(top_index(&row.points) + 1) {
+                let (_, fast) = one.speeds(p[1]).unwrap();
+                assert!(p[0] <= fast, "g {} {:?} past {}", row.g, p, fast);
+            }
+        }
+    }
+
+    #[test]
+    fn the_f5e_top_speed_trim_needs_the_retail_top_speeds() {
+        let object = BTreeMap::from([("maxAlt".to_string(), token(51_800))]);
+        // A 1 G polygon whose top speed is not the retail 1,840 ft/s: the G
+        // rows and ceiling still correct, the speeds are left alone.
+        let (mut plane, mut rows) = f5e_record();
+        rows[5].points[7][0] = 1_800.;
+        assert!(fit_envelopes(
+            AircraftId::F5E,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!(
+            top_speed_of(rows.iter().find(|e| e.g == 1).unwrap()),
+            1_800.
+        );
+        assert_eq!(
+            top_speed_of(rows.iter().find(|e| e.g == 0).unwrap()),
+            1_940.
+        );
+        // Likewise a 0 G polygon that is not the retail one.
+        let (mut plane, mut rows) = f5e_record();
+        rows[4].points[7][0] = 1_900.;
+        assert!(fit_envelopes(
+            AircraftId::F5E,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!(
+            top_speed_of(rows.iter().find(|e| e.g == 1).unwrap()),
+            1_840.
+        );
+        // Applied twice (a record already read once): the second pass finds
+        // 1,693 ft/s, not the retail edge, and does not trim again.
+        let (mut plane, mut rows) = f5e_record();
+        assert!(fit_envelopes(
+            AircraftId::F5E,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        let once = rows.clone();
+        assert!(!trim_top_speed(
+            &mut rows,
+            F5E_TOP_SPEED_SCALE,
+            F5E_RETAIL_ONE_G_TOP_FPS,
+            F5E_RETAIL_ZERO_G_TOP_FPS
+        ));
+        assert_eq!(rows, once);
+        // No other identity is trimmed.
+        for other in [AircraftId::F4E, AircraftId::F104, AircraftId::Mf1] {
+            let (mut plane, mut rows) = f5e_record();
+            assert!(!fit_envelopes(other, &object, &mut plane, &mut rows));
+            assert_eq!(
+                top_speed_of(rows.iter().find(|e| e.g == 1).unwrap()),
+                1_840.
+            );
+        }
     }
 
     /// A synthetic record shaped like the F-15E's: rows -4 (the sliver) to +9,

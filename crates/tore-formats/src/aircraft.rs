@@ -2263,7 +2263,11 @@ mod profile_tests {
         assert_eq!(f.envelopes.len(), 12);
         let one = f.envelopes.iter().find(|e| e.g == 1).unwrap();
         assert_eq!(one.points[4], [580., 51_800.]);
-        assert_eq!(one.points[5], [965., 51_800.]);
+        // B5-5 (John, 2026-11-11): the 1 G fast side is trimmed by 0.92, so
+        // the top-edge plateau ends at 888 ft/s (965 x 0.92) and the fastest
+        // point is 1,693 ft/s (1,840 x 0.92, Mach 1.64 at 36,000 ft).
+        assert_eq!(one.points[5], [888., 51_800.]);
+        assert_eq!(one.points[7], [1_693., 36_000.]);
         // The desert F-5E has its own record and keeps the retail ceiling.
         // One value off the copy (the fuel) leaves the whole ceiling and fuel
         // as they were, but the repeated +8 row is still retired.
