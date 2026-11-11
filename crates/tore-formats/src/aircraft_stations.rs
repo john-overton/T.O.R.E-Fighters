@@ -28,6 +28,10 @@ pub const MF1_CENTRELINE: usize = 4;
 /// The radar the F-5E carries in place of the generic `F18R.SEE`: the F-104
 /// record, the closest reviewed small-fighter radar (see [`adjust_defaults`]).
 pub const F5E_RADAR_RECORD: &str = "F104R.SEE";
+/// The countermeasures record the F-5E's row 2 holds in place of the generic
+/// `F18.ECM`: 20 chaff, 20 flares and no deception jammer, the stand-in for
+/// the real AN/ALE-40 dispenser (see [`adjust_defaults`]).
+pub const F5E_ECM_RECORD: &str = "F104.ECM";
 
 /// The source row of the F-4B's centreline station (`F4B.PT` row 3: four
 /// AIM-9Bs, Mk 82s and the other stores on the centreline) that also takes
@@ -207,9 +211,14 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   its mask admits.
 /// - **F-5E** (`F5E.PT`): row 5, the wing pair, defaults to empty (no `AIM7.JT`:
 ///   the real F-5E does not carry the Sparrow); the `AIM9B.JT` wingtip pair
-///   stays. Row 2 (`F18.ECM`) is empty by default: the real F-5E has no internal
-///   jammer, and the sensor profile reads a jammer only from a row that holds
-///   an `.ECM` record. Row 1 holds `F104R.SEE` in place of the generic
+///   stays. Row 2 holds `F104.ECM` in place of the generic `F18.ECM` (John,
+///   2026-11-10, B5-3, opinionated, replacing the B5-2 empty row that also
+///   dropped the chaff and flares): 20 chaff, 20 flares and no deception
+///   jammer. The real F-5E has no internal jammer but carries an AN/ALE-40
+///   chaff and flare dispenser (Wikipedia "Northrop F-5"; the F-5E's tail-cone
+///   dispensers; the AN/ALE-40 is a standard fit on USAF F-5E aggressors,
+///   Wikipedia "AN/ALE-40"), which the F-104 record's dispenser-only bundle
+///   matches best. The row keeps its place, mask, count and position. Row 1 holds `F104R.SEE` in place of the generic
 ///   `F18R.SEE`: the real radar is the Emerson AN/APQ-159 (20 nm, `F5E.INF`;
 ///   Wikipedia "Northrop F-5"), which TORE has no record for; the closest
 ///   reviewed record is the F-104's `F104R.SEE` (50 nm search, 25 nm track,
@@ -237,7 +246,7 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
     match id {
         AircraftId::F5E => {
             rows[F5E_RADAR].store = Some(F5E_RADAR_RECORD.into());
-            rows[F5E_JAMMER].store = None;
+            rows[F5E_JAMMER].store = Some(F5E_ECM_RECORD.into());
             rows[F5E_WING_PAIR].store = None;
         }
         AircraftId::Mf1 => rows[MF1_CENTRELINE].store = None,
@@ -753,16 +762,26 @@ mod tests {
     }
 
     #[test]
-    fn the_f5e_has_the_f104_radar_no_jammer_and_an_empty_wing_pair() {
+    fn the_f5e_has_the_f104_radar_the_f104_dispensers_and_an_empty_wing_pair() {
         let retail = default_rows(AircraftId::F5E);
         assert_eq!(retail.len(), 7);
         let mut rows = retail.clone();
         adjust_defaults(AircraftId::F5E, &mut rows);
         let mut expected = key(&retail);
         expected[F5E_RADAR].3 = Some("F104R.SEE".into());
-        expected[F5E_JAMMER].3 = None;
+        expected[F5E_JAMMER].3 = Some("F104.ECM".into());
         expected[F5E_WING_PAIR].3 = None;
         assert_eq!(key(&rows), expected);
+        // Only the store changes on the countermeasures row (B5-3, John,
+        // 2026-11-10): no index, mask, count or position moves.
+        assert_eq!(
+            (
+                rows[F5E_JAMMER].flags,
+                rows[F5E_JAMMER].position,
+                rows[F5E_JAMMER].count
+            ),
+            (0x8, [0, 0, -50], 1)
+        );
         // The wing pair still takes what its mask took (0x7e5: the Sparrow
         // among them), and the AIM-9B wingtip default stays.
         assert_eq!(rows[F5E_WING_PAIR].flags, 0x7e5);

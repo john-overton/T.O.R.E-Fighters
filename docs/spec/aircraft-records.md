@@ -277,3 +277,47 @@ the retail column is the record with one value nudged so the guards skip):
   instantaneous pull at 1,000 ft falls from 6.27 to 5.98 G with the +8 row gone.
 
 Logs are local: `.local/m3-aircraft/checks/B5-2/`.
+
+## Batch 5 follow-up corrections: Tornado fuel flows (B5-3, 2026-11-10)
+
+**Opinionated (John, 2026-11-10, batch decision round 2, item D3, "follow recs"),
+implemented by slice B5-3.** B5-2 left the Tornado's fuel flows as the Su-24's
+(`fuelConsumption` 6 and `aftFuelConsumption` 38 lb/s). They are now those of
+two real Turbo-Union RB199 Mk 103 at the thrust B5-2 set. Like the B5-2 values,
+the override fires only on the Tornado identity and only while every value it
+replaces, the flows included, still holds the retail number (an edited record is
+read as it is); it is two more rows of `CORRECTIONS` with a unit test in
+`aircraft_corrections.rs` and one in `aircraft.rs`.
+
+**The record's unit.** `fuelConsumption` is a whole number of pounds a second for
+all the engines together at full military power, and `aftFuelConsumption` the same
+at full afterburner; the flight model debits that times the throttle
+([rotorcraft fuel records](../formats/aircraft.md#rotorcraft-fuel-records)). The
+unit is the same for the Mirage 2000 and MiG-31 audits.
+
+| Input | Value | Source |
+| --- | --- | --- |
+| Thrust, dry, both engines | 17,300 lbf | B5-2 (2 x 8,650) |
+| Thrust, reheat, both engines | 32,150 lbf | B5-2 (2 x 16,075) |
+| RB199 dry TSFC (Tornado, static, sea level) | 0.598 lb/(lbf h) | Wikipedia "Thrust-specific fuel consumption" (RB.199 row, citing the jet-engine.net engine database), accessed 2026-11-10 |
+| RB199 reheat TSFC (Tornado, static, sea level) | 2.5 lb/(lbf h) | same table |
+
+Flow = thrust x TSFC / 3,600 s: dry 17,300 x 0.598 / 3,600 = 2.87 lb/s, stored 3;
+reheat 32,150 x 2.5 / 3,600 = 22.3 lb/s, stored 22. The same table lists the
+Tornado ECR's RB199 (Mk 105) at 0.637 dry; the Mk 103 value is used. The record
+holds whole pounds, so the dry flow carries a rounding of +4.5 percent against the
+cited figure.
+
+| | Retail (Su-24's) | B5-3 |
+| --- | --- | --- |
+| `fuelConsumption` (military, lb/s) | 6 | 3 |
+| `aftFuelConsumption` (afterburner, lb/s) | 38 | 22 |
+
+What a player notices (`performance_probe`, `PROBE_ONLY=fuel`, the local record,
+tank 11,221 lb, `.local/m3-aircraft/checks/B5-3/fuel-tornado.txt`): full tank at
+military power lasts 62.3 minutes (it was 31.2 at 6 lb/s) and in full afterburner
+8.5 minutes (it was 4.9 at 38 lb/s). The probe reads an implied military
+consumption of 0.624 and an afterburner one of 2.463 lb/(lbf h) at the record's
+thrust. Trimmed cruise at 65 percent of top speed burns 2.54 lb/s, 73.7 minutes
+and about 890 nm from a full tank. Thrust, weights and the G rows are the B5-2
+values.
