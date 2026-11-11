@@ -2583,7 +2583,39 @@ wire identity is 9 bits since NET-ID9, so capacity is not a constraint.
 | CFTs baked in the shape? | Row 7 and frames | F15E-2 frame check |
 | Tank and bomb clipping under the belly | Station rows | F15E-5 stop-and-report |
 | Per-row default quantities | Stores load | F15E-6 |
-||||||| 25a8c5b0
+
+### F-15E shape, damage looks and decals (F15E-2, 2026-11-10)
+
+Implementation, slice F15E-2, Claude Sonnet (sonnet-high). `AircraftId::F15E`
+flies `F15E.SH` at its own size: `aircraft_scale` stays `[1, 1, 1]`, because
+the size question ([above](#f-15e-size-for-john)) is John's and is still open.
+Nothing in this slice depends on the answer. The skin review (double-sided
+panels, the two omitted decal slots, damage looks, the conformal-tank answer)
+is in [the F-15E skin review](objects-and-shapes.md#f-15e-skin-review) in the
+objects and shapes guide; the `render-f15e-skin` battery scenario captures the
+top and under views with the gear down.
+
+- **Shape and twins.** 350 runtime faces (352 on the export path), 17
+  exact-vertex twin groups, every one a pair with opposite stored normals
+  (pinned by `crates/tore-import/tests/f15e_shape.rs`, which skips without a
+  retail install). No stored-normal exception is needed, as for the MiG-31 and
+  the Mirage 2000.
+- **Conformal fuel tanks: not in the shape.** The F-15E outline in plan and side
+  view matches the F-15C's; the only extra volume is a flat shelf on the lower
+  fuselage side. No tank shape exists to hang or hide, so F15E-5 draws any
+  tank as a store.
+- **Damage looks.** `F15E_A.SH` to `F15E_D.SH` (311, 138, 350 and 33 faces) and
+  their four skins load (pinned by the same test). No whole-body variant is
+  registered for the F-15E, as for the F-15C, MiG-25, MiG-31, F-16A and Mirage
+  2000, so a destroyed F-15E draws the intact skin with regional cuts. Choosing
+  an A to D substitution would be a decision for the damage slice; nothing here
+  changes `damage_variant`.
+- **Decals.** Two `E0` slots (3 and 4, the wing markings) stay omitted; the
+  tail and fuselage art are textured faces and draw whole.
+
+Provenance: spec-derived (retail shape, face counts and twins read as data);
+the omit-not-fill decal rule follows the existing texture-state decision;
+frames are review evidence only.
 
 ## Gripen source review (2026-11-10)
 
