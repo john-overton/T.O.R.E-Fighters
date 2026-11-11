@@ -798,3 +798,24 @@ brake and exhaust `required moved`, a 202-value dense gear sweep with every row
 passing (rigidity about 1e-6 ft, anchor gap 0, skin gap 0, lowest gear point at
 the scaled low point at gear 1), and the closed airbrake within 3e-6 ft of the
 spine line. Not a claim of original retraction timing.
+
+## F-15E gear, speed brake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice F15E-4), over `F15E.SH` at
+its own size (`aircraft_scale` identity until John decides). The source faces,
+the flap-word finding, the fold table and the provenance are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#f-15e-gear-speed-brake-and-plume-f15e-4-2026-11-10).
+The control surfaces are not in this fit yet (F15E-3).
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | Each main leg (wheel sheet and cross plate) is one rigid body: `90 degrees * (1 - gear)` about a vertical line through the wheel centre (lays it flat), then the same about a lateral line behind and above it (folds it forward) into the bay under the wing root. Each inboard door turns about its own top edge and closes outward. The six nose plates are one rigid body that folds forward about a lateral line behind and above them and steers about a vertical line through the strut. Hidden at 0, the source pose at 1. The real F-15's mains retract forward turning 90 degrees and its nose retracts forward (public text, cited in the geometry note); the law is fitted. |
+| Speed brake | The four source faces turn as one piece about the line y 25, z 11 by `0.774 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie on the dorsal ridge, 0 hides it. |
+| Afterburner | The eight plume plates scale along Y from the nozzle exit plane (y -61) by the afterburner fraction, hidden at 0. Two nozzle glows and two contrails, from the engine count of 2. |
+| Flaps | The two flap words are pinned and never set (value 1 deletes the inboard wedge, value -1 swaps in a lowered copy); the wedge stays drawn. The droop is F15E-3's. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity at most 2.2e-6 ft, anchor gap 0, skin gap 0, lowest gear point
+at the scaled low point at gear 1) and the closed brake within 8e-6 ft of the
+ridge. Not a claim of original retraction timing.

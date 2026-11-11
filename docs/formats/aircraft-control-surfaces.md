@@ -974,3 +974,140 @@ row passing: rigid, hinges fixed, feet inward or aft, nothing below the hinge
 height near stow, ground contact at 1), a seven-value airbrake sweep
 (`brake-sweep.csv`) and the gear, brake and exhaust witnesses. See the
 [Mirage 2000 gear, airbrake and plume fit](../spec/variety-animation.md#mirage-2000-gear-airbrake-and-plume-fit).
+
+## F-15E gear, speed brake and plume (F15E-4, 2026-11-10)
+
+Implementation, slice F15E-4, Claude Sonnet (sonnet-high). `AircraftId::F15E`
+flies `F15E.SH` through its own rig, `f15e_animation.rs` (no code is shared
+with the F-15C's `f15_animation.rs`, whose shape is a different model, and the
+identity is never aliased). The rig owns the gear, the dorsal speed brake and
+the two plumes. The stabilators, ailerons, flaps and fins are F15E-3's: the
+rig's `animate` has one arm per device and the control surfaces join it as
+further arms, so nothing here is restructured for them. The shape is read at
+`aircraft_scale` [1, 1, 1] (size is John's, still open); every hinge point is
+named in shape units and scaled with `scale_point`, so a later scale entry keeps
+every part rigid.
+
+**Word map.** Five words, all accounted for.
+
+| Word | Reading | Rig |
+| --- | --- | --- |
+| `0x80c0` | Two afterburner flames, 8 plates | Mapped: plumes scale from the nozzle exit plane |
+| `0x80c6` | Dorsal speed brake, 4 faces | Mapped: one piece about its forward hinge |
+| `0x80cc` | Gear down, 18 faces | Mapped: whole rigid pieces (below) |
+| `0x80d8`, `0x80de` | Left and right flap words | Pinned at load, never set (below) |
+
+**Flap words (new finding).** They are signed, and the F15E-0 review only read
+value 1. Value **1** deletes the inboard flap wedge (left `5557`, `5576`; right
+`5470`, `548f`) and adds nothing, so a rig that set it would make a surface
+vanish. Value **-1** swaps the wedge for a lowered copy (left `55c0`, `55df`
+plus the end triangle `55fe`; right `54d9`, `54f8`, `5517`), whose trailing edge
+is five units lower (z -2 against 3), which is the shape's own flap-down branch
+(the F-15C's flap words work the same way). The rig refuses a shape whose four
+branches differ from these address sets, never sets either word, and keeps the
+neutral wedge drawn in every pose, as the Mirage 2000 did. The droop itself
+(from the -1 branch or a whole-panel turn) is F15E-3's decision.
+
+**Gear faces (18, 3 pieces per leg).** Per main leg: an inboard door plate
+(plane x +-7, y -6 to 9, z -18 to -12, untextured), a wheel sheet (plane x +-13,
+y -4 to 6, z -27 to -11) and a cross plate (plane y 1, x +-9 to +-15, z -27 to
+-11), each in both windings (`50e3`/`50fa`, `5156`/`5175`, `5194`/`51b3` left;
+`524f`/`5266`, `52c2`/`52e1`, `5300`/`531f` right). Nose: a wheel sheet (x 0,
+y 48 to 62, z -27 to -8), an untextured strut plate (x +-2, y 46 to 50, z -21 to
+-8) and a cross plate (x -2 to 1, y 51 to 53, z -27 to -8), `539b` to `5426`.
+The rig checks every corner of every plate against these values at load.
+
+**Retraction direction (cited).** The real F-15's main gear legs "retract into
+the fuselage, the legs turning 90 degrees as they retract forward to lie flat
+in wells underneath the fuselage", and its "nosewheel retracts forward"
+([aircraftinformation.info, McDonnell F-15 Eagle, airframe and flight control
+systems](https://www.aircraftinformation.info/JB_AIF/usaf_fighters/f15_2.html),
+accessed 2026-11-10). The F-15C rig's fit swings its nose aft about the forward
+top corner (a fit read from the painted brace, no source law); the F-15E follows
+the cited direction instead, an agent decision, so the two disagree. John may
+choose either.
+
+**Gear law (fitted, agent decision 2026-11-10; hinge lines and angles are not
+recovered).** `quarter = 90 degrees * (1 - gear)`.
+
+- Each main leg (wheel sheet and cross plate, 4 faces) is **one rigid body**: it
+  turns `quarter` about a vertical line through the wheel centre (x +-12, y 1),
+  which lays the wheel flat, then `quarter` about a lateral line (along X at y
+  -4, z -9) which folds it forward. The fold line lies behind every leg vertex,
+  so the lowest point only rises while closing and never dips below the gear-down
+  height. Stowed, the leg lies flat at x 7 to 17 (mirrored), y -2 to 14, z -7 to
+  -1: in the bay between the keel (x 6) and the shelf wall (x 21), above the
+  belly skin (z -12 to -13) and below the wing skin.
+- Each inboard door turns `quarter` about its own top edge (the line along Y at
+  x +-7, z -12) and closes outward, ending flat at z -12 over x 7 to 13 (against
+  the belly skin line, 0.5 to 0.9 units above it).
+- The six nose plates are **one rigid body**: they turn `quarter` forward about
+  a lateral line at y 46, z -8 (behind and above every nose vertex) and steer
+  about a vertical line through the strut (x 0, y 52) by `-nosewheel_angle`.
+  Stowed, they stand at y 46 to 65, z -8 to 8, inside the nose between the belly
+  (z -9) and the fuselage top.
+- Gear 1 is the source pose with the lowest point at z -27 (9 ft below the
+  origin, the flight model's own gear low point); 0 hides the pieces.
+
+**Speed brake.** The four faces (a main plate rising aft from z 16 at y 20 to z
+30 at y -1, and a front closing plate falling to z 11 at y 25, both windings) are
+one piece. It turns about the lateral line y 25, z 11, where the front plate
+meets the dorsal skin, by `0.774 rad * (1 - brake)`: brake 1 is the source raised
+pose, 0 hides it, and the closed angle (44.3 degrees) is solved on the loaded
+shape so the free edge's mid point lies on the dorsal ridge (the line through the
+source spine vertices (0, 20, 10) and (0, -10, 6), faces `24b3` and `24c5`, which
+the rig checks at load); it comes to rest at y -6.9, z 6.4. Fitted. The real
+speed brake is one large dorsal plate ([same source](https://www.aircraftinformation.info/JB_AIF/usaf_fighters/f15_2.html)),
+which the shape matches.
+
+**Burners and trails.** Each plume is two crossed plates (a vertical plate at x
++-8, z -6 to 5, and a flat plate at z -1, x +-4 to +-13), both windings, from y
+-62 back to y -115 (38.3 ft behind the origin). They scale along Y from the
+nozzle exit plane (y -61) by the afterburner fraction. `engine_material` names the
+four nozzle faces at y -61 (`3d2e` and its cap `3d94` on the right, `3d55` and
+`3d79` on the left) and `outlet_count` is 2 (the record's engine count, which
+agrees with the shape), so there are two nozzle glows and `contrail_offsets`
+makes two trails: x +-2.83 ft, 0.50 ft below the origin, 22.33 ft behind it, each
+inside its plume. A unit test (`aircraft::tests`) pins the two offsets and the
+nozzle bounds on synthetic faces.
+
+**Rule 11 fold table.**
+
+| Piece | Faces | Vertices | Moved | On a hinge | Fixed |
+| --- | --- | --- | ---: | ---: | ---: |
+| Right door | `524f`, `5266` | 4 each | 2 each | 2 each: (7,9,-12), (7,-6,-12) | 0 |
+| Left door | `50e3`, `50fa` | 4 each | 2 each | 2 each: (-7,9,-12), (-7,-6,-12) | 0 |
+| Right leg (one body) | `52c2`, `52e1`, `5300`, `531f` | 4 each | all | 0 (both lines are free) | 0 |
+| Left leg (one body) | `5156`, `5175`, `5194`, `51b3` | 4 each | all | 0 | 0 |
+| Nose (one body) | `539b`, `53ba`, `53d9`, `53f0`, `5407`, `5426` | 4 each | all | 0 | 0 |
+| Speed brake (one piece) | `568c`, `56a3`, `56ba`, `56d1` | 4 each | 2 each in the front plate, all in the main plate | 2 in each front-plate face: (-3,25,11), (3,25,11) | 0 |
+| Plume (eight faces) | `574f` to `5860` | 4 each | all (scaled from y -61) | 0 | 0 |
+| Flap wedges | `5557`, `5576`, `5470`, `548f` | 4 each | none | none (F15E-3) | all |
+
+Verdict: **no face folds.** The legs and the nose have no vertex on their fold
+lines (the lines run through free space behind and above them), so each is a
+rigid body that meets no fixed face; the doors and the brake keep their hinge
+edges. The load-time check refuses a shape whose corners differ.
+
+**Probe (`--animation-probe`, `reviewed-controls-and-attachments`).** 350
+neutral faces, 0 required or check failures. Gear, brake and exhaust each read
+`required moved`; the elevator, aileron, rudder and flap controls read
+`unreviewed` (F15E-3 restores `Required` for them in
+`aircraft_animation_probe.rs`). The 202-value dense gear sweep
+(`dense-gear.csv`, 203 lines) passes every row: rigidity at most 2.2e-6 ft,
+anchor gap 0, skin gap 0, no new planar crossings, ground contact at gear 1
+(lowest point 27 units, 9 ft), legs and nose forward, doors outward, nothing
+below the gear-down height, and every piece inside its bay near stow. The
+seven-value brake sweep (`brake-sweep.csv`) is rigid to 1.3e-6 ft with the
+hinge gap 0 and the closed free edge 8e-6 ft off the ridge.
+
+Frames are in `.local/m3-aircraft/frames/F15E-4/` (local only): gear down, half,
+near stow and up from the side and below with 3x crops of the mains and nose, the
+brake open, half, nearly closed and off, the afterburner on and off from behind,
+and the aircraft parked on a runway.
+
+Provenance: faces, word roles, flap branches and corners spec-derived (retail
+shape, re-verified at load); retraction directions from the cited public text;
+every hinge line, the twist and fold angles, the stow envelopes, the 0.774 rad
+closed brake angle and the plume scaling fitted (agent decisions 2026-11-10);
+engine count 2 from the record; nothing here is attributed to John.

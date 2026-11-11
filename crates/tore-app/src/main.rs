@@ -56,6 +56,7 @@ mod f104_animation;
 mod f14_animation;
 mod f14_geometry;
 mod f15_animation;
+mod f15e_animation;
 mod f16_animation;
 mod f22_animation;
 mod f4_animation;

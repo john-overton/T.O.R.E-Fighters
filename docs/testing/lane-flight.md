@@ -865,6 +865,7 @@ and direction checks. The Mirage 2000 adds the same 202-value dense gear sweep (
 mains inward, nose rearward), a seven-value airbrake sweep that checks the
 closed plate on the spine, and the 25-combination pitch/roll grid; its
 `flight-variety-m2000` scenario flies 1,200 headless ticks.
+The F-15E (F15E-4, 2026-11-10) adds the same 202-value dense gear sweep (grounded at gear 1, legs and nose forward, doors outward) and a seven-value brake sweep that checks the closed piece on the dorsal ridge; its control-surface rows stay `unreviewed` until F15E-3, and `flight-variety-f15e` flies 1,200 headless ticks.
 
 Run one repaired aircraft before expanding the audit:
 

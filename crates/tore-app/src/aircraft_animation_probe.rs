@@ -16,6 +16,7 @@ mod e2;
 mod f104;
 mod f14;
 mod f15;
+mod f15e;
 mod f16;
 mod f18;
 mod f22;
@@ -170,6 +171,12 @@ impl Control {
         match self {
             Self::Rudder if id == Id::Ch47 => Expectation::Required,
             Self::Rudder | Self::Flaps if helicopter => Expectation::Unknown,
+            // F15E-4 maps the gear, speed brake and plumes only. The stabilators,
+            // ailerons, flaps and fins are F15E-3's: they stay unreviewed (not
+            // gated) until that slice restores `Required` here.
+            Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps if id == Id::F15E => {
+                Expectation::Unknown
+            }
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -215,6 +222,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::F15E
                 ) =>
             {
                 Expectation::Required
@@ -260,6 +268,7 @@ impl Control {
                         | Id::Mig25
                         | Id::Mig31
                         | Id::M2000
+                        | Id::F15E
                 ) =>
             {
                 Expectation::Required
@@ -599,6 +608,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mig25
             | AircraftId::Mig31
             | AircraftId::M2000
+            | AircraftId::F15E
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1047,6 +1057,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F15E {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f15e::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1208,6 +1229,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::M2000 {
         failures.extend(m2000::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F15E {
+        failures.extend(f15e::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

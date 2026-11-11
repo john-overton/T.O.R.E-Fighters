@@ -640,3 +640,24 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `mig25` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `mig31` | Gear, brake and burner words unmapped | Whole rigid gear with fixed roots and near-stow, dorsal airbrake and burner plume reviewed; mechanics fitted |
 | `m2000` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear plates (mains inward, nose rearward), the one dorsal airbrake plate and the burner plume reviewed; mechanics fitted |
+| `f15e` | Gear, brake and burner words unmapped (generic interim rig) | Whole rigid gear (legs flat and forward, doors outward, nose forward), the dorsal brake piece and two burner plumes reviewed; control surfaces and flap words pending F15E-3; mechanics fitted |
+
+## F-15E gear, speed brake and plume results (2026-11-10)
+
+Exact `f15e` (`F15E.PT`) passes the probe with the F15E-4 devices
+(`TORE_DATA_DIR=.local/m3-aircraft/profile-f15e target/debug/tore-app --aircraft
+f15e --animation-probe .local/m3-aircraft/checks/F15E-4-probe`): scope
+`reviewed-controls-and-attachments`, 350 neutral faces, zero required or check
+failures; gear, brake and exhaust each read `required moved`, and the elevator,
+aileron, rudder and flap controls read `unreviewed` until F15E-3. The 202-value
+dense gear sweep has every row passing (anchor gap 0, skin gap 0, rigidity at
+most 2.2e-6 ft, no new planar crossings, ground contact at gear 1); the
+seven-value brake sweep lays the closed piece on the dorsal ridge within 8e-6 ft.
+
+The mains and the nose retract forward (public text, fitted law), the legs
+turning flat as they fold; the doors close outward; the one dorsal brake piece
+is the source's. Two plumes, two nozzle glows and two contrails draw from the
+two engines. Frames: `.local/m3-aircraft/frames/F15E-4/`. Contrails form only
+above their onset altitude, so the two trails are pinned by a unit test rather
+than a frame. In the near-stow frame (gear 0.2) a sliver of the nose strut plate
+still shows below the belly: a transit pose, since fully stowed (gear 0) nothing draws and the stow gate holds every piece inside.
