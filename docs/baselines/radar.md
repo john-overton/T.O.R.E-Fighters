@@ -256,3 +256,16 @@ Super 530D (`R530.JT`) locks, hits and kills (`shots=1 hits=1 kills=1` at 700
 ticks). Not run: any side-by-side tuning, or an RWR with a plotted emitter (no
 scripted path exists).
 
+
+## F-15E radar, FLIR and jammer, 2026-11-10 (F15E-7)
+
+The F-15E flies the already reviewed `F15R.SEE` and `F15.ECM` of its record (the
+F-15C's), plus the record's internal FLIR as an infrared channel; no match arm and
+no code changed. `--sensor-summary` reads: `F15E: radar F15R.SEE search 150 nmi
+60x60 deg track 100 nmi 45x45 deg look-down 30 ADVANCED; infrared AV8IR.SEE search
+15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi 170x140
+deg track 5 nmi 170x140 deg; jammer F15.ECM LATE strength 0.30; signature radar
+100 infrared 100`. `--live-fire --aircraft f15e --weapon-slot 3` shows `TWS 10
+TRACK` and an AIM-120 that locks, hits and kills (`shots=1 hits=1 kills=1` at
+1,500 ticks); `--sensor-channel ir` shows the `IR` scope. Not run: any
+side-by-side tuning, or an RWR with a plotted emitter (no scripted path exists).

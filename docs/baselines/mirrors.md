@@ -200,3 +200,18 @@ position against the scaled canopy is measured in [the Mirage sensors, HUD and
 cockpit section](../formats/aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 Frames are under `.local/m3-aircraft/frames/M2K-7/`.
 
+
+## 2026-11-10 F-15E cockpit confirmation
+
+Slice F15E-7 confirmed the F-15E (`F15E.PT`) on the Harrier cockpit family its
+record names (`av8.HUD`, as the F-15C's; John, 2026-11-10, opinionated).
+`--cockpit-sheet OUT_DIR F15E,F15,AV8` reported `f15e: stem F15E cockpit
+~AV8H.PIC art 1280x490 FITTED CLR` with the centre mask at x 531 y 5 w 208 h 51,
+the left mask at x 156 y 180 w 109 h 171 and the right mask at x 1005 y 180 w 109
+h 171, identical to the F-15C's and the Harrier's three regions, and `Cockpit
+mirrors: 3 reviewed regions, 768x384 rear feed, every other visible frame`. No
+mask was fitted. The one shared pilot's eye (`mirrors::pilot_eye`) feeds the rear
+feed unchanged; its place against the F-15E canopy equals its place against the
+F-15C's, measured in [the F-15E sensors, HUD and cockpit
+section](../formats/aircraft-variety.md#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10).
+Frames are under `.local/m3-aircraft/frames/F15E-7/`.

@@ -299,10 +299,10 @@ search and 45 degree track for built-ins and 360 for pods).
 
 | Sensor | Aircraft | Laser | Gimbal |
 | --- | --- | --- | --- |
-| PAVESPK Pave Spike (fixed row) | F-16C, A-10 | yes, 10 nmi | pod: the hemisphere below the aircraft, as the AC-130 dome (fitted) |
+| PAVESPK Pave Spike (fixed row) | F-16C, A-10, F-15E (F15E-7, 2026-11-10) | yes, 10 nmi | pod: the hemisphere below the aircraft, as the AC-130 dome (fitted) |
 | PAVESPK as a loaded pod (PAVEKNF no longer offered) | any aircraft with a pod station (flag 0x400) | yes, 10 nmi | pod hemisphere |
 | SU24L, KA50L (built in) | Su-25, V-22 | yes, 10 nmi | 60 degree search, 45 degree track cone about the nose (record fields) |
-| AAS38 pod, AV8IR, MIG29I, SU27I, AC130I (FLIR) | Rafale (pod), X-31, F-22, F-22N, AV-8B, AH-64, MiG-29, Su-27, Su-35, AC-130 | no | FLIR pods: hemisphere; internal FLIR: 60 degree cone (fitted) |
+| AAS38 pod, AV8IR, MIG29I, SU27I, AC130I (FLIR) | Rafale (pod), X-31, F-22, F-22N, AV-8B, AH-64, MiG-29, Su-27, Su-35, AC-130, F-15E (AV8IR, scope channel only: its Pave Spike laser is the sight, F15E-7) | no | FLIR pods: hemisphere; internal FLIR: 60 degree cone (fitted) |
 
 Other aircraft have no sight. They designate by radar, FLIR channel or visually
 and cannot laze, but they can still drop laser bombs on a buddy's spot (see

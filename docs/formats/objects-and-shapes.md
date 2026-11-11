@@ -1604,6 +1604,12 @@ ft up and 10 ft ahead, the same relation the Rafale's own canopy has to the same
 eye (top 3.0 ft, 8 to 16 ft ahead). No per-aircraft eye was added; see [the
 Mirage sensors, HUD and cockpit section](aircraft-variety.md#mirage-2000-sensors-hud-and-cockpit-m2k-7-2026-11-10).
 
+Cockpit eye point, 2026-11-10 (F15E-7, agent decision, unchanged): the F-15E's
+canopy top is 5.3 ft above the model origin and 14.3 to 24.3 ft ahead of it, the
+F-15C's 5.3 ft and 15.0 to 25.7 ft, against the fixed pilot's eye 7 ft up and 10
+ft ahead. No per-aircraft eye was added; see [the F-15E sensors, HUD and cockpit
+section](aircraft-variety.md#f-15e-sensors-hud-and-cockpit-f15e-7-2026-11-10).
+
 ## Mirage 2000 skin review
 
 On 2026-11-09, slice M2K-2 checked the flyable `M2000.PT` import's skin (media
