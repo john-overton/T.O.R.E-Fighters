@@ -135,6 +135,13 @@ fuel against the F-16A and the Mirage 2000, are in the
 [variety flight baseline](../baselines/variety-flight.md#saab-gripen-validation-2026-11-10);
 `gripen` joins the liftoff, approach and internal-fuel tables of `flight.py`.
 
+Update (MF1-8, 2026-11-11): the Mirage F1 results, clean and with the default load,
+with the full-stick pull by fuel against the Mirage 2000, the Gripen, the F-5E and
+the F-16A, are in the
+[variety flight baseline](../baselines/variety-flight.md#mirage-f1-validation-2026-11-11);
+`mf1` joins the liftoff, approach and internal-fuel tables of `flight.py` (the
+windows depend on the open default-load decision).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
@@ -849,6 +856,7 @@ The art inspection cases below check for blank frames; look at their PPMs:
 | `render-f15e-skin` | The F-15E in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its own size with no underside showing through the top and no z-fighting on the double-sided panels; the omitted E0 decal slots leave no blank or skin-filled patch. |
 | `render-gripen-skin` | The Saab Gripen in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its own true size with no underside showing through the top and no z-fighting on the double-sided panels; the five omitted E0 decal slots leave no blank or skin-filled patch. |
 | `render-f5e-skin` | The F-5E in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The F-5E draws its own `F5E.SH` and `_F5E.PIC` with no underside showing through the top and no z-fighting on the double-sided panels; the two omitted E0 wing decal slots leave no blank or skin-filled patch. |
+| `render-mf1-skin` | The Mirage F1 in free flight, flight view 2, gear down, look `0,60` (top) and `0,-60` (under), `TORE_WEATHER_TIME=12:00`, `--flight-zoom 2` | The shape draws at its real size (per-axis scale) with no underside showing through the top and no z-fighting on the double-sided panels; the two omitted E0 wing-marking decal slots leave no blank or skin-filled patch. |
 | `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |
 
 The synthetic GPU checks run separately with
@@ -889,6 +897,9 @@ The F-15E (F15E-4, 2026-11-10) adds the same 202-value dense gear sweep (grounde
 F15E-3 (2026-11-10) makes elevator, aileron and flaps `required` (whole-panel stabilators with roll, ailerons about their slanted hinges, flaps), rudder `not-applicable` (no rudder motion), and adds the 25-combination pitch/roll grid and 21-value elevator, aileron and flap sweeps to the `flight-animation-f15e` sweep row.
 
 The Gripen (GRI-3, GRI-4) adds a 202-value dense gear sweep, a seven-value airbrake sweep, its gear, brake and exhaust witnesses, and the 25-combination pitch/roll grid over both canards (pitch together, roll against each other) and both elevon wedges, with the rudder, elevator, aileron and flap witnesses; `flight-animation-gripen` is registered and `flight-variety-gripen` flies 1,200 headless ticks.
+
+The Mirage F1 (MF1-3) adds the 25-combination pitch/roll grid (`flight-animation-mf1`): its tailplane must follow pitch only and its aileron panels roll only, each staying put under every other control including the flap lever (the probe records the flap control as not applicable for this aircraft); its gear, airbrake and plume are still the interim rig.
+Update (MF1-4, 2026-11-10): the Mirage F1 adds the same 202-value dense gear sweep (grounded at gear 1, mains forward and inward into the fuselage side, nose rearward), a seven-value airbrake sweep with the closed plate on the ridge line, the exhaust sweep, and is registered in the variety flight scenarios (`flight-variety-mf1` flies 1,200 headless ticks); `flight-animation-mf1` now expects the 203-line dense gear file beside the 26-line grid.
 
 Run one repaired aircraft before expanding the audit:
 

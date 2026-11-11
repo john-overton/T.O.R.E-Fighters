@@ -260,6 +260,45 @@ def f5e_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Mirage F1's stores (MF1-6, 2026-11-11), one run each, on the per-axis scaled shape: the
+# wing Magics leave left then right from 1 ft pylons; the wingtip Magics from the shifted tip
+# rail (1.1 ft outboard, MF1-5b) with no pylon depth; the belly Mk 82 pair, loaded for the
+# check, from the 3.24 ft pylon slot (the default belly pair is tanks).
+MF1_CASES = [
+    ("Magic wing", [(7.23, -1.12, -1.18)] * 2, "LR", WING),
+    ("Magic wingtip", [(14.88, 0.70, -4.33)] * 2, "LR", None),
+    ("Mk 82 belly pair", [(3.24, -1.45, 0.00)] * 2, "LR", WING),
+]
+
+
+def mf1_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(MF1_CASES):
+        return [f"{len(parts)} runs finished, want {len(MF1_CASES)}"]
+    problems: list[str] = []
+    for part, (label, wants, sides_want, depth_want) in zip(parts, MF1_CASES):
+        firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
+        if len(firsts) != len(wants):
+            problems.append(f"{label}: {len(firsts)} releases, want {len(wants)}")
+            continue
+        sides = []
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(firsts, wants)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(abs(r) - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want +-{wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth_want is None:
+                if depth != "none":
+                    problems.append(f"{label}: release {n} pylon depth {depth}, want none")
+            elif depth == "none" or abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+            sides.append("L" if r < 0 else "R")
+        if "".join(sides) != sides_want:
+            problems.append(f"{label}: sides {''.join(sides)}, want {sides_want}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -335,5 +374,19 @@ def scenarios() -> list[Scenario]:
             ],
             check=f5e_origin_problems,
             notes="The F-5E's wing-pair stores (an iron bomb and an AGM-65G, loaded on the empty default row 5) leave from their 1 ft pylons, outer pair first, left then right, and the default wingtip AIM-9Bs from the tip rails, left then right (F5E-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-mf1", lane="flight",
+            args=base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "mf1", "--station", "1", "--load", "R550",
+                         "--count", "2"],
+            timeout=300,
+            then=[
+                Step(base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "mf1", "--station", "2", "--load",
+                             "R550", "--count", "2"], timeout=300),
+                Step(base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "mf1", "--station", "4", "--load",
+                             "MK82", "--count", "2"], timeout=300),
+            ],
+            check=mf1_origin_problems,
+            notes="The Mirage F1's stores leave from where they hang: the wing Magics from 1 ft pylons, the wingtip Magics from the shifted tip rail, a Mk 82 pair from the belly pylon slot at 3.24 ft, left then right (MF1-6).",
         ),
     ]

@@ -106,6 +106,7 @@ mod locate;
 mod look;
 mod m2000_animation;
 mod menu;
+mod mf1_animation;
 mod mi24_animation;
 mod mig17_animation;
 mod mig21_animation;

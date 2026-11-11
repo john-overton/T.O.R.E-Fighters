@@ -1246,6 +1246,120 @@ points, within 0.05 ft). Jettison (`a2g-jettison-gripen`, `--attack jettison
 2,772 lb), then the two inner wing Mk 82s, and the run passes with no explosion.
 `flight-jettison-gripen-slot2..4` pass too.
 
+## The Mirage F1 (MF1-6, 2026-11-11)
+
+Implementation note for slice MF1-6, the Mirage F1's ordnance, default load and
+countermeasures. `MF1.PT` names eight source rows: a fixed visual sensor
+(`VIS340.SEE`), radar (`F18R.SEE`) and jammer suite (`AV8.ECM`), the internal DEFA
+gun, a centreline row that holds the `ALQ167.ECM` pod in the record, and three
+carrier rows (a wing row of four `F250.GAS`, a paired wing row of two `R550.JT`
+and the wingtip rail of two `R550.JT`; [source review](aircraft-variety.md#mirage-hardpoints)).
+TORE changes the record's defaults in two places before anything else reads it:
+the centreline row is empty (John, 2026-11-10, B5-2) and the belly row holds two
+stores (John, 2026-11-11, round 3). Those two defaults, the stations that follow
+from them and the clearances are in [stores on pylons](../spec/stores-on-pylons.md#the-mirage-f1-stations-finished-mf1-5b-2026-11-11).
+MF1-6 adds one rule, the mask below; it authors no row, capacity or default.
+
+| Row | Location | Mask | Default | Normal catalog (records) |
+| ---: | --- | --- | --- | --- |
+| 3 | Internal Gun | `0x000c` | `DEFA.JT` x250 | its own gun |
+| 4 | Centerline | `0x07e5` | empty (retained selection) | 58 records (one store; the two tanks and the weapons) |
+| 5 | Wing, belly pair, 3.24 ft out | `0x07e5` | `F250.GAS` x2 | 65 records less 33 refused, 32 left, 2 a row |
+| 6 | Wing, paired | `0x01c5` | `R550.JT` x2 | 47 records less 1 refused, 46 left, 2 a row |
+| 7 | Wingtip rail | `0x0085` | `R550.JT` x2 | 10 records, 2 a row |
+
+**The mask (agent decision, 2026-11-11, following John's F-15E A2 answer).**
+John's F-15E answer A2 (2026-11-10) refused the large stores that enter the belly
+by more than about 0.3 ft. The coordinator asked for the same on the Mirage F1;
+the choice of rows, the 0.3 ft line and the lists are agent decisions, not John's
+numbers. John's F-5E answer C2 ("for the f-5 keep") refused nothing on the wing
+pair, so the F-5E kept its wing entries; the F1's row 6 follows A2's 0.3 ft line
+and not a refuse-every-entry reading of C2 (corrected in place the same day, after
+a first version of this slice refused all seven row 6 entries). `aircraft_stations::weapon_allowed` refuses on normal loading, and only
+there (Cheat loading skips it, as for every other refusal):
+
+- Row 5 (the belly pair): 33 stores that enter the airframe by 0.37 to 3.39 ft at
+  the 3.24 ft slot: `AA11B`, `AA2`, `AA6`, `AA9`, `AIM9M`, `MICA`, `R530`, `R550`,
+  `PL7`, `PL10`, `AGM88`, `AIM7`, `AIM7E`, `AIM9B`, `GBU12`, `GBU16`, `GBU10`,
+  `GBU10A`, `PAVEWAY`, `PAVEWA3`, `GBU28`, `GBU29`, `GBU29P`, `GBU30`, `AS14`,
+  `AS30`, `AT12`, `AGM84E`, `AGM45`, `AGM84A`, `AM39`, `AS16`, `AS15` (each `.JT`).
+  The 13 that enter by 0.3 ft or less stay (`AA11`, `AA12`, `AS7`, `AIM9X`,
+  `AIM120`, `AGM65G`, `AGM65A`, `AT2`, `FAB1000`, `CBU89`, `GBU38` and the two big
+  tanks `F350.GAS` and `F500.GAS`, which are tanks and not under this check),
+  and so do the 19 clean records. Nothing on row 5 crosses the main gear.
+- Row 6 (the paired wing row): one store, `AS30.JT`, which enters the wing by
+  0.33 ft. The six alternatives that enter by 0.06 to 0.15 ft stay (`PL7` 0.07,
+  `PL10` 0.15, `AGM88` 0.15, `AGM45` 0.15, `AIM7` 0.06, `AIM7E` 0.06, each `.JT`),
+  as does `R550.JT`, which reads 0.05 ft on the left side and is the default of
+  this row and of the tip row (the right Magic is clean).
+- Never refused: any default store (the gun, the two tanks, the wing and wingtip
+  Magics), every row 4 and row 7 record, and every other aircraft's rows.
+
+The centreline (row 4) is outside this mask: 36 of its 58 records enter the belly
+by 0.05 to 0.71 ft and 15 cross the gear (MF1-5). The `R550.JT` that the belly row
+refuses is why an empty belly row's retained selection moved to `MK82.JT`
+(see below). 34 placements fewer: `--validate-ordnance` reads
+`ordnance MF1.PT: 5 source rows, 2 optional weapon rows, 141 compatible weapon
+placements (was 175), 6 tank placements; ... catalog 60 normal (was 62), 83 Cheat`,
+and the page now offers 147 choices (was 181). The two records no row offers any
+more are `AS16.JT` and `GBU28.JT`, which only the belly row took.
+
+**Retained selection.** An empty carrier row remembers a weapon so it can be loaded
+again; the row takes the first default weapon of the record that it accepts. The
+belly row held no weapon by default and its remembered weapon was `R550.JT`, which
+it now refuses, so the row's fallback is `MK82.JT` (the F-15 and MiG-17 have the
+same kind of fallback). The centreline's remembered weapon stays `R550.JT`.
+
+**Default load.** Same for the human and the AI (no override; the F1's rows flow
+through the shared loading rules, so saved loads, the lobby and restart agree, and
+`--validate-ordnance` reads "defaults and restart passed"): 250 `DEFA.JT` rounds on
+row 3, nothing on the centreline, two `F250.GAS` (3,300 lb of fuel, 250 gallon) on
+row 5, two `R550.JT` on row 6 and two on row 7. It weighs 26,143 lb of 30,203 lb
+(Load Ordnance page; carried 4,481 lb). The live-fire stations are
+`[250, 2, 2, 0, 0]`: the gun, the wing Magics, the wingtip Magics and the two
+retained selections (centreline, belly pair) at zero. Release order measured with
+`--a2g-run --attack release` on the scaled shape: the wing Magics leave left then
+right at 7.23 ft out, 1.12 ft down, 1.18 ft aft of the reference, depth 1.00 ft;
+the wingtip Magics at 14.88 ft out, 0.70 ft up, 4.33 ft aft, no pylon depth; a
+Mk 82 pair loaded on the belly row leaves left then right at 3.24 ft out, 1.45 ft
+down, depth 1.00 ft. Each leaves from the point the drawing hangs it at.
+
+**Is it a plausible Mirage F1 load?** The Magics on the wing and the tip rails and
+a belly or inner-wing tank are plausible: Jane's text in `MF1.INF` lists two
+1,200 L tanks on the inner wing pylons, a 2,200 L tank under the fuselage, and the
+Magic or Sidewinder on the wingtip rails. Two 250 gallon (about 950 L) tanks on one
+belly row at 3.24 ft is TORE's reading of the record's tank row, not a published
+load. The Magics on the outer wing pylons are also plausible (550 kg each, listed).
+
+**The gun.** `DEFA.JT`, row 3, 250 rounds (the record's own). The real Mirage F1C
+carries two 30 mm DEFA 553 with 135 rounds a gun, 270 together (Jane's text in
+`MF1.INF` and Aerospaceweb, as cited in the [source
+review](aircraft-variety.md#mirage-hardpoints)); the record's 250 is kept
+(spec-derived, no fitted value). Live fire: all 250 rounds fire headless (54 hits,
+one kill on the practice aircraft); the cadence is the shared gun's (about 32
+rounds a second in the Mirage 2000 and F-5E strafe runs; not re-measured for the F1
+and no real DEFA 553 rate was sourced here, so no comparison is made).
+
+**Countermeasures.** From the row 2 `AV8.ECM` record (John, 2026-11-11, O4: keep
+the record's jammer): 30 chaff and 30 flares loaded, with no radio-frequency jammer
+mode (strength 0.00, [MF1-7](aircraft-variety.md)). The record is the capacity and
+nothing is per-aircraft, so no fitted value was authored. `--combat-command chaff`
+and `flare` with `--countermeasure-preview`: five chaff leave 30 to 25 and show five
+cartridges in the air; three flares leave 30 to 27 with six burning. The real F1
+carries chaff and flare dispensers on the fuselage shoulders (Jane's text); no count
+was sourced, so the retail 30 and 30 stand.
+
+**Live fire and jettison.** `STATIONS["mf1"] = [250, 2, 2, 0, 0]`. Headless: the gun
+fires 250, the wing and wingtip Magics each fire one, guide and (wing) kill the
+practice aircraft; the two retained-selection stations stay at zero. The jettison
+battery runs drop the selected wing Magic group (slot 2: the pair leaves, payload
+4,481 to 3,892 lb, and the next shot comes from the wingtip pair) and the wingtip
+group (slot 3: the pair leaves and the selection falls back to the gun, 80 rounds
+fired); `a2g-jettison-mf1` releases the two tanks, then two Mk 82s loaded on the
+belly row, `PASS released 4 ... no-explosion`. An AGM-65G loaded on a belly station
+(kept after the mask) launches from the page, locks CUED and kills the lead truck.
+See [the baseline](../baselines/ordnance-availability.md#mirage-f1-ordnance-masks-and-default-load-mf1-6-2026-11-11).
+
 ## Original icons and geometry candidates
 
 

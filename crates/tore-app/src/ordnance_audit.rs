@@ -49,7 +49,17 @@ const TANK_RECORDS: usize = 9;
 /// that clip the intake flank (GBU-29, GBU-29P, GBU-30, GBU-38, AGM-88,
 /// AGM-45 and AT-2) and its wing pair (row 8) refuses the AA-6, eight
 /// placements fewer (F15E-5, John 2026-11-10; F15E.PT 65 to 57).
-const WEAPON_PLACEMENTS: usize = 4644;
+/// 4,610 from 4,644: the Mirage F1's belly pair (row 5) refuses 33 stores that
+/// enter the airframe by more than about 0.3 ft and its wing pair (row 6)
+/// refuses the `AS30.JT` (0.33 ft), 34 placements fewer (MF1-6, agent decision
+/// 2026-11-11 following John's F-15E A2 0.3 ft line; the F-5E kept its wing
+/// entries; MF1.PT 175 to 141).
+/// Integration note (Mirage F1 merge, 2026-11-11): the two refusal sets are
+/// independent, so they add. Measured with `--validate-ordnance` on the merged
+/// tree: 4,610 = 4,644 (m3-aircraft, with the F-15E's eight) less the Mirage
+/// F1's 34 (the branch alone measured 4,618 from 4,652). Every other pin is
+/// unchanged by the merge.
+const WEAPON_PLACEMENTS: usize = 4610;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -355,6 +365,9 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 };
                 // John, 2026-11-10 (F15E-5): the F-15E's bomb pair and wing pair
                 // refuse the stores that clip; normal loading must offer none.
+                // Agent decision, 2026-11-11 (MF1-6, John's A2 and C2 precedents):
+                // the Mirage F1's belly pair and wing pair refuse the stores
+                // that enter the airframe; normal loading must offer none.
                 if !tore_formats::aircraft::stations::weapon_allowed(id, hardpoint, &weapon.source)
                 {
                     if let Some(slot) = rows

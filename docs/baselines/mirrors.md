@@ -251,3 +251,18 @@ shared pilot's eye (`mirrors::pilot_eye`) feeds the rear feed unchanged;
 measured in [the F-5E sensors, HUD and cockpit
 section](../formats/aircraft-variety.md#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
 Frames are under `.local/m3-aircraft/frames/F5E-7/`.
+
+## 2026-11-10 Mirage F1 cockpit confirmation
+
+Slice MF1-7 confirmed the Mirage F1 (`MF1.PT`) on the Rafale cockpit its record
+names (`rafale.HUD`, the same binding as the Mirage 2000; John, 2026-11-10,
+decision 25, opinionated). `--cockpit-sheet OUT_DIR MF1,M2000,RAFALE` reported
+`mf1: stem MF1 cockpit ~RAFH.PIC art 1280x490 FITTED CLR` with the centre mask at
+x 461 y 24 w 360 h 79, the left mask at x 140 y 242 w 118 h 248 and the right mask
+at x 1024 y 242 w 118 h 248, identical to the Rafale's and the Mirage 2000's three
+regions, and `Cockpit mirrors: 3 reviewed regions, 768x384 rear feed, every other
+visible frame`. No mask was fitted. The one shared pilot's eye
+(`mirrors::pilot_eye`) feeds the rear feed unchanged; its place against the
+scaled F1 canopy is measured in [the Mirage F1 sensors, HUD and cockpit
+section](../formats/aircraft-variety.md#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10). Frames are under
+`.local/m3-aircraft/frames/MF1-7/`.

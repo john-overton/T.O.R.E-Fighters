@@ -490,7 +490,9 @@ def scenarios() -> list[Scenario]:
             # after the Tornado's outer wing row went and the F-5E and Mirage F1
             # default loads were cleared (ordnance_audit.rs has the per-aircraft note).
             # F15E-5 (2026-11-10): 4,644 weapon placements, the F-15E's bomb and wing pairs refuse eight clipping stores.
-            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4644 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
+            # MF1-6 (2026-11-11, agent decision following John's F-15E A2 0.3 ft line): 4,618 weapon placements on the branch alone, the Mirage F1's belly and wing pairs refuse 34 stores.
+            # Mirage F1 merge (2026-11-11): both refusal sets on m3-aircraft, 4,644 less 34 = 4,610 weapon placements (measured).
+            expect=[r"ordnance audit: 45 aircraft, 18 recovered weapon stations, 4610 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -793,6 +795,8 @@ def scenarios() -> list[Scenario]:
     # 2026-11-10), so the lobby page shows no laser warning (as the F-16C) and offers the sensor helper.
     # Slice GRI-9 adds the Saab Gripen: the same warning and helper (measured, not assumed).
     # Slice F5E-9 adds the F-5E Tiger (measured, not assumed; see the row below).
+    # Slice MF1-9 adds the Mirage F1: its decoded wing mask admits a laser-guided store, but its record
+    # has no Pave Spike row (the ALQ-167 centreline is cleared), so the lobby page warns and offers the pod helper.
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
         ("f18", "ordnance-laser", True, True, False),
@@ -807,6 +811,7 @@ def scenarios() -> list[Scenario]:
         ("f15e", "lobby-ordnance-laser", False, True, True),
         ("gripen", "lobby-ordnance-laser", True, True, True),
         ("f5e", "lobby-ordnance-laser", True, True, True),
+        ("mf1", "lobby-ordnance-laser", True, True, True),
     ):
         out.append(
             Scenario(

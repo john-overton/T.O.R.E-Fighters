@@ -379,7 +379,10 @@ impl Loadout {
             .position(|s| *s == Some(slot));
         if !self.cheat {
             // John, 2026-11-10: the F-15E's bomb pair and wing pair refuse the
-            // stores that clip the aircraft (normal loading only).
+            // stores that clip the aircraft (normal loading only). Agent
+            // decision, 2026-11-11 (MF1-6, following John's F-15E A2 and F-5E
+            // C2 precedents): the Mirage F1's belly pair and wing pair refuse
+            // the stores that enter the airframe (same check, same place).
             if row.is_some_and(|row| {
                 !tore_formats::aircraft::stations::weapon_allowed(self.aircraft, row, &w.source)
             }) {

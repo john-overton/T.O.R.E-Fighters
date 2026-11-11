@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -96,6 +96,12 @@ STATIONS = {
     # never loaded by default; B5-2). Its F150.GAS centreline tank is a tank
     # station (F5E-6, 2026-11-10).
     "f5e": [560, 2, 0],
+    # The Mirage F1 carries the DEFA gun on its internal row 3 (250 rounds) and
+    # two default weapon rows: row 6 R550.JT x2 (wing) and row 7 R550.JT x2
+    # (wingtip). Its centreline (row 4, empty by default) and belly pair (row 5,
+    # two F250.GAS tanks by default) are optional weapon rows with a retained
+    # selection and no default weapon, so they end the list at 0 (MF1-6).
+    "mf1": [250, 2, 2, 0, 0],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -298,6 +304,21 @@ APPROACH_TARGET = {
 # measured 156.1 kt sits above the band and is held by `KNOWN_APPROACH` below.
 LIFTOFF_TARGET.update({"f15e": (130, 150)})
 APPROACH_TARGET.update({"f15e": (125, 145)})
+# The Mirage F1's windows (MF1-8, 2026-11-11) are fitted, agent decisions. Its
+# approach range (125 to 150 kt) starts at the one published figure, about 125 kt
+# (MIGFlug, "Dassault Mirage F1", read 2026-11-11, a secondary history site) and
+# allows 20 percent above it, because the scripted approach flies the DEFAULT
+# load, which still carries four full 250 gallon tanks (gross 29,839 lb against
+# the real clean 24,030 lb): measured 145.6 kt with that load, 115.9 kt clean
+# (`--loadout none`). No primary liftoff speed was found (the game's Jane's text
+# gives a 600 m takeoff run and a 670 m landing run), so the liftoff band is the
+# same 125 to 150 kt plausibility band as the Mirage 2000's; measured 135.4 kt
+# after 1,655 ft (504 m) with the default load, 103.9 kt after 691 ft clean. All of
+# these depend on John's open stations decision (MF1-5/MF1-6): a lighter
+# default load lowers both speeds and the windows and the recorded values must
+# then be re-fitted.
+LIFTOFF_TARGET["mf1"] = (125, 150)
+APPROACH_TARGET["mf1"] = (125, 150)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -308,6 +329,14 @@ KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "fax
 # The F-15E's measured liftoff and approach at its default load (F15E-8, 2026-11-10).
 KNOWN_LIFTOFF.update({"f15e": 149.1})
 KNOWN_APPROACH.update({"f15e": 156.1})
+# Update (MF1-5b, 2026-11-11, agent decision): John's round-3 answer capped the
+# belly row at two stores, so the default load is two `F250.GAS` (gross 26,143 lb,
+# 87 percent of the maximum, was 29,839 lb). The scripted runs now measure
+# 121.0 kt at liftoff (after 1,144 ft, 349 m; was 135.4 kt) and an approach at
+# 127.6 kt (was 145.6 kt, near the published 125 kt). The 125 to 150 kt bands
+# above stay; the plus or minus 6 percent recorded windows follow the new values.
+KNOWN_LIFTOFF["mf1"] = 121.0
+KNOWN_APPROACH["mf1"] = 127.6
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -328,6 +357,9 @@ INTERNAL_FUEL_LB = {
 }
 # F15E.PT internal fuel, 13,662 lb (the F-15C record's tank; F15E-8, 2026-11-10).
 INTERNAL_FUEL_LB["f15e"] = 13662
+
+# MF1.PT internal fuel, 6,120 lb (MF1-0; the real F1 holds about 7,385 lb).
+INTERNAL_FUEL_LB["mf1"] = 6120
 
 
 def _in_target(value: float, target: tuple, known: float | None) -> str | None:
@@ -419,6 +451,7 @@ LIFTOFF_AIRCRAFT = AIRCRAFT + ["mig25", "f16a", "mig31", "m2000", "gripen"]
 LIFTOFF_AIRCRAFT += ["f15e"]
 # The F-5E joins the liftoff, retail-stall and approach scenarios (F5E-8, 2026-11-10).
 LIFTOFF_AIRCRAFT += ["f5e"]
+LIFTOFF_AIRCRAFT += ["mf1"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

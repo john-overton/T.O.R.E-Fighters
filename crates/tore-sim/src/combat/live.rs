@@ -1082,6 +1082,13 @@ impl Configuration {
                     || super::ballistics::is_bomb(weapon)
                     || super::guided::is_glide_bomb(weapon))
                     && weapon.source != "SUU16.JT"
+                    // A refused store (MF1-6: the Mirage F1's belly pair) is
+                    // never the retained selection of an empty row.
+                    && tore_formats::aircraft::stations::weapon_allowed(
+                        a.id,
+                        hardpoint,
+                        &weapon.source,
+                    )
                     && (1..32767).contains(
                         &source_station.allowed_count(super::loading::Store::weapon(weapon), false),
                     )
@@ -1094,6 +1101,9 @@ impl Configuration {
                 let fallback = match (a.id, hardpoint) {
                     (AircraftId::Mig23, 5) => Some("AIM9M.JT"),
                     (AircraftId::Mig17, 3) | (AircraftId::F15, 6) => Some("MK82.JT"),
+                    // The Mirage F1's belly pair refuses the Magic (the only
+                    // default weapon), so its empty selection is the Mk 82.
+                    (AircraftId::Mf1, 5) => Some("MK82.JT"),
                     _ => None,
                 };
                 if let Some(name) = fallback {

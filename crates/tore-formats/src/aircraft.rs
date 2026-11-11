@@ -531,6 +531,8 @@ impl AircraftId {
             Self::Gripen => "GRIPEN.HUD",
             Self::F5E => "F29.HUD",
             Self::Tornado => "E2000.HUD",
+            // Mirage F1: decided, not interim (opinionated, John, 2026-11-10,
+            // decision 25, MF1-7); the same binding as the Mirage 2000.
             Self::Mf1 => "RAFALE.HUD",
         }
     }
@@ -637,6 +639,7 @@ impl AircraftId {
             // opinionated; F5E-7), so no longer interim.
             Self::F5E => "F29",
             Self::Tornado => "EF2",
+            // Mirage F1: decided as above (John, 2026-11-10); the Rafale family.
             Self::Mf1 => "RAF",
             _ => self.stem(),
         }

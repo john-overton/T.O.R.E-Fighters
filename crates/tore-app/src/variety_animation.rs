@@ -293,6 +293,14 @@ fn specification(id: Id) -> Option<Spec> {
                 2. / 3.,
             ),
             // MF1.SH: six words, gear 0x5adc adds 6 faces (the parked word).
+            // MF1-3 and MF1-4 load it through its own `mf1_animation` rig,
+            // which owns the tailplane, the two outboard trailing-edge
+            // (aileron) panels, the rudder, the three rigid gear plates, the
+            // dorsal airbrake plate (0x5ad6) and the plume (0x5ad0); the
+            // shared groups are no longer used for it. The flap-slot words
+            // (0x5ae8, 0x5aee) and the rudder word (0x5af4) are pinned but
+            // never set; docs/spec/variety-animation.md, "Mirage F1 control
+            // fit" and "Mirage F1 gear, airbrake and plume fit".
             Id::Mf1 => (
                 19200,
                 236,
@@ -380,6 +388,9 @@ enum SpecificRig {
     /// F5E-3 and F5E-4: the control surfaces, the gear, the speed brake and
     /// the plume.
     F5E(crate::f5e_animation::Rig),
+    /// MF1-3 and MF1-4: the control surfaces, the gear, the airbrake and the
+    /// plume.
+    Mf1(crate::mf1_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -691,6 +702,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Mf1 => {
+                let (rig, shape) = crate::mf1_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Mf1(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -819,6 +839,7 @@ impl Rig {
                 SpecificRig::F15E(_) => crate::f15e_animation::flame(address),
                 SpecificRig::Gripen(_) => crate::gripen_animation::flame(address),
                 SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
+                SpecificRig::Mf1(_) => crate::mf1_animation::flame(address),
             };
         }
         self.groups
@@ -882,6 +903,7 @@ impl Rig {
                 SpecificRig::F15E(rig) => rig.animate(source, state),
                 SpecificRig::Gripen(rig) => rig.animate(source, state),
                 SpecificRig::F5E(rig) => rig.animate(source, state),
+                SpecificRig::Mf1(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

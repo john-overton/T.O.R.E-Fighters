@@ -260,6 +260,31 @@ fn the_f5e_round_trips_at_code_43_and_no_identity_shares_it() {
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
 }
 
+/// Slice MF1-9: the Mirage F1 is checkpoint code 45 (the batch table pins the
+/// code, appended after the Tornado's 44), every identity in `AircraftId::ALL`
+/// round-trips, and no two identities share a code, so a saved Mirage F1 loads
+/// back as the Mirage F1 and never as the Mirage 2000 or the Rafale.
+#[test]
+fn the_mf1_round_trips_at_code_45_and_no_identity_shares_it() {
+    assert_eq!(same(&AircraftId::Mf1).body, vec![45]);
+    assert_ne!(same(&AircraftId::Mf1).body, same(&AircraftId::M2000).body);
+    assert_ne!(same(&AircraftId::Mf1).body, same(&AircraftId::Rafale).body);
+    let mut codes = std::collections::BTreeSet::new();
+    for id in AircraftId::ALL {
+        let coded = same(&id);
+        assert!(codes.insert(coded.body.clone()), "{id:?} repeats a code");
+        let loaded: AircraftId = from_bytes(&coded, &NONE).unwrap();
+        assert_eq!(loaded, id);
+    }
+    assert_eq!(codes.len(), AircraftId::ALL.len());
+    // The code after the batch's last identity is still unknown.
+    let unknown = Coded {
+        body: vec![46],
+        records: Vec::new(),
+    };
+    assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
+}
+
 #[test]
 fn the_shared_leaf_types_round_trip() {
     for aircraft in [

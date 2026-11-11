@@ -115,6 +115,9 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // left 0x42a6 (x -5 to -1) and the right 0x4454 (x 1 to 5), the two
         // J85 nozzles (F5E-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::F5E => matches!(address, 0x42a6 | 0x4454),
+        // MF1.SH: the one Atar 9K-50 exit disc at y -42, two half discs either
+        // side of x = 0 (subtype 0x64; MF1-4, docs/formats/aircraft-control-surfaces.md).
+        AircraftId::Mf1 => crate::mf1_animation::nozzle(address),
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
         AircraftId::A4E
@@ -128,7 +131,11 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
 /// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
 pub fn outlet_count(id: AircraftId) -> usize {
     match id {
-        AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 | AircraftId::M2000 => 1,
+        AircraftId::X31
+        | AircraftId::Mig21
+        | AircraftId::Mig23
+        | AircraftId::M2000
+        | AircraftId::Mf1 => 1,
         // One RM12, one nozzle (GRI-4; the record's engine count is 1).
         AircraftId::Gripen => 1,
         AircraftId::A4E
@@ -171,6 +178,7 @@ mod tests {
             AircraftId::X31,
             AircraftId::M2000,
             AircraftId::Gripen,
+            AircraftId::Mf1,
         ] {
             assert_eq!(outlet_count(id), 1);
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);

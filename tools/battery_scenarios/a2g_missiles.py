@@ -354,6 +354,14 @@ def scenarios() -> list[Scenario]:
             notes="An AGM-65G loaded on the F-5E's wing pair (row 5, empty by default) is launched from the page and kills the column's lead truck (F5E-6).",
         ),
         Scenario(
+            name="a2g-maverick-mf1", lane="flight",
+            args=col + ["--aircraft", "mf1", "--load", "AGM65G", "--station", "4", "--count", "2",
+                        "--attack", "maverick", "--from", "6", "--altitude", "3000"],
+            timeout=300,
+            expect=[r"^a2g-run: kill 0x50000000 class 0x0400$", r"^a2g-run: target 0x50000000 hp 0/200$"],
+            notes="An AGM-65G loaded on the Mirage F1's belly pair (row 5, kept after the A2/C2-style refusals; tanks by default) is launched from the page and kills the column's lead truck (MF1-6).",
+        ),
+        Scenario(
             name="a2g-sarh-uncued", lane="flight",
             args=col + ["--aircraft", "mig23", "--load", "AS7", "--attack", "sarh-uncued",
                         "--from", "4", "--altitude", "3000", "--speed", "400"],

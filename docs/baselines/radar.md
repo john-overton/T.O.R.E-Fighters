@@ -305,3 +305,18 @@ RWR (strength 0.00, no RF mode); the diagnostic incoming round plots at the
 window centre, as for the other aircraft. The Weapons window shows `20 CHAFF`
 and `20 FLARE` (F5E-6). Not run: any side-by-side tuning, or an RWR with a
 plotted emitter (no scripted path exists).
+
+## Mirage F1 radar and jammer, 2026-11-10 (MF1-7)
+
+The Mirage F1 flies the already reviewed `F18R.SEE` (`Preset::Advanced`) and
+`AV8.ECM` (`Generation::Early`, no radio-frequency mode) of its record; no match
+arm and no code changed. `--sensor-summary` reads: `Mf1: radar F18R.SEE search 90
+nmi 60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED; infrared none; visual
+VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer AV8.ECM EARLY
+strength 0.00 (no RF mode); signature radar 100 infrared 100`. `--live-fire
+--aircraft mf1 --weapon-slot 2` (and 3) shows `RADAR TWS 10NM 1 CONTACTS TRACK`
+and the `R550.JT` Magic locks (`LOCK`), flies, hits and kills (`shots=1 hits=1
+kills=1` at 700 and 1,500 ticks; still flying at 150 to 450). The F1's jammer
+differs from the Mirage 2000's (`F18.ECM`, `LATE`, strength 0.30): it has chaff
+and flares only. Not run: any side-by-side tuning, or an RWR with a plotted
+emitter (no scripted path exists).

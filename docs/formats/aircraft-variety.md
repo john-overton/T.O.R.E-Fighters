@@ -4350,6 +4350,11 @@ Options (none chosen), as in the Mirage 2000 review:
 Agent note: option 1 is evidenced and needs one exhaustive stem arm in MF1-7,
 exactly as M2K-7 did.
 
+Update (MF1-7, 2026-11-10): John chose option 1 in the batch decision round
+(decision 25, "follow the record", opinionated); the stem arm already existed
+from B5-1 and needed no change. See [Mirage F1 sensors, HUD and
+cockpit](#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).
+
 ### Mirage F1 parked path
 
 `("MF1.PT", Some(0x5adc))` is in the `GEAR` table of the retail test in
@@ -4432,6 +4437,20 @@ Options for the tailplane and ailerons (none chosen):
 3. **Ailerons only on the outboard panel and no roll from the tail**, with the
    panel also taking the flap-slot words as a droop (same as option 1 for roll;
    decide the droop in MF1-3).
+
+Update (MF1-3, 2026-11-10): John chose option 1 (tailplane pitch only; ailerons
+carry roll). MF1-3 rigged the tailplane, the two outboard panels as ailerons and
+the rudder as whole panels; the flap-slot words are pinned and never set, and
+the flap lever moves nothing because no source places the real F1's flaps at the
+aileron position (option 3's droop is not applied). The geometry, fold table,
+seam openings and magnitudes are in [Mirage F1 control
+surfaces](aircraft-control-surfaces.md#mirage-f1-control-surfaces-mf1-3-2026-11-10).
+
+Update (MF1-4, 2026-11-10): the airbrake is rigged as the source's one dorsal
+plate only (hinge the forward edge, y 29, z 5), as planned; the real paired brakes
+are not in the shape and are not drawn. The gear and burner follow the same
+section: [Mirage F1 gear, airbrake and
+plume](aircraft-control-surfaces.md#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10).
 
 **Rule 11 face table** (from the `state_neutral` dump; "on hinge" means within
 one unit of the hinge line, the thickness of the wedge; no face has a fixed
@@ -4546,6 +4565,17 @@ Options (none chosen):
 
 Never hang `PAVESPK.SEE` or `AAS38.SEE` on an F1 (B7; neither row exists).
 
+Update (MF1-5, 2026-11-10): the stations were measured on the scaled shape and
+the slice stopped on clipping: the default four `F250.GAS` on row 5 cross each
+other and the main gear, and the wingtip Magic enters the tip by 1.48 ft. See
+[Mirage F1 stations measured](#mirage-f1-stations-measured-mf1-5-2026-11-10).
+The B5-2 remark that the centreline "takes two tanks" means two tank records
+(150 and 250 gallon); the row holds one store.
+
+Update (MF1-5b, 2026-11-11): John's round 3 answered both cases. Row 5 holds two
+stores (one a side) at 3.24 ft out and the wingtip Magic stands 1.1 ft outboard of
+the tip; both clean. See [Mirage F1 stations finished](#mirage-f1-stations-finished-mf1-5b-2026-11-11).
+
 ### Mirage F1 real size (for John)
 
 Shape extents at scale 1 (1 unit = 1/3 ft), `MF1.SH` neutral state: x -40 to 40,
@@ -4578,6 +4608,11 @@ per-axis real size with one per-aircraft scale):
 3. **Per-axis to the real figures** (about 1.03 / 1.18 / 1.05, fitted from the
    measured extents in MF1-2). The Mirage 2000 method; stretches the nose and
    tail, so the stations, pylons and the gear wheelbase move with it.
+
+Update (MF1-2, 2026-11-10): John chose option 3 in the batch decision round
+(per-axis to the real span, length and height); the fit is
+`[1.0335, 1.1804, 1.0546]`, see [Mirage F1 shape, real size and
+skin](#mirage-f1-shape-real-size-and-skin-mf1-2-2026-11-10).
 
 ### Mirage F1 roster note
 
@@ -4674,6 +4709,12 @@ opinionated (John, 2026-11-10), and the F-5E's HUD glass row is measured (a poly
 replaces the empty mask). The Gripen's and Tornado's rows stay as their own slices
 find them. See [F-5E sensors, HUD and
 cockpit](#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+
+Update (MF1-7, 2026-11-10): for the Mirage F1 the HUD and cockpit binding row is
+decided, no longer interim: John chose to follow the record, `rafale.HUD`, in the
+batch decision round (decision 25), so it is opinionated (John, 2026-11-10). The
+other aircraft's bindings stay as their own slices find them. See [Mirage F1
+sensors, HUD and cockpit](#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).
 
 **Tornado scale finding.** Before this slice no table drew `TOR.SH` at its
 header scale: `tore_sim::combat::debris::scale` returned 1/3 ft a unit for every
@@ -4799,6 +4840,27 @@ right; the tank and Mk 82s jettison. Details:
 [the baseline](../baselines/ordnance-availability.md#saab-gripen-ordnance-gri-6-2026-11-10).
 The guard tests keep expecting exactly the Gripen and the Tornado for
 `BK27.JT`, with GRI-6 notes.
+
+## Mirage F1 shape, real size and skin (MF1-2, 2026-11-10)
+
+Implementation, slice MF1-2, Claude Sonnet (sonnet-high). John's decision of
+2026-11-10 ("per-axis scale to the real span, length and height, as the Mirage
+2000"). `mf1.SH` is scaled per axis to the real Mirage F1C: factors
+`[1.0335, 1.1804, 1.0546]` (x right, y forward, z up), fitted from the measured
+gear-down extents (80 by 127 by 42 units) to 8.40 m span, 15.23 m length **with
+the nose probe** (the shape's own y maximum includes its probe spike, so the two
+use one definition) and 4.50 m height. The table row, the fit, the definitions
+and the consumers (drawn aircraft, stores preview, damage looks, station rows,
+debris, gear low point 17 to 17.93 units, wingtip vapor, parked placement) are in
+[Mirage F1 shape scale](objects-and-shapes.md#mirage-f1-shape-scale-mf1-2-2026-11-10)
+and the [skin review](objects-and-shapes.md#mirage-f1-skin-review) (23 exact twin
+groups, two omitted wing-marking decal slots). The parked path
+`("MF1.PT", Some(0x5adc))` is unchanged: the two Mirage F1s on
+`FRA QFLAIR` keep their identity, 95 hit points and gear word, and now stand at
+`origin-up` 5.98 ft on the scaled shape. The `render-mf1-skin` battery scenario
+captures the top and under views. Provenance: choice opinionated (John,
+2026-11-10), factors fitted. Later slices use the scaled geometry: MF1-3 and MF1-4
+scale any shape-unit hinge point their rigs name, MF1-5 measures the stations.
 
 ## Batch 5 follow-up corrections (B5-3, 2026-11-10)
 
@@ -5440,3 +5502,326 @@ The instantaneous pull is unchanged (6.84 / 7.42 / 7.75 / 8.01 G by fuel, B5-4's
 numbers to 0.01 G) because the trim leaves every row below the new 1 G edge
 alone. (3) The Gripen (11 percent under at sea level) and F-15E (8 percent under
 at 36,000 ft) stay slow; the shared drag law is untouched.
+
+## Mirage F1 gear, airbrake and plume (MF1-4, 2026-11-10)
+
+Implementation, slice MF1-4, Claude Sonnet (sonnet-high). The Mirage F1 rig
+(`mf1_animation.rs`) now owns the three device words. Results, with the geometry
+and the rule 11 fold table in [Mirage F1 gear, airbrake and
+plume](aircraft-control-surfaces.md#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10)
+and the player-visible laws in [Mirage F1 gear, airbrake and plume
+fit](../spec/variety-animation.md#mirage-f1-gear-airbrake-and-plume-fit):
+
+- **Gear.** The three plates turn as whole rigid pieces: the mains forward and
+  inward (95 degrees about an axis on their own top edge, 15 degrees off lateral),
+  the nose rearward (110 degrees about a lateral axis through its forward top
+  corner) with steering. The F1's mains retract forward and its nose gear
+  rearward ([Air Vectors, "The Dassault Mirage F1"](https://airvectors.net/avmirf1.html),
+  a general history). Gear 1 is the source pose, grounded at the MF1-2 scaled low
+  point (5.98 ft); gear 0 draws nothing.
+- **Parked path.** `("MF1.PT", Some(0x5adc))` is unchanged: `--surface-parked FRA
+  QFLAIR --seconds 0` lists both parked F1s exactly as before (class `0x8000`,
+  gear `0x5adc`, `origin-up` 5.98), and the windowed scene shows them gear down
+  on the apron.
+- **Airbrake.** The one dorsal plate turns whole about its forward edge
+  (`0.707 rad * (1 - brake)` onto the ridge, hidden at 0).
+- **Burner and engine count.** One plume from the nozzle exit plane, one nozzle
+  glow on the two half discs (`2e92`, `2eb3`) and one contrail from the engine
+  count of 1 (`outlet_count(Mf1) = 1`); the shape-end fallback MF1-2 noted is gone.
+- **Remaining words.** `0x5ae8`, `0x5aee` and `0x5af4` are pinned and never set
+  (the ailerons and the rudder are turned instead); no word is left unaccounted for.
+- **Open for John.** (1) The F1's real brakes are paired panels under the
+  intakes; only the source's dorsal plate is drawn. (2) The hull model used to
+  fit the stow is read off the skin faces; a stowed main is inside it to within
+  0.1 unit, but the shape has no gear bay, so nothing is cut open. (3) The main
+  foot dips 0.08 ft in the first degrees of travel (inclined axis).
+
+## Mirage F1 stations measured (MF1-5, 2026-11-10)
+
+Implementation and review, slice MF1-5, Claude Sonnet (sonnet-high). Measurement
+only: no code, station row or pin changed, and the slice is `[~]` pending John.
+The full tables, the per-record alternatives and the options are in [stores on
+pylons](../spec/stores-on-pylons.md#the-mirage-f1-mf1-5-2026-11-10). Summary:
+
+| Row | Location | Default | Result on the scaled shape |
+| ---: | --- | --- | --- |
+| 4 | Centerline | empty (B5-2) | clean when empty; a `F250.GAS` is 0.14 ft off the belly, 0.69 ft off the gear; takes one store |
+| 5 | Wing, four stores | `F250.GAS` x4 | **inner tanks cross each other and the main gear** (outer tanks clean) |
+| 6 | Wing, paired | `R550.JT` x2 | clean (left 0.05 ft) |
+| 7 | Wingtip | `R550.JT` x2 | **1.48 ft entry into the tip** |
+
+Real Mirage F1: five pylons and two wingtip rails (the record's seven positions
+agree); the real carries one tank a side where the record's default carries two.
+No pod or designator was added. Counts and audit pins unchanged (45 aircraft, 18
+recovered stations, 4,652 weapon and 233 tank placements, 80 pods, 220
+Cheat-only). Frames: `.local/m3-aircraft/frames/MF1-5/` (local only).
+
+## Mirage F1 sensors, HUD and cockpit (MF1-7, 2026-11-10)
+
+Slice MF1-7 confirmed the Mirage F1 on the sensor records and the Rafale HUD and
+cockpit family its record names. John's decision round of 2026-11-10 (decision 25,
+"follow the record", opinionated) settled what the batch identity slice had wired
+as an interim agent decision: the F1 flies `rafale.HUD`, the same binding as the
+Mirage 2000. Only two comments changed (`aircraft.rs`, `hud_aperture.rs`). Added:
+a retail-reading test (`crates/tore-import/tests/mf1_cockpit.rs`), an aperture
+unit test and documentation. No behaviour changed.
+
+**Sensors (spec-derived, retail records, already reviewed).** `--sensor-summary`
+reads: `Mf1: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg
+look-down 0 ADVANCED; infrared none; visual VIS340.SEE search 10 nmi 170x140 deg
+track 5 nmi 170x140 deg; jammer AV8.ECM EARLY strength 0.00 (no RF mode); signature
+radar 100 infrared 100`. The radar is the Mirage 2000's and the F/A-18's
+(`F18R.SEE`, `Preset::Advanced`); no `sensors/profile.rs` arm was needed. The
+visual record is `VIS340.SEE`. The infrared channel is absent because the record
+has no `.SEE` infrared row. Nothing under `crates/tore-sim/src/sensors` branches
+on the aircraft identity, so radar modes, the scope and the RWR behave as for the
+other `F18R.SEE` aircraft. A live-fire run (`--live-fire --aircraft mf1
+--weapon-slot 2`, the wing Magic pair; slot 3, the wingtip pair, behaves alike)
+shows the Radar window `TWS 10NM 1 CONTACTS TRACK`, the weapon window `R-550
+Magic ... LOCK`, the HUD `ARM 1 R-550 ... IN RNG`, and the Magic locks, flies,
+hits and kills (`shots=1 hits=1 kills=1` at 700 and 1,500 ticks; at 150 to 450
+ticks it is still flying, `hits=0 active=1`). The signature numbers (radar 100,
+infrared 100) are the record's own and differ from the Rafale's 50 and 70.
+
+**Countermeasures and the jammer.** `AV8.ECM` is the AV-8B's reviewed internal
+suite (`Generation::Early`, decoy chance and counts from the record): it has **no
+radio-frequency jammer mode** (`strength 0.00`), only chaff and flares. The
+Weapons window shows `30 CHAFF` and `30 FLARE`; `--combat-command chaff` and
+`flare` with `--countermeasure-preview 240` read `carried_chaff=29
+carried_flares=29 capacity_chaff=30 capacity_flares=30` after one of each, and the
+devices draw behind the aircraft. The jammer key (`--jammer-on`) lights `ECM ON`
+and `JAM` in the RWR window as for any aircraft, but with strength 0.00 it adds
+no radar jamming: this is the one sensor difference from the Mirage 2000, whose
+`F18.ECM` is `LATE` at 0.30. The B5-2 default pod `ALQ167.ECM` on the centreline
+is empty for play (John, decision 27); the retail record still lists it, and the
+test accepts both. The RWR window draws as for every aircraft; no scripted path
+plots an emitter or a missile on the player's RWR (the live-fire fixture's target
+emits no radar and the incoming-round command plots at the centre), the same
+limit as the Mirage 2000 review ([lane-flight](../testing/lane-flight.md)). The
+frame shows the window with `JAM` lit and an incoming round.
+
+**HUD and cockpit (opinionated, John, 2026-11-10, decision 25).**
+`AircraftId::Mf1.hud()` is `RAFALE.HUD` (the record's `rafale.HUD` resolves
+case-insensitively; same file and hash as the Rafale's and the Mirage 2000's), the
+cockpit stem is `RAF`, the forward art `~RAFH.PIC` and the instrument window frame
+`~RAF_P.PIC` (`Hud::parse` of `RAFALE.HUD` names it). Neither the Rafale's nor
+the Mirage 2000's record is aliased: `MF1.PT` stays the identity (pinned in
+`mf1_cockpit.rs`, retail-reading, skips without media: the sensor rows
+`VIS340.SEE, F18R.SEE, AV8.ECM` and the centreline `ALQ167.ECM`, the first two
+equal to the Mirage 2000's and the jammer row present in the AV-8B's, the binding,
+the HUD's panel reference, the overlays `~RAF_LH`, `~RAF_CH`, `~RAF_RH`, the record
+naming `rafale.HUD`, the record's own eye offset, and that no `~MF*` cockpit
+resource exists). `hud_aperture.rs` resolves the stem `RAF` to the Rafale's
+measured glass; a new unit test pins that the F1's mask equals the Rafale's and
+the Mirage 2000's and is not empty. `--cockpit-sheet OUT_DIR MF1,M2000,RAFALE`
+(through `tools/agent-run.sh`; the flag takes no further options) printed `mf1:
+stem MF1 cockpit ~RAFH.PIC art 1280x490 FITTED CLR`, centre mirror x 461 y 24 w 360
+h 79, left x 140 y 242 w 118 h 248, right x 1024 y 242 w 118 h 248, identical to
+the Rafale and the Mirage 2000. No Mirage F1 cockpit art exists, so the F1 flies a
+Rafale cockpit, as the Mirage 2000 does. The front frame shows the HUD inside the
+Rafale combiner glass with no clipping.
+
+**Views (windowed, `--flight-view`, `--flight-look`).** Forward cockpit with the six
+small-layout windows; look left and right 45 degrees (the cockpit art turns away
+with the look, the HUD glass and canopy bow at the frame edge); 90 degrees left
+and right and 60 degrees up (no cockpit art, open sky, as for the Rafale and the
+Mirage 2000); `--flight-view 4` (F3 Up) and `--flight-view 3` (F2 Back). F2 Back
+shows the F1's spine, fin and tailplane roots from the pilot's eye. The standalone
+instrument pages 0 to 9 (RCS, Envelope, Front View, Other View, Target Cam, RWR,
+Nav Info, Systems, Weapons, Radar) draw with the Rafale bezel; the F1's own
+envelope polygon is drawn on page 1.
+
+**Instruments and the single engine.** The Systems window shows `THR`, `TEMP`,
+`OIL`, `HYD` and `FUEL` / `(+ EXT)`: one engine readout serves every aircraft, so
+the one-engine F1 shows one throttle and one temperature and no second engine
+needle (the panel art has none; the readouts are generated text). Fuel reads the F1
+record's own number: `FUEL 6120 LBS` (the Rafale reads 9,900, the Mirage 2000
+6,346), and `(+ EXT 6600 LBS)` with the default four `F250.GAS` of row 5 (1,650 lb
+each; the clipping on that row is MF1-5's open question), 6,595 to 6,592 lb after
+the first seconds of a run (Update, MF1-5b, 2026-11-11: two tanks now, `(+ EXT 3300
+LBS)`). The Weapons window lists `250 DEFA`, `4 R-550` and `30
+CHAFF` / `30 FLARE`. Throttle shows 70 percent at the free-flight start, as for
+the other aircraft. The HUD airspeed and altitude boxes read the F1's own state
+(540 kt and 5,000 ft at the live-fire start).
+
+**Eye point (agent decision, 2026-11-10, left unchanged).** `mirrors::pilot_eye` is
+one fixed offset for every aircraft, 7 ft above and 10 ft ahead of the model
+origin, used only by F2 Back, the rear-view mirrors and the replay views; the
+forward cockpit looks from the origin with 2D art. The record's own `viewOffset`
+(x 0, y 20, z 60) equals the Mirage 2000's (the Rafale's z is 80) and no host
+code reads it, so there is no per-aircraft eye. Measured on the scaled neutral
+shape (the faces within 4 units of the centreline and ahead of the fin): the F1's
+roof line is 6 units, 2.1 ft above the origin after the height factor, and runs from
+unit 7 to unit 58 forward, 2.8 to 22.8 ft ahead; the shape draws no separate
+canopy bubble, so these are the spine and canopy faces together. The fixed eye
+therefore stands 4.9 ft above the roof and over its span, against 3.5 ft above
+the Mirage 2000's canopy top and 4.0 ft above the Rafale's. The F2 Back frames of
+the three show the same kind of picture (spine and fin from above and behind).
+Not changed; a seated eye would be a fleet change (a table keyed by aircraft
+through six call sites), a question for John as in the Mirage 2000 review.
+
+Evidence and frames: `.local/m3-aircraft/frames/MF1-7/` and
+`.local/m3-aircraft/checks/MF1-7/` (local only, no retail bytes committed).
+
+## Mirage F1 flight review (MF1-8, 2026-11-11)
+
+Dated section, additions only. The Mirage F1 flies the hybrid adapter's own
+`variety` configuration built from `MF1.PT` (`mf1.SH`): one Atar 9K-50 at 11,020 lbf
+military and 15,873 lbf afterburner (B5-2), retail weights and fuel (decision 24),
+its own G rows -3 to +7, a 66,125 ft ceiling and a 1,345 kt top row. No envelope, G,
+weight, fuel, flow, ceiling or thrust value was changed and no flight constant was
+touched.
+
+- Top speeds are the real ones: full internal fuel settles at 0.945 of the edge, 1,271
+  kt (Mach 2.22) at 36,000 ft against the published Mach 2.2 and 762 kt at 1,000 ft
+  against about 800 kt. Level flight is held to the 66,125 ft ceiling (published 65,600
+  ft).
+- Climb and acceleration: peak specific excess power 376 ft/s at sea level (22,600
+  ft/min), best sustained climb 360 to 375 ft/s: 54 percent of the encyclopedia's
+  41,930 ft/min and 47 percent of the 47,800 ft/min of MIGFlug and Wikipedia, from
+  the shared drag law and the missing ram thrust (the thrust and weights are the
+  real ones). Not changed; a fleet-level drag or ram fit remains John's call.
+- G: the +7 top row gives 6.14 G at 461 kt and 1,000 ft with full fuel, 6.59 and 6.84
+  G at half and a quarter, and 7.06 G nearly dry (0.06 G past the row), -2.61 to
+  -3.00 G on the push; the real limits are +7.5 and -3.6. The sustained turn at 461
+  kt and 1,000 ft is 3.63 G, 8.1 deg/s (the B5-2 figure). The rows hold their
+  strength at speed (6.1 G at Mach 1.1).
+- Fuel: record flows 3 and 23 lb/s kept; the dry flow equals the real Atar's
+  specific fuel consumption (0.98 lb/lbf/h) but the afterburner flow is 2.6 times it
+  (5.22 against 1.96 to 1.99), so the 6,120 lb tank gives 4.4 minutes at afterburner
+  (real consumption: about 11.8). Finding for John: a guarded override of
+  `aftFuelConsumption` 23 to about 9 lb/s would be the Tornado's B5-3 correction
+  again; not made.
+- Default load (29,839 lb, four 250 gallon belly tanks, 99 percent of the maximum):
+  5.2 G at 461 kt, a 2.93 G sustained turn, Mach 2.07 at 36,000 ft, liftoff 135.4 kt
+  after 504 m and approach 145.6 kt, against 6.1 G, 3.63 G, Mach 2.22, 103.9 kt after
+  211 m and 115.9 kt clean. These depend on John's open stations decision (MF1-5).
+  Update (MF1-5b, 2026-11-11): the stations decision is made (two belly tanks): the
+  default load is 26,143 lb (87 percent of the maximum), liftoff 121.0 kt after
+  349 m and approach 127.6 kt; the other default-load figures above were not re-run.
+- Takeoff and landing run: published 600 m and 670 m (the game's Jane's text, weights
+  unstated); the model gives 211 m and 376 to 384 m clean, 504 m and 584 to 598 m with
+  the default load.
+
+The liftoff and approach ranges (125 to 150 kt each) in the flight battery are fitted
+windows, agent decisions of 2026-11-11, from the published approach speed of about
+125 kt. Full tables, sources and commands are in the
+[variety flight baseline](../baselines/variety-flight.md#mirage-f1-validation-2026-11-11).
+
+## Mirage F1 in missions, multiplayer and replay (MF1-9, 2026-11-11)
+
+Implementation and verification, slice MF1-9 of the Mirage F1 port. No game
+code changed: `AircraftId::Mf1` was appended to every identity list in B5-1
+(checkpoint code 45, `SELECTABLE` index 45, `ALL` 45 entries), and the wire
+codes an identity by its 9-bit `SELECTABLE` position since protocol 83, so no
+golden, replay or network fixture moved. The AI builds a wing member from the
+record like any aircraft: it sees the one Atar 9K-50 of decision 23, and the
+default AI load check passes for it. `strike_class.rs` already lists it in the
+fighter family, so no AI behaviour work was done (rule 1). The AI default load
+is the record's current default load (DEFA gun 250 rounds, four R550 Magic, four
+`F250.GAS` belly tanks); the four tanks are MF1-5's open stations question with
+John, so anything below that mentions the tanks (the 8,050 lb payload and 6,474
+lb external fuel of the unengaged wingman) changes with his answer.
+
+Update (MF1-5b, 2026-11-11): the answer is two belly tanks, so the AI's default load
+is the gun, two `F250.GAS` (3,300 lb of external fuel) and four R550 Magic; the
+8,050 lb payload and 6,474 lb external fuel above were measured with four tanks and
+were not re-measured. No AI code changed.
+
+What changed is coverage: a Quick Mission test
+(`the_mf1_is_a_quick_mission_player_and_a_wing_choice`) naming `MF1.PT` as the
+player's aircraft and in every AI wing field and asserting it is neither the
+Mirage 2000 nor the Rafale, a checkpoint test
+(`the_mf1_round_trips_at_code_45_and_no_identity_shares_it`), the
+`ai-mf1-quick-mission-2v2` and `replay-rec-mf1-2v2` battery scenarios, the
+Mirage F1 row in the Load Ordnance notes loop
+(`menus-snap-quick-lobby-ordnance-laser-notes-mf1`: the lobby page warns about a
+laser-guided store and offers the pod helper, the same as the Mirage 2000,
+because its record has no Pave Spike row), and `ai-mf1-*` in the `ai-fights`
+battery family.
+
+Results (2026-11-11, throttled, profile `.local/m3-aircraft/profile-mf1`):
+
+- `--ai-roster-probe-ticks 3600`: the four `MF1.PT` lines (Novice, Average,
+  Experienced, Ace) each `ticks=3600 models=2 radar=true ir=false stores=5
+  gun=true projectiles=0 dropped=0 PASS` (the DEFA row and four R550 rows), so
+  the AI flies it finite with an exact input replay at every skill; the whole
+  roster has no FAIL.
+- `ai-mf1-quick-mission-2v2` passes: every wing the Mirage F1, the AI fires its
+  R550 twice (at 20,744 and 7,810 ft), one missile kill by the player, nothing
+  dropped, zero anomalies. Unlike the F-5E's AIM-9B, the F1's Magic is fired
+  (the F1 has a radar row, `F18R.SEE`, though no infrared sensor row).
+- `replay-rec-mf1-2v2` passes: the recording reads back `player.aircraft =
+  MF1.PT`, `probe.enemy = MF1.PT`, `draw.models = MF1.PT`, two runs are
+  identical and `--verify-render` finds nothing missing or differing.
+- `net-content-missing` and `net-window-lobby` pass with `tore-server` and
+  `tore-bot` rebuilt on this branch first.
+
+The parked Mirage F1 path is unchanged and checked: `--surface-parked FRA
+QFLAIR` lists two `MF1.PT` (`gear 0x5adc`, `scale 0.3333`, `origin-up 5.98`) and
+`QFSAIR` one, and `--surface-scene` draws them gear down on the apron at the
+same size as the flown aircraft (see
+[parked aircraft](../spec/surface-defenses.md#parked-aircraft)). Frames:
+`.local/m3-aircraft/frames/MF1-9/`.
+
+Provenance: identity wiring spec-derived (record) and B5-1 (agent decision,
+2026-11-10); the AI behaviour is the existing fighter family, unchanged; test
+and scenario coverage agent work, 2026-11-11. Living roster counts are left to
+X-10.
+
+## Mirage F1 stations finished (MF1-5b, 2026-11-11)
+
+Implementation, slice MF1-5 finish (round 3), Claude Sonnet (sonnet-high). John's
+round-3 answers of 2026-11-11 (M1 and the coordinator's reading M2, opinionated)
+applied to the stations the MF1-5 section above measured: the belly row (row 5,
+`F250.GAS` x4) holds two stores, one a side, at 3.24 ft out, and the wingtip Magic
+(row 7) stands 1.1 ft outboard of the tip. The jammer, the empty centreline and the
+per-axis scale are unchanged. Details, tables and the ten-record tip check are in
+[stores on pylons](../spec/stores-on-pylons.md#the-mirage-f1-stations-finished-mf1-5b-2026-11-11).
+
+| Row | Location | Default | Result on the scaled shape |
+| ---: | --- | --- | --- |
+| 4 | Centerline | empty (B5-2) | unchanged; a centreline `F250.GAS` is 1.36 ft clear of the new pair |
+| 5 | Wing, capped at two | `F250.GAS` x2 | clean: 1.25 ft off the main gear, 3.10 ft off the ground, no entry, 0.06 ft off the flank |
+| 6 | Wing, paired | `R550.JT` x2 | unchanged (left 0.05 ft) |
+| 7 | Wingtip | `R550.JT` x2 | clean (0.48 and 0.24 ft off the tip; was 1.48 ft entry); 9 of 10 tip records clean |
+
+Code: `aircraft_stations::adjust_defaults` (capacity four to two, under the same
+whole-retail-table guard as the empty centreline), `hardpoints::station_move`
+(`Mf1`, row 5, Wing, 3.24 ft) and `hardpoints::tip_offset` (1.1 ft outboard, the
+Mirage F1's retail wingtip row only). Audit pins unchanged (45, 18, 4,652, 233, 80,
+220). Default load 26,143 lb (was 29,839); battery windows refitted (liftoff 121.0
+kt, approach 127.6 kt). Frames: `.local/m3-aircraft/frames/MF1-5b/` (local only).
+
+Update (MF1-6, 2026-11-11): the audit pins of the paragraph above moved to 4,618
+weapon placements when MF1-6 refused 34 clipping stores; see the next section.
+
+## Mirage F1 ordnance, default load and countermeasures (MF1-6, 2026-11-11)
+
+Implementation, slice MF1-6, Claude Sonnet (sonnet-high). Details, lists and
+numbers are in [aircraft ordnance](aircraft-ordnance.md#the-mirage-f1-mf1-6-2026-11-11),
+[stores on pylons](../spec/stores-on-pylons.md#the-mirage-f1-refusals-mf1-6-2026-11-11)
+and [the baseline](../baselines/ordnance-availability.md#mirage-f1-ordnance-masks-and-default-load-mf1-6-2026-11-11).
+
+- **Masks (agent decision following John's F-15E A2 0.3 ft line; the F-5E kept its wing entries, C2).**
+  Normal loading refuses 33 stores on the belly pair (row 5, entries 0.37 to 3.39 ft)
+  and the `AS30.JT` on the paired wing row (row 6, 0.33 ft); the default
+  `R550.JT` is kept on row 6 (left 0.05 ft). Weapon placements 4,652 to 4,618.
+- **Default load (unchanged by this slice, proved).** Gun 250 `DEFA.JT`, empty
+  centreline, two `F250.GAS`, two wing and two wingtip `R550.JT`; 26,143 lb.
+  Same for the human, the AI, saved loads, the lobby and restart.
+- **Countermeasures.** `AV8.ECM` 30 chaff and 30 flares (O4: keep, John 2026-11-11).
+- **Live fire and jettison.** Gun 250 shots (54 hits, one kill), wing and wingtip
+  Magic one shot each (hit and kill), the two wing and wingtip groups jettison, two
+  tanks then two Mk 82s `PASS released 4`, a belly AGM-65G kills the lead truck.
+- **Code.** `aircraft_stations::weapon_allowed` (new), one check in
+  `Loadout::capacity_before_store_pairs`, one in the ordnance audit, and in
+  `live.rs` the empty-row selection skips a refused store (the belly row falls back
+  to `MK82.JT`). New retail-reading test `crates/tore-import/tests/mf1_ordnance.rs`
+  and battery scenarios `a2g-release-origin-mf1`, `a2g-jettison-mf1`,
+  `a2g-maverick-mf1`, `STATIONS["mf1"] = [250, 2, 2, 0, 0]`.
+
+Open items for John: the centreline (row 4) still lets 36 records enter the belly
+and 15 cross the gear (not asked); the gun cadence is the shared one and was not re-measured; the real
+chaff and flare counts of the F1 were not sourced.
+

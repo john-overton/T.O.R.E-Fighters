@@ -1273,4 +1273,85 @@ mod tests {
         assert_eq!(bounds[0], [-5., -1., -3., 1.]);
         assert_eq!(bounds[1], [1., 5., -3., 1.]);
     }
+
+    /// The Mirage F1 has one engine and one nozzle disc (two half discs at y
+    /// -42 either side of x = 0, faces 0x2e92 and 0x2eb3): one trail on the
+    /// centreline at the scaled disc centre, 2 ft behind its exit plane, and
+    /// one glow whose bounds span both halves (MF1-4).
+    #[test]
+    fn the_mirage_f1_draws_one_contrail_on_the_centreline_behind_its_one_nozzle() {
+        use tore_formats::aircraft::{AircraftId, scale::scale_point};
+        let id = AircraftId::Mf1;
+        assert_eq!(crate::engine_material::outlet_count(id), 1);
+        let right = [
+            [4., -42., 0.],
+            [4., -42., -3.],
+            [3., -42., -5.],
+            [0., -42., -6.],
+            [0., -42., 3.],
+            [3., -42., 2.],
+        ];
+        let left = [
+            [-4., -42., -3.],
+            [-4., -42., 0.],
+            [-3., -42., 2.],
+            [0., -42., 3.],
+            [0., -42., -6.],
+            [-3., -42., -5.],
+        ];
+        let face = |address: usize, points: &[[f32; 3]]| tore_formats::shape::Face {
+            address,
+            colors: vec![31; points.len()],
+            uv: vec![],
+            positions: points.iter().map(|&p| scale_point(id, p)).collect(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0x64,
+            normal: None,
+            fog: tore_formats::shape::FogMode::Enabled,
+        };
+        let neutral = Shape {
+            lines: vec![],
+            faces: vec![
+                face(0x2e92, &right),
+                face(0x2eb3, &left),
+                // The barrel plate forward of the disc is not the disc.
+                face(
+                    0x1ed6,
+                    &[
+                        [3., -39., 2.],
+                        [3., -42., 2.],
+                        [0., -42., 3.],
+                        [0., -39., 3.],
+                    ],
+                ),
+            ],
+            billboards: vec![],
+            state_words: Default::default(),
+        };
+        assert!(crate::engine_material::nozzle(id, 0x2e92));
+        assert!(crate::engine_material::nozzle(id, 0x2eb3));
+        assert!(!crate::engine_material::nozzle(id, 0x1ed6));
+        let offsets = contrail_offsets(id, &neutral, None, 1);
+        assert_eq!(offsets.len(), 1);
+        let centre = scale_point(id, [0., -42., -1.5]);
+        let want = [
+            0.,
+            f64::from(centre[2]) / 3.,
+            f64::from(centre[1]) / 3. - 2.,
+        ];
+        for k in 0..3 {
+            assert!((offsets[0][k] - want[k]).abs() < 1e-6, "axis {k}");
+        }
+        // The material spans both halves: the disc's own x and z.
+        let bounds = nozzle_bounds(id, &neutral);
+        assert_eq!(
+            bounds[0],
+            [
+                scale_point(id, [-4., 0., 0.])[0],
+                scale_point(id, [4., 0., 0.])[0],
+                scale_point(id, [0., 0., -6.])[2],
+                scale_point(id, [0., 0., 3.])[2]
+            ]
+        );
+    }
 }

@@ -124,7 +124,10 @@ impl VarietyFlightModel {
             Gripen => 16. / 3.,
             F5E => 18. / 3.,
             Tornado => 11. * 2. / 3.,
-            Mf1 => 17. / 3.,
+            // Update (MF1-2, 2026-11-10): MF1.SH's gear low point Z=-17 is
+            // scaled by the shape's height factor (17 units become 17.93,
+            // 5.98 ft); the B5-1 note above gave the unscaled 17 units.
+            Mf1 => 17. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {
@@ -416,6 +419,15 @@ pub(crate) mod tests {
         assert!((clearance(AircraftId::M2000) - 6.0212).abs() < 1e-9);
         // The MiG-31 keeps its 30 unit low point at a third of a foot.
         assert_eq!(clearance(AircraftId::Mig31), 30. / 3.);
+    }
+    #[test]
+    fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {
+        let model = AircraftModel::for_aircraft(&synthetic(AircraftId::Mf1)).unwrap();
+        let clearance = model.configuration().equipment.ground_clearance_ft;
+        // 17 shape units at a third of a foot, times the z factor 1.0546.
+        let expected = 17. / 3. * tore_formats::aircraft::scale::MF1_SHAPE_SCALE[2];
+        assert!((clearance - expected).abs() < 1e-12);
+        assert!((clearance - 5.9761).abs() < 1e-3);
     }
     #[test]
     fn fitted_top_speeds_move_only_the_fast_side_and_stay_valid() {

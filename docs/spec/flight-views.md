@@ -310,3 +310,12 @@ higher over a smaller canopy; Back shows the spine, the fin edge-on and the two
 stabilator plates from above (frame `cockpit-view-back-f2`). Not changed: a
 seated eye would be a fleet change, a question for John. Evidence in [the F-5E
 section](../formats/aircraft-variety.md#f-5e-sensors-hud-and-cockpit-f5e-7-2026-11-10).
+
+## Pilot's eye on the Mirage F1 (2026-11-10, MF1-7)
+
+The fixed Back eye (7 feet up and 10 feet ahead of the model origin) is kept for
+the Mirage F1 at its real-size scale (agent decision, no per-aircraft eye
+exists). Measured against the scaled shape it sits 4.9 feet above the roof line
+and over the roof's span (the Mirage 2000's eye is 3.5 feet above its canopy top,
+the Rafale's 4.0), so Back shows the F1's spine, fin and tailplane from above and
+behind. Evidence in [the Mirage F1 section](../formats/aircraft-variety.md#mirage-f1-sensors-hud-and-cockpit-mf1-7-2026-11-10).

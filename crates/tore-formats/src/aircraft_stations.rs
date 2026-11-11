@@ -29,6 +29,15 @@ pub const F5E_RADAR: usize = 1;
 pub const F5E_JAMMER: usize = 2;
 pub const F5E_WING_PAIR: usize = 5;
 pub const MF1_CENTRELINE: usize = 4;
+/// The Mirage F1's belly row (`MF1.PT` row 5, four stores) whose capacity
+/// [`adjust_defaults`] cuts to two.
+pub const MF1_BELLY: usize = 5;
+/// The capacity of the Mirage F1's belly row after [`adjust_defaults`]: one store
+/// a side, as the real aircraft carries one tank on each inner wing pylon,
+/// never four abreast.
+pub const MF1_BELLY_CAPACITY: i32 = 2;
+/// The Mirage F1's paired wing row (`MF1.PT` row 6, two `R550.JT`).
+pub const MF1_WING: usize = 6;
 /// The radar the F-5E carries in place of the generic `F18R.SEE`: the F-104
 /// record, the closest reviewed small-fighter radar (see [`adjust_defaults`]).
 pub const F5E_RADAR_RECORD: &str = "F104R.SEE";
@@ -133,14 +142,25 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// guided bombs and the 500 lb guided bomb (2.04, 1.83 and 0.32 ft), the two
 /// anti-radiation missiles (0.92 ft) and the AT-2 dispenser (0.46 ft). Row 8
 /// refuses the AA-6, whose 20 ft body crosses the wing. Cheat loading skips
-/// the check; every other aircraft and row keeps its stores.
+/// the check; every other aircraft and row keeps its stores. The Mirage F1
+/// has its own refusals (agent decision, 2026-11-11, following John's F-15E A2
+/// answer, the 0.3 ft line; the F-5E kept its wing entries, C2; MF1-6): row 5
+/// (the belly pair at 3.24 ft, [`MF1_BELLY_REFUSED`], 33 stores) and row 6 (the
+/// paired wing row, [`MF1_WING_REFUSED`], `AS30.JT` at 0.33 ft) refuse the stores
+/// that enter the airframe by more than about 0.3 ft. The default `R550.JT` is
+/// never refused (its left Magic reads 0.05 ft on row 6, kept).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
-    if id != AircraftId::F15E {
-        return true;
-    }
-    match row {
-        F15E_BELLY => !F15E_BELLY_REFUSED.contains(&source),
-        F15E_WING => source != "AA6.JT",
+    match id {
+        AircraftId::F15E => match row {
+            F15E_BELLY => !F15E_BELLY_REFUSED.contains(&source),
+            F15E_WING => source != "AA6.JT",
+            _ => true,
+        },
+        AircraftId::Mf1 => match row {
+            MF1_BELLY => !MF1_BELLY_REFUSED.contains(&source),
+            MF1_WING => !MF1_WING_REFUSED.contains(&source),
+            _ => true,
+        },
         _ => true,
     }
 }
@@ -155,6 +175,52 @@ pub const F15E_BELLY_REFUSED: [&str; 7] = [
     "AGM45.JT",
     "AT2.JT",
 ];
+
+/// The weapons row 5 of the Mirage F1 refuses ([`weapon_allowed`]): measured
+/// airframe entries of 0.37 to 3.39 ft (`docs/spec/stores-on-pylons.md`). The 13
+/// at 0.3 ft or less stay (AA11, AA12, AS7, AIM9X, AIM120, AGM65G, AT2,
+/// FAB1000, CBU89, GBU38, AGM65A, and the F350 and F500 tanks).
+pub const MF1_BELLY_REFUSED: [&str; 33] = [
+    "AA11B.JT",
+    "AA2.JT",
+    "AA6.JT",
+    "AA9.JT",
+    "AIM9M.JT",
+    "MICA.JT",
+    "R530.JT",
+    "R550.JT",
+    "PL7.JT",
+    "PL10.JT",
+    "AGM88.JT",
+    "AIM7.JT",
+    "AIM7E.JT",
+    "AIM9B.JT",
+    "GBU12.JT",
+    "GBU16.JT",
+    "GBU10.JT",
+    "GBU10A.JT",
+    "PAVEWAY.JT",
+    "PAVEWA3.JT",
+    "GBU28.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "AS14.JT",
+    "AS30.JT",
+    "AT12.JT",
+    "AGM84E.JT",
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AM39.JT",
+    "AS16.JT",
+    "AS15.JT",
+];
+
+/// The weapons row 6 of the Mirage F1 refuses ([`weapon_allowed`]): only the
+/// `AS30.JT`, 0.33 ft into the wing, the one entry over the 0.3 ft line. The
+/// six that enter by 0.06 to 0.15 ft (`PL7`, `PL10`, `AGM88`, `AGM45`, `AIM7`,
+/// `AIM7E`) and the default `R550.JT` (0.05 ft on the left) are kept.
+pub const MF1_WING_REFUSED: [&str; 1] = ["AS30.JT"];
 
 /// Source rows T.O.R.E does not carry (John, 2026-11-10, opinionated): the
 /// Mirage 2000's wingtip row (`M2000.PT` row 8: Wingtip, x 33, two `R550.JT`,
@@ -205,6 +271,24 @@ pub fn retire(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     }
 }
 
+/// Whether `rows` are exactly the retail rows of `id`'s [`default_signature`]
+/// table (every source row, so an edited record keeps its own stations).
+fn is_retail(id: AircraftId, rows: &[Hardpoint]) -> bool {
+    let signature = default_signature(id);
+    !signature.is_empty()
+        && rows.len() == signature.len()
+        && rows.iter().zip(signature).all(|(h, s)| {
+            (
+                h.location,
+                h.flags,
+                h.position,
+                h.store.as_deref(),
+                h.count,
+                h.weight_class,
+            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
+        })
+}
+
 /// The retail rows of the aircraft whose default load [`adjust_defaults`]
 /// changes: the whole table, so an edited record keeps its own defaults.
 fn default_signature(id: AircraftId) -> &'static [Signature] {
@@ -237,12 +321,20 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 /// retail one. No row is added, removed or moved and no row's mask, count,
 /// weight class or position changes, so every station index and everything
 /// each station accepts stays as decoded; only what the row holds by default
-/// changes (`store`).
+/// changes (`store`), with one exception, the Mirage F1's belly capacity
+/// (below).
 ///
 /// - **Mirage F1** (`MF1.PT` row 4, the centreline station): no default
 ///   `ALQ167.ECM` pod. The record's American jammer pod is not in Jane's list
 ///   of the F1's loads (`MF1.INF`); the station is real and still takes what
-///   its mask admits.
+///   its mask admits. Update (MF1-5b, 2026-11-11, opinionated, John's round 3,
+///   item M1): the belly row (row 5, Wing, paired, four `F250.GAS`, class 46)
+///   has capacity two (one a side, the real aircraft's tank on each inner
+///   wing pylon, Jane's text in `MF1.INF`); four abreast made the inner tanks
+///   cross each other and both main-gear plates. This is the one place the
+///   function changes a count, and the default `F250.GAS` count follows it, so
+///   the default load is two. The row keeps its place, mask, class and store;
+///   its drawn position moves in `hardpoints::station_move`.
 /// - **F-5E** (`F5E.PT`): row 5, the wing pair, defaults to empty (no `AIM7.JT`:
 ///   the real F-5E does not carry the Sparrow); the `AIM9B.JT` wingtip pair
 ///   stays. Row 2 holds `F104.ECM` in place of the generic `F18.ECM` (John,
@@ -261,20 +353,7 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   set) and `YAK141R.SEE` (40 / 25 nm, Transitional); `F8R.SEE` (35 / 20 nm)
 ///   is closest in range but has no reviewed preset and would never switch on.
 pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
-    let signature = default_signature(id);
-    if signature.is_empty()
-        || rows.len() != signature.len()
-        || !rows.iter().zip(signature).all(|(h, s)| {
-            (
-                h.location,
-                h.flags,
-                h.position,
-                h.store.as_deref(),
-                h.count,
-                h.weight_class,
-            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
-        })
-    {
+    if !is_retail(id, rows) {
         return;
     }
     match id {
@@ -283,7 +362,10 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             rows[F5E_JAMMER].store = Some(F5E_ECM_RECORD.into());
             rows[F5E_WING_PAIR].store = None;
         }
-        AircraftId::Mf1 => rows[MF1_CENTRELINE].store = None,
+        AircraftId::Mf1 => {
+            rows[MF1_CENTRELINE].store = None;
+            rows[MF1_BELLY].count = MF1_BELLY_CAPACITY;
+        }
         _ => {}
     }
 }
@@ -786,19 +868,24 @@ mod tests {
     }
 
     #[test]
-    fn the_mirage_f1_centreline_keeps_its_station_but_defaults_to_no_pod() {
+    fn the_mirage_f1_centreline_keeps_its_station_but_defaults_to_no_pod_and_the_belly_holds_two() {
         let retail = default_rows(AircraftId::Mf1);
         assert_eq!(retail.len(), 8);
         assert_eq!(retail[MF1_CENTRELINE].store.as_deref(), Some("ALQ167.ECM"));
         let mut rows = retail.clone();
         adjust_defaults(AircraftId::Mf1, &mut rows);
-        // Only the default store of the centreline row changes: same index,
-        // same mask, count, weight class and position, so it accepts what it did.
+        // The centreline row changes only its default store (same index, mask,
+        // count, weight class and position, so it accepts what it did); the
+        // belly row changes only its capacity, four to two (John, 2026-11-11,
+        // round 3, M1): same index, mask, class, position and store.
         let mut expected = key(&retail);
         expected[MF1_CENTRELINE].3 = None;
+        expected[MF1_BELLY].4 = 2;
+        assert_eq!(retail[MF1_BELLY].count, 4);
         assert_eq!(key(&rows), expected);
         assert_eq!(rows[MF1_CENTRELINE].flags, 0x7e5);
-        // The jammer suite (row 2), the tank pair and the Magics stay.
+        assert_eq!(rows[MF1_BELLY].count, MF1_BELLY_CAPACITY);
+        // The jammer suite (row 2), the belly tanks and the Magics stay.
         assert_eq!(rows[2].store.as_deref(), Some("AV8.ECM"));
         assert_eq!(rows[5].store.as_deref(), Some("F250.GAS"));
         adjust_defaults(AircraftId::Mf1, &mut rows);
@@ -820,6 +907,56 @@ mod tests {
                 })
             );
         }
+    }
+
+    /// Agent decision, 2026-11-11 (MF1-6, following John's F-15E A2 0.3 ft
+    /// line): the Mirage F1's belly pair refuses the deep entries, its wing pair
+    /// the one alternative over the line (`AS30.JT`); nothing else moves.
+    #[test]
+    fn the_mirage_f1_refuses_the_stores_that_enter_its_belly_pair_and_wing_pair() {
+        for name in MF1_BELLY_REFUSED {
+            assert!(!weapon_allowed(AircraftId::Mf1, MF1_BELLY, name), "{name}");
+            assert!(weapon_allowed(AircraftId::Mf1, 7, name), "{name}");
+            assert!(
+                weapon_allowed(AircraftId::Mf1, MF1_CENTRELINE, name),
+                "{name}"
+            );
+            assert!(
+                weapon_allowed(AircraftId::M2000, M2000_BELLY, name),
+                "{name}"
+            );
+        }
+        for name in MF1_WING_REFUSED {
+            assert!(!weapon_allowed(AircraftId::Mf1, MF1_WING, name), "{name}");
+            assert!(weapon_allowed(AircraftId::Mf1, 7, name), "{name}");
+            assert!(
+                weapon_allowed(AircraftId::Mf1, MF1_BELLY + 2, name),
+                "{name}"
+            );
+            assert!(weapon_allowed(AircraftId::M2000, MF1_WING, name), "{name}");
+        }
+        // Never a default store: the Magic stays on the wing pair and the tip
+        // pair, and the kept shallow entries stay on the belly pair.
+        assert!(weapon_allowed(AircraftId::Mf1, MF1_WING, "R550.JT"));
+        assert!(weapon_allowed(AircraftId::Mf1, 7, "R550.JT"));
+        assert!(!weapon_allowed(AircraftId::Mf1, MF1_BELLY, "R550.JT"));
+        for name in [
+            "AA11.JT",
+            "AA12.JT",
+            "AIM9X.JT",
+            "AIM120.JT",
+            "AGM65G.JT",
+            "MK82.JT",
+        ] {
+            assert!(weapon_allowed(AircraftId::Mf1, MF1_BELLY, name), "{name}");
+        }
+        // The six shallow wing entries stay (0.06 to 0.15 ft).
+        for name in [
+            "PL7.JT", "PL10.JT", "AGM88.JT", "AGM45.JT", "AIM7.JT", "AIM7E.JT",
+        ] {
+            assert!(weapon_allowed(AircraftId::Mf1, MF1_WING, name), "{name}");
+        }
+        assert_eq!(MF1_BELLY_REFUSED.len() + MF1_WING_REFUSED.len(), 34);
     }
 
     #[test]

@@ -989,6 +989,10 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         // halfway to the outermost pylon (John 2026-10-14).
         (AircraftId::A10, 6) => at(Location::Wing, A10_WING[0], 0., Hang::AsRecorded),
         (AircraftId::A10, 7) => at(Location::Wing, A10_WING[1], 0., Hang::AsRecorded),
+        // Mirage F1, John 2026-11-11 (round 3, M1): the belly row, capped at
+        // two stores by `aircraft_stations::cap_capacity`, one a side, hangs
+        // out at the clean slot (fitted).
+        (AircraftId::Mf1, 5) => at(Location::Wing, MF1_BELLY_OUT, 0., Hang::AsRecorded),
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
@@ -1028,6 +1032,40 @@ pub fn rail_drop(id: AircraftId, hardpoint: usize) -> f64 {
 
 /// The Mirage 2000 belly rail drop, feet ([`rail_drop`]).
 const M2000_BELLY_DROP: f64 = 0.1;
+
+/// How far out the Mirage F1's capped belly row hangs, feet right of the
+/// centreline (John, 2026-11-11, round 3 item M1, opinionated: "move it out to
+/// the measured clean slot"; the value is fitted, an agent decision, and no
+/// source gives the real lateral offset). It is where the outer tank of the
+/// record's four hung, measured clean of the main gear (0.63 ft) and the belly
+/// (0.86 ft). The record's own row is 2.07 ft out on the scaled shape, and a
+/// tank there stands in the gear plate. The store hangs on the standard 1 ft
+/// wing pylon at that spot (the `Hang::AsRecorded` rule).
+const MF1_BELLY_OUT: f64 = 3.24;
+
+/// How far a wingtip station's stores hang off the tip edge the tip rule
+/// finds, [outboard, down] feet (positive down), per aircraft and record:
+/// zero everywhere except the Mirage F1's row 7, whose `R550.JT` pair enters
+/// the thin wingtip by 1.48 ft on the rule's own centre line (John,
+/// 2026-11-11, round 3 item M2, opinionated: a fitted tip offset, outboard or
+/// down, the smallest that clears the tip; the stores stay on the tip rail).
+/// Guarded to the retail wingtip record (the row's own station: a Wingtip
+/// row of two stores). The value is fitted, an agent decision: 1.1 ft
+/// outboard is the smallest that takes the `R550.JT` fins clear of the tip
+/// edge (1.0 ft still reads 1.17 and 1.44 ft; down needs 1.6 ft).
+pub fn tip_offset(id: AircraftId, hardpoint: usize, h: &Hardpoint) -> [f64; 2] {
+    match (id, hardpoint) {
+        (AircraftId::Mf1, 7)
+            if Location::from_byte(h.location) == Location::Wingtip && h.count == 2 =>
+        {
+            MF1_TIP_OFFSET
+        }
+        _ => [0.; 2],
+    }
+}
+
+/// The Mirage F1's wingtip offset, feet, [outboard, down] ([`tip_offset`]).
+const MF1_TIP_OFFSET: [f64; 2] = [1.1, 0.];
 
 /// The MiG-31's four AA-9 row, [feet right of the centreline, feet forward]:
 /// two stores a side on tunnel pallets, the front pair first, under the
@@ -1134,6 +1172,13 @@ pub fn placed_on(
             for over in &mut rack.over {
                 *over = over.map(|h| h - drop as f32);
             }
+        }
+        let [out, down] = tip_offset(id, hardpoint, h);
+        if rack.location() == Location::Wingtip
+            && let Some(tip) = &mut rack.tip
+        {
+            tip[0] += out as f32;
+            tip[1] -= down as f32;
         }
         return (mount, rack);
     };
@@ -1426,6 +1471,19 @@ mod tests {
         assert_eq!(placed_on(AircraftId::M2000, 0, &h, None).0, scaled);
         assert_eq!(placed_on(AircraftId::F16C, 0, &h, None).0, plain);
         assert_eq!(placed_scaled(&h, None, [1.; 3]).0, plain);
+    }
+
+    #[test]
+    fn the_mirage_f1_record_row_scales_with_its_shape_too() {
+        let h = hardpoint(Location::Wing.byte(), 0);
+        let (plain, _) = placed(&h, None);
+        let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::Mf1);
+        assert_eq!(axes, [1.0335, 1.0546, 1.1804]);
+        assert_eq!(
+            placed_on(AircraftId::Mf1, 0, &h, None).0,
+            [10. * axes[0], -2. * axes[1], -axes[2]]
+        );
+        assert_ne!(placed_on(AircraftId::Mf1, 0, &h, None).0, plain);
     }
 
     #[test]
@@ -1901,6 +1959,86 @@ mod tests {
         let (_, tip) = placed(&tip, Some(&model));
         assert_eq!(tip.over, [None; 5]);
         assert_eq!(tip.tip, Some([20., -1.]), "a wingtip reads the tip's edge");
+    }
+
+    #[test]
+    fn the_mirage_f1_belly_pair_hangs_out_at_the_clean_slot_and_its_tip_pair_stands_off_the_tip() {
+        let flat = Shape {
+            lines: Vec::new(),
+            faces: vec![tore_formats::shape::Face {
+                positions: vec![
+                    [0., -60., -3.],
+                    [60., -60., -3.],
+                    [60., 60., -3.],
+                    [0., 60., -3.],
+                ],
+                colors: vec![1; 4],
+                fog: Default::default(),
+                uv: Vec::new(),
+                texture: String::new(),
+                subtype: 0x20,
+                normal: None,
+                address: 0,
+            }],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&flat, 1. / 3.);
+        // Row 5 (Wing, paired, capped at two): out at 3.24 ft, forward 0, the
+        // record's height kept; another aircraft with the row keeps its own.
+        let belly = Hardpoint {
+            location: Location::Wing.byte(),
+            flags: 0x7e5,
+            position: [6, -17, 0],
+            store: Some("F250.GAS".into()),
+            count: 2,
+            weight_class: 46,
+        };
+        let (mount, rack) = placed_on(AircraftId::Mf1, 5, &belly, Some(&model));
+        assert_eq!(mount[0], MF1_BELLY_OUT);
+        assert_eq!(mount[2], 0.);
+        assert_eq!(rack.location(), Location::Wing);
+        assert!(rack.paired);
+        assert_eq!(rack.sides(mount, 2), [1, 1], "one store a side");
+        assert_ne!(
+            placed_on(AircraftId::M2000, 5, &belly, Some(&model)).0[0],
+            mount[0]
+        );
+        // Row 7 (Wingtip, two Magics): the tip rule's edge, 1.1 ft further out,
+        // the same height; the record's other rows and other aircraft are
+        // untouched, as is an edited (four store) tip row.
+        let tip = Hardpoint {
+            location: Location::Wingtip.byte(),
+            flags: 0x85,
+            position: [58, -3, 0],
+            store: Some("R550.JT".into()),
+            count: 2,
+            weight_class: 4,
+        };
+        let plain = placed_scaled(
+            &tip,
+            Some(&model),
+            tore_formats::aircraft::scale::right_up_forward(AircraftId::Mf1),
+        )
+        .1
+        .tip
+        .expect("the tip edge");
+        let moved = placed_on(AircraftId::Mf1, 7, &tip, Some(&model))
+            .1
+            .tip
+            .expect("the tip edge");
+        assert_eq!(moved[0], plain[0] + MF1_TIP_OFFSET[0] as f32);
+        assert_eq!(moved[1], plain[1] - MF1_TIP_OFFSET[1] as f32);
+        assert_eq!(tip_offset(AircraftId::Mf1, 7, &tip), MF1_TIP_OFFSET);
+        assert_eq!(MF1_TIP_OFFSET, [1.1, 0.]);
+        let four = Hardpoint {
+            count: 4,
+            ..tip.clone()
+        };
+        assert_eq!(tip_offset(AircraftId::Mf1, 7, &four), [0.; 2]);
+        assert_eq!(tip_offset(AircraftId::Mf1, 6, &tip), [0.; 2]);
+        assert_eq!(tip_offset(AircraftId::M2000, 7, &tip), [0.; 2]);
+        assert_eq!(tip_offset(AircraftId::Rafale, 8, &tip), [0.; 2]);
     }
 
     #[test]

@@ -1667,3 +1667,234 @@ plume scaling are fitted agent decisions (2026-11-10); the dorsal brake rig is
 John's decision (2026-11-10); the twin glow and trail from the engine count of 2
 (record, real aircraft: two J85-GE-21). Not a claim of original retraction
 timing.
+
+## Mirage F1 control surfaces (MF1-3, 2026-11-10)
+
+`MF1.SH` (19,200 CODE bytes, 236 runtime faces, six state words `0x5ad0`,
+`0x5ad6`, `0x5adc`, `0x5ae8`, `0x5aee`, `0x5af4`; review in
+[aircraft variety](aircraft-variety.md#mirage-f1-source-review-2026-11-10), shape
+scale in [MF1-2](objects-and-shapes.md#mirage-f1-shape-scale-mf1-2-2026-11-10))
+names no signed pitch or roll branch and no flap travel, so the tailplane, the
+ailerons and the rudder are **fitted** whole-panel assignments over exact
+reviewed source faces. Source coordinates below are shape units (x right, y
+forward, z up, before the per-axis scale `[1.0335, 1.1804, 1.0546]`); the rig
+scales every hinge point and axis with the same factors as the shape, so a turned
+panel stays rigid.
+
+| Panel | Faces | Source geometry |
+| --- | --- | --- |
+| Right tailplane | `2d0e`, `2d36` (two windings) | One flat five-vertex panel at z -1: (6,-22), (5,-39), (6,-41), (23,-45), (23,-39); no state word |
+| Left tailplane | `2c60`, `2c88` | Mirror with the tip at x -22 (one unit shorter than the right) |
+| Right aileron (outboard trailing-edge panel) | `3ce8` (top quad), `3cc9` (bottom quad), `3d0f` (top wedge), `3d30` (bottom wedge) | x 23 to 35; hinge line (23,-6) to (35,-11) at mid thickness z 1 to 1.5; trailing edge (23,-12) to (35,-15), z 1; the panel is 4 ft wide at 59% to 90% of the semi-span |
+| Left aileron | `3e93`, `3e74`, `3eba`, `3edb` | Exact mirror in x |
+| Rudder | `40e1`, `4108` (quad, both windings) | Hinge edge (0,-30,3) to (0,-39,22); trailing edge (0,-37,3) to (0,-44,22) |
+
+**Hinge axes (rig definitions).** Tailplane: a **lateral** spindle (along X)
+through the root chord midpoint, (+-5.5, -31.5, -1) (the root chord runs y -22
+to y -41); the panel is flat, so its own anhedral is zero and the spindle is not
+tilted (the all-moving tail standard: whole panel, lateral spindle through the
+root chord midpoint, tilted only by the panel's own anhedral; never a swept span
+axis). Ailerons: the straight leading edge of the
+panel's wedge, through the mid-thickness points (23,-6,1) and (35,-11,1.5),
+direction (12,-5,0.5) on the right and the same line mirrored on the left. The
+wedge's hinge vertices sit 1 unit (root) and 0.5 unit (tip) above and below it,
+and the whole panel turns about the mid line. Rudder: the fin line from (0,-30,3)
+to (0,-39,22), pointing up and aft, so a positive angle swings the trailing edge
+toward +X (right), the sense of the fleet's rudders.
+
+**Rule 11 fold table (rig definitions).** Every face of every moving surface turns
+whole about its axis; no vertex is held fixed off an axis.
+
+| Surface | Face | Vertices | Turn about the axis | Held fixed | Fixed off the axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right tailplane | `2d0e`, `2d36` | 5 each | 5 each | 0 | 0 |
+| Left tailplane | `2c60`, `2c88` | 5 each | 5 each | 0 | 0 |
+| Right aileron | `3ce8` (top quad) | 4 | 4 | 0 | 0 |
+| Right aileron | `3cc9` (bottom quad) | 4 | 4 | 0 | 0 |
+| Right aileron | `3d0f`, `3d30` (wedges) | 3 each | 3 each | 0 | 0 |
+| Left aileron | `3e93`, `3e74` (quads), `3eba`, `3edb` (wedges) | 4, 4, 3, 3 | all | 0 | 0 |
+| Rudder | `40e1`, `4108` | 4 each | 2 each | 2 each: (0,-30,3), (0,-39,22) on the hinge | 0 |
+
+The review's own table counted the wedge hinge vertices as "on the hinge" because
+they are within one unit of the hinge line. The rig turns them with the rest of
+the panel about the mid line (they move by at most their offset times the angle,
+0.2 unit at the full 0.20 rad), exactly as the Mirage 2000's elevon wedge does.
+No face of any moving surface is split across a diagonal or a coordinate
+threshold: each panel is selected by face address, and the rig refuses the shape
+if a listed face is missing, duplicated, holds a vertex outside its reviewed
+points, or if a state word adds or removes a different face set than reviewed.
+**Verdict: no face folds**; the probe reports the largest inter-vertex distance
+change in each group as about 1e-6 ft.
+
+**Pitch only (John, 2026-11-10).** The tailplane panels take the same angle for
+pitch and **none** for roll: a positive elevator raises both trailing edges
+(`-0.30 * elevator` radians, positive lowers). Roll belongs to the ailerons. The
+probe proves each surface stays put under every other control (tailplane under
+roll, rudder and flaps; ailerons under pitch, rudder and flaps).
+
+**Ailerons and the flap-slot words (agent decision, 2026-11-10).** The source's
+one trailing-edge panel per wing is outboard, at the aileron position. Words
+`0x5ae8` (left) and `0x5aee` (right) delete exactly that panel and add nothing,
+so a rig that set them would make an aileron vanish in flight. The rig pins both
+words at load (a mismatch refuses the shape) and never sets them. The panels
+take roll only: `-/+0.20 * aileron` (a positive aileron raises the right trailing
+edge and lowers the left, the sense of every fleet aileron). They do **not** act
+as the flap: the sources found describe the real F1's high-lift kit as separate
+double-slotted trailing-edge flaps and leading-edge slats with ailerons
+(globalsecurity.org variants page: "differentially operated two-section
+double-slotted flaps, ailerons, two-section spoilers"), and no source places
+the flaps at the aileron position, so the flap lever moves nothing on this
+shape (there is no inboard flap panel in the source; none is invented). The probe
+records the flap control as not applicable for this aircraft and fails if the
+lever moves any geometry. If John wants the flap lever visible, the one-line
+alternative is a droop of the ailerons (the Mirage 2000 droops its elevons 0.40
+with the flap lever); it is not applied.
+
+**Rudder word `0x5af4`** swaps the quad for a copy deflected about 45 degrees to
++X (a fixed, one-direction pose, roughly 0.8 rad). The rig pins it at load and
+never sets it; the quad turns about its hinge edge instead, in both directions,
+with the fleet's travel `0.35 * rudder` (fitted).
+
+**Seam openings (measured, `seam-opening.csv`, reported not gated).** Every
+surface shares some vertices with fixed faces, so a turn opens a small crack:
+tailplane root vertex (5,-39,-1) shared with the rear fuselage, 0.88 ft at the
+full 0.30 rad pitch; aileron inboard seam (23,-8) and (23,-12) shared with the
+fixed inboard wing, 0.43 ft at the full 0.20 rad roll; rudder trailing top
+vertex (0,-44,22) shared with the fin cap, 0.61 ft at the full 0.35 rad. This is
+the whole-panel rule's accepted cost (the MiG-31 tail and the Mirage 2000
+elevons do the same); the probe's skin gap (0) measures the seam inside each
+panel, and the hinge or spindle midpoints stay put (anchor gap about 2e-7 ft).
+
+**Fitted magnitudes (agent decisions, 2026-11-10, matching the fleet).** Angle
+positive lowers the trailing edge. Tailplane `-0.30 * elevator` (the F-4 and
+F-104 all-moving tails); ailerons `-/+0.20 * aileron` (the F-4, F-16 and F-104
+roll surfaces); rudder `0.35 * rudder` (every fleet rudder). Nothing here is a
+source value.
+
+The gear, airbrake and plume are **not** owned by this rig: the gear keeps the
+shared interim rise (word `0x5adc`, plates `3b7e`, `3b9d`, `3be9`, `3c08`,
+`3c54`, `3c73`) and the airbrake (`0x5ad6`: `4182`, `4199`) and plume (`0x5ad0`:
+`4207`, `422e`, `4255`, `427c`, `42a3`, `42ca`, `42f1`, `4318`) stay unmapped
+until MF1-4; `mf1_animation.rs` pins those words and face lists at load as the
+places MF1-4 takes over. See the
+[Mirage F1 fit](../spec/variety-animation.md#mirage-f1-control-fit).
+
+Update (MF1-4, 2026-11-10): the gear, airbrake and plume are now owned by the
+rig; see [Mirage F1 gear, airbrake and plume](#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10).
+
+## Mirage F1 gear, airbrake and plume (MF1-4, 2026-11-10)
+
+Slice MF1-4 (implementation, Claude Sonnet, sonnet-high). `mf1_animation.rs` now
+loads the three device words with the control surfaces of
+[MF1-3](#mirage-f1-control-surfaces-mf1-3-2026-11-10). Each word adds faces and
+removes none (pinned at load: a different face set refuses the shape), the added
+faces are scaled per axis `[1.0335, 1.1804, 1.0546]` like the rest of the shape,
+and every hinge point and axis below is in shape units run through
+`scale_point(Mf1, ..)`. Nothing is split: each device is whole rigid pieces
+selected by face address. All six words are accounted for:
+
+| Word | Effect in the source | Rig |
+| --- | --- | --- |
+| `0x5adc` | Adds the three gear plates (6 faces, both windings) | Set by the gear lever, animated (this section) |
+| `0x5ad6` | Adds the one dorsal airbrake plate (2 faces) | Set by the brake lever, animated |
+| `0x5ad0` | Adds the plume (8 faces) | Set by the afterburner, animated |
+| `0x5ae8`, `0x5aee` | Delete one wing's outboard trailing-edge panel, add nothing | Pinned, never set (MF1-3: the panels are the ailerons) |
+| `0x5af4` | Swaps the rudder quad for a copy 45 degrees to starboard | Pinned, never set (MF1-3: the quad turns) |
+
+Beyond the six words the shape has no door, canopy, hook, slat, spoiler, nozzle
+petal or inboard flap geometry, and none is invented.
+
+**Gear (fitted; direction from a public source).** The F1's nose gear retracts
+rearward and its main gear retracts forward and rotates to tuck into the
+fuselage (Greg Goebel, "The Dassault Mirage F1", Air Vectors,
+`airvectors.net/avmirf1.html`: "The nose landing gear assembly retracted
+backwards while the main gear assemblies retracted forward, rotating to tuck
+neatly into the fuselage"; a general history, not a maintenance manual). The
+source plates, in shape units:
+
+| Plate | Faces | Geometry |
+| --- | --- | --- |
+| Left main | `3b7e`, `3b9d` | Top edge x -3, y -5 to 4, z -6; foot edge x -7, z -17 (a leg and wheel seen from the side, 9 wide, 11 tall, leaning outboard) |
+| Right main | `3be9`, `3c08` | Mirror, x +3 and +7 |
+| Nose | `3c54`, `3c73` | Plane x 0, y 38 to 47, z -7 to -17 |
+
+| Piece | Hinge (rig definition) | Angle |
+| --- | --- | --- |
+| Each main | The point of its own top edge 1 unit forward of the rear corner, (+-3, -4, -6), axis 15 degrees off lateral toward forward (right (0.966, 0.259, 0), left (0.966, -0.259, 0), the mirror) | `95 degrees * (1 - gear)`, the foot swings forward and inward |
+| Nose | Lateral axis (along X) through its own top forward corner (0, 47, -7) | `-110 degrees * (1 - gear)`, the foot swings rearward and the whole plate rises above the hinge line |
+| Nose steering | Vertical axis through the plate centre (0, 42.5, -12) | `-nosewheel_angle`, applied first |
+
+Gear 1 is the source pose (grounded: the lowest vertex is z -17 units, the MF1-2
+scaled gear low point 17/3 * 1.0546 = 5.98 ft the flight model and the parked
+path stand on); gear 0 draws nothing. A purely lateral axis would not stow the
+mains: the plate is 9 deep and 11 tall, so a quarter turn stands it on edge with
+its outboard foot corner about 1 ft above the wing shoulder, outside the hull.
+The 15 degree lean and the 95 degree angle were found by searching the hinge
+point, lean and angle against the fuselage section read off the skin faces
+(7 units half-wide from z -4 to 1 at y 7, 6 at z -7 and z 3, 2 at the ridge z 5,
+narrowing aft to 0.72 of that at y -39): stowed, each main lies at x 2.7 to 6.1,
+y -4.0 to 6.5, z -7.3 to 2.5 (shape units), inside the hull to within 0.1 unit.
+The cost of the lean: the main foot's rear corner dips 0.22 unit (0.08 ft)
+below its gear-down height in the first few degrees of travel. The probe allows
+0.1 ft. The nose plate stows in the plane x 0 between y 38.6 and 50.1, z -7 to 5.9 (the nose bay roof is at z 6).
+
+**Airbrake (fitted).** The one source plate (`4182`, `4199`, both windings):
+forward edge (-2, 29, 5) to (3, 29, 5), free edge (+-2, 19, 14) raised aft. The
+hinge is the forward edge, a line along X at (y 29, z 5), and the whole plate
+turns about it (the plate is not split: its four vertices are two on the hinge
+and two on the free edge). Brake 1 is the source raised pose; the angle
+`0.707 rad (40.5 degrees) * (1 - brake)` lays the plate along the dorsal ridge
+line (0, 37, 6) to (0, 7, 5) at a small brake (measured on the scaled shape: the
+free edge within 4e-6 ft of the ridge line at 1e-6); brake 0 hides it. The
+closed plate lies 0.7 unit under the ridge skin, so a thin sliver of its
+outboard corner shows beside the spine at small values (frame
+`crop3x-airbrake-closed-side`). The real F1's brakes are paired panels under the
+intakes (MF1-0 review); the source has only this dorsal plate, so only it moves.
+
+**Burner (fitted).** The plume is two crossed pairs of double-sided plates: x = 0
+plane (`4207`, `422e` outer, y -56 to -81; `42a3`, `42ca` inner, y -42 to -56,
+z -5 to 3) and z = -1 plane (`4255`, `427c` outer; `42f1`, `4318` inner, x -3 to
+4). The nozzle exit plane y -42 is the root: every plume vertex scales along Y
+about it by the afterburner fraction, so each plate stays in its plane (nothing
+folds; a plate that only stretches along its own plane stays flat), shared edges
+stay together (the y -56 edge is the same in the inner and outer plate), and the
+exit corners never move. Exhaust 0 draws nothing. `engine_material` gains the
+Mirage F1: `outlet_count(Mf1) = 1` (the record's one Atar 9K-50) and the nozzle
+faces `2e92` and `2eb3`, the two half discs either side of x = 0 at y -42 (x -4
+to 4, z -6 to 3, subtype 0x64; the two thin triangles at x +-4 in that plane have
+no area and carry no material). That gives one glow on the whole disc and one
+contrail at the disc centre (x 0, z -1.5) 2 ft behind the exit plane; MF1-2's
+shape-end fallback is no longer used (unit test
+`the_mirage_f1_draws_one_contrail_on_the_centreline_behind_its_one_nozzle`).
+
+**Rule 11 fold table (rig definitions).** Every added face turns or stretches
+whole; no vertex is held fixed off its hinge, and no face is selected by a
+coordinate threshold.
+
+| Piece | Faces | Vertices | Moved as one rigid body | Held fixed | Fixed off the hinge |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Left main | `3b7e`, `3b9d` | 4 each | 4 each | 0 (the hinge point is on the top edge, not a vertex) | 0 |
+| Right main | `3be9`, `3c08` | 4 each | 4 each | 0 | 0 |
+| Nose | `3c54`, `3c73` | 4 each | 3 each | 1 each: (0, 47, -7), on the hinge | 0 |
+| Airbrake | `4182`, `4199` | 4 each | 2 each | 2 each: (-2, 29, 5), (3, 29, 5), on the hinge | 0 |
+| Plume | the eight plates | 4 each | stretched about y -42 | the exit-plane vertices (y -42) | 0 |
+
+**Verdict: no face folds.** The probe's largest inter-vertex distance change in
+each gear plate and in the airbrake is about 6e-7 ft; the gear skin gap is 0.
+
+**Probe numbers** (`.local/m3-aircraft/checks/MF1-4/poses`, 0 failures): gear,
+brake and exhaust `required moved`; 202 dense gear values (0 to 1 in 200 steps
+plus 1e-6), every row passing: rigidity about 1e-6 ft, anchor gap about 2e-7 ft,
+skin gap 0, no direction failure, no new planar crossing, ground contact at gear
+1 (lowest point the scaled low point within 1e-3 ft), stow gates at 1e-6; the
+seven-value brake sweep (hinge gap 0, rigidity about 6e-7 ft, closed within
+4e-6 ft of the ridge, never raising the free edge); exhaust: exit corners fixed
+(gap 0), tips forward as the demand falls, the MF1-3 25-pose pitch/roll grid
+still passing.
+
+**Provenance.** Gear, airbrake and plume motion and every hinge and angle:
+fitted, agent decisions 2026-11-10. Retraction directions: public secondary
+source (Air Vectors, above), not original behaviour. Face lists, word effects,
+plate corners and the nozzle disc: spec-derived from the shape. Engine count 1:
+John's decision 23, 2026-11-10. Nothing here is a claim of the original's
+retraction timing or travel.

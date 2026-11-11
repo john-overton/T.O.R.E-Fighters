@@ -958,3 +958,54 @@ brake and exhaust `required moved`, a 202-value dense gear sweep with every row
 passing (rigidity at most 1.6e-6 ft, anchor gap 0, skin gap 0, lowest gear point
 at the 18 unit low point at gear 1) and the closed brake within 3e-6 ft of the
 ridge. Not a claim of original retraction timing.
+
+## Mirage F1 control fit
+
+Agent-authored whole-panel motion, 2026-11-10 (slice MF1-3), over `MF1.SH` after
+the per-axis shape scale of MF1-2 (hinge points and axes are scaled with
+`aircraft::scale::scale_point`). The shape names a rudder word (`0x5af4`), two
+flap-slot words (`0x5ae8`, `0x5aee`) and no signed pitch or roll branch, so the
+tailplane, the ailerons and the rudder are fitted assignments over exact reviewed
+source faces. Every moving surface is whole: each tailplane (two windings), each
+aileron (four faces) and the rudder (two windings) turns as one rigid panel. The
+source groups, the rule 11 fold table, the seam measurements and the flap-word
+decision are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#mirage-f1-control-surfaces-mf1-3-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Pitch | Both tailplane panels, `-0.30 * elevator` radians about a lateral spindle through the root chord midpoint (+-5.5, -31.5, -1) along X (positive elevator raises the trailing edges). Pitch only: no roll term (John, 2026-11-10). |
+| Roll | The outboard trailing-edge panels as ailerons, `-0.20 * aileron` on the right and `+0.20 * aileron` on the left (positive aileron raises the right trailing edge and lowers the left), about the wedge's leading edge line (23,-6,1) to (35,-11,1.5). No pitch term, no flap term. |
+| Flaps | Nothing moves: the source has no flap panel and the one trailing-edge panel is the aileron. The probe records the control as not applicable and fails if the lever moves geometry. |
+| Yaw | The rudder quad (both windings) turns `0.35 * rudder` radians about the fin line (0,-30,3) to (0,-39,22); positive swings the trailing edge to +X. |
+| Gear, airbrake, plume | Not owned yet: the six gear plates keep the shared interim rise until MF1-4; the airbrake and plume words are pinned and unmapped. |
+
+Update (MF1-4, 2026-11-10): the gear, airbrake and plume are now owned by the rig, see [Mirage F1 gear, airbrake and plume fit](#mirage-f1-gear-airbrake-and-plume-fit).
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments` with
+`anchor_missing=false`, `anchor_gap_ft` about 2e-7, `skin_gap_ft=0`, no direction
+failures and a largest inter-vertex distance change of about 1e-6 ft for pitch,
+roll and yaw sweeps, plus the 25-pose pitch/roll grid
+(`pitch-roll-combinations.csv`). The `flight-animation-mf1` battery scenario
+checks the report and the 26-line grid file.
+
+## Mirage F1 gear, airbrake and plume fit
+
+Agent-authored whole-piece motion, 2026-11-10 (slice MF1-4), over `MF1.SH` after
+the per-axis scale of MF1-2. Hinge points and axes are scaled with
+`aircraft::scale::scale_point`. Every piece is whole: the geometry, the six-word
+accounting and the rule 11 fold table (no face folds) are in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#mirage-f1-gear-airbrake-and-plume-mf1-4-2026-11-10).
+
+| Control | Fitted motion |
+| --- | --- |
+| Gear | Each main plate turns whole `95 degrees * (1 - gear)` about its own top edge (the point 1 unit forward of its rear corner, an axis 15 degrees off lateral), swinging forward and inward into the fuselage side; the nose plate turns whole `110 degrees * (1 - gear)` about a lateral axis through its forward top corner, swinging rearward, and steers about a vertical axis through its centre. Hidden at 0, the source pose at 1, where the lowest point is the scaled gear low point (5.98 ft). The real F1's main gear retracts forward and its nose gear rearward (public text, cited in the geometry note); the law is fitted. No gear doors: the source has none. |
+| Airbrake | The one source dorsal plate turns whole about its forward edge (y 29, z 5) by `0.707 rad * (1 - brake)`: brake 1 is the source raised pose, small values lie along the dorsal ridge, 0 hides it. The real aircraft's paired airbrakes under the intakes are not in the source and are not drawn. |
+| Afterburner | The eight plume plates scale along Y from the nozzle exit plane (y -42) by the afterburner fraction, hidden at 0. One nozzle glow on the single exit disc and one contrail at x 0, from the engine count of 1. |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, gear,
+brake and exhaust `required moved`, a 202-value dense gear sweep with every row
+passing (rigidity about 1e-6 ft, anchor gap about 2e-7 ft, skin gap 0, lowest
+gear point at the scaled low point at gear 1, stowed mains inside the fuselage
+section), and the closed airbrake within 4e-6 ft of the ridge line. Not a claim
+of original retraction timing.
