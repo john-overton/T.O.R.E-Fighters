@@ -4538,3 +4538,21 @@ right; the tank and Mk 82s jettison. Details:
 [the baseline](../baselines/ordnance-availability.md#saab-gripen-ordnance-gri-6-2026-11-10).
 The guard tests keep expecting exactly the Gripen and the Tornado for
 `BK27.JT`, with GRI-6 notes.
+
+## Batch 5 follow-up corrections (B5-3, 2026-11-10)
+
+Implementation mode, slice B5-3, John's decision round 2 of 2026-11-10 (items D2,
+D3 and E3, all "follow recs", opinionated). This adds to the B5-2 note above; that
+note's open items for the F-5E countermeasures and the Tornado fuel flows are
+answered here and the earlier text is kept as written.
+
+| Item | Change | Where |
+| --- | --- | --- |
+| D2 F-5E countermeasures | Row 2 (`F5E.PT`) holds `F104.ECM` (20 chaff, 20 flares, no deception jammer) in place of the empty row B5-2 left; the real F-5E carries an AN/ALE-40 dispenser. No station index moves; only the retail rows take it. | [stores on pylons](../spec/stores-on-pylons.md#batch-5-stations-tornado-outer-wing-mirage-f1-centreline-f-5e-defaults-b5-2-2026-11-10) (Update line) |
+| D3 Tornado fuel flows | 6 / 38 lb/s (the Su-24's) become 3 / 22 lb/s, two RB199 Mk 103 at 17,300 / 32,150 lbf with the cited dry 0.598 and reheat 2.5 lb/(lbf h). Full tank: 31.2 to 62.3 min military, 4.9 to 8.5 min afterburner. | [aircraft records](../spec/aircraft-records.md#batch-5-follow-up-corrections-tornado-fuel-flows-b5-3-2026-11-10) |
+| E3 F-15C nose gear | The nose gear folds forward (the real F-15's nosewheel retracts forward) as one rigid piece about Y=48, Z=-8, grounded at gear down. The F-15C probe and `flight-animation-f15` pass. | [control surfaces](aircraft-control-surfaces.md#f-15c-source-additions) (Update line), [F-15C fit](../spec/variety-animation.md#f-15c-control-and-device-fit) |
+
+No audit pin moves (the F-5E row keeps its place and the audit counts weapon rows
+only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
+placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
+on the retail record and has a unit test.
