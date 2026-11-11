@@ -4482,3 +4482,34 @@ Open for John: the F-5E radar stands in with the F-104's `F104R.SEE` (alternativ
 `F18.ECM` also removes its chaff and flares (`F104.ECM` would keep dispensers
 without a jammer). Tornado fuel flows (6 and 38 lb/s) are still the Su-24's. The
 Tornado's default load has no Sidewinders now that the outer wing pair is retired.
+
+## Gripen stations measured (GRI-5, 2026-11-10)
+
+Implementation and review mode, slice GRI-5 (batch 5), Claude Sonnet (sonnet-high).
+This answers the "things GRI-5 must handle" list of the
+[Gripen hardpoints](#gripen-hardpoints) above; the numbers, frames and options are
+in [stores on pylons](../spec/stores-on-pylons.md#the-saab-gripen-gri-5-2026-11-10).
+**Stopped on clipping** (John's standing rule): no station, mask or count changed
+and the audit pins did not move. Measured with `tore-app --stores-preview` (audit,
+catalog) and a local triangle-level check of 61 single-row loads, eight
+whole-aircraft loads and the default, gear up and down.
+
+| Question from the review | Measured |
+| --- | --- |
+| Wingtip row 3 units (1 ft) outboard of the shape's tip rail | The standard tip rule centres the missile on the tip's edge, 13.67 ft out (record 14.67 ft): the offset is absorbed, nothing to move. Residual entry 0.15 ft for the AIM-9M. |
+| Centreline tank 4 ft under the belly, close to the nose gear doors and main gear | The tank hangs on the 2 inch rail (1.28 ft above the ground, 0.16 ft from the belly, no airframe entry). Gear down it crosses the left main strut plate by 0.25 ft; the right plate clears by 0.09 ft; the nose gear is clear. |
+| Rows 6 and 7 under the wing (x 5 and 10 ft) | Row 7 is clean (gear up and down, twin Amraams 0.02 ft apart on the standard bar). Row 6 hangs at x 5.0 ft, where the open main gear door wall ends: every store on row 6 crosses it gear down (default AGM-65: 36 and 44 crossings). Gear up it is clean (0.59 to 0.64 ft from the wing). |
+| Gun row at x +4 (starboard) while the real gun is port | Row 4 is 1.1 ft inside the starboard skin (fuselage section x -2.4 to 2.7 ft at that station); nothing is drawn. Left as retail for GRI-6 to decide (options in the spec). |
+| AAS-38 row 3 (flags `0x8` at the origin) | A placeholder: no body is drawn and the FLIR sight stays (John, 2026-11-10, on the 2026-11-07 rule); retail test extended to the Gripen. Its 350 lb was never in the mass sum (rows flagged `0x8` are skipped, as for the A-10 and F-16C pods): unchanged, noted for GRI-6. |
+| Designator pod station | None exists in the record and none was added. |
+
+Canards (neutral) are at least 2.56 ft from every store measured; the ground is
+clear in every load (lowest 0.20 ft for a GBU-10 on the centreline). Three clipping
+cases wait for John (spec section): the inner wing row against the open gear doors,
+the centreline tank against the left strut plate (both gear down only), and the
+wingtip missiles' 0.15 ft entry into the thin tip (the last is below every reviewed
+default load and listed for completeness).
+
+Provenance: positions and masks spec-derived (retail `GRIPEN.PT`, `GRI.SH`); the
+measurements and the classification agent findings, 2026-11-10; the real station count
+(seven in the in-game encyclopedia, eight on public pages) plausibility only.

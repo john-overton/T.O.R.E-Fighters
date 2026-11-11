@@ -46,6 +46,10 @@ fn a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body() {
         (AircraftId::F16C, "PAVESPK.SEE", None),
         (AircraftId::Rafale, "AAS38.SEE", Some([0., -20. / 3., 0.])),
         (AircraftId::Av8, "ALQ167.ECM", None),
+        // GRI-5, 2026-11-10: the Gripen's AAS-38 row is flags 0x8 at the
+        // reference point, the A-10 pattern: a placeholder, no body drawn
+        // (John, 2026-11-10); the sensor and the mass stay.
+        (AircraftId::Gripen, "AAS38.SEE", None),
     ];
     let mut seen = Vec::new();
     for (id, record, drawn_at) in cases {
@@ -85,6 +89,15 @@ fn a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body() {
                 );
             }
             None => assert!(drawn.is_empty(), "{}: {record} is a placeholder", id.pt()),
+        }
+        // The Gripen's pod draws nothing but its sensor stays: the FLIR
+        // sight is read from the row, not from the drawn list (John,
+        // 2026-11-10).
+        if id == AircraftId::Gripen {
+            assert!(
+                config.sight_sensor().is_some(),
+                "the placeholder AAS-38 row keeps its FLIR sight"
+            );
         }
         // The retail pods carry a weight and the equipment flag bit 1; every
         // fixed pod the rule keeps must too, so a weight-zero sensor never

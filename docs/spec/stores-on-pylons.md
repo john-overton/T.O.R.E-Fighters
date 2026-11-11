@@ -1639,3 +1639,144 @@ Audit pins: recovered stations 17 to 18, weapon placements 4,663 to 4,652, tank
 placements 231 to 233, Cheat-only placements 222 to 220; the pod placements (80)
 and the roster (45) are unchanged. See the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-record-and-station-corrections-b5-2-2026-11-10).
+
+## The Saab Gripen (GRI-5, 2026-11-10)
+
+Measurement only, **stopped on clipping** as John's standing rule (2026-11-07,
+confirmed for the batch 2026-11-10) requires: no station table, `station_move`,
+pylon or mask was authored, and no count moved. `GRIPEN.PT` has nine decoded
+rows: four fixed sensor rows (visual sensor, radar, jammer and the AAS-38 pod
+row), the internal BK27 gun row and **four editable carrier rows**, the seven
+store stations of the real aircraft (centreline, two wing pairs, the wingtip
+pair; [source review](../formats/aircraft-variety.md#gripen-hardpoints)). The
+shape is true size (no scale), so the decoded rows hang under the standard rules
+of 2026-10-13 with the shape as it is. The check tool, the temporary dump hook
+(removed again, `git status` shows only a test) and every dump are local.
+
+| Row | Location | Decoded x / up / fwd, ft | Hangs at (centre, ft) | Default | Hang used |
+| ---: | --- | --- | --- | --- | --- |
+| 5 | Fuselage, centreline | 0 / -6.67 / 0 | 0 / -3.26 / 0 (tank 10.28 ft long, 1.58 ft wide, 2.30 ft under the reference) | `F150.GAS` x1 | 2 inch rail under the belly (surface -2.30 to -2.0) |
+| 6 | Wing, paired | 5.00 / -5.00 / -4.67 | +-5.00 / -2.21 / -4.67 | `AGM65G.JT` x2 | 1 ft wing pylon (surface -0.66 to -0.83) |
+| 7 | Wing, paired, 2 a side | 10.00 / -5.00 / -7.00 | +-9.37 and +-10.63 / -1.96 / -7.00 | `AIM120.JT` x4 | one pylon a side with a twin bar, 1 ft (surface -0.67) |
+| 8 | Wingtip, paired | 14.67 / -0.67 / -8.67 | +-13.67 / -0.67 / -8.67 | `AIM9M.JT` x2 | tip rule: centre line on the tip's edge, no pylon |
+
+Rows 0 to 3 and 4 draw nothing (sensors, the pod placeholder, the internal gun).
+
+**Default load, against everything** (triangle level: every store against the
+airframe gear up, the gear gear down, every other store and pylon, the ground
+plane 5.33 ft under the reference; surface distances sampled, good to about
+0.05 ft; the airframe is the neutral pose):
+
+| Store | Airframe, gear up | Neighbours | Gear down | Ground |
+| --- | --- | --- | --- | ---: |
+| F150 tank, row 5 | clean, 0.16 ft from the belly | more than 1 ft from the Mavericks | **crosses the left main strut plate** (16 edge crossings, the plate's inner 0.25 ft inside the tank body), right strut 0.09 to 0.13 ft clear, wheels 0.82 ft | 1.28 ft |
+| AGM-65 x2, row 6 | clean, 0.59 to 0.64 ft | clear | **cross the open main gear door** (36 right, 44 left crossings, door wall x 4.3 to 5.0 ft against a body x 4.17 to 5.83 ft) | 2.29 ft |
+| AIM-120 x4, row 7 | clean, 0.67 ft | twin fins 0.02 ft apart (the standard twin bar, as the F/A-18) | clear (3 ft) | 2.76 ft |
+| AIM-9M x2, row 8 | **0.15 ft** upper fins into the tip (34 and 15 crossings) | clear | clear | 3.93 ft |
+
+Canards (neutral): every one of the 91 stores measured stays 2.56 ft or more from
+the canard plates (nearest: AA-6 on row 6); a deflection of the 0.35 rad bound moves
+a plate about 0.8 ft at most (estimate from the chord, not run), so no contact is
+expected. Stores against stores: nothing closer than 1 ft except the twin bars
+(AIM-120 pair 0.02 ft, the four-Sidewinder, four-Maverick and four-Mk 82 loads 0.03,
+0.03 and 0.47 ft), and the eight whole-aircraft loads (all F150, all F500, all Mk 84,
+all AA-9, all AIM-9M, all AGM-65G, all Mk 82, all AS-16) show no new contact. Nothing
+touches the ground in any case (lowest: a GBU-10 on the centreline, 0.20 ft above it).
+
+**Clipping, three cases for John (not fixed):**
+
+1. **Inner wing row 6 against the open main gear door (every store, gear down only).**
+   The row's decoded x (5.0 ft) is where the retail door wall's outer edge stands
+   (the GRI-4 rig keeps the source pose, root plate x 3.0 to 4.3 ft, wall x 4.3 to
+   5.0 ft). Every one of the 17 stores measured on row 6 crosses it (a slim AIM-9M
+   only at its nose, 4 crossings; Mk 84 104, AGM-88 108). Gear up the row is clean.
+2. **Default centreline tank against the left main strut plate (gear down).** The
+   strut plates are zero-thickness sheets (in the plane 3.67 ft behind the reference)
+   whose inner edges stand at 0.67 ft (right) and 0.33 ft (left, the source's one unit
+   asymmetry) from the centreline; the default tank is 0.58 ft to a side at that plane
+   (0.79 ft at its widest), so the left plate's inner 0.25 ft is inside it and the
+   right plate clears it by 0.09 ft. Mirroring the left plate would clear the default
+   tank by 0.09 ft. Wider stores cross both plates (F250 0.94 ft to a side, F350 and
+   F500 1.18 ft, 56 crossings; the Mk 84 and the B-13 pod are slim and cross at their
+   noses, 10 and 16), so this is not particular to the default tank.
+3. **Wingtip AIM-9M, 0.15 ft** (and larger on other tip missiles, below). This is the
+   standard tip rule meeting a thin tip; it is below every reviewed default load
+   (0.27 ft MiG-25 to 0.72 ft Su-27), so it is recorded and not a stop on its own.
+
+**Options for John (not applied).** Case 1: (a) accept (the door is a retail
+zero-thickness plate, the contact exists only on the ground and in the landing
+phase); (b) move row 6 outboard so the body clears the wall: an estimate from the
+plates is about 1.2 ft (centre 6.2 ft out, fin half span 1.18 ft), which narrows the
+gap to row 7's pylon (10.0 ft) to 3.8 ft (not run); (c) change the gear-down door
+pose in the GRI-4 rig (a rig decision, the doors are fitted); (d) mask the heaviest
+stores off row 6 (does not remove the default's contact). Case 2: (a) accept; (b)
+mirror or widen the strut plates in the rig (fitted geometry; the retail wheels are
+1.3 to 2.0 ft from the centreline; mirroring clears the default tank by 0.09 ft but
+not F250 and larger); (c) keep only the 150 gal tank on row 5. **Nothing was moved:** no real
+Gripen station is closer, the shape is retail.
+
+**Alternatives the Load Ordnance page offers** (`TORE_STORES_PREVIEW_CATALOG`: 64
+choices on each of rows 5, 6 and 7, 10 on row 8; each measured against the default
+others: 61 single-row loads, representatives for the long, wide and fat shapes,
+plus the eight whole-aircraft loads and the default):
+
+| Row | Clean against the airframe (gear up) | Enters the airframe | Gear down | Ground |
+| --- | --- | --- | --- | --- |
+| 5 centreline | F250, F350, F500, Mk 82, Mk 84, FAB-1000, B-13, LAU-61 | AGM-65G 0.18 ft, AIM-120 0.13, AS-16 0.13, AIM-9M 0.33, AGM-84E 0.35, AA-9 0.37, AGM-88 0.66, GBU-10 0.60, AA-6 0.74, AM-39 0.97 (their pylon is a 2 inch rail on a belly that falls away) | 12 of 18 cross a strut plate (10 to 92 crossings); AIM-120 0.84 ft, AS-16 0.18, AIM-9M 0.21, LAU-61 0.98, FAB-1000 and Mk 82 0.04 ft clear | lowest 0.20 ft (GBU-10), F500 0.50 |
+| 6 inner wing | tanks, Mk 82, Mk 84, FAB-1000, B-13, AIM-120, AIM-9M, AA-9, AS-16 | AA-6 0.16, AM-39 0.43, AS-30 0.30, AGM-88 0.12, GBU-10 0.09 | all 17 cross the door wall (case 1) | 0.96 (GBU-10) and up |
+| 7 outer wing, twin | tanks, Mk 82, Mk 84, FAB-1000, B-13, AIM-9M, AGM-65G, AA-9, AS-16, GBU-10 | AA-6 0.17, AM-39 0.26, AS-30 0.09, AGM-88 0.07 | clear (3 ft) | 1.00 and up |
+| 8 wingtip | none | AIM-9M, AIM-9B, AA-2 0.15; AA-11 0.20; AA-11B 0.28; AA-8 0.45; AT-12 0.71; AIM-9X 0.74; R-550 1.08; PL-7 1.33 (the fins of the larger shapes stand in the thin tip) | clear | 3.7 and up |
+
+Twin bars on row 7: AIM-9M x4 0.03 ft, AGM-65G x4 0.03, AGM-88 x4 0.05, Mk 82 x4
+0.47 ft between the two stores of a side (fins nearly touching on the first three).
+The centreline row's alternative missiles are all masks the retail record admits;
+none is a default and the real aircraft carries a tank, a bomb or a pod there, so
+the entries are listed, not decided. The large store on row 6 or 7 never meets the
+canards.
+
+**The AAS-38 row draws no body (John, 2026-11-10).** Row 3 is flags `0x8` at the
+reference point, the A-10 pattern, so under
+[the 2026-11-07 rule](#fixed-pods-draw-only-on-a-real-station-2026-11-07) it is a
+placeholder: nothing is drawn (stores preview and the triangle dump hold no pod
+geometry; `frames/GRI-5/crop3x-aas38-row-no-body.png` looks from the starboard side
+at the intake and finds none), while the sensor stays: the FLIR sight is read from
+the row (`fixed_sight`), not from the drawn list. A guard was added: the existing
+retail test `a_fixed_pod_record_names_no_shape_and_draws_a_fitted_body` now also
+covers the Gripen (no drawn pod, the sight still resolves, the only drawn pod is
+still the Rafale's). **Mass:** the loader's external-equipment sum skips rows
+flagged `0x8`, so the row's 350 lb was never counted for the Gripen (the A-10's and
+F-16C's pod rows are the same); that is the existing behaviour, unchanged here, and
+the 2026-11-07 text above ("keeps its mass accounting") means it is as it was. If
+John wants the 350 lb counted it is a GRI-6 change. The real FLIR sits under the starboard intake trunk (the game's own
+encyclopedia text, `GRIPEN.INF`); no pod is hung there.
+
+**Findings for John (nothing moved).**
+- **Wingtip rail offset.** The record's x is 44 units (14.67 ft), the shape's tip
+  edge 41 units (13.67 ft). The standard tip rule already centres the missile on
+  the tip's edge (store centre 13.67 ft, fin tips 14.40 ft), so the 1 ft excess is
+  absorbed and no move is needed; the 0.15 ft entry is the residual.
+- **Gun side.** Row 4 is at x +4 units (+1.33 ft, starboard), 0.67 ft up, 12.3 ft
+  forward; the fuselage section there spans x -2.4 to +2.7 ft, so the muzzle origin
+  is 1.1 ft inside the starboard skin. The real BK27 is on the port side of the lower
+  front fuselage (`GRIPEN.INF`). Options for GRI-6: keep the retail side (nothing is
+  drawn; only the muzzle origin of the shots), mirror it to x -4, or move it to the
+  skin. Not changed here.
+
+**Real Gripen, for plausibility only** (the decoded rows decide): the in-game
+encyclopedia lists seven store stations (two wingtip, two under each wing, one
+centreline), which the record matches. Public pages count eight on the JAS 39C/D (two
+wingtip, four underwing, one centreline, and two further fuselage stations under the
+intake trunks; the Gripen NG demonstrator "also allowed for two additional hardpoints
+to be added on the fuselage underside", Wikipedia, "Saab JAS 39 Gripen", accessed
+2026-11-10; airforce-technology.com, Gripen project page, and a defencetalk
+forum thread, same date: the sources disagree on seven or eight, none gives lateral
+offsets). The record's wing pairs are the real inner and outer pylon pairs and the
+wingtip pair the real AIM-9 rails; no designator pod station exists in the record.
+No station was added.
+
+Provenance: rows, masks, capacities, defaults spec-derived from `GRIPEN.PT` (GRI-0);
+pylon and rail depths and the tip rule the opinionated rules of 2026-10-13; the AAS-38
+handling John's decision of 2026-11-10 (opinionated) on the 2026-11-07 rule; the
+measurement, the clipping classification and the options are agent findings,
+2026-11-10; the estimates marked "not run" are agent estimates; real-aircraft station
+counts from public pages (secondary, conflicting).
