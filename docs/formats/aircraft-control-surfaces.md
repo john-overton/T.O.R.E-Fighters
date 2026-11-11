@@ -1111,3 +1111,84 @@ shape, re-verified at load); retraction directions from the cited public text;
 every hinge line, the twist and fold angles, the stow envelopes, the 0.774 rad
 closed brake angle and the plume scaling fitted (agent decisions 2026-11-10);
 engine count 2 from the record; nothing here is attributed to John.
+
+## F-15E control surfaces (F15E-3, 2026-11-10)
+
+Implementation, slice F15E-3, Claude Sonnet (sonnet-high). `f15e_animation.rs`
+now also owns the two all-moving stabilators, the two ailerons and the two
+inboard flaps, as further arms of `Rig::animate` and load-time checks in
+`Rig::load`. Rule 11 fold table (corners from the `state_neutral` dump; a
+script also confirmed that no other face lies wholly inside any moving panel):
+
+| Surface | Faces | Vertices | Moved | On the turn line | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Right stabilator | `4b5f`, `4b86`, `4ba7`, `4c5d`, `4c8a` | 4, 3, 4, 5, 4 | all | 0 (the spindle runs through the root chord midpoint, not a vertex) | 0 |
+| Left stabilator | `42f1`, `4318`, `4339`, `43ef`, `441c` | 4, 3, 4, 5, 4 | all | 0 | 0 |
+| Right aileron | `4b33`, `4ac4` | 4 each | all | 1 (the tip vertex 59, -27, 3) | 0 |
+| Left aileron | `42c5`, `41d9` | 4 each | all | 1 | 0 |
+| Right flap wedge | `5470`, `548f` (+ end triangle `5517`) | 4 each (3) | all | 0 (the line runs through the front edge's mid height) | 0 |
+| Left flap wedge | `5557`, `5576` (+ end triangle `55fe`) | 4 each (3) | all | 0 | 0 |
+| Fins | `4ae3`, `4b0a`; `4242`, `4269` | 4 each | none | n/a | all |
+
+**No face folds**: every moving face turns with its whole panel. Each stabilator
+is flat at z -1 (both windings, zero anhedral, the real jet has about 15
+degrees), root chord y -41 to -70, tip x 47 and -47. Only its aft root corner
+(21, -70, -1) and (-22, -70, -1) is shared with fixed faces (eight each); the
+forward root corner is shared with nothing fixed.
+
+**Stabilators (fitted, labelled as the F-15C's, TR-6).** Each panel turns about
+a lateral spindle (axis +X, no tilt) through its root chord midpoint, (21, -55.5,
+-1) right and (-22, -55.5, -1) left, so the tip moves. Angle about +X, radians:
+`(-0.30 * elevator - side * 0.10 * aileron).clamp(-0.40, 0.40)`, `side` +1 right,
+-1 left. A pull raises both trailing edges; a positive aileron raises the right
+and lowers the left (the aileron sense). Real F-15 stabilators take roll as
+well as pitch (the taileron standard, TR-6 entry above, and the F15E-0 review's taileron note); John's decision of
+2026-11-10 made them whole panels with roll for the F-15E. Magnitudes are the
+fleet's, not recovered. The aft root corner opens from the fuselage by
+`2 * 14.5 * sin(angle / 2)` units: 1.44 ft at the 0.30 rad pitch limit, 1.92 ft
+at the 0.40 rad pitch-plus-roll corner, the same as the F-15C's tail.
+
+**Ailerons (fitted).** Each aileron is a two-face wedge (top `4b33`/`42c5`,
+bottom `4ac4`/`41d9`) turned as one panel about its slanted front edge. The
+front (hinge) edge runs from (+-39, -24) to (+-59, -27); its root pair is
+three units thick (z 1 and 4) and its tip is one vertex (z 3), so the vertices
+are not collinear. Axis choice: the line from the root pair's mid point
+(+-39, -24, 2.5) to the tip vertex (+-59, -27, 3), turning outward. It keeps the
+tip vertex and the root mid point exactly fixed and moves each root vertex
+(1.5 units off the axis) by `2 * 1.5 * sin(angle / 2)`, which is the least any
+rigid turn that keeps the tip vertex can leave at the root (an axis through
+either root vertex leaves 3 units on the other). Travel `-aileron * 0.20` rad
+about the outward axis on both sides (the F-15C's 0.20, fitted): a positive
+aileron raises the right trailing edge and lowers the left. **Measured root
+gap: 0.0998 ft (0.30 units) at full travel** against the two fixed wing faces
+that share the hinge edge. The outboard trailing corner (59, -34, 3) is shared
+with two fixed wingtip faces (`49db`, `49f4`) and opens 0.46 ft there (7 units
+aft of the axis), and the inboard trailing corner (39, -30, 3) meets the flap's
+corner; neither is a skin hole in the neutral pose, both are the usual notch of
+a rigid surface and are visible in the frames. No partial or diagonal surface.
+
+**Flaps (fitted).** The two flap words are never set. The inboard wedge stays
+drawn and turns whole, trailing edge down, about the lateral line through its
+front edge's mid height (y -24, z 2.5), `0.80 * flaps` rad (46 degrees at full
+travel). The `-1` branch is the source's lowered flap, but a rigid wedge cannot
+equal it (its chord shrinks from 6 to 5 units while the trailing edge drops
+five); 0.80 rad is the turn that brings the wedge's trailing edge nearest the
+branch's, 0.74 units (0.25 ft) off, and the rig refuses a shape where that
+error exceeds one unit. The branch's end triangle (`55fe` left, `5517` right,
+outboard end only) is drawn while the flap is down, re-seated on the neutral
+wedge's trailing corner so it stays rigid with the flap, and hidden at flaps 0
+(the neutral wedge has no end triangle). Hinge-edge opening against the wing: 0.39
+ft at full flap (1.5 units off the line); the trailing corners, which touch
+fuselage and aileron faces, open 1.56 ft.
+
+**Rudders: none (John, 2026-11-10).** Each fin is one flat plate with no rudder
+face or word. The rig turns nothing for a rudder command, the probe's rudder
+control is `not-applicable` for the F-15E, and the probe requires every surface
+to stay on its neutral faces under it.
+
+Provenance: faces, corners, hinge edges and the `-1` branch spec-derived (retail
+shape, re-verified at load); the stabilator law is the F-15C's fitted law
+(agent decision on John's 2026-11-08 and 2026-11-10 requests), the aileron and
+flap travels, the axes and the closure re-seating fitted (agent decisions
+2026-11-10); nothing is attributed to John beyond the three decisions he made
+(whole-panel tailerons with roll, no rudder motion, size 1:1).

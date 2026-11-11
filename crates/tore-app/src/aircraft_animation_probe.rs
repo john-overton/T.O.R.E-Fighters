@@ -171,12 +171,11 @@ impl Control {
         match self {
             Self::Rudder if id == Id::Ch47 => Expectation::Required,
             Self::Rudder | Self::Flaps if helicopter => Expectation::Unknown,
-            // F15E-4 maps the gear, speed brake and plumes only. The stabilators,
-            // ailerons, flaps and fins are F15E-3's: they stay unreviewed (not
-            // gated) until that slice restores `Required` here.
-            Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps if id == Id::F15E => {
-                Expectation::Unknown
-            }
+            // F15E-3 (2026-11-10): the F-15E has no rudder motion (John's
+            // decision of the same day; the source has no rudder geometry and
+            // the fin is one fixed plate), so the pedals must not move anything.
+            // Its stabilators, ailerons and flaps are `Required` below.
+            Self::Rudder if id == Id::F15E => Expectation::Unsupported,
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,

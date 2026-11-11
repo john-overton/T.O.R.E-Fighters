@@ -1,11 +1,13 @@
 //! F-15E Strike Eagle (`F15E.SH`) own-source rig: (F15E-4) the eighteen rigid
-//! gear plates, the dorsal speed brake and the two afterburner plumes. The
-//! control surfaces (stabilators, ailerons, flaps, fins) join this rig in
-//! F15E-3 as further arms of [`Rig::animate`] and further load-time checks in
-//! [`Rig::load`]; nothing here has to be restructured for them.
-//! See docs/spec/variety-animation.md "F-15E gear, speed brake and plume fit"
-//! and docs/formats/aircraft-control-surfaces.md "F-15E gear, speed brake and
-//! plume (F15E-4, 2026-11-10)".
+//! gear plates, the dorsal speed brake and the two afterburner plumes; (F15E-3)
+//! the control surfaces: the two all-moving stabilators (whole panels with
+//! pitch and differential roll), the two ailerons (whole panels about their
+//! slanted hinge edges) and the two inboard flaps (whole panels, with the source
+//! lowered flap's end triangle). There is no rudder: the fins stay put.
+//! See docs/spec/variety-animation.md "F-15E gear, speed brake and plume fit" and
+//! "F-15E control surfaces", and docs/formats/aircraft-control-surfaces.md
+//! "F-15E gear, speed brake and plume (F15E-4, 2026-11-10)" and "F-15E control
+//! surfaces (F15E-3, 2026-11-10)".
 //!
 //! F15E.SH ships five state words (the base order of the F-15 family, but a
 //! different shape from the F-15C's, so nothing here is shared with
@@ -14,10 +16,12 @@
 //! The flap words are signed. Value 1 deletes the inboard flap wedge (two
 //! faces) and adds nothing; value -1 swaps it for a lowered copy (two faces
 //! whose trailing edge sits five units lower) and adds one end-closing
-//! triangle. The rig never sets either: the neutral wedge stays drawn in every
-//! pose, so no surface ever vanishes. F15E-3 owns the flap droop and may use the
-//! reviewed -1 branch. There is no rudder, hook, slat, canopy, nozzle or
-//! gear-door word and none is invented.
+//! triangle. The rig never sets either word: the neutral wedge stays drawn in
+//! every pose and turns whole (rigid) toward the reviewed lowered pose, and the
+//! lowered branch's end triangle is drawn, rigid with the flap, while it is
+//! down. There is no rudder, hook, slat, canopy, nozzle or gear-door word and
+//! none is invented. The stabilators and ailerons have no word at all; they
+//! are the neutral faces, found by address and checked at load.
 //!
 //! The shape arrives scaled per axis (the F-15E has the identity scale until
 //! John decides its size). Every point named here is in shape units and is
@@ -88,9 +92,74 @@ pub(crate) const FLAME: [usize; 8] = [
 ];
 const FLAME_ROOT: f32 = -61.;
 const FLAME_TIP: f32 = -115.;
-/// The inboard flap wedges the flap words delete or lower.
-const INBOARD_L: [usize; 2] = [0x5557, 0x5576];
-const INBOARD_R: [usize; 2] = [0x5470, 0x548f];
+/// The inboard flap wedges the flap words delete or lower. Each is a top and
+/// a bottom quad (x 21 to 39, y -24 to -30, front edge z 1 and 4, trailing edge
+/// z 3). They are the flap panels the rig turns whole.
+pub(crate) const INBOARD_L: [usize; 2] = [0x5557, 0x5576];
+pub(crate) const INBOARD_R: [usize; 2] = [0x5470, 0x548f];
+/// The lowered flap branch's end triangle (word value -1): left `55fe`, right
+/// `5517`, at the outboard end (x -39, 39). The rig draws it only while the flap
+/// is down, with its trailing corner taken from the neutral wedge so it stays
+/// rigid with the flap.
+pub(crate) const FLAP_END_L: usize = 0x55fe;
+pub(crate) const FLAP_END_R: usize = 0x5517;
+/// Flap hinge: the lateral line through the front edge's mid height
+/// (y -24, z 2.5; the edge runs z 1 to 4). Flaps down turn the whole wedge by
+/// [`FLAP_DOWN`] about it, trailing edge down. Fitted to the lowered branch.
+const FLAP_HINGE: [f32; 3] = [0., -24., 2.5];
+/// Full flap travel, radians. Fitted (agent decision 2026-11-10): the rigid
+/// turn that brings the wedge's trailing edge closest to the source's lowered
+/// copy (trailing edge at y -29, z -2), about 0.74 units off; the source copy
+/// is a foreshortened silhouette (chord 5 against 6), so no rigid turn matches
+/// it exactly. Checked against the shape at load.
+const FLAP_DOWN: f64 = 0.80;
+/// Stabilators: the five faces of each all-moving panel (both windings; flat at
+/// z -1, no anhedral; root chord y -41 to -70 on x 21 / -22, tip x 47 / -47).
+/// Each turns whole about a lateral spindle through its root chord midpoint.
+pub(crate) const STAB_R: [usize; 5] = [0x4b5f, 0x4b86, 0x4ba7, 0x4c5d, 0x4c8a];
+pub(crate) const STAB_L: [usize; 5] = [0x42f1, 0x4318, 0x4339, 0x43ef, 0x441c];
+const STAB_SPINDLE_Y: f32 = -55.5;
+const STAB_SPINDLE_Z: f32 = -1.;
+/// Ailerons: a top and a bottom quad per side (x 39 to 59). The front (hinge)
+/// edge is slanted, from (39, -24) to (59, -27), and its root pair is 3 units
+/// thick (z 1 and 4) while its tip is one vertex (z 3), so the vertices are not
+/// collinear. The axis through the root pair's mid point (39, -24, 2.5) and the
+/// tip vertex (59, -27, 3) keeps the tip vertex and the root mid point fixed and
+/// moves each root vertex (1.5 units off the axis) a chord of
+/// 2 * 1.5 * sin(angle / 2), about 0.30 units (0.10 ft) at full travel, the
+/// least a rigid turn about any line can leave there.
+pub(crate) const AIL_R: [usize; 2] = [0x4b33, 0x4ac4];
+pub(crate) const AIL_L: [usize; 2] = [0x42c5, 0x41d9];
+const AIL_ROOT: [f32; 3] = [39., -24., 2.5];
+const AIL_TIP: [f32; 3] = [59., -27., 3.];
+/// Full aileron travel, radians (the F-15C's, fitted).
+const AIL_TRAVEL: f64 = 0.20;
+/// Stabilator pitch and differential roll terms, radians (the F-15C's law,
+/// fitted), and the clamp on their sum.
+const STAB_PITCH: f64 = 0.30;
+const STAB_ROLL: f64 = 0.10;
+const STAB_LIMIT: f64 = 0.40;
+
+/// Shape units between the wedge's trailing corner turned by [`FLAP_DOWN`] and
+/// the source's lowered trailing corner (y -29, z -2).
+pub(crate) fn flap_fit_error() -> f64 {
+    let (dy, dz) = (
+        f64::from(-30. - FLAP_HINGE[1]),
+        f64::from(3. - FLAP_HINGE[2]),
+    );
+    let (sin, cos) = FLAP_DOWN.sin_cos();
+    let y = f64::from(FLAP_HINGE[1]) + dy * cos - dz * sin;
+    let z = f64::from(FLAP_HINGE[2]) + dy * sin + dz * cos;
+    ((y + 29.).powi(2) + (z + 2.).powi(2)).sqrt()
+}
+
+/// The stabilator turn for an elevator and an aileron command, radians about
+/// +X (negative raises the trailing edge). Positive aileron raises the right
+/// trailing edge and lowers the left.
+pub(crate) fn stabilator_angle(side: f64, elevator: f64, aileron: f64) -> f64 {
+    (-STAB_PITCH * elevator.clamp(-1., 1.) - side * STAB_ROLL * aileron.clamp(-1., 1.))
+        .clamp(-STAB_LIMIT, STAB_LIMIT)
+}
 
 fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
     let mut found = shape.faces.iter().filter(|f| f.address == address);
@@ -234,22 +303,130 @@ impl Rig {
         // sets either word (F15E-3 owns the flap droop).
         branch(bytes, &original, 0x80d8, 1, &[], &INBOARD_L)?;
         branch(bytes, &original, 0x80de, 1, &[], &INBOARD_R)?;
-        branch(
+        let lowered_l = branch(
             bytes,
             &original,
             0x80d8,
             -1,
-            &[0x55c0, 0x55df, 0x55fe],
+            &[0x55c0, 0x55df, FLAP_END_L],
             &INBOARD_L,
-        )?;
-        branch(
+        )?
+        .scaled(axis);
+        let lowered_r = branch(
             bytes,
             &original,
             0x80de,
             -1,
-            &[0x54d9, 0x54f8, 0x5517],
+            &[0x54d9, 0x54f8, FLAP_END_R],
             &INBOARD_R,
-        )?;
+        )?
+        .scaled(axis);
+        // The end triangle is the lowered copy's, re-seated on the neutral
+        // wedge's trailing corner so it turns with the flap.
+        if flap_fit_error() > 1. {
+            return Err("F15E.SH flap travel too far from the lowered branch".into());
+        }
+        let mut flap_ends = Vec::new();
+        for (lowered, end, x) in [
+            (&lowered_l, FLAP_END_L, -1f32),
+            (&lowered_r, FLAP_END_R, 1.),
+        ] {
+            let mut triangle = one(lowered, end)?.clone();
+            // The corners in any order: the lowered trailing corner (y -29,
+            // z -2) and the two front corners (z 1 and 4).
+            let lowered_corner = sp([x * 39., -29., -2.]);
+            let reviewed = [
+                sp([x * 39., -24., 1.]),
+                lowered_corner,
+                sp([x * 39., -24., 4.]),
+            ];
+            if triangle.positions.len() != 3
+                || !reviewed.iter().all(|r| triangle.positions.contains(r))
+            {
+                return Err(format!("unreviewed F15E.SH flap end {end:x}").into());
+            }
+            for p in &mut triangle.positions {
+                if *p == lowered_corner {
+                    *p = sp([x * 39., -30., 3.]);
+                }
+            }
+            flap_ends.push(triangle);
+        }
+        // Every wedge, aileron and stabilator is a whole panel of reviewed
+        // faces; the corners are checked so a different shape is refused. The
+        // stabilators are flat at z -1 (no anhedral) and each panel's faces
+        // cover exactly its seven corners.
+        let panel = |ids: &[usize], allowed: &[[f32; 3]], sides: &[usize]| -> AppResult<()> {
+            let mut seen = BTreeSet::new();
+            for (&address, &count) in ids.iter().zip(sides) {
+                let face = one(&shape, address)?;
+                if face.positions.len() != count
+                    || !face
+                        .positions
+                        .iter()
+                        .all(|&p| allowed.iter().any(|&q| is(p, q)))
+                {
+                    return Err(format!("unreviewed F15E.SH panel face {address:x}").into());
+                }
+                seen.extend(face.positions.iter().map(|p| p.map(f32::to_bits)));
+            }
+            if seen.len() != allowed.len() {
+                return Err(format!("unreviewed F15E.SH panel {:x}", ids[0]).into());
+            }
+            Ok(())
+        };
+        for x in [1f32, -1.] {
+            let m = |v: [f32; 3]| [x * v[0], v[1], v[2]];
+            let inner = if x > 0. { 21. } else { -22. };
+            let stab = if x > 0. { &STAB_R } else { &STAB_L };
+            let corners = if x > 0. {
+                [
+                    [47., -67., -1.],
+                    [41., -73., -1.],
+                    [21., -70., -1.],
+                    [30., -50., -1.],
+                    [21., -41., -1.],
+                    [30., -47., -1.],
+                    [47., -65., -1.],
+                ]
+            } else {
+                [
+                    [-47., -67., -1.],
+                    [-42., -73., -1.],
+                    [-22., -70., -1.],
+                    [-31., -50., -1.],
+                    [-22., -41., -1.],
+                    [-31., -47., -1.],
+                    [-47., -65., -1.],
+                ]
+            };
+            panel(stab, &corners, &[4, 3, 4, 5, 4])?;
+            let ail = if x > 0. { &AIL_R } else { &AIL_L };
+            let wedge = if x > 0. { &INBOARD_R } else { &INBOARD_L };
+            panel(
+                ail,
+                &[
+                    m([39., -30., 3.]),
+                    m([59., -34., 3.]),
+                    m([59., -27., 3.]),
+                    m([39., -24., 1.]),
+                    m([39., -24., 4.]),
+                ],
+                &[4, 4],
+            )?;
+            panel(
+                wedge,
+                &[
+                    m([39., -24., 1.]),
+                    [inner, -24., 1.],
+                    [inner, -30., 3.],
+                    m([39., -30., 3.]),
+                    [inner, -24., 4.],
+                    m([39., -24., 4.]),
+                ],
+                &[4, 4],
+            )?;
+        }
         // The gear, brake and flame words add exactly the reviewed plates and
         // remove nothing. Each plate is one whole four-corner quad (both
         // windings) whose corners are checked against the reviewed source
@@ -397,14 +574,71 @@ impl Rig {
         {
             shape.faces.push(source);
         }
+        shape.faces.extend(flap_ends);
         Ok((Self, shape))
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
         let mut result = source.clone();
-        // F15E-3 adds the stabilators, ailerons, flaps and fins as arms above
-        // these device arms; each turns whole about its own hinge.
-        if GEAR.contains(&a) {
+        if STAB_R.contains(&a) || STAB_L.contains(&a) {
+            // All-moving stabilator: the whole five-face panel, both windings,
+            // turns rigidly about a lateral spindle through its root chord
+            // midpoint. The panel is flat (z -1, no anhedral), so the spindle is
+            // square to the fuselage. Pitch pulls both trailing edges up; the
+            // fitted differential roll raises the right and lowers the left for
+            // a positive aileron. No corner is pinned, so a small root gap to
+            // the fuselage is accepted (the aft root corner, 14.5 units from
+            // the spindle, is the only vertex shared with a fixed face).
+            let left = STAB_L.contains(&a);
+            let (root_x, side) = if left { (-22., -1.) } else { (21., 1.) };
+            let angle = stabilator_angle(side, state.elevator, state.aileron);
+            if angle != 0. {
+                turn(
+                    &mut result,
+                    sp([root_x, STAB_SPINDLE_Y, STAB_SPINDLE_Z]),
+                    sp([1., 0., 0.]),
+                    angle,
+                );
+            }
+        } else if AIL_R.contains(&a) || AIL_L.contains(&a) {
+            // Aileron: the whole wedge (both windings) turns about its slanted
+            // hinge edge, the line from the root pair's mid point to the tip
+            // vertex, outward. Positive aileron raises the right trailing edge
+            // and lowers the left (a turn of -aileron about the outward axis on
+            // both sides).
+            let side = if AIL_R.contains(&a) { 1. } else { -1. };
+            let root = sp([side * AIL_ROOT[0], AIL_ROOT[1], AIL_ROOT[2]]);
+            let tip = sp([side * AIL_TIP[0], AIL_TIP[1], AIL_TIP[2]]);
+            let angle = -state.aileron.clamp(-1., 1.) * AIL_TRAVEL;
+            if angle != 0. {
+                turn(
+                    &mut result,
+                    root,
+                    std::array::from_fn(|k| tip[k] - root[k]),
+                    angle,
+                );
+            }
+        } else if INBOARD_R.contains(&a)
+            || INBOARD_L.contains(&a)
+            || a == FLAP_END_R
+            || a == FLAP_END_L
+        {
+            // Flap: the whole wedge turns trailing edge down about the lateral
+            // line through its front edge's mid height; the source's lowered
+            // end triangle is drawn only while the flap is down.
+            let travel = state.flaps.clamp(0., 1.);
+            if (a == FLAP_END_R || a == FLAP_END_L) && travel <= 0. {
+                return None;
+            }
+            if travel > 0. {
+                turn(
+                    &mut result,
+                    sp(FLAP_HINGE),
+                    sp([1., 0., 0.]),
+                    travel * FLAP_DOWN,
+                );
+            }
+        } else if GEAR.contains(&a) {
             if state.gear <= 0. {
                 return None;
             }
@@ -824,6 +1058,247 @@ mod tests {
             rig.animate(&vertical, &s).unwrap().positions,
             vertical.positions
         );
+    }
+    fn stab_panel(left: bool) -> Vec<Face> {
+        let x = |v: f32| if left { -v } else { v };
+        let (ids, tip, root) = if left {
+            (STAB_L, 42., 22.)
+        } else {
+            (STAB_R, 41., 21.)
+        };
+        vec![
+            face(
+                ids[0],
+                &[
+                    [x(47.), -67., -1.],
+                    [x(tip), -73., -1.],
+                    [x(root), -70., -1.],
+                    [x(30.), -50., -1.],
+                ],
+            ),
+            face(
+                ids[1],
+                &[
+                    [x(root), -70., -1.],
+                    [x(root), -41., -1.],
+                    [x(30.), -50., -1.],
+                ],
+            ),
+            face(
+                ids[3],
+                &[
+                    [x(tip), -73., -1.],
+                    [x(47.), -67., -1.],
+                    [x(30.), -50., -1.],
+                    [x(root), -41., -1.],
+                    [x(root), -70., -1.],
+                ],
+            ),
+        ]
+    }
+    fn mean(points: &[[f32; 3]]) -> [f32; 3] {
+        std::array::from_fn(|k| points.iter().map(|p| p[k]).sum::<f32>() / points.len() as f32)
+    }
+    #[test]
+    fn stabilators_turn_as_whole_rigid_panels_about_the_root_chord_midpoint() {
+        let rig = rig();
+        let mut s = state();
+        for (left, side) in [(false, 1f32), (true, -1.)] {
+            let panel = stab_panel(left);
+            let source = all_points(&panel);
+            let root = if left { -22. } else { 21. };
+            for control in [-1., -0.5, 0., 0.5, 1.] {
+                for (elevator, aileron) in [(control, 0.), (0., control), (control, 1.)] {
+                    s.elevator = elevator;
+                    s.aileron = aileron;
+                    let moved = posed(&rig, &panel, &s);
+                    let out = all_points(&moved);
+                    assert!(spread(&source, &out) < 2e-3, "not rigid");
+                    // The two root corners keep their mid point.
+                    let (a, b) = (moved[1].positions[0], moved[1].positions[1]);
+                    let middle = mean(&[a, b]);
+                    let want = sp([root, STAB_SPINDLE_Y, STAB_SPINDLE_Z]);
+                    for k in 0..3 {
+                        assert!((middle[k] - want[k]).abs() < 1e-4);
+                    }
+                    // The trailing tip corner follows the net command: up for
+                    // pull, and up on the right for a positive aileron.
+                    let net =
+                        (0.30 * elevator + f64::from(side) * 0.10 * aileron).clamp(-0.40, 0.40);
+                    let dz = moved[2].positions[0][2] - panel[2].positions[0][2];
+                    if net == 0. {
+                        assert_eq!(out, source);
+                    } else {
+                        assert!(f64::from(dz) * net > 0., "{left} {elevator} {aileron}");
+                    }
+                    for (m, p) in moved.iter().zip(&panel) {
+                        assert_eq!(m.uv, p.uv);
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn stabilator_travel_is_the_clamped_pitch_plus_roll_law() {
+        assert_eq!(stabilator_angle(1., 1., 0.), -0.30);
+        assert_eq!(stabilator_angle(1., 0., 1.), -0.10);
+        assert_eq!(stabilator_angle(-1., 0., 1.), 0.10);
+        assert!((stabilator_angle(1., 1., 1.) + 0.40).abs() < 1e-12);
+        assert!((stabilator_angle(-1., 1., 1.) + 0.20).abs() < 1e-12);
+        assert_eq!(stabilator_angle(1., 9., 9.), -0.40);
+    }
+    fn aileron(left: bool) -> Vec<Face> {
+        let x = |v: f32| if left { -v } else { v };
+        let ids = if left { AIL_L } else { AIL_R };
+        vec![
+            face(
+                ids[0],
+                &[
+                    [x(39.), -30., 3.],
+                    [x(59.), -34., 3.],
+                    [x(59.), -27., 3.],
+                    [x(39.), -24., 1.],
+                ],
+            ),
+            face(
+                ids[1],
+                &[
+                    [x(59.), -34., 3.],
+                    [x(39.), -30., 3.],
+                    [x(39.), -24., 4.],
+                    [x(59.), -27., 3.],
+                ],
+            ),
+        ]
+    }
+    #[test]
+    fn ailerons_turn_whole_about_the_slanted_hinge_and_roll_oppositely() {
+        let rig = rig();
+        let mut s = state();
+        let tip_aft = sp([59., -34., 3.])[2];
+        for (left, side) in [(false, 1f32), (true, -1.)] {
+            let panel = aileron(left);
+            let source = all_points(&panel);
+            for value in [-1., -0.5, 0., 0.5, 1.] {
+                s.aileron = value;
+                let moved = posed(&rig, &panel, &s);
+                let out = all_points(&moved);
+                assert!(spread(&source, &out) < 2e-3, "not rigid");
+                // The hinge tip vertex and the root pair's mid point stay.
+                let tip = sp([side * 59., -27., 3.]);
+                for (before, after) in panel[0].positions.iter().zip(&moved[0].positions) {
+                    if *before == tip {
+                        for k in 0..3 {
+                            assert!((after[k] - tip[k]).abs() < 1e-4);
+                        }
+                    }
+                }
+                let middle = mean(&[moved[0].positions[3], moved[1].positions[2]]);
+                let want = sp([side * 39., -24., 2.5]);
+                for k in 0..3 {
+                    assert!((middle[k] - want[k]).abs() < 1e-4);
+                }
+                // Positive aileron raises the right aft tip and lowers the left.
+                let dz = moved[0].positions[1][2] - tip_aft;
+                if value == 0. {
+                    assert_eq!(out, source);
+                } else {
+                    assert!(dz * side * value as f32 > 0., "{left} {value}");
+                }
+                // The root vertices (1.5 units off the axis) swing a chord of
+                // 2 * 1.5 * sin(angle / 2) at most.
+                let root_top = moved[0].positions[3];
+                let before = panel[0].positions[3];
+                let gap = (0..3)
+                    .map(|k| (root_top[k] - before[k]).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                assert!(gap <= 3. * (0.1 * value.abs() as f32).sin() + 1e-3);
+            }
+        }
+    }
+    #[test]
+    fn flaps_turn_whole_toward_the_lowered_branch_and_draw_its_end_triangle() {
+        let rig = rig();
+        let mut s = state();
+        assert!(flap_fit_error() < 0.8);
+        let top = face(
+            0x5470,
+            &[
+                [39., -24., 1.],
+                [21., -24., 1.],
+                [21., -30., 3.],
+                [39., -30., 3.],
+            ],
+        );
+        let bottom = face(
+            0x548f,
+            &[
+                [21., -24., 4.],
+                [39., -24., 4.],
+                [39., -30., 3.],
+                [21., -30., 3.],
+            ],
+        );
+        let end = face(
+            FLAP_END_R,
+            &[[39., -24., 1.], [39., -30., 3.], [39., -24., 4.]],
+        );
+        let wedge = [top.clone(), bottom.clone()];
+        s.flaps = 0.;
+        assert_eq!(posed(&rig, &wedge, &s)[0].positions, top.positions);
+        assert!(rig.animate(&end, &s).is_none());
+        let mut last = 3f32;
+        for flaps in [0.25, 0.5, 0.75, 1.] {
+            s.flaps = flaps;
+            let moved = posed(&rig, &wedge, &s);
+            assert!(spread(&all_points(&wedge), &all_points(&moved)) < 2e-3);
+            // The trailing edge only falls; the front edge's mid height stays.
+            let trailing = moved[0].positions[3][2];
+            assert!(trailing < last);
+            last = trailing;
+            let front = mean(&[moved[0].positions[0], moved[1].positions[1]]);
+            let want = sp([39., -24., 2.5]);
+            for k in 0..3 {
+                assert!((front[k] - want[k]).abs() < 1e-4);
+            }
+            // The end triangle is rigid with the wedge's own end corners.
+            let closing = rig.animate(&end, &s).unwrap();
+            assert_eq!(closing.positions[0], moved[0].positions[0]);
+            assert_eq!(closing.positions[1], moved[0].positions[3]);
+            assert_eq!(closing.positions[2], moved[1].positions[1]);
+        }
+        // Full travel lands near the source's lowered trailing corner (y -29,
+        // z -2).
+        let corner = sp([39., -29., -2.]);
+        let got = posed(&rig, &wedge, &s)[0].positions[3];
+        let off = (0..3)
+            .map(|k| (got[k] - corner[k]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        assert!(off < 0.8, "{off}");
+    }
+    #[test]
+    fn the_fins_and_the_rudder_command_leave_every_surface_still() {
+        let rig = rig();
+        let mut s = state();
+        s.rudder = 1.;
+        let all: Vec<Face> = stab_panel(false)
+            .into_iter()
+            .chain(aileron(true))
+            .chain([face(
+                0x4ae3,
+                &[
+                    [21., -59., 5.],
+                    [21., -62., 43.],
+                    [21., -54., 43.],
+                    [21., -28., 3.],
+                ],
+            )])
+            .collect();
+        for f in &all {
+            assert_eq!(rig.animate(f, &s).unwrap().positions, f.positions);
+        }
     }
     #[test]
     fn faces_outside_the_devices_pass_through_unchanged() {

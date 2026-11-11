@@ -248,9 +248,9 @@ fn specification(id: Id) -> Option<Spec> {
             // reviews). Only the gear word is mapped; the other words are
             // pinned and unmapped, so each aircraft loads with the shared
             // fitted gear law until its own rig slice (X-3, X-4).
-            // F15E.SH: five words, gear 0x80cc adds 18 faces. F15E-4 loads it
-            // through its own `f15e_animation` rig (gear, speed brake, plumes;
-            // F15E-3 adds the control surfaces); this entry still gives the
+            // F15E.SH: five words, gear 0x80cc adds 18 faces. F15E-4 and F15E-3
+            // load it through its own `f15e_animation` rig (gear, speed brake,
+            // plumes, stabilators, ailerons, flaps); this entry still gives the
             // load-time layout, the shape scale and `supported`.
             Id::F15E => (
                 28906,

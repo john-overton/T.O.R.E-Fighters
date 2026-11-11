@@ -2615,6 +2615,19 @@ Provenance: spec-derived (retail shape, face counts and twins read as data);
 the omit-not-fill decal rule follows the existing texture-state decision;
 frames are review evidence only.
 
+### F-15E control surfaces resolved (F15E-3, 2026-11-10)
+
+The review's open surface items are answered by slice F15E-3 (details, fold
+table and measured gaps in [control-surface
+geometry](aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10)).
+The slanted aileron hinge is a whole-panel turn about the line from the root
+pair's mid point to the tip vertex, root gap 0.10 ft at full travel; the
+stabilators are whole panels with roll about a lateral spindle through the root
+chord midpoint; the flap wedge turns whole and the `-1` branch's end triangle
+draws while it is down; rudders: none, as John decided the same day. The
+"Rudders" and "Taileron" options in "F-15E surfaces (for John)" above are
+settled by his 2026-11-10 answers (no rudder motion, tailerons with roll).
+
 ## Gripen source review (2026-11-10)
 
 Research mode, slice GRI-0 (batch 5). This reviews `GRIPEN.PT` and its

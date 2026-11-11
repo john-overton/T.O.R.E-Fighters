@@ -819,3 +819,24 @@ brake and exhaust `required moved`, a 202-value dense gear sweep with every row
 passing (rigidity at most 2.2e-6 ft, anchor gap 0, skin gap 0, lowest gear point
 at the scaled low point at gear 1) and the closed brake within 8e-6 ft of the
 ridge. Not a claim of original retraction timing.
+
+## F-15E control surfaces
+
+Agent-authored whole-panel motion, 2026-11-10 (slice F15E-3), over `F15E.SH` at
+its own size. Faces, hinge choices, fold table, measured gaps and provenance are
+in [control-surface
+geometry](../formats/aircraft-control-surfaces.md#f-15e-control-surfaces-f15e-3-2026-11-10).
+Magnitudes are fitted, not recovered laws.
+
+| Control | Fitted motion |
+| --- | --- |
+| Pitch and roll (stabilators) | Each whole five-face panel turns about a lateral spindle through its root chord midpoint by `(-0.30 * elevator - side * 0.10 * aileron)` radians, clamped to 0.40 (the F-15C's law). A pull raises both trailing edges; a positive aileron raises the right and lowers the left. |
+| Roll (ailerons) | Each two-face wedge turns whole about its slanted front edge, the line from the root pair's mid point to the tip vertex, by `-aileron * 0.20` radians about the outward axis: positive raises the right trailing edge and lowers the left. Root gap 0.10 ft at full travel. |
+| Flaps | Each inboard wedge turns whole, trailing edge down, about the lateral line through its front edge's mid height by `0.80 * flaps` radians (46 degrees), the rigid turn nearest the source's lowered branch; the branch's end triangle draws while the flap is down. |
+| Rudder | None. The fins are fixed (John, 2026-11-10: the source has no rudder geometry). |
+
+Acceptance: `--animation-probe` reports elevator, aileron and flaps `required
+moved` and rudder `not-applicable`; every pose is a rigid whole panel (rigidity
+at most 3e-6 ft) with anchors held, skin gap 0 and the signed direction, over
+the 25 pitch and roll poses and 21-value elevator, aileron and flap sweeps. Not a
+claim of original control timing or deflection limits.

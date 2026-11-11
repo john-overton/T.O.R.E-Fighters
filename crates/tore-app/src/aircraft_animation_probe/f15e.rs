@@ -6,8 +6,15 @@
 //! afterburner plumes. Measures the shared Airframe output and never repeats
 //! the rig's algorithm. Witness points are named in shape units and scaled with
 //! the aircraft's own per-axis scale (the probe geometry is the scaled shape).
-//! F15E-3 adds the control-surface witnesses to `check` and the pose grids to
-//! `combinations`.
+//!
+//! F15E-3 adds the control surfaces: the two all-moving stabilators (five faces
+//! each, one rigid panel about a lateral spindle through the root chord
+//! midpoint; pitch plus differential roll), the two ailerons (two faces each,
+//! one rigid panel about the slanted hinge from the root pair's mid point to the
+//! tip vertex) and the two inboard flaps (two faces each plus the lowered
+//! branch's end triangle). The fins have no rudder motion (John, 2026-11-10):
+//! the Rudder control is not-applicable and `check` requires every surface to
+//! stay exactly at its neutral faces under a rudder command.
 use super::*;
 use tore_formats::aircraft::scale::scale_point;
 
@@ -25,6 +32,15 @@ const BRAKE: [usize; 4] = [0x568c, 0x56a3, 0x56ba, 0x56d1];
 const FLAME: [usize; 8] = [
     0x574f, 0x5776, 0x579d, 0x57c4, 0x57eb, 0x5812, 0x5839, 0x5860,
 ];
+
+const STAB_R: [usize; 5] = [0x4b5f, 0x4b86, 0x4ba7, 0x4c5d, 0x4c8a];
+const STAB_L: [usize; 5] = [0x42f1, 0x4318, 0x4339, 0x43ef, 0x441c];
+const AIL_R: [usize; 2] = [0x4b33, 0x4ac4];
+const AIL_L: [usize; 2] = [0x42c5, 0x41d9];
+const FLAP_R: [usize; 2] = [0x5470, 0x548f];
+const FLAP_L: [usize; 2] = [0x5557, 0x5576];
+const FLAP_END_R: usize = 0x5517;
+const FLAP_END_L: usize = 0x55fe;
 
 fn sp(p: [f32; 3]) -> [f32; 3] {
     scale_point(ID, p)
@@ -338,6 +354,191 @@ fn exhaust(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Me
     }
 }
 
+/// Faces of one group that differ from the reference mark a neutral mismatch.
+fn unchanged(reference: &[Face], pose: &[Face], ids: &[usize], m: &mut Metrics) {
+    let old = group(reference, ids);
+    let new = group(pose, ids);
+    if old.len() != new.len() {
+        m.reviewed_neutral_mismatch = true;
+    }
+    for (key, face) in &old {
+        match new.get(key) {
+            Some(after) if face.positions == after.positions => {}
+            _ => m.reviewed_neutral_mismatch = true,
+        }
+    }
+}
+
+/// Mid point of two reference corners followed into the pose, each corner
+/// averaged over its occurrences first (corners occur in unequal numbers of
+/// faces). Distance in feet from the reference mid point.
+fn midpoint_gap(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    corners: [[f32; 3]; 2],
+    scale: f32,
+) -> Option<f32> {
+    let mut means = Vec::new();
+    for corner in corners {
+        let moved = f4::witness_positions(old, new, corner);
+        if moved.is_empty() {
+            return None;
+        }
+        means.push(std::array::from_fn::<f32, 3, _>(|k| {
+            moved.iter().map(|p| p[k]).sum::<f32>() / moved.len() as f32
+        }));
+    }
+    let now: [f32; 3] = std::array::from_fn(|k| (means[0][k] + means[1][k]) / 2.);
+    let was: [f32; 3] = std::array::from_fn(|k| (corners[0][k] + corners[1][k]) / 2.);
+    Some(distance(now, was) * scale)
+}
+
+/// Whole-panel gates shared by a group: rigid, no skin gap between its faces.
+fn whole_panel(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32, m: &mut Metrics) {
+    group_skin_gap(reference, pose, ids, scale, m);
+    let error = rigidity(reference, pose, ids, scale);
+    m.reviewed_rigid_panel_error = m.reviewed_rigid_panel_error.max(error.min(1e9));
+}
+
+/// Direction of the net command on a witness's Z (feet times the sign).
+fn z_direction(
+    old: &BTreeMap<FaceKey, &Face>,
+    new: &BTreeMap<FaceKey, &Face>,
+    witness: [f32; 3],
+    sign: f32,
+    scale: f32,
+    m: &mut Metrics,
+) {
+    let qs = f4::witness_positions(old, new, witness);
+    m.reviewed_direction_failures += usize::from(qs.is_empty());
+    for q in qs {
+        m.reviewed_direction_failures += usize::from((q[2] - witness[2]) * scale * sign <= EPSILON);
+    }
+}
+
+/// The stabilators, ailerons and flaps for one combined command (`elevator`
+/// and `aileron` in -1..=1, `flaps` in 0..=1). A surface with a zero net
+/// command must be exactly the reference; one with a net command must be a
+/// rigid whole panel with its anchor held, no skin gap and the trailing edge
+/// moving the signed way. The rudder command is not a parameter: nothing may
+/// react to it.
+fn surfaces(
+    reference: &[Face],
+    pose: &[Face],
+    scale: f32,
+    m: &mut Metrics,
+    elevator: f64,
+    aileron: f64,
+    flaps: f64,
+) {
+    // Stabilators: pull raises both trailing edges, positive aileron raises the
+    // right and lowers the left. Pitch (3 parts) outweighs roll (1 part) in the
+    // fitted law, so the sign is that of 3 * pitch + side * roll.
+    for (ids, side, root, tip_in, tip_out) in [
+        (
+            &STAB_R[..],
+            1f32,
+            21f32,
+            [41f32, -73., -1.],
+            [47f32, -67., -1.],
+        ),
+        (&STAB_L[..], -1., -22., [-42., -73., -1.], [-47., -67., -1.]),
+    ] {
+        let net = 3. * elevator as f32 + side * aileron as f32;
+        if net == 0. {
+            unchanged(reference, pose, ids, m);
+            continue;
+        }
+        whole_panel(reference, pose, ids, scale, m);
+        let (old, new) = (group(reference, ids), group(pose, ids));
+        // The root chord midpoint is the spindle: it never moves.
+        let corners = [sp([root, -41., -1.]), sp([root, -70., -1.])];
+        match midpoint_gap(&old, &new, corners, scale) {
+            Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+            None => m.reviewed_anchor_missing = true,
+        }
+        // Both aft tip corners rise for a positive net command; the leading
+        // root corner, ahead of the spindle, moves the other way.
+        z_direction(&old, &new, sp(tip_in), net.signum(), scale, m);
+        z_direction(&old, &new, sp(tip_out), net.signum(), scale, m);
+        z_direction(&old, &new, sp([root, -41., -1.]), -net.signum(), scale, m);
+    }
+    for (ids, side) in [(&AIL_R[..], 1f32), (&AIL_L[..], -1.)] {
+        let net = side * aileron as f32;
+        if net == 0. {
+            unchanged(reference, pose, ids, m);
+            continue;
+        }
+        whole_panel(reference, pose, ids, scale, m);
+        let (old, new) = (group(reference, ids), group(pose, ids));
+        // The slanted hinge: the tip vertex and the root pair's mid point stay.
+        let tip = sp([side * 59., -27., 3.]);
+        let qs = f4::witness_positions(&old, &new, tip);
+        m.reviewed_anchor_missing |= qs.is_empty();
+        for q in qs {
+            m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(distance(tip, q) * scale);
+        }
+        let corners = [sp([side * 39., -24., 1.]), sp([side * 39., -24., 4.])];
+        match midpoint_gap(&old, &new, corners, scale) {
+            Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+            None => m.reviewed_anchor_missing = true,
+        }
+        for witness in [sp([side * 59., -34., 3.]), sp([side * 39., -30., 3.])] {
+            z_direction(&old, &new, witness, net.signum(), scale, m);
+        }
+    }
+    for (ids, end, side, inner) in [
+        (&FLAP_R[..], FLAP_END_R, 1f32, 21f32),
+        (&FLAP_L[..], FLAP_END_L, -1., -22.),
+    ] {
+        let has_end = pose.iter().any(|f| f.address == end);
+        if flaps == 0. {
+            unchanged(reference, pose, ids, m);
+            // The lowered end triangle exists only while the flap is down.
+            m.reviewed_direction_failures += usize::from(has_end);
+            continue;
+        }
+        whole_panel(reference, pose, ids, scale, m);
+        let (old, new) = (group(reference, ids), group(pose, ids));
+        // The front edge's mid height is the hinge line: both front pairs keep
+        // their mid points.
+        for x in [inner, side * 39.] {
+            let corners = [sp([x, -24., 1.]), sp([x, -24., 4.])];
+            match midpoint_gap(&old, &new, corners, scale) {
+                Some(gap) => m.max_reviewed_anchor_gap = m.max_reviewed_anchor_gap.max(gap),
+                None => m.reviewed_anchor_missing = true,
+            }
+        }
+        for witness in [sp([inner, -30., 3.]), sp([side * 39., -30., 3.])] {
+            z_direction(&old, &new, witness, -1., scale, m);
+        }
+        // The end triangle is drawn and sits on the wedge's own outboard
+        // corners wherever they went.
+        m.reviewed_direction_failures += usize::from(!has_end);
+        if let Some(triangle) = pose.iter().find(|f| f.address == end) {
+            // Each outboard wedge corner has a triangle vertex on it (the
+            // triangle lists its corners in either order).
+            m.reviewed_direction_failures += usize::from(triangle.positions.len() != 3);
+            for corner in [
+                sp([side * 39., -24., 1.]),
+                sp([side * 39., -30., 3.]),
+                sp([side * 39., -24., 4.]),
+            ] {
+                let qs = f4::witness_positions(&old, &new, corner);
+                m.reviewed_anchor_missing |= qs.is_empty();
+                for q in qs {
+                    let gap = triangle
+                        .positions
+                        .iter()
+                        .map(|&t| distance(q, t) * scale)
+                        .fold(f32::INFINITY, f32::min);
+                    m.max_reviewed_skin_gap = m.max_reviewed_skin_gap.max(gap);
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn check(
     c: Control,
     value: f64,
@@ -350,7 +551,12 @@ pub(super) fn check(
         Control::Gear => gear(value, reference, pose, scale, m),
         Control::Brake => brake(value, reference, pose, scale, m),
         Control::Exhaust => exhaust(value, reference, pose, scale, m),
-        // F15E-3: stabilators, ailerons, flaps and fins.
+        Control::Elevator => surfaces(reference, pose, scale, m, value, 0., 0.),
+        Control::Aileron => surfaces(reference, pose, scale, m, 0., value, 0.),
+        Control::Flaps => surfaces(reference, pose, scale, m, 0., 0., value),
+        // No rudder motion (John, 2026-11-10): the fins and every other
+        // surface stay at the neutral faces.
+        Control::Rudder => surfaces(reference, pose, scale, m, 0., 0., 0.),
         _ => {}
     }
 }
@@ -365,7 +571,207 @@ pub(super) fn combinations(
     let mut failures = Vec::new();
     failures.extend(dense_gear(airframe, neutral, out, &original, scale)?);
     failures.extend(dense_brake(airframe, neutral, out, scale)?);
+    failures.extend(pitch_roll_grid(airframe, neutral, out, &original, scale)?);
+    failures.extend(dense_surfaces(airframe, neutral, out, &original, scale)?);
+    seam_openings(airframe, neutral, out, &original, scale)?;
     Ok(failures)
+}
+
+/// Largest distance (feet) any vertex of the group that is shared with a face
+/// outside the group in the reference moved (`only` keeps the vertices it
+/// accepts): the opening of the moving/fixed seam. Reported and bounded, not a
+/// failure (a hinged surface has to open).
+fn seam_opening(
+    reference: &[Face],
+    pose: &[Face],
+    ids: &[usize],
+    scale: f32,
+    only: &dyn Fn([f32; 3]) -> bool,
+) -> f32 {
+    let before = keyed(reference);
+    let after = keyed(pose);
+    let fixed: std::collections::BTreeSet<[i64; 3]> = before
+        .iter()
+        .filter(|(k, _)| !ids.contains(&k.0))
+        .flat_map(|(_, f)| f.positions.iter().map(|p| quantized(*p)))
+        .collect();
+    let mut worst = 0f32;
+    for (key, face) in before.iter().filter(|(k, _)| ids.contains(&k.0)) {
+        let Some(moved) = after.get(key) else {
+            continue;
+        };
+        for (a, b) in face.positions.iter().zip(&moved.positions) {
+            if only(*a) && fixed.contains(&quantized(*a)) {
+                worst = worst.max(distance(*a, *b) * scale);
+            }
+        }
+    }
+    worst
+}
+
+fn surfaces_pass(m: &Metrics) -> bool {
+    m.finite
+        && !m.reviewed_anchor_missing
+        && m.max_reviewed_anchor_gap <= EPSILON
+        && m.max_reviewed_skin_gap <= EPSILON
+        && m.reviewed_rigid_panel_error <= EPSILON
+        && m.reviewed_direction_failures == 0
+        && !m.reviewed_neutral_mismatch
+        && m.new_planar_crossings.is_empty()
+}
+
+/// The 25 pitch and roll poses: every stabilator and aileron a whole rigid
+/// panel with its anchor held, nothing else moved, every trailing edge on the
+/// sign of its net command.
+fn pitch_roll_grid(
+    airframe: &Airframe,
+    neutral: &State,
+    out: &Path,
+    original: &[Face],
+    scale: f32,
+) -> AppResult<Vec<String>> {
+    let mut failures = Vec::new();
+    let mut rows = String::from(
+        "pitch,roll,finite,anchor_gap_ft,skin_gap_ft,rigidity_ft,stab_seam_ft,aileron_seam_ft,crossings,direction_failures,passed\n",
+    );
+    let mut poses = Vec::new();
+    for pitch in [-1., -0.5, 0., 0.5, 1.] {
+        for roll in [-1., -0.5, 0., 0.5, 1.] {
+            let mut state = neutral.clone();
+            state.elevator = pitch;
+            state.aileron = roll;
+            let pose = airframe.animation_faces(&state);
+            let mut m = measure(original, &pose, scale);
+            surfaces(original, &pose, scale, &mut m, pitch, roll, 0.);
+            // Flaps stay up in this grid: the wedges must be untouched.
+            unchanged(original, &pose, &FLAP_R, &mut m);
+            unchanged(original, &pose, &FLAP_L, &mut m);
+            let all = |_: [f32; 3]| true;
+            let stab = seam_opening(original, &pose, &STAB_R, scale, &all)
+                .max(seam_opening(original, &pose, &STAB_L, scale, &all));
+            let ail = seam_opening(original, &pose, &AIL_R, scale, &all)
+                .max(seam_opening(original, &pose, &AIL_L, scale, &all));
+            let passed = surfaces_pass(&m);
+            writeln!(
+                rows,
+                "{pitch},{roll},{},{},{},{},{stab},{ail},{},{},{passed}",
+                m.finite,
+                m.max_reviewed_anchor_gap,
+                m.max_reviewed_skin_gap,
+                m.reviewed_rigid_panel_error,
+                m.new_planar_crossings.len(),
+                m.reviewed_direction_failures
+            )?;
+            if !passed {
+                failures.push(format!(
+                    "F-15E pitch{pitch}/roll{roll}: whole-panel anchor, skin, rigidity or direction witness"
+                ));
+            }
+            poses.push(pose);
+        }
+    }
+    fs::write(out.join("pitch-roll-combinations.csv"), rows)?;
+    contact_sheet(&out.join("pitch-roll-combinations.ppm"), original, &poses)?;
+    Ok(failures)
+}
+
+/// Dense sweeps of the three surface controls (21 values each: elevator and
+/// aileron -1 to 1 in 0.1 steps, flaps 0 to 1 in 0.05 steps): every pose a
+/// whole rigid panel, anchors held, skin gap 0, the signed direction.
+fn dense_surfaces(
+    airframe: &Airframe,
+    neutral: &State,
+    out: &Path,
+    original: &[Face],
+    scale: f32,
+) -> AppResult<Vec<String>> {
+    let mut failures = Vec::new();
+    for (name, control, low, step) in [
+        ("elevator", Control::Elevator, -1., 0.1),
+        ("aileron", Control::Aileron, -1., 0.1),
+        ("flaps", Control::Flaps, 0., 0.05),
+    ] {
+        let mut csv = String::from(
+            "value,anchor_gap_ft,skin_gap_ft,rigidity_ft,crossings,direction_failures,passed\n",
+        );
+        for i in 0..=20 {
+            let value = low + f64::from(i) * step;
+            let value = (value * 1000.).round() / 1000.;
+            let mut state = neutral.clone();
+            control.apply(&mut state, value);
+            let pose = airframe.animation_faces(&state);
+            let mut m = measure(original, &pose, scale);
+            check(control, value, (original, original, &pose), scale, &mut m);
+            let passed = surfaces_pass(&m);
+            writeln!(
+                csv,
+                "{value},{},{},{},{},{},{passed}",
+                m.max_reviewed_anchor_gap,
+                m.max_reviewed_skin_gap,
+                m.reviewed_rigid_panel_error,
+                m.new_planar_crossings.len(),
+                m.reviewed_direction_failures
+            )?;
+            if !passed {
+                failures.push(format!(
+                    "F-15E dense {name} value{value}: whole-panel, anchor or direction gate"
+                ));
+            }
+        }
+        fs::write(out.join(format!("dense-{name}.csv")), csv)?;
+    }
+    Ok(failures)
+}
+
+/// The seam opening of every moving surface at full travel (feet): where a
+/// whole rigid panel leaves the fixed skin it hinges against.
+fn seam_openings(
+    airframe: &Airframe,
+    neutral: &State,
+    out: &Path,
+    original: &[Face],
+    scale: f32,
+) -> AppResult<()> {
+    let mut rows = String::from("command,surface,hinge_edge_opening_ft,other_opening_ft\n");
+    type Edit = fn(&mut State);
+    let commands: [(&str, Edit); 6] = [
+        ("pitch-up", |s| s.elevator = 1.),
+        ("pitch-down", |s| s.elevator = -1.),
+        ("roll-right", |s| s.aileron = 1.),
+        ("roll-left", |s| s.aileron = -1.),
+        ("flaps-down", |s| s.flaps = 1.),
+        ("pitch-up-roll-right", |s| {
+            s.elevator = 1.;
+            s.aileron = 1.;
+        }),
+    ];
+    // The hinge edge of a stabilator is its root (|x| at most 22.5); of an
+    // aileron or a flap, its front edge (y at least -27.5).
+    let root = sp([22.5, 0., 0.])[0];
+    let front = sp([0., -27.5, 0.])[1];
+    let at_root = move |p: [f32; 3]| p[0].abs() <= root;
+    let at_front = move |p: [f32; 3]| p[1] >= front;
+    type Hinge<'a> = &'a dyn Fn([f32; 3]) -> bool;
+    let surfaces: [(&str, &[usize], Hinge); 6] = [
+        ("stabilator-right", &STAB_R, &at_root),
+        ("stabilator-left", &STAB_L, &at_root),
+        ("aileron-right", &AIL_R, &at_front),
+        ("aileron-left", &AIL_L, &at_front),
+        ("flap-right", &FLAP_R, &at_front),
+        ("flap-left", &FLAP_L, &at_front),
+    ];
+    for (command, edit) in commands {
+        let mut state = neutral.clone();
+        edit(&mut state);
+        let pose = airframe.animation_faces(&state);
+        for (name, ids, hinge) in surfaces {
+            let edge = seam_opening(original, &pose, ids, scale, hinge);
+            let other = seam_opening(original, &pose, ids, scale, &|p| !hinge(p));
+            writeln!(rows, "{command},{name},{edge},{other}")?;
+        }
+    }
+    fs::write(out.join("seam-opening.csv"), rows)?;
+    Ok(())
 }
 
 /// 202 gear values (0 to 1 in 200 steps plus a near-stow sample): every pose
