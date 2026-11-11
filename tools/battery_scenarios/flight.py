@@ -78,6 +78,12 @@ STATIONS = {
     # centreline tank is a tank station, and it has no wingtip row (John,
     # 2026-11-10).
     "m2000": [250, 4, 2, 2],
+    # The F-15E carries the M61 gun on its internal row 5 (450 rounds, the
+    # record's count; the real jet's 512 is a finding only, John kept retail,
+    # 2026-11-10), row 7 MK82.JT x12 (the belly pair's two triple racks) and
+    # row 8 AIM120.JT x4 (the wing pair). Its F350.GAS centreline tank is a
+    # tank station (F15E-6, 2026-11-10).
+    "f15e": [450, 12, 4],
 }
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]

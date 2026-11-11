@@ -1047,6 +1047,93 @@ launches, stays locked for 23 seconds and kills the lead truck; the tank and the
 selected group jettison. See [the baseline](../baselines/ordnance-availability.md#mirage-2000-ordnance-m2k-6-2026-11-10)
 for the commands and frames.
 
+## The F-15E Strike Eagle (F15E-6, 2026-11-10)
+
+Implementation and review note for the F-15E's ordnance, default load and
+countermeasures (`AircraftId::F15E`, `F15E.PT`). Nothing about the default load
+changed: the record's rows, masks, capacities and defaults flow through the
+shared loading rules (as for the Mirage 2000 above), and John's F15E-5 round 2
+decisions (the 0.1 ft belly rail drop, the refused large stores) are already in
+place. This slice proves the load, the gun, the countermeasures, the releases and
+the live fire, and adds battery coverage. No gameplay code changed; only a
+retail-reading test and battery scenarios were added. Frames and commands: [the
+baseline](../baselines/ordnance-availability.md#f-15e-ordnance-f15e-6-2026-11-10).
+
+**Default load** (decoded; the same for the human player, AI wings, saved loads and
+the lobby; `--validate-ordnance` reads `ordnance F15E.PT: 4 source rows, 0 optional
+weapon rows, 57 compatible weapon placements, 3 tank placements; defaults and
+restart passed`). Nine source rows: `VIS340.SEE`, `F15R.SEE`, `F15.ECM`,
+`AV8IR.SEE` and the `PAVESPK.SEE` placeholder (rows 0 to 4, fixed equipment, no
+body drawn for the Pave Spike row, John's decision 3), then
+
+| Row | Position (ft, as F15E-5 measured) | Default | Notes |
+| ---: | --- | --- | --- |
+| 5 | 2.3 right / -1.7 up / 24.3 fwd | `M61.JT` x450 | internal gun, takes no other store |
+| 6 | centreline, 0 / -8.7 / 0 | `F350.GAS` x1 (2,300 lb of fuel) | a tank station; also `F150`, `F250` |
+| 7 | belly pair, 6.3 / -8.7 / -1.7 | `MK82.JT` x12 | six a side on two triple racks, 8,000 lb limit; 0.1 ft rail drop; seven large stores refused |
+| 8 | wing pair, 14.3 / -4.7 / -4.7 | `AIM120.JT` x4 | two a side on twin bars, 1,400 lb limit; `AA6.JT` refused |
+
+The Load Ordnance page reads `Fuselage M61 Vulcan Cannon 450 (max 450)`,
+`Centerline 350 gallon tank 1 loaded (max 1)`, `Fuselage MK-82 Slick 12 loaded
+(max 12)` and `Wing AIM-120 AMRAAM 4 loaded (max 4)`; the vehicle weight is 52,202
+lb against the 68,000 lb maximum. The stores weigh 9,940 lb with the tank's fuel
+(the live-fire probe's `payload_start_lb`). The AI wing leader carries the same
+stores (`tanks=1 external_fuel=2298 payload=9938 stations=[M61 x450, MK-82 x12,
+AIM-120 x4]`, `--ai-probe-ticks 60`). Four AIM-120s are two a side on the wing pair
+only; the real F-15E's missile stations and the CFT stations are not what the
+record decodes (the stations are John's F15E-5 decision).
+
+**The gun.** `M61.JT`, row 5, 450 rounds: the record's own count, the same M61 record
+the F-15C, F-16 and F/A-18 read, with the shared gun movement, burst and damage
+fields (spec-derived). The real F-15E carries 512 rounds of 20 mm (Air & Space
+Forces Magazine F-15E page and This Day in Aviation, read 2026-11-10; a few
+other pages quote 500, 510 or 650). John kept the retail 450 (2026-11-10), so the
+difference of 62 rounds is a finding only. Headless strafe (`--a2g-run --attack
+strafe`, the trigger held 2 seconds): 64 rounds, 22 tracers, 450 to 386, the
+shared gun cadence of 32 rounds a second; the 450 last 14 seconds of fire.
+
+**Countermeasures.** From the row 2 `F15.ECM` record, the F-15C's own jammer line:
+chaff loaded 30 and flares loaded 30 (spec-derived, retail; the fleet's convention,
+the record is the capacity and nothing is overridden per aircraft). `--combat-command
+chaff` and `flare` with `--countermeasure-preview 60`: after one chaff `carried_chaff=29
+carried_flares=30 capacity 30/30`, after one flare `carried_chaff=30 carried_flares=29`;
+after three chaff 27, after two flares 28. Real fit (finding only): the F-15 family
+carries the AN/ALE-45 dispenser system; the search found no F-15E-specific
+cartridge count (one database lists 144 cartridges for the F-15A to D, not applied).
+The retail 30 and 30 stand.
+
+**Release order and positions** (headless `--a2g-run --attack release`, the
+`a2g-release-origin-f15e` scenario; every store leaves from where it hangs, within
+0.05 ft across and up, left then right):
+
+- Belly Mk 82s: the first four leave from under the racks' bars at 6.33 ft out, 5.29 ft down, 0.74 ft
+  deep, front pair (2.48 ft forward) then rear pair (-5.82 ft), left then right; then the
+  outboard column at 7.02 ft out and 4.72 ft down, front pair then rear pair; then the inboard
+  column at 5.64 ft out, front pair first (depth 0.17 ft, the 2 inch rail). Eleven releases are
+  seen; the twelfth goes past the target on the bomb sight's pass.
+- AIM-120s: 14.96 ft out then 13.70 ft out (outboard pair first), 0.77 ft down, 4.67 ft aft, 1 ft
+  pylon depth, left then right.
+- Jettison (`--a2g-run --attack jettison --load MK82`, `a2g-jettison-f15e`): the 350 gallon tank
+  first (2,300 lb of fuel gone, payload 9,940 to 7,392 lb), then the twelve belly Mk 82s
+  (7,392 to 1,392 lb, the four AIM-120s stay), `PASS released 13 ... no-explosion`.
+
+**Live fire** (windowed, through `tools/agent-run.sh`, `STATIONS["f15e"] = [450, 12, 4]`):
+gun 320 shots, 52 hits, 1 kill in 1,200 ticks; the Mk 82 (slot 2) one shot, hit and kill; the
+AIM-120 (slot 3) one shot, in flight at 1,200 ticks and a hit and kill by 1,800 ticks (the shared
+probe window, as the F-16A and Gripen). No station is refused at the practice aircraft. The
+tank is a tank station. `flight-jettison-f15e-slot2` and `slot3` jettison the Mk 82s and
+AIM-120s, the other stations untouched.
+
+**Laser bomb with the Pave Spike** (`a2g-laser-f15e`): from 15,000 ft at 480 kt the sensor
+row lases (sight `Laser`, `Lasing`), a `GBU10.JT` from the belly pair (station 1) releases at 15.2 s
+guiding on aircraft 0's spot, impacts 3.3 ft from the tank and destroys it. A `GBU12.JT` (500 lb)
+does the same in the same geometry and leaves the tank at 100 of 200 hit points. No pod body is
+drawn, the row stays at 0 / 0 / 0.
+
+**Open items.** The gear leg crossing the aft inboard bombs while the gear retracts (F15E-5 round 2)
+is unchanged and was not part of this slice. The gun count, cadence and the real countermeasure
+fit are listed for John, nothing changed.
+
 ## Original icons and geometry candidates
 
 

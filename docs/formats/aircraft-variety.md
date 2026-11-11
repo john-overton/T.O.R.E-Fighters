@@ -4663,3 +4663,18 @@ No audit pin moves (the F-5E row keeps its place and the audit counts weapon row
 only): 45 aircraft, 18 recovered weapon stations, 4,652 weapon placements, 233 tank
 placements, 220 Cheat-only placements, 80 pod placements. Each correction fires only
 on the retail record and has a unit test.
+
+## F-15E ordnance, default load and countermeasures (F15E-6, 2026-11-10)
+
+Slice F15E-6 confirmed the F-15E's ordnance as the record's own, with no row, mask,
+capacity or default authored: the M61 gun at 450 rounds (the real jet's 512 is a
+finding only; John kept retail), `F350.GAS` on the centreline, twelve `MK82.JT` on the
+belly pair, four `AIM120.JT` on the wing pair, and 30 chaff and 30 flares from
+`F15.ECM` (the fleet's convention, the record is the capacity). The F15E-5 belly rail
+drop and refused stores are in place in these releases. Live fire (gun, Mk 82 and
+AIM-120 kill), release positions and rack order, the tank-then-bombs jettison and a
+Pave Spike laser bomb that destroys its tank are in [aircraft
+ordnance](aircraft-ordnance.md#the-f-15e-strike-eagle-f15e-6-2026-11-10) and the
+[ordnance availability baseline](../baselines/ordnance-availability.md#f-15e-ordnance-f15e-6-2026-11-10).
+No audit pin moved. Update to the F15E-5 "default load" lines above: the gear leg
+crossing the aft inboard bombs in transit is still open.
