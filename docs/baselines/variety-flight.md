@@ -2366,3 +2366,24 @@ Not run: `--native-flight-tables` (tables not present locally), a windowed free
 flight (the slice asks for no frames), a clean-load takeoff or landing, a
 primary-source takeoff or landing run, a better-pilot sustained turn, the default
 load's ceiling and sustained rate.
+
+Update (TOR-10, 2026-11-11): the clean and default-load figures were re-measured
+with the same probes after B5-4's +8 row and 50,000 ft ceiling and with the
+lighter default load (one centreline tank, two AIM-9Ms: 13,228 lb carried,
+`PROBE_PAYLOAD=13228`, 55,514 lb against 56,982), and the tables are in the
+[Tornado acceptance record](aircraft-tornado.md#flight-envelope). Clean, what
+moved: the pull by fuel 7.05 / 7.52 / 7.79 / 8.04 G (was 6.17 / 6.59 / 6.82 /
+7.04) and the instantaneous turn at 461 kt 7.05 G and 15.7 deg/s (was 6.17 G,
+13.1); top speeds, climb, acceleration, sustained turn, endurance and push are
+unchanged. The ceiling: level flight now stops at 50,000 ft (1,135 kt there, was
+1,156 on the record's polygon), a level start at 60,000 ft cannot hold altitude,
+and the zoom climb peaks at 55,514 to 57,910 ft (was 62,032 to 62,108); TOR-8's
+level flight to 60,000 ft at 837 kt no longer exists. Default load: top speed 763
+kt at 1,000 ft and 1,272 kt at 36,000 ft (was 760 / 1,266), peak Ps 294 ft/s (was
+285), 30,000 ft in 117 to 131 s (was 120 to 134), acceleration 363 to 590 kt in
+36 s (was 38), pull 6.13 / 6.49 / 6.68 / 6.87 G (was 5.29 / 5.59 / 5.76 / 5.91),
+sustained 461 kt turn 4.14 G at 9.3 deg/s (was 9.4), instantaneous turn 6.13 G and
+13.2 deg/s (was 5.29 G, 10.8), liftoff 147.2 kt after 1,805 ft (was 150.6 kt after
+1,945 ft), approach 156.2 kt, touchdown 155.3 kt, rollout 725 m (was 160.1 kt and
+757 m). The default-load rows above (two tanks) stay as the morning's record. Logs
+`.local/m3-aircraft/checks/TOR-10/`.

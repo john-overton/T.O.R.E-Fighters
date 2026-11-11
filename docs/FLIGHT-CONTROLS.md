@@ -348,7 +348,7 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 
 ## Exterior animations
 
-45 of the 46 playable profiles (all but the Tornado IDS, which waits for its own rig slices; the Mirage F1 joined at its acceptance, 2026-11-11) have bounded headless checks for their applicable
+All 46 playable profiles (the Mirage F1 joined at its acceptance and the Tornado IDS last, both 2026-11-11) have bounded headless checks for their applicable
 control surfaces and devices. Gear wheels, braces and doors use separate
 reviewed attachments; retractable hooks, vector nozzles, nacelles and rotor
 cyclic motion have aircraft-specific fits. Remaining source gaps include the

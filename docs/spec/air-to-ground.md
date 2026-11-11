@@ -1711,3 +1711,9 @@ carries the player-facing rules and links to the evidence.
   bomb HUD; W1 guided bombs and laser missiles; P1 targeting page; X1 packs,
   cluster and catalog; NA multiplayer; RA replay; A1 acceptance. The evidence is
   the one [baseline](../baselines/air-to-ground.md).
+
+Update (TOR-10, 2026-11-11): the Tornado IDS (its shoulder row admits laser and
+other guided bombs, its swivelling inner wing pylons Mk 82 packs and other bombs,
+with 40 stores refused on normal loading) is the 36th air-to-ground carrier. The
+per-record carrier ranges above still stand as measured before it
+([Tornado ordnance](../formats/aircraft-ordnance.md#the-panavia-tornado-ids-tor-6-2026-11-11)).

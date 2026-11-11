@@ -112,8 +112,7 @@ Keep complete validation evidence in feature baselines rather than per-check fil
 
 The M3 aircraft round appends the MiG-25 Foxbat, the F-16A Falcon, the MiG-31
 Foxhound, the Mirage 2000, the F-15E Strike Eagle, the Saab Gripen, the F-5E
-Tiger and the Mirage F1 to the roster (batch 5 also appends the Tornado IDS
-identity, whose slices have not run). None is one of the original 23-aircraft variety batch,
+Tiger, the Mirage F1 and the Panavia Tornado IDS to the roster (batch 5). None is one of the original 23-aircraft variety batch,
 and the batch count does not change.
 
 | Aircraft | Exact retail record | Family | Main behavior to review | Acceptance |
@@ -126,6 +125,7 @@ and the batch count does not change.
 | Saab Gripen | `GRIPEN.PT` | Fighter | Single-engine canard delta handling on the real RM12 numbers, canards that pitch and roll, whole-panel elevons, the BK 27 internal gun at 570 rounds, its own `GRI` cockpit and HUD glass, and no pod body on the AAS-38 row | [Gripen acceptance](../baselines/aircraft-gripen.md) |
 | F-5E Tiger | `F5E.PT` | Fighter | Twin J85 light-fighter handling on real fuel, ceiling and +7 G, pitch-only stabilators, ailerons that roll, a dorsal speed brake, the X-29 panel its record names, and an empty wing pair by default | [F-5E acceptance](../baselines/aircraft-f5e.md) |
 | Mirage F1 | `MF1.PT` | Fighter | Single-engine handling on one Atar 9K-50's real thrust (John), real-size per-axis shape scale, a pitch-only whole-panel tailplane, aileron roll, a dorsal airbrake, a +8 and -4 G fit and a 9 lb/s afterburner flow, two belly tanks at 3.24 ft, tip Magics 1.1 ft off the tip, an empty centreline, 34 refused stores, and the Rafale HUD and cockpit the record names | [Mirage F1 acceptance](../baselines/aircraft-mf1.md) |
+| Tornado IDS | `TOR.PT` | Fighter | Twin-engine swing-wing handling on two RB199s' real thrust, real weights, a +8 G fit, a 50,000 ft ceiling and 3 and 22 lb/s flows (John), true-size shape, a wing that sweeps 25 to 67 degrees with speed (a fitted schedule) with the two inner wing pylons swivelling with it, whole-panel tailerons that roll, flap strips, two airbrake plates, two burners, one centreline tank, Paveways on the shoulders, Mk 82 packs and AIM-9M side rails on the swinging panel, 40 refused stores, the BK 27 as its own internal gun, and the Eurofighter HUD and cockpit the record names | [Tornado IDS acceptance](../baselines/aircraft-tornado.md) |
 
 AC-130 linked fire and the tank side task have additional acceptance cases in
 their linked contracts. New autonomous flight behavior is outside this batch;
@@ -330,7 +330,7 @@ carrier launch/arrestment remains a separate capability review.
 | AC-130 | Live aiming usability and wider engagement cases | Validate linked fire, barrel/muzzle agreement and blocked-gun feedback against the [contract](ac130-linked-guns.md); review a gunner view separately |
 | Radar and shared contacts | AWACS sharing/operator behavior beyond existing sensors | Installed/absent profiles are reviewed; additional shared-contact behavior needs its own contract and acceptance |
 | Cockpits | Wider display review and original fallback evidence | Current roots and null-pointer fits are explicit; verify every new cockpit on wide/tall windows and keep unsupported gauges unavailable |
-| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | 45 of the 46 playable profiles (all but the Tornado IDS, which waits for its own rig slices) have bounded CPU pose acceptance; follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
+| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | All 46 playable profiles have bounded CPU pose acceptance (45 until the Tornado IDS joined, 2026-11-11); follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
 | Multiplayer | Selection, content compatibility, new control/state transport, seat handoff and replay | Trace client/server use of the shared aircraft type and every newly required control/state value |
 
 Player-flyable helicopters extend the recovered retail multiplayer

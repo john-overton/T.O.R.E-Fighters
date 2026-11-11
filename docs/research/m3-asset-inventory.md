@@ -41,25 +41,26 @@ first ones to confirm.
 
 | Object type | Records | Imported D/P/N/NA | Animations D/P/N/NA | AI D/P/N/NA | Logic D/P/N/NA |
 |---|---:|---|---|---|---|
-| Aircraft (PT) | 145 | 69 / 0 / 76 / 0 | 39 / 30 / 76 / 0 | 34 / 10 / 101 / 0 | 33 / 36 / 76 / 0 |
+| Aircraft (PT) | 145 | 70 / 0 / 75 / 0 | 40 / 30 / 75 / 0 | 35 / 10 / 100 / 0 | 34 / 36 / 75 / 0 |
 | Ordnance (JT) | 135 | 115 / 8 / 12 / 0 | 109 / 7 / 19 / 0 | 111 / 2 / 18 / 4 | 114 / 2 / 19 / 0 |
 | Equipment (SEE/ECM/GAS) | 85 | 55 / 26 / 4 / 0 | 21 / 0 / 15 / 49 | 24 / 0 / 12 / 49 | 53 / 3 / 29 / 0 |
 | Surface units (NT) | 84 | 82 / 2 / 0 / 0 | 13 / 71 / 0 / 0 | 39 / 19 / 3 / 23 | 71 / 12 / 0 / 1 |
 | Static objects (OT) | 170 | 157 / 11 / 2 / 0 | 72 / 69 / 3 / 26 | 0 / 0 / 0 / 170 | 140 / 28 / 2 / 0 |
-| **Total** | **619** | **478 / 47 / 94 / 0** | **254 / 177 / 113 / 75** | **208 / 31 / 134 / 246** | **411 / 81 / 126 / 1** |
+| **Total** | **619** | **479 / 47 / 93 / 0** | **255 / 177 / 112 / 75** | **209 / 31 / 133 / 246** | **412 / 81 / 125 / 1** |
 
 ## What remains, by object type
 
-- **Aircraft.** 44 of 145 are flyable by players and AI (13 original roster, 23
-  variety, and the MiG-25, F-16A, MiG-31, Mirage 2000, F-15E, Gripen, F-5E and
-  Mirage F1 M3 additions; 2026-11-10, X-10 of batch 5; Update (MF1-10,
-  2026-11-11): the Mirage F1 is counted now, its acceptance is
-  [here](../baselines/aircraft-mf1.md). The Tornado IDS joined
-  `AircraftId::ALL` in the same batch with an interim rig and is not counted
-  here until its own slices run, so the table above still lists it as
-  before). 24 more are parked scenery only (no AI, static pose; the Mirage F1
+- **Aircraft.** 45 of 145 are flyable by players and AI (13 original roster, 23
+  variety, and the MiG-25, F-16A, MiG-31, Mirage 2000, F-15E, Gripen, F-5E,
+  Mirage F1 and Tornado IDS M3 additions; 2026-11-10, X-10 of batch 5; Update
+  (MF1-10, 2026-11-11): the Mirage F1 is counted now, its acceptance is
+  [here](../baselines/aircraft-mf1.md); Update (TOR-10, 2026-11-11): the Tornado
+  IDS is counted now, its acceptance is
+  [here](../baselines/aircraft-tornado.md), and the table above lists it as
+  flyable). 24 more are parked scenery only (no AI, static pose; the Mirage F1
   left this group, and the earlier count of 25 parked and 76 decoded summed to
-  144, the rows give 24 parked and 77 decoded-only). 77 are decoded
+  144, the rows give 24 parked and 77 decoded-only; the Tornado IDS left the
+  decoded-only group, so 76). 76 are decoded
   in [`fa-aircraft.csv`](../formats/fa-aircraft.csv) and nothing else. Variety
   rotorcraft, VTOL, AWACS and the AC-130 are Partial (blade feathering, fitted
   powered-lift tuning, no contact sharing).
@@ -167,6 +168,7 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | MIG31.PT | MiG-31 Foxhound | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; GSh-6-30, AA-9 x4 and AA-8 x2; opinionated tunnel and wing-pylon station table; also parkable |
 | M2000.PT | Mirage 2000 | Done | Done | Done | Done | M3 import (AircraftId); rig reviewed; one M53-P2 (opinionated override of the record's two engines), real-size per-axis scale, DEFA, Super 530, Magic 2 and AS-15; eight station rows (no wingtip); Rafale HUD and cockpit by the record's name; also parkable |
 | MF1.PT | Mirage F1 | Done | Done | Done | Done | M3 import (AircraftId, batch 5; [acceptance](../baselines/aircraft-mf1.md)); rig reviewed; one Atar 9K-50 at the real 11,020 / 15,873 lbf (John), real-size per-axis scale, afterburner flow 9 lb/s, +8 and -4 G rows; two belly tanks at 3.24 ft, tip Magics 1.1 ft off the tip, centreline empty, 34 refusals; Rafale HUD and cockpit by the record's name; also parkable (parked path unchanged) |
+| TOR.PT | Tornado IDS | Done | Done | Done | Done | M3 import (AircraftId, batch 5; [acceptance](../baselines/aircraft-tornado.md)); rig reviewed; two RB199s at the real 17,300 / 32,150 lbf, real weights, +8 G row, 50,000 ft ceiling, flows 3 and 22 lb/s (John); a swing wing that sweeps 25 to 67 degrees with speed (fitted schedule) and inner wing pylons that swivel with it, whole-panel tailerons, glove plates; one centreline tank, Paveways, Mk 82 packs and AIM-9M side rails, 40 refusals, BK 27 as its own gun; Eurofighter HUD and cockpit by the record's name; not a parked target; ai_script f.BI |
 | V22.PT | V-22 Osprey | Done | Done | Partial | Partial | variety import (AircraftId); nacelles tilt 0-97.5deg, props; fitted physics, AI conversion |
 | YAK141.PT | Yak-141 Freestyle-A | Done | Done | Partial | Partial | variety import (AircraftId); nozzle animates; AI VTOL fitted; Kiev parking unresolved |
 | A37.PT | A-37 Dragonfly | Done | Partial | None | Partial | parked target only (OBJECT block+shape); gear-down static; no AI/flight |
@@ -264,7 +266,6 @@ Ported aircraft are the 13 original-roster `AircraftId` entries (F18, RAFALE, F1
 | SU33.PT | Su-33 Flanker-D | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | SU35B.PT | Su-35 (Forest) | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | TIGRE.PT | HAC Tiger | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script h.BI |
-| TOR.PT | Tornado IDS | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script f.BI |
 | TU160.PT | Tu-160 Blackjack-A | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script b.BI |
 | TU26.PT | Tu- 26 Backfire-C | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script b.BI |
 | TU95.PT | Tu- 95 Bear-H | None | None | None | None | catalog-decoded only; no shape/AI loaded; ai_script b.BI |
@@ -320,7 +321,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | AIM7.JT | AIM-7 Sparrow | Done | Done | Done | Done | Live; semi-active radar, support loss modelled; fit residual |
 | AIM7E.JT | AIM-7E Sparrow | Done | Done | Done | Done | Live; semi-active radar; short motor; fit residual exception |
 | AIM9B.JT | AIM-9B Sidewinder | Done | Done | Done | Done | Live; IR, early seeker; F-4B/J |
-| AIM9M.JT | AIM-9M Sidewinder | Done | Done | Done | Done | Live; IR; most common AAM (27 carriers) |
+| AIM9M.JT | AIM-9M Sidewinder | Done | Done | Done | Done | Live; IR; most common AAM (27 carriers; Update TOR-10, 2026-11-11: the Tornado's side rails carry it) |
 | AIM9X.JT | AIM-9X Sidewinder | Done | Done | Done | Done | Live; wide-angle IR; F-22/X-31 |
 | MICA.JT | Mica | Done | Done | Done | Done | Live; Rafale; MICA-EM radar role, no IR variant added |
 | PL10.JT | Chinese PL-10 | Done | Done | Done | Done | Live on compatible ported stations (JT-4, John 2026-11-06); semi-active radar (radar-concept PL10-R), own record envelope and motor; no default carrier anywhere ([stations](../formats/aircraft-ordnance.md#aa-6-aa-9-pl-7-and-pl-10-jt-4-2026-11-06)) |
@@ -367,10 +368,10 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | MK82AIR.JT | MK-82 AIR 7-Pack | Done | Partial | Done | Done | 7-pack retarder is drag only; no visible retarder deploy (unverified); the fitted visual draws its four rear retarder fins solid in flight, because the render path skips texture-only faces rather than drawing their retail texture (JT-8 rework, [why](../spec/ordnance-presentation.md#retarder-fins)) |
 | MK82HD.JT | MK-82 Snakeye | Done | Done | Done | Done | Snakeye; fins closed on pylon, open in flight; retarder drag |
 | MK82P.JT | MK-82HD 6-Pack | Done | Done | Done | Done | 6-pack Snakeye variant (shape snake.SH); retarder drag; one-tick release |
-| MK82P3.JT | MK-82 3-Pack | Done | Done | Done | Done | 3-pack leaves in one tick; flown A-7/F-16C |
+| MK82P3.JT | MK-82 3-Pack | Done | Done | Done | Done | 3-pack leaves in one tick; flown A-7/F-16C and the Tornado (swivelled inner wing pylons, TOR-10) |
 | MK84.JT | MK-84 Slick | Done | Done | Done | Done | Free-fall; flown F-15/A-10 |
 | PAVEWA3.JT | GBU-27 Paveway III | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers |
-| PAVEWAY.JT | GBU-10E Paveway | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers |
+| PAVEWAY.JT | GBU-10E Paveway | Done | Done | Done | Done | Laser bomb; own/buddy spot, blind when spot ends; flown 2+ carriers and the Tornado's shoulder row (TOR-10) |
 | RBK250.JT | RBK-250 Cluster | Done | Done | Done | Done | Splash 1,500 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
 | RBK500.JT | RBK-500 Cluster | Done | Done | Done | Done | Splash 2,500 ft; 28 burst flashes plus the fitted dispenser opening and bomblet flight ([why](../spec/ordnance-presentation.md#cluster-bomb-dispense)) |
 | ~BLDR.JT | Boulder | Done | Done | N/A | Done | Cheat-loading only; falls as free-fall bomb |
@@ -393,7 +394,7 @@ Research mode, read-only. Grades are from docs and code only; "unverified" marks
 | 20MM_4.JT | Colt 20mmx4 | Partial | None | None | None | Hidden; built-in-gun flags; only decoded carrier F8J not imported (JT-1) |
 | ADEN.JT | Aden 30mm Cannon Pod | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers DRAK, SEAHAR not imported (JT-1) |
 | ADENIN.JT | Aden 30mm Cannon | Partial | None | None | None | Hidden; internal Aden gun; carriers HWK, JAG not imported (JT-1) |
-| BK27.JT | 27-mm Mauser BK27 Cannon | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ALPH, E2000, GRIPEN, TOR, VIG not imported (JT-1); Update (GRI-10, 2026-11-10): the Gripen and Tornado are now imported and fire it as their own gun (GRI-6 verified the Gripen) |
+| BK27.JT | 27-mm Mauser BK27 Cannon | Partial | None | None | None | Hidden; built-in-gun flags despite the pod name; carriers ALPH, E2000, GRIPEN, TOR, VIG not imported (JT-1); Update (GRI-10, 2026-11-10): the Gripen and Tornado are now imported and fire it as their own gun (GRI-6 verified the Gripen); Update (TOR-10, 2026-11-11): the Tornado's BK 27 is verified too ([acceptance](../baselines/aircraft-tornado.md)) |
 | C_105.JT | 105mm Cannon | Done | Done | Done | Done | AC-130; authored 100 ft splash; muzzle flash, linked fire |
 | C_25.JT | 25mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
 | C_40.JT | 40mm Cannon | Done | Done | Done | Done | AC-130; muzzle flash, linked fire; no splash |
@@ -553,7 +554,7 @@ Per category:
 | F104R.SEE | F-104 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-104 |
 | F14R.SEE | AWG-9 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-14D |
 | F15R.SEE | F-15 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-15C |
-| F18R.SEE | APG-65 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-18, Rafale, F-16C, F-16A, F-4G/E, X-31, AH-64 |
+| F18R.SEE | APG-65 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-18, Rafale, F-16C, F-16A, F-4G/E, X-31, AH-64, Tornado (TOR-10, 2026-11-11) |
 | F22R.SEE | F-22 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-22A/N |
 | F4BR.SEE | APQ-72 radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; A-4E, F-4B |
 | F4JR.SEE | F-4J radar | Done | N/A | N/A | Done | Reviewed preset, shared radar component; F-4J |
@@ -587,10 +588,10 @@ Per category:
 | SU24L.SEE | Su-24 laser | Done | N/A | Done | Done | Su-25 built-in laser; AI lases own bombs |
 | KA50L.SEE | Ka-50 laser | Done | N/A | Done | Done | V-22 built-in laser; AI lases |
 | SU37L.SEE | Su-37 laser | None | N/A | N/A | None | Carriers Su-34, Tu-160/26/95 not in roster |
-| PAVESPK.SEE | Pave Spike laser pod | Done | None | Done | Done | Fixed on A-10/F-16C and loadable on pod stations; no shape named, drawn as a fitted pod body (EQ-2, 2026-11-06) |
+| PAVESPK.SEE | Pave Spike laser pod | Done | None | Done | Done | Fixed on A-10/F-16C and loadable on pod stations; no shape named, drawn as a fitted pod body (EQ-2, 2026-11-06); the Tornado's fixed row designates with no pod body drawn (TOR-7, TOR-10) |
 | PAVEKNF.SEE | Pave Knife laser pod | Partial | N/A | N/A | Partial | Retired 2026-10-16; old loads become Pave Spike |
 | VIS180.SEE | Visual sensor 180 | None | N/A | N/A | None | No carrier at all |
-| VIS240.SEE | Visual sensor 240 | Done | N/A | N/A | Done | MiG-17/21/23, Su-25; 10/5 nmi, 120x90 deg |
+| VIS240.SEE | Visual sensor 240 | Done | N/A | N/A | Done | MiG-17/21/23, Su-25, Tornado (TOR-10, 2026-11-11); 10/5 nmi, 120x90 deg |
 | VIS300.SEE | Visual sensor 300 | Done | N/A | N/A | Done | Transports, E-2/3, A-7, F-104, Mi-24, Yak-141; reviewed use unverified |
 | VIS340.SEE | Visual sensor 340 | Done | N/A | N/A | Done | Most fighters; 10/5 nmi, 170x140 deg |
 | GCIR.SEE | GCI radar | Done | N/A | N/A | Done | GCI site sensor; 303,800 ft detection range |
@@ -624,7 +625,7 @@ Per category:
 | EA6.ECM | EA-6 ECM | Partial | None | None | None | EA-6 only; non-roster, generation unreviewed |
 | F8.ECM | F-8 ECM | Partial | None | None | None | F-8J only; non-roster, generation unreviewed |
 | MIG27.ECM | MiG-27 ECM | Partial | None | None | None | MiG-27 only; non-roster, generation unreviewed |
-| MIG31.ECM | MiG-31 ECM | Done | None | None | Done | Chaff/flare 60/60 and jammer generation reviewed; MiG-31 (M31-7, John 2026-11-08); also Jaguar/Tornado (not imported) |
+| MIG31.ECM | MiG-31 ECM | Done | None | None | Done | Chaff/flare 60/60 and jammer generation reviewed; MiG-31 (M31-7, John 2026-11-08); the Tornado (TOR-10, 2026-11-11; Late, strength 0.30); also Jaguar (not imported) |
 | SEAHAR.ECM | Sea Harrier ECM | Partial | None | None | None | Sea Harrier only; non-roster, generation unreviewed |
 | SU37.ECM | Su-37 ECM | Partial | None | None | None | no carrier at all; non-roster, generation unreviewed |
 | TU160.ECM | Tu-160 ECM | Partial | None | None | None | Tu-160 only; non-roster, generation unreviewed |
@@ -636,7 +637,7 @@ Per category:
 | Resource | Name/role | Imported | Animations | AI | Logic | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | F150.GAS | 150 gal tank | Done | Done | Done | Done | A-4E, F-16C, F-16A, F-18, F-4, MiG-17, Mirage 2000; fitted body, fuel/mass, Shift+K jettison |
-| F250.GAS | 250 gal tank | Done | Done | Done | Done | F-14, F-104, MiG-25, Mirage F1 (two belly tanks, M3); fitted body, fuel/mass, Shift+K jettison |
+| F250.GAS | 250 gal tank | Done | Done | Done | Done | F-14, F-104, MiG-25, Mirage F1 (two belly tanks, M3), Tornado (one centreline tank by default, capacity two, M3); fitted body, fuel/mass, Shift+K jettison |
 | F350.GAS | 350 gal tank | Done | Done | Done | Done | F-4B/J; loadable on F-18, F-4E, Su-25; fitted body, fuel/mass, Shift+K jettison |
 | F500.GAS | 500 gal tank | Done | Done | Done | Done | Loadable on A-7, AV-8B, F-14, F-15, F-16C; fitted body, fuel/mass, Shift+K jettison |
 

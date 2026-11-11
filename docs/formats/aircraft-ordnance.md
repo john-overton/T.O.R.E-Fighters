@@ -1653,3 +1653,9 @@ default load is the TOR-6 default plus two `AIM9M.JT` (one a side, 380 lb): the 
 window lists `2 AIM-9M`, the live-fire probe starts at 13,228 lb of payload (12,848 before);
 the Load Ordnance page reads `AIM-9M Sidewinder 2 loaded (max 2)` under `Wing`, `55,514 lbs` current of `61,620`
 maximum, `6,106 lbs` available (frame `load-ordnance-page`).
+
+Update (TOR-10, 2026-11-11): the Tornado IDS, the other `BK27.JT` carrier named in
+the GRI-10 update above, has been verified: its own internal gun, 360 rounds, a
+single muzzle, live fire proved ([the Tornado](#the-panavia-tornado-ids-tor-6-2026-11-11),
+[acceptance](../baselines/aircraft-tornado.md)). The "its own verification slice
+has not run" note in that update is out of date.

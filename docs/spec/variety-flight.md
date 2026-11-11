@@ -903,6 +903,11 @@ The hybrid researched default is the validated path. The legacy
 `--legacy-flight` adapter and the restricted `--native-flight-tables` path
 stay separate and are not changed.
 
+Update (TOR-10, 2026-11-11): the +8 row and the 50,000 ft ceiling of B5-4 and the
+lighter default load of TOR-5b and TOR-6b change the figures above; the re-measured
+numbers are in the [Tornado acceptance record](../baselines/aircraft-tornado.md#flight-envelope).
+The record's 60,000 ft ceiling and the level flight to 837 kt there no longer hold.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

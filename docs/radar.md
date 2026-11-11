@@ -912,3 +912,9 @@ Terrain masks the AI sensor feed using the same host terrain intersection query
 as player sensing. Skill does not alter imported radar capabilities. Sensor
 history and stale plots never refresh AI memory or authorize firing. The
 player's sensor profiles and visual channel retain their existing behavior.
+
+Update (TOR-10, 2026-11-11): the Tornado IDS carries `MIG31.ECM` (its record's,
+kept by John, decision 22), read as Late with strength 0.30 (TOR-7 sensor
+summary), so it is one more aircraft on the Late-Cold-War jammer row above; its
+radar is `F18R.SEE` and its Pave Spike row is fixed with no pod body
+([Tornado radar rows](baselines/radar.md#tornado-radar-jammer-and-pave-spike-row-2026-11-11-tor-7)).

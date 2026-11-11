@@ -12,7 +12,7 @@ Implementation audit, 2026-10-05. John requested aircraft-by-aircraft headless
 animation checks after observing a detached A-7 rudder and missing control
 surfaces. This audit uses the actual clean drawing transforms through
 `Airframe::animation_faces`; it does not infer animation correctness from flight
-stability, imported branch counts, or creator launch tests. The individual CPU pose review is complete for 45 of the 46 profiles (the Tornado IDS keeps its interim rig until its own slices; the Mirage F1 joined at its acceptance, 2026-11-11). Broader
+stability, imported branch counts, or creator launch tests. The individual CPU pose review is complete for all 46 profiles (Update, 2026-11-11: the Mirage F1 joined at its acceptance and the Tornado IDS, the last, at its own, TOR-10). Broader
 repository validation follows this review; results are recorded below.
 
 ## Method
@@ -471,9 +471,9 @@ gaps in the per-aircraft contracts remain outside this acceptance.
 
 ## Fleet coverage
 
-The code inventory covers 45 of the 46 playable profiles (all but the Tornado IDS) in the ignored local report
+The code inventory covers all 46 playable profiles (45 until the Tornado IDS joined, 2026-11-11) in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
-variety imports lacked pitch, roll and flap mappings. 45 of the 46 profiles have bounded geometry acceptance in the table below, with
+variety imports lacked pitch, roll and flap mappings. All 46 profiles have bounded geometry acceptance in the table below (45 until the Tornado IDS, 2026-11-11), with
 explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline
 motion survey followed by individual attachment and pose acceptance. Existing
 transforms were not accepted merely because they were present.
@@ -652,7 +652,7 @@ claim of complete original animation behavior or textured GPU acceptance.
 | `gripen` | Gear, brake and burner words unmapped (interim gear rise); canards, elevons and rudder not yet mapped | Whole canards (pitch plus differential roll), elevon wedges (pitch, roll, flap droop), rudder, rigid gear (legs, door pairs, nose), the two rear-fuselage airbrake plates and the burner plume reviewed (GRI-3, GRI-4); mechanics fitted |
 | `f5e` | Gear, brake and burner words unmapped (interim gear rise); surfaces unmapped | Whole stabilators (pitch only), ailerons, flap strips and rudder reviewed with the 25-pose pitch/roll grid (F5E-3); whole rigid gear plates (mains inward, nose forward), the one dorsal speed brake plate and the twin burner plumes with two nozzle glows reviewed (F5E-4); mechanics fitted |
 | `mf1` | None open: all six state words accounted for (gear, brake and plume set by the rig; flap-slot and rudder words pinned, never set) | Whole tailplane (pitch only), outboard-panel ailerons (roll) and rudder with the 25-pose pitch/roll grid (MF1-3); the flap lever moves nothing (no flap panel in the source); whole rigid gear plates (mains forward and inward, nose rearward, 202-value dense sweep), the one dorsal airbrake plate and the single burner plume with one nozzle glow and one contrail (MF1-4); mechanics fitted |
-| `tornado` | Gear, brake and burner words unmapped (interim gear rise) | Whole rigid gear (mains and nose forward), the two dorsal airbrake plates and the two burner plumes reviewed; mechanics fitted (control surfaces: TOR-3) |
+| `tornado` | None open: all six state words accounted for (plumes, airbrakes and gear set by the rig; flaps and rudder set by TOR-3; no hook, slat, spoiler, canopy or reverser word exists); the shape has no sweep word, so the sweep is a fitted speed schedule | Whole swing-wing panels (25 to 67 degrees, 25-pose grids at both ends and a 35-pose sweep and flap grid), whole-panel tailerons (pitch and roll), flap strips, rudder and four fixed glove plates (TOR-3, TOR-5b); whole rigid gear (mains and nose forward, 202-value dense sweep), the two airbrake plates and the two burner plumes with two glows and two contrails (TOR-4); mechanics fitted |
 
 ## F-15E gear, speed brake and plume results (2026-11-10)
 
