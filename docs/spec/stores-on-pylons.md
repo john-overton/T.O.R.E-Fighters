@@ -1655,3 +1655,141 @@ Audit pins: recovered stations 17 to 18, weapon placements 4,663 to 4,652, tank
 placements 231 to 233, Cheat-only placements 222 to 220; the pod placements (80)
 and the roster (45) are unchanged. See the [ordnance availability
 baseline](../baselines/ordnance-availability.md#batch-5-record-and-station-corrections-b5-2-2026-11-10).
+
+## The Mirage F1 (MF1-5, 2026-11-10)
+
+Measurement only, no station table, rail drop, mask or pylon code adopted:
+**the slice stops on clipping** (John's standing rule, B7), with the options
+below for John. `MF1.PT` has four fixed or internal rows (visual sensor, radar,
+the internal `AV8.ECM` suite and the DEFA gun, rows 0 to 3) and four external
+rows. The shape is scaled per axis to real size ([aircraft shape
+scale](../formats/objects-and-shapes.md#aircraft-shape-scale-2026-11-09), factors
+1.0335 right, 1.0546 forward, 1.1804 up, fitted), and the decoded rows scale with
+it (`placed_on`). The stores hang under the standard rules of 2026-10-13. No
+`station_move` exists for the Mirage F1 and none was added. No sensor or
+designator pod was added or kept (B5-2 already cleared the centreline's
+`ALQ167.ECM` default).
+
+| Row | Location | Decoded x / up / fwd, ft | Scaled x / up / fwd, ft | Default | Hang used | Hangs at (centre, ft) |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 4 | Centerline | 0 / -6.0 / 1.7 | 0 / -6.33 / 1.97 | empty (B5-2) | 2 inch rail under the belly | one store; a `F250.GAS` centre at 0 / -3.9 / 1.97, 12.2 ft long |
+| 5 | Wing, paired, four stores | 2 / -5.7 / 0 | 2.07 / -5.98 / 0 | `F250.GAS` x4 | twin-rail pylon at 2.07 ft, one store each side of the bar (1.18 ft off it) | tanks at 0.89 and 3.24 ft a side, y -3.8, 1.23 ft above the ground |
+| 6 | Wing, paired | 7 / -3.3 / -1 | 7.23 / -3.52 / -1.18 | `R550.JT` x2 | 1 ft wing pylon under the wing | +-7.23 / -1.12 / -1.18 |
+| 7 | Wingtip, paired | 13.7 / 1 / -3.7 | 14.12 / 1.05 / -4.33 | `R550.JT` x2 | tip rule: centre line on the shape's tip edge, no pylon | +-13.78 / 0.70 / -4.33 |
+
+The default load is the fixed gun, **four `F250.GAS` under the belly**, two R550
+under the wing pylons and two R550 at the tips (the Weapons panel reads
+`250 DEFA`, `4 R-550`, `+ EXT 6600 LBS`). The count of four is the record's own
+(row 5 holds four), so the default carries two tanks a side where the real F1
+carries one (Jane's text in `MF1.INF`: two 1,200 L tanks on the inner wing
+pylons, one 2,200 L tank on the underfuselage station).
+
+Measured with `tore-app --stores-preview` (CPU, audit and catalog flags, then the
+GPU frames) plus a triangle-level check of every store against the airframe
+(gear up), the gear plates (gear down, the MF1-4 rig, ground plane 5.98 ft
+under the reference), every pylon and every other store (edge and face
+crossings, vertical entry as the audit measures it, surface distances sampled at
+0.12 ft), as for the Mirage 2000. The default load and 71 more cases were run
+(every record each row offers, row by row; the local scripts and their output
+are not committed).
+
+Default load:
+
+| Station | Entry into the airframe | Crossings | Nearest neighbour | Gear down | Ground |
+| --- | ---: | ---: | --- | --- | ---: |
+| Tank, row 5, inner (x 0.89 ft) | none (0.13 ft clear) | 0 | **crosses the other side's inner tank (32 crossings)** | **crosses the main gear plate (24 right, 20 left crossings, touching)** | 1.23 ft |
+| Tank, row 5, outer (x 3.24 ft) | none (0.86 ft clear) | 0 | 0.48 ft to the inner tank | 0.63 ft | 1.23 ft |
+| R550, row 6, right | none (0.13 ft clear) | 0 | clear | 3.0 ft | 4.19 ft |
+| R550, row 6, left | 0.05 ft (upper fin) | 20 | clear | 3.0 ft | 4.19 ft |
+| R550, row 7, right tip | **1.48 ft (fins into the wing tip)** | 66 | clear | 3.0 ft | 6.01 ft |
+| R550, row 7, left tip | **1.45 ft** | 56 | clear | 3.0 ft | 6.01 ft |
+
+The audit's own `clip` lines read 1.48 ft (hardpoint 7) and 2.43 ft (hardpoint 5,
+the inner tanks into the neighbours), against the 0.27 to 0.72 ft the reviewed
+default loads read.
+
+**Clipping, two cases for John** (not fixed):
+
+1. **Belly tanks (row 5, four `F250.GAS`).** Four tanks hang on two twin-rail
+   pylons at 2.07 ft each side of the centreline. A tank is 1.87 ft wide, so the
+   two inner tanks (x 0.89 and -0.89 ft) overlap each other across the
+   centreline by 0.05 ft each (32 crossings) and both stand in the main gear
+   plates when the gear is down (touching, 0.01 ft). The two outer tanks are
+   clean (0.63 ft off the gear, 0.86 ft off the belly). The frames show four tanks in
+   a row under the belly with the wheels among them. The real F1 carries one tank
+   a side. Not caused by the per-axis scale (the row is the record's own
+   position); the Mirage F1's gear sheet (the retail shape, scaled) is narrow, so
+   the inner pylon position meets it for any store.
+2. **Wingtip R550 (row 7), 1.48 ft.** The tip rule centres the missile on the
+   shape's tip edge, 0.70 ft up. The Magic's body and its upper fins stand inside
+   the thin tip (66 and 56 crossings, 1.48 and 1.45 ft vertical entry). The
+   position is the record's and the real F1 has wingtip rails (cited below), so
+   this is the rule meeting a thin tip, not a mis-scaled row. It is the largest
+   default-load entry of any reviewed aircraft (the F-5E's tip AIM-9B reads 0.32 ft
+   and John accepted it).
+
+The centreline row (empty by default), the wing pylon pair (row 6, the left R550
+at 0.05 ft aside) and the ground clearances are clean.
+
+**Options for John (not applied):**
+
+- Row 5 (belly tanks): (a) keep the record's four (clipping stays); (b) default
+  and capacity two (one a side), which fixes the tank-on-tank crossing but
+  leaves the tank in the gear (16 crossings with `F250.GAS` x2 at 2.07 ft, 0.01 ft
+  off the gear) and 0.21 ft from a centreline tank; (c) one tank a side moved
+  outboard to the clean outer slot, about 3.24 ft (the measured clean spot: 0.63 ft
+  off the gear, 0.86 ft off the belly; a `station_move` plus the capacity rule;
+  no source gives the real lateral position, so the number is a measurement,
+  not a citation); (d) the Mirage 2000's belly rail drop (0.1 ft) does not help
+  here, the problem is sideways.
+- Row 7 (wingtip): (a) accept 1.48 ft; (b) a fitted wingtip offset (outboard or
+  down, no `rail_drop` exists for Wingtip rows; the size is not measured here);
+  (c) a different carry rule for this row. It must not move to a wing pylon:
+  the real F1 has tip rails.
+
+**Alternatives the Load Ordnance page offers**, each with the other rows at the
+default (one case ran four rows at once, so only the same row's metrics are
+read). Row 4 takes one store: `F150.GAS` and `F250.GAS` (the 150 and 250 gallon
+tanks; `F350.GAS` and `F500.GAS` are refused on the row by the existing mask) and
+56 weapons (the mask is the Rafale template's). Of the 58 records, 22 are clean
+against the airframe and gear (both tanks, the bombs, the racks and
+`AA11B`, `AS7`, `B13`, `B8`, `AGM65A/G`, `GBU38`); 36 enter the belly by 0.05 to
+0.71 ft (the missiles; `AM39` 0.71 ft) and 15 cross the gear (`AA6`, `AA9`, the
+`GBU` pack, `AS14`, `AGM45/88`, `AIM7`). A centreline `F250.GAS` (12.2 ft long) alone
+is 0.14 ft off the belly, 0.69 ft off the gear and 1.15 ft off the ground; with
+the default four belly tanks it passes through them (148 and 156 crossings),
+and with row 5 cut to two (one a side, x 2.07 ft) it clears them by 0.21 ft.
+
+| Row 5 load (count) | Result |
+| --- | --- |
+| `F150.GAS` x4 / `F250.GAS` x4 (default) | tanks cross each other (32), inner tanks cross the gear (24, 20); outer clean |
+| `F150.GAS` x2 / `F250.GAS` x2 | one tank a side at x 2.07 ft: crosses the gear (24, 24 for the 150 gallon; 16, 16 for the 250), 0.42 ft off the belly; 0.21 ft off a centreline `F250` |
+| `F350.GAS` x2, `F500.GAS` x2 | cross the gear (16), 1.01 and 0.74 ft above the ground |
+| 63 of 65 records | enter the belly (0.01 to 1.44 ft), cross the gear (58 records) or cross a neighbour; the only clean ones are the two ejector racks `MK82P3.JT` and `MK82P.JT` (two stores) |
+| `R550.JT` x2 | 0.47 ft into the belly, crosses the gear (12, 14) |
+
+Row 6 (the wing pair): 39 of the 47 records are clean (no entry, gear 3 ft away).
+Eight enter the wing by 0.05 to 0.33 ft: `R550.JT` (left only, the default),
+`PL7`, `PL10`, `AGM88`, `AGM45`, `AIM7`, `AIM7E` (0.06 to 0.15 ft) and `AS30` (0.33
+ft). Row 7 (the wingtip rail, 10 records): all ten enter the tip, 0.50 ft
+(`AIM9B`, `AIM9M`, `AA2`) to 1.48 ft (`R550.JT`); none touches the gear or the
+ground.
+
+**Real Mirage F1 for plausibility only** (the decoded rows decide): five external
+hardpoints and two wingtip rails (Aerospaceweb, Mirage F1 page, accessed
+2026-11-10; Jane's text in `MF1.INF`: centreline 2,100 kg, inner wing pylons 1,300
+kg, outer wing pylons 550 kg, wingtip rails 150 kg for Magic or Sidewinder). The
+record's one centreline row plus three mirrored pairs is the same seven
+positions, so the station count agrees. The real centreline carries a 2,200 L tank
+or a bomb or a pod, never a second store; **the centreline "takes two tanks" in
+the B5-2 note meant two tank records (150 and 250 gallon), not two tanks at once:
+the row holds one store.** No source gives the real pylons' lateral offsets, so
+the measured clean slot above is a measurement of this shape, not a citation.
+
+Provenance: rows, masks, capacities and defaults spec-derived from `MF1.PT`
+(MF1-0, B5-1) with B5-2's opinionated empty centreline (John, 2026-11-10); the
+per-axis scale opinionated (John, 2026-11-10) with fitted factors; pylon and rail
+depths the existing opinionated rules of 2026-10-13; the measurement, the
+comparison, the stop and the options agent findings, 2026-11-10; the real
+aircraft's stations from public pages for plausibility only. The ordnance audit
+pins did not move (no placement count changed).

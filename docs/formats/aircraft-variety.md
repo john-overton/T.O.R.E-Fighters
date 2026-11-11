@@ -4317,6 +4317,13 @@ Options (none chosen):
 
 Never hang `PAVESPK.SEE` or `AAS38.SEE` on an F1 (B7; neither row exists).
 
+Update (MF1-5, 2026-11-10): the stations were measured on the scaled shape and
+the slice stopped on clipping: the default four `F250.GAS` on row 5 cross each
+other and the main gear, and the wingtip Magic enters the tip by 1.48 ft. See
+[Mirage F1 stations measured](#mirage-f1-stations-measured-mf1-5-2026-11-10).
+The B5-2 remark that the centreline "takes two tanks" means two tank records
+(150 and 250 gallon); the row holds one store.
+
 ### Mirage F1 real size (for John)
 
 Shape extents at scale 1 (1 unit = 1/3 ft), `MF1.SH` neutral state: x -40 to 40,
@@ -4552,3 +4559,23 @@ fit](../spec/variety-animation.md#mirage-f1-gear-airbrake-and-plume-fit):
   fit the stow is read off the skin faces; a stowed main is inside it to within
   0.1 unit, but the shape has no gear bay, so nothing is cut open. (3) The main
   foot dips 0.08 ft in the first degrees of travel (inclined axis).
+
+## Mirage F1 stations measured (MF1-5, 2026-11-10)
+
+Implementation and review, slice MF1-5, Claude Sonnet (sonnet-high). Measurement
+only: no code, station row or pin changed, and the slice is `[~]` pending John.
+The full tables, the per-record alternatives and the options are in [stores on
+pylons](../spec/stores-on-pylons.md#the-mirage-f1-mf1-5-2026-11-10). Summary:
+
+| Row | Location | Default | Result on the scaled shape |
+| ---: | --- | --- | --- |
+| 4 | Centerline | empty (B5-2) | clean when empty; a `F250.GAS` is 0.14 ft off the belly, 0.69 ft off the gear; takes one store |
+| 5 | Wing, four stores | `F250.GAS` x4 | **inner tanks cross each other and the main gear** (outer tanks clean) |
+| 6 | Wing, paired | `R550.JT` x2 | clean (left 0.05 ft) |
+| 7 | Wingtip | `R550.JT` x2 | **1.48 ft entry into the tip** |
+
+Real Mirage F1: five pylons and two wingtip rails (the record's seven positions
+agree); the real carries one tank a side where the record's default carries two.
+No pod or designator was added. Counts and audit pins unchanged (45 aircraft, 18
+recovered stations, 4,652 weapon and 233 tank placements, 80 pods, 220
+Cheat-only). Frames: `.local/m3-aircraft/frames/MF1-5/` (local only).
