@@ -6299,3 +6299,11 @@ of 36 (49 and 31 before). Details: [aircraft ordnance](aircraft-ordnance.md#the-
   position, flank, refusals, the guarded sim change and the measurements agent decisions or
   findings (2026-11-11). Real carriage (one AIM-9L on the inboard stub pylon of each wing)
   from public pages for plausibility only. No retail bytes committed.
+
+Update (TOR-11, 2026-11-12): the side rail is on the swivelling pylon's **inboard** flank (John:
+"The AIM-9 rail on the wing pylon is too long and on the wrong side."), as `Location::InboardRail`
+(byte 0x84) with `Hang::InboardRail`, the missile 1.25 ft inboard of the pack's pylon (8.25 ft out at
+25 degrees; the Position and Live bullets of the section above are the 2026-11-11 outboard
+state), and its drawn arm is 3.0 ft (was 5.6, fitted). The Tornado's wing also starts to sweep at 304 kt
+(350 mph, John), not 250. Row 8's location byte in the source record, the mask, the placements
+(4,581 on the merged tree) and the Cheat-only 222 do not move. Details: [stores on pylons](../spec/stores-on-pylons.md#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12).

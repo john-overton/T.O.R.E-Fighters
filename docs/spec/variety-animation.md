@@ -1024,7 +1024,7 @@ geometry](../formats/aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026
 
 | Control | Fitted motion |
 | --- | --- |
-| Sweep | Each wing panel (13 faces a side, the trailing strip included) turns as one rigid piece about a vertical axis through (+9.5, -1.5) on the right and (-10.5, -1.5) on the left, tip aft, 0 to 42 degrees (leading-edge sweep 25 to 67 degrees, the real range). Speed schedule: spread to 250 knots, linear to fully swept at 600 knots. Flaps hold the wing out (the turn times `1 - flaps`). Draws only; no flight law depends on it. |
+| Sweep | Each wing panel (13 faces a side, the trailing strip included) turns as one rigid piece about a vertical axis through (+9.5, -1.5) on the right and (-10.5, -1.5) on the left, tip aft, 0 to 42 degrees (leading-edge sweep 25 to 67 degrees, the real range). Speed schedule: spread to 304 knots (350 mph, John 2026-11-12, TOR-11; it was a fitted 250), linear to fully swept at 600 knots. Flaps hold the wing out (the turn times `1 - flaps`). Draws only; no flight law depends on it. |
 | Pitch | Both tailerons, whole panels, `-0.20*elevator` radians about the lateral spindle through the root chord midpoint (6, -22.5, -2) (mirrored on the left); positive elevator raises the trailing edges. |
 | Roll | The same panels, `-0.08*aileron` on the right and `+0.08*aileron` on the left. Pitch plus roll is clamped to 0.25 rad, below the fleet's 0.40 (John, 2026-11-10); the forward corner (7,-8,-2) swings 2.41 ft at the clamp. |
 | Flaps | The trailing strips droop `0.40*flaps` about their leading edge and ride with the sweep. The source flap words delete the strips and are never set. |

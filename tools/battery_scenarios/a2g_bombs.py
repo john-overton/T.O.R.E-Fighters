@@ -260,10 +260,12 @@ def tornado_jettison_problems(output: str) -> list[str]:
 
 
 # The Tornado's AIM-9 side rails jettison (TOR-6b, 2026-11-11): the tank, then the two AIM-9Ms
-# from the shoulder rails beside the swivelled pylons, right then left.
+# from the rails beside the swivelled pylons, right then left. Update (TOR-11, 2026-11-12,
+# John): the rails are on the pylons' inboard flank, 1.25 ft inboard of the Mk 82 packs (they were
+# 10.75 and 11.61/11.78 ft out on the outboard flank).
 TORNADO_RAIL_JETTISON = [
-    ("25 degrees", [(0.0, -5.94, 5.67), (10.75, -0.74, 1.50), (-10.75, -0.74, 1.50)]),
-    ("67 degrees", [(0.0, -5.94, 5.67), (11.61, -0.74, -1.26), (-11.78, -0.74, -0.81)]),
+    ("25 degrees", [(0.0, -5.94, 5.67), (8.25, -0.74, 1.50), (-8.25, -0.74, 1.50)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (9.11, -0.74, -1.26), (-9.28, -0.74, -0.81)]),
 ]
 
 
@@ -383,7 +385,7 @@ def scenarios() -> list[Scenario]:
                         "--aircraft", "tornado", "--station", "3", "--load", "AIM9M", "--altitude", "5000",
                         "--speed", "650", "--seconds", "30", "--defenses", "0", "0"], timeout=300)],
             check=tornado_rail_jettison_problems,
-            notes="The Tornado's centreline tank, then its AIM-9M side rails, jettison inert at 5,000 ft with the wing spread (200 kt) and swept (650 kt): each missile leaves from the shoulder rail beside its swivelled pylon (TOR-6b).",
+            notes="The Tornado's centreline tank, then its AIM-9M side rails, jettison inert at 5,000 ft with the wing spread (200 kt) and swept (650 kt): each missile leaves from the rail on the inboard flank of its swivelled pylon (TOR-6b; inboard since TOR-11, John 2026-11-12).",
         ),
         Scenario(
             name="a2g-bomb-motion", lane="flight",

@@ -867,7 +867,7 @@ afterburner in all, environment rows -3 to +7 G (the +7 row fitted from the +6 r
 real +7.5), fuel flows 3 and 22 lb/s; the 11,221 lb tank and the 60,000 ft ceiling
 are the record's own. The shared conventional flight, ground contact, actuator and
 loaded-mass rules apply unchanged, and no new fit was needed. **No flight law reads
-the wing sweep**: TOR-3 and TOR-5 draw it (spread to 250 kt, 67 degrees at 600 kt)
+the wing sweep**: TOR-3 and TOR-5 draw it (spread to 304 kt, 350 mph, since TOR-11 on 2026-11-12, John; it was 250 kt; 67 degrees at 600 kt)
 and move the swivelling pylons by it, and that is all it does. The real sweep changes
 lift and drag a great deal; TORE has one envelope, drag law and stall speed per
 aircraft, and because the drawn sweep is a function of speed only, the Tornado's own

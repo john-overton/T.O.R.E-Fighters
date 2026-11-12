@@ -208,8 +208,9 @@ pub(crate) fn rudder(address: usize) -> bool {
 }
 
 /// How far the wing panel has turned from its spread pose, radians (0 spread,
-/// `SWEEP_MAX - SWEEP_MIN` degrees fully swept): a fitted speed schedule, like
-/// the MiG-23's, and the flaps hold the wing out. This does not invent a flight
+/// `SWEEP_MAX - SWEEP_MIN` degrees fully swept): a speed schedule, from 304
+/// knots (350 mph, John 2026-11-12) to 600, like the MiG-23's, and the flaps
+/// hold the wing out. This does not invent a flight
 /// law; it only draws the wing.
 pub(crate) fn sweep_turn(state: &State) -> f64 {
     tore_sim::combat::swing::wing_turn(state.speed, state.flaps)
@@ -758,7 +759,9 @@ mod tests {
         for (kt, degrees) in [
             (0., 25.),
             (250., 25.),
-            (425., 46.),
+            // 350 mph is 304 knots: the wing is still spread there.
+            (304., 25.),
+            (452., 46.),
             (600., 67.),
             (900., 67.),
         ] {
@@ -786,7 +789,7 @@ mod tests {
             let source = face(a, &pts);
             knots(&mut s, 200.);
             assert_eq!(rig.animate(&source, &s).unwrap().positions, pts);
-            for kt in [300., 425., 600., 800.] {
+            for kt in [310., 425., 600., 800.] {
                 knots(&mut s, kt);
                 let out = rig.animate(&source, &s).unwrap();
                 assert!(out.positions[0][1] < source.positions[0][1]);
@@ -1198,7 +1201,7 @@ mod tests {
         let mut s = state();
         let rig = rig();
         for turn in [0., 0.4, 0.733] {
-            s.speed = (250. + turn / 0.733 * 350.) * 1.68781;
+            s.speed = (304. + turn / 0.733 * 296.) * 1.68781;
             for plate in &plates {
                 let out = rig.animate(plate, &s).unwrap();
                 assert_eq!(out.positions, plate.positions, "fixed to the fuselage");

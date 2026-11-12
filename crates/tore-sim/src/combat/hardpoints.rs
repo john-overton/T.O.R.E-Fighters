@@ -181,6 +181,13 @@ pub enum Location {
     Separate,
     /// Fitted Raptor bay magazines, forward store released first.
     Magazine,
+    /// T.O.R.E's own, never a source record's: a store on a rail on the
+    /// *inboard* flank of another station's pylon, facing the fuselage,
+    /// [`SHOULDER_OUT`] inboard of the pylon's centre line ([`station_move`],
+    /// the Tornado's AIM-9 rail on its inboard swivelling pylons; TOR-11, John
+    /// 2026-11-12). [`Location::Shoulder`] is the same rail on the outboard
+    /// flank. The drawn rail is [`INBOARD_RAIL_LENGTH`] long.
+    InboardRail,
     /// A byte outside the six reviewed names.
     Other(u8),
 }
@@ -193,6 +200,19 @@ pub const TUNNEL_BYTE: u8 = 0x81;
 pub const SEPARATE_BYTE: u8 = 0x82;
 /// Fitted internal magazine, retained in replay store layouts.
 pub const MAGAZINE_BYTE: u8 = 0x83;
+/// [`Location::InboardRail`]'s byte, outside the source's 0 to 5.
+pub const INBOARD_RAIL_BYTE: u8 = 0x84;
+
+/// How long the Tornado's AIM-9 rail on the inboard flank of its wing pylon is
+/// drawn, feet (fitted, agent decision, TOR-11, 2026-11-12, after John: "the
+/// AIM-9 rail on the wing pylon is too long"). It was the F-14 shoulder arm,
+/// 0.6 of the missile's length (5.6 ft on an AIM-9M); it is now 3.0 ft, a third
+/// of the missile, which is the span of the launcher that grips the missile's
+/// two launch shoes. The real LAU-7 Sidewinder launcher is 110 in (9.2 ft)
+/// long overall (Marvin Engineering's LAU-7 data sheet, accessed 2026-11-12),
+/// but that figure includes its forward housing and the missile's own length
+/// again; no source gives the shoe span, so the 3.0 ft is fitted.
+pub const INBOARD_RAIL_LENGTH: f64 = 3.0;
 
 /// How far either side of a [`Location::Separate`] station its two pylons
 /// stand, feet: the Su-27's and Su-35's middle and outer underwing pylons,
@@ -216,6 +236,7 @@ impl Location {
             TUNNEL_BYTE => Self::Tunnel,
             SEPARATE_BYTE => Self::Separate,
             MAGAZINE_BYTE => Self::Magazine,
+            INBOARD_RAIL_BYTE => Self::InboardRail,
             other => Self::Other(other),
         }
     }
@@ -231,6 +252,7 @@ impl Location {
             Self::Tunnel => TUNNEL_BYTE,
             Self::Separate => SEPARATE_BYTE,
             Self::Magazine => MAGAZINE_BYTE,
+            Self::InboardRail => INBOARD_RAIL_BYTE,
             Self::Other(byte) => byte,
         }
     }
@@ -251,7 +273,25 @@ impl Location {
                 | Self::Wing
                 | Self::Wingtip
                 | Self::Shoulder
+                | Self::InboardRail
         )
+    }
+    /// How far outboard of its pylon's centre line a store on this location's
+    /// rail hangs, feet: [`SHOULDER_OUT`] on the outboard flank
+    /// ([`Self::Shoulder`]), minus that on the inboard flank
+    /// ([`Self::InboardRail`]); zero elsewhere. Seen from the right-hand
+    /// wing; the left mirrors.
+    pub fn rail_out(self) -> f64 {
+        match self {
+            Self::Shoulder => SHOULDER_OUT,
+            Self::InboardRail => -SHOULDER_OUT,
+            _ => 0.,
+        }
+    }
+    /// Whether this is a rail on the flank of another station's pylon, on
+    /// either side of it.
+    pub fn on_pylon_flank(self) -> bool {
+        matches!(self, Self::Shoulder | Self::InboardRail)
     }
 }
 
@@ -473,7 +513,7 @@ impl Rack {
                 let up = match self.surface(offset) {
                     // On a shoulder rail: its centre line a little above
                     // the foot of the pylon beside it.
-                    Some(surface) if self.location() == Location::Shoulder => {
+                    Some(surface) if self.location().on_pylon_flank() => {
                         surface - self.depth() + shoulder_rise(size)
                     }
                     Some(surface)
@@ -490,17 +530,18 @@ impl Rack {
                     // store turns.
                     point: if self.turn == 0. {
                         point
-                    } else if self.location() == Location::Shoulder {
-                        // A shoulder rail on a swivelling pylon (the
-                        // Tornado's AIM-9 rails, TOR-6b): the pylon is
-                        // carried by the wing, the rail stays beside it as
-                        // the pylon swivels, so the sideways offset is not
-                        // turned with the wing.
+                    } else if self.location().on_pylon_flank() {
+                        // A rail on a swivelling pylon (the Tornado's AIM-9
+                        // rails, TOR-6b, on the inboard flank since TOR-11):
+                        // the pylon is carried by the wing, the rail stays
+                        // beside it as the pylon swivels, so the sideways
+                        // offset is not turned with the wing.
                         let sign = if right < 0. { -1. } else { 1. };
-                        let pylon = [point[0] - sign * SHOULDER_OUT, point[1], point[2]];
+                        let out = sign * self.location().rail_out();
+                        let pylon = [point[0] - out, point[1], point[2]];
                         let mut carried =
                             super::swing::swept(sign > 0., pylon, f64::from(self.turn));
-                        carried[0] += sign * SHOULDER_OUT;
+                        carried[0] += out;
                         carried
                     } else {
                         super::swing::swept(side == 0, point, f64::from(self.turn))
@@ -802,6 +843,10 @@ pub enum Hang {
     /// own station is, `pylon_forward` feet forward, so the two share a
     /// foot.
     Shoulder { pylon_forward: f64 },
+    /// As [`Self::Shoulder`], on the pylon's inboard flank
+    /// ([`Location::InboardRail`]): the pylon [`SHOULDER_OUT`] *outboard* of
+    /// the station.
+    InboardRail { pylon_forward: f64 },
     /// As recorded, on tunnel pallets ([`Location::Tunnel`]): pairs one
     /// behind another close up to [`PALLET_GAP`].
     Pallets,
@@ -1034,14 +1079,16 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             TORNADO_WING_INNER[1],
             Hang::AsRecorded,
         ),
-        // The Tornado's AIM-9 side rails (row 8, TOR-6b, John 2026-11-11):
-        // on the shoulder rail of the same inboard swivelling pylon as row 7,
-        // as the F-14's glove-pylon Sidewinder rides its pylon's shoulder.
+        // The Tornado's AIM-9 side rails (row 8, TOR-6b, John 2026-11-11): on
+        // a rail on the same inboard swivelling pylon as row 7, as the F-14's
+        // glove-pylon Sidewinder rides its pylon's shoulder. Update (TOR-11,
+        // John 2026-11-12): on the pylon's inboard flank, facing the
+        // fuselage, as the real aircraft's rails are, not the outboard one.
         (AircraftId::Tornado, 8) => at(
             Location::Wing,
-            TORNADO_WING_INNER[0] + SHOULDER_OUT,
+            TORNADO_WING_INNER[0] - SHOULDER_OUT,
             TORNADO_WING_INNER[1] + TORNADO_RAIL_FORWARD,
-            Hang::Shoulder {
+            Hang::InboardRail {
                 pylon_forward: TORNADO_WING_INNER[1],
             },
         ),
@@ -1270,6 +1317,10 @@ pub fn placed_on(
         Hang::Shoulder { pylon_forward } => {
             rack.location = SHOULDER_BYTE;
             (moved.right - SHOULDER_OUT, pylon_forward)
+        }
+        Hang::InboardRail { pylon_forward } => {
+            rack.location = INBOARD_RAIL_BYTE;
+            (moved.right + SHOULDER_OUT, pylon_forward)
         }
         Hang::Pallets | Hang::PalletsFromBelow { .. } => {
             rack.location = TUNNEL_BYTE;
@@ -2442,8 +2493,9 @@ mod tests {
     }
 
     /// TOR-6b, John 2026-11-11: the Tornado's AIM-9 side rail (row 8) rides
-    /// the shoulder of row 7's swivelling pylon, SHOULDER_OUT outboard of it,
-    /// at every sweep, on both wings.
+    /// the flank of row 7's swivelling pylon at every sweep, on both wings.
+    /// TOR-11, John 2026-11-12: the inboard flank (facing the fuselage),
+    /// SHOULDER_OUT inboard of the pylon, where it was outboard.
     #[test]
     fn the_tornado_side_rail_stays_beside_the_swivelling_pylon_at_every_sweep() {
         use crate::combat::swing;
@@ -2464,7 +2516,7 @@ mod tests {
         let moved = station_move(AircraftId::Tornado, 8).expect("row 8 is moved");
         let inner = station_move(AircraftId::Tornado, 7).expect("row 7 is moved");
         assert_eq!(moved.location, Location::Wing);
-        assert_eq!(moved.right, inner.right + SHOULDER_OUT);
+        assert_eq!(moved.right, inner.right - SHOULDER_OUT);
         assert_eq!(moved.forward, inner.forward);
         assert!(swing::swivels(AircraftId::Tornado, 8));
         assert!(!swing::swivels(AircraftId::Tornado, 6));
@@ -2472,8 +2524,13 @@ mod tests {
         assert_eq!(station_move(AircraftId::Mig23, 8), None);
         let (mount, mut rack) = placed_on(AircraftId::Tornado, 8, &rail_row, None);
         let (pylon_mount, mut pylon_rack) = placed_on(AircraftId::Tornado, 7, &pylon_row, None);
-        assert_eq!(rack.location(), Location::Shoulder);
+        assert_eq!(rack.location(), Location::InboardRail);
+        assert_eq!(rack.location().rail_out(), -SHOULDER_OUT);
+        assert_eq!(Location::Shoulder.rail_out(), SHOULDER_OUT);
         assert_eq!(pylon_rack.location(), Location::Wing);
+        // The F-14's glove pylon Sidewinder keeps its outboard shoulder.
+        let f14 = station_move(AircraftId::F14, 7).expect("the F-14's AIM-9 rail");
+        assert!(matches!(f14.hang, Hang::Shoulder { .. }));
         let aim9 = StoreSize::of_shape(Some("SIDEM.SH"));
         let bomb = StoreSize::of_shape(Some("MK82.SH"));
         for degrees in [25., 35., 46., 60., 67.] {
@@ -2484,10 +2541,11 @@ mod tests {
                 let rail = rack.store_point(mount, 2, side, 0, aim9);
                 let held = pylon_rack.store_point(pylon_mount, 2, side, 0, bomb);
                 let sign = if side == 0 { 1. } else { -1. };
-                // Beside the pylon's store, outboard by the shoulder offset,
-                // at the same place fore and aft, whatever the sweep.
+                // Beside the pylon's store, inboard by the shoulder offset
+                // (toward the fuselage), at the same place fore and aft,
+                // whatever the sweep.
                 assert!(
-                    (sign * (rail[0] - held[0]) - SHOULDER_OUT).abs() < 1e-9,
+                    (sign * (rail[0] - held[0]) + SHOULDER_OUT).abs() < 1e-9,
                     "{degrees} degrees, side {side}: {rail:?} against {held:?}"
                 );
                 assert!((rail[2] - held[2]).abs() < 1e-9, "{degrees} degrees");

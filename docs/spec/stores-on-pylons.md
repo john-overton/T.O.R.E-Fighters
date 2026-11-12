@@ -141,6 +141,7 @@ maximum and reports the default-load audit.
 | Real stations (Su-27, Su-35) | The Flankers' tunnel, intake and wing rows hang at the real aircraft's stations, one missile a pylon, from the per-aircraft table ([the Su-27 and Su-35](#the-su-27-and-su-35)) | opinionated, John 2026-10-14 ("make them look realistic"); the positions are agent decisions read from the models |
 | Real stations (Yak-141) | The Yak-141's two wing rows hang at its inner and outer underwing pylons, from the per-aircraft table, not the records' positions ([the Yak-141](#the-yak-141)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
 | Real stations (F-14) | The F-14's four weapon and tank records hang at the real aircraft's stations, from a per-aircraft table, not the records' positions: no move aside there ([the F-14](#the-f-14)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
+| Inboard rail | The Tornado's AIM-9 rail hangs on the swivelling pylon's inboard flank (facing the fuselage), 1.25 ft inboard of its centre line, drawn on a 3.0 ft arm; otherwise as the shoulder rail ([the Tornado](#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12)) | opinionated, John 2026-11-12; the 3.0 ft is fitted |
 | Shoulder rail | A store on a pylon's shoulder rail (the F-14's AIM-9) hangs 1.25 ft outboard of that pylon's centre line, its body 0.05 ft above the pylon's foot (the lugs, the top, of whatever store hangs under the pylon), and leaves from there: the rail juts off the pylon's side just above the main store, so the shoulder store's body is above the whole body of any store under the pylon, real loads or not (AIM-120, AIM-7, AIM-54, bombs, tanks, GBU-10). 1.25 ft keeps an AIM-9's fins (2.07 ft across at 45 degrees) clear of the pylon and of the fins of an AIM-120, AIM-7 or AIM-54 under it | opinionated, John 2026-10-14 ("the AIM-9 rail in real life is a jut off the main pylon slightly elevated above the stores on the main wing pylon"); the spacing and the 0.05 ft gap are agent decisions (fitted) |
 | Wingtip | A wingtip store's centre line lies on the tip's edge: as far out as the model's outermost point beside the record (within 4 ft inboard and 0.3 ft outboard of it, 2.5 ft fore and aft, 3 ft up or down), at the middle height of that edge. No pylon or rail is drawn. With no model read, the record's position | opinionated, John 2026-10-13 ("the missile's centre line sits on the wingtip geometry, no gap"); the search box is an agent decision |
 | Where the underside is read | When the loadout is built, from the aircraft shape the simulation already reads (`<ID>.SH`, at the debris scale): over the record, over a two-pylon wing's inboard and outboard pylons (1.4 ft either side), and 7 ft ahead of and behind the record; a tandem pylon's surface is interpolated between the record and the sample on its side. The heights travel with the station (`Rack::over`), into checkpoints and replays | agent decision |
@@ -2546,7 +2547,8 @@ wing sweeps; stores on them follow. Here:
 - **Where the store goes.** The sweep is a pure function of the aircraft's speed and
   flaps (`combat::swing::wing_turn`: spread to 250 kt, linear to fully swept at
   600 kt, 25 to 67 degrees, flaps hold the wing out; the numbers are TOR-3's,
-  moved from the drawing rig into the simulation unchanged). A swivelling
+  moved from the drawing rig into the simulation unchanged. Update (TOR-11,
+  2026-11-12): spread to 304 kt, John's 350 mph, the rest unchanged). A swivelling
   station's pylon is carried to where the wing's turn about its pivot puts it
   (`swing::swept`); the pylon swivels back by the same turn, so the store's heading
   stays along the fuselage at every sweep and only its position moves. The height
@@ -2926,3 +2928,73 @@ lugs whatever hangs there. Table: `checks/TOR-6b/matrix7/`.
 67 degrees; the gear-down legs are 5.5 ft (25 degrees) and 6.3 to 6.5 ft (67 degrees) from
 the rail missile; its lowest point is 5.9 ft above the ground, gear down. The pack,
 Paveways and the centreline tank are unchanged (0.00, 0.96 front pair, 0.00).
+
+## The Tornado AIM-9 rail on the inboard flank, shorter, and the sweep from 350 mph (TOR-11, 2026-11-12)
+
+**Opinionated (John, 2026-11-12): "I don't think for the tornado the wings should start
+sweeping back until it's about 350 mph." and "The AIM-9 rail on the wing pylon is too long
+and on the wrong side."** Update to the [TOR-5 swivel](#the-tornado-ids-swivelling-wing-pylons-and-a-stop-on-clipping-tor-5-2026-11-10)
+and [TOR-6b side rail](#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11)
+sections above, which stay as written (their sweep schedule is the 2026-11-10 one and their
+rail was on the outboard flank).
+
+**Sweep start.** `swing::SWEEP_FROM_KNOTS` is 304 (350 mph, John), where it was a fitted 250;
+`SWEEP_TO_KNOTS` stays 600. The wing is spread to 304 kt and fully swept (67 degrees) at 600 kt,
+about 0.14 degrees a knot. The human ownship, the AI (`AiWings::carry_swing_wings`), the drawing,
+replays and the animation probe all read the same function. 45 degrees is 445 kt (was 417 kt),
+the scenarios' 200 kt and 650 kt are still the spread and fully swept poses.
+
+**Which flank.** The rail is now on the pylon's **inboard** flank, facing the fuselage, which is
+where the real Tornado's AIM-9 rails are (John's correction of the TOR-6b agent choice, which
+had no source for either flank). A new `Location::InboardRail` (byte 0x84,
+`INBOARD_RAIL_BYTE`) with `Hang::InboardRail` puts the missile 1.25 ft inboard of row 7's
+pylon: 8.25 ft out, 1.50 ft forward, 0.74 ft under the reference at 25 degrees. The F-14's and
+the F-15's shoulder rails are unchanged (`Location::Shoulder`, outboard); `Location::rail_out`
+gives the signed offset, the one place the side lives, and `Rack::side_pylons`, the drawing
+(`pylons::shoulder_rail`) and `station_move` read it. The offset is still added after the sweep,
+so the rail stays 1.25 ft inboard of its pylon at every sweep, level with it fore and aft.
+
+| Sweep | Row 7 pack, right / left (ft out, forward) | Row 8 AIM-9M, right / left (ft out, forward) |
+| --- | --- | --- |
+| 25 degrees (spread) | 9.50 / -9.50, 1.50 | 8.25 / -8.25, 1.50 |
+| 45 degrees (445 kt) | 10.16, 0.27 / -10.20, 0.49 | 8.91, 0.27 / -8.95, 0.49 |
+| 67 degrees | 10.36, -1.26 / -10.53, -0.81 | 9.11, -1.26 / -9.28, -0.81 |
+
+Height 0.74 ft under the reference at every sweep (the pack's 1.45 ft); the rail is 0.53 ft
+under the wing. Release and jettison use the same point (scenarios
+`a2g-release-origin-tornado-rail`, `a2g-jettison-tornado-rail`).
+
+**Length (fitted).** The drawn arm off the pylon, which is the rail the missile hangs from,
+was the F-14's 0.6 of the missile, 5.61 ft on the 9.35 ft AIM-9M, longer than the 4.21 ft pylon
+it hangs from (0.45 of the missile). It is now `INBOARD_RAIL_LENGTH` = **3.0 ft**, a third of the
+missile, centred on its middle. Source: the real LAU-7 Sidewinder launcher is 110 in (9.2 ft) long
+overall (Marvin Engineering LAU-7 data sheet, accessed 2026-11-12), nearly the missile's own
+length, but that includes the launcher's forward housing and no public figure gives the span
+of the rail that holds the missile's two launch shoes, so 3.0 ft is fitted (it is also the
+F-14 arm's 3 ft floor). Drawing only: no clearance or release value reads it.
+
+**Clearance (CPU stores preview, `.local/m3-aircraft/checks/TOR-11/`, default load, AIM-9M
+on the rail).**
+
+| Quantity | 25 degrees | 45 degrees | 67 degrees |
+| --- | --- | --- | --- |
+| Rail missile into the airframe (fuselage, glove, wing) | 0.00 ft | 0.00 | 0.00 |
+| Gap to the row 7 Mk 82 pack (bounding boxes) | 0.06 ft | 0.06 | 0.06 |
+| Gap to the row 6 Paveways (right side) | 3.63 ft | 4.30 | 4.49 |
+| Gap to the centreline tank | 6.58 ft | 7.24 | 7.44 |
+| Gear-down legs (right) | 3.09 ft | 3.71 | 3.90 |
+| Lowest point above the ground, gear down | 5.86 ft | 5.86 | 5.86 |
+
+The gear is the model's three gear pieces (two main legs, the nose leg); the model has no gear
+door faces, so there is no door to measure. The pack, the Paveways and the tank are unchanged.
+The side is symmetric about the pylon, so the pack-and-rail gaps equal TOR-6b's outboard ones:
+the other six kept missiles (AIM-9B, AIM-9X, AA-2, AA-8, AA-11, AA-11B) read 0.00 ft into the
+airframe at all three sweeps and 0.06 to 0.34 ft from the pack; the four refused ones read the same
+entries as before on the inboard flank (R550 0.40, AT12 0.44, PL7 0.50, GBU12 1.02 ft, Cheat loading), so
+the refusals, the 4,581 placements and the 222 Cheat-only placements do not move. Against the row 7
+alternatives the boxes cross as in TOR-6b (FAB-250 0.04 ft clear to the HARM family -0.79 ft; Load
+Ordnance only, not a refusal, John accepts a wide store touching the rail's missile). Table:
+`checks/TOR-11/`.
+
+**Not changed.** The mask, refusals, the capacity (one a side), `swing::swivels` (rows 7 and 8) and
+the F-14 and F-15 shoulder rails.

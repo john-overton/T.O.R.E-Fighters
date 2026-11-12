@@ -60,16 +60,18 @@ choice in this record is an agent decision and is labelled as one. The numbers
 | T4 | 2026-11-11 (round 3) | **A small fitted glove plate** fills the wing-root wedge as the wing sweeps. | same, [glove plate](../formats/aircraft-control-surfaces.md#tornado-glove-plate-tor-5b-2026-11-11) |
 | T5 | 2026-11-11 (round 3) | **Tailerons keep 0.25 rad.** | [Control rig](../formats/aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10) |
 | Rail | 2026-11-11 (after TOR-6) | **"Lets do a custom side rail kind of like the f-14 for this station and put it on the inner [wing] rail like the RL Tornado."** An AIM-9 side rail on each inboard swivelling pylon. | [Side rails](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11) |
+| TOR-11 | 2026-11-12 | **"I don't think for the tornado the wings should start sweeping back until it's about 350 mph."** The sweep starts at 304 kt (350 mph), was a fitted 250; the full sweep stays 600 kt. | [TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12) |
+| TOR-11 | 2026-11-12 | **"The AIM-9 rail on the wing pylon is too long and on the wrong side."** The rail moves to the pylon's inboard flank and its drawn arm shortens from 5.6 to 3.0 ft. | [TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12) |
 | B5-4 | 2026-11-11 (after round 3) | **"Correct all flight model maximums and fuel flows per realistic numbers that fit in TORE."** For the Tornado: a +8 row beside the +7 row, a 50,000 ft ceiling (record 60,000), the flows confirmed at 3 and 22 lb/s, top speeds kept. | [Flight maxima and fuel flows](../spec/aircraft-records.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11) |
 | B5-4a | 2026-11-11 (after B5-4) | **"Tornado T2 accepted as is"**; the shared drag law is left alone. | not here |
 | O5 | 2026-11-11 (round 3) | **AI: a separate pass after the batch** (the F-5E's AIM-9B and related findings). No AI work here (AGENTS.md). | not here |
 
 Not asked of John and decided by an agent (each labelled where it lives): the
-sweep speed schedule (250 to 600 kt) and the pivot position, the taileron pitch
+sweep speed schedule (250 to 600 kt; Update (TOR-11, 2026-11-12): the start is John's, 304 kt) and the pivot position, the taileron pitch
 and roll weights, every fitted hinge and stow pose, the choice of which rows
 swivel (7 and 8), the row 7 position (9.5 ft out, 1.5 ft forward), the glove
 plate geometry, the 0.3 ft refusal line and its lists (following his F-15E A2
-answer), the rail position (1.25 ft outboard of the pack) and its refusals, the
+answer), the rail position (1.25 ft outboard of the pack; Update (TOR-11, 2026-11-12): inboard, John's call) and its refusals, the
 Mk 82 `rounds` and live scenarios, the HUD glass polygon, the mirror seeds, the
 battery windows, and the `same_stores` change in session recordings.
 
@@ -204,6 +206,9 @@ spindle through the root chord midpoint (6, -22.5, -2). Flaps: the strips stay
 drawn and droop 0.40 rad about their leading edge, riding with the sweep. Rudder:
 one rigid panel about the block's leading edge, 0.35 rad. The wingtip vapor
 follows the swept tip.
+
+Update (TOR-11, 2026-11-12): the wing is spread to 304 kt (350 mph, John), not 250;
+the full sweep stays 600 kt ([TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12)).
 
 | Sweep, degrees | Speed on the schedule, kt | Wing turn, degrees | Worst seam gap, ft |
 | ---: | ---: | ---: | ---: |
@@ -362,6 +367,10 @@ and keeps seven (`AIM9B`, `AIM9M`, `AIM9X`, `AA2`, `AA8`, `AA11`, `AA11B`, all 0
 at both sweeps). The air-to-air page lists seven missiles (before TOR-6b only
 `AA-11B` and `R-60M`).
 
+Update (TOR-11, 2026-11-12): the flank is now **inboard**, John's call (the paragraph
+above's "outboard" and "not measured" are the 2026-11-11 state); see
+[TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12).
+
 **Releases and jettison (all pass).** `--live-fire` slot 1 gun, slot 2 GBU-10 (one
 shot), slot 3 Mk 82 pack (3 shots, 3 hits, 1 kill), slot 4 AIM-9M (one shot and one
 hit at 200 kt and at 650 kt). `--a2g-run` release origins at 200 kt (25
@@ -447,11 +456,12 @@ passed, 0 failed.
 
 **Stations.** The table above: one centreline tank, Paveways on the shoulders
 (fin tips 0.96 and 0.55 ft in, accepted), Mk 82 packs on the swinging panel at 9.5
-ft out, AIM-9M side rails 1.25 ft beside the packs, the outer row retired, four
-glove plates.
+ft out, AIM-9M side rails 1.25 ft inboard of the packs (outboard until TOR-11, 2026-11-12),
+the outer row retired, four glove plates.
 
-**Sweep.** 25 to 67 degrees from 250 to 600 kt, flaps hold the wing out, a fitted
-schedule that moves drawing and swivelling stations only (no flight law).
+**Sweep.** 25 to 67 degrees from 304 kt (350 mph, John 2026-11-12, TOR-11; 250 kt until
+then) to 600 kt, flaps hold the wing out, a schedule that moves drawing and swivelling
+stations only (no flight law).
 
 **Ordnance (TOR-6, TOR-6b).** 33 refusals on row 6 and 3 on row 7 and 4 on row 8
 on normal loading (40 in all); `TOR.PT` 56 compatible weapon placements and 8 tank
@@ -583,6 +593,43 @@ and a release point of (-10.32, -1.45, 0.22) against (-9.50, -1.45, 1.50) before
 above are 0.76 and 1.56 ft). The run still drops three bombs, three impacts, one
 kill. Log `.local/m3-aircraft/checks/B5-AI/tor-fix.txt` against `tor-nofix.txt`.
 
+## TOR-11 Sweep from 350 mph and the inboard AIM-9 rail (2026-11-12)
+
+Implementation mode, in `m3-tornado`, after the batch merge (`b7d7abeb`); not yet committed
+when written. John (2026-11-12): "I don't think for the tornado the wings should start
+sweeping back until it's about 350 mph." and "The AIM-9 rail on the wing pylon is too long
+and on the wrong side."
+
+- **Sweep.** `swing::SWEEP_FROM_KNOTS` 250 to 304 (350 mph; opinionated, John), the full sweep
+  stays 600 kt (nothing forced a change); doc comment, `speed_for_sweep`, the unit tests, the
+  animation probe's expected sweep (it now reads the constants) and the quoted examples follow.
+  At the old numbers' sample speeds the drawn sweep is now 28.7 degrees at 330 kt, 47.3 at 461 kt,
+  66.0 at 593 kt; 45 degrees is 445 kt. The scenarios' 200 kt (spread) and 650 kt (fully swept)
+  are unchanged and still pose 25 and 67 degrees. Human and AI both use `wing_turn` (the AI
+  through `carry_swing_wings`), so both follow; the AI-flown release at 457.1 kt now sits at a 46.7
+  degree sweep, not 50 (the TOR-10 measurement is a dated record).
+- **Rail flank and length.** New `Location::InboardRail` (byte 0x84) with `Hang::InboardRail`:
+  the missile is 1.25 ft inboard of row 7's pylon (8.25 ft out at 25 degrees; 8.91 / -8.95 at
+  45; 9.11 / -9.28 at 67), the offset added after the sweep as before, drawn on a 3.0 ft arm
+  (was 5.61 ft on the 9.35 ft AIM-9M, from 0.6 of its length). The F-14's and F-15's shoulder
+  rails are untouched. The 3.0 ft is fitted: the real LAU-7 launcher is 110 in overall (Marvin
+  Engineering data sheet) but no source gives the shoe-span rail, see the
+  [spec](../spec/stores-on-pylons.md#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12).
+- **Clearance, inboard, AIM-9M, default load (25 / 45 / 67 degrees).** Into the airframe 0.00 /
+  0.00 / 0.00 ft; pack 0.06 ft clear at all three; row 6 Paveways 3.63 / 4.30 / 4.49 ft; centreline tank
+  6.58 / 7.24 / 7.44 ft; gear legs 3.09 / 3.71 / 3.90 ft (was 6.3 outboard at 67); lowest point 5.86 ft above the
+  ground, gear down. Every other kept missile 0.00 ft into the airframe; the four refused
+  stores read the same entries as outboard, so the refusals, 4,581 placements and 222
+  Cheat-only stand. Release origin and jettison follow (scenarios updated).
+- **Checks (2026-11-12).** `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings`
+  clean; `cargo test --locked --workspace --no-fail-fast` 7,692 passed, 0 failed (two new: the
+  inboard rail's hanging and arm in `pylons`, and the schedule's 304 kt knee; the sweep tests in
+  `swing`, `tornado_animation`, `replay::convert` and the rail position test in `hardpoints`
+  moved with the numbers); `--validate-ordnance --no-audio` 45 aircraft, 4,581 weapon placements,
+  233 tank placements, 222 Cheat-only (no pin moved); Tornado battery
+  (`--scenario '*tornado*'`) 21 of 21; tools unittests OK; `tools/check_docs.py` passed.
+- **Frames.** `.local/m3-aircraft/frames/TOR-11/` (local evidence): before and after at 25, 45 and 67 degrees from below, front-low and above, with 3x crops and side-by-side pairs.
+
 ## Open findings for John
 
 Nothing here was changed by this slice; each is a decision or a model question.
@@ -683,6 +730,12 @@ listed by TOR-6 and TOR-6b, item 8 is new).
 19. **Saved loads** from before TOR-6b (an eight-row Tornado) were never in a
     release; none were migrated.
 20. **Frames index.** The frame pack is indexed in the local `INDEX.md`.
+
+   Update (TOR-11, 2026-11-12): findings 6 and 7 move with the rail. The flank is now
+   inboard (John's call, no source), so the unsourced flank is John's choice, not an agent's;
+   the sweep start is John's 304 kt, so only the 600 kt end of the schedule is unsourced. The
+   wide row-7 stores cross the inboard missile's box by the same amounts as before (FAB-250
+   0.04 ft clear to HARM -0.79 ft).
 
 ## Definition of done
 

@@ -1934,6 +1934,13 @@ the shape is the minimum: its leading edge sweeps atan(10/21) = 25.5 degrees on
 the planform. The panel therefore turns 0 to 42 degrees about a vertical axis,
 the right wing clockwise seen from above (tip aft), the left the other way.
 
+Update (TOR-11, 2026-11-12): the Tornado's wing stays spread to 304 knots (350 mph),
+not 250: John, 2026-11-12, "I don't think for the tornado the wings should start
+sweeping back until it's about 350 mph" (opinionated). The full sweep stays at 600
+knots, so the turn now runs 304 to 600 knots, about 0.14 degrees a knot (it was 0.12).
+`swing::SWEEP_FROM_KNOTS` is the one place the number lives; the drawing, the
+swivelling stations, the AI and the animation probe all read it.
+
 **Pivot (fitted).** The real pivot is at the wing root joint on the fuselage
 glove; its position was not found in a source (unknown), so the rig puts it where
 it costs the least seam. Each wing panel shares five vertices with six fixed
@@ -2115,7 +2122,7 @@ TOR-4. See the [Tornado control fit](../spec/variety-animation.md#tornado-contro
 | --- | --- |
 | Face lists, vertices, state-word branches | spec-derived (retail `TOR.SH`, read at run time, refused if different) |
 | Sweep range 25 to 67 degrees | cited real figure (`TOR.INF`, Jane's), used as the endpoints of a fitted range |
-| Sweep speed schedule (250 to 600 knots, flaps hold out) | fitted, agent decision 2026-11-10, after the MiG-23's rig |
+| Sweep speed schedule (250 to 600 knots, flaps hold out) | fitted, agent decision 2026-11-10, after the MiG-23's rig. Update (TOR-11, 2026-11-12): 304 to 600 knots, the start opinionated (John, 2026-11-12: "I don't think for the tornado the wings should start sweeping back until it's about 350 mph"; 350 mph is 304 knots), the full sweep still the fitted 600 |
 | Sweep pivot (9.5, -1.5) and (-10.5, -1.5) | fitted, chosen to minimize the glove seam; the real pivot position is unknown (no source found) |
 | Rotating pylons as a design | opinionated, John 2026-11-10 (decision 19); the interface is agent-authored |
 | Taileron law and 0.25 rad limit | fitted, agent decision 2026-11-10, smaller than the fleet's 0.40 on John's request (decision 20) |
