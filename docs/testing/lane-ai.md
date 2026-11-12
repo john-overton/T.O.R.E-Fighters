@@ -824,3 +824,104 @@ are reported separately from prediction latency. Use `--player-turn=3` or
 battery coordination with invulnerability enabled.
 
 `ai-missile-envelope-gaps` runs the release cost example with `--gap-witness` against the isolated imported pack. It verifies R27ER hit/miss/hit points at 25/35/45 km: 25 km is in the first region (maximum between 26 and 27 km) and IN RNG, the 35 km gap advises the first region without IN RNG, and the 45 km hit advises the far region and is IN RNG; it also checks bounded queue work and completion without starvation. Synthetic combat and employment tests verify that the failed exact point cannot authorize an AI launch.
+
+## B5-AI: the F-5E's AIM-9B, the F-15E's role and the AI Tornado's racks (2026-11-11)
+
+An AI pass over the three batch-5 findings (slice B5-AI, `m3-aircraft`).
+Evidence logs are local, under `.local/m3-aircraft/checks/B5-AI/`; the prints
+used were temporary and are reverted (`git diff` shows only the swivel fix and
+its test).
+
+**The F-5E's AI does fire its AIM-9B; the missing infrared sensor row is not
+the cause.** The AI never consults a sensor row to launch an infrared missile
+(and neither does a human's mounted seeker): the store choice
+(`StationView::verdict`) asks the missile record's own envelope, and its
+infrared fit (`infrared_fit`, `seeker::infrared_quality`) reads the missile's
+aspect flag. `AIM9B.JT` and `AA2.JT` are the two rear-aspect infrared records
+(`weapon_corrections::infrared_aspect`, the reviewed aspect field); the
+`AIM9M.JT`, `R550.JT` and the rest are all-aspect. Same 2 v 2 head-on 5 nm fight
+(`--ai-probe-ticks N --probe-fight 2:2 ... --separation 5`, every wing the
+named aircraft), first infrared launches by the AI:
+
+| Aircraft, missile | Aspect | First AI launches (tick, seconds) | Station verdict at 60 s |
+| --- | --- | --- | --- |
+| Mirage F1, `R550.JT` | all | 1,561 and 1,621 (13.0, 13.5 s) | usable from tick 120 (28,544 ft, 0.7 degrees) |
+| Tornado, `AIM9M.JT` (side rail, row 8) | all | 1,561 and 1,621, then 4,681 and 21,781 | usable from tick 120 (28,434 ft) |
+| F-5E, `AIM9B.JT` (tip pair, station 1) | rear only | 16,201 and 17,161 (actor 2), 18,361 and 19,442 (actor 3): 135 to 162 s | `OutsideEnvelope`, `outside_zone` (IR fit false head-on) until the AI is behind the target at tick 15,660 (13,391 ft, 1.5 degrees) |
+| MiG-21, `AA2.JT` (the other rear-aspect record) | rear only | 22,801, 23,821, 24,781 (190 s on) | same shape |
+
+So the battery's 7,200 tick (60 s) F-5E fight ends before any shot: the head-on
+pass gives the AIM-9B no usable envelope, and the AI shoots only after the
+merge and the turn. The F-5E's AIM-9Bs are the tip pair (station 1, x2) and an
+empty wing pair (station 2, x0): the station and slot order is not a factor,
+and the gun stays usable throughout. In a 36,000 tick fight both enemy F-5Es
+fire both missiles (`enemy_aam=2/2` on the player, and 0/2 on the wingman).
+Counterfactual (a temporary change making `AIM9B.JT` and `AA2.JT` all-aspect,
+reverted): the same fight launches at ticks 1,561 and 1,621, to the tick the
+Mirage F1 and the Tornado do. The human path agrees: `--probe-attack 600:10` on
+a head-on F-5E prints `no AIM-9B shot (ACQUIRING), changes to the gun` at
+14.6 s (the mounted seeker's lock needs the same heat quality), and fires at
+tick 631 with the counterfactual, as the Mirage F1's R550 does at 631 with its
+real record. `ACQUIRING` there was the seeker's aspect, not a missing sensor.
+The Mirage F1 and Tornado fire "without an IR row" because no infrared missile
+needs one; nothing is radar-driven. The IR sensor row only gives a human the
+infrared scope channel (the I key).
+
+Whether the AI should turn toward the rear hemisphere sooner when its best
+store is rear-aspect only is AI behaviour, and fleet-wide (every AIM-9B and AA-2
+carrier, the MiG-21 above included): left as John's call
+([F-5E baseline, open finding 2](../baselines/aircraft-f5e.md#open-findings-for-john)).
+
+**The F-15E flies CAP because of its record's class word, not a bug.**
+`AiWings::apply_strike_roles` gives a friendly wing 2 or 3 the Strike role with
+a ground target set when the objective is Strike, or when it is "Use mission
+setting" and the record's class word has the bomber bit (`0x4000`, retail's own
+test, [AI strike](../spec/ai-strike.md#who-strikes)). `F15E.PT` carries
+`0x8000` (fighter), the Tornado `0x4000`. A temporary print in that function,
+`--a2g-run UKR QUFACT --pilot ai --aircraft f15e --load MK82 --quick-wing
+--seconds 300`: `class_word=0x8000 objective=Inherit ground_target=true
+armed=true`, `ROLE role=cap`, releases 0, 12 Mk 82 left; the Tornado
+(`--load MK82P3`): `class_word=0x4000`, `ROLE role=strike`, releases 3,
+impacts 3, kills 1, egress. The creator's "Strike the ground target" objective
+for a friendly wing 2 or 3 gives any armed aircraft the role, so an F-15E can be
+sent. Changing the F-15E's default is a record-class decision (a corrections
+row) and, as a rule, fleet-wide (the spec records retail's fighter-class bomb
+carriers, the A-10, A-7, AV-8B and Su-25 among them, as air only by default, and
+the F-16's quick-mission strike wing also flew CAP). Not changed.
+
+**Fixed: the AI-flown Tornado's racks now carry the sweep turn.** The host gave
+`Rack::turn` to a human's ownship only (`step_all_rewound`); `AiWings` never gave
+its configurations a turn, so an AI Tornado's bombs and rail missiles left from
+the spread pylon while the renderer drew the swept one. `AiWings::step` now
+calls `carry_swing_wings` first: every AI configuration gets
+`swing::wing_turn(speed, flaps)` of its own aircraft, each tick, from the same
+pure function (nothing checkpointed or recorded: the checkpoint skips `turn`
+and the next step recomputes it before anything reads it; an aircraft with no
+swivelling row is untouched). Test:
+`ai_wings::tests::an_ai_tornados_swivelling_stations_follow_its_speed_and_flaps_each_step`
+(fails without the call). Measured with the TOR-10 command, `--a2g-run UKR
+QUFACT --pilot ai --aircraft tornado --load MK82P3 --quick-wing --seconds 120`,
+a temporary print in `release_strike` at the first release (tick 5,592, 457.1
+kt, the schedule's turn 0.4337 rad):
+
+| | Before | After |
+| --- | --- | --- |
+| `Rack::turn` on the AI's row 7 | 0.0000 | 0.4338 |
+| Release point (right, up, forward, ft) | (-9.50, -1.45, 1.50) | (-10.32, -1.45, 0.22) |
+| Run | 3 releases, 3 impacts, 1 kill, egress | the same (closest approach 1,143 ft against 1,144) |
+
+That is 0.82 ft further out and 1.28 ft further aft on the left pylon (the
+TOR-10 right pylon figures: 0.76 and 1.56 ft). The AI's bomb sight
+(`next_release_point`) now predicts from the swept point too.
+
+Checks (2026-11-11): the whole lane at `--windows 1 --jobs 1` (run `20261111-145547`).
+Four `ai-missile-*` scenarios fail at 0.0 s because the release `missile_energy_cost`
+example is not built. The harness stopped reporting at `ai-determinism-1v1` (its check
+copies the profile named by `TORE_BATTERY_PROFILE`, default `.local/bugbash-data`, and
+the copy of a large profile into `/tmp` can exceed the quota: set both
+`TORE_BATTERY_PROFILE` and `TMPDIR` for the determinism scenarios) while the remaining
+scenarios kept running; re-judged from their logs, all pass except the two marked known
+failures and three that fail identically without the swivel call
+(`ai-regress-visual-incoming-flap`, `ai-regress-envelope-edge-flap`,
+`ai-ils-terrain-fra-a9`), which are not this change's and are left open. The five
+`ai-determinism-*` scenarios rerun properly all pass.

@@ -2207,12 +2207,35 @@ impl AiWings {
         self.ground_ceiling = Some(ceiling);
     }
 
+    /// Carry every AI aircraft's swivelling wing stations with its swinging
+    /// wing, as the host does for a human's ownship (TOR-5): the turn is a
+    /// pure function of the aircraft's own speed and flaps
+    /// ([`tore_sim::combat::swing::wing_turn`]), so every peer works out the
+    /// same value and nothing is checkpointed or recorded. Without it an AI
+    /// aircraft's rails and releases leave from the spread positions while its
+    /// drawn racks sit at the swept ones (B5-AI, 2026-11-11). An aircraft with
+    /// no swivelling station is untouched.
+    pub(crate) fn carry_swing_wings(&mut self) {
+        for actor in self.mission.actors() {
+            if let Some(config) = self.configs.get_mut(&actor.id()) {
+                let flight = actor.flight();
+                config.set_wing_turn(tore_sim::combat::swing::wing_turn(
+                    flight.speed,
+                    flight.flaps,
+                ));
+            }
+        }
+    }
+
     pub fn step(
         &mut self,
         state: &mut live::State,
         humans: &[HumanAircraft],
         world: &Terrain,
     ) -> WorldResult<()> {
+        // Before anything reads a release point: the strike gate, the
+        // bomb sight and the release itself all use it.
+        self.carry_swing_wings();
         let mut humans: Vec<&HumanAircraft> = humans.iter().collect();
         humans.sort_by_key(|h| h.slot.id);
         self.humans = humans.iter().map(|h| h.slot).collect();
@@ -7547,6 +7570,88 @@ mod tests {
                 (None, None, None)
             );
         }
+    }
+
+    /// B5-AI (2026-11-11): an AI-flown aircraft's swivelling wing stations
+    /// ride its swinging wing each step, from its own speed and flaps (the
+    /// same pure function a human's ownship gets), so its releases leave from
+    /// the swept pylon the renderer draws. A fixed row and an aircraft with no
+    /// swivelling row are untouched.
+    #[test]
+    fn an_ai_tornados_swivelling_stations_follow_its_speed_and_flaps_each_step() {
+        use tore_sim::combat::{hardpoints::Rack, swing};
+        let (mut wings, targets) = build(None);
+        let mut combat = combat_fixture(false);
+        combat.targets = targets;
+        let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        let mut config = combat.own().configuration().clone();
+        let mut wing = config.stations[0].clone();
+        wing.weapon.source = "MK82.JT".into();
+        wing.count = 2;
+        wing.internal = false;
+        wing.mount = [8.0, -8.3, 3.0];
+        wing.rack = Rack {
+            location: 4,
+            paired: true,
+            ..Rack::default()
+        };
+        let mut fixed = wing.clone();
+        fixed.mount = [2.0, -8.3, 4.67];
+        fixed.rack.location = 1;
+        config.stations = vec![wing, fixed];
+        config.aircraft = tore_formats::aircraft::AircraftId::Tornado;
+        // Station 0 is hardpoint row 7 (swivels), station 1 row 6 (fixed).
+        config.hardpoint_slots = vec![None, None, None, None, None, None, Some(1), Some(0)];
+        // An actor with no swivelling row: its configuration stays spread.
+        let mut other = config.clone();
+        other.aircraft = tore_formats::aircraft::AircraftId::F18;
+        let (tornado, plain) = (3, 4);
+        wings.configs.insert(tornado, config);
+        wings.configs.insert(plain, other);
+        let spread = wings.configs[&tornado].stations[0].release_point(1);
+        assert_eq!(wings.configs[&tornado].stations[0].rack.turn, 0.);
+        // 457 kt with the flaps up: a 50 degree sweep (the TOR-10 release).
+        for (speed_kt, flaps) in [(457., 0.), (580., 0.), (580., 0.5), (200., 0.)] {
+            let fps = speed_kt * swing::FPS_PER_KNOT;
+            for id in [tornado, plain] {
+                let flight = wings.mission.actor_mut(id).unwrap().flight_mut();
+                flight.speed = fps;
+                flight.flaps = flaps;
+            }
+            wings
+                .step(&mut combat, &[human(&player)], &world())
+                .unwrap();
+            // The turn is the one the flight had when the step began; the
+            // speed one tick later differs by a hair, so compare to that
+            // tolerance, and exactly against the function's own value for it.
+            let turn = wings.configs[&tornado].stations[0].rack.turn;
+            let want = swing::wing_turn(fps, flaps) as f32;
+            assert!(
+                (turn - want).abs() < 2e-3,
+                "{speed_kt} kt, flaps {flaps}: {turn} against {want}"
+            );
+            assert_eq!(wings.configs[&tornado].stations[1].rack.turn, 0.);
+            assert_eq!(wings.configs[&plain].stations[0].rack.turn, 0.);
+        }
+        // At 457 kt the wing is swept and the release moved out and aft of
+        // the spread point; with the wing spread again it is back.
+        let fps = 457. * swing::FPS_PER_KNOT;
+        wings.mission.actor_mut(tornado).unwrap().flight_mut().speed = fps;
+        wings.mission.actor_mut(tornado).unwrap().flight_mut().flaps = 0.;
+        wings
+            .step(&mut combat, &[human(&player)], &world())
+            .unwrap();
+        let swept = wings.configs[&tornado].stations[0].release_point(1);
+        assert!(
+            swept[0].abs() > spread[0].abs() && swept[2] < spread[2],
+            "{swept:?} against {spread:?}"
+        );
+        assert_eq!(swept[1], spread[1], "the height is the wing's");
+        wings.mission.actor_mut(tornado).unwrap().flight_mut().speed = 200. * swing::FPS_PER_KNOT;
+        wings
+            .step(&mut combat, &[human(&player)], &world())
+            .unwrap();
+        assert_eq!(wings.configs[&tornado].stations[0].release_point(1), spread);
     }
 
     #[test]

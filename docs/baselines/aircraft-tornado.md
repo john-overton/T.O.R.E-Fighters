@@ -572,6 +572,17 @@ configuration the turn its flight gives (`set_wing_turn` in `ai_wings`, with a
 test); it changes only where a store starts, not what the AI decides, so it
 stays on the right side of the no-AI-work rule, but it is John's call.
 
+**Update (B5-AI, 2026-11-11): fixed.** John asked for it (decision 19, the
+pylons swivel like the real aircraft). `AiWings::carry_swing_wings`, called first
+in `AiWings::step`, sets each AI configuration's turn from its own aircraft's
+speed and flaps through `swing::wing_turn`, every tick, on every peer; nothing is
+checkpointed or recorded (the checkpoint skips `turn`). The same temporary print
+at the same first release (tick 5,592, 457.1 kt) now reads `Rack::turn` 0.4338
+and a release point of (-10.32, -1.45, 0.22) against (-9.50, -1.45, 1.50) before
+(left pylon: 0.82 ft further out, 1.28 ft further aft; the right-hand figures
+above are 0.76 and 1.56 ft). The run still drops three bombs, three impacts, one
+kill. Log `.local/m3-aircraft/checks/B5-AI/tor-fix.txt` against `tor-nofix.txt`.
+
 ## Open findings for John
 
 Nothing here was changed by this slice; each is a decision or a model question.
@@ -620,10 +631,24 @@ listed by TOR-6 and TOR-6b, item 8 is new).
    2026-10-14).
 8. **The AI's swivelling stations release from the spread positions** (the section
    above). New in this slice; a one-call fix, John's call.
+   **Update (B5-AI, 2026-11-11): fixed.** `AiWings::step` now gives every AI
+   configuration its own aircraft's `swing::wing_turn(speed, flaps)` each tick
+   (`carry_swing_wings`), as a human's ownship has it, so AI bombs and rail
+   missiles leave from the swept pylon. Same TOR-10 run: at the first release
+   (457.1 kt, turn 0.4337 rad) `Rack::turn` is 0.4338 (was 0.0000) and the
+   release point moves from (-9.50, -1.45, 1.50) to (-10.32, -1.45, 0.22), 0.82
+   ft out and 1.28 ft aft; the run still drops three bombs for three impacts and
+   one kill. Test `an_ai_tornados_swivelling_stations_follow_its_speed_and_flaps_each_step`.
+   Detail in [lane AI, B5-AI](../testing/lane-ai.md#b5-ai-the-f-5es-aim-9b-the-f-15es-role-and-the-ai-tornados-racks-2026-11-11).
 9. **The AI Tornado bombs by default** (record class word `0x4000`, as the A-4E and
    F-111F; the F-15E's AI flies CAP). It now also fires its rail AIM-9M although
    the record gives it no infrared sensor row (`ir=false`), as the Mirage F1's AI
    does and the F-5E's never does: noted for the AI pass (O5), nothing changed.
+   **Update (B5-AI, 2026-11-11):** no infrared missile needs a sensor row, and the
+   F-5E's AI does fire; its AIM-9B is rear-aspect, the AIM-9M all-aspect (first
+   launch 13 s head-on against 135 s). The Tornado bombs by default through the
+   class word, which the F-15E (`0x8000`) lacks: see [lane AI,
+   B5-AI](../testing/lane-ai.md#b5-ai-the-f-5es-aim-9b-the-f-15es-role-and-the-ai-tornados-racks-2026-11-11).
 10. **The missile choice on the Tornado is narrow and Eastern in part.** Row 6
     refuses every air-to-air missile and the HARM, Harpoon and Exocet families (they enter
     the fuselage); row 8's mask keeps `AA2`, `AA8`, `AA11` and `AA11B` beside the
@@ -675,7 +700,7 @@ tailerons, the swing wing and the swivelling pylons).
 | Ordnance | Met | Every default store permitted live and released from its own station at both sweeps (gun, GBU-10, Mk 82 pack, AIM-9M); 40 refusals; compatibility, even pairs, tanks, jettison at both sweeps and the AI default checked; 60 / 60 countermeasures from `MIG31.ECM`; `--validate-ordnance` passes for all 45 aircraft (4,581 placements, `TOR.PT` 56 and 8 tank placements) |
 | Cockpit | Met | `e2000.HUD` and the Eurofighter panel by name (decision 21); the HUD draws inside a measured glass polygon; mirrors live; overlays and ten instrument pages checked; reviewed sensor presets only; absent systems absent (no infrared row). The RWR with a live threat was not demonstrated and the rear seat has no view (findings 13, 17) |
 | Flight | Met with open findings | Own configuration on the hybrid default with John's corrections (RB199 thrust, weights, +8 row, 3 and 22 lb/s, 50,000 ft); envelope re-measured 2026-11-11; stall, spin, takeoff, landing and touchdown probes and the flight battery family pass. `--native-flight-tables` was not run (tables not present locally). **No thrust reverser and no sweep term are modelled (findings 2, 3)**: the rollout is twice the real landing run |
-| AI and modes | **Not fully met** | Strike class row, Quick Mission, Load Ordnance, AI roster probe, wire, checkpoint and replay round trips, lobby, and the AI fights and bombs, all pass. **An AI-flown Tornado's stores leave from the spread positions, not the swept ones** (finding 8): drawn right, released up to 2.6 ft off. A Tornado in live multiplayer flight was not played |
+| AI and modes | **Not fully met** | Strike class row, Quick Mission, Load Ordnance, AI roster probe, wire, checkpoint and replay round trips, lobby, and the AI fights and bombs, all pass. **An AI-flown Tornado's stores leave from the spread positions, not the swept ones** (finding 8): drawn right, released up to 2.6 ft off. (Update, B5-AI, 2026-11-11: fixed, the AI's racks now carry the sweep turn; this row is met.) A Tornado in live multiplayer flight was not played |
 | Docs | Met | Source review, specs with provenance, this record, inventory, features, counts and import guide updated; full check list below; the frame pack is indexed in the local `INDEX.md` |
 | Extra: swing wing, tailerons, swivelling pylons | Met | Wing turns whole at every sweep with the flaps holding it out; pitch, roll and the 25-pose grids pass with `skin_gap_ft=0`; every moving surface has a rule 11 face table above; the pylons carry their stores through the sweep in the simulation (human), the drawing (every aircraft) and the replay. The AI's release origin is the exception (finding 8) |
 

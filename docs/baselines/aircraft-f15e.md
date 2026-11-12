@@ -314,6 +314,18 @@ Nothing here was changed; each is a decision or a fleet-level model question.
    defaults to `role=cap` and bombs only when ordered or given the Strike role.
    Whether bomb-carrying fighters should default to Strike is AI behaviour and
    John's call.
+   **Update (B5-AI, 2026-11-11): not a bug; the record's class word.** The role
+   rule (`AiWings::apply_strike_roles`) sends a friendly wing 2 or 3 with a
+   ground target when its objective is Strike, or by default when the record's
+   class word has the bomber bit `0x4000` (retail's own test); `F15E.PT` carries
+   `0x8000`, so the default is CAP (printed: `class_word=0x8000`, `ROLE
+   role=cap`, no release; the Tornado's `0x4000` gives `role=strike`, three
+   impacts). "Strike the ground target" in the creator sends an F-15E. Options
+   for John: leave it (retail's rule, fleet-wide); a per-aircraft class-word row
+   for the F-15E in the corrections (record data, so his call); or an
+   armed-for-ground rule for every fighter-class bomb carrier (fleet-wide
+   behaviour change). Recommendation: leave it. Detail in [lane AI,
+   B5-AI](../testing/lane-ai.md#b5-ai-the-f-5es-aim-9b-the-f-15es-role-and-the-ai-tornados-racks-2026-11-11).
 5. **The gear leg crosses the aft inboard bombs while retracting** (28 crossings
    at gear 0.4). John's round 2 answers did not cover it; the real fix would be a
    station move or a rail change. Also open: the rack fin tips touch by 0.005 ft

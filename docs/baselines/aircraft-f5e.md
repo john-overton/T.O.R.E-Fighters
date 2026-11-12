@@ -305,6 +305,18 @@ Nothing here was changed; each is a decision or a fleet-level model question.
    kill in the 2 v 2). Options: give the F-5E an IR seeker row, or let the AI
    acquire without one (AI behaviour, out of scope here). A player's single
    AIM-9B hits but does not kill the practice aircraft.
+   **Update (B5-AI, 2026-11-11): this finding's cause was wrong.** The AI does
+   fire its AIM-9B, and no infrared sensor row is needed to launch any infrared
+   missile (the Mirage F1 and Tornado AIs fire theirs with none). The AIM-9B is
+   a rear-aspect record (`weapon_corrections::infrared_aspect`, like the
+   MiG-21's AA-2), so on a head-on pass it has no usable envelope; the AI shoots
+   after the merge and the turn: in the 2 v 2 head-on from 5 nm the F-5E AIs
+   fire at 135, 143, 153 and 162 s (the Mirage F1's all-aspect R550 at 13 s, the
+   Tornado's AIM-9M at 13 s, the MiG-21's AA-2 from 190 s), and the 60 s battery
+   fight ends first. With the record made all-aspect (temporary, reverted) the
+   F-5E fires at 13 s, tick for tick the Mirage F1. Details and the options
+   (leave it; have the AI turn for the rear hemisphere; or an all-aspect AIM-9B,
+   not recommended) in [lane AI, B5-AI](../testing/lane-ai.md#b5-ai-the-f-5es-aim-9b-the-f-15es-role-and-the-ai-tornados-racks-2026-11-11).
 3. **Stand-ins.** The radar is `F104R.SEE` (alternatives `F4BR.SEE`,
    `YAK141R.SEE`) and the countermeasures are `F104.ECM`, with no deception
    jammer; the real APQ-159 and ALE-40 fit are cited second hand only (John kept
@@ -417,3 +429,15 @@ and `atan-pa.bin`, which are not present locally, so it stays a separate
 restricted path and was not run. The tip rail drop options were estimated, not
 measured. The flight and rendered evidence above comes from the Linux
 development host and the wrapped captures.
+
+## Update (B5-AI, 2026-11-11)
+
+The AI pass found that the F-5E's AI fires its AIM-9B once it is behind its
+target (finding 2's cause was the AIM-9B's rear-aspect record, not the missing
+infrared sensor row; see the update under finding 2 and
+[lane AI](../testing/lane-ai.md#b5-ai-the-f-5es-aim-9b-the-f-15es-role-and-the-ai-tornados-racks-2026-11-11)).
+The earlier "the AI never fires its AIM-9B" lines above (the F5E-9 section, the
+definition-of-done row) stand as written; the 60 s fight and the scripted
+player's `no AIM-9B shot (ACQUIRING)` both show the head-on aspect, not a defect
+in the F-5E's sensors or record. Whether the AI should seek the rear hemisphere
+sooner is John's call (AI behaviour, fleet-wide).
