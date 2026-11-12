@@ -650,7 +650,11 @@ mod tests {
         assert!((high - full).abs() < 1e-9, "700 kt is fully swept: {high}");
         let middle = turn(&replayed[1].targets[1]);
         assert!(
-            (middle - full * (425.4 - 250.) / 350.).abs() < 0.01,
+            (middle
+                - full * (425.4 - swing::SWEEP_FROM_KNOTS)
+                    / (swing::SWEEP_TO_KNOTS - swing::SWEEP_FROM_KNOTS))
+                .abs()
+                < 0.01,
             "{middle}"
         );
         // Half flaps hold the wing half out at the same speed.

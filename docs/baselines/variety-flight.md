@@ -2234,6 +2234,11 @@ per-aircraft changes, not made here. Finding for John: whether to leave the swee
 visual only (the current choice, John's decision 19 asks for the rig and the
 pylons only) or fit a sweep multiplier.
 
+Update (TOR-11, 2026-11-12): the wing now starts to sweep at 304 kt (350 mph, John), so
+the drawn sweep at the probe's speeds is 25 degrees below 304 kt, 28.7 degrees at 330
+kt, 47.3 degrees at 461 kt, 66.0 degrees at 593 kt and 67 degrees from 600 kt. The
+flight probes themselves are unchanged (nothing reads the sweep).
+
 ### Against the real aircraft
 
 Public figures read 2026-11-11 (Tornado IDS unless noted): Wikipedia, "Panavia

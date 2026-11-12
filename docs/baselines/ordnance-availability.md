@@ -794,3 +794,12 @@ Cheat-only placements 220 to 222 (the Tornado's side rail row, TOR-6b); tank pla
 and 6) and the Tornado's (rows 6, 7 and 8) arms, and each loading path
 (`Loadout::capacity`, the retained-selection rule in `combat/live.rs`, the audit) calls it
 once.
+
+## Tornado AIM-9 rail on the inboard flank (TOR-11, 2026-11-12)
+
+Update (TOR-11, 2026-11-12): John moved the Tornado's AIM-9 rail to the pylon's inboard flank
+and shortened its drawn arm to 3.0 ft ([spec](../spec/stores-on-pylons.md#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12)). Nothing about the stores
+the row accepts changed: the inboard entries into the airframe match the outboard ones for the four
+refused stores (R550 0.40, AT12 0.44, PL7 0.50, GBU12 1.02 ft, Cheat loading) and the seven kept
+missiles read 0.00 ft at 25, 45 and 67 degrees, so the audit pins stand at 4,581 weapon placements,
+233 tank placements and 222 Cheat-only placements (`--validate-ordnance --no-audio`).

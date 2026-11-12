@@ -784,13 +784,17 @@ pub(super) fn combinations(
         "knots,flaps,expected_turn_deg,measured_turn_deg_right,measured_turn_deg_left,rigidity_ft,skin_gap_ft,seam_separation_ft,seam_opening_ft,seam_overlap_ft,passed\n",
     );
     let mut poses = Vec::new();
-    for knots in [200., 250., 300., 400., 500., 600., 700.] {
+    for knots in [200., 250., 304., 400., 500., 600., 700.] {
         for flaps in [0., 0.25, 0.5, 0.75, 1.] {
             let mut state = at_knots(neutral, knots);
             state.flaps = flaps;
             let pose = airframe.animation_faces(&state);
             let mut m = measure(&original, &pose, scale);
-            let expected = ((knots - 250.) / 350.).clamp(0., 1.) * 42. * (1. - flaps);
+            let (from, to) = (
+                tore_sim::combat::swing::SWEEP_FROM_KNOTS,
+                tore_sim::combat::swing::SWEEP_TO_KNOTS,
+            );
+            let expected = ((knots - from) / (to - from)).clamp(0., 1.) * 42. * (1. - flaps);
             let mut measured = [0f64; 2];
             let mut seam = GloveSeam::default();
             let mut rigid = 0f32;
@@ -847,7 +851,7 @@ pub(super) fn combinations(
     );
     for degrees in [25., 30., 35., 40., 45., 50., 55., 60., 65., 67.] {
         // Pick the speed that gives this sweep angle in the documented schedule.
-        let knots = 250. + (degrees - 25.) / 42. * 350.;
+        let knots = tore_sim::combat::swing::speed_for_sweep(degrees) / 1.68781;
         let pose = airframe.animation_faces(&at_knots(neutral, knots));
         let turn = degrees - 25.;
         for side in &SIDES {

@@ -317,13 +317,17 @@ TORNADO_CASES = [
 ]
 
 
-# The Tornado's AIM-9 side rails (row 8, TOR-6b, 2026-11-11): the AIM-9M on the shoulder rail
-# of the inner pylon, 1.25 ft outboard of the Mk 82 pack's pylon, level with it fore and aft at
-# every sweep (the 1.25 ft is not turned with the wing); 0.53 ft from the wing's underside
-# (the shoulder rail's own depth: the pylon's 1 ft less the rail's rise). Left first.
+# The Tornado's AIM-9 side rails (row 8, TOR-6b, 2026-11-11): the AIM-9M on the rail of the
+# inner pylon, level with the Mk 82 pack's pylon fore and aft at every sweep (the 1.25 ft is not
+# turned with the wing); 0.53 ft from the wing's underside (the rail's own depth: the pylon's 1 ft
+# less the rail's rise). Update (TOR-11, 2026-11-12, John): the rail is on the pylon's INBOARD
+# flank, facing the fuselage, 1.25 ft inboard of the pack's pylon: 8.25 ft out at 25 degrees
+# (200 kt, still spread: the wing starts to sweep at 304 kt), and at 67 degrees (650 kt, past the
+# 600 kt full sweep) right 9.11 ft out and 1.26 ft aft, left 9.28 ft out and 0.81 ft aft (it
+# was 10.75 and 11.61/11.78 on the outboard flank). Left first.
 TORNADO_RAIL_CASES = [
-    ("AIM-9M side rail, 25 degrees", [(-10.75, -0.74, 1.50), (10.75, -0.74, 1.50)], 0.53),
-    ("AIM-9M side rail, 67 degrees", [(-11.78, -0.74, -0.81), (11.61, -0.74, -1.26)], 0.53),
+    ("AIM-9M side rail, 25 degrees", [(-8.25, -0.74, 1.50), (8.25, -0.74, 1.50)], 0.53),
+    ("AIM-9M side rail, 67 degrees", [(-9.28, -0.74, -0.81), (9.11, -0.74, -1.26)], 0.53),
 ]
 
 
@@ -467,6 +471,6 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             then=[Step(tornado_args("650", "3", "AIM9M", "2"), timeout=300)],
             check=tornado_rail_problems,
-            notes="The Tornado's AIM-9 side rails leave from where they hang at both sweeps: 10.75 ft out and 1.50 ft ahead at 25 degrees (200 kt), and beside the swivelled pylons at 67 degrees (650 kt), 1.25 ft outboard of the Mk 82 packs, left then right (TOR-6b).",
+            notes="The Tornado's AIM-9 side rails leave from where they hang at both sweeps: 8.25 ft out and 1.50 ft ahead at 25 degrees (200 kt), and beside the swivelled pylons at 67 degrees (650 kt), 1.25 ft inboard of the Mk 82 packs, left then right (TOR-6b; the inboard flank is TOR-11, John 2026-11-12).",
         ),
     ]

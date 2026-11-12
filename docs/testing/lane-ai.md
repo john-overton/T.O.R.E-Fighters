@@ -904,6 +904,11 @@ QUFACT --pilot ai --aircraft tornado --load MK82P3 --quick-wing --seconds 120`,
 a temporary print in `release_strike` at the first release (tick 5,592, 457.1
 kt, the schedule's turn 0.4337 rad):
 
+Update (TOR-11, 2026-11-12): the wing now starts to sweep at 304 kt (John), so at 457.1 kt the
+turn is 0.3791 rad (a 46.7 degree sweep), not 0.4337 rad; the table below is the 2026-11-11
+measurement. The AI's rail missiles (row 8) leave from the pylon's inboard flank, 1.25 ft inboard
+of the pack at every sweep (`swing::swivels` lists row 8; `Rack::side_pylons` adds the signed offset).
+
 | | Before | After |
 | --- | --- | --- |
 | `Rack::turn` on the AI's row 7 | 0.0000 | 0.4338 |

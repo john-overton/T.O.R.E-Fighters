@@ -1659,3 +1659,7 @@ the GRI-10 update above, has been verified: its own internal gun, 360 rounds, a
 single muzzle, live fire proved ([the Tornado](#the-panavia-tornado-ids-tor-6-2026-11-11),
 [acceptance](../baselines/aircraft-tornado.md)). The "its own verification slice
 has not run" note in that update is out of date.
+
+Update (TOR-11, 2026-11-12): the sim hangs row 8 on the **inboard** flank of row 7's pylon
+(`Location::InboardRail`, `Hang::InboardRail`), not on the outboard shoulder rail the row above
+describes; the source row, the mask, the refusals and the counts are unchanged ([measurements](../spec/stores-on-pylons.md#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12)).

@@ -12,7 +12,8 @@
 //! Provenance: the schedule, the pivot and the choice of the swivelling row are
 //! fitted or opinionated (agent decisions 2026-11-10, John's decision 19 for
 //! the rotating pylons); the real sweep range 25 to 67 degrees is cited from
-//! `TOR.INF` (Jane's).
+//! `TOR.INF` (Jane's). Update (TOR-11, 2026-11-12): the wing starts to sweep at
+//! 350 mph, 304 knots (opinionated, John 2026-11-12; was 250 knots, fitted).
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -21,9 +22,15 @@ pub const FEET_PER_UNIT: f64 = 2. / 3.;
 /// shape's spread pose is the minimum.
 pub const SWEEP_MIN: f64 = 25.;
 pub const SWEEP_MAX: f64 = 67.;
-/// Fitted speed schedule, knots: the wing stays spread up to the first speed
-/// and is fully swept at the second. Flaps hold the wing out.
-pub const SWEEP_FROM_KNOTS: f64 = 250.;
+/// Speed schedule, knots: the wing stays spread up to the first speed and is
+/// fully swept at the second. Flaps hold the wing out. The end points are
+/// fitted (agent decision 2026-11-10, after the MiG-23's rig); the start is
+/// John's (2026-11-12: "I don't think for the tornado the wings should start
+/// sweeping back until it's about 350 mph", opinionated): 350 mph is 304
+/// knots, where it was a fitted 250. The full sweep stays 600 knots, so the
+/// sweep now runs 304 to 600 knots, linear (about 0.14 degrees a knot, from
+/// 0.12).
+pub const SWEEP_FROM_KNOTS: f64 = 304.;
 pub const SWEEP_TO_KNOTS: f64 = 600.;
 /// Feet per second to knots.
 pub const FPS_PER_KNOT: f64 = 1.68781;
@@ -112,13 +119,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_schedule_spreads_below_250_knots_and_sweeps_fully_at_600() {
+    fn the_schedule_spreads_below_304_knots_and_sweeps_fully_at_600() {
         assert_eq!(wing_turn(200. * FPS_PER_KNOT, 0.), 0.);
+        // John, 2026-11-12: 350 mph is 304 knots, and the wing is still
+        // spread there; the old 250 knots start is gone.
+        assert_eq!(wing_turn(SWEEP_FROM_KNOTS * FPS_PER_KNOT, 0.), 0.);
         assert_eq!(wing_turn(250. * FPS_PER_KNOT, 0.), 0.);
+        assert_eq!(wing_turn(300. * FPS_PER_KNOT, 0.), 0.);
+        assert!((SWEEP_FROM_KNOTS - 350. * 0.868_976).abs() < 0.5);
+        assert!(wing_turn(305. * FPS_PER_KNOT, 0.) > 0.);
         let full = (SWEEP_MAX - SWEEP_MIN).to_radians();
         assert!((wing_turn(600. * FPS_PER_KNOT, 0.) - full).abs() < 1e-12);
         assert!((wing_turn(900. * FPS_PER_KNOT, 0.) - full).abs() < 1e-12);
-        assert!((wing_turn(425. * FPS_PER_KNOT, 0.) - full / 2.).abs() < 1e-12);
+        assert!((wing_turn(452. * FPS_PER_KNOT, 0.) - full / 2.).abs() < 1e-12);
         // Flaps hold the wing out.
         assert_eq!(wing_turn(900. * FPS_PER_KNOT, 1.), 0.);
     }

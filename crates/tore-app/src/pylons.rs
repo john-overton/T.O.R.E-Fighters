@@ -44,7 +44,7 @@ use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
 use tore_sim::combat::hardpoints::{
-    Location, PylonPlace, SHOULDER_OUT, rack_group, shoulder, shoulder_rise,
+    INBOARD_RAIL_LENGTH, Location, PylonPlace, rack_group, shoulder, shoulder_rise,
 };
 use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
@@ -333,11 +333,20 @@ pub fn vertices<'a>(
         // Each pylon once, with what it carries.
         let mut drawn: Vec<&PylonPlace> = Vec::new();
         for place in &places {
-            // A store on a shoulder rail rides beside the pylon it shares.
-            if store.rack.location() == Location::Shoulder {
+            // A store on a rail on a pylon's flank rides beside the pylon it
+            // shares.
+            if store.rack.location().on_pylon_flank() {
                 if !drawn.contains(&&place.pylon) {
                     drawn.push(&place.pylon);
-                    shoulder_rail(out, &at, surface.as_ref(), &place.pylon, &dims, size);
+                    shoulder_rail(
+                        out,
+                        &at,
+                        surface.as_ref(),
+                        &place.pylon,
+                        &dims,
+                        size,
+                        store.rack.location(),
+                    );
                 }
                 continue;
             }
@@ -589,15 +598,19 @@ fn hanger(
     }
 }
 
-/// What holds a store on a shoulder rail (the F-14's glove pylon
-/// Sidewinder): the pylon it rides beside, [`SHOULDER_OUT`] inboard of its
-/// centre line with its foot below the store's body by
+/// What holds a store on a rail on a pylon's flank: the F-14's glove pylon
+/// Sidewinder on its outboard shoulder ([`Location::Shoulder`]), the
+/// Tornado's on the inboard flank ([`Location::InboardRail`], TOR-11). The
+/// pylon it rides beside, [`tore_sim::combat::hardpoints::SHOULDER_OUT`] to the other side of its centre
+/// line (the F-14: inboard of it, the Tornado: outboard) with its foot below
+/// the store's body by
 /// [`tore_sim::combat::hardpoints::SHOULDER_GAP`] (the pylon
 /// the station under it hangs from, drawn again so it stands when that
 /// station is empty), and an arm from the pylon's side out along the
-/// store's top, 0.6 of its length (3 to 6 ft), the rail it hangs from:
-/// a jut off the pylon's side just above the store under the pylon (John
-/// 2026-10-14).
+/// store's top, 0.6 of its length (3 to 6 ft; the Tornado's
+/// [`tore_sim::combat::hardpoints::INBOARD_RAIL_LENGTH`], 3 ft), the rail it
+/// hangs from: a jut off the pylon's side just above the store under the
+/// pylon (John 2026-10-14).
 fn shoulder_rail(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
@@ -605,6 +618,7 @@ fn shoulder_rail(
     pylon: &PylonPlace,
     dims: &Dims,
     size: StoreSize,
+    location: Location,
 ) {
     let p = pylon.point;
     if pylon.slots.len() == 2 {
@@ -633,27 +647,36 @@ fn shoulder_rail(
         return;
     }
     let side = if p[0] < 0. { -1. } else { 1. };
-    let inboard = p[0] - side * SHOULDER_OUT;
+    // The pylon's centre line, and the way from it to the store (+1
+    // outboard, -1 inboard, seen from the right-hand wing).
+    let flank = location.rail_out().signum();
+    let pylon_x = p[0] - side * location.rail_out();
     let foot = p[1] - shoulder_rise(size);
     hanger(
         out,
         at,
         airframe,
         &PylonPlace {
-            point: [inboard, foot - dims.top, p[2]],
+            point: [pylon_x, foot - dims.top, p[2]],
             slots: pylon.slots.clone(),
         },
         dims,
         1,
         size,
     );
-    let inner = inboard + side * PYLON_WIDTH / 2.;
+    // The arm leaves the pylon's face turned to the store.
+    let face = pylon_x + side * flank * PYLON_WIDTH / 2.;
     let top = p[1] + dims.top;
+    let length = if location == Location::InboardRail {
+        INBOARD_RAIL_LENGTH
+    } else {
+        (0.6 * dims.length).clamp(3., 6.)
+    };
     block(
         out,
         at,
-        [(inner + p[0]) / 2., top + ARM / 2., p[2] + dims.middle],
-        [(p[0] - inner).abs(), ARM, (0.6 * dims.length).clamp(3., 6.)],
+        [(face + p[0]) / 2., top + ARM / 2., p[2] + dims.middle],
+        [(p[0] - face).abs(), ARM, length],
         PYLON,
     );
 }
@@ -1466,7 +1489,7 @@ mod tests {
     /// and an arm out over the store; nothing is drawn straight above it.
     #[test]
     fn a_shoulder_rail_store_hangs_beside_its_pylon() {
-        use tore_sim::combat::hardpoints::{PYLON_DEPTH, SHOULDER_BYTE};
+        use tore_sim::combat::hardpoints::{PYLON_DEPTH, SHOULDER_BYTE, SHOULDER_OUT};
         let airframe = flat_wing();
         let store = on_flat_wing(plain([8.75, -5., 0.], SHOULDER_BYTE, 2));
         assert_eq!(store.rack.location(), Location::Shoulder);
@@ -1495,6 +1518,65 @@ mod tests {
                 .all(|v| f64::from(v[1]) > up),
             "the arm is above the store's centre line"
         );
+    }
+
+    /// TOR-11, John 2026-11-12: the Tornado's AIM-9 rail hangs on the pylon's
+    /// inboard flank, its store between the pylon and the fuselage, and the arm
+    /// is the short Tornado rail, not the F-14's 0.6 of the missile.
+    #[test]
+    fn an_inboard_rail_store_hangs_inboard_of_its_pylon_on_a_short_arm() {
+        use tore_sim::combat::hardpoints::{
+            INBOARD_RAIL_BYTE, PYLON_DEPTH, SHOULDER_BYTE, SHOULDER_OUT,
+        };
+        let airframe = flat_wing();
+        let inboard = on_flat_wing(plain([8.75, -5., 0.], INBOARD_RAIL_BYTE, 2));
+        assert_eq!(inboard.rack.location(), Location::InboardRail);
+        let outboard = on_flat_wing(plain([8.75, -5., 0.], SHOULDER_BYTE, 2));
+        let up = -PYLON_DEPTH + shoulder_rise(inboard.size());
+        let centres: Vec<Vector> = hung(&inboard).iter().map(|h| h.centre).collect();
+        assert_eq!(centres, [[8.75, up, 0.], [-8.75, up, 0.]]);
+        let grey_of = |store: &StorePose| grey(&draw(std::slice::from_ref(store), &airframe));
+        let (near, far) = (grey_of(&inboard), grey_of(&outboard));
+        // The pylon stands outboard of the store, SHOULDER_OUT from it; the
+        // outboard rail's pylon is the mirror image inboard.
+        let pylon = 8.75 + SHOULDER_OUT;
+        let reach = |g: &[[f32; 3]], side: f64| {
+            g.iter()
+                .map(|v| f64::from(v[0]) * side)
+                .fold(f64::MIN, f64::max)
+        };
+        // The right wing: the pylon's outboard face is the outermost point.
+        assert!(
+            (reach(&near, 1.) - (pylon + PYLON_WIDTH / 2.)).abs() < 1e-4,
+            "pylon to {}",
+            reach(&near, 1.)
+        );
+        // The arm reaches in to the store's centre line, above it, and no
+        // further inboard.
+        let innermost = near
+            .iter()
+            .filter(|v| v[0] > 0.)
+            .map(|v| f64::from(v[0]))
+            .fold(f64::MAX, f64::min);
+        assert!((innermost - 8.75).abs() < 1e-4, "arm to {innermost}");
+        // The arm along the missile: INBOARD_RAIL_LENGTH, against 0.6 of the
+        // missile on the F-14's rail (clamped 3 to 6 ft).
+        let span = |g: &[[f32; 3]]| {
+            let arm: Vec<f64> = g
+                .iter()
+                // Only the arm's inner end is at the store's centre line.
+                .filter(|v| (f64::from(v[0]) - 8.75).abs() < 1e-4)
+                .map(|v| f64::from(v[2]))
+                .collect();
+            arm.iter().cloned().fold(f64::MIN, f64::max)
+                - arm.iter().cloned().fold(f64::MAX, f64::min)
+        };
+        assert!(
+            (span(&near) - INBOARD_RAIL_LENGTH).abs() < 1e-3,
+            "{}",
+            span(&near)
+        );
+        assert!(far.len() == near.len());
     }
 
     /// Every pylon, rack, fitted body and weapon face is lit as the
