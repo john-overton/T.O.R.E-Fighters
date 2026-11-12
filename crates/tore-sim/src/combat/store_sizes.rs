@@ -150,7 +150,11 @@ pub fn equipment_pod_body(record: &str) -> [f64; 2] {
         "ALQ72.ECM" => [10.0, 1.4],
         // AN/ALE-40 chaff/flare dispenser.
         "ALE40.ECM" => [4.0, 0.7],
-        _ => POD_BODY,
+        // The Tornado IDS (Combat)'s authored outer wing pods, keyed by their
+        // model names (no retail record: TOR-13, 2026-11-12): the Sky Shadow
+        // 3.0 m by 0.42 m and the BOZ-107 4.0 m by 0.48 m.
+        other => tore_formats::aircraft::stations::authored_pod(other)
+            .map_or(POD_BODY, |pod| [pod.length, pod.diameter]),
     }
 }
 

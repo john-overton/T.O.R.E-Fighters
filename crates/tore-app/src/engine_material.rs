@@ -89,7 +89,7 @@ impl Image {
 }
 
 pub fn nozzle(id: AircraftId, address: usize) -> bool {
-    match id {
+    match id.source() {
         AircraftId::F18 => {
             crate::aircraft_animation::part(address) == crate::aircraft_animation::Part::Nozzle
         }
@@ -133,7 +133,7 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
 }
 /// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
 pub fn outlet_count(id: AircraftId) -> usize {
-    match id {
+    match id.source() {
         AircraftId::X31
         | AircraftId::Mig21
         | AircraftId::Mig23

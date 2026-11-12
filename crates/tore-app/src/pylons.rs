@@ -28,7 +28,11 @@
 //! - **Equipment pods** (EQ-2) with an authored model, the Pave Spike, the
 //!   AAS-38 and the ALQ-167, draw that model at the pod's size (John
 //!   2026-11-07, [`pod_models`], built in Blender by
-//!   `assets/pods/build_pods.py`); any other pod is a fitted body.
+//!   `assets/pods/build_pods.py`); any other pod is a fitted body. The
+//!   Tornado IDS (Combat)'s Sky Shadow and BOZ-107 (John 2026-11-12, TOR-13)
+//!   have no retail equipment record, so their models are keyed by their own
+//!   names `SKYSHADOW` and `BOZ107`, which the aircraft's authored fixed pods
+//!   carry (`tore_formats::aircraft::stations::authored_pods`).
 //! - **Pylons** are fitted slabs from the top of the store's body (its lugs)
 //!   up into the model's underside, each corner meeting the surface above
 //!   it ([`Airframe::underside`]). A store on a wing station with nothing
@@ -850,6 +854,54 @@ fn authored(store: &StorePose) -> Option<&'static pod_models::PodModel> {
     pod_models::MODELS
         .iter()
         .find(|m| m.record.eq_ignore_ascii_case(record))
+}
+
+/// The authored model of an equipment pod `store` hung at `centre` (aircraft
+/// frame, feet right, up and forward) as triangles in the same frame, for the
+/// stores preview's clearance report; `None` for a store with no authored
+/// model.
+pub(crate) fn authored_triangles(store: &StorePose, centre: Vector) -> Option<Vec<[Vector; 3]>> {
+    let model = authored(store)?;
+    let [length, diameter] = store.body;
+    Some(
+        model
+            .triangles
+            .iter()
+            .map(|(corners, _)| {
+                corners.map(|[x, y, z]| {
+                    [
+                        centre[0] + f64::from(x) * diameter,
+                        centre[1] + f64::from(y) * diameter,
+                        centre[2] + f64::from(z) * length,
+                    ]
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The distinct colours of an authored equipment pod's model, each with the
+/// entry of `palette` it is drawn with and that entry's colour: what the
+/// game's palette makes of the model's colours (the stores preview reports it).
+pub(crate) fn authored_palette_entries(
+    store: &StorePose,
+    palette: &[[u8; 3]; 256],
+) -> Vec<([f32; 3], usize, [u8; 3])> {
+    let Some(model) = authored(store) else {
+        return Vec::new();
+    };
+    let mut seen: Vec<[f32; 3]> = Vec::new();
+    for (_, color) in model.triangles {
+        if !seen.contains(color) {
+            seen.push(*color);
+        }
+    }
+    seen.into_iter()
+        .map(|color| {
+            let entry = nearest(palette, color);
+            (color, entry, palette[entry])
+        })
+        .collect()
 }
 
 /// An authored pod model centred on `centre`, along the aircraft's forward
@@ -1681,14 +1733,30 @@ mod tests {
     }
 
     /// John 2026-11-07: three authored low-poly pod models, each under 100
-    /// triangles as FA's own shapes are, inside the pod's size.
+    /// triangles as FA's own shapes are, inside the pod's size. John
+    /// 2026-11-12 (TOR-13a, TOR-13): the two Tornado pods, keyed by their own
+    /// names (no retail record), may have up to 130.
     #[test]
     fn authored_pod_models_stay_low_poly_and_inside_their_size() {
         let records: Vec<_> = pod_models::MODELS.iter().map(|m| m.record).collect();
-        assert_eq!(records, ["PAVESPK.SEE", "AAS38.SEE", "ALQ167.ECM"]);
+        assert_eq!(
+            records,
+            [
+                "PAVESPK.SEE",
+                "AAS38.SEE",
+                "ALQ167.ECM",
+                "SKYSHADOW",
+                "BOZ107"
+            ]
+        );
         for model in &pod_models::MODELS {
             let count = model.triangles.len();
-            assert!((40..100).contains(&count), "{}: {count}", model.record);
+            let limit = if matches!(model.record, "SKYSHADOW" | "BOZ107") {
+                130
+            } else {
+                100
+            };
+            assert!((40..limit).contains(&count), "{}: {count}", model.record);
             for (corners, _) in model.triangles {
                 for [x, y, z] in corners {
                     assert!((-0.5..=0.5).contains(z), "{} along {z}", model.record);
@@ -1701,11 +1769,20 @@ mod tests {
         }
     }
 
-    /// The three records draw their authored model; every other equipment
-    /// pod, a rocket pod and a tank keep the fitted body.
+    /// The five records draw their authored model (the Tornado's two pods by
+    /// their own keys, which no retail equipment record carries); every other
+    /// equipment pod, a rocket pod and a tank keep the fitted body.
     #[test]
-    fn only_the_three_authored_records_draw_their_model() {
-        for record in ["PAVESPK.SEE", "AAS38.SEE", "ALQ167.ECM", "aas38.see"] {
+    fn only_the_five_authored_records_draw_their_model() {
+        for record in [
+            "PAVESPK.SEE",
+            "AAS38.SEE",
+            "ALQ167.ECM",
+            "aas38.see",
+            "SKYSHADOW",
+            "BOZ107",
+            "boz107",
+        ] {
             let drawn = colours(&[equipment_pod(record)]);
             assert!(authored(&equipment_pod(record)).is_some(), "{record}");
             assert!(
@@ -1730,6 +1807,33 @@ mod tests {
         };
         assert!(authored(&rocket).is_none());
         assert!(colours(&[rocket]).iter().any(|(c, _)| *c == POD));
+    }
+
+    /// The Tornado's pods are RAF Medium Sea Grey (a pick); the Sky Shadow
+    /// carries a yellow warning triangle and the BOZ-107 nine slightly darker
+    /// dispenser outlets on its aft face (John 2026-11-12).
+    #[test]
+    fn the_tornado_pods_take_their_authored_colours() {
+        const GREY: [f32; 3] = [0.42, 0.47, 0.5];
+        const YELLOW: [f32; 3] = [1.0, 0.82, 0.0];
+        const OUTLET: [f32; 3] = [0.27, 0.29, 0.31];
+        for (record, detail) in [("SKYSHADOW", YELLOW), ("BOZ107", OUTLET)] {
+            let model = pod_models::MODELS
+                .iter()
+                .find(|m| m.record == record)
+                .unwrap();
+            let count = |c: [f32; 3]| model.triangles.iter().filter(|t| t.1 == c).count();
+            assert_eq!(
+                count(GREY) + count(detail),
+                model.triangles.len(),
+                "{record}: only grey and its one detail colour"
+            );
+            assert!(count(detail) > 0, "{record}: its detail");
+            assert!(count(detail) * 3 < model.triangles.len(), "{record}");
+            let drawn = colours(&[equipment_pod(record)]);
+            assert!(drawn.iter().any(|(c, _)| *c == GREY), "{record}");
+            assert!(drawn.iter().any(|(c, _)| *c == detail), "{record}");
+        }
     }
 
     /// Pave Spike is white; the AAS-38 and ALQ-167 are Navy tactical light

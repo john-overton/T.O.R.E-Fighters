@@ -689,6 +689,46 @@ impl Configuration {
             }
         }
     }
+    /// Where chaff and flares leave this aircraft when it carries a dispenser
+    /// pod of its own (the Tornado IDS (Combat)'s BOZ-107, TOR-13): the
+    /// centre of the pod's aft face, feet right, up and forward of the
+    /// aircraft's reference point, with the wing's present sweep and the
+    /// pylon's swivel ([`Self::set_wing_turn`]) already in it. The pod hangs
+    /// streamwise, so the devices leave straight aft. `None` for every other
+    /// aircraft, whose devices leave from the standard point
+    /// ([`super::countermeasures::Release`]).
+    pub fn dispenser_exit(&self) -> Option<Vector> {
+        let (pod, model) = self.fixed_pods.iter().find_map(|pod| {
+            tore_formats::aircraft::stations::authored_pod(&pod.record)
+                .filter(|model| model.dispenser)
+                .map(|model| (pod, model))
+        })?;
+        let size = super::store_sizes::StoreSize::body([model.length, model.diameter]);
+        let place = pod.rack.side_pylons(pod.mount, 0, 1, size).pop()?;
+        let [right, up, forward] = place.point;
+        Some([right, up, forward - model.length / 2.])
+    }
+    /// The release of one chaff cartridge or flare by an aircraft with this
+    /// configuration at `position` moving at `velocity` with `basis`
+    /// ([`Self::dispenser_exit`]).
+    pub fn countermeasure_release(
+        &self,
+        position: Vector,
+        velocity: Vector,
+        basis: Basis,
+    ) -> super::countermeasures::Release {
+        let Some([right, up, forward]) = self.dispenser_exit() else {
+            return super::countermeasures::Release {
+                position,
+                velocity,
+                basis,
+            };
+        };
+        let outlet = std::array::from_fn(|i| {
+            position[i] + basis.right[i] * right + basis.up[i] * up + basis.forward[i] * forward
+        });
+        super::countermeasures::Release::from_outlet(outlet, velocity, basis)
+    }
     /// The gun pod on weapon station `station`, when that station's weapon
     /// is the pod: a row that can take a pod keeps its (empty) entry while it
     /// carries something else, which is no pod.
@@ -934,6 +974,32 @@ impl Configuration {
                 rack,
             });
         }
+        // The authored pods of the identity (the Tornado IDS (Combat)'s outer
+        // wing pair, TOR-13): not source rows, so no record is read; each is a
+        // lone store on its own wing's pylon, carried and drawn like a fixed
+        // pod, its mass in the fixed external equipment (the aircraft's
+        // carried mass and, through it, the shared loaded drag).
+        for pod in tore_formats::aircraft::stations::authored_pods(a.id) {
+            let row = tore_formats::aircraft::Hardpoint {
+                location: super::hardpoints::Location::Wing.byte(),
+                flags: 8,
+                position: [0, -25, 0],
+                store: None,
+                count: 1,
+                weight_class: 0,
+            };
+            let (mount, mut rack) = place(pod.row, &row);
+            rack.paired = false;
+            external_equipment_lbs = external_equipment_lbs
+                .checked_add(pod.weight_lbs)
+                .ok_or_else(|| super::invalid("external mass overflow"))?;
+            fixed_pods.push(FixedPod {
+                hardpoint: pod.row,
+                record: pod.record.to_owned(),
+                mount,
+                rack,
+            });
+        }
         let mut tanks = Vec::new();
         for (index, h) in hardpoints.iter().enumerate() {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
@@ -1057,7 +1123,7 @@ impl Configuration {
                     ["BK27.JT", "AGM65G.JT", "AIM120.JT", "AIM9M.JT"].contains(&name)
                 }
                 AircraftId::F5E => ["M61.JT", "AIM7.JT", "AIM9B.JT"].contains(&name),
-                AircraftId::Tornado => {
+                AircraftId::Tornado | AircraftId::TornadoClean => {
                     ["BK27.JT", "PAVEWAY.JT", "MK82P3.JT", "AIM9M.JT"].contains(&name)
                 }
                 AircraftId::Mf1 => ["DEFA.JT", "R550.JT"].contains(&name),
@@ -4168,11 +4234,8 @@ impl State {
         }
         let left = *count;
         self.note_release(
-            super::countermeasures::Release {
-                position: launcher.position,
-                velocity: launcher.velocity,
-                basis: launcher.basis,
-            },
+            own.config
+                .countermeasure_release(launcher.position, launcher.velocity, launcher.basis),
             kind,
             own.aircraft,
             Some(left),
@@ -7949,6 +8012,76 @@ mod tests {
         assert!(spread[0].iter().all(|was| *was != right));
     }
 
+    /// TOR-13: an aircraft with a dispenser pod lets its chaff and flares go
+    /// from the middle of the pod's aft face, carried with the swinging wing,
+    /// streamwise; every other aircraft's devices leave from the standard
+    /// point, unchanged.
+    #[test]
+    fn a_dispenser_pod_releases_the_devices_from_its_aft_face_and_follows_the_wing() {
+        use crate::combat::{hardpoints::Rack, swing};
+        use tore_formats::aircraft::stations::BOZ_107;
+        let mut config = fixture(false).own().configuration().clone();
+        config.aircraft = tore_formats::aircraft::AircraftId::Tornado;
+        let basis = Basis::new(0.4, 0.1, -0.3);
+        let (position, velocity) = ([500., 8_000., -900.], [20., 5., 300.]);
+        // No pod: the standard release, exactly.
+        assert_eq!(config.dispenser_exit(), None);
+        let plain = config.countermeasure_release(position, velocity, basis);
+        assert_eq!((plain.position, plain.velocity), (position, velocity));
+        let mount = [16., -8., 1.5];
+        let pod = |record: &str, mount: Vector| FixedPod {
+            hardpoint: BOZ_107.row,
+            record: record.into(),
+            mount,
+            rack: Rack {
+                location: crate::combat::hardpoints::Location::Wing.byte(),
+                paired: false,
+                ..Rack::default()
+            },
+        };
+        // A pod that carries no dispenser (a jammer) changes nothing.
+        config.fixed_pods = vec![pod("SKYSHADOW", [-mount[0], mount[1], mount[2]])];
+        assert_eq!(config.dispenser_exit(), None);
+        config.fixed_pods.push(pod("BOZ107", mount));
+        // Spread wing: the pod's centre is the mount, the exit half its
+        // length aft of it, on its axis.
+        let exit = config.dispenser_exit().expect("the BOZ-107's exit");
+        assert_eq!(exit, [mount[0], mount[1], mount[2] - BOZ_107.length / 2.]);
+        // The release puts the device there, from the numbers a recording
+        // and the wire carry.
+        let release = config.countermeasure_release(position, velocity, basis);
+        let mut devices = super::super::countermeasures::Devices::default();
+        devices.release_chaff(release);
+        let want: Vector = std::array::from_fn(|i| {
+            position[i]
+                + basis.right[i] * exit[0]
+                + basis.up[i] * exit[1]
+                + basis.forward[i] * exit[2]
+        });
+        for (got, want) in devices.chaff[0].position.iter().zip(want) {
+            assert!((got - want).abs() < 1e-6, "{got} against {want}");
+        }
+        assert_eq!(release.velocity, velocity);
+        // Swept: the exit rides the right wing aft about its pivot at the
+        // same radius, deterministically from the turn alone.
+        let turn = swing::wing_turn(swing::speed_for_sweep(67.), 0.);
+        config.set_wing_turn(turn);
+        let swept = config.dispenser_exit().expect("swept exit");
+        let pivot = swing::pivot_feet(true);
+        // The pod's centre (the exit is half its length further aft).
+        let centre = |p: Vector| [p[0], p[1], p[2] + BOZ_107.length / 2.];
+        let radius = |p: Vector| (p[0] - pivot[0]).hypot(centre(p)[2] - pivot[2]);
+        assert!((radius(swept) - radius(exit)).abs() < 1e-9);
+        assert!(swept[2] < exit[2] - 2., "{swept:?} aft of {exit:?}");
+        assert_eq!(swept[1], exit[1]);
+        let again = config.clone();
+        assert_eq!(again.dispenser_exit(), Some(swept));
+        // The Clean version carries no pod and so no outlet of its own.
+        config.aircraft = tore_formats::aircraft::AircraftId::TornadoClean;
+        config.fixed_pods.clear();
+        assert_eq!(config.dispenser_exit(), None);
+    }
+
     #[test]
     fn a_gun_pod_row_is_a_pod_only_while_the_pod_is_its_weapon_and_fires_from_the_nose() {
         let mut config = fixture(false).own().configuration().clone();
@@ -9614,7 +9747,7 @@ mod tests {
     fn every_supported_aircraft_uses_its_canonical_gun_damage_and_dispersion() {
         let aircraft = AircraftId::ALL
             .into_iter()
-            .chain([AircraftId::Faxx])
+            .chain([AircraftId::Faxx, AircraftId::TornadoClean])
             .filter(|id| id.gun().is_some())
             .collect::<Vec<_>>();
         assert_eq!(

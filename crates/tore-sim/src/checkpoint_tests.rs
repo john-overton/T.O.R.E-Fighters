@@ -252,9 +252,10 @@ fn the_f5e_round_trips_at_code_43_and_no_identity_shares_it() {
         assert_eq!(loaded, id);
     }
     assert_eq!(codes.len(), AircraftId::ALL.len());
-    // The code after the batch's last identity is still unknown.
+    // The code after the last identity (46, the Tornado IDS (Clean), is the
+    // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        body: vec![46],
+        body: vec![47],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -277,9 +278,10 @@ fn the_tornado_round_trips_at_code_44_and_no_identity_shares_it() {
         assert_eq!(loaded, id);
     }
     assert_eq!(codes.len(), AircraftId::ALL.len());
-    // The code after the batch's last identity is still unknown.
+    // The code after the last identity (46, the Tornado IDS (Clean), is the
+    // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        body: vec![46],
+        body: vec![47],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -302,12 +304,35 @@ fn the_mf1_round_trips_at_code_45_and_no_identity_shares_it() {
         assert_eq!(loaded, id);
     }
     assert_eq!(codes.len(), AircraftId::ALL.len());
-    // The code after the batch's last identity is still unknown.
+    // The code after the last identity (46, the Tornado IDS (Clean), is the
+    // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        body: vec![46],
+        body: vec![47],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
+}
+
+/// Slice TOR-13 (John, 2026-11-12): the Tornado IDS (Clean) is checkpoint
+/// code 46, appended after the batch's 45, a runtime variant of the Tornado
+/// (as the F/A-XX is of the F-22N): it round-trips as itself and shares no
+/// code with the Combat version's 44, so a saved Clean Tornado loads back
+/// Clean and never as the Combat one.
+#[test]
+fn the_clean_tornado_round_trips_at_code_46_and_shares_no_code() {
+    assert_eq!(same(&AircraftId::TornadoClean).body, vec![46]);
+    assert_ne!(
+        same(&AircraftId::TornadoClean).body,
+        same(&AircraftId::Tornado).body
+    );
+    let mut codes = std::collections::BTreeSet::new();
+    for id in AircraftId::SELECTABLE {
+        let coded = same(&id);
+        assert!(codes.insert(coded.body.clone()), "{id:?} repeats a code");
+        let loaded: AircraftId = from_bytes(&coded, &NONE).unwrap();
+        assert_eq!(loaded, id);
+    }
+    assert_eq!(codes.len(), AircraftId::SELECTABLE.len());
 }
 
 #[test]

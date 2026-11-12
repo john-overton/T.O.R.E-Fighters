@@ -24,7 +24,7 @@ struct Spec {
 }
 fn specification(id: Id) -> Option<Spec> {
     let (code, faces, words, branches, scale): (_, _, &[usize], &[(usize, Part, usize)], _) =
-        match id {
+        match id.source() {
             Id::C130 => (10812, 144, &[0x3a30], &[(0x3a30, Part::Gear, 6)], 2. / 3.),
             Id::Ac130 => (19666, 339, &[0x5cc0], &[(0x5cc0, Part::Gear, 8)], 2. / 3.),
             Id::E3 => (
@@ -406,6 +406,8 @@ pub struct Rig {
 }
 impl Rig {
     pub fn load(id: Id, bytes: &[u8]) -> AppResult<(Self, Shape)> {
+        // A variant (the Tornado IDS (Clean)) drives its source's rig.
+        let id = id.source();
         // The aircraft's per-axis shape scale (M2K-2) is applied here, to the
         // parsed vertices, before any device turns them: a panel turned about
         // a hinge in scaled space stays rigid. Every aircraft but the Mirage

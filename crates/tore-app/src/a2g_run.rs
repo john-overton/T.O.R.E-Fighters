@@ -700,10 +700,11 @@ fn fit_store(
     // The row retail loads this store on by default (the A-4E's Mk 82s,
     // whose centreline row carries a tank in T.O.R.E's default load since
     // PY3).
-    let record = tore_formats::aircraft::Aircraft::parse(
+    let record = tore_formats::aircraft::Aircraft::parse_as(
         resources
             .get(o.aircraft.pt())
             .ok_or("missing aircraft record")?,
+        o.aircraft,
     )?;
     let retail = o.load.as_ref().and_then(|name| {
         let hardpoint = record.hardpoints.iter().position(|h| {

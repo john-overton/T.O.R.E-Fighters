@@ -234,6 +234,7 @@ impl Control {
                         | Id::F5E
                         | Id::Mf1
                         | Id::Tornado
+                        | Id::TornadoClean
                 ) =>
             {
                 Expectation::Required
@@ -259,7 +260,9 @@ impl Control {
                 Expectation::Required
             }
             Self::Rotor => Expectation::Unknown,
-            Self::Sweep if matches!(id, Id::F14 | Id::Mig23 | Id::Tornado) => Expectation::Required,
+            Self::Sweep if matches!(id, Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean) => {
+                Expectation::Required
+            }
             Self::Sweep => Expectation::Unknown,
             Self::GunHeading | Self::GunElevation if id == Id::Ac130 => Expectation::Required,
             Self::GunHeading | Self::GunElevation => Expectation::Unsupported,
@@ -284,6 +287,7 @@ impl Control {
                         | Id::F5E
                         | Id::Mf1
                         | Id::Tornado
+                        | Id::TornadoClean
                 ) =>
             {
                 Expectation::Required
@@ -445,7 +449,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     // The Tornado's wing sweeps with speed (TOR-3), so its controls are isolated
     // below the 250 knot sweep threshold; the sweep schedule and the coupled
     // sweep/flap grid cover that interaction explicitly.
-    if id == AircraftId::Tornado {
+    if id.source() == AircraftId::Tornado {
         neutral.speed = 200. * 1.68781;
     }
     neutral.engine = false;
@@ -634,6 +638,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::F5E
             | AircraftId::Mf1
             | AircraftId::Tornado
+            | AircraftId::TornadoClean
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1126,7 +1131,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
-        if id == AircraftId::Tornado {
+        if id.source() == AircraftId::Tornado {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 tornado::check(
                     control,
@@ -1311,7 +1316,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if id == AircraftId::Mf1 {
         failures.extend(mf1::combinations(&airframe, &neutral, out)?);
     }
-    if id == AircraftId::Tornado {
+    if id.source() == AircraftId::Tornado {
         failures.extend(tornado::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);

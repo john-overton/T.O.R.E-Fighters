@@ -27,7 +27,8 @@ impl VarietyFlightModel {
     /// Exact reviewed PT identity, including shared F-4B/J shape references.
     pub fn identity(id: AircraftId) -> Option<(&'static str, &'static str)> {
         use AircraftId::*;
-        Some(match id {
+        // A variant (the Tornado IDS (Clean)) is its source's exact PT.
+        Some(match id.source() {
             C130 => ("C-130", "C130.SH"),
             Ac130 => ("AC-130U", "AC130.SH"),
             E3 => ("E-3", "AWACS.SH"),
@@ -73,13 +74,13 @@ impl VarietyFlightModel {
             ));
         }
         use AircraftId::*;
-        let alignment_rate = match a.id {
+        let alignment_rate = match a.id.source() {
             C130 | Ac130 | E3 | Il76 | E2 => 0.4,
             B747 | A310 => 0.3,
             _ => 0.7,
         };
         // Fitted contact plane from reviewed deployed original gear geometry.
-        let clearance = match a.id {
+        let clearance = match a.id.source() {
             C130 => 14.,
             Ac130 => 40. / 3.,
             E3 => 38. / 3.,

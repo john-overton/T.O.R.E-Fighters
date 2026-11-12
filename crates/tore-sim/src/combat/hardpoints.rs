@@ -544,7 +544,10 @@ impl Rack {
                         carried[0] += out;
                         carried
                     } else {
-                        super::swing::swept(side == 0, point, f64::from(self.turn))
+                        // The wing that carries the point: a left-hand pod
+                        // is a lone store on the left wing (TOR-13), a
+                        // paired record's left side mirrors to a negative x.
+                        super::swing::swept(point[0] >= 0., point, f64::from(self.turn))
                     },
                     slots,
                 }
@@ -965,6 +968,9 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             hang,
         })
     };
+    // The Tornado IDS (Clean) hangs its stations exactly where the Combat
+    // version does (John, 2026-11-12, TOR-13).
+    let id = id.source();
     match (id, hardpoint) {
         // F-15C, John 2026-10-15: lower outer intake corners, two missiles
         // in tandem per side; wing dual rails a little further aft.
@@ -1091,6 +1097,23 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             Hang::InboardRail {
                 pylon_forward: TORNADO_WING_INNER[1],
             },
+        ),
+        // The Tornado IDS (Combat)'s outer wing pylons (stations 9 and 10, past
+        // the nine source rows; John, 2026-11-12, TOR-13): the BOZ-107 on the
+        // right wing, the Sky Shadow on the left, on the swinging panel
+        // outboard of the inner pylon like rows 7 and 8, so the swivel carries
+        // them and the wing's own position (TOR-12) moves them.
+        (AircraftId::Tornado, 9) => at(
+            Location::Wing,
+            TORNADO_WING_OUTER[0],
+            TORNADO_WING_OUTER[1],
+            Hang::AsRecorded,
+        ),
+        (AircraftId::Tornado, 10) => at(
+            Location::Wing,
+            -TORNADO_WING_OUTER[0],
+            TORNADO_WING_OUTER[1],
+            Hang::AsRecorded,
         ),
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
@@ -1233,6 +1256,11 @@ const YAK141_INNER: [f64; 2] = [7.5, -2.8];
 /// enters it least. The station stays under the wing surface and its store
 /// streamwise from 25 to 67 degrees (docs/spec/stores-on-pylons.md).
 const TORNADO_WING_INNER: [f64; 2] = [9.5, 1.5];
+
+/// The Tornado IDS (Combat)'s outer swivelling wing pylon, feet out and
+/// forward (TOR-13, fitted, agent decision 2026-11-12; see
+/// docs/spec/stores-on-pylons.md).
+const TORNADO_WING_OUTER: [f64; 2] = [16., 1.5];
 
 /// How far ahead of the inboard swivelling pylon's own store the Tornado's
 /// AIM-9 side rail hangs its missile, feet (TOR-6b, fitted, agent decision
@@ -2551,6 +2579,77 @@ mod tests {
                 assert!((rail[2] - held[2]).abs() < 1e-9, "{degrees} degrees");
             }
         }
+    }
+
+    /// TOR-13, John 2026-11-12: the Combat Tornado's outer wing pylons (stations
+    /// 9 and 10, no source rows) hang on the swinging panel outboard of the
+    /// inner pylon, one lone store a wing, and ride the swivel on their own
+    /// wing; the Clean version's stations are the same.
+    #[test]
+    fn the_tornados_outer_pod_pylons_ride_their_own_wing_at_every_sweep() {
+        use crate::combat::swing;
+        use tore_formats::aircraft::stations::{BOZ_107, SKY_SHADOW};
+        let row = |pod: &tore_formats::aircraft::stations::AuthoredPod| {
+            let h = Hardpoint {
+                location: Location::Wing.byte(),
+                flags: 8,
+                position: [0, -25, 0],
+                store: None,
+                count: 1,
+                weight_class: 0,
+            };
+            let (mount, mut rack) = placed_on(AircraftId::Tornado, pod.row, &h, None);
+            rack.paired = false;
+            (mount, rack)
+        };
+        let inner = station_move(AircraftId::Tornado, 7).expect("row 7 is moved");
+        let (right_mount, right) = row(&BOZ_107);
+        let (left_mount, left) = row(&SKY_SHADOW);
+        // Outboard of the inner pylon, level with it or ahead, each on its
+        // own side: the BOZ-107 on the right wing, the Sky Shadow on the left.
+        assert!(right_mount[0] > inner.right + 3.);
+        assert_eq!(left_mount[0], -right_mount[0]);
+        assert_eq!(right_mount[2], left_mount[2]);
+        for rack in [right, left] {
+            assert_eq!(rack.location(), Location::Wing);
+            assert!(!rack.paired, "a lone pod, not a pair");
+        }
+        for id in [AircraftId::Tornado, AircraftId::TornadoClean] {
+            assert!(swing::swivels(id, BOZ_107.row) && swing::swivels(id, SKY_SHADOW.row));
+        }
+        let size = StoreSize::body([BOZ_107.length, BOZ_107.diameter]);
+        let pivot_r = swing::pivot_feet(true);
+        let pivot_l = swing::pivot_feet(false);
+        let mut previous = 0.;
+        for degrees in [25., 35., 46., 60., 67.] {
+            let turn = swing::wing_turn(swing::speed_for_sweep(degrees), 0.) as f32;
+            let (mut r, mut l) = (right, left);
+            r.turn = turn;
+            l.turn = turn;
+            let at =
+                |rack: Rack, mount: Vector| rack.side_pylons(mount, 0, 1, size).remove(0).point;
+            let (pr, pl) = (at(r, right_mount), at(l, left_mount));
+            // Each stays on its own side of the aircraft, carried about its
+            // own wing's pivot at the same radius.
+            assert!(pr[0] > 0. && pl[0] < 0., "{degrees}: {pr:?} {pl:?}");
+            let radius = |p: Vector, pivot: [f64; 3]| (p[0] - pivot[0]).hypot(p[2] - pivot[2]);
+            let spread_r = at(right, right_mount);
+            let spread_l = at(left, left_mount);
+            assert!((radius(pr, pivot_r) - radius(spread_r, pivot_r)).abs() < 1e-6);
+            assert!((radius(pl, pivot_l) - radius(spread_l, pivot_l)).abs() < 1e-6);
+            // Aft with the sweep, the same on both wings, never forward.
+            assert!(pr[2] <= spread_r[2] + 1e-9 && pl[2] <= spread_l[2] + 1e-9);
+            assert!(spread_r[2] - pr[2] >= previous - 1e-9, "{degrees}");
+            previous = spread_r[2] - pr[2];
+            // (The left glove sits a unit further out, so the two wings' aft
+            // travel differ by a little until TOR-12 mirrors them.)
+            assert!(((spread_r[2] - pr[2]) - (spread_l[2] - pl[2])).abs() < 1.);
+        }
+        // The Clean version places them where the Combat does (it carries none).
+        assert_eq!(
+            station_move(AircraftId::TornadoClean, BOZ_107.row),
+            station_move(AircraftId::Tornado, BOZ_107.row)
+        );
     }
 
     #[test]

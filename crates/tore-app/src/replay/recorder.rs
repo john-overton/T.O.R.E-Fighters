@@ -2245,15 +2245,19 @@ fn side(side: tore_sim::ai::launch::Side) -> replay::Side {
 }
 
 /// An aircraft type's name in a recording. The imported PT name, except that
-/// the F-22N and the F/A-XX borrow the F-22's PT name, so they take their own
-/// exact label and are never shown as another aircraft.
+/// the F-22N and the F/A-XX borrow the F-22's PT name, and the two Tornado
+/// versions share `TOR.PT`, so they take their own exact label and are never
+/// shown as another aircraft (TOR-13).
 fn type_name(
     id: tore_formats::aircraft::AircraftId,
     models: &[std::sync::Arc<crate::aircraft_type::AircraftType>],
     loaded: Option<&str>,
 ) -> String {
     use tore_formats::aircraft::AircraftId;
-    if matches!(id, AircraftId::F22n | AircraftId::Faxx) {
+    if matches!(
+        id,
+        AircraftId::F22n | AircraftId::Faxx | AircraftId::Tornado | AircraftId::TornadoClean
+    ) {
         return id.label().to_owned();
     }
     loaded

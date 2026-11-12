@@ -30,12 +30,17 @@ and stay local. Look at the result in game with
 
 ## 2026-11-12 (TOR-13a): Tornado IDS Sky Shadow and BOZ-107 models
 
-Two more models, for the RAF Tornado outer wing pylons, keyed by placeholder
-names `SKYSHADOW` and `BOZ107` (no retail record exists for them; TOR-13
-decides the mapping). Model only: nothing wires them to a station yet, and
-`crates/tore-app/src/pylons/pod_models.rs` is unchanged, because the guard test
-`authored_pod_models_stay_low_poly_and_inside_their_size` asserts exactly the
-three shipped records; TOR-13 exports into it and updates that test.
+Two more models, for the RAF Tornado outer wing pylons, keyed by the names
+`SKYSHADOW` and `BOZ107` (no retail record exists for them). Model only in
+TOR-13a; **Update (TOR-13, 2026-11-12): wired in.** The export is in
+`crates/tore-app/src/pylons/pod_models.rs` (the first three models'
+triangles byte for byte as before), the guard tests assert five records, and
+the two keys are the Tornado IDS (Combat)'s authored fixed pods
+(`tore_formats::aircraft::stations::authored_pods`): they are no hardpoint row
+and no retail equipment record, so the key is an identifier, never a file name,
+and the drawing finds the model by the same key a `StorePose` carries after
+`TORE-POD:`. Their drawn size, mass and the BOZ-107's chaff and flare outlet
+are in [stores on pylons](../../docs/spec/stores-on-pylons.md#two-tornado-ids-versions-and-the-combat-version-outer-wing-pods-tor-13-2026-11-12).
 
 - Both share John's shape (a long teardrop, pointed nose, widest a little
   forward of the middle, a short cylindrical aft end, four small fins), in RAF

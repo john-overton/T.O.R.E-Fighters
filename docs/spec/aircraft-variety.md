@@ -330,7 +330,7 @@ carrier launch/arrestment remains a separate capability review.
 | AC-130 | Live aiming usability and wider engagement cases | Validate linked fire, barrel/muzzle agreement and blocked-gun feedback against the [contract](ac130-linked-guns.md); review a gunner view separately |
 | Radar and shared contacts | AWACS sharing/operator behavior beyond existing sensors | Installed/absent profiles are reviewed; additional shared-contact behavior needs its own contract and acceptance |
 | Cockpits | Wider display review and original fallback evidence | Current roots and null-pointer fits are explicit; verify every new cockpit on wide/tall windows and keep unsupported gauges unavailable |
-| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | All 46 playable profiles have bounded CPU pose acceptance (45 until the Tornado IDS joined, 2026-11-11); follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
+| Hooks and animation | Textured GPU acceptance, unlocated AC-130 hook, individual rotor feathering and carrier-operation boundaries | All 47 playable profiles have bounded CPU pose acceptance (45 until the Tornado IDS joined, 2026-11-11; 46 to 47 with the Tornado IDS (Clean) variant on the same rig, 2026-11-12); follow the [audit](../baselines/aircraft-animations.md) for retained source gaps and separate rendering/handling acceptance |
 | Multiplayer | Selection, content compatibility, new control/state transport, seat handoff and replay | Trace client/server use of the shared aircraft type and every newly required control/state value |
 
 Player-flyable helicopters extend the recovered retail multiplayer

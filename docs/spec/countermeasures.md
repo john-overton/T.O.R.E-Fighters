@@ -96,7 +96,13 @@ messages, decoy odds or seekers.
   one flare, so counts, messages, AI budgets and decoy odds are unchanged.
   John chose this on 2026-09-26.
 - Both leave 15 feet behind the aircraft's reference point and 2 feet below
-  it, at the aircraft's speed, pushed 15 ft/s out of the belly.
+  it, at the aircraft's speed, pushed 15 ft/s out of the belly. Update (TOR-13,
+  2026-11-12): an aircraft with a dispenser pod of its own lets them go from
+  the pod instead: the Tornado IDS (Combat)'s BOZ-107, from the centre of its
+  aft face, following the wing's sweep ([stores on pylons](stores-on-pylons.md#chaff-and-flares-from-the-boz-107)).
+  The outlet is worked out where the release is made and carried in the
+  release's position, so the wire, a recording and the decoy rolls read the
+  same point.
 - Each is thrown sideways along the wings **20 to 30 feet** (John's range,
   random per flare), 95 percent of the way within 0.75 seconds.
 - Drag slows a flare hard. Behind a 400-knot jet it is more than 250 feet

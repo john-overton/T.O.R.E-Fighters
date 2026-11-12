@@ -571,6 +571,19 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The Tornado IDS (Clean) (slice TOR-13): the same 2 v 2 recorded three times, so the second
+    # Tornado identity (checkpoint code 46, the TOR.PT record with no jammer, chaff or flares)
+    # round-trips through the recording against the Combat version and records the same twice.
+    out.append(
+        record_scenario(
+            "replay-rec-tornadoc-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "tornadoc", "--probe-friendly-aircraft", "tornadoc",
+             "--probe-enemy-aircraft", "tornado", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

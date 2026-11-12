@@ -105,13 +105,19 @@ pub fn pylon_swivel(right: bool, turn: f64) -> f64 {
 /// fuselage and stay fixed. Row 8, the outer wing pair, is retired.
 /// Update (TOR-6b, 2026-11-11): row 8 is now the AIM-9 side rail on the row 7
 /// pylon, which swivels with it.
+/// Update (TOR-13, 2026-11-12): rows 9 and 10 are the Tornado IDS (Combat)'s
+/// outer wing pylons with the BOZ-107 and the Sky Shadow
+/// ([`tore_formats::aircraft::stations::authored_pods`]); they are not source
+/// rows, only station indices past them, and they swivel with the wing like
+/// rows 7 and 8. Both Tornado versions share rows 7 and 8
+/// ([`AircraftId::source`]).
 pub fn swivels(id: AircraftId, hardpoint: usize) -> bool {
-    id == AircraftId::Tornado && matches!(hardpoint, 7 | 8)
+    id.source() == AircraftId::Tornado && matches!(hardpoint, 7..=10)
 }
 
 /// Whether `id` has any swivelling station.
 pub fn has_swivel(id: AircraftId) -> bool {
-    id == AircraftId::Tornado
+    id.source() == AircraftId::Tornado
 }
 
 #[cfg(test)]
@@ -169,17 +175,26 @@ mod tests {
     }
 
     #[test]
-    fn only_the_tornados_inner_wing_pair_and_its_side_rail_swivel() {
-        let rows: Vec<usize> = (0..9)
+    fn only_the_tornados_wing_pylons_and_the_outer_pod_pylons_swivel() {
+        let rows: Vec<usize> = (0..12)
             .filter(|row| swivels(AircraftId::Tornado, *row))
             .collect();
-        // Row 7, the inner wing pair, and row 8, the AIM-9 side rails on its
-        // pylons (TOR-6b, 2026-11-11).
-        assert_eq!(rows, [7, 8]);
+        // Row 7, the inner wing pair, row 8, the AIM-9 side rails on its
+        // pylons (TOR-6b, 2026-11-11), and stations 9 and 10, the Combat
+        // version's outer pod pylons (TOR-13, 2026-11-12). The Clean version
+        // swivels the same rows (it has no pod on 9 and 10).
+        assert_eq!(rows, [7, 8, 9, 10]);
         assert!(has_swivel(AircraftId::Tornado));
+        for row in 0..12 {
+            assert_eq!(
+                swivels(AircraftId::TornadoClean, row),
+                swivels(AircraftId::Tornado, row)
+            );
+        }
+        assert!(has_swivel(AircraftId::TornadoClean));
         for id in [AircraftId::F15E, AircraftId::Mig23, AircraftId::F14] {
             assert!(!has_swivel(id));
-            assert!((0..9).all(|row| !swivels(id, row)));
+            assert!((0..12).all(|row| !swivels(id, row)));
         }
     }
 

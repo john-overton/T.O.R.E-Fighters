@@ -11,7 +11,7 @@
 Implementation mode, acceptance record for gate F of the
 [aircraft import guide](../aircraft-import.md#f-acceptance-record-and-support-status).
 The Panavia Tornado IDS (`TOR.PT`) is a selectable retail identity in
-`AircraftId::ALL` (the 44th entry) and `AircraftId::SELECTABLE` (the 45th),
+`AircraftId::ALL` (the 44th entry) and `AircraftId::SELECTABLE` (the 45th; Update (TOR-13, 2026-11-12): beside it `AircraftId::TornadoClean`, the Clean version, a variant on this record; this `tornado` identity is the Combat version),
 appended at checkpoint code 44 and carried on the wire as `SELECTABLE` index 44
 inside the 9-bit field (NET-ID9, protocol 83). It is not an alias for the Su-24
 (`SU24.PT`, the record it was copied from, which is not a roster aircraft), the
@@ -52,7 +52,7 @@ choice in this record is an agent decision and is labelled as one. The numbers
 | 20 | 2026-11-10 (round 1) | **Tailerons: whole panels with roll and a smaller limit** (0.25 rad against the fleet's 0.40); frames shown. | [Control rig](../formats/aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10) |
 | 21 | 2026-11-10 (round 1) | **HUD and cockpit follow the record**: Eurofighter `E2000.HUD`, stem `EF2`, `~EF2*`. No Tornado cockpit art exists. | [Sensors, HUD and cockpit](../formats/aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11) |
 | 22 | 2026-11-10 (round 1) | **Radar, jammer and Pave Spike row stay as the record's**, no pod body drawn. | same |
-| 23b | 2026-11-10 (round 1) | **Remove the outer wing stations, which the real aircraft reserves for pods**: the outer-wing row is retired so no store hangs there. | [Stations](../formats/aircraft-variety.md#batch-5-record-and-station-corrections-b5-2-2026-11-10) |
+| 23b | 2026-11-10 (round 1) | **Remove the outer wing stations, which the real aircraft reserves for pods**: the outer-wing row is retired so no store hangs there. Update (TOR-13, 2026-11-12): the Combat version carries pods on those two stations again, fixed and no weapon row; the Clean version keeps them empty. | [Stations](../formats/aircraft-variety.md#batch-5-record-and-station-corrections-b5-2-2026-11-10) |
 | D3 | 2026-11-10 (round 2, "follow recs") | **Fuel flows corrected to two real RB199 Mk 103** (3 and 22 lb/s), replacing the Su-24's 6 and 38. | [Fuel flows](../spec/aircraft-records.md#batch-5-follow-up-corrections-tornado-fuel-flows-b5-3-2026-11-10) |
 | T1 | 2026-11-11 (round 3) | **Row 7 moves onto the swinging wing panel** at a fitted position, so the swivel carries it. | [Stations finished](../spec/stores-on-pylons.md#the-tornado-ids-inner-wing-pair-on-the-wing-one-centreline-tank-a-glove-plate-tor-5b-2026-11-11) |
 | T2 | 2026-11-11 (round 3, accepted after the stop) | **Row 6 Paveways stay where they are and the fin-tip entry is accepted** (0.96 ft front pair, 0.55 ft rear pair; the bodies clear and no outboard move clears the tips). | same |
@@ -61,6 +61,7 @@ choice in this record is an agent decision and is labelled as one. The numbers
 | T5 | 2026-11-11 (round 3) | **Tailerons keep 0.25 rad.** | [Control rig](../formats/aircraft-control-surfaces.md#tornado-control-rig-tor-3-2026-11-10) |
 | Rail | 2026-11-11 (after TOR-6) | **"Lets do a custom side rail kind of like the f-14 for this station and put it on the inner [wing] rail like the RL Tornado."** An AIM-9 side rail on each inboard swivelling pylon. | [Side rails](../spec/stores-on-pylons.md#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11) |
 | TOR-11 | 2026-11-12 | **"I don't think for the tornado the wings should start sweeping back until it's about 350 mph."** The sweep starts at 304 kt (350 mph), was a fitted 250; the full sweep stays 600 kt. | [TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12) |
+| TOR-13 | 2026-11-12 | **"Lets go two versions to TORE, 1 is the (Combat) which has the ECM and countermeasure pod on the outer wing pylons we removed earlier (not configurable), and the second is (Clean) which doesn't have them on the outer wing pylons today but doesn't have the jammer or chaff/flares."** Then: model the pods, a yellow triangle on the ECM pod's sides, chaff and flares out of the back of the countermeasures pod; Sky Shadow left, BOZ-107 right (John's photo). Update to 23b: the outer wing stations return, fixed, on the Combat version only. | [TOR-13](#tor-13-two-versions-combat-and-clean-2026-11-12) |
 | TOR-11 | 2026-11-12 | **"The AIM-9 rail on the wing pylon is too long and on the wrong side."** The rail moves to the pylon's inboard flank and its drawn arm shortens from 5.6 to 3.0 ft. | [TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12) |
 | B5-4 | 2026-11-11 (after round 3) | **"Correct all flight model maximums and fuel flows per realistic numbers that fit in TORE."** For the Tornado: a +8 row beside the +7 row, a 50,000 ft ceiling (record 60,000), the flows confirmed at 3 and 22 lb/s, top speeds kept. | [Flight maxima and fuel flows](../spec/aircraft-records.md#batch-5-flight-maxima-and-fuel-flows-b5-4-2026-11-11) |
 | B5-4a | 2026-11-11 (after B5-4) | **"Tornado T2 accepted as is"**; the shared drag law is left alone. | not here |
@@ -629,6 +630,58 @@ and on the wrong side."
   233 tank placements, 222 Cheat-only (no pin moved); Tornado battery
   (`--scenario '*tornado*'`) 21 of 21; tools unittests OK; `tools/check_docs.py` passed.
 - **Frames.** `.local/m3-aircraft/frames/TOR-11/` (local evidence): before and after at 25, 45 and 67 degrees from below, front-low and above, with 3x crops and side-by-side pairs.
+
+## TOR-13 Two versions, Combat and Clean (2026-11-12)
+
+Update (TOR-13, 2026-11-12), decision 23b revisited: John asked for two selectable Tornado IDS
+versions. Full behaviour, numbers and the clearance table are in
+[stores on pylons](../spec/stores-on-pylons.md#two-tornado-ids-versions-and-the-combat-version-outer-wing-pods-tor-13-2026-11-12);
+this is the acceptance summary.
+
+- **Identities.** `tornado` is now "Tornado IDS (Combat)" and a new `tornadoc` is "Tornado IDS
+  (Clean)" (`AircraftId::TornadoClean`, wire index 45, checkpoint code 46; the Mirage F1's wire index
+  moves 45 to 46), a runtime variant on the same `TOR.PT`, shape, rig, cockpit, flight model and
+  weapon stations, never an alias. The selectable roster is 47 (45 retail identities, the F/A-XX
+  and this variant); `AircraftId::ALL` stays 45.
+- **Combat** carries the BOZ-107 (right, 717 lb, 13.1 by 1.58 ft) and the Sky Shadow (left, 441 lb,
+  9.8 by 1.38 ft) on fixed outer wing pylons, 16.0 ft out and 1.5 ft forward on the swinging
+  panel (fitted), swivelling with it. They are no hardpoint row: Load Ordnance (Normal and Cheat), saved
+  loads, the lobby and the AI never see them. The record's `MIG31.ECM` stays (jammer, 60 chaff, 60
+  flares); chaff and flares leave the BOZ-107's aft face, following the sweep. Carried mass is
+  1,158 lb more than the previous Tornado, through the existing fixed-equipment mass and loaded
+  drag law (no per-store drag exists). **Flight figures that depend on the load (TOR-8's default-load
+  rows, liftoff, approach, rollout) move for Combat; the Clean version is exactly the earlier
+  Tornado.** Measured (`flight-liftoff-*` and `flight-approach-*`): default gross 56,672 lb for
+  Combat, 55,514 for Clean; liftoff 149.9 kt after 1,916 ft (Clean 147.2 kt, 1,805 ft); touchdown
+  158.0 kt (Clean 155.3). The other TOR-8 default-load figures were not re-measured.
+- **Clean** is the previous Tornado with no jammer, chaff or flares (`MIG31.ECM` is one record, so
+  they go together) and no outer pods. The RWR is not tied to the record and stays. The weapons
+  window lists no `CHAFF` and `FLARE` counts and the RWR window no `JAM` for an aircraft with no
+  dispenser or jammer.
+- **Whole-surface gate.** At 25, 45 and 67 degrees both pods clear the wing panel (1.03 to 1.06 ft,
+  the pylon), the flap strips (0.63 ft with the flaps down, 1.17 to 1.97 up), the tailerons (3.98 ft at
+  67), the glove plates, the fuselage, the row 7 store (3.61 ft) and the AIM-9 rail (4.15 ft), the
+  gear (10.6 ft) and the ground (4.76 and 4.96 ft above the gear contact). Nothing crosses; no move
+  was needed.
+- **Pins.** `--validate-ordnance`: 45 aircraft, 18 recovered stations, 4,581 weapon placements, 233 tank
+  placements, 222 Cheat-only, 80 pods: **none moved** (the pods are no row); a new step checks the
+  versions.
+- **Frames** (`.local/m3-aircraft/frames/TOR-13/`): the Combat version from below and the front
+  quarter at 25 and 67 degrees, close-ups of the Sky Shadow (yellow triangle; palette entry 187,
+  (247, 194, 40)) and the BOZ-107's aft end, a flare and chaff release leaving the BOZ-107, the Clean
+  version from below, and the Quick Mission aircraft list with both names.
+- **Checks (2026-11-12).** `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings` clean;
+  `cargo test --locked --workspace --no-fail-fast` 7,701 passed, 0 failed; `--validate-ordnance` and
+  `--validate-creator` passed (0 problems, 177,000 and 76,000 fuzz events); the Tornado battery
+  (`*tornado*`, with the new Clean, countermeasure-origin and two-version net scenarios) 41 of 41 after
+  two scenario-table fixes; `net-window-lobby` and `net-content-missing` 2 of 2; tools unittests 559
+  OK; `tools/check_docs.py` passed. Local: `.local/m3-aircraft/checks/TOR-13/`.
+- **Open for John.** The outer pylon position and the pods' diameters are fitted; the Sky Shadow
+  pair of bulges and the BOZ-107's nine outlets are the TOR-13a models; in a Guns only start (no
+  external stores) the shared rule carries none of the fixed external equipment's mass, the pods' included,
+  although the pods stay drawn (a fixed pod's existing behaviour, not examined further);
+  `by_label("Tornado IDS")` no longer names an identity (a recording made before this slice, none was
+  released).
 
 ## Open findings for John
 

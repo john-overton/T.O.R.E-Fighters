@@ -232,7 +232,7 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // outside the frame and loses about 1.2 percent of the glass at the
         // chords. Measured on the imported art,
         // `the_tornado_glass_matches_the_imported_eurofighter_art`.
-        AircraftId::Tornado => (
+        AircraftId::Tornado | AircraftId::TornadoClean => (
             (1280, 490),
             &[
                 (611, 105),

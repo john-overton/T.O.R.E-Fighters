@@ -147,7 +147,16 @@ default load, with the full-stick pull by fuel against the F-15E, the F-5E, the
 Gripen and the Mirage F1, are in the
 [variety flight baseline](../baselines/variety-flight.md#panavia-tornado-ids-validation-2026-11-11);
 `tornado` joins the liftoff, approach and internal-fuel tables of `flight.py`
-(fitted windows 135 to 165 kt and 140 to 175 kt).
+(fitted windows 135 to 165 kt and 140 to 175 kt). Update (TOR-13, 2026-11-12):
+`tornadoc` (the Tornado IDS (Clean), the Tornado without its pods and jammer)
+joins the same tables and the variety, liftoff and approach scenarios with the
+earlier Tornado's recorded figures; `flight-countermeasures-tornado-boz`,
+`flight-countermeasures-tornado-boz-sweep67` and
+`flight-countermeasures-tornadoc-none` (`--countermeasure-preview 2`) check
+that the Combat version's chaff and flares are at the BOZ-107's aft face
+(the `Countermeasure outlet:` and `Countermeasure origin:` lines) at the
+default speed and at 650 kt, and that the Clean version carries and releases
+none.
 
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the

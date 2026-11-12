@@ -160,7 +160,7 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// [`TORNADO_SIDE_RAIL_REFUSED`], which otherwise take what their infrared
 /// mask (0x85) admits, as the F-14's glove-pylon rail does).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
-    match id {
+    match id.source() {
         AircraftId::F15E => match row {
             F15E_BELLY => !F15E_BELLY_REFUSED.contains(&source),
             F15E_WING => source != "AA6.JT",
@@ -417,6 +417,111 @@ pub fn side_rail(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     });
 }
 
+/// The Tornado's jammer and countermeasures row (`TOR.PT` row 2: Fuselage,
+/// flag 0x8, `MIG31.ECM`), which the Clean version drops ([`variant`]).
+pub const TORNADO_JAMMER: usize = 2;
+
+/// The record [`TORNADO_JAMMER`] holds in the Combat version and the retail
+/// file: 60 chaff, 60 flares and a deception jammer (one bundle).
+pub const TORNADO_JAMMER_RECORD: &str = "MIG31.ECM";
+
+/// Runtime variants' station tables (John, 2026-11-12, TOR-13, opinionated):
+/// the Tornado IDS (Clean) is the Tornado record with no jammer, chaff or
+/// flares, which is how an aircraft has none of them: the jammer row holds no
+/// store (the F-5E's B5-2 interim and the sensor profile read a countermeasure
+/// bundle only from the row that holds one). `MIG31.ECM` is one record, so the
+/// jammer, the chaff and the flares go together. Guarded on the exact record
+/// name; every other identity and an edited record are untouched; repeated
+/// application is a no-op. Applied by [`super::Aircraft::into_identity`].
+pub fn variant(id: AircraftId, rows: &mut [Hardpoint]) {
+    if id != AircraftId::TornadoClean {
+        return;
+    }
+    if let Some(row) = rows.get_mut(TORNADO_JAMMER)
+        && row
+            .store
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case(TORNADO_JAMMER_RECORD))
+    {
+        row.store = None;
+    }
+}
+
+/// A pod an aircraft carries as fixed external equipment on a station that no
+/// source row records: the Tornado IDS (Combat)'s two outer wing pylons
+/// (John, 2026-11-12, TOR-13). It is not a hardpoint row, so Load Ordnance,
+/// saved loads, the lobby and the AI never see it and cannot change it; the
+/// simulation builds it with the aircraft's configuration (a
+/// `Configuration::fixed_pods` entry, its mass in the fixed external
+/// equipment) and the drawing finds its model by [`Self::record`]. There is no
+/// retail equipment record for these pods, so `record` is an authored
+/// identifier, never a file name, and the model of `crates/tore-app/src/pylons/
+/// pod_models.rs` carries the same key (`assets/pods/build_pods.py`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AuthoredPod {
+    /// The station index, past the source table's rows, that the pod's mount
+    /// and swivel are keyed by (`hardpoints::station_move`, `swing::swivels`).
+    pub row: usize,
+    /// The authored model's key.
+    pub record: &'static str,
+    /// Which wing it hangs from: the right-hand one.
+    pub right: bool,
+    /// Drawn and carried length and diameter, feet, and carried mass, pounds.
+    pub length: f64,
+    pub diameter: f64,
+    pub weight_lbs: i32,
+    /// Chaff and flares leave from the model's aft face centre.
+    pub dispenser: bool,
+}
+
+/// The first station index past the Tornado's nine source rows.
+pub const TORNADO_RIGHT_POD: usize = 9;
+pub const TORNADO_LEFT_POD: usize = 10;
+
+/// The ARI 23246 Sky Shadow ECM pod, 3.0 m (9.84 ft), 200 kg (441 lb), and the
+/// BOZ-107 chaff and flare dispenser, 4.0 m (13.12 ft), 325 kg (717 lb): real
+/// lengths and masses (Wikipedia, "Sky Shadow (radar jammer)", and the Czech
+/// armedconflicts.com database, secondary and approximate, both read
+/// 2026-11-12); diameters 0.42 m (1.38 ft) and 0.48 m (1.58 ft) are fitted from
+/// John's labelled photo (`assets/pods/build_pods.py`).
+pub const SKY_SHADOW: AuthoredPod = AuthoredPod {
+    row: TORNADO_LEFT_POD,
+    record: "SKYSHADOW",
+    right: false,
+    length: 3.0 / 0.3048,
+    diameter: 0.42 / 0.3048,
+    weight_lbs: 441,
+    dispenser: false,
+};
+pub const BOZ_107: AuthoredPod = AuthoredPod {
+    row: TORNADO_RIGHT_POD,
+    record: "BOZ107",
+    right: true,
+    length: 4.0 / 0.3048,
+    diameter: 0.48 / 0.3048,
+    weight_lbs: 717,
+    dispenser: true,
+};
+
+/// The authored fixed pods of `id`: the Combat Tornado's outer pair, the Sky
+/// Shadow on the left (port) pylon and the BOZ-107 on the right (starboard)
+/// one (John's labelled photo, 2026-11-12). The Clean version and every other
+/// aircraft carry none.
+pub fn authored_pods(id: AircraftId) -> &'static [AuthoredPod] {
+    if id == AircraftId::Tornado {
+        &[BOZ_107, SKY_SHADOW]
+    } else {
+        &[]
+    }
+}
+
+/// The authored pod keyed `record` (for its drawn size), if any.
+pub fn authored_pod(record: &str) -> Option<AuthoredPod> {
+    [BOZ_107, SKY_SHADOW]
+        .into_iter()
+        .find(|pod| pod.record.eq_ignore_ascii_case(record))
+}
+
 /// The retail rows of the aircraft whose default load [`adjust_defaults`]
 /// changes: the whole table, so an edited record keeps its own defaults.
 fn default_signature(id: AircraftId) -> &'static [Signature] {
@@ -514,7 +619,7 @@ pub const TORNADO_CENTRELINE: usize = 5;
 /// record keeps its own default) and on the identity; repeated application
 /// is a no-op. Applied by `tore_sim::combat::hardpoints::default_records`.
 pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
-    if id != AircraftId::Tornado {
+    if id.source() != AircraftId::Tornado {
         return;
     }
     if let Some(row) = rows.get_mut(TORNADO_CENTRELINE)
@@ -1030,6 +1135,69 @@ mod tests {
         .into_iter()
         .map(row)
         .collect()
+    }
+
+    /// TOR-13 (John, 2026-11-12): the Clean version is the Tornado record with
+    /// no jammer row; the Combat version and every other identity keep it.
+    #[test]
+    fn the_clean_tornado_loses_only_the_jammer_row_and_the_pods_are_the_combats() {
+        let retail = tornado_retail();
+        let mut combat = retail.clone();
+        variant(AircraftId::Tornado, &mut combat);
+        assert_eq!(key(&combat), key(&retail));
+        let mut clean = retail.clone();
+        variant(AircraftId::TornadoClean, &mut clean);
+        assert_eq!(clean[TORNADO_JAMMER].store, None);
+        let mut kept = key(&clean);
+        kept[TORNADO_JAMMER].3 = retail[TORNADO_JAMMER].store.clone();
+        assert_eq!(kept, key(&retail), "only the jammer row's store goes");
+        // Repeated application is a no-op, an edited row keeps its own record.
+        let once = key(&clean);
+        variant(AircraftId::TornadoClean, &mut clean);
+        assert_eq!(key(&clean), once);
+        let mut edited = retail.clone();
+        edited[TORNADO_JAMMER].store = Some("F18.ECM".into());
+        variant(AircraftId::TornadoClean, &mut edited);
+        assert_eq!(edited[TORNADO_JAMMER].store.as_deref(), Some("F18.ECM"));
+        // Both versions share the Tornado's station refusals and defaults.
+        for name in TORNADO_SHOULDER_REFUSED {
+            assert!(!weapon_allowed(
+                AircraftId::TornadoClean,
+                TORNADO_SHOULDER,
+                name
+            ));
+        }
+        let mut counts = retail.clone();
+        default_counts(AircraftId::TornadoClean, &mut counts);
+        assert_eq!(counts[TORNADO_CENTRELINE].count, 1);
+        assert_eq!(retail[TORNADO_JAMMER].location, 1);
+    }
+
+    #[test]
+    fn only_the_combat_tornado_carries_the_authored_pods_with_real_sizes_and_masses() {
+        let pods = authored_pods(AircraftId::Tornado);
+        assert_eq!(pods, [BOZ_107, SKY_SHADOW]);
+        assert!(authored_pods(AircraftId::TornadoClean).is_empty());
+        assert!(authored_pods(AircraftId::Mig23).is_empty());
+        // Stations past the nine source rows: no Load Ordnance row.
+        assert!(pods.iter().all(|pod| pod.row >= 9));
+        assert!(pods[0].right && !pods[1].right);
+        assert!(pods[0].dispenser && !pods[1].dispenser);
+        // 3.0 m by 0.42 m, 200 kg, and 4.0 m by 0.48 m, 325 kg.
+        assert!((SKY_SHADOW.length - 9.843).abs() < 1e-3);
+        assert!((BOZ_107.length - 13.123).abs() < 1e-3);
+        assert!((SKY_SHADOW.diameter - 1.378).abs() < 1e-3);
+        assert!((BOZ_107.diameter - 1.575).abs() < 1e-3);
+        assert_eq!(
+            f64::from(SKY_SHADOW.weight_lbs).round(),
+            (200. * 2.20462_f64).round()
+        );
+        assert_eq!(
+            f64::from(BOZ_107.weight_lbs).round(),
+            (325. * 2.20462_f64).round()
+        );
+        assert_eq!(authored_pod("boz107"), Some(BOZ_107));
+        assert_eq!(authored_pod("PAVESPK.SEE"), None);
     }
 
     type RowKey = (u8, i32, [i32; 3], Option<String>, i32, i32);

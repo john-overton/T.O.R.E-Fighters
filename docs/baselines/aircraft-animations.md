@@ -471,7 +471,7 @@ gaps in the per-aircraft contracts remain outside this acceptance.
 
 ## Fleet coverage
 
-The code inventory covers all 46 playable profiles (45 until the Tornado IDS joined, 2026-11-11) in the ignored local report
+The code inventory covers all 47 playable profiles (45 until the Tornado IDS joined, 2026-11-11; 46 until the Tornado IDS (Clean) variant, `tornadoc`, which drives the Tornado's own rig, joined, 2026-11-12) in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
 variety imports lacked pitch, roll and flap mappings. All 46 profiles have bounded geometry acceptance in the table below (45 until the Tornado IDS, 2026-11-11), with
 explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline

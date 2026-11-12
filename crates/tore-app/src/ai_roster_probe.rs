@@ -23,11 +23,17 @@ pub fn roster_probe(
         launch::{self, WingId, WingSelection, resolve_wings},
         weapon_service::Rounds,
     };
-    for id in AircraftId::ALL {
-        let aircraft = Aircraft::parse(
+    // The Tornado IDS (Clean) flies the roster probe beside the Combat version
+    // (TOR-13): the same record with no jammer, chaff, flares or pods.
+    for id in AircraftId::ALL
+        .into_iter()
+        .chain([AircraftId::TornadoClean])
+    {
+        let aircraft = Aircraft::parse_as(
             resources
                 .get(id.pt())
                 .ok_or_else(|| format!("missing {}", id.pt()))?,
+            id,
         )?;
         let config = live::Configuration::from_source(&aircraft, |name| {
             resources

@@ -112,7 +112,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI against AI, one against one up to fifteen against fifteen, guns, skills, threats",
         (
             "ai-fight-*", "ai-pair-*", "ai-big-*", "ai-guns-*", "ai-separation-*", "ai-skill-*",
-            "ai-mig25-*", "ai-f16a-*", "ai-mig31-*", "ai-m2000-*", "ai-f15e-*", "ai-gripen-*", "ai-f5e-*", "ai-mf1-*", "ai-tornado-*", "ai-threat-*", "ai-missile-launch-regression", "ai-missile-envelope-gaps", "ai-missile-player-cue", "ai-missile-turning-cue", "ai-long-1v1", "ai-long-5v5", "ai-long-15v15*", "ai-long-guns-*", "ai-long-hold-*",
+            "ai-mig25-*", "ai-f16a-*", "ai-mig31-*", "ai-m2000-*", "ai-f15e-*", "ai-gripen-*", "ai-f5e-*", "ai-mf1-*", "ai-tornado-*", "ai-tornadoc-*", "ai-threat-*", "ai-missile-launch-regression", "ai-missile-envelope-gaps", "ai-missile-player-cue", "ai-missile-turning-cue", "ai-long-1v1", "ai-long-5v5", "ai-long-15v15*", "ai-long-guns-*", "ai-long-hold-*",
         ),
     ),
     "ai-damage": ("AI with faults and damage", ("ai-damaged-*", "ai-fault-*", "ai-record-fault")),
@@ -217,7 +217,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "a server and bots over UDP: join, fly, chat, console, observe, scores, the King, PvP, a delayed observer, "
         "revival, the lead hold, the idle AI, Autobalance, debrief, clean exit",
         (
-            "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
+            "net-server-fight", "net-server-tornado-versions", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
             "net-server-min-players", "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive", "net-window-respawn-menu",
             "net-server-results", "net-server-away", "net-server-rejoin", "net-server-replies",
             "net-server-datalink", "net-server-datalink-lead", "net-server-smoke-pvp", "net-server-smoke-coop",

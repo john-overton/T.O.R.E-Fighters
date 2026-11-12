@@ -1843,6 +1843,26 @@ def scenarios() -> list[Scenario]:
                            "TOR.PT identity (two RB199, F18R.SEE radar, MIG31.ECM, BK27, "
                            "tank and laser-bomb default load) in a 2 v 2 fight."))
 
+    # 13i. The two Tornado versions (slice TOR-13, John 2026-11-12): the Clean version (key
+    # `tornadoc`, the TOR.PT record with no jammer, chaff, flares or outer pods) flies a mission
+    # in every wing, and against the Combat version (BOZ-107 and Sky Shadow on the outer pylons,
+    # chaff and flares leaving the BOZ), so both identities share one fight and neither is the
+    # other's alias.
+    out.append(probe("tornadoc-quick-mission-2v2", fight(2, 2, "--aircraft", "tornadoc",
+                                                          "--probe-friendly-aircraft", "tornadoc",
+                                                          "--probe-enemy-aircraft", "tornadoc",
+                                                          "--separation", "5", *attack), ticks=7200,
+                     notes="All Tornado IDS (Clean): the player's wing and the enemy wing fly "
+                           "the TOR.PT record with no jammer, chaff or flares and no outer pods "
+                           "in a 2 v 2 fight."))
+    out.append(probe("tornadoc-vs-tornado-quick-mission-2v2", fight(2, 2, "--aircraft", "tornadoc",
+                                                                     "--probe-friendly-aircraft", "tornadoc",
+                                                                     "--probe-enemy-aircraft", "tornado",
+                                                                     "--separation", "5", *attack),
+                     ticks=7200,
+                     notes="Tornado IDS (Clean) against Tornado IDS (Combat) in a 2 v 2 fight: "
+                           "the Combat version's chaff and flares leave its BOZ-107."))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

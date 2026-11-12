@@ -13887,7 +13887,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if sensor_summary {
         // The reviewable per-aircraft capability report. Porting an aircraft
         // means reviewing this output, not writing another radar controller.
-        for id in tore_formats::aircraft::AircraftId::ALL {
+        // The Tornado IDS (Clean) is listed too, so the version with no
+        // jammer is reviewable beside the Combat one (TOR-13).
+        for id in tore_formats::aircraft::AircraftId::ALL
+            .into_iter()
+            .chain([tore_formats::aircraft::AircraftId::TornadoClean])
+        {
             match aircraft::Airframe::load(&assets.theater_resources, id) {
                 Ok(airframe) => println!("{}", airframe.sensors.summary()),
                 Err(error) => println!("{id:?}: unavailable, {error}"),
@@ -15850,6 +15855,49 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 flight.position[1],
                 flight.position[2]
             );
+        }
+        // Where the devices are against the aircraft, right, up and forward
+        // of its reference point in feet, and where its own dispenser pod
+        // lets them go when it has one (the Tornado IDS (Combat)'s BOZ-107,
+        // TOR-13). Read a tick or two after the release the devices are still
+        // at their outlet to within a foot.
+        let basis = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
+        let offset = |p: [f64; 3]| {
+            let d: [f64; 3] = std::array::from_fn(|i| p[i] - flight.position[i]);
+            [
+                tore_sim::attitude::dot(d, basis.right),
+                tore_sim::attitude::dot(d, basis.up),
+                tore_sim::attitude::dot(d, basis.forward),
+            ]
+        };
+        match combat.state.own().configuration().dispenser_exit() {
+            Some(exit) => println!(
+                "Countermeasure outlet: dispenser pod exit {:.2},{:.2},{:.2}",
+                exit[0], exit[1], exit[2]
+            ),
+            None => println!("Countermeasure outlet: standard"),
+        }
+        for (kind, points) in [
+            (
+                "flare",
+                devices
+                    .flares
+                    .iter()
+                    .map(|f| f.position)
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "chaff",
+                devices.chaff.iter().map(|c| c.position).collect::<Vec<_>>(),
+            ),
+        ] {
+            for point in points {
+                let o = offset(point);
+                println!(
+                    "Countermeasure origin: {kind} {:.2},{:.2},{:.2}",
+                    o[0], o[1], o[2]
+                );
+            }
         }
     }
     if let Some(ticks) = combat_probe {

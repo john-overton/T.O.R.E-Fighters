@@ -49,6 +49,20 @@ pub struct Release {
     pub basis: Basis,
 }
 impl Release {
+    /// A release whose devices leave from `outlet`, a world point, instead of
+    /// the standard point behind and below the reference point: the position
+    /// is the one [`Self::outlet`] undoes, so every peer, a recording and the
+    /// energy decoys read the same point from the same numbers (the Tornado
+    /// IDS (Combat)'s BOZ-107 pod, TOR-13).
+    pub fn from_outlet(outlet: Vector, velocity: Vector, basis: Basis) -> Self {
+        Self {
+            position: std::array::from_fn(|i| {
+                outlet[i] + basis.forward[i] * TAIL_FEET + basis.up[i] * BELOW_FEET
+            }),
+            velocity,
+            basis,
+        }
+    }
     fn outlet(&self) -> Vector {
         std::array::from_fn(|i| {
             self.position[i] - self.basis.forward[i] * TAIL_FEET - self.basis.up[i] * BELOW_FEET
@@ -379,6 +393,31 @@ mod tests {
                 assert!(flare.position[1] < 10000. - BELOW_FEET);
             }
         }
+    }
+
+    /// TOR-13: a release made from an outlet puts the devices exactly there,
+    /// from the numbers a recording and the wire carry (position, velocity,
+    /// attitude), and the standard release is untouched.
+    #[test]
+    fn a_release_from_an_outlet_leaves_from_that_point() {
+        let basis = Basis::new(0.7, 0.1, -0.2);
+        let outlet = [120., 9_990., -45.];
+        let release = Release::from_outlet(outlet, [10., 0., 300.], basis);
+        let mut devices = Devices::default();
+        devices.release_flare(release);
+        devices.release_chaff(release);
+        assert_eq!(devices.flares.len(), 2);
+        let near = |a: Vector| a.iter().zip(outlet).all(|(a, b)| (a - b).abs() < 1e-9);
+        assert!(devices.flares.iter().all(|flare| near(flare.position)));
+        assert!(near(devices.chaff[0].position));
+        // The standard release is the reference point's, behind and below.
+        let standard = level(0.);
+        let mut plain = Devices::default();
+        plain.release_chaff(standard);
+        assert_eq!(
+            plain.chaff[0].position,
+            [0., 10_000. - BELOW_FEET, -TAIL_FEET]
+        );
     }
 
     #[test]

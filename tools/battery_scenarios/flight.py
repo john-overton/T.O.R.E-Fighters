@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -111,6 +111,7 @@ STATIONS = {
     # a fourth weapon slot.
     "tornado": [360, 4, 2, 2],
 }
+STATIONS["tornadoc"] = STATIONS["tornado"]
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
 
@@ -266,7 +267,7 @@ def liftoff_problems(output: str) -> list[str]:
 # What John asked for on 2026-09-29 (unsourced real-world figures, a plausibility
 # range only), in knots: liftoff at the default gross weight and approach at a
 # landing weight of 65 percent internal fuel. `None` where there is no figure.
-LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "gripen": (125, 150), "f5e": (135, 165), "tornado": (135, 165)}
+LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150), "mig25": (160, 190), "mig31": (160, 190), "m2000": (125, 150), "gripen": (125, 150), "f5e": (135, 165), "tornado": (135, 165), "tornadoc": (135, 165)}
 # The MiG-25PD's own figures are fitted from the flight manual quoted in the
 # AviaSimHD MSFS manual: V1 300 km/h, V2 350 km/h at maximum takeoff weight and
 # a 270-290 km/h landing speed (agent decision, 2026-11-07, M25-8).
@@ -307,6 +308,7 @@ APPROACH_TARGET = {
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145), "mig25": (146, 157), "mig31": (143, 160),
     "m2000": (133, 147), "gripen": (140, 160), "f5e": (155, 175), "tornado": (140, 175),
+    "tornadoc": (140, 175),
 }
 # The F-15E (F15E-8, 2026-11-10; agent decision, fitted windows). Its liftoff
 # band is the fleet plausibility range (130 to 150 kt): no primary takeoff speed
@@ -338,8 +340,8 @@ APPROACH_TARGET["mf1"] = (125, 150)
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1, "f5e": 153.4, "tornado": 150.6}
-KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5, "f5e": 166.2, "tornado": 160.1}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7, "mig25": 153.9, "mig31": 165.8, "m2000": 130.3, "gripen": 132.1, "f5e": 153.4, "tornado": 150.6, "tornadoc": 150.6}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5, "mig25": 165.6, "mig31": 166.2, "m2000": 145.2, "gripen": 147.5, "f5e": 166.2, "tornado": 160.1, "tornadoc": 160.1}
 # The F-15E's measured liftoff and approach at its default load (F15E-8, 2026-11-10).
 KNOWN_LIFTOFF.update({"f15e": 149.1})
 KNOWN_APPROACH.update({"f15e": 156.1})
@@ -373,6 +375,7 @@ INTERNAL_FUEL_LB = {
     # TOR.PT internal fuel, 11,221 lb (the record's own tank; the 3,300 lb of
     # external tanks on the default load are not counted).
     "tornado": 11221,
+    "tornadoc": 11221,
     # F16.PT internal fuel, the same 6,972 lb as F16C.PT (F16A-0).
     "f16a": 6972,
 }
@@ -475,6 +478,10 @@ LIFTOFF_AIRCRAFT += ["f5e"]
 LIFTOFF_AIRCRAFT += ["mf1"]
 # The Tornado joins the liftoff, retail-stall and approach scenarios (TOR-8, 2026-11-11).
 LIFTOFF_AIRCRAFT += ["tornado"]
+# The Tornado IDS (Clean) joins them (TOR-13, 2026-11-12): the TOR.PT record with no jammer, chaff,
+# flares or outer pods, so its default gross, liftoff and approach are the figures the Tornado had
+# before the Combat version took on 1,158 lb of pods.
+LIFTOFF_AIRCRAFT += ["tornadoc"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1129,7 +1136,7 @@ REFUSED_SLOTS = {
 # Stations whose one round is a pack of several bodies: the shots counted are the bodies, the
 # station's ammunition falls by one pack. The Tornado's MK82P3.JT row (inner wing) is the only
 # one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11).
-SHOTS_PER_ROUND = {("tornado", 3): 3}
+SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3}
 
 
 def check_slot(ac: str, slot: int):
@@ -1320,6 +1327,99 @@ def countermeasure_scenarios() -> list[Scenario]:
         args += ["--combat-command", "flare"] * 3
         args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
         out.append(Scenario(name=f"flight-countermeasures-{ac}", lane="flight", args=args, window=True, check=check_countermeasures, timeout=180))
+    out.extend(tornado_countermeasure_scenarios())
+    return out
+
+
+def _origins(output: str) -> tuple[list[float] | None, list[tuple[str, list[float]]]]:
+    """The dispenser pod's exit, if the aircraft has one, and each device's offset from the aircraft."""
+    outlet = re.search(r"Countermeasure outlet: (?:standard|dispenser pod exit (-?[\d.]+),(-?[\d.]+),(-?[\d.]+))", output)
+    exit_ = [float(outlet.group(i)) for i in (1, 2, 3)] if outlet and outlet.group(1) else None
+    origins = [
+        (kind, [float(x), float(y), float(z)])
+        for kind, x, y, z in re.findall(r"Countermeasure origin: (flare|chaff) (-?[\d.]+),(-?[\d.]+),(-?[\d.]+)", output)
+    ]
+    if not outlet:
+        return None, []
+    return exit_ or [], origins
+
+
+def check_combat_tornado_origin(output: str) -> list[str]:
+    """Chaff and flares leave the Tornado IDS (Combat) from the BOZ-107's aft face (TOR-13).
+
+    The preview reads the devices two ticks after the release: a chaff cartridge is still at its
+    outlet to within about two feet (the aircraft pulls ahead of it), a flare pair is thrown a few feet
+    to each side in that time.
+    """
+    problems = check_countermeasures(output)
+    exit_, origins = _origins(output)
+    if exit_ is None:
+        return problems + ["no Countermeasure outlet line"]
+    if not exit_:
+        return problems + ["the Combat Tornado has no dispenser pod exit (standard outlet)"]
+    right, up, forward = exit_
+    # The right wing's pod: well out on the wing, behind its own nose, nowhere near the old tail point.
+    if not 8.0 < right < 20.0:
+        problems.append(f"dispenser exit {right} ft out is not on the right wing's outer pylon")
+    if not -25.0 < forward < 3.0:
+        problems.append(f"dispenser exit {forward} ft forward is not at the BOZ-107's tail")
+    if forward > -5.0 and right < 8.0:
+        problems.append("dispenser exit is the standard tail outlet")
+    chaff = [o for kind, o in origins if kind == "chaff"]
+    flares = [o for kind, o in origins if kind == "flare"]
+    if not chaff or not flares:
+        problems.append(f"expected devices in the air, found {len(chaff)} chaff and {len(flares)} flares")
+    for o in chaff:
+        if max(abs(o[0] - right), abs(o[1] - up), abs(o[2] - forward)) > 3.0:
+            problems.append(f"chaff left {o}, not the pod's exit {exit_}")
+    for o in flares:
+        if abs(o[0] - right) > 4.0 or abs(o[1] - up) > 2.0 or abs(o[2] - forward) > 3.0:
+            problems.append(f"flare left {o}, not the pod's exit {exit_}")
+    return problems
+
+
+def check_clean_tornado_origin(output: str) -> list[str]:
+    """The Tornado IDS (Clean) has no chaff, flares or dispenser: a release does nothing (TOR-13)."""
+    problems = []
+    m = re.search(
+        r"Countermeasure preview: ticks=\d+ flares=(\d+) burning=(\d+) puffs=(\d+) chaff=(\d+) carried_chaff=(\d+) carried_flares=(\d+) capacity_chaff=(\d+) capacity_flares=(\d+)",
+        output,
+    )
+    if not m:
+        return ["no Countermeasure preview line"]
+    flares, _, _, chaff, carried_chaff, carried_flares, cap_chaff, cap_flares = (int(m.group(i)) for i in range(1, 9))
+    if (cap_chaff, cap_flares, carried_chaff, carried_flares) != (0, 0, 0, 0):
+        problems.append(f"carries chaff {carried_chaff}/{cap_chaff}, flares {carried_flares}/{cap_flares}")
+    if flares or chaff:
+        problems.append(f"{chaff} chaff and {flares} flares in the air from an aircraft with none")
+    exit_, _ = _origins(output)
+    if exit_ is None:
+        problems.append("no Countermeasure outlet line")
+    elif exit_:
+        problems.append(f"a dispenser pod exit {exit_} on the Clean version")
+    return problems
+
+
+def tornado_countermeasure_scenarios() -> list[Scenario]:
+    """Slice TOR-13: the Combat Tornado's chaff and flares leave its BOZ-107, the Clean one has none."""
+    out = []
+    for name, ac, speed, check in (
+        ("flight-countermeasures-tornado-boz", "tornado", None, check_combat_tornado_origin),
+        ("flight-countermeasures-tornado-boz-sweep67", "tornado", "650", check_combat_tornado_origin),
+        ("flight-countermeasures-tornadoc-none", "tornadoc", None, check_clean_tornado_origin),
+    ):
+        args = ["--live-fire", "--aircraft", ac]
+        if speed:
+            args += ["--flight-speed", speed]
+        args += ["--combat-command", "chaff"] * 5
+        args += ["--combat-command", "flare"] * 3
+        args += ["--countermeasure-preview", "2", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+        out.append(Scenario(
+            name=name, lane="flight", args=args, window=True, check=check, timeout=180,
+            notes="Chaff and flares leave the Combat Tornado's BOZ-107 aft face, following the wing sweep (TOR-13)."
+            if ac == "tornado"
+            else "The Clean Tornado carries no chaff or flares and no dispenser pod (TOR-13).",
+        ))
     return out
 
 

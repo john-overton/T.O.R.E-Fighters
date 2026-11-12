@@ -493,6 +493,8 @@ pub fn readout(
         targeting: crate::instruments::targeting::Page::new(ro, config, s),
         chaff: ro.countermeasures.chaff,
         flares: ro.countermeasures.flares,
+        no_countermeasures: config.ecm.chaff[0] == 0 && config.ecm.flare[0] == 0,
+        no_jammer: config.ecm_hardpoint.is_none(),
         target: ro.targets.display.as_ref().map(|target| {
             let name = combat
                 .ground_name(target.id)

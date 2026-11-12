@@ -1128,7 +1128,7 @@ does not relabel those weapons or add cosmetic missiles. Real Apache launcher
 support remains separate work; these are fitted pylons for the game's
 available stores, not a claim of exact real-aircraft carriage or retail parity.
 
-The CPU stores preview checks all 46 selectable aircraft with default and
+The CPU stores preview checks all 47 selectable aircraft (46 until the Tornado IDS (Clean), TOR-13) with default and
 maximum current-candidate weapon loads, retaining installed tanks. This
 includes the Mi-24, CH-47, V-22, AV-8, Yak-141, A-10, Su-25, A-7, C-130,
 AC-130, Il-76, E-2 and E-3. Aircraft with no external weapon load stay clean;
@@ -2998,3 +2998,153 @@ Ordnance only, not a refusal, John accepts a wide store touching the rail's miss
 
 **Not changed.** The mask, refusals, the capacity (one a side), `swing::swivels` (rows 7 and 8) and
 the F-14 and F-15 shoulder rails.
+
+## Two Tornado IDS versions and the Combat version outer wing pods (TOR-13, 2026-11-12)
+
+**Opinionated (John, 2026-11-12), implemented by slice TOR-13** (the pods' models are TOR-13a,
+[`assets/pods/`](../../assets/pods/README.md)). John: "lets go two versions to TORE, 1 is the
+(Combat) which has the ECM and countermeasure pod on the outer wing pylons we removed earlier (not
+configurable), and the second is (Clean) which doesn't have them on the outer wing pylons today but
+doesn't have the jammer or chaff/flares." The pods are the ARI 23246 Sky Shadow ECM pod on the
+**left** (port) pylon and the BOZ-107 chaff and flare dispenser on the **right** (starboard) one
+(John's labelled photo; the Panavia GR4 page agrees).
+
+### Identities
+
+| | Tornado IDS (Combat) | Tornado IDS (Clean) |
+| --- | --- | --- |
+| Key (`--aircraft`, mission text, recordings) | `tornado` (as before; also `tor`, `tor.pt`, `tornado-combat`) | `tornadoc` (also `tornado-clean`) |
+| `AircraftId` | `Tornado` (wire index 44, checkpoint code 44) | `TornadoClean` (wire index 45, checkpoint code 46) |
+| Label | `Tornado IDS (Combat)` (was `Tornado IDS`) | `Tornado IDS (Clean)` |
+| Record, shape, rig, flight model, cockpit, HUD, radar, guns, weapon rows and defaults | `TOR.PT` and its own | the same, unchanged |
+| Outer wing pylon pods | Sky Shadow left, BOZ-107 right, fixed | none |
+| Jammer, chaff, flares | the record's `MIG31.ECM`: jammer, 60 chaff, 60 flares | none |
+
+`AircraftId::TornadoClean` follows the F/A-XX precedent: a runtime variant of its own identity,
+never an alias (`AircraftId::source()` names the record it shares, as the F/A-XX's names the
+F-22N's). It has its own selection key, label, checkpoint code and place in `SELECTABLE` (right after
+the Combat version, so the Mirage F1's wire index moves from 45 to 46; both are unreleased, protocol
+83), its own recordings key (`identity_key`), seat label, replay type name and Quick Mission list
+entry (the list is sorted by label: Clean, then Combat). Every table the F/A-XX touches that the
+Tornado shares was read once for the variant: the rig and animation (`variety_animation`,
+`engine_material`, `hud_aperture`, the animation probe), the swing wing (`swing::swivels`,
+`has_swivel`, `Airframe::swept_surface`, the vapor point), the station moves and refusals
+(`hardpoints::station_move`, `aircraft_stations::weapon_allowed`, `default_counts`), the debris scale,
+the variety flight model's identity, the live-fire permitted weapons and the AI roster
+(`ai_wings` parses the record for the actor's own identity). `Aircraft::parse` never yields a
+variant: every reader that flies or loads an identity takes the record through
+`Aircraft::into_identity` or `parse_as`, which applies the variant's station table.
+
+### The pods are no hardpoint row
+
+The Combat pods are **not** source rows and not appended rows: they are `AuthoredPod`s
+(`aircraft_stations::authored_pods`), station indices 9 (right) and 10 (left) past the nine source
+rows. `Configuration::from_source` builds each as a `FixedPod` on the aircraft's configuration,
+exactly as a retail fixed pod (EQ-2) is, so Load Ordnance (Normal and Cheat), saved loads, the lobby,
+the AI's loads and the audit see nothing to offer or change: `--validate-ordnance` pins do not move
+and a new audit step (`tornado_versions`) checks that both versions offer the same five rows, that no
+offered row is a pod station, and that the pods' mass and jammer differences are exact. The pods
+ride the swinging wing: `swing::swivels` lists stations 7 to 10 and `station_move` puts them on the
+`Location::Wing` panel outboard of the inner pylon by the same rule as rows 7 and 8, so the sweep
+carries them and the wing's own position (TOR-12) moves them. Each is a lone, unpaired store, the
+right one at +x, the left at -x (`Rack::side_pylons` takes the wing to turn about from the point's
+side, where it took it from the paired-side index).
+
+**How a pod model is keyed when no retail record names it.** Retail equipment pods are drawn by their
+record name after `TORE-POD:` in `StorePose::shape`. These two have no record, so their key is an
+authored identifier, never a file name: `SKYSHADOW` and `BOZ107`, the same strings in
+`aircraft_stations::{SKY_SHADOW, BOZ_107}`, `store_sizes::equipment_pod_body` (drawn size) and
+`pod_models::MODELS` (the model). Nothing reads a file by that key.
+
+### Numbers
+
+| | Sky Shadow (left, row 10) | BOZ-107 (right, row 9) |
+| --- | --- | --- |
+| Length by diameter | 3.0 m by 0.42 m, 9.84 by 1.38 ft | 4.0 m by 0.48 m, 13.12 by 1.58 ft |
+| Carried mass | 200 kg, 441 lb | 325 kg, 717 lb |
+| Sources | Wikipedia, "Sky Shadow (radar jammer)": around 3 m and 200 kg; diameter fitted from John's photo | armedconflicts.com's database: about 4 m and 325 kg (secondary, approximate); diameter fitted |
+| Model | 108 triangles, yellow triangle each side | 122 triangles, nine outlets on the aft face |
+| Station | 16.0 ft out, 1.5 ft forward of the reference (fitted), `Hang::AsRecorded` from the wing's underside | the same, mirrored |
+
+Mass and drag go through the existing path: the pods' 1,158 lb are in
+`fixed_external_equipment_lbs` and so in the aircraft's carried mass (`payload_lbs`, the Loadout
+total) and its `loadedDrag` law; TORE has no per-store drag model, so none is invented. The Combat
+default load is 1,158 lb heavier than before; the Clean version is exactly the previous Tornado.
+The position (16.0 ft out is 70 percent of the 22.8 ft semispan, 6.8 ft inboard of the spread tip,
+6.5 ft outboard of the inner pylon) is the one fitted number: no source gives the outer pylons'
+span, only that they carry pods and sit outboard of the inner pair.
+
+### Whole-surface gate (`TORE_STORES_PREVIEW_PODCLEAR=1`, `TORE_STORES_PREVIEW_SWEEP`)
+
+The preview samples each pod's drawn model and the airframe as drawn at that sweep, wing panel,
+flap strips, tailerons, fin, glove plates and fuselage, a quarter foot apart both ways; the other
+stores come from their drawn pylons and bodies; the gear is the rig's at gear 1. Gaps in feet,
+smallest of the two pods (BOZ-107 first), default load; scripts and logs `.local/m3-aircraft/checks/TOR-13/`.
+
+| Against | 25 degrees | 45 degrees | 67 degrees |
+| --- | ---: | ---: | ---: |
+| Wing panel (the pylon's own 1.0 ft) | 1.04 / 1.03 | 1.04 / 1.04 | 1.06 / 1.05 |
+| Flap strips, flaps up | 1.19 / 1.17 | 1.19 / 1.22 | 1.48 / 1.97 |
+| Flap strips, flaps down (wing held at 25) | 0.63 / 0.96 | n/a | n/a |
+| Tailerons (neutral) | 8.83 / 9.86 | 7.01 / 8.21 | 3.98 / 5.41 |
+| Fin | 18.1 / 19.0 | 16.9 / 17.7 | 15.1 / 15.7 |
+| Glove plate | 5.93 / 5.40 | 6.46 / 6.08 | 6.33 / 6.43 |
+| Fuselage | 8.73 / 8.15 | 9.00 / 8.41 | 8.05 / 7.64 |
+| Row 7 store (Mk 82 pack) | 5.34 / 5.01 | 4.92 / 5.01 | 3.61 / 3.70 |
+| Row 8 AIM-9 on its inboard rail | 5.63 / 5.69 | 5.24 / 5.34 | 4.15 / 4.28 |
+| Gear legs, gear down | 10.61 / 10.71 | n/a | n/a |
+| Ground, lowest point above the gear contact | 4.76 / 4.96 | | |
+
+Alternative row 7 stores (MK 84, FAB-500, AGM-88, LAU-10, CBU-87, GBU-38, B-8, two each): the
+closest is the AGM-88, 4.52 / 4.67 ft at 25 degrees and 3.07 / 3.02 ft at 67; none touches. Nothing
+crosses at any sweep and no pod enters the wing, a flap strip, a taileron, the gear or the ground,
+so no move was needed. Left unmeasured: the tailerons at deflection (they turn about a lateral
+spindle at x 6, so their lateral distance to a pod at x 14 to 17 does not shrink), and the TOR-12
+wing positions (the stations are relative to the wing).
+
+### Chaff and flares from the BOZ-107
+
+On the Combat version chaff and flares leave the centre of the BOZ-107's aft face
+(`DISPENSER_EXIT`, model (0, -0.5, 0): on the pod's axis, half its length aft of the pod's centre),
+heading aft with the aircraft's velocity as before (a flare still leaves as the usual mirrored pair
+thrown to each side). `Configuration::dispenser_exit` works the point out from the pod's mount, its
+size and the wing's present sweep (`rack.turn`, set every tick from the aircraft's speed and flaps
+on the host and for each AI aircraft, the same on every peer); `countermeasure_release` bakes it into
+the release's position (`Release::from_outlet`: the standard tail offset is undone, so the device
+leaves at the outlet), which is what the wire, a recording and the energy decoys already read, so no
+peer needs the sweep to place it. Numbers, aircraft frame (right, up, forward, feet): 25 degrees
+(spread) 16.00, -1.79, -5.06; 45 degrees 16.27, -1.79, -8.52; 67 degrees 15.19, -1.79, -12.17. The
+standard point (0, -2, -15) still serves every other aircraft and the Clean version (which has
+nothing to release). `--countermeasure-preview` prints each device's offset two ticks after a
+release; the battery scenarios `flight-countermeasures-tornado-boz` and `...-sweep67` check it.
+
+### The Clean version, and what the record ties together
+
+`MIG31.ECM` is one record: the deception jammer (radar and infrared chances), 60 chaff and 60 flares
+come together, so Clean's jammer row holds no store (`stations::variant`, the way the F-5E's B5-2
+interim row did) and the three go together. The sensor profile reads a jammer only from a row that
+holds one; `Configuration::ecm` is `NONE`. **The RWR is not tied to it**: `TOR.PT` has no RWR
+equipment row (`rwr_hardpoint` is `None` on both versions) and the warning receiver the scope shows
+is the shared one, so it stays on the Clean version. The weapons window lists no `CHAFF` or `FLARE`
+count for an aircraft with no dispenser at all (a `0 CHAFF` would say it ran out; this applies to
+any aircraft whose record has none, not only the Clean Tornado), and the RWR window never lights
+`JAM` for an aircraft with no jammer record, so the jammer key does nothing visible either (it never
+did anything to a seeker: jamming is gated on the jammer profile).
+
+### Guards
+
+`the_two_tornado_versions_are_distinct_identities_on_one_record` (`tore-formats`),
+`the_clean_tornado_loses_only_the_jammer_row_and_the_pods_are_the_combats` and
+`only_the_combat_tornado_carries_the_authored_pods_with_real_sizes_and_masses`
+(`aircraft_stations.rs`), `the_tornados_outer_pod_pylons_ride_their_own_wing_at_every_sweep`
+(`hardpoints.rs`), `only_the_tornados_wing_pylons_and_the_outer_pod_pylons_swivel` (`swing.rs`),
+`a_release_from_an_outlet_leaves_from_that_point` (`countermeasures.rs`),
+`a_dispenser_pod_releases_the_devices_from_its_aft_face_and_follows_the_wing` (`live.rs`),
+`the_clean_tornado_round_trips_at_code_46_and_shares_no_code` (`checkpoint_tests.rs`), the retail
+`the_combat_tornado_carries_its_two_pods_and_the_clean_one_none` (`tore-world`), the pod model guards
+`authored_pod_models_stay_low_poly_and_inside_their_size`, `only_the_five_authored_records_draw_their_model`
+and `the_tornado_pods_take_their_authored_colours` (`pylons.rs`), and the audit's `tornado_versions`
+step. **Palette (frames, `.local/m3-aircraft/frames/TOR-13/`):** the pods' Medium Sea Grey
+(0.42, 0.47, 0.50) takes palette entry 76 (97, 113, 130), the BOZ-107's outlet colour (0.27, 0.29, 0.31)
+entry 56 (73, 73, 73) and the Sky Shadow's yellow (1.0, 0.82, 0.0) entry 187 (247, 194, 40), an
+orange-leaning yellow: the palette has a yellow, only slightly darker and warmer than asked.

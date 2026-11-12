@@ -36,7 +36,7 @@ pub fn damage_variant(id: AircraftId, section: usize) -> Option<usize> {
     }
 }
 pub fn scale(id: AircraftId) -> f64 {
-    match id {
+    match id.source() {
         AircraftId::F14 => 4. / 3.,
         // The Tornado's shape header scale is 2 (B5-1, 2026-11-10, TOR-0
         // review), like the MiG-23's.

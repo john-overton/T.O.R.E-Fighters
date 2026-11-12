@@ -460,6 +460,13 @@ pub struct CombatReadout {
     pub gun_group: Option<String>,
     pub chaff: u8,
     pub flares: u8,
+    /// The aircraft has no chaff or flare dispenser at all (the Tornado IDS
+    /// (Clean), TOR-13): the weapons window lists no countermeasure counts
+    /// rather than `0 CHAFF` and `0 FLARE`, which would say it ran out.
+    pub no_countermeasures: bool,
+    /// The aircraft has no jammer record (the same Tornado version): the
+    /// RWR window never lights `JAM`, whatever the jammer key last did.
+    pub no_jammer: bool,
     pub target: Option<crate::target_window::Readout>,
     /// The AC-130's gunsight page; `None` on every other aircraft.
     pub gunsight: Option<gunsight::Page>,
@@ -1225,7 +1232,7 @@ impl Instruments {
                     draw_rwr_indicator(&mut r, f, "R", 121, rwr.radar_indicator, blink_on);
                     draw_rwr_indicator(&mut r, f, "I", 130, rwr.infrared_indicator, blink_on);
                 }
-                if s.jammer && s.engine {
+                if s.jammer && s.engine && !self.combat.as_ref().is_some_and(|c| c.no_jammer) {
                     text(&mut r, "JAM", 6, 103);
                 }
             }
@@ -1443,13 +1450,15 @@ impl Instruments {
                     if let Some(group) = &c.gun_group {
                         text(&mut r, &fit_width(f, group, 130), 4, 88);
                     }
-                    text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
-                    let flare = format!("{} FLARE", c.flares);
-                    let width: usize = flare
-                        .glyph_codes()
-                        .map(|ch| f.glyphs[ch as usize].advance)
-                        .sum();
-                    text(&mut r, &flare, 135 - width as i32, 101);
+                    if !c.no_countermeasures {
+                        text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
+                        let flare = format!("{} FLARE", c.flares);
+                        let width: usize = flare
+                            .glyph_codes()
+                            .map(|ch| f.glyphs[ch as usize].advance)
+                            .sum();
+                        text(&mut r, &flare, 135 - width as i32, 101);
+                    }
                 } else {
                     text(&mut r, "NO WEAPONS", 9, 14);
                 }

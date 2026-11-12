@@ -368,6 +368,34 @@ def drive_fight(d: Drive) -> None:
         d.problem(problem)
 
 
+def drive_tornado_versions(d: Drive) -> None:
+    """Slice TOR-13: the two Tornado IDS versions in one game. One bot takes the Combat version's mandatory seat (plane 0,
+    key `TOR.PT`), the other flies the Clean version (key `tornadoc`, the Player-choice wing the server logs as
+    `Tornado Clean`): both join, are seated and fly over the 9-bit wire identity and leave cleanly, with the server
+    never calling either a content mismatch."""
+    port = d.port()
+    mission = guide_mission(separation_nm=5)
+    mission = re.sub(r"(?m)^wing friendly 1 .*$", "wing friendly 1 TOR.PT 1 experienced", mission)
+    mission = re.sub(r"(?m)^wing friendly 2 .*$", "wing friendly 2 tornadoc 1 average", mission)
+    server = start_server(d, port, mission)
+    combat = start_bots(d, port, "combat", 60, "--callsign", "Combat", "--slot", "0")
+    clean = start_bots(d, port, "clean", 60, "--callsign", "Clean", "--slot", "1")
+    for name in ("Combat", "Clean"):
+        if not server.wait_for(rf"{name} took plane", 60):
+            raise DriveError(f"{name} never took a plane")
+    combat.finish(120, 0)
+    clean.finish(120, 0)
+    server.finish(60, 0)
+    for bot, name in ((combat, "Combat"), (clean, "Clean")):
+        bot.expect(rf"^{name}: joined$", "a join")
+        bot.expect(rf"^{name}: seat \d+, plane \d+, at tick \d+$", "a seating")
+        bot.expect(rf"^{name}: round trip \d+ ms, loss", "flight figures")
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD + r"|content mismatch", "a network problem")
+    log_must(d, server_log(d), r"joined as Combat \(path: local network\)", r"joined as Clean \(path: local network\)", forbid=NET_BAD)
+    server.expect(r"Clean took plane \d+ \(Player choice\): Tornado Clean", "the Clean version's label")
+
+
 def drive_chat(d: Drive) -> None:
     """Chat: free text and CHAT.TXT's quick lines go through the host to the other players, and are logged."""
     port = d.port()
@@ -2513,6 +2541,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-fight", lane="net", args=[], driver=drive_fight, uses=("server", "bot"), timeout=300,
             notes="a server and two bots fly about 75 seconds; join, seat, debrief, clean exit, the server's log",
+        ),
+        Scenario(
+            name="net-server-tornado-versions", lane="net", args=[], driver=drive_tornado_versions, uses=("server", "bot"), timeout=300,
+            notes="TOR-13: one bot flies the Tornado IDS (Combat) seat and one the Clean seat of the same game",
         ),
         Scenario(
             name="net-server-chat", lane="net", args=[], driver=drive_chat, uses=("server", "bot"), timeout=240,

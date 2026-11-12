@@ -1175,8 +1175,7 @@ impl AiWings {
             let bytes = resources
                 .get(id.pt())
                 .ok_or_else(|| format!("aircraft cache missing {}", id.pt()))?;
-            let mut aircraft = Aircraft::parse(bytes)?;
-            aircraft.id = id;
+            let aircraft = Aircraft::parse_as(bytes, id)?;
             let found = sensors::SensorProfiles::from_source(&aircraft, |name| {
                 resources
                     .get(name)
@@ -1187,10 +1186,11 @@ impl AiWings {
         })?;
         for actor in bridge.mission.actors_mut() {
             let pt = actor.identity().aircraft.pt();
-            let aircraft = Aircraft::parse(
+            let aircraft = Aircraft::parse_as(
                 resources
                     .get(pt)
                     .ok_or_else(|| format!("aircraft cache missing {pt}"))?,
+                actor.identity().aircraft,
             )?;
             let loaded = loadouts.get(&actor.id());
             let config = match loaded {
@@ -3585,10 +3585,17 @@ impl AiWings {
         }
         .min(100);
         let flight = actor.flight();
-        let release = tore_sim::combat::countermeasures::Release {
-            position: flight.position,
-            velocity: flight.velocity,
-            basis: Basis::new(flight.yaw, flight.pitch, flight.bank),
+        let basis = Basis::new(flight.yaw, flight.pitch, flight.bank);
+        // An aircraft with a dispenser pod of its own (the Tornado IDS
+        // (Combat)'s BOZ-107, TOR-13) lets its devices go from the pod, with
+        // the wing's sweep `carry_swing_wings` last gave its configuration.
+        let release = match self.configs.get(&event.actor) {
+            Some(config) => config.countermeasure_release(flight.position, flight.velocity, basis),
+            None => tore_sim::combat::countermeasures::Release {
+                position: flight.position,
+                velocity: flight.velocity,
+                basis,
+            },
         };
         for _ in 0..event.released {
             state.device_released(

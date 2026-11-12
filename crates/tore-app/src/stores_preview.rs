@@ -14,6 +14,7 @@ use crate::{
     snapshot::{ProjectilePose, RenderSnapshot, StorePose, store_poses},
     terrain::{Overrides, Terrain},
 };
+mod pod_clearance;
 use std::path::Path;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_sim::{
@@ -25,7 +26,7 @@ use tore_sim::{
 const HEIGHT_FT: f64 = 4000.;
 
 /// The aircraft drawn, with a short file name each.
-const AIRCRAFT: [(AircraftId, &str); 31] = [
+const AIRCRAFT: [(AircraftId, &str); 32] = [
     (AircraftId::F18, "f18d"),
     (AircraftId::F16C, "f16c"),
     (AircraftId::F14, "f14"),
@@ -56,6 +57,7 @@ const AIRCRAFT: [(AircraftId, &str); 31] = [
     (AircraftId::Gripen, "gripen"),
     (AircraftId::F5E, "f5e"),
     (AircraftId::Tornado, "tornado"),
+    (AircraftId::TornadoClean, "tornadoc"),
     (AircraftId::Mf1, "mf1"),
 ];
 
@@ -149,7 +151,8 @@ pub fn run() -> AppResult<()> {
                 );
             }
         }
-        let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft record")?)?;
+        let profile =
+            Aircraft::parse_as(resources.get(id.pt()).ok_or("missing aircraft record")?, id)?;
         let mut loadout = tore_sim::combat::loadout::Loadout::new(&profile, |name| {
             resources
                 .get(name)
@@ -425,6 +428,17 @@ pub fn run() -> AppResult<()> {
             ("empty", store_poses(&config, |_| 0, loaded)),
         ];
         clip_report(short, &airframe, &art, &loads[1].1, turn);
+        if std::env::var_os("TORE_STORES_PREVIEW_PODCLEAR").is_some() {
+            pod_clearance::report(
+                short,
+                &airframe,
+                &art,
+                &loads[1].1,
+                sweep.unwrap_or(25.),
+                airframe.start(&world),
+            );
+            continue;
+        }
         if std::env::var_os("TORE_STORES_PREVIEW_CLEARANCE").is_some() {
             clearance_report(short, &airframe, &art, &loads[1].1);
         }
@@ -488,6 +502,36 @@ pub fn run() -> AppResult<()> {
             continue;
         }
         let gpu = gpu.as_mut().expect("GPU preview initialized");
+        // `TORE_STORES_PREVIEW_CAMERAS=NAME:EX,EY,EZ:LX,LY,LZ:FOV|...` draws the
+        // loaded aircraft from those cameras only (eye and look point in feet
+        // right, up and forward of the aircraft; the file is
+        // `SHORT-camera-NAME.png`): the TOR-13 pod frames.
+        if let Ok(cameras) = std::env::var("TORE_STORES_PREVIEW_CAMERAS") {
+            for entry in cameras.split('|').filter(|e| !e.is_empty()) {
+                let parts: Vec<&str> = entry.split(':').collect();
+                let [name, eye, look, fov] = parts.as_slice() else {
+                    return Err("expected NAME:EX,EY,EZ:LX,LY,LZ:FOV".into());
+                };
+                let point = |text: &str| -> Result<[f64; 3], Box<dyn std::error::Error>> {
+                    let v: Vec<f64> = text.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                    v.try_into()
+                        .map_err(|_| "expected three coordinates".into())
+                };
+                render(
+                    gpu,
+                    &mut scenery,
+                    &world,
+                    &art,
+                    &airframe,
+                    &state,
+                    &loads[1].1,
+                    &[],
+                    (point(eye)?, point(look)?, fov.parse()?),
+                    &out.join(format!("{short}-camera-{name}.png")),
+                )?;
+            }
+            continue;
+        }
         let close_only = std::env::var_os("TORE_STORES_PREVIEW_CLOSE").is_some();
         let loaded_only = std::env::var_os("TORE_STORES_PREVIEW_LOADED_ONLY").is_some();
         for (load, stores) in &loads {
@@ -1364,7 +1408,7 @@ fn clearance_report(
     if let Some((gap, pair)) = closest {
         println!("Stores preview: {short} closest pair {pair}: gap {gap:.2} ft");
     }
-    if airframe.profile.id != tore_formats::aircraft::AircraftId::Tornado {
+    if airframe.profile.id.source() != tore_formats::aircraft::AircraftId::Tornado {
         return;
     }
     let Some(shape) = airframe.poses.first() else {

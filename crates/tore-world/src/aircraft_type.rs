@@ -53,13 +53,15 @@ impl AircraftType {
                 .get(name)
                 .ok_or_else(|| format!("aircraft cache missing {name}; re-import media"))
         };
-        let mut profile = Aircraft::parse(get(id.pt())?)?;
+        let profile = Aircraft::parse(get(id.pt())?)?;
         if profile.id != id.source() || profile.shape != format!("{}.SH", id.stem()) {
             return Err(
                 "aircraft identity/shape does not match the selected retail profile".into(),
             );
         }
-        profile.id = id;
+        // The runtime identity: a variant's own station table (the Tornado
+        // IDS (Clean) has no jammer row) as well as its id.
+        let profile = profile.into_identity(id)?;
         let sensors = SensorProfiles::from_source(&profile, |name| {
             get(name).cloned().map_err(std::io::Error::other)
         })?;

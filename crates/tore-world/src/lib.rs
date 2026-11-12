@@ -43,6 +43,8 @@ mod content_tests;
 
 #[cfg(test)]
 mod pod_equipment_tests;
+#[cfg(test)]
+mod tornado_versions_tests;
 
 #[cfg(test)]
 mod sensor_equipment_tests;

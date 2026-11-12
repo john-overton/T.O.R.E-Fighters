@@ -285,6 +285,8 @@ mod tests {
             (AircraftId::Gripen, Fighter),
             (AircraftId::F5E, Fighter),
             (AircraftId::Tornado, Fighter),
+            // The Clean version shares the Tornado record (TOR-13).
+            (AircraftId::TornadoClean, Fighter),
             (AircraftId::Mf1, Fighter),
         ];
         assert_eq!(expected.len(), AircraftId::SELECTABLE.len());

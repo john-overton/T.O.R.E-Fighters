@@ -236,21 +236,30 @@ pub enum AircraftId {
     Gripen,
     F5E,
     Tornado,
+    /// The Tornado IDS (Clean): the same record, shape and flight model as
+    /// [`Self::Tornado`] (the Combat version), with no jammer, chaff or flares
+    /// and no outer wing pods (John, 2026-11-12, TOR-13). A runtime variant of
+    /// its own identity, never an alias.
+    TornadoClean,
     Mf1,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
     pub fn source(self) -> Self {
-        if self == Self::Faxx { Self::F22n } else { self }
-    }
-    pub fn selection_key(self) -> &'static str {
-        if self == Self::Faxx {
-            "faxx"
-        } else {
-            self.pt()
+        match self {
+            Self::Faxx => Self::F22n,
+            Self::TornadoClean => Self::Tornado,
+            other => other,
         }
     }
-    pub const SELECTABLE: [Self; 46] = [
+    pub fn selection_key(self) -> &'static str {
+        match self {
+            Self::Faxx => "faxx",
+            Self::TornadoClean => "tornadoc",
+            other => other.pt(),
+        }
+    }
+    pub const SELECTABLE: [Self; 47] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -296,6 +305,7 @@ impl AircraftId {
         Self::Gripen,
         Self::F5E,
         Self::Tornado,
+        Self::TornadoClean,
         Self::Mf1,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
@@ -418,10 +428,11 @@ impl AircraftId {
             "f15e" | "f15e.pt" => Ok(Self::F15E),
             "gripen" | "gripen.pt" => Ok(Self::Gripen),
             "f5e" | "f5e.pt" => Ok(Self::F5E),
-            "tornado" | "tor" | "tor.pt" => Ok(Self::Tornado),
+            "tornado" | "tor" | "tor.pt" | "tornado-combat" => Ok(Self::Tornado),
+            "tornadoc" | "tornado-clean" | "tornado_clean" => Ok(Self::TornadoClean),
             "mf1" | "mf1.pt" => Ok(Self::Mf1),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1",
             )),
         }
     }
@@ -470,7 +481,7 @@ impl AircraftId {
             Self::F15E => "F15E.PT",
             Self::Gripen => "GRIPEN.PT",
             Self::F5E => "F5E.PT",
-            Self::Tornado => "TOR.PT",
+            Self::Tornado | Self::TornadoClean => "TOR.PT",
             Self::Mf1 => "MF1.PT",
         }
     }
@@ -532,7 +543,7 @@ impl AircraftId {
             Self::F5E => "F29.HUD",
             // Tornado: decided, follows the record and flies the Eurofighter
             // 2000's panel (opinionated, John, 2026-11-10; TOR-7).
-            Self::Tornado => "E2000.HUD",
+            Self::Tornado | Self::TornadoClean => "E2000.HUD",
             // Mirage F1: decided, not interim (opinionated, John, 2026-11-10,
             // decision 25, MF1-7); the same binding as the Mirage 2000.
             Self::Mf1 => "RAFALE.HUD",
@@ -586,7 +597,7 @@ impl AircraftId {
             Self::F15E => "F15E",
             Self::Gripen => "GRI",
             Self::F5E => "F5E",
-            Self::Tornado => "TOR",
+            Self::Tornado | Self::TornadoClean => "TOR",
             Self::Mf1 => "MF1",
         }
     }
@@ -642,7 +653,7 @@ impl AircraftId {
             Self::F5E => "F29",
             // Tornado: decided as above (John, 2026-11-10, TOR-7), no longer
             // interim; the first aircraft on the ~EF2*.PIC family.
-            Self::Tornado => "EF2",
+            Self::Tornado | Self::TornadoClean => "EF2",
             // Mirage F1: decided as above (John, 2026-11-10); the Rafale family.
             Self::Mf1 => "RAF",
             _ => self.stem(),
@@ -697,7 +708,7 @@ impl AircraftId {
             Self::F15E => "~AV8H.PIC",
             Self::Gripen => "~GRIH.PIC",
             Self::F5E => "~F29H.PIC",
-            Self::Tornado => "~EF2H.PIC",
+            Self::Tornado | Self::TornadoClean => "~EF2H.PIC",
             Self::Mf1 => "~RAFH.PIC",
         }
     }
@@ -705,6 +716,13 @@ impl AircraftId {
     pub fn short_label(self) -> &'static str {
         if self == Self::Rafale {
             return "Rafale C";
+        }
+        // The two Tornado versions share the PT's short name, so each says
+        // which it is (TOR-13).
+        match self {
+            Self::Tornado => return "Tornado Combat",
+            Self::TornadoClean => return "Tornado Clean",
+            _ => {}
         }
         self.reviewed_names()
             .map(|(short, _)| short)
@@ -762,7 +780,8 @@ impl AircraftId {
             Self::F15E => "F- 15E Strike Eagle",
             Self::Gripen => "Saab Gripen",
             Self::F5E => "F-  5E Tiger",
-            Self::Tornado => "Tornado IDS",
+            Self::Tornado => "Tornado IDS (Combat)",
+            Self::TornadoClean => "Tornado IDS (Clean)",
             Self::Mf1 => "Mirage F1",
         }
     }
@@ -863,7 +882,7 @@ impl AircraftId {
             Self::F15E => Some("F15R.SEE"),
             Self::Gripen => Some("F18R.SEE"),
             Self::F5E => Some("F104R.SEE"),
-            Self::Tornado => Some("F18R.SEE"),
+            Self::Tornado | Self::TornadoClean => Some("F18R.SEE"),
             Self::Mf1 => Some("F18R.SEE"),
         }
     }
@@ -938,7 +957,7 @@ impl AircraftId {
             // live-fire probe); it still stays out of SUPPORTED_WEAPONS.
             Self::Gripen => &["BK27.JT"],
             Self::F5E => &["M61.JT"],
-            Self::Tornado => &["BK27.JT"],
+            Self::Tornado | Self::TornadoClean => &["BK27.JT"],
             Self::Mf1 => &["DEFA.JT"],
         }
     }
@@ -998,6 +1017,25 @@ pub struct Aircraft {
     pub sounds: BTreeMap<String, String>,
 }
 impl Aircraft {
+    /// This record as runtime identity `id`, which must be the identity it was
+    /// parsed for or one of its variants ([`AircraftId::source`]). The F/A-XX
+    /// is its donor's record unchanged; the Tornado IDS (Clean) loses its
+    /// jammer row ([`stations::variant`], TOR-13). Parsing a record never
+    /// yields a variant, so every reader that flies or loads an identity takes
+    /// it through here (or [`Aircraft::parse_as`]).
+    pub fn into_identity(mut self, id: AircraftId) -> Result<Self> {
+        if self.id != id && self.id != id.source() {
+            return Err(invalid("aircraft record is not this identity's"));
+        }
+        self.id = id;
+        stations::variant(id, &mut self.hardpoints);
+        Ok(self)
+    }
+    /// [`Aircraft::parse`] of the record `data` for identity `id`
+    /// ([`Aircraft::into_identity`]).
+    pub fn parse_as(data: &[u8], id: AircraftId) -> Result<Self> {
+        Self::parse(data)?.into_identity(id)
+    }
     pub fn parse(data: &[u8]) -> Result<Self> {
         let b = Brf::parse(data)?;
         let root = b.block("")?;
@@ -1634,6 +1672,39 @@ mod tests {
         }
     }
 
+    /// John, 2026-11-12 (TOR-13): two Tornado IDS versions, each its own
+    /// identity on the one TOR.PT record, never aliases of each other.
+    #[test]
+    fn the_two_tornado_versions_are_distinct_identities_on_one_record() {
+        use super::AircraftId::{Tornado, TornadoClean};
+        assert_eq!(TornadoClean.source(), Tornado);
+        assert_eq!(Tornado.source(), Tornado);
+        assert_eq!(TornadoClean.pt(), Tornado.pt());
+        assert_ne!(TornadoClean.selection_key(), Tornado.selection_key());
+        assert_eq!(TornadoClean.selection_key(), "tornadoc");
+        assert_eq!(Tornado.label(), "Tornado IDS (Combat)");
+        assert_eq!(TornadoClean.label(), "Tornado IDS (Clean)");
+        assert_ne!(TornadoClean.short_label(), Tornado.short_label());
+        assert_eq!(AircraftId::parse("tornadoc").unwrap(), TornadoClean);
+        assert_eq!(AircraftId::parse("tornado").unwrap(), Tornado);
+        assert_eq!(AircraftId::parse("TOR.PT").unwrap(), Tornado);
+        assert!(AircraftId::SELECTABLE.contains(&TornadoClean));
+        assert!(!AircraftId::ALL.contains(&TornadoClean));
+        // Every identity-keyed table the Tornado has, its variant has too.
+        for (clean, combat) in [
+            (TornadoClean.hud(), Tornado.hud()),
+            (TornadoClean.cockpit(), Tornado.cockpit()),
+            (TornadoClean.stem(), Tornado.stem()),
+            (TornadoClean.cockpit_stem(), Tornado.cockpit_stem()),
+        ] {
+            assert_eq!(clean, combat);
+        }
+        assert_eq!(TornadoClean.radar(), Tornado.radar());
+        assert_eq!(TornadoClean.guns(), Tornado.guns());
+        assert_eq!(TornadoClean.has_pts(), Tornado.has_pts());
+        assert_eq!(TornadoClean.reviewed_names(), Tornado.reviewed_names());
+    }
+
     #[test]
     fn variety_capabilities_preserve_missing_and_multiple_source_guns() {
         use super::AircraftId;
@@ -1936,7 +2007,7 @@ mod profile_tests {
             );
         }
         assert_eq!(AircraftId::ALL.len(), 45);
-        assert_eq!(AircraftId::SELECTABLE.len(), 46);
+        assert_eq!(AircraftId::SELECTABLE.len(), 47);
         assert_eq!(
             AircraftId::ALL[40..],
             [

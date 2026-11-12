@@ -562,14 +562,14 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     );
     // The selectable concept shares F22N's source records, but runs the
     // shared capacity rules with its own runtime identity as flight does.
-    let mut concept = Aircraft::parse(&data[AircraftId::Faxx.pt()])?;
-    concept.id = AircraftId::Faxx;
+    let concept = Aircraft::parse_as(&data[AircraftId::Faxx.pt()], AircraftId::Faxx)?;
     let load = Loadout::new(&concept, |name| {
         data.get(name)
             .cloned()
             .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
     })?;
     store_pairs::audit(&load, &concept, data)?;
+    tornado_versions(data)?;
     Ok(())
 }
 
@@ -745,6 +745,104 @@ fn check_novelty(standard: &Loadout, novelty: &[Weapon], pt: &str) -> AppResult<
         }
     }
     Ok(placements)
+}
+
+/// The two Tornado versions (TOR-13, John 2026-11-12): the Combat version
+/// carries the Sky Shadow and BOZ-107 on outer wing pylons that are no source
+/// row, so Load Ordnance (either mode) offers nothing there and a saved load
+/// cannot change them; the Clean version carries neither pod, no jammer and no
+/// chaff or flares; every other station, default and mask is the same.
+fn tornado_versions(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    use tore_formats::aircraft::stations::{self, AuthoredPod};
+    let read = |name: &str| {
+        data.get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    };
+    let load = |id: AircraftId| -> AppResult<(Aircraft, Loadout)> {
+        let aircraft = Aircraft::parse_as(&data[id.pt()], id)?;
+        let loadout = Loadout::new(&aircraft, read)?;
+        Ok((aircraft, loadout))
+    };
+    let (combat, combat_load) = load(AircraftId::Tornado)?;
+    let (clean, clean_load) = load(AircraftId::TornadoClean)?;
+    let rows = |load: &Loadout| -> Vec<usize> {
+        load.editable_stations()
+            .iter()
+            .map(|row| row.hardpoint)
+            .collect()
+    };
+    if rows(&combat_load) != rows(&clean_load) {
+        return Err("the Tornado versions offer different stations".into());
+    }
+    let table = |aircraft: &Aircraft| {
+        aircraft
+            .hardpoints
+            .iter()
+            .map(|h| (h.location, h.flags, h.position, h.count, h.weight_class))
+            .collect::<Vec<_>>()
+    };
+    if table(&combat) != table(&clean) {
+        return Err("the Tornado versions differ in a station's place or capacity".into());
+    }
+    if let Some(row) = rows(&combat_load)
+        .into_iter()
+        .find(|row| *row >= combat.hardpoints.len())
+    {
+        return Err(format!("Load Ordnance offers the fixed pod station {row}").into());
+    }
+    let pods: Vec<&str> = combat_load
+        .configuration
+        .fixed_pods
+        .iter()
+        .map(|pod| pod.record.as_str())
+        .collect();
+    let expected: Vec<AuthoredPod> = stations::authored_pods(AircraftId::Tornado).to_vec();
+    if pods != expected.iter().map(|pod| pod.record).collect::<Vec<_>>()
+        || !clean_load.configuration.fixed_pods.is_empty()
+    {
+        return Err(format!("the Tornado versions carry the pods {pods:?} and none").into());
+    }
+    let (combat_config, clean_config) = (&combat_load.configuration, &clean_load.configuration);
+    let mass: i32 = expected.iter().map(|pod| pod.weight_lbs).sum();
+    if combat_config.external_equipment_lbs - clean_config.external_equipment_lbs != mass
+        || combat_config.fixed_external_equipment_lbs - clean_config.fixed_external_equipment_lbs
+            != mass
+    {
+        return Err("the Combat Tornado's pods are not exactly its extra carried mass".into());
+    }
+    if combat_config.ecm.chaff[0] == 0
+        || combat_config.ecm.flare[0] == 0
+        || combat_config.ecm_hardpoint.is_none()
+        || combat_config.dispenser_exit().is_none()
+    {
+        return Err("the Combat Tornado lost its jammer, chaff, flares or dispenser".into());
+    }
+    if clean_config.ecm != tore_formats::weapons::Countermeasures::NONE
+        || clean_config.ecm_hardpoint.is_some()
+        || clean_config.sensors.jammer.is_some()
+        || clean_config.dispenser_exit().is_some()
+    {
+        return Err("the Clean Tornado keeps a jammer, chaff, flares or a dispenser".into());
+    }
+    // Neither mode of Load Ordnance lists a pod record or an outer pylon's
+    // store: the catalogs are weapons and tanks by source row, the same for
+    // both versions.
+    for cheat in [false, true] {
+        if crate::ordnance::catalog_sources(&combat_load, data, cheat)?
+            != crate::ordnance::catalog_sources(&clean_load, data, cheat)?
+        {
+            return Err("the Tornado versions list different stores".into());
+        }
+    }
+    store_pairs::audit(&combat_load, &combat, data)?;
+    store_pairs::audit(&clean_load, &clean, data)?;
+    println!(
+        "ordnance audit: Tornado IDS (Combat) {:?} fixed on outer pylons, no source row; Tornado IDS (Clean) none, no jammer, chaff or flares; same {} Load Ordnance rows; passed",
+        pods,
+        rows(&combat_load).len()
+    );
+    Ok(())
 }
 
 /// Full requested loads, through the same selector, save and live paths as flight.

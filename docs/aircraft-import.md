@@ -20,6 +20,12 @@ from Quick Mission. Since 2026-09-22 it uses the validated F-22N import
 media. See the [variant contract](spec/fa-xx.md) for split flaps, the stowed
 hook and handling limits.
 
+Update (TOR-13, 2026-11-12): the Tornado IDS is a second such variant. `--aircraft tornado` is the
+"Tornado IDS (Combat)" (the record's jammer and countermeasures and fixed Sky Shadow and BOZ-107 pods on
+the outer wing pylons) and `--aircraft tornadoc` the "Tornado IDS (Clean)" (no jammer, chaff, flares or
+pods); both use the one imported `TOR.PT` with no extra media and neither aliases the other (see
+[stores on pylons](spec/stores-on-pylons.md#two-tornado-ids-versions-and-the-combat-version-outer-wing-pods-tor-13-2026-11-12)).
+
 Updated 2026-10-05. Start here when adding an aircraft. This guide joins the
 existing extraction, format, simulation, presentation and systems contracts;
 linked research remains authoritative for byte layouts and native behavior.

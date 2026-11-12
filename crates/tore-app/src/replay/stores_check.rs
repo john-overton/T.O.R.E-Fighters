@@ -61,7 +61,7 @@ fn check_load(
     resources: &BTreeMap<String, Vec<u8>>,
     weapon: Option<(usize, &str)>,
 ) -> AppResult<()> {
-    let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft")?)?;
+    let profile = Aircraft::parse_as(resources.get(id.pt()).ok_or("missing aircraft")?, id)?;
     let mut load = tore_sim::combat::loadout::Loadout::new(&profile, |name| {
         resources
             .get(name)

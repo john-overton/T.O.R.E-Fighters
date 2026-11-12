@@ -357,7 +357,7 @@ impl Airframe {
                 })
             }));
         }
-        if self.profile.id == tore_formats::aircraft::AircraftId::Tornado {
+        if self.profile.id.source() == tore_formats::aircraft::AircraftId::Tornado {
             // The swing wing carries its vapor point with the tip (TOR-3).
             let turn = crate::tornado_animation::sweep_turn(s);
             let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
@@ -487,7 +487,8 @@ impl Airframe {
         turn: f64,
     ) -> Option<std::sync::Arc<tore_sim::combat::hardpoints::Underside>> {
         let quarters = (turn.to_degrees() * 4.).round() as i64;
-        if quarters == 0 || self.profile.id != tore_formats::aircraft::AircraftId::Tornado {
+        if quarters == 0 || self.profile.id.source() != tore_formats::aircraft::AircraftId::Tornado
+        {
             return None;
         }
         let base = self.poses.first()?;
